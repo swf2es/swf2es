@@ -2,7 +2,7 @@
 // ending as avmshell does, which the oracle checks where it can run.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
@@ -111,6 +111,50 @@ test("run takes the libraries --lib names, in their place", { skip }, () => {
   const rejected = swf2es(hello, "--lib", write("corrupt.abc", abcs.corrupt));
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /^swf2es: error: library corrupt was rejected: VerifyError #1107/);
+});
+
+// root reads every file, so an unreadable one cannot be made.
+const asRoot = process.getuid?.() === 0 && "running as root";
+
+test("run's File cannot open what it cannot read, as avmshell's", { skip: skip || asRoot }, () => {
+  // Strings 1 avmplus, 2 File, 3 read, 4 secret, 5 "". Namespaces 1 avmplus, 2 public.
+  // Multinames 1 avmplus::File, 2 read. getlex File, pushstring "secret", callpropvoid read 1.
+  const readSecret = abc(
+    {
+      strings: ["avmplus", "File", "read", "secret", ""],
+      namespaces: [
+        [0x16, ...u30(1)],
+        [0x16, ...u30(5)],
+      ],
+      multinames: [
+        [0x07, ...u30(1), ...u30(2)],
+        [0x07, ...u30(2), ...u30(3)],
+      ],
+    },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0 }],
+      bodies: [
+        {
+          method: 0,
+          code: [0xd0, 0x30, 0x60, 1, 0x2c, 4, 0x4f, 2, 1, RETURNVOID],
+          maxStack: 2,
+          maxScopeDepth: 2,
+        },
+      ],
+    }),
+  );
+  const file = write("read-secret.abc", readSecret);
+  const dir = `${out}unreadable/`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}secret`, "hidden");
+  chmodSync(`${dir}secret`, 0);
+  try {
+    const r = spawnSync(process.execPath, [cli, "run", file], { encoding: "utf8", cwd: dir });
+    assert.deepEqual([r.status, r.stdout, r.stderr], [1, "Error: Error #1500\n", ""]);
+  } finally {
+    chmodSync(`${dir}secret`, 0o644);
+  }
 });
 
 test("run refuses what is not an ABC", () => {

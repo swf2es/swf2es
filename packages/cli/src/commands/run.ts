@@ -1,6 +1,6 @@
 // swf2es run: ABCs run as avmshell runs them, each compiled by codegen and
 // loaded into the runtime, their trace and print on stdout.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createCodegen } from "@swf2es/codegen";
@@ -44,10 +44,14 @@ const OPTIONS = {
 function workingFiles(): ShellFiles {
   return {
     read(name) {
-      const path = resolve(name);
-      return existsSync(path) && statSync(path).isFile()
-        ? new Uint8Array(readFileSync(path))
-        : null;
+      // One it cannot open, unreadable or a directory, avmshell's File cannot
+      // open either: Error #1500 for the ABC to catch, not swf2es failing.
+      try {
+        const path = resolve(name);
+        return statSync(path).isFile() ? new Uint8Array(readFileSync(path)) : null;
+      } catch {
+        return null;
+      }
     },
     write(name, bytes) {
       try {
