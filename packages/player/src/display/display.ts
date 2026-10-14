@@ -1245,7 +1245,8 @@ export class Container extends DisplayObject {
   /**
    * The clips and buttons the frame's walks visit at and under it, in
    * their order, kept while no clip or container comes or goes below it
-   * (walkList); null where it is to be made again, or too short to keep.
+   * (walkList), and its arrays after, to be made again in; null where it
+   * has never been long enough to keep.
    */
   walk: WalkList | null = null;
   /** Counts the children put on the list, for removeAtDepth to see whether a listener put one back. */
@@ -1268,7 +1269,13 @@ export class Container extends DisplayObject {
     }
 
     for (let p: Container | null = this; p; p = p.parent) {
-      p.walk = null;
+      const walk = p.walk;
+      if (walk?.current) {
+        walk.current = false;
+        // Emptied, its room kept: one no walk makes again, off the list or now too short to
+        // keep, would hold what left it alive.
+        (walk.items as (DisplayObject | null)[]).fill(null);
+      }
     }
   }
 
@@ -1663,6 +1670,8 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
 export interface WalkList {
   items: DisplayObject[];
   ends: number[];
+  /** Whether it is what is under its container now; once not, its arrays are made again in. */
+  current: boolean;
 }
 
 /** The shortest list a container keeps for itself; a shorter one its parent's making walks again. */
@@ -1673,37 +1682,46 @@ const KEPT_WALK = 32;
  * out: kept on each container till a clip or a container comes or goes
  * under it (Container.relist), so that a frame visits the clips alone,
  * where its walks visited every object with children, twice or more.
+ * Made again in the arrays it had, as a busy movie's are made again every
+ * frame, some ten thousand objects long.
  */
 export function walkList(root: Container): WalkList {
-  const kept = root.walk;
-  if (kept) {
-    return kept;
+  let list = root.walk;
+  if (list?.current) {
+    return list;
   }
 
-  const list: WalkList = { items: [], ends: [] };
-  listInto(root, list, false);
+  list ??= { items: [], ends: [], current: false };
+  const length = listInto(root, list, 0, false);
+  // Cut to length, which keeps the arrays' room unless far shorter: a length of 0 would not.
+  list.items.length = length;
+  list.ends.length = length;
+  list.current = true;
   root.walk = list;
   return list;
 }
 
 /**
- * `c` and those under it appended to `list`, each container's kept list
- * copied where it has one; `c`'s own kept too where `keep`, and long enough.
+ * `c` and those under it written to `list` from index `at`, each
+ * container's kept list copied where it has one; `c`'s own kept too where
+ * `keep`, and long enough. Returns the index after the last written.
  */
-function listInto(c: Container, list: WalkList, keep = true): void {
+function listInto(c: Container, list: WalkList, at: number, keep = true): number {
   const { items, ends } = list;
-  const start = items.length;
+  const start = at;
+  let n = at;
   if (c.kind === CLIP) {
-    items.push(c);
-    ends.push(0);
+    items[n] = c;
+    ends[n++] = 0;
   }
 
   const children = c.children;
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     if (child.kind === BUTTON) {
-      items.push(child);
-      ends.push(items.length);
+      items[n] = child;
+      ends[n] = n + 1;
+      n++;
       continue;
     }
 
@@ -1712,33 +1730,46 @@ function listInto(c: Container, list: WalkList, keep = true): void {
     }
 
     const kept = (child as Container).walk;
-    if (!kept) {
-      listInto(child as Container, list);
+    if (!kept?.current) {
+      n = listInto(child as Container, list, n);
       continue;
     }
 
-    const base = items.length;
+    const base = n;
     const keptItems = kept.items;
     const keptEnds = kept.ends;
     for (let k = 0; k < keptItems.length; k++) {
-      items.push(keptItems[k]);
-      ends.push(keptEnds[k] + base);
+      items[n] = keptItems[k];
+      ends[n++] = keptEnds[k] + base;
     }
   }
 
   if (c.kind === CLIP) {
-    ends[start] = items.length;
+    ends[start] = n;
   }
 
   // Long enough, kept for the next list made above it, which then copies it.
-  if (keep && items.length - start >= KEPT_WALK) {
-    const own: WalkList = { items: items.slice(start), ends: ends.slice(start) };
-    for (let k = 0; k < own.ends.length; k++) {
-      own.ends[k] -= start;
+  const length = n - start;
+  if (keep && length >= KEPT_WALK) {
+    let own = c.walk;
+    if (!own) {
+      own = { items: [], ends: [], current: false };
+      c.walk = own;
     }
 
-    c.walk = own;
+    const ownItems = own.items;
+    const ownEnds = own.ends;
+    for (let k = 0; k < length; k++) {
+      ownItems[k] = items[start + k];
+      ownEnds[k] = ends[start + k] - start;
+    }
+
+    ownItems.length = length;
+    ownEnds.length = length;
+    own.current = true;
   }
+
+  return n;
 }
 
 /**

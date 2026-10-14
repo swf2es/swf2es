@@ -994,3 +994,77 @@ test("the walks' kept lists follow every clip, container and button that comes, 
     "a state round the button",
   );
 });
+
+test("the walks' lists are made again in the arrays they had, holding none that left", () => {
+  // A busy movie's list is made again every frame: new arrays each time were most of what its
+  // walks allocated.
+  const tags: Uint8Array[] = [
+    w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+  ];
+  for (let i = 0; i < 100; i++) {
+    tags.push(w.place({ depth: i + 1, character: 3 }));
+  }
+
+  const { root, stage } = movie(tags);
+  const first = walkList(stage as Container);
+  const { items, ends } = first;
+  const length = items.length;
+  const gone = root.children[root.children.length - 1];
+  root.removeChild(gone);
+  const again = walkList(stage as Container);
+  assert.equal(again, first);
+  assert.equal(again.items, items);
+  assert.equal(again.ends, ends);
+  assert.equal(items.length, length - 1);
+  assert.ok(!items.includes(gone));
+
+  root.addChildAt(gone, 0);
+  assert.equal(walkList(stage as Container).items[1], gone);
+});
+
+test("a kept list holds none of what leaves its container after the walks no longer visit it", () => {
+  // A panel a script keeps off the list, whose clips come and go: its list, out of date, is made
+  // again by no walk, so it must not keep those that left alive.
+  const tags: Uint8Array[] = [
+    w.sprite(3, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+  ];
+  for (let i = 0; i < 40; i++) {
+    tags.push(w.place({ depth: i + 1, character: 3 }));
+  }
+
+  const { root, stage } = movie(tags);
+  const panel = new Container();
+  const clips = [...root.children];
+  for (const clip of clips) {
+    panel.addChildAt(clip, panel.children.length);
+  }
+
+  root.addChildAt(panel, 0);
+  walkList(stage as Container);
+  assert.ok(panel.walk?.items.includes(clips[0]));
+
+  root.removeChild(panel);
+  for (const clip of clips) {
+    panel.removeChild(clip);
+  }
+
+  assert.ok(!panel.walk?.items.some((o) => clips.includes(o as DisplayObject)));
+
+  // And one a walk still visits whose list grows too short to keep.
+  const shrinking = new Container();
+  for (const clip of clips) {
+    shrinking.addChildAt(clip, shrinking.children.length);
+  }
+
+  const holder = new Container();
+  holder.addChildAt(shrinking, 0);
+  root.addChildAt(holder, 0);
+  walkList(stage as Container);
+  assert.ok(shrinking.walk?.current);
+  for (const clip of clips.slice(1)) {
+    shrinking.removeChild(clip);
+  }
+
+  walkList(stage as Container);
+  assert.ok(!shrinking.walk?.items.some((o) => clips.slice(1).includes(o as DisplayObject)));
+});
