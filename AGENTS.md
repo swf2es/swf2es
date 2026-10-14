@@ -46,6 +46,9 @@ pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on 
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
+node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks: the decoder
+                              # and flow never trap, and decode a block the same after others
+                              # (SWF2ES_CHECKED=1 for the checked build)
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
 SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
