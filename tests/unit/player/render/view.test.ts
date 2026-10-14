@@ -1604,6 +1604,7 @@ test("a filtered object's colour colours its chain's output, not what is in it",
 
     type Node = {
       alpha: number;
+      renderable: boolean;
       colorRoot: boolean;
       filters: { resources: { colorUniforms: { uniforms: { uMul: number[]; uAdd: number[] } } } }[];
       children: Node[];
@@ -1630,6 +1631,18 @@ test("a filtered object's colour colours its chain's output, not what is in it",
     view.prepare(root);
     assert.equal(uniforms.uMul[3], Math.fround(0.2));
     assert.ok(art.every((g) => g.flashColor?.rAdd === 20 && g.flashColor.aMul === 1));
+    assert.equal(glowingContainer.renderable, true);
+
+    // Faded out, it is not drawn and its filters do not run, as Pixi skips an alpha of 0; faded
+    // in again, it is.
+    outer.colorTransform = ct(0, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(glowingContainer.renderable, false);
+    outer.colorTransform = ct(0.5, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(glowingContainer.renderable, true);
   } finally {
     pixi.DOMAdapter.set(adapter);
   }

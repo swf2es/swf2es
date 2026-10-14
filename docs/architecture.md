@@ -3816,7 +3816,10 @@ its faded shape, 77 off. Children's own colours, masks, text, bitmaps,
 filtered objects in filtered objects, render groups in and around them,
 filters taken off and put on, and the colours that leave one clear, are
 the `filtered-colors` case. A colour that changes
-draws the output it kept again in the new colour, with no filter run.
+draws the output it kept again in the new colour, with no filter run;
+one that leaves every pixel clear draws nothing and runs none, as Pixi
+skipped an object at an alpha of 0 before its colour went to the chain
+(a rig's faded glowing parts took 12 ms a frame for nothing, 2 skipped).
 
 ### Blend modes
 

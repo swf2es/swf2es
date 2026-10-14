@@ -137,6 +137,11 @@ function anyClips(children: readonly DisplayObject[]): boolean {
   return false;
 }
 
+/** Whether `ct` leaves every pixel clear, whatever its alpha. */
+function clearsAll(ct: ColorTransform | null): boolean {
+  return ct !== null && ct.aAdd <= 0 && ct.aMul * 255 + ct.aAdd <= 0;
+}
+
 /** Whether any layer has lines of the node's own to stroke. */
 function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
   for (let i = 0; i < strokes.length; i++) {
@@ -1758,6 +1763,10 @@ export class PixiView {
       if (container.tint !== tint) {
         container.tint = tint;
       }
+
+      // One its colour leaves wholly clear is not drawn, nor its filters run, as Pixi skips one
+      // whose alpha is 0: a filtered object's alpha is its chain's.
+      container.renderable = !rooted || !clearsAll(node.color);
     }
 
     if (moved || dirty & TRANSFORM) {
