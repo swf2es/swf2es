@@ -1,5 +1,6 @@
 // Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
-// natives in packages/player/src/playerglobal/flash/events/MouseEvent.ts.
+// natives in packages/player/src/playerglobal/flash/events/MouseEvent.ts. Its
+// fields are AS3's; only the stage point and a redraw need the player.
 
 package flash.events
 {
@@ -7,6 +8,17 @@ package flash.events
 
 	public class MouseEvent extends Event
 	{
+		private var _localX:Number;
+		private var _localY:Number;
+		private var _relatedObject:InteractiveObject;
+		private var _ctrlKey:Boolean;
+		private var _altKey:Boolean;
+		private var _shiftKey:Boolean;
+		private var _buttonDown:Boolean;
+		private var _delta:int;
+		private var _isRelatedObjectInaccessible:Boolean;
+		private var _movementX:Number = 0;
+		private var _movementY:Number = 0;
 		private var _commandKey:Boolean;
 		private var _controlKey:Boolean;
 		private var _clickCount:int;
@@ -56,67 +68,133 @@ package flash.events
 			return formatToString("MouseEvent", "type", "bubbles", "cancelable", "eventPhase", "localX", "localY", "stageX", "stageY", "relatedObject", "ctrlKey", "altKey", "shiftKey", "buttonDown", "delta");
 		}
 
-		public native function get localX():Number;
+		public function get localX():Number
+		{
+			return _localX;
+		}
 
-		public native function set localX(value:Number):void;
+		public function set localX(value:Number):void
+		{
+			_localX = value;
+		}
 
-		public native function get localY():Number;
+		public function get localY():Number
+		{
+			return _localY;
+		}
 
-		public native function set localY(value:Number):void;
+		public function set localY(value:Number):void
+		{
+			_localY = value;
+		}
 
-		public native function get relatedObject():InteractiveObject;
+		public function get relatedObject():InteractiveObject
+		{
+			return _relatedObject;
+		}
 
-		public native function set relatedObject(value:InteractiveObject):void;
+		public function set relatedObject(value:InteractiveObject):void
+		{
+			_relatedObject = value;
+		}
 
-		public native function get ctrlKey():Boolean;
+		public function get ctrlKey():Boolean
+		{
+			return _ctrlKey;
+		}
 
-		public native function set ctrlKey(value:Boolean):void;
+		public function set ctrlKey(value:Boolean):void
+		{
+			_ctrlKey = value;
+		}
 
-		public native function get altKey():Boolean;
+		public function get altKey():Boolean
+		{
+			return _altKey;
+		}
 
-		public native function set altKey(value:Boolean):void;
+		public function set altKey(value:Boolean):void
+		{
+			_altKey = value;
+		}
 
-		public native function get shiftKey():Boolean;
+		public function get shiftKey():Boolean
+		{
+			return _shiftKey;
+		}
 
-		public native function set shiftKey(value:Boolean):void;
+		public function set shiftKey(value:Boolean):void
+		{
+			_shiftKey = value;
+		}
 
-		public native function get buttonDown():Boolean;
+		public function get buttonDown():Boolean
+		{
+			return _buttonDown;
+		}
 
-		public native function set buttonDown(value:Boolean):void;
+		public function set buttonDown(value:Boolean):void
+		{
+			_buttonDown = value;
+		}
 
-		public native function get delta():int;
+		public function get delta():int
+		{
+			return _delta;
+		}
 
-		public native function set delta(value:int):void;
+		public function set delta(value:int):void
+		{
+			_delta = value;
+		}
 
 		public function get stageX():Number
 		{
-			return getStageX();
+			return getStageX(_localX, _localY);
 		}
 
 		public function get stageY():Number
 		{
-			return getStageY();
+			return getStageY(_localX, _localY);
 		}
 
 		public native function updateAfterEvent():void;
 
 		[API("662")]
-		public native function get isRelatedObjectInaccessible():Boolean;
+		public function get isRelatedObjectInaccessible():Boolean
+		{
+			return _isRelatedObjectInaccessible;
+		}
 
 		[API("662")]
-		public native function set isRelatedObjectInaccessible(value:Boolean):void;
+		public function set isRelatedObjectInaccessible(value:Boolean):void
+		{
+			_isRelatedObjectInaccessible = value;
+		}
 
 		[API("678")]
-		public native function get movementX():Number;
+		public function get movementX():Number
+		{
+			return _movementX;
+		}
 
 		[API("678")]
-		public native function set movementX(value:Number):void;
+		public function set movementX(value:Number):void
+		{
+			_movementX = value;
+		}
 
 		[API("678")]
-		public native function get movementY():Number;
+		public function get movementY():Number
+		{
+			return _movementY;
+		}
 
 		[API("678")]
-		public native function set movementY(value:Number):void;
+		public function set movementY(value:Number):void
+		{
+			_movementY = value;
+		}
 
 		public function get commandKey():Boolean
 		{
@@ -144,8 +222,8 @@ package flash.events
 		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/events/MouseEvent.ts).
-		private native function getStageX():Number;
+		private native function getStageX(x:Number, y:Number):Number;
 
-		private native function getStageY():Number;
+		private native function getStageY(x:Number, y:Number):Number;
 	}
 }

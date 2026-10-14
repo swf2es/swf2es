@@ -38,6 +38,23 @@ export function setStaticVar(cls: AsObject, name: string, value: Value): void {
   }
 }
 
+/**
+ * The field that holds class `cls`'s own instance variable `name`, in
+ * whatever namespace, or null if it declares none: for a player that reads
+ * or writes a private field its playerglobal's AS3 keeps.
+ */
+export function instanceVarField(cls: AsObject, name: string): string | null {
+  // A class no module describes, as a host's stand-in, declares none.
+  const desc = cls?.$desc as ClassDesc | undefined;
+  for (const [, , n, b] of desc?.instance.bindings ?? []) {
+    if (n === name && (b & 7) === BIND_Var) {
+      return `$${b >> 3}`;
+    }
+  }
+
+  return null;
+}
+
 /** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
 const TRAIT_Slot = 0;
 const TRAIT_Getter = 2;

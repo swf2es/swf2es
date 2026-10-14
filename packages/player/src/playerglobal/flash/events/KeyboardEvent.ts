@@ -1,6 +1,7 @@
-// flash.events.KeyboardEvent's native fields: the character, and the
-// modifier keys held, which playerglobal's constructor sets through them;
-// and TextEvent's one native, which a clone copies IME data through.
+// flash.events.KeyboardEvent's natives: a redraw, and the character and
+// modifier keys Flash Player's playerglobal keeps in natives, which ours
+// keeps in AS3; and TextEvent's one native, which a clone copies IME data
+// through.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 
@@ -14,7 +15,6 @@ export function keyboardEventNatives(s: Scripting): avm2.Natives {
     declare $ctrlKey: boolean | undefined;
     declare $altKey: boolean | undefined;
     declare $shiftKey: boolean | undefined;
-    declare $commandKey: boolean | undefined;
 
     get charCode(): number {
       return this.$charCode ?? 0;
@@ -46,14 +46,6 @@ export function keyboardEventNatives(s: Scripting): avm2.Natives {
 
     set shiftKey(value: Value) {
       this.$shiftKey = !!value;
-    }
-
-    get commandKey(): boolean {
-      return this.$commandKey ?? false;
-    }
-
-    set commandKey(value: Value) {
-      this.$commandKey = !!value;
     }
 
     updateAfterEvent(): void {

@@ -1,5 +1,7 @@
-// flash.events.Event: its constructor's private native ctor keeps the type
-// and flags; dispatch sets the target, current target and phase.
+// flash.events.Event's natives, which Flash Player's playerglobal has:
+// its constructor's private native ctor keeps the type and flags, and
+// dispatch sets the target, current target and phase in the fields they
+// read (scripting/events.ts's eventFields). Ours keeps them all in AS3.
 import { avm2 } from "@swf2es/runtime";
 import { AT_TARGET } from "../../../scripting/events.js";
 

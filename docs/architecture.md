@@ -1192,7 +1192,14 @@ player object, `dispatchEvent` through the player's parent chain
 (`scripting/events.ts`), and the frame events the player broadcasts.
 The player makes its events of an object put on the list or taken off
 only where a listener on the object or above it would hear them: where
-none does, no script runs, and none could tell.
+none does, no script runs, and none could tell. An event keeps its
+fields in AS3, Event's and its subclasses' private variables, which
+compiled code reads as slots: dispatch writes the target, current target
+and phase into Event's and reads its flags there, by the slots
+`eventFields` finds once (under Flash Player's playerglobal, the fields
+its natives keep). An EventDispatcher made with a target dispatches as
+that target, along its parent chain, its own listeners seeing the target
+as the current one (`event-fields`).
 
 A display object nobody named is named as its AS3 object is made,
 `instance` and the next of one count for the player, which every SWF it
