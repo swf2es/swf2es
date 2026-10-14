@@ -2615,9 +2615,18 @@ seconds so it can return without rebuilding. At most 64 groups that have never
 returned are parked; new one-off branches evict the oldest batches. Evicted
 batchers, up to 16 groups' worth (`render/batchers.ts`), go to the next group a view makes rather
 than being freed while a new group allocates its own; a root rendered once,
-as BitmapData.draw's, allocates its own, since Pixi destroys it after. A colour
-batcher whose buffers stay mostly empty for 120 rebuilds shrinks them; a
-default batcher keeps its largest buffers when it moves to a smaller group.
+as BitmapData.draw's, allocates its own, since Pixi destroys it after. On
+WebGL 2 the batches are kept on the GPU alone (the fork's
+`BatcherPipe.gpuResident`): every group's batchers pack into one set of
+buffers per batcher kind, lent for each build and grown to the largest,
+and what a build packed is written to the batcher's GPU buffers as it
+ends; an element updated in place is packed apart and written, runs of
+neighbours together, before the batches draw. A batcher kept its buffers
+for as long as it lived, grown to the most it ever packed, so a renderer
+of many groups held all their vertices on the CPU too: `bench.ts
+--branches 64` held 45 MB of them. A lost context has every group built
+again from the display list (the fork's `RenderGroupSystem`). Elsewhere a
+batcher keeps its own buffers, cut back once they stay mostly empty.
 The colour batcher's shader ignores Pixi's group colour, since
 its vertex colour transform already includes every ancestor. The
 `render-groups` case checks colours, masks moved between branches, scrolls,
