@@ -42,6 +42,8 @@ export function hookRenderer(renderer: Renderer): void {
   if (batchPipe instanceof BatcherPipe) {
     batchPipe.batcherNameFor = batcherNameFor;
     batchPipe.batchersFor = (set) => spareBatchersFor(batchPipe, set);
+    // Batches on the GPU alone, packed in buffers every group shares (WebGL 2; others keep their own).
+    batchPipe.gpuResident = true;
   }
 
   const contexts = (renderer as { graphicsContext?: unknown }).graphicsContext;

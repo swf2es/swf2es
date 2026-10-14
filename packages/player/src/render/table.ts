@@ -68,6 +68,7 @@ const MIN_RUN = 16;
 const SHORT_RUN = 40;
 /** Floats a vertex of a context's packed geometry: position, UV, colour, texture and rounding. */
 const VERTEX_FLOATS = 6;
+const VERTEX_BYTES = VERTEX_FLOATS * 4;
 /** Atlas vertices dropped contexts may leave as holes before it is packed again. */
 const ATLAS_SLACK = 1 << 16;
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
@@ -216,35 +217,66 @@ export interface Placed {
   offsets: number[];
 }
 
+/**
+ * Where an atlas' vertices and indices are kept: the GPU's buffers, which
+ * the table writes into and grows there (TablePipe), with no copy on the CPU.
+ */
+export interface AtlasStore {
+  /** Room for `vertices` and `indices`, the first `keptVertices` and `keptIndices` kept. */
+  resize(vertices: number, indices: number, keptVertices: number, keptIndices: number): void;
+  /** The first `floats` of `data` written from vertex `at` on. */
+  writeVertices(at: number, data: Float32Array, floats: number): void;
+  /** The first `count` of `data` written from index `at` on. */
+  writeIndices(at: number, data: Uint32Array, count: number): void;
+}
+
+/**
+ * Vertices placed and not yet written are gathered in arrays of up to this
+ * many, and their indices in up to thrice as many, written in one call
+ * each: so a frame that places hundreds of contexts makes a few writes,
+ * not hundreds, and keeps no more than these on the CPU, some 2 MB at most.
+ */
+const STAGED_VERTICES = 1 << 16;
+const STAGED_FLOATS = STAGED_VERTICES * VERTEX_FLOATS;
+const STAGED_INDICES = STAGED_VERTICES * 3;
+
 const atlases = new Set<Atlas>();
 
 /**
  * The local vertices of every context the table has drawn, in one buffer
  * with one index buffer, absolute: each context's are copied in once, as
  * Pixi packed them for it, and stay until it is rebuilt or destroyed. The
- * holes those leave are reclaimed by packing again (compact).
+ * holes those leave are reclaimed by packing again (compact). They are
+ * kept on the GPU alone: a crowded room's atlas held some 130 MB on the CPU
+ * as well, which only a lost context, after which it starts again anyway,
+ * could have used.
  */
 export class Atlas {
-  vertices = new Float32Array(VERTEX_FLOATS * ATLAS_LEAST);
-  indices = new Uint32Array(ATLAS_LEAST * 3);
+  /** The vertices and indices placed, which the store holds or which are staged for it. */
   vertexCount = 0;
   indexCount = 0;
-  /** The vertices and indices the GPU's buffers hold; what was added since goes up alone. */
-  sentVertices = 0;
-  sentIndices = 0;
-  /** Whether the buffers must take the atlas whole: it grew into new arrays, or started again. */
-  whole = true;
-  /** Whether it started again in smaller arrays, which the GPU's buffers are to shrink to. */
-  shrunk = false;
+  /** The vertices and indices the store has room for. */
+  capacity = ATLAS_LEAST;
+  indexCapacity = ATLAS_LEAST * 3;
+  /** The vertices and indices the store holds; those placed since are staged. */
+  private sentVertices = 0;
+  private sentIndices = 0;
+  /** Whether the store has room made for the capacity: not as it starts, shrinks or is lost. */
+  private allocated = false;
+  /** What is staged, in arrays grown as a frame places more, up to STAGED_VERTICES. */
+  private staged = new Float32Array(0);
+  private stagedIndices = new Uint32Array(0);
   private readonly placed = new Map<object, Placed | null>();
   private live = 0;
   private liveIndices = 0;
   private holes = 0;
   /** The id of a texture that is no texture, which alone the table draws. */
   private readonly white: number;
+  private readonly store: AtlasStore;
 
-  constructor(white: number) {
+  constructor(white: number, store: AtlasStore) {
     this.white = white;
+    this.store = store;
     atlases.add(this);
   }
 
@@ -255,7 +287,8 @@ export class Atlas {
 
   /**
    * Where `key`'s batches lie, `packed` copied in first if they are not
-   * there yet; null if the table cannot draw them.
+   * there yet; null if the table cannot draw them. What is copied in is
+   * staged, and the store has it once send is called.
    */
   place(key: object, packed: Packed): Placed | null {
     const known = this.placed.get(key);
@@ -279,25 +312,22 @@ export class Atlas {
     }
 
     const vertexCount = batcher.attributeSize / VERTEX_FLOATS;
-    this.reserve(vertexCount, batcher.indexSize);
-    const base = this.vertexCount;
-    this.vertices.set(
-      batcher.attributeBuffer.float32View.subarray(0, batcher.attributeSize),
-      base * VERTEX_FLOATS,
-    );
+    const indexCount = batcher.indexSize;
+    this.reserve(vertexCount, indexCount);
     const first = this.indexCount;
-    for (let i = 0; i < batcher.indexSize; i++) {
-      this.indices[first + i] = batcher.indexBuffer[i] + base;
-    }
+    this.copyIn(
+      batcher.attributeBuffer.float32View,
+      batcher.attributeSize,
+      batcher.indexBuffer,
+      indexCount,
+    );
 
-    this.vertexCount += vertexCount;
-    this.indexCount += batcher.indexSize;
     this.live += vertexCount;
-    this.liveIndices += batcher.indexSize;
+    this.liveIndices += indexCount;
 
     const placed: Placed = {
       vertices: vertexCount,
-      indices: batcher.indexSize,
+      indices: indexCount,
       counts: [],
       offsets: [],
     };
@@ -314,7 +344,7 @@ export class Atlas {
     if (!shown) {
       this.holes += vertexCount;
       this.live -= vertexCount;
-      this.liveIndices -= batcher.indexSize;
+      this.liveIndices -= indexCount;
     }
 
     return shown;
@@ -348,20 +378,16 @@ export class Atlas {
 
   /**
    * Forget every context, to be copied in again as each is next drawn: in
-   * arrays cut down to what was live, with room to grow, if those it has
-   * are larger.
+   * a store cut down to what was live, with room to grow, if the one it has
+   * is larger.
    */
   clear(): void {
-    const vertices = VERTEX_FLOATS * Math.ceil(Math.max(this.live * ATLAS_GROWTH, ATLAS_LEAST));
-    if (vertices < this.vertices.length) {
-      this.vertices = new Float32Array(vertices);
-      this.shrunk = true;
-    }
-
+    const vertices = Math.ceil(Math.max(this.live * ATLAS_GROWTH, ATLAS_LEAST));
     const indices = Math.ceil(Math.max(this.liveIndices * ATLAS_GROWTH, ATLAS_LEAST * 3));
-    if (indices < this.indices.length) {
-      this.indices = new Uint32Array(indices);
-      this.shrunk = true;
+    if (vertices < this.capacity || indices < this.indexCapacity) {
+      this.capacity = Math.min(vertices, this.capacity);
+      this.indexCapacity = Math.min(indices, this.indexCapacity);
+      this.allocated = false;
     }
 
     this.placed.clear();
@@ -369,10 +395,32 @@ export class Atlas {
     this.indexCount = 0;
     this.sentVertices = 0;
     this.sentIndices = 0;
-    this.whole = true;
     this.live = 0;
     this.liveIndices = 0;
     this.holes = 0;
+  }
+
+  /** The store's buffers were lost with their context: every context is copied in again as drawn. */
+  lost(): void {
+    this.clear();
+    this.allocated = false;
+  }
+
+  /** Write what was staged into the store, room made for it first if the store has none yet. */
+  send(): void {
+    this.allocate();
+    const vertices = this.vertexCount - this.sentVertices;
+    if (vertices > 0) {
+      this.store.writeVertices(this.sentVertices, this.staged, vertices * VERTEX_FLOATS);
+    }
+
+    const indices = this.indexCount - this.sentIndices;
+    if (indices > 0) {
+      this.store.writeIndices(this.sentIndices, this.stagedIndices, indices);
+    }
+
+    this.sentVertices = this.vertexCount;
+    this.sentIndices = this.indexCount;
   }
 
   destroy(): void {
@@ -380,25 +428,102 @@ export class Atlas {
     atlases.delete(this);
   }
 
-  private reserve(vertexCount: number, indexCount: number): void {
-    const vertices = (this.vertexCount + vertexCount) * VERTEX_FLOATS;
-    if (vertices > this.vertices.length) {
-      const room = VERTEX_FLOATS * Math.ceil((this.vertices.length / VERTEX_FLOATS) * ATLAS_GROWTH);
-      const grown = new Float32Array(Math.max(vertices, room));
-      grown.set(this.vertices.subarray(0, this.vertexCount * VERTEX_FLOATS));
-      this.vertices = grown;
-      this.whole = true;
+  private allocate(): void {
+    if (!this.allocated) {
+      // Only ever with nothing sent: as the atlas starts, starts again smaller, or is lost.
+      this.store.resize(this.capacity, this.indexCapacity, 0, 0);
+      this.allocated = true;
+    }
+  }
+
+  /**
+   * Stage `floats` of `vertices` and `count` of `indices` after what is
+   * placed, the indices offset by the vertices before them; written
+   * straight into the store, after what was staged, if they would not fit.
+   */
+  private copyIn(
+    vertices: Float32Array,
+    floats: number,
+    indices: ArrayLike<number>,
+    count: number,
+  ): void {
+    const base = this.vertexCount;
+    if (
+      (base - this.sentVertices) * VERTEX_FLOATS + floats > STAGED_FLOATS ||
+      this.indexCount - this.sentIndices + count > STAGED_INDICES
+    ) {
+      this.send();
     }
 
-    const indices = this.indexCount + indexCount;
-    if (indices > this.indices.length) {
-      const grown = new Uint32Array(
-        Math.max(indices, Math.ceil(this.indices.length * ATLAS_GROWTH)),
-      );
-      grown.set(this.indices.subarray(0, this.indexCount));
-      this.indices = grown;
-      this.whole = true;
+    if (floats > STAGED_FLOATS || count > STAGED_INDICES) {
+      // Larger than the stage alone: written as it comes, its indices offset in an array of its own.
+      const offset = new Uint32Array(count);
+      for (let i = 0; i < count; i++) {
+        offset[i] = indices[i] + base;
+      }
+
+      this.store.writeVertices(base, vertices, floats);
+      this.store.writeIndices(this.indexCount, offset, count);
+      this.vertexCount += floats / VERTEX_FLOATS;
+      this.indexCount += count;
+      this.sentVertices = this.vertexCount;
+      this.sentIndices = this.indexCount;
+      return;
     }
+
+    const stagedFloats = (base - this.sentVertices) * VERTEX_FLOATS;
+    const at = this.indexCount - this.sentIndices;
+    this.stage(stagedFloats + floats, at + count);
+    this.staged.set(vertices.subarray(0, floats), stagedFloats);
+    for (let i = 0; i < count; i++) {
+      this.stagedIndices[at + i] = indices[i] + base;
+    }
+
+    this.vertexCount += floats / VERTEX_FLOATS;
+    this.indexCount += count;
+  }
+
+  /** Staging arrays of at least `floats` and `count`, doubled as need be, what they stage kept. */
+  private stage(floats: number, count: number): void {
+    if (floats > this.staged.length) {
+      const grown = new Float32Array(
+        Math.min(STAGED_FLOATS, Math.max(floats, this.staged.length * 2, 4096 * VERTEX_FLOATS)),
+      );
+      grown.set(this.staged.subarray(0, (this.vertexCount - this.sentVertices) * VERTEX_FLOATS));
+      this.staged = grown;
+    }
+
+    if (count > this.stagedIndices.length) {
+      const grown = new Uint32Array(
+        Math.min(STAGED_INDICES, Math.max(count, this.stagedIndices.length * 2, 4096 * 3)),
+      );
+      grown.set(this.stagedIndices.subarray(0, this.indexCount - this.sentIndices));
+      this.stagedIndices = grown;
+    }
+  }
+
+  /**
+   * Room in the store for `vertexCount` and `indexCount` more, grown by
+   * half if they do not fit, what it holds kept by the GPU's own copy.
+   */
+  private reserve(vertexCount: number, indexCount: number): void {
+    this.allocate();
+    const vertices = this.vertexCount + vertexCount;
+    const indices = this.indexCount + indexCount;
+    if (vertices <= this.capacity && indices <= this.indexCapacity) {
+      return;
+    }
+
+    this.send();
+    if (vertices > this.capacity) {
+      this.capacity = Math.max(vertices, Math.ceil(this.capacity * ATLAS_GROWTH));
+    }
+
+    if (indices > this.indexCapacity) {
+      this.indexCapacity = Math.max(indices, Math.ceil(this.indexCapacity * ATLAS_GROWTH));
+    }
+
+    this.store.resize(this.capacity, this.indexCapacity, this.vertexCount, this.indexCount);
   }
 }
 
@@ -483,6 +608,9 @@ export class TablePipe {
   private atlas!: Atlas;
   private attributes!: Buffer;
   private indexBuffer!: Buffer;
+  /** The bytes the GPU's copies of the atlas' buffers were last made to hold. */
+  private vertexBytes = 0;
+  private indexBytes = 0;
   private geometry!: Geometry;
   /** The run being gathered: its first row, blend mode, and its draws' counts and offsets. */
   private counts = new Int32Array(1024);
@@ -500,16 +628,37 @@ export class TablePipe {
     }
 
     this.table = tableSource(16);
-    this.atlas = new Atlas(Texture.WHITE.source.uid);
+    // Placeholders: what the buffers hold lives on the GPU alone, written there by the atlas.
     this.attributes = new Buffer({
-      data: this.atlas.vertices,
+      data: new Float32Array(0),
       usage: BufferUsage.VERTEX | BufferUsage.COPY_DST,
       shrinkToFit: false,
     });
     this.indexBuffer = new Buffer({
-      data: this.atlas.indices,
+      data: new Uint32Array(0),
       usage: BufferUsage.INDEX | BufferUsage.COPY_DST,
       shrinkToFit: false,
+    });
+    // Not to be collected unused for a while, as Pixi would: nothing could upload them again.
+    this.attributes.autoGarbageCollect = false;
+    this.indexBuffer.autoGarbageCollect = false;
+    this.atlas = new Atlas(Texture.WHITE.source.uid, {
+      resize: (vertices, indices, keptVertices, keptIndices) => {
+        const buffers = this.renderer.buffer;
+        if (vertices * VERTEX_BYTES !== this.vertexBytes) {
+          this.vertexBytes = vertices * VERTEX_BYTES;
+          buffers.resizeOnGpu(this.attributes, this.vertexBytes, keptVertices * VERTEX_BYTES);
+        }
+
+        if (indices * 4 !== this.indexBytes) {
+          this.indexBytes = indices * 4;
+          buffers.resizeOnGpu(this.indexBuffer, this.indexBytes, keptIndices * 4);
+        }
+      },
+      writeVertices: (at, data, floats) =>
+        this.renderer.buffer.writeOnGpu(this.attributes, at * VERTEX_BYTES, data, 0, floats),
+      writeIndices: (at, data, count) =>
+        this.renderer.buffer.writeOnGpu(this.indexBuffer, at * 4, data, 0, count),
     });
     const stride = VERTEX_FLOATS * 4;
     this.geometry = new Geometry({
@@ -531,7 +680,9 @@ export class TablePipe {
         : null;
     this.maxRows = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) * ROWS_A_LINE;
     // A lost context took the atlas' buffers: every context is copied in again as it is drawn.
-    this.atlas.clear();
+    this.vertexBytes = 0;
+    this.indexBytes = 0;
+    this.atlas.lost();
   }
 
   prerender(): void {
@@ -717,7 +868,7 @@ export class TablePipe {
       this.upload(this.runBase, this.cursor);
     }
 
-    this.send();
+    this.atlas.send();
 
     const shader = short ? this.shortRunShader() : this.tableShader();
     shader.groups[0] = renderer.globalUniforms.bindGroup;
@@ -778,42 +929,6 @@ export class TablePipe {
       this.runBase * floats,
       this.draws * floats,
     );
-  }
-
-  /**
-   * Bring the GPU's atlas buffers up to date: what was added since the
-   * last draw alone, as contexts are placed on most frames of an animation
-   * into an atlas of hundreds of thousands of vertices; whole only once it
-   * grew or started again.
-   */
-  private send(): void {
-    const atlas = this.atlas;
-    if (atlas.shrunk) {
-      atlas.shrunk = false;
-      this.renderer.buffer.resizeOnNextUpload(this.attributes);
-      this.renderer.buffer.resizeOnNextUpload(this.indexBuffer);
-    }
-
-    if (atlas.whole) {
-      atlas.whole = false;
-      this.attributes.setDataWithSize(atlas.vertices, atlas.vertexCount * VERTEX_FLOATS, true);
-      this.indexBuffer.setDataWithSize(atlas.indices, atlas.indexCount, true);
-    } else {
-      const bytes = VERTEX_FLOATS * 4;
-      if (atlas.vertexCount > atlas.sentVertices) {
-        this.attributes.update(
-          (atlas.vertexCount - atlas.sentVertices) * bytes,
-          atlas.sentVertices * bytes,
-        );
-      }
-
-      if (atlas.indexCount > atlas.sentIndices) {
-        this.indexBuffer.update((atlas.indexCount - atlas.sentIndices) * 4, atlas.sentIndices * 4);
-      }
-    }
-
-    atlas.sentVertices = atlas.vertexCount;
-    atlas.sentIndices = atlas.indexCount;
   }
 
   /**

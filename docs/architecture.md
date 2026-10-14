@@ -2670,9 +2670,18 @@ seconds so it can return without rebuilding. At most 64 groups that have never
 returned are parked; new one-off branches evict the oldest batches. Evicted
 batchers, up to 16 groups' worth (`render/batchers.ts`), go to the next group a view makes rather
 than being freed while a new group allocates its own; a root rendered once,
-as BitmapData.draw's, allocates its own, since Pixi destroys it after. A colour
-batcher whose buffers stay mostly empty for 120 rebuilds shrinks them; a
-default batcher keeps its largest buffers when it moves to a smaller group.
+as BitmapData.draw's, allocates its own, since Pixi destroys it after. On
+WebGL 2 the batches are kept on the GPU alone (the fork's
+`BatcherPipe.gpuResident`): every group's batchers pack into one set of
+buffers per batcher kind, lent for each build and grown to the largest,
+and what a build packed is written to the batcher's GPU buffers as it
+ends; an element updated in place is packed apart and written, runs of
+neighbours together, before the batches draw. A batcher kept its buffers
+for as long as it lived, grown to the most it ever packed, so a renderer
+of many groups held all their vertices on the CPU too: `bench.ts
+--branches 64` held 45 MB of them. A lost context has every group built
+again from the display list (the fork's `RenderGroupSystem`). Elsewhere a
+batcher keeps its own buffers, cut back once they stay mostly empty.
 The colour batcher's shader ignores Pixi's group colour, since
 its vertex colour transform already includes every ancestor. The
 `render-groups` case checks colours, masks moved between branches, scrolls,
@@ -2739,7 +2748,15 @@ borrows the stage's fills and lines where they are still kept. A
 Graphics of a shared context (a shape's, a blend's or a glyph's fills,
 or lines) does not listen on it, as no such context changes once built:
 a listener a Graphics made each destroy search them all, so a text of n
-glyphs of one font took O(n²) to go.
+glyphs of one font took O(n²) to go. Once Pixi has built a view's fills
+or lines, their paths go altogether, the bounds measured and the vertices
+weighed first (`render/tessellate.ts`, `remakeable`): Pixi draws them from
+their tessellation, kept from its collection of what went unused for a
+minute, which would build them again from their paths, and a batched copy
+is made anew from the layer, which its shape keeps anyway. Kept, the
+flattened points were a second copy of every outline, some 8 MB in
+`bench.ts --town 200`. A glyph's fill, which every view shares, keeps
+them, for each renderer to build it.
 A line context no one holds stays idle 30
 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them and half a million of their vertices (some
@@ -2747,8 +2764,7 @@ frames, at most 4096 of them and half a million of their vertices (some
 room made were ones it had made before and dropped, an animation's
 rarer turns coming back after tens of seconds (`bench.ts --pulse 16
 --pace 150`, whose stretches come round again some 7 s apart, made 11
-contexts a frame kept 5 s and 2 kept 30). Longer would gain nothing, as
-Pixi lets an unused context's geometry go after a minute. A drawing's lines
+contexts a frame kept 5 s and 2 kept 30). A drawing's lines
 are its own, as it changes. No line is thinner than a pixel of the
 screen, which is how wide Flash draws a hairline however far its stage
 is zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
@@ -2823,13 +2839,18 @@ rounds to pixels, is drawn by Pixi's pipe in its place in the run, as is
 all of a run in a context restored without the extension, or past the
 rows a texture may hold. Contexts are placed on most frames of an
 animation, its lines stroked for a new stretch, so only the vertices and
-indices added since the last draw are uploaded, the atlas whole only as
-it grows or starts again: `bench.ts --rig 400 --fresh`, whose parts take
-a new size on every frame, uploads 0.5 MB a frame where uploading the
-atlas whole sent 7. A context rebuilt or destroyed leaves a hole, and
-between frames the atlas starts again from scratch once the holes pass
-65,536 vertices and the live ones; neither the atlas nor the table
-shrinks from its peak. On a desktop GPU the render's main-thread time
+indices added since the last draw are uploaded: `bench.ts --rig 400
+--fresh`, whose parts take a new size on every frame, uploads 0.5 MB a
+frame where uploading the atlas whole sent 7. The atlas is kept on the
+GPU alone: what a frame places is gathered in arrays of 65,536 vertices
+and written in a call or two, and a full atlas grows by half with the GPU
+copying what it held (the fork's `resizeOnGpu`), so no copy of it stays
+on the CPU, where `bench.ts --town 200` held 127 MB of one; a lost
+context's atlas starts again empty, its contexts copied in as they are
+drawn. A context rebuilt or destroyed leaves a hole, and between frames
+the atlas starts again from scratch once the holes pass 65,536 vertices
+and the live ones, at half again what is live; the table never shrinks
+from its peak. On a desktop GPU the render's main-thread time
 fell from 9–10 to 2 ms on `--rig 400` and `--rig 400 --fresh`, 0.7 to
 0.1 on `--rig 32`, 1.2 to 0.5 on `--rig 32 --swap`, 18 to 8 on `--rig
 400 --swap` and 2.5 to 0.2 on the 2,000 shapes, with GL's own time

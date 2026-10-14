@@ -1,11 +1,16 @@
 // What the player lets go of in a context once Pixi has built it: its
-// paths' commands, flattened to shapes by then; and that it measures and
-// builds the same again from those.
+// paths' commands, flattened to shapes by then, and that it measures and
+// builds the same again from those; or, for a view's own, its paths
+// whole, a copy made anew from what made it.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { forgetCommands } from "../../../../packages/player/dist/render/tessellate.js";
+import {
+  copyContext,
+  forgetCommands,
+  remakeable,
+} from "../../../../packages/player/dist/render/tessellate.js";
 
 const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
 const pixi = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
@@ -18,7 +23,10 @@ type Context = {
   batchMode: string;
   dirty: boolean;
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
-  instructions: { data: { path: { instructions: unknown[] } } }[];
+  autoGarbageCollect: boolean;
+  instructions: {
+    data: { path: { instructions: unknown[]; shapePath: { shapePrimitives: unknown[] } } };
+  }[];
   moveTo(x: number, y: number): Context;
   lineTo(x: number, y: number): Context;
   closePath(): Context;
@@ -83,4 +91,24 @@ test("a context built keeps its paths' shapes and not their commands, and builds
   assert.deepEqual(plain(contexts.updateGpuContext(context).geometryData), first);
   context.unload();
   assert.deepEqual(plain(contexts.updateGpuContext(context).geometryData), first);
+});
+
+test("a view's context lets go of its paths whole once built, measured first, and is copied anew", () => {
+  const contexts = system();
+  const make = () => star(40);
+  const context = remakeable(make() as never, make as never) as unknown as Context;
+  const bounds = { ...make().bounds };
+  assert.equal(context.autoGarbageCollect, false);
+
+  const first = plain(contexts.updateGpuContext(context).geometryData);
+  for (const instruction of context.instructions) {
+    assert.deepEqual(instruction.data.path.instructions, []);
+    assert.deepEqual(instruction.data.path.shapePath.shapePrimitives, []);
+  }
+
+  assert.deepEqual({ ...context.bounds }, bounds);
+  // A batched copy, made after: from what made the context, not its empty paths.
+  const copy = copyContext(context as never) as unknown as Context;
+  assert.notEqual(copy, context);
+  assert.deepEqual(plain(contexts.updateGpuContext(copy).geometryData), first);
 });

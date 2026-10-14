@@ -37,6 +37,7 @@ import {
   Shader,
   UniformGroup,
 } from "pixi.js";
+import { copyContext } from "./tessellate.js";
 
 const NAME = "flash-color";
 
@@ -379,7 +380,7 @@ function batched(context: GraphicsContext): GraphicsContext {
 
   let copy = batchedCopies.get(context);
   if (!copy) {
-    copy = context.clone();
+    copy = copyContext(context);
     copy.batchMode = "batch";
     batchedCopies.set(context, copy);
   }
@@ -387,13 +388,11 @@ function batched(context: GraphicsContext): GraphicsContext {
   return copy;
 }
 
-/** A context destroyed: its batched copy too, if it has one. */
-export function dropBatchedCopy(context: GraphicsContext): void {
+/** A context destroyed: its batched copy, if it has one, taken for it to destroy too. */
+export function takeBatchedCopy(context: GraphicsContext): GraphicsContext | undefined {
   const copy = batchedCopies.get(context);
-  if (copy) {
-    batchedCopies.delete(context);
-    copy.destroy();
-  }
+  batchedCopies.delete(context);
+  return copy;
 }
 
 /**
@@ -441,9 +440,10 @@ function lineVertices(style: { join?: string; pixelLine?: boolean }): number {
  * Whether `context` has ALONE_VERTICES or more, weighed from its paths
  * before it is built, as a part may show under a transform it then keeps,
  * and lines are swapped for new contexts as they turn: a fill a vertex a
- * point, a line as lineVertices says, a texture four.
+ * point, a line as lineVertices says, a texture four. Weighed once built
+ * too, as a view's contexts let go of their paths then (render/tessellate.ts).
  */
-function large(context: GraphicsContext): boolean {
+export function weigh(context: GraphicsContext): boolean {
   let vertices = weights.get(context);
   if (vertices === undefined) {
     vertices = 0;
@@ -539,7 +539,7 @@ export function showFor(g: SharingGraphics, ct: ColorTransform | null): void {
     shared.batchMode === "no-batch" &&
     renderers.size > 0 &&
     notWebGL.size === 0 &&
-    large(shared);
+    weigh(shared);
   const want = alone || !(ct || g.settled) ? shared : batched(shared);
   if (alone) {
     shownAlone.add(g);

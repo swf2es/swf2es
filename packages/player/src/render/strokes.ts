@@ -14,7 +14,7 @@ import {
   LINES_IDLE_VERTICES,
   linesCeiling,
 } from "./pools.js";
-import { destroyContext, shapeContext, trace } from "./tessellate.js";
+import { destroyContext, remakeable, shapeContext, trace } from "./tessellate.js";
 
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */
 export type Linear = [number, number, number, number];
@@ -479,5 +479,14 @@ export function scalesEvenly(layer: ShapeLayer): boolean {
 export function linesContext(layer: ShapeLayer, m: Linear, least: number, by = m): GraphicsContext {
   // Empty, drawn alone as every shape's are: one batched would get no
   // instruction till its group rebuilt.
-  return m[0] * m[3] - m[1] * m[2] === 0 ? shapeContext() : strokeContext(layer, m, least, by);
+  if (m[0] * m[3] - m[1] * m[2] === 0) {
+    return shapeContext();
+  }
+
+  // A view's alone, whose renderer builds it once: its paths go then. The
+  // transforms copied, as a caller may reuse its arrays.
+  const seen: Linear = [m[0], m[1], m[2], m[3]];
+  const width: Linear = [by[0], by[1], by[2], by[3]];
+  const make = () => strokeContext(layer, seen, least, width);
+  return remakeable(make(), make);
 }

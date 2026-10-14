@@ -78,7 +78,14 @@ import {
   UNIT,
   widestLine,
 } from "./strokes.js";
-import { destroyContext, fillContext, type Painter, paint, SharedFills } from "./tessellate.js";
+import {
+  destroyContext,
+  fillContext,
+  type Painter,
+  paint,
+  remakeable,
+  SharedFills,
+} from "./tessellate.js";
 import { drawStaticText, drawText } from "./text.js";
 import { Plane, SAMPLES } from "./three.js";
 
@@ -1277,7 +1284,9 @@ export class PixiView {
   private readonly buildFills = (layers: readonly ShapeLayer[]): GraphicsContext[] => {
     const fills: GraphicsContext[] = [];
     for (let i = 0; i < layers.length; i++) {
-      const context = fillContext(layers[i], this.painter);
+      const layer = layers[i];
+      const make = () => fillContext(layer, this.painter);
+      const context = remakeable(make(), make);
       if (this.fresh) {
         this.built.add(context);
       }

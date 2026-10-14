@@ -3,7 +3,7 @@
 // WebGL (SwiftShader) draws them, so the result does not depend on the
 // machine's GPU. CHROME names the browser; by default google-chrome.
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "./serve.ts";
@@ -391,6 +391,11 @@ export interface BenchResult {
   /** Bytes allocated in the frames' tick, sync and render, sampled, with `allocs`. */
   allocated: number;
   heap: [number, number];
+  /**
+   * What the page held after the frames and a full collection, the renderer still alive: the JS
+   * heap, and the backing stores of its array buffers (typed arrays' data), in bytes.
+   */
+  retained: { heap: number; buffers: number };
   tick: number[];
   sync: number[];
   draw: number[];
@@ -453,6 +458,7 @@ export function benchPlayer(
   cpuProfilePath?: string,
   finishEvery = 1,
   hover = false,
+  snapshotPath?: string,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -474,9 +480,46 @@ export function benchPlayer(
         });
       }
 
-      const { value, exception } = await evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover})`,
+      const answer = evaluate<BenchResult>(
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true)`,
       );
+      // The page waits, renderer alive, once its frames are done, for what they left to be measured.
+      let retained = { heap: 0, buffers: 0 };
+      let settled = false;
+      void answer.finally(() => {
+        settled = true;
+      });
+      while (!settled) {
+        const held = await evaluate<boolean>("globalThis.benchHeld === true");
+        if (held.value) {
+          // Twice: what the first collection's finalizers let go goes in the second.
+          await send("HeapProfiler.collectGarbage");
+          await send("HeapProfiler.collectGarbage");
+          const usage = await send<{ usedSize: number; backingStorageSize?: number }>(
+            "Runtime.getHeapUsage",
+          );
+          retained = { heap: usage.usedSize, buffers: usage.backingStorageSize ?? 0 };
+          if (snapshotPath) {
+            // Chunk by chunk: a crowded scene's snapshot is longer than a string may be.
+            writeFileSync(snapshotPath, "");
+            listen("HeapProfiler.addHeapSnapshotChunk", (params) =>
+              appendFileSync(snapshotPath, String(params.chunk)),
+            );
+            await send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+          }
+
+          await evaluate("globalThis.benchRelease()");
+          break;
+        }
+
+        await sleep(50);
+      }
+
+      const { value, exception } = await answer;
+      if (value) {
+        value.retained = retained;
+      }
+
       if (value && allocs) {
         const { profile } = await send<{ profile: { head: SampledNode } }>(
           "HeapProfiler.stopSampling",
@@ -493,6 +536,7 @@ export function benchPlayer(
           meters: [],
           allocated: 0,
           heap: [0, 0],
+          retained: { heap: 0, buffers: 0 },
           tick: [],
           sync: [],
           draw: [],
@@ -657,6 +701,20 @@ export function playResized(
   return withPage("resizeSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
       `resizeSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(sizes)})`,
+    );
+    return exception ?? value ?? null;
+  });
+}
+
+/** Play a SWF with no scripts in the page's contextLossPlanSwf, in two renderers, one losing its context as `plan` says. */
+export function playLosingContextPlan(
+  swf: Uint8Array,
+  plan: string,
+  table: boolean,
+): Promise<string | null> {
+  return withPage("contextLossPlanSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<string | null>(
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table})`,
     );
     return exception ?? value ?? null;
   });

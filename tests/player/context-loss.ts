@@ -4,7 +4,7 @@
 // ones batched, a colour transform, a gradient and a line.
 import assert from "node:assert/strict";
 import * as w from "../swf-writer.ts";
-import { playLosingContext } from "./chrome.ts";
+import { playLosingContext, playLosingContextPlan } from "./chrome.ts";
 
 /** A closed ring of `n` curves round (cx, cy), `r` twips out: hundreds of vertices once flattened. */
 function ring(cx: number, cy: number, r: number, n: number): w.PathCommand[] {
@@ -62,7 +62,23 @@ const turning = w.sprite(4, 2, [
   w.showFrame(),
 ]);
 
-const tags: Uint8Array[] = [w.fileAttributes(false), large, small, shaded, turning];
+// Small shapes moving every frame: batched elements written in place, not rebuilt.
+const moving = w.sprite(5, 4, [
+  w.place({ depth: 1, character: 2 }),
+  w.place({ depth: 2, character: 2, matrix: { tx: 500 } }),
+  w.showFrame(),
+  w.place({ depth: 1, move: true, matrix: { tx: 120, ty: 40 } }),
+  w.place({ depth: 2, move: true, matrix: { tx: 620, ty: -40 } }),
+  w.showFrame(),
+  w.place({ depth: 1, move: true, matrix: { tx: 240, ty: 80 } }),
+  w.place({ depth: 2, move: true, matrix: { tx: 740, ty: -80 } }),
+  w.showFrame(),
+  w.place({ depth: 1, move: true, matrix: { tx: 120, ty: 120 } }),
+  w.place({ depth: 2, move: true, matrix: { tx: 620, ty: 0 } }),
+  w.showFrame(),
+]);
+
+const tags: Uint8Array[] = [w.fileAttributes(false), large, small, shaded, turning, moving];
 let depth = 1;
 for (let i = 0; i < 24; i++) {
   const tx = 600 + (i % 6) * 1300;
@@ -78,6 +94,10 @@ for (let i = 0; i < 24; i++) {
   );
 }
 
+for (let i = 0; i < 6; i++) {
+  tags.push(w.place({ depth: depth++, character: 5, matrix: { tx: 300 + i * 1200, ty: 5200 } }));
+}
+
 tags.push(
   w.place({ depth: depth++, character: 3, matrix: { a: 0.6, d: 0.6, tx: 7000, ty: 5000 } }),
   w.showFrame(),
@@ -89,4 +109,12 @@ const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");
 assert.equal(await playLosingContext(swf, 4, false), null, "without the transform table");
 assert.equal(await playLosingContext(swf, 4, true, true), null, "with objects turned in 3D");
+// Lost for frames that draw into nothing, lost twice, and resized while lost and after: every
+// frame drawn with a context matches a renderer that kept its own.
+for (const table of [true, false]) {
+  for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt"]) {
+    assert.equal(await playLosingContextPlan(swf, plan, table), null, `${plan}, table ${table}`);
+  }
+}
+
 console.log("context-loss: ok");
