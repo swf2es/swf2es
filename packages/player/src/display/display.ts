@@ -1269,8 +1269,12 @@ export class Container extends DisplayObject {
     }
 
     for (let p: Container | null = this; p; p = p.parent) {
-      if (p.walk) {
-        p.walk.current = false;
+      const walk = p.walk;
+      if (walk?.current) {
+        walk.current = false;
+        // Emptied, its room kept: one no walk makes again, off the list or now too short to
+        // keep, would hold what left it alive.
+        (walk.items as (DisplayObject | null)[]).fill(null);
       }
     }
   }
