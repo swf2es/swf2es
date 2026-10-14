@@ -164,9 +164,11 @@ const SPECIAL: Record<string, [string, string]> = {
     "vec4(min(front.rgb + back.rgb, 1.0), min(front.a + back.a, 1.0))",
     "vec4<f32>(min(front.rgb + back.rgb, vec3<f32>(1.0)), min(front.a + back.a, 1.0))",
   ],
+  // What is below less the object, its alpha the two's as the object over it: over a layer's
+  // clear ground, adl's subtract leaves the object's alpha in black.
   subtract: [
-    "vec4(max(back.rgb - front.rgb, 0.0), back.a)",
-    "vec4<f32>(max(back.rgb - front.rgb, vec3<f32>(0.0)), back.a)",
+    "vec4(max(back.rgb - front.rgb, 0.0), front.a + back.a * (1.0 - front.a))",
+    "vec4<f32>(max(back.rgb - front.rgb, vec3<f32>(0.0)), front.a + back.a * (1.0 - front.a))",
   ],
   // What is below inverted, as far as the object covers it.
   invert: [

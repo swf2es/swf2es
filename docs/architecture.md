@@ -3830,7 +3830,8 @@ and computes the mode in premultiplied colour, its result replacing what
 is there. Multiply, screen, lighten, darken, difference, overlay and
 hardlight are the separable blends of the straight colours, composited
 source over; `add` adds and `subtract` takes the object from what is
-below, each clamped; `invert` inverts what is below as far as the
+below, each clamped, subtract's alpha the object's over what is below
+(over a layer's clear ground adl leaves the object's alpha in black); `invert` inverts what is below as far as the
 object covers it; `alpha` and `erase` scale the layer below by the
 object's alpha, or by what it leaves, only where the object has any.
 The `blend-modes` case draws each over two grounds against adl. Pixi
