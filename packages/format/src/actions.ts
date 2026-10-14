@@ -70,7 +70,11 @@ export type ActionOwner =
   | { type: "frame"; timeline: number | null; frame: number }
   /** DoInitAction: `sprite`'s #initclip actions. */
   | { type: "init"; sprite: number; timeline: number | null; frame: number }
-  /** A clip action of the PlaceObject2 or 3 at `depth`; `key` is keyPress's key code, else 0. */
+  /**
+   * A clip action of the PlaceObject2 or 3 at `depth`. `events` are those
+   * both its flags and the place's field of all events have, the ones Flash
+   * runs it for; `key` is keyPress's key code, else 0.
+   */
   | {
       type: "clip";
       timeline: number | null;
@@ -164,7 +168,7 @@ function add(list: ActionList, tag: Tag, owner: ActionOwner, offset: number, end
   }
 }
 
-/** CLIPACTIONS: a reserved u16, every record's events together, then records to one of no events. */
+/** CLIPACTIONS: a reserved u16, the events Flash dispatches, then records to one of no events. */
 function clipActions(
   bytes: Uint8Array,
   tag: Tag,
@@ -188,7 +192,8 @@ function clipActions(
 
     return wide ? r.u32() : r.u16();
   };
-  flags();
+  // Flash runs a record only for the events this field also has.
+  const all = flags() & CLIP_EVENTS;
 
   for (;;) {
     const raw = flags();
@@ -196,7 +201,7 @@ function clipActions(
       return;
     }
 
-    const events = raw & CLIP_EVENTS;
+    const events = raw & all;
 
     const length = r.u32();
     let start = r.pos;

@@ -21,6 +21,11 @@ function movie(version: number, list: Uint8Array[]): Swf {
   return readSwf(w.swf({ version, width: 10, height: 10, frameCount: 2, tags: list }));
 }
 
+/** A PlaceObject2 of depth 1 whose CLIPACTIONS are `body`, as given. */
+function placeWith(body: w.BitWriter): Uint8Array {
+  return w.tag(26, new w.BitWriter().u8(0x80).u16(1).raw(body.done()).done());
+}
+
 function bytesOf(swf: Swf, block: ActionBlock): number[] {
   return [...swf.bytes.subarray(block.offset, block.offset + block.length)];
 }
@@ -113,6 +118,34 @@ test("SWF 5's clip event flags are 16 bits, so its keyPress and construct bits a
   );
 });
 
+test("a clip action runs only for the events the place's field of all events has", () => {
+  const body = new w.BitWriter()
+    .u16(0)
+    .u32(ClipEvent.load | ClipEvent.mouseUp)
+    .u32(ClipEvent.load | ClipEvent.enterFrame)
+    .u32(2)
+    .raw(STOP)
+    .u32(ClipEvent.enterFrame)
+    .u32(2)
+    .raw(PLAY)
+    .u32(ClipEvent.mouseUp)
+    .u32(2)
+    .raw(NEXT)
+    .u32(0);
+  const swf = movie(6, [placeWith(body), w.end()]);
+
+  assert.deepEqual(
+    readActions(swf).blocks.map((b) => [
+      b.owner.type === "clip" && b.owner.events,
+      bytesOf(swf, b),
+    ]),
+    [
+      [ClipEvent.load, STOP],
+      [ClipEvent.mouseUp, NEXT],
+    ],
+  );
+});
+
 test("a sprite's frames are its own, nested in another's or not", () => {
   const swf = movie(8, [
     w.doAction(PLAY),
@@ -169,11 +202,6 @@ test("PlaceObject3's clip actions follow its own fields", () => {
   );
   assert.equal(readPlace(swf.bytes, swf.tags[0], list).name, "a");
 });
-
-/** A PlaceObject2 of depth 1 whose CLIPACTIONS are `body`, as given. */
-function placeWith(body: w.BitWriter): Uint8Array {
-  return w.tag(26, new w.BitWriter().u8(0x80).u16(1).raw(body.done()).done());
-}
 
 test("a truncated or malformed clip action ends the place's list, keeping those before it", () => {
   // The second record's length runs past the tag.
