@@ -5300,6 +5300,19 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "draw-triangles",
+    swf: (abc) => bare(abc, 2, "DrawTriangles", 400, 280),
+    script: "DrawTriangles",
+    frames: 2,
+    capture: [1, 2],
+    // The textures are adl's to a level where flat or smoothed, and to the texel but at a few
+    // pixels where a perspective puts a pixel's corner on a texel's edge. The rest are edges:
+    // adl covers a 45° edge's pixel with 10 of its 16 samples where the page takes 6, and
+    // strokes' ends and joins, as in the other cases.
+    tolerance: 32,
+    maxOutliers: 760,
+  },
+  {
     name: "read-graphics-data",
     swf: (abc) => bare(abc, 1, "ReadGraphicsData"),
     script: "ReadGraphicsData",

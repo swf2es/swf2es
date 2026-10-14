@@ -1157,7 +1157,7 @@ and the player's paths in this document are relative to it:
   the Graphics that draws a shared context (`shared.ts`), what the view
   and Pixi pool and how much (`pools.ts`),
   text drawn (`text.ts`), bitmaps' and gradients' textures
-  (`bitmaps.ts`), batchers kept for new groups (`batchers.ts`), the
+  (`bitmaps.ts`), drawTriangles' textured triangles (`triangles.ts`), batchers kept for new groups (`batchers.ts`), the
   transform table, colour transforms, blend modes, filters and resolves
   on the GPU.
 - `playerglobal/`: the `flash.*` classes, a path per package and class,
@@ -2981,10 +2981,51 @@ re-stroking as a shape's for their width under a transform. The drawing's
 points, and its lines' half widths, give the object its bounds, for
 `width`, `height`, `getBounds` and the hit tests to come. Gradient and
 bitmap fills are recorded as a shape's are, and drawn as far as a shape's
-are (the first stop); shader fills, `drawTriangles` and
-`drawGraphicsData` wait. An adl case draws in a `Shape` and in a
+are (the first stop); shader fills wait. An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
+
+`drawTriangles` draws as adl does (`display/drawing.ts`, the
+`draw-triangles` case). Its triangles, three vertices each by the indices
+or in order up to the first index past the vertices, go in a layer of
+their own: each a fill of its own, so overlapping triangles never cancel
+whichever way round they are, and the line, if one is set, around each,
+its outline closed and joined, over them all. They end the open fill's
+contour, whose closing line stays, and the line's path; both go on from
+the pen, which stays where it was, in a layer after them, the contour
+still closing to where it began. `culling` drops the triangles that turn
+one way in the drawing's own space, `positive` those clockwise on the
+y-down screen, as `readGraphicsData` and the hit tests see it; adl culls
+on the screen, so a mirrored drawing drops the others there: a limit,
+noted. A bitmap fill without `uvtData` fills through its matrix, as any
+fill does. With `uvtData`, two or three numbers a vertex, only a bitmap
+fill draws, the triangles textured and its matrix ignored; any other fill
+draws nothing, nor its lines, though without a fill the lines draw. The
+textured triangles are a layer's `meshes`, drawn after its fills by a
+Pixi mesh of their own (`render/triangles.ts`, WebGL alone): u·t, v·t and
+t a vertex, which the GPU interpolates straight and each pixel divides,
+so t is a perspective. adl maps u and v from 0 to 1 onto the bitmap's
+first texel's centre to its last's, wrapped there when the fill repeats
+or clamped, a hair nearer 0 as its fixed-point steps come out, and
+samples once a pixel at the pixel's top left corner: the nearer texel,
+or the four around weighed when smoothed; a bitmap a texel high shows its
+first texel throughout. The shader reads the texels itself, so the
+texture's sampling counts for nothing, and every sample of a pixel the
+page draws finer takes the pixel's value. Flash colour transforms apply
+as the colour batcher's do. The bounds count every triangle given, culled
+or drawing nothing, with the line's width if a line was set; the hit
+tests count the textured triangles; `readGraphicsData` gives each
+untextured triangle as a fill, a path and an end, the lines all in one
+path, and leaves the textured ones out. Errors are adl's: vertices not in
+pairs, or not three a triangle without indices, indices not in threes and
+`uvtData` not two or three a vertex are ArgumentError 2004, a culling
+not one of the three 2008, after them; null vertices draw nothing; a
+`GraphicsTrianglePath` refuses a culling as it is set, 2008. Where an
+open contour went on after triangles, adl reads it back from the pen to
+where it began, and the player from where it began through the pen; and
+a filter's output or a cached bitmap over textured triangles adl keeps
+though the texture changes, which the player draws again (not checked
+for other bitmap fills).
 
 `readGraphicsData` reads a drawing back as Flash does, from the shape in
 twips rather than the commands (`display/graphicsdata.ts`): each fill as
