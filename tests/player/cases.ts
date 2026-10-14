@@ -5144,6 +5144,16 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  // A field's selection after text, htmlText, appendText and replaceText.
+  {
+    name: "text-field-selection-moves",
+    swf: (abc) => bare(abc, 1, "TextFieldSelectionMoves"),
+    script: "TextFieldSelectionMoves",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "number-parse-result-natives",
     swf: (abc) => bare(abc, 1, "NumberParseResultNatives"),

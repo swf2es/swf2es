@@ -247,11 +247,21 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "value");
       }
 
+      const field = this.$display;
+      const text = s.rt.toString(v);
+      // A field not of type input selects nothing at its start for new text.
+      // An input field keeps its selection, cut to the text, as Flash Player
+      // does in Ruffle's avm2/selection, though adl moves it to the start too.
+      const moves = field.type !== "input" && text !== field.model.text;
       // Under a sheet, text is read as HTML too, as adl reads it.
-      if (this.$display.styleSheet) {
-        setStyledHtml(this.$display, s.rt.toString(v));
+      if (field.styleSheet) {
+        setStyledHtml(field, text);
       } else {
-        this.$display.model.setText(s.rt.toString(v));
+        field.model.setText(text);
+      }
+
+      if (moves) {
+        field.select(0, 0);
       }
 
       changed(this);
@@ -272,6 +282,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
         const html = s.rt.toString(v);
         if (html !== this.$display.htmlSource) {
           setStyledHtml(this.$display, html);
+          htmlMoves(this.$display);
           changed(this);
         }
 
@@ -283,6 +294,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
         this.$display.multiline,
         s.trimTrailingHtmlBreak,
       );
+      htmlMoves(this.$display);
       changed(this);
     }
     get length(): number {
@@ -294,6 +306,11 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     appendText(v: Value): void {
       const model = this.$display.model;
       model.replace(model.text.length, model.text.length, s.rt.toString(v));
+      // An input field keeps its selection; another's caret follows the text.
+      if (this.$display.type !== "input") {
+        caretAtEnd(this.$display);
+      }
+
       changed(this);
     }
     replaceText(begin: Value, end: Value, v: Value): void {
@@ -304,7 +321,13 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       const model = this.$display.model;
       const b = Math.max(0, Math.min(model.text.length, s.rt.toInt(begin)));
       const e = Math.max(b, Math.min(model.text.length, s.rt.toInt(end)));
-      model.replace(b, e, s.rt.toString(v));
+      const text = s.rt.toString(v);
+      model.replace(b, e, text);
+      // An input field keeps its selection; another's caret follows what came in.
+      if (this.$display.type !== "input") {
+        this.$display.select(b + text.length, b + text.length);
+      }
+
       changed(this);
     }
     get textColor(): number {
@@ -728,6 +751,22 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       };
     }
   }
+
+  const caretAtEnd = (field: TextObject): void => {
+    const end = field.model.text.length;
+    field.select(end, end);
+  };
+
+  /**
+   * After htmlText, a field not of type input has its caret after the text.
+   * adl does the same to an input field, which here keeps its selection, as
+   * for text (no Flash Player trace says otherwise).
+   */
+  const htmlMoves = (field: TextObject): void => {
+    if (field.type !== "input") {
+      caretAtEnd(field);
+    }
+  };
 
   /** `html` as the field's text, styled by its sheet's TextFormats by selector. */
   const setStyledHtml = (field: TextObject, html: string): void => {
