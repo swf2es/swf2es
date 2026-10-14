@@ -3,5 +3,5 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist", "types": ["node"], "lib": ["ES2022"] },
   // Node has WebAssembly, but neither ES2022 nor @types/node declares it.
   "include": ["src", "../codegen/src/webassembly.d.ts"],
-  "references": [{ "path": "../format" }, { "path": "../codegen" }]
+  "references": [{ "path": "../format" }, { "path": "../codegen" }, { "path": "../runtime" }]
 }

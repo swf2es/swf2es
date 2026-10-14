@@ -99,7 +99,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 language semantics called by generated code (AVM1 a placeholder) | format               |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
-| `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
+| `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
@@ -793,6 +793,18 @@ Flash Player's own instead. No version mark goes past the reference's 41:
 a builtin's highest mark from 42 up is the VM's internal one
 (`API_FirstInternalMark`), which a higher mark would make public.
 
+### Running ABCs as avmshell does
+
+The tests that run ABCs as avmshell does share one host, `runShell` in
+`packages/cli`'s `shell.ts`: one compiler domain for the runtime, each ABC
+compiled into the application domain the runtime loads it into, so that an
+ABC `Domain.loadBytes` loads compiles against what its domain sees, with
+the findings the runtime reports (`RuntimeOptions.compileAbc`). The
+conformance runner and the Tamarin runner give it the test build of
+codegen (`tests/conformance/abc-compiler.ts`), which `pnpm test:checked`
+checks every array access of, a loader that keeps source maps, and for
+Tamarin the builtins' modules compiled once for every test.
+
 ## Compiling ahead of time and caching modules
 
 A module need not be compiled in the page: the swf2es command writes it
@@ -819,8 +831,8 @@ libraries, the command's modules, the libraries' included, are the
 player's, which its own `Code.link` compiles in node.
 
 The libraries are the host's, so `--lib` names them, in load order; the
-command depends on format and codegen alone, so it cannot take the
-player's playerglobalLibrary itself. With none given, it takes builtin.abc
+command does not depend on the player, so it cannot take the player's
+playerglobalLibrary itself. With none given, it takes builtin.abc
 and playerglobal-swf2es.abc from `tests/player/out/libraries/`, where the
 player's tests write them, and
 says what to pass when they are not there. The player loads only the

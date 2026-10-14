@@ -1,7 +1,7 @@
 {
   "name": "@swf2es/cli",
   "version": "0.0.0",
-  "description": "swf2es command line: ahead-of-time compile SWF and ABC files",
+  "description": "swf2es command line: ahead-of-time compile SWF and ABC files, and run ABCs as avmshell does",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -15,7 +15,8 @@
   ],
   "dependencies": {
     "@swf2es/format": "workspace:*",
-    "@swf2es/codegen": "workspace:*"
+    "@swf2es/codegen": "workspace:*",
+    "@swf2es/runtime": "workspace:*"
   },
   "bin": {
     "swf2es": "./dist/main.js"
