@@ -61,13 +61,16 @@ import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { videoNatives } from "./flash/media/Video.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { fileReferenceNatives } from "./flash/net/FileReference.js";
+import { localConnectionNatives } from "./flash/net/LocalConnection.js";
 import { netConnectionNatives } from "./flash/net/NetConnection.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
+import { xmlSocketNatives } from "./flash/net/XMLSocket.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
+import { accelerometerNatives } from "./flash/sensors/Accelerometer.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { fsCommandNatives } from "./flash/system/FSCommand.js";
@@ -81,7 +84,9 @@ import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
 import { styleSheetNatives } from "./flash/text/StyleSheet.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
+import { textRendererNatives } from "./flash/text/TextRenderer.js";
 import { traceNatives } from "./flash/trace/Trace.js";
+import { contextMenuNatives } from "./flash/ui/ContextMenu.js";
 import { gameInputNatives } from "./flash/ui/GameInput.js";
 import { keyboardNatives } from "./flash/ui/Keyboard.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
@@ -142,6 +147,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...socketNatives(s),
+    ...xmlSocketNatives(s),
+    ...localConnectionNatives(s),
     ...webSocketNatives(s),
     ...sharedObjectNatives(s),
     ...transformNatives(s),
@@ -167,6 +174,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...fontDescriptionNatives(s),
     ...tabStopNatives(s),
     ...textFieldNatives(s),
+    ...textRendererNatives(s),
     ...traceNatives(),
     ...utils3DNatives(s),
     ...perspectiveProjectionNatives(s),
@@ -179,6 +187,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...videoNatives(s),
     ...keyboardNatives(),
     ...gameInputNatives(s),
+    ...contextMenuNatives(s),
+    ...accelerometerNatives(),
   };
 }
 

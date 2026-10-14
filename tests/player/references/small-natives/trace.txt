@@ -1,0 +1,44 @@
+contextMenu at first null
+contextMenu set true
+contextMenu null null
+contextMenu undefined null
+contextMenu string threw [class TypeError] 1034 
+contextMenu object threw [class TypeError] 1034 
+contextMenu after null
+link at first null
+link set true
+link string threw [class TypeError] 1034 
+link after true
+link undefined null
+selectedText none []
+selectedText 2 7 [llo w]
+selectedText 7 2 [llo w]
+selectedText 3 100 [lo world]
+selectedText line e1%0Dli
+selectedText html [ld and ]
+renderer at first crt 4 default
+displayMode lcd lcd
+displayMode null lcd
+displayMode LCD crt
+displayMode 5 crt
+maxLevel 7 7
+maxLevel 5 7
+maxLevel 3.9 3
+maxLevel '4' 4
+maxLevel null 4
+maxLevel 2^32 + 3 3
+antiAliasType on on
+antiAliasType ON off
+antiAliasType null threw [class TypeError] 2007 Error #2007: Parameter antialiasType must be non-null.
+antiAliasType undefined threw [class TypeError] 2007 Error #2007: Parameter antialiasType must be non-null.
+antiAliasType default default
+table undefined
+table fontName null threw [class TypeError] 2007 Error #2007: Parameter fontName must be non-null.
+table fontStyle null threw [class TypeError] 2007 Error #2007: Parameter fontStyle must be non-null.
+table colorType null threw [class TypeError] 2007 Error #2007: Parameter colorType must be non-null.
+table null undefined
+table unknown names undefined
+table of numbers threw [class TypeError] 2005 Error #2005: Parameter 4 is of the incorrect type. Should be type CSMSettings.
+table of null threw [class TypeError] 2005 Error #2005: Parameter 4 is of the incorrect type. Should be type CSMSettings.
+table all wrong threw [class TypeError] 2007 Error #2007: Parameter fontName must be non-null.
+Accelerometer false

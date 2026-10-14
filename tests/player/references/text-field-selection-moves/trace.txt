@@ -1,0 +1,16 @@
+dynamic text longer [] 0 0 0
+dynamic text the same [ll] 2 4 4
+dynamic htmlText [] 11 11 11
+dynamic appendText [] 16 16 16
+dynamic replaceText [] 1 1 1
+dynamic text shorter [] 0 0 0
+dynamic text empty [] 0 0 0
+unselectable text longer [] 0 0 0
+unselectable text the same [ll] 2 4 4
+unselectable htmlText [] 11 11 11
+unselectable appendText [] 16 16 16
+unselectable replaceText [] 1 1 1
+unselectable text shorter [] 0 0 0
+unselectable text empty [] 0 0 0
+focused input appendText [ll] 2 4 4
+focused input replaceText [ll] 2 4 4
