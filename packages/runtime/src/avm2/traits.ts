@@ -15,6 +15,7 @@ import type { Domain } from "./domain.js";
 import type { IndexHook, PropertyHook } from "./hooks.js";
 import type { Multiname, Namespace } from "./names.js";
 import { invalidate } from "./property-cache.js";
+import { fillSlots, NAMED_SLOTS, type SlotFiller, slotFiller } from "./slots.js";
 
 // Binding kinds, as the compiler encodes them: kind | id << 3.
 export const BIND_Method = 1;
@@ -62,6 +63,11 @@ export class Traits {
   own: [string, Value][] = [];
   /** Every slot field and its initial value, the base's first, once an instance is made. */
   private allDefaults: [string, Value][] | null = null;
+  /** Their values, where they are slots 0 to n - 1 in order, few enough to set by name. */
+  private slotValues: Value[] | null = null;
+  /** How many objects fillSlots made, and, from FILLER_AFTER on, the class's own function. */
+  private made = 0;
+  private filler: SlotFiller | null = null;
   /** The JavaScript prototype of objects with these traits. */
   proto: AsObject;
   /** The class whose instances these are the traits of, once it exists. */
@@ -261,11 +267,24 @@ export class Traits {
     o.$d = this.dynamic ? new Map() : null;
     if (!this.allDefaults) {
       this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
+      this.slotValues = namedSlots(this.allDefaults);
+      this.made = 0;
+      this.filler = null;
     }
 
-    const defaults = this.allDefaults;
-    for (let i = 0; i < defaults.length; i++) {
-      o[defaults[i][0]] = defaults[i][1];
+    const values = this.slotValues;
+    if (this.filler) {
+      this.filler(o, values as Value[]);
+    } else if (values) {
+      fillSlots(o, values);
+      if (++this.made === FILLER_AFTER) {
+        this.filler = slotFiller(values.length);
+      }
+    } else {
+      const defaults = this.allDefaults;
+      for (let i = 0; i < defaults.length; i++) {
+        o[defaults[i][0]] = defaults[i][1];
+      }
     }
 
     return o;
@@ -360,6 +379,24 @@ export class VectorRef {
 
 // The names of slot and method properties by id, made once each, for the
 // runtime's dynamic paths; generated code names them itself.
+/** How many objects of a class are made before its own slotFiller: one made a few times needs none. */
+const FILLER_AFTER = 32;
+
+/** The values of `defaults` if they are slots 0 to n - 1 in order, few enough to set by name, or null. */
+function namedSlots(defaults: [string, Value][]): Value[] | null {
+  if (defaults.length > NAMED_SLOTS) {
+    return null;
+  }
+
+  for (let i = 0; i < defaults.length; i++) {
+    if (defaults[i][0] !== slotKey(i)) {
+      return null;
+    }
+  }
+
+  return defaults.map(([, value]) => value);
+}
+
 const slotKeys: string[] = [];
 const methodKeys: string[] = [];
 export const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);

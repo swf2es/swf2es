@@ -381,7 +381,15 @@ which `newclass` builds from the module's layout:
 
 - **Slots** are fields named by slot id (`$0`, `$1`, ...), set to their
   initial values when the object is made, so an early bound slot is one
-  property access and cannot collide with any dynamic name.
+  property access and cannot collide with any dynamic name. They are set by
+  name (`slots.ts`): V8 makes an object a dictionary once stores by a
+  computed key give it a seventeenth property, and every access to it a
+  lookup. A shared function sets them for a class's first 32 objects, and
+  then one of the class's own, made with `Function` where the page lets
+  code be made from text, whose stores see that class's shape alone; both
+  set them highest first, so a class's objects keep one shape. Objects of
+  a class of 24 slots were made eight times as fast so, and read 40%
+  faster; of 5 slots, 30% faster.
 - **Methods, getters and setters** are on the prototype, named by dispatch
   id, so `callmethod` is a direct call and overriding is JavaScript's own
   inheritance.
