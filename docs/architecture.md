@@ -382,14 +382,15 @@ which `newclass` builds from the module's layout:
 - **Slots** are fields named by slot id (`$0`, `$1`, ...), set to their
   initial values when the object is made, so an early bound slot is one
   property access and cannot collide with any dynamic name. They are set by
-  name (`slots.ts`): V8 makes an object a dictionary once stores by a
-  computed key give it a seventeenth property, and every access to it a
-  lookup. A shared function sets them for a class's first 32 objects, and
-  then one of the class's own, made with `Function` where the page lets
-  code be made from text, whose stores see that class's shape alone; both
-  set them highest first, so a class's objects keep one shape. Objects of
-  a class of 24 slots were made eight times as fast so, and read 40%
-  faster; of 5 slots, 30% faster.
+  name, by a function the module has for each traits (`fill`, see below):
+  V8 makes an object a dictionary once stores by a computed key give it a
+  seventeenth property, and every access to it a lookup. The function sets
+  the slots highest first, the base's included, so a class's objects keep
+  one shape, and as each class has its own, its stores see that shape
+  alone and stay inline. It is code in the module, not made from text at
+  run time, so a page without 'unsafe-eval' runs it too. Objects of a class
+  of 24 slots were made nine times as fast so, and read four times as
+  fast; of 5 slots, made a third faster.
 - **Methods, getters and setters** are on the prototype, named by dispatch
   id, so `callmethod` is a direct call and overriding is JavaScript's own
   inheritance.
@@ -453,7 +454,14 @@ runtime, `rt`, that returns:
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
-  getters and setters by dispatch id;
+  getters and setters by dispatch id; and, for traits of up to 128 slots,
+  `fill: (o, v) => { o.$n = ...; ... o.$0 = ...; }`, which sets a new
+  object's slots, its base's too. A value is a literal where it is one
+  however the module is compiled, a type's default or a constant of the
+  module's own ABC; a namespace, or a base's constant from another ABC, it
+  takes from `v`, the runtime's initial values by slot. Traits without one,
+  a catch scope's or past 128 slots where V8 keeps no object fast, are set
+  by key;
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
 - **hash** and **linked**: the hash of its ABC and of the ABCs loaded
