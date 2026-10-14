@@ -4,9 +4,10 @@
 // (read_clip_actions, read_clip_event_flags, read_define_button_1 and 2,
 // read_button_action) and its swf/src/types.rs numbers their flags: MIT OR
 // Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
-// Where a record is malformed Ruffle drops the whole tag; here the tag keeps
-// the records before it, since the player places the clip or defines the
-// button whatever its actions.
+// Where they differ on clip actions, what adl does decides (clipActions, the
+// list's `corrupt`). A malformed button action ends the button's list and
+// keeps those before it: adl defines the button, and its actions cannot run
+// there without a pointer to check them.
 
 import { buttonActionsOffset } from "./button.js";
 import { clipActionsOffset, readSprite } from "./display.js";
@@ -104,6 +105,12 @@ export interface ActionList {
   blocks: ActionBlock[];
   /** The indices of each tag's blocks, by the offset of the tag's body. */
   byTag: Map<number, number[]>;
+  /**
+   * The offsets of the PlaceObject2 and 3 tags' bodies whose clip actions
+   * run past the tag: Flash stops playing the whole SWF, every timeline of
+   * it, as it reaches one, so they have no blocks.
+   */
+  corrupt: number[];
 }
 
 /**
@@ -111,7 +118,12 @@ export interface ActionList {
  * They are listed in an ActionScript 3 SWF too, where Flash runs none.
  */
 export function readActions(swf: Swf): ActionList {
-  const list: ActionList = { version: swf.header.version, blocks: [], byTag: new Map() };
+  const list: ActionList = {
+    version: swf.header.version,
+    blocks: [],
+    byTag: new Map(),
+    corrupt: [],
+  };
   walk(swf.bytes, swf.tags, null, list);
   return list;
 }
@@ -183,7 +195,7 @@ function clipActions(
   const wide = list.version >= 6;
   const flagSize = wide ? 4 : 2;
   r.u16();
-  // A final record's flags cut short read as none (Ruffle's #2899), which ends the list.
+  // Flags cut short end the list whatever their bytes, in adl as in Ruffle (its #2899).
   const flags = () => {
     if (r.pos + flagSize > end) {
       r.pos = end;
@@ -194,23 +206,30 @@ function clipActions(
   };
   // Flash runs a record only for the events this field also has.
   const all = flags() & CLIP_EVENTS;
+  const records: { owner: ActionOwner; start: number; end: number }[] = [];
 
   for (;;) {
     const raw = flags();
-    if (raw === 0 || r.pos + 4 > end) {
+    if (raw === 0) {
+      break;
+    }
+
+    // A record cut short stops the whole SWF in Flash, before any of the place's records runs.
+    if (r.pos + 4 > end) {
+      list.corrupt.push(tag.offset);
       return;
     }
 
     const events = raw & all;
-
     const length = r.u32();
     let start = r.pos;
     let key = 0;
     // keyPress's key code is the first byte of the record's length. Flash
     // reads it even of a length of 0, as the next record's first byte, and
     // goes on from there: that record keeps its key and has no actions.
-    if (events & ClipEvent.keyPress) {
+    if (raw & ClipEvent.keyPress) {
       if (r.pos >= end) {
+        list.corrupt.push(tag.offset);
         return;
       }
 
@@ -219,15 +238,20 @@ function clipActions(
     }
 
     if (length > end - r.pos) {
+      list.corrupt.push(tag.offset);
       return;
     }
 
     if (events !== 0) {
       const owner: ActionOwner = { type: "clip", timeline, frame, depth, events, key };
-      add(list, tag, owner, start, r.pos + length);
+      records.push({ owner, start, end: r.pos + length });
     }
 
     r.pos += length;
+  }
+
+  for (const record of records) {
+    add(list, tag, record.owner, record.start, record.end);
   }
 }
 

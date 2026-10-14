@@ -126,9 +126,12 @@ a button's actions (DefineButton's one, DefineButton2's conditions and key
 codes), each with its owner and its range in the SWF's bytes, in tag order.
 A block's index in that list is a pure function of the bytes, so the JIT and
 the AOT compiler number blocks alike; `readPlace` and `readButton`, given the
-list, give the indices of their own. A malformed record ends its tag's list
-and keeps the records before it, where Ruffle drops the whole tag, as the
-player places the clip or defines the button whatever its actions.
+list, give the indices of their own. The records are read as adl reads
+them where it differs from Ruffle: only flags of 0 end a place's records, a
+record runs only for the events the place's field of all events also has,
+and a clip action that runs past its tag stops the whole SWF in Flash, so its
+tag has no blocks and is listed in `corrupt`. A malformed button action ends
+its button's list and keeps the records before it.
 
 Apps, in `apps/`, are what people run rather than import: `desktop`, the
 Electron app (see [The desktop app](#the-desktop-app)), and later a browser

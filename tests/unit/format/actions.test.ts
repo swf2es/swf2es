@@ -203,13 +203,13 @@ test("PlaceObject3's clip actions follow its own fields", () => {
   assert.equal(readPlace(swf.bytes, swf.tags[0], list).name, "a");
 });
 
-test("a truncated or malformed clip action ends the place's list, keeping those before it", () => {
-  // The second record's length runs past the tag.
+test("clip actions cut short or of odd flags are read as Flash reads them", () => {
+  // The second record's length runs past the tag: Flash stops the SWF, so the first has no block either.
   const past = new w.BitWriter().u16(0).u32(3).u32(1).u32(2).raw(STOP);
   past.u32(2).u32(100).raw(PLAY);
-  // A final record's flags cut to 2 bytes, as SWFs in the wild have them.
+  // A final record's flags cut to 2 bytes, as SWFs in the wild have them, end the list.
   const short = new w.BitWriter().u16(0).u32(1).u32(1).u32(2).raw(STOP).u16(0);
-  // keyPress with no room for its key code.
+  // keyPress with no room for its key code stops the SWF.
   const keyless = new w.BitWriter()
     .u16(0)
     .u32(1 << 17)
@@ -236,7 +236,7 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
     .u32(2)
     .raw(PLAY)
     .u32(0);
-  // No room for a record's length.
+  // No room for a record's length stops the SWF.
   const lengthless = new w.BitWriter().u16(0).u32(1).u32(1).u16(2);
   const swf = movie(6, [
     placeWith(past),
@@ -252,7 +252,6 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
   assert.deepEqual(
     list.blocks.map((b) => [b.tag, bytesOf(swf, b)]),
     [
-      [swf.tags[0].offset, STOP],
       [swf.tags[1].offset, STOP],
       [swf.tags[3].offset, PLAY],
       [swf.tags[5].offset, []],
@@ -264,6 +263,7 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
     [1, 0],
   );
   assert.equal(readPlace(swf.bytes, swf.tags[2], list).actions, null);
+  assert.deepEqual(list.corrupt, [swf.tags[0].offset, swf.tags[2].offset, swf.tags[4].offset]);
 });
 
 test("a malformed button action ends the button's list; an action offset of 0 has none", () => {
