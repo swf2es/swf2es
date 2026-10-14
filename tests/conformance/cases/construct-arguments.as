@@ -62,6 +62,7 @@ probe("args 2", function():* { return new Args(x, y).got; });
 probe("args 4", function():* { return new Args(x, y, z, x).got; });
 
 var cls:Class = Rest;
+probe("class var", function():* { return new cls(x, y).got; });
 var star:* = Args;
 probe("star var", function():* { return new star(x).got; });
 
@@ -85,5 +86,7 @@ probe("array", function():* { return new A(x, y, z).length; });
 probe("dictionary", function():* { return new D() is Dictionary; });
 probe("proxy", function():* { return new P() is Proxy; });
 probe("bytearray", function():* { return new B(3).length; });
+probe("class", function():* { var c:* = Class; return new c(); });
+probe("class message", function():* { try { new Class(); } catch (e:TypeError) { return e.message; } return "none"; });
 probe("namespace", function():* { return new Namespace("p", "u").uri; });
 probe("object args", function():* { return new Object(x, y).toString(); });
