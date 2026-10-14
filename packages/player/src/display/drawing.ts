@@ -10,6 +10,7 @@
 // the paths (shapes.ts' Close): a line drawn on after endFill takes it away
 // again, as in Flash, and bounds and hit tests leave it out.
 import type { Line } from "@swf2es/format";
+import { BitmapStore } from "../bitmap/bitmap.js";
 import { type Rect, union } from "./geometry.js";
 import {
   type Close,
@@ -21,6 +22,7 @@ import {
   type Paint,
   type Path,
   type ShapeLayer,
+  type TriangleMesh,
   type Winding,
 } from "./shapes.js";
 
@@ -52,6 +54,8 @@ export class Drawing {
   private bent = false;
   /** Whether drawPath drew the open contour, which Flash never closes with a line. */
   private pathed = false;
+  /** The layer the fill and line went on in after drawTriangles, which endFill drops while empty. */
+  private resumed: ShapeLayer | null = null;
   private x = 0;
   private y = 0;
 
@@ -74,8 +78,28 @@ export class Drawing {
 
   /** The closing line stays till what comes next: a line on from the pen takes it away. */
   endFill(): void {
+    const layer = this.fillLayer;
     this.fill = null;
     this.fillLayer = null;
+    if (layer && layer === this.resumed) {
+      this.dropEmpty(layer);
+    }
+
+    this.resumed = null;
+  }
+
+  /** `layer` taken away if it is the last and draws nothing yet: an empty layer would be a Graphics drawing nothing. */
+  private dropEmpty(layer: ShapeLayer): void {
+    if (
+      layer === this.layers[this.layers.length - 1] &&
+      !layer.strokes.length &&
+      !layer.meshes &&
+      !layer.extent &&
+      layer.fills.every((f) => f.contours.every((c) => c.length <= 3))
+    ) {
+      this.layers.pop();
+      this.version++;
+    }
   }
 
   /** A stroke from here on with `line`, or none for null; the one before it ends either way. */
@@ -253,6 +277,143 @@ export class Drawing {
     }
   }
 
+  /**
+   * drawTriangles' triangles, as adl draws them: `vertices` x y in pixels,
+   * three a triangle by `indices` or in order, up to the first index past
+   * them. They go in a layer of their own, each triangle a fill of its own,
+   * so that overlapping ones never cancel, and the line around each over
+   * them all. They end the open fill's contour, whose closing line stays,
+   * and the line's path; both go on from the pen, which stays, in a layer
+   * after them, the contour still closing to where it began. With `uvt`, u
+   * v t a vertex, only a bitmap fill draws them, textured; any other fill
+   * draws nothing, lines neither. `cull` 1 drops those clockwise on a
+   * y-down screen, -1 the others; the bounds count all.
+   */
+  drawTriangles(
+    vertices: number[],
+    indices: number[] | null,
+    uvt: number[] | null,
+    cull: number,
+  ): void {
+    const n = vertices.length >> 1;
+    const count = indices ? Math.floor(indices.length / 3) : Math.floor(n / 3);
+    const kept: number[] = [];
+    const e: [number, number, number, number, number] = [
+      Infinity,
+      Infinity,
+      -Infinity,
+      -Infinity,
+      this.stroke ? Math.max(this.stroke.line.width / TWIPS, 1) / 2 : 0,
+    ];
+    for (let k = 0; k < count * 3; k += 3) {
+      const a = indices ? indices[k] : k;
+      const b = indices ? indices[k + 1] : k + 1;
+      const c = indices ? indices[k + 2] : k + 2;
+      if (!(a >= 0 && a < n && b >= 0 && b < n && c >= 0 && c < n)) {
+        break;
+      }
+
+      for (const v of [a, b, c]) {
+        e[0] = Math.min(e[0], vertices[2 * v]);
+        e[1] = Math.min(e[1], vertices[2 * v + 1]);
+        e[2] = Math.max(e[2], vertices[2 * v]);
+        e[3] = Math.max(e[3], vertices[2 * v + 1]);
+      }
+
+      const [x0, y0, x1, y1, x2, y2] = [a, b, c].flatMap((v) => [
+        vertices[2 * v],
+        vertices[2 * v + 1],
+      ]);
+      if (cull * ((x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0)) <= 0) {
+        kept.push(a, b, c);
+      }
+    }
+
+    if (e[0] > e[2]) {
+      return;
+    }
+
+    this.version++;
+    const fill = this.fill;
+    const line = this.stroke?.line ?? null;
+    const contour = fill?.contours[fill.contours.length - 1];
+    const origin = contour ? [contour[1], contour[2]] : [this.x, this.y];
+    // The open contour ends for good, with any closing line it has.
+    this.closing = null;
+    this.dropStroke();
+    if (this.fillLayer) {
+      this.dropEmpty(this.fillLayer);
+    }
+
+    const layer: ShapeLayer = { fills: [], strokes: [], extent: e };
+    this.layers.push(layer);
+
+    const paint = fill?.fill;
+    const image = paint?.type === "image" && paint.image instanceof BitmapStore ? paint : null;
+    const outline = (k: number): Path => {
+      const [x0, y0, x1, y1, x2, y2] = [kept[k], kept[k + 1], kept[k + 2]].flatMap((v) => [
+        vertices[2 * v],
+        vertices[2 * v + 1],
+      ]);
+      return [MOVE, x0, y0, LINE, x1, y1, LINE, x2, y2, LINE, x0, y0];
+    };
+    if (uvt && image) {
+      const mesh: TriangleMesh = {
+        image: image.image as BitmapStore,
+        repeat: image.repeat,
+        smooth: image.smooth,
+        positions: [],
+        uvt: [],
+      };
+      for (const v of kept) {
+        mesh.positions.push(vertices[2 * v], vertices[2 * v + 1]);
+        mesh.uvt.push(uvt[3 * v], uvt[3 * v + 1], uvt[3 * v + 2]);
+      }
+
+      layer.meshes = [mesh];
+    } else if (!uvt && paint) {
+      for (let k = 0; k < kept.length; k += 3) {
+        layer.fills.push({ fill: paint, contours: [outline(k)], winding: "evenOdd" });
+      }
+    }
+
+    if (line && (!uvt || image || !paint) && kept.length) {
+      const paths: Path[] = [];
+      for (let k = 0; k < kept.length; k += 3) {
+        paths.push(outline(k));
+      }
+
+      layer.strokes.push({ line, paths, triangles: true });
+    }
+
+    if (!fill && !line) {
+      return;
+    }
+
+    const next: ShapeLayer = { fills: [], strokes: [] };
+    this.layers.push(next);
+    this.resumed = next;
+    if (fill) {
+      this.fill = { fill: fill.fill, contours: [], winding: fill.winding };
+      this.fillLayer = next;
+      next.fills.push(this.fill);
+      const [ox, oy] = origin;
+      const away = ox !== this.x || oy !== this.y;
+      this.fill.contours.push(away ? [MOVE, ox, oy, LINE, this.x, this.y] : [MOVE, ox, oy]);
+      this.toward = null;
+      this.bent = false;
+      if (away) {
+        this.bend([this.x, this.y]);
+      }
+    }
+
+    if (line) {
+      this.stroke = { line, paths: [] };
+      next.strokes.push(this.stroke);
+      this.begin(this.stroke.paths);
+    }
+  }
+
   clear(): void {
     this.version++;
     this.layers.length = 0;
@@ -261,6 +422,7 @@ export class Drawing {
     this.stroke = null;
     this.closing = null;
     this.pathed = false;
+    this.resumed = null;
     this.x = 0;
     this.y = 0;
   }
@@ -279,7 +441,11 @@ export class Drawing {
           line: s.line,
           paths: s.paths.map((c) => c.slice()),
           closes: s.closes?.map((c) => ({ ...c })),
+          triangles: s.triangles,
         })),
+        // A mesh's arrays never change once drawn.
+        meshes: layer.meshes?.slice(),
+        extent: layer.extent,
       });
     }
 
@@ -301,6 +467,12 @@ export class Drawing {
       }
     };
     for (const layer of this.layers) {
+      const e = layer.extent;
+      if (e) {
+        const pad = lines ? e[4] : 0;
+        r = union(r, { xMin: e[0] - pad, yMin: e[1] - pad, xMax: e[2] + pad, yMax: e[3] + pad });
+      }
+
       for (const f of layer.fills) {
         for (const c of f.contours) {
           take(c, 0);

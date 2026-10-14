@@ -380,6 +380,10 @@ function drawnAt(
       }
     }
 
+    if (layer.meshes?.some((mesh) => inMesh(mesh.positions, x, y))) {
+      return true;
+    }
+
     if (mask) {
       continue;
     }
@@ -408,6 +412,22 @@ function drawnAt(
       ) {
         return true;
       }
+    }
+  }
+
+  return false;
+}
+
+/** Whether (x, y) is in any of the triangles, three points of `positions` each. */
+function inMesh(positions: number[], x: number, y: number): boolean {
+  const triangle = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < positions.length; i += 6) {
+    for (let k = 0; k < 6; k++) {
+      triangle[k] = positions[i + k];
+    }
+
+    if (inside(triangle, x, y)) {
+      return true;
     }
   }
 

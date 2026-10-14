@@ -721,16 +721,25 @@ export function graphicsData(
       }
     }
 
+    // A drawTriangles' textured triangles are left out, as adl leaves them, and their lines are
+    // one path.
     for (const stroke of layer.strokes) {
+      let w = new Writer();
       for (const [i, path] of stroke.paths.entries()) {
-        const w = new Writer();
         writeStroke(w, strokeSegments(path, stroke.closes ?? [], i, m), stroke.line);
-        if (w.commands.length) {
-          out.push({ type: "solid", ...storedColor(stroke.line.color) });
-          out.push({ type: "path", winding: "nonZero", commands: w.commands, data: w.data });
-          out.push({ type: "end" });
+        if (!stroke.triangles || i === stroke.paths.length - 1) {
+          writeLine(out, w, stroke.line);
+          w = new Writer();
         }
       }
     }
+  }
+}
+
+function writeLine(out: GraphicsDatum[], w: Writer, line: Line): void {
+  if (w.commands.length) {
+    out.push({ type: "solid", ...storedColor(line.color) });
+    out.push({ type: "path", winding: "nonZero", commands: w.commands, data: w.data });
+    out.push({ type: "end" });
   }
 }

@@ -2,6 +2,7 @@
 // edges Flash has around them.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { LINE, MOVE } from "../../../../packages/player/dist/display/shapes.js";
 
@@ -182,4 +183,83 @@ test("an open contour is closed with a line in the line style of the time, kept 
   h.lineTo(10, 80);
   h.endFill();
   assert.equal(h.layers[0].strokes[0].closes, undefined);
+});
+
+test("drawTriangles' triangles are a layer of fills of their own, the line around each, the fill going on after, as adl draws them", () => {
+  const line = {
+    width: 40,
+    color: 0xff000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  const d = new Drawing();
+  d.lineStyle(line);
+  d.beginFill(red);
+  d.moveTo(0, 0);
+  d.lineTo(50, 0);
+  d.lineTo(50, 20);
+  // The second clockwise, culled; the third's index past the vertices ends them.
+  d.drawTriangles([0, 0, 40, 0, 0, 40, 40, 40], [3, 1, 2, 0, 1, 2, 0, 1, 9], null, 1);
+  d.lineTo(50, 50);
+  d.endFill();
+
+  const [before, triangles, after] = d.layers;
+  assert.equal(d.layers.length, 3);
+  // The open contour ends at them, its closing line kept.
+  assert.deepEqual(before.fills[0].contours.at(-1), [MOVE, 0, 0, LINE, 50, 0, LINE, 50, 20]);
+  assert.deepEqual(before.strokes[0].closes, [{ at: 1, x: 0, y: 0 }]);
+  assert.deepEqual(triangles.fills, [
+    {
+      fill: red,
+      contours: [[MOVE, 40, 40, LINE, 40, 0, LINE, 0, 40, LINE, 40, 40]],
+      winding: "evenOdd",
+    },
+  ]);
+  assert.deepEqual(triangles.strokes[0].paths, [
+    [MOVE, 40, 40, LINE, 40, 0, LINE, 0, 40, LINE, 40, 40],
+  ]);
+  assert.equal(triangles.strokes[0].triangles, true);
+  // The bounds count the culled one, the line's width too.
+  assert.deepEqual(triangles.extent, [0, 0, 40, 40, 1]);
+  // On from the pen, closing to where the contour began.
+  assert.deepEqual(after.fills[0].contours, [[MOVE, 0, 0, LINE, 50, 20, LINE, 50, 50]]);
+  assert.deepEqual(after.strokes[0].paths, [[MOVE, 50, 20, LINE, 50, 50]]);
+  assert.deepEqual(after.strokes[0].closes, [{ at: 0, x: 0, y: 0 }]);
+
+  // A bitmap fill with u, v and t: a mesh, three vertices a triangle; a solid one draws nothing.
+  const store = new BitmapStore(2, 2, true, 0xffffffff);
+  const t = new Drawing();
+  t.beginFill({
+    type: "image",
+    image: store,
+    matrix: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    repeat: true,
+    smooth: false,
+  });
+  t.drawTriangles([0, 0, 10, 0, 0, 10], null, [0, 0, 1, 1, 0, 0.5, 0, 1, 1], 0);
+  t.endFill();
+  assert.equal(t.layers.length, 1);
+  assert.deepEqual(t.layers[0].meshes, [
+    {
+      image: store,
+      repeat: true,
+      smooth: false,
+      positions: [0, 0, 10, 0, 0, 10],
+      uvt: [0, 0, 1, 1, 0, 0.5, 0, 1, 1],
+    },
+  ]);
+  const s = new Drawing();
+  s.lineStyle(line);
+  s.beginFill(red);
+  s.drawTriangles([0, 0, 10, 0, 0, 10], null, [0, 0, 1, 1, 0, 1, 0, 1, 1], 0);
+  assert.deepEqual(s.layers[0].fills, []);
+  assert.deepEqual(s.layers[0].strokes, []);
+  assert.deepEqual(s.bounds(false), { xMin: 0, yMin: 0, xMax: 10, yMax: 10 });
 });

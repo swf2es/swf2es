@@ -19,6 +19,8 @@ type Value = avm2.Value;
 const TWIPS = 20;
 const CAPS: Record<string, number> = { round: 0, none: 1, square: 2 };
 const JOINTS: Record<string, number> = { round: 0, bevel: 1, miter: 2 };
+/** Which way round a triangle drawTriangles drops: 1 clockwise on a y-down screen, -1 the other. */
+const CULLING: Record<string, number> = { none: 0, positive: 1, negative: -1 };
 const IDENTITY = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 
 /** The gradients begun with no matrix, which read back with Flash's default for one. */
@@ -364,6 +366,57 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       drawing(this).drawPath(c, d, winding);
     }
 
+    /**
+     * As Flash checks: the vertices in pairs, three of them a triangle
+     * without indices, indices in threes, and uvtData two or three a vertex,
+     * each ArgumentError #2004; then the culling one of its three, #2008.
+     * Null vertices draw nothing, and an index past the vertices ends the
+     * triangles there, without an error.
+     */
+    drawTriangles(
+      vertices: Value,
+      indices: Value = null,
+      uvtData: Value = null,
+      culling: Value = "none",
+    ): void {
+      if (vertices === null || vertices === undefined) {
+        return;
+      }
+
+      const numbers = (v: Value) => ((v as AsObject).$a as Value[]).map((x) => Number(x));
+      // Flash keeps a point in twips as an int: NaN, or one past an int's range, is its least.
+      const coordinates = numbers(vertices).map((x) =>
+        x * TWIPS >= -2147483648 && x * TWIPS <= 2147483647 ? x : -2147483648 / TWIPS,
+      );
+      const n = coordinates.length / 2;
+      const order = indices === null || indices === undefined ? null : numbers(indices);
+      const uvt = uvtData === null || uvtData === undefined ? null : numbers(uvtData);
+      if (
+        coordinates.length % 2 ||
+        (order ? order.length % 3 : n % 3) ||
+        (uvt && uvt.length !== n * 2 && uvt.length !== n * 3)
+      ) {
+        throw s.rt.error("ArgumentError", 2004);
+      }
+
+      const cull =
+        typeof culling === "string" && Object.hasOwn(CULLING, culling)
+          ? CULLING[culling]
+          : undefined;
+      if (cull === undefined) {
+        throw s.rt.error("ArgumentError", 2008, "culling");
+      }
+
+      // Three a vertex, t 1 where Flash was given none.
+      const each = uvt && n > 0 && uvt.length === n * 3 ? 3 : 2;
+      const full =
+        uvt &&
+        Array.from({ length: n * 3 }, (_, i) =>
+          i % 3 === 2 && each === 2 ? 1 : uvt[Math.floor(i / 3) * each + (i % 3)],
+        );
+      drawing(this).drawTriangles(coordinates, order, full, cull);
+    }
+
     copyFrom(other: Value): void {
       const source = (other as AsObject)?.$display?.drawing as Drawing | undefined;
       if (source) {
@@ -374,6 +427,10 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
             if (fill.type === "image" && fill.image instanceof BitmapStore) {
               fill.image.views.add(this.$display.ref);
             }
+          }
+
+          for (const mesh of layer.meshes ?? []) {
+            mesh.image.views.add(this.$display.ref);
           }
         }
       } else {

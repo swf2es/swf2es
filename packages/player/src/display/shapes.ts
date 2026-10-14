@@ -225,7 +225,32 @@ export type Paint = Fill | ImageFill | GradientFill;
 
 export interface ShapeLayer {
   fills: { fill: Paint; contours: Path[]; winding: Winding }[];
-  strokes: { line: Line; paths: Path[]; closes?: Close[] }[];
+  /**
+   * `triangles` marks drawTriangles' outlines: each path closed, joined at
+   * its start, and all read back as one path, as Flash keeps them.
+   */
+  strokes: { line: Line; paths: Path[]; closes?: Close[]; triangles?: boolean }[];
+  /** drawTriangles' triangles textured through u, v and t, drawn after the fills, under the lines. */
+  meshes?: TriangleMesh[];
+  /**
+   * Where drawTriangles' triangles of the layer lie, drawn or not, as
+   * xMin, yMin, xMax, yMax, and the half width of the line set as they
+   * were drawn: the bounds count them all, the line's width too.
+   */
+  extent?: [number, number, number, number, number];
+}
+
+/**
+ * Triangles a bitmap fill textures by each vertex's u and v, interpolated
+ * in perspective by its t, as drawTriangles draws them: three vertices a
+ * triangle, x y each in pixels, and u v t each, t 1 where none was given.
+ */
+export interface TriangleMesh {
+  image: BitmapStore;
+  repeat: boolean;
+  smooth: boolean;
+  positions: number[];
+  uvt: number[];
 }
 
 /**
