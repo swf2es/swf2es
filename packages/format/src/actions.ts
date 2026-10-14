@@ -198,16 +198,19 @@ function clipActions(
 
     const events = raw & CLIP_EVENTS;
 
-    let length = r.u32();
+    const length = r.u32();
+    let start = r.pos;
     let key = 0;
-    // keyPress's key code is counted in the record's length.
+    // keyPress's key code is the first byte of the record's length. Flash
+    // reads it even of a length of 0, as the next record's first byte, and
+    // goes on from there: that record keeps its key and has no actions.
     if (events & ClipEvent.keyPress) {
-      if (length === 0 || r.pos >= end) {
+      if (r.pos >= end) {
         return;
       }
 
-      length--;
-      key = r.u8();
+      key = bytes[r.pos];
+      start += Math.min(length, 1);
     }
 
     if (length > end - r.pos) {
@@ -216,7 +219,7 @@ function clipActions(
 
     if (events !== 0) {
       const owner: ActionOwner = { type: "clip", timeline, frame, depth, events, key };
-      add(list, tag, owner, r.pos, r.pos + length);
+      add(list, tag, owner, start, r.pos + length);
     }
 
     r.pos += length;

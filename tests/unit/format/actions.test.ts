@@ -187,6 +187,16 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
     .u32(1 << 17)
     .u32(1 << 17)
     .u32(0);
+  // keyPress of length 0: its key is the next record's first byte, and that record follows.
+  const empty = new w.BitWriter()
+    .u16(0)
+    .u32((1 << 17) | 1)
+    .u32(1 << 17)
+    .u32(0)
+    .u32(1)
+    .u32(2)
+    .raw(NEXT)
+    .u32(0);
   // Flags of none of the known events are a record Flash skips, not the list's end.
   const unknown = new w.BitWriter()
     .u16(0)
@@ -206,6 +216,7 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
     placeWith(keyless),
     placeWith(unknown),
     placeWith(lengthless),
+    placeWith(empty),
     w.end(),
   ]);
   const list = readActions(swf);
@@ -216,7 +227,13 @@ test("a truncated or malformed clip action ends the place's list, keeping those 
       [swf.tags[0].offset, STOP],
       [swf.tags[1].offset, STOP],
       [swf.tags[3].offset, PLAY],
+      [swf.tags[5].offset, []],
+      [swf.tags[5].offset, NEXT],
     ],
+  );
+  assert.deepEqual(
+    list.blocks.slice(-2).map((b) => b.owner.type === "clip" && b.owner.key),
+    [1, 0],
   );
   assert.equal(readPlace(swf.bytes, swf.tags[2], list).actions, null);
 });
