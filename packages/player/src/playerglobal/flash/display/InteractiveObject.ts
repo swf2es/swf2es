@@ -20,6 +20,7 @@ export function interactiveObjectNatives(_s: Scripting): avm2.Natives {
     declare $accessibility: Value;
     declare $softKeyboardArea: Value;
     declare $needsSoftKeyboard: boolean | undefined;
+    declare $contextMenu: Value;
 
     get tabEnabled(): boolean {
       return this.$tabEnabled ?? tabEnabledDefault(displayOf(this as unknown as avm2.AsObject));
@@ -84,6 +85,15 @@ export function interactiveObjectNatives(_s: Scripting): avm2.Natives {
 
     set needsSoftKeyboard(v: Value) {
       this.$needsSoftKeyboard = !!v;
+    }
+
+    /** Kept for the SWF to read back: the player draws no context menu of its own. */
+    get contextMenu(): Value {
+      return this.$contextMenu ?? null;
+    }
+
+    set contextMenu(v: Value) {
+      this.$contextMenu = v;
     }
 
     requestSoftKeyboard(): boolean {

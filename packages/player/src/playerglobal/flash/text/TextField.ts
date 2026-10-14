@@ -606,6 +606,10 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     get selectionEndIndex(): number {
       return this.$display.selection[1];
     }
+    get selectedText(): string {
+      const [begin, end] = this.$display.selection;
+      return this.$display.model.text.slice(begin, end);
+    }
     get caretIndex(): number {
       return this.$display.caret;
     }
