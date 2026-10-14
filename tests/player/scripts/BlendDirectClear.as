@@ -7,9 +7,8 @@ package {
   // any layer, as adl clears it: over those clear pixels the GPU's multiply
   // and subtract are not Flash's, so the player keeps their blend filter
   // while the band is on the list. Frame 3 takes the band off, so they
-  // blend directly from that frame on. (A frame drawn with clear pixels
-  // after the first shows the frame before through them on the test page,
-  // so the band does not come back: a unit test puts it back.)
+  // blend directly from that frame on. (`stage-erase` and a unit test put
+  // a band back.)
   public class BlendDirectClear extends Sprite {
     private function rect(g:Graphics, color:uint, alpha:Number, x:Number, y:Number, w:Number, h:Number):void {
       g.beginFill(color, alpha);

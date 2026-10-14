@@ -3806,7 +3806,12 @@ while an `erase` or `alpha` blend outside any layer is on the list, which
 clears what it covers of the stage as adl does; the view checks both
 before and after it brings the list up to date, and where that changes,
 each multiply and subtract blend outside a layer chooses again, so that
-it switches on the frame the change is drawn on (`blend-direct-clear`). A filtered object's chain draws
+it switches on the frame the change is drawn on (`blend-direct-clear`).
+Pixi drew its back buffer onto the canvas blended, over what the canvas
+held: with a drawing buffer kept, as the test page keeps it, the frame
+before showed through such cleared pixels, and an erase added after the
+first frame seemed to clear nothing. The fork copies it instead
+(`stage-erase`). A filtered object's chain draws
 its result with that blend (`FilterChain.blendOver`); the Pixi fork maps
 `subtract` to WebGL's reverse subtraction. adl's lighten, darken and
 difference blend the straight colours, which the GPU's min and max of

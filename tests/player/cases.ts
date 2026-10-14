@@ -5545,6 +5545,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "stage-erase",
+    swf: (abc) => bare(abc, 1, "StageErase", 240, 80),
+    script: "StageErase",
+    frames: 5,
+    capture: [1, 2, 3, 4, 5],
+    // Within 5 a channel: adl's rounding of the glows and of the blends, a subtracted glow's
+    // faint edge the most.
+    tolerance: 5,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",
