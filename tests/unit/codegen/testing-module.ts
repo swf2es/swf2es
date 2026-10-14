@@ -15,6 +15,12 @@ const COLLECT_EVERY = 64;
 /** A new instance of `build`, with a memory of its own. */
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
 export async function loadTesting(build: Build): Promise<any> {
+  return (await testingInstances(build))();
+}
+
+/** New instances of `build`, each with a memory of its own, its module compiled once. */
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+export async function testingInstances(build: Build): Promise<() => Promise<any>> {
   // SWF2ES_CODEGEN=<dir> loads another copy of the release build, to compare two (tests/programs/ab.ts).
   const other = build === "dist-test" ? process.env.SWF2ES_CODEGEN : undefined;
   const dir = other
@@ -22,6 +28,14 @@ export async function loadTesting(build: Build): Promise<any> {
     : new URL(`../../../packages/codegen/${build}/`, import.meta.url);
   const { instantiate } = await import(new URL("testing.js", dir).href);
   const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
+  return () => instance(instantiate, module);
+}
+
+async function instance(
+  instantiate: (module: WebAssembly.Module, imports: object) => Promise<unknown>,
+  module: WebAssembly.Module,
+  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+): Promise<any> {
   // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
   const exports: any = await instantiate(module, { env: {} });
   let size = exports.memory.buffer.byteLength;

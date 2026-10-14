@@ -6,7 +6,9 @@
 //   - the decoder did not trap (with SWF2ES_CHECKED, nor read past an array);
 //   - each region lists an action at most once among its blocks;
 //   - the block decodes to the same regions again, after other blocks, as
-//     the JIT/AOT invariant asks (docs/architecture.md).
+//     the JIT/AOT invariant asks (docs/architecture.md);
+//   - its module, at SWF 5 or 10, is well-formed UTF-8 that imports as an
+//     ES module, and the block compiled alone is its entry in it.
 //
 // The seeds are blocks generated from the actions' grammar, nested bodies
 // and branches included, and a few shapes at the edges: bodies that jump
@@ -243,6 +245,35 @@ function fail(block: Uint8Array, why: string): void {
   failures.push(`${why}: ${file}`);
 }
 
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+const range = [Int32Array.of(0), Int32Array.of(0)] as const;
+
+/** What is wrong with the block's module at `version`, or null. */
+async function emitted(block: Uint8Array, version: number): Promise<string | null> {
+  range[1][0] = block.length;
+  const bytes: Uint8Array = testing.actionsModuleBytes(block, range[0], range[1], version, true);
+  let module: string;
+  try {
+    module = utf8.decode(bytes);
+  } catch {
+    return "a module that is not UTF-8";
+  }
+
+  // Imported as the player imports it: an ES module, strict.
+  try {
+    await import(`data:text/javascript;base64,${Buffer.from(module).toString("base64")}`);
+  } catch (e) {
+    return `a module that does not parse (${(e as Error).message})`;
+  }
+
+  const entry: string = testing.actionsModuleEntries();
+  if (testing.actionsEmitEach(block, range[0], range[1], version, "0", false) !== entry) {
+    return "the block compiled alone differs from its entry";
+  }
+
+  return null;
+}
+
 const started = Date.now();
 let previous: { block: Uint8Array; check: string } | null = null;
 for (let k = 0; k < caseCount; k++) {
@@ -263,9 +294,13 @@ for (let k = 0; k < caseCount; k++) {
     }
 
     previous = { block, check };
+    const why = await emitted(block, k % 2 ? 5 : 10);
+    if (why) {
+      fail(block, why);
+    }
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.
-    fail(block, `the decoder trapped (${(e as Error).message})`);
+    fail(block, `the compiler trapped (${(e as Error).message})`);
     testing = await loadTesting(build);
     previous = null;
   } finally {
