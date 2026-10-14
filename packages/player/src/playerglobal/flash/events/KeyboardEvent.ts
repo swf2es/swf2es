@@ -1,6 +1,7 @@
-// flash.events.KeyboardEvent's native fields: the character, and the
-// modifier keys held, which playerglobal's constructor sets through them;
-// and TextEvent's one native, which a clone copies IME data through.
+// flash.events.KeyboardEvent's natives: a redraw, and the character and
+// modifier keys Flash Player's playerglobal keeps in natives, which ours
+// keeps in AS3; and TextEvent's one native, which a clone copies IME data
+// through.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 

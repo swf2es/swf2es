@@ -7,6 +7,7 @@ import type {
   ClassDesc,
   Metadata,
   Signature,
+  SlotFill,
   TraitsDesc,
   TypeRef,
   Value,
@@ -37,6 +38,23 @@ export function setStaticVar(cls: AsObject, name: string, value: Value): void {
   }
 }
 
+/**
+ * The field that holds class `cls`'s own instance variable `name`, in
+ * whatever namespace, or null if it declares none: for a player that reads
+ * or writes a private field its playerglobal's AS3 keeps.
+ */
+export function instanceVarField(cls: AsObject, name: string): string | null {
+  // A class no module describes, as a host's stand-in, declares none.
+  const desc = cls?.$desc as ClassDesc | undefined;
+  for (const [, , n, b] of desc?.instance.bindings ?? []) {
+    if (n === name && (b & 7) === BIND_Var) {
+      return `$${b >> 3}`;
+    }
+  }
+
+  return null;
+}
+
 /** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
 const TRAIT_Slot = 0;
 const TRAIT_Getter = 2;
@@ -62,6 +80,11 @@ export class Traits {
   own: [string, Value][] = [];
   /** Every slot field and its initial value, the base's first, once an instance is made. */
   private allDefaults: [string, Value][] | null = null;
+  /** What the module compiled to set the slots by name, if it did (TraitsDesc.fill). */
+  private fill: SlotFill | null = null;
+  /** Once an instance is made: the fill these traits' objects use, if any, and its values by slot. */
+  private filler: SlotFill | null = null;
+  private slotValues: Value[] = [];
   /** The JavaScript prototype of objects with these traits. */
   proto: AsObject;
   /** The class whose instances these are the traits of, once it exists. */
@@ -149,6 +172,7 @@ export class Traits {
       this.annotate(desc.meta);
     }
 
+    this.fill = desc.fill ?? null;
     this.allDefaults = null;
   }
 
@@ -261,14 +285,31 @@ export class Traits {
     o.$d = this.dynamic ? new Map() : null;
     if (!this.allDefaults) {
       this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
+      this.filler = this.fillOf();
+      this.slotValues = this.filler ? valuesBySlot(this.allDefaults) : [];
     }
 
-    const defaults = this.allDefaults;
-    for (let i = 0; i < defaults.length; i++) {
-      o[defaults[i][0]] = defaults[i][1];
+    if (this.filler) {
+      this.filler(o, this.slotValues);
+    } else {
+      // Traits no module compiled a fill for: a catch scope's, or past
+      // FILL_SLOTS, where V8 keeps no object fast anyway.
+      const defaults = this.allDefaults;
+      for (let i = 0; i < defaults.length; i++) {
+        o[defaults[i][0]] = defaults[i][1];
+      }
     }
 
     return o;
+  }
+
+  /** The fill for these traits' objects: their module's, or a base's that has all their slots, as a Vector.<T>'s. */
+  private fillOf(): SlotFill | null {
+    if (this.fill || this.own.length) {
+      return this.fill;
+    }
+
+    return this.base ? this.base.fillOf() : null;
   }
 
   defaultsOf(): [string, Value][] {
@@ -356,6 +397,21 @@ export class VectorRef {
   traits: Traits | null = null;
 
   constructor(readonly param: TypeRef) {}
+}
+
+/** The initial values of `defaults` by slot id, the last of a slot listed twice, as they are set. */
+function valuesBySlot(defaults: [string, Value][]): Value[] {
+  let count = 0;
+  for (const [key] of defaults) {
+    count = Math.max(count, Number(key.slice(1)) + 1);
+  }
+
+  const values: Value[] = new Array(count).fill(undefined);
+  for (const [key, value] of defaults) {
+    values[Number(key.slice(1))] = value;
+  }
+
+  return values;
 }
 
 // The names of slot and method properties by id, made once each, for the

@@ -1,5 +1,6 @@
-// flash.events.PressAndTapGestureEvent's native fields: the tap's point,
-// on the target as GestureEvent's own point is.
+// flash.events.PressAndTapGestureEvent's natives: the tap's stage point,
+// on the target as GestureEvent's own point is, and its local point, which
+// Flash Player's playerglobal keeps in natives and ours in AS3.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { stagePoint } from "./MouseEvent.js";
@@ -29,12 +30,12 @@ export function pressAndTapGestureEventNatives(s: Scripting): avm2.Natives {
       this.$tapY = s.rt.toNumber(value);
     }
 
-    "flash.events:PressAndTapGestureEvent::getTapStageX"(): number {
-      return stagePoint(s, this, this.$tapX, this.$tapY)[0];
+    "flash.events:PressAndTapGestureEvent::getTapStageX"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$tapX, y ?? this.$tapY)[0];
     }
 
-    "flash.events:PressAndTapGestureEvent::getTapStageY"(): number {
-      return stagePoint(s, this, this.$tapX, this.$tapY)[1];
+    "flash.events:PressAndTapGestureEvent::getTapStageY"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$tapX, y ?? this.$tapY)[1];
     }
   }
 

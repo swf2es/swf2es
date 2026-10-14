@@ -1,13 +1,19 @@
 // Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
-// natives in packages/player/src/playerglobal/flash/events/KeyboardEvent.ts.
+// natives in packages/player/src/playerglobal/flash/events/KeyboardEvent.ts. Its
+// fields are AS3's; only a redraw needs the player.
 
 package flash.events
 {
 	public class KeyboardEvent extends Event
 	{
+		private var _charCode:uint;
 		private var _keyCode:uint;
 		private var _keyLocation:uint;
+		private var _ctrlKey:Boolean;
+		private var _altKey:Boolean;
+		private var _shiftKey:Boolean;
 		private var _controlKey:Boolean;
+		private var _commandKey:Boolean;
 
 		public function KeyboardEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, charCodeValue:uint = 0, keyCodeValue:uint = 0, keyLocationValue:uint = 0, ctrlKeyValue:Boolean = false, altKeyValue:Boolean = false, shiftKeyValue:Boolean = false, controlKeyValue:Boolean = false, commandKeyValue:Boolean = false)
 		{
@@ -35,9 +41,15 @@ package flash.events
 			return formatToString("KeyboardEvent", "type", "bubbles", "cancelable", "eventPhase", "charCode", "keyCode", "keyLocation", "ctrlKey", "altKey", "shiftKey");
 		}
 
-		public native function get charCode():uint;
+		public function get charCode():uint
+		{
+			return _charCode;
+		}
 
-		public native function set charCode(val:uint):void;
+		public function set charCode(value:uint):void
+		{
+			_charCode = value;
+		}
 
 		public function get keyCode():uint
 		{
@@ -59,17 +71,35 @@ package flash.events
 			_keyLocation = value;
 		}
 
-		public native function get ctrlKey():Boolean;
+		public function get ctrlKey():Boolean
+		{
+			return _ctrlKey;
+		}
 
-		public native function set ctrlKey(val:Boolean):void;
+		public function set ctrlKey(value:Boolean):void
+		{
+			_ctrlKey = value;
+		}
 
-		public native function get altKey():Boolean;
+		public function get altKey():Boolean
+		{
+			return _altKey;
+		}
 
-		public native function set altKey(val:Boolean):void;
+		public function set altKey(value:Boolean):void
+		{
+			_altKey = value;
+		}
 
-		public native function get shiftKey():Boolean;
+		public function get shiftKey():Boolean
+		{
+			return _shiftKey;
+		}
 
-		public native function set shiftKey(val:Boolean):void;
+		public function set shiftKey(value:Boolean):void
+		{
+			_shiftKey = value;
+		}
 
 		public native function updateAfterEvent():void;
 
@@ -86,9 +116,15 @@ package flash.events
 		}
 
 		[API("661")]
-		public native function get commandKey():Boolean;
+		public function get commandKey():Boolean
+		{
+			return _commandKey;
+		}
 
 		[API("661")]
-		public native function set commandKey(val:Boolean):void;
+		public function set commandKey(value:Boolean):void
+		{
+			_commandKey = value;
+		}
 	}
 }
