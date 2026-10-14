@@ -3941,7 +3941,11 @@ passes' reach, and cuts what they spread. A blur is a box of fractional width, i
 part, run along x and then y `quality` times, each value truncated to
 8 bits. A glow's alpha is that blur of the source's alpha (of 255 less
 it, for an inner one), truncated, times strength to 255 and alpha, over
-or under the source as the display's are; a shadow samples it from its
+or under the source as the display's are; inner, the source keeps its
+alpha and the glow lies on its straight colour, the glow's colour times
+that alpha in 255ths and the source's times what is left in 256ths,
+truncated, premultiplied again rounding, and knocked out the glow's
+alpha is times the source's, rounded; a shadow samples it from its
 offset between pixels, linearly with weights in 256ths. A colour matrix
 maps straight colour, rounded, the pixels about what the source has
 premultiplied truncated and the rest of the rect the map of a
@@ -3949,7 +3953,8 @@ transparent pixel. A bevel is the source's alpha so blurred, read from
 its offset on and back between pixels, as a shadow reads; their
 difference times strength, to 255, times the colour's alpha, rounded, in
 the highlight colour where on is more and the shadow colour where it is
-less. Inner, it lies atop the source, which keeps its alpha; outer,
+less. Inner, it lies atop the source, which keeps its alpha, on its
+straight colour as an inner glow does; outer,
 behind it; full, over it; knocked out, alone, masked to where the source
 is (inner) or is not (outer); each over another as the store draws it,
 s + d × (256 − sa) / 256 truncated. Off the axes adl reads the offset
@@ -3991,8 +3996,15 @@ refuses an outer shadow and is none for the rest (`filterRefusal`). Cast some 2^
 an outer shadow in pieces as its 16-bit sums wrap, which swf2es leaves.
 However far the offset, the work is what the destination shows: the
 alpha read from the offset is blurred where it is read, not over all the
-offset spans (the `filter-distances` case). applyFilter writes the rect
-alone: adl, displacing a rect moved elsewhere, fills its grown rect from
+offset spans (the `filter-distances` case). An inner filter writes its
+rect as generateFilterRect gives it, the rect within the bitmap grown
+and kept within it, and adl moves it by that rect's corner from the
+source rect's twice: the source rect (8, 8) at (10, 10) of an inner glow
+reaching 2, whose rect is (6, 6), writes at (6, 6), not (8, 8)
+(`apply-filter-inner`, every inner filter from a rect inside the
+source's content, past its edge and past the bitmap's, to the bit; it
+wrote the grown rect where an outer filter's goes). A displacement map
+writes the rect alone: adl, displacing a rect moved elsewhere, fills its grown rect from
 the rect's corner, shifted, and into an opaque destination leaves alpha,
 quirks swf2es does not take on. The map is read as it is when applied.
 The `apply-filter` case matches adl's numbers to the bit.

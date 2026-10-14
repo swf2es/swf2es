@@ -337,10 +337,25 @@ export function applyFilter(
   // What the destination shows of the filter's rect, in the filter's
   // coordinates, and the work: that and as far round it as the filter
   // reaches into it, so that a rect far past the destination costs nothing.
-  const mx = dx - rect.x;
-  const my = dy - rect.y;
+  let mx = dx - rect.x;
+  let my = dy - rect.y;
   // A displacement map writes the rect alone: what adl writes past it is a quirk of its own.
-  const written = f.kind === "displacementMap" ? rect : out;
+  let written = f.kind === "displacementMap" ? rect : out;
+  if (isInner(f)) {
+    // adl writes an inner filter's rect as generateFilterRect gives it, within the bitmap, and
+    // moves it by that rect's corner from the source rect's a second time (apply-filter-inner).
+    const bitmap = { x: 0, y: 0, width: source.width, height: source.height };
+    const held = intersect(rect, bitmap);
+    const grown = held && intersect(filterRect(held, f), bitmap);
+    if (!grown) {
+      return true;
+    }
+
+    mx += grown.x - rect.x;
+    my += grown.y - rect.y;
+    written = grown;
+  }
+
   const shown = intersect(written, { x: -mx, y: -my, width: dest.width, height: dest.height });
   if (!shown) {
     return true;
@@ -1107,9 +1122,9 @@ function bevel(
  * How a bevel or a gradient filter places its layer (premultiplied, alpha
  * la) on the source's pixel: masked, rounding, to where the source is
  * (inner) or, knocked out, is not (outer); inner atop the source, which keeps its
- * alpha, outer behind it, full over it, knocked out alone; each over
- * another as the store draws, top + bottom × (256 − top's alpha) / 256,
- * truncated.
+ * alpha, on its straight colour as an inner glow lies; outer behind it, full over it,
+ * knocked out alone; each over another as the store draws, top + bottom × (256 − top's
+ * alpha) / 256, truncated.
  */
 function placer(
   f: Filter,
@@ -1148,9 +1163,16 @@ function placer(
       or = over(sr, sa, mr);
       og = over(sg, sa, mg);
       ob = over(sb, sa, mb);
+    } else if (inner) {
+      // Atop the source's straight colour by the layer's own alpha, as an inner glow lies (glow),
+      // the source keeping its alpha.
+      const p = unmultiply(((sa << 24) | (sr << 16) | (sg << 8) | sb) >>> 0);
+      const mix = (c: number, shift: number) =>
+        Math.min(255, Math.floor(c + (((p >>> shift) & 0xff) * (256 - la)) / 256));
+      return premultiply(((sa << 24) | (mix(lr, 16) << 16) | (mix(lg, 8) << 8) | mix(lb, 0)) >>> 0);
     } else {
-      // What is left shows through, by the layer's own alpha atop, by its masked one over.
-      const ta = inner ? la : mA;
+      // What is left shows through, by its masked alpha over.
+      const ta = mA;
       oa = over(mA, ta, sa);
       or = over(mr, ta, sr);
       og = over(mg, ta, sg);
@@ -1249,10 +1271,8 @@ function glow(result: Uint32Array, [a, r, g, b]: Int32Array[], moved: Int32Array
   for (let i = 0; i < result.length; i++) {
     const blurA = moved[i];
     const sa = a[i];
-    let ga = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
-    if (f.inner) {
-      ga = Math.floor((ga * sa) / 255);
-    }
+    const raw = Math.floor(Math.min(255, Math.floor(blurA * f.strength)) * f.alpha);
+    const ga = f.inner ? Math.round((raw * sa) / 255) : raw;
 
     const gr = (cr * ga) / 255;
     const gg = (cg * ga) / 255;
@@ -1267,11 +1287,17 @@ function glow(result: Uint32Array, [a, r, g, b]: Int32Array[], moved: Int32Array
       og = (gg * (255 - sa)) / 255;
       ob = (gb * (255 - sa)) / 255;
     } else if (f.inner && !f.knockout) {
-      const keep = (255 - ga) / 255;
-      oa = ga + sa * keep;
-      or = gr + r[i] * keep;
-      og = gg + g[i] * keep;
-      ob = gb + b[i] * keep;
+      // Over the source's straight colour by the glow's own alpha, the glow's in 255ths and the
+      // source's in 256ths, truncated; the source keeps its alpha, which then multiplies the
+      // colour back in (apply-filter-inner, fitted to adl's pixels).
+      const keep = 256 - raw;
+      const p = unmultiply(((sa << 24) | (r[i] << 16) | (g[i] << 8) | b[i]) >>> 0);
+      const mix = (c: number, shift: number) =>
+        Math.floor((c * raw) / 255 + (((p >>> shift) & 0xff) * keep) / 256);
+      result[i] = premultiply(
+        ((sa << 24) | (mix(cr, 16) << 16) | (mix(cg, 8) << 8) | mix(cb, 0)) >>> 0,
+      );
+      continue;
     } else if (f.knockout || hide) {
       // Knocked out inside, or a shadow drawn alone: the glow by itself.
       oa = ga;

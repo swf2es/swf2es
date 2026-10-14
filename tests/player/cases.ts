@@ -5623,6 +5623,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "apply-filter-inner",
+    swf: (abc) => bare(abc, 1, "ApplyFilterInner"),
+    script: "ApplyFilterInner",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "convolution",
     swf: (abc) => bare(abc, 1, "Convolution"),
     script: "Convolution",
