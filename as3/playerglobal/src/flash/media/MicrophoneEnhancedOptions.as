@@ -6,7 +6,8 @@ package flash.media
 	[API("672")]
 	public final class MicrophoneEnhancedOptions
 	{
-		private var _echoPath:int;
+		// Flash's defaults, and the values its setters take; others leave a field as it was.
+		private var _echoPath:int = 128;
 
 		public function get echoPath():int
 		{
@@ -15,9 +16,12 @@ package flash.media
 
 		public function set echoPath(value:int):void
 		{
-			this._echoPath = value;
+			if (value == 128 || value == 256)
+			{
+				this._echoPath = value;
+			}
 		}
-		private var _isVoiceDetected:int;
+		private var _isVoiceDetected:int = -1;
 
 		public function get isVoiceDetected():int
 		{
@@ -28,7 +32,7 @@ package flash.media
 		{
 			this._isVoiceDetected = value;
 		}
-		private var _mode:String;
+		private var _mode:String = MicrophoneEnhancedMode.FULL_DUPLEX;
 
 		public function get mode():String
 		{
@@ -37,9 +41,18 @@ package flash.media
 
 		public function set mode(value:String):void
 		{
-			this._mode = value;
+			switch (value)
+			{
+				case MicrophoneEnhancedMode.FULL_DUPLEX:
+				case MicrophoneEnhancedMode.HALF_DUPLEX:
+				case MicrophoneEnhancedMode.HEADSET:
+				case MicrophoneEnhancedMode.SPEAKER_MUTE:
+				case MicrophoneEnhancedMode.OFF:
+					this._mode = value;
+					break;
+			}
 		}
-		private var _nonLinearProcessing:Boolean;
+		private var _nonLinearProcessing:Boolean = true;
 
 		public function get nonLinearProcessing():Boolean
 		{
