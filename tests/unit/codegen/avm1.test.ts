@@ -62,9 +62,14 @@ test("Push reads each value type, a double's words swapped", () => {
   );
 });
 
-test("Push skips a value type it does not know, as Flash Player 9 does", () => {
-  // Ruffle's read_push: 10 is skipped; the byte after the length is not read.
-  assert.equal(one([PUSH, 3, 0, 2, 10, 3, 3]), "0 Push null undefined next 6");
+test("a Push of a value type Flash does not know stops, as adl does", () => {
+  // Flash Player 9 and Ruffle's read_push skip type 10; adl stops the SWF.
+  assert.equal(one([PUSH, 3, 0, 2, 10, 3, 3]), "0 Push push type next 6");
+  assert.deepEqual(dump([PUSH, 3, 0, 2, 10, 3], [TRACE]), [
+    "region 0 block 0-7",
+    "block 0",
+    "0 Push push type",
+  ]);
 });
 
 test("an action's operands may run past its length; the next action is where the length says", () => {
@@ -269,17 +274,17 @@ test("a jump into the middle of an action decodes from there", () => {
 });
 
 test("code that two actions fall into starts a block", () => {
-  // The Push's last byte, a type it skips, is an Add the jump lands on:
+  // The Push's last byte, a boolean's value, is an Add the jump lands on:
   // both fall into the Trace.
   const lines = dump(
-    act(PUSH, 2, 2, 2, 2, 2, 2, 0x0a), // 0
+    act(PUSH, 2, 2, 2, 2, 2, 5, 0x0a), // 0
     [TRACE], // 10
     act(JUMP, ...u16(0x10000 - 7)), // 11 -> 9
   );
   assert.deepEqual(lines, [
     "region 0 block 0-16",
     "block 0",
-    "0 Push null null null null null null",
+    "0 Push null null null null null true",
     "block 9",
     "9 Add",
     "block 10",

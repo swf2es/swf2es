@@ -1,6 +1,6 @@
 // Test-only entry point: what codegen.wasm exports, and the reader, the
 // verifier and the emitter besides, for the node tests to look inside.
-import { Action, Actions, ERROR_None } from "./avm1/actions/decode";
+import { Action, Actions, ERROR_None, ERROR_PushType } from "./avm1/actions/decode";
 import * as avm1 from "./avm1/actions/opcodes";
 import { branches, Flow, Region } from "./avm1/flow/regions";
 import { Abc } from "./avm2/abc/abc";
@@ -899,7 +899,7 @@ function avm1Line(actions: Actions, action: Action, region: Region): string {
   const op = action.opcode;
   let line = `${action.offset} ${avm1.opcodeNames[op]}`;
   if (action.error !== ERROR_None) {
-    return `${line} truncated`;
+    return `${line} ${action.error === ERROR_PushType ? "push type" : "truncated"}`;
   }
 
   switch (op) {
@@ -1031,6 +1031,7 @@ function hex(kind: u8): string {
   return `0x${kind < 0x10 ? "0" : ""}${kind.toString(16)}`;
 }
 
+export { actionsEmitEach, actionsModuleBytes, actionsModuleEntries } from "./avm1/compile";
 export {
   domainAdd,
   domainChild,

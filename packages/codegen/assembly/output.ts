@@ -210,7 +210,7 @@ export class Output {
  * JavaScript reads as avmplus does: shortest form, no surrogate, at most
  * U+10FFFF; 0 if there is none.
  */
-function wellFormed(ptr: usize, left: u32): u32 {
+export function wellFormed(ptr: usize, left: u32): u32 {
   const c = load<u8>(ptr);
   if (c >= 0xc2 && c <= 0xdf) {
     return left >= 2 && follows(ptr, 1) ? 2 : 0;

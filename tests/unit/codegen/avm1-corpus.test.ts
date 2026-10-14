@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { readSwf, readTags, type Tag } from "@swf2es/format";
+import { isAs3, readActions, readSwf, readTags, type Tag } from "@swf2es/format";
 import { testing } from "./testing-module.ts";
 
 // The AVM1 decoder over the frame and init actions of Ruffle's corpus's
 // avm1/ SWFs, where it is fetched (tests/player/corpus/fetch-ruffle.ts): it
 // never traps, and the actions it meets are ones Flash knows. Clip and
-// button actions wait for format's listing of a SWF's blocks.
+// button actions wait for format's listing of a SWF's blocks. Every AVM1
+// SWF's module, all its blocks' as readActions lists them, parses.
 const corpus = new URL("../../player/corpus/ruffle/tests/tests/swfs/avm1/", import.meta.url);
 
 const DO_ACTION = 12;
@@ -75,4 +76,44 @@ test("decodes the frame actions of Ruffle's AVM1 corpus", { skip: !existsSync(co
   t.diagnostic(`actions: ${seen.join(", ")}`);
   t.diagnostic(`unknown: ${unknown.join(", ") || "none"}`);
   assert.ok(count > 0);
+});
+
+test("every AVM1 SWF of the corpus compiles to a module that parses", {
+  skip: !existsSync(corpus),
+}, async (t) => {
+  let modules = 0;
+  let bytes = 0;
+  for (const name of readdirSync(corpus, { recursive: true, encoding: "utf8" })) {
+    if (!name.endsWith(".swf")) {
+      continue;
+    }
+
+    let swf: ReturnType<typeof readSwf>;
+    try {
+      swf = readSwf(new Uint8Array(readFileSync(new URL(name, corpus))));
+    } catch {
+      continue;
+    }
+
+    if (isAs3(swf)) {
+      continue;
+    }
+
+    const { version, blocks } = readActions(swf);
+    const module = testing.actionsModuleBytes(
+      swf.bytes,
+      Int32Array.from(blocks, (b) => b.offset),
+      Int32Array.from(blocks, (b) => b.length),
+      version,
+    ) as Uint8Array;
+    // Imported as the player imports it: an ES module, strict.
+    const url = `data:text/javascript;base64,${Buffer.from(module).toString("base64")}`;
+    const { default: factory } = await import(url);
+    assert.equal(typeof factory, "function", name);
+    modules++;
+    bytes += module.length;
+  }
+
+  t.diagnostic(`${modules} modules, ${bytes} bytes`);
+  assert.ok(modules > 0);
 });

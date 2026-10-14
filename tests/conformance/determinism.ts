@@ -17,7 +17,9 @@
 //
 // The ABCs are the conformance cases, as the runner compiles them and again
 // with asc's -d, so that their source maps have lines, and as3pb when the
-// programs runner has compiled it. Run after the runners:
+// programs runner has compiled it. AVM1's action blocks are checked the
+// same ways first (determinism-avm1.ts), which needs no oracle. Run after
+// the runners:
 //
 //   node tests/conformance/determinism.ts
 import { createHash } from "node:crypto";
@@ -27,15 +29,26 @@ import { containerEngine, runOracle } from "../../oracle/oracle.ts";
 // The built package, as the player loads it: node runs its .js, not its sources.
 import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { type Build, loadTesting } from "../unit/codegen/testing-module.ts";
+import { avm1Determinism } from "./determinism-avm1.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
 const programs = fileURLToPath(new URL("../programs/out/", import.meta.url));
 
+const avm1Started = Date.now();
+const avm1 = await avm1Determinism();
+const avm1Seconds = ((Date.now() - avm1Started) / 1000).toFixed(1);
+console.log(
+  `determinism: ${avm1.swfs} AVM1 SWFs, each the same 5 ways, and ${avm1.blocks} blocks each alone as in its module, 2 ways${avm1.differences ? `, ${avm1.differences} differ` : ""} (${avm1Seconds} s)`,
+);
+if (avm1.differences) {
+  process.exit(1);
+}
+
 try {
   containerEngine();
 } catch (e) {
-  console.log(`determinism: skipped (${(e as Error).message})`);
+  console.log(`determinism: ABCs skipped (${(e as Error).message})`);
   process.exit(0);
 }
 

@@ -133,6 +133,17 @@ and a clip action that runs past its tag stops the whole SWF in Flash, so its
 tag has no blocks and is listed in `corrupt`. A malformed button action ends
 its button's list and keeps the records before it.
 
+`codegen` compiles that list to one ES module a SWF (`Codegen.compileActions`,
+`assembly/avm1/`): `export default function (rt)` whose `rt.version(v)`
+gives the operations of the SWF's version once, `V`, and which returns an
+entry per block, in the list's order, each the array of its regions'
+functions, the block's code first and then its functions' bodies, each in
+the dispatcher form. A block compiles alone to its entry byte for byte
+(`compileActionBlocks`), as `pnpm determinism` checks; its key
+(`actionsKey`) names the compiler, the version and the SHA-256 of the SWF's
+decompressed bytes. What the module calls, and what is built of it so far,
+is in [avm1.md](avm1.md).
+
 Apps, in `apps/`, are what people run rather than import: `desktop`, the
 Electron app (see [The desktop app](#the-desktop-app)), and later a browser
 extension. An app may use any package, and no package may use an app; an
@@ -883,9 +894,11 @@ says what to pass when they are not there. The player loads only the
 libraries its host gives `loadLibraries`, builtin and playerglobal by
 default: a host that also loads one of the player's own, as
 `airLibrary`, gets the same modules only from a command given the same
-libraries in the same order. An AVM1 SWF, whose FileAttributes lacks the
-ActionScript 3 flag, is refused, as the player never compiles its
-DoABCs, and so is a file that ends inside a DoABC.
+libraries in the same order. A file that ends inside a DoABC is refused.
+An AVM1 SWF, whose FileAttributes lacks the ActionScript 3 flag, compiles
+to one module of its action blocks, `avm1.js`, and takes no library
+(`compileActionsAhead`): the player runs its code as AVM1 and never
+compiles its DoABCs.
 
 It writes a module per ABC, `abc-<n>.js` (`lib-<n>.js` for the libraries
 with `--emit-libraries`), beside it `abc-<n>.log`, what its compile fixed
@@ -895,7 +908,12 @@ identity stamped into `codegen.wasm` (`Codegen.identity`; version 1 named
 it by its file's SHA-256, which is not what keys name); the API version;
 the input's kind, SWF version and SHA-256; and for each library and ABC
 its name, SHA-256, module and log, the module's key and the module's and
-the log's lengths, and for an ABC its lazy flag. The key is the one the
+the log's lengths, and for an ABC its lazy flag. An AVM1 SWF's manifest
+lists no library nor ABC but an `avm1` entry, added without a new
+version since a reader of the others' entries need not know it: its
+module, the SHA-256 of the SWF's decompressed bytes, how many blocks it
+has, and, from a compiler with an identity, its key (`actionsKey`) and
+length. The key is the one the
 player's module cache looks the module up by when it loads the input as
 its main movie, with the same libraries (see Caching modules): codegen's
 `moduleKey`, which both take, so that they cannot drift apart, taken

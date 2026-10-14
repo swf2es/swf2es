@@ -1,11 +1,14 @@
 // swf2es compile: a SWF's or an ABC's modules, ahead of time, as the player
-// compiles them for its main movie, with a manifest.
+// compiles them for its main movie, with a manifest; an AVM1 SWF's one
+// module of its action blocks.
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { COMPILER_VERSION, createCodegen } from "@swf2es/codegen";
 import {
   API_VERSION,
+  type Avm1Input,
+  compileActionsAhead,
   compileAhead,
   InputError,
   type Module,
@@ -25,7 +28,9 @@ ABC, to ES modules as the player compiles them for a SWF it loads as its
 main movie, byte for byte. Writes a .js file per ABC, a .log file of what
 its compile fixed, which the player replays in its place, and a
 manifest.json naming them, their ABCs' hashes, the keys the player's
-module cache looks them up by, and the compiler.
+module cache looks them up by, and the compiler. An AVM1 SWF (one whose
+FileAttributes has no ActionScript 3 flag) compiles to one module of its
+action blocks, avm1.js, which takes no library.
 
 options:
   -o, --out <dir>      where to write (default: <file name>.swf2es)
@@ -39,8 +44,8 @@ options:
 ${COMMON_USAGE}
 
 exit status: 0 on success, 2 for a mistake in the command line or missing
-default libraries, 1 for anything else (an unreadable, AVM1 or rejected
-input or library, or an output that cannot be written)`;
+default libraries, 1 for anything else (an unreadable or rejected input or
+library, or an output that cannot be written)`;
 
 const OPTIONS = {
   out: { type: "string", short: "o" },
@@ -53,23 +58,27 @@ const OPTIONS = {
 /**
  * manifest.json's format: 2 added each module's log, key and lengths, and
  * named the compiler by its stamped identity rather than its file's hash.
+ * An AVM1 SWF's `avm1` entry, which a reader of the ABCs' entries need not
+ * know, came later without a new version.
  */
 const MANIFEST_VERSION = 2;
 
 /** What a previous run wrote to `out`, as its manifest names it, so that no stale module stays beside a new manifest. */
 async function removeModules(out: string): Promise<void> {
-  let old: { libraries?: unknown; abcs?: unknown } | null;
+  let old: { libraries?: unknown; abcs?: unknown; avm1?: unknown } | null;
   try {
     old = JSON.parse(await readFile(join(out, "manifest.json"), "utf8"));
   } catch {
     return;
   }
 
-  const entries = [old?.libraries, old?.abcs].flatMap((list) => (Array.isArray(list) ? list : []));
+  const entries = [old?.libraries, old?.abcs, [old?.avm1]].flatMap((list) =>
+    Array.isArray(list) ? list : [],
+  );
   // Only names this command writes: a manifest edited by hand names nothing else to delete.
   for (const entry of entries) {
     const name = (entry as { module?: unknown } | null)?.module;
-    if (typeof name === "string" && /^(abc|lib)-\d+\.js$/.test(name)) {
+    if (typeof name === "string" && /^((abc|lib)-\d+|avm1)\.js$/.test(name)) {
       for (const file of [name, name.replace(/\.js$/, ".log")]) {
         await writing(join(out, file), () => rm(join(out, file), { force: true }));
       }
@@ -95,6 +104,20 @@ export const compile: Command = {
     }
 
     const file = positionals[0];
+    const bytes = await read(file, "input");
+    let input: ReturnType<typeof readInput>;
+    try {
+      input = readInput(bytes);
+    } catch (e) {
+      fail(e instanceof InputError ? `${file}: ${e.message}` : String((e as Error).stack ?? e));
+    }
+
+    const out = values.out ?? `${basename(file, extname(file))}.swf2es`;
+    if (input.avm1) {
+      await compileAvm1(file, bytes, input.avm1, out, values.quiet ?? false);
+      return;
+    }
+
     const libraries =
       values.lib ??
       defaultLibraries(
@@ -105,15 +128,7 @@ export const compile: Command = {
           "the player's tests once, which write them there.",
       );
 
-    const bytes = await read(file, "input");
     const libs = await readLibraries(libraries);
-    let input: ReturnType<typeof readInput>;
-    try {
-      input = readInput(bytes);
-    } catch (e) {
-      fail(e instanceof InputError ? `${file}: ${e.message}` : String((e as Error).stack ?? e));
-    }
-
     if (input.abcs.length === 0) {
       fail(`${file}: no DoABC or DoABC2 tag, so no ActionScript 3 to compile`);
     }
@@ -132,7 +147,6 @@ export const compile: Command = {
     }
 
     const ms = performance.now() - started;
-    const out = values.out ?? `${basename(file, extname(file))}.swf2es`;
     await writing(out, () => mkdir(out, { recursive: true }));
     await removeModules(out);
     let size = 0;
@@ -196,3 +210,55 @@ export const compile: Command = {
     }
   },
 };
+
+/**
+ * An AVM1 SWF's module, avm1.js, and its manifest: the module's key, as
+ * the player's module cache is to look it up, the SHA-256 of the SWF's
+ * decompressed bytes it names, its length and how many blocks it has.
+ */
+async function compileAvm1(
+  file: string,
+  bytes: Uint8Array,
+  avm1: Avm1Input,
+  out: string,
+  quiet: boolean,
+): Promise<void> {
+  const codegen = await createCodegen(await codegenModule());
+  const started = performance.now();
+  const compiled = compileActionsAhead(codegen, avm1);
+  const ms = performance.now() - started;
+  await writing(out, () => mkdir(out, { recursive: true }));
+  await removeModules(out);
+  const module = "avm1.js";
+  await writing(join(out, module), () => writeFile(join(out, module), compiled.module));
+  const manifest = {
+    manifestVersion: MANIFEST_VERSION,
+    compiler: { name: "swf2es", version: COMPILER_VERSION, identity: codegen.identity },
+    apiVersion: API_VERSION,
+    input: {
+      file: basename(file),
+      kind: "swf",
+      version: avm1.actions.version,
+      sha256: sha256(bytes),
+    },
+    libraries: [],
+    abcs: [],
+    avm1: {
+      module,
+      sha256: compiled.hash,
+      blocks: compiled.blocks,
+      ...(compiled.key === null ? {} : { key: compiled.key, length: compiled.module.length }),
+    },
+  };
+  const manifestPath = join(out, "manifest.json");
+  await writing(manifestPath, () =>
+    writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`),
+  );
+  if (!quiet) {
+    const size = Buffer.byteLength(compiled.module);
+    const blocks = `${compiled.blocks} AVM1 block${compiled.blocks === 1 ? "" : "s"}`;
+    console.log(
+      `${file}: ${blocks}, 1 module, ${size} bytes, compiled in ${Math.round(ms)} ms, in ${out}`,
+    );
+  }
+}
