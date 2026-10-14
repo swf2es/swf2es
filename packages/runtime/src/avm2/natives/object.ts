@@ -238,7 +238,13 @@ export const objectHooks: Record<string, ClassHook> = {
     construct: (rt, _cls, args) =>
       args[0] === null || args[0] === undefined ? rt.newObject([]) : args[0],
   },
-  // As NamespaceClass: Namespace(), Namespace(uri) or Namespace(prefix, uri).
+  // As ClassClass::construct: Class itself makes no classes.
+  Class: {
+    construct: (rt) => {
+      throw rt.error("TypeError", 1115, "Class");
+    },
+  },
+  // As NamespaceClass: Namespace(),Namespace(uri) or Namespace(prefix, uri).
   Namespace: {
     construct: (rt, _cls, args) => constructNamespace(rt, args),
     call: (rt, _cls, args) =>
