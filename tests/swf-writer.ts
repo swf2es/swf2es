@@ -442,6 +442,8 @@ export interface PlaceSpec {
   visible?: boolean;
   /** 0xAARRGGBB. */
   opaqueBackground?: number;
+  /** CLIPACTIONS' bytes, as clipActions() writes them. */
+  clipActions?: Uint8Array;
 }
 
 /** A CXFORMWITHALPHA, its multipliers in 8.8 fixed. */
@@ -494,6 +496,10 @@ export function place(spec: PlaceSpec): Uint8Array {
 
   if (spec.clipDepth !== undefined) {
     flags |= 0x40;
+  }
+
+  if (spec.clipActions !== undefined) {
+    flags |= 0x80;
   }
 
   // With HasImage and no character Flash reads a class name anyway, so the
@@ -623,7 +629,50 @@ export function place(spec: PlaceSpec): Uint8Array {
       .u8(c);
   }
 
+  if (spec.clipActions !== undefined) {
+    w.raw(spec.clipActions);
+  }
+
   return tag(v3 ? 70 : 26, w.done());
+}
+
+/** A clip action: its CLIPEVENTFLAGS, keyPress's key code, and its actions' bytes. */
+export interface ClipActionSpec {
+  events: number;
+  key?: number;
+  actions: number[];
+}
+
+/**
+ * CLIPACTIONS for a SWF of `version`, whose flags are 16 bits up to 5 and 32
+ * from 6, ending in a record of no events.
+ */
+export function clipActions(version: number, records: ClipActionSpec[]): Uint8Array {
+  const w = new BitWriter().u16(0);
+  const flags = (v: number) => (version >= 6 ? w.u32(v) : w.u16(v));
+  flags(records.reduce((all, r) => all | r.events, 0));
+  for (const record of records) {
+    flags(record.events);
+    const keyed = record.key !== undefined;
+    w.u32(record.actions.length + (keyed ? 1 : 0));
+    if (keyed) {
+      w.u8(record.key ?? 0);
+    }
+
+    w.raw(record.actions);
+  }
+
+  flags(0);
+  return w.done();
+}
+
+export function doAction(actions: number[]): Uint8Array {
+  return tag(12, new Uint8Array(actions));
+}
+
+/** DoInitAction: `sprite`'s #initclip actions. */
+export function doInitAction(sprite: number, actions: number[]): Uint8Array {
+  return tag(59, new BitWriter().u16(sprite).raw(actions).done());
 }
 
 export function remove(depth: number): Uint8Array {
@@ -1146,12 +1195,43 @@ export function buttonSound(
   return tag(17, w.done());
 }
 
-/** DefineButton2 of one character in every state, at depth 1, untransformed. */
-export function button2(id: number, character: number): Uint8Array {
-  const w = new BitWriter().u16(id).u8(0).u16(0);
-  w.u8(0x0f).u16(character).u16(1);
+/**
+ * DefineButton2 of one character in every state, at depth 1, untransformed,
+ * with BUTTONCONDACTIONs: each its conditions (the key code in their top 7
+ * bits) and its actions' bytes.
+ */
+export function button2(
+  id: number,
+  character: number,
+  conditions: { conditions: number; actions: number[] }[] = [],
+): Uint8Array {
+  const records = new BitWriter();
+  records.u8(0x0f).u16(character).u16(1);
   // An identity MATRIX, then a CXFORMWITHALPHA of no terms.
+  records.ub(1, 0).ub(1, 0).ub(5, 0).align();
+  records.ub(1, 0).ub(1, 0).ub(4, 0).align();
+  const head = records.u8(0).done();
+
+  // The action offset counts from its own field, which is 2 bytes long.
+  const w = new BitWriter()
+    .u16(id)
+    .u8(0)
+    .u16(conditions.length > 0 ? head.length + 2 : 0);
+  w.raw(head);
+  conditions.forEach((c, i) => {
+    const last = i === conditions.length - 1;
+    w.u16(last ? 0 : c.actions.length + 4)
+      .u16(c.conditions)
+      .raw(c.actions);
+  });
+
+  return tag(34, w.done());
+}
+
+/** DefineButton of one character in every state, at depth 1, with its actions' bytes. */
+export function button(id: number, character: number, actions: number[]): Uint8Array {
+  const w = new BitWriter().u16(id);
+  w.u8(0x0f).u16(character).u16(1);
   w.ub(1, 0).ub(1, 0).ub(5, 0).align();
-  w.ub(1, 0).ub(1, 0).ub(4, 0).align();
-  return tag(34, w.u8(0).done());
+  return tag(7, w.u8(0).raw(actions).done());
 }

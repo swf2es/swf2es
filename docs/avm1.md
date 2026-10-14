@@ -2,9 +2,9 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Nothing of it is built yet; [architecture.md](architecture.md)
-describes what is, and this document is folded into it as each piece
-lands.
+there. Step 1, `format`'s list of action blocks, is built; the rest is
+not. [architecture.md](architecture.md) describes what is, and this
+document is folded into it as each piece lands.
 
 AVM1 is compiled, not interpreted. The same `codegen.wasm` that compiles
 ABCs compiles a SWF's action blocks to an ES module, in the browser as
@@ -67,9 +67,19 @@ as `ActionBlock`s: the bytes, what they belong to (a frame of a timeline,
 a sprite's init, a place's event, a button's condition) and their index
 in the list. The index is how the player finds a block's compiled code,
 and the list is a pure function of the SWF's bytes, so the JIT and AOT
-modules agree on it. `display.ts` already keeps a place's clip actions
-undecoded and `button.ts` skips a button's; both then record which
-blocks they own instead.
+modules agree on it. `readPlace` and `readButton`, given the list, give
+the indices of the blocks they own.
+
+Where adl reads clip actions otherwise than Ruffle, adl decides: only
+flags of 0 end a place's records (one of unknown events is skipped), a
+record runs only for the events the place's field of all events also has,
+and a record that runs past its tag stops the whole SWF as Flash reaches
+the tag, every timeline of it, none of the place's records run. Such a tag
+has no blocks and is in the list's `corrupt`, for the player to stop the
+SWF there (step 11). A malformed button action keeps the records before
+it; adl defines the button, and whether those run there is not checked
+yet (step 12). The list has the blocks of an ActionScript 3 SWF too,
+whose FileAttributes flag says it runs none of them.
 
 ## Compiling
 
@@ -490,7 +500,7 @@ determinism` green, and the corpus baseline may only go up.
    AVM1 SWFs where it is fetched, each block alone and in its module.
 4. **Hello world.** `runtime/src/avm1` with values, `rt.version`,
    `toString` and `toBoolean`; `player/src/avm1/avm1.ts` running a main
-   AVM1 SWF's frame blocks in order; the web element and the corpus page
+   AVM1 SWF's frame blocks in order, never an ActionScript 3 SWF's; the web element and the corpus page
    giving an AVM1 SWF codegen. `pnpm corpus` takes `avm1/` among its
    default prefixes and records every AVM1 test's standing, and
    `check-references.ts` gives an AVM1 SWF its frame more. Passes the
@@ -538,8 +548,9 @@ determinism` green, and the corpus baseline may only go up.
     queue in Flash's order, `onClipEvent`, `on*` handlers, `onEnterFrame`,
     `#initclip`, `Object.registerClass`, `attachMovie`,
     `duplicateMovieClip`, `createEmptyMovieClip`, `removeMovieClip`,
-    depths. Passes `register_class*`, `register_and_init_order` and the
-    corpus's event-order tests.
+    depths, and the SWF stopped at a tag in `ActionList.corrupt`. Passes
+    `register_class*`, `register_and_init_order` and the corpus's
+    event-order tests.
 12. **Buttons, the pointer and the keyboard.** Button conditions, clips as
     buttons, `Key`, `Mouse`, `Selection`, `startDrag`, `hitTest`,
     `_droptarget`. Corpus tests that run without input, adl cases for

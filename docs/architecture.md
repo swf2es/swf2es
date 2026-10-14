@@ -95,7 +95,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC) | —                        |
+| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 language semantics called by generated code (AVM1 a placeholder) | format               |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
@@ -118,6 +118,20 @@ SWF's start alone, for its FileAttributes (`fileAttributes`). `codegen` knows th
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
+
+`format`'s `readActions` lists a SWF's AVM1 action blocks ([avm1.md](avm1.md)):
+DoAction, DoInitAction, a PlaceObject2 or 3's clip actions record by record
+(event flags of 16 bits up to SWF 5 and 32 from 6, keyPress's key code) and
+a button's actions (DefineButton's one, DefineButton2's conditions and key
+codes), each with its owner and its range in the SWF's bytes, in tag order.
+A block's index in that list is a pure function of the bytes, so the JIT and
+the AOT compiler number blocks alike; `readPlace` and `readButton`, given the
+list, give the indices of their own. The records are read as adl reads
+them where it differs from Ruffle: only flags of 0 end a place's records, a
+record runs only for the events the place's field of all events also has,
+and a clip action that runs past its tag stops the whole SWF in Flash, so its
+tag has no blocks and is listed in `corrupt`. A malformed button action ends
+its button's list and keeps the records before it.
 
 Apps, in `apps/`, are what people run rather than import: `desktop`, the
 Electron app (see [The desktop app](#the-desktop-app)), and later a browser

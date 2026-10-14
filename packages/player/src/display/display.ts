@@ -1694,7 +1694,7 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
     visible: null,
     opaqueBackground: null,
     filters: look ? record.filters : null,
-    clipActions: null,
+    actions: null,
   };
 }
 
@@ -2390,7 +2390,7 @@ function mergePlace(previous: Place, next: Place): Place {
     visible: next.visible ?? previous.visible,
     opaqueBackground: next.opaqueBackground ?? previous.opaqueBackground,
     filters: next.filters ?? previous.filters,
-    clipActions: next.clipActions ?? previous.clipActions,
+    actions: next.actions ?? previous.actions,
   };
 }
 
