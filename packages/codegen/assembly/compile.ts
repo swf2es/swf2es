@@ -7,7 +7,6 @@ import { BodyDecoder, verifyMethods } from "./avm2/abc/code";
 import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
-import { Output } from "./avm2/emit/output";
 import {
   DOMAIN_Live,
   Domain,
@@ -18,6 +17,7 @@ import {
   LOG_Verify,
 } from "./avm2/link/domain";
 import { TRAITS_Activation, TRAITS_Instance, TRAITS_Script } from "./avm2/link/traits";
+import { Output } from "./output";
 
 export let domain = new Domain();
 
