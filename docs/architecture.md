@@ -3474,7 +3474,8 @@ clamped to the source's edges; the translation is snapped down to
 quarter pixels before rasterising, which the 4 × 4 coverage reads exactly
 (a move of 0.49 covers three quarters of the left edge pixels); `normal`
 is the store's source-over; a Bitmap draws as its data, its own transform
-ignored, as any source's is; a BitmapData drawn into itself goes a row
+ignored, as any source's is, and its own colour transform too, though
+not its filters (`filtered-colors`); a BitmapData drawn into itself goes a row
 at a time, top down, every pixel of the row read before one is written,
 so a move right keeps the pixels and a move down smears rows, while
 through a Bitmap of itself it goes in plain scan order and smears both

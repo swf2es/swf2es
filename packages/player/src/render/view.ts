@@ -1723,9 +1723,12 @@ export class PixiView {
       recolor = true;
     }
 
+    // BitmapData.draw takes its object without its own colour transform, as adl draws it, though
+    // its filters with it (filtered-colors).
+    const ownColor = o === this.drawRoot ? null : o.colorTransform;
     if (dirty & TRANSFORM || tint !== node.inherited) {
       node.inherited = tint;
-      const ct = o.colorTransform;
+      const ct = ownColor;
       const color = masking ? null : ct ? (tint ? concatColor(tint, ct) : ct) : tint;
       if (!sameColor(color, node.color)) {
         node.color = color;
@@ -1742,7 +1745,7 @@ export class PixiView {
       // A 3D object's bitmap is drawn coloured by all above it too, each of its fills under the
       // alpha, as Flash's is: its quad takes none of Pixi's colour (render/three.ts). A filtered
       // object's chain colours what its filters make.
-      const ct = flash || masking || rooted ? null : three ? node.color : o.colorTransform;
+      const ct = flash || masking || rooted ? null : three ? node.color : ownColor;
       container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
       const tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
