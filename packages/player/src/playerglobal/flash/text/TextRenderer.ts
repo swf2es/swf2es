@@ -47,15 +47,42 @@ export function textRendererNatives(s: Scripting): avm2.Natives {
     /** "on" and "default" set, anything else is "off"; null TypeError #2007. */
     static set antiAliasType(v: Value) {
       if (v === null || v === undefined) {
-        throw s.rt.error("TypeError", 2007, "antiAliasType");
+        // adl spells the parameter so.
+        throw s.rt.error("TypeError", 2007, "antialiasType");
       }
 
       const type = s.rt.toString(v);
       antiAliasType = type === "on" || type === "default" ? type : "off";
     }
 
-    static setAdvancedAntiAliasingTable(): void {
-      // The player's text has no tables to tune.
+    /** Checked as adl checks it, then dropped: the player's text has no tables to tune. */
+    static setAdvancedAntiAliasingTable(
+      fontName: Value,
+      fontStyle: Value,
+      colorType: Value,
+      table: Value,
+    ): void {
+      for (const [name, v] of [
+        ["fontName", fontName],
+        ["fontStyle", fontStyle],
+        ["colorType", colorType],
+      ]) {
+        if (v === null || v === undefined) {
+          throw s.rt.error("TypeError", 2007, name);
+        }
+      }
+
+      const entries = (table as avm2.AsObject | null)?.$a as Value[] | undefined;
+      if (!entries) {
+        return;
+      }
+
+      const settings = s.rt.classNamed("flash.text::CSMSettings");
+      for (const entry of entries) {
+        if (!s.rt.isInstance(entry, settings)) {
+          throw s.rt.error("TypeError", 2005, 4, "CSMSettings");
+        }
+      }
     }
   }
 
