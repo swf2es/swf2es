@@ -3057,6 +3057,10 @@ test("a new object of a released one's character takes its node, reset, and the 
     assert.equal(placed(0), container);
     assert.equal(container.filters?.[0], chain);
     assert.equal(container.alpha, 1);
+    // Nor does the chain it keeps colour what its filters make in the first one's colour.
+    const uniforms = (chain as { resources: { colorUniforms: { uniforms: { uColored: number } } } })
+      .resources.colorUniforms.uniforms;
+    assert.equal(uniforms.uColored, 0);
     assert.equal(container.visible, true);
     container.updateLocalTransform();
     const { a, b, tx, ty } = container.localTransform;

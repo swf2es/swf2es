@@ -891,6 +891,13 @@ export class PixiView {
     node.stale = null;
     node.color = null;
     node.inherited = null;
+    // The chain it keeps, as filters set alike keep it, is coloured only as the colour changes:
+    // from none, as node.color now is, not in the old object's.
+    const chain = node.filters[0];
+    if (chain instanceof FilterChain) {
+      chain.recolor(null);
+    }
+
     node.slice = null;
     node.sliceKey = "";
     node.sliceOwner = null;
