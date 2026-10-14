@@ -814,8 +814,9 @@ player adding and compiling ABCs exactly as the command does.
 
 ### Ahead-of-time compilation
 
-`swf2es <file.swf|file.abc> --lib builtin.abc --lib playerglobal.abc [-o
-dir]` (`packages/cli`) compiles a SWF's DoABCs, or a bare ABC, as the
+`swf2es compile <file.swf|file.abc> --lib builtin.abc --lib
+playerglobal.abc [-o dir]` (`packages/cli`, `commands/compile.ts`; a bare
+`swf2es <file>` is the same) compiles a SWF's DoABCs, or a bare ABC, as the
 player compiles them for a SWF it loads as its main movie, so that each
 module is byte for byte the player's (`compileAhead` in `aot.ts`, which
 follows `Code` in `packages/player/src/scripting/code.ts` step by step):
