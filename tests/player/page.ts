@@ -840,6 +840,140 @@ async function contextLossSwf(
   }
 }
 
+/**
+ * Play a SWF with no scripts in two renderers at once, one of which loses
+ * its WebGL context and gets it back as `plan` says: each `t` plays a
+ * frame and draws it in both, `l` loses the context, `r` waits for Pixi to
+ * give it back, which it does once the steps between have run, and `s`
+ * resizes both. Frames drawn while it is lost are drawn into nothing;
+ * every frame drawn with it must match the other renderer's. What first
+ * differed, or threw.
+ */
+async function contextLossPlanSwf(
+  base64: string,
+  plan: string,
+  table: boolean,
+): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  setTransformTable(table, 1);
+  const make = async () => {
+    const player = new Player(bytes, null);
+    const renderer = await autoDetectRenderer({
+      preference: "webgl",
+      width: player.width,
+      height: player.height,
+      background: player.background,
+      resolution: 1,
+      preserveDrawingBuffer: true,
+      useBackBuffer: true,
+    });
+    const view = new PixiView(renderer);
+    await player.start();
+    return { player, renderer, view };
+  };
+  const steady = await make();
+  const losing = await make();
+  const glOf = (r: typeof steady) => (r.renderer as unknown as { gl: WebGL2RenderingContext }).gl;
+  const pixels = (gl: WebGL2RenderingContext) => {
+    const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+    gl.readPixels(
+      0,
+      0,
+      gl.drawingBufferWidth,
+      gl.drawingBufferHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      out,
+    );
+    return out;
+  };
+  const canvas = losing.renderer.canvas as HTMLCanvasElement;
+  const within = (event: Promise<unknown>) =>
+    Promise.race([
+      event.then(() => true),
+      new Promise<boolean>((done) => setTimeout(done, 5000, false)),
+    ]);
+  let lost = false;
+  let wide = false;
+  try {
+    for (let step = 0; step < plan.length; step++) {
+      switch (plan[step]) {
+        case "t": {
+          for (const r of [steady, losing]) {
+            r.player.tick();
+            r.view.render(r.player.stage);
+          }
+
+          if (!lost) {
+            const a = pixels(glOf(steady));
+            const b = pixels(glOf(losing));
+            let differ = 0;
+            for (let i = 0; i < a.length; i++) {
+              if (a[i] !== b[i]) {
+                differ++;
+              }
+            }
+
+            if (differ > 0) {
+              return `step ${step} of ${plan}: ${differ} of ${a.length} bytes differ`;
+            }
+          }
+
+          break;
+        }
+
+        case "l": {
+          const gone = new Promise((done) =>
+            canvas.addEventListener("webglcontextlost", done, { once: true }),
+          );
+          // Pixi gives it back once the frames drawn till the next await are drawn.
+          (
+            losing.renderer as unknown as { context: { forceContextLoss(): void } }
+          ).context.forceContextLoss();
+          if (!(await within(gone))) {
+            return `step ${step} of ${plan}: the context was not lost`;
+          }
+
+          lost = true;
+          break;
+        }
+
+        case "r": {
+          // Registered before anything yields, so the restore Pixi asked for cannot be missed.
+          const back = new Promise((done) =>
+            canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
+              once: true,
+            }),
+          );
+          if (!(await within(back))) {
+            return `step ${step} of ${plan}: the context did not come back`;
+          }
+
+          lost = false;
+          break;
+        }
+
+        case "s": {
+          wide = !wide;
+          for (const r of [steady, losing]) {
+            r.renderer.resize(r.player.width + (wide ? 37 : 0), r.player.height + (wide ? 21 : 0));
+          }
+
+          break;
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    steady.renderer.destroy();
+    losing.renderer.destroy();
+    setTransformTable(true);
+  }
+}
+
 /** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
 let opened: {
   player: Player;
@@ -1166,6 +1300,7 @@ const page = globalThis as unknown as {
   traceSwf: typeof traceSwf;
   resizeSwf: typeof resizeSwf;
   contextLossSwf: typeof contextLossSwf;
+  contextLossPlanSwf: typeof contextLossPlanSwf;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -1177,3 +1312,4 @@ page.closeSwf = closeSwf;
 page.traceSwf = traceSwf;
 page.resizeSwf = resizeSwf;
 page.contextLossSwf = contextLossSwf;
+page.contextLossPlanSwf = contextLossPlanSwf;

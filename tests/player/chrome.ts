@@ -706,6 +706,20 @@ export function playResized(
   });
 }
 
+/** Play a SWF with no scripts in the page's contextLossPlanSwf, in two renderers, one losing its context as `plan` says. */
+export function playLosingContextPlan(
+  swf: Uint8Array,
+  plan: string,
+  table: boolean,
+): Promise<string | null> {
+  return withPage("contextLossPlanSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<string | null>(
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table})`,
+    );
+    return exception ?? value ?? null;
+  });
+}
+
 /** Play a SWF with no scripts in the page's contextLossSwf: what differs after a lost context, or threw. */
 export function playLosingContext(
   swf: Uint8Array,
