@@ -112,8 +112,13 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   goes on after it in the enclosing one (for a function, returns), and a
   jump back before its start stays in it (Ruffle's `run_actions` over a
   subslice). So a region's blocks are its own, an offset reached from two
-  regions is decoded and emitted in each, and every exit of a `With` or
-  `Try` body is known while compiling. The constant pool is tracked along
+  regions is in each (decoded once, emitted in each), and every exit of a
+  `With` or `Try` body is known while compiling. A region is the same for
+  every action that opens the same bytes as the same kind, so a body that
+  jumps back before its own opener opens itself again: regions form a
+  graph, cycles included, and the emitter writes each once, not inlined
+  into its parent. A target before the block's first byte, which Ruffle
+  reads from the tags before it, is taken as the block's exit. The constant pool is tracked along
   the flow: where one `ConstantPool` reaches a `Push` on every path, its
   strings are literals; where none or several may, the push reads the
   activation's pool at run time.
@@ -141,8 +146,10 @@ AVM2's `s0`, come later, for regions whose depths the decoder can prove.
   host whether the frame is loaded. The player has the whole SWF before it
   plays, so every frame is, but the branch stays for SWFs that test it.
 - **With**: the body is a region; its code runs with the object pushed on
-  the activation's scope chain, popped at every exit of the region, and a
-  `with (undefined)` or `null` runs the body without one, as Ruffle does.
+  the activation's scope chain, popped at every exit of the region. A
+  `with (undefined)` or `null` skips the body, as Ruffle does
+  (`action_with`): the action's length covers its body, so the code after
+  it goes on past it.
 - **Try**: the try, catch and finally bodies are regions in a
   JavaScript `try`/`catch`/`finally`. `Throw` throws the runtime's
   `Avm1Throw` with the value; a catch takes only those, sets its register
@@ -487,8 +494,8 @@ determinism` green, and the corpus baseline may only go up.
    on hand-built tags, including SWF 5's 16-bit event flags. No behaviour
    changes.
 2. **The decoder.** `codegen/assembly/avm1/actions/`: opcodes, operands,
-   `Push`'s value types, regions and blocks, jumps into an action's middle,
-   truncated input; exposed in the test build, and fuzzed
+   `Push`'s value types, jumps into an action's middle, truncated input;
+   `avm1/flow/`: regions and blocks. Exposed in the test build, and fuzzed
    (`tests/fuzz/avm1.ts`). Moves `Output` beside `avm2/` for both.
 3. **Emitting a block.** `codegen/assembly/avm1/emit/` for `Push` of
    constants, `ConstantPool`, `Trace`, `Pop`, `Jump`, `If`, `Play`,
