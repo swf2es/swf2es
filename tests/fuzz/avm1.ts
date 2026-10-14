@@ -10,9 +10,9 @@
 //
 // The seeds are blocks generated from the actions' grammar, nested bodies
 // and branches included, and a few shapes at the edges: bodies that jump
-// back before their own start, long WaitForFrame chains, nesting too deep
-// to walk. A case that fails is written to out/failures/ as a .avm1 file of
-// the block's bytes. The generator is seeded, so a run repeats exactly:
+// back before their own start, long WaitForFrame chains, deep nesting, and
+// blocks that read the same bytes from many offsets. A case that fails is
+// written to out/failures/ as a .avm1 file of the block's bytes. The generator is seeded, so a run repeats exactly:
 //
 //   node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]
 import { createHash } from "node:crypto";
@@ -143,7 +143,7 @@ function actions(size: number, depth: number): number[] {
   return bytes;
 }
 
-/** Edge shapes: bodies that jump back before themselves, chained skips, deep nesting. */
+/** Edge shapes: bodies that jump back before themselves, chained skips, deep nesting, rereading. */
 function edges(): number[][] {
   const leaving: number[] = [];
   for (let k = 0; k < 2500; k++) {
@@ -166,7 +166,23 @@ function edges(): number[][] {
   }
 
   const skips = Array.from({ length: 5000 }, () => act(0x8d, [255])).flat();
-  return [leaving, reopening, nested, skips];
+  return [leaving, reopening, nested, skips, rereading(0x8c), rereading(0x96)];
+}
+
+/**
+ * Ifs into each offset of a long run of `fill` without a zero: as
+ * GotoLabels, each looks through the rest for its string's zero; as
+ * Pushes, each reads tens of kilobytes of values it skips.
+ */
+function rereading(fill: number): number[] {
+  const ifs = 2000;
+  const bytes: number[] = new Array(5 * ifs + 0x10000).fill(fill);
+  for (let k = 0; k < ifs; k++) {
+    const offset = 5 * ifs + k - (5 * k + 5);
+    bytes.splice(5 * k, 5, ...act(0x9d, u16(offset)));
+  }
+
+  return bytes;
 }
 
 /**

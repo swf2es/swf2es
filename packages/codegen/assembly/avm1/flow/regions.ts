@@ -38,6 +38,14 @@ export const REGION_Function: u8 = 1;
  */
 export const MAX_VISITS: i32 = 1 << 21;
 
+/**
+ * How many bytes decoding a block may read, per byte of it and besides:
+ * each action is decoded once, so a block reads about its size unless it
+ * is crafted to read the same bytes from many offsets.
+ */
+export const MAX_READ_PER_BYTE: i64 = 8;
+export const MAX_READ_BESIDES: i64 = 1 << 20;
+
 @final
 export class Region {
   /** Its actions' indices in `Actions.actions`, by offset. */
@@ -116,7 +124,10 @@ export function branches(action: Action): bool {
 @final
 export class Flow {
   regions: Region[] = [];
-  /** Sticky: the regions would hold more than MAX_VISITS actions. */
+  /**
+   * Sticky: the regions would hold more than MAX_VISITS actions, or
+   * decoding them would read more than MAX_READ_PER_BYTE bytes per byte.
+   */
   tooLarge: bool = false;
   private visits: i32 = 0;
   /** Function regions by their bodies' start and end. */
@@ -128,9 +139,11 @@ export class Flow {
   private counted: StaticArray<i32>;
   private preds: StaticArray<i32>;
   private work: i32[] = [];
+  private maxRead: i64;
 
   constructor(public actions: Actions) {
     const n = actions.length;
+    this.maxRead = <i64>n * MAX_READ_PER_BYTE + MAX_READ_BESIDES;
     this.visited = new StaticArray<i32>(n);
     this.started = new StaticArray<i32>(n);
     this.counted = new StaticArray<i32>(n);
@@ -165,6 +178,11 @@ export class Flow {
       this.visited[p] = tag;
       offsets.push(p);
       const action = actions.decode(p);
+      if (actions.read > this.maxRead) {
+        this.tooLarge = true;
+        return;
+      }
+
       if (action.error !== ERROR_None) {
         continue;
       }

@@ -88,6 +88,13 @@ export class Actions {
   /** A string value's string, a register or a constant's index. */
   valueIndex: i32[] = [];
 
+  /**
+   * How many bytes decoding has read, strings looked through included: a
+   * block crafted so that many offsets decode long Pushes or look through
+   * the same long run of bytes for a string's zero costs this, not its size.
+   */
+  read: i64 = 0;
+
   // The operand reader: a position, and whether a read ran past the end.
   private pos: i32 = 0;
   private failed: bool = false;
@@ -108,7 +115,7 @@ export class Actions {
     }
 
     const action = new Action(offset);
-    this.read(action);
+    this.operands(action);
     this.at[offset] = this.actions.length + 1;
     this.actions.push(action);
     return action;
@@ -133,7 +140,7 @@ export class Actions {
     action.skips = true;
   }
 
-  private read(action: Action): void {
+  private operands(action: Action): void {
     const end = this.length;
     const opcode = this.bytes[action.offset];
     action.opcode = opcode;
@@ -153,6 +160,8 @@ export class Actions {
     }
 
     const start = this.pos;
+    // Nested bodies' sizes, which the position passes without reading.
+    let bodies = 0;
     switch (opcode) {
       case ops.OP_GotoFrame:
         action.a = this.u16();
@@ -182,11 +191,13 @@ export class Actions {
         break;
       case ops.OP_DefineFunction:
       case ops.OP_DefineFunction2:
-        length += this.defineFunction(action, opcode === ops.OP_DefineFunction2);
+        bodies = this.defineFunction(action, opcode === ops.OP_DefineFunction2);
+        length += bodies;
         break;
       case ops.OP_Try:
         if (length >= 7) {
-          length += this.try(action);
+          bodies = this.try(action);
+          length += bodies;
         } else {
           // Too short for its header: a Try with empty bodies, after it.
           const at = start + length;
@@ -197,9 +208,9 @@ export class Actions {
         }
         break;
       case ops.OP_With: {
-        const size = <i32>this.u16();
-        length += size;
-        this.body(action, size);
+        bodies = <i32>this.u16();
+        length += bodies;
+        this.body(action, bodies);
         break;
       }
       case ops.OP_Push:
@@ -225,6 +236,7 @@ export class Actions {
         break;
     }
 
+    this.read += <i64>(this.pos - start - bodies);
     // Wherever the operands ended, the next action is where the length says.
     // A length past the block's end, read or not, is as truncated: Flash
     // gives up on the movie there (adl exits), even with the bytes that
@@ -429,6 +441,7 @@ export class Actions {
       p++;
     }
 
+    this.read += <i64>(p - from);
     if (p >= this.length) {
       this.failed = true;
       return -1;

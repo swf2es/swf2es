@@ -4955,9 +4955,13 @@ which catches a read past a table's end the release build lets through.
 (`codegen/assembly/avm1/`): action blocks generated from the actions'
 grammar, nested bodies and branches among them, and shapes at the edges
 (bodies that jump back before their own start, long `WaitForFrame` chains,
-deep nesting), mutated a few bytes at a time or cut short. A block must
-decode without a trap, no region may hold an action in two of its blocks,
-and a block must decode the same again after others.
+deep nesting, blocks that read the same bytes from many offsets), mutated
+a few bytes at a time or cut short. A block must decode without a trap, no
+region may hold an action in two of its blocks, and a block must decode
+the same again after others. The flow refuses a block whose regions would
+hold more than 2M actions or whose decoding would read more than eight
+bytes per byte of it (and a megabyte besides), so a crafted block costs
+time in proportion to its size.
 
 `tests/fuzz/domains.ts` gives two instances the same ABCs, child domains
 and findings in a seeded random order, and lets one of them also drop,
