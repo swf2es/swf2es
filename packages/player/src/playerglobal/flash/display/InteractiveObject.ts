@@ -8,7 +8,25 @@ import { displayOf } from "./DisplayObject.js";
 
 type Value = avm2.Value;
 
-export function interactiveObjectNatives(_s: Scripting): avm2.Natives {
+/**
+ * `v` as an instance of the class `qualified` names, as Flash coerces a
+ * native's argument to its declared type: null for null and undefined,
+ * TypeError #1034 for anything else that is not one.
+ */
+export function coerceArgument(s: Scripting, v: Value, qualified: string): Value {
+  if (v === null || v === undefined) {
+    return null;
+  }
+
+  const cls = s.rt.classNamed(qualified);
+  if (s.rt.isInstance(v, cls)) {
+    return v;
+  }
+
+  throw s.rt.error("TypeError", 1034, s.rt.describe(v), cls.$it.name);
+}
+
+export function interactiveObjectNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   class InteractiveObjectNatives {
@@ -93,7 +111,7 @@ export function interactiveObjectNatives(_s: Scripting): avm2.Natives {
     }
 
     set contextMenu(v: Value) {
-      this.$contextMenu = v;
+      this.$contextMenu = coerceArgument(s, v, "flash.display::NativeMenu");
     }
 
     requestSoftKeyboard(): boolean {

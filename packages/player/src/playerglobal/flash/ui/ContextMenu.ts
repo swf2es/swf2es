@@ -2,10 +2,12 @@
 // would offer is kept for the SWF to read back, as the player shows no
 // context menu of a SWF's.
 import { avm2 } from "@swf2es/runtime";
+import type { Scripting } from "../../../scripting.js";
+import { coerceArgument } from "../display/InteractiveObject.js";
 
 type Value = avm2.Value;
 
-export function contextMenuNatives(): avm2.Natives {
+export function contextMenuNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   class ContextMenuNatives {
@@ -16,7 +18,7 @@ export function contextMenuNatives(): avm2.Natives {
     }
 
     set link(v: Value) {
-      this.$link = v;
+      this.$link = coerceArgument(s, v, "flash.net::URLRequest");
     }
   }
 

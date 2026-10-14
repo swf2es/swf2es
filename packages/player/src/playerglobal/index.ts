@@ -187,7 +187,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...videoNatives(s),
     ...keyboardNatives(),
     ...gameInputNatives(s),
-    ...contextMenuNatives(),
+    ...contextMenuNatives(s),
     ...accelerometerNatives(),
   };
 }
