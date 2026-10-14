@@ -295,10 +295,10 @@ test("WaitForFrame skips a count of actions, not bytes", () => {
 test("truncated actions end the block; unknown ones are skipped", () => {
   // An operand past the block's end.
   assert.equal(one(act(0x81, 1)), "0 GotoFrame truncated next 4");
-  // A length past the end where nothing is read: the action is whole, and
-  // the next is the end.
-  assert.equal(one(actLength(0x9e, 50)), "0 Call next 3");
-  // An unknown action's data must be there.
+  // A length past the end, even where nothing is read: Flash gives up on
+  // the movie, whatever follows the block in the SWF.
+  assert.equal(one(actLength(0x9e, 50)), "0 Call truncated next 3");
+  assert.equal(one(actLength(JUMP, 50, 0, 0)), "0 Jump truncated next 5");
   assert.equal(one(actLength(0xa0, 50)), "0 0xa0 truncated next 3");
   assert.equal(one(actLength(0xa0, 1, 0)), "0 0xa0 next 4");
   // No room for the length: only the opcode was read.

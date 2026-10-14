@@ -13,8 +13,9 @@ import * as ops from "./opcodes";
 /** The action decoded as Flash reads it. */
 export const ERROR_None: u8 = 0;
 /**
- * Its opcode's length, an operand or a nested body runs past the block's
- * end; Flash stops running the block there.
+ * Its opcode's length, its length, an operand or a nested body runs past the
+ * block's end. Flash gives up on the movie at a length past the end and runs
+ * no further at an operand past it; the block ends there.
  */
 export const ERROR_Truncated: u8 = 1;
 
@@ -222,15 +223,19 @@ export class Actions {
         break;
       }
       default:
-        // An unknown action's data must be there, though nothing reads it.
-        if (!ops.opcodeKnown[opcode] && start + length > end) {
-          this.failed = true;
-        }
         break;
     }
 
     // Wherever the operands ended, the next action is where the length says.
-    action.next = <i32>min(<i64>start + length, <i64>end);
+    // A length past the block's end, read or not, is as truncated: Flash
+    // gives up on the movie there (adl exits), even with the bytes that
+    // follow in the SWF.
+    const next = <i64>start + length;
+    if (next > <i64>end) {
+      this.failed = true;
+    }
+
+    action.next = <i32>min(next, <i64>end);
     if (this.failed) {
       action.error = ERROR_Truncated;
       return;
