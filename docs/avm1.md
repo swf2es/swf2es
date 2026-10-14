@@ -176,12 +176,21 @@ written straight, without the dispatcher. Structured output, as
 `emit/structure.ts` makes for AVM2, comes later, for blocks that profile
 hot.
 
-The operand stack is a JavaScript array per activation, `st`: a `Push`
-is `st.push(...)` and an action's operands `st.pop()`, which gives
-`undefined` on an empty stack, as Flash's AVM1 does. AVM1's stack depth
-is not fixed at a merge (`Enumerate` pushes as many names as an object has,
-and the loop after it pops until `null`), so registers for stack slots, as
-AVM2's `s0`, come later, for regions whose depths the decoder can prove.
+The operand stack is a JavaScript array, `st`, which a region takes from
+the activation, `cx.st`: a `Push` is `st.push(...)` and an action's
+operands `st.pop()`, which gives `undefined` on an empty stack, as
+Flash's AVM1 does. In adl it is one stack, not one an activation: what a
+frame's block leaves on it the next block run in that frame pops, a
+DoInitAction's and a clip event's included, and a function's body pops
+its caller's values below its own and leaves what it does not pop under
+the value the call pushes. Frames do not share it: what a frame left is
+gone when the next frame's actions run. So the runtime gives every
+activation of a frame's actions the same array and empties it between
+frames (step 4). AVM1's stack depth is not fixed at a merge (`Enumerate`
+pushes as many names as an object has, and the loop after it pops until
+`null`), and a region may pop below its start, so registers for stack
+slots, as AVM2's `s0`, come later, for regions whose depths the decoder
+can prove, spilling to `st` at calls and at the region's ends.
 
 - **Jump** and **If**: `b = k; continue;`, and `if (V.toBoolean(st.pop()))`
   before it. A jump out of the region is the region's exit.
@@ -208,23 +217,23 @@ AVM2's `s0`, come later, for regions whose depths the decoder can prove.
   ends the block. Every region ends in `return`.
 
 A region's function takes the activation, `cx`: its scope chain, target,
-`this`, the constant pool, the registers, the version's operations and
-the SWF's host. A module, an entry per block in the order `readActions`
-lists them, looks like:
+`this`, the constant pool, the operand stack, the registers, the
+version's operations and the SWF's host. A module, an entry per block in
+the order `readActions` lists them, looks like:
 
 ```js
 export default function (rt) {
 const V = rt.version(6);
 return [
 [function (cx) {
-const st = [];
+const st = cx.st;
 V.constantPool(cx, ["frame"]);
 st.push("frame");
 V.trace(cx, st.pop());
 return;
 }],
 [function (cx) {
-const st = [];
+const st = cx.st;
 let b = 0;
 for (;;) switch (b) {
 case 0:
@@ -237,7 +246,7 @@ case 2:
 return;
 }
 }, function (cx) {
-const st = [];
+const st = cx.st;
 st.push("in a function");
 V.trace(cx, st.pop());
 return;

@@ -2,7 +2,8 @@
 // block's own code first, then its functions' bodies, each written once in
 // the dispatcher form (docs/avm1.md, "The dispatcher"), never inlined into
 // the region that defines it, since a body may define itself. A region
-// makes its operand stack, `st`, a JavaScript array. A region whose code
+// takes the operand stack, `st`, from the activation, since Flash's is one
+// stack that a frame's blocks and the calls they make share. A region whose code
 // is one block that nothing jumps into is written straight, without the
 // dispatcher.
 //
@@ -50,7 +51,7 @@ export class BlockEmitter {
 
   private region(actions: Actions, region: Region): void {
     const out = this.out;
-    out.text("function (cx) {\nconst st = [];\n");
+    out.text("function (cx) {\nconst st = cx.st;\n");
 
     const n = region.blocks.length;
     if (n === 0) {

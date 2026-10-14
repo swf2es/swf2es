@@ -47,6 +47,7 @@ type Region = (cx: Activation, st?: unknown[]) => void;
 
 interface Activation {
   pool: unknown[];
+  st: unknown[];
 }
 
 /** A stub runtime: what the code calls, in order. */
@@ -102,7 +103,7 @@ async function run(
   const entries = await load(module, rt);
   let error: string | null = null;
   try {
-    entries[0][0]({ pool });
+    entries[0][0]({ pool, st: [] });
   } catch (e) {
     error = (e as Error).message;
   }
@@ -165,6 +166,21 @@ test("a pop of the empty stack gives undefined", async () => {
   assert.equal(error, null);
   assert.deepEqual(calls, [
     ["trace", undefined],
+    ["trace", undefined],
+  ]);
+});
+
+test("the operand stack is the activation's, which blocks share", async () => {
+  // In adl, the next block run in a frame pops what one left on the stack.
+  const blocks = [asm().push("left", "over").bytes(), asm().trace().trace().trace().bytes()];
+  const { calls, rt } = stub();
+  const entries = await load(moduleOf(blocks, 8), rt);
+  const st: unknown[] = [];
+  entries[0][0]({ pool: [], st });
+  entries[1][0]({ pool: [], st });
+  assert.deepEqual(calls, [
+    ["trace", "over"],
+    ["trace", "left"],
     ["trace", undefined],
   ]);
 });
@@ -535,7 +551,7 @@ test("a function's body is an entry of its own, not inlined; a With's body is th
 
   const { calls, rt } = stub();
   const regions = (await load(moduleOf([block], 10), rt))[0];
-  regions[1]({ pool: [] });
+  regions[1]({ pool: [], st: [] });
   assert.deepEqual(calls, [["trace", "in the body"]]);
 });
 
