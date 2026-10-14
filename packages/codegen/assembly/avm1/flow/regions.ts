@@ -74,6 +74,23 @@ export class Region {
   runs(offset: i32): bool {
     return offset >= 0 && offset < this.end;
   }
+
+  /** The index of the block that starts at `offset`, which must start one. */
+  blockAt(offset: i32): i32 {
+    const blocks = this.blocks;
+    let low = 0;
+    let high = blocks.length - 1;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (blocks[mid] < offset) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+
+    return low;
+  }
 }
 
 /** Whether control goes on to the action's `fallsTo`. */

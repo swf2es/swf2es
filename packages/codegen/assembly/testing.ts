@@ -1031,6 +1031,7 @@ function hex(kind: u8): string {
   return `0x${kind < 0x10 ? "0" : ""}${kind.toString(16)}`;
 }
 
+export { actionsEmitEach, actionsModuleBytes, actionsModuleEntries } from "./avm1/compile";
 export {
   domainAdd,
   domainChild,
