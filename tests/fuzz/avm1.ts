@@ -143,13 +143,21 @@ function actions(size: number, depth: number): number[] {
   return bytes;
 }
 
-/** Edge shapes: bodies that reopen themselves, chained skips, deep nesting. */
+/** Edge shapes: bodies that jump back before themselves, chained skips, deep nesting. */
 function edges(): number[][] {
+  const leaving: number[] = [];
+  for (let k = 0; k < 2500; k++) {
+    // A With whose body jumps back to the block's start, leaving it.
+    const body = act(0x99, u16(-(leaving.length + 10) & 0xffff));
+    leaving.push(...act(0x94, u16(body.length)), ...body);
+  }
+
   const reopening: number[] = [];
   for (let k = 0; k < 2500; k++) {
-    // A With whose body jumps back to the block's start, opening every With again.
-    const body = act(0x99, u16(-(reopening.length + 10) & 0xffff));
-    reopening.push(...act(0x94, u16(body.length)), ...body);
+    // A function whose body jumps back to the block's start, running it all
+    // and defining every function again.
+    const body = act(0x99, u16(-(reopening.length + 13) & 0xffff));
+    reopening.push(...act(0x9b, [0, ...u16(0), ...u16(body.length)]), ...body);
   }
 
   let nested: number[] = [0x26];
@@ -158,7 +166,7 @@ function edges(): number[][] {
   }
 
   const skips = Array.from({ length: 5000 }, () => act(0x8d, [255])).flat();
-  return [reopening, nested, skips];
+  return [leaving, reopening, nested, skips];
 }
 
 /**

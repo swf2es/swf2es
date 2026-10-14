@@ -813,7 +813,7 @@ export function avm1Opcodes(): string {
   return out.join("\n");
 }
 
-const REGION_NAMES = ["block", "function", "with", "try", "catch", "finally"];
+const REGION_NAMES = ["block", "function"];
 
 /**
  * An AVM1 block's regions as the flow finds them, each with its blocks and
@@ -937,7 +937,7 @@ function avm1Line(actions: Actions, action: Action, region: Region): string {
         const name = avm1String(actions, action.first + i);
         params.push(register ? `r${register}=${name}` : name);
       }
-      line += ` (${params.join(", ")}) body ${action.s0}-${action.s1} region ${action.region0}`;
+      line += ` (${params.join(", ")}) body ${action.s0}-${action.s1} region ${action.region}`;
       break;
     }
     case avm1.OP_Try:
@@ -949,10 +949,9 @@ function avm1Line(actions: Actions, action: Action, region: Region): string {
       }
       line += ` try ${action.s0}-${action.s1} catch ${action.s1}-${action.s2}`;
       line += ` finally ${action.s2}-${action.s3}`;
-      line += ` regions ${action.region0} ${action.region1} ${action.region2}`;
       break;
     case avm1.OP_With:
-      line += ` body ${action.s0}-${action.s1} region ${action.region0}`;
+      line += ` body ${action.s0}-${action.s1}`;
       break;
     case avm1.OP_Push:
       for (let i = action.first; i < action.first + action.count; i++) {

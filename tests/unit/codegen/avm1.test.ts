@@ -138,57 +138,95 @@ test("DefineFunction2's registers, flags and parameters", () => {
   ]);
 });
 
-test("With's body is a region, and the code after it goes on past it", () => {
+test("With goes into its body and, for undefined or null, past it", () => {
+  // adl: with (undefined) and with (null) skip the body.
   const body = [...act(PUSH, 2), TRACE];
   const lines = dump(act(0x94, ...u16(body.length)), body, [POP]);
   assert.deepEqual(lines, [
     "region 0 block 0-11",
     "block 0",
-    "0 With body 5-10 region 1",
-    "10 Pop",
-    "region 1 with 5-10 from 0 at 0",
+    "0 With body 5-10",
     "block 5",
     "5 Push null",
     "9 Trace",
+    "block 10",
+    "10 Pop",
   ]);
 });
 
-test("Try's bodies, its catch in a register or a variable", () => {
+test("a With's body that jumps back before it leaves it, in the same activation", () => {
+  // adl: the scope is gone at the jump's target, and the With there opens
+  // it again; no code runs after the With as its body ends.
+  const body = [TRACE, ...act(JUMP, ...u16(0x10000 - 12))];
+  const lines = dump([POP], act(0x94, ...u16(body.length)), body, [END]);
+  assert.deepEqual(lines, [
+    "region 0 block 0-13",
+    "block 0",
+    "0 Pop",
+    "1 With body 6-12",
+    "block 6",
+    "6 Trace",
+    "7 Jump -12 -> 0",
+    "block 12",
+    "12 End",
+  ]);
+});
+
+test("Try's bodies run in its activation, a throw landing on the catch or the finally", () => {
   const tryBody = [TRACE];
   const catchBody = [POP, POP];
   const finallyBody = [TRACE];
   const sizes = [...u16(1), ...u16(2), ...u16(1)];
+  // adl: code running off the try body runs the catch's bytes, and on into
+  // the finally's.
   let lines = dump(act(0x8f, 7, ...sizes, 2), tryBody, catchBody, finallyBody, [END]);
   assert.deepEqual(lines, [
     "region 0 block 0-16",
     "block 0",
-    "0 Try flags 7 r2 try 11-12 catch 12-14 finally 14-15 regions 1 2 3",
-    "15 End",
-    "region 1 try 11-12 from 0 at 0",
+    "0 Try flags 7 r2 try 11-12 catch 12-14 finally 14-15",
     "block 11",
     "11 Trace",
-    "region 2 catch 12-14 from 0 at 0",
     "block 12",
     "12 Pop",
     "13 Pop",
-    "region 3 finally 14-15 from 0 at 0",
     "block 14",
     "14 Trace",
+    "block 15",
+    "15 End",
   ]);
 
-  // No catch flag: the catch's bytes are skipped, with no region.
-  lines = dump(act(0x8f, 2, ...sizes, ...str("e")), tryBody, catchBody, finallyBody);
-  assert.equal(lines[2], '0 Try flags 2 "e" try 12-13 catch 13-15 finally 15-16 regions 1 -1 2');
-  assert.equal(lines.length, 9);
+  // No catch flag: a throw lands on the finally, past the catch's bytes,
+  // which only code running off the try body runs.
+  const jumpOver = act(JUMP, ...u16(2));
+  lines = dump(
+    act(0x8f, 2, ...u16(6), ...sizes.slice(2), ...str("e")),
+    tryBody,
+    jumpOver,
+    catchBody,
+    finallyBody,
+    [END],
+  );
+  assert.deepEqual(lines, [
+    "region 0 block 0-22",
+    "block 0",
+    '0 Try flags 2 "e" try 12-18 catch 18-20 finally 20-21',
+    "block 12",
+    "12 Trace",
+    "13 Jump 2 -> 20",
+    "block 20",
+    "20 Trace",
+    "block 21",
+    "21 End",
+  ]);
 });
 
-test("a Try shorter than its header has empty bodies", () => {
+test("a Try shorter than its header has empty bodies, after it", () => {
   assert.deepEqual(dump(act(0x8f, 1, 0, 0), [TRACE]), [
     "region 0 block 0-7",
     "block 0",
-    "0 Try flags 0 try 3-3 catch 3-3 finally 3-3 regions 1 -1 -1",
+    "0 Try flags 0 try 6-6 catch 6-6 finally 6-6",
+    "block 6",
     "6 Trace",
-    "region 1 try 3-3 from 0 at 0",
   ]);
 });
 

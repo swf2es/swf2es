@@ -107,24 +107,40 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   where adl gives up on the movie too: content made for the older players
   plays. Never a trap: errors are sticky flags, as in the ABC parser.
 - `flow/`: blocks and regions. A block starts at a jump's target, an
-  `If`'s, a `WaitForFrame`'s skip, and after each. A **region** is a range
-  of code Flash runs as an activation of its own: a block's whole code, a
-  DefineFunction's body, a `With`'s body, `Try`'s try, catch and finally
-  bodies. Flash runs a region until its program counter leaves its end:
-  a jump past the end, or the code running off it, leaves the region and
-  goes on after it in the enclosing one (for a function, returns), and a
-  jump back before its start stays in it (Ruffle's `run_actions` over a
-  subslice). So a region's blocks are its own, an offset reached from two
-  regions is in each (decoded once, emitted in each), and every exit of a
-  `With` or `Try` body is known while compiling. A region is the same for
-  every action that opens the same bytes as the same kind, so a body that
-  jumps back before its own opener opens itself again: regions form a
-  graph, cycles included, and the emitter writes each once, not inlined
-  into its parent. A target before the block's first byte, which Ruffle
-  reads from the tags before it, is taken as the block's exit. The constant pool is tracked along
+  `If`'s, a `WaitForFrame`'s skip, and after each. A **region** is code
+  Flash runs as an activation of its own: a block's whole code, or a
+  DefineFunction's body. Flash runs a region until its program counter
+  leaves its end: a jump past the end, or the code running off it, leaves
+  the region (for a function, returns), and a jump back before its start
+  stays in it, running the bytes there (adl runs a function's body that
+  jumps back before its `DefineFunction`, and Ruffle's `run_actions` over
+  a subslice does the same). So a region's blocks are its own, and an
+  offset reached from two regions is in each (decoded once, emitted in
+  each). A region is the same for every `DefineFunction` of the same
+  bytes, so a body that jumps back before its own `DefineFunction` defines
+  itself again: regions form a graph, cycles included, and the emitter
+  writes each once, not inlined into its parent. A target before the
+  block's first byte is taken as the block's exit; adl, as Ruffle, runs
+  the SWF's bytes before the block there, which a block compiled alone
+  does not have. The constant pool is tracked along
   the flow: where one `ConstantPool` reaches a `Push` on every path, its
   strings are literals; where none or several may, the push reads the
   activation's pool at run time.
+
+  `With` and `Try` bodies are not regions, though Ruffle runs them as
+  activations: in adl their code runs in the activation that reached
+  them, and the `With`'s scope or the `Try`'s handler holds while the
+  program counter stays in their bytes. A jump out of a body, back before
+  it or past its end, drops them and goes on at its target: a `With`'s body
+  that jumps back before the `With` finds no scope there, and opens one
+  again at the `With`; a `Try`'s body that jumps back has no handler for
+  a throw there. Code running off a try body runs the catch's bytes and
+  the finally's after them, thrown or not, which is why compilers end a
+  try body with a jump past its catch. A jump into a body from outside
+  has no scope or handler either. So for the flow a `With` branches to
+  its body and past it, a `Try` to its try body and, where a throw lands,
+  to its catch's or finally's bytes, and their bodies' bounds start
+  blocks, where the emitter drops what is no longer held.
 - `emit/`: a block as a function, the module around them.
 
 ### The dispatcher
@@ -148,16 +164,21 @@ AVM2's `s0`, come later, for regions whose depths the decoder can prove.
   actions, which the decoder turns into an offset; the branch asks the
   host whether the frame is loaded. The player has the whole SWF before it
   plays, so every frame is, but the branch stays for SWFs that test it.
-- **With**: the body is a region; its code runs with the object pushed on
-  the activation's scope chain, popped at every exit of the region. A
-  `with (undefined)` or `null` skips the body, as Ruffle does
-  (`action_with`): the action's length covers its body, so the code after
-  it goes on past it.
-- **Try**: the try, catch and finally bodies are regions in a
-  JavaScript `try`/`catch`/`finally`. `Throw` throws the runtime's
-  `Avm1Throw` with the value; a catch takes only those, sets its register
-  or variable, and runs its region; an error of the host's, a bug,
-  passes through.
+- **With**: the object goes on the activation's scope chain with the
+  body's bounds, and comes off at the first block outside them, however
+  control got there. A `with (undefined)` or `null` skips the body, in
+  adl as in Ruffle (`action_with`): the action's length covers its body,
+  so the code after it goes on past it.
+- **Try**: a handler goes on the activation with the try and catch
+  bodies' bounds, and comes off as a With's scope does; the dispatcher's
+  loop runs in a JavaScript `try`/`catch`. `Throw` throws the runtime's
+  `Avm1Throw` with the value; a throw in the try body with a catch sets
+  its register or variable and goes on at the catch's bytes. A throw in
+  the try body without a catch, or in the catch body, goes on at the
+  finally's bytes and throws again as control leaves them, even by a jump
+  (adl); without a finally it goes on to the handler outside. Leaving a
+  try or catch body by a jump runs no finally. An error of the host's, a
+  bug, passes through.
 - **Return** returns from the function's region; in a frame's block it
   ends the block. Every region ends in `return`.
 

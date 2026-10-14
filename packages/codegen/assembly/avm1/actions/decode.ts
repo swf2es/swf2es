@@ -61,10 +61,8 @@ export class Action {
   s3: i32 = 0;
   /** Whether a WaitForFrame's target is set (Actions.skip). */
   skips: bool = false;
-  /** The regions of its bodies (flow/regions.ts), -1 for none. */
-  region0: i32 = -1;
-  region1: i32 = -1;
-  region2: i32 = -1;
+  /** A DefineFunction's body's region (flow/regions.ts), -1 for none. */
+  region: i32 = -1;
 
   constructor(public offset: i32) {}
 }
@@ -190,11 +188,12 @@ export class Actions {
         if (length >= 7) {
           length += this.try(action);
         } else {
-          // Too short for its header: a Try with empty bodies.
-          action.s0 = start;
-          action.s1 = start;
-          action.s2 = start;
-          action.s3 = start;
+          // Too short for its header: a Try with empty bodies, after it.
+          const at = start + length;
+          action.s0 = at;
+          action.s1 = at;
+          action.s2 = at;
+          action.s3 = at;
         }
         break;
       case ops.OP_With: {

@@ -1,37 +1,40 @@
 // A block's regions and, in each, its blocks: what the dispatcher writes as
 // a case each (docs/avm1.md, "Compiling").
 //
-// A region is code Flash runs as an activation of its own: the block, a
-// function's body, a With's, a Try's try, catch and finally bodies. Flash
-// runs a region from its start until the program counter is at or past its
-// end: a jump past the end, or code running off it, leaves the region, and
-// a jump back before its start stays in it, running whatever bytes are
-// there. So a region's code is every action reachable from its start by
-// offsets below its end, which may include actions outside its bytes, and
-// an offset two regions reach is in both.
+// A region is code Flash runs as an activation of its own: the block, or a
+// function's body. Flash runs a region from its start until the program
+// counter is at or past its end: a jump past the end, or code running off
+// it, leaves the region, and a jump back before its start stays in it,
+// running whatever bytes are there. So a region's code is every action
+// reachable from its start by offsets below its end, which may include
+// actions outside its bytes, and an offset two regions reach is in both.
+// Regions are the same for every DefineFunction of the same bytes: a body
+// that jumps back before its DefineFunction defines itself again, so
+// regions form a graph, cycles included, which the emitter writes a region
+// at a time. A target before the block's start (a negative offset) is not
+// in the block's bytes at all; it is taken as an exit, where Flash runs
+// the SWF's bytes before the block.
 //
-// Regions are found as the actions opening them are reached, and are the
-// same for every action opening the same bytes as the same kind: a body that
-// jumps back before its opener opens itself again, so regions form a graph,
-// cycles included, which the emitter writes a region at a time. A target
-// before the block's start (a negative offset) is not in the block's bytes
-// at all; it is taken as an exit.
+// With and Try bodies are not regions: in adl, their code runs in the
+// activation that reached them, the With's scope and the Try's handlers
+// held while the program counter stays in their bytes. A jump out of a
+// body, back or forward, drops them and goes on at its target; code
+// running off a try body goes on into the catch's bytes. So With and Try
+// branch, as the emitter sees them: a With to its body and, for undefined
+// or null, past it; a Try to its try body and, as a throw lands, to its
+// catch's and finally's bytes. Their bodies' bounds start blocks, where
+// the emitter drops what is no longer held.
 
 import { Action, Actions, ERROR_None } from "../actions/decode";
 import * as ops from "../actions/opcodes";
 
 export const REGION_Block: u8 = 0;
 export const REGION_Function: u8 = 1;
-export const REGION_With: u8 = 2;
-export const REGION_Try: u8 = 3;
-export const REGION_Catch: u8 = 4;
-export const REGION_Finally: u8 = 5;
-const REGION_Kinds: i32 = 6;
 
 /**
  * How many actions all of a block's regions may hold together. Each region
- * holds what it reaches, so regions that jump back over a large block hold
- * it each; past this, the block is too large to compile.
+ * holds what it reaches, so functions that jump back over a large block
+ * hold it each; past this, the block is too large to compile.
  */
 export const MAX_VISITS: i32 = 1 << 21;
 
@@ -65,7 +68,7 @@ export class Region {
   }
 }
 
-/** Whether control goes on to the action's `next`. */
+/** Whether control goes on to the action's `fallsTo`. */
 export function fallsThrough(action: Action): bool {
   if (action.error !== ERROR_None) {
     return false;
@@ -79,6 +82,17 @@ export function fallsThrough(action: Action): bool {
       return false;
     default:
       return true;
+  }
+}
+
+/** Where control falls to from the action: a With's or Try's body, or its `next`. */
+export function fallsTo(action: Action): i32 {
+  switch (action.opcode) {
+    case ops.OP_With:
+    case ops.OP_Try:
+      return action.s0;
+    default:
+      return action.next;
   }
 }
 
@@ -105,7 +119,8 @@ export class Flow {
   /** Sticky: the regions would hold more than MAX_VISITS actions. */
   tooLarge: bool = false;
   private visits: i32 = 0;
-  private keys: StaticArray<Map<u64, i32>> = new StaticArray<Map<u64, i32>>(REGION_Kinds);
+  /** Function regions by their bodies' start and end. */
+  private functions: Map<u64, i32> = new Map<u64, i32>();
   // Per offset, the region (plus one) that last visited it, made it a block
   // start, or counted its fall-through predecessors, which `preds` holds.
   private visited: StaticArray<i32>;
@@ -120,10 +135,6 @@ export class Flow {
     this.started = new StaticArray<i32>(n);
     this.counted = new StaticArray<i32>(n);
     this.preds = new StaticArray<i32>(n);
-    for (let k = 0; k < REGION_Kinds; k++) {
-      this.keys[k] = new Map<u64, i32>();
-    }
-
     this.regions.push(new Region(REGION_Block, 0, n, -1, -1));
     // Regions found while walking are walked in turn.
     for (let r = 0; r < this.regions.length && !this.tooLarge; r++) {
@@ -158,8 +169,32 @@ export class Flow {
         continue;
       }
 
-      if (action.region0 < 0) {
-        this.opens(action, r, actions.at[p] - 1);
+      switch (action.opcode) {
+        case ops.OP_WaitForFrame:
+        case ops.OP_WaitForFrame2:
+          actions.skip(action);
+          break;
+        case ops.OP_DefineFunction:
+        case ops.OP_DefineFunction2:
+          if (action.region < 0) {
+            action.region = this.function(action, r, actions.at[p] - 1);
+          }
+          break;
+        case ops.OP_With:
+          // undefined or null skips the body.
+          this.follow(region, tag, action.next);
+          break;
+        case ops.OP_Try:
+          // Where a throw lands: the catch's bytes, else the finally's.
+          if (action.a & ops.TRY_Catch) {
+            this.follow(region, tag, action.s1);
+          }
+          if (action.a & ops.TRY_Finally) {
+            this.follow(region, tag, action.s2);
+          }
+          break;
+        default:
+          break;
       }
 
       if (branches(action)) {
@@ -167,7 +202,7 @@ export class Flow {
       }
 
       if (fallsThrough(action)) {
-        this.follow(region, tag, action.next);
+        this.follow(region, tag, fallsTo(action));
       }
     }
 
@@ -179,72 +214,62 @@ export class Flow {
     this.blocks(region, tag, offsets);
   }
 
-  /**
-   * Skips' targets and the regions an action opens, the first time a region
-   * reaches it: the same bytes open the same regions from any other.
-   */
-  private opens(action: Action, r: i32, index: i32): void {
-    switch (action.opcode) {
-      case ops.OP_WaitForFrame:
-      case ops.OP_WaitForFrame2:
-        this.actions.skip(action);
-        break;
-      case ops.OP_DefineFunction:
-      case ops.OP_DefineFunction2:
-        action.region0 = this.open(REGION_Function, action.s0, action.s1, r, index);
-        break;
-      case ops.OP_With:
-        action.region0 = this.open(REGION_With, action.s0, action.s1, r, index);
-        break;
-      case ops.OP_Try:
-        action.region0 = this.open(REGION_Try, action.s0, action.s1, r, index);
-        if (action.a & ops.TRY_Catch) {
-          action.region1 = this.open(REGION_Catch, action.s1, action.s2, r, index);
-        }
-        if (action.a & ops.TRY_Finally) {
-          action.region2 = this.open(REGION_Finally, action.s2, action.s3, r, index);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
   private follow(region: Region, tag: i32, offset: i32): void {
     if (region.runs(offset) && this.visited[offset] !== tag) {
       this.work.push(offset);
     }
   }
 
-  /** The region of `kind` over `start` to `end`, made if it is new. */
-  private open(kind: u8, start: i32, end: i32, parent: i32, opener: i32): i32 {
-    const keys = this.keys[kind];
-    const key = ((<u64>start) << 32) | <u64>end;
-    if (keys.has(key)) {
-      return keys.get(key);
+  /** The region of a function's body, made if it is new. */
+  private function(action: Action, parent: i32, opener: i32): i32 {
+    const key = ((<u64>action.s0) << 32) | <u64>action.s1;
+    const functions = this.functions;
+    if (functions.has(key)) {
+      return functions.get(key);
     }
 
     const r = this.regions.length;
-    keys.set(key, r);
-    this.regions.push(new Region(kind, start, end, parent, opener));
+    functions.set(key, r);
+    this.regions.push(new Region(REGION_Function, action.s0, action.s1, parent, opener));
     return r;
+  }
+
+  /** Makes `offset` a block start, if the region holds it. */
+  private start(region: Region, tag: i32, offset: i32): void {
+    if (region.runs(offset) && this.visited[offset] === tag) {
+      this.started[offset] = tag;
+    }
   }
 
   /**
    * A block starts at the region's start, at a branch's target, after a
-   * conditional branch, and where code from two actions falls through, as
-   * actions that overlap can; every other action follows the one before it.
+   * conditional branch, at a With's or Try's bodies' bounds, and where code
+   * from two actions falls through, as actions that overlap can; every
+   * other action follows the one before it.
    */
   private blocks(region: Region, tag: i32, offsets: i32[]): void {
     const actions = this.actions;
-    if (region.start < region.end) {
-      this.started[region.start] = tag;
-    }
-
+    this.start(region, tag, region.start);
     for (let i = 0; i < offsets.length; i++) {
       const action = actions.decode(offsets[i]);
-      if (branches(action) && region.runs(action.target)) {
-        this.started[action.target] = tag;
+      if (action.error !== ERROR_None) {
+        continue;
+      }
+
+      const opcode = action.opcode;
+      if (opcode === ops.OP_With || opcode === ops.OP_Try) {
+        this.start(region, tag, action.s0);
+        this.start(region, tag, action.s1);
+        this.start(region, tag, action.next);
+        if (opcode === ops.OP_Try) {
+          this.start(region, tag, action.s2);
+          this.start(region, tag, action.s3);
+        }
+        continue;
+      }
+
+      if (branches(action)) {
+        this.start(region, tag, action.target);
       }
 
       if (!fallsThrough(action) || !region.runs(action.next)) {
@@ -274,12 +299,12 @@ export class Flow {
       for (;;) {
         region.order.push(actions.at[p] - 1);
         const action = actions.decode(p);
-        if (!fallsThrough(action) || !region.runs(action.next)) {
+        if (!fallsThrough(action)) {
           break;
         }
 
-        p = action.next;
-        if (this.started[p] === tag) {
+        p = fallsTo(action);
+        if (!region.runs(p) || this.started[p] === tag) {
           break;
         }
       }
