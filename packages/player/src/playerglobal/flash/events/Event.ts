@@ -1,11 +1,14 @@
-// flash.events.Event: its constructor's private native ctor keeps the type
-// and flags; dispatch sets the target, current target and phase.
+// flash.events.Event's natives, which Flash Player's playerglobal has:
+// its constructor's private native ctor keeps the type and flags, and
+// dispatch sets the target, current target and phase in the fields they
+// read (scripting/events.ts's eventFields). Ours keeps them all in AS3.
 import { avm2 } from "@swf2es/runtime";
 import { AT_TARGET } from "../../../scripting/events.js";
+import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
 
-export function eventNatives(): avm2.Natives {
+export function eventNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   class EventNatives {
@@ -20,6 +23,10 @@ export function eventNatives(): avm2.Natives {
     declare $prevented: boolean;
 
     "flash.events:Event::ctor"(type: Value, bubbles: Value, cancelable: Value): void {
+      if (type == null) {
+        throw s.rt.error("TypeError", 2007, "type");
+      }
+
       this.$type = String(type);
       this.$bubbles = !!bubbles;
       this.$cancelable = !!cancelable;

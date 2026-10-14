@@ -381,7 +381,16 @@ which `newclass` builds from the module's layout:
 
 - **Slots** are fields named by slot id (`$0`, `$1`, ...), set to their
   initial values when the object is made, so an early bound slot is one
-  property access and cannot collide with any dynamic name.
+  property access and cannot collide with any dynamic name. They are set by
+  name, by a function the module has for each traits (`fill`, see below):
+  V8 makes an object a dictionary once stores by a computed key give it a
+  seventeenth property, and every access to it a lookup. The function sets
+  the slots highest first, the base's included, so a class's objects keep
+  one shape, and as each class has its own, its stores see that shape
+  alone and stay inline. It is code in the module, not made from text at
+  run time, so a page without 'unsafe-eval' runs it too. Objects of a class
+  of 24 slots were made nine times as fast so, and read four times as
+  fast; of 5 slots, made a third faster.
 - **Methods, getters and setters** are on the prototype, named by dispatch
   id, so `callmethod` is a direct call and overriding is JavaScript's own
   inheritance.
@@ -445,7 +454,14 @@ runtime, `rt`, that returns:
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
-  getters and setters by dispatch id;
+  getters and setters by dispatch id; and, for traits of up to 128 slots,
+  `fill: (o, v) => { o.$n = ...; ... o.$0 = ...; }`, which sets a new
+  object's slots, its base's too. A value is a literal where it is one
+  however the module is compiled, a type's default or a constant of the
+  module's own ABC; a namespace, or a base's constant from another ABC, it
+  takes from `v`, the runtime's initial values by slot. Traits without one,
+  a catch scope's or past 128 slots where V8 keeps no object fast, are set
+  by key;
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
 - **hash** and **linked**: the hash of its ABC and of the ABCs loaded
@@ -1184,7 +1200,14 @@ player object, `dispatchEvent` through the player's parent chain
 (`scripting/events.ts`), and the frame events the player broadcasts.
 The player makes its events of an object put on the list or taken off
 only where a listener on the object or above it would hear them: where
-none does, no script runs, and none could tell.
+none does, no script runs, and none could tell. An event keeps its
+fields in AS3, Event's and its subclasses' private variables, which
+compiled code reads as slots: dispatch writes the target, current target
+and phase into Event's and reads its flags there, by the slots
+`eventFields` finds once (under Flash Player's playerglobal, the fields
+its natives keep). An EventDispatcher made with a target dispatches as
+that target, along its parent chain, its own listeners seeing the target
+as the current one (`event-fields`).
 
 A display object nobody named is named as its AS3 object is made,
 `instance` and the next of one count for the player, which every SWF it

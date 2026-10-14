@@ -1,5 +1,6 @@
-// flash.events.GestureEvent's native fields, its subclasses' included;
-// playerglobal keeps the rest in AS3. Scripts make and dispatch gesture
+// flash.events.GestureEvent's natives, its subclasses' included: the
+// stage point, and the local point Flash Player's playerglobal keeps in
+// natives, which ours keeps in AS3 with the rest. Scripts make and dispatch gesture
 // events of their own: the player recognizes no gestures yet.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
@@ -34,12 +35,12 @@ export function gestureEventNatives(s: Scripting): avm2.Natives {
       this.$gestureY = s.rt.toNumber(value);
     }
 
-    "flash.events:GestureEvent::getStageX"(): number {
-      return stagePoint(s, this, this.$gestureX, this.$gestureY)[0];
+    "flash.events:GestureEvent::getStageX"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$gestureX, y ?? this.$gestureY)[0];
     }
 
-    "flash.events:GestureEvent::getStageY"(): number {
-      return stagePoint(s, this, this.$gestureX, this.$gestureY)[1];
+    "flash.events:GestureEvent::getStageY"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$gestureX, y ?? this.$gestureY)[1];
     }
   }
 

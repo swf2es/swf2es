@@ -34,6 +34,10 @@ export function systemNatives(s: Scripting): avm2.Natives {
       clipboard.set(TEXT, s.rt.toString(text));
     }
 
+    static get totalMemory(): number {
+      return 0;
+    }
+
     static get totalMemoryNumber(): number {
       return 0;
     }
