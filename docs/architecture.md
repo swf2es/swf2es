@@ -2693,7 +2693,15 @@ borrows the stage's fills and lines where they are still kept. A
 Graphics of a shared context (a shape's, a blend's or a glyph's fills,
 or lines) does not listen on it, as no such context changes once built:
 a listener a Graphics made each destroy search them all, so a text of n
-glyphs of one font took O(n²) to go.
+glyphs of one font took O(n²) to go. Once Pixi has built a view's fills
+or lines, their paths go altogether, the bounds measured and the vertices
+weighed first (`render/tessellate.ts`, `remakeable`): Pixi draws them from
+their tessellation, kept from its collection of what went unused for a
+minute, which would build them again from their paths, and a batched copy
+is made anew from the layer, which its shape keeps anyway. Kept, the
+flattened points were a second copy of every outline, some 8 MB in
+`bench.ts --town 200`. A glyph's fill, which every view shares, keeps
+them, for each renderer to build it.
 A line context no one holds stays idle 30
 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them and half a million of their vertices (some
@@ -2701,8 +2709,7 @@ frames, at most 4096 of them and half a million of their vertices (some
 room made were ones it had made before and dropped, an animation's
 rarer turns coming back after tens of seconds (`bench.ts --pulse 16
 --pace 150`, whose stretches come round again some 7 s apart, made 11
-contexts a frame kept 5 s and 2 kept 30). Longer would gain nothing, as
-Pixi lets an unused context's geometry go after a minute. A drawing's lines
+contexts a frame kept 5 s and 2 kept 30). A drawing's lines
 are its own, as it changes. No line is thinner than a pixel of the
 screen, which is how wide Flash draws a hairline however far its stage
 is zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
