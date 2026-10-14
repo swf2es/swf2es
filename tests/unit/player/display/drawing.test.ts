@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
-import { LINE, MOVE } from "../../../../packages/player/dist/display/shapes.js";
+import { facing, LINE, MOVE } from "../../../../packages/player/dist/display/shapes.js";
 
 const red = { type: "solid" as const, color: 0xffff0000 };
 
@@ -232,6 +232,16 @@ test("drawTriangles' triangles are a layer of fills of their own, the line aroun
   assert.deepEqual(after.fills[0].contours, [[MOVE, 0, 0, LINE, 50, 20, LINE, 50, 50]]);
   assert.deepEqual(after.strokes[0].paths, [[MOVE, 50, 20, LINE, 50, 50]]);
   assert.deepEqual(after.strokes[0].closes, [{ at: 0, x: 0, y: 0 }]);
+  // Mirrored on the screen, adl culls the other: the layers as drawn there, the rest as they were.
+  const outline = [MOVE, 0, 0, LINE, 40, 0, LINE, 0, 40, LINE, 0, 0];
+  const turned = facing(d.layers, true, d.version);
+  assert.equal(facing(d.layers, false, d.version), d.layers);
+  assert.equal(facing(d.layers, true, d.version), turned);
+  assert.equal(turned[0], before);
+  assert.equal(turned[2], after);
+  assert.deepEqual(turned[1].fills, [{ fill: red, contours: [outline], winding: "evenOdd" }]);
+  assert.deepEqual(turned[1].strokes, [{ line, paths: [outline], triangles: true }]);
+  assert.equal(turned[1].extent, triangles.extent);
 
   // A bitmap fill with u, v and t: a mesh, three vertices a triangle; a solid one draws nothing.
   const store = new BitmapStore(2, 2, true, 0xffffffff);

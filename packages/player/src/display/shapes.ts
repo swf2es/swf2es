@@ -238,6 +238,56 @@ export interface ShapeLayer {
    * were drawn: the bounds count them all, the line's width too.
    */
   extent?: [number, number, number, number, number];
+  /**
+   * What a culled drawTriangles draws where its object is mirrored on the
+   * screen or in a BitmapData's draw, as adl culls there; readGraphicsData
+   * reads the layer's own, culled in the drawing's space.
+   */
+  mirrored?: TriangleParts;
+}
+
+/** drawTriangles' fills, one a triangle, its textured triangles and the line around them. */
+export interface TriangleParts {
+  fills: ShapeLayer["fills"];
+  meshes?: TriangleMesh[];
+  stroke?: ShapeLayer["strokes"][number];
+}
+
+/** Layers as they draw mirrored, as of a version: the renderer and the hit tests ask on each redraw. */
+const mirroredLayers = new WeakMap<ShapeLayer[], { version: number; layers: ShapeLayer[] }>();
+
+/**
+ * `layers` as they draw where a transform turns them over (`mirrored`),
+ * each culled drawTriangles' the triangles it keeps there. `version` is the
+ * drawing's, whose layers change in place.
+ */
+export function facing(layers: ShapeLayer[], mirrored: boolean, version = 0): ShapeLayer[] {
+  if (!mirrored || !layers.some((layer) => layer.mirrored)) {
+    return layers;
+  }
+
+  const kept = mirroredLayers.get(layers);
+  if (kept?.version === version) {
+    return kept.layers;
+  }
+
+  const made = layers.map((layer): ShapeLayer => {
+    const parts = layer.mirrored;
+    if (!parts) {
+      return layer;
+    }
+
+    // The triangles' line is the layer's first; a line set after them goes on in it.
+    const rest = layer.strokes.filter((s) => !s.triangles);
+    return {
+      fills: parts.fills,
+      strokes: parts.stroke ? [parts.stroke, ...rest] : rest,
+      meshes: parts.meshes,
+      extent: layer.extent,
+    };
+  });
+  mirroredLayers.set(layers, { version, layers: made });
+  return made;
 }
 
 /**

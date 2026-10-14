@@ -2994,10 +2994,13 @@ its outline closed and joined, over them all. They end the open fill's
 contour, whose closing line stays, and the line's path; both go on from
 the pen, which stays where it was, in a layer after them, the contour
 still closing to where it began. `culling` drops the triangles that turn
-one way in the drawing's own space, `positive` those clockwise on the
-y-down screen, as `readGraphicsData` and the hit tests see it; adl culls
-on the screen, so a mirrored drawing drops the others there: a limit,
-noted. A bitmap fill without `uvtData` fills through its matrix, as any
+one way, `positive` those clockwise on the y-down screen: as they turn on
+the screen, or in a BitmapData's draw, for what is drawn and the hit
+tests, so a mirror drops the others (the layer's `mirrored` parts, which
+`facing` puts in its place where the object's transform turns it over);
+as they turn in the drawing's own space for `readGraphicsData`; and in a
+3D object's own space within it, as its content is drawn into its bitmap
+(the `draw-triangles-culling` case). A bitmap fill without `uvtData` fills through its matrix, as any
 fill does. With `uvtData`, two or three numbers a vertex, only a bitmap
 fill draws, the triangles textured and its matrix ignored; any other fill
 draws nothing, nor its lines, though without a fill the lines draw. The
@@ -3024,8 +3027,12 @@ not one of the three 2008, after them; null vertices draw nothing; a
 open contour went on after triangles, adl reads it back from the pen to
 where it began, and the player from where it began through the pen; and
 a filter's output or a cached bitmap over textured triangles adl keeps
-though the texture changes, which the player draws again (not checked
-for other bitmap fills).
+though the texture changes, which the player draws again; adl keeps them
+over a path's bitmap fill too, so this is any bitmap fill's limit, not
+the triangles'. adl hits a culled drawing's triangles where it last drew
+them on the screen, so a hit test asked after a flip, before the next
+frame is drawn, finds them where they were; the player's, where they
+now are.
 
 `readGraphicsData` reads a drawing back as Flash does, from the shape in
 twips rather than the commands (`display/graphicsdata.ts`): each fill as

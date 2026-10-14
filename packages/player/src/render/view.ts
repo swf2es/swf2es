@@ -42,7 +42,7 @@ import {
 import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import type { ShapeLayer, TriangleMesh } from "../display/shapes.js";
+import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
@@ -181,6 +181,8 @@ interface Node {
   art: PixiContainer;
   /** The layers drawn, a shape's or a drawing's, as of the last redraw. */
   layers: ShapeLayer[];
+  /** Whether they were drawn turned over, which decides the triangles a culled drawTriangles keeps. */
+  mirrored: boolean;
   /** Their fills, one context a layer. */
   fills: GraphicsContext[];
   /**
@@ -810,6 +812,7 @@ export class PixiView {
       node = {
         container: new PixiContainer(),
         world: [0, 0, 0, 0],
+        mirrored: false,
         stale: null,
         art,
         layers: [],
@@ -1237,7 +1240,12 @@ export class PixiView {
     }
 
     const shape = o instanceof ShapeObject ? this.shapeOf(o, node) : null;
-    node.layers = o.drawing?.layers ?? shape?.layers ?? [];
+    // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
+    const w = node.world;
+    node.mirrored = w[0] * w[3] - w[1] * w[2] < 0;
+    node.layers = o.drawing
+      ? facing(o.drawing.layers, node.mirrored, o.drawing.version)
+      : (shape?.layers ?? []);
     const slicing = this.slicing(o, node);
     if (slicing) {
       node.layers = sliceLayers(node.layers, slicing.slice, slicing.m, o.drawing?.version);
@@ -1327,7 +1335,7 @@ export class PixiView {
       this.renderer.type === RendererType.WEBGL
         ? gpuBitmaps(this.renderer).texture(mesh.image)
         : null;
-    if (texture) {
+    if (texture && mesh.positions.length) {
       node.art.addChild(new TriangleView(mesh, texture, this.flashPixel, this.meshes));
     }
   }
@@ -1873,6 +1881,13 @@ export class PixiView {
         if (kid) {
           kid.sliceKey = STALE;
         }
+      }
+    }
+
+    if (o.drawing?.culled && !(dirty & CONTENT)) {
+      const w = node.world;
+      if (w[0] * w[3] - w[1] * w[2] < 0 !== node.mirrored) {
+        dirty |= CONTENT;
       }
     }
 

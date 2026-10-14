@@ -1,0 +1,13 @@
+upright (x=0, y=0, w=50, h=50) SolidFill Path(1222|50,50,50,5,5,50,50,50) EndFill
+mirrored (x=0, y=0, w=50, h=50) 
+lines (x=-1, y=-1, w=52, h=52) SolidFill Path(1222222123332333233) EndFill
+hit upright 5 5 false
+hit upright 45 45 true
+hit mirrored 5 5 true
+hit mirrored 45 45 false
+hit under a mirror 5 5 true
+hit under a mirror 45 45 false
+hit flipped 5 5 true
+hit flipped 45 45 false
+hit unmirrored 5 5 false
+hit unmirrored 45 45 true

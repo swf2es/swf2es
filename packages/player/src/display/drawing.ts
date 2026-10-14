@@ -23,6 +23,7 @@ import {
   type Path,
   type ShapeLayer,
   type TriangleMesh,
+  type TriangleParts,
   type Winding,
 } from "./shapes.js";
 
@@ -56,6 +57,11 @@ export class Drawing {
   private pathed = false;
   /** The layer the fill and line went on in after drawTriangles, which endFill drops while empty. */
   private resumed: ShapeLayer | null = null;
+  /**
+   * Whether a drawTriangles culled: what it draws then depends on whether
+   * a transform turns the drawing over.
+   */
+  culled = false;
   private x = 0;
   private y = 0;
 
@@ -298,6 +304,8 @@ export class Drawing {
     const n = vertices.length >> 1;
     const count = indices ? Math.floor(indices.length / 3) : Math.floor(n / 3);
     const kept: number[] = [];
+    // Those culled, which a transform that turns the drawing over draws in their place.
+    const other: number[] = [];
     const e: [number, number, number, number, number] = [
       Infinity,
       Infinity,
@@ -324,8 +332,13 @@ export class Drawing {
         vertices[2 * v],
         vertices[2 * v + 1],
       ]);
-      if (cull * ((x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0)) <= 0) {
+      const turn = cull * ((x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0));
+      if (turn <= 0) {
         kept.push(a, b, c);
+      }
+
+      if (cull && turn >= 0) {
+        other.push(a, b, c);
       }
     }
 
@@ -345,46 +358,64 @@ export class Drawing {
       this.dropEmpty(this.fillLayer);
     }
 
-    const layer: ShapeLayer = { fills: [], strokes: [], extent: e };
-    this.layers.push(layer);
-
     const paint = fill?.fill;
     const image = paint?.type === "image" && paint.image instanceof BitmapStore ? paint : null;
-    const outline = (k: number): Path => {
-      const [x0, y0, x1, y1, x2, y2] = [kept[k], kept[k + 1], kept[k + 2]].flatMap((v) => [
-        vertices[2 * v],
-        vertices[2 * v + 1],
-      ]);
-      return [MOVE, x0, y0, LINE, x1, y1, LINE, x2, y2, LINE, x0, y0];
-    };
-    if (uvt && image) {
-      const mesh: TriangleMesh = {
-        image: image.image as BitmapStore,
-        repeat: image.repeat,
-        smooth: image.smooth,
-        positions: [],
-        uvt: [],
+    const parts = (list: number[]): TriangleParts => {
+      const out: TriangleParts = { fills: [] };
+      const outline = (k: number): Path => {
+        const [x0, y0, x1, y1, x2, y2] = [list[k], list[k + 1], list[k + 2]].flatMap((v) => [
+          vertices[2 * v],
+          vertices[2 * v + 1],
+        ]);
+        return [MOVE, x0, y0, LINE, x1, y1, LINE, x2, y2, LINE, x0, y0];
       };
-      for (const v of kept) {
-        mesh.positions.push(vertices[2 * v], vertices[2 * v + 1]);
-        mesh.uvt.push(uvt[3 * v], uvt[3 * v + 1], uvt[3 * v + 2]);
+      if (uvt && image) {
+        const mesh: TriangleMesh = {
+          image: image.image as BitmapStore,
+          repeat: image.repeat,
+          smooth: image.smooth,
+          positions: [],
+          uvt: [],
+        };
+        for (const v of list) {
+          mesh.positions.push(vertices[2 * v], vertices[2 * v + 1]);
+          mesh.uvt.push(uvt[3 * v], uvt[3 * v + 1], uvt[3 * v + 2]);
+        }
+
+        out.meshes = [mesh];
+      } else if (!uvt && paint) {
+        for (let k = 0; k < list.length; k += 3) {
+          out.fills.push({ fill: paint, contours: [outline(k)], winding: "evenOdd" });
+        }
       }
 
-      layer.meshes = [mesh];
-    } else if (!uvt && paint) {
-      for (let k = 0; k < kept.length; k += 3) {
-        layer.fills.push({ fill: paint, contours: [outline(k)], winding: "evenOdd" });
+      if (line && (!uvt || image || !paint) && list.length) {
+        const paths: Path[] = [];
+        for (let k = 0; k < list.length; k += 3) {
+          paths.push(outline(k));
+        }
+
+        out.stroke = { line, paths, triangles: true };
       }
+
+      return out;
+    };
+    const own = parts(kept);
+    const layer: ShapeLayer = {
+      fills: own.fills,
+      strokes: own.stroke ? [own.stroke] : [],
+      extent: e,
+    };
+    if (own.meshes) {
+      layer.meshes = own.meshes;
     }
 
-    if (line && (!uvt || image || !paint) && kept.length) {
-      const paths: Path[] = [];
-      for (let k = 0; k < kept.length; k += 3) {
-        paths.push(outline(k));
-      }
-
-      layer.strokes.push({ line, paths, triangles: true });
+    if (cull) {
+      layer.mirrored = parts(other);
+      this.culled = true;
     }
+
+    this.layers.push(layer);
 
     if (!fill && !line) {
       return;
@@ -423,6 +454,7 @@ export class Drawing {
     this.closing = null;
     this.pathed = false;
     this.resumed = null;
+    this.culled = false;
     this.x = 0;
     this.y = 0;
   }
@@ -446,8 +478,12 @@ export class Drawing {
         // A mesh's arrays never change once drawn.
         meshes: layer.meshes?.slice(),
         extent: layer.extent,
+        // Never changed once drawn.
+        mirrored: layer.mirrored,
       });
     }
+
+    this.culled = other.culled;
 
     this.version++;
   }

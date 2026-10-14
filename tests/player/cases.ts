@@ -5313,6 +5313,18 @@ export const cases: PlayerCase[] = [
     maxOutliers: 760,
   },
   {
+    name: "draw-triangles-culling",
+    swf: (abc) => bare(abc, 3, "DrawTrianglesCulling", 400, 220),
+    script: "DrawTrianglesCulling",
+    frames: 3,
+    capture: [1, 2],
+    // Edges alone: a 45° edge through pixels' corners, where adl counts the samples on it and
+    // the page does not (any fill's, as the draw-triangles case's), the 3D turn's, the glow's
+    // and the lines' ends.
+    tolerance: 32,
+    maxOutliers: 440,
+  },
+  {
     name: "read-graphics-data",
     swf: (abc) => bare(abc, 1, "ReadGraphicsData"),
     script: "ReadGraphicsData",
