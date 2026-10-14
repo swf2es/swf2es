@@ -4951,6 +4951,14 @@ is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
 `pnpm test:checked` the same in the build that checks every array access,
 which catches a read past a table's end the release build lets through.
 
+`tests/fuzz/avm1.ts` does the same for AVM1's decoder and flow
+(`codegen/assembly/avm1/`): action blocks generated from the actions'
+grammar, nested bodies and branches among them, and shapes at the edges
+(bodies that jump back before their own start, long `WaitForFrame` chains,
+deep nesting), mutated a few bytes at a time or cut short. A block must
+decode without a trap, no region may hold an action in two of its blocks,
+and a block must decode the same again after others.
+
 `tests/fuzz/domains.ts` gives two instances the same ABCs, child domains
 and findings in a seeded random order, and lets one of them also drop,
 evict, revive and rebuild domains; every module, entry, method compiled
