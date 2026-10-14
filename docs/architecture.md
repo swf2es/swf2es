@@ -1739,7 +1739,8 @@ AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
 DoAction, DoInitAction, clip and button actions read past; its buttons
 show their up state and are inert, with no other state, sound or hand
 cursor; and `AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
-while interop is unavailable. Its timeline sounds do not play either:
+while interop is unavailable (AVM1's plan, compiled by codegen with no
+interpreter, is [avm1.md](avm1.md)). Its timeline sounds do not play either:
 with no action to `stop()` it, its timeline loops where the content would
 have stopped, and its StartSounds would start again on every loop; they
 wait for AVM1 actions (see Timeline sounds).
