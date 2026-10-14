@@ -2,6 +2,7 @@
 // list, while Pixi only supplies the pointer's position and buttons.
 import type { Matrix } from "@swf2es/format";
 import {
+  hidden3D,
   hitsOwnLocal,
   hitsOwnPoint,
   hitsPoint,
@@ -20,7 +21,14 @@ import {
   StaticTextObject,
   TextObject,
 } from "../display/display.js";
-import { apply, concat, invert, type Rect } from "../display/geometry.js";
+import {
+  apply,
+  concat,
+  invert,
+  isProjective,
+  type Projective,
+  type Rect,
+} from "../display/geometry.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { maxScrollV } from "../text/layout.js";
@@ -135,6 +143,10 @@ export function pointerTarget(
       return false;
     }
 
+    if (d.space && hidden3D(d)) {
+      return false;
+    }
+
     const lx = at.x;
     const ly = at.y;
     if (missesShape(d, lx, ly)) {
@@ -158,7 +170,7 @@ export function pointerTarget(
       return null;
     }
 
-    if (d !== stage && !toLocal(d, px, py)) {
+    if (d !== stage && (!toLocal(d, px, py) || (d.space && hidden3D(d)))) {
       return null;
     }
 
@@ -249,6 +261,10 @@ const at = { x: 0, y: 0 };
 /** (x, y) of `d`'s parent's space in `d`'s own, put in `at`: false where its matrix flattens the plane. */
 function toLocal(d: DisplayObject, x: number, y: number): boolean {
   const m = d.placed;
+  if (isProjective(m)) {
+    return toPlane(m, x, y);
+  }
+
   const det = m.a * m.d - m.b * m.c;
   if (det === 0) {
     return false;
@@ -258,6 +274,24 @@ function toLocal(d: DisplayObject, x: number, y: number): boolean {
   const dy = y - m.ty;
   at.x = (m.d * dx - m.c * dy) / det;
   at.y = (m.a * dy - m.b * dx) / det;
+  return true;
+}
+
+/** toLocal through a 3D object's plane in perspective: false where the point is behind the eye. */
+function toPlane(m: Projective, x: number, y: number): boolean {
+  const inverse = invert(m) as Projective | null;
+  if (!inverse) {
+    return false;
+  }
+
+  // The plane's w at the point found is 1 / q: behind the eye where it is not positive.
+  const q = inverse.u * x + inverse.v * y + inverse.w;
+  if (!(q > 0)) {
+    return false;
+  }
+
+  at.x = (inverse.a * x + inverse.c * y + inverse.tx) / q;
+  at.y = (inverse.b * x + inverse.d * y + inverse.ty) / q;
   return true;
 }
 
@@ -348,7 +382,8 @@ function pickBounds(d: DisplayObject): Rect | null {
           extend(box, r, child.placed);
         }
 
-        stale ||= child.pickStale;
+        // A 3D child's plane moves with what is above this, which marks nothing here stale.
+        stale ||= child.pickStale || child.space !== null;
       }
     }
 
@@ -393,8 +428,10 @@ function extend(box: Float64Array, r: Rect | null, m: Matrix | null, scale = 1):
   for (let i = 0; i < 4; i++) {
     const px = (i & 1 ? r.xMax : r.xMin) * scale;
     const py = (i & 2 ? r.yMax : r.yMin) * scale;
-    const x = m ? m.a * px + m.c * py + m.tx : px;
-    const y = m ? m.b * px + m.d * py + m.ty : py;
+    // Through a 3D object's plane; a corner behind the eye makes the box NaN, which rules nothing out.
+    const q = m && isProjective(m) ? m.u * px + m.v * py + m.w : 1;
+    const x = (m ? m.a * px + m.c * py + m.tx : px) / (q > 0 ? q : Number.NaN);
+    const y = (m ? m.b * px + m.d * py + m.ty : py) / (q > 0 ? q : Number.NaN);
     box[0] = Math.min(box[0], x);
     box[1] = Math.min(box[1], y);
     box[2] = Math.max(box[2], x);

@@ -667,10 +667,11 @@ export function playLosingContext(
   swf: Uint8Array,
   frames: number,
   table: boolean,
+  turned = false,
 ): Promise<string | null> {
   return withPage("contextLossSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${table})`,
+      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${table}, ${turned})`,
     );
     return exception ?? value ?? null;
   });

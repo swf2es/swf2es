@@ -15,9 +15,11 @@ import {
 } from "./display.js";
 import {
   apply,
+  behindEye,
   concat,
   contains,
   invert,
+  isProjective,
   overlaps,
   type Rect,
   transformRect,
@@ -98,7 +100,8 @@ export function bounds(d: DisplayObject, lines: boolean): Rect | null {
   if (d instanceof Container) {
     for (const child of d.children) {
       const b = bounds(child, lines);
-      if (b) {
+      // A 3D child with a corner behind the eye is not drawn, and counts for nothing.
+      if (b && !(child.space && behindEye(b, child.placed))) {
         r = union(r, transformRect(b, child.placed));
       }
     }
@@ -138,7 +141,18 @@ export function hitsPoint(
   shape: boolean,
   root: DisplayObject | null,
 ): boolean {
-  const toLocal = invert(toStage(d, root));
+  const up = toStage(d, root);
+  if (isProjective(up) && inHidden3D(d)) {
+    return false;
+  }
+
+  // In 3D, the bounds are the box around what is drawn on the stage, as Flash tests them.
+  if (!shape && isProjective(up)) {
+    const r = bounds(d, true);
+    return r !== null && !behindEye(r, up) && contains(transformRect(r, up), x, y);
+  }
+
+  const toLocal = invert(up);
   if (!toLocal) {
     return false;
   }
@@ -274,8 +288,13 @@ export interface Probe {
   root: DisplayObject | null;
 }
 
-/** Whether the probe is on `mask`'s fills, where it is: its lines clip nothing. */
+/** Whether the probe is on `mask`'s fills, where it is: its lines clip nothing; a 3D mask's, all of it. */
 function inMask(mask: DisplayObject, probe: Probe): boolean {
+  // A 3D mask clips nothing, as Flash draws it.
+  if (mask.space) {
+    return true;
+  }
+
   const toLocal = invert(toStage(mask, probe.root));
   if (!toLocal) {
     return false;
@@ -382,6 +401,7 @@ function drawnAt(
       const toChild = invert(child.placed);
       if (
         toChild &&
+        !(child.space && hidden3D(child)) &&
         child.clipDepth === 0 &&
         child.maskOf === null &&
         drawnAt(child, ...apply(toChild, x, y), probe, mask)
@@ -392,6 +412,23 @@ function drawnAt(
   }
 
   return false;
+}
+
+/** Whether `d` or a 3D object above it has a corner behind the eye, so that none of `d` is drawn. */
+function inHidden3D(d: DisplayObject): boolean {
+  for (let p: DisplayObject | null = d; p; p = p.parent) {
+    if (p.space && hidden3D(p)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Whether a 3D object has a corner behind the eye, which Flash draws none of, and hits none of. */
+export function hidden3D(d: DisplayObject): boolean {
+  const r = bounds(d, true);
+  return r !== null && behindEye(r, d.placed);
 }
 
 /** A path as hit tests read it: its polygon, the polygon's orientation, and the box around it. */

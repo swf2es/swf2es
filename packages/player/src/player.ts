@@ -16,6 +16,7 @@ import {
   unloads,
   walkList,
 } from "./display/display.js";
+import { setStageSize } from "./display/perspective.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { KeyboardInput } from "./input/keyboard.js";
 import { PointerInput } from "./input/pointer.js";
@@ -81,6 +82,7 @@ export class Player {
     this.library = readLibrary(this.swf);
     this.width = Math.round((this.swf.frameSize.xMax - this.swf.frameSize.xMin) / 20);
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
+    setStageSize(this.stage, this.width, this.height);
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
     this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;

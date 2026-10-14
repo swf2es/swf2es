@@ -6020,8 +6020,9 @@ export const cases: PlayerCase[] = [
     script: "FlipZeroScale",
     frames: 1,
     capture: [1],
-    tolerance: 0,
-    // Flash smooths the edges of the two boxes it draws as 3D objects, a pixel round each.
+    // The two boxes it draws as 3D objects, both drawn from a bitmap, smoothed: their edges'
+    // levels differ by a little (render/three.ts).
+    tolerance: 24,
     maxOutliers: 250,
   },
   {
@@ -6032,6 +6033,72 @@ export const cases: PlayerCase[] = [
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  // Drawn in perspective from a bitmap of each 3D object (render/three.ts). The stages are 500
+  // wide: adl draws with the focal length of a stage that wide, whatever the SWF's, where Flash
+  // Player draws with its stage's, as its bounds and local3DToGlobal are in both.
+  {
+    name: "three-d-flip",
+    swf: (abc) => bare(abc, 7, "ThreeDFlip", 500, 200),
+    script: "ThreeDFlip",
+    frames: 7,
+    capture: [1, 2, 3, 4, 5, 6, 7],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-scene",
+    swf: (abc) => bare(abc, 2, "ThreeDScene", 500, 400),
+    script: "ThreeDScene",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-nested-turn",
+    swf: (abc) => bare(abc, 4, "ThreeDNestedTurn", 500, 300),
+    script: "ThreeDNestedTurn",
+    frames: 4,
+    capture: [1, 4],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-behind-hit",
+    swf: (abc) => bare(abc, 2, "ThreeDBehindHit", 500, 400),
+    script: "ThreeDBehindHit",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-blend-turn",
+    swf: (abc) => bare(abc, 3, "ThreeDBlendTurn", 500, 200),
+    script: "ThreeDBlendTurn",
+    frames: 3,
+    capture: [1, 3],
+    tolerance: 40,
+    maxOutliers: 400,
+  },
+  {
+    name: "three-d-mixed",
+    swf: (abc) => bare(abc, 1, "ThreeDMixed", 500, 400),
+    script: "ThreeDMixed",
+    frames: 1,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 400,
+  },
+  {
+    name: "three-d-projection",
+    swf: (abc) => bare(abc, 2, "ThreeDProjection", 500, 400),
+    script: "ThreeDProjection",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 200,
   },
   {
     name: "point-at",

@@ -1,10 +1,10 @@
 // flash.geom.PerspectiveProjection: a field of view and a centre, of its
 // own or, got from a Transform, of its display object, which it then
 // reads and writes. The stage and each SWF's root always have one, back to
-// their defaults when set to null. The player stores it; it draws without
-// perspective.
+// their defaults when set to null. What is in a display object with one
+// is drawn through it (display/perspective.ts).
 import { avm2 } from "@swf2es/runtime";
-import type { DisplayObject, Projection } from "../../../display/display.js";
+import { type DisplayObject, type Projection, TRANSFORM } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -137,6 +137,7 @@ export function perspectiveProjectionNatives(s: Scripting): avm2.Natives {
   /** A change to a display object's projection, made from its current one. */
   const update = (d: DisplayObject, change: Partial<Projection>): void => {
     d.projection = { ...projectionOf(s, d), ...change };
+    d.invalidate(TRANSFORM);
   };
 
   avm2.registerNativeClass(

@@ -27,6 +27,7 @@ import { type Filter, filterOfSwf } from "./filters.js";
 import { type Rect, shifted } from "./geometry.js";
 import { compose3D, decompose3D, identity3D } from "./matrix3d.js";
 import { morphAt } from "./morph.js";
+import { placedInPerspective } from "./perspective.js";
 import {
   type BitmapCharacter,
   type ButtonCharacter,
@@ -177,9 +178,15 @@ export interface Space {
   composed: boolean;
   /** The 2D scales, rotation and skew from before it went 3D, which matrix3D set to null gives back. */
   flat: readonly number[];
+  /** Its plane in perspective in its parent's (`placed`), and the changes (pickWork) it was made at. */
+  plane?: Matrix | null;
+  planeAt?: number;
 }
 
-export type SpaceProperty = Exclude<keyof Space, "raw" | "singular" | "composed" | "flat">;
+export type SpaceProperty = Exclude<
+  keyof Space,
+  "raw" | "singular" | "composed" | "flat" | "plane" | "planeAt"
+>;
 
 /**
  * The least a 3D scale goes to, as Flash's: a smaller one, 0 or NaN is
@@ -328,7 +335,16 @@ export class DisplayObject {
    * when it next draws.
    */
   scrollRect: Rect | null = null;
-  scroll: Rect | null = null;
+  private scrollTaken: Rect | null = null;
+
+  /** The scroll a 3D object has none of: Flash draws, bounds and hits all of it whatever its scrollRect. */
+  get scroll(): Rect | null {
+    return this.space ? null : this.scrollTaken;
+  }
+
+  set scroll(r: Rect | null) {
+    this.scrollTaken = r;
+  }
   /**
    * Its 9-slice grid, in its own space, in pixels (display/scale9.ts): its
    * symbol's DefineScalingGrid's, or what a script set; null for none.
@@ -341,8 +357,8 @@ export class DisplayObject {
   /**
    * Its 3D transform, from when a script first sets a 3D property, its
    * matrix3D, or its 2D matrix to null, until it sets matrix3D to null: in
-   * place of the 2D matrix to a script, and drawn as the matrix3D's x and
-   * y rows, without perspective, which the player does not draw.
+   * place of the 2D matrix to a script, and drawn, bounded and hit in
+   * perspective (`placed`).
    */
   space: Space | null = null;
   /** The perspective projection a script set on its transform, or null. */
@@ -383,8 +399,31 @@ export class DisplayObject {
     }
   }
 
-  /** Its matrix after its scroll's shift: from what it draws to its parent's space. */
+  /**
+   * Its matrix after its scroll's shift: from what it draws to its parent's
+   * space. A 3D object's is its plane in perspective (display/perspective.ts),
+   * kept until anything is invalidated, as an ancestor's move changes it.
+   */
   get placed(): Matrix {
+    if (this.space) {
+      return this.perspective();
+    }
+
+    return this.scroll ? shifted(this.matrix, this.scroll) : this.matrix;
+  }
+
+  private perspective(): Matrix {
+    const space = this.space as Space;
+    if (space.planeAt !== pickWork.changes || !space.plane) {
+      space.plane = placedInPerspective(this);
+      space.planeAt = pickWork.changes;
+    }
+
+    return space.plane;
+  }
+
+  /** Its 2D matrix after its scroll's shift, a 3D object's its matrix3D's x and y rows: what a mask draws by. */
+  get flatPlaced(): Matrix {
     return this.scroll ? shifted(this.matrix, this.scroll) : this.matrix;
   }
 
@@ -642,7 +681,7 @@ export class DisplayObject {
     this.flatten();
   }
 
-  /** The 2D fields from the 3D transform: the matrix its x and y rows, which is how it draws and hits. */
+  /** The 2D fields from the 3D transform: the matrix its x and y rows, which a mask draws by (`flatPlaced`). */
   private flatten(): void {
     const space = this.space as Space;
     const m = space.raw;
