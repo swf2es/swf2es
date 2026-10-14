@@ -2603,6 +2603,12 @@ Flash without a GPU gives, so content can fall back to the display list.
 at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
 which bounds, scales and hits as Flash's and shows nothing: no stream or
 camera plays in it, and a timeline's DefineVideoStream is not read yet.
+Camera and Microphone are Flash's on a machine with neither (the
+`camera-microphone` case): supported, but `names` empty and no camera or
+microphone to get; one made with `new` reads as zeros and nulls whatever
+is set, its copies and setters throwing only TypeError 2007 for a null.
+Once `getEnhancedMicrophone` is called, whatever it gives, every
+Microphone shares one MicrophoneEnhancedOptions, copied in and out.
 NetConnection has its local mode, `connect(null)`, with Flash's status
 events and its properties, ArgumentError 2126 for those of a connection
 it does not have; an HTTP URI is kept, and a `call` over it, Flash
