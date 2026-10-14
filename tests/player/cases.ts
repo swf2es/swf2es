@@ -5569,6 +5569,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 52,
   },
   {
+    name: "filtered-colors",
+    swf: (abc) => bare(abc, 1, "FilteredColors", 320, 240),
+    script: "FilteredColors",
+    frames: 2,
+    capture: [1, 2],
+    // Within 5 a channel but for some 170: the corners of a glow under an alpha offset, as in
+    // blend-filtered-alpha, up to 49 off; a glow's edge along a mask's, 35; a bitmap's, 10.
+    tolerance: 5,
+    maxOutliers: 170,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",
