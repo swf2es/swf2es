@@ -55,9 +55,13 @@ SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/player
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
                               # heap after a full collection must stay bounded, and codegen's
                               # memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT: the
-                              # player's modules for the SWF, their logs and a manifest (libraries
-                              # from tests/player/out/libraries/ by default)
+node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT:
+                              # the player's modules for the SWF, their logs and a manifest (libraries
+                              # from tests/player/out/libraries/ by default; `compile` may be left out)
+node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
+                              # ABCs after builtin and shell_toplevel (oracle/avmplus/generated/ by
+                              # default), their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js help [command]   # the commands, or one's options
 node tests/player/module-cache.ts   # the IndexedDB module cache in Chrome (part of pnpm test)
 node tests/player/precompiled.ts    # AOT modules played in Chrome, imported under a policy
                               # without 'unsafe-eval' too (part of pnpm test)
@@ -103,8 +107,8 @@ calling a change done; CI runs the same steps.
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
 - **Package boundaries.** `format` depends on nothing, `codegen` and
-  `runtime` on `format`, `cli` on `format` and `codegen`, `player` on `format`,
-  `codegen` and `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
+  `runtime` on `format`, `cli` and `player` on `format`, `codegen` and
+  `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
   `player` and `player-hosts`. `codegen` never imports the runtime implementation.
   `format`, `codegen` and `runtime` load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.

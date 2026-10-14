@@ -14,7 +14,7 @@ const allowed: Record<string, string[]> = {
   player: ["codegen", "format", "runtime"],
   "player-hosts": ["player"],
   web: ["codegen", "format", "player", "player-hosts"],
-  cli: ["codegen", "format"],
+  cli: ["codegen", "format", "runtime"],
 };
 
 // Third-party packages swf2es forks are submodules in vendor/, built as

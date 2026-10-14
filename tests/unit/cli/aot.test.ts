@@ -165,7 +165,7 @@ test("the command's modules are the player's for as3pb's ABC", { skip }, async (
 
 test("the command explains what it cannot do", () => {
   mkdirSync(out, { recursive: true });
-  const none = swf2es();
+  const none = swf2es("compile");
   assert.equal(none.status, 2);
   assert.match(none.stderr, /expected one input file/);
 
@@ -214,7 +214,7 @@ test("the command explains what it cannot do", () => {
   const bad = write("bad.abc", new Uint8Array([16, 0, 46, 0, 255]));
   const rejected = swf2es(write("ok.abc", abc), "--lib", bad);
   assert.equal(rejected.status, 1);
-  assert.match(rejected.stderr, /^swf2es: library bad was rejected: VerifyError #\d+/);
+  assert.match(rejected.stderr, /^swf2es: error: library bad was rejected: VerifyError #\d+/);
 
   // An output that cannot be written is an error, not a stack.
   refused(write("ok2.abc", abc), /cannot write .*lib\.abc: (EEXIST|ENOTDIR)/, "-o", lib);

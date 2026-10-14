@@ -50,6 +50,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
+      '@swf2es/runtime':
+        specifier: workspace:*
+        version: link:../runtime
 
   packages/codegen:
     dependencies:
