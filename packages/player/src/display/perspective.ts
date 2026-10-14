@@ -21,11 +21,16 @@ export function setStageSize(stage: DisplayObject, width: number, height: number
 /**
  * A BitmapData's draw of what is on no stage, `top` the topmost of it: as
  * in Flash, what is in 3D in it projects as on a stage the bitmap's size,
- * centred on it, for the draw. Returns how to put it back.
+ * centred on it, for the draw. Returns how to put it back, or null where it
+ * is on a stage already.
  */
-export function drawnAsStage(top: DisplayObject, width: number, height: number): () => void {
+export function drawnAsStage(
+  top: DisplayObject,
+  width: number,
+  height: number,
+): (() => void) | null {
   if (top.parent || top.loaderInfo || stageSizes.has(top)) {
-    return () => {};
+    return null;
   }
 
   stageSizes.set(top, { width, height });

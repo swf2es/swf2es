@@ -124,13 +124,6 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
   return storeOf(s, v as AsObject);
 }
 
-/**
- * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
- * composited on the CPU (bitmap/ops.ts drawBitmap); any other display
- * object rendered by the Scripting's drawer at `samples` a side, over its
- * own bounds alone, then composited the same way. A null source is
- * ArgumentError 2005, as Flash words it.
- */
 /** `d` drawn into `store` through `m`, as drawInto draws a display object. */
 function drawObject(
   s: Scripting,
@@ -175,6 +168,13 @@ function drawObject(
   drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
 }
 
+/**
+ * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
+ * composited on the CPU (bitmap/ops.ts drawBitmap); any other display
+ * object rendered by the Scripting's drawer at `samples` a side, over its
+ * own bounds alone, then composited the same way. A null source is
+ * ArgumentError 2005, as Flash words it.
+ */
 function drawInto(
   s: Scripting,
   store: BitmapStore,
@@ -217,7 +217,13 @@ function drawInto(
     }
 
     const restore = drawnAsStage(top, store.width, store.height);
-    // Planes in perspective made before are made again, for that stage and after it.
+    if (!restore) {
+      drawObject(s, store, o.$display, m, c, blend, r, samples);
+      return;
+    }
+
+    // Planes in perspective made before are made again, for that stage and after it; only then,
+    // as each change picks the pointer's hover again and remakes every plane.
     pickWork.changes++;
     try {
       drawObject(s, store, o.$display, m, c, blend, r, samples);
