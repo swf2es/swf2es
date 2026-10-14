@@ -5556,6 +5556,19 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-filtered-alpha",
+    swf: (abc) => bare(abc, 1, "BlendFilteredAlpha", 320, 200),
+    script: "BlendFilteredAlpha",
+    frames: 2,
+    capture: [1, 2],
+    // Within 5 a channel: adl's rounding of the glows and of the blends, and a drop shadow's edge
+    // a pixel wide. But for the corners of the glow under an alpha offset, some 30 channels up to
+    // 10 off: each of the test page's samples there with any alpha takes the offset, where adl's
+    // pixel has none; and a few of the shadow's corners.
+    tolerance: 5,
+    maxOutliers: 52,
+  },
+  {
     name: "blend-edges",
     swf: (abc) => bare(abc, 1, "BlendEdges", 200, 150),
     script: "BlendEdges",

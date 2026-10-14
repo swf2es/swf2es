@@ -3786,6 +3786,18 @@ vertex colour there too. A gradient there is
 transformed pixel by pixel, which clamps after the ramp where Flash clamps
 its stops, so the two part only where a transformed stop is clamped.
 
+A filtered object is the exception: adl colours the bitmap its filters
+make, the glow and the shadow too, not what they are run on. Its
+colour transform from the stage down, or from the filtered object it is
+in, is applied by its chain's last pass to the straight colour of each
+pixel the filters made, a clear one staying clear, and what is in it is
+drawn as though nothing above it, itself included, were coloured: the
+fork's `Container.colorRoot` keeps Pixi's tint and alpha, the render
+group's included, from reaching it. A glowing object faded to an alpha of
+0.6 had its glow drawn from its faded shape, 65 off, and offsets left the
+glow as it was, 139 off (`blend-filtered-alpha`). A colour that changes
+draws the output it kept again in the new colour, with no filter run.
+
 ### Blend modes
 
 adl composites an object with a blend mode as a layer, its children
@@ -4067,8 +4079,8 @@ were stepped beside its unfiltered neighbours' smooth ones, for some
 As Flash caches a filtered object as a bitmap, an object's filters run
 as one chain (`FilterChain`) whose output is kept and drawn again until
 what it was run on changes: the object or anything below it, its
-transform other than a move, the colour and alpha it is drawn in, or how
-much of it the screen shows. Filters set again with the values they had,
+transform other than a move, or how much of it the screen shows (its
+colour colours the output as it is drawn). Filters set again with the values they had,
 as a tween writes them on each frame or a script sets them from their
 own, keep the chain and its output; a displacement's map is the same only
 as the same object, which setting it again takes anew. A wide blur's

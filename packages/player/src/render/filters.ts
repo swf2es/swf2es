@@ -9,6 +9,8 @@
 // sums its taps' straight colour over the object's pixels and one more
 // right and down, as BitmapData.applyFilter does. WebGL
 // alone: each pass is a filter of its own.
+
+import type { ColorTransform } from "@swf2es/format";
 import {
   type BLEND_MODES,
   type Bounds,
@@ -1069,11 +1071,23 @@ function insetFilters(filters: readonly Filter[]): void {
   }
 }
 
+// The chain's output, as its object's colour transform colours it where it has one: each pixel's
+// straight colour multiplied and offset, clamped; a clear pixel stays clear, as a bitmap's does.
 const COPY = `in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
+uniform float uColored;
+uniform vec4 uMul;
+uniform vec4 uAdd;
 void main(void) {
-  finalColor = texture(uTexture, vTextureCoord);
+  vec4 c = texture(uTexture, vTextureCoord);
+  if (uColored > 0.5) {
+    if (c.a > 0.0) {
+      vec4 t = clamp(vec4(c.rgb / c.a, c.a) * uMul + uAdd, 0.0, 1.0);
+      c = vec4(t.rgb * t.a, t.a);
+    }
+  }
+  finalColor = c;
 }`;
 
 /** A chain's object's area on the stage, and its transform on the stage then. */
@@ -1120,8 +1134,8 @@ function sameInput(a: Input, b: Input): boolean {
  * A display object's filters as one, their output kept and drawn again
  * while nothing they were run on changed, as Flash caches a filtered
  * object as a bitmap: the object, all below it, its transform but for a
- * move, the colour and alpha it is drawn in, and how much of it the
- * screen shows. The owner calls `changed()` for what Pixi cannot see.
+ * move, and how much of it the screen shows; its colour is the output's
+ * (recolor). The owner calls `changed()` for what Pixi cannot see.
  * One changing frame after frame is filtered straight to the target,
  * with no copy kept; so is one that `keeps` not, drawn once.
  */
@@ -1183,7 +1197,13 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   ) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
-      resources: {},
+      resources: {
+        colorUniforms: {
+          uColored: { value: 0, type: "f32" },
+          uMul: { value: new Float32Array([1, 1, 1, 1]), type: "vec4<f32>" },
+          uAdd: { value: new Float32Array(4), type: "vec4<f32>" },
+        },
+      },
     });
     this.rescale(units);
     this.resolution = "inherit";
@@ -1329,6 +1349,42 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     this.blendMode = mode;
   }
 
+  /** Whether its output is drawn coloured (recolor), which takes a pass of its own. */
+  private colored = false;
+
+  /**
+   * Its output drawn in `color`, its object's colour transform from the stage down (or from the
+   * filtered object it is in), as Flash colours a filtered object's bitmap: the glow and the
+   * shadow too, and not what they are run on. What it kept stands.
+   */
+  recolor(color: ColorTransform | null): void {
+    const u = this.resources.colorUniforms.uniforms;
+    // A placement's transform that changes nothing takes no pass: most filtered objects have one.
+    this.colored =
+      color !== null &&
+      !(
+        color.rMul === 1 &&
+        color.gMul === 1 &&
+        color.bMul === 1 &&
+        color.aMul === 1 &&
+        color.rAdd === 0 &&
+        color.gAdd === 0 &&
+        color.bAdd === 0 &&
+        color.aAdd === 0
+      );
+    u.uColored = this.colored ? 1 : 0;
+    if (color && this.colored) {
+      u.uMul[0] = color.rMul;
+      u.uMul[1] = color.gMul;
+      u.uMul[2] = color.bMul;
+      u.uMul[3] = color.aMul;
+      u.uAdd[0] = color.rAdd / 255;
+      u.uAdd[1] = color.gAdd / 255;
+      u.uAdd[2] = color.bAdd / 255;
+      u.uAdd[3] = color.aAdd / 255;
+    }
+  }
+
   /** The output kept let go of, as its object leaves the display list. */
   forget(): void {
     this.release();
@@ -1379,9 +1435,9 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   }
 
   /**
-   * Run into `output`; blended over it, into a texture of the pool first,
-   * which its own pass then blends: the filters' last passes draw as each
-   * of them blends, not as the chain does.
+   * Run into `output`; blended over it or coloured, into a texture of the
+   * pool first, which its own pass then blends and colours: the filters'
+   * last passes draw as each of them blends, not as the chain does.
    */
   private runOver(
     system: FilterSystem,
@@ -1389,7 +1445,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     output: RenderSurface,
     clear: boolean,
   ): void {
-    if (this.blendMode === "normal") {
+    if (this.blendMode === "normal" && !this.colored) {
       this.run(system, input, output, clear);
       return;
     }
