@@ -68,6 +68,7 @@ function stub(conditions: boolean[] = []) {
     notYet: (name: string) => {
       throw new Error(`not yet supported: ${name}`);
     },
+    halt: () => calls.push(["halt"]),
     tooLarge: () => {
       throw new Error("too large");
     },
@@ -319,7 +320,7 @@ test("every other action throws that it is not yet supported", async () => {
   assert.equal(ret.error, "not yet supported: Return");
 });
 
-test("an action Flash does not know is skipped, and one cut short ends the block", async () => {
+test("an action Flash does not know is skipped, and one cut short stops the SWF", async () => {
   const unknown = asm().push("a").action(0x01).action(0xa0, [1, 2]).trace().bytes();
   assert.deepEqual((await run([unknown])).calls, [["trace", "a"]]);
 
@@ -327,7 +328,15 @@ test("an action Flash does not know is skipped, and one cut short ends the block
   const cut = asm().push("a").trace().raw([0x96, 5, 0, 7, 1]).bytes();
   const { calls, error } = await run([cut]);
   assert.equal(error, null);
-  assert.deepEqual(calls, [["trace", "a"]]);
+  assert.deepEqual(calls, [["trace", "a"], ["halt"]]);
+});
+
+test("a Push of a value type Flash does not know stops the SWF, pushing nothing", async () => {
+  const block = asm().push("a").raw([0x96, 3, 0, 2, 10, 3]).trace().bytes();
+  const { calls, error, module } = await run([block]);
+  assert.equal(error, null);
+  assert.deepEqual(calls, [["halt"]]);
+  assert.ok(!module.includes("null"), module);
 });
 
 test("strings read as UTF-8 from SWF 6, as Windows-1252 before", async () => {

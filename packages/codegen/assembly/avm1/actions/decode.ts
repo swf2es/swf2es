@@ -6,8 +6,8 @@
 // 2018-2022 Ruffle LLC and Ruffle contributors. From it: an action's operands
 // are read from wherever they lie and the next action is where its length
 // says, whatever the operands took; a nested body's size adds to that
-// length; a Push skips a value type it does not know; a Try shorter than its
-// header is empty; and a ConstantPool keeps the strings it could read.
+// length; a Try shorter than its header is empty; and a ConstantPool keeps
+// the strings it could read.
 import * as ops from "./opcodes";
 
 /** The action decoded as Flash reads it. */
@@ -18,6 +18,11 @@ export const ERROR_None: u8 = 0;
  * further at an operand past it; the block ends there.
  */
 export const ERROR_Truncated: u8 = 1;
+/**
+ * A Push of a value type Flash does not know. Flash Player 9 and Ruffle
+ * skip the value; adl, as later players, stops the whole SWF there.
+ */
+export const ERROR_PushType: u8 = 2;
 
 /**
  * One action at an offset of the block. Its operands, by opcode:
@@ -369,9 +374,8 @@ export class Actions {
           index = this.u16();
           break;
         default:
-          // Flash Player 9 skips a type it does not know, and so does Ruffle;
-          // adl stops the SWF.
-          continue;
+          action.error = ERROR_PushType;
+          return;
       }
 
       if (this.failed) {

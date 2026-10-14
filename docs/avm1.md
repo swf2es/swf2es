@@ -105,11 +105,14 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   start, following jumps, and decodes each offset once, so a jump into the
   middle of an action, as obfuscators write, decodes from there as Flash
   reads it. An unknown opcode is skipped, as adl does. An operand or a
-  length past the block's end ends the block: adl stops the whole SWF at
-  such a length, as at a clip action past its tag, even with the SWF's
-  next tag behind it. A `Push` value type it does not know is skipped, as
-  Flash Player 9 and Ruffle do, where adl stops the SWF too: content made
-  for the older players plays. Never a trap: errors are sticky flags, as in the ABC parser.
+  length past the block's end, and a `Push` of a value type Flash does not
+  know, stop the whole SWF there, as adl does, as at a clip action past
+  its tag, even with the SWF's next tag behind it: the emitter writes
+  `V.halt(cx)`, which the player is to take as it takes `corrupt`. Flash
+  Player 9 and Ruffle skip the unknown value type instead; adl decides.
+  The one place swf2es knowingly parts from adl is a jump before the
+  block's first byte (below). Never a trap: errors are sticky flags, as
+  in the ABC parser.
 - `flow/`: blocks and regions. A block starts at a jump's target, an
   `If`'s, a `WaitForFrame`'s skip, and after each. A **region** is code
   Flash runs as an activation of its own: a block's whole code, or a
@@ -241,7 +244,7 @@ Step 3 writes `Push` of constants, `ConstantPool`, `Trace`, `Pop`,
 `Jump`, `If`, `Play`, `Stop` and `End`. Every other action Flash knows,
 and a `Push` of a register, is `V.notYet("<name>")`, which throws, so
 the steps after fill them in one at a time; an unknown opcode is
-skipped. A block the flow finds too large is `V.tooLarge()`.
+skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
 
 ### Version-dependent semantics
 

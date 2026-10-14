@@ -9,7 +9,8 @@
 // The actions written so far: Push of constants, ConstantPool, Trace, Pop,
 // Jump, If, Play, Stop and End. Every other action Flash knows is a call
 // that throws, V.notYet, and one it does not know is skipped, as Flash
-// skips it.
+// skips it. An action Flash cannot read, cut short or a Push of a value
+// type it does not know, stops the SWF, V.halt, as adl does.
 
 import { Output } from "../../output";
 import { Action, Actions, ERROR_None } from "../actions/decode";
@@ -109,7 +110,8 @@ export class BlockEmitter {
   private action(actions: Actions, region: Region, action: Action, pool: i32): void {
     const out = this.out;
     if (action.error !== ERROR_None) {
-      // Flash stops the block at an action it cannot read; the block's end returns.
+      // adl stops the whole SWF at an action it cannot read; the block's end returns.
+      out.text("V.halt(cx);\n");
       return;
     }
 
