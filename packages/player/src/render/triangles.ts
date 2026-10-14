@@ -97,6 +97,22 @@ void main(void) {
 `;
 
 let program: GlProgram | null = null;
+let ascending = new Uint32Array(0);
+
+/**
+ * Indices 0 to `count` in order, the vertices drawn as they are: views of
+ * one array, which only ever grows, as no buffer writes to its data.
+ */
+function inOrder(count: number): Uint32Array {
+  if (ascending.length < count) {
+    ascending = new Uint32Array(Math.max(count, ascending.length * 2));
+    for (let i = 0; i < ascending.length; i++) {
+      ascending[i] = i;
+    }
+  }
+
+  return ascending.subarray(0, count);
+}
 
 /**
  * A drawing's textured triangles: a mesh of their vertices under its own
@@ -112,17 +128,11 @@ export class TriangleView extends Mesh<MeshGeometry, Shader> {
   private flash: ColorTransform | null;
 
   constructor(source: TriangleMesh, texture: Texture, pixel: number, owner: Set<TriangleView>) {
-    const count = source.positions.length / 2;
-    const indices = count > 65535 ? new Uint32Array(count) : new Uint16Array(count);
-    for (let i = 0; i < count; i++) {
-      indices[i] = i;
-    }
-
     const geometry = new MeshGeometry({
-      positions: new Float32Array(source.positions),
-      indices: indices as Uint32Array,
+      positions: source.positions,
+      indices: inOrder(source.positions.length / 2),
     });
-    geometry.addAttribute("aUVT", { buffer: new Float32Array(source.uvt), format: "float32x3" });
+    geometry.addAttribute("aUVT", { buffer: source.uvt, format: "float32x3" });
     program ??= new GlProgram({ vertex, fragment, name: "flash-triangles" });
     const uniforms = new UniformGroup({
       uSize: { value: new Float32Array([1, 1]), type: "vec2<f32>" },

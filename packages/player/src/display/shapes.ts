@@ -299,8 +299,8 @@ export interface TriangleMesh {
   image: BitmapStore;
   repeat: boolean;
   smooth: boolean;
-  positions: number[];
-  uvt: number[];
+  positions: Float32Array;
+  uvt: Float32Array;
 }
 
 /**

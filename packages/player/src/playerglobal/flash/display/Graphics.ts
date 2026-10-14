@@ -383,11 +383,16 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const numbers = (v: Value) => ((v as AsObject).$a as Value[]).map((x) => Number(x));
+      const numbers = (v: Value) => ((v as AsObject).$a as Value[]).map(Number);
+      const coordinates = numbers(vertices);
       // Flash keeps a point in twips as an int: NaN, or one past an int's range, is its least.
-      const coordinates = numbers(vertices).map((x) =>
-        x * TWIPS >= -2147483648 && x * TWIPS <= 2147483647 ? x : -2147483648 / TWIPS,
-      );
+      for (let i = 0; i < coordinates.length; i++) {
+        const x = coordinates[i] * TWIPS;
+        if (!(x >= -2147483648 && x <= 2147483647)) {
+          coordinates[i] = -2147483648 / TWIPS;
+        }
+      }
+
       const n = coordinates.length / 2;
       const order = indices === null || indices === undefined ? null : numbers(indices);
       const uvt = uvtData === null || uvtData === undefined ? null : numbers(uvtData);
@@ -408,12 +413,16 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       }
 
       // Three a vertex, t 1 where Flash was given none.
-      const each = uvt && n > 0 && uvt.length === n * 3 ? 3 : 2;
-      const full =
-        uvt &&
-        Array.from({ length: n * 3 }, (_, i) =>
-          i % 3 === 2 && each === 2 ? 1 : uvt[Math.floor(i / 3) * each + (i % 3)],
-        );
+      let full = uvt;
+      if (uvt && uvt.length !== n * 3) {
+        full = new Array<number>(n * 3);
+        for (let v = 0; v < n; v++) {
+          full[3 * v] = uvt[2 * v];
+          full[3 * v + 1] = uvt[2 * v + 1];
+          full[3 * v + 2] = 1;
+        }
+      }
+
       drawing(this).drawTriangles(coordinates, order, full, cull);
     }
 

@@ -261,8 +261,8 @@ test("drawTriangles' triangles are a layer of fills of their own, the line aroun
       image: store,
       repeat: true,
       smooth: false,
-      positions: [0, 0, 10, 0, 0, 10],
-      uvt: [0, 0, 1, 1, 0, 0.5, 0, 1, 1],
+      positions: new Float32Array([0, 0, 10, 0, 0, 10]),
+      uvt: new Float32Array([0, 0, 1, 1, 0, 0.5, 0, 1, 1]),
     },
   ]);
   const s = new Drawing();

@@ -440,7 +440,7 @@ function turnedOver(d: DisplayObject): boolean {
 }
 
 /** Whether (x, y) is in any of the triangles, three points of `positions` each. */
-function inMesh(positions: number[], x: number, y: number): boolean {
+function inMesh(positions: Float32Array, x: number, y: number): boolean {
   const triangle = [0, 0, 0, 0, 0, 0];
   for (let i = 0; i < positions.length; i += 6) {
     for (let k = 0; k < 6; k++) {

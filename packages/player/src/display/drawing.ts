@@ -22,7 +22,6 @@ import {
   type Paint,
   type Path,
   type ShapeLayer,
-  type TriangleMesh,
   type TriangleParts,
   type Winding,
 } from "./shapes.js";
@@ -313,6 +312,7 @@ export class Drawing {
       -Infinity,
       this.stroke ? Math.max(this.stroke.line.width / TWIPS, 1) / 2 : 0,
     ];
+    // Scalars, no arrays a triangle: a 3D engine draws thousands of them anew every frame.
     for (let k = 0; k < count * 3; k += 3) {
       const a = indices ? indices[k] : k;
       const b = indices ? indices[k + 1] : k + 1;
@@ -321,17 +321,16 @@ export class Drawing {
         break;
       }
 
-      for (const v of [a, b, c]) {
-        e[0] = Math.min(e[0], vertices[2 * v]);
-        e[1] = Math.min(e[1], vertices[2 * v + 1]);
-        e[2] = Math.max(e[2], vertices[2 * v]);
-        e[3] = Math.max(e[3], vertices[2 * v + 1]);
-      }
-
-      const [x0, y0, x1, y1, x2, y2] = [a, b, c].flatMap((v) => [
-        vertices[2 * v],
-        vertices[2 * v + 1],
-      ]);
+      const x0 = vertices[2 * a];
+      const y0 = vertices[2 * a + 1];
+      const x1 = vertices[2 * b];
+      const y1 = vertices[2 * b + 1];
+      const x2 = vertices[2 * c];
+      const y2 = vertices[2 * c + 1];
+      e[0] = Math.min(e[0], x0, x1, x2);
+      e[1] = Math.min(e[1], y0, y1, y2);
+      e[2] = Math.max(e[2], x0, x1, x2);
+      e[3] = Math.max(e[3], y0, y1, y2);
       const turn = cull * ((x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0));
       if (turn <= 0) {
         kept.push(a, b, c);
@@ -360,39 +359,60 @@ export class Drawing {
 
     const paint = fill?.fill;
     const image = paint?.type === "image" && paint.image instanceof BitmapStore ? paint : null;
+    const outline = (list: number[], k: number): Path => {
+      const a = 2 * list[k];
+      const b = 2 * list[k + 1];
+      const c = 2 * list[k + 2];
+      const x0 = vertices[a];
+      const y0 = vertices[a + 1];
+      return [
+        MOVE,
+        x0,
+        y0,
+        LINE,
+        vertices[b],
+        vertices[b + 1],
+        LINE,
+        vertices[c],
+        vertices[c + 1],
+        LINE,
+        x0,
+        y0,
+      ];
+    };
     const parts = (list: number[]): TriangleParts => {
       const out: TriangleParts = { fills: [] };
-      const outline = (k: number): Path => {
-        const [x0, y0, x1, y1, x2, y2] = [list[k], list[k + 1], list[k + 2]].flatMap((v) => [
-          vertices[2 * v],
-          vertices[2 * v + 1],
-        ]);
-        return [MOVE, x0, y0, LINE, x1, y1, LINE, x2, y2, LINE, x0, y0];
-      };
       if (uvt && image) {
-        const mesh: TriangleMesh = {
-          image: image.image as BitmapStore,
-          repeat: image.repeat,
-          smooth: image.smooth,
-          positions: [],
-          uvt: [],
-        };
-        for (const v of list) {
-          mesh.positions.push(vertices[2 * v], vertices[2 * v + 1]);
-          mesh.uvt.push(uvt[3 * v], uvt[3 * v + 1], uvt[3 * v + 2]);
+        const positions = new Float32Array(list.length * 2);
+        const coordinates = new Float32Array(list.length * 3);
+        for (let i = 0; i < list.length; i++) {
+          const v = list[i];
+          positions[2 * i] = vertices[2 * v];
+          positions[2 * i + 1] = vertices[2 * v + 1];
+          coordinates[3 * i] = uvt[3 * v];
+          coordinates[3 * i + 1] = uvt[3 * v + 1];
+          coordinates[3 * i + 2] = uvt[3 * v + 2];
         }
 
-        out.meshes = [mesh];
+        out.meshes = [
+          {
+            image: image.image as BitmapStore,
+            repeat: image.repeat,
+            smooth: image.smooth,
+            positions,
+            uvt: coordinates,
+          },
+        ];
       } else if (!uvt && paint) {
         for (let k = 0; k < list.length; k += 3) {
-          out.fills.push({ fill: paint, contours: [outline(k)], winding: "evenOdd" });
+          out.fills.push({ fill: paint, contours: [outline(list, k)], winding: "evenOdd" });
         }
       }
 
       if (line && (!uvt || image || !paint) && list.length) {
         const paths: Path[] = [];
         for (let k = 0; k < list.length; k += 3) {
-          paths.push(outline(k));
+          paths.push(outline(list, k));
         }
 
         out.stroke = { line, paths, triangles: true };
