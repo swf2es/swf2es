@@ -1,19 +1,19 @@
-// An AVM1 string as a JavaScript string literal of what Flash reads from its
-// bytes, as Ruffle (https://github.com/ruffle-rs/ruffle) reads them:
-// SwfStr::to_str_lossy with SwfStr::encoding_for_version, UTF-8 from SWF 6
-// and Windows-1252 before, decoded as the WHATWG Encoding Standard does,
-// each maximal ill-formed run of UTF-8 a U+FFFD. Ruffle is MIT OR
-// Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
+// An AVM1 string as a JavaScript string literal of what adl reads from its
+// bytes. Up to SWF 5 a string is its bytes, each the character of its value:
+// length and charCodeAt count bytes, 0x80 is U+0080. From SWF 6 it is UTF-8,
+// read leniently: a lead byte takes as many bytes after it as its high bits
+// say, continuation bytes or not, and the code point is their sum less the
+// lead's offset, as Unicode's old ConvertUTF.c computes it. A byte that leads
+// nothing (0x80 to 0xbf) is the character of its value; a surrogate's code
+// point, or one past U+10FFFF, is a U+FFFD; and a code point of 0, or a
+// sequence the string's end cuts short, ends the string there.
+// tests/unit/codegen/avm1-emit.test.ts holds the cases adl was asked.
 import { Output, wellFormed } from "../../output";
 
-/** Windows-1252's characters for the bytes 0x80 to 0x9f; the rest are Latin-1's. */
-const WINDOWS_1252: StaticArray<u16> = [
-  0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152,
-  0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122,
-  0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
-];
+/** What ConvertUTF.c subtracts from the sum of a sequence of 1 to 6 bytes. */
+const OFFSETS: StaticArray<u32> = [0, 0x3080, 0xe2080, 0x3c82080, 0xfa082080, 0x82082080];
 
-/** The string of `length` bytes at `ptr`, read as UTF-8 if `utf8`, else as Windows-1252. */
+/** The string of `length` bytes at `ptr`, read as UTF-8 if `utf8`, else a character a byte. */
 export function avm1String(out: Output, ptr: usize, length: u32, utf8: bool): void {
   out.reserve(length + 2);
   out.byte(0x22);
@@ -36,72 +36,53 @@ export function avm1String(out: Output, ptr: usize, length: u32, utf8: bool): vo
     }
 
     if (!utf8) {
-      out.unit(b < 0xa0 ? <u32>WINDOWS_1252[b - 0x80] : <u32>b);
+      out.unit(b);
       i++;
       continue;
     }
 
+    // Well-formed UTF-8 reads as adl reads it, and is copied.
     const n = wellFormed(ptr + i, length - i);
-    if (n === 0) {
-      out.unit(0xfffd);
-      i += illFormed(ptr + i, length - i);
-    } else if (
-      b === 0xe2 &&
-      load<u8>(ptr + i + 1) === 0x80 &&
-      (load<u8>(ptr + i + 2) & 0xfe) === 0xa8
-    ) {
-      // U+2028 and U+2029 end a line in older engines.
-      out.text(load<u8>(ptr + i + 2) === 0xa8 ? "\\u2028" : "\\u2029");
-      i += 3;
-    } else {
-      for (let k: u32 = 0; k < n; k++) {
-        out.byte(load<u8>(ptr + i + k));
+    if (n !== 0) {
+      if (b === 0xe2 && load<u8>(ptr + i + 1) === 0x80 && (load<u8>(ptr + i + 2) & 0xfe) === 0xa8) {
+        // U+2028 and U+2029 end a line in older engines.
+        out.text(load<u8>(ptr + i + 2) === 0xa8 ? "\\u2028" : "\\u2029");
+      } else {
+        for (let k: u32 = 0; k < n; k++) {
+          out.byte(load<u8>(ptr + i + k));
+        }
       }
 
       i += n;
+      continue;
+    }
+
+    const more: u32 = b < 0xc0 ? 0 : b < 0xe0 ? 1 : b < 0xf0 ? 2 : b < 0xf8 ? 3 : b < 0xfc ? 4 : 5;
+    if (more >= length - i) {
+      break;
+    }
+
+    let c: u32 = 0;
+    for (let k: u32 = 0; k <= more; k++) {
+      c = (c << 6) + <u32>load<u8>(ptr + i + k);
+    }
+
+    c -= OFFSETS[more];
+    i += more + 1;
+    if (c === 0) {
+      break;
+    }
+
+    // Escaped, since what it reads as may be a quote or a line's end.
+    if (c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) {
+      out.unit(0xfffd);
+    } else if (c > 0xffff) {
+      out.unit(0xd800 + ((c - 0x10000) >> 10));
+      out.unit(0xdc00 + ((c - 0x10000) & 0x3ff));
+    } else {
+      out.unit(c);
     }
   }
 
   out.byte(0x22);
-}
-
-/**
- * How many bytes from `ptr`, which start no well-formed sequence, one
- * U+FFFD replaces: the lead and the continuation bytes that could still have
- * followed it, at least one.
- */
-function illFormed(ptr: usize, left: u32): u32 {
-  const c = load<u8>(ptr);
-  let n: u32 = 0;
-  let lo: u8 = 0x80;
-  let hi: u8 = 0xbf;
-  if (c >= 0xc2 && c <= 0xdf) {
-    n = 2;
-  } else if (c >= 0xe0 && c <= 0xef) {
-    n = 3;
-    lo = c === 0xe0 ? 0xa0 : 0x80;
-    hi = c === 0xed ? 0x9f : 0xbf;
-  } else if (c >= 0xf0 && c <= 0xf4) {
-    n = 4;
-    lo = c === 0xf0 ? 0x90 : 0x80;
-    hi = c === 0xf4 ? 0x8f : 0xbf;
-  } else {
-    return 1;
-  }
-
-  let k: u32 = 1;
-  if (k < left) {
-    const second = load<u8>(ptr + k);
-    if (second < lo || second > hi) {
-      return 1;
-    }
-
-    k++;
-  }
-
-  while (k < n && k < left && (load<u8>(ptr + k) & 0xc0) === 0x80) {
-    k++;
-  }
-
-  return k;
 }

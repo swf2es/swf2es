@@ -21,7 +21,7 @@ import { avm1String } from "./strings";
 
 @final
 export class BlockEmitter {
-  /** The SWF's version, which decides how its strings read. */
+  /** The SWF's version, which decides how its strings read (strings.ts). */
   version: i32 = 0;
 
   constructor(public out: Output) {}

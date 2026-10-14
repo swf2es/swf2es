@@ -339,18 +339,183 @@ test("a Push of a value type Flash does not know stops the SWF, pushing nothing"
   assert.ok(!module.includes("null"), module);
 });
 
-test("strings read as UTF-8 from SWF 6, as Windows-1252 before", async () => {
-  // "é", 0x80, an ill-formed run, a quote, a backslash, a line separator, a control character.
-  const bytes = [0xc3, 0xa9, 0x80, 0xe2, 0x82, 0x22, 0x5c, 0xe2, 0x80, 0xa8, 0x01];
-  const block = new Uint8Array([0x96, ...[bytes.length + 2, 0], 0, ...bytes, 0, 0x26]);
-  const six = await run([block], { version: 6 });
-  assert.deepEqual(six.calls, [["trace", 'é\ufffd\ufffd"\\\u2028\u0001']]);
+/**
+ * What adl reads from a string's bytes from SWF 6 (strings.ts), as char
+ * codes: the reference the emitter's strings are held to.
+ */
+function adlString(bytes: number[]): string {
+  const offsets = [0, 0x3080, 0xe2080, 0x3c82080, 0xfa082080, 0x82082080];
+  const units: number[] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i];
+    const more = b < 0xc0 ? 0 : b < 0xe0 ? 1 : b < 0xf0 ? 2 : b < 0xf8 ? 3 : b < 0xfc ? 4 : 5;
+    if (i + more >= bytes.length) {
+      break;
+    }
+
+    let c = 0;
+    for (let k = 0; k <= more; k++) {
+      c = ((c << 6) + bytes[i + k]) >>> 0;
+    }
+
+    c = (c - offsets[more]) >>> 0;
+    i += more + 1;
+    if (c === 0) {
+      break;
+    }
+
+    if (c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) {
+      units.push(0xfffd);
+    } else if (c > 0xffff) {
+      units.push(0xd800 + ((c - 0x10000) >> 10), 0xdc00 + ((c - 0x10000) & 0x3ff));
+    } else {
+      units.push(c);
+    }
+  }
+
+  return String.fromCharCode(...units);
+}
+
+/** A Push of each string, as its bytes, and a Trace of each. */
+function tracing(strings: number[][]): Uint8Array {
+  const code: number[] = [];
+  for (const bytes of strings) {
+    code.push(0x96, (bytes.length + 2) & 0xff, (bytes.length + 2) >> 8, 0, ...bytes, 0, 0x26);
+  }
+
+  return new Uint8Array(code);
+}
+
+test("strings read as adl reads them: UTF-8 from SWF 6, a character a byte before", async () => {
+  // adl's char codes for these bytes, at SWF 6, 8 and 10 alike.
+  const cases: [number[], number[]][] = [
+    [[0xc3, 0xa9], [0xe9]],
+    [[0xe2, 0x82, 0xac], [0x20ac]],
+    [[0xc2, 0x80], [0x80]],
+    [
+      [0xe2, 0x80, 0xa8, 0x22, 0x5c],
+      [0x2028, 0x22, 0x5c],
+    ],
+    [[0xef, 0xbf, 0xbf], [0xffff]],
+    [
+      [0xf4, 0x8f, 0xbf, 0xbf],
+      [0xdbff, 0xdfff],
+    ],
+    // A byte that leads nothing is its own character.
+    [
+      [0x41, 0xbf, 0x41],
+      [0x41, 0xbf, 0x41],
+    ],
+    [
+      [0x80, 0x81, 0x9f, 0xe9, 0x41],
+      [0x80, 0x81, 0x9f],
+    ],
+    // A lead takes the bytes after it, whatever they are, and overlong forms read.
+    [
+      [0xc3, 0xc3, 0x41],
+      [0x103, 0x41],
+    ],
+    [[0xc2, 0x41], [0x41]],
+    [
+      [0xe2, 0x41, 0x41, 0x42],
+      [0x1001, 0x42],
+    ],
+    [
+      [0xe2, 0x82, 0x41, 0x42],
+      [0x2041, 0x42],
+    ],
+    [
+      [0xf0, 0x9f, 0x98, 0x41],
+      [0xd83d, 0xddc1],
+    ],
+    [[0xc1, 0x81], [0x41]],
+    [[0xe0, 0x81, 0x81], [0x41]],
+    [[0xc1, 0xbf], [0x7f]],
+    [[0xe0, 0x9f, 0xbf], [0x7ff]],
+    [[0xf0, 0x8f, 0xbf, 0xbf], [0xffff]],
+    // A surrogate, a code point past U+10FFFF or below 0 is U+FFFD.
+    [[0xed, 0xbf, 0xbf], [0xfffd]],
+    [
+      [0xed, 0xa0, 0xbd, 0xed, 0xb8, 0x80],
+      [0xfffd, 0xfffd],
+    ],
+    [[0xf5, 0x80, 0x80, 0x80], [0xfffd]],
+    [[0xf7, 0xbf, 0xbf, 0xbf], [0xfffd]],
+    [
+      [0xf8, 0x88, 0x80, 0x80, 0x80, 0x41],
+      [0xfffd, 0x41],
+    ],
+    [
+      [0xfc, 0x84, 0x80, 0x80, 0x80, 0x80, 0x41],
+      [0xfffd, 0x41],
+    ],
+    [[0xc0, 0x41], [0xfffd]],
+    // A sequence cut short by the end, or a code point of 0, ends the string.
+    [[0x61, 0xe2, 0x82], [0x61]],
+    [[0x41, 0xc3], [0x41]],
+    [[0xfe, 0x41], []],
+    [[0xff, 0x41], []],
+    [[0xc0, 0x80, 0x41], []],
+    [[0xe0, 0x80, 0x80, 0x41], []],
+    [[0xf0, 0x80, 0x80, 0x80, 0x41], []],
+  ];
+  const block = tracing(cases.map(([bytes]) => bytes));
+  for (const version of [6, 10]) {
+    const { calls } = await run([block], { version });
+    assert.deepEqual(
+      calls.map((c) => c[1]),
+      cases.map(([, codes]) => String.fromCharCode(...codes)),
+    );
+  }
+
+  for (const [bytes, codes] of cases) {
+    assert.equal(adlString(bytes), String.fromCharCode(...codes), String(bytes));
+  }
+
+  // Up to SWF 5, each byte is its own character, as adl's charCodeAt and length count them.
   const five = await run([block], { version: 5 });
-  assert.deepEqual(five.calls, [
-    ["trace", '\u00c3\u00a9\u20ac\u00e2\u201a"\\\u00e2\u20ac\u00a8\u0001'],
-  ]);
-  // The module is UTF-8 that decodes as it was written.
-  assert.ok(!six.module.includes("\u2028"));
+  assert.deepEqual(
+    five.calls.map((c) => c[1]),
+    cases.map(([bytes]) => String.fromCharCode(...bytes)),
+  );
+});
+
+test("a string's literal is what it reads as, whatever its bytes", async () => {
+  // Bytes that read as quotes, backslashes and line ends, overlong or not, among others.
+  const random = (() => {
+    let s = 1;
+    return () => {
+      s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+      return (s >>> 8) / 0x1000000;
+    };
+  })();
+  const special = [0x22, 0x5c, 0x0a, 0x0d, 0x24, 0x60, 0xc0, 0xc1, 0xe0, 0x80, 0x88, 0x9c, 0xa2];
+  const byte = () => {
+    const r = random();
+    if (r < 0.4) {
+      return special[Math.floor(random() * special.length)];
+    }
+
+    return r < 0.7 ? 0x80 + Math.floor(random() * 0x80) : 1 + Math.floor(random() * 0xff);
+  };
+  const strings = Array.from({ length: 1000 }, () =>
+    Array.from({ length: 1 + Math.floor(random() * 6) }, byte),
+  );
+  const block = tracing(strings);
+  const six = await run([block], { version: 6 });
+  assert.deepEqual(
+    six.calls.map((c) => c[1]),
+    strings.map(adlString),
+  );
+  const five = await run([block], { version: 5 });
+  assert.deepEqual(
+    five.calls.map((c) => c[1]),
+    strings.map((bytes) => String.fromCharCode(...bytes)),
+  );
+
+  // The module is UTF-8 that decodes as it was written, with no line separator in a literal.
+  assert.ok(!six.module.includes(" ") && !six.module.includes(" "));
 });
 
 test("a function's body is an entry of its own, not inlined; a With's body is the block's", async () => {

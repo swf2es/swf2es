@@ -157,8 +157,14 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   the block's own code first, then the bodies of the functions it
   defines, in the order the flow finds them; the module around them
   (`module.ts`); strings as JavaScript literals (`strings.ts`), read as
-  Ruffle reads them, UTF-8 from SWF 6 and Windows-1252 before, an
-  ill-formed run of UTF-8 a U+FFFD.
+  adl reads them. Up to SWF 5 a string is its bytes, each the character of
+  its value (0x80 is U+0080, not Windows-1252's euro, which Ruffle reads).
+  From SWF 6 it is UTF-8 read leniently, as Unicode's old `ConvertUTF.c`
+  sums a sequence: a lead byte takes the bytes its high bits ask for,
+  continuation bytes or not, so overlong forms read and `C3 41` is
+  U+0081; a byte that leads nothing is its own character; a surrogate or
+  a code point past U+10FFFF is U+FFFD; and a code point of 0, or a
+  sequence the string's end cuts short, ends the string there.
 
 ### The dispatcher
 
