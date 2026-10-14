@@ -3,7 +3,7 @@
 // AS3 object; or to one object's own, as a broadcast reaches it. The
 // player's input and frame events and playerglobal's dispatchEvent all
 // go through it.
-import type { avm2 } from "@swf2es/runtime";
+import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -19,20 +19,66 @@ export interface Listener {
   priority: number;
 }
 
+/**
+ * Where an event keeps what dispatch reads and writes, by field: the slots
+ * of playerglobal's AS3 fields (as3/playerglobal/src/flash/events/Event.as),
+ * which compiled code reads directly, or under Flash Player's playerglobal
+ * the fields its natives keep (playerglobal/flash/events/Event.ts).
+ */
+export interface EventFields {
+  type: string;
+  bubbles: string;
+  target: string;
+  currentTarget: string;
+  phase: string;
+  /** 0 propagating, 1 stopped after the current object, 2 stopped at once. */
+  stopped: string;
+  prevented: string;
+}
+
+/** The fields of `s`'s events, found once playerglobal is loaded. */
+export function eventFields(s: Scripting): EventFields {
+  if (s.eventFields) {
+    return s.eventFields;
+  }
+
+  const cls = s.rt.classNamed("flash.events::Event");
+  const field = (as3: string, native: string) => avm2.instanceVarField(cls, as3) ?? native;
+  s.eventFields = {
+    type: field("_type", "$type"),
+    bubbles: field("_bubbles", "$bubbles"),
+    target: field("_target", "$target"),
+    currentTarget: field("_currentTarget", "$currentTarget"),
+    phase: field("_eventPhase", "$phase"),
+    stopped: field("_stopped", "$stopped"),
+    prevented: field("_prevented", "$prevented"),
+  };
+  return s.eventFields;
+}
+
 /** The display object `o` is the face of, if it is one. */
 export const displayOf = (o: AsObject) => o.$display ?? null;
 
 // A listener's error is reported as uncaught, and the listeners after it
 // still run: it never reaches the dispatcher, a script's dispatchEvent
 // included, which returns as if none had thrown (as in Flash and Ruffle).
-function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void {
-  const list = o.$listeners?.get(event.$type) as Listener[] | undefined;
+// `current` is `o` but where `o` stands in for another dispatcher, which
+// its listeners see as the current target, as in Flash.
+function invoke(
+  s: Scripting,
+  f: EventFields,
+  o: AsObject,
+  event: AsObject,
+  phase: number,
+  current: AsObject = o,
+): void {
+  const list = o.$listeners?.get(event[f.type]) as Listener[] | undefined;
   if (!list) {
     return;
   }
 
-  event.$currentTarget = o;
-  event.$phase = phase;
+  event[f.currentTarget] = current;
+  event[f.phase] = phase;
   // A copy: a listener may add or remove listeners. Not of one alone, read before it is called,
   // which nothing it does could add to or take from what this dispatch calls: each frame's
   // events reach thousands of objects so.
@@ -50,7 +96,7 @@ function invoke(s: Scripting, o: AsObject, event: AsObject, phase: number): void
       s.reportUncaught(error);
     }
 
-    if (event.$stopped === 2) {
+    if (event[f.stopped] === 2) {
       return;
     }
   }
@@ -78,38 +124,46 @@ export function heard(target: AsObject, type: string): boolean {
 
 /** Dispatch `event` to `target`'s own listeners only, as a broadcast reaches each object: no capture, no bubble. */
 export function dispatchTo(s: Scripting, target: AsObject, event: AsObject): void {
-  event.$target = target.$target ?? target;
-  invoke(s, target, event, AT_TARGET);
+  const f = eventFields(s);
+  event[f.target] = target.$target ?? target;
+  invoke(s, f, target, event, AT_TARGET);
 }
 
-/** Dispatch `event` from `target`, as EventDispatcher.dispatchEvent does; whether no listener prevented its default. */
+/**
+ * Dispatch `event` from `target`, as EventDispatcher.dispatchEvent does; whether no listener
+ * prevented its default. A dispatcher that stands in for another, an
+ * EventDispatcher made with a target, dispatches as that one, along its
+ * parent chain, with its own listeners at the target.
+ */
 export function dispatchEvent(s: Scripting, target: AsObject, event: AsObject): boolean {
-  event.$target = target.$target ?? target;
+  const f = eventFields(s);
+  const owner: AsObject = target.$target ?? target;
+  event[f.target] = owner;
   // The ancestors of a display object, nearest first.
   const ancestors: AsObject[] = [];
-  for (let d = displayOf(target)?.parent; d; d = d.parent) {
+  for (let d = displayOf(owner)?.parent; d; d = d.parent) {
     if (d.object) {
       ancestors.push(d.object);
     }
   }
 
-  for (let i = ancestors.length - 1; i >= 0 && event.$stopped === 0; i--) {
-    invoke(s, ancestors[i], event, CAPTURING_PHASE);
+  for (let i = ancestors.length - 1; i >= 0 && event[f.stopped] === 0; i--) {
+    invoke(s, f, ancestors[i], event, CAPTURING_PHASE);
   }
 
-  if (event.$stopped === 0) {
-    invoke(s, target, event, AT_TARGET);
+  if (event[f.stopped] === 0) {
+    invoke(s, f, target, event, AT_TARGET, owner);
   }
 
-  if (event.$bubbles) {
+  if (event[f.bubbles]) {
     for (const a of ancestors) {
-      if (event.$stopped !== 0) {
+      if (event[f.stopped] !== 0) {
         break;
       }
 
-      invoke(s, a, event, BUBBLING_PHASE);
+      invoke(s, f, a, event, BUBBLING_PHASE);
     }
   }
 
-  return !event.$prevented;
+  return !event[f.prevented];
 }

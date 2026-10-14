@@ -7,6 +7,8 @@ package flash.events
 	public class GestureEvent extends Event
 	{
 		private var _phase:String;
+		private var _localX:Number;
+		private var _localY:Number;
 		private var _ctrlKey:Boolean;
 		private var _altKey:Boolean;
 		private var _shiftKey:Boolean;
@@ -38,13 +40,25 @@ package flash.events
 			return formatToString("GestureEvent", "type", "bubbles", "cancelable", "phase", "localX", "localY", "stageX", "stageY", "ctrlKey", "altKey", "shiftKey", "commandKey", "controlKey");
 		}
 
-		public native function get localX():Number;
+		public function get localX():Number
+		{
+			return _localX;
+		}
 
-		public native function set localX(value:Number):void;
+		public function set localX(value:Number):void
+		{
+			_localX = value;
+		}
 
-		public native function get localY():Number;
+		public function get localY():Number
+		{
+			return _localY;
+		}
 
-		public native function set localY(value:Number):void;
+		public function set localY(value:Number):void
+		{
+			_localY = value;
+		}
 
 		public function get phase():String
 		{
@@ -88,12 +102,12 @@ package flash.events
 
 		public function get stageX():Number
 		{
-			return getStageX();
+			return getStageX(_localX, _localY);
 		}
 
 		public function get stageY():Number
 		{
-			return getStageY();
+			return getStageY(_localX, _localY);
 		}
 
 		public native function updateAfterEvent():void;
@@ -119,8 +133,8 @@ package flash.events
 		}
 
 		// The player's natives (packages/player/src/playerglobal/flash/events/GestureEvent.ts).
-		private native function getStageX():Number;
+		private native function getStageX(x:Number, y:Number):Number;
 
-		private native function getStageY():Number;
+		private native function getStageY(x:Number, y:Number):Number;
 	}
 }

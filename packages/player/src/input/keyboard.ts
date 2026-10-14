@@ -152,8 +152,7 @@ function focusEvent(
     false,
     keyCode,
   );
-  dispatchEvent(s, target.object, event);
-  return !!event.$prevented;
+  return !dispatchEvent(s, target.object, event);
 }
 
 /**
@@ -627,8 +626,7 @@ export class KeyboardInput {
         true,
         text.replace(/\r/g, "\n"),
       );
-      dispatchEvent(s, field.object, event);
-      if (event.$prevented) {
+      if (!dispatchEvent(s, field.object, event)) {
         return true;
       }
     }

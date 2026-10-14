@@ -1,5 +1,7 @@
-// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts);
-// natives in packages/player/src/playerglobal/flash/events/Event.ts.
+// Its API as Flash Player's playerglobal declares it (tools/abc-surface/as3.ts).
+// Its fields are AS3's, which compiled code reads as slots; the player's
+// dispatch (packages/player/src/scripting/events.ts) writes the target,
+// current target and phase into them and reads the flags.
 // clone, toString and formatToString from Ruffle (https://github.com/ruffle-rs/ruffle),
 // core/src/avm2/globals/flash/events/Event.as: MIT OR Apache-2.0, Copyright (c)
 // 2018-2022 Ruffle LLC and Ruffle contributors.
@@ -7,9 +9,26 @@ package flash.events
 {
 	public class Event
 	{
+		private var _type:String;
+		private var _bubbles:Boolean;
+		private var _cancelable:Boolean;
+		private var _target:Object;
+		private var _currentTarget:Object;
+		private var _eventPhase:uint = 2; // EventPhase.AT_TARGET
+		// 0 propagating, 1 stopped after the current object, 2 stopped at once.
+		private var _stopped:int;
+		private var _prevented:Boolean;
+
 		public function Event(type:String, bubbles:Boolean = false, cancelable:Boolean = false)
 		{
-			ctor(type, bubbles, cancelable);
+			if (type == null)
+			{
+				Error.throwError(TypeError, 2007, "type");
+			}
+
+			_type = type;
+			_bubbles = bubbles;
+			_cancelable = cancelable;
 		}
 
 		public static const ACTIVATE:String = "activate";
@@ -104,27 +123,60 @@ package flash.events
 			return formatToString("Event", "type", "bubbles", "cancelable", "eventPhase");
 		}
 
-		public native function get type():String;
+		public function get type():String
+		{
+			return _type;
+		}
 
-		public native function get bubbles():Boolean;
+		public function get bubbles():Boolean
+		{
+			return _bubbles;
+		}
 
-		public native function get cancelable():Boolean;
+		public function get cancelable():Boolean
+		{
+			return _cancelable;
+		}
 
-		public native function get target():Object;
+		public function get target():Object
+		{
+			return _target;
+		}
 
-		public native function get currentTarget():Object;
+		public function get currentTarget():Object
+		{
+			return _currentTarget;
+		}
 
-		public native function get eventPhase():uint;
+		public function get eventPhase():uint
+		{
+			return _eventPhase;
+		}
 
-		public native function stopPropagation():void;
+		public function stopPropagation():void
+		{
+			if (_stopped == 0)
+			{
+				_stopped = 1;
+			}
+		}
 
-		public native function stopImmediatePropagation():void;
+		public function stopImmediatePropagation():void
+		{
+			_stopped = 2;
+		}
 
-		public native function preventDefault():void;
+		public function preventDefault():void
+		{
+			if (_cancelable)
+			{
+				_prevented = true;
+			}
+		}
 
-		public native function isDefaultPrevented():Boolean;
-
-		// The player's natives (packages/player/src/playerglobal/flash/events/Event.ts).
-		private native function ctor(type:String, bubbles:Boolean, cancelable:Boolean):void;
+		public function isDefaultPrevented():Boolean
+		{
+			return _prevented;
+		}
 	}
 }

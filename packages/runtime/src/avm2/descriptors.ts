@@ -42,7 +42,16 @@ export interface TraitsDesc {
    * setter's one past the getter's), and the entries.
    */
   meta?: [number, number, Metadata[]][];
+  /**
+   * What sets a new object's slots, the base's included, by name, highest
+   * first, when it has any: constants it writes itself, any other initial
+   * value from `values`, by slot.
+   */
+  fill?: SlotFill;
 }
+
+/** Sets the slots of a new object `o`; `values` holds their initial values by slot. */
+export type SlotFill = (o: AsObject, values: Value[]) => void;
 
 export interface ClassDesc {
   name: number;

@@ -5132,6 +5132,18 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  // The events' fields as scripts read and write them: playerglobal keeps
+  // them in AS3, which must look to describeType, coercion, clone and
+  // dispatch as Flash's natives do.
+  {
+    name: "event-fields",
+    swf: (abc) => bare(abc, 1, "EventFields"),
+    script: "EventFields",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "number-parse-result-natives",
     swf: (abc) => bare(abc, 1, "NumberParseResultNatives"),

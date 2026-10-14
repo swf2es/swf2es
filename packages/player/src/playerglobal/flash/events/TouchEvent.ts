@@ -1,5 +1,6 @@
-// flash.events.TouchEvent's native fields. Playerglobal keeps the rest in
-// AS3; the stage point follows the current target, as MouseEvent's does.
+// flash.events.TouchEvent's natives: the stage point, which follows the
+// target as MouseEvent's does, and the local point Flash Player's
+// playerglobal keeps in natives, which ours keeps in AS3 with the rest.
 // No device the player knows records a stylus's samples, so there are none
 // to get, and no tool button is down.
 import { avm2 } from "@swf2es/runtime";
@@ -35,12 +36,12 @@ export function touchEventNatives(s: Scripting): avm2.Natives {
       this.$touchY = s.rt.toNumber(value);
     }
 
-    "flash.events:TouchEvent::getStageX"(): number {
-      return stagePoint(s, this, this.$touchX, this.$touchY)[0];
+    "flash.events:TouchEvent::getStageX"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$touchX, y ?? this.$touchY)[0];
     }
 
-    "flash.events:TouchEvent::getStageY"(): number {
-      return stagePoint(s, this, this.$touchX, this.$touchY)[1];
+    "flash.events:TouchEvent::getStageY"(x?: number, y?: number): number {
+      return stagePoint(s, this, x ?? this.$touchX, y ?? this.$touchY)[1];
     }
 
     isToolButtonDown(): boolean {

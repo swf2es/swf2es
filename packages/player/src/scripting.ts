@@ -59,7 +59,7 @@ import {
 } from "./playerglobal/index.js";
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
-import { dispatchTo } from "./scripting/events.js";
+import { dispatchTo, type EventFields } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
@@ -210,6 +210,8 @@ export class Scripting {
   inputMode: "none" | "gesture" | "touchPoint";
   /** Multitouch.mapTouchToMouse, AIR's: whether the primary touch moves the mouse in touchPoint mode too. */
   mapTouchToMouse = true;
+  /** Where its events keep what dispatch reads and writes (scripting/events.ts's eventFields). */
+  eventFields: EventFields | null = null;
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */

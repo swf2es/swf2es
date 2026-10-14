@@ -10,6 +10,8 @@ package flash.events
 	public class TouchEvent extends Event
 	{
 		private var _touchPointID:int;
+		private var _localX:Number;
+		private var _localY:Number;
 		private var _isPrimaryTouchPoint:Boolean;
 		private var _sizeX:Number;
 		private var _sizeY:Number;
@@ -76,13 +78,25 @@ package flash.events
 			return formatToString("TouchEvent", "type", "bubbles", "cancelable", "eventPhase", "touchPointID", "isPrimaryTouchPoint", "localX", "localY", "stageX", "stageY", "sizeX", "sizeY", "pressure", "relatedObject", "ctrlKey", "altKey", "shiftKey", "commandKey", "controlKey", "timestamp", "touchIntent", "isTouchPointCanceled");
 		}
 
-		public native function get localX():Number;
+		public function get localX():Number
+		{
+			return _localX;
+		}
 
-		public native function set localX(value:Number):void;
+		public function set localX(value:Number):void
+		{
+			_localX = value;
+		}
 
-		public native function get localY():Number;
+		public function get localY():Number
+		{
+			return _localY;
+		}
 
-		public native function set localY(value:Number):void;
+		public function set localY(value:Number):void
+		{
+			_localY = value;
+		}
 
 		public function get touchPointID():int
 		{
@@ -177,12 +191,12 @@ package flash.events
 		public function get stageX():Number
 		{
 			// Without a whole local point there is no stage point, as Flash's shows.
-			return isNaN(localX) || isNaN(localY) ? NaN : getStageX();
+			return isNaN(localX) || isNaN(localY) ? NaN : getStageX(_localX, _localY);
 		}
 
 		public function get stageY():Number
 		{
-			return isNaN(localX) || isNaN(localY) ? NaN : getStageY();
+			return isNaN(localX) || isNaN(localY) ? NaN : getStageY(_localX, _localY);
 		}
 
 		public native function updateAfterEvent():void;
@@ -260,9 +274,9 @@ package flash.events
 		public native function getSamples(buffer:ByteArray, append:Boolean = false):uint;
 
 		// The player's natives (packages/player/src/playerglobal/flash/events/TouchEvent.ts).
-		private native function getStageX():Number;
+		private native function getStageX(x:Number, y:Number):Number;
 
-		private native function getStageY():Number;
+		private native function getStageY(x:Number, y:Number):Number;
 
 		private native function privateGetSamples(arg0:ByteArray):uint;
 
