@@ -801,11 +801,6 @@ export function opcodeTable(): string {
   return lines.join("\n");
 }
 
-// Held in a global so the collector keeps it alive while it is read
-// through raw pointers.
-let input: StaticArray<u8> = new StaticArray<u8>(0);
-
-/** Copy `bytes` into a buffer followed by PADDING bytes; returns its start. */
 /** The AVM1 actions Flash knows, one a line: "0x96 Push". */
 export function avm1Opcodes(): string {
   const out: string[] = [];
@@ -1021,6 +1016,11 @@ function avm1Value(actions: Actions, i: i32): string {
   }
 }
 
+// Held in a global so the collector keeps it alive while it is read
+// through raw pointers.
+let input: StaticArray<u8> = new StaticArray<u8>(0);
+
+/** Copy `bytes` into a buffer followed by PADDING bytes; returns its start. */
 function padded(bytes: Uint8Array): usize {
   input = new StaticArray<u8>(bytes.length + PADDING);
   const start = changetype<usize>(input);
