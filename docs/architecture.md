@@ -3810,7 +3810,12 @@ drawn as though nothing above it, itself included, were coloured: the
 fork's `Container.colorRoot` keeps Pixi's tint and alpha, the render
 group's included, from reaching it. A glowing object faded to an alpha of
 0.6 had its glow drawn from its faded shape, 65 off, and offsets left the
-glow as it was, 139 off (`blend-filtered-alpha`). A colour that changes
+glow as it was, 139 off (`blend-filtered-alpha`). A filtered 3D object
+is coloured so in its bitmap: one at an alpha of 0.6 drew its glow from
+its faded shape, 77 off. Children's own colours, masks, text, bitmaps,
+filtered objects in filtered objects, render groups in and around them,
+filters taken off and put on, and the colours that leave one clear, are
+the `filtered-colors` case. A colour that changes
 draws the output it kept again in the new colour, with no filter run.
 
 ### Blend modes

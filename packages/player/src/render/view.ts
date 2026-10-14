@@ -1715,7 +1715,8 @@ export class PixiView {
     // Pixi's tint and alpha, which Pixi composes down the tree itself; any
     // other is what is drawn's own (render/color.ts), and the tint stays white.
     let recolor = false;
-    const rooted = node.filters[0] instanceof FilterChain && !three && !masking;
+    // A 3D one's chain runs in its bitmap, where it colours what its filters make as any does.
+    const rooted = node.filters[0] instanceof FilterChain && !masking;
     const rerooted = rooted !== node.rooted;
     if (rerooted) {
       node.rooted = rooted;
