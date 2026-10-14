@@ -1,14 +1,13 @@
 // The constant pool along a region's flow: which ConstantPool a Push of a
 // constant reads, where one is known.
 //
-// A ConstantPool sets the pool of the activation running it, and the
-// movie's, which a frame's block starts with and a function keeps from
-// where it was defined (Ruffle's core/src/avm1/activation.rs, MIT OR
-// Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors).
-// A call runs in an activation of its own, so it never changes the
-// caller's; a With's and a Try's bodies run in the caller's, as adl runs
-// them, and are flow like any other. A constant past the pool's end pushes
-// undefined.
+// A ConstantPool sets the pool of the activation running it. A frame's
+// block starts with the pool the frame's last block left, and a function
+// with the pool it was defined under, as adl has them (docs/avm1.md, "The
+// constant pool"). A call runs in an activation of its own, so it never
+// changes the caller's; a With's and a Try's bodies run in the caller's,
+// as adl runs them, and are flow like any other. A constant past the
+// pool's end pushes undefined.
 //
 // A region starts with a pool it cannot know, the activation's, and so
 // does a Try's catch or finally, which a throw reaches from anywhere in

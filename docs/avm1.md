@@ -135,9 +135,9 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   Ruffle pushes it; where none or several may, the push reads the
   activation's pool at run time, `cx.pool[i]`, which `V.constantPool`
   sets as the action runs. A region starts with the activation's pool,
-  which for a frame's block is the movie's, the last any block set, and
-  so does a `Try`'s catch or finally, which a throw reaches from anywhere
-  in the try body (`flow/pool.ts`).
+  which the runtime gives it (see "The constant pool" below), and so
+  does a `Try`'s catch or finally, which a throw reaches from anywhere in
+  the try body (`flow/pool.ts`).
 
   `With` and `Try` bodies are not regions, though Ruffle runs them as
   activations: in adl their code runs in the activation that reached
@@ -292,6 +292,31 @@ the entry needs nothing of the JavaScript frame it was defined in, and
 each entry is written alone, as the JIT/AOT invariant asks of AVM2's
 methods. The function object also keeps the constant pool of the
 activation that defined it.
+
+### The constant pool
+
+What adl does with `ConstantPool`, for the runtime (steps 4 and 7):
+
+- A frame's `DoAction` blocks share a pool: a block without a
+  `ConstantPool` of its own reads the one the frame's last block set.
+  A frame's pool is not the next frame's, and neither a
+  `DoInitAction`'s nor a clip event's pool reaches the blocks after it.
+- A function keeps the pool of the activation that ran its
+  `DefineFunction`, as it was then: a `ConstantPool` after the
+  definition, before the call, does not change what the body reads, in
+  the frame it was defined in or a later one. A `ConstantPool` in its
+  body sets its own activation's pool, not its caller's, nor the
+  frame's, nor what its next call starts with.
+- A `With`'s and a `Try`'s bodies run in their activation, and a
+  `ConstantPool` in them holds after them.
+- A constant past the pool's end, an empty pool's included, is
+  `undefined`.
+- A constant read where no pool was set (a frame's first block, a
+  `DoInitAction`, a clip event, a function defined before any pool)
+  reads whatever adl's memory holds there: most often `""`, at times
+  bytes of other strings, `undefined` past a few indices, and in a
+  `Push` of several values it can end the block. No compiler writes
+  that; swf2es reads `undefined` there, as past a pool's end.
 
 A DefineFunction2's registers below its register count are JavaScript
 `let`s, `r1` to `rN`, since their indices are in the code: its preloads

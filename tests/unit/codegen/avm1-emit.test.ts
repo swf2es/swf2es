@@ -277,7 +277,7 @@ test("a ConstantPool that reaches a push on every path makes its constants liter
 });
 
 test("a push reads the activation's pool where none or several reach it", async () => {
-  // The block starts with the movie's pool, which the runtime gives.
+  // The block starts with the pool the runtime gives it.
   const unknown = asm().push(constant(1), constant(5)).trace().trace().bytes();
   const before = await run([unknown], { pool: ["x", "y"] });
   assert.match(before.module, /cx\.pool\[1\]/);
