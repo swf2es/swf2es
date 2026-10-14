@@ -26,9 +26,12 @@ test("help lists the commands, and shows each one's usage", () => {
     assert.equal(r.status, 0, args.join(" "));
     assert.match(r.stdout, /^usage: swf2es <command>/);
     assert.match(r.stdout, /^ {2}compile {2}/m);
+    assert.match(r.stdout, /^ {2}run {6}/m);
   }
 
   for (const [args, usage] of [
+    [["help", "run"], /^usage: swf2es run <file\.abc>/],
+    [["run", "--help"], /^usage: swf2es run <file\.abc>/],
     [["help", "compile"], /^usage: swf2es compile <file\.swf\|file\.abc>/],
     [["compile", "-h"], /^usage: swf2es compile/],
     [["help", "help"], /^usage: swf2es help/],
@@ -40,7 +43,7 @@ test("help lists the commands, and shows each one's usage", () => {
 });
 
 test("each command prints the version", () => {
-  for (const args of [["-v"], ["--version"], ["compile", "--version"]]) {
+  for (const args of [["-v"], ["--version"], ["run", "-v"], ["compile", "--version"]]) {
     const r = swf2es(args);
     assert.equal(r.status, 0, args.join(" "));
     assert.match(r.stdout, /^swf2es \d+\.\d+\.\d+\n$/);
@@ -56,6 +59,8 @@ test("a mistake in the command line is status 2, with where to read the usage", 
     [["rnu", "x.abc"], /no command rnu; to compile a file of that name/, "help"],
     [["help", "nope"], /no command nope/, "help"],
     [["help", "compile", "help"], /expected one command at most/, "help"],
+    [["run"], /expected an ABC file to run/, "help run"],
+    [["run", "--frobnicate", "x.abc"], /Unknown option '--frobnicate'/, "help run"],
     [["compile", "--frobnicate", "x.abc"], /Unknown option '--frobnicate'/, "help compile"],
     [["compile"], /expected one input file, got 0/, "help compile"],
     [["compile", "a.swf", "b.swf"], /expected one input file, got 2/, "help compile"],

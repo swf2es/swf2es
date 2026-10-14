@@ -58,6 +58,9 @@ node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and o
 node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT:
                               # the player's modules for the SWF, their logs and a manifest (libraries
                               # from tests/player/out/libraries/ by default; `compile` may be left out)
+node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
+                              # ABCs after builtin and shell_toplevel (oracle/avmplus/generated/ by
+                              # default), their output on stdout, avmshell's exit status
 node packages/cli/dist/main.js help [command]   # the commands, or one's options
 node tests/player/module-cache.ts   # the IndexedDB module cache in Chrome (part of pnpm test)
 node tests/player/precompiled.ts    # AOT modules played in Chrome, imported under a policy

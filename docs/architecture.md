@@ -795,11 +795,24 @@ a builtin's highest mark from 42 up is the VM's internal one
 
 ### Running ABCs as avmshell does
 
-The tests that run ABCs as avmshell does share one host, `runShell` in
-`packages/cli`'s `shell.ts`: one compiler domain for the runtime, each ABC
-compiled into the application domain the runtime loads it into, so that an
-ABC `Domain.loadBytes` loads compiles against what its domain sees, with
-the findings the runtime reports (`RuntimeOptions.compileAbc`). The
+`swf2es run file.abc [more.abc ...]` (`packages/cli`, `commands/run.ts`)
+is avmshell in node: avmshell's libraries, builtin.abc and
+shell_toplevel.abc (from `oracle/avmplus/generated/`, or `--lib`), each
+compiled by `codegen.wasm` and loaded into one runtime, their scripts run
+on first use; then each ABC in the order given, added to the root domain,
+compiled and its entry point run, as avmshell runs each file once the one
+before has. What they trace and print goes to stdout. An ABC rejected
+with a VerifyError, or an exception nothing catches, is printed there as
+avmshell prints it (`VerifyError: Error #1107`, `TypeError: Error
+#1009`), and ends the run with avmshell's exit status, 1. avmshell's `File`
+reads and writes the working directory. A SWF is refused: its code needs
+the player's playerglobal, which the command does not depend on.
+
+The command and the tests that run ABCs share one host, `runShell` in
+`shell.ts`: one compiler domain for the runtime, each ABC compiled into the
+application domain the runtime loads it into, so that an ABC
+`Domain.loadBytes` loads compiles against what its domain sees, with the
+findings the runtime reports (`RuntimeOptions.compileAbc`). The
 conformance runner and the Tamarin runner give it the test build of
 codegen (`tests/conformance/abc-compiler.ts`), which `pnpm test:checked`
 checks every array access of, a loader that keeps source maps, and for
