@@ -1,0 +1,39 @@
+Camera.isSupported: true (Boolean)
+Camera.names: 0 new true (String)
+getCamera(): null (null)
+getCamera('0'): null (null)
+getCamera(null): null (null)
+new Camera: [object Camera] 0 0 0 0 0 0 0 0 false 0 0 false 0 (String)
+name: true (Boolean)
+setMode: 0 0 0 0 0 0 0 0 false 0 0 false 0 (String)
+setQuality: 0 0 0 0 0 0 0 0 false 0 0 false 0 (String)
+setMotionLevel: 0 0 0 0 0 0 0 0 false 0 0 false 0 (String)
+setKeyFrameInterval: 0 0 0 0 0 0 0 0 false 0 0 false 0 (String)
+setLoopback: 0 0 0 0 0 0 0 0 false 0 0 false 0 (String)
+drawToBitmapData: 123456 (String)
+drawToBitmapData(null) threw 2007 TypeError: Error #2007: Parameter destination must be non-null.
+copyToByteArray: 0 (int)
+copyToByteArray(null, ba) threw 2007 TypeError: Error #2007: Parameter rect must be non-null.
+copyToByteArray(rect, null) threw 2007 TypeError: Error #2007: Parameter destination must be non-null.
+copyToVector: 0 (int)
+copyToVector(null, null) threw 2007 TypeError: Error #2007: Parameter rect must be non-null.
+copyToVector(rect, null) threw 2007 TypeError: Error #2007: Parameter destination must be non-null.
+Microphone.isSupported: true (Boolean)
+getMicrophone(99): null (null)
+getMicrophone(-5): null (null)
+new Microphone: [object Microphone] 0 0 0 0 false 0 0 0 false 0 0 false (String)
+name, codec: true true (String)
+set all: 0 0 0 0 false 0 0 0 false 0 0 false (String)
+codec = null threw 2007 TypeError: Error #2007: Parameter codecString must be non-null.
+soundTransform: 1 0 new true (String)
+soundTransform set: 1 0 (String)
+soundTransform = null threw 2007 TypeError: Error #2007: Parameter sndTransform must be non-null.
+enhancedOptions: null (null)
+getEnhancedMicrophone(99): null (null)
+enhancedOptions now: fullDuplex false 128 true -1 new true (String)
+enhancedOptions shared: headset false 256 false -1 (String)
+enhancedOptions = null: headset false 256 false -1 (String)
+enhancedOptions copied: headset false 256 false -1 (String)
+new MicrophoneEnhancedOptions: [object MicrophoneEnhancedOptions] fullDuplex false 128 true -1 (String)
+options set: headset false 256 false 3 (String)
+options set badly: halfDuplex false 256 true -1 (String)

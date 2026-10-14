@@ -55,6 +55,8 @@ import { localeIDNatives } from "./flash/globalization/LocaleID.js";
 import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
 import { stringToolsNatives } from "./flash/globalization/StringTools.js";
+import { cameraNatives } from "./flash/media/Camera.js";
+import { microphoneNatives } from "./flash/media/Microphone.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
@@ -185,6 +187,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...stage3DNatives(s),
     ...xmlDocumentNatives(s),
     ...videoNatives(s),
+    ...cameraNatives(s),
+    ...microphoneNatives(s),
     ...keyboardNatives(),
     ...gameInputNatives(s),
     ...contextMenuNatives(s),
