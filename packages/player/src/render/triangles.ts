@@ -100,8 +100,8 @@ let program: GlProgram | null = null;
 
 /**
  * A drawing's textured triangles: a mesh of their vertices under its own
- * shader, one draw. It destroys its geometry and shader with itself, and
- * leaves the texture, its store's.
+ * shader, one draw. It destroys its geometry, buffers and all, and its
+ * shader with itself, and leaves the texture, its store's.
  */
 export class TriangleView extends Mesh<MeshGeometry, Shader> {
   /** What it draws, the drawing's. */
@@ -188,7 +188,8 @@ export class TriangleView extends Mesh<MeshGeometry, Shader> {
     const shader = this.shader as Shader;
     this.owner.delete(this);
     super.destroy();
-    geometry.destroy();
+    // Its buffers too: the renderer holds a buffer, and its data, till the buffer goes.
+    geometry.destroy(true);
     shader.destroy();
   }
 }
