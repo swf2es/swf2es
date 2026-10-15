@@ -94,6 +94,8 @@ param
 root
 undefined
 root
+function
+undefined
 -- arguments
 2
 1

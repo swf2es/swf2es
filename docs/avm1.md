@@ -412,7 +412,9 @@ cases), where it is not what Ruffle does:
 - From SWF 6 a function closes over the scope chain it was defined in; a
   SWF 5 function runs above the clip of its `this`, or else of its
   caller's target, as Flash 5 did, its variables not found reaching the
-  timeline (`counter()` of a SWF 5 counts on the root).
+  timeline (`counter()` of a SWF 5 counts on the root). A SWF 5
+  function's named `DefineFunction` defines it on that clip, not as a
+  local variable, which `DefineLocal` still makes.
 - `arguments` is an array of the arguments, `callee` and `caller`
   DontEnum on it, `caller` the function that called, null from a block; a
   new one each call, not tied to the parameters. `Delete2` removes it.

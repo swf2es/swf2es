@@ -548,9 +548,23 @@ function defineFunction(
   const key = nameOf(name, version);
   if (key === "") {
     cx.st.push(fn);
-  } else {
-    defineLocal(cx, key, fn, version);
+    return;
   }
+
+  // A SWF 5 function's named function is its clip's, not a local variable (adl).
+  if (version < 6 && cx.callee !== null) {
+    let s: Scope | null = cx.scope;
+    while (s !== null && s.kind !== SCOPE_Target) {
+      s = s.parent;
+    }
+
+    if (s !== null) {
+      set(s.object, key, fn, version);
+      return;
+    }
+  }
+
+  defineLocal(cx, key, fn, version);
 }
 
 /**

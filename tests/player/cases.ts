@@ -2902,6 +2902,16 @@ function avm1Functions(version: number): Uint8Array {
         drop(callFunction("missing")),
         defineFn("outerP", ["p"], ret(fnExpr([], ret(op("Add2", getVar("p"), getVar("shadow")))))),
         traceOf(callMethod(callFunction("outerP", lit("p:")), "")),
+        // A SWF 5 function's named function is its clip's; any other variable stays its own.
+        defineFn(
+          "definesInner",
+          [],
+          defineFn("innerNamed", [], ret(lit("inner"))),
+          local("innerLocal", lit(1)),
+        ),
+        drop(callFunction("definesInner")),
+        traceOf(op("TypeOf", getVar("innerNamed"))),
+        traceOf(op("TypeOf", getVar("innerLocal"))),
       ),
       block(
         note("-- arguments"),
