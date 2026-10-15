@@ -5,13 +5,18 @@
 // Ruffle LLC and Ruffle contributors. Where adl parts from Ruffle, adl
 // decides (docs/avm1.md, "Objects").
 //
-// So far Object and the global functions on objects; Function, Array,
+// So far Object, Function and the global functions on objects; Array,
 // String, Number and Boolean are what boxing, InitArray and the
 // conversions need of them, which step 9 completes with their classes.
+// The realm also holds what runs AVM1 code across calls: the activation
+// running, how many function calls are, and the movie's global registers.
+import type { Activation, Region } from "./activation.js";
+import { pendingLocal, ScriptFunction } from "./functions.js";
 import { numberToString } from "./numbers.js";
 import {
   Avm1Function,
   Avm1Object,
+  arraySet,
   type Boxer,
   caseSensitive,
   DONT_DELETE,
@@ -19,11 +24,14 @@ import {
   fold,
   get,
   invoke,
+  lengthOf,
   type Native,
   nameOf,
+  type Property,
   READ_ONLY,
   VERSION_6,
 } from "./objects.js";
+import { SCOPE_Global, Scope } from "./scope.js";
 import {
   isPrimitive,
   objects,
@@ -57,6 +65,19 @@ export class Realm implements Boxer {
   readonly Number: Class;
   readonly Boolean: Class;
   readonly Array: Class;
+  /** The bottom of every scope chain. */
+  readonly globalScope: Scope;
+  /** The four registers outside DefineFunction2's own, which every activation shares. */
+  readonly registers: Value[] = [undefined, undefined, undefined, undefined];
+  /** The activation running, null between the player's calls into AVM1 code. */
+  current: Activation | null = null;
+  /** How many function calls are running, one in another. */
+  calls = 0;
+  /**
+   * How deep function calls may go, the call that reaches it disabling the
+   * movie's actions: a SWF's ScriptLimits sets it, adl's is 1000.
+   */
+  maxCalls = 1000;
 
   constructor() {
     const object = this.classOf(
@@ -70,10 +91,11 @@ export class Realm implements Boxer {
         return v === undefined || v === null ? new Avm1Object() : this.box(v, version);
       },
     );
+    // Function() of nothing gives an object without a prototype, as Ruffle has it.
     const fn = this.classOf(
       this.functionProto,
       (self, args) => (args.length > 0 ? args[0] : self),
-      (self, args) => (args.length > 0 ? args[0] : self),
+      (_, args) => (args.length > 0 ? args[0] : new Avm1Object()),
     );
     this.Object = object;
     this.Function = fn;
@@ -81,6 +103,7 @@ export class Realm implements Boxer {
     fn.define("constructor", fn, DONT_ENUM | DONT_DELETE);
     this.functionProto.define("__proto__", this.objectProto, DONT_ENUM | DONT_DELETE);
     this.objectPrototype();
+    this.functionPrototype();
 
     this.String = this.boxClass(
       (self, args, version) => {
@@ -111,6 +134,7 @@ export class Realm implements Boxer {
     this.Array = this.arrayClass();
 
     const g = this.global;
+    this.globalScope = new Scope(null, SCOPE_Global, g);
     g.define("Object", object, DONT_ENUM);
     g.define("Function", fn, DONT_ENUM | VERSION_6);
     // Getters, which give undefined to a SWF 4.
@@ -179,8 +203,45 @@ export class Realm implements Boxer {
       return constr.construct(self, args, version);
     }
 
-    constr.native(self, args, version);
+    constr.initialize(self, args, version);
     return self;
+  }
+
+  /**
+   * DefineFunction's function of `region`, in the activation `cx` that
+   * defines it: its scope, constant pool and clip kept, a new `prototype`
+   * whose `constructor` it is.
+   */
+  newFunction(
+    cx: Activation,
+    region: Region,
+    params: (string | null)[],
+    flags: number,
+    version: number,
+  ): ScriptFunction {
+    const fn = new ScriptFunction(
+      this.functionProto,
+      this,
+      region,
+      cx.code,
+      params,
+      flags,
+      version,
+      cx.scope,
+      cx.pool,
+      cx.target,
+      cx.clip,
+      version < 6 ? undefined : cx.self,
+    );
+    const prototype = new Avm1Object(this.objectProto);
+    prototype.define("constructor", fn, DONT_ENUM);
+    fn.define("prototype", prototype, DONT_ENUM | DONT_DELETE);
+    return fn;
+  }
+
+  /** `arguments` or `super` of a function's activation object, as it is first asked for. */
+  pendingLocal(cx: Activation, o: Avm1Object, name: string, version: number): Property | undefined {
+    return pendingLocal(cx, o, name, version);
   }
 
   /**
@@ -354,6 +415,42 @@ export class Realm implements Boxer {
     return self;
   }
 
+  /** Function.prototype's `call` and `apply`: `this` an object, the global object for none. */
+  private functionPrototype(): void {
+    const proto = this.functionProto;
+    const thisOf = (args: Value[], version: number): Avm1Object => {
+      const v = first(args);
+      return v === undefined || v === null ? this.global : this.box(v, version);
+    };
+    proto.define(
+      "call",
+      this.method((self, args, version) =>
+        invoke(self, thisOf(args, version), args.slice(1), version, 1),
+      ),
+      DONT_ENUM | DONT_DELETE,
+    );
+    proto.define(
+      "apply",
+      this.method((self, args, version) => {
+        const list = args.length > 1 ? args[1] : undefined;
+        const elements: Value[] = [];
+        if (list instanceof Avm1Object) {
+          const length = list.array
+            ? lengthOf(list)
+            : toNumber(get(list, "length", version), version);
+          // A length far past any list's is cut short, as no SWF gives one.
+          const n = Math.min(length | 0, 1 << 20);
+          for (let i = 0; i < n; i++) {
+            elements.push(get(list, String(i), version));
+          }
+        }
+
+        return invoke(self, thisOf(args, version), elements, version, 1);
+      }),
+      DONT_ENUM | DONT_DELETE,
+    );
+  }
+
   private objectPrototype(): void {
     const proto = this.objectProto;
     const v6 = DONT_ENUM | DONT_DELETE | VERSION_6;
@@ -378,7 +475,7 @@ export class Realm implements Boxer {
         w.data = data;
       } else {
         self.watchers ??= [];
-        self.watchers.push({ name, callback, data });
+        self.watchers.push({ name, callback, data, calls: 0 });
       }
 
       return true;
@@ -420,6 +517,11 @@ export class Realm implements Boxer {
 
       p.get = getter;
       p.set = setter;
+      // An index's property lengthens an array as its element would (adl).
+      if (self.array && p.get !== null && fold(name) !== "length") {
+        arraySet(self, name, undefined, version);
+      }
+
       return true;
     });
     define("valueOf", DONT_ENUM | DONT_DELETE, (self) => self);

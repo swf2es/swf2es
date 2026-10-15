@@ -31,4 +31,6 @@ export interface Host {
   level?(level: number): Value;
   parent?(clip: object): Value;
   child?(clip: object, name: string, caseSensitive: boolean): Value;
+  /** The clip whose AVM1 object `object` is, where it is one's: a SWF 5 function runs in its scope. */
+  clipOf?(object: object): Target | undefined;
 }

@@ -8,7 +8,9 @@ import {
   byteString,
   constant,
   double,
+  FunctionFlag,
   type PushValue,
+  register,
   type SimpleAction,
 } from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
@@ -2639,6 +2641,841 @@ function avm1Objects(version: number): Uint8Array {
         setMember(getVar("pr"), "__PROTO__", initObject(["inherited", lit("yes")])),
         traceOf(member(getVar("pr"), "inherited")),
       ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** A function's body of statements. */
+const body = (...statements: Avm1Statement[]) =>
+  statements.reduce((b, s) => s(b), new Avm1Assembler());
+/** `function name(params) { ... }`: DefineFunction. */
+const defineFn =
+  (name: string, params: string[], ...statements: Avm1Statement[]): Avm1Statement =>
+  (a) =>
+    a.defineFunction(name, params, body(...statements));
+/** An anonymous function, which DefineFunction pushes. */
+const fnExpr =
+  (params: string[], ...statements: Avm1Statement[]): Avm1Expr =>
+  (a) =>
+    a.defineFunction("", params, body(...statements));
+/** DefineFunction2, with its register count, flags and parameters' registers. */
+const defineFn2 =
+  (
+    name: string,
+    registers: number,
+    flags: number,
+    params: [string, number][],
+    ...statements: Avm1Statement[]
+  ): Avm1Statement =>
+  (a) =>
+    a.defineFunction2(name, registers, flags, params, body(...statements));
+const fn2Expr =
+  (
+    registers: number,
+    flags: number,
+    params: [string, number][],
+    ...statements: Avm1Statement[]
+  ): Avm1Expr =>
+  (a) =>
+    a.defineFunction2("", registers, flags, params, body(...statements));
+const ret =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).op("Return");
+const reg =
+  (n: number): Avm1Expr =>
+  (a) =>
+    a.push(register(n));
+const storeReg =
+  (n: number, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).storeRegister(n).pop();
+const local =
+  (name: string, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a.push(name)).op("DefineLocal");
+const newMethod =
+  (o: Avm1Expr, name: string | undefined, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    o(args(a, values)).push(name).op("NewMethod");
+let ifLabels = 0;
+/** `if (cond) { statements }`. */
+const ifThen =
+  (cond: Avm1Expr, ...statements: Avm1Statement[]): Avm1Statement =>
+  (a) => {
+    const skip = `skip${ifLabels++}`;
+    return statements.reduce((b, s) => s(b), cond(a).op("Not").if(skip)).label(skip);
+  };
+const proto = (name: string) => member(getVar(name), "prototype");
+/**
+ * "root" for the root, else the value's type: the player's root is no clip
+ * yet (docs/avm1.md, step 10), whose `typeof` is "movieclip".
+ */
+const kind =
+  (e: Avm1Expr): Avm1Expr =>
+  (a) => {
+    const n = ifLabels++;
+    return e(a)
+      .op("PushDuplicate")
+      .push("_root")
+      .op("GetVariable")
+      .op("StrictEquals")
+      .if(`root${n}`)
+      .op("TypeOf")
+      .jump(`kind${n}`)
+      .label(`root${n}`)
+      .pop()
+      .push("root")
+      .label(`kind${n}`);
+  };
+
+// What AVM1 functions do in a SWF of `version`, as adl traces it
+// (docs/avm1.md, "Functions and registers"): calls and what they give,
+// the operand stack a body shares with its caller, `this` by how a
+// function is called, closures, `arguments`, registers global and
+// DefineFunction2's own with its preloads, Function's call and apply, new,
+// super, getters, setters, watchers and __resolve that are functions, the
+// recursion limits, and the constant pool a function reads.
+function avm1Functions(version: number): Uint8Array {
+  // The root's _parent is left out: adl loads the SWF, whose root has one there.
+  const all =
+    FunctionFlag.preloadThis |
+    FunctionFlag.preloadArguments |
+    FunctionFlag.preloadSuper |
+    FunctionFlag.preloadRoot |
+    FunctionFlag.preloadGlobal;
+  const describe = [
+    traceOf(kind(reg(1))),
+    traceOf(kind(getVar("this"))),
+    traceOf(op("Equals2", getVar("this"), o)),
+    traceOf(op("Equals2", getVar("this"), getVar("_root"))),
+    traceOf(op("TypeOf", getVar("arguments"))),
+    traceOf(op("TypeOf", getVar("super"))),
+  ];
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      block(
+        note("-- calls"),
+        defineFn(
+          "add",
+          ["a", "b"],
+          traceOf(getVar("a")),
+          traceOf(getVar("b")),
+          traceOf(member(getVar("arguments"), "length")),
+          ret(op("Add2", getVar("a"), getVar("b"))),
+        ),
+        traceOf(callFunction("add", lit(1), lit(2))),
+        traceOf(callFunction("add", lit(1))),
+        traceOf(callFunction("add", lit(1), lit(2), lit(3))),
+        defineFn("none", []),
+        traceOf(callFunction("none")),
+        traceOf(op("TypeOf", callFunction("none"))),
+        traceOf(op("TypeOf", getVar("add"))),
+        traceOf(getVar("add")),
+        traceOf(op("TypeOf", member(getVar("add"), "prototype"))),
+        traceOf(op("Equals2", member(proto("add"), "constructor"), getVar("add"))),
+        traceOf(op("Equals2", member(proto("add"), "__proto__"), OBJECT_PROTO)),
+        traceOf(op("Equals2", member(getVar("add"), "__proto__"), proto("Function"))),
+        keysOf(getVar("add")),
+        keysOf(proto("add")),
+        traceOf(callMethod(getVar("add"), "hasOwnProperty", lit("prototype"))),
+        setVar("anon", fnExpr(["x"], ret(op("Multiply", getVar("x"), lit(2))))),
+        traceOf(callFunction("anon", lit(21))),
+        traceOf(callFunction("noSuchFunction", lit(1))),
+        setVar("num", lit(5)),
+        traceOf(callFunction("num")),
+        setVar("obj", initObject(["v", lit(1)])),
+        traceOf(callMethod(getVar("obj"), "nope")),
+        traceOf(callMethod(getVar("obj"), "v")),
+        traceOf(op("TypeOf", newObject("noSuchClass"))),
+        traceOf(op("TypeOf", newMethod(getVar("obj"), "nope"))),
+        traceOf(op("TypeOf", newMethod(getVar("obj"), "v"))),
+        traceOf(op("TypeOf", newMethod(lit(undefined), "x"))),
+        traceOf(callMethod(getVar("add"), "", lit(2), lit(3))),
+        traceOf(callMethod(getVar("add"), undefined, lit(4), lit(5))),
+        setVar("made", newMethod(getVar("add"), "", lit(1), lit(1))),
+        traceOf(op("TypeOf", getVar("made"))),
+        setMember(
+          getVar("obj"),
+          "self",
+          fnExpr([], ret(op("Equals2", getVar("this"), getVar("obj")))),
+        ),
+        traceOf(callFunction("obj.self")),
+        traceOf(callMethod(getVar("obj"), "self")),
+        traceOf(callFunction("obj:self")),
+        setVar("thisOf", fnExpr([], ret(kind(getVar("this"))))),
+        traceOf(callMethod(getVar("thisOf"), "")),
+        traceOf(callFunction("thisOf")),
+        traceOf(callMethod(getVar("obj"), "thisOf")),
+        defineFn("Casey", [], ret(lit("casey"))),
+        traceOf(callFunction("casey")),
+        traceOf(callFunction("CASEY")),
+      ),
+      block(
+        note("-- the stack"),
+        defineFn("popper", [], (a) => a.trace().trace()),
+        (a) => a.push("under1", "under2", 0, "popper").op("CallFunction").trace(),
+        defineFn("leaver", [], (a) => a.push("left"), ret(lit("ret"))),
+        (a) => a.push(0, "leaver").op("CallFunction").trace().trace(),
+        defineFn("emptyReturn", [], (a) => a.op("Return")),
+        (a) => a.push("callers", 0, "emptyReturn").op("CallFunction").trace().trace(),
+        (a) => a.push("kept", "popped").op("Return").push("after return").trace(),
+      ),
+      block(note("-- after a block's return"), (a) => a.trace().trace()),
+      block(
+        note("-- this"),
+        setVar("o", initObject()),
+        setMember(
+          o,
+          "who",
+          fnExpr(
+            [],
+            traceOf(op("Equals2", getVar("this"), o)),
+            traceOf(op("Equals2", getVar("this"), getVar("_root"))),
+            traceOf(kind(getVar("this"))),
+            traceOf(kind(getVar("THIS"))),
+          ),
+        ),
+        drop(callMethod(o, "who")),
+        setVar("who", member(o, "who")),
+        drop(callFunction("who")),
+        setMember(
+          o,
+          "outer",
+          fnExpr(
+            [],
+            defineFn("inner", [], ret(getVar("this"))),
+            local("got", callFunction("inner")),
+            traceOf(op("Equals2", getVar("got"), o)),
+            traceOf(op("Equals2", getVar("got"), getVar("_root"))),
+            traceOf(kind(getVar("got"))),
+            traceOf(callMethod(getVar("got"), "hasOwnProperty", lit("got"))),
+            traceOf(op("TypeOf", callMethod(getVar("this"), "inner"))),
+          ),
+        ),
+        drop(callMethod(o, "outer")),
+        setMember(OBJECT_PROTO, "me", fnExpr([], ret(op("TypeOf", getVar("this"))))),
+        traceOf(callMethod(lit("s"), "me")),
+        traceOf(callMethod(lit(5), "me")),
+        traceOf(callMethod(lit(true), "me")),
+        drop(op("Delete", OBJECT_PROTO, lit("me"))),
+        setMember(o, "setThis", fnExpr([], setVar("this", lit(5)), traceOf(getVar("this")))),
+        drop(callMethod(o, "setThis")),
+      ),
+      block(
+        note("-- closures"),
+        defineFn(
+          "counter",
+          ["n"],
+          local("c", getVar("n")),
+          ret(fnExpr([], setVar("c", op("Add2", getVar("c"), lit(1))), ret(getVar("c")))),
+        ),
+        setVar("c1", callFunction("counter", lit(10))),
+        traceOf(callFunction("c1")),
+        traceOf(callFunction("c1")),
+        setVar("c2", callFunction("counter", lit(20))),
+        traceOf(callFunction("c2")),
+        traceOf(callFunction("c1")),
+        traceOf(op("TypeOf", getVar("c"))),
+        traceOf(getVar("c")),
+        defineFn("locals", [], local("loc", lit(1)), setVar("glob", lit(2)), (a) =>
+          a.push("loc2").op("DefineLocal2"),
+        ),
+        drop(callFunction("locals")),
+        traceOf(op("TypeOf", getVar("loc"))),
+        traceOf(op("TypeOf", getVar("loc2"))),
+        traceOf(getVar("glob")),
+        setVar("shadow", lit("root")),
+        defineFn("shadower", ["shadow"], setVar("shadow", lit("param")), traceOf(getVar("shadow"))),
+        drop(callFunction("shadower", lit("arg"))),
+        traceOf(getVar("shadow")),
+        defineFn("missing", ["shadow"], traceOf(getVar("shadow"))),
+        drop(callFunction("missing")),
+        defineFn("outerP", ["p"], ret(fnExpr([], ret(op("Add2", getVar("p"), getVar("shadow")))))),
+        traceOf(callMethod(callFunction("outerP", lit("p:")), "")),
+        // A SWF 5 function's named function is its clip's; any other variable stays its own.
+        defineFn(
+          "definesInner",
+          [],
+          defineFn("innerNamed", [], ret(lit("inner"))),
+          local("innerLocal", lit(1)),
+        ),
+        drop(callFunction("definesInner")),
+        traceOf(op("TypeOf", getVar("innerNamed"))),
+        traceOf(op("TypeOf", getVar("innerLocal"))),
+      ),
+      block(
+        note("-- arguments"),
+        defineFn(
+          "args",
+          ["a"],
+          traceOf(member(getVar("arguments"), "length")),
+          traceOf(member(getVar("arguments"), "0")),
+          traceOf(op("TypeOf", getVar("arguments"))),
+          traceOf(op("Equals2", member(getVar("arguments"), "callee"), getVar("args"))),
+          traceOf(member(getVar("arguments"), "caller")),
+          traceOf(op("TypeOf", member(getVar("arguments"), "caller"))),
+          traceOf(op("Equals2", member(getVar("arguments"), "__proto__"), proto("Array"))),
+          traceOf(op("Equals2", member(getVar("arguments"), "constructor"), getVar("Array"))),
+          keysOf(getVar("arguments")),
+          traceOf(getVar("arguments")),
+          setMember(getVar("arguments"), "0", lit("changed")),
+          traceOf(getVar("a")),
+          setVar("a", lit("a set")),
+          traceOf(member(getVar("arguments"), "0")),
+          traceOf(callMethod(getVar("arguments"), "hasOwnProperty", lit("callee"))),
+          traceOf(callMethod(getVar("arguments"), "isPropertyEnumerable", lit("callee"))),
+          traceOf(getVar("ARGUMENTS")),
+        ),
+        drop(callFunction("args", lit(1), lit(2))),
+        defineFn("callsArgs", [], drop(callFunction("whoCalled"))),
+        defineFn(
+          "whoCalled",
+          [],
+          traceOf(op("Equals2", member(getVar("arguments"), "caller"), getVar("callsArgs"))),
+          traceOf(op("TypeOf", member(getVar("arguments"), "caller"))),
+        ),
+        drop(callFunction("callsArgs")),
+        drop(callFunction("whoCalled")),
+        defineFn("argsTwice", [], ret(getVar("arguments"))),
+        traceOf(op("Equals2", callFunction("argsTwice"), callFunction("argsTwice"))),
+        defineFn("argsSet", [], setVar("arguments", lit("mine")), traceOf(getVar("arguments"))),
+        drop(callFunction("argsSet")),
+        defineFn(
+          "argsDelete",
+          [],
+          traceOf(op("Delete2", lit("arguments"))),
+          traceOf(op("TypeOf", getVar("arguments"))),
+        ),
+        drop(callFunction("argsDelete")),
+        traceOf(op("TypeOf", getVar("arguments"))),
+      ),
+      block(
+        note("-- registers"),
+        storeReg(0, lit("g0")),
+        storeReg(1, lit("g1")),
+        storeReg(2, lit("g2")),
+        storeReg(3, lit("g3")),
+        storeReg(4, lit("g4")),
+        traceOf(reg(0)),
+        traceOf(reg(1)),
+        traceOf(reg(2)),
+        traceOf(reg(3)),
+        traceOf(reg(4)),
+        traceOf(reg(255)),
+        (a) => a.push("stays").storeRegister(1).trace(),
+        traceOf(reg(1)),
+        defineFn("df1", [], traceOf(reg(1)), storeReg(2, lit("from df1")), traceOf(reg(0))),
+        drop(callFunction("df1")),
+        traceOf(reg(2)),
+        defineFn2(
+          "df2",
+          3,
+          0,
+          [
+            ["x", 1],
+            ["y", 0],
+          ],
+          traceOf(reg(0)),
+          traceOf(reg(1)),
+          traceOf(reg(2)),
+          traceOf(reg(3)),
+          traceOf(getVar("y")),
+          traceOf(op("TypeOf", getVar("x"))),
+          storeReg(2, lit("own")),
+          storeReg(3, lit("global 3")),
+          storeReg(5, lit("none")),
+          traceOf(reg(5)),
+        ),
+        drop(callFunction("df2", lit("X"), lit("Y"))),
+        traceOf(reg(2)),
+        traceOf(reg(3)),
+        defineFn2(
+          "df2past",
+          2,
+          0,
+          [
+            ["x", 4],
+            ["y", 1],
+          ],
+          traceOf(reg(4)),
+          traceOf(reg(1)),
+          traceOf(op("TypeOf", getVar("x"))),
+        ),
+        drop(callFunction("df2past", lit("X"), lit("Y"))),
+        defineFn2(
+          "df2zero",
+          0,
+          0,
+          [["x", 0]],
+          traceOf(reg(0)),
+          traceOf(reg(1)),
+          traceOf(getVar("x")),
+        ),
+        drop(callFunction("df2zero", lit("X0"))),
+        defineFn2(
+          "fact",
+          2,
+          0,
+          [["n", 1]],
+          ifThen(op("Less2", reg(1), lit(2)), ret(lit(1))),
+          ret(op("Multiply", reg(1), callFunction("fact", op("Decrement", reg(1))))),
+        ),
+        traceOf(callFunction("fact", lit(5))),
+        defineFn2(
+          "same",
+          2,
+          0,
+          [
+            ["a", 1],
+            ["b", 1],
+          ],
+          traceOf(reg(1)),
+        ),
+        drop(callFunction("same", lit("A"), lit("B"))),
+      ),
+      block(
+        note("-- preloads"),
+        defineFn2(
+          "pre",
+          10,
+          all,
+          [["p", 7]],
+          ...[1, 2, 3, 4, 5, 6, 7, 8].map((r) => traceOf(kind(reg(r)))),
+          traceOf(op("Equals2", reg(1), o)),
+          traceOf(op("Equals2", reg(5), getVar("_global"))),
+          traceOf(member(reg(2), "length")),
+          traceOf(reg(7)),
+          ...describe,
+        ),
+        setMember(o, "pre", getVar("pre")),
+        drop(callMethod(o, "pre", lit("P"))),
+        // Without its own `this`, a function's is its caller's or its definer's.
+        defineFn2(
+          "noThis",
+          2,
+          FunctionFlag.suppressThis,
+          [],
+          traceOf(op("Equals2", getVar("this"), o)),
+          traceOf(kind(getVar("this"))),
+        ),
+        setMember(o, "callsNoThis", fnExpr([], drop(callFunction("noThis")))),
+        drop(callMethod(o, "callsNoThis")),
+        setMember(
+          o,
+          "definesNoThis",
+          fnExpr(
+            [],
+            ret(
+              fn2Expr(
+                2,
+                FunctionFlag.suppressThis,
+                [],
+                traceOf(op("Equals2", getVar("this"), o)),
+                traceOf(kind(getVar("this"))),
+              ),
+            ),
+          ),
+        ),
+        drop(callMethod(callMethod(o, "definesNoThis"), "")),
+        ...[
+          FunctionFlag.preloadThis | FunctionFlag.suppressThis,
+          FunctionFlag.suppressThis,
+          FunctionFlag.preloadArguments | FunctionFlag.suppressArguments,
+          FunctionFlag.suppressArguments,
+          FunctionFlag.preloadSuper | FunctionFlag.suppressSuper,
+          FunctionFlag.suppressSuper,
+          FunctionFlag.preloadRoot,
+          FunctionFlag.preloadParent,
+          FunctionFlag.preloadGlobal,
+        ].flatMap((flags) => [
+          note(`flags ${flags}`),
+          setMember(o, "flagged", fn2Expr(4, flags, [], ...describe)),
+          drop(callMethod(o, "flagged")),
+        ]),
+      ),
+      block(
+        note("-- call and apply"),
+        setVar(
+          "ca",
+          fnExpr(
+            ["a", "b"],
+            traceOf(op("Equals2", getVar("this"), o)),
+            traceOf(op("TypeOf", getVar("this"))),
+            traceOf(getVar("a")),
+            traceOf(getVar("b")),
+            traceOf(member(getVar("arguments"), "length")),
+            traceOf(op("TypeOf", getVar("super"))),
+            ret(lit("r")),
+          ),
+        ),
+        traceOf(callMethod(getVar("ca"), "call", o, lit(1), lit(2))),
+        traceOf(callMethod(getVar("ca"), "apply", o, initArray(lit(3), lit(4)))),
+        traceOf(callMethod(getVar("ca"), "apply", o)),
+        traceOf(callMethod(getVar("ca"), "apply", o, lit(5))),
+        traceOf(
+          callMethod(
+            getVar("ca"),
+            "apply",
+            o,
+            initObject(["length", lit(2)], ["0", lit("x")], ["1", lit("y")]),
+          ),
+        ),
+        traceOf(callMethod(getVar("ca"), "call")),
+        traceOf(callMethod(getVar("ca"), "call", lit(null), lit("n"))),
+        traceOf(callMethod(getVar("ca"), "call", lit("str"))),
+        traceOf(op("TypeOf", member(proto("Function"), "call"))),
+        traceOf(op("TypeOf", member(proto("Function"), "apply"))),
+        traceOf(callMethod(member(OBJECT_PROTO, "hasOwnProperty"), "call", o, lit("pre"))),
+        traceOf(callMethod(member(proto("Function"), "call"), "call", getVar("ca"), o, lit("cc"))),
+        keysOf(proto("Function")),
+        traceOf(op("TypeOf", callFunction("Function"))),
+        traceOf(op("TypeOf", member(callFunction("Function"), "__proto__"))),
+        traceOf(op("Equals2", callFunction("Function", getVar("ca")), getVar("ca"))),
+        traceOf(op("TypeOf", newObject("Function"))),
+        traceOf(op("Equals2", newObject("Function", getVar("ca")), getVar("ca"))),
+      ),
+      block(
+        note("-- new"),
+        defineFn(
+          "Point",
+          ["x", "y"],
+          setMember(getVar("this"), "x", getVar("x")),
+          setMember(getVar("this"), "y", getVar("y")),
+          ret(lit("ignored")),
+        ),
+        setVar("pt", newObject("Point", lit(1), lit(2))),
+        traceOf(op("TypeOf", getVar("pt"))),
+        traceOf(member(getVar("pt"), "x")),
+        traceOf(op("Equals2", member(getVar("pt"), "__proto__"), proto("Point"))),
+        traceOf(op("Equals2", member(getVar("pt"), "constructor"), getVar("Point"))),
+        traceOf(op("Equals2", member(getVar("pt"), "__constructor__"), getVar("Point"))),
+        keysOf(getVar("pt")),
+        defineFn("RetObj", [], ret(initObject(["from", lit("returned")]))),
+        traceOf(member(newObject("RetObj"), "from")),
+        setMember(
+          proto("Point"),
+          "sum",
+          fnExpr([], ret(op("Add2", member(getVar("this"), "x"), member(getVar("this"), "y")))),
+        ),
+        traceOf(callMethod(getVar("pt"), "sum")),
+        setMember(getVar("Point"), "prototype", initObject(["kind", lit("replaced")])),
+        traceOf(member(newObject("Point"), "kind")),
+        setMember(o, "Ctor", getVar("Point")),
+        traceOf(member(newMethod(o, "Ctor", lit(3), lit(4)), "x")),
+        drop(callFunction("Point", lit("px"), lit("py"))),
+        traceOf(getVar("x")),
+      ),
+      block(
+        note("-- super"),
+        defineFn(
+          "Base",
+          ["v"],
+          traceOf(op("Add2", lit("Base "), getVar("v"))),
+          setMember(getVar("this"), "base", getVar("v")),
+        ),
+        setMember(
+          proto("Base"),
+          "hello",
+          fnExpr([], ret(op("Add2", lit("Base.hello "), member(getVar("this"), "name")))),
+        ),
+        defineFn(
+          "Derived",
+          ["v"],
+          drop(callMethod(getVar("super"), undefined, op("Add2", getVar("v"), lit(1)))),
+          traceOf(lit("Derived")),
+        ),
+        setMember(proto("Derived"), "__proto__", proto("Base")),
+        setMember(proto("Derived"), "__constructor__", getVar("Base")),
+        setMember(
+          proto("Derived"),
+          "hello",
+          fnExpr([], ret(op("Add2", lit("Derived.hello "), callMethod(getVar("super"), "hello")))),
+        ),
+        setVar("d", newObject("Derived", lit(1))),
+        traceOf(member(getVar("d"), "base")),
+        setMember(getVar("d"), "name", lit("d")),
+        traceOf(callMethod(getVar("d"), "hello")),
+        defineFn("Third", [], drop(callMethod(getVar("super"), undefined)), traceOf(lit("Third"))),
+        setMember(proto("Third"), "__proto__", proto("Derived")),
+        setMember(proto("Third"), "__constructor__", getVar("Derived")),
+        setMember(
+          proto("Third"),
+          "hello",
+          fnExpr([], ret(op("Add2", lit("Third.hello "), callMethod(getVar("super"), "hello")))),
+        ),
+        setVar("t3", newObject("Third")),
+        setMember(getVar("t3"), "name", lit("t3")),
+        traceOf(callMethod(getVar("t3"), "hello")),
+        setMember(proto("Base"), "prop", lit("base prop")),
+        setMember(
+          proto("Derived"),
+          "peek",
+          fnExpr(
+            [],
+            traceOf(op("TypeOf", getVar("super"))),
+            traceOf(member(getVar("super"), "prop")),
+            traceOf(op("TypeOf", member(getVar("super"), "peek"))),
+            traceOf(op("TypeOf", member(getVar("super"), "hello"))),
+            traceOf(op("Equals2", getVar("super"), getVar("this"))),
+            traceOf(getVar("super")),
+          ),
+        ),
+        drop(callMethod(getVar("d"), "peek")),
+        defineFn(
+          "plainSuper",
+          [],
+          traceOf(op("TypeOf", getVar("super"))),
+          traceOf(callMethod(getVar("super"), "hello")),
+        ),
+        drop(callFunction("plainSuper")),
+        setMember(getVar("d"), "own", fnExpr([], ret(callMethod(getVar("super"), "hello")))),
+        traceOf(callMethod(getVar("d"), "own")),
+        // A method found two prototypes up, and one a getter gives: up to SWF 6
+        // its `super` is above `this`'s prototype, from SWF 7 above where it was found.
+        setMember(proto("Base"), "inh", fnExpr([], ret(callMethod(getVar("super"), "hello")))),
+        traceOf(callMethod(getVar("t3"), "inh")),
+        drop(
+          callMethod(
+            proto("Base"),
+            "addProperty",
+            lit("viaGetter"),
+            fnExpr([], ret(member(proto("Base"), "inh"))),
+            lit(null),
+          ),
+        ),
+        traceOf(callMethod(getVar("t3"), "viaGetter")),
+      ),
+      block(
+        note("-- properties"),
+        setVar("pp", initObject()),
+        traceOf(
+          callMethod(
+            getVar("pp"),
+            "addProperty",
+            lit("v"),
+            fnExpr([], ret(lit("got"))),
+            fnExpr(
+              ["x"],
+              traceOf(op("Add2", lit("set "), getVar("x"))),
+              setMember(getVar("this"), "stored", getVar("x")),
+            ),
+          ),
+        ),
+        traceOf(member(getVar("pp"), "v")),
+        setMember(getVar("pp"), "v", lit(5)),
+        traceOf(member(getVar("pp"), "stored")),
+        setVar("wo", initObject(["x", lit(1)])),
+        traceOf(
+          callMethod(
+            getVar("wo"),
+            "watch",
+            lit("x"),
+            fnExpr(
+              ["name", "old", "nu", "data"],
+              traceOf(getVar("name")),
+              traceOf(getVar("old")),
+              traceOf(getVar("nu")),
+              traceOf(getVar("data")),
+              traceOf(op("Equals2", getVar("this"), getVar("wo"))),
+              ret(op("Add2", getVar("nu"), lit(100))),
+            ),
+            lit("d"),
+          ),
+        ),
+        setMember(getVar("wo"), "x", lit(2)),
+        traceOf(member(getVar("wo"), "x")),
+        traceOf(callMethod(getVar("wo"), "watch", lit("x"), fnExpr([]))),
+        setMember(getVar("wo"), "x", lit(3)),
+        traceOf(op("TypeOf", member(getVar("wo"), "x"))),
+        setVar("rs", initObject()),
+        setMember(
+          getVar("rs"),
+          "__resolve",
+          fnExpr(["n"], ret(op("Add2", lit("resolved "), getVar("n")))),
+        ),
+        traceOf(member(getVar("rs"), "anything")),
+        traceOf(callMethod(getVar("rs"), "method", lit(1))),
+        setVar("count", lit(0)),
+        setVar("rec", initObject()),
+        drop(
+          callMethod(
+            getVar("rec"),
+            "addProperty",
+            lit("p"),
+            fnExpr(
+              [],
+              setVar("count", op("Increment", getVar("count"))),
+              ret(member(getVar("this"), "p")),
+            ),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("rec"), "p")),
+        traceOf(getVar("count")),
+        setVar("count", lit(0)),
+        setVar("ws", initObject()),
+        drop(
+          callMethod(
+            getVar("ws"),
+            "watch",
+            lit("p"),
+            fnExpr(
+              ["n", "old", "v"],
+              setVar("count", op("Increment", getVar("count"))),
+              setMember(getVar("this"), "p", op("Add2", getVar("v"), lit(1))),
+              ret(getVar("v")),
+            ),
+          ),
+        ),
+        setMember(getVar("ws"), "p", lit(0)),
+        traceOf(member(getVar("ws"), "p")),
+        traceOf(getVar("count")),
+        // A native getter that reads itself: join of an array whose element it is.
+        setVar("ja", initArray()),
+        drop(
+          callMethod(
+            getVar("ja"),
+            "addProperty",
+            lit("0"),
+            member(proto("Array"), "join"),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("ja"), "length")),
+        traceOf(callMethod(getVar("ja"), "join")),
+        traceOf(member(getVar("ja"), "0")),
+      ),
+      block(
+        note("-- constant pool"),
+        (a) => a.constantPool("pool A"),
+        defineFn("poolFn", [], traceOf(lit(constant(0)))),
+        (a) => a.constantPool("pool B"),
+        drop(callFunction("poolFn")),
+        traceOf(lit(constant(0))),
+        defineFn("poolSetter", [], (a) => a.constantPool("in body"), traceOf(lit(constant(0)))),
+        drop(callFunction("poolSetter")),
+        traceOf(lit(constant(0))),
+        drop(callFunction("poolSetter")),
+      ),
+      w.showFrame(),
+      block(
+        note("-- frame 2"),
+        traceOf(reg(1)),
+        traceOf(reg(3)),
+        drop(callFunction("poolFn")),
+        traceOf(callFunction("c1")),
+        storeReg(1, lit("across blocks")),
+      ),
+      block(traceOf(reg(1))),
+      block(
+        note("-- recursion"),
+        setVar("depth", lit(0)),
+        defineFn(
+          "deep",
+          [],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(op("Greater", getVar("depth"), lit(250)), traceOf(getVar("depth"))),
+          drop(callFunction("deep")),
+          traceOf(lit("unwound")),
+        ),
+        drop(callFunction("deep")),
+        traceOf(lit("after deep")),
+      ),
+      block(note("the block after")),
+      w.showFrame(),
+      block(note("-- frame 3"), traceOf(getVar("depth"))),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Past the recursion limit, a ScriptLimits of 40 here, Flash disables the
+// movie's actions, the rest of the frame's and every later frame's, and
+// its timeline plays on: frame 2 places a square, which frame 3 shows.
+function avm1Recursion(): Uint8Array {
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.backgroundColor(0xffffff),
+      w.tag(tags.ScriptLimits, Uint8Array.from([40, 0, 15, 0])),
+      square(1, 0xff0000, 400),
+      block(
+        setVar("depth", lit(0)),
+        defineFn(
+          "deep",
+          [],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(op("Greater", getVar("depth"), lit(35)), traceOf(getVar("depth"))),
+          drop(callFunction("deep")),
+          note("unwound"),
+        ),
+        drop(callFunction("deep")),
+        note("after"),
+      ),
+      block(note("the next block")),
+      w.showFrame(),
+      w.place({ depth: 1, character: 1, matrix: { tx: 100, ty: 100 } }),
+      block(note("frame 2")),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A ScriptLimits takes effect as its frame comes, before the frame's
+// actions, and of two in a frame the later: frame 1 recurses 100 deep
+// under Flash's default limit, frame 2 sets 80 then 40, under which 30
+// deep runs and 60 disables the actions, frame 3's too.
+function avm1ScriptLimits(): Uint8Array {
+  const limits = (depth: number) => w.tag(tags.ScriptLimits, Uint8Array.from([depth, 0, 15, 0]));
+  const recurse = (n: number) => [
+    setVar("depth", lit(0)),
+    drop(callFunction("deep", lit(n))),
+    traceOf(op("Add2", lit("reached "), getVar("depth"))),
+  ];
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.backgroundColor(0xffffff),
+      block(
+        defineFn(
+          "deep",
+          ["n"],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(
+            op("Less2", getVar("depth"), getVar("n")),
+            drop(callFunction("deep", getVar("n"))),
+          ),
+        ),
+        ...recurse(100),
+      ),
+      w.showFrame(),
+      block(note("frame 2"), ...recurse(30)),
+      limits(80),
+      limits(40),
+      block(...recurse(60), note("unreached")),
+      w.showFrame(),
+      block(note("frame 3")),
       w.showFrame(),
       w.end(),
     ],
@@ -6936,6 +7773,39 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
+  ...[5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-functions-swf${version}`,
+      swf: avm1Functions(version),
+      traced: true,
+      frames: 3,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+      // Past its recursion limit Flash runs no AVM1 action again, a later SWF's neither.
+      alone: true,
+    }),
+  ),
+  {
+    name: "avm1-recursion",
+    swf: avm1Recursion(),
+    traced: true,
+    frames: 3,
+    capture: [3],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
+  {
+    name: "avm1-script-limits",
+    swf: avm1ScriptLimits(),
+    traced: true,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
   {
     name: "avm1-movie",
     build: avm1Movie,

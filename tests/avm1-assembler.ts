@@ -50,6 +50,19 @@ export const constant = (value: number): TypedValue => ({
 });
 export const constant16 = (value: number): TypedValue => ({ type: PushType.constant16, value });
 
+/** DefineFunction2's flags: what it preloads into registers from 1, and what it leaves out. */
+export const FunctionFlag = {
+  preloadThis: 0x001,
+  suppressThis: 0x002,
+  preloadArguments: 0x004,
+  suppressArguments: 0x008,
+  preloadSuper: 0x010,
+  suppressSuper: 0x020,
+  preloadRoot: 0x040,
+  preloadParent: 0x080,
+  preloadGlobal: 0x100,
+} as const;
+
 /** The opcodes of the actions without operands, by name. */
 export const Simple = {
   End: 0x00,
@@ -200,6 +213,33 @@ export class Avm1Assembler {
       ...params.flatMap(str),
       ...u16(code.length),
     ]).raw([...code]);
+  }
+
+  /**
+   * DefineFunction2: `name` ("" for an anonymous one), its register count
+   * and flags (the FunctionFlag bits), its parameters, each with its
+   * register or 0 for a variable, and its body.
+   */
+  defineFunction2(
+    name: string,
+    registers: number,
+    flags: number,
+    params: [string, number][],
+    body: Avm1Assembler,
+  ): this {
+    const code = body.bytes();
+    return this.action(0x8e, [
+      ...str(name),
+      ...u16(params.length),
+      registers & 0xff,
+      ...u16(flags),
+      ...params.flatMap(([param, r]) => [r & 0xff, ...str(param)]),
+      ...u16(code.length),
+    ]).raw([...code]);
+  }
+
+  storeRegister(register: number): this {
+    return this.action(0x87, [register & 0xff]);
   }
 
   jump(label: string): this {

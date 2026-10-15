@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
-import { Avm1Assembler, constant, type PushValue } from "../../../avm1-assembler.ts";
+import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
 import * as w from "../../../swf-writer.ts";
 
 const codegen = await createCodegen(
@@ -220,4 +220,143 @@ test("a place whose clip actions run past its tag stops the SWF as the first of 
     lines: ["init", "init after", "2", "3", "2"],
     halted: false,
   });
+});
+
+/** `function deep() { trace(++depth); deep(); }`, called, then a trace that never comes. */
+const recursing = () =>
+  doAction((a) =>
+    a
+      .defineFunction(
+        "deep",
+        [],
+        new Avm1Assembler()
+          .push("depth", "depth")
+          .op("GetVariable")
+          .op("Increment")
+          .op("SetVariable")
+          .push("depth")
+          .op("GetVariable")
+          .trace()
+          .push(0, "deep")
+          .op("CallFunction"),
+      )
+      .push("depth", 0)
+      .op("SetVariable")
+      .push(0, "deep")
+      .op("CallFunction")
+      .push("unreached")
+      .trace(),
+  );
+
+test("past the recursion limit, a SWF's ScriptLimits, every action is disabled and the timeline plays on", async () => {
+  const limits = w.tag(65, Uint8Array.from([4, 0, 15, 0]));
+  const swf = movie(6, [[limits, recursing(), traced("next block")], [traced("2")], []]);
+  const { lines, errors, player, avm1 } = await play(swf, 3);
+
+  assert.deepEqual(lines, ["1", "2", "3"]);
+  assert.deepEqual(errors, []);
+  assert.ok(avm1.rt.disabled);
+  assert.ok(!avm1.halted);
+  assert.equal(player.root.currentFrame, 3);
+});
+
+/** `depth = 0; function deep(n) { trace(++depth); if (depth < n) deep(n); } deep(n); trace("back")`. */
+const recursingTo = (n: number) =>
+  doAction((a) =>
+    a
+      .defineFunction(
+        "deep",
+        ["n"],
+        new Avm1Assembler()
+          .push("depth", "depth")
+          .op("GetVariable")
+          .op("Increment")
+          .op("SetVariable")
+          .push("depth")
+          .op("GetVariable")
+          .trace()
+          .push("depth")
+          .op("GetVariable")
+          .push("n")
+          .op("GetVariable")
+          .op("Less2")
+          .op("Not")
+          .if("done")
+          .push("n")
+          .op("GetVariable")
+          .push(1, "deep")
+          .op("CallFunction")
+          .pop()
+          .label("done"),
+      )
+      .push("depth", 0)
+      .op("SetVariable")
+      .push(n, 1, "deep")
+      .op("CallFunction")
+      .pop()
+      .push("back")
+      .trace(),
+  );
+
+test("a ScriptLimits takes effect as its frame comes, the frame's last of two", async () => {
+  const limits = (depth: number) => w.tag(65, Uint8Array.from([depth, 0, 10, 0]));
+  const swf = movie(6, [[recursingTo(50)], [limits(9), limits(3), recursingTo(5)], [traced("3")]]);
+  const { lines, avm1 } = await play(swf, 3);
+
+  // Frame 1 recurses 50 deep under the default limit, frame 2 two deep under its own.
+  assert.equal(lines.length, 50 + 1 + 2);
+  assert.deepEqual(lines.slice(-4), ["50", "back", "1", "2"]);
+  assert.ok(avm1.rt.disabled);
+  assert.equal(avm1.rt.maxRecursion, 3);
+  assert.equal(avm1.rt.scriptTimeout, 10);
+});
+
+test("a ScriptLimits depth of 1 or 0 runs no action at all", async () => {
+  for (const depth of [0, 1]) {
+    const limits = w.tag(65, Uint8Array.from([depth, 0, 15, 0]));
+    const { lines, avm1 } = await play(movie(6, [[limits, traced("1")], [traced("2")]]), 2);
+
+    assert.deepEqual(lines, []);
+    assert.ok(avm1.rt.disabled);
+  }
+});
+
+test("a RangeError other than the stack's is an error, which disables nothing", async () => {
+  // A string doubled past the engine's longest.
+  const doubling = doAction((a) =>
+    a
+      .push("s", "s")
+      .op("SetVariable")
+      .push(0)
+      .storeRegister(0)
+      .pop()
+      .label("top")
+      .push("s", "s")
+      .op("GetVariable")
+      .push("s")
+      .op("GetVariable")
+      .op("Add2")
+      .op("SetVariable")
+      .push(register(0))
+      .op("Increment")
+      .storeRegister(0)
+      .push(40)
+      .op("Less2")
+      .if("top"),
+  );
+  const { lines, errors, avm1 } = await play(movie(6, [[doubling], [traced("2")]]), 2);
+
+  assert.equal(errors.length, 1);
+  assert.ok(errors[0] instanceof RangeError);
+  assert.ok(!avm1.rt.disabled);
+  assert.deepEqual(lines, ["2"]);
+});
+
+test("the global registers are the frame's, kept from block to block", async () => {
+  const swf = movie(6, [
+    [doAction((a) => a.push("r").storeRegister(1)), doAction((a) => a.push(register(1)).trace())],
+    [doAction((a) => a.push(register(1)).trace().stop())],
+  ]);
+
+  assert.deepEqual((await play(swf, 3)).lines, ["r", "undefined"]);
 });

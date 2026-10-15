@@ -52,6 +52,8 @@ interface FrameActions {
   actions: ActionBlock[];
   /** Where a place in the frame whose clip actions Flash cannot read stops the SWF. */
   stop: Stop | null;
+  /** The frame's last ScriptLimits: its recursion depth and script timeout, in seconds. */
+  limits: [number, number] | null;
 }
 
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
@@ -77,6 +79,8 @@ export class Avm1 {
    * object until clips have their class (docs/avm1.md, step 10).
    */
   private rootObject: avm1.Avm1Object | null = null;
+  /** The root clip, whose face `rootObject` is. */
+  private root: MovieClip | null = null;
   private readonly host: avm1.Host;
   private readonly onUncaught: (error: unknown) => void;
 
@@ -99,6 +103,7 @@ export class Avm1 {
       },
       root: () => this.rootObject ?? undefined,
       level: (level) => (level === 0 ? (this.rootObject ?? undefined) : undefined),
+      clipOf: (object) => (object === this.rootObject ? (this.root ?? undefined) : undefined),
     };
   }
 
@@ -122,7 +127,7 @@ export class Avm1 {
       const at = Math.min(frame, last);
       let actions = this.frames.get(at);
       if (!actions) {
-        actions = { inits: [], actions: [], stop: null };
+        actions = { inits: [], actions: [], stop: null, limits: null };
         this.frames.set(at, actions);
       }
 
@@ -143,12 +148,19 @@ export class Avm1 {
     }
 
     // The root's tags Flash cannot read, by frame, the earliest stop of
-    // each; a sprite's wait for clips' frames.
+    // each; a sprite's wait for clips' frames. A ScriptLimits takes effect
+    // as its frame comes, before the frame's actions, the frame's last
+    // one if it has two (adl): two u16s, the recursion depth and the
+    // script timeout in seconds.
     let frame = 1;
     for (const tag of swf.tags) {
       const events = list.corruptEvents.get(tag.offset);
       if (tag.code === tags.ShowFrame) {
         frame++;
+      } else if (tag.code === tags.ScriptLimits && tag.length >= 4) {
+        const at = tag.offset;
+        const b = swf.bytes;
+        frameOf(frame).limits = [b[at] | (b[at + 1] << 8), b[at + 2] | (b[at + 3] << 8)];
       } else if (events !== undefined) {
         const actions = frameOf(frame);
         const stop = stopOf(events);
@@ -172,7 +184,7 @@ export class Avm1 {
       this.halted = true;
     }
 
-    if (this.halted || root.currentFrame === this.ranFrame) {
+    if (this.halted || this.rt.disabled || root.currentFrame === this.ranFrame) {
       return;
     }
 
@@ -187,7 +199,13 @@ export class Avm1 {
       return;
     }
 
+    if (frame.limits !== null) {
+      [this.rt.maxRecursion, this.rt.scriptTimeout] = frame.limits;
+    }
+
+    // The frame starts with an empty stack and the global registers undefined, as Flash's does.
     this.st.length = 0;
+    this.rt.realm.registers.fill(undefined);
     for (const block of frame.inits) {
       const owner = block.owner;
       if (owner.type !== "init" || this.initialized.has(owner.sprite)) {
@@ -221,14 +239,15 @@ export class Avm1 {
   /** Run `block` with `target` as its target, starting from constant pool `pool`; the pool it leaves. */
   private run(block: ActionBlock, pool: avm1.Value[], target: MovieClip): avm1.Value[] {
     this.rootObject ??= this.rt.newObject();
+    this.root ??= target;
     const cx = this.rt.activation(this.st, pool, target, this.rootObject, this.host);
-    const code = this.blocks[block.index]?.[0];
-    if (!code) {
+    const regions = this.blocks[block.index];
+    if (!regions) {
       return pool;
     }
 
     try {
-      code(cx);
+      this.rt.run(regions, cx);
     } catch (error) {
       if (!(error instanceof avm1.Halt)) {
         this.onUncaught(error);

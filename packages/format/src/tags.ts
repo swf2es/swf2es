@@ -33,6 +33,7 @@ export const FrameLabel = 43;
 export const SoundStreamHead2 = 45;
 export const DefineMorphShape = 46;
 export const DefineFont2 = 48;
+export const ScriptLimits = 65;
 export const DoInitAction = 59;
 export const FileAttributes = 69;
 export const PlaceObject3 = 70;
