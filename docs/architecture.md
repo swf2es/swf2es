@@ -3341,6 +3341,18 @@ eye adl still projects its 2D children's bounds through the negative w,
 and `hitTestPoint(0, 0, false)` on it is true; the player gives such an
 object no bounds and no hits.
 
+Left as they are: adl composes a 2D matrix a scale or rotation setter
+makes in 16.16 fixed point (scale cut, sines and cosines rounded, so
+`rotation = 30` reads `a` 0.86602783203125 and `scaleX = 0.1` reads
+0.0999908447265625, a scale below 2^-16 nothing), in 2D as well, and it
+goes into the matrix3D as the object enters 3D; a scale set after a whole
+matrix makes all four of its numbers again. The player keeps doubles, and
+stretches a column in proportion as the corpus's `displayobject_invalid_floats`
+has Flash Player do: matching it is a change to every 2D matrix, for
+differences below 2^-16 of a scale, and shows in bounds in a turned
+parent to a twip. A hairline in a 3D object's bitmap straddles two texel
+rows where Flash's covers one, as on the stage.
+
 ### Nine-slice scaling
 
 A sprite, movie clip, button or `Shape` with a grid, its symbol's
