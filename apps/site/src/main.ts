@@ -130,6 +130,11 @@ copyLog.addEventListener("click", async () => {
 
 // --- Loading ------------------------------------------------------------
 
+/** What the report says a local file came from, and never more. */
+const LOCAL = "a local file";
+/** Local files' names, and the URLs the page gave them, which the report leaves out of the errors. */
+const localNames = new Set<string>();
+
 /** What plays, to play again or report on. */
 let current: { bytes: Uint8Array; name: string; facts: SwfFacts; base: string | null } | null =
   null;
@@ -212,7 +217,7 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // The errors go into the report, which never names a local file.
-    write("error", `${base === null ? "The SWF" : name} did not play: ${message}`);
+    write("error", `${origin === LOCAL ? "The SWF" : name} did not play: ${message}`);
     showStatus(`${name} did not play: ${message}`, true);
   }
 
@@ -224,7 +229,11 @@ async function playFile(file: File): Promise<void> {
   history.replaceState(null, "", location.pathname);
   urlInput.value = "";
   // Read here, in the browser: the file goes nowhere else.
-  await play(new Uint8Array(await file.arrayBuffer()), file.name, "a local file", null);
+  // Its own URL under the site, by its name, so that its shared objects are
+  // its own and not every local file's; nothing is there to load from it.
+  const base = new URL(`local/${encodeURIComponent(file.name)}`, document.baseURI).href;
+  localNames.add(file.name).add(encodeURIComponent(file.name)).add(base);
+  await play(new Uint8Array(await file.arrayBuffer()), file.name, LOCAL, base);
 }
 
 /** `url` resolved against the page, or null, said why, for one the page does not load. */
@@ -380,6 +389,16 @@ function renderer(): string {
   return `${gl instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1"}, ${name}`;
 }
 
+/** `text` without local files' names, longest first, so a URL goes before the name in it. */
+function scrub(text: string): string {
+  let scrubbed = text;
+  for (const name of [...localNames].sort((a, b) => b.length - a.length)) {
+    scrubbed = scrubbed.split(name).join("<a local file>");
+  }
+
+  return scrubbed;
+}
+
 /** The link is made as it is followed, with what is known then. */
 function updateReport(): void {
   report.href = reportUrl({
@@ -389,7 +408,7 @@ function updateReport(): void {
     quality: quality.value,
     scale: scale.value,
     swf: current?.facts ?? null,
-    errors: [...errors],
+    errors: errors.map(scrub),
   });
 }
 

@@ -12,8 +12,27 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withPage } from "../player/chrome.ts";
+import { compileScripts } from "../player/scripts.ts";
 import { serve } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
+
+/** A SWF's URL, sandbox and the shared object it saves its file name in, by what was there before. */
+const PROBE = `package {
+  import flash.display.Sprite;
+  import flash.net.SharedObject;
+  import flash.system.Security;
+  public class Probe extends Sprite {
+    public function Probe() {
+      var so:SharedObject = SharedObject.getLocal("probe");
+      var url:String = loaderInfo.url;
+      var before:String = so.data.owner === undefined ? "none" : so.data.owner;
+      trace("probe " + url + " " + Security.sandboxType + ", before: " + before);
+      so.data.owner = url.split("/").pop();
+      so.flush();
+      trace("probe saved");
+    }
+  }
+}`;
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -218,6 +237,50 @@ async function check(): Promise<void> {
             ).searchParams.get("body");
             assert.match(failed ?? "", /did not play/);
             assert.doesNotMatch(failed ?? "", /private-name/);
+          },
+        ],
+        [
+          "local files keep shared objects of their own, from a URL on the site",
+          async () => {
+            const abc = compileScripts([{ name: "Probe", source: PROBE }], `${out}scripts`).get(
+              "Probe",
+            ) as Uint8Array;
+            const probe = w.swf({
+              width: 100,
+              height: 100,
+              frameRate: 30,
+              frameCount: 1,
+              tags: [
+                w.fileAttributes(true),
+                w.doAbc(abc, "Probe"),
+                w.symbolClass([[0, "Probe"]]),
+                w.showFrame(),
+                w.end(),
+              ],
+            });
+            const { result } = await send<{ result: { objectId: string } }>("Runtime.evaluate", {
+              expression: "document.getElementById('file')",
+            });
+            const open = async (name: string, expected: string) => {
+              writeFileSync(`${out}${name}`, probe);
+              await value("document.getElementById('log').replaceChildren()");
+              await send("DOM.setFileInputFiles", {
+                objectId: result.objectId,
+                files: [`${out}${name}`],
+              });
+              await until(logHas("probe saved"));
+              const line = await value<string>(
+                "[...document.querySelectorAll('#log div')].map((d) => d.textContent).find((t) => t.startsWith('probe '))",
+              );
+              assert.equal(line, expected);
+            };
+            const local = `${base}local/`;
+            await open("first one.swf", `probe ${local}first%20one.swf remote, before: none`);
+            await open("second.swf", `probe ${local}second.swf remote, before: none`);
+            await open(
+              "first one.swf",
+              `probe ${local}first%20one.swf remote, before: first%20one.swf`,
+            );
           },
         ],
         [
