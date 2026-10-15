@@ -62,8 +62,9 @@ export function capabilitiesNatives(s: Scripting): avm2.Natives {
       return "color";
     }
 
+    // A browser tells a finger's screen from none, not a stylus's.
     static get touchscreenType(): string {
-      return "none";
+      return s.maxTouchPoints > 0 ? "finger" : "none";
     }
 
     static get maxLevelIDC(): string {

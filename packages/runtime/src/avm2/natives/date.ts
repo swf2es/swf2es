@@ -10,7 +10,8 @@
 // where the host's time zone says daylight saving is in effect, asked of the
 // host (here through JavaScript's Date) with the time in 32-bit seconds.
 // So no zone's history beyond its daylight saving applies, and none after
-// 2038.
+// 2038. Flash on Windows (WinPortUtils) applies the zone's rule of today
+// to every year instead, 1900 and 2050 alike; avmshell is the reference.
 //
 // The calendar, local time and parseDate are translated from avmplus'
 // core/Date.cpp, core/DateClass.cpp and VMPI/PosixPortUtils.cpp, and so subject
@@ -438,7 +439,7 @@ function dateKeyword(word: string, f: DateFields): boolean {
  * few others ("1/1/1999 13:30 PM"), by numbers and the separators before
  * and after them, and three-letter keywords; NaN for anything else.
  */
-export function parseDate(s: string): number {
+function parseDate(s: string): number {
   const f: DateFields = { year: -1, month: -1, day: -1, hour: -1, min: -1, sec: -1, zone: -1 };
   const length = s.length;
   const code = (k: number) => s.charCodeAt(k);

@@ -2,7 +2,7 @@
 // (version 19) lays them out: after the 8-byte file header and the body's
 // decompression, the frame size as a RECT, the frame rate as 8.8 fixed
 // point, the frame count, then tags to an End tag or the body's end.
-import { decompressSwf } from "./compression.js";
+import { decompressSwf, decompressSwfPrefix } from "./compression.js";
 import { End, FileAttributes, SetBackgroundColor } from "./tags.js";
 
 export type SwfCompression = "none" | "zlib" | "lzma";
@@ -190,6 +190,36 @@ export function backgroundColor(swf: Swf): number {
 
   const b = swf.bytes;
   return (b[tag.offset] << 16) | (b[tag.offset + 1] << 8) | b[tag.offset + 2];
+}
+
+/**
+ * The flags of a SWF file's FileAttributes, from the start of the file
+ * alone, as Flash Player reads them, FileAttributes being the first tag:
+ * 0 for a SWF whose first tag is another. For a host that must not
+ * decompress the whole of a SWF it does not trust, as a desktop shell
+ * choosing a local SWF's sandbox; ActionScript3 is 0x08, UseNetwork 0x01.
+ */
+export function fileAttributes(file: Uint8Array): number {
+  // The header's rect is 17 bytes at most, then the rate, count, and a long tag header.
+  const bytes = decompressSwfPrefix(file, 64);
+  try {
+    const r = new SwfReader(bytes, 8);
+    r.rect();
+    r.u16();
+    r.u16();
+    const head = r.u16();
+    if (head >> 6 !== FileAttributes) {
+      return 0;
+    }
+
+    if ((head & 0x3f) === 0x3f) {
+      r.u32();
+    }
+
+    return r.u8();
+  } catch {
+    return 0;
+  }
 }
 
 /** Whether FileAttributes marks the SWF as ActionScript 3; without the bit it is an AVM1 movie. */

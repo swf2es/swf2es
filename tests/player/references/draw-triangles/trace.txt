@@ -1,0 +1,27 @@
+overlap (x=0, y=0, w=50, h=50) (x=0, y=0, w=50, h=50) SolidFill Path(1222|0,0,40,0,0,40,0,0) EndFill SolidFill Path(1222|10,10,50,10,10,50,10,10) EndFill SolidFill Path(1222|50,50,10,50,50,10,50,50) EndFill
+culling (x=0, y=0, w=50, h=50) (x=0, y=0, w=50, h=50) SolidFill Path(1222|25,25,25,50,50,25,25,25) EndFill SolidFill Path(1222|25,0,50,0,25,25,25,0) EndFill
+lines  (x=0, y=0, w=50, h=50) SolidFill Path(1222222222122222212222222221222222) EndFill
+fill and line (x=-1, y=-1, w=52, h=52) (x=0, y=0, w=50, h=50) SolidFill Path(1222|0,0,40,0,0,40,0,0) EndFill SolidFill Path(1222|10,10,50,10,10,50,10,10) EndFill SolidFill Path(12332333233312222221233233323331222222) EndFill
+pen (x=-1, y=-1, w=52, h=52) (x=0, y=0, w=50, h=50) SolidFill Path(12333323333) EndFill SolidFill Path(1233323332331222222) EndFill SolidFill Path(12333323333) EndFill
+contour (x=-1, y=-1, w=52, h=52) (x=0, y=0, w=50, h=50)
+matrix (x=0, y=0, w=50, h=50) (x=0, y=0, w=50, h=50) BitmapFill Path(1222|0,0,50,0,50,50,0,0) EndFill BitmapFill Path(1222|0,0,50,50,0,50,0,0) EndFill
+textured (x=0, y=0, w=50, h=50) (x=0, y=0, w=50, h=50) 
+solid uvt (x=-1, y=-1, w=52, h=52) (x=0, y=0, w=50, h=50) SolidFill Path(12222|15,15,35,15,35,35,15,35,15,15) EndFill
+textured lines (x=-1, y=-1, w=52, h=52) (x=0, y=0, w=50, h=50) SolidFill Path(1233323332333122222212333233233331222222) EndFill
+null vertices no error
+odd vertices 2004 ArgumentError
+two vertices 2004 ArgumentError
+indices of two 2004 ArgumentError
+index past no error
+short uvt 2004 ArgumentError
+uvt of three no error
+bad culling 2008 ArgumentError
+path culling 2008 ArgumentError
+hit 0 5 5 true
+hit 0 45 45 true
+hit 1 5 5 false
+hit 1 40 40 false
+hit 1 40 5 true
+hit 7 25 25 true
+hit 12 25 25 true
+hit 2 1 25 true

@@ -1,10 +1,19 @@
 /**
  * Parsers for the SWF container and its tags: shapes, fonts, text, bitmaps,
- * sounds, buttons and filters, and a DoABC's bytes, which codegen parses.
+ * sounds, buttons and filters, a DoABC's bytes, which codegen parses, and
+ * the AVM1 action blocks, which it compiles.
  * The compiler and the player both use this package, so it must stay free of
  * DOM and node APIs.
  */
 
+export {
+  type ActionBlock,
+  type ActionList,
+  type ActionOwner,
+  ButtonCondition,
+  ClipEvent,
+  readActions,
+} from "./actions.js";
 export { type Bitmap, isBitmapTag, readBitmap } from "./bitmap.js";
 export {
   BUTTON_DOWN,
@@ -18,6 +27,7 @@ export {
 export {
   CompressedDataError,
   decompressSwf,
+  decompressSwfPrefix,
   deflateCompress,
   LZMA_HEADER,
   lzmaByteArrayCompress,
@@ -75,6 +85,7 @@ export {
 } from "./sound.js";
 export {
   backgroundColor,
+  fileAttributes,
   isAs3,
   type Rect,
   readSwf,

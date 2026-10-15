@@ -15,9 +15,10 @@ must give **identical output** in both modes.
 ## Commands
 
 ```sh
-git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb
+git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
+                              # vendor/pixijs (the Pixi fork the player draws with)
 pnpm install
-pnpm build       # asc → codegen.wasm, then tsc -b for all packages
+pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
@@ -45,22 +46,56 @@ pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on 
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
+node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks: the decoder
+                              # and flow never trap, and decode a block the same after others
+                              # (SWF2ES_CHECKED=1 for the checked build)
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
+SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
+                              # BitmapData's natives and filters fed odd numbers longer, or from
+                              # another seed, than pnpm test's 2000 steps from 1; a failure names
+                              # the two to reproduce it, SWF2ES_FUZZ_LOG=1 prints each step
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
                               # heap after a full collection must stay bounded, and codegen's
                               # memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT: the
-                              # player's modules for the SWF, their logs and a manifest (libraries
-                              # from tests/player/out/libraries/ by default)
+node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT:
+                              # the player's modules for the SWF, their logs and a manifest (libraries
+                              # from tests/player/out/libraries/ by default; `compile` may be left out)
+node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
+                              # ABCs after builtin and shell_toplevel (oracle/avmplus/generated/ by
+                              # default), their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js help [command]   # the commands, or one's options
 node tests/player/module-cache.ts   # the IndexedDB module cache in Chrome (part of pnpm test)
 node tests/player/precompiled.ts    # AOT modules played in Chrome, imported under a policy
                               # without 'unsafe-eval' too (part of pnpm test)
+node tests/player/resize.ts         # filters inside filters drawn while the renderer is resized
+                              # in Chrome (part of pnpm test)
+node tests/player/context-loss.ts   # a WebGL context lost and given back mid-play draws the same
+                              # in Chrome (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
+pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
+pnpm --filter @swf2es/desktop start [--trace] [file.swf]   # the desktop app (apps/desktop);
+                              # --trace prints the SWF's trace() to the terminal
+node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
+                              # socket, a drop (part of pnpm test; skipped without Electron's binary)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
                               # timeline in Chrome; keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
+node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classes, traits and
+                              # signatures; how many methods are native and how many AS3
+node tools/abc-surface/as3.ts lib.abc out-dir [package...] [--names dir]   # AS3 skeletons of
+                              # an ABC's public API, parameter names from sources such as Ruffle's
+pnpm as3                      # the AS3 libraries under as3/, compiled by ASC 1 in the oracle's
+                              # image: as3:playerglobal, the player's playerglobal held to Flash
+                              # Player's API and into playerglobal-library.ts; as3:air, the AIR
+                              # library into air-library.ts
+pnpm as3:format               # format them with Apache Royale's asformat, in its default style
+                              # (ASFORMAT names its script if it is not on the PATH)
+SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
+                              # playerglobal in place of the player's own (tests/player/libraries.ts)
+node tools/pixijs.ts [--force]   # build vendor/pixijs's lib/ and the bundles swf2es loads (pnpm
+                              # build's first step; skipped while the fork is unchanged)
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
@@ -75,10 +110,11 @@ calling a change done; CI runs the same steps.
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
 - **Package boundaries.** `format` depends on nothing, `codegen` and
-  `runtime` on `format`, `cli` on `format` and `codegen`, `player` on `format`,
-  `codegen` and `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
+  `runtime` on `format`, `cli` and `player` on `format`, `codegen` and
+  `runtime`, `player-hosts` on `player`, `web` on `codegen`, `format`,
   `player` and `player-hosts`. `codegen` never imports the runtime implementation.
-  `format`, `codegen` and `runtime` load no DOM or node types.
+  `format`, `codegen` and `runtime` load no DOM or node types. Apps
+  (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.
 - **The Tamarin baseline is avmshell's behaviour**, failures included:
@@ -96,6 +132,10 @@ calling a change done; CI runs the same steps.
   its own that carry the MPL-2.0 header; nothing from avmplus goes into an
   Apache-2.0 file, so the MPL's file-level copyleft never reaches the rest.
 - **Only redistributable SWFs** go into the repository.
+- **PixiJS is the fork in `vendor/pixijs`**, pinned to its `swf2es` branch
+  (its `SWF2ES.md` has the plan). Change Pixi there, in commits of its own
+  on `swf2es`, which is never rebased, then move the submodule. The
+  fork's commits carry no attribution trailers either.
 
 ## Code style
 

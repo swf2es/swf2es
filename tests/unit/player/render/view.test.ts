@@ -15,7 +15,6 @@ import {
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import type { Player } from "../../../../packages/player/dist/player.js";
-import { ColorBatcher } from "../../../../packages/player/dist/render/color.js";
 import { PixiView } from "../../../../packages/player/dist/render/view.js";
 
 setFlagsFromString("--expose-gc");
@@ -135,22 +134,29 @@ test("a timeline mask's range goes in a container it masks, a scroll clips the r
 });
 
 test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
-  // Pixi as the player loads it, its ES module, which render/color.ts patched.
+  const { batcherNameFor } = await import("../../../../packages/player/dist/render/color.js");
   const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
   const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  const { BatchableSprite } = (await import(entry)) as {
+  const { BatchableMesh, BatchableSprite } = (await import(entry)) as {
+    BatchableMesh: new () => { batcherName: string; renderable: unknown };
     BatchableSprite: new () => { batcherName: string; renderable: unknown };
   };
+  type Element = Parameters<typeof batcherNameFor>[0];
   const sprite = new BatchableSprite();
-  assert.equal(sprite.batcherName, "default");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "default");
   sprite.batcherName = "host-custom";
-  assert.equal(sprite.batcherName, "host-custom");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "host-custom");
 
   const ct = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 10, gAdd: 0, bAdd: 0, aAdd: 0 };
   sprite.renderable = { flashColor: ct };
-  assert.equal(sprite.batcherName, "flash-color");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "flash-color");
   sprite.renderable = { flashColor: null };
-  assert.equal(sprite.batcherName, "host-custom");
+  assert.equal(batcherNameFor(sprite as unknown as Element), "host-custom");
+
+  // A mesh, which the colour batcher does not pack, keeps its own.
+  const mesh = new BatchableMesh();
+  mesh.renderable = { flashColor: ct };
+  assert.equal(batcherNameFor(mesh as unknown as Element), "default");
 });
 
 test("nested render groups keep their hierarchy while parked and release idle batches", async () => {
@@ -285,20 +291,36 @@ test("one-off groups give back the oldest batches past the parked limit", () => 
 });
 
 /** A batch pipe that gives each instruction set it builds a default and a colour batcher. */
+/** Pixi's module, as the player loads it. */
+const pixiEntry = pathToFileURL(
+  createRequire(new URL("../../../../packages/player/package.json", import.meta.url))
+    .resolve("pixi.js")
+    .replace(/\.js$/, ".mjs"),
+).href;
+const { BatcherPipe } = (await import(pixiEntry)) as { BatcherPipe: { prototype: object } };
+
+/**
+ * Pixi's batch pipe as the player uses it, its batchers stood in for: kept
+ * by instruction set, taken out (takeBatchers, Pixi's own), and given to a
+ * new set as it builds (batchersFor), or made.
+ */
 function batchPipe() {
   type Batchers = Record<string, { name: string; destroy(): void }>;
   const destroyed: string[] = [];
-  const pipe = {
+  const pipe = Object.assign(Object.create(BatcherPipe.prototype) as object, {
     _batchersByInstructionSet: {} as Record<number, Batchers | undefined>,
+    batchersFor: null as ((set: { uid: number }) => Batchers | undefined) | null,
     buildStart(set: { uid: number }) {
-      this._batchersByInstructionSet[set.uid] ??= Object.fromEntries(
-        ["default", "flash-color"].map((name) => [
-          name,
-          { name, destroy: () => destroyed.push(name) },
-        ]),
-      );
+      this._batchersByInstructionSet[set.uid] ??=
+        this.batchersFor?.(set) ??
+        Object.fromEntries(
+          ["default", "flash-color"].map((name) => [
+            name,
+            { name, destroy: () => destroyed.push(name) },
+          ]),
+        );
     },
-  };
+  });
   const renderer = {
     ...standIn([]).renderer,
     renderPipes: { batch: pipe },
@@ -384,7 +406,6 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
   }
 
   // Masked, each art gives up its group: 16 keep their batchers, the 17th's are destroyed.
-  const unwrapped = pipe.buildStart;
   for (const [index, art] of arts.entries()) {
     art.setMask(masks[index]);
   }
@@ -395,8 +416,6 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
     false,
   );
   assert.deepEqual(destroyed.sort(), ["default", "flash-color"]);
-  const wrapped = pipe.buildStart;
-  assert.notEqual(wrapped, unwrapped);
 
   // The panels, grouped now, take the 16 records whole, and the 17th builds anew.
   const taken = new Set<unknown>();
@@ -415,7 +434,7 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
 
   assert.equal(taken.size, 16);
 
-  // Given back again, the pipe keeps the one wrapper.
+  // Given back again, and taken again.
   for (const art of arts) {
     art.setMask(null);
   }
@@ -435,7 +454,6 @@ test("given-back batchers go to groups a view makes, up to 16 groups' worth, eac
   }
 
   view.prepare(root);
-  assert.equal(pipe.buildStart, wrapped);
   assert.equal(destroyed.length, 4);
 
   // A root rendered once, though in a group Pixi pooled from one a view made, builds anew.
@@ -471,33 +489,6 @@ test("a nested group regroups under its parent's group after the branch comes ba
   view.prepare(root);
   assert.equal(view.stage.children[0].children[1], outer);
   assert.equal(outer.children[1], inner);
-});
-
-test("a colour batcher gives back a past geometry peak after many smaller builds", () => {
-  // Shader construction needs a browser; the batcher lifecycle itself does not.
-  const batcher = Object.create(ColorBatcher.prototype) as ColorBatcher;
-  let destroyed = 0;
-  const largeGeometry = { destroy: () => destroyed++ };
-  Object.assign(batcher, {
-    attributeBuffer: { size: 8 << 20, destroy: () => {} },
-    indexBuffer: new Uint32Array(1 << 20),
-    geometry: largeGeometry,
-    batches: [],
-    batchIndex: 0,
-    _elements: [],
-    underusedBuilds: 0,
-  });
-
-  for (let frame = 0; frame < 120; frame++) {
-    batcher.attributeSize = 1000;
-    batcher.indexSize = 1000;
-    batcher.begin();
-  }
-
-  assert.ok(batcher.attributeBuffer.size < 8 << 20);
-  assert.ok(batcher.indexBuffer.byteLength < 4 << 20);
-  assert.notEqual(batcher.geometry, largeGeometry);
-  assert.equal(destroyed, 1);
 });
 
 test("Pixi pointer delivery scales to SWF coordinates and stops on unbind", () => {
@@ -594,16 +585,17 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   >[0];
   const view = new PixiView(renderer);
   const calls: string[] = [];
-  const player = {
-    width: 100,
-    height: 100,
-    pointer: {
-      post: (p: { x: number }) => calls.push(`post ${p.x}`),
-      flush: () => calls.push("flush"),
-      handle: (type: string, p: { x: number }) => calls.push(`${type} ${p.x}`),
-      cursor: () => "default",
+  const pointer = {
+    captured: false,
+    post: (p: { x: number }) => calls.push(`post ${p.x}`),
+    flush: () => calls.push("flush"),
+    handle: (type: string, p: { x: number }) => {
+      calls.push(`${type} ${p.x}`);
+      pointer.captured &&= type !== "up";
     },
-  } as unknown as Player;
+    cursor: () => "default",
+  };
+  const player = { width: 100, height: 100, pointer } as unknown as Player;
   const frames: (() => void)[] = [];
   const g = globalThis as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown };
   g.requestAnimationFrame = (f: () => void) => frames.push(f);
@@ -613,22 +605,111 @@ test("Pixi pointer moves are posted, flushed by a frame of their own where nothi
   try {
     const unbind = view.bindPointer(player);
     const at = (x: number) => ({ global: { x, y: 0 }, button: 0, buttons: 0 }) as never;
-    view.stage.emit("pointermove", at(1));
-    view.stage.emit("pointermove", at(2));
+    view.stage.emit("globalpointermove", at(1));
+    view.stage.emit("globalpointermove", at(2));
     view.stage.emit("pointerdown", at(3));
     assert.deepEqual(calls, ["post 1", "post 2", "down 3"]);
     assert.equal(frames.length, 1);
     frames[0]();
     assert.deepEqual(calls.slice(3), ["flush"]);
 
-    view.stage.emit("pointermove", at(4));
-    unbind();
+    // A move off the canvas is the player's only while it holds the mouse,
+    // and a release off it is a release, then, at the next move off it, the
+    // leave the press held back, once.
+    view.stage.emit("globalpointermove", at(150));
+    pointer.captured = true;
+    view.stage.emit("globalpointermove", at(160));
+    view.stage.emit("pointerupoutside", at(170));
+    view.stage.emit("globalpointermove", at(180));
+    view.stage.emit("globalpointermove", at(190));
+    assert.deepEqual(calls.slice(4), ["post 160", "up 170", "leave 180"]);
+    // A release outside that held nothing leaves nothing: the leave came as the pointer left.
+    view.stage.emit("pointerupoutside", at(170));
+    view.stage.emit("globalpointermove", at(180));
+    assert.deepEqual(calls.slice(7), ["up 170"]);
     frames[1]();
-    assert.deepEqual(calls.slice(4), ["post 4", "flush"]);
+
+    view.stage.emit("globalpointermove", at(4));
+    unbind();
+    frames[2]();
+    assert.deepEqual(calls.slice(8), ["flush", "post 4", "flush"]);
   } finally {
     delete g.requestAnimationFrame;
     delete g.cancelAnimationFrame;
   }
+});
+
+test("Pixi touch pointers go to the player's touches, the mouse's alone to its pointer", () => {
+  const listeners = new Map<string, (e: unknown) => void>();
+  const canvas = {
+    style: { cursor: "" },
+    addEventListener: (type: string, f: (e: unknown) => void) => listeners.set(type, f),
+    removeEventListener: (type: string) => listeners.delete(type),
+  };
+  const renderer = {
+    screen: { width: 100, height: 100 },
+    canvas,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const calls: string[] = [];
+  const player = {
+    width: 200,
+    height: 200,
+    pointer: {
+      post: () => {},
+      flush: () => {},
+      handle: (type: string, p: { x: number }) => calls.push(`mouse ${type} ${p.x}`),
+      cursor: () => "default",
+    },
+    touch: {
+      post: () => {},
+      flush: () => {},
+      handle: (type: string, t: { x: number; id: number; primary: boolean; width: number }) =>
+        calls.push(`touch ${type} ${t.x} ${t.id} ${t.primary} ${t.width}`),
+    },
+  } as unknown as Player;
+  const unbind = view.bindPointer(player);
+  const at = (x: number, pointerType: string, pointerId = 1, isPrimary = true) =>
+    ({
+      global: { x, y: 0 },
+      button: 0,
+      buttons: 0,
+      pointerType,
+      pointerId,
+      isPrimary,
+      width: 3,
+      height: 3,
+      pressure: 0.5,
+    }) as never;
+  view.stage.emit("pointerdown", at(1, "touch"));
+  view.stage.emit("pointerdown", at(2, "touch", 2, false));
+  view.stage.emit("globalpointermove", at(3, "touch"));
+  view.stage.emit("pointerup", at(4, "touch"));
+  view.stage.emit("pointerupoutside", at(5, "touch", 2, false));
+  // A finger lifted leaves the canvas; the mouse it moved stays where it was.
+  view.stage.emit("pointerleave", at(5, "touch"));
+  view.stage.emit("pointerdown", at(6, "mouse"));
+  view.stage.emit("pointerdown", at(7, "pen"));
+  // A cancel ends a touch where it last was, wherever the browser says it is.
+  view.stage.emit("pointerdown", at(8, "touch", 3));
+  const cancel = listeners.get("pointercancel");
+  assert.ok(cancel);
+  cancel({ pointerType: "touch", pointerId: 3, clientX: 999, clientY: 999, timeStamp: 1 });
+  cancel({ pointerType: "touch", pointerId: 3, clientX: 999, clientY: 999, timeStamp: 2 });
+  unbind();
+  assert.equal(listeners.has("pointercancel"), false);
+  // Stage units: the stage is twice the screen, so are the contact's width and the points.
+  assert.deepEqual(calls, [
+    "touch begin 2 1 true 6",
+    "touch begin 4 2 false 6",
+    "touch move 6 1 true 6",
+    "touch end 8 1 true 6",
+    "touch end 10 2 false 6",
+    "mouse down 12",
+    "mouse down 14",
+    "touch begin 16 3 true 6",
+    "touch cancel 16 3 true 6",
+  ]);
 });
 
 test("Pixi pointer positions are taken within the box CSS object-fit shows the canvas in", () => {
@@ -1480,6 +1561,93 @@ test("filters blur, move and pad in pixels of the stage however far a host zooms
   }
 });
 
+test("a filtered object's colour colours its chain's output, not what is in it", async () => {
+  // adl colours a filtered object's bitmap, glow and all: what is in it is drawn as though nothing
+  // above it were coloured (the `blend-filtered-alpha` case).
+  const { ShapeObject, TRANSFORM } = await import(
+    "../../../../packages/player/dist/display/display.js"
+  );
+  const { filterDefaults } = await import("../../../../packages/player/dist/display/filters.js");
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = 1;
+    const view = new PixiView(renderer);
+    const root = new Container();
+    const ct = (aMul: number, rAdd: number) => ({
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul,
+      rAdd,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    });
+    const outer = new Container();
+    outer.colorTransform = ct(0.5, 0);
+    const glowing = new Container();
+    glowing.colorTransform = ct(0.8, 40);
+    glowing.filters = [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    const shape = new ShapeObject(await outlinedSquare());
+    shape.colorTransform = ct(1, 20);
+    glowing.placeAtDepth(shape, 1);
+    outer.placeAtDepth(glowing, 1);
+    root.placeAtDepth(outer, 1);
+    view.prepare(root);
+
+    type Node = {
+      alpha: number;
+      renderable: boolean;
+      colorRoot: boolean;
+      filters: { resources: { colorUniforms: { uniforms: { uMul: number[]; uAdd: number[] } } } }[];
+      children: Node[];
+      flashColor?: { aMul: number; rAdd: number } | null;
+    };
+    const outerContainer = view.stage.children[0].children[1] as unknown as Node;
+    const glowingContainer = outerContainer.children[1];
+    assert.equal(outerContainer.colorRoot, false);
+    assert.equal(outerContainer.alpha, 0.5);
+    assert.equal(glowingContainer.colorRoot, true);
+    assert.equal(glowingContainer.alpha, 1);
+    // The chain takes the colour from the stage down: the parent's alpha and its own.
+    const uniforms = glowingContainer.filters[0].resources.colorUniforms.uniforms;
+    assert.equal(uniforms.uMul[3], Math.fround(0.4));
+    assert.equal(uniforms.uAdd[0], Math.fround(40 / 255));
+    // What is in it takes its own alone.
+    const art = glowingContainer.children[1].children[0].children;
+    assert.ok(art.length > 0);
+    assert.ok(art.every((g) => g.flashColor?.rAdd === 20 && g.flashColor.aMul === 1));
+
+    // Faded further, the chain's colour changes; what is in it does not.
+    outer.colorTransform = ct(0.25, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(uniforms.uMul[3], Math.fround(0.2));
+    assert.ok(art.every((g) => g.flashColor?.rAdd === 20 && g.flashColor.aMul === 1));
+    assert.equal(glowingContainer.renderable, true);
+
+    // Faded out, it is not drawn and its filters do not run, as Pixi skips an alpha of 0; faded
+    // in again, it is.
+    outer.colorTransform = ct(0, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(glowingContainer.renderable, false);
+    outer.colorTransform = ct(0.5, 0);
+    outer.invalidate(TRANSFORM);
+    view.prepare(root);
+    assert.equal(glowingContainer.renderable, true);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
 test("a tween's lines go once its morph drops their blend, not idle for a ratio never drawn again", async () => {
   const { ShapeObject, CONTENT } = await import(
     "../../../../packages/player/dist/display/display.js"
@@ -2111,187 +2279,6 @@ test("of many objects off the list at once, only the latest 1024 are kept whole"
   assert.notEqual(fills[1099].parent, null);
 });
 
-test("a blend's copy of what is behind it is held to the target and the texture, and clears nothing", async () => {
-  // Loaded with the view, it patches the copy for every renderer.
-  await import("../../../../packages/player/dist/render/blend.js");
-  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
-  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  const { RenderTargetSystem } = (await import(entry)) as {
-    RenderTargetSystem: {
-      prototype: { copyToTexture(this: unknown, ...args: unknown[]): unknown };
-    };
-  };
-  type Copy = [number, number, number, number, number, number];
-  // A target of 893×150 pixels and a back texture of 256×128.
-  const copy = (from: [number, number], size: [number, number], to: [number, number] = [0, 0]) => {
-    const copies: Copy[] = [];
-    const clears: unknown[] = [];
-    const system = {
-      getRenderTarget: () => ({ pixelWidth: 893, pixelHeight: 150 }),
-      adaptor: {
-        copyToTexture: (
-          _source: unknown,
-          _destination: unknown,
-          o: { x: number; y: number },
-          s: { width: number; height: number },
-          d: { x: number; y: number },
-        ) => copies.push([o.x, o.y, s.width, s.height, d.x, d.y]),
-      },
-      push: (options: { clearColor: unknown }) => clears.push(options.clearColor),
-      pop: () => {},
-    };
-    const destination = { source: { pixelWidth: 256, pixelHeight: 128 } };
-    RenderTargetSystem.prototype.copyToTexture.call(
-      system,
-      {},
-      destination,
-      { x: from[0], y: from[1] },
-      { width: size[0], height: size[1] },
-      { x: to[0], y: to[1] },
-    );
-    return { copies, clears };
-  };
-
-  // Inside: copied as asked, nothing cleared.
-  assert.deepEqual(copy([10, 20], [100, 50]), { copies: [[10, 20, 100, 50, 0, 0]], clears: [] });
-  // A hair wider and taller than the texture: held to it, and nothing missed.
-  assert.deepEqual(copy([10, 20], [257, 129]), { copies: [[10, 20, 256, 128, 0, 0]], clears: [] });
-  // Past the top-left: what the target has goes where it belongs, the rest left as it is.
-  assert.deepEqual(copy([-4, -6], [100, 50]), {
-    copies: [[0, 0, 96, 44, 4, 6]],
-    clears: [],
-  });
-  // Past the bottom-right: the copy stops at the target's edge.
-  assert.deepEqual(copy([850, 120], [100, 50]), {
-    copies: [[850, 120, 43, 30, 0, 0]],
-    clears: [],
-  });
-  // Wholly beyond, which Pixi's own clamp left as a width of -1 or a height
-  // of -3 that GL refused: no copy at all.
-  assert.deepEqual(copy([894, 150], [10, 75]), { copies: [], clears: [] });
-  assert.deepEqual(copy([205, -4], [174, 1]), { copies: [], clears: [] });
-});
-
-/** Pixi's bounds, as far as these tests use them. */
-interface PixiBounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-  clear(): void;
-  addFrame(x0: number, y0: number, x1: number, y1: number): void;
-}
-
-/** Pixi's own module, as the player loads it, with the player's patches to it. */
-async function patchedPixi(): Promise<{
-  Bounds: new (minX?: number, minY?: number, maxX?: number, maxY?: number) => PixiBounds;
-  FilterEffect: new () => { filters: unknown };
-  FilterSystem: { prototype: unknown };
-}> {
-  await import("../../../../packages/player/dist/render/blend.js");
-  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
-  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  return import(entry);
-}
-
-test("a filter's region lies on its texture's texels at a resolution that is no whole number", async () => {
-  const { Bounds, FilterSystem } = await patchedPixi();
-  const system = FilterSystem.prototype as unknown as {
-    _calculateFilterBounds(this: unknown, data: unknown, ...rest: unknown[]): void;
-  };
-  const r = 1.5;
-  const data = {
-    bounds: new Bounds(10.3, 20.7, 50.2, 60.1),
-    filters: [
-      {
-        enabled: true,
-        resolution: "inherit",
-        padding: 3,
-        antialias: "off",
-        clipToViewport: false,
-        compatibleRenderers: 1,
-        blendRequired: false,
-      },
-    ],
-    skip: false,
-    resolution: 0,
-  };
-  const stub = { renderer: { type: 1, backBuffer: { useBackBuffer: true } } };
-  system._calculateFilterBounds.call(stub, data, { width: 1000, height: 1000 }, false, r, 1);
-
-  // Pixi put it on the texels, then padded it by 3 pixels, 4.5 texels:
-  // half a texel off them. It is put on them again, grown by the half.
-  const { minX, minY, maxX, maxY } = data.bounds;
-  assert.deepEqual(
-    [minX, minY, maxX, maxY].map((v) => Math.round(v * r * 1e6) / 1e6),
-    [10, 26, 81, 96],
-  );
-});
-
-test("a blend's copy of what is behind it starts at the texel its region does", async () => {
-  const { Bounds, FilterSystem } = await patchedPixi();
-  const system = FilterSystem.prototype as unknown as {
-    getBackTexture(this: unknown, surface: unknown, bounds: unknown, previous?: unknown): unknown;
-  };
-  const r = 1.6228571428571428;
-  const copies: number[][] = [];
-  const stub = {
-    renderer: {
-      renderTarget: {
-        copyToTexture: (
-          _source: unknown,
-          _destination: unknown,
-          o: { x: number; y: number },
-          s: { width: number; height: number },
-        ) => copies.push([o.x, o.y, s.width, s.height]),
-      },
-    },
-  };
-  const surface = { colorTexture: { source: { resolution: r } } };
-
-  // A blend in a layer, its region 18 texels left of and 3 above the
-  // layer's, a hair short of whole: Pixi's floor took 19 and 4, and the
-  // blend read, along its region's top and left, texels never copied.
-  const layer = new Bounds(531 / r, 140 / r, 600 / r, 200 / r);
-  const blend = new Bounds(513 / r - 1e-12, 137 / r - 1e-12, 560 / r, 170 / r);
-  system.getBackTexture.call(stub, surface, blend, layer);
-  assert.deepEqual(copies, [[-18, -3, 47, 33]]);
-});
-
-test("a layer's region holds its filtered children's padding, but not its own", async () => {
-  const { Bounds, FilterEffect, FilterSystem } = await patchedPixi();
-  const system = FilterSystem.prototype as unknown as {
-    _calculateFilterArea(this: unknown, instruction: unknown, bounds: unknown): void;
-  };
-  type Padded = { filters: unknown; addBounds(b: unknown, skip: boolean): void };
-  const effect = (...paddings: number[]) => {
-    const e = new FilterEffect();
-    // The second filter disabled.
-    e.filters = paddings.map((padding, i) => ({ enabled: i !== 1, padding }));
-    return e as Padded;
-  };
-  const own = effect(7);
-  const child = effect(4, 10, 2.5);
-  // Measured as Pixi measures: the shapes, then the effects, the child's and the object's own.
-  const container = {
-    parentRenderGroup: {},
-    getFastGlobalBounds(_layers: boolean, bounds: PixiBounds) {
-      bounds.clear();
-      bounds.addFrame(10, 20, 30, 40);
-      child.addBounds(bounds, true);
-      own.addBounds(bounds, true);
-      return bounds;
-    },
-  };
-  const bounds = new Bounds();
-  system._calculateFilterArea.call({}, { container, filterEffect: own }, bounds);
-  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [4, 14, 36, 46]);
-
-  // Measured for anything else, its own is padded too.
-  container.getFastGlobalBounds(true, bounds);
-  assert.deepEqual([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], [-3, 7, 43, 53]);
-});
-
 test("large branches keep their own instructions as they shrink, without grouping their wrappers", () => {
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();
@@ -2475,7 +2462,9 @@ test("a shape's lines share a context through every turn and mirror of one stret
   assert.equal(view.counts.strokeContexts, 5);
   assert.ok(lines(7).instructions.length > 0);
 
-  // Each one's lines reach the stage through a turn or a mirror alone: the stroke is not stretched.
+  // Each one's lines reach the stage through a turn or a mirror alone, but for the grid it was
+  // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/128 or less:
+  // the stroke is not stretched.
   shapes.forEach((shape, i) => {
     const m = shape.matrix;
     // Pixi works its local transform out of its scale, turn and skew as it renders.
@@ -2492,15 +2481,15 @@ test("a shape's lines share a context through every turn and mirror of one stret
     }
 
     assert.ok(
-      Math.abs(Math.hypot(w[0], w[1]) - 1) < 1e-3,
+      Math.abs(Math.hypot(w[0], w[1]) - 1) < 0.01,
       `shape ${i}: column 1 is ${w[0]},${w[1]}`,
     );
     assert.ok(
-      Math.abs(Math.hypot(w[2], w[3]) - 1) < 1e-3,
+      Math.abs(Math.hypot(w[2], w[3]) - 1) < 0.01,
       `shape ${i}: column 2 is ${w[2]},${w[3]}`,
     );
     assert.ok(
-      Math.abs(w[0] * w[2] + w[1] * w[3]) < 1e-3,
+      Math.abs(w[0] * w[2] + w[1] * w[3]) < 0.02,
       `shape ${i}: columns not at right angles`,
     );
   });
@@ -2524,6 +2513,71 @@ test("a line scaled one way alone keeps its lines for each angle", async () => {
   view.prepare(root);
   // Its width reads one row of the transform, which the turn changes.
   assert.equal(view.counts.strokeContexts, 2);
+});
+
+test("a shape that pulses a little shares its lines between the frames of the pulse", async () => {
+  // A character that breathes scales a few percent on every frame: each
+  // frame's stretch was its own, its lines tessellated again on every
+  // frame of every loop. Settled on a grid, its frames share a few.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const shape = new ShapeObject(character);
+  root.placeAtDepth(shape, 1);
+  type Lines = {
+    context: unknown;
+    localTransform: { a: number; b: number; c: number; d: number };
+    updateLocalTransform(): void;
+  };
+  const strokes = () =>
+    view.stage.children[0].children[1].children[0].children[1] as unknown as Lines;
+  for (let f = 0; f < 48; f++) {
+    const s = 1 + 0.02 * Math.sin((2 * Math.PI * f) / 48);
+    const turn = 0.3 * Math.sin((2 * Math.PI * f) / 24);
+    shape.setMatrix({
+      a: s * Math.cos(turn),
+      b: s * Math.sin(turn),
+      c: -s * 0.99 * Math.sin(turn),
+      d: s * 0.99 * Math.cos(turn),
+      tx: 0,
+      ty: 0,
+    });
+    view.prepare(root);
+    // Its 2 pixel lines, under the stretch's inverse, reach the stage within a few hundredths of
+    // a pixel of their width: their path is the shape's exactly.
+    const lines = strokes();
+    lines.updateLocalTransform();
+    const l = lines.localTransform;
+    const m = shape.matrix;
+    const column = Math.hypot(m.a * l.a + m.c * l.b, m.b * l.a + m.d * l.b);
+    assert.ok(Math.abs(column - 1) < 0.02, `frame ${f}: column 1 is ${column} long`);
+  }
+
+  // 48 frames of a pulse of 2% and a squash of 1%: a few stretches.
+  assert.ok(view.counts.strokeContexts <= 6, `${view.counts.strokeContexts} contexts`);
+});
+
+test("a wide line settles on a finer grid, and one too wide on none", async () => {
+  const { settledStretch } = await import("../../../../packages/player/dist/render/strokes.js");
+  const pulse: [number, number, number, number] = [1.013, 0.002, 0.002, 1.007];
+  // A hairline moves to a grid of 64ths of its logarithm.
+  const hair = settledStretch(pulse, 1, 1);
+  assert.notDeepEqual(hair, pulse);
+  // Its lines' edges, half a pixel out, stand where the pulse's put them within a fiftieth.
+  const det = hair[0] * hair[3] - hair[1] * hair[2];
+  const e0 = (pulse[0] * hair[3] - pulse[2] * hair[1]) / det;
+  assert.ok(Math.abs(e0 - 1) * 0.5 < 0.02);
+  // A line of 20 pixels needs a grid 20 times finer, which a near pulse may still reach.
+  const wide = settledStretch(pulse, 400, 1);
+  assert.ok(Math.abs(wide[0] - pulse[0]) < Math.abs(hair[0] - pulse[0]) || wide[0] === pulse[0]);
+  // One of 2000 pixels is its own stretch.
+  assert.deepEqual(settledStretch(pulse, 40000, 1), pulse);
+  // Stretches a step apart on the grid's scale settle alike.
+  assert.deepEqual(
+    settledStretch([1.0101, 0, 0, 1.0101], 1, 1),
+    settledStretch([1.0102, 0, 0, 1.0102], 1, 1),
+  );
 });
 
 test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", async () => {
@@ -2608,62 +2662,6 @@ test("a shape drawn anew with its fills laid out alike keeps its Graphics, in pl
   });
   assert.notEqual(art()[0].context, fills);
   assert.equal(before[0].destroyed, false);
-});
-
-test("a Graphics whose context is swapped gets its group rebuilt unless drawn alone before and after", async () => {
-  // Pixi rebuilt a group for every swap of a context drawn alone, as each
-  // shape's are; the player asks for a rebuild only where the last build
-  // batched the Graphics, or where its new context is batched. One the
-  // last build batched into no batches, an empty context, has no
-  // instruction of its own until a rebuild gives it one.
-  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
-  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
-  type Context = { batchMode: string; rect(...a: number[]): { fill(color: number): Context } };
-  type Graphic = { context: Context };
-  type Pipe = {
-    addRenderable(graphics: Graphic, instructions: never): void;
-    validateRenderable(graphics: Graphic): boolean;
-  };
-  const pixi = (await import(entry)) as {
-    GraphicsContextSystem: { prototype: object };
-    GraphicsPipe: { prototype: object };
-    GraphicsContext: new () => Context;
-    Graphics: new (context: Context) => Graphic;
-  };
-  type Mutable = Record<string, unknown>;
-  const renderer: Mutable = {
-    uid: 7,
-    gc: { addCollection() {}, addResource() {}, removeResource() {} },
-    runners: { contextChange: { add() {} } },
-  };
-  const contexts = Object.create(pixi.GraphicsContextSystem.prototype) as Mutable;
-  contexts._renderer = renderer;
-  contexts._managedContexts = { add() {} };
-  renderer.graphicsContext = contexts;
-  const added: unknown[] = [];
-  renderer.renderPipes = { batch: { break() {}, addToBatch: (b: unknown) => added.push(b) } };
-  const pipe = Object.create(pixi.GraphicsPipe.prototype) as Pipe;
-  Object.assign(pipe, { renderer, _managedGraphics: { add() {} } });
-  const instructions = { add: (x: unknown) => added.push(x) } as never;
-  const alone = () => {
-    const context = new pixi.GraphicsContext();
-    context.batchMode = "no-batch";
-    return context.rect(0, 0, 10, 10).fill(0xff0000);
-  };
-
-  // Drawn alone, then swapped for another drawn alone: no rebuild.
-  const graphics = new pixi.Graphics(alone());
-  pipe.addRenderable(graphics, instructions);
-  graphics.context = alone();
-  assert.equal(pipe.validateRenderable(graphics), false);
-
-  // Batched into nothing, empty: the next swap rebuilds, else it would have no instruction.
-  const empty = new pixi.Graphics(new pixi.GraphicsContext());
-  added.length = 0;
-  pipe.addRenderable(empty, instructions);
-  assert.equal(added.length, 0);
-  empty.context = alone();
-  assert.equal(pipe.validateRenderable(empty), true);
 });
 
 test("a shape swapped for one with fills and lines laid out alike keeps its Graphics, and its lines", async () => {
@@ -2779,6 +2777,137 @@ test("Graphics a settled group batched draw alone again in a group that has not 
   });
 });
 
+test("a large shape under a colour transform draws alone until its group settles, or a renderer is not WebGL", async () => {
+  // A batched copy is packed again at each rebuild and each change of the
+  // transform, every frame of a creature fading out; drawn alone, a draw
+  // takes the transform in a row of the table or in uniforms instead.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const { MOVE, LINE } = await import("../../../../packages/player/dist/display/shapes.js");
+  const { ColorAloneSystem } = await import("../../../../packages/player/dist/render/color.js");
+  const disc: number[] = [MOVE, 200, 0];
+  for (let k = 1; k <= 240; k++) {
+    const a = (2 * Math.PI * k) / 240;
+    disc.push(LINE, Math.round(200 * Math.cos(a)), Math.round(200 * Math.sin(a)));
+  }
+
+  const large = (await outlinedSquare()) as unknown as {
+    layers: { fills: { contours: number[][] }[]; strokes: { paths: number[][] }[] }[];
+  };
+  large.layers[0].fills[0].contours = [disc];
+  large.layers[0].strokes[0].paths = [disc];
+  const small = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const shapes = [
+    new ShapeObject(large as unknown as ConstructorParameters<typeof ShapeObject>[0]),
+    new ShapeObject(small),
+  ];
+  for (const [i, shape] of shapes.entries()) {
+    shape.colorTransform = {
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul: 1,
+      rAdd: 40,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    };
+    root.placeAtDepth(shape, i + 1);
+  }
+
+  type Drawn = { context: { batchMode: string }; shared: unknown; settled?: boolean };
+  type Group = { $builtAt?: number; $settled?: boolean };
+  const art = (k: number) =>
+    [...view.stage.children[0].children[1 + k].children[0].children] as unknown as Drawn[];
+  const alone = (g: Drawn) => g.context === g.shared;
+  const webgl = new ColorAloneSystem({ type: 1 });
+  let other: InstanceType<typeof ColorAloneSystem> | null = null;
+  try {
+    await withClock((clock) => {
+      view.prepare(root);
+      view.stage.enableRenderGroup();
+      const group = view.stage.renderGroup as unknown as Group;
+      group.$builtAt = clock.at;
+      view.prepare(root);
+      // Weighed before it is ever built: the large shape's fill and lines alone, the small batched.
+      assert.ok(art(0).every(alone));
+      assert.ok(art(1).every((g) => !alone(g) && g.context.batchMode === "batch"));
+
+      // Settled: batched copies, packed once.
+      clock.at += 2500;
+      view.prepare(root);
+      assert.equal(group.$settled, true);
+      assert.ok(art(0).every((g) => g.settled && !alone(g) && g.context.batchMode === "batch"));
+
+      // Rebuilt again: alone again.
+      group.$builtAt = clock.at;
+      view.prepare(root);
+      assert.ok(art(0).every(alone));
+
+      // A renderer that is not WebGL, whose graphics shader has no colour transform: batched copies.
+      other = new ColorAloneSystem({ type: 2 });
+      assert.ok(art(0).every((g) => !alone(g) && g.context.batchMode === "batch"));
+    });
+  } finally {
+    webgl.destroy();
+    (other as InstanceType<typeof ColorAloneSystem> | null)?.destroy();
+  }
+});
+
+test("batched Graphics are looked through only in groups that change, and follow a move to another settled group", async () => {
+  // A static stage's thousands of batched Graphics were looked through on every frame an animated
+  // group beside them was rebuilt.
+  const { settle, unsettle } = await import("../../../../packages/player/dist/render/settle.js");
+  const { SharedGraphics } = await import("../../../../packages/player/dist/render/shared.js");
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    Container: new () => {
+      enableRenderGroup(): void;
+      addChild(...c: unknown[]): void;
+      renderGroup: Parameters<typeof settle>[0];
+    };
+  };
+  const stage = new pixi.Container();
+  stage.enableRenderGroup();
+  const group = () => {
+    const c = new pixi.Container();
+    c.enableRenderGroup();
+    stage.addChild(c);
+    return c;
+  };
+  const scenery = group();
+  const shelf = group();
+  const animated = group();
+  const parts = Array.from({ length: 3 }, () => {
+    const part = new pixi.Container();
+    const g = new SharedGraphics();
+    part.addChild(g);
+    scenery.addChild(part);
+    return { part, g };
+  });
+  settle(scenery.renderGroup);
+  settle(shelf.renderGroup);
+  assert.ok(parts.every(({ g }) => g.settled));
+  assert.equal(scenery.renderGroup.$batched?.size, 3);
+
+  // The animated group rebuilt, the scenery unchanged: nothing of the scenery's is touched.
+  scenery.renderGroup.structureDidChange = false;
+  unsettle(new Set([animated.renderGroup]), [animated.renderGroup]);
+  assert.ok(parts.every(({ g }) => g.settled));
+
+  // One part moved to the settled shelf stays batched, listed there; one to the animated group draws alone.
+  shelf.addChild(parts[0].part);
+  animated.addChild(parts[1].part);
+  unsettle(new Set([animated.renderGroup]), [scenery.renderGroup, animated.renderGroup]);
+  assert.equal(parts[0].g.settled, true);
+  assert.ok(shelf.renderGroup.$batched?.has(parts[0].g));
+  assert.equal(parts[1].g.settled, false);
+  assert.equal(parts[2].g.settled, true);
+  assert.equal(scenery.renderGroup.$batched?.size, 1);
+});
+
 test("a mask's Graphics are never batched, as they draw in another group", async () => {
   const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
   const character = await outlinedSquare();
@@ -2878,4 +3007,357 @@ test("a child taken off gives its Graphics, emptied, to the next shape placed", 
       taken.every((g) => !g.destroyed && g.parent !== null && (g.flashColor ?? null) === null),
     );
   });
+});
+
+test("a new object of a released one's character takes its node, reset, and the old one gets its own back", async () => {
+  // A timeline that places its children anew on every frame made and
+  // dropped hundreds of nodes a frame, with their containers and filters.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const { filterDefaults } = await import("../../../../packages/player/dist/display/filters.js");
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  try {
+    const character = await outlinedSquare();
+    const { renderer } = standIn([]);
+    (renderer as unknown as { type: number }).type = 1;
+    const view = new PixiView(renderer);
+    const root = new Container();
+    const glow = () => [{ ...filterDefaults("glow"), blurX: 4, blurY: 4 }];
+    type Placed = {
+      filters: unknown[] | null;
+      alpha: number;
+      colorRoot: boolean;
+      visible: boolean;
+      localTransform: { a: number; b: number; tx: number; ty: number };
+      updateLocalTransform(): void;
+      children: { children: unknown[] }[];
+    };
+    const placed = (k: number) => view.stage.children[0].children[1 + k] as unknown as Placed;
+
+    const first = new ShapeObject(character);
+    first.setMatrix({ a: 0, b: 1, c: -1, d: 0, tx: 30, ty: 20 });
+    first.colorTransform = {
+      rMul: 1,
+      gMul: 1,
+      bMul: 1,
+      aMul: 0.5,
+      rAdd: 0,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    };
+    first.visible = false;
+    first.filters = glow();
+    root.placeAtDepth(first, 1);
+    view.prepare(root);
+    const container = placed(0);
+    const chain = container.filters?.[0];
+    assert.ok(chain);
+    const art = [...container.children[0].children];
+
+    // Its place taken by another of the character: the node comes back to it, as the new one is.
+    root.removeChild(first);
+    const second = new ShapeObject(character);
+    second.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
+    second.filters = glow();
+    root.placeAtDepth(second, 1);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.equal(container.filters?.[0], chain);
+    assert.equal(container.alpha, 1);
+    // Nor does the chain it keeps colour what its filters make in the first one's colour.
+    const uniforms = (chain as { resources: { colorUniforms: { uniforms: { uColored: number } } } })
+      .resources.colorUniforms.uniforms;
+    assert.equal(uniforms.uColored, 0);
+    assert.equal(container.visible, true);
+    container.updateLocalTransform();
+    const { a, b, tx, ty } = container.localTransform;
+    assert.deepEqual([a, b, tx, ty], [1, 0, 5, 6]);
+    assert.deepEqual(container.children[0].children, art);
+
+    // One without filters takes it without them.
+    root.removeChild(second);
+    const third = new ShapeObject(character);
+    root.placeAtDepth(third, 1);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.equal(container.filters, null);
+
+    // The first back on the list has a node of its own, drawn anew, its filters with it.
+    root.placeAtDepth(first, 2);
+    view.prepare(root);
+    assert.equal(placed(0), container);
+    assert.notEqual(placed(1), container);
+    // Its alpha is its chain's, which colours what the filters make, not what they are run on.
+    assert.equal(placed(1).alpha, 1);
+    assert.equal(placed(1).colorRoot, true);
+    assert.equal(placed(1).visible, false);
+    assert.ok(placed(1).filters?.[0]);
+    assert.equal(placed(1).children[0].children.length, art.length);
+  } finally {
+    pixi.DOMAdapter.set(adapter);
+  }
+});
+
+test("an object made a mask as it leaves the list keeps its node from a new one of its character", async () => {
+  // Released before the object it masks takes it as its mask, it was listed
+  // spare: taken, the new one drew as the mask, and itself not at all.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const mask = new ShapeObject(character);
+  const masked = new Container();
+  root.placeAtDepth(mask, 1);
+  root.placeAtDepth(masked, 2);
+  view.prepare(root);
+
+  masked.setMask(mask);
+  root.removeChild(mask);
+  root.placeAtDepth(new ShapeObject(character), 3);
+  view.prepare(root);
+  const [, maskedContainer, next] = view.stage.children[0].children;
+  assert.notEqual(maskedContainer.mask, next);
+  assert.equal(maskedContainer.mask, view.stage.children[1].children[0]);
+  assert.notEqual(next.includeInBuild, false);
+});
+
+test("spare nodes are listed once, kept to the most, and dropped as a SWF unloads", async () => {
+  // They hold their objects' characters: kept on past an unload, they kept the SWF.
+  const { ShapeObject, unloads } = await import(
+    "../../../../packages/player/dist/display/display.js"
+  );
+  const { SPARE_NODES_MOST } = await import("../../../../packages/player/dist/render/pools.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const spares = view as unknown as {
+    spareNodes: Map<unknown, Set<unknown>>;
+    spareSince: Map<unknown, number>;
+  };
+  const root = new Container();
+
+  await withClock(() => {
+    const placeAll = (n: number) => {
+      for (let i = 0; i < n; i++) {
+        root.placeAtDepth(new ShapeObject(character), i + 1);
+      }
+
+      view.prepare(root);
+    };
+    const removeAll = () => {
+      for (const child of [...root.children]) {
+        root.removeChild(child);
+      }
+
+      view.prepare(root);
+    };
+
+    placeAll(3);
+    removeAll();
+    assert.equal(spares.spareSince.size, 3);
+    assert.equal(spares.spareNodes.get(character)?.size, 3);
+
+    // Taken by new objects, they leave the lists; released again, each is listed once.
+    placeAll(3);
+    assert.equal(spares.spareSince.size, 0);
+    removeAll();
+    assert.equal(spares.spareSince.size, 3);
+
+    // Past the most, the oldest go.
+    placeAll(SPARE_NODES_MOST + 10);
+    removeAll();
+    assert.equal(spares.spareSince.size, SPARE_NODES_MOST);
+    assert.equal(spares.spareNodes.get(character)?.size, SPARE_NODES_MOST);
+
+    // An unload lets go of them all at the next prepare.
+    unloads.count++;
+    view.prepare(root);
+    assert.equal(spares.spareSince.size, 0);
+    assert.equal(spares.spareNodes.size, 0);
+  });
+});
+
+test("a node off the list keeps none of its children, and arranges them anew as it comes back", async () => {
+  // A spare node kept its last object's children, and all below them, for as long as it was kept.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const nodes = (view as unknown as { nodes: WeakMap<object, { kids: readonly unknown[] }> }).nodes;
+  const root = new Container();
+  const branch = new Container();
+  const child = new ShapeObject(character);
+  branch.placeAtDepth(child, 1);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+  assert.equal(nodes.get(branch)?.kids.length, 1);
+
+  root.removeChild(branch);
+  view.prepare(root);
+  assert.equal(nodes.get(branch)?.kids.length, 0);
+
+  // Its child gone while it was off, it comes back with its art alone.
+  branch.removeChild(child);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+  const container = view.stage.children[0].children[1];
+  assert.equal(container.children.length, 1);
+  assert.equal(nodes.get(branch)?.kids.length, 0);
+});
+
+test("an unload takes the lines' budget back to its floor at the next prepare", async () => {
+  const { unloads } = await import("../../../../packages/player/dist/display/display.js");
+  const { LINES_IDLE_VERTICES } = await import("../../../../packages/player/dist/render/pools.js");
+  const view = new PixiView(standIn([]).renderer);
+  const budget = (view as unknown as { lines: { budget: { size: number } } }).lines.budget;
+  const root = new Container();
+  view.prepare(root);
+  budget.size = 2_000_000;
+  view.prepare(root);
+  // Not grown, it shrinks only slowly on its own.
+  assert.ok(budget.size > 1_900_000, `${budget.size}`);
+
+  unloads.count++;
+  view.prepare(root);
+  assert.equal(budget.size, LINES_IDLE_VERTICES);
+});
+
+test("the wheel reaches the player in Flash's lines, keeps the page from scrolling only where the SWF takes it, and leaves Ctrl's zoom to the page", () => {
+  const listeners = new Map<string, (e: unknown) => void>();
+  const canvas = {
+    style: { cursor: "" },
+    addEventListener: (type: string, f: (e: unknown) => void) => listeners.set(type, f),
+    removeEventListener: (type: string) => listeners.delete(type),
+  };
+  const renderer = {
+    screen: { width: 100, height: 100 },
+    canvas,
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const calls: string[] = [];
+  let taken = true;
+  const player = {
+    width: 200,
+    height: 200,
+    pointer: {
+      post: () => {},
+      flush: () => {},
+      cursor: () => "default",
+      wheel: (p: { x: number }, delta: number) => {
+        calls.push(`${p.x} ${delta}`);
+        return taken;
+      },
+    },
+  } as unknown as Player;
+  const unbind = view.bindPointer(player);
+  const wheel = listeners.get("wheel");
+  assert.ok(wheel);
+  const turn = (deltaY: number, deltaMode = 0, ctrlKey = false) => {
+    let prevented = false;
+    wheel({
+      deltaY,
+      deltaMode,
+      ctrlKey,
+      offsetX: 5,
+      offsetY: 5,
+      buttons: 0,
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+    return prevented;
+  };
+
+  // A notch, however many pixels the browser makes it, is 3 lines, up positive.
+  assert.equal(turn(100), true);
+  turn(-100);
+  turn(53);
+  turn(200);
+  turn(3, 1);
+  // A touchpad's pixels add up: 100 of them are 3 lines.
+  for (let i = 0; i < 4; i++) {
+    turn(10);
+  }
+
+  // Where the SWF does not take it the page scrolls; with Ctrl, a pinch too, the page zooms
+  // and the SWF hears nothing.
+  taken = false;
+  assert.equal(turn(100), false);
+  taken = true;
+  assert.equal(turn(100, 0, true), false);
+  unbind();
+  assert.equal(listeners.has("wheel"), false);
+  assert.deepEqual(calls, [
+    "10 -3",
+    "10 3",
+    "10 -3",
+    "10 -6",
+    "10 -3",
+    "10 0",
+    "10 0",
+    "10 0",
+    "10 -1",
+    "10 -3",
+  ]);
+});
+
+test("multiply and subtract blend directly only while the stage's pixels are opaque", async () => {
+  const { Drawing } = await import("../../../../packages/player/dist/display/drawing.js");
+  const { renderer } = standIn([]);
+  const background = { alpha: 1 };
+  Object.assign(renderer, { type: 1, background });
+  const view = new PixiView(renderer);
+  const filled = (mode: string) => {
+    const sprite = new Container();
+    const drawing = new Drawing();
+    drawing.beginFill({ type: "solid", color: 0xff336699 });
+    drawing.drawRect(0, 0, 30, 20);
+    drawing.endFill();
+    sprite.drawing = drawing;
+    sprite.blendMode = mode;
+    return sprite;
+  };
+  const root = new Container();
+  const multiply = filled("multiply");
+  const subtract = filled("subtract");
+  const add = filled("add");
+  root.placeAtDepth(multiply, 1);
+  root.placeAtDepth(subtract, 2);
+  root.placeAtDepth(add, 3);
+  const nodes = (view as unknown as { nodes: WeakMap<object, { directBlend: string | null }> })
+    .nodes;
+  const direct = () => [multiply, subtract, add].map((o) => nodes.get(o)?.directBlend ?? null);
+
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+
+  // An erase outside any layer clears the stage's pixels below what comes after it: the blends
+  // drawn before it choose again on the frame it comes on, though nothing in them changed.
+  const eraser = filled("erase");
+  root.placeAtDepth(eraser, 0);
+  view.prepare(root);
+  assert.deepEqual(direct(), [null, null, "add"]);
+  root.removeChild(eraser);
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+
+  // In a layer, it clears the layer's alone.
+  const layer = new Container();
+  layer.blendMode = "layer";
+  layer.placeAtDepth(filled("erase"), 1);
+  root.placeAtDepth(layer, 0);
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
+
+  // A host that makes the stage clear, as a transparent window mode, is seen on the frame it draws.
+  background.alpha = 0;
+  view.prepare(root);
+  assert.deepEqual(direct(), [null, null, "add"]);
+  background.alpha = 1;
+  view.prepare(root);
+  assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
 });

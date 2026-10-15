@@ -425,3 +425,23 @@ export function shownLines(field: { layout: TextLayout; height: number }, first:
 
   return Math.max(1, n);
 }
+
+/** The last first line a scroll can show: the lines after it fit the field's height. */
+export function maxScrollV(field: { layout: TextLayout; height: number }): number {
+  const lines = field.layout.lines;
+  const room = field.height * TWIPS - 2 * GUTTER;
+  let used = 0;
+  let first = lines.length;
+  while (first > 0) {
+    const line = lines[first - 1];
+    const next = used + line.ascent + line.descent + (first < lines.length ? line.leading : 0);
+    if (next > room && first < lines.length) {
+      break;
+    }
+
+    used = next;
+    first--;
+  }
+
+  return Math.max(1, first + 1);
+}

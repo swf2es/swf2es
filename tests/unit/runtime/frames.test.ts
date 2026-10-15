@@ -53,6 +53,22 @@ test("V8's frames: its heading is no frame, an anonymous function's names its sc
   ]);
 });
 
+test("a frame's script is read from where its line ends, whatever its name holds", () => {
+  const v8 = [
+    "Error",
+    "    at async http://127.0.0.1:1/swf2es-3.js:1:2",
+    "    at x (swf2es-5.js:1:1) (http://127.0.0.1:1/runtime.js:10:5)",
+  ].join("\n");
+  const sm = ["x@swf2es-5.js:1:1@http://127.0.0.1:1/runtime.js:10:5"].join("\n");
+
+  assert.deepEqual(avm2.stackFrames(v8), [
+    "http://127.0.0.1:1/swf2es-3.js",
+    "http://127.0.0.1:1/runtime.js",
+  ]);
+  // No SWF's name holds an @, so the first ends it and the rest is the URL.
+  assert.deepEqual(avm2.stackFrames(sm), ["swf2es-5.js:1:1@http://127.0.0.1:1/runtime.js"]);
+});
+
 test("SpiderMonkey's frames", () => {
   const sm = ["abc@http://127.0.0.1:1/runtime.js:10:5", "factory@swf2es-3.js:2:9", ""].join("\n");
 

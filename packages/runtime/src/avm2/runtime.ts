@@ -576,6 +576,12 @@ export class Runtime {
   }
 
   findDef(mn: Multiname): AsObject {
+    // A script already run, as nearly every `new` and call by name finds.
+    const known = (mn as Multiname & { $script?: Script }).$script;
+    if (known !== undefined && known.state === 2) {
+      return known.global as AsObject;
+    }
+
     const script = this.definingScript(mn);
     if (!script) {
       throw this.error("ReferenceError", 1065, mn.toString());
@@ -1673,6 +1679,11 @@ export class Runtime {
   }
 
   construct(f: Value, ...args: Value[]): Value {
+    return this.constructWith(f, args);
+  }
+
+  /** construct, its arguments as an array: constructProperty passes its own on, unspread. */
+  constructWith(f: Value, args: Value[]): Value {
     if (f !== null && typeof f === "object") {
       // A method closure is not a constructor, as MethodClosure's construct has it.
       if (f.$closure) {
@@ -1684,25 +1695,31 @@ export class Runtime {
       }
 
       if (f.$f) {
-        // A function as a constructor: a new Object whose prototype is the
-        // function's. One whose prototype a script cleared gets Object's own
-        // prototype object back at its first new, as avmplus reinitializes
-        // it, so from then on every object is an instance of the function.
-        const o = this.objectTraits.instance();
-        let p = this.functionPrototype(f);
-        if (p === undefined) {
-          p = this.builtinClass("Object").$prototype;
-          f.$prototype = p;
-          f.$noPrototype = false;
-        }
-
-        o.$p = p;
-        const result = f.$f.apply(o, args);
-        return result !== null && typeof result === "object" ? result : o;
+        return this.constructFunction(f, args);
       }
     }
 
     throw this.error("TypeError", 1007);
+  }
+
+  /**
+   * A function as a constructor: a new Object whose prototype is the
+   * function's. One whose prototype a script cleared gets Object's own
+   * prototype object back at its first new, as avmplus reinitializes it,
+   * so from then on every object is an instance of the function.
+   */
+  private constructFunction(f: AsObject, args: Value[]): Value {
+    const o = this.objectTraits.instance();
+    let p = this.functionPrototype(f);
+    if (p === undefined) {
+      p = this.builtinClass("Object").$prototype;
+      f.$prototype = p;
+      f.$noPrototype = false;
+    }
+
+    o.$p = p;
+    const result = f.$f.apply(o, args);
+    return result !== null && typeof result === "object" ? result : o;
   }
 
   constructProperty(o: Value, mn: Multiname, ...args: Value[]): Value {
@@ -1710,7 +1727,7 @@ export class Runtime {
     // from its prototype, where a missing name is undefined.
     const primitive =
       (o !== null && o !== undefined && typeof o !== "object") || o instanceof Namespace;
-    return this.construct(this.getProperty(primitive ? this.protoOf(o) : o, mn), ...args);
+    return this.constructWith(this.getProperty(primitive ? this.protoOf(o) : o, mn), args);
   }
 
   constructClass(cls: AsObject, args: Value[]): Value {
@@ -1719,7 +1736,7 @@ export class Runtime {
       return hook(this, cls, args);
     }
 
-    const o = this.allocate(cls) as AsObject;
+    const o = this.instantiate(cls);
     cls.$it.proto.$init.apply(o, args);
     return o;
   }
@@ -1735,6 +1752,11 @@ export class Runtime {
       return null;
     }
 
+    return this.instantiate(cls);
+  }
+
+  /** allocate for a class with no construct hook, which constructClass has looked up already. */
+  private instantiate(cls: AsObject): AsObject {
     // An interface's constructor is a method nothing implements, as avmplus words it.
     if (cls.$desc?.interface) {
       throw this.error("VerifyError", 1001, `${cls.$it.name}()`);

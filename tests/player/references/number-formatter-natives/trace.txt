@@ -1,0 +1,192 @@
+en-US | en-US en-US noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+fi-FI | fi-FI fi-FI noError 2c a0 3;* 2 1 - 48 true true true
+   1 234 567,89 -0,50 -1 234,00 4 000 000 000,00 NaN ∞ -∞ noError
+de-DE | de-DE de-DE noError 2c 2e 3;* 2 1 - 48 true true true
+   1.234.567,89 -0,50 -1.234,00 4.000.000.000,00 NaN ∞ -∞ noError
+ja-JP | ja-JP ja-JP noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+en_US | en-US en-US noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+EN-gb | en-GB en-GB noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+en | en en-US noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+de | de de-DE noError 2c 2e 3;* 2 1 - 48 true true true
+   1.234.567,89 -0,50 -1.234,00 4.000.000.000,00 NaN ∞ -∞ noError
+en-IN | en-IN en-IN noError 2e 2c 3;2;* 2 1 - 48 true true true
+   12,34,567.89 -0.50 -1,234.00 4,00,00,00,000.00 NaN ∞ -∞ noError
+xx-YY | xx-YY en-US usingDefaultWarning 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+en-ZZ | en-ZZ en-US usingFallbackWarning 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+ |  en-US noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+i-default | i-default en-US noError 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+de-AT-1996 | de-at-1996 en-US usingDefaultWarning 2e 2c 3;* 2 1 - 48 true true true
+   1,234,567.89 -0.50 -1,234.00 4,000,000,000.00 NaN ∞ -∞ noError
+p20 1.12345678900000000000 0.33333333300000000000 123,456,789.12500000000000000000 0.00009876500000000000 12,345,678,901,234,567,168.00000000000000000000 0.00000000000000000000
+p2 0.01 1.01 2.68 -0.00 1.00 100.00 -0.00 -0.00 1,000,000,000,000,000,000,000.00 10,000,000,000,000,000,159,028,911,097,599,180,468,360,808,563,945,281,389,781,327,557,747,838,772,170,381,060,813,469,985,856,815,104.00
+p0 1 3 -1 1 -0 -2,147,483,648 4,294,967,295
+fractionalDigits -1 2 illegalArgumentError 1.12
+fractionalDigits 0 0 noError 1
+fractionalDigits 1 1 noError 1.1
+fractionalDigits 5 5 noError 1.12346
+fractionalDigits 21 21 noError 1.123456789000000000000
+negativeNumberFormat 0 0 noError (12.50)
+negativeNumberFormat 1 1 noError -12.50
+negativeNumberFormat 2 2 noError - 12.50
+negativeNumberFormat 3 3 noError 12.50-
+negativeNumberFormat 4 4 noError 12.50 -
+negativeNumberFormat 5 4 invalidAttrValue 12.50 -
+negativeNumberFormat 2147483647 4 invalidAttrValue 12.50 -
+negativeNumberFormat 2147483648 4 illegalArgumentError 12.50 -
+negativeNumberFormat 4294967295 4 illegalArgumentError 12.50 -
+groupingPattern [3] 3 noError 123456789,012.00
+groupingPattern [3;2] 3;2 noError 1234567,89,012.00
+groupingPattern [3;2;*] 3;2;* noError 1,23,45,67,89,012.00
+groupingPattern [3;*] 3;* noError 123,456,789,012.00
+groupingPattern [1;*] 1;* noError 1,2,3,4,5,6,7,8,9,0,1,2.00
+groupingPattern [4;3;*] 4;3;* noError 12,345,678,9012.00
+groupingPattern [3;2;1] 3;2;1 noError 123456,7,89,012.00
+groupingPattern [2;3;4;5;*] 2;3;4;5;* noError 123,4567,890,12.00
+groupingPattern [1;2;3;4;5] 1;2;3;4;5 noError 12,3456,789,01,2.00
+groupingPattern [1;2;3;4;5;*] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [1;2;3;4;5;6] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [0;3] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [x] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [3;] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [;3] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [10;*] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [3;0;*] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [3;*;2] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [3;**] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [3 ;2] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [03;*] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern [3;2;*;] 1;2;3;4;5 illegalArgumentError 12,3456,789,01,2.00
+groupingPattern null TypeError: Error #2007: Parameter value must be non-null.
+leadingZero .50 -.50 .00 1.50
+leadingZero none [] []
+trailingZeros 0.5 2 2.1 5 0
+useGrouping 1234567.00 -1234567.00 noError
+decimalSeparator empty . illegalArgumentError
+decimalSeparator two @@ noError 1@@50
+groupingSeparator ' noError 1'234'567@@50
+groupingSeparator empty noError 1234567@@50
+negativeSymbol - unsupportedError -3@@00
+decimalSeparator null TypeError: Error #2007: Parameter value must be non-null.
+groupingSeparator null TypeError: Error #2007: Parameter value must be non-null.
+negativeSymbol null TypeError: Error #2007: Parameter value must be non-null.
+digitsType 48 48 noError 1,234.50
+digitsType 1632 1632 noError ١,٢٣٤.٥٠
+digitsType 1776 1776 noError ۱,۲۳۴.۵۰
+digitsType 2406 2406 noError १,२३४.५०
+digitsType 3664 3664 noError ๑,๒๓๔.๕๐
+digitsType 65296 65296 noError １,２３４.５０
+digitsType 4160 4160 noError ၁,၂၃၄.၅၀
+digitsType 49 49 noError 2,345.61
+status usingDefaultWarning true en-US usingDefaultWarning
+status after format 3.00 noError
+status after a bad setter illegalArgumentError 2 illegalArgumentError
+status after a good one noError
+parse 0 [(5)]-5,0,3,noError/-5,noError [-5]5,1,2,noError/NaN,parseError [5-]5,0,1,noError/NaN,parseError [- 5]5,2,3,noError/NaN,parseError [5 -]5,0,1,noError/NaN,parseError [+5]5,1,2,noError/NaN,parseError [x5]5,1,2,noError/NaN,parseError [5x]5,0,1,noError/NaN,parseError [(5]5,1,2,noError/NaN,parseError [5)]5,0,1,noError/NaN,parseError [-(5)]-5,1,4,noError/NaN,parseError [--5]5,2,3,noError/NaN,parseError [5--]5,0,1,noError/NaN,parseError [a-5]5,2,3,noError/NaN,parseError [ ( 5 ) ]-5,1,6,noError/-5,noError [( 5)]-5,0,4,noError/-5,noError [5 ]5,0,1,noError/5,noError [	5
+]5,1,2,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [ 5]5,1,2,noError/5,noError [(-5)]5,2,3,noError/NaN,parseError [((5))]-5,1,4,noError/NaN,parseError [5..]5,0,2,noError/NaN,parseError [5.]5,0,2,noError/5,noError [5,]5,0,1,noError/NaN,parseError [,5]5,1,2,noError/NaN,parseError [5.,1]5,0,2,noError/NaN,parseError [1,,2]1,0,1,noError/NaN,parseError [1.2,3]1.2,0,3,noError/NaN,parseError
+parse 1 [(5)]5,1,2,noError/NaN,parseError [-5]-5,0,2,noError/-5,noError [5-]5,0,1,noError/NaN,parseError [- 5]-5,0,3,noError/-5,noError [5 -]5,0,1,noError/NaN,parseError [+5]5,1,2,noError/NaN,parseError [x5]5,1,2,noError/NaN,parseError [5x]5,0,1,noError/NaN,parseError [(5]5,1,2,noError/NaN,parseError [5)]5,0,1,noError/NaN,parseError [-(5)]5,2,3,noError/NaN,parseError [--5]-5,1,3,noError/NaN,parseError [5--]5,0,1,noError/NaN,parseError [a-5]-5,1,3,noError/NaN,parseError [ ( 5 ) ]5,3,4,noError/NaN,parseError [( 5)]5,2,3,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [	5
+]5,1,2,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [ 5]5,1,2,noError/5,noError [(-5)]-5,1,3,noError/NaN,parseError [((5))]5,2,3,noError/NaN,parseError [5..]5,0,2,noError/NaN,parseError [5.]5,0,2,noError/5,noError [5,]5,0,1,noError/NaN,parseError [,5]5,1,2,noError/NaN,parseError [5.,1]5,0,2,noError/NaN,parseError [1,,2]1,0,1,noError/NaN,parseError [1.2,3]1.2,0,3,noError/NaN,parseError
+parse 2 [(5)]5,1,2,noError/NaN,parseError [-5]-5,0,2,noError/-5,noError [5-]5,0,1,noError/NaN,parseError [- 5]-5,0,3,noError/-5,noError [5 -]5,0,1,noError/NaN,parseError [+5]5,1,2,noError/NaN,parseError [x5]5,1,2,noError/NaN,parseError [5x]5,0,1,noError/NaN,parseError [(5]5,1,2,noError/NaN,parseError [5)]5,0,1,noError/NaN,parseError [-(5)]5,2,3,noError/NaN,parseError [--5]-5,1,3,noError/NaN,parseError [5--]5,0,1,noError/NaN,parseError [a-5]-5,1,3,noError/NaN,parseError [ ( 5 ) ]5,3,4,noError/NaN,parseError [( 5)]5,2,3,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [	5
+]5,1,2,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [ 5]5,1,2,noError/5,noError [(-5)]-5,1,3,noError/NaN,parseError [((5))]5,2,3,noError/NaN,parseError [5..]5,0,2,noError/NaN,parseError [5.]5,0,2,noError/5,noError [5,]5,0,1,noError/NaN,parseError [,5]5,1,2,noError/NaN,parseError [5.,1]5,0,2,noError/NaN,parseError [1,,2]1,0,1,noError/NaN,parseError [1.2,3]1.2,0,3,noError/NaN,parseError
+parse 3 [(5)]5,1,2,noError/NaN,parseError [-5]5,1,2,noError/NaN,parseError [5-]-5,0,2,noError/-5,noError [- 5]5,2,3,noError/NaN,parseError [5 -]-5,0,3,noError/-5,noError [+5]5,1,2,noError/NaN,parseError [x5]5,1,2,noError/NaN,parseError [5x]5,0,1,noError/NaN,parseError [(5]5,1,2,noError/NaN,parseError [5)]5,0,1,noError/NaN,parseError [-(5)]5,2,3,noError/NaN,parseError [--5]5,2,3,noError/NaN,parseError [5--]-5,0,2,noError/NaN,parseError [a-5]5,2,3,noError/NaN,parseError [ ( 5 ) ]5,3,4,noError/NaN,parseError [( 5)]5,2,3,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [	5
+]5,1,2,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [ 5]5,1,2,noError/5,noError [(-5)]5,2,3,noError/NaN,parseError [((5))]5,2,3,noError/NaN,parseError [5..]5,0,2,noError/NaN,parseError [5.]5,0,2,noError/5,noError [5,]5,0,1,noError/NaN,parseError [,5]5,1,2,noError/NaN,parseError [5.,1]5,0,2,noError/NaN,parseError [1,,2]1,0,1,noError/NaN,parseError [1.2,3]1.2,0,3,noError/NaN,parseError
+parse 4 [(5)]5,1,2,noError/NaN,parseError [-5]5,1,2,noError/NaN,parseError [5-]-5,0,2,noError/-5,noError [- 5]5,2,3,noError/NaN,parseError [5 -]-5,0,3,noError/-5,noError [+5]5,1,2,noError/NaN,parseError [x5]5,1,2,noError/NaN,parseError [5x]5,0,1,noError/NaN,parseError [(5]5,1,2,noError/NaN,parseError [5)]5,0,1,noError/NaN,parseError [-(5)]5,2,3,noError/NaN,parseError [--5]5,2,3,noError/NaN,parseError [5--]-5,0,2,noError/NaN,parseError [a-5]5,2,3,noError/NaN,parseError [ ( 5 ) ]5,3,4,noError/NaN,parseError [( 5)]5,2,3,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [	5
+]5,1,2,noError/NaN,parseError [5 ]5,0,1,noError/5,noError [ 5]5,1,2,noError/5,noError [(-5)]5,2,3,noError/NaN,parseError [((5))]5,2,3,noError/NaN,parseError [5..]5,0,2,noError/NaN,parseError [5.]5,0,2,noError/5,noError [5,]5,0,1,noError/NaN,parseError [,5]5,1,2,noError/NaN,parseError [5.,1]5,0,2,noError/NaN,parseError [1,,2]1,0,1,noError/NaN,parseError [1.2,3]1.2,0,3,noError/NaN,parseError
+parse [123] 123 0 3 noError 123 noError
+parse [ 123 ] 123 1 4 noError 123 noError
+parse [1,234.5] 1234.5 0 7 noError 1234.5 noError
+parse [-1,234.5] -1234.5 0 8 noError -1234.5 noError
+parse [abc] NaN 2147483647 2147483647 parseError NaN parseError
+parse [] NaN 2147483647 2147483647 illegalArgumentError NaN illegalArgumentError
+parse [   ] NaN 2147483647 2147483647 parseError NaN parseError
+parse [12abc] 12 0 2 noError NaN parseError
+parse [abc12] 12 3 5 noError NaN parseError
+parse [1.2.3] 1.2 0 3 noError NaN parseError
+parse [1e5] 1 0 1 noError NaN parseError
+parse [0x10] 0 0 1 noError NaN parseError
+parse [.5] 0.5 0 2 noError 0.5 noError
+parse [-.5] -0.5 0 3 noError -0.5 noError
+parse [1,2,3] 123 0 5 noError 123 noError
+parse [12,34] 1234 0 5 noError 1234 noError
+parse [٣.٥] 3.5 0 3 noError 3.5 noError
+parse [１２] 12 0 2 noError 12 noError
+parse [Infinity] NaN 2147483647 2147483647 parseError NaN parseError
+parse [NaN] NaN 2147483647 2147483647 parseError NaN parseError
+parse [  -42  ] -42 2 5 noError -42 noError
+parse [x-3y] -3 1 3 noError NaN parseError
+parse [3 4] 3 0 1 noError NaN parseError
+de parse [1.234,5] 1234.5 0 7 1234.5 noError
+de parse [1234,5] 1234.5 0 6 1234.5 noError
+de parse [1,5] 1.5 0 3 1.5 noError
+de parse [1.5] 15 0 3 15 noError
+de parse [-1.234,5] -1234.5 0 8 -1234.5 noError
+parse null TypeError: Error #2007: Parameter parseString must be non-null.
+parseNumber null TypeError: Error #2007: Parameter parseString must be non-null.
+constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+digitsType 10000 10000 noError
+digitsType 10fff6 10fff6 noError
+digitsType 10fff7 6f0 invalidAttrValue
+digitsType 10ffff 6f0 invalidAttrValue
+digitsType 110000 6f0 invalidAttrValue
+digitsType 7fffffff 6f0 invalidAttrValue
+digitsType 80000000 6f0 illegalArgumentError
+digitsType ffffffff 6f0 illegalArgumentError
+digitsType zero [-.]
+separator a noError noError a a
+separator abc noError noError abc abc
+separator abcd illegalArgumentError illegalArgumentError . ,
+separator éééé illegalArgumentError illegalArgumentError . ,
+spaces 0 [-  5]5,3,4/NaN [- 5]5,2,3/NaN [5 -]5,0,1/NaN [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]-5,0,5/-5 [−5]5,1,2/NaN [5−]5,0,1/NaN [- 5]5,2,3/NaN [12  -]12,0,2/NaN
+spaces 1 [-  5]5,3,4/NaN [- 5]-5,0,3/-5 [5 -]5,0,1/NaN [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]5,2,3/NaN [−5]-5,0,2/-5 [5−]5,0,1/NaN [- 5]-5,0,3/-5 [12  -]12,0,2/NaN
+spaces 3 [-  5]5,3,4/NaN [- 5]5,2,3/NaN [5 -]-5,0,3/-5 [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]5,2,3/NaN [−5]5,1,2/NaN [5−]-5,0,2/-5 [- 5]5,2,3/NaN [12  -]12,0,2/NaN
+spaces 4 [-  5]5,3,4/NaN [- 5]5,2,3/NaN [5 -]-5,0,3/-5 [5  -]5,0,1/NaN [(  5)]5,3,4/NaN [( 5 )]5,2,3/NaN [−5]5,1,2/NaN [5−]-5,0,2/-5 [- 5]5,2,3/NaN [12  -]12,0,2/NaN
+locale [nb-NO] nb-NO nb-NO noError
+locale [iw-IL] iw-IL en-US usingDefaultWarning
+locale [in-ID] in-ID en-US usingDefaultWarning
+locale [tl] tl en-US usingDefaultWarning
+locale [und] und en-US usingDefaultWarning
+locale [en--us] en--us en-US noError
+locale [en-US-] en-US- en-US noError
+locale [en.US] en.US en-US noError
+locale [  en-US]   en-us en-US usingDefaultWarning
+locale [ja-JP-JP] ja-JP-JP ja-JP noError
+locale [en-us-x-foo] en-us-x-foo en-US usingDefaultWarning
+locale [en-u-nu-arab] en-u-nu-arab en-US usingDefaultWarning
+locale [de-1996] de-1996 en-US usingDefaultWarning
+locale [C] c en-US usingDefaultWarning
+locale [POSIX] posix en-US usingDefaultWarning
+locale [EN_us] en-US en-US noError
+locale [en@currency=EUR] en@currency=EUR en-US noError
+locale [fil-PH] fil-PH fil-PH noError
+locale [zh-Hans-CN] zh-Hans-CN zh-CN noError
+locale [sr-Cyrl] sr-Cyrl sr-Cyrl-RS noError
+locale [es-MX] es-MX es-MX noError
+locale [pt] pt pt-BR noError
+digitsType d800 6f0 invalidAttrValue
+digitsType dc00 6f0 invalidAttrValue
+digitsType dfff 6f0 invalidAttrValue
+digitsType fffe 6f0 invalidAttrValue
+digitsType ffff 6f0 invalidAttrValue
+digitsType e000 e000 noError
+separator nul a c noError 1c234a50
+separator nul alone a illegalArgumentError
+grouping nul alone [] noError
+sign space %20 -5 0 3 -5 5
+sign space %A0 -5 0 3 -5 5
+sign space %u2000 5 2 3 NaN 5
+sign space %u2007 5 2 3 NaN 5
+sign space %u2009 5 2 3 NaN 5
+sign space %u202F -5 0 3 -5 5
+sign space %u3000 -5 0 3 -5 5
+sign space %u205F 5 2 3 NaN 5
+sign space %09 5 2 3 NaN NaN
+available true noError

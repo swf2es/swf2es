@@ -47,7 +47,7 @@ export function recordOf(o: AsObject, kind: FilterKind): Filter {
 }
 
 /** The conversions of filters' values as adl keeps them: alpha in 255ths, strength in 256ths, clamped. */
-export function filterValues(s: Scripting) {
+function filterValues(s: Scripting) {
   const num = (v: Value) => s.rt.toNumber(v);
   const blur = (v: Value) => {
     const n = num(v);
@@ -146,9 +146,11 @@ export function filterValues(s: Scripting) {
       colors: [
         (f) => s.rt.array([...f.colors]),
         (f, v) => {
-          f.colors = elements(v, "colors")
-            .slice(0, 16)
-            .map((c) => color(c));
+          // A hole reads as undefined, colour 0, where map would skip it.
+          const values = elements(v, "colors");
+          f.colors = Array.from({ length: Math.min(16, values.length) }, (_, i) =>
+            color(values[i]),
+          );
           const n = f.colors.length;
           f.alphas = Array.from({ length: n }, (_, i) => f.alphas[i] ?? 0);
           f.ratios = Array.from({ length: n }, (_, i) => f.ratios[i] ?? 0);
@@ -170,8 +172,8 @@ export function filterValues(s: Scripting) {
           const n = Math.min(f.colors.length, values.length);
           f.colors.length = n;
           f.alphas.length = n;
-          f.ratios = values.slice(0, n).map((r) => {
-            const x = Math.trunc(num(r));
+          f.ratios = Array.from({ length: n }, (_, i) => {
+            const x = Math.trunc(num(values[i]));
             return Number.isNaN(x) ? 0 : Math.max(0, Math.min(255, x));
           });
         },

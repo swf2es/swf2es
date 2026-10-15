@@ -1,6 +1,6 @@
 // flash.utils.Timer: playerglobal counts, checks the delay and completes
-// in AS3; the player keeps the started timers and fires them by its clock
-// as a frame begins (Timers.beginFrame), each firing dispatching the
+// in AS3; the player keeps the started timers and fires them in its frames
+// and between them (scripting/timers.ts), each firing dispatching the
 // timer event here.
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent } from "../../../scripting/events.js";

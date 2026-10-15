@@ -84,7 +84,7 @@ function inTable(table: Uint16Array, c: number): boolean {
   return false;
 }
 
-export const isLetter = (c: number): boolean => inTable(LETTER, c);
+const isLetter = (c: number): boolean => inTable(LETTER, c);
 
 /**
  * As AvmCore::isXMLName: a letter or _, then letters, digits, ., -, _,

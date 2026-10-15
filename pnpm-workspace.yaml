@@ -1,3 +1,12 @@
 packages:
   - packages/*
+  - apps/*
   - tests/*
+  - vendor/pixijs
+# Electron's postinstall downloads its ~100 MB binary; pnpm skips it, and
+# `pnpm --filter @swf2es/desktop fetch-electron` fetches it for those who run the app.
+# esbuild's postinstall only checks the binary its optional dependency already
+# brings. vendor/pixijs's `prepare` (husky) is dropped by .pnpmfile.cjs.
+ignoredBuiltDependencies:
+  - electron
+  - esbuild

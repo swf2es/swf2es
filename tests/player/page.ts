@@ -17,11 +17,12 @@
 //
 // And it may ask for multisampling, as a host made with `antialias: true`
 // draws: the samples are then each resolved from the multisampled targets,
-// blends' backdrops and the back buffer alike (render/resolve.ts), before
+// blends' backdrops and the back buffer alike (the Pixi fork's bounded resolves), before
 // the page averages them.
 import { createCodegen } from "@swf2es/codegen";
-import { isAs3, readSwf, tags } from "@swf2es/format";
+import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
+  Avm1,
   Container,
   type DisplayObject,
   type ModuleCache,
@@ -33,6 +34,13 @@ import {
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { autoDetectRenderer } from "pixi.js";
+
+// The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
+// (chrome.ts, libraries.ts).
+const LIBRARIES = [
+  "builtin",
+  new URLSearchParams(location.search).has("adobe") ? "playerglobal-adobe" : "playerglobal-swf2es",
+];
 
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
 if (new URLSearchParams(location.search).has("checked")) {
@@ -83,8 +91,8 @@ async function scriptingFor(
 
   const scripting = new Scripting(codegen, {
     moduleCache,
-    // A trace of several lines is several lines of Flash's output.
-    print: (line) => trace.push(...line.split("\n")),
+    // A trace of several lines is several lines of Flash's log, which breaks at "\r" as at "\n".
+    print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
     debugger: true,
     // The frame clock: traces that tell getTimer are the same on every run.
@@ -120,7 +128,7 @@ async function scriptingFor(
     },
   });
   const libraries = await Promise.all(
-    ["builtin", "playerglobal"].map(async (n) => {
+    LIBRARIES.map(async (n) => {
       // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.
       const response = await fetch(`/libraries/${n}.abc`);
       if (!response.ok) {
@@ -132,6 +140,32 @@ async function scriptingFor(
   );
   await scripting.loadLibraries(libraries);
   return scripting;
+}
+
+let avm1Codegen: Promise<Awaited<ReturnType<typeof createCodegen>>> | null = null;
+
+/**
+ * The AVM1 of `bytes`, an AVM1 SWF with actions, through the served
+ * codegen; null for any other. Its traces and uncaught errors go where a
+ * scripting's do.
+ */
+async function avm1For(
+  bytes: Uint8Array,
+  trace: string[],
+  uncaught: unknown[],
+): Promise<Avm1 | null> {
+  const swf = readSwf(bytes);
+  if (isAs3(swf) || readActions(swf).blocks.length === 0) {
+    return null;
+  }
+
+  // One codegen for every AVM1 SWF the page plays: its actions need no
+  // domain, and an instance each would hold a wasm memory each until collected.
+  avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
+  return new Avm1(await avm1Codegen, {
+    print: (line) => trace.push(...line.split(/\r|\n/)),
+    onUncaught: (error) => uncaught.push(error),
+  });
 }
 
 const GRID = [1, 2, 4, 4];
@@ -190,7 +224,7 @@ async function runSwf(
   };
   try {
     scripting = await scriptingFor(bytes, trace, url, uncaught);
-    const player = new Player(bytes, scripting);
+    const player = new Player(bytes, scripting, await avm1For(bytes, trace, uncaught));
     const n = GRID[quality] ?? 4;
     setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
@@ -314,7 +348,7 @@ interface Bench {
  * What a renderer does in a frame, counted by wrapping it: GL's draw calls,
  * Pixi's unbatched Graphics and batches, its render groups' instruction
  * rebuilds and their time, contexts tessellated with their vertices and
- * time, buffer uploads and their bytes, and program switches. `read` gives
+ * time, buffer uploads and their bytes, program switches, and readbacks. `read` gives
  * the counts since the last read.
  */
 function meter(renderer: object): { read(): Record<string, number> } {
@@ -365,6 +399,15 @@ function meter(renderer: object): { read(): Record<string, number> } {
     }
   });
   wrap(gl, "texSubImage2D", () => add("texUploads"));
+  // Pixels brought back from the GPU, each a wait for it to finish; the
+  // bench's own wait, a single pixel, is not the player's.
+  wrap(gl, "readPixels", (args) => {
+    const pixels = (args[2] as number) * (args[3] as number);
+    if (pixels > 1) {
+      add("readbacks");
+      add("readbackPixels", pixels);
+    }
+  });
   for (const method of ["bufferData", "bufferSubData"]) {
     wrap(gl, method, (args) => {
       add("uploads");
@@ -429,6 +472,12 @@ function meter(renderer: object): { read(): Record<string, number> } {
   };
 }
 
+/** Chrome's console profiler, which the DOM's types leave out. */
+type Profiling = Console & { profile(label: string): void; profileEnd(label: string): void };
+
+/** The first frame a bench profiles, after bench.ts's ten of warm-up and the first. */
+const PROFILED_FROM = 12;
+
 async function benchSwf(
   base64: string,
   frames: number,
@@ -441,6 +490,10 @@ async function benchSwf(
   table = true,
   tableMinRun?: number,
   pace = 0,
+  cpuProfile = false,
+  finishEvery = 1,
+  hover = false,
+  hold = false,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -473,6 +526,11 @@ async function benchSwf(
     }
 
     await player.start();
+    // The mouse over the stage's middle, still, as a user's often is.
+    if (hover) {
+      player.pointer?.handle("move", { x: player.width / 2, y: player.height / 2 });
+    }
+
     if (uncaught.length > 0) {
       throw uncaught[0];
     }
@@ -520,6 +578,11 @@ async function benchSwf(
     const counter = meter(renderer);
     let stroked = view.counts.strokeContexts;
     for (let frame = 2; frame <= frames; frame++) {
+      // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
+      if (cpuProfile && frame === PROFILED_FROM) {
+        (console as Profiling).profile("frames");
+      }
+
       const before = performance.now();
       for (const [depth, child] of toggled.entries()) {
         if (Math.floor((frame - 2) / toggleEvery) % 2) {
@@ -539,7 +602,12 @@ async function benchSwf(
       const synced = performance.now();
       renderer.render(view.stage);
       const drawn = performance.now();
-      await finish();
+      // Pipelined, the GPU's work goes on behind the next frames', as a page's does, and only
+      // every so many frames is waited for: what the frames take is then the slower of the two.
+      if (frame % finishEvery === 0 || frame === frames) {
+        await finish();
+      }
+
       tick.push(ticked - before);
       sync.push(synced - ticked);
       draw.push(drawn - synced);
@@ -563,8 +631,19 @@ async function benchSwf(
       }
     }
 
+    if (cpuProfile) {
+      (console as Profiling).profileEnd("frames");
+    }
+
     const counts = { ...view.counts };
     const heap: [number, number] = [heapBefore, heapNow()];
+    // Everything still held while chrome.ts collects and measures what the frames left (benchHold).
+    if (hold) {
+      await new Promise<void>((release) => {
+        Object.assign(globalThis, { benchRelease: release, benchHeld: true });
+      });
+    }
+
     renderer.destroy();
     return {
       counts,
@@ -642,6 +721,285 @@ WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssem
   codegenMemory = memory instanceof WebAssembly.Memory ? memory : codegenMemory;
   return instance;
 }) as typeof WebAssembly.instantiate;
+
+/**
+ * Play a SWF with no scripts a frame for each of `sizes`, the renderer
+ * resized before it to that width, height and resolution, as a host
+ * fitting the stage to a page that resizes does (resize.ts): what threw,
+ * if anything.
+ */
+async function resizeSwf(
+  base64: string,
+  sizes: [number, number, number][],
+): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const player = new Player(bytes, null);
+  const renderer = await autoDetectRenderer({
+    preference: "webgl",
+    width: player.width,
+    height: player.height,
+    background: player.background,
+    resolution: 1,
+    useBackBuffer: true,
+  });
+  try {
+    const view = new PixiView(renderer);
+    await player.start();
+    for (const [width, height, resolution] of sizes) {
+      renderer.resize(width, height, resolution);
+      player.tick();
+      view.render(player.stage);
+    }
+
+    return null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    renderer.destroy();
+  }
+}
+
+/**
+ * Play a SWF with no scripts, through the transform table or with each
+ * large context drawn alone, lose the WebGL context and get it back, and
+ * draw the same frame again, then play on: the pixels that differ between
+ * the two draws, or what threw.
+ */
+async function contextLossSwf(
+  base64: string,
+  frames: number,
+  table: boolean,
+  turned = false,
+): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const player = new Player(bytes, null);
+  setTransformTable(table, 1);
+  const renderer = await autoDetectRenderer({
+    preference: "webgl",
+    width: player.width,
+    height: player.height,
+    background: player.background,
+    resolution: 1,
+    preserveDrawingBuffer: true,
+    useBackBuffer: true,
+  });
+  const gl = (renderer as unknown as { gl: WebGL2RenderingContext }).gl;
+  const pixels = () => {
+    const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+    gl.readPixels(
+      0,
+      0,
+      gl.drawingBufferWidth,
+      gl.drawingBufferHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      out,
+    );
+    return out;
+  };
+  let tableDraws = 0;
+  try {
+    const multi = gl.getExtension("WEBGL_multi_draw");
+    const view = new PixiView(renderer);
+    await player.start();
+    for (let i = 0; i < frames; i++) {
+      player.tick();
+      if (turned && i === 0) {
+        // Some objects turned in 3D, each drawn from a bitmap of its own (render/three.ts).
+        const root = player.stage.children[0] as unknown as { children: DisplayObject[] };
+        root.children.forEach((child, n) => {
+          if (n % 3 === 0) {
+            child.set3D("rotationY", 30 + n);
+          }
+        });
+      }
+
+      view.render(player.stage);
+    }
+
+    const before = pixels();
+    const restored = new Promise((done) =>
+      renderer.canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
+        once: true,
+      }),
+    );
+    (renderer as unknown as { context: { forceContextLoss(): void } }).context.forceContextLoss();
+    await restored;
+    // The restored context's extension is a new object: count the table's draws through it.
+    const again = gl.getExtension("WEBGL_multi_draw");
+    if (multi && again) {
+      const draw = again.multiDrawElementsWEBGL.bind(again);
+      again.multiDrawElementsWEBGL = (...args: Parameters<typeof draw>) => {
+        tableDraws += args[6];
+        draw(...args);
+      };
+    }
+
+    view.render(player.stage);
+    const after = pixels();
+    let differ = 0;
+    for (let i = 0; i < before.length; i += 4) {
+      if (
+        before[i] !== after[i] ||
+        before[i + 1] !== after[i + 1] ||
+        before[i + 2] !== after[i + 2] ||
+        before[i + 3] !== after[i + 3]
+      ) {
+        differ++;
+      }
+    }
+
+    for (let i = 0; i < frames; i++) {
+      player.tick();
+      view.render(player.stage);
+    }
+
+    if (table && multi && tableDraws === 0) {
+      return "the table drew nothing after the context came back";
+    }
+
+    return differ > 0 ? `${differ} of ${before.length / 4} pixels differ` : null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    renderer.destroy();
+    setTransformTable(true);
+  }
+}
+
+/**
+ * Play a SWF with no scripts in two renderers at once, one of which loses
+ * its WebGL context and gets it back as `plan` says: each `t` plays a
+ * frame and draws it in both, `l` loses the context, `r` waits for Pixi to
+ * give it back, which it does once the steps between have run, and `s`
+ * resizes both. Frames drawn while it is lost are drawn into nothing;
+ * every frame drawn with it must match the other renderer's. What first
+ * differed, or threw.
+ */
+async function contextLossPlanSwf(
+  base64: string,
+  plan: string,
+  table: boolean,
+): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  setTransformTable(table, 1);
+  const make = async () => {
+    const player = new Player(bytes, null);
+    const renderer = await autoDetectRenderer({
+      preference: "webgl",
+      width: player.width,
+      height: player.height,
+      background: player.background,
+      resolution: 1,
+      preserveDrawingBuffer: true,
+      useBackBuffer: true,
+    });
+    const view = new PixiView(renderer);
+    await player.start();
+    return { player, renderer, view };
+  };
+  const steady = await make();
+  const losing = await make();
+  const glOf = (r: typeof steady) => (r.renderer as unknown as { gl: WebGL2RenderingContext }).gl;
+  const pixels = (gl: WebGL2RenderingContext) => {
+    const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+    gl.readPixels(
+      0,
+      0,
+      gl.drawingBufferWidth,
+      gl.drawingBufferHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      out,
+    );
+    return out;
+  };
+  const canvas = losing.renderer.canvas as HTMLCanvasElement;
+  const within = (event: Promise<unknown>) =>
+    Promise.race([
+      event.then(() => true),
+      new Promise<boolean>((done) => setTimeout(done, 5000, false)),
+    ]);
+  let lost = false;
+  let wide = false;
+  try {
+    for (let step = 0; step < plan.length; step++) {
+      switch (plan[step]) {
+        case "t": {
+          for (const r of [steady, losing]) {
+            r.player.tick();
+            r.view.render(r.player.stage);
+          }
+
+          if (!lost) {
+            const a = pixels(glOf(steady));
+            const b = pixels(glOf(losing));
+            let differ = 0;
+            for (let i = 0; i < a.length; i++) {
+              if (a[i] !== b[i]) {
+                differ++;
+              }
+            }
+
+            if (differ > 0) {
+              return `step ${step} of ${plan}: ${differ} of ${a.length} bytes differ`;
+            }
+          }
+
+          break;
+        }
+
+        case "l": {
+          const gone = new Promise((done) =>
+            canvas.addEventListener("webglcontextlost", done, { once: true }),
+          );
+          // Pixi gives it back once the frames drawn till the next await are drawn.
+          (
+            losing.renderer as unknown as { context: { forceContextLoss(): void } }
+          ).context.forceContextLoss();
+          if (!(await within(gone))) {
+            return `step ${step} of ${plan}: the context was not lost`;
+          }
+
+          lost = true;
+          break;
+        }
+
+        case "r": {
+          // Registered before anything yields, so the restore Pixi asked for cannot be missed.
+          const back = new Promise((done) =>
+            canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
+              once: true,
+            }),
+          );
+          if (!(await within(back))) {
+            return `step ${step} of ${plan}: the context did not come back`;
+          }
+
+          lost = false;
+          break;
+        }
+
+        case "s": {
+          wide = !wide;
+          for (const r of [steady, losing]) {
+            r.renderer.resize(r.player.width + (wide ? 37 : 0), r.player.height + (wide ? 21 : 0));
+          }
+
+          break;
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    steady.renderer.destroy();
+    losing.renderer.destroy();
+    setTransformTable(true);
+  }
+}
 
 /** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
 let opened: {
@@ -967,6 +1325,9 @@ const page = globalThis as unknown as {
   stepSwf: typeof stepSwf;
   closeSwf: typeof closeSwf;
   traceSwf: typeof traceSwf;
+  resizeSwf: typeof resizeSwf;
+  contextLossSwf: typeof contextLossSwf;
+  contextLossPlanSwf: typeof contextLossPlanSwf;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -976,3 +1337,6 @@ page.openSwf = openSwf;
 page.stepSwf = stepSwf;
 page.closeSwf = closeSwf;
 page.traceSwf = traceSwf;
+page.resizeSwf = resizeSwf;
+page.contextLossSwf = contextLossSwf;
+page.contextLossPlanSwf = contextLossPlanSwf;

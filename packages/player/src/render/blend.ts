@@ -4,189 +4,130 @@
 // that reads the back buffer computes. Colours are premultiplied.
 import {
   AlphaFilter,
-  type BindGroup,
   BlendModeFilter,
   type Bounds,
+  Container,
   type Filter,
-  FilterEffect,
-  FilterSystem,
-  RenderTargetSystem,
-  Texture,
-  TexturePool,
-  TextureSource,
+  type FilterInstruction,
+  type FilterSystem,
 } from "pixi.js";
 
-type FilterData = { skip: boolean; resolution: number; bounds: Bounds };
-const filterSystem = FilterSystem.prototype as unknown as {
-  _calculateFilterArea(instruction: { filterEffect: FilterEffect }, bounds: Bounds): void;
-  _calculateFilterBounds(data: FilterData, ...rest: unknown[]): void;
-  _applyFiltersToTexture(data: { backTexture: Texture }, clear: boolean): void;
+/**
+ * A filter that keeps the area its object was last measured at, to give
+ * it again while nothing in the object changed but where it is
+ * (FilterChain): Pixi measured every filtered object, all of it, on every
+ * frame, a crowd's glows and their characters' every part.
+ */
+export interface AreaKeeper {
+  /** Into `bounds` the area kept, moved as `container` has moved since; false where none stands. */
+  keptArea(container: Container, bounds: Bounds): boolean;
+  /** Keep `bounds`, the area just measured of `container`. */
+  keepArea(container: Container, bounds: Bounds): void;
+}
+
+/** The keeper of the instruction's area, where it is measured as Pixi measures a container. */
+function keeperOf(instruction: FilterInstruction): AreaKeeper | null {
+  const container = instruction.container;
+  const first = instruction.filterEffect.filters?.[0] as Partial<AreaKeeper> | undefined;
+  if (
+    !container ||
+    !first?.keptArea ||
+    instruction.renderables ||
+    instruction.filterEffect.filterArea
+  ) {
+    return null;
+  }
+
+  const group = container.renderGroup || container.parentRenderGroup;
+  return group?.cacheToLocalTransform ? null : (first as AreaKeeper);
+}
+
+/** What a filter's area is measured from, and whether a mask outside it bounds something in it. */
+const areaWatch: { root: Container | null; outside: boolean } = {
+  root: null,
+  outside: false,
 };
 
-// Graphics batch bindings fill their unused slots with EMPTY. Removing a
-// listener from it scans all those slots, every time a blend follows a
-// regular filter. Keep the filter system's empty back texture private.
-const emptyBackTextures = new WeakMap<FilterSystem, Texture>();
-const applyFiltersToTexture = filterSystem._applyFiltersToTexture;
-filterSystem._applyFiltersToTexture = function (this: FilterSystem, data, clear) {
-  const back = data.backTexture;
-  if (back === Texture.EMPTY) {
-    let empty = emptyBackTextures.get(this);
-    if (!empty) {
-      empty = new Texture({ source: new TextureSource() });
-      emptyBackTextures.set(this, empty);
+/** Whether `inner` is `outer` or under it. */
+function within(outer: Container, inner: Container): boolean {
+  for (let p: Container | null = inner; p; p = p.parent) {
+    if (p === outer) {
+      return true;
     }
-
-    data.backTexture = empty;
   }
 
-  try {
-    applyFiltersToTexture.call(this, data, clear);
-  } finally {
-    data.backTexture = back;
-  }
-};
+  return false;
+}
 
-const destroyFilterSystem = FilterSystem.prototype.destroy;
-FilterSystem.prototype.destroy = function () {
-  const empty = emptyBackTextures.get(this);
-  if (empty) {
-    const group = (this as unknown as { _globalFilterBindGroup: BindGroup })._globalFilterBindGroup;
-    group.destroy();
-    emptyBackTextures.delete(this);
-    empty.destroy(true);
-  }
-
-  destroyFilterSystem.call(this);
-};
-
-// A layer's region holds what its filtered children draw past their shapes,
-// as Flash's layer holds a child's glow whole: Pixi measures a filtered
-// object by its descendants' shapes alone, and cut a blurred child of a
-// blend off at its shapes' edges. Each filter of a descendant grows the
-// region by its padding, in the stage's pixels as Pixi pads; the object's
-// own filters are padded by Pixi after.
-let measuring: FilterEffect | null = null;
-(FilterEffect.prototype as FilterEffect & { addBounds(bounds: Bounds): void }).addBounds =
-  function (this: FilterEffect, bounds: Bounds) {
-    if (this === measuring || !this.filters) {
-      return;
+/**
+ * A masked container Pixi's bounds walk measured (render/hooks.ts): a mask
+ * from outside the area watched may bound what is in it, and move as
+ * nothing in it changes, so that area is not kept.
+ */
+export function noteMask(container: Container): void {
+  const watch = areaWatch.root;
+  if (watch && !areaWatch.outside) {
+    const mask = container.mask;
+    if (mask instanceof Container && !within(watch, mask)) {
+      areaWatch.outside = true;
     }
-
-    let padding = 0;
-    for (const f of this.filters) {
-      if (f.enabled) {
-        padding += f.padding;
-      }
-    }
-
-    bounds.pad(padding | 0);
-  };
-const calculateFilterArea = filterSystem._calculateFilterArea;
-filterSystem._calculateFilterArea = function (instruction, bounds) {
-  measuring = instruction.filterEffect;
-  try {
-    calculateFilterArea.call(this, instruction, bounds);
-  } finally {
-    measuring = null;
   }
-};
+}
 
-// A filter's region on its texture's texels. Pixi puts the region on them
-// and then pads it by whole pixels, which at a resolution that is no whole
-// number (a stage fitted to its window) leaves it between them: the filter
-// read its input between texels, and a blend nested in a layer, its region
-// starting left of or above the layer's, read along its top and left edge
-// texels of the pooled back texture the copy of what is behind never
-// reached, drawing lines Flash does not. The region is put on the texels
-// again after the padding. Patched for every renderer on the page.
-const SNAP = 1e-6;
-const calculateFilterBounds = filterSystem._calculateFilterBounds;
-filterSystem._calculateFilterBounds = function (data, ...rest) {
-  calculateFilterBounds.call(this, data, ...rest);
-  if (data.skip) {
+/**
+ * The area a filter instruction is applied to, measured in place of Pixi's
+ * filter system (render/hooks.ts): a filter that keeps its object's area
+ * gives it again while the object has only moved, and keeps the area
+ * measured otherwise, unless a mask from outside bounds something in it.
+ */
+export function measureFilterArea(
+  instruction: FilterInstruction,
+  bounds: Bounds,
+  system: FilterSystem,
+): void {
+  measureArea(instruction, bounds, system);
+  // The area known, a filter that pads past what the GPU can draw round it pads less.
+  for (const filter of instruction.filterEffect.filters ?? []) {
+    (filter as Partial<PaddingFitter>).fitPadding?.(bounds, system);
+  }
+}
+
+/** A filter whose padding depends on the area it pads and on what the renderer can draw. */
+export interface PaddingFitter {
+  /** Its padding for `bounds`, as the filter system will pad them. */
+  fitPadding(bounds: Bounds, system: FilterSystem): void;
+}
+
+function measureArea(instruction: FilterInstruction, bounds: Bounds, system: FilterSystem): void {
+  const keeper = keeperOf(instruction);
+  const container = instruction.container as Container;
+  if (keeper?.keptArea(container, bounds)) {
     return;
   }
 
-  const r = data.resolution;
-  const b = data.bounds;
-  b.minX = Math.floor(b.minX * r + SNAP) / r;
-  b.minY = Math.floor(b.minY * r + SNAP) / r;
-  b.maxX = Math.ceil(b.maxX * r - SNAP) / r;
-  b.maxY = Math.ceil(b.maxY * r - SNAP) / r;
-};
+  areaWatch.root = keeper ? container : null;
+  areaWatch.outside = false;
+  try {
+    system.measureFilterArea(instruction, bounds);
+    // An object that draws nothing is filtered into nothing, as adl draws a glow or a shadow of
+    // it (the `filters-empty` case). Pixi measures it as a point at its group's origin, which its
+    // padding made an area it ran every filter on: emptied, the push skips them.
+    if (
+      !instruction.renderables &&
+      !instruction.filterEffect.filterArea &&
+      !(bounds.maxX > bounds.minX && bounds.maxY > bounds.minY)
+    ) {
+      bounds.clear();
+      return;
+    }
 
-// The copy of what is behind a blend into its back texture, held to both:
-// - The texture is sized with a hair of tolerance for rounding, and the
-//   copy without, so at some resolutions the copy is a pixel taller or
-//   wider than the texture, which GL refuses (copyTexSubImage2D's offset
-//   overflow), and the blend reads nothing.
-// - An object at or past the target's edge asks for pixels the target does
-//   not have; Pixi's own clamp then leaves a width or height below zero,
-//   which GL refuses (GL_INVALID_VALUE) and WebGPU fails its frame for.
-// What the copy does not reach is not cleared: it lies past what the
-// target has, where what the filter draws is cut off anyway (the
-// `blend-edges` case matches adl without it). Patched for every renderer
-// on the page.
-const copyToTexture = RenderTargetSystem.prototype.copyToTexture;
-RenderTargetSystem.prototype.copyToTexture = function (source, destination, from, size, to) {
-  const target = this.getRenderTarget(source);
-  const { pixelWidth, pixelHeight } = destination.source;
-  // What the texture can take of what was asked, and of that what the target has.
-  const reachX = Math.min(to.x + size.width, pixelWidth);
-  const reachY = Math.min(to.y + size.height, pixelHeight);
-  const skipX = Math.max(0, -from.x, -to.x);
-  const skipY = Math.max(0, -from.y, -to.y);
-  const x = from.x + skipX;
-  const y = from.y + skipY;
-  const toX = to.x + skipX;
-  const toY = to.y + skipY;
-  const width = Math.min(reachX - toX, target.pixelWidth - x);
-  const height = Math.min(reachY - toY, target.pixelHeight - y);
-  if (width <= 0 || height <= 0) {
-    return destination;
+    if (keeper && !areaWatch.outside) {
+      keeper.keepArea(container, bounds);
+    }
+  } finally {
+    areaWatch.root = null;
   }
-
-  return copyToTexture.call(
-    this,
-    source,
-    destination,
-    { x, y },
-    { width, height },
-    { x: toX, y: toY },
-  );
-};
-
-// What is behind a blend is copied from the pixels its bounds cover, which
-// Pixi has put on whole pixels of the target but keeps in stage units, as
-// k · (1/r): at a resolution such as 1.62, as a host fitting the stage to
-// its page gives, k · (1/r) · r can fall a hair short of k, and Pixi's floor
-// took the pixel before it. The blend then read what was behind it a pixel
-// off at those positions alone, so a moving blend shook what showed through
-// it. The corner and the size are rounded instead; the patch above holds
-// the copy to the target and the texture.
-FilterSystem.prototype.getBackTexture = function (target, bounds, previous) {
-  const resolution = target.colorTexture.source.resolution;
-  const back = TexturePool.getOptimalTexture({
-    width: bounds.width,
-    height: bounds.height,
-    resolution,
-  });
-  const x = previous ? bounds.minX - previous.minX : bounds.minX;
-  const y = previous ? bounds.minY - previous.minY : bounds.minY;
-  this.renderer.renderTarget.copyToTexture(
-    target,
-    back,
-    { x: Math.round(x * resolution), y: Math.round(y * resolution) },
-    {
-      width: Math.round(bounds.width * resolution),
-      height: Math.round(bounds.height * resolution),
-    },
-    { x: 0, y: 0 },
-  );
-
-  return back;
-};
+}
 
 /** Each separable mode's B(back, front) of straight colours, GLSL and WGSL. */
 const SEPARABLE: Record<string, [string, string]> = {
@@ -223,9 +164,11 @@ const SPECIAL: Record<string, [string, string]> = {
     "vec4(min(front.rgb + back.rgb, 1.0), min(front.a + back.a, 1.0))",
     "vec4<f32>(min(front.rgb + back.rgb, vec3<f32>(1.0)), min(front.a + back.a, 1.0))",
   ],
+  // What is below less the object, its alpha the two's as the object over it: over a layer's
+  // clear ground, adl's subtract leaves the object's alpha in black.
   subtract: [
-    "vec4(max(back.rgb - front.rgb, 0.0), back.a)",
-    "vec4<f32>(max(back.rgb - front.rgb, vec3<f32>(0.0)), back.a)",
+    "vec4(max(back.rgb - front.rgb, 0.0), front.a + back.a * (1.0 - front.a))",
+    "vec4<f32>(max(back.rgb - front.rgb, vec3<f32>(0.0)), front.a + back.a * (1.0 - front.a))",
   ],
   // What is below inverted, as far as the object covers it.
   invert: [

@@ -7,6 +7,7 @@ import type { Scripting } from "../scripting.js";
 import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
+import { clipboardHooks, clipboardNatives } from "./flash/desktop/Clipboard.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
 import { bitmapNatives } from "./flash/display/Bitmap.js";
 import { bitmapDataHooks, bitmapDataNatives } from "./flash/display/BitmapData.js";
@@ -24,10 +25,13 @@ import { stageNatives } from "./flash/display/Stage.js";
 import { stage3DNatives } from "./flash/display/Stage3D.js";
 import { eventNatives } from "./flash/events/Event.js";
 import { eventDispatcherNatives } from "./flash/events/EventDispatcher.js";
+import { gestureEventNatives } from "./flash/events/GestureEvent.js";
 import { httpStatusHooks } from "./flash/events/HTTPStatusEvent.js";
 import { keyboardEventNatives } from "./flash/events/KeyboardEvent.js";
 import { mouseEventNatives } from "./flash/events/MouseEvent.js";
+import { pressAndTapGestureEventNatives } from "./flash/events/PressAndTapGestureEvent.js";
 import { timerEventNatives } from "./flash/events/TimerEvent.js";
+import { touchEventNatives } from "./flash/events/TouchEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { bevelFilterNatives } from "./flash/filters/BevelFilter.js";
 import { bitmapFilterHooks } from "./flash/filters/BitmapFilter.js";
@@ -43,21 +47,32 @@ import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
 import { utils3DNatives } from "./flash/geom/Utils3D.js";
+import { collatorNatives } from "./flash/globalization/Collator.js";
+import { currencyFormatterNatives } from "./flash/globalization/CurrencyFormatter.js";
 import { currencyParseResultNatives } from "./flash/globalization/CurrencyParseResult.js";
+import { dateTimeFormatterNatives } from "./flash/globalization/DateTimeFormatter.js";
+import { localeIDNatives } from "./flash/globalization/LocaleID.js";
+import { numberFormatterNatives } from "./flash/globalization/NumberFormatter.js";
 import { numberParseResultNatives } from "./flash/globalization/NumberParseResult.js";
+import { stringToolsNatives } from "./flash/globalization/StringTools.js";
+import { cameraNatives } from "./flash/media/Camera.js";
+import { microphoneNatives } from "./flash/media/Microphone.js";
 import { soundHooks, soundNatives } from "./flash/media/Sound.js";
 import { soundMixerNatives } from "./flash/media/SoundMixer.js";
 import { soundTransformNatives } from "./flash/media/SoundTransform.js";
 import { videoNatives } from "./flash/media/Video.js";
 import { fileFilterNatives } from "./flash/net/FileFilter.js";
 import { fileReferenceNatives } from "./flash/net/FileReference.js";
+import { localConnectionNatives } from "./flash/net/LocalConnection.js";
 import { netConnectionNatives } from "./flash/net/NetConnection.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
 import { urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
+import { xmlSocketNatives } from "./flash/net/XMLSocket.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
+import { accelerometerNatives } from "./flash/sensors/Accelerometer.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
 import { fsCommandNatives } from "./flash/system/FSCommand.js";
@@ -71,27 +86,36 @@ import { fontHooks, fontNatives } from "./flash/text/Font.js";
 import { staticTextNatives } from "./flash/text/StaticText.js";
 import { styleSheetNatives } from "./flash/text/StyleSheet.js";
 import { textFieldNatives } from "./flash/text/TextField.js";
+import { textRendererNatives } from "./flash/text/TextRenderer.js";
 import { traceNatives } from "./flash/trace/Trace.js";
+import { contextMenuNatives } from "./flash/ui/ContextMenu.js";
 import { gameInputNatives } from "./flash/ui/GameInput.js";
 import { keyboardNatives } from "./flash/ui/Keyboard.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
+import { multitouchNatives } from "./flash/ui/Multitouch.js";
 import { byteArrayHooks } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
 import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
 
 export { airLibrary } from "./air-library.js";
+export { playerglobalLibrary } from "./playerglobal-library.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
   return {
     ...accessibilityNatives(s),
     ...toplevelNatives(s),
     ...cryptoNatives(),
-    ...eventNatives(),
+    ...clipboardNatives(s),
+    ...eventNatives(s),
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
     ...mouseEventNatives(s),
+    ...touchEventNatives(s),
+    ...gestureEventNatives(s),
+    ...pressAndTapGestureEventNatives(s),
     ...mouseNatives(s),
+    ...multitouchNatives(s),
     ...eventDispatcherNatives(s),
     ...displayObjectNatives(s),
     ...avm1MovieNatives(),
@@ -106,6 +130,12 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...externalInterfaceNatives(s),
     ...currencyParseResultNatives(s),
     ...numberParseResultNatives(),
+    ...collatorNatives(s),
+    ...currencyFormatterNatives(s),
+    ...dateTimeFormatterNatives(s),
+    ...localeIDNatives(s),
+    ...numberFormatterNatives(s),
+    ...stringToolsNatives(s),
     ...urlRequestNatives(s),
     ...urlStreamNatives(s),
     ...navigateNatives(s),
@@ -119,6 +149,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...socketNatives(s),
+    ...xmlSocketNatives(s),
+    ...localConnectionNatives(s),
     ...webSocketNatives(s),
     ...sharedObjectNatives(s),
     ...transformNatives(s),
@@ -144,6 +176,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...fontDescriptionNatives(s),
     ...tabStopNatives(s),
     ...textFieldNatives(s),
+    ...textRendererNatives(s),
     ...traceNatives(),
     ...utils3DNatives(s),
     ...perspectiveProjectionNatives(s),
@@ -154,8 +187,12 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...stage3DNatives(s),
     ...xmlDocumentNatives(s),
     ...videoNatives(s),
+    ...cameraNatives(s),
+    ...microphoneNatives(s),
     ...keyboardNatives(),
     ...gameInputNatives(s),
+    ...contextMenuNatives(s),
+    ...accelerometerNatives(),
   };
 }
 
@@ -167,6 +204,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...httpStatusHooks,
     ...bitmapFilterHooks,
     ...workerHooks(),
+    ...clipboardHooks(),
     ...soundHooks(s),
     ...fontHooks(s),
   };

@@ -171,6 +171,8 @@ export class Playback {
       this.scripting.drawer = null;
     }
 
+    this.view.dropSpares();
+
     // Pixi loses the GL context as it goes, which a browser allows only so many of.
     this.renderer.destroy({ removeView: true });
   }

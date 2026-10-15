@@ -1,0 +1,11 @@
+{
+  "config": "air",
+  "type": "lib",
+  "compilerOptions": {
+    "source-path": ["src"],
+    "include-sources": ["src"],
+    "strict": true,
+    "warnings": true,
+    "output": "bin/air.swc"
+  }
+}

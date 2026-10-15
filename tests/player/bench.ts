@@ -11,7 +11,7 @@
 // --back-buffer makes the renderer as a host that draws blend modes must,
 // with Pixi's back buffer. --antialias makes it multisampled, as a host
 // made with `antialias: true`; with --back-buffer, what blends and
-// filters resolve of it (render/resolve.ts) counts in the draw and gl.
+// filters resolve of it (the Pixi fork's bounded resolves) counts in the draw and gl.
 //
 // --rig N plays instead N instances of one animated character, a sprite of
 // 12 outlined parts that turn and swell on a loop of 24 frames, all in
@@ -30,6 +30,11 @@
 // transform table's run (render/table.ts), which then draws only the parts
 // between two, as in a game's creatures with a glow on every few parts.
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
+// --added adds the blurred parts to what is below (blend mode add), as a
+// game's glowing effects do; with --back-buffer, as blends need it.
+// --colored gives the blurred parts a colour transform, an alpha and
+// offsets, which their chain's last pass applies to what the blur made;
+// --fade changes the alpha on every frame, as a tween fades a creature.
 //
 // --pulse plays instead N rigs whose 12 parts are curved outlines, half of
 // them swelling and shrinking a little as they turn, the others squashed
@@ -46,6 +51,10 @@
 // does: what the stencil masks cost. --unmasked places the rectangle as a
 // plain shape instead, the same art with no mask, which bounds what any
 // cheaper clip (a scissor) could gain.
+//
+// --hover holds the mouse still over the stage's middle, as a user's often
+// is, for what a SWF with scripts does for it each frame: with --scripted
+// only, as the other SWFs have no scripts, and so no pointer.
 //
 // --idle K renders K times more after each frame with no tick between, as
 // a host that draws on every animation frame does, and times those apart.
@@ -77,25 +86,62 @@
 // --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
 // --nested-groups also renders nested Pixi groups while they leave and return.
 //
+// --town N plays instead a busy town: N characters, each of its own parts
+// (outlined in hairlines, as a game's are), on loops of different lengths:
+// every eighth one's body breathing, a uniform pulse of a few percent, limbs that turn
+// and swing, one that turns about (squashed across, then mirrored), a hand
+// whose timeline swaps its shape on every frame, and a glowing weapon; half
+// of them mirrored, every fourth glowing whole, every third walking to and
+// fro, all of them clips of a class with frame scripts. Among
+// them scenery: N clips of eight clips of two shapes, every fourth glowing,
+// every fifth pulsing. What a crowded town's characters cost: new lines for
+// new stretches, filters, render group rebuilds and the frame's walks.
+//
+// --pipelined waits for the GPU only every 30 frames, not after each, so
+// that its work goes on behind the next frames' as a page's does: the
+// frames' mean is then the slower of the page's and the GPU's share, where
+// the median of each part is the page's alone.
+//
+// --scroll N plays instead a BitmapData of N by N shown in a Bitmap, into
+// which a script draws a sprite of drifting dots each frame and then
+// scrolls it a pixel up, as a preloader's trail of rising sparks does: a
+// draw on the GPU followed by an operation on the store's pixels, which
+// must not bring them back from the GPU each frame (perFrame.readbacks).
+//
+// --triangles N plays instead a script that clears a Graphics and draws N
+// textured triangles again on every frame, their vertices turning, with
+// drawTriangles and a smoothed, repeating bitmap fill, as a 3D engine draws
+// its meshes: what drawing them anew each frame costs, and whether it
+// leaks. --culled has it cull half of them.
+//
+// --cpu-profile FILE samples the frames after the warm-up in Chrome's
+// profiler and writes the profile there (DevTools' Performance panel opens
+// it); the bench prints the functions that took the most time themselves.
+//
 // Each run also gives per-frame means of what the renderer did: GL draw
 // calls, Pixi's unbatched Graphics and batches, render group rebuilds and
 // their time, contexts tessellated with their vertices and time, buffer
 // uploads and bytes, texture uploads, program switches, and the table's
 // runs and draws. --allocs samples the heap and gives the KB the frames
 // allocated, the player's start left out; --profile FILE also writes the
-// sampled profile there, for DevTools' Memory panel to open.
+// sampled profile there, for DevTools' Memory panel to open. After the
+// frames, with the renderer still alive, it gives what the page holds after
+// a full collection, the JS heap and array buffers' data apart; --snapshot
+// FILE also writes a heap snapshot then.
 //
-//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--glide]
+//   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
+//     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
+//     | --triangles N [--culled]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--pace MS]
-//     [--json] [--write-swf FILE]
+//     [--min-run N] [--pace MS] [--hover]
+//     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import * as w from "../swf-writer.ts";
 import { benchPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
@@ -109,6 +155,9 @@ const option = (name: string, fallback: number) => {
 const shapes = option("shapes", 2000);
 const rig = option("rig", 0);
 const filtered = option("filtered", 0);
+const added = args.includes("--added");
+const colored = args.includes("--colored");
+const fade = args.includes("--fade");
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
 const toggleEvery = Math.max(1, option("toggle-every", 1));
@@ -118,10 +167,21 @@ const toggle = option("toggle", 0);
 const masks = option("masks", 0);
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
+const town = option("town", 0);
+const scrolled = option("scroll", 0);
+const triangles = option("triangles", 0);
+const cpuProfile = args.includes("--cpu-profile")
+  ? args[args.indexOf("--cpu-profile") + 1]
+  : undefined;
 const pace = option("pace", 0);
 const profile = args.includes("--profile") ? args[args.indexOf("--profile") + 1] : undefined;
 const toggleStatic = option("toggle-static", 0);
 const frames = option("frames", 120);
+if (args.includes("--hover") && scripted === 0) {
+  console.error("--hover needs --scripted: the other SWFs have no scripts, and so no pointer");
+  process.exit(2);
+}
+
 const WARMUP = 10;
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -312,15 +372,35 @@ function rigSwf(
         ty: Math.round(400 * Math.sin(i * 1.7)),
       };
       const blurs = blurred && (filtered === 0 || i % filtered === 0) ? [3] : undefined;
+      const blendMode = blurs && added ? 8 : undefined;
+      const alpha = fade ? 0.55 + 0.4 * Math.sin(t * 3 + i) : 0.8;
+      const colorTransform =
+        blurs && colored ? { mult: [1, 1, 1, alpha], add: [24, -16, 32, 0] } : undefined;
       if (f === 0) {
-        sprite.push(w.place({ depth: i + 1, character: 11 + (i % 4), matrix, blurs }));
+        sprite.push(
+          w.place({
+            depth: i + 1,
+            character: 11 + (i % 4),
+            matrix,
+            blurs,
+            blendMode,
+            colorTransform,
+          }),
+        );
       } else if (swap) {
         sprite.push(
           w.remove(i + 1),
-          w.place({ depth: i + 1, character: 11 + ((i + f) % 4), matrix, blurs }),
+          w.place({
+            depth: i + 1,
+            character: 11 + ((i + f) % 4),
+            matrix,
+            blurs,
+            blendMode,
+            colorTransform,
+          }),
         );
       } else {
-        sprite.push(w.place({ depth: i + 1, move: true, matrix, blurs }));
+        sprite.push(w.place({ depth: i + 1, move: true, matrix, blurs, colorTransform }));
       }
     }
 
@@ -701,6 +781,395 @@ function scriptedSwf(count: number, still: boolean): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: still ? 2 : 1, tags });
 }
 
+/** The scrolling trail's class (--scroll): dots drawn into a bitmap each frame, then scrolled up a pixel. */
+const SCROLL_SOURCE = `package {
+  import flash.display.Bitmap;
+  import flash.display.BitmapData;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Main extends Sprite {
+    private var data:BitmapData;
+    private var dots:Sprite = new Sprite();
+    private var frame:int = 0;
+
+    public function Main() {
+      var size:int = SIZE;
+      data = new BitmapData(size, size, true, 0);
+      addChild(new Bitmap(data));
+      for (var i:int = 0; i < 40; i++) {
+        var dot:Shape = new Shape();
+        dot.graphics.beginFill(0xffc040 + i * 4, 0.8);
+        dot.graphics.drawCircle(0, 0, 2 + (i % 3));
+        dots.addChild(dot);
+      }
+
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      for (var i:int = 0; i < dots.numChildren; i++) {
+        var dot:Shape = Shape(dots.getChildAt(i));
+        dot.x = (i * 97 + frame * (1 + i % 5)) % data.width;
+        dot.y = data.height - 8 - (i * 13 + frame) % 24;
+      }
+
+      data.draw(dots);
+      data.scroll(0, -1);
+    }
+  }
+}
+`;
+
+/** The scrolling trail (--scroll): a bitmap of `size` a side that a script draws into and scrolls each frame. */
+function scrollSwf(size: number): Uint8Array {
+  const abc = compiler()(`BenchScroll${size}`, SCROLL_SOURCE.replace("SIZE", String(size)));
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x102040),
+      w.doAbc(abc, `BenchScroll${size}`),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** The triangles' class (--triangles): a grid of textured triangles drawn anew each frame. */
+const TRIANGLES_SOURCE = `package {
+  import flash.display.BitmapData;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Main extends Sprite {
+    private var shape:Shape = new Shape();
+    private var texture:BitmapData = new BitmapData(64, 64, false, 0);
+    private var vertices:Vector.<Number> = new Vector.<Number>();
+    private var indices:Vector.<int> = new Vector.<int>();
+    private var uvt:Vector.<Number> = new Vector.<Number>();
+    private var side:int;
+    private var frame:int = 0;
+
+    public function Main() {
+      texture.perlinNoise(16, 16, 2, 7, true, true);
+      // Two triangles a square of a grid of side by side squares.
+      side = Math.ceil(Math.sqrt(COUNT / 2));
+      for (var y:int = 0; y <= side; y++) {
+        for (var x:int = 0; x <= side; x++) {
+          vertices.push(0, 0);
+          uvt.push(x / 8, y / 8, 1);
+        }
+      }
+
+      for (var i:int = 0; i < COUNT; i++) {
+        var square:int = i >> 1;
+        var at:int = (square / side) * (side + 1) + square % side;
+        if (i & 1) {
+          indices.push(at + 1, at + side + 2, at + side + 1);
+        } else {
+          indices.push(at, at + 1, at + side + 1);
+        }
+      }
+
+      addChild(shape);
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      var turn:Number = frame / 48;
+      var c:Number = Math.cos(turn);
+      var s:Number = Math.sin(turn);
+      var cell:Number = 560 / side;
+      var k:int = 0;
+      for (var y:int = 0; y <= side; y++) {
+        for (var x:int = 0; x <= side; x++) {
+          var px:Number = (x - side / 2) * cell;
+          var py:Number = (y - side / 2) * cell;
+          vertices[k++] = 400 + px * c - py * s;
+          vertices[k++] = 300 + px * s + py * c;
+        }
+      }
+
+      shape.graphics.clear();
+      shape.graphics.beginBitmapFill(texture, null, true, true);
+      shape.graphics.drawTriangles(vertices, indices, uvt, CULLING);
+      shape.graphics.endFill();
+    }
+  }
+}
+`;
+
+/** The triangles (--triangles): `count` textured triangles a script draws anew each frame. */
+function trianglesSwf(count: number, culled: boolean): Uint8Array {
+  const name = `BenchTriangles${count}${culled ? "Culled" : ""}`;
+  const abc = compiler()(
+    name,
+    TRIANGLES_SOURCE.replaceAll("COUNT", String(count)).replace(
+      "CULLING",
+      culled ? '"positive"' : '"none"',
+    ),
+  );
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x102040),
+      w.doAbc(abc, name),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** The town's classes: the root, and each character's, whose frame scripts count its loops. */
+const TOWN_SOURCE = `package {
+  import flash.display.MovieClip;
+
+  public class Main extends MovieClip {
+    public var loops:int = 0;
+  }
+
+  public class Character extends MovieClip {
+    private var turns:int = 0;
+
+    public function Character() {
+      addFrameScript(0, first, totalFrames - 1, last);
+    }
+
+    private function first():void {
+      turns++;
+    }
+
+    private function last():void {
+      Main(root).loops++;
+    }
+  }
+}
+`;
+
+/**
+ * The town (--town): `count` characters of their own parts, on loops of
+ * different lengths, half of them mirrored, and scenery among them.
+ */
+function townSwf(count: number): Uint8Array {
+  const abc = compiler()("BenchTown", TOWN_SOURCE);
+  libraryAbcs();
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xd0e0c0)];
+  const PARTS = 12;
+  const symbols: [number, string][] = [[0, "Main"]];
+  // Scenery's shapes, shared by all its clips.
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  let next = 1000;
+  const characters: number[] = [];
+  for (let c = 0; c < count; c++) {
+    // Its own parts, each a clip of one frame holding a shape outlined in a hairline.
+    const parts: number[] = [];
+    for (let k = 0; k < PARTS; k++) {
+      const shape = next++;
+      const inner = next++;
+      const clip = next++;
+      tags.push(
+        curvedPart(shape, 1, 120 + ((c * 37 + k * 53) % 200)),
+        w.sprite(inner, 1, [w.place({ depth: 1, character: shape }), w.showFrame(), w.end()]),
+        w.sprite(clip, 1, [w.place({ depth: 1, character: inner }), w.showFrame(), w.end()]),
+      );
+      parts.push(clip);
+    }
+
+    // A hand drawn frame by frame: four shapes, one swapped for the next on each frame.
+    const hands: number[] = [];
+    for (let k = 0; k < 4; k++) {
+      hands.push(next);
+      tags.push(curvedPart(next++, 1, 80 + 40 * k));
+    }
+
+    const hand = next++;
+    const handFrames: Uint8Array[] = [];
+    for (let f = 0; f < 4; f++) {
+      handFrames.push(
+        f === 0
+          ? w.place({ depth: 1, character: hands[0] })
+          : w.place({ depth: 1, move: true, character: hands[f] }),
+        w.showFrame(),
+      );
+    }
+
+    tags.push(w.sprite(hand, 4, [...handFrames, w.end()]));
+    // The body: its parts turning and swinging on a loop of its own length.
+    const loop = 36 + (c % 7) * 4;
+    const body = next++;
+    const frames: Uint8Array[] = [];
+    for (let f = 0; f < loop; f++) {
+      const t = (2 * Math.PI * f) / loop;
+      for (let k = 0; k <= PARTS + 1; k++) {
+        const swing = 0.35 * Math.sin(t + k);
+        // Two parts pulse a few percent, one turns about, the rest only turn.
+        const pulse = k === 2 || k === 5 ? 1 + 0.04 * Math.sin(2 * t + k) : 1;
+        const across = k === 7 ? Math.cos(t) : 1;
+        const sx = Math.sign(across || 1) * Math.max(0.05, Math.abs(across)) * pulse;
+        const matrix = {
+          a: sx * Math.cos(swing),
+          b: sx * Math.sin(swing),
+          c: -pulse * Math.sin(swing),
+          d: pulse * Math.cos(swing),
+          tx: Math.round(300 * Math.cos(k * 0.9)),
+          ty: Math.round(450 * Math.sin(k * 1.3)),
+        };
+        const id = k < PARTS ? parts[k] : k === PARTS ? hand : parts[0];
+        // The last a weapon, glowing.
+        const glows = k === PARTS + 1 ? [{ color: 0x60c0ff, blur: 6, strength: 1.5 }] : undefined;
+        frames.push(
+          f === 0
+            ? w.place({ depth: k + 1, character: id, matrix, glows })
+            : w.place({ depth: k + 1, move: true, matrix }),
+        );
+      }
+
+      frames.push(w.showFrame());
+    }
+
+    tags.push(w.sprite(body, loop, [...frames, w.end()]));
+    // The character, a clip of the class Character: every eighth one's body breathing, its chest
+    // rising a little.
+    const figure = next++;
+    const breaths: Uint8Array[] = [];
+    for (let f = 0; f < loop; f++) {
+      const s = c % 8 ? 1 : 1 + 0.01 * Math.sin((4 * Math.PI * f) / loop);
+      breaths.push(
+        f === 0
+          ? w.place({ depth: 1, character: body, matrix: { a: 1, d: s } })
+          : w.place({ depth: 1, move: true, matrix: { a: 1, d: s } }),
+        w.showFrame(),
+      );
+    }
+
+    tags.push(w.sprite(figure, loop, [...breaths, w.end()]));
+    symbols.push([figure, "Character"]);
+    // Every fourth glows whole, as a game marks a character; every third walks to and fro.
+    const glows = c % 4 === 0 ? [{ color: 0xffe060, blur: 8, strength: 2 }] : undefined;
+    if (c % 3 === 0) {
+      const walker = next++;
+      const steps: Uint8Array[] = [];
+      for (let f = 0; f < 96; f++) {
+        const matrix = { tx: Math.round(1200 * Math.sin((2 * Math.PI * f) / 96)) };
+        steps.push(
+          f === 0
+            ? w.place({ depth: 1, character: figure, matrix, glows })
+            : w.place({ depth: 1, move: true, matrix }),
+          w.showFrame(),
+        );
+      }
+
+      tags.push(w.sprite(walker, 96, [...steps, w.end()]));
+      characters.push(walker);
+    } else {
+      const holder = next++;
+      tags.push(
+        w.sprite(holder, 1, [
+          w.place({ depth: 1, character: figure, glows }),
+          w.showFrame(),
+          w.end(),
+        ]),
+      );
+      characters.push(holder);
+    }
+  }
+
+  // Scenery: clips of eight clips of two shapes, every fourth glowing, every fifth pulsing.
+  const sceneryCount = count;
+  const piece = next++;
+  tags.push(
+    w.sprite(piece, 1, [
+      w.place({ depth: 1, character: 1, matrix: { a: 0.3, d: 0.3 } }),
+      w.place({ depth: 2, character: 2, matrix: { a: 0.2, d: 0.2, tx: 100 } }),
+      w.showFrame(),
+      w.end(),
+    ]),
+  );
+  const scenery = next++;
+  const pieces: Uint8Array[] = [];
+  for (let k = 0; k < 8; k++) {
+    pieces.push(
+      w.place({
+        depth: k + 1,
+        character: piece,
+        matrix: { tx: (k % 4) * 300, ty: Math.floor(k / 4) * 300 },
+      }),
+    );
+  }
+
+  tags.push(w.sprite(scenery, 1, [...pieces, w.showFrame(), w.end()]));
+  const pulsing = next++;
+  const pulses: Uint8Array[] = [];
+  for (let f = 0; f < 24; f++) {
+    const s = 1 + 0.1 * Math.sin((2 * Math.PI * f) / 24);
+    pulses.push(
+      f === 0
+        ? w.place({ depth: 1, character: scenery, matrix: { a: s, d: s } })
+        : w.place({ depth: 1, move: true, matrix: { a: s, d: s } }),
+      w.showFrame(),
+    );
+  }
+
+  tags.push(
+    w.sprite(pulsing, 24, [...pulses, w.end()]),
+    w.doAbc(abc, "BenchTown"),
+    w.symbolClass(symbols),
+  );
+  let depth = 1;
+  for (let i = 0; i < sceneryCount; i++) {
+    tags.push(
+      w.place({
+        depth: depth++,
+        character: i % 5 === 0 ? pulsing : scenery,
+        matrix: {
+          tx: Math.round(((i * 97) % WIDTH) * TWIPS),
+          ty: Math.round(((i * 61) % HEIGHT) * TWIPS),
+        },
+        glows: i % 4 === 0 ? [{ color: 0xfff080, blur: 4, strength: 1 }] : undefined,
+      }),
+    );
+  }
+
+  const columns = Math.ceil(Math.sqrt(count * 1.5));
+  for (let c = 0; c < count; c++) {
+    const flip = c % 2 ? -1 : 1;
+    tags.push(
+      w.place({
+        depth: depth++,
+        character: characters[c],
+        matrix: {
+          a: 0.12 * flip,
+          d: 0.12,
+          tx: Math.round(((c % columns) + 0.5) * (WIDTH / columns) * TWIPS),
+          ty: Math.round((Math.floor(c / columns) + 0.6) * ((HEIGHT * 1.5) / columns) * TWIPS),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
 const ordinal = (n: number) => {
   const tens = Math.floor(n / 10) % 10;
@@ -760,29 +1229,35 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  toggleBranches > 0
-    ? branchSwf(toggleBranches)
-    : toggle > 0
-      ? toggleSwf(toggle)
-      : toggleStatic > 0
-        ? toggleStaticSwf(toggleStatic)
-        : scripted > 0
-          ? scriptedSwf(scripted, args.includes("--still"))
-          : pulse > 0
-            ? pulseSwf(pulse, option("loop", 96), option("line", 1))
-            : masks > 0
-              ? masksSwf(masks, args.includes("--unmasked"))
-              : branches > 0
-                ? branchSwf(branches)
-                : rig > 0
-                  ? rigSwf(
-                      rig,
-                      args.includes("--swap"),
-                      args.includes("--fresh"),
-                      args.includes("--blurred") || filtered > 0,
-                      args.includes("--glide"),
-                    )
-                  : synthetic();
+  triangles > 0
+    ? trianglesSwf(triangles, args.includes("--culled"))
+    : scrolled > 0
+      ? scrollSwf(scrolled)
+      : town > 0
+        ? townSwf(town)
+        : toggleBranches > 0
+          ? branchSwf(toggleBranches)
+          : toggle > 0
+            ? toggleSwf(toggle)
+            : toggleStatic > 0
+              ? toggleStaticSwf(toggleStatic)
+              : scripted > 0
+                ? scriptedSwf(scripted, args.includes("--still"))
+                : pulse > 0
+                  ? pulseSwf(pulse, option("loop", 96), option("line", 1))
+                  : masks > 0
+                    ? masksSwf(masks, args.includes("--unmasked"))
+                    : branches > 0
+                      ? branchSwf(branches)
+                      : rig > 0
+                        ? rigSwf(
+                            rig,
+                            args.includes("--swap"),
+                            args.includes("--fresh"),
+                            args.includes("--blurred") || filtered > 0,
+                            args.includes("--glide"),
+                          )
+                        : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -803,6 +1278,10 @@ const result = await benchPlayer(
   args.includes("--min-run") ? option("min-run", 1) : undefined,
   profile,
   pace,
+  cpuProfile,
+  args.includes("--pipelined") ? 30 : 1,
+  args.includes("--hover"),
+  args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
 );
 if (result.error) {
   console.error(result.error);
@@ -831,25 +1310,35 @@ const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    toggleBranches > 0
-      ? `toggle of ${toggleBranches} branches`
-      : toggle > 0
-        ? `toggle of ${toggle}`
-        : toggleStatic > 0
-          ? `static toggle of ${toggleStatic}`
-          : scripted > 0
-            ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-            : pulse > 0
-              ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-              : masks > 0
-                ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                : branches > 0
-                  ? `${branches} branches`
-                  : rig > 0
-                    ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}`
-                    : shapes,
+    triangles > 0
+      ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+      : scrolled > 0
+        ? `scrolled bitmap of ${scrolled}`
+        : town > 0
+          ? `town of ${town}`
+          : toggleBranches > 0
+            ? `toggle of ${toggleBranches} branches`
+            : toggle > 0
+              ? `toggle of ${toggle}`
+              : toggleStatic > 0
+                ? `static toggle of ${toggleStatic}`
+                : scripted > 0
+                  ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                  : pulse > 0
+                    ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                    : masks > 0
+                      ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                      : branches > 0
+                        ? `${branches} branches`
+                        : rig > 0
+                          ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                          : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
+  retainedMb: {
+    heap: Math.round(result.retained.heap / 1e5) / 10,
+    buffers: Math.round(result.retained.buffers / 1e5) / 10,
+  },
   frames,
   swfBytes: swf.length,
   renderer: result.renderer,
@@ -859,6 +1348,8 @@ const summary = {
   draw: stats(draw),
   gl: stats(gl),
   frame: stats(total),
+  // The frames' mean, whole: pipelined, the time the slower of the page and the GPU takes a frame.
+  frameMean: Math.round((total.reduce((a, b) => a + b, 0) / total.length) * 100) / 100,
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, rebuilds, tessellation, uploads.
   perFrame: perFrame(result.meters.slice(WARMUP)),
@@ -875,6 +1366,45 @@ const summary = {
       }
     : {}),
 };
+/** A sampled CPU profile's self time by function and by where its code is from, in ms a frame. */
+function selfTimes(path: string, measured: number): { areas: string[]; functions: string[] } {
+  const profile = JSON.parse(readFileSync(path, "utf8")) as {
+    nodes: {
+      id: number;
+      callFrame: { functionName: string; url: string; lineNumber: number };
+    }[];
+    samples: number[];
+    timeDeltas: number[];
+  };
+  const byId = new Map(profile.nodes.map((n) => [n.id, n.callFrame]));
+  const functions = new Map<string, number>();
+  const areas = new Map<string, number>();
+  for (let i = 0; i < profile.samples.length; i++) {
+    const frame = byId.get(profile.samples[i]);
+    const dt = (profile.timeDeltas[i + 1] ?? 0) / 1000;
+    if (!frame || frame.functionName === "(idle)") {
+      continue;
+    }
+
+    const url = frame.url.replace(/[?#].*/, "");
+    const area = /^\(/.test(frame.functionName)
+      ? frame.functionName
+      : /pixi/.test(url)
+        ? "pixi"
+        : (/\/(player|runtime|codegen|format)\//.exec(url)?.[1] ?? (url ? "other" : "native"));
+    const name = `${frame.functionName || "(anonymous)"} ${url.split("/").slice(-2).join("/")}:${frame.lineNumber + 1}`;
+    functions.set(name, (functions.get(name) ?? 0) + dt);
+    areas.set(area, (areas.get(area) ?? 0) + dt);
+  }
+
+  const top = (m: Map<string, number>, n: number) =>
+    [...m]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([k, v]) => `${(v / measured).toFixed(3).padStart(7)} ms  ${k}`);
+  return { areas: top(areas, 12), functions: top(functions, 30) };
+}
+
 if (args.includes("--json")) {
   console.log(JSON.stringify(summary));
 } else {
@@ -884,6 +1414,9 @@ if (args.includes("--json")) {
   );
   console.log(
     `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,
+  );
+  console.log(
+    `  held    ${summary.retainedMb.heap} MB of JS heap and ${summary.retainedMb.buffers} MB of array buffers after a full collection`,
   );
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
   console.log(`  sync    median ${ms(summary.sync.median)}  p90 ${ms(summary.sync.p90)}`);
@@ -903,5 +1436,15 @@ if (args.includes("--json")) {
     );
   }
 
-  console.log(`  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}`);
+  console.log(
+    `  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}  mean ${ms(summary.frameMean)}`,
+  );
+  if (cpuProfile) {
+    // Profiled from the 12th frame (page.ts, PROFILED_FROM) to the last.
+    const { areas, functions } = selfTimes(cpuProfile, frames - 11);
+    console.log("  self time a frame, by area:");
+    console.log(areas.map((line) => `    ${line}`).join("\n"));
+    console.log("  self time a frame, by function:");
+    console.log(functions.map((line) => `    ${line}`).join("\n"));
+  }
 }

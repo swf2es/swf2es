@@ -116,7 +116,7 @@ export function containerEngine(): string {
   throw new Error("The avmshell oracle needs podman or docker");
 }
 
-function container(engine: string, args: string[]) {
+export function container(engine: string, args: string[]) {
   // Keep files written into the mounted repo owned by the calling user.
   const user =
     engine === "podman"

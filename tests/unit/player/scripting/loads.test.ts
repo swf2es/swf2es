@@ -446,6 +446,7 @@ test("URLRequest data reaches the host as a query or a copied body", { skip }, a
     method: "GET",
     headers: [],
     body: null,
+    purpose: "data",
   });
 
   const variables = rt.construct(rt.classNamed("flash.net::URLVariables"), "sku=Test");
@@ -468,6 +469,7 @@ test("URLRequest data reaches the host as a query or a copied body", { skip }, a
       ["Content-Type", "text/plain"],
     ],
     body: new TextEncoder().encode("hello"),
+    purpose: "data",
   });
 
   const binary = rt.construct(rt.classNamed("flash.utils::ByteArray")) as avm2.AsObject;
@@ -779,6 +781,26 @@ test("an AVM1 SWF from bytes closed or unloaded before the frame's end never com
   assert.equal((loader.$display as Container).children.length, 0);
 });
 
+test("content unloaded, or its player destroyed, is told to the renderer, which keeps what it drew for others", {
+  skip,
+}, async () => {
+  // A renderer keeps the nodes of objects off the list for new objects of their characters: kept
+  // past an unload, they would keep the SWF's characters (render/view.ts, dropSpares).
+  const { unloads } = await import("../../../../packages/player/dist/display/display.js");
+  const { scripting, player, rt, loader, content } = await avm1Loading();
+  scripting.loads.requestLoad(loader, avm1Swf());
+  player.tick();
+  assert.ok(content());
+  const before = unloads.count;
+  rt.callProperty(loader, rt.publicName("unload"));
+  assert.equal(unloads.count, before + 1);
+  // Nothing to let go of: not told.
+  rt.callProperty(loader, rt.publicName("unload"));
+  assert.equal(unloads.count, before + 1);
+  player.destroy();
+  assert.equal(unloads.count, before + 2);
+});
+
 test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no InteractiveObject", {
   skip,
 }, async () => {
@@ -941,7 +963,7 @@ function nestMain(compile: ReturnType<typeof compiler>, between: boolean): [Uint
 }
 
 /** Enough fillers for the compiler to let go of the parent's ABCs. */
-const FILLERS = 80;
+const FILLERS = 120;
 
 const LOAD_CHILD = `public function loadChild():void {
       var loader:Loader = new Loader();
@@ -1126,4 +1148,167 @@ class ChildOnly {}`,
   } finally {
     Error.prepareStackTrace = prepare;
   }
+});
+
+/**
+ * A player by the real clock whose root traces each ENTER_FRAME, has
+ * arm(ms) trace "timeout <ms>" after `ms` and every(ms) "tick" each `ms`, its loads' links held until `release`
+ * is called; `step` moves the clock by a 60 Hz display's interval and advances.
+ */
+async function heldLoading() {
+  const compile = compiler(out);
+  const lines: string[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => now,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const root = compile(
+    "HoldRoot",
+    `package {
+      import flash.display.Sprite;
+      import flash.events.Event;
+      import flash.utils.setInterval;
+      import flash.utils.setTimeout;
+      public class HoldRoot extends Sprite {
+        public function HoldRoot() {
+          addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("frame"); });
+        }
+        public function arm(ms:int):void {
+          setTimeout(function():void { trace("timeout " + ms); }, ms);
+        }
+        public function every(ms:int):void {
+          setInterval(function():void { trace("tick"); }, ms);
+        }
+      }
+    }`,
+  );
+  const player = new Player(bare(root, 1, "HoldRoot"), scripting);
+  await player.start();
+
+  const code = scripting.code as unknown as { link: (...args: unknown[]) => Promise<unknown> };
+  const link = code.link.bind(code);
+  // hold() makes the links from then on wait for the next release.
+  let release = () => {};
+  let held = Promise.resolve();
+  const hold = () => {
+    held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  };
+  hold();
+  code.link = async (...args) => {
+    await held;
+    return link(...args);
+  };
+
+  const rt = scripting.rt;
+  const loader = rt.construct(rt.classNamed("flash.display::Loader")) as avm2.AsObject;
+  rt.callProperty(player.root.object, rt.publicName("addChild"), loader);
+  const step = (calls = 1) => {
+    for (let i = 0; i < calls; i++) {
+      now += 1000 / 60;
+      player.advance(1000 / 60);
+    }
+  };
+  // The host's typical interval, known.
+  step(10);
+  lines.length = 0;
+  const arm = (ms: number) => rt.callProperty(player.root.object, rt.publicName("arm"), ms);
+  const every = (ms: number) => rt.callProperty(player.root.object, rt.publicName("every"), ms);
+  const content = () => rt.getProperty(loader, rt.publicName("content"));
+  return { scripting, loader, lines, step, arm, every, content, hold, release: () => release() };
+}
+
+test("a load from bytes comes in the next frame however long its code takes, the timers after it", {
+  skip,
+}, async () => {
+  const held = await heldLoading();
+  held.scripting.loads.requestLoad(held.loader, innerSwf(compiler(out)("Inner"), 1));
+  // Timers set at the call that count on the content by then, as content may.
+  held.arm(10);
+  held.arm(1000);
+  held.every(10);
+
+  // Two seconds of the host's: no frame, and only the timers due by the
+  // frame's slot, between frames, as Flash's before its parse.
+  held.step(120);
+  assert.deepEqual(
+    held.lines.filter((line) => line !== "tick"),
+    ["timeout 10"],
+  );
+  assert.ok(held.lines.filter((line) => line === "tick").length <= 3, held.lines.join(" | "));
+  assert.equal(held.content(), null);
+
+  held.release();
+  await held.scripting.settled();
+  held.lines.length = 0;
+  held.step();
+  assert.equal(held.lines[0], "frame");
+  assert.ok(!held.lines.some((line) => line.startsWith("timeout") || line === "tick"));
+  assert.ok(held.content());
+
+  // The time held counts: what fell due in it fires now, once each, the
+  // interval's lost ticks dropped, not the second's wait over again.
+  held.step(3);
+  const after = held.lines.filter((line) => line === "tick" || line.startsWith("timeout"));
+  assert.deepEqual(
+    after.filter((line) => line !== "tick"),
+    ["timeout 1000"],
+  );
+  assert.ok(after.filter((line) => line === "tick").length <= 3, held.lines.join(" | "));
+});
+
+test("a closed load from bytes still compiling does not end the wait for one after it", {
+  skip,
+}, async () => {
+  const held = await heldLoading();
+  const inner = innerSwf(compiler(out)("Inner"), 1);
+  // The second load closes the first, which still compiles ahead of it.
+  held.scripting.loads.requestLoad(held.loader, inner);
+  held.scripting.loads.requestLoad(held.loader, inner);
+
+  held.step(120);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.equal(held.lines[0], "frame");
+  assert.ok(held.content());
+});
+
+test("a frame waits ten seconds at most for a load from bytes", { skip }, async () => {
+  const held = await heldLoading();
+  held.scripting.loads.requestLoad(held.loader, innerSwf(compiler(out)("Inner"), 1));
+
+  held.step(590);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  held.step(20);
+  assert.ok(held.lines.includes("frame"));
+  assert.equal(held.content(), null);
+  held.release();
+});
+
+test("each load from bytes waited for has ten seconds of its own", { skip }, async () => {
+  const held = await heldLoading();
+  const inner = innerSwf(compiler(out)("Inner"), 1);
+  held.scripting.loads.requestLoad(held.loader, inner);
+  held.step(480);
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.ok(held.content());
+
+  // Asked again as the first came: eight seconds on, it still holds the frame.
+  held.hold();
+  held.scripting.loads.requestLoad(held.loader, inner);
+  held.lines.length = 0;
+  held.step(480);
+  assert.equal(held.lines.length, 0, held.lines.join(" | "));
+  held.release();
+  await held.scripting.settled();
+  held.step();
+  assert.equal(held.lines[0], "frame");
+  assert.ok(held.content());
 });

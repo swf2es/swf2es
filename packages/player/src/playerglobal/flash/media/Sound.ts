@@ -454,97 +454,102 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
-      s.loads.requestBytes(request as AsObject, abort.signal, ({ bytes, local }, url) => {
-        if (sound.generation !== generation) {
-          return;
-        }
+      s.loads.requestBytes(
+        request as AsObject,
+        abort.signal,
+        ({ bytes, local }, url) => {
+          if (sound.generation !== generation) {
+            return;
+          }
 
-        sound.abort = null;
-        sound.url = url;
-        if (!bytes) {
-          discardPending(sound);
+          sound.abort = null;
+          sound.url = url;
+          if (!bytes) {
+            discardPending(sound);
+            dispatchEvent(
+              s,
+              this as AsObject,
+              s.rt.construct(
+                s.rt.classNamed("flash.events::IOErrorEvent"),
+                "ioError",
+                false,
+                false,
+                s.loads.streamError(url, local),
+              ) as AsObject,
+            );
+            return;
+          }
+
+          sound.bytes = bytes;
+          sound.loaded = bytes.length;
+          sound.total = bytes.length;
+          dispatchEvent(s, this as AsObject, s.event("open"));
+          if (sound.generation !== generation) {
+            return;
+          }
+
           dispatchEvent(
             s,
             this as AsObject,
             s.rt.construct(
-              s.rt.classNamed("flash.events::IOErrorEvent"),
-              "ioError",
+              s.rt.classNamed("flash.events::ProgressEvent"),
+              "progress",
               false,
               false,
-              s.loads.streamError(url, local),
+              bytes.length,
+              bytes.length,
             ) as AsObject,
           );
-          return;
-        }
-
-        sound.bytes = bytes;
-        sound.loaded = bytes.length;
-        sound.total = bytes.length;
-        dispatchEvent(s, this as AsObject, s.event("open"));
-        if (sound.generation !== generation) {
-          return;
-        }
-
-        dispatchEvent(
-          s,
-          this as AsObject,
-          s.rt.construct(
-            s.rt.classNamed("flash.events::ProgressEvent"),
-            "progress",
-            false,
-            false,
-            bytes.length,
-            bytes.length,
-          ) as AsObject,
-        );
-        if (sound.generation !== generation) {
-          return;
-        }
-
-        if (!s.audio) {
-          discardPending(sound);
-          dispatchEvent(s, this as AsObject, s.event("complete"));
-          return;
-        }
-
-        sound.clip = s.audio.decode(bytes);
-        for (const channel of channels.get(s) ?? []) {
-          const state = channel.$channel as ChannelState;
-          if (state.sound === sound && !state.stopped) {
-            startAudio(state);
+          if (sound.generation !== generation) {
+            return;
           }
-        }
 
-        const completed = sound.clip.then(
-          (clip) => {
-            sound.length = clip.durationMs;
-            s.loads.deferHostEvent(() => {
-              if (sound.generation === generation) {
-                dispatchEvent(s, this as AsObject, s.event("complete"));
-              }
-            });
-          },
-          () => {
+          if (!s.audio) {
             discardPending(sound);
-            s.loads.deferHostEvent(() => {
-              if (sound.generation === generation) {
-                dispatchEvent(
-                  s,
-                  this as AsObject,
-                  s.rt.construct(
-                    s.rt.classNamed("flash.events::IOErrorEvent"),
-                    "ioError",
-                    false,
-                    false,
-                    s.loads.streamError(url, local),
-                  ) as AsObject,
-                );
-              }
-            });
-          },
-        );
-        s.loads.trackRequest(completed);
-      });
+            dispatchEvent(s, this as AsObject, s.event("complete"));
+            return;
+          }
+
+          sound.clip = s.audio.decode(bytes);
+          for (const channel of channels.get(s) ?? []) {
+            const state = channel.$channel as ChannelState;
+            if (state.sound === sound && !state.stopped) {
+              startAudio(state);
+            }
+          }
+
+          const completed = sound.clip.then(
+            (clip) => {
+              sound.length = clip.durationMs;
+              s.loads.deferHostEvent(() => {
+                if (sound.generation === generation) {
+                  dispatchEvent(s, this as AsObject, s.event("complete"));
+                }
+              });
+            },
+            () => {
+              discardPending(sound);
+              s.loads.deferHostEvent(() => {
+                if (sound.generation === generation) {
+                  dispatchEvent(
+                    s,
+                    this as AsObject,
+                    s.rt.construct(
+                      s.rt.classNamed("flash.events::IOErrorEvent"),
+                      "ioError",
+                      false,
+                      false,
+                      s.loads.streamError(url, local),
+                    ) as AsObject,
+                  );
+                }
+              });
+            },
+          );
+          s.loads.trackRequest(completed);
+        },
+        "content",
+      );
     }
 
     get url(): string | null {

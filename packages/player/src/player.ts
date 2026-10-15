@@ -2,17 +2,47 @@
 // a frame on, in the order Flash runs one: the clips that were on the
 // display list advance their timelines (a clip made in this frame does not
 // advance until the next); with scripts, the frame's events and scripts
-// follow; then the frame is drawn.
+// follow, or an AVM1 SWF's actions; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
+import type { Avm1 } from "./avm1/avm1.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
-import { CLIP, Container, type DisplayObject, MovieClip, OTHER } from "./display/display.js";
+import {
+  BUTTON,
+  type ButtonObject,
+  CLIP,
+  Container,
+  type DisplayObject,
+  MovieClip,
+  OTHER,
+  unloads,
+  walkList,
+} from "./display/display.js";
+import { setStageSize } from "./display/perspective.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { KeyboardInput } from "./input/keyboard.js";
 import { PointerInput } from "./input/pointer.js";
+import { TouchInput } from "./input/touch.js";
 import type { Scripting } from "./scripting.js";
 
-/** Frames one advance() may run to catch up with time passed. */
-const MAX_CATCH_UP = 5;
+/** Frames one advance() may run at most, however fast the SWF and slow the display. */
+const MAX_FRAMES_PER_CALL = 5;
+/** The host's recent calls to advance() whose lower median is its typical interval. */
+const INTERVALS = 9;
+/** Calls seen before the typical interval is trusted; until then, a frame per call at most. */
+const MIN_INTERVALS = 3;
+/**
+ * The longest typical interval taken for a display's, in ms: none
+ * refreshes slower than about 30 Hz. Longer, the host is lagging, its
+ * calls stretched by the frames themselves, and more frames a call would
+ * feed the lag; it gets one a call and the content slows down, as Flash's.
+ */
+const DISPLAY_INTERVAL = 36;
+/**
+ * The longest a frame waits for a load from bytes, in ms of the host's
+ * time (Scripting.holdsFrame): a load that never ends does not stop the
+ * player for good.
+ */
+const HOLD_LIMIT = 10_000;
 
 export class Player {
   readonly swf: Swf;
@@ -37,24 +67,32 @@ export class Player {
   readonly pointer: PointerInput | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
   readonly keyboard: KeyboardInput | null;
+  /** Touches, likewise: TouchEvents, and the mouse the primary touch moves. */
+  readonly touch: TouchInput | null;
 
   /**
    * Without scripts the player is ready at once, but for the images of
    * its bitmap fills, which `start` decodes; with them, `start` loads the
-   * SWF's code and constructs the root, which is asynchronous.
+   * SWF's code and constructs the root, which is asynchronous. An AVM1
+   * SWF's actions run with `avm1`, which `start` compiles them for; an
+   * ActionScript 3 SWF's never do.
    */
   constructor(
     readonly bytes: Uint8Array,
     readonly scripting: Scripting | null = null,
+    readonly avm1: Avm1 | null = null,
   ) {
     this.swf = readSwf(bytes);
     this.library = readLibrary(this.swf);
     this.width = Math.round((this.swf.frameSize.xMax - this.swf.frameSize.xMin) / 20);
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
+    setStageSize(this.stage, this.width, this.height);
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
     this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
     this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
+    this.touch =
+      this.pointer && scripting ? new TouchInput(this.stage, scripting, this.pointer) : null;
     if (scripting) {
       scripting.pointer = this.pointer;
     }
@@ -76,6 +114,12 @@ export class Player {
     if (!s) {
       // Its bitmap fills' images, which a SWF with scripts decodes as it links.
       await decodeImages(this.library, decodeInBrowser);
+      // Its first frame's actions, once its code is loaded.
+      if (this.avm1) {
+        await this.avm1.load(this.swf);
+        this.avm1.frame(this.root);
+      }
+
       return;
     }
 
@@ -138,10 +182,17 @@ export class Player {
   destroy(): void {
     this.stopped = true;
     this.scripting?.destroy();
+    unloads.count++;
   }
 
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
+  /** The host's time the frame due has waited for a load from bytes so far. */
+  private held = 0;
+  /** The last INTERVALS times passed to advance(), a ring, for the host's typical interval. */
+  private readonly intervals: number[] = [];
+  private nextInterval = 0;
+  private readonly sortedIntervals: number[] = [];
   /** Frames played. */
   private played = 0;
   /** The clips a tick advances, kept: the whole display list's, every frame. Null while in use. */
@@ -163,6 +214,7 @@ export class Player {
     return (
       this.played +
       (this.pointer?.redraws ?? 0) +
+      (this.touch?.redraws ?? 0) +
       (this.scripting?.updates ?? 0) +
       (this.keyboard?.handled ?? 0) +
       (this.scripting?.hostCalls ?? 0)
@@ -170,34 +222,133 @@ export class Player {
   }
 
   /**
-   * Play what `dt` milliseconds are worth, a frame per frame's duration at
-   * the frame rate, the rest kept for the next call; at most MAX_CATCH_UP
-   * frames at once, so that a long pause does not become a spiral of
-   * catching up, as Ruffle paces. A host playing in real time calls this
-   * each animation frame; the tests step frames with tick(). Returns how
-   * many frames it played.
+   * Play what `dt` milliseconds are worth, as Flash paces: frames on a
+   * grid of the frame rate's duration, and those a long frame or a stall
+   * lost dropped, not caught up with. Flash runs the frame due at once
+   * after an overrun and the next one at its slot on the grid, never two
+   * back to back (measured in adl, docs/architecture.md), so content that
+   * moves by the time between frames always sees time pass between them.
+   * A call runs as many frames as the host's typical interval holds, the
+   * lower median of its recent calls and never the current one, so a
+   * hitch does not become a burst: one where the SWF's frame is as long
+   * as the display's or longer, more for a SWF faster than the display,
+   * and one while the interval is longer than a display's. A `dt` that is
+   * not a finite positive number counts as none. A host playing in real
+   * time calls this each animation frame; the tests step frames with
+   * tick(). Returns how many frames it played.
    */
   advance(dt: number): number {
     if (this.stopped) {
       return 0;
     }
 
-    // The pointer's last move, so the frame's scripts see where it is now.
+    // The pointer's and the touches' last moves, so the frame's scripts see where they are now.
     this.pointer?.flush();
-    this.owed += Math.max(0, dt);
+    this.touch?.flush();
+    const passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
+    const frame = 1000 / this.frameRate;
+    const typical = this.typicalInterval(passed);
+    let most =
+      typical > DISPLAY_INTERVAL
+        ? 1
+        : Math.min(MAX_FRAMES_PER_CALL, Math.max(1, Math.round(typical / frame)));
+    // A frame that waits for a load from bytes plays once it is ready, as
+    // Flash's waits for the parse. The frames do not catch up the time
+    // held: they stop at the frame's slot. The timers count it, as Flash's
+    // do, but fire nothing due after that slot until the frame has played,
+    // its content made and INIT and COMPLETE told: Flash's parse takes a
+    // few tens of milliseconds where a compile here may take seconds, and
+    // content counts on having its content before a timer set at the call.
+    // That holds for the call in which the load came too, which its
+    // compile may have taken whole. Each load waited for has the ten
+    // seconds to itself: one asked as the last comes does not inherit its
+    // wait.
+    const timers = this.scripting?.timers;
+    let holding = false;
+    let resuming = false;
+    if (!this.scripting?.heldTime()) {
+      this.held = 0;
+    } else if (!this.scripting.holdsFrame()) {
+      this.held = 0;
+      resuming = true;
+    } else if (this.held < HOLD_LIMIT) {
+      this.held += passed;
+      holding = true;
+      most = 0;
+    }
+
+    let framePassed = passed;
+    if (holding || resuming) {
+      timers?.holdAfter(Math.max(0, frame - this.owed));
+      framePassed = Math.max(0, Math.min(passed, frame - this.owed));
+    } else {
+      timers?.release();
+    }
+
+    this.owed += framePassed;
+    // How many frames play and what is owed after, worked out first: the
+    // timers fire by each frame's time on the grid, not the call's.
     let n = 0;
-    while (n < MAX_CATCH_UP && this.owed >= 1000 / this.frameRate) {
-      this.owed -= 1000 / this.frameRate;
-      this.tick();
+    let rest = this.owed;
+    while (n < most && rest >= frame) {
+      rest -= frame;
       n++;
     }
 
-    // What could not be caught up with is let go, not owed for ever; less than a frame is kept.
-    if (this.owed >= 1000 / this.frameRate) {
-      this.owed = 0;
+    // Whole frames lost are dropped, the part of one kept for the grid's
+    // phase; but not within half an interval of the next, where a call
+    // that came a little early leaves one owed under ordinary jitter.
+    if (rest >= frame + Math.min(frame, typical) / 2) {
+      rest %= frame;
+    }
+
+    timers?.hostPassed(passed);
+    try {
+      for (let i = 0; i < n; i++) {
+        // Owed as each frame starts: a frame that throws leaves those after it owed.
+        this.owed = rest + (n - 1 - i) * frame;
+        timers?.frameAt((n - 1 - i) * frame, rest);
+        this.tick();
+      }
+    } finally {
+      timers?.frameAt(Number.NaN, Number.NaN);
+      if (resuming) {
+        timers?.release();
+      }
+    }
+
+    // Flash fires timers shorter than a frame between frames too: a call
+    // that played none checks them.
+    if (n === 0) {
+      this.owed = rest;
+      timers?.betweenFrames(frame);
     }
 
     return n;
+  }
+
+  /** `dt` recorded, and the lower median of the recent intervals; 0 until there are a few. */
+  private typicalInterval(dt: number): number {
+    const intervals = this.intervals;
+    if (intervals.length < INTERVALS) {
+      intervals.push(dt);
+    } else {
+      intervals[this.nextInterval] = dt;
+      this.nextInterval = (this.nextInterval + 1) % INTERVALS;
+    }
+
+    if (intervals.length < MIN_INTERVALS) {
+      return 0;
+    }
+
+    const sorted = this.sortedIntervals;
+    sorted.length = 0;
+    for (let i = 0; i < intervals.length; i++) {
+      sorted.push(intervals[i]);
+    }
+
+    sorted.sort((a, b) => a - b);
+    return sorted[(sorted.length - 1) >> 1];
   }
 
   /**
@@ -207,7 +358,8 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
-    if (this.stopped) {
+    // An AVM1 SWF halted at what Flash cannot read plays no more.
+    if (this.stopped || this.avm1?.halted) {
       return;
     }
 
@@ -216,20 +368,40 @@ export class Player {
     const clips = this.ticking ?? [];
     this.ticking = null;
     let count = 0;
+    const frames = this.scripting?.frames;
+    // One a goto made sit this frame out takes all in it along.
+    const sitsOut = (clip: MovieClip) => clip.skipsAfter >= 0 && clip.skipsAfter === frames;
     const collect = (o: DisplayObject) => {
-      if (o.kind === CLIP) {
-        // One a goto made sit this frame out takes all in it along.
-        const clip = o as MovieClip;
-        if (clip.skipsAfter >= 0 && clip.skipsAfter === this.scripting?.frames) {
-          return;
-        }
-
-        clips[count++] = clip;
+      if (o.kind === CLIP && sitsOut(o as MovieClip)) {
+        return;
       }
 
-      // A button's states all play, whichever it shows. An index, not for-of,
-      // and no call for a leaf: this visits every object on the list each frame.
-      const children = o.frameChildren;
+      // The clips under a container from the list it keeps (walkList); a button's states all
+      // play, whichever it shows, walked as they are.
+      if (o instanceof Container && o.kind !== BUTTON) {
+        const { items, ends } = walkList(o);
+        for (let i = 0; i < items.length; ) {
+          const item = items[i];
+          if (item.kind === BUTTON) {
+            collect(item);
+          } else if (sitsOut(item as MovieClip)) {
+            i = ends[i];
+            continue;
+          } else {
+            clips[count++] = item as MovieClip;
+          }
+
+          i++;
+        }
+
+        return;
+      }
+
+      if (o.kind === CLIP) {
+        clips[count++] = o as MovieClip;
+      }
+
+      const children = o.kind === BUTTON ? (o as ButtonObject).playingStates() : o.frameChildren;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         if (child.kind !== OTHER || child.frameChildren.length !== 0) {
@@ -256,5 +428,7 @@ export class Player {
       this.scripting.frame(this.stage);
       this.frameRate = this.scripting.frameRate;
     }
+
+    this.avm1?.frame(this.root);
   }
 }

@@ -2,8 +2,14 @@
 // object, as $store; the natives read and write it. Flash's limits and its
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
-import { BitmapStore, type PixelRect } from "../../../bitmap/bitmap.js";
-import { applyFilter, filterRect, filtersDrawn } from "../../../bitmap/filters.js";
+import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
+import {
+  applyFilter,
+  filterRect,
+  filterRefusal,
+  filtersDrawn,
+  isInner,
+} from "../../../bitmap/filters.js";
 import {
   type Affine,
   alphaAt,
@@ -25,8 +31,10 @@ import {
 } from "../../../bitmap/ops.js";
 import { encodePng } from "../../../bitmap/png.js";
 import { bounds } from "../../../display/bounds.js";
+import { type DisplayObject, pickWork } from "../../../display/display.js";
 import type { Filter } from "../../../display/filters.js";
 import { transformRect } from "../../../display/geometry.js";
+import { drawnAsStage } from "../../../display/perspective.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
@@ -41,6 +49,12 @@ const GLOWS: ReadonlySet<string> = new Set([
 ]);
 
 import { colorOf } from "../geom/Transform.js";
+
+/** The longest side adl makes a BitmapData of: 2^31 / 20, whole. */
+const MAX_SIDE = 107374182;
+
+/** The most pixels adl makes a BitmapData of, whatever its shape: 2146500576 bytes. */
+const MAX_PIXELS = 536625144;
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
@@ -66,43 +80,38 @@ function sizeOf(s: Scripting, o: AsObject): BitmapStore {
   return store;
 }
 
-/** The nearest integer, a half to the even one, as C's rint rounds and Flash's pixel coordinates do. */
-function nearest(v: number): number {
-  const f = Math.floor(v);
-  const d = v - f;
-  if (d !== 0.5) {
-    return d > 0.5 ? f + 1 : f;
-  }
-
-  return f % 2 === 0 ? f : f + 1;
-}
-
-/** A flash.geom.Rectangle as pixels; TypeError 2007 for null. */
-function rectOf(s: Scripting, v: Value): PixelRect {
+/**
+ * A flash.geom.Rectangle as pixels (bitmap.ts pixelRect), NaN and Infinity
+ * as adl takes them; with `span`, a negative size spanning back, as merge,
+ * copyChannel, paletteMap, threshold and pixelDissolve take it (spanRect).
+ * TypeError 2007 for null.
+ */
+function rectOf(s: Scripting, v: Value, span = false): PixelRect {
   if (v === null || v === undefined) {
     throw s.rt.error("TypeError", 2007, "rect");
   }
 
-  // Each edge rounded to the nearest pixel, a half to the even one, as
-  // Flash does: a rect from 1.6 of 1.8 fills the pixel at 2 alone, one
-  // from 3.5 of 1 fills nothing (Ruffle's bitmapdata_rectangle_rounding).
   const r = v as AsObject;
-  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k))) || 0;
-  const x0 = nearest(read("x"));
-  const y0 = nearest(read("y"));
-  const x1 = nearest(read("x") + read("width"));
-  const y1 = nearest(read("y") + read("height"));
-  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k)));
+  return (span ? spanRect : pixelRect)(read("x"), read("y"), read("width"), read("height"));
 }
 
-/** A flash.geom.Point's values, rounded to pixels; TypeError 2007 for null. */
+/**
+ * A flash.geom.Point's values as pixels, truncated toward 0 as Flash's
+ * destination, alpha and hit-test points are, unlike a rect's rounded
+ * edges; NaN, and anything past int's range, int's least, which lies off
+ * every bitmap, as adl takes them; TypeError 2007 for null.
+ */
 function pointOf(s: Scripting, v: Value, name: string): [number, number] {
   if (v === null || v === undefined) {
     throw s.rt.error("TypeError", 2007, name);
   }
 
   const p = v as AsObject;
-  const read = (k: string) => nearest(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))) || 0);
+  const read = (k: string) => {
+    const t = Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))));
+    return t >= -0x80000000 && t <= 0x7fffffff ? t + 0 : -0x80000000;
+  };
   return [read("x"), read("y")];
 }
 
@@ -113,6 +122,50 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
   }
 
   return storeOf(s, v as AsObject);
+}
+
+/** `d` drawn into `store` through `m`, as drawInto draws a display object. */
+function drawObject(
+  s: Scripting,
+  store: BitmapStore,
+  d: DisplayObject,
+  m: Affine,
+  c: ReturnType<typeof colorOf> | null,
+  blend: string,
+  r: PixelRect | null,
+  samples: number,
+): void {
+  const drawer = s.drawer as NonNullable<Scripting["drawer"]>;
+  // Only the part the object can reach: its bounds through the matrix, a
+  // pixel wider for anti-aliasing, within the clip and the bitmap; the
+  // snapshot's cost is then the object's size, not the bitmap's.
+  const local = bounds(d, true);
+  if (!local) {
+    return;
+  }
+
+  const reach = transformRect(local, m);
+  const x0 = Math.max(0, Math.floor(reach.xMin) - 1, r ? r.x : 0);
+  const y0 = Math.max(0, Math.floor(reach.yMin) - 1, r ? r.y : 0);
+  const x1 = Math.min(store.width, Math.ceil(reach.xMax) + 1, r ? r.x + r.width : store.width);
+  const y1 = Math.min(store.height, Math.ceil(reach.yMax) + 1, r ? r.y + r.height : store.height);
+  if (x1 <= x0 || y1 <= y0) {
+    return;
+  }
+
+  const placed = { ...m, tx: m.tx - x0, ty: m.ty - y0 };
+  // Plain source over goes on the GPU, the store left there until a script reads it.
+  if (
+    !c &&
+    blend === "normal" &&
+    drawer.drawInto(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples)
+  ) {
+    return;
+  }
+
+  const drawn = new BitmapStore(x1 - x0, y1 - y0, true, 0);
+  drawn.pixels = drawer.snapshot(d, placed, x1 - x0, y1 - y0, samples);
+  drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
 }
 
 /**
@@ -157,36 +210,28 @@ function drawInto(
       throw s.rt.unsupported("BitmapData#draw of a display object without a renderer");
     }
 
-    // Only the part the object can reach: its bounds through the matrix, a
-    // pixel wider for anti-aliasing, within the clip and the bitmap; the
-    // snapshot's cost is then the object's size, not the bitmap's.
-    const local = bounds(o.$display, true);
-    if (!local) {
+    // What is in 3D in an object on no stage projects as on a stage the bitmap's size.
+    let top: DisplayObject = o.$display;
+    while (top.parent) {
+      top = top.parent;
+    }
+
+    const restore = drawnAsStage(top, store.width, store.height);
+    if (!restore) {
+      drawObject(s, store, o.$display, m, c, blend, r, samples);
       return;
     }
 
-    const reach = transformRect(local, m);
-    const x0 = Math.max(0, Math.floor(reach.xMin) - 1, r ? r.x : 0);
-    const y0 = Math.max(0, Math.floor(reach.yMin) - 1, r ? r.y : 0);
-    const x1 = Math.min(store.width, Math.ceil(reach.xMax) + 1, r ? r.x + r.width : store.width);
-    const y1 = Math.min(store.height, Math.ceil(reach.yMax) + 1, r ? r.y + r.height : store.height);
-    if (x1 <= x0 || y1 <= y0) {
-      return;
+    // Planes in perspective made before are made again, for that stage and after it; only then,
+    // as each change picks the pointer's hover again and remakes every plane.
+    pickWork.changes++;
+    try {
+      drawObject(s, store, o.$display, m, c, blend, r, samples);
+    } finally {
+      restore();
+      pickWork.changes++;
     }
 
-    const placed = { ...m, tx: m.tx - x0, ty: m.ty - y0 };
-    // Plain source over goes on the GPU, the store left there until a script reads it.
-    if (
-      !c &&
-      blend === "normal" &&
-      s.drawer.drawInto(store, o.$display, placed, x0, y0, x1 - x0, y1 - y0, samples)
-    ) {
-      return;
-    }
-
-    const drawn = new BitmapStore(x1 - x0, y1 - y0, true, 0);
-    drawn.pixels = s.drawer.snapshot(o.$display, placed, x1 - x0, y1 - y0, samples);
-    drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
     return;
   }
 
@@ -214,10 +259,35 @@ function samplesOf(s: Scripting, quality: Value): number {
   }
 }
 
-/** A flash.geom.Matrix's six values. */
+/**
+ * A flash.geom.Matrix's six values, its translation as draw takes it under
+ * adl, in twips in an int: NaN is int's least, and so is anything past
+ * the int's range, Infinity too, which a matrix that only moves draws at
+ * 0 (and any other off every bitmap); and a move within 2^30 twips of
+ * the range's ends wraps round to near 0, 107374180 drawing at -2.4.
+ */
 function matrixOf(s: Scripting, o: AsObject): Affine {
   const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
-  return { a: read("a"), b: read("b"), c: read("c"), d: read("d"), tx: read("tx"), ty: read("ty") };
+  const m = {
+    a: read("a"),
+    b: read("b"),
+    c: read("c"),
+    d: read("d"),
+    tx: read("tx"),
+    ty: read("ty"),
+  };
+  const moves = m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1;
+  const twips = (t: number) => {
+    const v = t * 20;
+    if (Number.isNaN(v) || (moves && Math.abs(v) >= 2 ** 31)) {
+      return 0;
+    }
+
+    return moves && Math.abs(v) >= 2 ** 30 ? (v - Math.sign(v) * 2 ** 31) / 20 : t;
+  };
+  m.tx = twips(m.tx);
+  m.ty = twips(m.ty);
+  return m;
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {
@@ -249,19 +319,30 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // A side under 1 is refused; Flash sets no upper bound any more (16384 wide and 4097 by 4096 both pass).
+      // A side under 1 is refused, and as adl refuses them, a side past 2^31 / 20
+      // (107374183 by 1) and more than MAX_PIXELS (32753 by 16384, 65514 by 8191).
       const w = s.rt.toInt(width);
       const h = s.rt.toInt(height);
-      if (w < 1 || h < 1) {
+      if (w < 1 || h < 1 || w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS) {
         throw s.rt.error("ArgumentError", 2015);
       }
 
-      this.$store = new BitmapStore(
-        w,
-        h,
-        transparent === undefined ? true : !!transparent,
-        s.rt.toUint(fill === undefined ? 0xffffffff : fill),
-      );
+      // One the browser cannot allocate is refused, as adl refuses what its memory
+      // cannot hold, rather than ending the player with a RangeError.
+      try {
+        this.$store = new BitmapStore(
+          w,
+          h,
+          transparent === undefined ? true : !!transparent,
+          s.rt.toUint(fill === undefined ? 0xffffffff : fill),
+        );
+      } catch (e) {
+        if (e instanceof RangeError) {
+          throw s.rt.error("ArgumentError", 2015);
+        }
+
+        throw e;
+      }
     }
 
     // Disposed, every read throws, the size included, as Flash has it.
@@ -368,6 +449,13 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("flash.errors::IllegalOperationError", 2077);
       }
 
+      switch (filterRefusal(r, f, { x: 0, y: 0, width: from.width, height: from.height })) {
+        case 2015:
+          throw s.rt.error("ArgumentError", 2015);
+        case 2077:
+          throw s.rt.error("flash.errors::IllegalOperationError", 2077);
+      }
+
       // A displacement map's map as it is now, not as it was when set.
       const map =
         f.kind === "displacementMap" && f.mapBitmap ? storeOf(s, f.mapBitmap as AsObject) : null;
@@ -383,7 +471,29 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
       }
 
-      // The rect within the bitmap first; a displacement map's result within it too.
+      // The rect within the bitmap first, an edge of it a rect of no width;
+      // one apart from it Flash makes 2^27 - 1 on each side, of no size.
+      const given = rectOf(s, sourceRect);
+      const x0 = Math.max(0, given.x);
+      const y0 = Math.max(0, given.y);
+      const x1 = Math.min(store.width, given.x + given.width);
+      const y1 = Math.min(store.height, given.y + given.height);
+      if (x1 < x0 || y1 < y0) {
+        // Grown as any other, but an inner filter's, which stays where it is.
+        const apart = { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 };
+        const r = isInner(f) ? apart : filterRect(apart, f);
+        return s.rt.construct(
+          s.rt.classNamed("flash.geom::Rectangle"),
+          r.x,
+          r.y,
+          r.width,
+          r.height,
+        );
+      }
+
+      let r = filterRect({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, f);
+      // A displacement map's result within the bitmap too, and an inner
+      // filter's, which draws within what it filters.
       const within = (r: PixelRect): PixelRect => {
         const x0 = Math.max(0, r.x);
         const y0 = Math.max(0, r.y);
@@ -393,8 +503,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
           : { x: 0, y: 0, width: 0, height: 0 };
       };
-      let r = filterRect(within(rectOf(s, sourceRect)), f);
-      if (f.kind === "displacementMap") {
+      if (f.kind === "displacementMap" || isInner(f)) {
         r = within(r);
       }
 
@@ -524,7 +633,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     copyChannel(source: Value, rect: Value, dest: Value, from: Value, to: Value): void {
       const store = storeOf(s, this);
       const src = sourceOf(s, source);
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       copyChannel(store, src, r, dx, dy, s.rt.toUint(from), s.rt.toUint(to));
     }
@@ -582,7 +691,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "sourceRect");
       }
 
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       // A channel's table, or itself where none is given.
       const table = (v: Value, shift: number): Uint32Array =>
@@ -646,6 +755,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "colorTransform");
       }
 
+      // A foot of NaN, int's least, less a top past 0 wraps round in int
+      // arithmetic to a height reaching the bitmap's foot, as adl has it; a
+      // width of NaN covers nothing.
+      r.height |= 0;
       colorTransform(store, r, colorOf(s, ct as AsObject));
     }
 
@@ -660,7 +773,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): void {
       const store = storeOf(s, this);
       const src = sourceOf(s, source);
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       merge(
         store,
@@ -688,7 +801,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): number {
       const store = storeOf(s, this);
       const src = sourceOf(s, source);
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       // A String parameter: undefined is null, refused with 2007 before the value is looked at.
       if (op === null || op === undefined) {
@@ -756,6 +869,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     ): boolean {
       const store = storeOf(s, this);
       const [fx, fy] = pointOf(s, firstPoint, "firstPoint");
+      // adl refuses a point the bitmap, put there, would reach past int's range from.
+      if (fx + store.width > 0x7fffffff || fy + store.height > 0x7fffffff) {
+        throw s.rt.error("ArgumentError", 1508, "firstPoint");
+      }
+
       const a1 = s.rt.toUint(firstAlpha);
       const other = second as AsObject;
       if (other === null || other === undefined) {
@@ -773,11 +891,13 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const isPoint = name === "flash.geom::Point";
       const isRect = name === "flash.geom::Rectangle";
       if (isPoint || isRect) {
-        const read = (k: string) => s.rt.toNumber(s.rt.getProperty(other, s.rt.publicName(k))) || 0;
-        const x0 = Math.trunc(read("x")) - fx;
-        const y0 = Math.trunc(read("y")) - fy;
-        const w = isRect ? Math.trunc(read("width")) : 1;
-        const h = isRect ? Math.trunc(read("height")) : 1;
+        // A point truncated, a rect's edges rounded, as everywhere else.
+        const area = isRect ? rectOf(s, other) : null;
+        const [px, py] = isPoint ? pointOf(s, other, "secondObject") : [0, 0];
+        const x0 = (area ? area.x : px) - fx;
+        const y0 = (area ? area.y : py) - fy;
+        const w = area ? area.width : 1;
+        const h = area ? area.height : 1;
         for (let y = Math.max(0, y0); y < Math.min(store.height, y0 + h); y++) {
           for (let x = Math.max(0, x0); x < Math.min(store.width, x0 + w); x++) {
             // A point or rect hits no pixel of alpha 0, at threshold 0 too (bitmapdata_hittest_threshold).
@@ -795,6 +915,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         const second = storeOf(s, data);
         // Against a bitmap, its point is required.
         const [sx, sy] = pointOf(s, secondPoint, "secondBitmapDataPoint");
+        if (sx + second.width > 0x7fffffff || sy + second.height > 0x7fffffff) {
+          throw s.rt.error("ArgumentError", 1508, "secondBitmapDataPoint");
+        }
+
         const a2 = secondAlpha === undefined ? 1 : s.rt.toUint(secondAlpha);
         const ox = sx - fx;
         const oy = sy - fy;
@@ -831,7 +955,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "sourceRect");
       }
 
-      const r = rectOf(s, rect);
+      const r = rectOf(s, rect, true);
       const [dx, dy] = pointOf(s, dest, "destPoint");
       const n = count === undefined ? 0 : s.rt.toInt(count);
       if (n < 0) {
@@ -844,7 +968,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         r,
         dx,
         dy,
-        seed === undefined ? 0 : s.rt.toNumber(seed),
+        // An int, as declared: NaN is 0, where it would never reach a state.
+        seed === undefined ? 0 : s.rt.toInt(seed),
         n,
         fill === undefined ? 0 : s.rt.toUint(fill),
       );

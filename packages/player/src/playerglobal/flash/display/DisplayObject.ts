@@ -15,6 +15,7 @@ import {
 } from "../../../display/display.js";
 import { copyFilter } from "../../../display/filters.js";
 import { apply, invert, type Rect, transformRect } from "../../../display/geometry.js";
+import { stagePoint3D } from "../../../display/perspective.js";
 import { gridInside, sliceBounds } from "../../../display/scale9.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterClassName, filterKindOf, recordOf } from "../filters/BitmapFilter.js";
@@ -55,6 +56,22 @@ function halfEven(v: number): number {
 
 function point(s: Scripting, x: number, y: number): Value {
   return s.rt.construct(s.rt.classNamed("flash.geom::Point"), x, y);
+}
+
+/** A point of the stage's in `d`'s plane: through a 3D object's in perspective, NaN where the matrices flatten it. */
+function stageToLocal(s: Scripting, d: DisplayObject, p: Value): [number, number] {
+  const x = Number(s.rt.getProperty(p as AsObject, name("x")));
+  const y = Number(s.rt.getProperty(p as AsObject, name("y")));
+  const up = toStage(d, s.stage);
+  const m = invert(up);
+  if (m) {
+    return apply(m, x, y);
+  }
+
+  // Divided by the zero determinant all the same: infinities where a point is off the line.
+  const dx = x - up.tx;
+  const dy = y - up.ty;
+  return [(up.d * dx - up.c * dy) / 0, (up.a * dy - up.b * dx) / 0];
 }
 
 /** Flash keeps positions in twips, so what it reports of bounds is a multiple of a twentieth. */
@@ -170,7 +187,7 @@ function transform(d: DisplayObject, change: (m: Matrix) => void): void {
 const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
 
 /** Whether `d` is on the display list: under the stage. */
-export function onStage(s: Scripting, d: DisplayObject): boolean {
+function onStage(s: Scripting, d: DisplayObject): boolean {
   for (let o: DisplayObject | null = d; o; o = o.parent) {
     if (o === s.stage) {
       return true;
@@ -311,8 +328,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.set3D("rotationY", Number(v));
     }
 
+    // 0 in 2D, whatever the rotation, as Flash reads it.
     get rotationZ(): number {
-      return this.$display.rotation;
+      return this.$display.space ? this.$display.rotation : 0;
     }
 
     set rotationZ(v: Value) {
@@ -646,16 +664,30 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       const m = toStage(this.$display, s.stage);
       const x = Number(s.rt.getProperty(p as AsObject, name("x")));
       const y = Number(s.rt.getProperty(p as AsObject, name("y")));
-      return point(s, m.a * x + m.c * y + m.tx, m.b * x + m.d * y + m.ty);
+      return point(s, ...apply(m, x, y));
     }
 
     /** A point of the stage's space in this object's: the inverse of the way up. */
     globalToLocal(p: Value): Value {
-      const m = toStage(this.$display, s.stage);
-      const x = Number(s.rt.getProperty(p as AsObject, name("x"))) - m.tx;
-      const y = Number(s.rt.getProperty(p as AsObject, name("y"))) - m.ty;
-      const det = m.a * m.d - m.b * m.c;
-      return point(s, (m.d * x - m.c * y) / det, (m.a * y - m.b * x) / det);
+      const [x, y] = stageToLocal(s, this.$display, p);
+      return point(s, x, y);
+    }
+
+    /**
+     * A point of this object's 3D space on the stage: through the 3D
+     * transforms above it to its projector's space, projected there, as
+     * drawn. Flash reports it to a quarter pixel.
+     */
+    local3DToGlobal(v: Value): Value {
+      const get = (key: string) => Number(s.rt.getProperty(v as AsObject, name(key)));
+      const [x, y] = stagePoint3D(this.$display, get("x"), get("y"), get("z"), s.stage);
+      return point(s, Math.round(x * 4) / 4, Math.round(y * 4) / 4);
+    }
+
+    /** The point of this object's plane, z = 0, under a point of the stage, as a Vector3D. */
+    globalToLocal3D(p: Value): Value {
+      const [x, y] = stageToLocal(s, this.$display, p);
+      return s.rt.construct(s.rt.classNamed("flash.geom::Vector3D"), x, y, 0);
     }
 
     /** One Transform per display object, made when first asked for. */

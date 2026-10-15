@@ -14,6 +14,7 @@ import { avm2 } from "@swf2es/runtime";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
+  BUTTON,
   ButtonObject,
   buttonStates,
   CLIP,
@@ -24,16 +25,20 @@ import {
   scriptChildren,
   scriptWork,
   TRANSFORM,
+  walkList,
 } from "./display/display.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
 import {
+  browserClipboard,
   browserNavigate,
+  type ClipboardHost,
   type Drawer,
   defaultStorage,
   type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
   globalWebSocketHost,
+  hostTouchPoints,
   type ModuleCache,
   type Navigate,
   type PlatformCapabilities,
@@ -46,16 +51,22 @@ import {
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
-import { airLibrary, playerHooks, playerNatives } from "./playerglobal/index.js";
+import {
+  airLibrary,
+  playerglobalLibrary,
+  playerHooks,
+  playerNatives,
+} from "./playerglobal/index.js";
+import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
-import { dispatchTo } from "./scripting/events.js";
+import { dispatchTo, type EventFields } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
 
 // For index.ts, which reaches playerglobal only through here.
-export { airLibrary };
+export { airLibrary, playerglobalLibrary };
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -87,8 +98,10 @@ export class Scripting {
   readonly lifecycle = new Lifecycle(this);
   /** What Loaders, URLStreams and host callbacks asked for, till the frame it comes in. */
   readonly loads: Loads;
-  /** The frame clock, getTimer's, and the timers that fire by it. */
+  /** The clocks, getTimer's, and the timers that fire by them. */
   readonly timers: Timers;
+  /** The system's clipboard as scripts see it, and when they may read or write it. */
+  readonly clipboard: Clipboard;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
@@ -171,6 +184,14 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
+  /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's. */
+  readonly sandboxType: string;
+  /**
+   * Takes the policy files Security.loadPolicyFile names, resolved, for a
+   * host that judges requests by them; nothing does by default, as a
+   * browser's fetch knows only CORS.
+   */
+  readonly loadPolicyFile: ((url: string) => void) | null;
   /** Where every relative URL the SWFs ask for resolves, where the host gives one; else against the SWF's. */
   readonly base: string | null;
   /** Where local SharedObjects are kept (flash/net/SharedObject.ts). */
@@ -179,6 +200,18 @@ export class Scripting {
   flushSharedObjects: (() => void) | null = null;
   /** What Capabilities reports of the system (flash/system/Capabilities.ts). */
   readonly platform: PlatformCapabilities;
+  /** How many touches the host's screen takes at once: none where it has no touch screen. */
+  readonly maxTouchPoints: number;
+  /**
+   * Multitouch.inputMode: "gesture" where the host takes touches, as Flash
+   * starts on a touch screen; "none" where it does not, which Flash keeps
+   * there whatever a script sets (measured in adl and Flash Player 32).
+   */
+  inputMode: "none" | "gesture" | "touchPoint";
+  /** Multitouch.mapTouchToMouse, AIR's: whether the primary touch moves the mouse in touchPoint mode too. */
+  mapTouchToMouse = true;
+  /** Where its events keep what dispatch reads and writes (scripting/events.ts's eventFields). */
+  eventFields: EventFields | null = null;
   /** The display object the next DisplayObject allocation is for, while the player constructs a timeline child's class. */
   pending: DisplayObject | null = null;
   /** The stage, once the player has made it, and the root it holds. */
@@ -226,6 +259,13 @@ export class Scripting {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       /**
+       * Security.sandboxType: "remote", "localWithFile", "localWithNetwork"
+       * or "localTrusted", as the host placed the SWF; "remote" by default.
+       */
+      sandboxType?: string;
+      /** Takes the URLs Security.loadPolicyFile names, resolved: an "xmlsocket:" one as given. */
+      loadPolicyFile?: (url: string) => void;
+      /**
        * Where the SWFs' relative URLs resolve, as a page's `base` parameter
        * has Flash resolve them all; against the URL of the SWF that asks
        * by default.
@@ -241,11 +281,15 @@ export class Scripting {
       storage?: SharedObjectStorage;
       /** What Capabilities reports of the system: by default the browser's, as Flash Player 32's plugin. */
       platform?: Partial<PlatformCapabilities>;
+      /** How many touches the screen takes at once: by default the browser's navigator.maxTouchPoints, 0 without one. */
+      maxTouchPoints?: number;
       externalInterface?: ExternalInterfaceHost;
       socket?: SocketHost;
       webSocket?: WebSocketHost | null;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
+      /** Where scripts' writes to the clipboard go outside a copy event: the browser's by default, null for none. */
+      clipboard?: ClipboardHost | null;
       /**
        * What fscommand sends: a plug-in's page gets it as its DoFSCommand
        * call; none by default. The SWF chooses both strings: never evaluate
@@ -263,10 +307,14 @@ export class Scripting {
       /** Drop the final newline produced by an HTML paragraph or BR. */
       trimTrailingHtmlBreak?: boolean;
       /**
-       * The clock getTimer reads, a monotonic one in milliseconds: by default
+       * The clock getTimer reads, in milliseconds: by default
        * `performance.now`, as Flash's runs on in real time, while a script
        * does too; null for the frame clock, which a frame moves and nothing
        * else, the same on every run, as tests that compare traces want.
+       * With a clock, timers fire by the host's time, the sum of the
+       * intervals it passes to advance() (started at this clock's), and this
+       * clock tells the time between calls. Readings that are not finite
+       * are skipped, and one that goes back counts as no time.
        */
       realTime?: (() => number) | null;
       /**
@@ -311,6 +359,9 @@ export class Scripting {
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
+    this.clipboard = new Clipboard(
+      options.clipboard === undefined ? browserClipboard() : options.clipboard,
+    );
     this.fsCommand = options.fsCommand ?? null;
     this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
@@ -319,10 +370,14 @@ export class Scripting {
       ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
       : null;
     this.url = options.url ?? this.url;
+    this.sandboxType = options.sandboxType ?? "remote";
+    this.loadPolicyFile = options.loadPolicyFile ?? null;
     this.base = options.base ?? null;
     this.loads = new Loads(this, options);
     this.storage = options.storage ?? defaultStorage();
     this.platform = { ...platformCapabilities(), ...options.platform };
+    this.maxTouchPoints = Math.max(0, Math.floor(options.maxTouchPoints ?? hostTouchPoints()) || 0);
+    this.inputMode = this.maxTouchPoints > 0 ? "gesture" : "none";
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
@@ -340,6 +395,16 @@ export class Scripting {
   /** Resolves once every load and host request so far is ready or failed (Loads.settled). */
   settled(): Promise<void> {
     return this.loads.settled();
+  }
+
+  /** Whether the time since the host's last call was a load from bytes' (Loads.heldTime). */
+  heldTime(): boolean {
+    return this.loads.heldTime();
+  }
+
+  /** Whether the next frame waits for a load from bytes still compiling (Loads.holdsFrame). */
+  holdsFrame(): boolean {
+    return this.loads.holdsFrame();
   }
 
   /**
@@ -761,12 +826,27 @@ export class Scripting {
     };
     let count = 0;
     const visit = (o: DisplayObject) => {
+      // The clips under a container from the list it keeps (walkList); a button is visited as it
+      // is, for its states' first order.
+      if (o instanceof Container && o.kind !== BUTTON) {
+        const items = walkList(o).items;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.kind === BUTTON) {
+            visit(item);
+          } else if (item.object) {
+            queue[count++] = item as MovieClip;
+          }
+        }
+
+        return;
+      }
+
       if (o.kind === CLIP && o.object) {
         queue[count++] = o as MovieClip;
       }
 
-      // An index, not for-of, and no call for a leaf: this visits every
-      // object on the list. A button is visited for its states' first order.
+      // An index, not for-of, and no call for a leaf.
       const children = scriptChildren(o);
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
@@ -918,6 +998,7 @@ export class Scripting {
     if (entered) {
       this.frames++;
       this.broadcast("enterFrame");
+      this.timers.frameTimers();
     }
 
     this.constructPending();
@@ -944,13 +1025,22 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    // What is under a mouse that stands still, as the frame left the list.
+    this.pointer?.frameEnded();
+    this.render();
+  }
 
+  /**
+   * The stage renders, at the end of a frame or between frames for a
+   * timer's updateAfterEvent: RENDER if a script invalidated the stage,
+   * and the scroll rectangles set since take effect, as Flash's do.
+   */
+  render(): void {
     if (this.invalidated) {
       this.invalidated = false;
       this.broadcast("render");
     }
 
-    // The frame is drawn: the scroll rectangles set since take effect, as Flash's do.
     for (const d of this.scrolled) {
       d.scroll = d.scrollRect;
       d.invalidate(TRANSFORM);

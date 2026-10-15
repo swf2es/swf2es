@@ -6,6 +6,8 @@
 // Typed lowering starts simple: what the IR's types make certain is plain
 // JavaScript (int arithmetic ends in `| 0`), anything else calls the
 // runtime, which does what avmplus does at run time.
+
+import { Output } from "../../output";
 import { Abc } from "../abc/abc";
 import * as C from "../abc/constants";
 import * as ops from "../abc/opcodes";
@@ -36,7 +38,6 @@ import {
 } from "../link/traits";
 import { CONSTANT, flowCopies, getsLocal, NONE, pushesConstant, setsLocal } from "./copies";
 import { inRange, isAddress, viewMethod } from "./memory";
-import { Output } from "./output";
 import { constant, poolString, typeRef } from "./refs";
 import { SourceMap } from "./sourcemap";
 import { analyze, branchTo, conditional, enclosed, node, terminates } from "./structure";

@@ -1,0 +1,27 @@
+init
+frame 1
+left on the stack
+pooled
+undefined
+null
+true
+false
+7
+0
+NaN
+Infinity
+-Infinity
+1e+21
+0.1
+1.5
+-990.123
+1e-7
+1e+15
+0.00001
+1.23456789012346e+20
+0.800000000000001
+10
+-e+16
+-10e-6
+undefined
+frame 2

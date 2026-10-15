@@ -7,7 +7,7 @@ import type { Scripting } from "../scripting.js";
 type Value = avm2.Value;
 
 /** "pkg.Name" or "pkg::Name" as "pkg::Name", as getDefinitionByName takes either. */
-export function qualify(name: string): string {
+function qualify(name: string): string {
   if (name.includes("::")) {
     return name;
   }

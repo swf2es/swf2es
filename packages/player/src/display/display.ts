@@ -25,8 +25,9 @@ import { TextModel } from "../text/text.js";
 import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
 import { type Rect, shifted } from "./geometry.js";
-import { compose3D, decompose3D } from "./matrix3d.js";
+import { compose3D, decompose3D, identity3D } from "./matrix3d.js";
 import { morphAt } from "./morph.js";
+import { placedInPerspective } from "./perspective.js";
 import {
   type BitmapCharacter,
   type ButtonCharacter,
@@ -60,6 +61,25 @@ export const PIXELS = 8;
  * it costs a round, never a script.
  */
 export const scriptWork = { changes: 0 };
+
+/**
+ * A count that moves whenever something changes that may change what is
+ * under a pointer that stands still: any change a renderer would sync
+ * (DisplayObject.invalidate), and the pick's own fields, mouseEnabled,
+ * mouseChildren, a hitArea, a button's enabled. While it stands still,
+ * the pointer has no need to pick again at a frame's end. One for every
+ * player: another's moving it costs a pick, never an event. `picks`
+ * counts the pointer's picks, which an object's pickChangedAt is told in.
+ */
+export const pickWork = { changes: 0, picks: 0 };
+
+/**
+ * How many times a SWF's content was let go of, a Loader's unloaded or
+ * replaced or a player destroyed: a renderer lets go then of what it kept
+ * of objects off the list for others to take, which holds their SWF's
+ * characters (render/view.ts).
+ */
+export const unloads = { count: 0 };
 
 /** DisplayObject.kind's. */
 export const OTHER = 0;
@@ -145,9 +165,52 @@ export interface Space {
   rotationY: number;
   rotationZ: number;
   raw: Float32Array;
+  /**
+   * Whether its matrix could not be taken apart, a column of it of no
+   * length: Flash then reads the properties as the identity's, at the
+   * position, until a scale or rotation set makes it the identity.
+   */
+  singular: boolean;
+  /**
+   * Whether a scale or rotation set has made the matrix since it was set
+   * whole: Flash keeps the first scale set after that as a float32.
+   */
+  composed: boolean;
+  /** The 2D scales, rotation and skew from before it went 3D, which matrix3D set to null gives back. */
+  flat: readonly number[];
+  /** Its plane in perspective in its parent's (`placed`), and the changes (pickWork) it was made at. */
+  plane?: Matrix | null;
+  planeAt?: number;
 }
 
-export type SpaceProperty = Exclude<keyof Space, "raw">;
+export type SpaceProperty = Exclude<
+  keyof Space,
+  "raw" | "singular" | "composed" | "flat" | "plane" | "planeAt"
+>;
+
+/**
+ * The least a 3D scale goes to, as Flash's: a smaller one, 0 or NaN is
+ * this, so the matrix stays invertible and the scale can come back.
+ */
+export const LEAST_SCALE_3D = 1.175494351e-36;
+
+/**
+ * The records of a place's filters, read once for each list of them: an
+ * animated character's timeline places the same glowing children again on
+ * each frame, and each read the list anew. Shared by every object placed
+ * with the list, as nothing changes a record in place: a script reads
+ * copies and sets new ones.
+ */
+const placedLists = new WeakMap<Uint8Array, readonly Filter[]>();
+function placedFilters(bytes: Uint8Array): readonly Filter[] {
+  let filters = placedLists.get(bytes);
+  if (!filters) {
+    filters = readFilters(bytes).map(filterOfSwf);
+    placedLists.set(bytes, filters);
+  }
+
+  return filters;
+}
 
 /** A perspective projection a script gave a display object: the field of view in radians, as Flash keeps it, and the centre. */
 export interface Projection {
@@ -183,6 +246,12 @@ export class DisplayObject {
   rotation = 0;
   /** The second column's turn beyond the first's, in degrees: 0 but for a matrix that skews. */
   skew = 0;
+  /**
+   * Whether the matrix is not the one the scales, rotation and skew make:
+   * the identity matrix3D set to null leaves, which a scale set then makes
+   * again from all of them, as Flash's does, not in proportion.
+   */
+  private unmade = false;
   colorTransform: ColorTransform | null = null;
   visible = true;
   /**
@@ -214,6 +283,23 @@ export class DisplayObject {
   drawing: Drawing | null = null;
   /** What changed since the renderer last synced it: TRANSFORM, CHILDREN, CONTENT. */
   dirty = TRANSFORM | CONTENT;
+  /**
+   * Where anything under it may take the pointer, in its own space, as the
+   * pointer's pick last worked it out (input/pointer.ts), and whether a
+   * change under it since has made that stale: the renderer's flags are
+   * cleared as it syncs, these as the pick reads them. A move alone marks
+   * its ancestors, not it: its bounds in its own space stand.
+   */
+  pickBounds: Rect | null = null;
+  pickStale = true;
+  /** The scroll its pick bounds were worked out for: a scroll's change marks it only moved. */
+  pickScroll: Rect | null = null;
+  /**
+   * The pick (pickWork.picks) before which it or something under it last
+   * changed, or it was made: one that changes between every two picks is
+   * not worth its bounds, and the pick goes through it instead.
+   */
+  pickChangedAt = pickWork.picks;
   /**
    * The display objects whose frames its frames run: a container's own
    * children array, a button's states (ButtonObject), none for the rest.
@@ -249,7 +335,16 @@ export class DisplayObject {
    * when it next draws.
    */
   scrollRect: Rect | null = null;
-  scroll: Rect | null = null;
+  private scrollTaken: Rect | null = null;
+
+  /** The scroll a 3D object has none of: Flash draws, bounds and hits all of it whatever its scrollRect. */
+  get scroll(): Rect | null {
+    return this.space ? null : this.scrollTaken;
+  }
+
+  set scroll(r: Rect | null) {
+    this.scrollTaken = r;
+  }
   /**
    * Its 9-slice grid, in its own space, in pixels (display/scale9.ts): its
    * symbol's DefineScalingGrid's, or what a script set; null for none.
@@ -262,8 +357,8 @@ export class DisplayObject {
   /**
    * Its 3D transform, from when a script first sets a 3D property, its
    * matrix3D, or its 2D matrix to null, until it sets matrix3D to null: in
-   * place of the 2D matrix to a script, and drawn as the matrix3D's x and
-   * y rows, without perspective, which the player does not draw.
+   * place of the 2D matrix to a script, and drawn, bounded and hit in
+   * perspective (`placed`).
    */
   space: Space | null = null;
   /** The perspective projection a script set on its transform, or null. */
@@ -277,13 +372,58 @@ export class DisplayObject {
   /** Mark a change, and that its ancestors have a changed descendant. */
   invalidate(what: number): void {
     this.dirty |= what;
+    pickWork.changes++;
     for (let p = this.parent; p && !p.descendantsDirty; p = p.parent) {
       p.descendantsDirty = true;
     }
+
+    // Its own pick bounds stand when it only moves; its ancestors' do not.
+    this.pickChanged(what !== TRANSFORM);
   }
 
-  /** Its matrix after its scroll's shift: from what it draws to its parent's space. */
+  /**
+   * Mark the pick bounds above it stale, and its own unless `own` is false
+   * (input/pointer.ts): an ancestor of one changed since the last pick is
+   * marked already.
+   */
+  pickChanged(own: boolean): void {
+    const picks = pickWork.picks;
+    if (own) {
+      this.pickStale = true;
+      this.pickChangedAt = picks;
+    }
+
+    for (let p = this.parent; p && p.pickChangedAt !== picks; p = p.parent) {
+      p.pickStale = true;
+      p.pickChangedAt = picks;
+    }
+  }
+
+  /**
+   * Its matrix after its scroll's shift: from what it draws to its parent's
+   * space. A 3D object's is its plane in perspective (display/perspective.ts),
+   * kept until anything is invalidated, as an ancestor's move changes it.
+   */
   get placed(): Matrix {
+    if (this.space) {
+      return this.perspective();
+    }
+
+    return this.scroll ? shifted(this.matrix, this.scroll) : this.matrix;
+  }
+
+  private perspective(): Matrix {
+    const space = this.space as Space;
+    if (space.planeAt !== pickWork.changes || !space.plane) {
+      space.plane = placedInPerspective(this);
+      space.planeAt = pickWork.changes;
+    }
+
+    return space.plane;
+  }
+
+  /** Its 2D matrix after its scroll's shift, a 3D object's its matrix3D's x and y rows: what a mask draws by. */
+  get flatPlaced(): Matrix {
     return this.scroll ? shifted(this.matrix, this.scroll) : this.matrix;
   }
 
@@ -350,6 +490,7 @@ export class DisplayObject {
   /** As setMatrix, with a matrix made for it, which it keeps: a place's, on each move of each frame. */
   private adoptMatrix(m: Matrix): void {
     this.space = null;
+    this.unmade = false;
     this.matrix = m;
     this.scaleX = Math.hypot(m.a, m.b);
     this.scaleY = Math.hypot(m.c, m.d);
@@ -373,6 +514,12 @@ export class DisplayObject {
       return;
     }
 
+    if (this.unmade) {
+      this.scaleX = v;
+      this.remake();
+      return;
+    }
+
     const column = scaled(v, this.scaleX, this.matrix.a, this.matrix.b);
     this.scaleX = v;
     if (column) {
@@ -386,6 +533,12 @@ export class DisplayObject {
   setScaleY(v: number): void {
     if (this.space) {
       this.set3D("scaleY", v);
+      return;
+    }
+
+    if (this.unmade) {
+      this.scaleY = v;
+      this.remake();
       return;
     }
 
@@ -412,6 +565,7 @@ export class DisplayObject {
   }
 
   private remake(): void {
+    this.unmade = false;
     const [sinR, cosR] = sinCos(this.rotation || 0);
     const [sinQ, cosQ] = sinCos((this.rotation || 0) + this.skew);
     this.matrix = {
@@ -425,12 +579,15 @@ export class DisplayObject {
     this.invalidate(TRANSFORM);
   }
 
-  /** Its 3D transform, made from the 2D matrix the first time. */
+  /** Its 3D transform, made from the 2D matrix the first time, a -0 in it taken as 0. */
   enter3D(): Space {
     if (!this.space) {
       const m = this.matrix;
       this.setMatrix3D(
-        Float32Array.of(m.a, m.b, 0, 0, m.c, m.d, 0, 0, 0, 0, 1, 0, m.tx, m.ty, 0, 1),
+        Float32Array.of(m.a, m.b, 0, 0, m.c, m.d, 0, 0, 0, 0, 1, 0, m.tx, m.ty, 0, 1).map(
+          (v) => v + 0,
+        ),
+        true,
       );
     }
 
@@ -440,17 +597,32 @@ export class DisplayObject {
   /**
    * One 3D property set, as Flash's: a position moves the matrix3D, as set
    * whole or not; a scale or rotation makes it again from all of them, a
-   * rotation as set, not brought within ±180. A NaN position or rotation
-   * is 0.
+   * rotation as set, not brought within ±180, a scale no nearer 0 than
+   * LEAST_SCALE_3D, and a float32 if the matrix was set whole since the
+   * last such set. A NaN position or rotation is 0. A scale or rotation
+   * set where the 2D matrix could not be taken apart makes it the
+   * identity, at the origin, and is lost, as in Flash.
    */
   set3D(key: SpaceProperty, v: number): void {
     const space = this.enter3D();
-    space[key] = Number.isNaN(v) && !key.startsWith("scale") ? 0 : v;
     const at = ["x", "y", "z"].indexOf(key);
     if (at >= 0) {
+      space[key] = Number.isNaN(v) ? 0 : v;
       space.raw[12 + at] = space[key];
       this.flatten();
       return;
+    }
+
+    if (space.singular) {
+      this.setMatrix3D(identity3D());
+      return;
+    }
+
+    if (!key.startsWith("scale")) {
+      space[key] = Number.isNaN(v) ? 0 : v;
+    } else {
+      const kept = Math.abs(v) >= LEAST_SCALE_3D ? v : LEAST_SCALE_3D;
+      space[key] = space.composed ? kept : Math.fround(kept);
     }
 
     const radians = [space.rotationX, space.rotationY, space.rotationZ].map(
@@ -462,35 +634,54 @@ export class DisplayObject {
       [space.scaleX, space.scaleY, space.scaleZ],
       "eulerAngles",
     );
+    space.composed = true;
     this.flatten();
   }
 
-  /** The matrix3D set whole, and taken apart into the properties as Matrix3D.decompose would; null back to 2D, at the identity. */
-  setMatrix3D(raw: Float32Array | null): void {
+  /**
+   * The matrix3D set whole, and taken apart into the properties as
+   * Matrix3D.decompose would; null back to 2D, at the identity, with the
+   * scales and rotation it had before it went 3D. Null in 2D changes
+   * nothing. One made from the 2D matrix (`flat`) with a column of no
+   * length reads as the identity at its position, as in Flash, where a
+   * matrix3D set so reads as NaN.
+   */
+  setMatrix3D(raw: Float32Array | null, flat = false): void {
+    const before = this.space?.flat ?? [this.scaleX, this.scaleY, this.rotation, this.skew];
     if (!raw) {
-      this.space = null;
-      this.setMatrix(IDENTITY);
+      if (this.space) {
+        this.setMatrix(IDENTITY);
+        [this.scaleX, this.scaleY, this.rotation, this.skew] = before;
+        this.unmade = true;
+      }
+
       return;
     }
 
     const [[x, y, z], rotation, [scaleX, scaleY, scaleZ]] = decompose3D(raw, "eulerAngles");
-    const [rotationX, rotationY, rotationZ] = rotation.map((r) => r * DEGREES);
+    const singular = flat && (scaleX === 0 || scaleY === 0);
+    const [rotationX, rotationY, rotationZ] = singular
+      ? [0, 0, 0]
+      : rotation.map((r) => r * DEGREES);
     this.space = {
       x,
       y,
       z,
-      scaleX,
-      scaleY,
-      scaleZ,
+      scaleX: singular ? 1 : scaleX,
+      scaleY: singular ? 1 : scaleY,
+      scaleZ: singular ? 1 : scaleZ,
       rotationX,
       rotationY,
       rotationZ,
       raw: Float32Array.from(raw),
+      singular,
+      composed: false,
+      flat: before,
     };
     this.flatten();
   }
 
-  /** The 2D fields from the 3D transform: the matrix its x and y rows, which is how it draws and hits. */
+  /** The 2D fields from the 3D transform: the matrix its x and y rows, which a mask draws by (`flatPlaced`). */
   private flatten(): void {
     const space = this.space as Space;
     const m = space.raw;
@@ -557,7 +748,7 @@ export class DisplayObject {
     }
 
     if (place.filters !== null) {
-      this.filters = readFilters(place.filters).map(filterOfSwf);
+      this.filters = placedFilters(place.filters);
       this.invalidate(TRANSFORM);
     }
 
@@ -639,6 +830,10 @@ export class ShapeObject extends DisplayObject {
     ) {
       this.shape = morphAt(this.morph, this.ratio);
       this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
+      // New bounds, which no invalidate tells of: the change of ratio did,
+      // but those it marked may have been measured since, with the old blend.
+      pickWork.changes++;
+      this.pickChanged(true);
     }
 
     return this.shape;
@@ -1086,10 +1281,41 @@ export class Container extends DisplayObject {
   readonly depths = new Map<number, DisplayObject>();
   /** Whether a descendant changed since the renderer last synced. */
   descendantsDirty = true;
+  /**
+   * The clips and buttons the frame's walks visit at and under it, in
+   * their order, kept while no clip or container comes or goes below it
+   * (walkList), and its arrays after, to be made again in; null where it
+   * has never been long enough to keep.
+   */
+  walk: WalkList | null = null;
+  /** Counts the children put on the list, for removeAtDepth to see whether a listener put one back. */
+  protected puts = 0;
 
   constructor() {
     super();
     this.frameChildren = this.children;
+  }
+
+  /**
+   * A child came, went or moved: the walks' lists that hold it are made
+   * again, those of this container and every one above it. Not for a
+   * leaf, a shape or a text, which no walk visits: a timeline's shapes
+   * swapped every frame leave the lists be.
+   */
+  protected relist(child: DisplayObject): void {
+    if (child.kind === OTHER && child.frameChildren.length === 0) {
+      return;
+    }
+
+    for (let p: Container | null = this; p; p = p.parent) {
+      const walk = p.walk;
+      if (walk?.current) {
+        walk.current = false;
+        // Emptied, its room kept: one no walk makes again, off the list or now too short to
+        // keep, would hold what left it alive.
+        (walk.items as (DisplayObject | null)[]).fill(null);
+      }
+    }
   }
 
   /** Place `child` at timeline depth `depth`: before the first child of a greater depth. */
@@ -1107,7 +1333,9 @@ export class Container extends DisplayObject {
     child.depth = depth;
     child.parent = this;
     this.children.splice(index, 0, child);
+    this.puts++;
     this.depths.set(depth, child);
+    this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1119,22 +1347,51 @@ export class Container extends DisplayObject {
     }
 
     // The timeline's removal: a script's goes through the natives, which tell of it themselves.
+    // Flash has the child out of the list while it tells of it, still its parent's: the
+    // siblings' indexes have closed up, and the parent no longer finds it there (#2025).
+    const index = this.children.indexOf(child);
+    if (index >= 0) {
+      this.takeOut(child, index);
+    }
+
+    const puts = this.puts;
     this.library?.removing?.(child, true);
     this.library?.sounds?.removed(child);
-    this.removeChild(child);
+    // A listener may have put it on this list again (which Flash does not survive). Where
+    // nothing was put on it meanwhile, the search, a whole list's on every removal, is spared.
+    if (child.parent === this && (this.puts === puts || !this.children.includes(child))) {
+      child.parent = null;
+      child.focusDrop?.(child);
+    }
+
     return child;
   }
 
-  /** Take `child` out, wherever it is in the list, and off the timeline's depths. */
+  /**
+   * Take `child` out, wherever it is in the list, and off the timeline's
+   * depths; nothing for one not in it, which a listener of its removal may
+   * have taken out already.
+   */
   removeChild(child: DisplayObject): void {
+    const index = this.children.indexOf(child);
+    if (index < 0) {
+      return;
+    }
+
+    this.takeOut(child, index);
+    child.parent = null;
+    child.focusDrop?.(child);
+  }
+
+  /** `child`, at `index`, out of the list and off the depths; its parent is left to the caller. */
+  private takeOut(child: DisplayObject, index: number): void {
     if (child.depth !== null) {
       this.depths.delete(child.depth);
       child.depth = null;
     }
 
-    this.children.splice(this.children.indexOf(child), 1);
-    child.parent = null;
-    child.focusDrop?.(child);
+    this.children.splice(index, 1);
+    this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1149,6 +1406,8 @@ export class Container extends DisplayObject {
     child.parent?.removeChild(child);
     child.parent = this;
     this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    this.puts++;
+    this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1158,6 +1417,8 @@ export class Container extends DisplayObject {
     const j = this.children.indexOf(b);
     this.children[i] = b;
     this.children[j] = a;
+    this.relist(a);
+    this.relist(b);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
   }
@@ -1168,9 +1429,11 @@ export type ButtonState = "up" | "over" | "down";
 
 /**
  * Which of DefineButtonSound's sounds a change of state plays, by the
- * state before and after, as Ruffle's button events pick them: a drag off
- * while pressed, down to up here, and back over, up to down, none (-1); a
- * release outside plays over to up's (ButtonObject.releasedOutside).
+ * state before and after, as Ruffle's button events pick them; none is -1.
+ * A drag off while pressed, which shows over, and back on, down again,
+ * play none either, as Ruffle's DragOut and DragOver: the pointer asks
+ * those quietly. A release outside plays over to up's
+ * (ButtonObject.releasedOutside).
  */
 const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
   up: { up: -1, over: 1, down: -1 },
@@ -1235,6 +1498,8 @@ export class ButtonObject extends Container {
 
   set hitTestState(d: DisplayObject | null) {
     this.hitTest = d;
+    // Where it is hit, which no change in the display list tells the pointer.
+    pickWork.changes++;
     this.statesChanged();
   }
 
@@ -1244,11 +1509,28 @@ export class ButtonObject extends Container {
    * new list, so that none it let go of stays held.
    */
   private statesChanged(): void {
+    // A state that holds the button plays as its parent's child, not as the button's.
     const states = [this.hitTest, this.up, this.down, this.over].filter(
-      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i && !o.encloses(this),
     );
     this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
     scriptWork.changes++;
+  }
+
+  /**
+   * Its frame children but any that has since come to hold it, as a state
+   * off the list a script then put the button in: a walk down them would
+   * come back to it.
+   */
+  playingStates(): readonly DisplayObject[] {
+    const states = this.frameChildren;
+    for (let i = 0; i < states.length; i++) {
+      if (states[i].encloses(this)) {
+        return states.filter((o) => !o.encloses(this));
+      }
+    }
+
+    return states;
   }
 
   /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
@@ -1269,15 +1551,19 @@ export class ButtonObject extends Container {
   }
 
   /** Show state `state`, with the sound DefineButtonSound gives the change. */
-  setState(state: ButtonState): void {
-    this.playSound(BUTTON_SOUNDS[this.state][state]);
+  setState(state: ButtonState, sound = true): void {
+    if (sound) {
+      this.playSound(BUTTON_SOUNDS[this.state][state]);
+    }
+
     this.state = state;
     this.show();
   }
 
-  /** A press on it released elsewhere: over to up's sound, as Ruffle's ReleaseOutside plays. */
+  /** A press on it released elsewhere: up, with over to up's sound, as Ruffle's ReleaseOutside plays. */
   releasedOutside(): void {
     this.playSound(0);
+    this.setState("up", false);
   }
 
   /** DefineButtonSound's sound `index`, if it has one. */
@@ -1308,13 +1594,17 @@ export class ButtonObject extends Container {
       }
     }
 
-    if (current && !this.children.includes(current)) {
+    // One that holds the button cannot be its child, as Flash refuses it (#2150): the button
+    // shows nothing, and it stays where it is.
+    if (current && !this.children.includes(current) && !current.encloses(this)) {
       if (current.parent !== this) {
         current.parent?.removeChild(current);
       }
 
       this.children.splice(0, 0, current);
+      this.puts++;
       current.parent = this;
+      this.relist(current);
       this.invalidate(CHILDREN);
       scriptWork.changes++;
     }
@@ -1404,8 +1694,121 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
     visible: null,
     opaqueBackground: null,
     filters: look ? record.filters : null,
-    clipActions: null,
+    actions: null,
   };
+}
+
+/**
+ * The clips and buttons the frame's walks visit at and under a container,
+ * in tree order, parents first (Player.tick's collect, a round of frame
+ * scripts): `ends[i]` is the index after `items[i]` and all under it, to
+ * leave a clip out with what it holds. A button's states are not in it,
+ * its end the index after it: they are walked as they are, which a button
+ * changes without its parent knowing (`frameChildren`, `scriptChildren`).
+ */
+export interface WalkList {
+  items: DisplayObject[];
+  ends: number[];
+  /** Whether it is what is under its container now; once not, its arrays are made again in. */
+  current: boolean;
+}
+
+/** The shortest list a container keeps for itself; a shorter one its parent's making walks again. */
+const KEPT_WALK = 32;
+
+/**
+ * Those the frame's walks visit at and under `root`, as WalkList lays them
+ * out: kept on each container till a clip or a container comes or goes
+ * under it (Container.relist), so that a frame visits the clips alone,
+ * where its walks visited every object with children, twice or more.
+ * Made again in the arrays it had, as a busy movie's are made again every
+ * frame, some ten thousand objects long.
+ */
+export function walkList(root: Container): WalkList {
+  let list = root.walk;
+  if (list?.current) {
+    return list;
+  }
+
+  list ??= { items: [], ends: [], current: false };
+  const length = listInto(root, list, 0, false);
+  // Cut to length, which keeps the arrays' room unless far shorter: a length of 0 would not.
+  list.items.length = length;
+  list.ends.length = length;
+  list.current = true;
+  root.walk = list;
+  return list;
+}
+
+/**
+ * `c` and those under it written to `list` from index `at`, each
+ * container's kept list copied where it has one; `c`'s own kept too where
+ * `keep`, and long enough. Returns the index after the last written.
+ */
+function listInto(c: Container, list: WalkList, at: number, keep = true): number {
+  const { items, ends } = list;
+  const start = at;
+  let n = at;
+  if (c.kind === CLIP) {
+    items[n] = c;
+    ends[n++] = 0;
+  }
+
+  const children = c.children;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.kind === BUTTON) {
+      items[n] = child;
+      ends[n] = n + 1;
+      n++;
+      continue;
+    }
+
+    if (child.kind === OTHER && child.frameChildren.length === 0) {
+      continue;
+    }
+
+    const kept = (child as Container).walk;
+    if (!kept?.current) {
+      n = listInto(child as Container, list, n);
+      continue;
+    }
+
+    const base = n;
+    const keptItems = kept.items;
+    const keptEnds = kept.ends;
+    for (let k = 0; k < keptItems.length; k++) {
+      items[n] = keptItems[k];
+      ends[n++] = keptEnds[k] + base;
+    }
+  }
+
+  if (c.kind === CLIP) {
+    ends[start] = n;
+  }
+
+  // Long enough, kept for the next list made above it, which then copies it.
+  const length = n - start;
+  if (keep && length >= KEPT_WALK) {
+    let own = c.walk;
+    if (!own) {
+      own = { items: [], ends: [], current: false };
+      c.walk = own;
+    }
+
+    const ownItems = own.items;
+    const ownEnds = own.ends;
+    for (let k = 0; k < length; k++) {
+      ownItems[k] = items[start + k];
+      ownEnds[k] = ends[start + k] - start;
+    }
+
+    ownItems.length = length;
+    ownEnds.length = length;
+    own.current = true;
+  }
+
+  return n;
 }
 
 /**
@@ -1418,11 +1821,11 @@ export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
     const b = d as ButtonObject;
     b.firstScripts = false;
     return [b.upState, b.overState, b.downState, b.hitTestState].filter(
-      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i && !o.encloses(b),
     );
   }
 
-  return d.frameChildren;
+  return d.kind === BUTTON ? (d as ButtonObject).playingStates() : d.frameChildren;
 }
 
 /** The root `d` is under, or is: the nearest display object up from it that carries a LoaderInfo; null under none, as for one a script made and did not add. */
@@ -1932,7 +2335,10 @@ export class MovieClip extends Container {
     }
 
     if (this.currentFrame >= this.totalFrames) {
-      this.gotoFrame(1, true);
+      if (this.timeline.loops) {
+        this.gotoFrame(1, true);
+      }
+
       return;
     }
 
@@ -1987,7 +2393,7 @@ function mergePlace(previous: Place, next: Place): Place {
     visible: next.visible ?? previous.visible,
     opaqueBackground: next.opaqueBackground ?? previous.opaqueBackground,
     filters: next.filters ?? previous.filters,
-    clipActions: next.clipActions ?? previous.clipActions,
+    actions: next.actions ?? previous.actions,
   };
 }
 
@@ -2080,4 +2486,5 @@ export const EMPTY_TIMELINE: Timeline = {
   scenes: [{ name: "", frame: 1 }],
   sounds: new Map(),
   stream: null,
+  loops: true,
 };

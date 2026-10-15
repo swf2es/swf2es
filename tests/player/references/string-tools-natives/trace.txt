@@ -1,0 +1,24 @@
+en-US | en-US en-US noError
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+tr-TR | tr-TR tr-TR noError
+   İSTANBUL Iİ SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ıi σασ ß ǆ äöå | [] noError
+de-DE | de-DE de-DE noError
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+el-GR | el-GR el-GR noError
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+lt-LT | lt-LT lt-LT noError
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+fi-FI | fi-FI fi-FI noError
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+xx | xx en-US usingDefaultWarning
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+ |  en-US noError
+   ISTANBUL II SS ﬁ Ǆ ŉ ÄÖÅ ΣΑΣ | istanbul ii σασ ß ǆ äöå | [] noError
+status usingDefaultWarning a noError
+upper null TypeError: Error #2007: Parameter s must be non-null.
+lower null TypeError: Error #2007: Parameter s must be non-null.
+constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+el-GR ΆΛΦΑ ΈΨΙΛΟΝ ΏΜΕΓΑ Ϊ ΐ ᾼ ᾼ ǰ ﬀ άλφα οδοσ σ ᾳ
+en-US ΆΛΦΑ ΈΨΙΛΟΝ ΏΜΕΓΑ Ϊ ΐ ᾼ ᾼ ǰ ﬀ άλφα οδοσ σ ᾳ
+lt ìíĩįïi i j ÌÍĨ I J
+available true

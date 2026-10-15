@@ -1,0 +1,321 @@
+en-US | en-US en-US noError long long 0
+   long long [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   long medium [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   long short [EEEE, MMMM d, yyyy h:mm a] [Sunday, November 21, 1999 3:30 PM] noError
+   long none [EEEE, MMMM d, yyyy] [Sunday, November 21, 1999] noError
+   medium long [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   medium medium [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   medium short [EEEE, MMMM d, yyyy h:mm a] [Sunday, November 21, 1999 3:30 PM] noError
+   medium none [EEEE, MMMM d, yyyy] [Sunday, November 21, 1999] noError
+   short long [M/d/yyyy h:mm:ss a] [11/21/1999 3:30:59 PM] noError
+   short medium [M/d/yyyy h:mm:ss a] [11/21/1999 3:30:59 PM] noError
+   short short [M/d/yyyy h:mm a] [11/21/1999 3:30 PM] noError
+   short none [M/d/yyyy] [11/21/1999] noError
+   none long [h:mm:ss a] [3:30:59 PM] noError
+   none medium [h:mm:ss a] [3:30:59 PM] noError
+   none short [h:mm a] [3:30 PM] noError
+   none none [] [] noError
+  months January|February|March|April|May|June|July|August|September|October|November|December / January|February|March|April|May|June|July|August|September|October|November|December
+  months abbreviated Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec / Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec
+  weekdays Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday / Sun|Mon|Tue|Wed|Thu|Fri|Sat / Su|Mo|Tu|We|Th|Fr|Sa
+de-DE | de-DE de-DE noError long long 1
+   long long [EEEE, d. MMMM yyyy HH:mm:ss] [] noError
+   long medium [EEEE, d. MMMM yyyy HH:mm:ss] [] noError
+   long short [EEEE, d. MMMM yyyy HH:mm] [] noError
+   long none [EEEE, d. MMMM yyyy] [] noError
+   medium long [EEEE, d. MMMM yyyy HH:mm:ss] [] noError
+   medium medium [EEEE, d. MMMM yyyy HH:mm:ss] [] noError
+   medium short [EEEE, d. MMMM yyyy HH:mm] [] noError
+   medium none [EEEE, d. MMMM yyyy] [] noError
+   short long [d.M.yyyy HH:mm:ss] [21.11.1999 15:30:59] noError
+   short medium [d.M.yyyy HH:mm:ss] [21.11.1999 15:30:59] noError
+   short short [d.M.yyyy HH:mm] [21.11.1999 15:30] noError
+   short none [d.M.yyyy] [21.11.1999] noError
+   none long [HH:mm:ss] [15:30:59] noError
+   none medium [HH:mm:ss] [15:30:59] noError
+   none short [HH:mm] [15:30] noError
+   none none [] [] noError
+  months Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember / Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember
+  months abbreviated Jan|Feb|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez / Jan|Feb|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez
+ja-JP | ja-JP ja-JP noError long long 0
+   long long [yyyy年M月d日EEEE H:mm:ss] [1999年11月21日日曜日 15:30:59] noError
+   long medium [yyyy年M月d日EEEE H:mm:ss] [1999年11月21日日曜日 15:30:59] noError
+   long short [yyyy年M月d日EEEE H:mm] [1999年11月21日日曜日 15:30] noError
+   long none [yyyy年M月d日EEEE] [1999年11月21日日曜日] noError
+   medium long [yyyy年M月d日EEEE H:mm:ss] [1999年11月21日日曜日 15:30:59] noError
+   medium medium [yyyy年M月d日EEEE H:mm:ss] [1999年11月21日日曜日 15:30:59] noError
+   medium short [yyyy年M月d日EEEE H:mm] [1999年11月21日日曜日 15:30] noError
+   medium none [yyyy年M月d日EEEE] [1999年11月21日日曜日] noError
+   short long [yyyy/M/d H:mm:ss] [1999/11/21 15:30:59] noError
+   short medium [yyyy/M/d H:mm:ss] [1999/11/21 15:30:59] noError
+   short short [yyyy/M/d H:mm] [1999/11/21 15:30] noError
+   short none [yyyy/M/d] [1999/11/21] noError
+   none long [H:mm:ss] [15:30:59] noError
+   none medium [H:mm:ss] [15:30:59] noError
+   none short [H:mm] [15:30] noError
+   none none [] [] noError
+  months 1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月 / 1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月
+  months abbreviated 1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月 / 1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月
+  weekdays 日曜日|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日 / 日|月|火|水|木|金|土 / 日|月|火|水|木|金|土
+en-GB | en-GB en-GB noError long long 1
+   long long [EEEE, d MMMM yyyy HH:mm:ss] [Sunday, 21 November 1999 15:30:59] noError
+   long medium [EEEE, d MMMM yyyy HH:mm:ss] [Sunday, 21 November 1999 15:30:59] noError
+   long short [EEEE, d MMMM yyyy HH:mm] [Sunday, 21 November 1999 15:30] noError
+   long none [EEEE, d MMMM yyyy] [Sunday, 21 November 1999] noError
+   medium long [EEEE, d MMMM yyyy HH:mm:ss] [Sunday, 21 November 1999 15:30:59] noError
+   medium medium [EEEE, d MMMM yyyy HH:mm:ss] [Sunday, 21 November 1999 15:30:59] noError
+   medium short [EEEE, d MMMM yyyy HH:mm] [Sunday, 21 November 1999 15:30] noError
+   medium none [EEEE, d MMMM yyyy] [Sunday, 21 November 1999] noError
+   short long [dd/MM/yyyy HH:mm:ss] [21/11/1999 15:30:59] noError
+   short medium [dd/MM/yyyy HH:mm:ss] [21/11/1999 15:30:59] noError
+   short short [dd/MM/yyyy HH:mm] [21/11/1999 15:30] noError
+   short none [dd/MM/yyyy] [21/11/1999] noError
+   none long [HH:mm:ss] [15:30:59] noError
+   none medium [HH:mm:ss] [15:30:59] noError
+   none short [HH:mm] [15:30] noError
+   none none [] [] noError
+  months January|February|March|April|May|June|July|August|September|October|November|December / January|February|March|April|May|June|July|August|September|October|November|December
+  months abbreviated Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Oct|Nov|Dec / Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Oct|Nov|Dec
+  weekdays Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday / Sun|Mon|Tue|Wed|Thu|Fri|Sat / Su|Mo|Tu|We|Th|Fr|Sa
+fr-FR | fr-FR fr-FR noError long long 1
+   long long [EEEE d MMMM yyyy HH:mm:ss] [dimanche 21 novembre 1999 15:30:59] noError
+   long medium [EEEE d MMMM yyyy HH:mm:ss] [dimanche 21 novembre 1999 15:30:59] noError
+   long short [EEEE d MMMM yyyy HH:mm] [dimanche 21 novembre 1999 15:30] noError
+   long none [EEEE d MMMM yyyy] [dimanche 21 novembre 1999] noError
+   medium long [EEEE d MMMM yyyy HH:mm:ss] [dimanche 21 novembre 1999 15:30:59] noError
+   medium medium [EEEE d MMMM yyyy HH:mm:ss] [dimanche 21 novembre 1999 15:30:59] noError
+   medium short [EEEE d MMMM yyyy HH:mm] [dimanche 21 novembre 1999 15:30] noError
+   medium none [EEEE d MMMM yyyy] [dimanche 21 novembre 1999] noError
+   short long [dd/MM/yyyy HH:mm:ss] [21/11/1999 15:30:59] noError
+   short medium [dd/MM/yyyy HH:mm:ss] [21/11/1999 15:30:59] noError
+   short short [dd/MM/yyyy HH:mm] [21/11/1999 15:30] noError
+   short none [dd/MM/yyyy] [21/11/1999] noError
+   none long [HH:mm:ss] [15:30:59] noError
+   none medium [HH:mm:ss] [15:30:59] noError
+   none short [HH:mm] [15:30] noError
+   none none [] [] noError
+  months janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre / janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre
+  months abbreviated janv.|févr.|mars|avr.|mai|juin|juil.|août|sept.|oct.|nov.|déc. / janv.|févr.|mars|avr.|mai|juin|juil.|août|sept.|oct.|nov.|déc.
+  weekdays dimanche|lundi|mardi|mercredi|jeudi|vendredi|samedi / dim.|lun.|mar.|mer.|jeu.|ven.|sam. / di|lu|ma|me|je|ve|sa
+zh-CN | zh-CN zh-CN noError long long 1
+   long long [yyyy年M月d日EEEE HH:mm:ss] [1999年11月21日星期日 15:30:59] noError
+   long medium [yyyy年M月d日EEEE HH:mm:ss] [1999年11月21日星期日 15:30:59] noError
+   long short [yyyy年M月d日EEEE HH:mm] [1999年11月21日星期日 15:30] noError
+   long none [yyyy年M月d日EEEE] [1999年11月21日星期日] noError
+   medium long [yyyy年M月d日EEEE HH:mm:ss] [1999年11月21日星期日 15:30:59] noError
+   medium medium [yyyy年M月d日EEEE HH:mm:ss] [1999年11月21日星期日 15:30:59] noError
+   medium short [yyyy年M月d日EEEE HH:mm] [1999年11月21日星期日 15:30] noError
+   medium none [yyyy年M月d日EEEE] [1999年11月21日星期日] noError
+   short long [yyyy/M/d HH:mm:ss] [1999/11/21 15:30:59] noError
+   short medium [yyyy/M/d HH:mm:ss] [1999/11/21 15:30:59] noError
+   short short [yyyy/M/d HH:mm] [1999/11/21 15:30] noError
+   short none [yyyy/M/d] [1999/11/21] noError
+   none long [HH:mm:ss] [15:30:59] noError
+   none medium [HH:mm:ss] [15:30:59] noError
+   none short [HH:mm] [15:30] noError
+   none none [] [] noError
+  months 一月|二月|三月|四月|五月|六月|七月|八月|九月|十月|十一月|十二月 / 一月|二月|三月|四月|五月|六月|七月|八月|九月|十月|十一月|十二月
+  months abbreviated 1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月 / 1月|2月|3月|4月|5月|6月|7月|8月|9月|10月|11月|12月
+  weekdays 星期日|星期一|星期二|星期三|星期四|星期五|星期六 / 周日|周一|周二|周三|周四|周五|周六 / 周日|周一|周二|周三|周四|周五|周六
+fi-FI | fi-FI fi-FI noError long long 1
+   long long [EEEE d. MMMM yyyy H.mm.ss] [] noError
+   long medium [EEEE d. MMMM yyyy H.mm.ss] [] noError
+   long short [EEEE d. MMMM yyyy H.mm] [] noError
+   long none [EEEE d. MMMM yyyy] [] noError
+   medium long [EEEE d. MMMM yyyy H.mm.ss] [] noError
+   medium medium [EEEE d. MMMM yyyy H.mm.ss] [] noError
+   medium short [EEEE d. MMMM yyyy H.mm] [] noError
+   medium none [EEEE d. MMMM yyyy] [] noError
+   short long [d.M.yyyy H.mm.ss] [21.11.1999 15.30.59] noError
+   short medium [d.M.yyyy H.mm.ss] [21.11.1999 15.30.59] noError
+   short short [d.M.yyyy H.mm] [21.11.1999 15.30] noError
+   short none [d.M.yyyy] [21.11.1999] noError
+   none long [H.mm.ss] [15.30.59] noError
+   none medium [H.mm.ss] [15.30.59] noError
+   none short [H.mm] [15.30] noError
+   none none [] [] noError
+  months tammikuu|helmikuu|maaliskuu|huhtikuu|toukokuu|kesäkuu|heinäkuu|elokuu|syyskuu|lokakuu|marraskuu|joulukuu / tammikuuta|helmikuuta|maaliskuuta|huhtikuuta|toukokuuta|kesäkuuta|heinäkuuta|elokuuta|syyskuuta|lokakuuta|marraskuuta|joulukuuta
+  months abbreviated tammi|helmi|maalis|huhti|touko|kesä|heinä|elo|syys|loka|marras|joulu / tammi|helmi|maalis|huhti|touko|kesä|heinä|elo|syys|loka|marras|joulu
+xx | xx en-US usingDefaultWarning long long 0
+   long long [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   long medium [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   long short [EEEE, MMMM d, yyyy h:mm a] [Sunday, November 21, 1999 3:30 PM] noError
+   long none [EEEE, MMMM d, yyyy] [Sunday, November 21, 1999] noError
+   medium long [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   medium medium [EEEE, MMMM d, yyyy h:mm:ss a] [Sunday, November 21, 1999 3:30:59 PM] noError
+   medium short [EEEE, MMMM d, yyyy h:mm a] [Sunday, November 21, 1999 3:30 PM] noError
+   medium none [EEEE, MMMM d, yyyy] [Sunday, November 21, 1999] noError
+   short long [M/d/yyyy h:mm:ss a] [11/21/1999 3:30:59 PM] noError
+   short medium [M/d/yyyy h:mm:ss a] [11/21/1999 3:30:59 PM] noError
+   short short [M/d/yyyy h:mm a] [11/21/1999 3:30 PM] noError
+   short none [M/d/yyyy] [11/21/1999] noError
+   none long [h:mm:ss a] [3:30:59 PM] noError
+   none medium [h:mm:ss a] [3:30:59 PM] noError
+   none short [h:mm a] [3:30 PM] noError
+   none none [] [] noError
+  months January|February|March|April|May|June|July|August|September|October|November|December / January|February|March|April|May|June|July|August|September|October|November|December
+  months abbreviated Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec / Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec
+  weekdays Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday / Sun|Mon|Tue|Wed|Thu|Fri|Sat / Su|Mo|Tu|We|Th|Fr|Sa
+pattern [dd/MM/yyyy] noError [dd/MM/yyyy] custom custom [05/01/2024] [21/11/1999] [07/07/1905] noError
+pattern [y] usingFallbackWarning [y] custom custom [2024] [1999] [1905] noError
+pattern [yy] noError [yy] custom custom [24] [99] [05] noError
+pattern [yyy] noError [yyy] custom custom [2024] [1999] [1905] noError
+pattern [yyyyy] noError [yyyyy] custom custom [2024] [1999] [1905] noError
+pattern [yyyyyyyy] usingFallbackWarning [yyyyy] custom custom [2024] [1999] [1905] noError
+pattern [M] noError [M] custom custom [1] [11] [7] noError
+pattern [MM] noError [MM] custom custom [01] [11] [07] noError
+pattern [MMM] noError [MMM] custom custom [Jan] [Nov] [Jul] noError
+pattern [MMMM] noError [MMMM] custom custom [January] [November] [July] noError
+pattern [MMMMM] noError [MMMMM] custom custom [January] [November] [July] noError
+pattern [MMMMMM] usingFallbackWarning [MMMM] custom custom [January] [November] [July] noError
+pattern [d] noError [d] custom custom [5] [21] [7] noError
+pattern [dd] noError [dd] custom custom [05] [21] [07] noError
+pattern [ddd] usingFallbackWarning [dd] custom custom [05] [21] [07] noError
+pattern [E] noError [E] custom custom [Fri] [Sun] [Fri] noError
+pattern [EEE] noError [EEE] custom custom [Fri] [Sun] [Fri] noError
+pattern [EEEE] noError [EEEE] custom custom [Friday] [Sunday] [Friday] noError
+pattern [EEEEE] noError [EEEEE] custom custom [Friday] [Sunday] [Friday] noError
+pattern [EEEEEE] usingFallbackWarning [EEEE] custom custom [Friday] [Sunday] [Friday] noError
+pattern [a] noError [a] custom custom [AM] [PM] [AM] noError
+pattern [aa] usingFallbackWarning [a] custom custom [AM] [PM] [AM] noError
+pattern [h] noError [h] custom custom [3] [3] [12] noError
+pattern [hh] noError [hh] custom custom [03] [03] [12] noError
+pattern [hhh] usingFallbackWarning [hh] custom custom [03] [03] [12] noError
+pattern [H] noError [H] custom custom [3] [15] [0] noError
+pattern [HH] noError [HH] custom custom [03] [15] [00] noError
+pattern [K] usingFallbackWarning [K] custom custom [3] [3] [12] noError
+pattern [KK] usingFallbackWarning [KK] custom custom [03] [03] [12] noError
+pattern [k] usingFallbackWarning [k] custom custom [3] [15] [0] noError
+pattern [kk] usingFallbackWarning [kk] custom custom [03] [15] [00] noError
+pattern [m] noError [m] custom custom [4] [30] [0] noError
+pattern [mm] noError [mm] custom custom [04] [30] [00] noError
+pattern [mmm] usingFallbackWarning [mm] custom custom [04] [30] [00] noError
+pattern [s] noError [s] custom custom [5] [59] [0] noError
+pattern [ss] noError [ss] custom custom [05] [59] [00] noError
+pattern [S] unsupportedError [S] custom custom [] [] [] noError
+pattern [SSS] unsupportedError [SSS] custom custom [] [] [] noError
+pattern [D] unsupportedError [D] custom custom [] [] [] noError
+pattern [z] unsupportedError [z] custom custom [] [] [] noError
+pattern [zzzz] unsupportedError [zzzz] custom custom [] [] [] noError
+pattern [Z] unsupportedError [Z] custom custom [] [] [] noError
+pattern [v] unsupportedError [v] custom custom [] [] [] noError
+pattern [Q] unsupportedError [Q] custom custom [] [] [] noError
+pattern [w] unsupportedError [w] custom custom [] [] [] noError
+pattern [W] unsupportedError [W] custom custom [] [] [] noError
+pattern [F] unsupportedError [F] custom custom [] [] [] noError
+pattern [e] patternSyntaxError [F] custom custom [] [] [] noError
+pattern [c] patternSyntaxError [F] custom custom [] [] [] noError
+pattern [L] patternSyntaxError [F] custom custom [] [] [] noError
+pattern [u] patternSyntaxError [F] custom custom [] [] [] noError
+pattern [x] patternSyntaxError [F] custom custom [] [] [] noError
+pattern [Y] patternSyntaxError [F] custom custom [] [] [] noError
+pattern ['quoted'] noError ['quoted'] custom custom [quoted] [quoted] [quoted] noError
+pattern [''] noError [''] custom custom ['] ['] ['] noError
+pattern ['it''s'] noError ['it''s'] custom custom [it's] [it's] [it's] noError
+pattern ['unterminated] usingFallbackWarning ['unterminated'] custom custom [unterminated] [unterminated] [unterminated] noError
+pattern [yyyy-MM-dd'T'HH:mm:ss.SSS] unsupportedError [yyyy-MM-dd'T'HH:mm:ss.SSS] custom custom [2024-01-05T03:04:05.] [1999-11-21T15:30:59.] [1905-07-07T00:00:00.] noError
+pattern [[yyyy] #@! é] noError [[yyyy] #@! é] custom custom [[2024] #@! é] [[1999] #@! é] [[1905] #@! é] noError
+pattern [MMMMd] noError [MMMMd] custom custom [January5] [November21] [July7] noError
+pattern [] noError [] custom custom [] [] [] noError
+pattern [ ] noError [ ] custom custom [ ] [ ] [ ] noError
+pattern [SSS yyyy D] unsupportedError [SSS yyyy D] custom custom [ 2024 ] [ 1999 ] [ 1905 ] noError
+pattern [ddd SSS] unsupportedError [dd SSS] custom custom [05 ] [21 ] [07 ] noError
+pattern [ddd q] patternSyntaxError [dd SSS] custom custom [05 ] [21 ] [07 ] noError
+pattern [hh 'a''b' MMMMMMM] usingFallbackWarning [hh 'a''b' MMMM] custom custom [03 a'b January] [03 a'b November] [12 a'b July] noError
+fi [MMMM d] tammikuuta 5
+fi [d MMMM] 5 tammikuuta
+fi [d. MMMM] 5. tammikuuta
+fi [MMMM yyyy] tammikuu 2024
+fi [dd MMMM] 05 tammikuuta
+fi [MMMM, d] tammikuuta, 5
+fi [MMMM] tammikuu
+fi ['d' MMMM] d tammikuu
+fi [H MMMM] 3 tammikuu
+fi [MMMM 'x' d] tammikuuta x 5
+fi [d MMM] 5 tammi
+fi [yyyy d MMMM] 2024 5 tammikuuta
+fi [MMMMM d] tammikuuta 5
+fi [dMMMM] 5tammikuuta
+fi [a] ap.
+local true noError
+invalid date [] illegalArgumentError
+status usingFallbackWarning en-US usingFallbackWarning 0 noError
+status pattern dd noError
+status names 12 noError
+status style custom noError
+styles after a pattern M/d/yyyy short none noError
+   illegalArgumentError short none
+styles long,custom ok
+   illegalArgumentError short none
+styles custom,long ok
+styles foo,long ArgumentError: Error #2008: Parameter DateTimeFormatterStyle must be one of the accepted values.
+styles long,foo ArgumentError: Error #2008: Parameter DateTimeFormatterStyle must be one of the accepted values.
+styles LONG,long ArgumentError: Error #2008: Parameter DateTimeFormatterStyle must be one of the accepted values.
+styles ,none ArgumentError: Error #2008: Parameter DateTimeFormatterStyle must be one of the accepted values.
+styles null date TypeError: Error #2007: Parameter dateStyle must be non-null.
+styles null time TypeError: Error #2007: Parameter timeStyle must be non-null.
+pattern null TypeError: Error #2007: Parameter pattern must be non-null.
+formatUTC null TypeError: Error #2007: Parameter dateTime must be non-null.
+format null TypeError: Error #2007: Parameter dateTime must be non-null.
+months bad style ArgumentError: Error #2008: Parameter invalid style or context must be one of the accepted values.
+months bad context ArgumentError: Error #2008: Parameter invalid style or context must be one of the accepted values.
+months null TypeError: Error #2007: Parameter nameStyle must be non-null.
+weekdays null context TypeError: Error #2007: Parameter context must be non-null.
+weekdays bad style ArgumentError: Error #2008: Parameter invalid style or context must be one of the accepted values.
+constructor bad style ArgumentError: Error #2008: Parameter DateTimeFormatterStyle must be one of the accepted values.
+constructor custom style TypeError: Error #2007: Parameter Constructor Failed must be non-null.
+constructor null style TypeError: Error #2007: Parameter dateStyle must be non-null.
+constructor null TypeError: Error #2007: Parameter requestedLocaleIDName must be non-null.
+quotes [''''] 4 noError [''''] 4 ['']
+quotes ['''] 3 usingFallbackWarning [''''] 4 ['']
+quotes ['a''] 4 usingFallbackWarning ['a'''] 5 [a']
+quotes ['] 1 usingFallbackWarning [''] 2 [']
+quotes [a'b'c] 5 patternSyntaxError [''] 2 [']
+quotes [yyyy'] 5 usingFallbackWarning [yyyy''] 6 [2024']
+quotes [''yyyy''] 8 noError [''yyyy''] 8 ['2024']
+quotes ['''yyyy'''] 10 noError ['''yyyy'''] 10 ['yyyy']
+quotes [yyyy<nul>MM] 7 noError [yyyy] 4 [2024]
+quotes [------------] 255 noError [------------] 255 [------------]
+quotes [------------] 256 patternSyntaxError [------------] 255 [------------]
+quotes [yyyy -------] 255 noError [yyyy -------] 255 [2024 -------]
+year 1 [1901-09-13 Friday] noError [14:05 x PM] noError
+year 1600 [] illegalArgumentError [14:05 x PM] noError
+year 1601 [1601-09-13 Thursday] noError [14:05 x PM] noError
+year 30827 [30827-09-13 Monday] noError [14:05 x PM] noError
+year 30828 [30828-09-13 Wednesday] noError [14:05 x PM] noError
+year 65535 [] illegalArgumentError [14:05 x PM] noError
+year 65536 [] illegalArgumentError [14:05 x PM] noError
+year 70000 [4464-09-13 Saturday] noError [14:05 x PM] noError
+year 275760 [] illegalArgumentError [00:00 x AM] noError
+year -1 [1899-09-13 Wednesday] noError [14:05 x PM] noError
+es-ES [EEEE, d 'de' MMMM 'de' yyyy H:mm:ss]
+pt-BR [EEEE, d 'de' MMMM 'de' yyyy HH:mm:ss]
+fr-CA [EEEE d MMMM yyyy HH 'h' mm 'min' ss 's']
+th-TH [EEEEที่ d MMMM G yyyy HH:mm:ss]
+he-IL [EEEE, d בMMMM yyyy H:mm:ss]
+ko-KR [yyyy년 MMMM d일 EEEE a h:mm:ss]
+en-AU Su|Mo|Tu|We|Th|Fr|Sa
+zh-CN 周日|周一|周二|周三|周四|周五|周六
+ja-JP 日|月|火|水|木|金|土
+fr-FR di|lu|ma|me|je|ve|sa
+fi-FI su|ma|ti|ke|to|pe|la
+sv-SE sö|må|ti|on|to|fr|lö
+he-IL א׳|ב׳|ג׳|ד׳|ה׳|ו׳|ש׳
+hi-IN र|सो|मं|बु|गु|शु|श
+last [30828-09-14 23:59] noError
+last [] illegalArgumentError
+last [30828-09-14 00:00] noError
+last [] illegalArgumentError
+invalid HH:mm [00:00] noError [00:00] noError
+invalid 'x' [x] noError [x] noError
+invalid '' ['] noError ['] noError
+invalid yyyy [] illegalArgumentError [] illegalArgumentError
+invalid D [] illegalArgumentError [] illegalArgumentError
+invalid QQQ [] illegalArgumentError [] illegalArgumentError
+invalid w [] illegalArgumentError [] illegalArgumentError
+invalid F [] illegalArgumentError [] illegalArgumentError
+invalid z [] noError [] noError
+invalid S [] noError [] noError
+overflow bufferOverflowError 0
+limit past nul patternSyntaxError 0
+available true

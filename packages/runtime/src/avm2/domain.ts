@@ -73,29 +73,56 @@ export class Domain {
 }
 
 /**
- * The script each of a stack's frames names, innermost first, or null for
- * a frame that names none: V8's "at f (script:1:2)" and "at script:1:2",
- * and SpiderMonkey's and JavaScriptCore's "f@script:1:2". JavaScriptCore
- * names none for code a Function or eval made, whatever its sourceURL
- * ("f@"), nor for native code ("f@[native code]"). Lines that are no frame,
- * as V8's heading "Error", are left out.
+ * Each frame's site, "script:line:column", innermost first, or null for a
+ * frame line it cannot read: V8's "at f (script:1:2)" and "at script:1:2",
+ * and SpiderMonkey's and JavaScriptCore's "f@script:1:2". Lines that are
+ * no frame, as V8's heading "Error", are left out. The site is read so
+ * that nothing a name holds can stand for it: in V8's frames, inside the
+ * last parentheses; in the others, after the first "@", since URLs may
+ * hold one ("/npm/p@1.0/m.js") and the names a SWF's code can have
+ * cannot (codegen spells them from [A-Za-z0-9_$]). One without a line and
+ * column is unread: JavaScriptCore's for code a Function or eval made,
+ * whatever its sourceURL ("f@"), and for native code ("f@[native code]"),
+ * and V8's "native", "<anonymous>" or "index 0".
  */
-export function stackFrames(stack: string | undefined): (string | null)[] {
+export function frameSites(stack: string | undefined): (string | null)[] {
   const lines = stack?.split("\n") ?? [];
   const v8 = lines.some((line) => /^\s*at /.test(line));
-  const frames: (string | null)[] = [];
+  const sites: (string | null)[] = [];
   for (const line of lines) {
     if (v8 ? !/^\s*at /.test(line) : !line.includes("@")) {
       continue;
     }
 
-    const m = v8
-      ? (/^\s*at .*? \((.*):\d+:\d+\)$/.exec(line) ?? /^\s*at (.*):\d+:\d+$/.exec(line))
-      : /@(.*):\d+:\d+$/.exec(line);
-    frames.push(m ? m[1] : null);
+    let site: string;
+    if (v8) {
+      const text = line.replace(/^\s*at /, "");
+      const open = text.lastIndexOf(" (");
+      site =
+        text.endsWith(")") && open >= 0 ? text.slice(open + 2, -1) : text.replace(/^async /, "");
+    } else {
+      site = line.slice(line.indexOf("@") + 1);
+    }
+
+    sites.push(/:\d+:\d+$/.test(site) ? site : null);
   }
 
-  return frames;
+  return sites;
+}
+
+/** A frame site's script: "script:1:2" without its line and column. */
+export function siteScript(site: string): string | null {
+  return /^(.+):\d+:\d+$/.exec(site)?.[1] ?? null;
+}
+
+/**
+ * The script each of a stack's frames names, innermost first, or null for
+ * a frame that names none or a line it cannot read (see frameSites). For
+ * security checks, where such a frame must not be passed over;
+ * frameScripts leaves them out.
+ */
+export function stackFrames(stack: string | undefined): (string | null)[] {
+  return frameSites(stack).map((site) => (site === null ? null : siteScript(site)));
 }
 
 /** The scripts a stack's frames name, innermost first, those that name none left out. */

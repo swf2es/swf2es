@@ -17,7 +17,7 @@ import {
   type ShapeLayer,
 } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
-import { dropBatchedCopy } from "./color.js";
+import { takeBatchedCopy, weigh } from "./color.js";
 import { IDLE_MS } from "./pools.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
@@ -209,7 +209,11 @@ export function destroyContext(context: GraphicsContext): void {
   }
 
   holds.delete(context);
-  dropBatchedCopy(context);
+  const copy = takeBatchedCopy(context);
+  if (copy) {
+    destroyContext(copy);
+  }
+
   context.destroy();
 }
 
@@ -251,6 +255,62 @@ export function shapeContext(): GraphicsContext {
   const context = new GraphicsContext();
   context.batchMode = "no-batch";
   return context;
+}
+
+/**
+ * How to make again each context of a view's whose paths go once Pixi has
+ * built it (remakeable), for what needs them after: its batched copy.
+ */
+const makers = new WeakMap<GraphicsContext, () => GraphicsContext>();
+
+/**
+ * Have `context`'s paths go altogether once Pixi has built it, `make`
+ * making it anew for a copy (copyContext): a view's fills and lines, which
+ * that view's renderer alone builds, from layers their shape keeps anyway.
+ * Pixi's collection of what went unused for a minute is kept off it, as
+ * it would build the context again from its paths: its tessellation stays
+ * while it lives, which the view destroys once idle. A glyph's fill, which
+ * every view shares, keeps its paths for each renderer to build.
+ */
+export function remakeable(context: GraphicsContext, make: () => GraphicsContext): GraphicsContext {
+  context.autoGarbageCollect = false;
+  makers.set(context, make);
+  return context;
+}
+
+/** A context to draw as `context` does: made anew if its paths may be gone, as remakeable's are, else a clone. */
+export function copyContext(context: GraphicsContext): GraphicsContext {
+  const make = makers.get(context);
+  return make ? remakeable(make(), make) : context.clone();
+}
+
+/**
+ * Let go of what a context's paths hold once Pixi has built it
+ * (render/hooks.ts). A remakeable context's go whole, its bounds measured
+ * and its vertices weighed first (render/color.ts), as nothing reads them
+ * again: Pixi draws it from its tessellation, and a copy is made anew. In
+ * a crowd of 200 characters (bench.ts --town 200), their flattened points
+ * held some 8 MB. Any other's keep the shapes they were flattened to,
+ * which is all Pixi reads of them again: to build the context again, as a
+ * lost context or Pixi's collection of what went unused for a minute has
+ * it, to measure its bounds, and to hit test it; their commands go, which
+ * a crowded room's contexts kept some 120 MB of, an object and an array
+ * for each segment. Every context of the player is made whole before it
+ * is first built, and none is changed after.
+ */
+export function forgetCommands(context: GraphicsContext): void {
+  if (makers.has(context)) {
+    weigh(context);
+    context.releasePaths();
+    return;
+  }
+
+  for (const instruction of context.instructions) {
+    if (instruction.action !== "texture") {
+      instruction.data.path.releaseInstructions();
+      instruction.data.hole?.releaseInstructions();
+    }
+  }
 }
 
 /**
@@ -354,11 +414,15 @@ export class SharedFills {
     return this.held.get(shape)?.fills ?? null;
   }
 
-  /** The shape's fills, taken: found, or built by `build`. */
-  take(shape: ShapeCharacter, build: () => GraphicsContext[]): GraphicsContext[] {
+  /** The shape's fills, taken: found, or built of `layers` by `build`. */
+  take<L>(
+    shape: ShapeCharacter,
+    layers: L,
+    build: (layers: L) => GraphicsContext[],
+  ): GraphicsContext[] {
     let entry = this.held.get(shape);
     if (!entry) {
-      entry = { fills: build(), uses: 0 };
+      entry = { fills: build(layers), uses: 0 };
       this.held.set(shape, entry);
     }
 

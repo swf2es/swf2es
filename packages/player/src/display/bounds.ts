@@ -15,16 +15,18 @@ import {
 } from "./display.js";
 import {
   apply,
+  behindEye,
   concat,
   contains,
   invert,
+  isProjective,
   overlaps,
   type Rect,
   transformRect,
   union,
 } from "./geometry.js";
 import { sliceFor, sliceLayers, withinMask } from "./scale9.js";
-import { flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
+import { facing, flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -98,7 +100,8 @@ export function bounds(d: DisplayObject, lines: boolean): Rect | null {
   if (d instanceof Container) {
     for (const child of d.children) {
       const b = bounds(child, lines);
-      if (b) {
+      // A 3D child with a corner behind the eye is not drawn, and counts for nothing.
+      if (b && !(child.space && behindEye(b, child.placed))) {
         r = union(r, transformRect(b, child.placed));
       }
     }
@@ -138,7 +141,18 @@ export function hitsPoint(
   shape: boolean,
   root: DisplayObject | null,
 ): boolean {
-  const toLocal = invert(toStage(d, root));
+  const up = toStage(d, root);
+  if (isProjective(up) && inHidden3D(d)) {
+    return false;
+  }
+
+  // In 3D, the bounds are the box around what is drawn on the stage, as Flash tests them.
+  if (!shape && isProjective(up)) {
+    const r = bounds(d, true);
+    return r !== null && !behindEye(r, up) && contains(transformRect(r, up), x, y);
+  }
+
+  const toLocal = invert(up);
   if (!toLocal) {
     return false;
   }
@@ -188,6 +202,24 @@ export function hitsOwnPoint(
 
   const probe = { x: x - 0.5, y, root };
   const [lx, ly] = apply(toLocal, probe.x, probe.y);
+  return hitsOwnLocal(d, lx, ly, probe, clips);
+}
+
+/**
+ * hitsOwnPoint with the probe already in `d`'s own space, at (`lx`, `ly`):
+ * the pointer's pick carries it down the list, making no matrix per object.
+ */
+export function hitsOwnLocal(
+  d: DisplayObject,
+  lx: number,
+  ly: number,
+  probe: Probe,
+  clips = false,
+): boolean {
+  if (!underRoot(d) || d.maskOf) {
+    return false;
+  }
+
   let hit: boolean;
   if (d instanceof TextObject) {
     const r = ownBounds(d, true);
@@ -250,14 +282,19 @@ function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
 }
 
 /** The point a shape test asks of, in the root's space: masks are found from it. */
-interface Probe {
+export interface Probe {
   x: number;
   y: number;
   root: DisplayObject | null;
 }
 
-/** Whether the probe is on `mask`'s fills, where it is: its lines clip nothing. */
+/** Whether the probe is on `mask`'s fills, where it is: its lines clip nothing; a 3D mask's, all of it. */
 function inMask(mask: DisplayObject, probe: Probe): boolean {
+  // A 3D mask clips nothing, as Flash draws it.
+  if (mask.space) {
+    return true;
+  }
+
   const toLocal = invert(toStage(mask, probe.root));
   if (!toLocal) {
     return false;
@@ -311,8 +348,12 @@ function drawnAt(
     return hitsGlyph(d.definition, d.glyphs.glyphs, x, y, mask);
   }
 
-  let layers: ShapeLayer[] =
-    d.drawing?.layers ?? (d instanceof ShapeObject ? (d.shape?.layers ?? []) : []);
+  const drawing = d.drawing;
+  let layers: ShapeLayer[] = drawing
+    ? facing(drawing.layers, drawing.culled && turnedOver(d), drawing.version)
+    : d instanceof ShapeObject
+      ? (d.shape?.layers ?? [])
+      : [];
   // A 9-slice is hit where it is drawn, its layers as the renderer moves them, and only within
   // its own bounds as drawn unsliced: adl misses an owner's fill that a wider child stretched
   // past them. A mask is not sliced.
@@ -343,6 +384,10 @@ function drawnAt(
       }
     }
 
+    if (layer.meshes?.some((mesh) => inMesh(mesh.positions, x, y))) {
+      return true;
+    }
+
     if (mask) {
       continue;
     }
@@ -364,6 +409,7 @@ function drawnAt(
       const toChild = invert(child.placed);
       if (
         toChild &&
+        !(child.space && hidden3D(child)) &&
         child.clipDepth === 0 &&
         child.maskOf === null &&
         drawnAt(child, ...apply(toChild, x, y), probe, mask)
@@ -374,6 +420,56 @@ function drawnAt(
   }
 
   return false;
+}
+
+/**
+ * Whether `d` is turned over on the stage, which decides the triangles a
+ * culled drawTriangles keeps there: as the renderer draws it, within a 3D
+ * object's own space.
+ */
+function turnedOver(d: DisplayObject): boolean {
+  let turned = false;
+  for (let o: DisplayObject | null = d; o && !o.space; o = o.parent) {
+    const m = o.matrix;
+    if (m.a * m.d - m.b * m.c < 0) {
+      turned = !turned;
+    }
+  }
+
+  return turned;
+}
+
+/** Whether (x, y) is in any of the triangles, three points of `positions` each. */
+function inMesh(positions: Float32Array, x: number, y: number): boolean {
+  const triangle = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < positions.length; i += 6) {
+    for (let k = 0; k < 6; k++) {
+      triangle[k] = positions[i + k];
+    }
+
+    if (inside(triangle, x, y)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Whether `d` or a 3D object above it has a corner behind the eye, so that none of `d` is drawn. */
+function inHidden3D(d: DisplayObject): boolean {
+  for (let p: DisplayObject | null = d; p; p = p.parent) {
+    if (p.space && hidden3D(p)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Whether a 3D object has a corner behind the eye, which Flash draws none of, and hits none of. */
+export function hidden3D(d: DisplayObject): boolean {
+  const r = bounds(d, true);
+  return r !== null && behindEye(r, d.placed);
 }
 
 /** A path as hit tests read it: its polygon, the polygon's orientation, and the box around it. */

@@ -3,6 +3,16 @@
 // made by run.ts --update with the Flash oracle.
 import { readFileSync } from "node:fs";
 import { tags, zlibCompress } from "../../packages/format/dist/index.js";
+import {
+  Avm1Assembler,
+  byteString,
+  constant,
+  double,
+  FunctionFlag,
+  type PushValue,
+  register,
+  type SimpleAction,
+} from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
 
@@ -29,10 +39,15 @@ export interface PlayerCase {
    * draws `flash` for them, the SWF built at that size.
    */
   shown?: boolean;
-  /** What Flash draws for the references in place of the case's SWF. */
-  flash?: Uint8Array;
+  /**
+   * What Flash draws for the references in place of the case's SWF, or how
+   * to build it around the compiled script.
+   */
+  flash?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
+  /** An AVM1 SWF whose trace must match Flash's. */
+  traced?: boolean;
   /**
    * The transform table (render/table.ts) must draw some of it, and played
    * again without the table it must draw the same pixels.
@@ -1602,6 +1617,37 @@ function addedEvents(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A row of Boxes the timeline places on frame 1 and partly removes on
+// frame 2, under the rows scripts/RemoveReentry.as adds and removes from
+// the display list's events.
+function removeReentry(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 170,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 200),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "RemoveReentry"),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Box"],
+      ]),
+      ...[0, 1, 2].map((i) =>
+        w.place({ depth: i + 1, character: 2, name: `p${i}`, matrix: { tx: 240 * i, ty: 3000 } }),
+      ),
+      w.showFrame(),
+      w.remove(1),
+      w.remove(2),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // What differs from Flash in "moves" is anti-aliasing a quarter pixel off:
 // Flash's curved lines reach further into their shape, and under the skew
 // of frame 2 its lines are a little wider or narrower than Ruffle's rule
@@ -1798,6 +1844,1644 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
   });
 }
 
+/** An AVM1 block of what `write` assembles, and End. */
+const avm1 = (write: (a: Avm1Assembler) => Avm1Assembler): number[] => [
+  ...write(new Avm1Assembler()).end().bytes(),
+];
+
+/** Values as AVM1 traces them, in adl: a number to 15 digits, with Flash's own exponents. */
+const AVM1_VALUES = [
+  undefined,
+  null,
+  true,
+  false,
+  7,
+  double(-0),
+  double(Number.NaN),
+  double(Number.POSITIVE_INFINITY),
+  double(Number.NEGATIVE_INFINITY),
+  1e21,
+  0.1,
+  1.5,
+  -990.123,
+  1e-7,
+  1e15,
+  1e-5,
+  123456789012345680000,
+  0.8000000000000005,
+  9.999999999999998,
+  -9999999999999996,
+  -0.000009999999999999996,
+];
+
+// An AVM1 SWF of version 6 (player/src/avm1/avm1.ts): frame 1's DoAction
+// blocks share the operand stack and the constant pool, its DoInitAction
+// runs before them though its tag comes after, and values trace as AVM1
+// writes them; frame 2 finds the stack empty, traces and stops, so
+// frame 1's actions never run again.
+function avm1Hello(): Uint8Array {
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.backgroundColor(0xffffff),
+      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      w.doAction(avm1((a) => a.push("left on the stack"))),
+      w.doAction(avm1((a) => a.push("frame 1").trace().trace())),
+      w.doAction(avm1((a) => a.constantPool("pooled"))),
+      w.doAction(avm1((a) => a.push(constant(0)).trace())),
+      w.doAction(avm1((a) => AVM1_VALUES.reduce((b, v) => b.push(v).trace(), a))),
+      w.doInitAction(
+        1,
+        avm1((a) => a.push("init").trace()),
+      ),
+      w.showFrame(),
+      w.doAction(avm1((a) => a.trace().push("frame 2").trace().stop())),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** Every pair of `values`, each pushed in turn, but NaN with NaN (see `avm1Operators`). */
+function pairs(left: PushValue[], right: PushValue[] = left): [PushValue, PushValue][] {
+  const nan = (v: PushValue) =>
+    typeof v === "object" && v !== null && "value" in v && Number.isNaN(v.value);
+  return left.flatMap((a) =>
+    right.flatMap((b): [PushValue, PushValue][] => (nan(a) && nan(b) ? [] : [[a, b]])),
+  );
+}
+
+/** A DoAction that traces `action` of each of `operands`, pushed in order. */
+function traceEach(action: SimpleAction, operands: PushValue[][]): Uint8Array {
+  return w.doAction(
+    avm1((a) =>
+      operands.reduce(
+        (b, values) =>
+          b
+            .push(...values)
+            .op(action)
+            .trace(),
+        a,
+      ),
+    ),
+  );
+}
+
+const NAN = double(Number.NaN);
+const INFINITY = double(Number.POSITIVE_INFINITY);
+
+/** Values to convert, as SWF 4 to 10 read strings, numbers and their edges. */
+const AVM1_CONVERTED: PushValue[] = [
+  undefined,
+  null,
+  true,
+  false,
+  0,
+  double(-0),
+  1,
+  double(-2.5),
+  NAN,
+  INFINITY,
+  double(2147483648),
+  double(4294967295),
+  double(1e21),
+  "",
+  " 12",
+  "12 ",
+  "0x1A",
+  "-0x10",
+  "012",
+  "1e3",
+  ".",
+  "abc",
+  "\t5",
+  "é",
+  "😀",
+  byteString(0xc3, 0xa9),
+  byteString(0x80),
+];
+
+// What AVM1's arithmetic, comparison, logical, bitwise, string and
+// conversion actions push in a SWF of `version`, as adl traces them: the
+// conversions of each version (undefined and strings as numbers, hex from
+// SWF 6, booleans as 1 and 0 up to 4), SWF 4's "#ERROR#" for a division by
+// zero, Less2's undefined for NaN and its empty string after every other,
+// >>> signed in SWF 8 and 9, and up to SWF 5 strings as bytes, which the
+// log writes as UTF-8. A NaN is never compared with another: Flash has
+// one equal to a copy of itself and not to another, which values cannot
+// tell (docs/avm1.md).
+function avm1Operators(version: number): Uint8Array {
+  const arithmetic: PushValue[] = [
+    undefined,
+    null,
+    true,
+    0,
+    double(-0),
+    double(2.5),
+    NAN,
+    INFINITY,
+    "",
+    "2",
+    "abc",
+    "0x10",
+  ];
+  const divisors: PushValue[] = [undefined, true, 0, double(-0), 2, "3", "abc", "0x10"];
+  const compared: PushValue[] = [undefined, null, true, 0, 1, NAN, "", "1", "abc", "0x1"];
+  const strings: PushValue[] = ["", "a", "B", "ab", "é", "中", byteString(0x80)];
+  const codes = [0, 65, 233, 256, 321, 1000, 0xc3a9, 0xd800, 65535, 65601, -191];
+  const shifted: [PushValue, PushValue][] = [
+    [-1, 0],
+    [-1, 1],
+    [-1, 31],
+    [-1, 32],
+    [-1, 33],
+    [double(2147483648), 0],
+    [double(4294967295), 1],
+    [double(1e21), 0],
+    [double(1.9), 1],
+    [double(-1.9), 1],
+    [NAN, 1],
+    [INFINITY, 1],
+    ["0x80000000", 1],
+    [5, -1],
+    [1, 31],
+  ];
+  const extracted: [PushValue, PushValue][] = [
+    [0, 2],
+    [1, 2],
+    [2, 2],
+    [-1, -1],
+    [2, -1],
+    [6, 10],
+    [7, 1],
+    [double(2.7), double(1.5)],
+    ["3", NAN],
+    [undefined, undefined],
+    [double(-2147483648), 2],
+  ];
+  const unary = (action: SimpleAction, values: PushValue[]) =>
+    traceEach(
+      action,
+      values.map((v) => [v]),
+    );
+  const binary = (action: SimpleAction, operands: [PushValue, PushValue][]) =>
+    traceEach(action, operands);
+
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      ...(
+        ["ToNumber", "ToString", "ToInteger", "Not", "Increment", "Decrement", "TypeOf"] as const
+      ).map((action) => unary(action, AVM1_CONVERTED)),
+      ...(["StringLength", "MBStringLength", "CharToAscii", "MBCharToAscii"] as const).map(
+        (action) => unary(action, [...strings, 7, true, undefined]),
+      ),
+      ...(["AsciiToChar", "MBAsciiToChar"] as const).map((action) => unary(action, codes)),
+      w.doAction(
+        avm1((a) =>
+          codes.reduce((b, c) => b.push(c).op("MBAsciiToChar").op("StringLength").trace(), a),
+        ),
+      ),
+      ...(["Add", "Add2", "Subtract", "Multiply", "Divide", "Modulo"] as const).map((action) =>
+        binary(action, pairs(arithmetic, divisors)),
+      ),
+      ...(
+        ["Equals", "Equals2", "StrictEquals", "Less", "Less2", "Greater", "And", "Or"] as const
+      ).map((action) => binary(action, pairs(compared))),
+      // Whether a comparison pushes a boolean, even in SWF 4.
+      w.doAction(
+        avm1((a) =>
+          (["Equals", "Less", "And", "StringEquals"] as const)
+            .reduce((b, action) => b.push(1, 1).op(action).op("TypeOf").trace(), a)
+            .push(1)
+            .op("Not")
+            .op("TypeOf")
+            .trace(),
+        ),
+      ),
+      ...(["StringAdd", "StringEquals", "StringLess", "StringGreater", "Less2"] as const).map(
+        (action) => binary(action, pairs(strings)),
+      ),
+      ...(["BitAnd", "BitOr", "BitXor", "BitLShift", "BitRShift", "BitURShift"] as const).map(
+        (action) => binary(action, shifted),
+      ),
+      ...(["StringExtract", "MBStringExtract"] as const).map((action) =>
+        traceEach(
+          action,
+          ["abcdef", byteString(0xc3, 0xa9, 0x41)].flatMap((text) =>
+            extracted.map(([index, count]) => [text, index, count]),
+          ),
+        ),
+      ),
+      // Each half of a surrogate pair StringExtract cuts is U+FFFD from SWF 6,
+      // when compared or joined: the halves joined again are not the pair.
+      w.doAction(
+        avm1((a) =>
+          a
+            .push("a😀b", 2, 1)
+            .op("StringExtract")
+            .push("a😀b", 3, 1)
+            .op("StringExtract")
+            .op("StringAdd")
+            .op("PushDuplicate")
+            .trace()
+            .push("😀")
+            .op("StringEquals")
+            .trace()
+            .push("a😀b", 3, 1)
+            .op("MBStringExtract")
+            .push(0xfffd)
+            .op("AsciiToChar")
+            .op("StringEquals")
+            .trace()
+            .push("😀😀", 2, 2)
+            .op("StringExtract")
+            .push("c")
+            .op("StringAdd")
+            .trace(),
+        ),
+      ),
+      // PushDuplicate and StackSwap of the empty stack's undefined.
+      w.doAction(
+        avm1((a) =>
+          a
+            .push("a", "b")
+            .op("StackSwap")
+            .trace()
+            .trace()
+            .op("PushDuplicate")
+            .op("TypeOf")
+            .trace()
+            .trace(),
+        ),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** AVM1 code that leaves a value on the stack, for the cases of objects. */
+type Avm1Expr = (a: Avm1Assembler) => Avm1Assembler;
+
+const lit =
+  (v: PushValue): Avm1Expr =>
+  (a) =>
+    a.push(v);
+const getVar =
+  (name: string): Avm1Expr =>
+  (a) =>
+    a.push(name).op("GetVariable");
+const member =
+  (o: Avm1Expr, name: string): Avm1Expr =>
+  (a) =>
+    o(a).push(name).op("GetMember");
+const op =
+  (action: SimpleAction, ...operands: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    operands.reduce((b, e) => e(b), a).op(action);
+/** Arguments as calls take them: the last first, then their count. */
+const args = (a: Avm1Assembler, values: Avm1Expr[]) =>
+  [...values]
+    .reverse()
+    .reduce((b, e) => e(b), a)
+    .push(values.length);
+const callMethod =
+  (o: Avm1Expr, name: string | undefined, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    o(args(a, values)).push(name).op("CallMethod");
+const callFunction =
+  (name: string, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    args(a, values).push(name).op("CallFunction");
+const newObject =
+  (name: string, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    args(a, values).push(name).op("NewObject");
+const initObject =
+  (...pairs: [string, Avm1Expr][]): Avm1Expr =>
+  (a) =>
+    pairs
+      .reduce((b, [name, e]) => e(b.push(name)), a)
+      .push(pairs.length)
+      .op("InitObject");
+const initArray =
+  (...elements: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    [...elements]
+      .reverse()
+      .reduce((b, e) => e(b), a)
+      .push(elements.length)
+      .op("InitArray");
+
+/** Statements of the cases of objects, each a function of the assembler. */
+type Avm1Statement = (a: Avm1Assembler) => Avm1Assembler;
+
+const setVar =
+  (name: string, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a.push(name)).op("SetVariable");
+const setMember =
+  (o: Avm1Expr, name: string, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(o(a).push(name)).op("SetMember");
+const traceOf =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).trace();
+const note =
+  (text: string): Avm1Statement =>
+  (a) =>
+    a.push(text).trace();
+const drop =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).pop();
+let forInLabels = 0;
+/** `for (k in o) trace(k)`, by Enumerate2: the names up to the terminator. */
+const forIn =
+  (o: Avm1Expr): Avm1Statement =>
+  (a) => {
+    const n = forInLabels++;
+    return o(a)
+      .op("Enumerate2")
+      .label(`in${n}`)
+      .op("PushDuplicate")
+      .push(null)
+      .op("Equals2")
+      .if(`out${n}`)
+      .trace()
+      .jump(`in${n}`)
+      .label(`out${n}`)
+      .pop();
+  };
+/** `for (k in o)` the names joined in one line, so that a line stands for an enumeration. */
+const keysOf =
+  (o: Avm1Expr): Avm1Statement =>
+  (a) => {
+    const n = forInLabels++;
+    a.push("k", "").op("SetVariable");
+    return o(a)
+      .op("Enumerate2")
+      .label(`in${n}`)
+      .op("PushDuplicate")
+      .push(null)
+      .op("Equals2")
+      .if(`out${n}`)
+      .push("k")
+      .op("StackSwap")
+      .push("k")
+      .op("GetVariable")
+      .op("StackSwap")
+      .op("Add2")
+      .push(" ")
+      .op("Add2")
+      .op("SetVariable")
+      .jump(`in${n}`)
+      .label(`out${n}`)
+      .pop()
+      .push("k")
+      .op("GetVariable")
+      .trace();
+  };
+const block = (...statements: Avm1Statement[]) =>
+  w.doAction(avm1((a) => statements.reduce((b, s) => s(b), a)));
+
+const o = getVar("o");
+const OBJECT_PROTO = member(getVar("Object"), "prototype");
+
+// What AVM1's objects do in a SWF of `version`, as adl traces it
+// (docs/avm1.md, "Objects"): for..in's order and its terminator, names by
+// the version's case, ASSetPropFlags' attributes and version bits,
+// addProperty, watch and __resolve with native functions, which are all a
+// SWF can call before step 7 brings its own, delete, the prototypes of
+// primitives, _global, Object, and variables and paths on the root.
+function avm1Objects(version: number): Uint8Array {
+  const v6 = version >= 6;
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      // for..in: the last added first, a name deleted and set again last.
+      block(
+        note("-- enumeration"),
+        setVar("o", initObject(["a", lit(1)], ["b", lit(2)])),
+        setMember(o, "c", lit(3)),
+        setMember(o, "d", lit(4)),
+        traceOf(op("Delete", o, lit("b"))),
+        setMember(o, "b", lit(5)),
+        keysOf(o),
+        // A prototype's names come first, but those the object has.
+        setVar("p", initObject(["x", lit(1)], ["c", lit(2)], ["y", lit(3)])),
+        setMember(o, "__proto__", getVar("p")),
+        keysOf(o),
+        setVar("q", initObject(["z", lit(1)])),
+        setMember(getVar("q"), "__proto__", o),
+        keysOf(getVar("q")),
+        // The terminator, and an enumeration of no object.
+        (a) => a.push("t").op("Enumerate").op("TypeOf").trace(),
+        (a) => a.push(7).op("Enumerate2").op("TypeOf").trace(),
+        keysOf(initArray(lit("a"), lit("b"), lit("c"))),
+        keysOf(initObject(["10", lit(1)], ["2", lit(2)], ["1", lit(3)])),
+        forIn(initObject(["only", lit(1)])),
+      ),
+      // Names by the version's case: up to SWF 6 the first spelling stays.
+      block(
+        note("-- case"),
+        setVar("c", initObject()),
+        setMember(getVar("c"), "Ab", lit(1)),
+        setMember(getVar("c"), "aB", lit(2)),
+        traceOf(member(getVar("c"), "ab")),
+        traceOf(member(getVar("c"), "Ab")),
+        traceOf(member(getVar("c"), "aB")),
+        keysOf(getVar("c")),
+        setVar("Vx", lit(7)),
+        traceOf(getVar("vX")),
+        traceOf(getVar("Vx")),
+        traceOf(callMethod(getVar("c"), "HASOWNPROPERTY", lit("AB"))),
+        traceOf(op("Delete", getVar("c"), lit("AB"))),
+        keysOf(getVar("c")),
+        ...(v6
+          ? [
+              setMember(getVar("c"), "é", lit(1)),
+              traceOf(member(getVar("c"), "É")),
+              setMember(getVar("c"), "ж", lit(2)),
+              traceOf(member(getVar("c"), "Ж")),
+            ]
+          : []),
+        traceOf(op("Equals2", getVar("THIS"), getVar("this"))),
+      ),
+      // ASSetPropFlags: don't enum 1, don't delete 2, read only 4, and the
+      // bits that hide a property from SWFs before a version.
+      block(
+        note("-- flags"),
+        setVar("f", initObject(["a", lit(1)], ["b", lit(2)], ["c", lit(3)], ["d", lit(4)])),
+        drop(callFunction("ASSetPropFlags", getVar("f"), lit("a"), lit(1))),
+        drop(callFunction("ASSetPropFlags", getVar("f"), lit("b,C"), lit(2))),
+        drop(callFunction("ASSetPropFlags", getVar("f"), initArray(lit("d")), lit(4))),
+        keysOf(getVar("f")),
+        traceOf(op("Delete", getVar("f"), lit("b"))),
+        traceOf(op("Delete", getVar("f"), lit("a"))),
+        setMember(getVar("f"), "d", lit(40)),
+        traceOf(member(getVar("f"), "d")),
+        traceOf(callMethod(getVar("f"), "isPropertyEnumerable", lit("c"))),
+        traceOf(callMethod(getVar("f"), "isPropertyEnumerable", lit("d"))),
+        drop(callFunction("ASSetPropFlags", getVar("f"), lit(null), lit(0), lit(7))),
+        keysOf(getVar("f")),
+        // Every property, __proto__ and constructor included, shown.
+        drop(callFunction("ASSetPropFlags", OBJECT_PROTO, lit(null), lit(0), lit(1))),
+        keysOf(initObject()),
+        drop(callFunction("ASSetPropFlags", OBJECT_PROTO, lit(null), lit(1))),
+        setVar("g", initObject(["k", lit(1)])),
+        drop(callFunction("ASSetPropFlags", getVar("g"), lit(null), lit(0), lit(1))),
+        keysOf(getVar("g")),
+        // The version bits.
+        ...[0x80, 0x100, 0x400, 0x500, 0x1000, 0x2000, 0x4000, 0x8000].flatMap((bits) => [
+          setVar("h", initObject(["v", lit(bits)])),
+          drop(callFunction("ASSetPropFlags", getVar("h"), lit("v"), lit(bits))),
+          traceOf(member(getVar("h"), "v")),
+          traceOf(callMethod(getVar("h"), "hasOwnProperty", lit("v"))),
+          keysOf(getVar("h")),
+          setMember(getVar("h"), "v", lit("set")),
+          traceOf(member(getVar("h"), "v")),
+        ]),
+        traceOf(op("TypeOf", getVar("Function"))),
+        traceOf(op("TypeOf", member(initObject(), "watch"))),
+        traceOf(op("TypeOf", member(initObject(), "toString"))),
+      ),
+      // addProperty, with natives as getter and setter.
+      block(
+        note("-- addProperty"),
+        setVar("a", initObject(["s", lit(1)])),
+        traceOf(callMethod(getVar("a"), "addProperty")),
+        traceOf(callMethod(getVar("a"), "addProperty", lit("p"))),
+        traceOf(callMethod(getVar("a"), "addProperty", lit(""), member(OBJECT_PROTO, "valueOf"))),
+        traceOf(callMethod(getVar("a"), "addProperty", lit("p"), lit(5), lit(null))),
+        traceOf(callMethod(getVar("a"), "addProperty", lit("p"), member(OBJECT_PROTO, "valueOf"))),
+        traceOf(
+          callMethod(getVar("a"), "addProperty", lit("p"), member(OBJECT_PROTO, "valueOf"), lit(7)),
+        ),
+        traceOf(op("TypeOf", member(getVar("a"), "p"))),
+        traceOf(
+          callMethod(
+            getVar("a"),
+            "addProperty",
+            lit("p"),
+            member(OBJECT_PROTO, "valueOf"),
+            lit(null),
+          ),
+        ),
+        traceOf(op("Equals2", member(getVar("a"), "p"), getVar("a"))),
+        setMember(getVar("a"), "p", lit(9)),
+        traceOf(op("Equals2", member(getVar("a"), "p"), getVar("a"))),
+        traceOf(callMethod(getVar("a"), "hasOwnProperty", lit("p"))),
+        keysOf(getVar("a")),
+        // A getter or a setter that is an object but no function is refused.
+        traceOf(callMethod(getVar("a"), "addProperty", lit("n"), initObject(), initObject())),
+        traceOf(member(getVar("a"), "n")),
+        traceOf(
+          callMethod(
+            getVar("a"),
+            "addProperty",
+            lit("n"),
+            member(OBJECT_PROTO, "valueOf"),
+            initObject(),
+          ),
+        ),
+        // A getter over a value, and a toString getter.
+        traceOf(
+          callMethod(
+            getVar("a"),
+            "addProperty",
+            lit("s"),
+            member(OBJECT_PROTO, "toString"),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("a"), "s")),
+        // A getter on the prototype, seen through an object and a primitive.
+        setVar("b", initObject()),
+        setMember(getVar("b"), "__proto__", getVar("a")),
+        traceOf(member(getVar("b"), "s")),
+        setMember(getVar("b"), "s", lit("own")),
+        traceOf(member(getVar("b"), "s")),
+        traceOf(callMethod(getVar("b"), "hasOwnProperty", lit("s"))),
+      ),
+      // watch: what each call gives, and a native callback's value set.
+      block(
+        note("-- watch"),
+        setVar("w", initObject(["x", lit(1)])),
+        traceOf(callMethod(getVar("w"), "watch")),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"))),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), lit(5))),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), initObject())),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), member(OBJECT_PROTO, "valueOf"))),
+        setMember(getVar("w"), "x", lit(2)),
+        traceOf(op("Equals2", member(getVar("w"), "x"), getVar("w"))),
+        // A second watch replaces the first: Object called with the name boxes it.
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), getVar("Object"), lit("data"))),
+        setMember(getVar("w"), "x", lit(3)),
+        traceOf(member(getVar("w"), "x")),
+        traceOf(op("TypeOf", member(getVar("w"), "x"))),
+        traceOf(callMethod(getVar("w"), "unwatch", lit("X"))),
+        traceOf(callMethod(getVar("w"), "unwatch", lit("x"))),
+        traceOf(callMethod(getVar("w"), "unwatch")),
+        setMember(getVar("w"), "x", lit(4)),
+        traceOf(member(getVar("w"), "x")),
+        // A name not set yet, then set through SetVariable's path.
+        traceOf(callMethod(getVar("w"), "watch", lit("later"), getVar("Object"))),
+        setVar("w.later", lit(1)),
+        traceOf(member(getVar("w"), "later")),
+        // A watched read-only property.
+        drop(callFunction("ASSetPropFlags", getVar("w"), lit("later"), lit(4))),
+        setMember(getVar("w"), "later", lit(2)),
+        traceOf(member(getVar("w"), "later")),
+      ),
+      // __resolve: asked for a name the chain lacks, with the name.
+      block(
+        note("-- __resolve"),
+        setVar("r", initObject(["here", lit("here")])),
+        setMember(getVar("r"), "__resolve", getVar("Object")),
+        traceOf(member(getVar("r"), "missing")),
+        traceOf(op("TypeOf", member(getVar("r"), "missing"))),
+        traceOf(member(getVar("r"), "here")),
+        traceOf(callMethod(getVar("r"), "hasOwnProperty", lit("missing"))),
+        setMember(getVar("r"), "__resolve", lit(5)),
+        traceOf(member(getVar("r"), "missing")),
+        setMember(getVar("r"), "__resolve", initObject()),
+        traceOf(member(getVar("r"), "missing")),
+        setMember(getVar("r"), "__resolve", member(OBJECT_PROTO, "toString")),
+        traceOf(member(getVar("r"), "missing")),
+        // On the prototype; and not for a conversion's valueOf.
+        setVar("s", initObject()),
+        setMember(getVar("s"), "__proto__", getVar("r")),
+        traceOf(member(getVar("s"), "missing")),
+        setVar("bare", callFunction("Object")),
+        setMember(getVar("bare"), "__resolve", getVar("Object")),
+        traceOf(op("Add2", getVar("bare"), lit(""))),
+        traceOf(getVar("bare")),
+        // Through the scope chain: a variable missing is not resolved.
+        traceOf(op("TypeOf", getVar("noSuchVariable"))),
+      ),
+      // delete, Delete2, and variables at the root.
+      block(
+        note("-- delete"),
+        setVar("d", initObject(["x", lit(1)])),
+        traceOf(op("Delete", getVar("d"), lit("x"))),
+        traceOf(op("Delete", getVar("d"), lit("x"))),
+        traceOf(op("Delete", lit("str"), lit("length"))),
+        traceOf(op("Delete", getVar("d"), lit("__proto__"))),
+        traceOf(op("Delete", OBJECT_PROTO, lit("toString"))),
+        setVar("gone", lit(1)),
+        traceOf(op("Delete2", lit("gone"))),
+        traceOf(op("Delete2", lit("gone"))),
+        traceOf(op("TypeOf", getVar("gone"))),
+        setVar("dd", initObject(["y", lit(2)])),
+        traceOf(op("Delete2", lit("dd.y"))),
+        traceOf(op("TypeOf", member(getVar("dd"), "y"))),
+        (a) => a.push("loc", 1).op("DefineLocal"),
+        traceOf(getVar("loc")),
+        (a) => a.push("loc").op("DefineLocal2"),
+        traceOf(getVar("loc")),
+        (a) => a.push("loc2").op("DefineLocal2"),
+        traceOf(op("TypeOf", getVar("loc2"))),
+        traceOf(callMethod(getVar("this"), "hasOwnProperty", lit("loc2"))),
+        // Paths to objects' properties.
+        setVar("pa", initObject(["b", initObject(["c", lit("deep")])])),
+        traceOf(getVar("pa.b.c")),
+        traceOf(getVar("pa:b")),
+        traceOf(getVar("pa.b:c")),
+        setVar("pa.b.e", lit("set")),
+        traceOf(member(member(getVar("pa"), "b"), "e")),
+        setVar("nopath.x", lit(1)),
+        traceOf(op("TypeOf", getVar("nopath"))),
+        traceOf(getVar("this.loc")),
+        traceOf(getVar(".x")),
+      ),
+      // The prototypes of primitives, which GetMember and CallMethod box.
+      block(
+        note("-- primitives"),
+        traceOf(member(lit("abc"), "length")),
+        traceOf(member(lit("abc"), "LENGTH")),
+        traceOf(
+          op("Equals2", member(lit("abc"), "__proto__"), member(getVar("String"), "prototype")),
+        ),
+        traceOf(op("Equals2", member(lit("abc"), "constructor"), getVar("String"))),
+        traceOf(op("Equals2", member(lit(5), "__constructor__"), getVar("Number"))),
+        traceOf(callMethod(lit(5), "toString")),
+        traceOf(callMethod(lit(true), "toString")),
+        traceOf(callMethod(lit("s"), "valueOf")),
+        traceOf(op("TypeOf", callMethod(lit("s"), "valueOf"))),
+        setMember(member(getVar("String"), "prototype"), "extra", lit("on String")),
+        traceOf(member(lit("x"), "extra")),
+        traceOf(member(lit(1), "extra")),
+        setMember(member(getVar("Object"), "prototype"), "everywhere", lit("on Object")),
+        traceOf(member(lit(1), "everywhere")),
+        traceOf(member(lit(false), "everywhere")),
+        setMember(lit("x"), "bar", lit(1)),
+        traceOf(member(lit("x"), "bar")),
+        traceOf(member(lit(undefined), "x")),
+        traceOf(member(lit(null), "x")),
+        traceOf(callMethod(lit("x"), "hasOwnProperty", lit("length"))),
+        traceOf(callMethod(lit(1), "hasOwnProperty", lit("length"))),
+        traceOf(op("Delete", member(getVar("Object"), "prototype"), lit("everywhere"))),
+        traceOf(op("Delete", member(getVar("String"), "prototype"), lit("extra"))),
+        traceOf(callMethod(lit(undefined), "toString")),
+      ),
+      // _global, Object and the builtins' conversions.
+      block(
+        note("-- global"),
+        traceOf(op("TypeOf", getVar("_global"))),
+        setMember(getVar("_global"), "gv", lit("global")),
+        traceOf(getVar("gv")),
+        setVar("gv", lit("root")),
+        traceOf(getVar("gv")),
+        traceOf(member(getVar("_global"), "gv")),
+        traceOf(op("TypeOf", member(getVar("_global"), "__proto__"))),
+        traceOf(op("Equals2", getVar("_global"), lit(null))),
+        traceOf(op("TypeOf", getVar("Object"))),
+        // A SWF 5 sees no prototype of a function.
+        traceOf(op("TypeOf", member(getVar("Object"), "__proto__"))),
+        traceOf(getVar("Object")),
+        traceOf(getVar("NaN")),
+        traceOf(getVar("o")),
+        traceOf(op("TypeOf", newObject("Object"))),
+        traceOf(op("TypeOf", callFunction("Object"))),
+        traceOf(op("TypeOf", member(callFunction("Object"), "toString"))),
+        traceOf(newObject("Object", lit("boxed"))),
+        traceOf(op("TypeOf", newObject("Object", lit(5)))),
+        traceOf(op("Add2", newObject("Object", lit(5)), lit(1))),
+        traceOf(callFunction("Object", lit(true))),
+        traceOf(callMethod(newObject("Object"), "hasOwnProperty", lit("constructor"))),
+        traceOf(callMethod(newObject("Object"), "hasOwnProperty", lit("__constructor__"))),
+        traceOf(callMethod(initObject(), "hasOwnProperty", lit("constructor"))),
+        traceOf(callMethod(initObject(), "isPrototypeOf", initObject())),
+        traceOf(callMethod(OBJECT_PROTO, "isPrototypeOf", initObject())),
+        traceOf(callMethod(OBJECT_PROTO, "isPrototypeOf", lit("s"))),
+        traceOf(initObject(["a", lit(1)])),
+        traceOf(callMethod(initObject(), "toString")),
+        traceOf(callMethod(getVar("Object"), "toString")),
+        traceOf(op("Equals2", callMethod(o, "valueOf"), o)),
+        traceOf(op("Add2", initObject(), lit(1))),
+        traceOf(initArray(lit(1), lit(undefined), lit("c"))),
+        traceOf(op("TypeOf", initArray())),
+        traceOf(member(initArray(lit(1), lit(2)), "length")),
+        // InitObject's later pairs are set first; a count out of range pops none.
+        keysOf(initObject(["a", lit(1)], ["b", lit(2)], ["a", lit(3)])),
+        traceOf(member(initObject(["a", lit(1)], ["b", lit(2)], ["a", lit(3)]), "a")),
+        (a) => a.push("kept", -1).op("InitObject").op("TypeOf").trace().trace(),
+        (a) => a.push("kept", -1).op("InitArray").op("TypeOf").trace().trace(),
+        // Counts are truncated: -0.5 is 0, NaN none, 1.7 pairs one.
+        (a) => a.push("kept", -0.5).op("InitObject").op("TypeOf").trace().trace(),
+        (a) => a.push("kept", Number.NaN).op("InitArray").op("TypeOf").trace().trace(),
+        (a) => a.push("kept", "a", 1, "b", 2, 1.7).op("InitObject").op("Enumerate2"),
+        (a) => a.trace().trace().trace().trace().trace(),
+      ),
+      // Flash's lower case, ASSetPropFlags' bits as an int's low 16, and paths' first steps.
+      block(
+        note("-- more names"),
+        ...(v6
+          ? (
+              [
+                ["İ", "i"],
+                ["ΑΣ", "ασ"],
+                ["xς", "XΣ"],
+                ["ß", "ẞ"],
+                ["ა", "Ⴀ"],
+                ["ɐ", "Ɐ"],
+              ] as const
+            ).map(([stored, asked]) => traceOf(member(initObject([stored, lit(stored)]), asked)))
+          : []),
+        setVar("h", initObject(["v", lit(1)])),
+        drop(callFunction("ASSetPropFlags", getVar("h"), lit("v"), lit(65537))),
+        traceOf(op("Delete", getVar("h"), lit("v"))),
+        setVar("h", initObject(["v", lit(1)])),
+        drop(callFunction("ASSetPropFlags", getVar("h"), lit("v"), lit(-65534))),
+        traceOf(op("Delete", getVar("h"), lit("v"))),
+        setVar("h", initObject()),
+        setMember(getVar("h"), "__resolve", getVar("Object")),
+        drop(callFunction("ASSetPropFlags", getVar("h"), lit("__resolve"), lit(0x4000))),
+        traceOf(op("TypeOf", member(getVar("h"), "missing"))),
+        setVar("px", lit("root's")),
+        traceOf(getVar("_ROOT.px")),
+        traceOf(getVar("THIS.px")),
+        traceOf(getVar("_global.ASSetPropFlags")),
+        setVar("_global.pg", lit("global's")),
+        traceOf(member(getVar("_global"), "pg")),
+        setVar("this.pt", lit(1)),
+        traceOf(getVar("pt")),
+        // An array's indices: up to SWF 6 the digits before anything else; its length by case.
+        ...["3abc", "1.9", " +3", "4294967298"].flatMap((name) => [
+          setVar("ar", initArray(lit("x"))),
+          setMember(getVar("ar"), name, lit(1)),
+          traceOf(member(getVar("ar"), "length")),
+        ]),
+        setVar("ar", initArray(lit("x"), lit("y"), lit("z"))),
+        setMember(getVar("ar"), "LENGTH", lit(1)),
+        keysOf(getVar("ar")),
+        // A __PROTO__ where __proto__ was deleted.
+        setVar("pr", initObject()),
+        drop(callFunction("ASSetPropFlags", getVar("pr"), lit("__proto__"), lit(0), lit(2))),
+        traceOf(op("Delete", getVar("pr"), lit("__proto__"))),
+        setMember(getVar("pr"), "__PROTO__", initObject(["inherited", lit("yes")])),
+        traceOf(member(getVar("pr"), "inherited")),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** A function's body of statements. */
+const body = (...statements: Avm1Statement[]) =>
+  statements.reduce((b, s) => s(b), new Avm1Assembler());
+/** `function name(params) { ... }`: DefineFunction. */
+const defineFn =
+  (name: string, params: string[], ...statements: Avm1Statement[]): Avm1Statement =>
+  (a) =>
+    a.defineFunction(name, params, body(...statements));
+/** An anonymous function, which DefineFunction pushes. */
+const fnExpr =
+  (params: string[], ...statements: Avm1Statement[]): Avm1Expr =>
+  (a) =>
+    a.defineFunction("", params, body(...statements));
+/** DefineFunction2, with its register count, flags and parameters' registers. */
+const defineFn2 =
+  (
+    name: string,
+    registers: number,
+    flags: number,
+    params: [string, number][],
+    ...statements: Avm1Statement[]
+  ): Avm1Statement =>
+  (a) =>
+    a.defineFunction2(name, registers, flags, params, body(...statements));
+const fn2Expr =
+  (
+    registers: number,
+    flags: number,
+    params: [string, number][],
+    ...statements: Avm1Statement[]
+  ): Avm1Expr =>
+  (a) =>
+    a.defineFunction2("", registers, flags, params, body(...statements));
+const ret =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).op("Return");
+const reg =
+  (n: number): Avm1Expr =>
+  (a) =>
+    a.push(register(n));
+const storeReg =
+  (n: number, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).storeRegister(n).pop();
+const local =
+  (name: string, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a.push(name)).op("DefineLocal");
+const newMethod =
+  (o: Avm1Expr, name: string | undefined, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    o(args(a, values)).push(name).op("NewMethod");
+let ifLabels = 0;
+/** `if (cond) { statements }`. */
+const ifThen =
+  (cond: Avm1Expr, ...statements: Avm1Statement[]): Avm1Statement =>
+  (a) => {
+    const skip = `skip${ifLabels++}`;
+    return statements.reduce((b, s) => s(b), cond(a).op("Not").if(skip)).label(skip);
+  };
+const proto = (name: string) => member(getVar(name), "prototype");
+/**
+ * "root" for the root, else the value's type: the player's root is no clip
+ * yet (docs/avm1.md, step 10), whose `typeof` is "movieclip".
+ */
+const kind =
+  (e: Avm1Expr): Avm1Expr =>
+  (a) => {
+    const n = ifLabels++;
+    return e(a)
+      .op("PushDuplicate")
+      .push("_root")
+      .op("GetVariable")
+      .op("StrictEquals")
+      .if(`root${n}`)
+      .op("TypeOf")
+      .jump(`kind${n}`)
+      .label(`root${n}`)
+      .pop()
+      .push("root")
+      .label(`kind${n}`);
+  };
+
+// What AVM1 functions do in a SWF of `version`, as adl traces it
+// (docs/avm1.md, "Functions and registers"): calls and what they give,
+// the operand stack a body shares with its caller, `this` by how a
+// function is called, closures, `arguments`, registers global and
+// DefineFunction2's own with its preloads, Function's call and apply, new,
+// super, getters, setters, watchers and __resolve that are functions, the
+// recursion limits, and the constant pool a function reads.
+function avm1Functions(version: number): Uint8Array {
+  // The root's _parent is left out: adl loads the SWF, whose root has one there.
+  const all =
+    FunctionFlag.preloadThis |
+    FunctionFlag.preloadArguments |
+    FunctionFlag.preloadSuper |
+    FunctionFlag.preloadRoot |
+    FunctionFlag.preloadGlobal;
+  const describe = [
+    traceOf(kind(reg(1))),
+    traceOf(kind(getVar("this"))),
+    traceOf(op("Equals2", getVar("this"), o)),
+    traceOf(op("Equals2", getVar("this"), getVar("_root"))),
+    traceOf(op("TypeOf", getVar("arguments"))),
+    traceOf(op("TypeOf", getVar("super"))),
+  ];
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      block(
+        note("-- calls"),
+        defineFn(
+          "add",
+          ["a", "b"],
+          traceOf(getVar("a")),
+          traceOf(getVar("b")),
+          traceOf(member(getVar("arguments"), "length")),
+          ret(op("Add2", getVar("a"), getVar("b"))),
+        ),
+        traceOf(callFunction("add", lit(1), lit(2))),
+        traceOf(callFunction("add", lit(1))),
+        traceOf(callFunction("add", lit(1), lit(2), lit(3))),
+        defineFn("none", []),
+        traceOf(callFunction("none")),
+        traceOf(op("TypeOf", callFunction("none"))),
+        traceOf(op("TypeOf", getVar("add"))),
+        traceOf(getVar("add")),
+        traceOf(op("TypeOf", member(getVar("add"), "prototype"))),
+        traceOf(op("Equals2", member(proto("add"), "constructor"), getVar("add"))),
+        traceOf(op("Equals2", member(proto("add"), "__proto__"), OBJECT_PROTO)),
+        traceOf(op("Equals2", member(getVar("add"), "__proto__"), proto("Function"))),
+        keysOf(getVar("add")),
+        keysOf(proto("add")),
+        traceOf(callMethod(getVar("add"), "hasOwnProperty", lit("prototype"))),
+        setVar("anon", fnExpr(["x"], ret(op("Multiply", getVar("x"), lit(2))))),
+        traceOf(callFunction("anon", lit(21))),
+        traceOf(callFunction("noSuchFunction", lit(1))),
+        setVar("num", lit(5)),
+        traceOf(callFunction("num")),
+        setVar("obj", initObject(["v", lit(1)])),
+        traceOf(callMethod(getVar("obj"), "nope")),
+        traceOf(callMethod(getVar("obj"), "v")),
+        traceOf(op("TypeOf", newObject("noSuchClass"))),
+        traceOf(op("TypeOf", newMethod(getVar("obj"), "nope"))),
+        traceOf(op("TypeOf", newMethod(getVar("obj"), "v"))),
+        traceOf(op("TypeOf", newMethod(lit(undefined), "x"))),
+        traceOf(callMethod(getVar("add"), "", lit(2), lit(3))),
+        traceOf(callMethod(getVar("add"), undefined, lit(4), lit(5))),
+        setVar("made", newMethod(getVar("add"), "", lit(1), lit(1))),
+        traceOf(op("TypeOf", getVar("made"))),
+        setMember(
+          getVar("obj"),
+          "self",
+          fnExpr([], ret(op("Equals2", getVar("this"), getVar("obj")))),
+        ),
+        traceOf(callFunction("obj.self")),
+        traceOf(callMethod(getVar("obj"), "self")),
+        traceOf(callFunction("obj:self")),
+        setVar("thisOf", fnExpr([], ret(kind(getVar("this"))))),
+        traceOf(callMethod(getVar("thisOf"), "")),
+        traceOf(callFunction("thisOf")),
+        traceOf(callMethod(getVar("obj"), "thisOf")),
+        defineFn("Casey", [], ret(lit("casey"))),
+        traceOf(callFunction("casey")),
+        traceOf(callFunction("CASEY")),
+      ),
+      block(
+        note("-- the stack"),
+        defineFn("popper", [], (a) => a.trace().trace()),
+        (a) => a.push("under1", "under2", 0, "popper").op("CallFunction").trace(),
+        defineFn("leaver", [], (a) => a.push("left"), ret(lit("ret"))),
+        (a) => a.push(0, "leaver").op("CallFunction").trace().trace(),
+        defineFn("emptyReturn", [], (a) => a.op("Return")),
+        (a) => a.push("callers", 0, "emptyReturn").op("CallFunction").trace().trace(),
+        (a) => a.push("kept", "popped").op("Return").push("after return").trace(),
+      ),
+      block(note("-- after a block's return"), (a) => a.trace().trace()),
+      block(
+        note("-- this"),
+        setVar("o", initObject()),
+        setMember(
+          o,
+          "who",
+          fnExpr(
+            [],
+            traceOf(op("Equals2", getVar("this"), o)),
+            traceOf(op("Equals2", getVar("this"), getVar("_root"))),
+            traceOf(kind(getVar("this"))),
+            traceOf(kind(getVar("THIS"))),
+          ),
+        ),
+        drop(callMethod(o, "who")),
+        setVar("who", member(o, "who")),
+        drop(callFunction("who")),
+        setMember(
+          o,
+          "outer",
+          fnExpr(
+            [],
+            defineFn("inner", [], ret(getVar("this"))),
+            local("got", callFunction("inner")),
+            traceOf(op("Equals2", getVar("got"), o)),
+            traceOf(op("Equals2", getVar("got"), getVar("_root"))),
+            traceOf(kind(getVar("got"))),
+            traceOf(callMethod(getVar("got"), "hasOwnProperty", lit("got"))),
+            traceOf(op("TypeOf", callMethod(getVar("this"), "inner"))),
+          ),
+        ),
+        drop(callMethod(o, "outer")),
+        setMember(OBJECT_PROTO, "me", fnExpr([], ret(op("TypeOf", getVar("this"))))),
+        traceOf(callMethod(lit("s"), "me")),
+        traceOf(callMethod(lit(5), "me")),
+        traceOf(callMethod(lit(true), "me")),
+        drop(op("Delete", OBJECT_PROTO, lit("me"))),
+        setMember(o, "setThis", fnExpr([], setVar("this", lit(5)), traceOf(getVar("this")))),
+        drop(callMethod(o, "setThis")),
+      ),
+      block(
+        note("-- closures"),
+        defineFn(
+          "counter",
+          ["n"],
+          local("c", getVar("n")),
+          ret(fnExpr([], setVar("c", op("Add2", getVar("c"), lit(1))), ret(getVar("c")))),
+        ),
+        setVar("c1", callFunction("counter", lit(10))),
+        traceOf(callFunction("c1")),
+        traceOf(callFunction("c1")),
+        setVar("c2", callFunction("counter", lit(20))),
+        traceOf(callFunction("c2")),
+        traceOf(callFunction("c1")),
+        traceOf(op("TypeOf", getVar("c"))),
+        traceOf(getVar("c")),
+        defineFn("locals", [], local("loc", lit(1)), setVar("glob", lit(2)), (a) =>
+          a.push("loc2").op("DefineLocal2"),
+        ),
+        drop(callFunction("locals")),
+        traceOf(op("TypeOf", getVar("loc"))),
+        traceOf(op("TypeOf", getVar("loc2"))),
+        traceOf(getVar("glob")),
+        setVar("shadow", lit("root")),
+        defineFn("shadower", ["shadow"], setVar("shadow", lit("param")), traceOf(getVar("shadow"))),
+        drop(callFunction("shadower", lit("arg"))),
+        traceOf(getVar("shadow")),
+        defineFn("missing", ["shadow"], traceOf(getVar("shadow"))),
+        drop(callFunction("missing")),
+        defineFn("outerP", ["p"], ret(fnExpr([], ret(op("Add2", getVar("p"), getVar("shadow")))))),
+        traceOf(callMethod(callFunction("outerP", lit("p:")), "")),
+        // A SWF 5 function's named function is its clip's; any other variable stays its own.
+        defineFn(
+          "definesInner",
+          [],
+          defineFn("innerNamed", [], ret(lit("inner"))),
+          local("innerLocal", lit(1)),
+        ),
+        drop(callFunction("definesInner")),
+        traceOf(op("TypeOf", getVar("innerNamed"))),
+        traceOf(op("TypeOf", getVar("innerLocal"))),
+      ),
+      block(
+        note("-- arguments"),
+        defineFn(
+          "args",
+          ["a"],
+          traceOf(member(getVar("arguments"), "length")),
+          traceOf(member(getVar("arguments"), "0")),
+          traceOf(op("TypeOf", getVar("arguments"))),
+          traceOf(op("Equals2", member(getVar("arguments"), "callee"), getVar("args"))),
+          traceOf(member(getVar("arguments"), "caller")),
+          traceOf(op("TypeOf", member(getVar("arguments"), "caller"))),
+          traceOf(op("Equals2", member(getVar("arguments"), "__proto__"), proto("Array"))),
+          traceOf(op("Equals2", member(getVar("arguments"), "constructor"), getVar("Array"))),
+          keysOf(getVar("arguments")),
+          traceOf(getVar("arguments")),
+          setMember(getVar("arguments"), "0", lit("changed")),
+          traceOf(getVar("a")),
+          setVar("a", lit("a set")),
+          traceOf(member(getVar("arguments"), "0")),
+          traceOf(callMethod(getVar("arguments"), "hasOwnProperty", lit("callee"))),
+          traceOf(callMethod(getVar("arguments"), "isPropertyEnumerable", lit("callee"))),
+          traceOf(getVar("ARGUMENTS")),
+        ),
+        drop(callFunction("args", lit(1), lit(2))),
+        defineFn("callsArgs", [], drop(callFunction("whoCalled"))),
+        defineFn(
+          "whoCalled",
+          [],
+          traceOf(op("Equals2", member(getVar("arguments"), "caller"), getVar("callsArgs"))),
+          traceOf(op("TypeOf", member(getVar("arguments"), "caller"))),
+        ),
+        drop(callFunction("callsArgs")),
+        drop(callFunction("whoCalled")),
+        defineFn("argsTwice", [], ret(getVar("arguments"))),
+        traceOf(op("Equals2", callFunction("argsTwice"), callFunction("argsTwice"))),
+        defineFn("argsSet", [], setVar("arguments", lit("mine")), traceOf(getVar("arguments"))),
+        drop(callFunction("argsSet")),
+        defineFn(
+          "argsDelete",
+          [],
+          traceOf(op("Delete2", lit("arguments"))),
+          traceOf(op("TypeOf", getVar("arguments"))),
+        ),
+        drop(callFunction("argsDelete")),
+        traceOf(op("TypeOf", getVar("arguments"))),
+      ),
+      block(
+        note("-- registers"),
+        storeReg(0, lit("g0")),
+        storeReg(1, lit("g1")),
+        storeReg(2, lit("g2")),
+        storeReg(3, lit("g3")),
+        storeReg(4, lit("g4")),
+        traceOf(reg(0)),
+        traceOf(reg(1)),
+        traceOf(reg(2)),
+        traceOf(reg(3)),
+        traceOf(reg(4)),
+        traceOf(reg(255)),
+        (a) => a.push("stays").storeRegister(1).trace(),
+        traceOf(reg(1)),
+        defineFn("df1", [], traceOf(reg(1)), storeReg(2, lit("from df1")), traceOf(reg(0))),
+        drop(callFunction("df1")),
+        traceOf(reg(2)),
+        defineFn2(
+          "df2",
+          3,
+          0,
+          [
+            ["x", 1],
+            ["y", 0],
+          ],
+          traceOf(reg(0)),
+          traceOf(reg(1)),
+          traceOf(reg(2)),
+          traceOf(reg(3)),
+          traceOf(getVar("y")),
+          traceOf(op("TypeOf", getVar("x"))),
+          storeReg(2, lit("own")),
+          storeReg(3, lit("global 3")),
+          storeReg(5, lit("none")),
+          traceOf(reg(5)),
+        ),
+        drop(callFunction("df2", lit("X"), lit("Y"))),
+        traceOf(reg(2)),
+        traceOf(reg(3)),
+        defineFn2(
+          "df2past",
+          2,
+          0,
+          [
+            ["x", 4],
+            ["y", 1],
+          ],
+          traceOf(reg(4)),
+          traceOf(reg(1)),
+          traceOf(op("TypeOf", getVar("x"))),
+        ),
+        drop(callFunction("df2past", lit("X"), lit("Y"))),
+        defineFn2(
+          "df2zero",
+          0,
+          0,
+          [["x", 0]],
+          traceOf(reg(0)),
+          traceOf(reg(1)),
+          traceOf(getVar("x")),
+        ),
+        drop(callFunction("df2zero", lit("X0"))),
+        defineFn2(
+          "fact",
+          2,
+          0,
+          [["n", 1]],
+          ifThen(op("Less2", reg(1), lit(2)), ret(lit(1))),
+          ret(op("Multiply", reg(1), callFunction("fact", op("Decrement", reg(1))))),
+        ),
+        traceOf(callFunction("fact", lit(5))),
+        defineFn2(
+          "same",
+          2,
+          0,
+          [
+            ["a", 1],
+            ["b", 1],
+          ],
+          traceOf(reg(1)),
+        ),
+        drop(callFunction("same", lit("A"), lit("B"))),
+      ),
+      block(
+        note("-- preloads"),
+        defineFn2(
+          "pre",
+          10,
+          all,
+          [["p", 7]],
+          ...[1, 2, 3, 4, 5, 6, 7, 8].map((r) => traceOf(kind(reg(r)))),
+          traceOf(op("Equals2", reg(1), o)),
+          traceOf(op("Equals2", reg(5), getVar("_global"))),
+          traceOf(member(reg(2), "length")),
+          traceOf(reg(7)),
+          ...describe,
+        ),
+        setMember(o, "pre", getVar("pre")),
+        drop(callMethod(o, "pre", lit("P"))),
+        // Without its own `this`, a function's is its caller's or its definer's.
+        defineFn2(
+          "noThis",
+          2,
+          FunctionFlag.suppressThis,
+          [],
+          traceOf(op("Equals2", getVar("this"), o)),
+          traceOf(kind(getVar("this"))),
+        ),
+        setMember(o, "callsNoThis", fnExpr([], drop(callFunction("noThis")))),
+        drop(callMethod(o, "callsNoThis")),
+        setMember(
+          o,
+          "definesNoThis",
+          fnExpr(
+            [],
+            ret(
+              fn2Expr(
+                2,
+                FunctionFlag.suppressThis,
+                [],
+                traceOf(op("Equals2", getVar("this"), o)),
+                traceOf(kind(getVar("this"))),
+              ),
+            ),
+          ),
+        ),
+        drop(callMethod(callMethod(o, "definesNoThis"), "")),
+        ...[
+          FunctionFlag.preloadThis | FunctionFlag.suppressThis,
+          FunctionFlag.suppressThis,
+          FunctionFlag.preloadArguments | FunctionFlag.suppressArguments,
+          FunctionFlag.suppressArguments,
+          FunctionFlag.preloadSuper | FunctionFlag.suppressSuper,
+          FunctionFlag.suppressSuper,
+          FunctionFlag.preloadRoot,
+          FunctionFlag.preloadParent,
+          FunctionFlag.preloadGlobal,
+        ].flatMap((flags) => [
+          note(`flags ${flags}`),
+          setMember(o, "flagged", fn2Expr(4, flags, [], ...describe)),
+          drop(callMethod(o, "flagged")),
+        ]),
+      ),
+      block(
+        note("-- call and apply"),
+        setVar(
+          "ca",
+          fnExpr(
+            ["a", "b"],
+            traceOf(op("Equals2", getVar("this"), o)),
+            traceOf(op("TypeOf", getVar("this"))),
+            traceOf(getVar("a")),
+            traceOf(getVar("b")),
+            traceOf(member(getVar("arguments"), "length")),
+            traceOf(op("TypeOf", getVar("super"))),
+            ret(lit("r")),
+          ),
+        ),
+        traceOf(callMethod(getVar("ca"), "call", o, lit(1), lit(2))),
+        traceOf(callMethod(getVar("ca"), "apply", o, initArray(lit(3), lit(4)))),
+        traceOf(callMethod(getVar("ca"), "apply", o)),
+        traceOf(callMethod(getVar("ca"), "apply", o, lit(5))),
+        traceOf(
+          callMethod(
+            getVar("ca"),
+            "apply",
+            o,
+            initObject(["length", lit(2)], ["0", lit("x")], ["1", lit("y")]),
+          ),
+        ),
+        traceOf(callMethod(getVar("ca"), "call")),
+        traceOf(callMethod(getVar("ca"), "call", lit(null), lit("n"))),
+        traceOf(callMethod(getVar("ca"), "call", lit("str"))),
+        traceOf(op("TypeOf", member(proto("Function"), "call"))),
+        traceOf(op("TypeOf", member(proto("Function"), "apply"))),
+        traceOf(callMethod(member(OBJECT_PROTO, "hasOwnProperty"), "call", o, lit("pre"))),
+        traceOf(callMethod(member(proto("Function"), "call"), "call", getVar("ca"), o, lit("cc"))),
+        keysOf(proto("Function")),
+        traceOf(op("TypeOf", callFunction("Function"))),
+        traceOf(op("TypeOf", member(callFunction("Function"), "__proto__"))),
+        traceOf(op("Equals2", callFunction("Function", getVar("ca")), getVar("ca"))),
+        traceOf(op("TypeOf", newObject("Function"))),
+        traceOf(op("Equals2", newObject("Function", getVar("ca")), getVar("ca"))),
+      ),
+      block(
+        note("-- new"),
+        defineFn(
+          "Point",
+          ["x", "y"],
+          setMember(getVar("this"), "x", getVar("x")),
+          setMember(getVar("this"), "y", getVar("y")),
+          ret(lit("ignored")),
+        ),
+        setVar("pt", newObject("Point", lit(1), lit(2))),
+        traceOf(op("TypeOf", getVar("pt"))),
+        traceOf(member(getVar("pt"), "x")),
+        traceOf(op("Equals2", member(getVar("pt"), "__proto__"), proto("Point"))),
+        traceOf(op("Equals2", member(getVar("pt"), "constructor"), getVar("Point"))),
+        traceOf(op("Equals2", member(getVar("pt"), "__constructor__"), getVar("Point"))),
+        keysOf(getVar("pt")),
+        defineFn("RetObj", [], ret(initObject(["from", lit("returned")]))),
+        traceOf(member(newObject("RetObj"), "from")),
+        setMember(
+          proto("Point"),
+          "sum",
+          fnExpr([], ret(op("Add2", member(getVar("this"), "x"), member(getVar("this"), "y")))),
+        ),
+        traceOf(callMethod(getVar("pt"), "sum")),
+        setMember(getVar("Point"), "prototype", initObject(["kind", lit("replaced")])),
+        traceOf(member(newObject("Point"), "kind")),
+        setMember(o, "Ctor", getVar("Point")),
+        traceOf(member(newMethod(o, "Ctor", lit(3), lit(4)), "x")),
+        drop(callFunction("Point", lit("px"), lit("py"))),
+        traceOf(getVar("x")),
+      ),
+      block(
+        note("-- super"),
+        defineFn(
+          "Base",
+          ["v"],
+          traceOf(op("Add2", lit("Base "), getVar("v"))),
+          setMember(getVar("this"), "base", getVar("v")),
+        ),
+        setMember(
+          proto("Base"),
+          "hello",
+          fnExpr([], ret(op("Add2", lit("Base.hello "), member(getVar("this"), "name")))),
+        ),
+        defineFn(
+          "Derived",
+          ["v"],
+          drop(callMethod(getVar("super"), undefined, op("Add2", getVar("v"), lit(1)))),
+          traceOf(lit("Derived")),
+        ),
+        setMember(proto("Derived"), "__proto__", proto("Base")),
+        setMember(proto("Derived"), "__constructor__", getVar("Base")),
+        setMember(
+          proto("Derived"),
+          "hello",
+          fnExpr([], ret(op("Add2", lit("Derived.hello "), callMethod(getVar("super"), "hello")))),
+        ),
+        setVar("d", newObject("Derived", lit(1))),
+        traceOf(member(getVar("d"), "base")),
+        setMember(getVar("d"), "name", lit("d")),
+        traceOf(callMethod(getVar("d"), "hello")),
+        defineFn("Third", [], drop(callMethod(getVar("super"), undefined)), traceOf(lit("Third"))),
+        setMember(proto("Third"), "__proto__", proto("Derived")),
+        setMember(proto("Third"), "__constructor__", getVar("Derived")),
+        setMember(
+          proto("Third"),
+          "hello",
+          fnExpr([], ret(op("Add2", lit("Third.hello "), callMethod(getVar("super"), "hello")))),
+        ),
+        setVar("t3", newObject("Third")),
+        setMember(getVar("t3"), "name", lit("t3")),
+        traceOf(callMethod(getVar("t3"), "hello")),
+        setMember(proto("Base"), "prop", lit("base prop")),
+        setMember(
+          proto("Derived"),
+          "peek",
+          fnExpr(
+            [],
+            traceOf(op("TypeOf", getVar("super"))),
+            traceOf(member(getVar("super"), "prop")),
+            traceOf(op("TypeOf", member(getVar("super"), "peek"))),
+            traceOf(op("TypeOf", member(getVar("super"), "hello"))),
+            traceOf(op("Equals2", getVar("super"), getVar("this"))),
+            traceOf(getVar("super")),
+          ),
+        ),
+        drop(callMethod(getVar("d"), "peek")),
+        defineFn(
+          "plainSuper",
+          [],
+          traceOf(op("TypeOf", getVar("super"))),
+          traceOf(callMethod(getVar("super"), "hello")),
+        ),
+        drop(callFunction("plainSuper")),
+        setMember(getVar("d"), "own", fnExpr([], ret(callMethod(getVar("super"), "hello")))),
+        traceOf(callMethod(getVar("d"), "own")),
+        // A method found two prototypes up, and one a getter gives: up to SWF 6
+        // its `super` is above `this`'s prototype, from SWF 7 above where it was found.
+        setMember(proto("Base"), "inh", fnExpr([], ret(callMethod(getVar("super"), "hello")))),
+        traceOf(callMethod(getVar("t3"), "inh")),
+        drop(
+          callMethod(
+            proto("Base"),
+            "addProperty",
+            lit("viaGetter"),
+            fnExpr([], ret(member(proto("Base"), "inh"))),
+            lit(null),
+          ),
+        ),
+        traceOf(callMethod(getVar("t3"), "viaGetter")),
+      ),
+      block(
+        note("-- properties"),
+        setVar("pp", initObject()),
+        traceOf(
+          callMethod(
+            getVar("pp"),
+            "addProperty",
+            lit("v"),
+            fnExpr([], ret(lit("got"))),
+            fnExpr(
+              ["x"],
+              traceOf(op("Add2", lit("set "), getVar("x"))),
+              setMember(getVar("this"), "stored", getVar("x")),
+            ),
+          ),
+        ),
+        traceOf(member(getVar("pp"), "v")),
+        setMember(getVar("pp"), "v", lit(5)),
+        traceOf(member(getVar("pp"), "stored")),
+        setVar("wo", initObject(["x", lit(1)])),
+        traceOf(
+          callMethod(
+            getVar("wo"),
+            "watch",
+            lit("x"),
+            fnExpr(
+              ["name", "old", "nu", "data"],
+              traceOf(getVar("name")),
+              traceOf(getVar("old")),
+              traceOf(getVar("nu")),
+              traceOf(getVar("data")),
+              traceOf(op("Equals2", getVar("this"), getVar("wo"))),
+              ret(op("Add2", getVar("nu"), lit(100))),
+            ),
+            lit("d"),
+          ),
+        ),
+        setMember(getVar("wo"), "x", lit(2)),
+        traceOf(member(getVar("wo"), "x")),
+        traceOf(callMethod(getVar("wo"), "watch", lit("x"), fnExpr([]))),
+        setMember(getVar("wo"), "x", lit(3)),
+        traceOf(op("TypeOf", member(getVar("wo"), "x"))),
+        setVar("rs", initObject()),
+        setMember(
+          getVar("rs"),
+          "__resolve",
+          fnExpr(["n"], ret(op("Add2", lit("resolved "), getVar("n")))),
+        ),
+        traceOf(member(getVar("rs"), "anything")),
+        traceOf(callMethod(getVar("rs"), "method", lit(1))),
+        setVar("count", lit(0)),
+        setVar("rec", initObject()),
+        drop(
+          callMethod(
+            getVar("rec"),
+            "addProperty",
+            lit("p"),
+            fnExpr(
+              [],
+              setVar("count", op("Increment", getVar("count"))),
+              ret(member(getVar("this"), "p")),
+            ),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("rec"), "p")),
+        traceOf(getVar("count")),
+        setVar("count", lit(0)),
+        setVar("ws", initObject()),
+        drop(
+          callMethod(
+            getVar("ws"),
+            "watch",
+            lit("p"),
+            fnExpr(
+              ["n", "old", "v"],
+              setVar("count", op("Increment", getVar("count"))),
+              setMember(getVar("this"), "p", op("Add2", getVar("v"), lit(1))),
+              ret(getVar("v")),
+            ),
+          ),
+        ),
+        setMember(getVar("ws"), "p", lit(0)),
+        traceOf(member(getVar("ws"), "p")),
+        traceOf(getVar("count")),
+        // A native getter that reads itself: join of an array whose element it is.
+        setVar("ja", initArray()),
+        drop(
+          callMethod(
+            getVar("ja"),
+            "addProperty",
+            lit("0"),
+            member(proto("Array"), "join"),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("ja"), "length")),
+        traceOf(callMethod(getVar("ja"), "join")),
+        traceOf(member(getVar("ja"), "0")),
+      ),
+      block(
+        note("-- constant pool"),
+        (a) => a.constantPool("pool A"),
+        defineFn("poolFn", [], traceOf(lit(constant(0)))),
+        (a) => a.constantPool("pool B"),
+        drop(callFunction("poolFn")),
+        traceOf(lit(constant(0))),
+        defineFn("poolSetter", [], (a) => a.constantPool("in body"), traceOf(lit(constant(0)))),
+        drop(callFunction("poolSetter")),
+        traceOf(lit(constant(0))),
+        drop(callFunction("poolSetter")),
+      ),
+      w.showFrame(),
+      block(
+        note("-- frame 2"),
+        traceOf(reg(1)),
+        traceOf(reg(3)),
+        drop(callFunction("poolFn")),
+        traceOf(callFunction("c1")),
+        storeReg(1, lit("across blocks")),
+      ),
+      block(traceOf(reg(1))),
+      block(
+        note("-- recursion"),
+        setVar("depth", lit(0)),
+        defineFn(
+          "deep",
+          [],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(op("Greater", getVar("depth"), lit(250)), traceOf(getVar("depth"))),
+          drop(callFunction("deep")),
+          traceOf(lit("unwound")),
+        ),
+        drop(callFunction("deep")),
+        traceOf(lit("after deep")),
+      ),
+      block(note("the block after")),
+      w.showFrame(),
+      block(note("-- frame 3"), traceOf(getVar("depth"))),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Past the recursion limit, a ScriptLimits of 40 here, Flash disables the
+// movie's actions, the rest of the frame's and every later frame's, and
+// its timeline plays on: frame 2 places a square, which frame 3 shows.
+function avm1Recursion(): Uint8Array {
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.backgroundColor(0xffffff),
+      w.tag(tags.ScriptLimits, Uint8Array.from([40, 0, 15, 0])),
+      square(1, 0xff0000, 400),
+      block(
+        setVar("depth", lit(0)),
+        defineFn(
+          "deep",
+          [],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(op("Greater", getVar("depth"), lit(35)), traceOf(getVar("depth"))),
+          drop(callFunction("deep")),
+          note("unwound"),
+        ),
+        drop(callFunction("deep")),
+        note("after"),
+      ),
+      block(note("the next block")),
+      w.showFrame(),
+      w.place({ depth: 1, character: 1, matrix: { tx: 100, ty: 100 } }),
+      block(note("frame 2")),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// A ScriptLimits takes effect as its frame comes, before the frame's
+// actions, and of two in a frame the later: frame 1 recurses 100 deep
+// under Flash's default limit, frame 2 sets 80 then 40, under which 30
+// deep runs and 60 disables the actions, frame 3's too.
+function avm1ScriptLimits(): Uint8Array {
+  const limits = (depth: number) => w.tag(tags.ScriptLimits, Uint8Array.from([depth, 0, 15, 0]));
+  const recurse = (n: number) => [
+    setVar("depth", lit(0)),
+    drop(callFunction("deep", lit(n))),
+    traceOf(op("Add2", lit("reached "), getVar("depth"))),
+  ];
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.backgroundColor(0xffffff),
+      block(
+        defineFn(
+          "deep",
+          ["n"],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(
+            op("Less2", getVar("depth"), getVar("n")),
+            drop(callFunction("deep", getVar("n"))),
+          ),
+        ),
+        ...recurse(100),
+      ),
+      w.showFrame(),
+      block(note("frame 2"), ...recurse(30)),
+      limits(80),
+      limits(40),
+      block(...recurse(60), note("unreached")),
+      w.showFrame(),
+      block(note("frame 3")),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 SWFs an AS3 one loads (scripts/Avm1Movie.as.template): one of
 // version 8 whose FileAttributes leaves out ActionScript 3, three frames
 // that move a square and add another, and one of version 6 without
@@ -1860,6 +3544,84 @@ function avm1Movie(compile: Compile): Uint8Array {
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
       w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// When content from Loader.loadBytes comes (scripts/LoaderBytesFrames.as):
+// a small SWF, and a large one of 200 classes' ABC and a megabyte of
+// sounds, each in the frame after the call whatever its size, as adl has
+// it. Their bytes are DefineBinaryData bound to ByteArray subclasses, too
+// large for the script's source.
+function loaderBytesFrames(compile: Compile): Uint8Array {
+  const bytesClass = (name: string) =>
+    compile(
+      name,
+      `package { import flash.utils.ByteArray; public class ${name} extends ByteArray { public function ${name}() { super(); } } }`,
+    );
+  const inner = (name: string, body: string, tags: Uint8Array[]) =>
+    w.swf({
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        ...tags,
+        w.doAbc(
+          compile(
+            name,
+            `package { import flash.display.MovieClip; public class ${name} extends MovieClip { public function ${name}() { ${body} addFrameScript(0, function():void { trace("${name} frame 1"); }); } } }`,
+          ),
+          name,
+        ),
+        w.symbolClass([[0, name]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const classes = Array.from(
+    { length: 200 },
+    (_, c) =>
+      `package { public class Many${c} { public static function f(x:int):int { var y:int = x; for (var i:int = 0; i < 4; i++) { y = (y ^ i) + ${c}; } return y; } public function g():String { return "${c}"; } } }`,
+  );
+  const sounds = Array.from({ length: 4 }, (_, k) => {
+    const data = new Uint8Array(250_000);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (i * 7 + k) & 0xff;
+    }
+
+    return w.defineSound(
+      10 + k,
+      { rate: 3, sixteen: true, stereo: true, samples: data.length / 4 },
+      data,
+    );
+  });
+  const small = inner("SmallInner", `trace("SmallInner made");`, []);
+  const large = inner("LargeInner", `trace("LargeInner made", Many0.f(1) + Many199.f(2));`, [
+    ...sounds,
+    w.doAbc(compile("ManyClasses", classes.join("\n")), "ManyClasses"),
+  ]);
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.binaryData(1, small),
+      w.binaryData(2, large),
+      w.doAbc(bytesClass("SmallBytes"), "SmallBytes"),
+      w.doAbc(bytesClass("LargeBytes"), "LargeBytes"),
+      w.doAbc(compile("LoaderBytesFrames"), "LoaderBytesFrames"),
+      w.symbolClass([
+        [1, "SmallBytes"],
+        [2, "LargeBytes"],
+        [0, "Main"],
+      ]),
       w.showFrame(),
       w.end(),
     ],
@@ -4044,6 +5806,190 @@ function tableRuns(): Uint8Array {
   return w.swf({ width: 240, height: 160, frameRate: 24, frameCount: 3, tags });
 }
 
+/**
+ * Large timeline shapes under colour transforms that change each frame, as
+ * a tween fades a creature out to white, in a render group that has not
+ * settled: batched copies on the first frame, before their shapes are
+ * built, and drawn alone after (render/color.ts, showFor). Flat discs,
+ * which the transform table draws with the transform in their rows
+ * (render/table.ts), and a gradient and a bitmap with transparent pixels,
+ * which Pixi's pipe draws with the colour shader; an offset, a fade, an
+ * alpha multiplier and a negative one, a shape taking a transform and
+ * another giving its up. No gradient stop is clamped, which Flash does
+ * before the ramp and swf2es after.
+ */
+function colorAlone(): Uint8Array {
+  // Of hundreds of vertices, as a creature's parts are, which a batched copy packs again for each
+  // change of transform: a disc of 240 sides, and squares of 60 points a side.
+  const round: w.PathCommand[] = [{ move: [300, 0] }];
+  for (let k = 1; k <= 240; k++) {
+    const a = (2 * Math.PI * k) / 240;
+    round.push({ line: [Math.round(300 * Math.cos(a)), Math.round(300 * Math.sin(a))] });
+  }
+
+  const square: w.PathCommand[] = [{ move: [0, 0] }];
+  const corners = [
+    [0, 0],
+    [800, 0],
+    [800, 800],
+    [0, 800],
+    [0, 0],
+  ];
+  for (let side = 0; side < 4; side++) {
+    const [x0, y0] = corners[side];
+    const [x1, y1] = corners[side + 1];
+    for (let k = 1; k <= 60; k++) {
+      square.push({
+        line: [Math.round(x0 + ((x1 - x0) * k) / 60), Math.round(y0 + ((y1 - y0) * k) / 60)],
+      });
+    }
+  }
+
+  const disc = (id: number, color: number) =>
+    w.shape({
+      id,
+      bounds: [-300, 300, -300, 300],
+      fills: [color],
+      paths: [{ fill1: 1, commands: round }],
+    });
+  const box = (id: number, fill: w.ShapeSpec["fills"][number]) =>
+    w.shape({
+      id,
+      bounds: [0, 800, 0, 800],
+      fills: [fill],
+      paths: [{ fill1: 1, commands: square }],
+      version: 3,
+    });
+  // 4 by 4 premultiplied ARGB, a quarter of it transparent and a quarter half so.
+  const pixels = Array.from({ length: 16 }, (_, i) =>
+    i < 4 ? 0x00000000 : i < 8 ? 0x80400020 : i % 2 ? 0xff20c040 : 0xffe08020,
+  );
+  const data = pixels.flatMap((p) => [p >>> 24, (p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff]);
+  const header = [4, 0, 5, 4, 0, 4, 0];
+  const compressed = zlibCompress(Uint8Array.from(data));
+  const body = new Uint8Array(header.length + compressed.length);
+  body.set(header);
+  body.set(compressed, header.length);
+  const at = (x: number, y: number) => ({ tx: x * 20, ty: y * 20 });
+  const fade = (alpha: number) => ({ mult: [0, 0, 0, alpha], add: [255, 255, 255, 0] });
+  const frames = [
+    [
+      fade(1),
+      { mult: [1, 1, 1, 1], add: [80, 0, -40, 0] },
+      undefined,
+      { mult: [1, 0.5, 1, 0.5], add: [0, 60, 0, 0] },
+    ],
+    [fade(0.6), { mult: [1, 1, 1, 1], add: [0, 90, 0, 0] }, fade(0.8), { mult: [1, 1, 1, 1] }],
+    [
+      fade(0.3),
+      { mult: [-1, -1, -1, 1], add: [255, 255, 255, 0] },
+      { mult: [1.5, 1, 1, 1], add: [0, 0, 0, -64] },
+      { mult: [1, 1, 1, 1], add: [0, 0, 60, 0] },
+    ],
+  ];
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0x606060),
+    disc(1, 0xe04030),
+    disc(2, 0x30b050),
+    box(3, {
+      type: 0x10,
+      matrix: { a: 800 / 32768, d: 800 / 32768, tx: 400, ty: 400 },
+      stops: [
+        [0, 0xff806040],
+        [255, 0x403060a0],
+      ],
+    }),
+    w.tag(36, body, true),
+    box(5, { bitmap: 4, type: 0x43, matrix: { a: 200, d: 200 } }),
+  ];
+  // Four columns, one transform each: two discs, the gradient and the bitmap a column.
+  const place = (frame: number) => {
+    const out: Uint8Array[] = [];
+    for (let column = 0; column < 4; column++) {
+      const ct = frames[frame - 1][column];
+      for (let row = 0; row < 4; row++) {
+        const depth = 1 + column * 4 + row;
+        const character = [1, 2, 3, 5][row];
+        const x = 10 + column * 55 + (row < 2 ? 15 + row * 25 : (row - 2) * 27);
+        const y = row < 2 ? 22 : 50;
+        out.push(
+          w.place({
+            depth,
+            ...(frame === 1 ? { character } : { move: true }),
+            matrix: row < 2 ? at(x, y) : { a: 0.6, d: 0.6, ...at(x, y) },
+            colorTransform: ct ?? (frame === 1 ? undefined : { mult: [1, 1, 1, 1] }),
+          }),
+        );
+      }
+    }
+
+    return out;
+  };
+  for (let frame = 1; frame <= 3; frame++) {
+    tags.push(...place(frame), w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 230, height: 100, frameRate: 24, frameCount: 3, tags });
+}
+
+/**
+ * Two rows of 48 small discs under offsets that change each frame, in a
+ * render group that has not settled: one run of the transform table longer
+ * than a run that takes its rows in uniforms, which uploads them, the
+ * transform's flag among them, to the table's texture (render/table.ts).
+ */
+function colorAloneRuns(): Uint8Array {
+  // A disc of 240 sides, large enough to be drawn alone under a transform (render/color.ts).
+  const round: w.PathCommand[] = [{ move: [300, 0] }];
+  for (let k = 1; k <= 240; k++) {
+    const a = (2 * Math.PI * k) / 240;
+    round.push({ line: [Math.round(300 * Math.cos(a)), Math.round(300 * Math.sin(a))] });
+  }
+
+  const disc = (id: number, color: number) =>
+    w.shape({
+      id,
+      bounds: [-300, 300, -300, 300],
+      fills: [color],
+      paths: [{ fill1: 1, commands: round }],
+    });
+  const offsets = [
+    [40, -30, 0],
+    [-20, 50, 30],
+    [0, 0, -60],
+  ];
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0x606060),
+    disc(1, 0xe04030),
+    disc(2, 0x30b050),
+  ];
+  for (let frame = 1; frame <= 3; frame++) {
+    for (let k = 0; k < 48; k++) {
+      tags.push(
+        w.place({
+          depth: 1 + k,
+          ...(frame === 1 ? { character: 1 + (k % 2) } : { move: true }),
+          matrix: {
+            a: 0.28,
+            d: 0.28,
+            tx: (10 + (k % 24) * 9) * 20,
+            ty: (8 + Math.floor(k / 24) * 10) * 20,
+          },
+          colorTransform: { mult: [1, 1, 1, 1], add: [...offsets[frame - 1], 0] },
+        }),
+      );
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 230, height: 26, frameRate: 24, frameCount: 3, tags });
+}
+
 const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
 
 // A rounded panel 100 by 60 with a line, for the `scale9` case: its corners
@@ -4408,6 +6354,7 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     tolerance: 32,
     maxOutliers: 60,
+    table: true,
   },
   {
     name: "table-runs",
@@ -4418,6 +6365,31 @@ export const cases: PlayerCase[] = [
     // and around the small shapes.
     tolerance: 32,
     maxOutliers: 1000,
+    table: true,
+  },
+  {
+    name: "color-alone",
+    swf: colorAlone(),
+    frames: 3,
+    capture: [1, 2, 3],
+    // Within 3 a channel, Flash's 8.8 multipliers against floats, but for
+    // the discs' edges, anti-aliased each rasteriser's way: up to 1,034
+    // channels a frame. A shape in a wrong colour adds some 1,700.
+    tolerance: 3,
+    maxOutliers: 1100,
+    table: true,
+  },
+  {
+    name: "color-alone-runs",
+    swf: colorAloneRuns(),
+    frames: 3,
+    capture: [1, 2, 3],
+    // Within 3 a channel, Flash's 8.8 multipliers against floats, but for
+    // the discs' edges, anti-aliased each rasteriser's way: up to 768
+    // channels a frame. Played without the table, they must draw the same
+    // pixels, which guards the rows read from the texture closer still.
+    tolerance: 3,
+    maxOutliers: 800,
     table: true,
   },
   {
@@ -4697,6 +6669,51 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Shadows and a bevel cast hundreds of pixels from small objects (scripts/FilterFarShadow.as):
+    // padded as far as they reach, drawn whole.
+    name: "filter-far-shadow",
+    swf: (abc) => bare(abc, 1, "Main", 480, 60),
+    script: "FilterFarShadow",
+    frames: 1,
+    capture: [1],
+    // The page blurs at its four samples a pixel, as the filters case says.
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
+    // Display objects with a shadow, bevel or gradient filter cast past what adl holds
+    // (scripts/FilterFar.as): the GPU's padding stays what can be drawn.
+    name: "filter-far",
+    swf: (abc) => bare(abc, 1, "Main", 80, 60),
+    script: "FilterFar",
+    frames: 2,
+    capture: [2],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    // A shadow's and a bevel's distance past what adl holds, and NaN; inner filters'
+    // rects; draw's matrix past the int's range; hitTest's points near it.
+    name: "filter-distances",
+    swf: (abc) => bare(abc, 1, "Main", 40, 40),
+    script: "FilterDistances",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // The rects and points of BitmapData's operations, in place and not, on the GPU and not
+    // (scripts/BitmapRects.as); shown, an opaque bitmap a copy in place left empty pixels in.
+    name: "bitmap-rects",
+    swf: (abc) => bare(abc, 1, "Main", 80, 32),
+    script: "BitmapRects",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "bitmap-symbols",
     build: bitmapSymbols,
     frames: 1,
@@ -4757,9 +6774,105 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "touch-natives",
+    swf: (abc) => bare(abc, 1, "TouchNatives"),
+    script: "TouchNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  // The events' fields as scripts read and write them: playerglobal keeps
+  // them in AS3, which must look to describeType, coercion, clone and
+  // dispatch as Flash's natives do.
+  {
+    name: "event-fields",
+    swf: (abc) => bare(abc, 1, "EventFields"),
+    script: "EventFields",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  // Natives that keep a value or answer a constant (contextMenu, TextRenderer,
+  // selectedText and others), and the errors a wrong argument gives.
+  {
+    name: "small-natives",
+    swf: (abc) => bare(abc, 1, "SmallNatives"),
+    script: "SmallNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  // A field's selection after text, htmlText, appendText and replaceText.
+  {
+    name: "text-field-selection-moves",
+    swf: (abc) => bare(abc, 1, "TextFieldSelectionMoves"),
+    script: "TextFieldSelectionMoves",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "number-parse-result-natives",
     swf: (abc) => bare(abc, 1, "NumberParseResultNatives"),
     script: "NumberParseResultNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "number-formatter-natives",
+    swf: (abc) => bare(abc, 1, "NumberFormatterNatives"),
+    script: "NumberFormatterNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "currency-formatter-natives",
+    swf: (abc) => bare(abc, 1, "CurrencyFormatterNatives"),
+    script: "CurrencyFormatterNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "date-time-formatter-natives",
+    swf: (abc) => bare(abc, 1, "DateTimeFormatterNatives"),
+    script: "DateTimeFormatterNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "collator-natives",
+    swf: (abc) => bare(abc, 1, "CollatorNatives"),
+    script: "CollatorNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "string-tools-natives",
+    swf: (abc) => bare(abc, 1, "StringToolsNatives"),
+    script: "StringToolsNatives",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "locale-id-natives",
+    swf: (abc) => bare(abc, 1, "LocaleIDNatives"),
+    script: "LocaleIDNatives",
     frames: 1,
     capture: [],
     tolerance: 0,
@@ -4835,6 +6948,32 @@ export const cases: PlayerCase[] = [
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  {
+    name: "draw-triangles",
+    swf: (abc) => bare(abc, 2, "DrawTriangles", 400, 280),
+    script: "DrawTriangles",
+    frames: 2,
+    capture: [1, 2],
+    // The textures are adl's to a level where flat or smoothed, and to the texel but at a few
+    // pixels where a perspective puts a pixel's corner exactly on a texel's edge, which adl's
+    // fixed point rounds either way. The rest are edges: adl covers a 45° edge's pixel with 10
+    // of its 16 samples where the page takes 6, as it does a path's fill, and strokes' ends and
+    // joins, as in the other cases: some 680.
+    tolerance: 32,
+    maxOutliers: 700,
+  },
+  {
+    name: "draw-triangles-culling",
+    swf: (abc) => bare(abc, 3, "DrawTrianglesCulling", 400, 220),
+    script: "DrawTrianglesCulling",
+    frames: 3,
+    capture: [1, 2],
+    // Edges alone: a 45° edge through pixels' corners, where adl counts the samples on it and
+    // the page does not (any fill's, as the draw-triangles case's), the 3D turn's, the glow's
+    // and the lines' ends.
+    tolerance: 32,
+    maxOutliers: 440,
   },
   {
     name: "read-graphics-data",
@@ -4949,6 +7088,7 @@ export const cases: PlayerCase[] = [
     // line's round caps, anti-aliased each rasteriser's way: 48 channels a frame.
     tolerance: 2,
     maxOutliers: 60,
+    table: true,
   },
   {
     name: "text-layout",
@@ -5040,6 +7180,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-formulas",
+    swf: (abc) => bare(abc, 1, "BlendFormulas", 320, 210),
+    script: "BlendFormulas",
+    frames: 1,
+    capture: [1],
+    // Within 2 a channel: adl's rounding of the premultiplied source and of
+    // the blend, which the GPU's blending and the blend filter round alike.
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     name: "blend-direct",
     swf: (abc) => bare(abc, 1, "BlendDirect", 240, 80),
     script: "BlendDirect",
@@ -5047,6 +7198,62 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3, 4],
     tolerance: 1,
     maxOutliers: 0,
+  },
+  {
+    name: "blend-direct-filtered",
+    swf: (abc) => bare(abc, 1, "BlendDirectFiltered", 320, 160),
+    script: "BlendDirectFiltered",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    // Within 6 a channel: adl's rounding of the glows' blurs, and of the layer whose ground is
+    // partly clear, as the blend filter draws them too.
+    tolerance: 6,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-direct-clear",
+    swf: (abc) => bare(abc, 1, "BlendDirectClear", 240, 80),
+    script: "BlendDirectClear",
+    frames: 3,
+    capture: [1, 3],
+    // Within 4 a channel: adl's rounding of the glows and of the blends.
+    tolerance: 4,
+    maxOutliers: 0,
+  },
+  {
+    name: "stage-erase",
+    swf: (abc) => bare(abc, 1, "StageErase", 240, 80),
+    script: "StageErase",
+    frames: 5,
+    capture: [1, 2, 3, 4, 5],
+    // Within 5 a channel: adl's rounding of the glows and of the blends, a subtracted glow's
+    // faint edge the most.
+    tolerance: 5,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-filtered-alpha",
+    swf: (abc) => bare(abc, 1, "BlendFilteredAlpha", 320, 200),
+    script: "BlendFilteredAlpha",
+    frames: 2,
+    capture: [1, 2],
+    // Within 5 a channel: adl's rounding of the glows and of the blends, and a drop shadow's edge
+    // a pixel wide. But for the corners of the glow under an alpha offset, some 30 channels up to
+    // 10 off: each of the test page's samples there with any alpha takes the offset, where adl's
+    // pixel has none; and a few of the shadow's corners.
+    tolerance: 5,
+    maxOutliers: 52,
+  },
+  {
+    name: "filtered-colors",
+    swf: (abc) => bare(abc, 1, "FilteredColors", 320, 240),
+    script: "FilteredColors",
+    frames: 2,
+    capture: [1, 2],
+    // Within 5 a channel but for some 170: the corners of a glow under an alpha offset, as in
+    // blend-filtered-alpha, up to 49 off; a glow's edge along a mask's, 35; a bitmap's, 10.
+    tolerance: 5,
+    maxOutliers: 170,
   },
   {
     name: "blend-edges",
@@ -5064,7 +7271,7 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     // Multisampled, as most hosts draw: blends and filters then read their
-    // backdrops through the bounded resolves of render/resolve.ts, which no
+    // backdrops through the Pixi fork's bounded resolves, which no
     // other case runs. Within 3 a channel, as drawn without multisampling:
     // the blends' 8-bit round trips and adl's rounding of the blurs.
     antialias: true,
@@ -5097,6 +7304,15 @@ export const cases: PlayerCase[] = [
     name: "apply-filter",
     swf: (abc) => bare(abc, 1, "ApplyFilter"),
     script: "ApplyFilter",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "apply-filter-inner",
+    swf: (abc) => bare(abc, 1, "ApplyFilterInner"),
+    script: "ApplyFilterInner",
     frames: 1,
     capture: [],
     tolerance: 0,
@@ -5243,6 +7459,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 20,
   },
   {
+    // Filters on objects that draw nothing draw nothing, glows, shadows and colour matrices alike.
+    name: "filters-empty",
+    swf: (abc) => bare(abc, 1, "FiltersEmpty", 330, 132),
+    script: "FiltersEmpty",
+    frames: 1,
+    capture: [1],
+    // As "filters": the page's samples against adl's whole pixels.
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     name: "filter-retween",
     swf: filterRetween,
     script: "FilterRetween",
@@ -5277,6 +7504,24 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // A filtered submenu, batched as a group of its own, shown beside the
+    // filtered menu it is a child of (scripts/FilterMenu.as).
+    name: "filter-menu",
+    swf: (abc) => bare(abc, 4, "FilterMenu", 300, 330),
+    script: "FilterMenu",
+    frames: 4,
+    capture: [2, 3, 4],
+    // A host showing the stage twice its size, as a game's page shows it larger.
+    zoom: 2,
+    shown: true,
+    // Flash draws the SWF built at that size, the script scaling the menu to it.
+    flash: (abc) => bare(abc, 4, "FilterMenu", 600, 660),
+    tolerance: 32,
+    // The bevels' one-pixel edges around each menu, lit differently in adl,
+    // up to about 3,800; the submenu cut short leaves about 371,000.
+    maxOutliers: 7000,
+  },
+  {
     name: "filter-cache",
     swf: (abc) => bare(abc, 7, "FilterCache", 380, 100),
     script: "FilterCache",
@@ -5304,6 +7549,18 @@ export const cases: PlayerCase[] = [
     capture: [1],
     // The smoothed tiles: Flash's bilinear filter and the GPU's part by up to 2 a channel.
     tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    // Draws followed by scrolls, fills and copies on every frame (scripts/DrawScroll.as).
+    name: "draw-scroll",
+    swf: (abc) => bare(abc, 1, "DrawScroll", 512, 104),
+    script: "DrawScroll",
+    frames: 6,
+    capture: [2, 4, 6],
+    // The half-green square drawn over the opaque bitmap's blue rounds a level apart: the
+    // draw's own compositing, the same whether the operations after it run on the GPU or not.
+    tolerance: 1,
     maxOutliers: 0,
   },
   {
@@ -5364,6 +7621,15 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  {
+    name: "remove-reentry",
+    swf: removeReentry,
+    script: "RemoveReentry",
+    frames: 2,
+    capture: [2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   // Curves and a turned sprite: anti-aliased a little differently, as "moves" is.
   {
     name: "draws",
@@ -5393,6 +7659,14 @@ export const cases: PlayerCase[] = [
   },
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "loader-bytes-frames",
+    build: loaderBytesFrames,
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "loader-parameters",
     build: loaderParameters,
@@ -5469,6 +7743,70 @@ export const cases: PlayerCase[] = [
   // Frame 1 is drawn at the outer SWF's INIT, before the AVM1 movies come at
   // that frame's end; the player draws the frame whole, with them.
   {
+    name: "avm1-hello",
+    swf: avm1Hello(),
+    traced: true,
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  ...[4, 5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-operators-swf${version}`,
+      swf: avm1Operators(version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-objects-swf${version}`,
+      swf: avm1Objects(version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-functions-swf${version}`,
+      swf: avm1Functions(version),
+      traced: true,
+      frames: 3,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+      // Past its recursion limit Flash runs no AVM1 action again, a later SWF's neither.
+      alone: true,
+    }),
+  ),
+  {
+    name: "avm1-recursion",
+    swf: avm1Recursion(),
+    traced: true,
+    frames: 3,
+    capture: [3],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
+  {
+    name: "avm1-script-limits",
+    swf: avm1ScriptLimits(),
+    traced: true,
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
+  {
     name: "avm1-movie",
     build: avm1Movie,
     frames: 6,
@@ -5494,6 +7832,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "flip-zero-scale",
+    swf: (abc) => bare(abc, 1, "FlipZeroScale", 160, 20),
+    script: "FlipZeroScale",
+    frames: 1,
+    capture: [1],
+    // The two boxes it draws as 3D objects, both drawn from a bitmap, smoothed: their edges'
+    // levels differ by a little (render/three.ts).
+    tolerance: 24,
+    maxOutliers: 250,
+  },
+  {
     name: "three-d",
     swf: (abc) => bare(abc, 1, "ThreeD"),
     script: "ThreeD",
@@ -5501,6 +7850,72 @@ export const cases: PlayerCase[] = [
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  // Drawn in perspective from a bitmap of each 3D object (render/three.ts). The stages are 500
+  // wide: adl draws with the focal length of a stage that wide, whatever the SWF's, where Flash
+  // Player draws with its stage's, as its bounds and local3DToGlobal are in both.
+  {
+    name: "three-d-flip",
+    swf: (abc) => bare(abc, 7, "ThreeDFlip", 500, 200),
+    script: "ThreeDFlip",
+    frames: 7,
+    capture: [1, 2, 3, 4, 5, 6, 7],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-scene",
+    swf: (abc) => bare(abc, 2, "ThreeDScene", 500, 400),
+    script: "ThreeDScene",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-nested-turn",
+    swf: (abc) => bare(abc, 4, "ThreeDNestedTurn", 500, 300),
+    script: "ThreeDNestedTurn",
+    frames: 4,
+    capture: [1, 4],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-behind-hit",
+    swf: (abc) => bare(abc, 2, "ThreeDBehindHit", 500, 400),
+    script: "ThreeDBehindHit",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 500,
+  },
+  {
+    name: "three-d-blend-turn",
+    swf: (abc) => bare(abc, 3, "ThreeDBlendTurn", 500, 200),
+    script: "ThreeDBlendTurn",
+    frames: 3,
+    capture: [1, 3],
+    tolerance: 40,
+    maxOutliers: 400,
+  },
+  {
+    name: "three-d-mixed",
+    swf: (abc) => bare(abc, 1, "ThreeDMixed", 500, 400),
+    script: "ThreeDMixed",
+    frames: 1,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 400,
+  },
+  {
+    name: "three-d-projection",
+    swf: (abc) => bare(abc, 2, "ThreeDProjection", 500, 400),
+    script: "ThreeDProjection",
+    frames: 2,
+    capture: [1],
+    tolerance: 40,
+    maxOutliers: 200,
   },
   {
     name: "point-at",
@@ -5560,6 +7975,15 @@ export const cases: PlayerCase[] = [
     name: "perlin-noise",
     swf: (abc) => bare(abc, 1, "PerlinNoise"),
     script: "PerlinNoise",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "camera-microphone",
+    swf: (abc) => bare(abc, 1, "CameraMicrophone"),
+    script: "CameraMicrophone",
     frames: 1,
     capture: [],
     tolerance: 0,

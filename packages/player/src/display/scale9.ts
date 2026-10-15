@@ -278,7 +278,9 @@ function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): Shape
     return out;
   };
 
+  // drawTriangles' textured triangles stay where they were drawn.
   return layers.map((layer) => ({
+    ...layer,
     fills: layer.fills.map((f) => ({ ...f, contours: f.contours.map(move) })),
     strokes: layer.strokes.map((s) => ({
       ...s,

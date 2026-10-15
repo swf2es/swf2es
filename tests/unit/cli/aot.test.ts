@@ -3,18 +3,20 @@
 // own compile path (Code.link) run in node with the release codegen.wasm.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { type Codegen, createCodegen } from "@swf2es/codegen";
-import { readSwf } from "@swf2es/format";
+import { actionsKey, type Codegen, createCodegen } from "@swf2es/codegen";
+import { readActions, readSwf } from "@swf2es/format";
 import { containerEngine, libraries, runOracle } from "../../../oracle/oracle.ts";
 import type { Library } from "../../../packages/player/dist/display/timeline.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { Avm1Assembler } from "../../avm1-assembler.ts";
 import { cases, scripted } from "../../player/cases.ts";
-import { libraryAbcs } from "../../player/libraries.ts";
+import { libraryAbcs, libraryFiles } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
 
@@ -74,7 +76,7 @@ function assertSame(cliOut: Buffer[], player: string[]): void {
 
 test("the command's modules are the player's for its cases' SWFs", { skip }, async () => {
   const libs = libraryAbcs(`${out}libraries/`);
-  const libPaths = ["builtin", "playerglobal"].map((n) => `${out}libraries/${n}.abc`);
+  const libPaths = libraryFiles(`${out}libraries/`);
   const picked = ["scripted", "events", "init", "goto-children"];
   const chosen = cases.filter((c) => picked.includes(c.name));
   assert.equal(chosen.length, picked.length);
@@ -165,7 +167,7 @@ test("the command's modules are the player's for as3pb's ABC", { skip }, async (
 
 test("the command explains what it cannot do", () => {
   mkdirSync(out, { recursive: true });
-  const none = swf2es();
+  const none = swf2es("compile");
   assert.equal(none.status, 2);
   assert.match(none.stderr, /expected one input file/);
 
@@ -203,8 +205,6 @@ test("the command explains what it cannot do", () => {
 
   // No DoABC: nothing to compile, said so rather than an empty manifest.
   refused(write("empty.swf", as3()), /no DoABC or DoABC2 tag/);
-  const avm1 = w.swf({ width: 10, height: 10, frameRate: 24, frameCount: 1, tags: [w.end()] });
-  refused(write("avm1.swf", avm1), /an AVM1 SWF/);
   const whole = as3(w.doAbc(abc, "A"));
   refused(write("cut.swf", whole.subarray(0, whole.length - 8)), /truncated SWF/);
   refused(write("short.abc", new Uint8Array([16, 0])), /neither a SWF nor an ABC/);
@@ -214,8 +214,49 @@ test("the command explains what it cannot do", () => {
   const bad = write("bad.abc", new Uint8Array([16, 0, 46, 0, 255]));
   const rejected = swf2es(write("ok.abc", abc), "--lib", bad);
   assert.equal(rejected.status, 1);
-  assert.match(rejected.stderr, /^swf2es: library bad was rejected: VerifyError #\d+/);
+  assert.match(rejected.stderr, /^swf2es: error: library bad was rejected: VerifyError #\d+/);
 
   // An output that cannot be written is an error, not a stack.
   refused(write("ok2.abc", abc), /cannot write .*lib\.abc: (EEXIST|ENOTDIR)/, "-o", lib);
+});
+
+test("an AVM1 SWF compiles to one module of its action blocks, without libraries", async () => {
+  mkdirSync(out, { recursive: true });
+  const block = (text: string) => [...new Avm1Assembler().push(text).trace().end().bytes()];
+  const swf = w.swf({
+    version: 6,
+    width: 10,
+    height: 10,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.doAction(block("one")),
+      w.showFrame(),
+      w.doAction(block("two")),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const path = `${out}avm1.swf`;
+  const dir = `${out}avm1/`;
+  writeFileSync(path, swf);
+  const r = swf2es(path, "-o", dir, "-q", "--lib", `${out}missing.abc`);
+  assert.equal(r.status, 0, r.stderr);
+
+  const manifest = JSON.parse(readFileSync(`${dir}manifest.json`, "utf8"));
+  const module = readFileSync(`${dir}avm1.js`, "utf8");
+  const read = readSwf(swf);
+  const codegen = await createCodegen(wasm);
+  assert.equal(module, codegen.compileActionsModule(read.bytes, readActions(read)));
+  assert.match(module, /V\.trace\(cx, st\.pop\(\)\)/);
+  assert.deepEqual(manifest.abcs, []);
+  assert.equal(manifest.input.version, 6);
+  const sha = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex");
+  assert.deepEqual(manifest.avm1, {
+    module: "avm1.js",
+    sha256: sha(read.bytes),
+    blocks: 2,
+    key: sha(actionsKey(codegen, sha(read.bytes), 6)),
+    length: module.length,
+  });
 });

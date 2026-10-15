@@ -54,7 +54,7 @@ function call(rt: Runtime, o: AsObject, method: string, ...args: Value[]): Value
   return r;
 }
 
-export const proxyHook: PropertyHook = {
+const proxyHook: PropertyHook = {
   // A method the traits bind is the method, as for any object; only unbound names reach the proxy.
   hidesMethods: false,
   get: (rt, o, mn) => call(rt, o, "getProperty", nameFor(rt, mn)),

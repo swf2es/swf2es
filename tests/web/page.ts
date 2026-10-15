@@ -143,7 +143,13 @@ page.report = (value: unknown) => {
 // checks, and a load that fails is their error, not a page that never ran.
 const loading = import("@swf2es/web").then((web) => {
   web.configure({
-    libraries: { builtin: "/libraries/builtin.abc", playerglobal: "/libraries/playerglobal.abc" },
+    libraries: {
+      builtin: "/libraries/builtin.abc",
+      // The package's own playerglobal, unless SWF2ES_PLAYERGLOBAL=adobe (chrome.ts).
+      playerglobal: new URLSearchParams(location.search).has("adobe")
+        ? "/libraries/playerglobal-adobe.abc"
+        : undefined,
+    },
     socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
     cache: true,
   });
@@ -267,6 +273,40 @@ async function destroyMovie() {
   };
 }
 
+/**
+ * A player loading through the embedder's fetch: the requests it was
+ * asked, by purpose, and whether the SWF played. The fetch is taken away
+ * again, so the other players keep the browser's.
+ */
+async function embedderFetch() {
+  const { web } = await loading;
+  const asked: [string, string | undefined][] = [];
+  web.configure({
+    fetch: async (request, signal) => {
+      asked.push([new URL(request.url).pathname, request.purpose]);
+      const response = await pageFetch(request.url, { signal });
+      return {
+        bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
+        status: response.status,
+        headers: [],
+      };
+    },
+  });
+  const player = document.createElement("swf2es-player") as Player;
+  document.body.append(player);
+  let played = true;
+  try {
+    await player.load("/web-test/shapes.swf");
+  } catch {
+    played = false;
+  } finally {
+    web.configure({ fetch: undefined });
+    player.remove();
+  }
+
+  return { asked, played };
+}
+
 /** Pixels per CSS pixel and the scripted SWF's canvas after the page widens it. */
 async function resize() {
   const movie = element("movie");
@@ -322,6 +362,31 @@ async function churn(n: number) {
   return { ...counts };
 }
 
+/**
+ * Make an element for the AVM1 SWF, play it until its actions stop its
+ * root on frame 2, and take it away, `n` times; how many stopped there.
+ */
+async function avm1Churn(n: number) {
+  let stopped = 0;
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("swf2es-player") as Player;
+    p.setAttribute("src", "/web-test/avm1.swf");
+    document.body.append(p);
+    await p.ready;
+    await frames(4);
+    const player = p.player as { root: { currentFrame: number; playing: boolean } } | null;
+    if (player) {
+      stopped += player.root.currentFrame === 2 && !player.root.playing ? 1 : 0;
+      gone.push(new WeakRef(player));
+    }
+
+    p.remove();
+    await new Promise((done) => setTimeout(done, 0));
+  }
+
+  return stopped;
+}
+
 /** What a collection left: players made and destroyed still alive, and codegen instances. */
 function survivors() {
   return {
@@ -336,7 +401,107 @@ async function databases() {
   return (await indexedDB.databases()).map((d) => d.name);
 }
 
+/** What the page last saw copied from a player, read as the copy event went by. */
+let copied: string | null = null;
+document.addEventListener("copy", (e) => {
+  copied = e.clipboardData?.getData("text/plain") ?? null;
+});
+
+/** The clipboard SWF in an element of its own, and a textarea of the page's beside it: where each is. */
+async function clipboardPlayer() {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "clip";
+  p.setAttribute("src", "/web-test/clipboard.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  document.body.append(p);
+  const seed = document.createElement("textarea");
+  seed.id = "seed";
+  document.body.append(seed);
+  await p.ready;
+  await frames(2);
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top];
+}
+
+/** The page's textarea focused, holding `text` selected, for a copy into the clipboard or a paste from it. */
+function seedFocus(text: string) {
+  const seed = document.getElementById("seed") as HTMLTextAreaElement;
+  seed.value = text;
+  seed.focus();
+  seed.select();
+  return true;
+}
+
+/** The clipboard element focused, and in its SWF its field or its box. */
+function clipFocus(target: "Field" | "Box") {
+  const p = element("clip");
+  p.focus();
+  p[`focus${target}`]();
+  return true;
+}
+
+/** What the SWF heard since last asked, its field's text, what was copied, and the textarea's value. */
+function clipState() {
+  const p = element("clip");
+  const state = {
+    log: p.takeLog(),
+    text: p.text(),
+    copied,
+    seed: (document.getElementById("seed") as HTMLTextAreaElement).value,
+  };
+  copied = null;
+  return state;
+}
+
+function clipDestroy() {
+  element("clip").destroy();
+  document.getElementById("seed")?.remove();
+  return true;
+}
+
+/** A player of the touch SWF, made once the test has given the page a touch screen; where its stage is. */
+async function touchPlayer() {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "touch";
+  p.setAttribute("src", "/web-test/touch.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  document.body.append(p);
+  const seed = document.createElement("textarea");
+  seed.id = "seed";
+  document.body.append(seed);
+  await p.ready;
+  await frames(2);
+  const box = p.getBoundingClientRect();
+  return [
+    box.left,
+    box.top,
+    getComputedStyle(p.shadowRoot?.querySelector("canvas") as Element).touchAction,
+  ];
+}
+
+/** What the touch SWF heard since last asked, after the frame that handles a posted move. */
+async function touchLog() {
+  await frames(2);
+  return element("touch").takeLog();
+}
+
 Object.assign(globalThis, {
+  touchPlayer,
+  touchLog,
+  touchCall: (name: string, ...args: unknown[]) => element("touch")[name](...args),
+  touchSeed: () => (document.getElementById("seed") as HTMLTextAreaElement).value,
+  touchDestroy: () => {
+    element("touch").destroy();
+    // Gone from the page too: the next check makes a player of its own by the same id.
+    element("touch").remove();
+    document.getElementById("seed")?.remove();
+    return true;
+  },
+  clipboardPlayer,
+  seedFocus,
+  clipFocus,
+  clipState,
+  clipDestroy,
   loaded,
   databases,
   booted,
@@ -344,8 +509,10 @@ Object.assign(globalThis, {
   externalInterface,
   destroyMovie,
   resize,
+  embedderFetch,
   watched,
   churn,
+  avm1Churn,
   survivors,
   webCounts: () => ({ ...counts }),
 });

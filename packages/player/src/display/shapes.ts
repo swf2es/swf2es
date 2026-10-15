@@ -225,7 +225,82 @@ export type Paint = Fill | ImageFill | GradientFill;
 
 export interface ShapeLayer {
   fills: { fill: Paint; contours: Path[]; winding: Winding }[];
-  strokes: { line: Line; paths: Path[]; closes?: Close[] }[];
+  /**
+   * `triangles` marks drawTriangles' outlines: each path closed, joined at
+   * its start, and all read back as one path, as Flash keeps them.
+   */
+  strokes: { line: Line; paths: Path[]; closes?: Close[]; triangles?: boolean }[];
+  /** drawTriangles' triangles textured through u, v and t, drawn after the fills, under the lines. */
+  meshes?: TriangleMesh[];
+  /**
+   * Where drawTriangles' triangles of the layer lie, drawn or not, as
+   * xMin, yMin, xMax, yMax, and the half width of the line set as they
+   * were drawn: the bounds count them all, the line's width too.
+   */
+  extent?: [number, number, number, number, number];
+  /**
+   * What a culled drawTriangles draws where its object is mirrored on the
+   * screen or in a BitmapData's draw, as adl culls there; readGraphicsData
+   * reads the layer's own, culled in the drawing's space.
+   */
+  mirrored?: TriangleParts;
+}
+
+/** drawTriangles' fills, one a triangle, its textured triangles and the line around them. */
+export interface TriangleParts {
+  fills: ShapeLayer["fills"];
+  meshes?: TriangleMesh[];
+  stroke?: ShapeLayer["strokes"][number];
+}
+
+/** Layers as they draw mirrored, as of a version: the renderer and the hit tests ask on each redraw. */
+const mirroredLayers = new WeakMap<ShapeLayer[], { version: number; layers: ShapeLayer[] }>();
+
+/**
+ * `layers` as they draw where a transform turns them over (`mirrored`),
+ * each culled drawTriangles' the triangles it keeps there. `version` is the
+ * drawing's, whose layers change in place.
+ */
+export function facing(layers: ShapeLayer[], mirrored: boolean, version = 0): ShapeLayer[] {
+  if (!mirrored || !layers.some((layer) => layer.mirrored)) {
+    return layers;
+  }
+
+  const kept = mirroredLayers.get(layers);
+  if (kept?.version === version) {
+    return kept.layers;
+  }
+
+  const made = layers.map((layer): ShapeLayer => {
+    const parts = layer.mirrored;
+    if (!parts) {
+      return layer;
+    }
+
+    // The triangles' line is the layer's first; a line set after them goes on in it.
+    const rest = layer.strokes.filter((s) => !s.triangles);
+    return {
+      fills: parts.fills,
+      strokes: parts.stroke ? [parts.stroke, ...rest] : rest,
+      meshes: parts.meshes,
+      extent: layer.extent,
+    };
+  });
+  mirroredLayers.set(layers, { version, layers: made });
+  return made;
+}
+
+/**
+ * Triangles a bitmap fill textures by each vertex's u and v, interpolated
+ * in perspective by its t, as drawTriangles draws them: three vertices a
+ * triangle, x y each in pixels, and u v t each, t 1 where none was given.
+ */
+export interface TriangleMesh {
+  image: BitmapStore;
+  repeat: boolean;
+  smooth: boolean;
+  positions: Float32Array;
+  uvt: Float32Array;
 }
 
 /**

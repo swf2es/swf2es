@@ -8,6 +8,10 @@
 // follows its size and the device's pixels, and that destroy lets go of
 // everything: 20 elements made and destroyed leave no player, codegen,
 // socket or audio context alive, and the heap no larger than a bound.
+// Last, Chrome's own Ctrl+C, X and V and a press reach a SWF's field and
+// its Clipboard through the element's copy, cut and paste events, the
+// mouse's events come in Flash's order, and touches as TouchEvents and as
+// the mouse.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -30,16 +34,30 @@ const CHURN = 20;
 // This package's own copies: pnpm runs the player's tests at the same time.
 libraryAbcs(`${out}libraries/`);
 const abcs = compileScripts(
-  ["Main", { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") }],
+  [
+    "Main",
+    { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
+    { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
+    { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
+  ],
   out,
 );
 mkdirSync(site, { recursive: true });
 const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
+writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
+);
+writeFileSync(
+  `${site}clipboard.swf`,
+  bare(abcs.get("ClipboardTest") as Uint8Array, 1, "ClipboardTest", 160, 120),
+);
+writeFileSync(
+  `${site}touch.swf`,
+  bare(abcs.get("TouchTest") as Uint8Array, 1, "TouchTest", 200, 100),
 );
 writeFileSync(
   `${site}index.html`,
@@ -195,7 +213,7 @@ check(
     assert.equal(ei.attribute, "movie");
     assert.equal(ei.pwned, false);
     // window.location.href, through an inline function with no space before "(".
-    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html(\?checked)?$/);
+    assert.match(String(ei.calls.reports[0]?.href), /\/web-test\/index\.html(\?[a-z&]+)?$/);
     assert.deepEqual(ei.calls.captured, [
       { "a:(window.swf2esPwned=1),b": 1 },
       { "a:(window.swf2esPwned=1),b": 1 },
@@ -209,7 +227,8 @@ check(
     const counts = await call<Record<string, number>>(evaluate, "webCounts()");
     assert.equal(counts.codegenFetches, 1);
     assert.equal(counts.codegenCompiles, 1);
-    assert.equal(counts.libraryFetches, 2);
+    // builtin.abc, and Flash Player's playerglobal where the page is given it in place of the package's.
+    assert.equal(counts.libraryFetches, process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? 2 : 1);
   },
 );
 
@@ -221,6 +240,13 @@ check("the element follows its size and the device's pixels", async (evaluate) =
   const r = await call<{ dpr: number; canvas: number[]; css: string[] }>(evaluate, "resize()");
   // exactFit to 320 by 120, twice as wide: drawn as fine as that axis needs, twice that for the device.
   assert.deepEqual(r, { dpr: 2, canvas: [640, 480], css: ["320px", "120px"] });
+});
+
+check("an embedder's fetch loads the SWF, asked for as the movie", async (evaluate) => {
+  assert.deepEqual(await call(evaluate, "embedderFetch()"), {
+    asked: [["/web-test/shapes.swf", "movie"]],
+    played: true,
+  });
 });
 
 check("watchFlash replaces the Flash tags the page adds or makes Flash later", async (evaluate) => {
@@ -276,6 +302,366 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
   assert.equal(left.codegens, 2);
   assert.ok(after - warm < BOUND * CHURN, `the heap grew by ${after - warm} bytes`);
 });
+
+check(
+  "an AVM1 SWF's actions run, and its players and compilers go with them",
+  async (evaluate, send) => {
+    const stopped = await call<number>(evaluate, "avm1Churn(5)");
+    assert.equal(stopped, 5, "the actions' stop held the root on frame 2");
+    await send("HeapProfiler.collectGarbage");
+    await send("HeapProfiler.collectGarbage");
+    const left = await call<{ players: number; codegens: number }>(evaluate, "survivors()");
+    assert.equal(left.players, 0, "a destroyed AVM1 player is still alive");
+    assert.equal(left.codegens, 2);
+  },
+);
+
+/** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
+async function ctrl(send: Send, letter: string, command?: string) {
+  const key = {
+    modifiers: 2,
+    key: letter,
+    code: `Key${letter.toUpperCase()}`,
+    windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
+  };
+  await send("Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    ...key,
+    ...(command ? { commands: [command] } : {}),
+  });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+}
+
+check(
+  "Ctrl+C, X and V and a press use the clipboard, as Flash Player did",
+  async (evaluate, send) => {
+    type State = { log: string[]; text: string; copied: string | null; seed: string };
+    const state = () => call<State>(evaluate, "clipState()");
+    const [left, top] = await call<[number, number]>(evaluate, "clipboardPlayer()");
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+
+    // The page's own copy puts two lines on the clipboard; pasted into the
+    // single-line field, they lose the line break, a TextEvent and a change.
+    await call(evaluate, `seedFocus("two\\nlines")`);
+    await ctrl(send, "c", "copy");
+    await call(evaluate, `clipFocus("Field")`);
+    await ctrl(send, "v", "paste");
+    assert.deepEqual(await state(), {
+      log: ["textInput twolines", "change twolines"],
+      text: "twolines",
+      // The page's own copy, whose data the browser fills in after the event.
+      copied: "",
+      seed: "two\nlines",
+    });
+
+    // Ctrl+A selects the field's text, Ctrl+X cuts it to the clipboard.
+    await ctrl(send, "a", "selectAll");
+    await ctrl(send, "x", "cut");
+    assert.deepEqual(await state(), {
+      log: ["change "],
+      text: "",
+      copied: null,
+      seed: "two\nlines",
+    });
+    await call(evaluate, `seedFocus("")`);
+    await ctrl(send, "v", "paste");
+    assert.equal((await state()).seed, "twolines");
+
+    // The box hears copy, paste and selectAll, and writes and reads the clipboard in them.
+    await call(evaluate, `clipFocus("Box")`);
+    await ctrl(send, "c", "copy");
+    await ctrl(send, "v", "paste");
+    await ctrl(send, "a", "selectAll");
+    assert.deepEqual(await state(), {
+      log: ["copy", "paste copied by the box", "selectAll"],
+      text: "",
+      copied: "copied by the box",
+      seed: "twolines",
+    });
+
+    // A press on the stage writes the clipboard with System.setClipboard, through the async API.
+    const at = { x: left + 100, y: top + 100, button: "left", clickCount: 1 };
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", ...at });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...at });
+    // The write is a promise the page settles later: paste until it lands, or give up.
+    let pressed = await state();
+    const log = pressed.log;
+    for (let i = 0; i < 20 && pressed.seed !== "set on a press"; i++) {
+      await new Promise((done) => setTimeout(done, 50));
+      await call(evaluate, `seedFocus("")`);
+      await ctrl(send, "v", "paste");
+      pressed = await state();
+    }
+
+    assert.deepEqual([log, pressed.seed], [["press"], "set on a press"]);
+    await call(evaluate, "clipDestroy()");
+  },
+);
+
+check(
+  "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",
+  async (evaluate, send) => {
+    const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    const log = () => call<string[]>(evaluate, "touchLog()");
+    const mouse = async (type: string, x: number, y: number, buttons = 0, button = "left") => {
+      await send("Input.dispatchMouseEvent", {
+        type,
+        x: left + x,
+        y: top + y,
+        button: type === "mouseMoved" && buttons === 0 ? "none" : button,
+        buttons,
+        clickCount: type === "mouseMoved" ? 0 : 1,
+      });
+      return log();
+    };
+
+    // As Flash Player 32 traced it: a move first, then the hover; the empty
+    // stage takes the move, but no over.
+    assert.deepEqual(await mouse("mouseMoved", 150, 90), ["mouseMove stage 150,90 false null"]);
+    assert.deepEqual(await mouse("mouseMoved", 30, 30), [
+      "mouseMove b 10,10 false null",
+      "rollOver b 10,10 false null",
+      "rollOver a 30,30 false null",
+      "mouseOver b 10,10 false null",
+    ]);
+    // A press where the mouse was not is a move there first, its button still up.
+    assert.deepEqual(await mouse("mousePressed", 110, 30, 1), [
+      "mouseMove c 10,30 false null",
+      "mouseOut b 90,10 false c",
+      "rollOut b 90,10 false c",
+      "rollOut a 110,30 false c",
+      "rollOver c 10,30 false b",
+      "mouseOver c 10,30 false b",
+      "mouseDown c 10,30 true null",
+    ]);
+    // Dragged off the player, the mouse stays its own: moves to the stage,
+    // the release too, and the leave only at the next move after it.
+    assert.deepEqual(await mouse("mouseMoved", 300, 30, 1), [
+      "mouseMove stage 300,30 true null",
+      "mouseOut c 200,30 true null",
+      "rollOut c 200,30 true null",
+    ]);
+    assert.deepEqual(await mouse("mouseReleased", 300, 30), ["mouseUp stage 300,30 false null"]);
+    assert.deepEqual(await mouse("mouseMoved", 310, 30), ["mouseLeave stage"]);
+
+    // The right button holds nothing: the pointer leaves as it goes, and its
+    // release outside leaves no second time.
+    await mouse("mouseMoved", 110, 30);
+    await mouse("mousePressed", 110, 30, 2, "right");
+    assert.deepEqual(await mouse("mouseMoved", 300, 30, 2, "right"), [
+      "mouseOut c -101,-1 false null",
+      "rollOut c -101,-1 false null",
+      "mouseLeave stage",
+    ]);
+    assert.deepEqual(await mouse("mouseReleased", 300, 30, 0, "right"), []);
+    assert.deepEqual(await mouse("mouseMoved", 310, 30), []);
+
+    // The left button let go while the right stays down is a release, which
+    // the browser tells as a move: the leave after it is not held back.
+    await mouse("mouseMoved", 110, 30);
+    await mouse("mousePressed", 110, 30, 1);
+    await mouse("mousePressed", 110, 30, 3, "right");
+    assert.deepEqual(await mouse("mouseReleased", 110, 30, 2), [
+      "mouseUp c 10,30 false null",
+      "click c 10,30 false null",
+    ]);
+    assert.deepEqual(await mouse("mouseMoved", 300, 30, 2, "right"), [
+      "mouseOut c -101,-1 false null",
+      "rollOut c -101,-1 false null",
+      "mouseLeave stage",
+    ]);
+    await mouse("mouseReleased", 300, 30, 0, "right");
+    await call(evaluate, "touchDestroy()");
+  },
+);
+
+check(
+  "a double click in Chrome is a doubleClick where the target's doubleClickEnabled is true",
+  async (evaluate, send) => {
+    const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    const log = () => call<string[]>(evaluate, "touchLog()");
+    const click = async (x: number, y: number, clickCount: number) => {
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount,
+        });
+      }
+
+      return log();
+    };
+
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: left + 110, y: top + 30 });
+    await log();
+    await call(evaluate, `touchCall("setBox", "c", "doubleClickEnabled", true)`);
+    assert.deepEqual(await click(110, 30, 1), [
+      "mouseDown c 10,30 true null",
+      "mouseUp c 10,30 false null",
+      "click c 10,30 false null",
+    ]);
+    assert.deepEqual(await click(110, 30, 2), [
+      "mouseDown c 10,30 true null",
+      "mouseUp c 10,30 false null",
+      "doubleClick c 10,30 false null",
+    ]);
+    await call(evaluate, "touchDestroy()");
+  },
+);
+
+check(
+  "the wheel scrolls the page over a SWF that does not listen for it, and only goes to one that does",
+  async (evaluate, send) => {
+    const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    const scrolled = () =>
+      call<number>(evaluate, "(document.body.style.height = '3000px', window.scrollY)");
+    // The wheel over c, the page at its top; a page that scrolls takes the
+    // player from under the pointer, whose leave is logged too.
+    const wheel = async (deltaY: number) => {
+      await call(evaluate, "(window.scrollTo(0, 0), window.scrollY)");
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: left + 110, y: top + 30 });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x: left + 110,
+        y: top + 30,
+        deltaX: 0,
+        deltaY,
+      });
+      // The page scrolls a moment later, if at all.
+      await new Promise((done) => setTimeout(done, 300));
+      const log = await call<string[]>(evaluate, "touchLog()");
+      return [(await scrolled()) > 0, log.filter((line) => line.startsWith("mouseWheel"))];
+    };
+
+    await scrolled();
+    assert.deepEqual(await wheel(100), [true, []]);
+    await call(evaluate, `touchCall("listenWheel")`);
+    // A notch of 100 pixels is 3 lines, down negative, as Flash's delta.
+    assert.deepEqual(await wheel(100), [false, ["mouseWheel c -3"]]);
+    assert.deepEqual(await wheel(-100), [false, ["mouseWheel c 3"]]);
+    await call(evaluate, "(document.body.style.height = '', window.scrollTo(0, 0), true)");
+    await call(evaluate, "touchDestroy()");
+  },
+);
+
+check(
+  "touches reach a SWF as TouchEvents and as the mouse, and a tap may write the clipboard",
+  async (evaluate, send) => {
+    // A touch screen the page has from here on: the players made before it saw none.
+    await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    const [left, top, touchAction] = await call<[number, number, string]>(
+      evaluate,
+      "touchPlayer()",
+    );
+    const log = () => call<string[]>(evaluate, "touchLog()");
+    const touch = (type: string, points: [x: number, y: number, id: number][]) =>
+      send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: points.map(([x, y, id]) => ({ x: left + x, y: top + y, id })),
+      });
+
+    // The page does not scroll or zoom under the SWF, which takes every touch as Flash's plug-in did.
+    assert.equal(touchAction, "none");
+    assert.deepEqual(await call(evaluate, `touchCall("touchState")`), [
+      true,
+      5,
+      "gesture",
+      "finger",
+    ]);
+
+    // In gesture mode, which recognizes no gestures here, a tap is the mouse's alone.
+    await touch("touchStart", [[30, 30, 0]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await log(), [
+      "mouseMove b 10,10 false null",
+      "rollOver b 10,10 false null",
+      "rollOver a 30,30 false null",
+      "mouseOver b 10,10 false null",
+      "mouseDown b 10,10 true null",
+      "mouseUp b 10,10 false null",
+      "click b 10,10 false null",
+    ]);
+
+    // In touchPoint mode, each step's touch events, then the primary touch's mouse
+    // events; the mouse stays over b, where the tap left it.
+    assert.equal(await call(evaluate, `touchCall("setMode", "touchPoint")`), "touchPoint");
+    await touch("touchStart", [[30, 30, 0]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await log(), [
+      "touchRollOver b primary 10,10 30,30 null",
+      "touchRollOver a primary 30,30 30,30 null",
+      "touchOver b primary 10,10 30,30 null",
+      "touchBegin b primary 10,10 30,30 null",
+      "mouseDown b 10,10 true null",
+      "touchEnd b primary 10,10 30,30 null",
+      "touchTap b primary 10,10 30,30 null",
+      "touchOut b primary 10,10 30,30 null",
+      "touchRollOut b primary 10,10 30,30 null",
+      "touchRollOut a primary 30,30 30,30 null",
+      "mouseUp b 10,10 false null",
+      "click b 10,10 false null",
+    ]);
+    // The tap's listener wrote the clipboard, through the async API, as a click's would.
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    let seed = "";
+    for (let i = 0; i < 20 && seed !== "tapped b"; i++) {
+      await new Promise((done) => setTimeout(done, 50));
+      await call(evaluate, `seedFocus("")`);
+      await ctrl(send, "v", "paste");
+      seed = await call<string>(evaluate, "touchSeed()");
+    }
+
+    assert.equal(seed, "tapped b");
+
+    // A drag from b to c: a move that may not write the clipboard, then out
+    // and rolls as the point moves, in the mouse's order, and the mouse after it.
+    await touch("touchStart", [[30, 30, 0]]);
+    await log();
+    await touch("touchMove", [[110, 30, 0]]);
+    assert.deepEqual(await log(), [
+      "touchMove c primary 10,30 110,30 null",
+      "setClipboard in touchMove 2176",
+      "touchOut b primary 90,10 110,30 c",
+      "touchRollOut b primary 90,10 110,30 c",
+      "touchRollOut a primary 110,30 110,30 c",
+      "touchRollOver c primary 10,30 110,30 b",
+      "touchOver c primary 10,30 110,30 b",
+      "mouseMove c 10,30 true null",
+      "mouseOut b 90,10 true c",
+      "rollOut b 90,10 true c",
+      "rollOut a 110,30 true c",
+      "rollOver c 10,30 true b",
+      "mouseOver c 10,30 true b",
+    ]);
+
+    // A second finger is touch events alone; the first, lifted over c where
+    // it did not begin, is no tap and no click.
+    await touch("touchStart", [
+      [110, 30, 0],
+      [10, 10, 1],
+    ]);
+    await touch("touchEnd", [[10, 10, 1]]);
+    await touch("touchEnd", []);
+    assert.deepEqual(await log(), [
+      "touchRollOver a secondary 10,10 10,10 null",
+      "touchOver a secondary 10,10 10,10 null",
+      "touchBegin a secondary 10,10 10,10 null",
+      "touchEnd a secondary 10,10 10,10 null",
+      "touchTap a secondary 10,10 10,10 null",
+      "touchOut a secondary 10,10 10,10 null",
+      "touchRollOut a secondary 10,10 10,10 null",
+      "touchEnd c primary 10,30 110,30 null",
+      "touchOut c primary 10,30 110,30 null",
+      "touchRollOut c primary 10,30 110,30 null",
+      "mouseUp c 10,30 false null",
+    ]);
+    await call(evaluate, "touchDestroy()");
+    await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  },
+);
 
 const failures = await withPage(
   "survivors",

@@ -10,7 +10,7 @@
 // --diff prints, for each test that does not pass, the lines where the
 // player's trace and Flash's part, and what stopped the player.
 //
-// The avm2/ and timeline/ tests with an output.txt, less those the
+// The avm1/, avm2/ and timeline/ tests with an output.txt, less those the
 // collector ignores (input, audio, video, fonts). Only traces compare: the
 // frames are the Flash oracle's business (check-references.ts).
 import { readFileSync, writeFileSync } from "node:fs";
@@ -48,7 +48,7 @@ const TIMEOUT = 20_000;
 /** A test asking for more frames than this runs this many: a tick a frame, nothing waits for time. */
 const MAX_FRAMES = 300;
 
-const tests = collectRuffle(prefixes.length ? prefixes : ["avm2/", "timeline/"]).filter(
+const tests = collectRuffle(prefixes.length ? prefixes : ["avm1/", "avm2/", "timeline/"]).filter(
   (t) => t.output !== null && !t.ignore,
 );
 if (tests.length === 0) {

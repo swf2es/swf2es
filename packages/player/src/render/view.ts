@@ -5,6 +5,7 @@
 // shared by the instances that see them through the same one (strokes.ts).
 import type { ColorTransform } from "@swf2es/format";
 import {
+  type BLEND_MODES,
   type FederatedPointerEvent,
   type Filter,
   Graphics,
@@ -16,10 +17,10 @@ import {
   RendererType,
   type RenderTexture,
   Sprite,
-  type WebGLRenderer,
 } from "pixi.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
-import { toStage } from "../display/bounds.js";
+import { filterRect } from "../bitmap/filters.js";
+import { bounds, toStage } from "../display/bounds.js";
 import { concatColor, multipliesOnly, sameColor } from "../display/color.js";
 import {
   BitmapObject,
@@ -36,20 +37,22 @@ import {
   StaticTextObject,
   TextObject,
   TRANSFORM,
+  unloads,
 } from "../display/display.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import type { ShapeLayer } from "../display/shapes.js";
+import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import type { PointerState } from "../input/pointer.js";
+import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
-import { retireBatchers, viewGroups } from "./batchers.js";
+import { retireBatchers, trimBatchers, viewGroups } from "./batchers.js";
 import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
-import { SETTLE_MS, type Settling, SharedGraphics, settle } from "./patches.js";
+import { hookRenderer } from "./hooks.js";
 import {
   drawTarget,
   IDLE_MS,
@@ -57,9 +60,11 @@ import {
   PARKED_MOST,
   releaseDrawTarget,
   SPARE_GRAPHICS_MOST,
+  SPARE_NODES_MOST,
   trimPools,
 } from "./pools.js";
-import { boundedResolves } from "./resolve.js";
+import { SETTLE_MS, type Settling, settle, unsettle } from "./settle.js";
+import { SharedGraphics } from "./shared.js";
 import {
   type Linear,
   linesContext,
@@ -67,21 +72,35 @@ import {
   StrokeContexts,
   sameLinear,
   scalesEvenly,
+  settledStretch,
   stretchOf,
   strokeFrame,
   UNIT,
+  widestLine,
 } from "./strokes.js";
-import { destroyContext, fillContext, type Painter, paint, SharedFills } from "./tessellate.js";
+import {
+  destroyContext,
+  fillContext,
+  type Painter,
+  paint,
+  remakeable,
+  SharedFills,
+} from "./tessellate.js";
 import { drawStaticText, drawText } from "./text.js";
+import { Plane, SAMPLES } from "./three.js";
+import { TriangleView } from "./triangles.js";
+
+/** No transform, for a 3D object's container in its bitmap's space. */
+const IDENTITY_PLACE = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 
 /** No transform, for a Graphics kept to be taken again (recycle). */
 const IDENTITY = new Matrix();
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+const NO_KIDS: readonly DisplayObject[] = [];
 /** What an emptied node has drawn, shared by all: replaced as it draws, never added to. */
 const NO_LAYERS: ShapeLayer[] = [];
 const NO_FILLS: GraphicsContext[] = [];
-const NO_LINES_GIVEN: readonly (GraphicsContext | undefined)[] = [];
 
 /** Whether every one of `art` is a SharedGraphics, which a redraw keeps for its new content. */
 function allShared(art: readonly PixiContainer[]): boolean {
@@ -120,6 +139,22 @@ function anyClips(children: readonly DisplayObject[]): boolean {
   return false;
 }
 
+/** Whether `ct` leaves every pixel clear, whatever its alpha. */
+function clearsAll(ct: ColorTransform | null): boolean {
+  return ct !== null && ct.aAdd <= 0 && ct.aMul * 255 + ct.aAdd <= 0;
+}
+
+/** Whether any of the layers has drawTriangles' textured triangles. */
+function meshed(layers: readonly ShapeLayer[]): boolean {
+  for (let i = 0; i < layers.length; i++) {
+    if (layers[i].meshes) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Whether any layer has lines of the node's own to stroke. */
 function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
   for (let i = 0; i < strokes.length; i++) {
@@ -133,15 +168,13 @@ function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
 
 /** sync's scratch, which a container's matrix is set from and which it does not keep. */
 const PLACED = new Matrix();
-/** restroke's scratch, which a stretch is compared in and never kept. */
-const STRETCH: Linear = [0, 0, 0, 0];
 /** A Shape child's slice key once its owner's slice changed: it is sliced again on its next sync. */
 const STALE = "stale";
 
 /** What the view keeps for a display object. */
 interface Node {
   container: PixiContainer;
-  /** The linear part of the object's transform on the stage. */
+  /** The linear part of the object's transform on the stage, its own, which it changes in place. */
   world: Linear;
   /** A stale cache drawn, the scale it was first drawn at, and whether that has changed since. */
   stale: { cache: StaleCache; world: Linear; spent: boolean } | null;
@@ -149,6 +182,8 @@ interface Node {
   art: PixiContainer;
   /** The layers drawn, a shape's or a drawing's, as of the last redraw. */
   layers: ShapeLayer[];
+  /** Whether they were drawn turned over, which decides the triangles a culled drawTriangles keeps. */
+  mirrored: boolean;
   /** Their fills, one context a layer. */
   fills: GraphicsContext[];
   /**
@@ -181,15 +216,19 @@ interface Node {
    * leaves them as they are. Null otherwise.
    */
   stretched: Linear | null;
+  /** The width of the widest line of its layers that scale both ways, in twips (settledStretch). */
+  widest: number;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
   lines: SharedGraphics[];
   /**
-   * Between a redraw's clear and its draw, the Graphics the content left,
-   * and which are lines, for the next to take in place.
+   * Between a redraw's clear and its draw (while `spared`), the Graphics
+   * the content left, and which are lines, for the next to take in place;
+   * kept, emptied, for the next redraw.
    */
   spare: { graphics: SharedGraphics[]; lines: boolean[] } | null;
+  spared: boolean;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
@@ -201,11 +240,18 @@ interface Node {
   /** Its colour transform from the stage down, null for none, and its parent's that it was made from. */
   color: ColorTransform | null;
   inherited: ColorTransform | null;
+  /**
+   * Whether its filters' output takes its colour, not what they are run on, as Flash colours a
+   * filtered object's bitmap: what is in it is then drawn uncoloured by it and all above it.
+   */
+  rooted: boolean;
   /** The blend mode its filters composite it in. */
   blend: string;
   /** Its filters' records as of the last sync, and the Pixi filters made of them, its own. */
   filterRecords: readonly FilterRecord[];
   filters: Filter[];
+  /** A 3D object's bitmap and quad (render/three.ts), which it is drawn by in its parent; null for any other. */
+  plane: Plane | null;
   /** Draws in this branch, excluding those already isolated in a child render group. */
   draws: number;
   /** Zero draws, one safe draw, or more than one draw/one requiring isolation. */
@@ -229,6 +275,13 @@ interface Node {
    * line as wide as in that space. Null for its own transform.
    */
   lineSpace: Linear | null;
+  /**
+   * The object it draws, the one it was made for or the last to take it,
+   * and the character and class of those that may take it (`PixiView.spareNodes`).
+   */
+  owner: WeakRef<DisplayObject>;
+  character: object | null;
+  kind: object;
 }
 
 /** Only a partner outside the branch prevents it owning a separate instruction set. */
@@ -248,6 +301,34 @@ export class PixiView {
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
   private readonly spareGraphics: SharedGraphics[] = [];
+  /**
+   * The released nodes, by their objects' character, for a new object of
+   * the character to take. A timeline that places its children anew on
+   * every frame, as an animated character's often does, made hundreds of
+   * nodes a frame, each with its containers, and dropped as many: taken, a
+   * node keeps its containers and Graphics, where they are in Pixi's tree
+   * when it comes back in its place, and its filters where the new
+   * object's are the same. And all of them, oldest first, with the time
+   * each was listed: SPARE_NODES_MOST at most, none past IDLE_MS, and none
+   * past an unload (`dropSpares`), which would keep its SWF's characters.
+   */
+  private readonly spareNodes = new Map<object, Set<Node>>();
+  private readonly spareSince = new Map<Node, number>();
+  /** The unloads (display's `unloads`) the spares were last dropped for. */
+  private unloadsSeen = unloads.count;
+  /** The nodes by their containers, for a child's sync to take the node that is in its place. */
+  private readonly containerNodes = new WeakMap<PixiContainer, Node>();
+  /** The container in the place the next object synced goes to, set and read as arrange syncs it. */
+  private placeHint: PixiContainer | null = null;
+  /** What the nodes cleared give back once their new content is drawn (clear, giveBack). */
+  private readonly giving = {
+    fills: [] as GraphicsContext[],
+    lines: [] as GraphicsContext[],
+    shapes: [] as ShapeCharacter[],
+  };
+  /** settleGroups' scratch: the groups whose batched Graphics draw alone again, and whose to look through. */
+  private readonly unsettling = new Set<Settling>();
+  private readonly scanned: Settling[] = [];
   private readonly lines = new StrokeContexts(this.counts);
   private readonly nodes = new WeakMap<DisplayObject, Node>();
   /** A fresh view's fills of the shapes it built them for, shared by their instances; it destroys them with itself. */
@@ -283,6 +364,16 @@ export class PixiView {
     const m = fill.matrix;
     return { texture, matrix: new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty), textureSpace: "global" };
   };
+  /** The nodes of 3D objects, each drawn into its bitmap before the stage is drawn (renderPlanes). */
+  private readonly planes = new Set<Node>();
+  /**
+   * In a 3D object's sync, the renderer's units a pixel of its own space its content is drawn at
+   * (render/three.ts), and its thinnest line, a texel; 0 elsewhere.
+   */
+  private planeUnits = 0;
+  private planeLeast = 1;
+  /** renderPlanes' scratch, the 3D objects to draw, deepest first. */
+  private readonly planeOrder: { depth: number; node: Node; o: DisplayObject }[] = [];
   /** Whether the renderer was found to lack the back buffer that filter-backed blends read. */
   private backBufferChecked = false;
 
@@ -314,6 +405,12 @@ export class PixiView {
    * as a pool's objects or a panel shown and hidden come back, then emptied.
    */
   private readonly parked = new Map<Node, number>();
+  /** The nodes on the list blended with erase or alpha outside any layer (checkStageClear). */
+  private readonly clearing = new Set<Node>();
+  /** The nodes on the list blended outside any layer in a mode the GPU blends as Flash only over opaque pixels. */
+  private readonly overOpaque = new Set<Node>();
+  /** Whether the stage's pixels may be less than opaque below a blend (checkStageClear). */
+  private stageClear = true;
   /** Retain only batches, not detached display trees, while a group waits for reuse. */
   private readonly parkedGroups = new Map<
     number,
@@ -341,6 +438,9 @@ export class PixiView {
    * which are the stage's, so its thinnest line is a pixel.
    */
   screenScale: number | null = null;
+  /** Its drawings' textured triangles drawn, and the target's pixels a side of one of Flash's they were last told. */
+  private readonly meshes = new Set<TriangleView>();
+  private meshPixel = 1;
   /** The thinnest line it last drew the stage's lines with; a change draws them all again. */
   private strokedAt = 0;
   /** The filter units it last drew the stage's filters with; the stage's own scale changes them too. */
@@ -360,9 +460,7 @@ export class PixiView {
     /** The stage's view, whose geometry and textures a fresh view borrows where they are current. */
     private readonly source: PixiView | null = null,
   ) {
-    if (renderer.type === RendererType.WEBGL) {
-      boundedResolves(renderer as WebGLRenderer);
-    }
+    hookRenderer(renderer);
   }
 
   /**
@@ -372,21 +470,26 @@ export class PixiView {
    * as `fill` would, so the point is taken within that box instead, centred
    * as the default `object-position` puts it, and then from the canvas's
    * pixels to Pixi's screen and the stage. `style` is the canvas's live
-   * computed style, null where there is no DOM.
+   * computed style, null where there is no DOM. A `size`, a touch's
+   * contact, comes back in stage units after the point.
    */
   private stagePoint(
     player: Player,
-    e: FederatedPointerEvent,
+    e: { clientX: number; clientY: number; global: { x: number; y: number } },
     style: CSSStyleDeclaration | null,
-  ): [number, number] {
+    size: { width: number; height: number } = { width: 0, height: 0 },
+  ): [x: number, y: number, width: number, height: number] {
     const screen = this.renderer.screen;
-    const toStage = (x: number, y: number): [number, number] => [
-      (x * player.width) / screen.width,
-      (y * player.height) / screen.height,
-    ];
+    const toStage = (x: number, y: number, w: number, h: number) =>
+      [
+        (x * player.width) / screen.width,
+        (y * player.height) / screen.height,
+        (w * player.width) / screen.width,
+        (h * player.height) / screen.height,
+      ] as [number, number, number, number];
     const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
     if (!canvas?.getBoundingClientRect || !style) {
-      return toStage(e.global.x, e.global.y);
+      return toStage(e.global.x, e.global.y, size.width, size.height);
     }
 
     // The content box: the element's rectangle within its borders and padding.
@@ -423,7 +526,12 @@ export class PixiView {
     }
 
     const resolution = this.renderer.resolution || 1;
-    return toStage((e.clientX - left) / sx / resolution, (e.clientY - top) / sy / resolution);
+    return toStage(
+      (e.clientX - left) / sx / resolution,
+      (e.clientY - top) / sy / resolution,
+      size.width / sx / resolution,
+      size.height / sy / resolution,
+    );
   }
 
   /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
@@ -450,7 +558,57 @@ export class PixiView {
       canvas?.getBoundingClientRect && typeof getComputedStyle === "function"
         ? getComputedStyle(canvas)
         : null;
+    const flushSoon = () => {
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        player.pointer?.flush();
+        player.touch?.flush();
+      });
+    };
+    // Each touch's last point, which a cancel, whose own may be anywhere, ends at.
+    const touches = new Map<number, TouchState>();
+    // A touch goes to the player's touches, which move the mouse for the primary one.
+    const touched = (type: "move" | "down" | "up" | "leave", e: FederatedPointerEvent) => {
+      const touch = player.touch;
+      // A lifted finger leaves the canvas too: the mouse it moved stays, as Flash's does.
+      if (!touch || type === "leave") {
+        return;
+      }
+
+      const [x, y, width, height] = this.stagePoint(player, e, style, e);
+      const t: TouchState = {
+        x,
+        y,
+        id: e.pointerId,
+        primary: e.isPrimary,
+        width,
+        height,
+        pressure: e.pressure,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        time: e.timeStamp,
+      };
+      if (type === "up") {
+        touches.delete(t.id);
+      } else {
+        touches.set(t.id, t);
+      }
+
+      if (type === "move" && typeof requestAnimationFrame === "function") {
+        touch.post(t);
+        flushSoon();
+        return;
+      }
+
+      touch.handle(type === "down" ? "begin" : type === "up" ? "end" : "move", t);
+    };
     const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
+      if (e.pointerType === "touch") {
+        touched(type, e);
+        return;
+      }
+
       const [x, y] = this.stagePoint(player, e, style);
       const p: PointerState = {
         x,
@@ -464,24 +622,94 @@ export class PixiView {
       };
       if (type === "move" && player.pointer && typeof requestAnimationFrame === "function") {
         player.pointer.post(p);
-        frame ||= requestAnimationFrame(() => {
-          frame = 0;
-          player.pointer?.flush();
-        });
+        flushSoon();
         return;
       }
 
       player.pointer?.handle(type, p);
     };
-    const move = send("move");
+    const moved = send("move");
     const down = send("down");
     const up = send("up");
     const leave = send("leave");
-    this.stage.on("pointermove", move);
+    // Every move on the page: one over the canvas, and, while the mouse's
+    // button is down after a press on it, one anywhere, as Flash keeps the
+    // mouse until the release.
+    const screen = this.renderer.screen;
+    // A release outside after a press that held the mouse leaves it at the
+    // next move outside, as Flash's mouseLeave comes.
+    let leaveNext = false;
+    const move = (e: FederatedPointerEvent) => {
+      const { x, y } = e.global;
+      const inside = x >= 0 && y >= 0 && x < screen.width && y < screen.height;
+      if (inside || (e.pointerType !== "touch" && player.pointer?.captured)) {
+        leaveNext = false;
+        moved(e);
+      } else if (leaveNext && e.pointerType !== "touch") {
+        leaveNext = false;
+        leave(e);
+      }
+    };
+    const upOutside = (e: FederatedPointerEvent) => {
+      const held = e.pointerType !== "touch" && !!player.pointer?.captured;
+      up(e);
+      leaveNext ||= held && !player.pointer?.captured;
+    };
+    this.stage.on("globalpointermove", move);
     this.stage.on("pointerdown", down);
     this.stage.on("pointerup", up);
-    this.stage.on("pointerupoutside", up);
+    this.stage.on("pointerupoutside", upOutside);
     this.stage.on("pointerleave", leave);
+    // Pixi listens for no cancel: the browser takes a touch back so, as for a
+    // system gesture, and the touch ends where it last was, without its tap or click.
+    const cancel = (e: Event) => {
+      const t = touches.get((e as PointerEvent).pointerId);
+      if (t && (e as PointerEvent).pointerType === "touch") {
+        touches.delete(t.id);
+        player.touch?.handle("cancel", { ...t, time: e.timeStamp });
+      }
+    };
+    canvas?.addEventListener?.("pointercancel", cancel);
+    // The wheel in Flash's lines, up positive: 3 a notch, Flash's delta on
+    // Windows. A browser gives a notch as 3 lines, or as about 100 pixels,
+    // fewer where the page is zoomed or the screen scaled, and several at
+    // once as their multiple; a touchpad's few pixels at a time add up, 100
+    // to 3 lines. The page scrolls unless the SWF takes the wheel where the
+    // pointer is. With Ctrl, as a touchpad's pinch comes too, the page zooms
+    // and the SWF hears nothing. Pixi listens passively.
+    let lines = 0;
+    const wheel = (e: WheelEvent) => {
+      const pointer = player.pointer;
+      if (!pointer || e.deltaY === 0 || e.ctrlKey) {
+        return;
+      }
+
+      const size = Math.abs(e.deltaY);
+      if (e.deltaMode !== 0) {
+        lines = -e.deltaY * (e.deltaMode === 2 ? 3 : 1);
+      } else if (size >= 50) {
+        lines = -Math.sign(e.deltaY) * 3 * Math.max(1, Math.round(size / 100));
+      } else {
+        lines -= (e.deltaY * 3) / 100;
+      }
+
+      const delta = Math.trunc(lines);
+      lines -= delta;
+      const at = { clientX: e.clientX, clientY: e.clientY, global: { x: e.offsetX, y: e.offsetY } };
+      const [x, y] = this.stagePoint(player, at, style);
+      const p: PointerState = {
+        x,
+        y,
+        buttons: e.buttons,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        time: e.timeStamp,
+      };
+      if (pointer.wheel(p, delta)) {
+        e.preventDefault();
+      }
+    };
+    canvas?.addEventListener?.("wheel", wheel, { passive: false });
     // Pixi sets the canvas's cursor on every move, from its target's, which
     // is this stage: the player's cursor goes there, and through Pixi's own
     // setter now, which keeps Pixi's record of it right.
@@ -531,10 +759,13 @@ export class PixiView {
       }
 
       player.pointer?.flush();
-      this.stage.off("pointermove", move);
+      player.touch?.flush();
+      canvas?.removeEventListener?.("pointercancel", cancel);
+      canvas?.removeEventListener?.("wheel", wheel);
+      this.stage.off("globalpointermove", move);
       this.stage.off("pointerdown", down);
       this.stage.off("pointerup", up);
-      this.stage.off("pointerupoutside", up);
+      this.stage.off("pointerupoutside", upOutside);
       this.stage.off("pointerleave", leave);
       this.stage.eventMode = "passive";
       this.stage.hitArea = null;
@@ -554,6 +785,10 @@ export class PixiView {
 
   /** Destroy what this fresh view built, and its containers; what it borrowed stays its owner's. */
   dispose(root: PixiContainer): void {
+    for (const node of this.planes) {
+      this.dropPlane(node);
+    }
+
     root.destroy({ children: true });
     for (const context of this.built) {
       destroyContext(context);
@@ -566,12 +801,19 @@ export class PixiView {
   }
 
   private node(o: DisplayObject): Node {
+    const hint = this.placeHint;
+    this.placeHint = null;
     let node = this.nodes.get(o);
+    if (!node && !this.fresh) {
+      node = this.takeSpare(o, hint);
+    }
+
     if (!node) {
       const art = new PixiContainer();
       node = {
         container: new PixiContainer(),
         world: [0, 0, 0, 0],
+        mirrored: false,
         stale: null,
         art,
         layers: [],
@@ -586,18 +828,22 @@ export class PixiView {
         emptied: false,
         strokedAt: 0,
         stretched: null,
+        widest: 0,
         bitmap: null,
         lines: [],
         spare: null,
+        spared: false,
         masking: false,
         groups: [],
         scroll: null,
         clipped: false,
         color: null,
         inherited: null,
+        rooted: false,
         blend: "normal",
         filterRecords: NO_RECORDS,
         filters: [],
+        plane: null,
         draws: 0,
         singleDraw: 0,
         directBlend: null,
@@ -608,12 +854,162 @@ export class PixiView {
         sliceOwner: null,
         sliceLinear: null,
         lineSpace: null,
+        owner: o.ref,
+        character: o.character,
+        kind: o.constructor,
       };
       node.container.addChild(art);
       this.nodes.set(o, node);
+      if (!this.fresh) {
+        this.containerNodes.set(node.container, node);
+      }
     }
 
     return node;
+  }
+
+  /**
+   * A released node of `o`'s character and class for `o` to take, the one
+   * whose container is `hint`, in `o`'s place, where it is one. Its object
+   * gets a node of its own if it comes back. The node is synced as one
+   * that comes back is, which `o`, new, has redrawn and placed whole;
+   * what only its old object's history set (a stale cache, a slice, a
+   * colour) is forgotten here.
+   */
+  private takeSpare(o: DisplayObject, hint: PixiContainer | null): Node | undefined {
+    const character = o.character;
+    const listed = character && this.spareNodes.get(character);
+    if (!listed) {
+      return undefined;
+    }
+
+    let node: Node | undefined;
+    const placed = hint ? this.containerNodes.get(hint) : undefined;
+    if (placed && listed.has(placed) && this.spareFor(placed, o)) {
+      node = placed;
+    } else {
+      // Oldest first; one no longer fit to take, as one made a mask, is let go of on the way.
+      for (const spare of listed) {
+        if (this.spareFor(spare, o)) {
+          node = spare;
+          break;
+        }
+
+        this.unlistSpare(spare);
+      }
+    }
+
+    if (!node) {
+      return undefined;
+    }
+
+    this.unlistSpare(node);
+    // Back on the list, the old object is drawn whole into a node of its own.
+    const was = node.owner.deref();
+    if (was) {
+      this.nodes.delete(was);
+      was.dirty |= TRANSFORM | CONTENT | (was instanceof Container ? CHILDREN : 0);
+    }
+
+    node.owner = o.ref;
+    node.stale = null;
+    node.color = null;
+    node.inherited = null;
+    // The chain it keeps, as filters set alike keep it, is coloured only as the colour changes:
+    // from none, as node.color now is, not in the old object's.
+    const chain = node.filters[0];
+    if (chain instanceof FilterChain) {
+      chain.recolor(null);
+    }
+
+    node.slice = null;
+    node.sliceKey = "";
+    node.sliceOwner = null;
+    node.sliceLinear = null;
+    node.lineSpace = null;
+    this.nodes.set(o, node);
+    return node;
+  }
+
+  /**
+   * Whether `node`, listed spare, may be taken by `o`: still off the list,
+   * of its class, and not made a mask since it was listed, as an object
+   * taken off the list in the frame a script makes it one is.
+   */
+  private spareFor(node: Node, o: DisplayObject): boolean {
+    const container = node.container;
+    return (
+      node.released &&
+      node.kind === o.constructor &&
+      node.character === o.character &&
+      container.includeInBuild !== false &&
+      container.measurable !== false
+    );
+  }
+
+  /**
+   * List a node just released for a new object of its character to take:
+   * not a mask's, whose container a masked one may still hold.
+   */
+  private listSpare(node: Node): void {
+    // As its object is now: a timeline may have swapped the character it was made of.
+    const owner = node.owner.deref();
+    if (owner) {
+      node.character = owner.character;
+      node.kind = owner.constructor;
+    }
+
+    const character = node.character;
+    const container = node.container;
+    if (
+      this.fresh ||
+      !character ||
+      node.masking ||
+      container.includeInBuild === false ||
+      container.measurable === false ||
+      this.spareSince.has(node)
+    ) {
+      return;
+    }
+
+    let listed = this.spareNodes.get(character);
+    if (!listed) {
+      listed = new Set();
+      this.spareNodes.set(character, listed);
+    }
+
+    listed.add(node);
+    this.spareSince.set(node, performance.now());
+    if (this.spareSince.size > SPARE_NODES_MOST) {
+      this.unlistSpare(this.spareSince.keys().next().value as Node);
+    }
+  }
+
+  /** A node off the spares: taken, come back, kept too long, or past the most. */
+  private unlistSpare(node: Node): void {
+    if (!this.spareSince.delete(node)) {
+      return;
+    }
+
+    const character = node.character as object;
+    const listed = this.spareNodes.get(character);
+    listed?.delete(node);
+    if (listed?.size === 0) {
+      this.spareNodes.delete(character);
+    }
+  }
+
+  /**
+   * Let go of every spare node, as a SWF unloads: they hold its characters,
+   * and its objects' containers, till taken or IDLE_MS on, which a player
+   * paused or let go of never reaches. For a host to call too as it lets
+   * go of a player whose view it keeps. And the lines' budget back to
+   * its floor: what grew it may have gone with the SWF.
+   */
+  dropSpares(): void {
+    this.spareNodes.clear();
+    this.spareSince.clear();
+    this.lines.unloaded();
   }
 
   /**
@@ -622,43 +1018,65 @@ export class PixiView {
    * its own and change.
    */
   private redraw(o: DisplayObject, node: Node): void {
-    const done = this.clear(node, true);
+    this.clear(node, true);
     // Given back after the new ones are made, so that a texture or a blend they share is kept, not
     // made again.
     try {
       this.draw(o, node);
     } finally {
-      done();
+      this.giveBack();
       // Drawn, the new content has taken or dropped them all; one that threw has not.
       this.dropSpare(node);
     }
   }
 
   /**
-   * Empty the node of what it drew, and return what gives back its fills
-   * and lines: a drawing's fills, a blend's, and every node's lines; a
-   * Graphics frees only a context it made.
+   * Empty the node of what it drew, listing for giveBack what gives back
+   * its fills and lines: a drawing's fills, a blend's, and every node's
+   * lines; a Graphics frees only a context it made.
    */
-  private clear(node: Node, keep = false): () => void {
+  private clear(node: Node, keep = false): void {
     // A Bitmap's texture is its store's: only the sprite goes.
     node.bitmap?.destroy();
     node.bitmap = null;
-    // Of the content's arrays, none is made where it has nothing: an object is emptied and drawn
-    // anew each time its content changes.
-    const old = node.ownFills && !this.fresh ? node.fills : NO_FILLS;
-    const oldLines =
-      this.fresh || node.strokes.length === 0 ? NO_LINES_GIVEN : node.strokes.map((g) => g?.shared);
-    const shared = node.sharedFills;
+    // Listed in the view's own lists, not in arrays of their own: an object is emptied and drawn
+    // anew each time its content changes, hundreds of times a frame in an animated crowd.
+    const giving = this.giving;
+    if (node.ownFills && !this.fresh) {
+      for (let i = 0; i < node.fills.length; i++) {
+        giving.fills.push(node.fills[i]);
+      }
+    }
+
+    if (!this.fresh) {
+      for (let i = 0; i < node.strokes.length; i++) {
+        const context = node.strokes[i]?.shared;
+        if (context) {
+          giving.lines.push(context);
+        }
+      }
+    }
+
+    if (node.sharedFills) {
+      giving.shapes.push(node.sharedFills);
+    }
+
     // A shape's Graphics stay where they are, for the content drawn next to take in place: taken
     // off and put on, they changed the structure of its render group, which Pixi then rebuilt
     // whole, an animated character's every frame its timeline swapped a shape.
     const art = node.art.children;
     if (keep && art.length > 0 && allShared(art)) {
       const lines = node.lines;
-      node.spare = {
-        graphics: art.slice() as SharedGraphics[],
-        lines: art.map((g) => lines.includes(g as SharedGraphics)),
-      };
+      node.spare ??= { graphics: [], lines: [] };
+      const spare = node.spare;
+      spare.graphics.length = 0;
+      spare.lines.length = 0;
+      for (let i = 0; i < art.length; i++) {
+        spare.graphics.push(art[i] as SharedGraphics);
+        spare.lines.push(lines.includes(art[i] as SharedGraphics));
+      }
+
+      node.spared = true;
     } else {
       // A text's characters are in a container of their own; their shared
       // glyph fills stay, not being theirs. A shape's Graphics are kept for
@@ -676,24 +1094,30 @@ export class PixiView {
     node.fills = NO_FILLS;
     node.ownFills = false;
     node.sharedFills = null;
-    node.strokes = [];
-    node.lines = [];
-    return () => {
-      for (let i = 0; i < old.length; i++) {
-        destroyContext(old[i]);
+    node.strokes.length = 0;
+    node.lines.length = 0;
+  }
+
+  /** Give back what the nodes cleared since listed (clear): their fills, lines and shapes' fills. */
+  private giveBack(): void {
+    const { fills, lines, shapes } = this.giving;
+    try {
+      for (let i = 0; i < fills.length; i++) {
+        destroyContext(fills[i]);
       }
 
-      for (let i = 0; i < oldLines.length; i++) {
-        const context = oldLines[i];
-        if (context) {
-          this.lines.give(context);
-        }
+      for (let i = 0; i < lines.length; i++) {
+        this.lines.give(lines[i]);
       }
 
-      if (shared) {
-        this.shared.give(shared);
+      for (let i = 0; i < shapes.length; i++) {
+        this.shared.give(shapes[i]);
       }
-    };
+    } finally {
+      fills.length = 0;
+      lines.length = 0;
+      shapes.length = 0;
+    }
   }
 
   /**
@@ -762,7 +1186,7 @@ export class PixiView {
    */
   private lineSpace(o: DisplayObject, node: Node, parent: Linear): Linear {
     if (node.slice) {
-      return parent;
+      return [...parent];
     }
 
     const owner = this.nodes.get(o.parent as Container)?.lineSpace ?? parent;
@@ -787,7 +1211,7 @@ export class PixiView {
     }
 
     if (node.stale?.cache !== cache) {
-      node.stale = { cache, world: node.world, spent: false };
+      node.stale = { cache, world: [...node.world], spent: false };
     }
 
     return node.stale.spent ? o.drawn() : cache.shape;
@@ -817,35 +1241,33 @@ export class PixiView {
     }
 
     const shape = o instanceof ShapeObject ? this.shapeOf(o, node) : null;
-    node.layers = o.drawing?.layers ?? shape?.layers ?? [];
+    // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
+    const w = node.world;
+    node.mirrored = w[0] * w[3] - w[1] * w[2] < 0;
+    node.layers = o.drawing
+      ? facing(o.drawing.layers, node.mirrored, o.drawing.version)
+      : (shape?.layers ?? []);
     const slicing = this.slicing(o, node);
     if (slicing) {
       node.layers = sliceLayers(node.layers, slicing.slice, slicing.m, o.drawing?.version);
     }
 
-    const build = (layer: ShapeLayer) => {
-      const context = fillContext(layer, this.painter);
-      if (this.fresh) {
-        this.built.add(context);
-      }
-
-      return context;
-    };
     let fills: GraphicsContext[];
     node.ownFills = false;
     if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
       fills = current.fills;
     } else if (shape && !o.drawing && !slicing && !this.fresh) {
       // A shape's, or a morph's blend's, shared and counted: they go once nothing draws them.
-      fills = this.shared.take(shape, () => node.layers.map(build));
+      fills = this.shared.take(shape, node.layers, this.buildFills);
       node.sharedFills = shape;
     } else if (shape && !o.drawing && !slicing) {
       // A fresh view borrows the stage's, which its object, off the list, may no longer hold;
       // else builds its own, shared by its instances, which it destroys with the rest.
-      fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? node.layers.map(build);
+      fills =
+        this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? this.buildFills(node.layers);
       this.fills.set(shape, fills);
     } else {
-      fills = node.layers.map(build);
+      fills = this.buildFills(node.layers);
       node.ownFills = true;
     }
 
@@ -862,32 +1284,38 @@ export class PixiView {
         : null;
     // The Graphics the last content left, taken in place where it laid out
     // its fills and lines alike.
+    // Textured triangles are meshes among the Graphics, which a spare's places do not allow for.
     const spare =
-      node.spare && laidOutAs(node.spare.lines, node.layers) ? node.spare.graphics : null;
+      node.spared && node.spare && laidOutAs(node.spare.lines, node.layers) && !meshed(node.layers)
+        ? node.spare.graphics
+        : null;
     if (!spare) {
       this.dropSpare(node);
     }
 
-    node.spare = null;
+    node.spared = false;
+    // A loop, not forEach with closures: a crowd's shapes are drawn again hundreds of times a frame.
     let next = 0;
-    const graphic = (context?: GraphicsContext): SharedGraphics => {
-      if (!spare) {
-        const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
-        made.swap(context ?? NO_LINES);
-        node.art.addChild(made);
-        return made;
+    node.widest = 0;
+    const layers = node.layers;
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
+      if (layer.strokes.length > 0 && scalesEvenly(layer)) {
+        node.widest = Math.max(node.widest, widestLine(layer));
       }
 
-      const kept = spare[next++];
-      // A line's shows none till restroke gives it its own, and gives back the old.
-      kept.swap(context ?? NO_LINES);
-      return kept;
-    };
+      this.graphic(node, spare, next++, fills[i]);
+      const meshes = layer.meshes;
+      if (meshes) {
+        for (let k = 0; k < meshes.length; k++) {
+          this.drawMesh(node, meshes[k]);
+        }
+      }
 
-    node.layers.forEach((layer, i) => {
-      graphic(fills[i]);
       const borrowed = lines?.[i];
-      const strokes = layer.strokes.length ? graphic(borrowed?.shared) : null;
+      const strokes = layer.strokes.length
+        ? this.graphic(node, spare, next++, borrowed?.shared)
+        : null;
       if (strokes) {
         if (borrowed) {
           strokes.setFromMatrix(borrowed.localTransform);
@@ -897,8 +1325,60 @@ export class PixiView {
       }
 
       node.strokes.push(borrowed ? null : strokes);
-    });
+    }
+
     this.restroke(node);
+  }
+
+  /** Textured triangles, after what the node draws so far; none where the renderer is not WebGL's. */
+  private drawMesh(node: Node, mesh: TriangleMesh): void {
+    const texture =
+      this.renderer.type === RendererType.WEBGL
+        ? gpuBitmaps(this.renderer).texture(mesh.image)
+        : null;
+    if (texture && mesh.positions.length) {
+      node.art.addChild(new TriangleView(mesh, texture, this.flashPixel, this.meshes));
+    }
+  }
+
+  /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
+  private readonly buildFills = (layers: readonly ShapeLayer[]): GraphicsContext[] => {
+    const fills: GraphicsContext[] = [];
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
+      const make = () => fillContext(layer, this.painter);
+      const context = remakeable(make(), make);
+      if (this.fresh) {
+        this.built.add(context);
+      }
+
+      fills.push(context);
+    }
+
+    return fills;
+  };
+
+  /**
+   * The Graphics the `k`th of a node's new content draws `context` with:
+   * the `k`th the last content left, in place, or one kept or made, put on.
+   */
+  private graphic(
+    node: Node,
+    spare: SharedGraphics[] | null,
+    k: number,
+    context: GraphicsContext | undefined,
+  ): SharedGraphics {
+    if (!spare) {
+      const made = this.spareGraphics.pop() ?? new SharedGraphics(NO_LINES);
+      made.swap(context ?? NO_LINES);
+      node.art.addChild(made);
+      return made;
+    }
+
+    const kept = spare[k];
+    // A line's shows none till restroke gives it its own, and gives back the old.
+    kept.swap(context ?? NO_LINES);
+    return kept;
   }
 
   /**
@@ -927,6 +1407,10 @@ export class PixiView {
     }
 
     node.released = true;
+    this.clearing.delete(node);
+    this.overOpaque.delete(node);
+    this.dropPlane(node);
+    this.listSpare(node);
     const group = node.container.isRenderGroup ? node.container.renderGroup : null;
     if (group) {
       const uid = group.instructionSet.uid;
@@ -981,6 +1465,12 @@ export class PixiView {
         this.release(children[i]);
       }
     }
+
+    // Released, they need no keeping: a node kept spare held its last
+    // object's children, and through them their own children, scripts and
+    // timelines, after all had gone (some 6 MB in a crowd of 32 animated
+    // characters). Coming back, a container arranges its children anew.
+    node.kids = NO_KIDS;
   }
 
   /**
@@ -993,7 +1483,14 @@ export class PixiView {
 
   /** Keep the Graphics a redraw kept for its new content that it did not take, or destroy them in a fresh view. */
   private dropSpare(node: Node): void {
-    for (const graphic of node.spare?.graphics ?? []) {
+    const spare = node.spare;
+    if (!node.spared || !spare) {
+      return;
+    }
+
+    node.spared = false;
+    for (let i = 0; i < spare.graphics.length; i++) {
+      const graphic = spare.graphics[i];
       graphic.parent?.removeChild(graphic);
       if (this.fresh) {
         graphic.destroy();
@@ -1002,7 +1499,8 @@ export class PixiView {
       }
     }
 
-    node.spare = null;
+    spare.graphics.length = 0;
+    spare.lines.length = 0;
   }
 
   /**
@@ -1034,7 +1532,8 @@ export class PixiView {
   private empty(node: Node): void {
     this.parked.delete(node);
     node.emptied = true;
-    this.clear(node)();
+    this.clear(node);
+    this.giveBack();
   }
 
   /** Return a parked group's batches without changing its nested group hierarchy. */
@@ -1060,11 +1559,14 @@ export class PixiView {
   private restroke(node: Node, moved = false): void {
     const m = node.world;
     const least = this.leastWidth;
-    // Turned or mirrored, not stretched: the lines and the inverse they are under stay, as a limb's
-    // that only turns on every frame.
+    // Turned or mirrored, or stretched within one settled stretch: the lines and the inverse they
+    // are under stay, as a limb's that only turns on every frame.
+    // Settled once, for the test and the lines alike.
+    let settled: Linear | null | undefined;
     if (moved && node.stretched && node.strokedAt === least) {
-      const stretch = stretchOf(m, STRETCH);
-      if (stretch && sameLinear(stretch, node.stretched)) {
+      const stretch = stretchOf(m);
+      settled = stretch && settledStretch(stretch, node.widest, least, stretch);
+      if (settled && sameLinear(settled, node.stretched)) {
         return;
       }
     }
@@ -1074,26 +1576,34 @@ export class PixiView {
     // One key and one inverse for all its layers of each kind, made as one first needs them.
     let exact: ReturnType<typeof strokeFrame> | null = null;
     let scaled: ReturnType<typeof strokeFrame> | null | undefined;
-    const frameFor = (layer: ShapeLayer) => {
-      if (scaled === undefined && !by && scalesEvenly(layer)) {
-        const stretch = stretchOf(m);
-        scaled = stretch && strokeFrame(stretch, least);
-      }
-
-      if (scaled && scalesEvenly(layer)) {
-        return scaled;
-      }
-
-      exact ??= strokeFrame(m, least);
-      return exact;
-    };
-    node.layers.forEach((layer, i) => {
+    // A loop, not forEach with closures: every shape that moves on a frame is stroked again.
+    const layers = node.layers;
+    for (let i = 0; i < layers.length; i++) {
       const strokes = node.strokes[i];
       if (!strokes) {
-        return;
+        continue;
       }
 
-      const { m: seen, key, inverse } = frameFor(layer);
+      const layer = layers[i];
+      const even = scalesEvenly(layer);
+      if (scaled === undefined && !by && even) {
+        if (settled === undefined) {
+          const stretch = stretchOf(m);
+          settled = stretch && settledStretch(stretch, node.widest, least, stretch);
+        }
+
+        scaled = settled && strokeFrame(settled, least);
+      }
+
+      let frame: ReturnType<typeof strokeFrame>;
+      if (scaled && even) {
+        frame = scaled;
+      } else {
+        exact ??= strokeFrame(m, least);
+        frame = exact;
+      }
+
+      const { m: seen, key, inverse } = frame;
       // The new context goes in before the old one goes back, as it may be the same.
       const previous = strokes.shared;
       // A fresh view borrows the stage's lines where it draws them alike.
@@ -1120,7 +1630,8 @@ export class PixiView {
       if (inverse) {
         strokes.setFromMatrix(inverse);
       }
-    });
+    }
+
     node.stretched = scaled && !exact ? scaled.m : null;
   }
 
@@ -1134,33 +1645,59 @@ export class PixiView {
     o: DisplayObject,
     parent: Linear,
     moved: boolean,
-    own: DisplayObject["matrix"] = o.placed,
+    own: DisplayObject["matrix"] = o.flatPlaced,
     inMask = false,
     tint: ColorTransform | null = null,
     isolated = false,
   ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
+    // A 3D object's content is drawn in its own space into its bitmap, which its plane then
+    // places (render/three.ts); a mask, which Flash draws by no plane, and the root of a
+    // BitmapData's draw, which its matrix places, go by its matrix3D's x and y rows.
+    const three =
+      o.space !== null &&
+      o !== this.drawRoot &&
+      this.renderer.type !== RendererType.WEBGPU &&
+      !(inMask || o.maskOf !== null || o.clipDepth > 0);
+    const outsideUnits = this.planeUnits;
+    const outsideLeast = this.planeLeast;
+    if (three) {
+      own = IDENTITY_PLACE;
+      parent = UNIT;
+      this.planeUnits = node.plane?.units ?? SAMPLES;
+      this.planeLeast = 1 / (node.plane?.texels ?? 1);
+      if (node.plane) {
+        node.plane.syncedUnits = this.planeUnits;
+      }
+    }
+
     let dirty = this.fresh ? TRANSFORM | CHILDREN | CONTENT : o.dirty;
+    // What a 3D object's bitmap shows changes with what is in it, not with its own transform.
+    let redrawn = three && o instanceof Container && o.descendantsDirty;
     if (node.released) {
       // Back from off the list: drawn again if its art was emptied, its transform as if unknown, so
-      // that it and all below draw their lines again; a parked one has kept its own. Its children,
-      // if it has or had any, are arranged again, as those that were emptied with it are drawn
-      // again.
+      // that it and all below draw their lines again; a parked one has kept its own. A container's
+      // children, if it has or had any, are arranged again, as those that were emptied with it are
+      // drawn again.
       node.released = false;
       node.reused = true;
       this.parked.delete(node);
+      this.unlistSpare(node);
       const group = node.container.renderGroup;
       if (group) {
         this.parkedGroups.delete(group.instructionSet.uid);
         this.parkedFirstGroups.delete(group.instructionSet.uid);
       }
 
-      const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
+      // Those it drew are in its content after its art, as are their masks' groups.
+      const kids =
+        o instanceof Container &&
+        (o.children.length > 0 || (node.scroll?.content ?? node.container).children.length > 1);
       dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
         node.emptied = false;
-        node.world = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
+        node.world.fill(Number.NaN);
         dirty |= CONTENT;
       }
     }
@@ -1173,10 +1710,13 @@ export class PixiView {
       dirty |= TRANSFORM | (o instanceof ShapeObject && o.stale ? CONTENT : 0);
     }
 
+    // Whether its filters were made again, which a direct blend sets again.
+    let refilled = false;
     if (dirty & TRANSFORM) {
       const m = own;
       container.setFromMatrix(PLACED.set(m.a, m.b, m.c, m.d, m.tx, m.ty));
-      container.visible = o.visible || masking;
+      // A 3D mask masks nothing in Flash, and is not drawn.
+      container.visible = (o.visible || masking) && !(o.maskOf && o.space);
       // A blend mode composites the object as a layer (render/blend.ts); a mask is its fills alone.
       // Its filters, then its blend: adl filters the object, then blends what they make.
       const blend = masking ? "normal" : o.blendMode;
@@ -1187,6 +1727,7 @@ export class PixiView {
         records !== node.filterRecords && !sameFilterRecords(records, node.filterRecords);
       node.filterRecords = records;
       if (blend !== node.blend || refiltered) {
+        redrawn = true;
         node.blend = blend;
         for (const f of node.filters) {
           f.destroy();
@@ -1216,6 +1757,7 @@ export class PixiView {
         const blending = blendFilters(blend);
         container.filters =
           node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
+        refilled = true;
       }
 
       // Most objects have neither: they pay one test.
@@ -1230,9 +1772,21 @@ export class PixiView {
     // Pixi's tint and alpha, which Pixi composes down the tree itself; any
     // other is what is drawn's own (render/color.ts), and the tint stays white.
     let recolor = false;
+    // A 3D one's chain runs in its bitmap, where it colours what its filters make as any does.
+    const rooted = node.filters[0] instanceof FilterChain && !masking;
+    const rerooted = rooted !== node.rooted;
+    if (rerooted) {
+      node.rooted = rooted;
+      container.colorRoot = rooted;
+      recolor = true;
+    }
+
+    // BitmapData.draw takes its object without its own colour transform, as adl draws it, though
+    // its filters with it (filtered-colors).
+    const ownColor = o === this.drawRoot ? null : o.colorTransform;
     if (dirty & TRANSFORM || tint !== node.inherited) {
       node.inherited = tint;
-      const ct = o.colorTransform;
+      const ct = ownColor;
       const color = masking ? null : ct ? (tint ? concatColor(tint, ct) : ct) : tint;
       if (!sameColor(color, node.color)) {
         node.color = color;
@@ -1240,9 +1794,16 @@ export class PixiView {
       }
     }
 
-    const flash = node.color && !multipliesOnly(node.color) ? node.color : null;
+    if (rooted && (recolor || refilled)) {
+      (node.filters[0] as FilterChain).recolor(node.color);
+    }
+
+    const flash = !rooted && node.color && !multipliesOnly(node.color) ? node.color : null;
     if (dirty & TRANSFORM || recolor) {
-      const ct = flash || masking ? null : o.colorTransform;
+      // A 3D object's bitmap is drawn coloured by all above it too, each of its fills under the
+      // alpha, as Flash's is: its quad takes none of Pixi's colour (render/three.ts). A filtered
+      // object's chain colours what its filters make.
+      const ct = flash || masking || rooted ? null : three ? node.color : ownColor;
       container.alpha = ct ? Math.max(0, Math.min(1, ct.aMul)) : 1;
       const tint = ct
         ? (Math.round(Math.max(0, Math.min(1, ct.rMul)) * 255) << 16) |
@@ -1254,6 +1815,10 @@ export class PixiView {
       if (container.tint !== tint) {
         container.tint = tint;
       }
+
+      // One its colour leaves wholly clear is not drawn, nor its filters run, as Pixi skips one
+      // whose alpha is 0: a filtered object's alpha is its chain's.
+      container.renderable = !rooted || !clearsAll(node.color);
     }
 
     if (moved || dirty & TRANSFORM) {
@@ -1263,10 +1828,14 @@ export class PixiView {
       const c = parent[0] * m.c + parent[2] * m.d;
       const d = parent[1] * m.c + parent[3] * m.d;
       const was = node.world;
-      // A new one only where it changed: others may hold the one before, which stays as it was.
       moved = a !== was[0] || b !== was[1] || c !== was[2] || d !== was[3];
+      // In place, as a node's world is held by none but it: what keeps one keeps a copy. Thousands
+      // of parts move on a busy frame, and each made an array.
       if (moved) {
-        node.world = [a, b, c, d];
+        was[0] = a;
+        was[1] = b;
+        was[2] = c;
+        was[3] = d;
       }
     }
 
@@ -1325,6 +1894,13 @@ export class PixiView {
       }
     }
 
+    if (o.drawing?.culled && !(dirty & CONTENT)) {
+      const w = node.world;
+      if (w[0] * w[3] - w[1] * w[2] < 0 !== node.mirrored) {
+        dirty |= CONTENT;
+      }
+    }
+
     if (dirty & CONTENT) {
       this.redraw(o, node);
     } else if ((moved || node.strokedAt !== this.leastWidth) && hasLines(node.strokes)) {
@@ -1357,6 +1933,16 @@ export class PixiView {
           }
         }
       }
+
+      for (const leaf of node.art.children) {
+        if (leaf instanceof TriangleView) {
+          const texture = bitmaps.texture(leaf.source.image);
+          leaf.visible = texture !== null;
+          if (texture) {
+            leaf.show(texture);
+          }
+        }
+      }
     }
 
     // What its filters' kept output was drawn from changed, but for a move.
@@ -1373,7 +1959,8 @@ export class PixiView {
       (dirty & ~TRANSFORM ||
         moved ||
         remask ||
-        recolor ||
+        (recolor && !rooted) ||
+        rerooted ||
         this.rescaled ||
         // A scroll moves what is drawn within the input; any move of a scrolled object counts.
         (dirty & TRANSFORM && (o.scroll || node.scroll)) ||
@@ -1410,7 +1997,15 @@ export class PixiView {
             child.dirty !== CLEAN ||
             (child instanceof Container && child.descendantsDirty)
           ) {
-            this.sync(child, node.world, moved, child.placed, masking, node.color, childIsolation);
+            this.sync(
+              child,
+              node.world,
+              moved,
+              child.flatPlaced,
+              masking,
+              node.rooted ? null : node.color,
+              childIsolation,
+            );
           }
         }
       }
@@ -1422,27 +2017,20 @@ export class PixiView {
 
     if (!this.fresh) {
       this.group(o, node);
-      // Fixed-function multiply needs an opaque backdrop; screen's equation
-      // also holds over transparent pixels. Add does not preserve layer alpha.
-      let direct: "multiply" | "screen" | null = null;
-      if (node.singleDraw === 1) {
-        if (node.blend === "screen") {
-          direct = "screen";
-        } else if (node.blend === "multiply" && this.renderer.background.alpha === 1) {
-          direct = "multiply";
-        }
-      }
-      if (isolated) {
-        direct = null;
+      // What may leave the stage's pixels less than opaque, and what blends only over opaque ones.
+      if (!isolated && (node.blend === "erase" || node.blend === "alpha")) {
+        this.clearing.add(node);
+      } else {
+        this.clearing.delete(node);
       }
 
-      if (direct !== node.directBlend || (direct && container.filters)) {
-        container.blendMode = direct ?? "inherit";
-        const blending = direct ? null : blendFilters(node.blend);
-        container.filters =
-          node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
-        node.directBlend = direct;
+      if (!isolated && (node.blend === "multiply" || node.blend === "subtract")) {
+        this.overOpaque.add(node);
+      } else {
+        this.overOpaque.delete(node);
       }
+
+      this.blendDirectly(node, isolated ? null : this.directBlend(node), refilled);
       o.dirty = CLEAN;
     }
 
@@ -1450,7 +2038,286 @@ export class PixiView {
       this.checkBackBuffer();
     }
 
+    this.planeUnits = outsideUnits;
+    this.planeLeast = outsideLeast;
+    if (three || node.plane) {
+      redrawn ||= (dirty & ~TRANSFORM) !== 0 || recolor || remask || this.rescaled;
+      return this.planeOf(o, node, three, redrawn);
+    }
+
     return container;
+  }
+
+  /** Blend `node` in `direct` by the GPU's own blending, or by its blend filter for null. */
+  private blendDirectly(node: Node, direct: BLEND_MODES | null, refilled: boolean): void {
+    if (direct === node.directBlend && !(direct && refilled)) {
+      return;
+    }
+
+    // A fill blends as it is drawn; a filtered object as its chain's result is drawn.
+    const container = node.container;
+    const chain = node.filters[0];
+    container.blendMode = direct && !chain ? direct : "inherit";
+    if (chain instanceof FilterChain) {
+      chain.blendOver(direct ?? "normal");
+    }
+
+    const blending = direct ? null : blendFilters(node.blend);
+    container.filters =
+      node.filters.length > 0 || blending ? [...node.filters, ...(blending ?? [])] : null;
+    node.directBlend = direct;
+    if (node.plane) {
+      this.blendQuad(node, node.plane);
+    }
+  }
+
+  /**
+   * Whether the stage's pixels may be less than opaque as what is below a
+   * blend: a clear background, or an erase or alpha blend outside any layer
+   * on the list, which clears what it covers on the stage as adl does.
+   * Where that changes, the multiply and subtract blends drawn over it
+   * choose again, before what is drawn this frame.
+   */
+  private checkStageClear(): void {
+    // A stand-in renderer may have no background: it is drawn on nothing.
+    const clear = (this.renderer.background?.alpha ?? 1) < 1 || this.clearing.size > 0;
+    if (clear === this.stageClear) {
+      return;
+    }
+
+    this.stageClear = clear;
+    for (const node of this.overOpaque) {
+      this.blendDirectly(node, this.directBlend(node), false);
+    }
+  }
+
+  /**
+   * The mode `node` is blended in by the GPU's own blending, where that is
+   * what Flash draws, else null for a blend filter (render/blend.ts). Flash
+   * blends the object as one layer, so it must be drawn at once: as a
+   * single fill, or as its filters' result. Flash's add and screen are the
+   * GPU's over any backdrop, its subtract and multiply over an opaque one,
+   * to 8-bit rounding (the `blend-formulas` case): over a clear pixel GPU
+   * multiply drops the object's own colour, which Flash keeps, and
+   * subtract its alpha. An isolated layer's ground may be clear where the
+   * stage's is not, so none is used in one. Its lighten, darken and
+   * difference blend the straight colours, which the GPU's min and max of
+   * premultiplied ones are only where opaque.
+   */
+  private directBlend(node: Node): BLEND_MODES | null {
+    if (node.singleDraw !== 1 && !(node.filters[0] instanceof FilterChain)) {
+      return null;
+    }
+
+    // WebGPU's add leaves an opaque target less than opaque, and it has no subtract.
+    switch (node.blend) {
+      case "screen":
+        return "screen";
+      case "multiply":
+        return this.stageClear ? null : "multiply";
+      case "add":
+        return this.renderer.type === RendererType.WEBGL ? "add" : null;
+      case "subtract":
+        return this.renderer.type === RendererType.WEBGL && !this.stageClear ? "subtract" : null;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * What a 3D object is drawn by in its parent, its quad, which takes its
+   * container's place, the container going into the plane's holder; and
+   * the container again for one no longer drawn in 3D. A mask set on it
+   * clips the quad, on the stage.
+   */
+  private planeOf(o: DisplayObject, node: Node, three: boolean, redrawn: boolean): PixiContainer {
+    const { container } = node;
+    let plane = node.plane;
+    if (!three) {
+      const quad = plane?.quad;
+      const parent = quad?.parent;
+      if (quad && parent) {
+        parent.addChildAt(container, parent.getChildIndex(quad));
+      }
+
+      this.dropPlane(node);
+      return container;
+    }
+
+    if (!plane) {
+      plane = new Plane();
+      node.plane = plane;
+      this.planes.add(node);
+    }
+
+    const quad = plane.quad;
+    if (container.parent !== plane.holder) {
+      const parent = container.parent;
+      if (parent) {
+        parent.addChildAt(quad, parent.getChildIndex(container));
+      }
+
+      plane.holder.addChild(container);
+    }
+
+    this.blendQuad(node, plane);
+
+    const mask = container.mask;
+    if (mask) {
+      // Let go of first: Pixi gives a mask taken off a container back to the build, to be drawn.
+      container.mask = null;
+      quad.mask = mask;
+    } else if (!o.mask) {
+      quad.mask = null;
+    }
+
+    plane.stale ||= redrawn;
+    return quad;
+  }
+
+  /**
+   * A 3D object's blend mode put on its quad, which Flash composites with what is behind it, not
+   * on its content within its bitmap: the blend's filters, or the GPU's own blending, from the
+   * node's state, as blendDirectly may change them outside a sync. One with filters that blends
+   * directly is blended by its chain (FilterChain.blendOver), in its bitmap.
+   */
+  private blendQuad(node: Node, plane: Plane): void {
+    const { container } = node;
+    const filters = container.filters;
+    if (filters && filters.length > node.filters.length) {
+      container.filters = node.filters.length > 0 ? node.filters : null;
+    }
+
+    const blending = node.directBlend === null ? blendFilters(node.blend) : null;
+    if (blending !== plane.blending) {
+      plane.blending = blending;
+      plane.quad.filters = blending;
+    }
+
+    const direct = node.filters[0] instanceof FilterChain ? null : node.directBlend;
+    plane.quad.blendMode = (direct as BLEND_MODES | null) ?? "inherit";
+    container.blendMode = "inherit";
+  }
+
+  /** A 3D object's plane let go of, its container on no list. */
+  private dropPlane(node: Node): void {
+    const plane = node.plane;
+    if (!plane) {
+      return;
+    }
+
+    plane.destroy();
+    node.plane = null;
+    this.planes.delete(node);
+  }
+
+  /**
+   * Each 3D object's quad placed by its plane in perspective, which moves
+   * as anything above it does, and its bitmap drawn again where it may
+   * have changed: those in another first, as the other's bitmap draws
+   * their quads. One with a corner behind the eye is not drawn.
+   */
+  private renderPlanes(): void {
+    if (this.planes.size === 0) {
+      return;
+    }
+
+    const drawn = this.planeOrder;
+    drawn.length = 0;
+    for (const node of this.planes) {
+      const o = node.owner.deref();
+      if (!o || !node.plane) {
+        this.dropPlane(node);
+        continue;
+      }
+
+      if (node.released) {
+        continue;
+      }
+
+      let depth = 0;
+      for (let p = o.parent; p; p = p.parent) {
+        depth += p.space ? 1 : 0;
+      }
+
+      drawn.push({ depth, node, o });
+    }
+
+    drawn.sort((a, b) => b.depth - a.depth);
+    const onStage = this.flashPixel;
+    for (const { depth, node, o } of drawn) {
+      const plane = node.plane as Plane;
+      // What it draws is measured again only when it may have changed, as its bitmap is drawn.
+      if (plane.stale || plane.drawnRect === undefined) {
+        const r = bounds(o, true);
+        let rect = r && { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
+        for (const f of node.filterRecords) {
+          rect = rect && filterRect(rect, f);
+        }
+
+        plane.drawnRect = rect;
+      }
+
+      const rect = plane.drawnRect;
+      let shown = false;
+      if (rect && node.container.visible) {
+        shown = plane.place(
+          o.placed,
+          rect.x,
+          rect.y,
+          rect.x + rect.width,
+          rect.y + rect.height,
+          depth > 0 ? this.unitsAbove(o) : onStage,
+        );
+      }
+
+      plane.changed ||= plane.quad.visible !== shown;
+      plane.quad.visible = shown;
+      if (shown) {
+        plane.draw(this.renderer);
+        // Drawn at other units than its content was made for, as an object grown past what the
+        // GPU or the budget takes at full samples: its lines and filters made again for them.
+        if (plane.units !== plane.syncedUnits) {
+          this.rescaled = true;
+          this.sync(o, UNIT, false, o.flatPlaced, false, node.inherited, node.childIsolation);
+          this.rescaled = false;
+          plane.draw(this.renderer);
+        }
+      }
+
+      // Its quad is drawn into the bitmap of the 3D object it is in, which then shows it as it is
+      // now: its plane there moves as that object turns, which changes nothing in it.
+      if (depth > 0 && plane.changed) {
+        this.restaleAbove(o);
+      }
+
+      plane.changed = false;
+    }
+  }
+
+  /** The units of the bitmap of the nearest 3D object above `o`, which its quad is drawn into. */
+  private unitsAbove(o: DisplayObject): number {
+    for (let p = o.parent; p; p = p.parent) {
+      if (p.space) {
+        return this.nodes.get(p)?.plane?.units ?? SAMPLES;
+      }
+    }
+
+    return SAMPLES;
+  }
+
+  /** The bitmap of the nearest 3D object above `o` marked to be drawn again. */
+  private restaleAbove(o: DisplayObject): void {
+    for (let p = o.parent; p; p = p.parent) {
+      if (p.space) {
+        const plane = this.nodes.get(p)?.plane;
+        if (plane) {
+          plane.stale = true;
+        }
+
+        return;
+      }
+    }
   }
 
   /** Keep an animated branch from rebuilding all the stage's batches when its children change. */
@@ -1529,7 +2396,10 @@ export class PixiView {
     // pools the group, which the next to take it must find unmarked.
     const group = container.renderGroup as unknown as Settling | null;
     if (group) {
-      settle(group, false);
+      this.unsettling.add(group);
+      unsettle(this.unsettling, this.unsettling);
+      this.unsettling.clear();
+      group.$batched = undefined;
       group.$builtAt = undefined;
       group.$settled = undefined;
       group.$settling = undefined;
@@ -1594,13 +2464,14 @@ export class PixiView {
       let at = 1;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
+        this.placeHint = content.children[at] ?? null;
         const container = this.sync(
           child,
           node.world,
           moved,
-          child.placed,
+          child.flatPlaced,
           masking,
-          node.color,
+          node.rooted ? null : node.color,
           isolated,
         );
         if (content.children[at] !== container) {
@@ -1627,9 +2498,9 @@ export class PixiView {
         child,
         node.world,
         moved,
-        child.placed,
+        child.flatPlaced,
         masking,
-        node.color,
+        node.rooted ? null : node.color,
         isolated,
       );
       into.addChild(container);
@@ -1649,7 +2520,8 @@ export class PixiView {
    * the object or above it, Pixi could not draw: it is left out.
    */
   private clip(o: DisplayObject, node: Node): boolean {
-    const mask = o.mask && !o.maskOf && !o.mask.encloses(o) ? o.mask : null;
+    // A 3D mask masks nothing in Flash.
+    const mask = o.mask && !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
     node.container.mask = mask ? this.node(mask).container : null;
     if (mask) {
       this.maskees.add(o.ref);
@@ -1724,9 +2596,32 @@ export class PixiView {
     }
   }
 
+  /**
+   * The target's pixels a side of a pixel of Flash's, which a 3D object's
+   * quad and textured triangles sample once: in a BitmapData's draw, its
+   * samples; on the stage, a pixel of the screen, where the host says what
+   * that is.
+   */
+  private get flashPixel(): number {
+    if (this.fresh) {
+      return this.samples;
+    }
+
+    const scale = this.stage.scale.x;
+    return this.screenScale
+      ? ((this.renderer.resolution ?? 1) * (Number.isFinite(scale) && scale > 0 ? scale : 1)) /
+          this.screenScale
+      : 1;
+  }
+
   /** Bring the stage up to date with `root`'s display list, without drawing. */
   /** The thinnest line, in stage pixels: a pixel of the screen. */
   private get leastWidth(): number {
+    // In a 3D object's bitmap, a pixel of its own space, as Flash draws a hairline there.
+    if (this.planeUnits) {
+      return this.planeLeast;
+    }
+
     return this.fresh ? 1 : 1 / (this.screenScale ?? this.renderer.resolution ?? 1);
   }
 
@@ -1735,7 +2630,7 @@ export class PixiView {
    * the stage larger has them reach as much further on the screen, as Flash Player's do.
    */
   private get filterUnits(): number {
-    const units = this.fresh ? this.samples : this.stage.scale.x;
+    const units = this.planeUnits || (this.fresh ? this.samples : this.stage.scale.x);
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
     return Number.isFinite(units) && units > 0 ? units : 1;
   }
@@ -1760,13 +2655,38 @@ export class PixiView {
       this.emptyGroup(uid, entry.group.deref());
     }
 
+    for (const [node, since] of this.spareSince) {
+      if (now - since < IDLE_MS) {
+        break;
+      }
+
+      this.unlistSpare(node);
+    }
+
     trimPools();
+    trimBatchers(this.renderer, now);
+    const pixel = this.flashPixel;
+    if (pixel !== this.meshPixel) {
+      this.meshPixel = pixel;
+      for (const mesh of this.meshes) {
+        mesh.pixel = pixel;
+      }
+    }
+
     const units = this.filterUnits;
     this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
     this.strokedAt = this.leastWidth;
     this.filteredAt = units;
+    if (!this.fresh) {
+      this.checkStageClear();
+    }
+
     const node = this.sync(root, UNIT, false);
     this.rescaled = false;
+    if (!this.fresh) {
+      this.checkStageClear();
+    }
+
     if (node.parent !== this.stage) {
       this.stage.removeChildren();
       this.stage.addChild(node, this.offList);
@@ -1776,15 +2696,24 @@ export class PixiView {
     if (!this.fresh) {
       this.settleGroups();
     }
+
+    // After the sync, which released what an unload took off the list and listed it spare.
+    if (unloads.count !== this.unloadsSeen) {
+      this.unloadsSeen = unloads.count;
+      this.dropSpares();
+    }
+
+    // Their bitmaps are drawn now, as a host may draw the stage itself after.
+    this.renderPlanes();
   }
 
   /**
    * Batch the Graphics of each render group drawn that has not been rebuilt
    * for SETTLE_MS, and draw those of one rebuilt since alone again: walking
    * Pixi's tree of groups from the stage's, which holds those drawn and no
-   * other. A group rebuilt and not settled is looked through for Graphics
-   * still batched, which a branch brings along as it moves under it or
-   * becomes a group of its own.
+   * other. What a group batched is looked through as it unsettles or its
+   * structure changes, for Graphics a branch took along as it moved under
+   * another group or became a group of its own (unsettle).
    */
   private settleGroups(): void {
     const stage = this.stage.renderGroup as unknown as Settling | null;
@@ -1793,18 +2722,33 @@ export class PixiView {
     }
 
     const now = performance.now();
+    const unsettling = this.unsettling;
+    const scanned = this.scanned;
     const visit = (group: Settling) => {
       const quiet = group.$builtAt !== undefined && now - group.$builtAt >= SETTLE_MS;
-      if (quiet !== !!group.$settled || (!quiet && group.$seen !== group.$builtAt)) {
-        settle(group, quiet);
+      if (quiet && !group.$settled) {
+        settle(group);
+      } else if (!quiet && (group.$settled || group.$seen !== group.$builtAt)) {
+        unsettling.add(group);
+      }
+
+      // What it batched may have left it only as its structure changed, or be its own to unbatch.
+      if (group.$batched?.size && (group.structureDidChange || unsettling.has(group))) {
+        scanned.push(group);
       }
 
       group.$seen = group.$builtAt;
-      for (const child of group.renderGroupChildren) {
-        visit(child);
+      const children = group.renderGroupChildren;
+      for (let i = 0; i < children.length; i++) {
+        visit(children[i]);
       }
     };
     visit(stage);
+    if (unsettling.size > 0 || scanned.length > 0) {
+      unsettle(unsettling, scanned);
+      unsettling.clear();
+      scanned.length = 0;
+    }
   }
 
   /**
@@ -1835,6 +2779,7 @@ export class PixiView {
       const masks = new PixiContainer();
       scaled.addChild(node, masks);
       view.placeMasks(o, masks);
+      view.renderPlanes();
       scaled.scale.set(n);
       this.renderer.render({ container: scaled, target, clear: true });
     } catch (error) {

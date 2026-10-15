@@ -12,7 +12,7 @@ const M = 2147483647;
  * 2^31 - 1, a seed of 0 taken as 1 and one under 0 as -seed + 1 (all 25
  * pixels Ruffle's bitmapdata_getvector records of noise(0) match).
  */
-export class ParkMiller {
+class ParkMiller {
   private x: number;
 
   constructor(seed: number) {
@@ -210,7 +210,9 @@ export function merge(
 /**
  * The source rect's pixels against the destination's at the point, both
  * clipped and unmultiplied, each destination pixel set to what `f` makes
- * of the pair; from a copy where the source is the destination.
+ * of the pair. In place, rows down and pixels along, each read as the
+ * ones before it left it, as Flash does: a move down or right repeats what
+ * it wrote.
  */
 function forEachCopied(
   store: BitmapStore,
@@ -234,12 +236,13 @@ function forEachCopied(
 
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
-  const [pixels, pw, ox, oy] = readFrom(source, store, sx, sy, d.width, d.height);
+  const pixels = source.pixels;
+  const into = store.pixels;
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
-      const p = unmultiply(pixels[(sy - oy + row) * pw + sx - ox + i]);
-      store.pixels[to] = store.premultiplied(f(p, unmultiply(store.pixels[to])));
+      const p = unmultiply(pixels[(sy + row) * source.width + sx + i]);
+      into[to] = store.premultiplied(f(p, unmultiply(into[to])));
     }
   }
 
@@ -358,6 +361,23 @@ export function perlinNoise(
 /** scroll: the pixels moved by (x, y); what nothing moved onto keeps its old pixels. */
 export function scroll(store: BitmapStore, x: number, y: number): void {
   const { width, height } = store;
+  // Nothing moves: the pixels are left where they are, on the GPU or not, and
+  // a GPU copy that holds the newest stays current, or the next move on it
+  // would bring the store back and leave the CPU's copy behind.
+  if (x === 0 && y === 0) {
+    if (!store.onGpu(() => true)) {
+      store.changed();
+    }
+
+    return;
+  }
+
+  // The pixels that stay within the store, moved on the GPU where it holds the newest.
+  const moved = store.clip({ x: -x, y: -y, width, height });
+  if (store.onGpu((copy) => !moved || copy.copy(store, moved, moved.x + x, moved.y + y))) {
+    return;
+  }
+
   const old = store.pixels.slice();
   for (let row = 0; row < height; row++) {
     const sy = row - y;
@@ -426,17 +446,19 @@ export function threshold(
 
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
-  const [pixels, pw, ox, oy] = readFrom(source, store, sx, sy, d.width, d.height);
+  // In place, each pixel read as the ones before it left it (forEachCopied).
+  const pixels = source.pixels;
+  const into = store.pixels;
   const fill = store.premultiplied(color >>> 0);
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
-      const raw = pixels[(sy - oy + row) * pw + sx - ox + i];
+      const raw = pixels[(sy + row) * source.width + sx + i];
       if (test((unmultiply(raw) & mask) >>> 0, target)) {
-        store.pixels[to] = fill;
+        into[to] = fill;
         count++;
       } else if (copySource) {
-        store.pixels[to] = store.transparent ? raw : (raw | 0xff000000) >>> 0;
+        into[to] = store.transparent ? raw : (raw | 0xff000000) >>> 0;
       }
     }
   }
@@ -576,8 +598,10 @@ function bitsFor(n: number): number {
  * pixel at the origin too, which no state stands for, and so n calls of
  * 1 write n + 1 (Ruffle's bitmapdata_pixeldissolve); a seed past the
  * generator's states is taken modulo 2^bits - 1, and 0 starts at the tap. A
- * pixel takes the fill colour where the source is the destination, else
- * the source's; a rect a pixel high or wide dissolves nothing.
+ * pixel takes the fill colour where the source is the destination, and
+ * there it is the source rect that dissolves, the point aside, though
+ * clipped as a copy's; else the source's pixel. A rect a pixel high or
+ * wide dissolves nothing.
  */
 export function pixelDissolve(
   store: BitmapStore,
@@ -625,8 +649,9 @@ export function pixelDissolve(
     const py = Math.floor(state / 2 ** bw);
     const sx = rx + px;
     const sy = ry + py;
-    const tx = dx + px;
-    const ty = dy + py;
+    // In place, Flash fills the source rect's pixels, wherever the point is.
+    const tx = source === store ? sx : dx + px;
+    const ty = source === store ? sy : dy + py;
     if (
       sx < 0 ||
       sy < 0 ||
@@ -672,32 +697,6 @@ export function pixelDissolve(
 
   store.changed();
   return s;
-}
-
-/**
- * The pixels a copy reads, with their row width and origin: the source's
- * own, or where the source is the destination, a copy of the rect alone,
- * so a one-pixel operation does not copy the whole store.
- */
-function readFrom(
-  source: BitmapStore,
-  store: BitmapStore,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-): [Uint32Array, number, number, number] {
-  if (source !== store) {
-    return [source.pixels, source.width, 0, 0];
-  }
-
-  const copy = new Uint32Array(w * h);
-  for (let row = 0; row < h; row++) {
-    const from = (y + row) * source.width + x;
-    copy.set(source.pixels.subarray(from, from + w), row * w);
-  }
-
-  return [copy, w, x, y];
 }
 
 /** An affine matrix as Flash's flash.geom.Matrix has it: x' = a x + c y + tx, y' = b x + d y + ty. */

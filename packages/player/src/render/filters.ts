@@ -9,7 +9,11 @@
 // sums its taps' straight colour over the object's pixels and one more
 // right and down, as BitmapData.applyFilter does. WebGL
 // alone: each pass is a filter of its own.
+
+import type { ColorTransform } from "@swf2es/format";
 import {
+  type BLEND_MODES,
+  type Bounds,
   BufferImageSource,
   type Container,
   Filter,
@@ -24,6 +28,7 @@ import {
 } from "pixi.js";
 import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
+import type { AreaKeeper, PaddingFitter } from "./blend.js";
 
 const VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -108,35 +113,41 @@ function blur(
   // Not a stage pixel's texels: on a stage shown larger than its size those strode over texels,
   // blurring past the padding, which cut the blur off.
   const step = 1 / input.source.resolution;
-  const runs: [number, number, number][] = [];
-  for (let i = 0; i < quality; i++) {
-    if (blurX > 1) {
-      runs.push([step, 0, blurX * texels]);
-    }
-
-    if (blurY > 1) {
-      runs.push([0, step, blurY * texels]);
-    }
-  }
-
-  if (runs.length === 0) {
+  // Each quality's run across, then down, of those wider than a texel; counted, not listed, as
+  // every glow's and shadow's passes come here on every frame they are drawn.
+  const across = blurX > 1;
+  const down = blurY > 1;
+  const each = (across ? 1 : 0) + (down ? 1 : 0);
+  const runs = quality * each;
+  if (runs === 0) {
     pass.set(1, 0, 1);
     system.applyFilter(pass, input, output, clear);
     return;
   }
 
-  const temps = [TexturePool.getSameSizeTexture(input), TexturePool.getSameSizeTexture(input)];
+  // Between the runs, two textures in turn, the second only where a third run needs one.
+  const first = runs > 1 ? TexturePool.getSameSizeTexture(input) : null;
+  const second = runs > 2 ? TexturePool.getSameSizeTexture(input) : null;
   let from = input;
-  for (const [k, [dx, dy, width]] of runs.entries()) {
-    pass.set(dx, dy, width);
-    const last = k === runs.length - 1;
-    const to = last ? output : temps[k % 2];
+  for (let k = 0; k < runs; k++) {
+    if (across && (!down || k % 2 === 0)) {
+      pass.set(step, 0, blurX * texels);
+    } else {
+      pass.set(0, step, blurY * texels);
+    }
+
+    const last = k === runs - 1;
+    const to = last ? output : ((k % 2 === 0 ? first : second) as Texture);
     system.applyFilter(pass, from, to, last ? clear : true);
     from = to as Texture;
   }
 
-  for (const t of temps) {
-    TexturePool.returnTexture(t);
+  if (first) {
+    TexturePool.returnTexture(first);
+  }
+
+  if (second) {
+    TexturePool.returnTexture(second);
   }
 }
 
@@ -145,6 +156,15 @@ function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, un
   const radians = ((f.angle || 0) * Math.PI) / 180;
   offset[0] = distance * Math.cos(radians) * units;
   offset[1] = distance * Math.sin(radians) * units;
+}
+
+/**
+ * A distance as far as it pads: NaN none; Infinity, or the -8388866
+ * generateFilterRect makes of NaN, as far as a GPU's texture could be,
+ * which the chain fits to what this one can draw (FilterChain.fitPadding).
+ */
+function paddedDistance(distance: number): number {
+  return Number.isNaN(distance) ? 0 : Math.max(-(2 ** 24), Math.min(2 ** 24, distance));
 }
 
 /**
@@ -296,7 +316,7 @@ class GlowFilter extends BlurredFilter {
         },
       },
     });
-    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(paddedDistance(distance));
     this.padding = Math.ceil(this.reach);
     this.distance = distance;
   }
@@ -401,7 +421,7 @@ class BevelFilter extends BlurredFilter {
         },
       },
     });
-    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(distance);
+    this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2 + Math.abs(paddedDistance(distance));
     this.padding = Math.ceil(this.reach);
   }
 
@@ -548,7 +568,13 @@ class GradientFilter extends BlurredFilter {
     });
     this.gradient = gradient;
     // The rect's growth each way, as applyFilter's: left, top, right, bottom.
-    const rect = filterRect({ x: 0, y: 0, width: 1, height: 1 }, f);
+    const rect = filterRect(
+      { x: 0, y: 0, width: 1, height: 1 },
+      {
+        ...f,
+        distance: paddedDistance(f.distance),
+      },
+    );
     this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
     this.reach = Math.max(...this.grows) + 1;
     this.padding = this.reach;
@@ -1020,13 +1046,20 @@ export function displayFilters(
  * the padding of it and the filters after it.
  */
 function scaleFilters(filters: readonly Filter[], units: number): void {
-  let inset = 0;
-  for (let i = filters.length - 1; i >= 0; i--) {
-    const filter = filters[i];
+  for (const filter of filters) {
     if (filter instanceof FlashFilter) {
       filter.setUnits(units);
     }
+  }
 
+  insetFilters(filters);
+}
+
+/** Each filter that reads the object's own pixels told how far in they start: its and the later filters' padding. */
+function insetFilters(filters: readonly Filter[]): void {
+  let inset = 0;
+  for (let i = filters.length - 1; i >= 0; i--) {
+    const filter = filters[i];
     inset += filter.padding;
     if (
       filter instanceof ConvolutionFilter ||
@@ -1038,12 +1071,38 @@ function scaleFilters(filters: readonly Filter[], units: number): void {
   }
 }
 
+// The chain's output, as its object's colour transform colours it where it has one: each pixel's
+// straight colour multiplied and offset, clamped; a clear pixel stays clear, as a bitmap's does.
 const COPY = `in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
+uniform float uColored;
+uniform vec4 uMul;
+uniform vec4 uAdd;
 void main(void) {
-  finalColor = texture(uTexture, vTextureCoord);
+  vec4 c = texture(uTexture, vTextureCoord);
+  if (uColored > 0.5) {
+    if (c.a > 0.0) {
+      vec4 t = clamp(vec4(c.rgb / c.a, c.a) * uMul + uAdd, 0.0, 1.0);
+      c = vec4(t.rgb * t.a, t.a);
+    }
+  }
+  finalColor = c;
 }`;
+
+/** A chain's object's area on the stage, and its transform on the stage then. */
+interface Measured {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tx: number;
+  ty: number;
+}
 
 /**
  * What a chain's output depends on beyond its object: its input's size
@@ -1075,14 +1134,55 @@ function sameInput(a: Input, b: Input): boolean {
  * A display object's filters as one, their output kept and drawn again
  * while nothing they were run on changed, as Flash caches a filtered
  * object as a bitmap: the object, all below it, its transform but for a
- * move, the colour and alpha it is drawn in, and how much of it the
- * screen shows. The owner calls `changed()` for what Pixi cannot see.
+ * move, and how much of it the screen shows; its colour is the output's
+ * (recolor). The owner calls `changed()` for what Pixi cannot see.
  * One changing frame after frame is filtered straight to the target,
  * with no copy kept; so is one that `keeps` not, drawn once.
  */
-export class FilterChain extends Filter {
+/** Each renderer's largest texture side, asked once. */
+const textureLimits = new WeakMap<object, number>();
+
+/** The largest texture side `renderer` makes: WebGL's MAX_TEXTURE_SIZE, WebGPU's limit, else 4096. */
+function textureLimit(renderer: FilterSystem["renderer"]): number {
+  let limit = textureLimits.get(renderer);
+  if (limit === undefined) {
+    const r = renderer as unknown as {
+      gl?: WebGLRenderingContext;
+      gpu?: { device?: { limits?: { maxTextureDimension2D?: number } } };
+    };
+    limit =
+      (r.gl?.getParameter(r.gl.MAX_TEXTURE_SIZE) as number | undefined) ??
+      r.gpu?.device?.limits?.maxTextureDimension2D ??
+      4096;
+    textureLimits.set(renderer, limit);
+  }
+
+  return limit;
+}
+
+export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
+  /** The input to be compared with it, which then becomes it. */
+  private next: Input = { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
+  /**
+   * The area its object was last measured at on the stage, and the
+   * object's transform on the stage then; null till measured again.
+   */
+  private area: Measured | null = null;
+  /** What `area` points to when it is set, filled again at each measure. */
+  private readonly measured: Measured = {
+    minX: 0,
+    minY: 0,
+    maxX: 0,
+    maxY: 0,
+    a: 0,
+    b: 0,
+    c: 0,
+    d: 0,
+    tx: 0,
+    ty: 0,
+  };
   private kept: Texture | null = null;
   private stale = true;
   /** Runs in a row its object changed for. */
@@ -1097,7 +1197,13 @@ export class FilterChain extends Filter {
   ) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
-      resources: {},
+      resources: {
+        colorUniforms: {
+          uColored: { value: 0, type: "f32" },
+          uMul: { value: new Float32Array([1, 1, 1, 1]), type: "vec4<f32>" },
+          uAdd: { value: new Float32Array(4), type: "vec4<f32>" },
+        },
+      },
     });
     this.rescale(units);
     this.resolution = "inherit";
@@ -1108,9 +1214,59 @@ export class FilterChain extends Filter {
     this.antialias = "inherit";
   }
 
-  /** What it was run on changed: run it again. */
+  /** What it was run on changed: run it again, and measure it again. */
   changed(): void {
     this.stale = true;
+    this.area = null;
+  }
+
+  /**
+   * The area kept, moved as the object moved: while nothing in the object
+   * changed (`changed`) and its transform on the stage only moved, all it
+   * draws moved alike, and so did its bounds.
+   */
+  keptArea(container: Container, bounds: Bounds): boolean {
+    const area = this.area;
+    if (!area || container !== this.owner) {
+      return false;
+    }
+
+    const m = container.worldTransform;
+    if (m.a !== area.a || m.b !== area.b || m.c !== area.c || m.d !== area.d) {
+      return false;
+    }
+
+    const dx = m.tx - area.tx;
+    const dy = m.ty - area.ty;
+    bounds.minX = area.minX + dx;
+    bounds.minY = area.minY + dy;
+    bounds.maxX = area.maxX + dx;
+    bounds.maxY = area.maxY + dy;
+    return true;
+  }
+
+  keepArea(container: Container, bounds: Bounds): void {
+    // A view drawn once measures once; an object that draws nothing is placed by its group, not by
+    // itself.
+    if (!this.keeps || container !== this.owner || !(bounds.width > 0 && bounds.height > 0)) {
+      this.area = null;
+      return;
+    }
+
+    // In place: a moving object is measured again on every frame.
+    const m = container.worldTransform;
+    const area = this.measured;
+    area.minX = bounds.minX;
+    area.minY = bounds.minY;
+    area.maxX = bounds.maxX;
+    area.maxY = bounds.maxY;
+    area.a = m.a;
+    area.b = m.b;
+    area.c = m.c;
+    area.d = m.d;
+    area.tx = m.tx;
+    area.ty = m.ty;
+    this.area = area;
   }
 
   /** The target's units to a pixel of the stage its filters are drawn at. */
@@ -1122,36 +1278,138 @@ export class FilterChain extends Filter {
   rescale(units: number): void {
     this.drawnAt = units;
     scaleFilters(this.filters, units);
-    this.padding = this.filters.reduce((sum, f) => sum + f.padding, 0);
+    this.wanted = this.filters.map((f) => f.padding);
+    this.padding = this.wanted.reduce((sum, p) => sum + p, 0);
     this.stale = true;
+    this.area = null;
+  }
+
+  /** Each filter's padding as its reach asks, before fitPadding cuts it to what can be drawn. */
+  private wanted: number[] = [];
+
+  /**
+   * The filters' padding as their reach asks, where the texture the object
+   * is filtered in, its area within the screen and twice the padding at
+   * the target's resolution, fits the renderer's largest; past that, cut
+   * alike from the furthest reaching down to what fits, as a shadow cast
+   * 1e9 away, or Infinity, asks. What is cut lies past the screen, but for
+   * an object off it whose shadow is not.
+   */
+  fitPadding(bounds: Bounds, system: FilterSystem): void {
+    const renderer = system.renderer;
+    const target = renderer.renderTarget;
+    const resolution = target.rootRenderTarget.colorTexture.source.resolution;
+    const viewport = target.rootViewPort;
+    // As the filter system clips the area before it pads it.
+    const width = Math.min(bounds.maxX, viewport.width / resolution) - Math.max(bounds.minX, 0);
+    const height = Math.min(bounds.maxY, viewport.height / resolution) - Math.max(bounds.minY, 0);
+    const room =
+      Math.floor((textureLimit(renderer) / resolution - Math.max(width, height, 0)) / 2) - 2;
+    const wanted = this.wanted;
+    let total = wanted.reduce((sum, p) => sum + p, 0);
+    // The most any one filter pads: all they want where it fits, else the level that fits.
+    let cap = Infinity;
+    if (total > room) {
+      const sorted = [...wanted].sort((a, b) => a - b);
+      let below = 0;
+      cap = 0;
+      for (let i = 0; i < sorted.length; i++) {
+        const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
+        if (level <= sorted[i]) {
+          cap = Math.max(0, level);
+          break;
+        }
+
+        below += sorted[i];
+      }
+    }
+
+    let changed = false;
+    total = 0;
+    for (let i = 0; i < this.filters.length; i++) {
+      const padding = Math.min(wanted[i], cap);
+      changed ||= this.filters[i].padding !== padding;
+      this.filters[i].padding = padding;
+      total += padding;
+    }
+
+    if (changed) {
+      insetFilters(this.filters);
+    }
+
+    this.padding = total;
+  }
+
+  /**
+   * Its result blended over what is below in `mode`, by the GPU's own
+   * blending as its last pass draws it, where that is Flash's blend
+   * (render/view.ts): no copy of what is below, nor a blend filter after it.
+   */
+  blendOver(mode: BLEND_MODES): void {
+    this.blendMode = mode;
+  }
+
+  /** Whether its output is drawn coloured (recolor), which takes a pass of its own. */
+  private colored = false;
+
+  /**
+   * Its output drawn in `color`, its object's colour transform from the stage down (or from the
+   * filtered object it is in), as Flash colours a filtered object's bitmap: the glow and the
+   * shadow too, and not what they are run on. What it kept stands.
+   */
+  recolor(color: ColorTransform | null): void {
+    const u = this.resources.colorUniforms.uniforms;
+    // A placement's transform that changes nothing takes no pass: most filtered objects have one.
+    this.colored =
+      color !== null &&
+      !(
+        color.rMul === 1 &&
+        color.gMul === 1 &&
+        color.bMul === 1 &&
+        color.aMul === 1 &&
+        color.rAdd === 0 &&
+        color.gAdd === 0 &&
+        color.bAdd === 0 &&
+        color.aAdd === 0
+      );
+    u.uColored = this.colored ? 1 : 0;
+    if (color && this.colored) {
+      u.uMul[0] = color.rMul;
+      u.uMul[1] = color.gMul;
+      u.uMul[2] = color.bMul;
+      u.uMul[3] = color.aMul;
+      u.uAdd[0] = color.rAdd / 255;
+      u.uAdd[1] = color.gAdd / 255;
+      u.uAdd[2] = color.bAdd / 255;
+      u.uAdd[3] = color.aAdd / 255;
+    }
   }
 
   /** The output kept let go of, as its object leaves the display list. */
   forget(): void {
     this.release();
     this.ran = null;
+    this.area = null;
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     if (!this.keeps) {
-      this.run(system, input, output, clear);
+      this.runOver(system, input, output, clear);
       return;
     }
 
     const resolution = input.source.resolution;
-    // The input's corner on the screen, which Pixi 8 keeps to itself.
-    const bounds = (
-      system as unknown as { _activeFilterData: { bounds: { minX: number; minY: number } } }
-    )._activeFilterData.bounds;
+    // The input's corner on the screen.
+    const bounds = system.activeBounds as Bounds;
     const m = this.owner.worldTransform;
-    const now: Input = {
-      width: input.frame.width,
-      height: input.frame.height,
-      resolution,
-      dx: (bounds.minX - m.tx) * resolution,
-      dy: (bounds.minY - m.ty) * resolution,
-      colorAlpha: this.owner.groupColorAlpha,
-    };
+    // Filled in place, and swapped with `ran` as it becomes that: a chain runs on every frame.
+    const now = this.next;
+    now.width = input.frame.width;
+    now.height = input.frame.height;
+    now.resolution = resolution;
+    now.dx = (bounds.minX - m.tx) * resolution;
+    now.dy = (bounds.minY - m.ty) * resolution;
+    now.colorAlpha = this.owner.groupColorAlpha;
     const same = this.ran !== null && sameInput(this.ran, now);
     if (same && !this.stale && this.kept) {
       this.changing = 0;
@@ -1162,10 +1420,11 @@ export class FilterChain extends Filter {
     // Unchanged but not kept, as after being filtered straight: kept now.
     this.changing = this.stale || !same ? this.changing + 1 : 0;
     this.stale = false;
+    this.next = this.ran ?? { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
     this.ran = now;
     this.release();
     if (this.changing > 1) {
-      this.run(system, input, output, clear);
+      this.runOver(system, input, output, clear);
       return;
     }
 
@@ -1173,6 +1432,28 @@ export class FilterChain extends Filter {
     this.run(system, input, kept, true);
     this.kept = kept;
     system.applyFilter(this, kept, output, clear);
+  }
+
+  /**
+   * Run into `output`; blended over it or coloured, into a texture of the
+   * pool first, which its own pass then blends and colours: the filters'
+   * last passes draw as each of them blends, not as the chain does.
+   */
+  private runOver(
+    system: FilterSystem,
+    input: Texture,
+    output: RenderSurface,
+    clear: boolean,
+  ): void {
+    if (this.blendMode === "normal" && !this.colored) {
+      this.run(system, input, output, clear);
+      return;
+    }
+
+    const result = TexturePool.getSameSizeTexture(input);
+    this.run(system, input, result, true);
+    system.applyFilter(this, result, output, clear);
+    TexturePool.returnTexture(result);
   }
 
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
@@ -1183,21 +1464,20 @@ export class FilterChain extends Filter {
       return;
     }
 
-    const temps = [TexturePool.getSameSizeTexture(input)];
-    if (filters.length > 2) {
-      temps.push(TexturePool.getSameSizeTexture(input));
-    }
-
+    // Two textures in turn between them, the second only for a third filter.
+    const first = TexturePool.getSameSizeTexture(input);
+    const second = filters.length > 2 ? TexturePool.getSameSizeTexture(input) : first;
     let from = input;
     for (let i = 0; i < filters.length - 1; i++) {
-      const to = temps[i % temps.length];
+      const to = i % 2 === 0 ? first : second;
       filters[i].apply(system, from, to, true);
       from = to;
     }
 
     filters[filters.length - 1].apply(system, from, output, clear);
-    for (const t of temps) {
-      TexturePool.returnTexture(t);
+    TexturePool.returnTexture(first);
+    if (second !== first) {
+      TexturePool.returnTexture(second);
     }
   }
 

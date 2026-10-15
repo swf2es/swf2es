@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
   Atlas,
+  type AtlasStore,
   addToRun,
   type Packed,
   type TableInstruction,
@@ -28,6 +29,36 @@ type Run = Parameters<typeof addToRun>;
 
 const WHITE = 1;
 
+/**
+ * A store as the GPU's buffers keep the atlas, in arrays to read back, and
+ * the calls made to it: each resize's sizes and what it kept, each write's place and length.
+ */
+function store(): AtlasStore & { vertices: Float32Array; indices: Uint32Array; calls: string[] } {
+  const out = {
+    vertices: new Float32Array(0),
+    indices: new Uint32Array(0),
+    calls: [] as string[],
+    resize(vertices: number, indices: number, keptVertices: number, keptIndices: number) {
+      const v = new Float32Array(vertices * 6);
+      v.set(out.vertices.subarray(0, keptVertices * 6));
+      const i = new Uint32Array(indices);
+      i.set(out.indices.subarray(0, keptIndices));
+      out.vertices = v;
+      out.indices = i;
+      out.calls.push(`resize ${vertices} ${indices} keeping ${keptVertices} ${keptIndices}`);
+    },
+    writeVertices(at: number, data: Float32Array, floats: number) {
+      out.vertices.set(data.subarray(0, floats), at * 6);
+      out.calls.push(`vertices ${at} ${floats / 6}`);
+    },
+    writeIndices(at: number, data: Uint32Array, count: number) {
+      out.indices.set(data.subarray(0, count), at);
+      out.calls.push(`indices ${at} ${count}`);
+    },
+  };
+  return out;
+}
+
 /** A context's render data as Pixi packs it: `vertices` vertices of six floats, and its batches. */
 function packed(
   vertices: number,
@@ -44,7 +75,10 @@ function packed(
     },
     instructions: {
       instructionSize: batches.length,
+      // Pixi's batches, as far as the atlas reads them.
       instructions: batches.map((b) => ({
+        renderPipeId: "batch",
+        canBundle: true,
         start: b.start,
         size: b.size,
         topology: b.topology ?? "triangle-list",
@@ -55,7 +89,8 @@ function packed(
 }
 
 test("contexts go into the atlas once, their indices offset by the vertices before them", () => {
-  const atlas = new Atlas(WHITE);
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
   const a = {};
   const b = {};
 
@@ -75,29 +110,61 @@ test("contexts go into the atlas once, their indices offset by the vertices befo
   assert.deepEqual(first?.offsets, [0]);
   assert.deepEqual(second?.counts, [3, 3]);
   assert.deepEqual(second?.offsets, [3 * 4, 6 * 4]);
-  assert.deepEqual([...atlas.indices.subarray(0, atlas.indexCount)], [0, 1, 2, 3, 4, 5, 3, 5, 6]);
   assert.equal(atlas.vertexCount, 7);
-  assert.equal(atlas.vertices[3 * 6], 0);
-  assert.equal(atlas.whole, true);
+  // Staged until sent, then written in one call each.
+  assert.deepEqual(gpu.calls, ["resize 4096 12288 keeping 0 0"]);
+  atlas.send();
+  assert.deepEqual(gpu.calls.slice(1), ["vertices 0 7", "indices 0 9"]);
+  assert.deepEqual([...gpu.indices.subarray(0, 9)], [0, 1, 2, 3, 4, 5, 3, 5, 6]);
+  assert.equal(gpu.vertices[3 * 6], 0);
+  assert.equal(gpu.vertices[3 * 6 + 1], 1);
 
   // Sent: asked again, a context is where it was, nothing copied.
-  atlas.whole = false;
-  atlas.sentVertices = atlas.vertexCount;
-  atlas.sentIndices = atlas.indexCount;
   assert.equal(atlas.place(a, packed(3, [0, 1, 2], [{ start: 0, size: 3 }])), first);
-  assert.equal(atlas.vertexCount, atlas.sentVertices);
+  atlas.send();
+  assert.equal(gpu.calls.length, 3);
 
-  // One more goes after what was sent, for that alone to go up; one past the arrays, all of it.
+  // One more goes after what was sent, for that alone to go up.
   atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3 }]));
-  assert.equal(atlas.vertexCount, 10);
-  assert.equal(atlas.whole, false);
+  atlas.send();
+  assert.deepEqual(gpu.calls.slice(3), ["vertices 7 3", "indices 9 3"]);
+  assert.deepEqual([...gpu.indices.subarray(9, 12)], [7, 8, 9]);
+
+  // One past the store's room: what was staged goes first, then the store grows keeping it.
+  atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3 }]));
   atlas.place({}, packed(5000, [0, 1, 2], [{ start: 0, size: 3 }]));
-  assert.equal(atlas.whole, true);
+  assert.deepEqual(gpu.calls.slice(5), [
+    "vertices 10 3",
+    "indices 12 3",
+    "resize 6144 12288 keeping 13 15",
+  ]);
+  atlas.send();
+  assert.deepEqual([...gpu.indices.subarray(12, 18)], [10, 11, 12, 13, 14, 15]);
+  assert.equal(gpu.vertices[13 * 6 + 5], 5);
+  atlas.destroy();
+});
+
+test("a context larger than the stage goes straight in, after what was staged", () => {
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
+  atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3 }]));
+  atlas.place({}, packed(70000, [0, 1, 2], [{ start: 0, size: 3 }]));
+  assert.deepEqual(gpu.calls, [
+    "resize 4096 12288 keeping 0 0",
+    "vertices 0 3",
+    "indices 0 3",
+    "resize 70003 12288 keeping 3 3",
+    "vertices 3 70000",
+    "indices 3 3",
+  ]);
+  assert.deepEqual([...gpu.indices.subarray(0, 6)], [0, 1, 2, 3, 4, 5]);
+  atlas.send();
+  assert.equal(gpu.calls.length, 6);
   atlas.destroy();
 });
 
 test("a context with a texture or another topology is not the table's", () => {
-  const atlas = new Atlas(WHITE);
+  const atlas = new Atlas(WHITE, store());
 
   assert.equal(atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3, texture: 7 }])), null);
   assert.equal(
@@ -109,7 +176,7 @@ test("a context with a texture or another topology is not the table's", () => {
 });
 
 test("the atlas starts again only once released contexts leave more holes than live vertices", () => {
-  const atlas = new Atlas(WHITE);
+  const atlas = new Atlas(WHITE, store());
   const big = 40000;
   const indices = [0, 1, 2];
   const keys = [{}, {}, {}];
@@ -129,6 +196,56 @@ test("the atlas starts again only once released contexts leave more holes than l
   const again = atlas.place(keys[2], packed(big, indices, [{ start: 0, size: 3 }]));
   assert.deepEqual(again?.offsets, [0]);
   assert.equal(atlas.vertexCount, big);
+  atlas.destroy();
+});
+
+test("the atlas starts again in a store cut down to what was live, and grows by half", () => {
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
+  const keys = Array.from({ length: 8 }, () => ({}));
+  const big = 40000;
+  for (const key of keys) {
+    atlas.place(key, packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  }
+
+  const peak = atlas.capacity;
+  assert.ok(peak >= 8 * big && peak < 8 * big * 1.5 + big);
+  for (const key of keys.slice(1)) {
+    atlas.release(key);
+  }
+
+  atlas.compact();
+  assert.equal(atlas.vertexCount, 0);
+  assert.equal(atlas.capacity, big * 1.5);
+  assert.equal(atlas.indexCapacity, 4096 * 3);
+
+  // Placed again, the one left fits, in a store made again at that size; more grows by half.
+  gpu.calls.length = 0;
+  atlas.place(keys[0], packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  assert.equal(atlas.capacity, big * 1.5);
+  assert.deepEqual(gpu.calls, [`resize ${big * 1.5} 12288 keeping 0 0`]);
+  atlas.place({}, packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  assert.equal(atlas.capacity, big * 1.5 * 1.5);
+  atlas.destroy();
+});
+
+test("a lost context's atlas makes room again before writing, whatever its size", () => {
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
+  atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3 }]));
+  atlas.send();
+  atlas.lost();
+  assert.equal(atlas.vertexCount, 0);
+  atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3 }]));
+  atlas.send();
+  assert.deepEqual(gpu.calls, [
+    "resize 4096 12288 keeping 0 0",
+    "vertices 0 3",
+    "indices 0 3",
+    "resize 4096 12288 keeping 0 0",
+    "vertices 0 3",
+    "indices 0 3",
+  ]);
   atlas.destroy();
 });
 
@@ -153,34 +270,21 @@ test("Graphics added one after another share a run, and anything between them st
   assert.deepEqual((set.instructions[0] as TableInstruction).items, [c]);
 });
 
-test("rows go up to texture unit 0, even where a render pass left another active", () => {
-  // Pixi's texture system as far as the table uses it: a bind of what a unit
-  // holds already changes nothing, so the unit a pass activated to unbind its
-  // target stays active.
-  const units: unknown[] = [];
-  let active = 0;
-  const uploads: number[] = [];
+test("rows go up bound for an upload to texture unit 0", () => {
+  // Bound already, Pixi's bind leaves the unit a pass activated to unbind
+  // its target active: the table binds for an upload, which activates it.
+  const steps: string[] = [];
   const texture = {
-    _boundTextures: units,
-    _premultiplyAlpha: false,
-    _activateLocation(location: number) {
-      active = location;
-    },
-    bind(source: unknown, location: number) {
-      if (units[location] !== source) {
-        units[location] = source;
-        active = location;
-      }
+    bindForUpload(_source: unknown, location: number) {
+      steps.push(`bind ${location}`);
     },
   };
   const gl = {
     TEXTURE_2D: 1,
     RGBA: 2,
     FLOAT: 3,
-    UNPACK_PREMULTIPLY_ALPHA_WEBGL: 4,
-    pixelStorei() {},
     texSubImage2D() {
-      uploads.push(active);
+      steps.push("upload");
     },
   };
   const renderer = {
@@ -193,15 +297,13 @@ test("rows go up to texture unit 0, even where a render pass left another active
   const upload = (pipe as unknown as { upload(from: number, to: number): void }).upload.bind(pipe);
 
   upload(0, 1);
-  // A pass's target, bound at unit 1 as a back texture, unbound: unit 1 active.
-  active = 1;
   upload(1, 2);
-  assert.deepEqual(uploads, [0, 0]);
+  assert.deepEqual(steps, ["bind 0", "upload", "bind 0", "upload"]);
 });
 
 test("a run's rows go up in one call: the part of their line, or the whole lines they span", () => {
   const calls: number[][] = [];
-  const texture = { _premultiplyAlpha: false, _activateLocation() {}, bind() {} };
+  const texture = { bindForUpload() {} };
   const gl = {
     TEXTURE_2D: 1,
     RGBA: 2,
@@ -220,13 +322,13 @@ test("a run's rows go up in one call: the part of their line, or the whole lines
   const pipe = new TablePipe(renderer as unknown as ConstructorParameters<typeof TablePipe>[0]);
   const upload = (pipe as unknown as { upload(from: number, to: number): void }).upload.bind(pipe);
 
-  // A line holds 256 rows of 4 texels, 16 floats a row.
+  // A line holds 256 rows of 5 texels, 20 floats a row.
   upload(10, 20);
   upload(250, 300);
   upload(256, 512);
   assert.deepEqual(calls, [
-    [40, 0, 40, 1, 160],
-    [0, 0, 1024, 2, 0],
-    [0, 1, 1024, 1, 256 * 16],
+    [50, 0, 50, 1, 200],
+    [0, 0, 1280, 2, 0],
+    [0, 1, 1280, 1, 256 * 20],
   ]);
 });

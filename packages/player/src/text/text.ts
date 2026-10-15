@@ -54,7 +54,7 @@ export const DEFAULT_FORMAT: CharFormat = {
   display: "block",
 };
 
-export const FORMAT_KEYS = Object.keys(DEFAULT_FORMAT) as (keyof CharFormat)[];
+const FORMAT_KEYS = Object.keys(DEFAULT_FORMAT) as (keyof CharFormat)[];
 
 /** A TextFormat that sets nothing. */
 export function emptyFormat(): PartialFormat {

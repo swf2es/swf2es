@@ -95,22 +95,98 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC) | —                        |
+| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
-| `runtime` | AS3 language semantics called by generated code (AVM1 a placeholder) | format               |
+| `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
-| `cli`     | ahead-of-time compiler command: a SWF's modules and a manifest  | format, codegen           |
+| `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
 `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
-(zlib through pako, LZMA through lzma1): ByteArray's `compress` and a SWF's
-body are the same code. `codegen` knows the runtime's function names and signatures
+(zlib through pako; LZMA compressed through lzma1 and decoded by
+`format`'s own `lzma.ts`): ByteArray's `compress` and a SWF's body are the
+same code. The decoder follows the LZMA SDK's specification decoder, as
+avmplus' LzmaDec reads a stream: a properties byte past 224 is refused,
+a dictionary is 4 KB at least, and it fails as soon as it would read past
+the stream's end, so a header's length costs at most some 7000 bytes for
+each of the stream's; a ZWS whose header names more than 8192 times its
+stream is refused before decoding, and `decompressSwfPrefix` decodes a
+SWF's start alone, for its FileAttributes (`fileAttributes`). `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
+
+`format`'s `readActions` lists a SWF's AVM1 action blocks ([avm1.md](avm1.md)):
+DoAction, DoInitAction, a PlaceObject2 or 3's clip actions record by record
+(event flags of 16 bits up to SWF 5 and 32 from 6, keyPress's key code) and
+a button's actions (DefineButton's one, DefineButton2's conditions and key
+codes), each with its owner and its range in the SWF's bytes, in tag order.
+A block's index in that list is a pure function of the bytes, so the JIT and
+the AOT compiler number blocks alike; `readPlace` and `readButton`, given the
+list, give the indices of their own. The records are read as adl reads
+them where it differs from Ruffle: only flags of 0 end a place's records, a
+record runs only for the events the place's field of all events also has,
+and a clip action that runs past its tag stops the whole SWF in Flash as
+the first event of the place's field of all events comes, so its tag has no
+blocks and is listed in `corrupt`, its events in `corruptEvents`. A malformed button action ends
+its button's list and keeps the records before it.
+
+`codegen` compiles that list to one ES module a SWF (`Codegen.compileActions`,
+`assembly/avm1/`): `export default function (rt)` whose `rt.version(v)`
+gives the operations of the SWF's version once, `V`, and which returns an
+entry per block, in the list's order, each the array of its regions'
+functions, the block's code first and then its functions' bodies, each in
+the dispatcher form. A block compiles alone to its entry byte for byte
+(`compileActionBlocks`), as `pnpm determinism` checks; its key
+(`actionsKey`) names the compiler, the version and the SHA-256 of the SWF's
+decompressed bytes. What the module calls, and what is built of it so far,
+is in [avm1.md](avm1.md).
+
+`runtime/src/avm1/` has AVM1's values and their conversions by version
+(`numbers.ts`'s number formatting and string-to-number, Ruffle's,
+translated, which adl traces alike), its arithmetic, comparison, logical,
+bitwise and string actions (`operators.ts`), the operations of each version
+that `rt.version(v)` gives, made once and shared, and the `Host` through
+which they reach the player's display list. An object's `valueOf` and
+`toString`, which the conversions call, are hooks (`objects` in
+`values.ts`) that the steps bringing objects fill. The player's `Avm1`
+(`player/src/avm1/avm1.ts`) compiles a main AVM1 SWF's blocks with the
+same codegen, as `start` loads it, and runs its root's frame blocks as the
+root enters each frame: a `Player` given one, as the web element and the
+test page give an AVM1 SWF with actions, runs them; an ActionScript 3
+SWF's never run.
+
+Apps, in `apps/`, are what people run rather than import: `desktop`, the
+Electron app (see [The desktop app](#the-desktop-app)), and later a browser
+extension. An app may use any package, and no package may use an app; an
+app is private, never published. The boundaries test checks both.
+
+Third-party code swf2es forks lives in `vendor/`, a git submodule each,
+kept apart from `packages/` because it is neither swf2es's code nor under
+its licence, and is built with its own tools rather than `tsc -b`.
+`vendor/pixijs` is [swf2es/pixijs](https://github.com/swf2es/pixijs), PixiJS
+(MIT) pinned to a commit of its `swf2es` branch; its `SWF2ES.md` says why
+and what changes there. It is the workspace package `pixi.js`, under its
+own name and version, so `player` and `web`, the only packages that may use
+it, import `"pixi.js"` as from npm and declare it as `workspace:*`; the
+boundaries test checks both. `.pnpmfile.cjs` trims its manifest to the
+tools its build needs, at the versions of its own `package-lock.json`, and
+`tools/pixijs.ts`, the first step of `pnpm build`, runs its rollup and
+declaration builds for `lib/` and the two bundles the pages load. At the
+fork's first commit the output is byte for byte npm's `pixi.js` 8.21.0 but
+for the bundles' build date, which is the fork commit's.
+
+The player overwrites no method of Pixi's. What is Pixi's own
+behaviour, a bug fix or a memory or speed fix any user of Pixi would
+want, is changed in the fork; what is the player's policy, Flash's
+semantics, when a render group settles, the colour transform's shader,
+runs through extension points the fork adds for it (a pipe's
+`aloneDrawer` and `shaderFor`, a system's `onContextBuilt`,
+`onBuildInstructions` and `filterAreaHook`, and the like), which
+`render/hooks.ts` sets on each renderer the player draws with.
 
 ## Parsing, linking and verifying
 
@@ -345,7 +421,16 @@ which `newclass` builds from the module's layout:
 
 - **Slots** are fields named by slot id (`$0`, `$1`, ...), set to their
   initial values when the object is made, so an early bound slot is one
-  property access and cannot collide with any dynamic name.
+  property access and cannot collide with any dynamic name. They are set by
+  name, by a function the module has for each traits (`fill`, see below):
+  V8 makes an object a dictionary once stores by a computed key give it a
+  seventeenth property, and every access to it a lookup. The function sets
+  the slots highest first, the base's included, so a class's objects keep
+  one shape, and as each class has its own, its stores see that shape
+  alone and stay inline. It is code in the module, not made from text at
+  run time, so a page without 'unsafe-eval' runs it too. Objects of a class
+  of 24 slots were made nine times as fast so, and read four times as
+  fast; of 5 slots, made a third faster.
 - **Methods, getters and setters** are on the prototype, named by dispatch
   id, so `callmethod` is a direct call and overriding is JavaScript's own
   inheritance.
@@ -409,7 +494,14 @@ runtime, `rt`, that returns:
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
-  getters and setters by dispatch id;
+  getters and setters by dispatch id; and, for traits of up to 128 slots,
+  `fill: (o, v) => { o.$n = ...; ... o.$0 = ...; }`, which sets a new
+  object's slots, its base's too. A value is a literal where it is one
+  however the module is compiled, a type's default or a constant of the
+  module's own ABC; a namespace, or a base's constant from another ABC, it
+  takes from `v`, the runtime's initial values by slot. Traits without one,
+  a catch scope's or past 128 slots where V8 keeps no object fast, are set
+  by key;
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
 - **hash** and **linked**: the hash of its ABC and of the ABCs loaded
@@ -739,9 +831,48 @@ cannot judge; Flash's traces in Ruffle's corpus do. A host gives the
 libraries' bytes, and the player compiles them as any ABC, or takes their
 modules from a module cache, as the swf2es command writes them with
 `--emit-libraries`. builtin.abc's AS3 sources are MPL-2.0, and so are its
-compiled modules. `playerglobal` (`flash.*`) is declarations only, so the
-player implements all of it; it is Adobe's, and neither it nor its modules
-ship with swf2es.
+compiled modules.
+
+The playerglobal (`flash.*`) the player loads is its own,
+`playerglobalLibrary`, compiled from `as3/playerglobal/src` by ASC 1 in
+the oracle's image as avmplus compiles its libraries (`tools/playerglobal.ts`,
+`pnpm as3:playerglobal`), into `playerglobal/playerglobal-library.ts`. Each
+public definition of Flash Player's playerglobal has a file there: Ruffle's
+AS3 where both are plain AS3 (MIT OR Apache-2.0, as each file says), else
+Flash Player's API with bodies of swf2es's own over the player's natives.
+A method native in Flash Player's playerglobal is native in ours, which the
+player's TypeScript implements; private natives are declared with the
+signatures it binds. `--check` holds the compiled API to Flash Player's
+(names, version marks, types, defaults, flags), and a unit test holds the
+committed file to its sources; `SWF2ES_PLAYERGLOBAL=adobe` runs the tests on
+Flash Player's own instead. No version mark goes past the reference's 41:
+a builtin's highest mark from 42 up is the VM's internal one
+(`API_FirstInternalMark`), which a higher mark would make public.
+
+### Running ABCs as avmshell does
+
+`swf2es run file.abc [more.abc ...]` (`packages/cli`, `commands/run.ts`)
+is avmshell in node: avmshell's libraries, builtin.abc and
+shell_toplevel.abc (from `oracle/avmplus/generated/`, or `--lib`), each
+compiled by `codegen.wasm` and loaded into one runtime, their scripts run
+on first use; then each ABC in the order given, added to the root domain,
+compiled and its entry point run, as avmshell runs each file once the one
+before has. What they trace and print goes to stdout. An ABC rejected
+with a VerifyError, or an exception nothing catches, is printed there as
+avmshell prints it (`VerifyError: Error #1107`, `TypeError: Error
+#1009`), and ends the run with avmshell's exit status, 1. avmshell's `File`
+reads and writes the working directory. A SWF is refused: its code needs
+the player's playerglobal, which the command does not depend on.
+
+The command and the tests that run ABCs share one host, `runShell` in
+`shell.ts`: one compiler domain for the runtime, each ABC compiled into the
+application domain the runtime loads it into, so that an ABC
+`Domain.loadBytes` loads compiles against what its domain sees, with the
+findings the runtime reports (`RuntimeOptions.compileAbc`). The
+conformance runner and the Tamarin runner give it the test build of
+codegen (`tests/conformance/abc-compiler.ts`), which `pnpm test:checked`
+checks every array access of, a loader that keeps source maps, and for
+Tamarin the builtins' modules compiled once for every test.
 
 ## Compiling ahead of time and caching modules
 
@@ -752,8 +883,9 @@ player adding and compiling ABCs exactly as the command does.
 
 ### Ahead-of-time compilation
 
-`swf2es <file.swf|file.abc> --lib builtin.abc --lib playerglobal.abc [-o
-dir]` (`packages/cli`) compiles a SWF's DoABCs, or a bare ABC, as the
+`swf2es compile <file.swf|file.abc> --lib builtin.abc --lib
+playerglobal.abc [-o dir]` (`packages/cli`, `commands/compile.ts`; a bare
+`swf2es <file>` is the same) compiles a SWF's DoABCs, or a bare ABC, as the
 player compiles them for a SWF it loads as its main movie, so that each
 module is byte for byte the player's (`compileAhead` in `aot.ts`, which
 follows `Code` in `packages/player/src/scripting/code.ts` step by step):
@@ -768,17 +900,20 @@ cases, a SWF of two DoABCs, one lazy, and as3pb's ABC against avmshell's
 libraries, the command's modules, the libraries' included, are the
 player's, which its own `Code.link` compiles in node.
 
-The libraries are the host's (playerglobal is Adobe's and cannot ship),
-so `--lib` names them, in load order; with
-none given, the command takes builtin.abc and playerglobal.abc from
-`tests/player/out/libraries/`, where the player's tests copy them, and
+The libraries are the host's, so `--lib` names them, in load order; the
+command does not depend on the player, so it cannot take the player's
+playerglobalLibrary itself. With none given, it takes builtin.abc
+and playerglobal-swf2es.abc from `tests/player/out/libraries/`, where the
+player's tests write them, and
 says what to pass when they are not there. The player loads only the
 libraries its host gives `loadLibraries`, builtin and playerglobal by
 default: a host that also loads one of the player's own, as
 `airLibrary`, gets the same modules only from a command given the same
-libraries in the same order. An AVM1 SWF, whose FileAttributes lacks the
-ActionScript 3 flag, is refused, as the player never compiles its
-DoABCs, and so is a file that ends inside a DoABC.
+libraries in the same order. A file that ends inside a DoABC is refused.
+An AVM1 SWF, whose FileAttributes lacks the ActionScript 3 flag, compiles
+to one module of its action blocks, `avm1.js`, and takes no library
+(`compileActionsAhead`): the player runs its code as AVM1 and never
+compiles its DoABCs.
 
 It writes a module per ABC, `abc-<n>.js` (`lib-<n>.js` for the libraries
 with `--emit-libraries`), beside it `abc-<n>.log`, what its compile fixed
@@ -788,7 +923,12 @@ identity stamped into `codegen.wasm` (`Codegen.identity`; version 1 named
 it by its file's SHA-256, which is not what keys name); the API version;
 the input's kind, SWF version and SHA-256; and for each library and ABC
 its name, SHA-256, module and log, the module's key and the module's and
-the log's lengths, and for an ABC its lazy flag. The key is the one the
+the log's lengths, and for an ABC its lazy flag. An AVM1 SWF's manifest
+lists no library nor ABC but an `avm1` entry, added without a new
+version since a reader of the others' entries need not know it: its
+module, the SHA-256 of the SWF's decompressed bytes, how many blocks it
+has, and, from a compiler with an identity, its key (`actionsKey`) and
+length. The key is the one the
 player's module cache looks the module up by when it loads the input as
 its main movie, with the same libraries (see Caching modules): codegen's
 `moduleKey`, which both take, so that they cannot drift apart, taken
@@ -1024,10 +1164,12 @@ and the player's paths in this document are relative to it:
   URLStreams ask for through the host and gives it to a frame,
   `symbols.ts` keeps what SymbolClass
   bound classes to, the fonts registered and the sounds' shared decodes,
-  `timers.ts` keeps the clock and the timers that fire by it. `hosts.ts`
+  `timers.ts` keeps the clock and the timers that fire by it,
+  `clipboard.ts` what the clipboard holds and when scripts may touch it.
+  `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
-  shared objects' storage, the platform Capabilities reports) with the
-  browser's defaults, and the interfaces of what only a host supplies
+  shared objects' storage, the platform Capabilities reports, the
+  clipboard's writes) with the browser's defaults, and the interfaces of what only a host supplies
   (ExternalInterface's page, a renderer's draws, fetches, sockets).
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings and what they read back as, bounds and hit
@@ -1043,10 +1185,12 @@ and the player's paths in this document are relative to it:
 - `input/`: the pointer and the keyboard.
 - `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
   fills tessellated (`tessellate.ts`) and lines stroked (`strokes.ts`)
-  into shared contexts, Pixi's pipe and render-group builds patched
-  (`patches.ts`), what the view and Pixi pool and how much (`pools.ts`),
+  into shared contexts, where the player plugs into the Pixi fork's
+  extension points (`hooks.ts`), render groups settling (`settle.ts`),
+  the Graphics that draws a shared context (`shared.ts`), what the view
+  and Pixi pool and how much (`pools.ts`),
   text drawn (`text.ts`), bitmaps' and gradients' textures
-  (`bitmaps.ts`), batchers kept for new groups (`batchers.ts`), the
+  (`bitmaps.ts`), drawTriangles' textured triangles (`triangles.ts`), batchers kept for new groups (`batchers.ts`), the
   transform table, colour transforms, blend modes, filters and resolves
   on the GPU.
 - `playerglobal/`: the `flash.*` classes, a path per package and class,
@@ -1129,7 +1273,14 @@ player object, `dispatchEvent` through the player's parent chain
 (`scripting/events.ts`), and the frame events the player broadcasts.
 The player makes its events of an object put on the list or taken off
 only where a listener on the object or above it would hear them: where
-none does, no script runs, and none could tell.
+none does, no script runs, and none could tell. An event keeps its
+fields in AS3, Event's and its subclasses' private variables, which
+compiled code reads as slots: dispatch writes the target, current target
+and phase into Event's and reads its flags there, by the slots
+`eventFields` finds once (under Flash Player's playerglobal, the fields
+its natives keep). An EventDispatcher made with a target dispatches as
+that target, along its parent chain, its own listeners seeing the target
+as the current one (`event-fields`).
 
 A display object nobody named is named as its AS3 object is made,
 `instance` and the next of one count for the player, which every SWF it
@@ -1167,7 +1318,18 @@ advance, and once for each round of frame scripts, which a busy scene of
 some 13,000 objects felt. A walk reads each object's `frameChildren`, a
 container's own children array, a button's states, one empty list for
 the rest, and its `kind`, not its class, and calls into no object with
-nothing under it. Another round runs only when the last ran a script and
+nothing under it. Each container keeps the list of clips and buttons at
+and under it in that order (`walkList`), with where each clip's own end,
+for one that sits a frame out with all it holds; a clip or container that
+comes, goes or moves under it drops the lists from its parent up, and the
+next walk makes them again, copying those still kept below (a list of
+fewer than 32 is not kept, but walked again within its parent's). A
+shape or text swapped, as a timeline swaps them on every frame, drops
+none. So a frame visits the clips alone, not every container: in
+`walk-bench.ts`'s 13,000 objects a tick went from 284 to 117 µs and a
+round of scripts from 122 to 44, for some 25 bytes an object. A
+button's states, which it changes without its parent knowing, are walked
+as they are. Another round runs only when the last ran a script and
 something a round reads changed since it walked, which `scriptWork`
 counts: a clip's frame, its frame scripts, `makingChildren` or
 `timelineChild`, a children list or a button's states, an object made
@@ -1528,15 +1690,16 @@ query (Ruffle passes that on). A `LoaderContext`'s `parameters` take the place o
 query from the call on, and a value in them that is not a String, null
 included, is refused at the call with `IllegalOperationError` #2196. An
 unload leaves none (the `loader-parameters` case and the node tests).
-The player runs no AVM1, so an AVM1 root's `_root` variables get no
-flashvars.
+The player's AVM1 has no variables yet, so an AVM1 root's `_root`
+variables get no flashvars.
 
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
 the whole of the progress in the call, `PROGRESS` with nothing loaded and
 again with all of it, `bytes` set and `url` still null, and has no
 `OPEN`; a `load` of a URL has `OPEN` once the bytes come. The content
-comes in a later frame, after `ENTER_FRAME` and before `FRAME_CONSTRUCTED`:
+comes in a later frame, for `loadBytes` the next, after `ENTER_FRAME`
+and before `FRAME_CONSTRUCTED`:
 its SWF's code runs, its document class is constructed with `parent` and
 `stage` null and its timeline's first frame in place, it gets `ADDED`
 while it still has no parent, then `url` and `content` are set and it is
@@ -1555,7 +1718,26 @@ SWF's does (`scripting/loads.ts`). Linking is asynchronous (its ABCs are hashed 
 asked for is compiled and linked between frames, in the order asked, and
 each takes its place in the first frame after its code is linked; a host
 that steps frames by hand awaits `Scripting.settled()` between them, as
-the tests do, to see Flash's frame. `SymbolClass` bindings are the
+the tests do, to see Flash's frame. Flash has a `loadBytes`' content in
+the frame after the call whatever its size (the `loader-bytes-frames`
+case): it parses the SWF before that frame's `ENTER_FRAME`, which comes
+late by the parse's time, a few to a few tens of milliseconds in adl for
+0.5 MB of ABC (8 MB of sounds cost nothing). Its timers count that time:
+those due by the frame's slot fire between frames before it, those due
+during the parse fire once each in the frame after `ENTER_FRAME`, a
+repeating one's lost ticks dropped, and the rest at their times after.
+Content counts on the content coming first, as a timer of a second set at
+the call that reads the `Loader`'s child. Compiling such an ABC takes a
+few hundred milliseconds here, seconds on a slow machine, so
+`Player.advance` holds the next frame while a load from bytes due next
+still compiles: the frames stop at the frame's slot and do not catch up
+the time held; the timers count it, but none due after the slot fires
+until the held frame has played, its content made and `INIT` and
+`COMPLETE` told, the call in which the load came included. Each wait
+lasts ten seconds at most, so that a load that never ends does not stop
+the player. Several loads from bytes asked in one frame all come in the
+next, here in the order asked; adl completes them in an order of its
+own, neither that order nor its reverse. `SymbolClass` bindings are the
 library's, since character ids collide across SWFs. The player package
 has no I/O: `load` of a URL asks the host for the bytes through a
 function the `Scripting` is given, with a resolved URL, method, headers,
@@ -1599,12 +1781,16 @@ loads both kinds alike, not adl, whose harness loads only from bytes.
 The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
 movie go to its `Loader`, as Flash has them (the corpus's
 `mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
-frame rate as an AVM1 main SWF's does without scripts. The player has no
-AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
+frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
+many frames as its ShowFrame tags end, whatever its header says, and stays
+on its last without an End tag. The
+player runs AVM1 actions only in a main AVM1 SWF so far, so what needs
+them is missing here: no AVM1 action runs, its
 DoAction, DoInitAction, clip and button actions read past; its buttons
 show their up state and are inert, with no other state, sound or hand
 cursor; and `AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
-while interop is unavailable. Its timeline sounds do not play either:
+while interop is unavailable (AVM1's plan, compiled by codegen with no
+interpreter, is [avm1.md](avm1.md)). Its timeline sounds do not play either:
 with no action to `stop()` it, its timeline loops where the content would
 have stopped, and its StartSounds would start again on every loop; they
 wait for AVM1 actions (see Timeline sounds).
@@ -1614,7 +1800,16 @@ status and headers. A `URLRequest`'s GET string or URLVariables data is appended
 GET ByteArray data is currently left out and has not been checked against Flash;
 other methods send its string, URLVariables or ByteArray data as the body.
 Only POST forwards custom headers in the browser player, as Flash Player does;
-the host's fetch decides which requests its environment permits. The result
+the host's fetch decides which requests its environment permits. Each
+request says what it is for (`purpose`), as Flash's security model told
+them apart: a Loader's or Sound's `content`, which Flash let a SWF load
+from any domain, a URLStream's `data`, which it let a SWF read from
+another domain only as that domain's policy file allowed, and
+sendToURL's `send`; a browser's fetch ignores it, and a host that judges
+requests as Flash did (the desktop app) reads it. Such a host also gets
+the policy files `Security.loadPolicyFile` names, resolved against the
+SWF (`loadPolicyFile`), and names the sandbox `Security.sandboxType`
+reports (`sandboxType`, "remote" by default). The result
 arrives on the player thread in a later frame.
 A successful stream reports `OPEN`, `PROGRESS`, `HTTP_STATUS`, `COMPLETE`;
 a failed one reports `HTTP_STATUS` before `IO_ERROR`. A URL load through
@@ -1718,59 +1913,130 @@ once the case loads its SWF.
 ### Time
 
 The player keeps a clock of its own, in milliseconds, apart from the
-frame count: `getTimer` reads it, and `Timer` fires by it. A frame
+frame count: with `realTime: null`, `getTimer` reads it and `Timer`
+fires by it, and sounds go by it always. A frame
 stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
-`Player.advance(dt)` with the time passed, which accumulates it and runs
-as many frames as it is worth, five at most after a long pause and the
-rest let go, as Ruffle paces, so a stall does not become a spiral of
-catch-up. It returns how many it ran, and `Player.changes` counts what
-may change the picture: each frame, each key, each call from the page
-into an ExternalInterface callback, each `updateAfterEvent`, and the
-pointer events that change what shows at once: a hover that moves on or
-off a button or a sprite in `buttonMode`, as Ruffle redraws for, and,
-more than Ruffle, any press, release or leave, which may move focus and
-a caret, and a drag selecting text. A plain move does
-not: what its listeners change shows at the next frame, as in Flash, so
-a fast mouse draws a 24 fps SWF 24 times a second, not at the screen's
-rate. Loads and socket data are delivered in a frame. A host
-draws when it moved, not on every animation frame: at 60 Hz a 24 fps SWF
-drew each picture two or three times over, and drawing it once took a
-quarter to a third of Chrome's CPU off 32 animated characters, the
-pictures alike. Frame pacing and the clock are related but not one counter:
-the clock may run on within a frame later, where the frame count cannot.
-`getTimer` tells real time, as Flash's does: the whole milliseconds,
-truncated, since the `Scripting` was made, by `performance.now` or the
-`realTime` clock a host gives, running on while a script does, so that
-code timing itself within a frame, as benchmarks and Crossbridge's C
-do, sees the time pass, and a game's motion follows the time between
-frames. `realTime: null` makes it tell the frame clock instead, rounded
-as it was, the same on every run: the player's cases and the corpus
-(`tests/player/page.ts`) and the node tests that trace it ask for that.
-Timers fire by the frame clock either way; a host playing in real time
-drives it through `advance(dt)`, so it never runs ahead of the real one,
-and a timer's `getTimer() - start >= delay` still holds.
+`Player.advance(dt)` with the time passed, which plays frames on a grid
+of the frame's duration and drops those a long frame or a stall lost, as
+Flash does, rather than catch up with them as Ruffle does. Measured in
+adl at 24 fps with a 200 ms busy loop in some frames' ENTER_FRAME, Flash
+runs the next frame at once after the long one, the one after at its
+slot on the grid (8 to 9 ms later, 24 ms after three long frames in a
+row), then 41 to 42 ms apart again: never two back to back, and the lost
+frames are gone, the movie slowing down. Content that moves by the wall
+clock between frames counts on that: a large real-world SWF's walk stops
+when two ENTER_FRAMEs move it less than a pixel, which frames run back
+to back to catch up, with no time between them, did on every hitch. So a
+call runs as many frames as the host's typical interval holds, the lower
+median of its last nine calls, never the current one: one, where the
+SWF's frame is as long as the display's or longer, two for a 120 fps SWF
+at 60 Hz, five at most; until it has seen three calls, one. A typical
+interval over 36 ms is no display's (none refreshes slower than about 30
+Hz) but the host lagging, often by the frames themselves, and gets one
+frame a call, so that the content slows down as Flash's does rather than
+feed its own lag with frames run back to back. What is owed beyond that
+is dropped but for the part of a frame, which keeps the grid's phase;
+not within half an interval of the next frame, though, where a call that
+came a little early would leave a frame owed under ordinary jitter and
+the next drop it. A `dt` that is not a finite positive number counts as
+none. Two limits remain: a SWF faster than the display still runs its
+frames back to back, so a walk placed by the wall clock at 60 fps on a
+30 Hz display can still stop short; and a stream sound runs on by its
+own clock while frames are dropped, drifting from the timeline after a
+hitch, where Flash skipped frames to keep the timeline with the stream
+(`startStream` in `media/sounds.ts` does not yet). `advance` returns how
+many frames it ran, and `Player.changes` counts what may change the
+picture: each frame, each key, each call from the page into an
+ExternalInterface callback, each `updateAfterEvent`, and the pointer
+events that change what shows at once: a hover that moves on or off a
+button or a sprite in `buttonMode`, as Ruffle redraws for, and, more
+than Ruffle, any press, release or leave, which may move focus and a
+caret, and a drag selecting text. A plain move does not: what its
+listeners change shows at the next frame, as in Flash, so a fast mouse
+draws a 24 fps SWF 24 times a second, not at the screen's rate. Loads
+and socket data are delivered in a frame. A host draws when it moved,
+not on every animation frame: at 60 Hz a 24 fps SWF drew each picture
+two or three times over, and drawing it once took a quarter to a third
+of Chrome's CPU off 32 animated characters, the pictures alike. Frame
+pacing and the clock are related but not one counter: the clock may run
+on within a frame later, where the frame count cannot. `getTimer` tells
+real time, as Flash's does: the whole milliseconds, truncated, since the
+`Scripting` was made, by `performance.now` or the `realTime` clock a
+host gives, running on while a script does, so that code timing itself
+within a frame, as benchmarks and Crossbridge's C do, sees the time
+pass, and a game's motion follows the time between frames. `realTime:
+null` makes it tell the frame clock instead, rounded as it was, the same
+on every run: the player's cases and the corpus (`tests/player/page.ts`)
+and the node tests that trace it ask for that.
+Timers follow the same choice. With a real clock they fire as Flash
+fires them, measured in adl: in each frame right after ENTER_FRAME and
+before the frame's construction, every timer due fires once, in the
+order the timers were started, and next falls due its delay after it
+fired, so the ticks a long frame or a stall lost are dropped, not caught
+up with (a 10 ms timer fires once after a 200 ms frame, and `currentCount`
+counts only the firings). A timer shorter than the frame interval also
+fires between frames at its time, at most once a check; one as long as a
+frame or longer waits for a frame, so a 45 or 50 ms timer at 24 fps fires
+every other frame though the player checks between. In adl a 10 ms timer
+fires two to four times a 24 fps frame, a 1 ms one about once a
+millisecond at 1 fps; there is no floor above 1 ms, for `setInterval`
+neither. Flash truncates a delay to whole milliseconds: `Timer(1000 /
+24)` is 41 ms, shorter than the frame, and fired in 117 of 120 frames,
+`Timer(1000 / 30)` in 150 of 150 and `Timer(1000 / 60)` in 287 of 300;
+`Timer(40)` at 25 fps, the frame's length, fired in 106 of 125, and one
+a millisecond longer than the frame in about 55 to 70 % (five seconds
+each in adl). Our hosts check at each `advance(dt)` that plays no frame,
+60 times a second for a 24 fps SWF, so a timer shorter than that fires
+at each call: two or three times a frame. Their calls do not fall on the
+SWF's grid, though: a 25 fps SWF's frames come 33 and 50 ms apart at 60
+Hz. So the timers keep the host's time, the sum of the `dt`s it passed,
+on which a frame has its exact place on the grid, the time it fell due;
+a timer as long as a frame or longer is due by that, and every timer
+fired in a frame next falls due from it, as does one as long as a frame
+started in a frame. A timer of the frame's length then fires every
+frame, however the calls fall and jitter, where adl's fired in 85 % of
+them, its own frames jittering; one a millisecond longer fires every
+other frame, adl's in 55 to 70 %. A short one is due in a frame by the
+call's time, less a frame for each the call plays after it, so that a
+frame run late does not hold it back, and a SWF faster than the display
+fires it in each of its frames, not once a call; between frames it also
+waits its whole delay since it last fired, the least interval adl showed.
+At 60 Hz the checks come every 16.7 ms where Flash's come every few, so a
+timer shorter than that fires two or three times a 24 fps frame where
+adl's fired two to four, and a 20 ms one each 33 ms between frames where
+Flash's fired each 20 to 25. The host's time follows the `dt`s it
+passes, not the real clock, which only places it at the first call and
+tells the time between calls. `updateAfterEvent` in a timer
+fired between frames has the stage render then, with RENDER if a script
+invalidated it, as Flash does; an invalidation without it waits for the
+frame. Ruffle fires its timers after the frame from the same real clock
+but catches missed ticks up, ten at most a call, clamps delays to 10 ms
+and fires long timers between frames too. With `realTime: null` timers
+fire by the frame clock: a frame moves it on and every due time in it
+fires, at the same point after ENTER_FRAME, the same on every run, which
+the cases and the corpus's `timer*` tests rely on.
 
 `flash.utils.Timer` is playerglobal's own in all but three natives: the
 counting, `delay`'s range (RangeError #2066), `reset` and the events are
 AS3; the player keeps the timers started (`scripting/timers.ts`, with
-the clock), each with its delay and the
-closure to call, fires the ones due as a frame begins, before its
-timeline advances, each firing the earliest due so that two timers
-interleave as their times do, two due at once in the order scheduled,
-and tells `running`. The timers are a heap by due time, as asyncio keeps
-its callbacks: a scan of all of them per firing costs 2.5 ms a frame at a
-thousand timers where the heap costs 0.3, and nothing either way below a
-hundred.
-Flash fires timers between frames at their own times, so while a
-timer's closure runs the time is the one it fell due at, which a timer
-started from it counts from and `getTimer` tells: three timers set one
-from another at 100 ms each land at 400, 500 and 600 ms, as in Flash,
-not a frame later each (the corpus's `timer_finished`).
+the clocks), each with its delay and the closure to call, fires the ones
+due as above (by the frame clock, each firing the earliest due so that
+two timers interleave as their times do, two due at once in the order
+scheduled), and tells `running`. The timers are a heap by due time, as
+asyncio keeps its callbacks: a scan of all of them per firing costs
+2.5 ms a frame at a thousand timers where the heap costs 0.3, and
+nothing either way below a hundred.
+Flash fires timers between frames at their own times, so by the frame
+clock, while a timer's closure runs the time is the one it fell due at,
+which a timer started from it counts from and `getTimer` tells: three
+timers set one from another at 100 ms each land at 400, 500 and 600 ms,
+as in Flash, not a frame later each (the corpus's `timer_finished`).
 `setTimeout` and `setInterval` are AS3 over `Timer`. The corpus's
 `timer*` tests, Flash's traces of timers against frames, are the
-reference, with a node test of the clock and `advance`.
+reference by the frame clock, with node tests of the real clock's
+passes against an injected clock (`tests/unit/player/scripting/timers.test.ts`).
 
 ### The pointer
 
@@ -1809,13 +2075,87 @@ first. `supportsCursor` and `supportsNativeCursor` are true, as in
 desktop Flash.
 The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
-scripts see; Pixi's render tree does not choose a Flash target. The first
-input slice sends `mouseOver`, `mouseOut`, `mouseMove`, `mouseDown`,
-`mouseUp` and `click` through EventDispatcher's capture and bubble phases.
+scripts see; Pixi's render tree does not choose a Flash target. The
+pointer sends `mouseOver`, `mouseOut`, `rollOver`, `rollOut`, `mouseMove`,
+`mouseDown`, `mouseUp`, `click` and `doubleClick` through EventDispatcher's capture and
+bubble phases, and the stage's `mouseLeave`, in the order Flash Player 32
+traced them (a probe logging every event with its target, run in
+Electron's PepperFlash and driven over the DevTools protocol, the
+`MouseOrder` test of `tests/unit/player/input/pointer.test.ts`): a
+pointer at a new point sends `mouseMove` to what is under it first, then
+moves the hover, `mouseOut` and the `rollOut`s from what it was over up to
+the common ancestor, the `rollOver`s from the new object up, then
+`mouseOver`. A press or a release at a new point is that move, with
+`buttonDown` as it was before, then the press or release; one where the
+pointer already was is its own events, then any hover that changed. A
+move to where the pointer is sends nothing. The empty stage takes
+`mouseMove`, `mouseDown`, `mouseUp` and `click`, but nothing is over it:
+leaving an object for it is a `mouseOut` whose `relatedObject` is null,
+and no `mouseOver`. The pointer leaving the player with its button up is
+`mouseOut` and `rollOut`s at the stage point (-1, -1), though `mouseX`
+and `mouseY` stay where they were, then `mouseLeave`. With the button
+down after a press on the player, the mouse stays its own, as Flash's
+plug-in kept it: no leave, the moves outside go to the stage, and so
+does the release, and the leave comes at the next move outside after it.
+A leave is sent once until the pointer is back, so a right button's
+release outside, which holds nothing, leaves no second time; a left
+button let go where the host told of no release (outside the browser, or
+while another button stays down, which Chrome tells as a move) is
+released at the next move that shows it, and left where that is outside.
+`updateAfterEvent` changes none of this. The second click of a double
+is a `doubleClick` in the click's place where the target's own
+`doubleClickEnabled` is true, its parent's counting for nothing, and a
+third a click again, as Flash Player 32 traced them. The plug-in took the
+browser's count of clicks, and counted none whose first was on another
+object; the player counts a press on the last one's target within half a
+second and two pixels of it, Ruffle's rule, as the browser's own would.
+Ruffle sends
+`mouseMove` first too, and no `mouseLeave`.
+A mouse that stands still is picked for again at each frame's end, after
+its `exitFrame` and before its `render`, as Flash Player 32 does: an
+object a script moves, hides, disables or takes off the list from under
+it gets its outs, one that comes under it its overs, with no
+`mouseMove`, and the cursor follows. One taken off the list hears no
+`mouseOut`, only the `rollOut`s of the ancestors it had when the hover
+came, the root's too, as Flash sends them. Flash notices an object moved
+in under the mouse a frame later than one moved out (its pick seems to
+go by where the last render drew it); the player notices both at once.
+Nor does Flash notice a text field that shrinks out from under a still
+mouse until the mouse next moves; the player sends its outs at the
+frame's end, as for any other object.
+The pick runs only when something a pick reads changed since the last
+(`pickWork`: whatever invalidates an object, and `mouseEnabled`,
+`mouseChildren`, a `hitArea` or a button's `enabled`), so a still scene
+costs nothing, and a busy one a pick a frame, what one mouse move costs.
+The pick carries the point down the list into each object's space, making
+no matrix per object, and passes over a container whose bounds miss it:
+bounds each object keeps in its own space (`pickBounds`), marked stale by
+a change in it or under it, and not by its own move, which only its
+ancestors' bounds see. They are worked out only for what stood still over
+the last two picks, as what changes on most frames costs less gone
+through than measured; a timeline shape is checked against its recorded
+bounds before its fills. A button's hit test state is in no container,
+so a button and those above it are measured each time, as is a sprite
+with a `hitArea`, which may be anywhere on the list, its bounds taken
+through the stage into the sprite's. A NaN in bounds, from a NaN or
+infinite matrix or an infinite drawing, rules no point out.
+On 400 rigs of 12 moving parts (10,000 objects), a pick takes 0.01 ms
+where it took 0.5 ms and 125 KB, and
+`tests/player/bench.ts --scripted 400 --still --hover` ticks as without a
+mouse over the stage, 0.3 to 0.4 ms, where it took 0.8; where every part
+is new each frame, a pick after a tick takes 0.2 to 0.3 ms, against 0.7.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer
-goes up only once nothing else under the point has taken it. What a
+goes up only once nothing else under the point has taken it, to the
+nearest ancestor whose `mouseEnabled` is true, past any number that are
+false. The main SWF's root is never the target, as Flash Player 32
+traced it (the `MouseGaps` probe of the same test file): its own art, a
+hit passed up to it, and all of it with its `mouseChildren` false go to
+the stage, while it stays over as an ancestor; a sprite a script puts on
+the stage beside it takes its hits as any other; a loaded SWF's root a
+script puts on the stage itself is taken for the main root, which no
+probe has measured. What a
 mask, a scroll rect or a timeline's mask layer hides takes no pointer
 (`mouse_pick_masking`): a list scrolled under a mask layer is clicked
 only where it shows. `hitTestPoint` asks no mask layer above the object
@@ -1841,8 +2181,81 @@ sprite, which `dropTarget` reads: the shape, not the sprite that takes
 the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names
 the shapes in its sprites, and null over nothing. Neither can be played
 in adl, which the harness gives no pointer, so the unit tests carry them.
-Roll events, wheel, right and middle buttons, and Flash's drag and focus
-rules still need their own cases.
+The wheel sends `mouseWheel` to what is under the pointer, bubbling and
+not cancelable, its `delta` lines up positive, and a text field there
+whose `mouseWheelEnabled` is true then scrolls by as many lines, as the
+corpus's `mouse_wheel_events` has Flash trace them (its `scroll` event is
+not sent yet). PepperFlash on Linux, the Flash Player 32 at hand, gave no
+`mouseWheel` at all for the DevTools protocol's wheel, and let the page
+scroll under it; Adobe documents the delta as the lines a notch
+scrolls, 3 by Windows' default, as Ruffle's own tests send it. The host makes a browser's notch 3 lines, whether it gives 3 lines
+or about 100 pixels (fewer on a zoomed page or a scaled screen, a
+multiple for notches run together), and adds a touchpad's pixels up, 100
+to 3 lines, sending nothing for a part of one. That is untried on
+macOS, whose wheels and touchpads give pixels of their own measure. It keeps the page from
+scrolling only where the SWF takes the wheel: a `mouseWheel` listener on
+the target or an ancestor, or a field that can scroll; elsewhere the page
+has it. With Ctrl, as a touchpad's pinch comes too, the page zooms and the
+SWF hears nothing. Right and middle buttons, and
+Flash's drag and focus rules, still need their own cases.
+
+### Touch
+
+`Multitouch` reports the host's touch screen: `maxTouchPoints` is the
+browser's `navigator.maxTouchPoints` (or the `maxTouchPoints` a host gives
+`Scripting`), `supportsTouchEvents` whether it is above zero, and
+`Capabilities.touchscreenType` `"finger"` then, `"none"` otherwise.
+Without a touch screen, adl and Flash Player 32 both start `inputMode`
+at `"none"` and keep it there whatever a script sets, after checking the
+value (TypeError #2007 for null, ArgumentError #2008 for a name not
+MultitouchInputMode's), and the player does the same (the `touch-natives`
+case); with one, it starts at `"gesture"`, as Adobe's reference has
+Flash start, and takes every mode. No gesture is recognized:
+`supportsGestureEvents` is false and `supportedGestures` null, so gesture
+mode leaves touches to the mouse, and scripts can only make and dispatch
+the gesture events themselves.
+
+`bindPointer` sends the pointer events whose `pointerType` is `"touch"`
+to `input/touch.ts`; a pen is a mouse. The browser's primary touch, the
+first finger down while none was, moves the mouse, in every mode, as
+Flash's plug-in did (AIR's `mapTouchToMouse`, true by default, turns
+that off in touchPoint mode): a press is a move to the point, where the
+mouse was elsewhere, and a press, as Flash Player 32 handled a browser's
+emulated touch, then moves, then a release, which clicks as a mouse's
+does; the lifted finger leaves the mouse where it was, with no rollOut.
+In touchPoint mode every touch is TouchEvents too, picked as the pointer
+picks and in the mouse's order: a move's `touchMove`, then `touchOut` and
+`touchRollOut` from what the point was over and `touchRollOver` and
+`touchOver` on what it is over (none on the empty stage); for a begin
+the hover, then `touchBegin`; for an end `touchEnd`, a `touchTap` where
+it ends on the object it began on, and, once lifted, `touchOut` and
+`touchRollOut`, as a lifted finger is over nothing. `touchPointID` is the pointerId, the
+local point is the target's, `sizeX` and `sizeY` the contact's size in
+stage units and `pressure` the browser's. Each step's touch events come
+before the mouse events of the same step. A point's moves are posted as
+the pointer's are, the last of each point handled at the next flush. A
+touch the browser cancels ends where it last was, with a `touchEnd` whose
+AIR `isTouchPointCanceled` is true but no `touchTap`, and its mouse with
+`mouseUp` but no click; a pointer id that begins again before its end
+came first takes the old point out of what it was over and lets its
+mouse go, without a click. Each step reads `inputMode` and
+`mapTouchToMouse` as they are then, so a change in the middle of a touch
+applies from its next step: a touch begun in gesture mode may end with
+touch events and no begin, and one begun in touchPoint mode with none.
+What Flash did there is not known. A touch's begin, end and tap are a
+user's gesture for the clipboard, as a press is; the browser itself
+counts only a touch's release as the user's activation, so a write in
+`touchBegin`, or in the `mouseDown` a touch makes, may be refused by its
+async API. The canvas keeps Pixi's `touch-action:
+none` whatever the mode: Flash's plug-in took every touch on it, and a
+SWF that drags with the mouse needs it, as a page that scrolled under the
+finger would cancel the drag. None of the order between touch and mouse
+events could be measured: adl under Wine and Flash Player 32 on Linux
+report no touch screen and dispatch no TouchEvent. The order is the
+reference's ("the first point of contact dispatches a mouse event and a
+touch event") and the W3C's, touch first; Ruffle dispatches no
+TouchEvent. Nor could the TouchEvents' own order: a move before its hover
+is the mouse's, measured, taken over.
 
 ### Keyboard and focus
 
@@ -1875,9 +2288,63 @@ selection shaded, line by line, both clipped to the lines shown; a
 focused selectable dynamic field shows its selection too. A key the
 player used, an edit or a caret moved in a field or a Tab that moved
 focus, the host keeps from the browser; any other, a game's arrows say,
-still reaches the page too, which may scroll by it. adl cannot be typed
-into, so none of this is recorded against Flash; there is no IME, no
-clipboard, and no scrolling to keep the caret in view.
+still reaches the page too, which may scroll by it. A focused selectable
+field that takes no typing moves its caret and selection with the same
+keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
+this is recorded against Flash; there is no IME, and no scrolling to
+keep the caret in view.
+
+### The clipboard
+
+Flash Player 10 let a script write the clipboard only while it handled
+a user's event, a key, a mouse button, a copy or a cut, and read it only
+while it handled a paste, as the
+[Clipboard reference](https://help.adobe.com/en_US/FlashPlatform/reference/actionscript/3/flash/desktop/Clipboard.html)
+and the
+[developer's guide](https://help.adobe.com/en_US/as3/dev/WS2F6A31B9-1AE6-4b23-9C12-57A33F4F0516.html)
+tell; the player keeps those rules in `scripting/clipboard.ts`, which
+holds the clipboard by Flash's native format names (`air:text`,
+`air:html`, `air:rtf`, `air:url`, and a script's own formats as
+`air:reference:` and `air:serialization:` entries). The pointer's
+presses and releases, a touch's begin, end and tap, and every key run as a gesture, in which
+`canWriteContents` is true; a paste runs as one in which
+`canReadContents` is too. playerglobal's AS3 checks both and throws its
+SecurityErrors; the natives (`playerglobal/flash/desktop/Clipboard.ts`)
+store and give back, run a `setDataHandler` handler when its format is
+first read, and refuse `new Clipboard()` with IllegalOperationError
+#2178, Flash Player having the system's alone. `clear` and `clearData`
+outside a gesture throw SecurityError #2191, and `System.setClipboard`
+Error #2176, as Ruffle has the plug-in throw it; a null string is
+TypeError #2007. Bitmaps and files are AIR's, and are not kept.
+
+The keys go through the text field with focus, as Ruffle's
+`text_control_input` has them: Ctrl+C copies its selection, but not a
+password's; Ctrl+X does so and deletes it, in an input field only, with
+Event.CHANGE; Ctrl+V types the clipboard's text into an input field as
+if typed, a TextEvent first that a listener may cancel, then `restrict`
+and `maxChars`, its line breaks as `"\r"` in a multiline field and
+dropped from a single-line one, with every other control character,
+and nothing at all from an empty clipboard. A TextField dispatches no
+Event.COPY, CUT, PASTE or SELECT_ALL, Flash's reference says; any other
+object with focus hears them for the same keys, PASTE bubbling as in
+Flash Player and the others not, and writes or reads the clipboard in
+them. With nothing in focus, none is heard, and Ctrl+A is the page's.
+
+The browser's own copy, cut and paste events carry the data both ways:
+`bindKeyboard` lets Ctrl+C, X and V through to the browser, which sends
+the focused element the event, and the player answers it at once, the
+copy's data set on the event and the paste's read from it, which needs
+no permission. A script's write in any other gesture, a click's
+`System.setClipboard` say, goes to the host's `ClipboardHost`, by
+default the async Clipboard API's `writeText`, or `write` with HTML,
+which a browser allows during a user's activation; null in node, where
+the clipboard is the player's memory alone and a paste without the
+host's data pastes what the SWF last copied. Nothing reads the system's
+clipboard but a paste, as in Flash. Flash's context menu, with its Cut,
+Copy, Paste, Delete and Select All, has no counterpart: a menu of the
+player's own could paste only through the async API's `readText`, which
+asks the user's leave, so the browser's menu stays. `tests/web` presses
+the keys in Chrome.
 
 ### ExternalInterface
 
@@ -1930,8 +2397,9 @@ which the player reads from the stack:
   sort, `.call`, `.apply`, `o.f()`, a timer), or a frame line it cannot
   read, leaves the caller untold.
 
-A frame line's location is read from where the line ends, inside its last
-parentheses or after its last `@` (`frameLocations`), so a name cannot
+A frame line's location is read inside its last parentheses in V8's
+frames, and after its first `@` in the others, whose URLs may hold one
+(`/npm/p@1.0/m.js`) (`avm2.frameSites`), so a name cannot
 stand for a location; and a SWF cannot set one anyway: codegen names
 functions, methods, getters and classes from `[A-Za-z0-9_$]`, a SWF has no
 eval or `new Function`, an AS3 function's JavaScript `name` is not its to
@@ -1982,9 +2450,8 @@ script access.
 AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are
 newer than the oracle's playerglobal, and Adobe's airglobal that has
 them may not be committed. The player declares them itself, in AS3 of its
-own beside their natives (`playerglobal/air/net/WebSocket.as`,
-`playerglobal/flash/events/WebSocketEvent.as`), with AIR's API as adl
-shows it. `tests/player/air-library.ts` compiles them with ASC in the
+own under `as3/air/src` (`air/net/WebSocket.as`,
+`flash/events/WebSocketEvent.as`), with AIR's API as adl shows it. `tests/player/air-library.ts` compiles them with ASC in the
 oracle's container against builtin and playerglobal into one ABC,
 committed as `playerglobal/air-library.ts`, and a unit test compiles them
 again and compares. ASC keeps no default values for a native method's
@@ -2055,6 +2522,123 @@ screen. By default, resolution comes from the browser's `screen` (zero in a
 non-browser host), pixel aspect ratio is 1 and DPI is 72. The corpus harness
 supplies the screen on which its Flash traces were recorded.
 
+### Globalization
+
+`flash.globalization` (`playerglobal/flash/globalization/`) is Flash on
+Windows' as AIR's adl shows it (the `*-formatter-natives`,
+`collator-natives`, `string-tools-natives` and `locale-id-natives` cases),
+with its locale data from the host's `Intl`, ICU's, where Flash takes the
+system's. Its rules are its own and are followed here; only the data is
+ICU's.
+
+- **Locales.** A name is kept as Flash keeps it: one it takes apart, its
+  subtags parted by single hyphens or underscores, canonical (`EN_us` as
+  `en-US`, variants in upper case), one parted otherwise as it came
+  (`en--us`, `en.US`, `en US`), one it cannot take apart (extensions, a
+  variant of digits alone, a language of one letter or nine, a keyword
+  other than calendar, collation, currency or numbers) in lower case. It
+  resolves to a locale Intl supports: the language's likely region where
+  none is given (`de` is `de-DE`, Chinese named by region, `zh-TW`),
+  `usingFallbackWarning` and the likely region for a region whose data ICU
+  does not resolve to (`en-ZZ`; `nb-NO` resolves to `nb`, Norway's), and
+  the default, `usingDefaultWarning`, for a language Intl does not know or
+  knows by another code (`iw`, `in`, `tl`, `und`). The default, also for
+  `""` and `i-default`, is `PlatformCapabilities.locale`, the browser's
+  language unless a host sets it; the player's tests start Chrome in
+  en-US, as adl's machine is. Methods and setters set
+  `lastOperationStatus`; getters leave it. What Intl gives a locale is
+  read once per locale; a name's resolution is kept for the last 64 names
+  only, as a SWF may make any number of them and every player shares the
+  cache (a unit test holds it to that).
+- **Numbers and currencies** take only their settings from Intl: the
+  separators, digits, grouping, the negative format, the currency's
+  digits, its narrow symbol (`$` in Hong Kong) and, for its formats,
+  Intl's currency and accounting formats with a narrow symbol, matched
+  against Windows' sixteen negative and four positive ones. A region's
+  currency comes from a table, as Intl has none; an area of several
+  countries (`419`, `150`) has Windows' XDR with no symbol. Formatting is
+  Flash's: the number printed with nine decimals, then rounded half up to
+  `fractionalDigits` (2 by default, Windows'; padded to a thousand at
+  most, where adl crashes), grouped by `groupingPattern` (five fields at
+  most), its digits from `digitsType` (`invalidAttrValue` for a
+  surrogate, a noncharacter or past Unicode's last, `illegalArgumentError`
+  past int's range), cut at a NUL as Flash's C strings are. Separators of
+  four characters or more are illegal, and a NUL ends one. `parse` finds
+  the first number anywhere, signed by the negative format around it at
+  most a plain, no-break, narrow or ideographic space away, U+2212 a minus
+  too; `parseNumber` and a currency's `parse` take a string that holds
+  nothing else but spaces, a currency one space from its number and any
+  more spaces its own.
+- **Dates** are formatted by Flash's LDML pattern, interpreted here as
+  Windows does: Gregorian, European digits, long and medium alike, a long
+  month's genitive when a day is its nearest field, the letters it cannot
+  format left out with `unsupportedError`, a run too long cut and an
+  unclosed quote closed with `usingFallbackWarning` (and the pattern so
+  kept formatted), an unknown letter or a pattern past 255 characters,
+  counted past a NUL, rejected with `patternSyntaxError`, one that closing
+  its quote takes past them emptied with `bufferOverflowError`, a NUL
+  ending it. A pattern with the date (or one of the letters of it Flash
+  cannot format) formats only Windows' dates, from 1601 to 14 September
+  30828, a year past 65535 wrapping as a 16-bit year does, local times
+  past JavaScript's range too, and gives `""` with `illegalArgumentError`
+  otherwise; one of the time alone formats any. An invalid date is
+  midnight of 1 January 1970 to a pattern without the date in UTC and to
+  one of the date alone in local time, and refused otherwise. The
+  locale's patterns are read off Intl's parts for its full date, its
+  numeric date and its medium and short times, the cased letters of their
+  literals quoted (`d 'de' MMMM`). The shortest weekday names are CLDR's
+  short width, which Intl does not give: a cased script's short names cut
+  to two letters, other scripts' short ones of two characters at most,
+  else the narrow ones, and the short ones wherever that would name two
+  days alike (Vietnamese, Portuguese).
+- **Collation** is `Intl.Collator`, with Windows' word sort, hyphens and
+  apostrophes compared last, `ß` as `ss`, symbols ignored with
+  punctuation, and the empty string apart from one of what is ignored;
+  width and kana are folded before comparing, as Intl has no options for
+  them. `numericComparison` is kept and reports `unsupportedError`, as in
+  adl, without changing the order.
+- **Case** is mapped a character at a time, as Windows does: no locale's
+  rules but Turkish, Azerbaijani and Lithuanian ones (Greek keeps its
+  accents), a character whose full mapping expands taking its simple one
+  where its decomposition gives one (`ᾳ` to `ᾼ`, Lithuanian `Ì` to `ì`).
+- **LocaleID** fills in the script and region of the whole name from
+  Intl's likely subtags (`zh-TW` is Hant), but for `und` and the codes
+  Windows does not know (`ji`, `jw`, `sh`). `determinePreferredLocales`
+  gives, for each locale wanted, those of its language and script: the
+  same locale (as Windows names it, `zh-Hant-HK` being `zh-HK`), those its
+  likely locale is, another locale wanted, other regions, then the
+  language alone; `und` matches only itself.
+
+What ICU's data gives differently from the system adl runs on, and so
+the cases leave out: separators (French and Swiss German group with
+U+202F and U+2019 where Windows has U+00A0 and an apostrophe; Arabic
+locales' are Arabic; Russian's and Bulgarian's date spaces are no-break
+where Windows' are narrow), symbols and formats of some currencies
+(Egyptian, Iranian, Norwegian's, Indonesian's and Malay's position,
+Turkish's parentheses, Curaçao's symbol), Finnish weekdays (`sunnuntai`
+for `sunnuntaina`), German abbreviated weekdays without a dot, the
+shortest weekday names where CLDR's short width is not two letters
+(Spanish `DO`, Catalan `dg.`, Arabic, Thai), Korean day periods, kana and
+width in collation, Windows' likely regions and scripts for some
+languages (`ar` is Saudi Arabia's, `ckb`, `mzn` have none, `mo` is
+Moldova's), script subtags, variants and keywords in Windows' resolved
+names (`az-Latn-AZ`, `ca-ES-VALENCIA`, `de-DE@collation=phonebook`,
+`zh-Hans-HK`), and `no` without a region. Chrome's ICU leaves out some
+locales' data (Georgian, Armenian, Mongolian, Basque, Galician, Kazakh,
+Irish, Hawaiian, Nynorsk among them): those fall back to the default or
+format with ICU's root data. Windows' collation is its own in what it
+ignores as a symbol (an emoji or ™ it does not) and in matching mode,
+where a precomposed letter differs from its decomposition and "áb" from
+"ab". Some pattern corners differ: a run cut short before an unclosed
+quote (`MMMMMMM'`), and the unsupported `W` with invalid and early dates.
+Local times far in the future follow the runtime's Date, which, as
+avmplus, applies no daylight saving after 2038. The oddities of adl
+under Wine are not reproduced: an era printed twice (`ADAD`), a lone `*`
+grouping pattern grouping by eleven, astral digits printed as
+replacement characters, a crash for a thousand fractional digits.
+`getAvailableLocaleIDNames` lists each region's likely locale that Intl
+supports, as Intl lists none.
+
 ### What a browser player lacks
 
 Some of playerglobal stands for what the player does not have, and acts
@@ -2070,6 +2654,12 @@ Flash without a GPU gives, so content can fall back to the display list.
 at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
 which bounds, scales and hits as Flash's and shows nothing: no stream or
 camera plays in it, and a timeline's DefineVideoStream is not read yet.
+Camera and Microphone are Flash's on a machine with neither (the
+`camera-microphone` case): supported, but `names` empty and no camera or
+microphone to get; one made with `new` reads as zeros and nulls whatever
+is set, its copies and setters throwing only TypeError 2007 for a null.
+Once `getEnhancedMicrophone` is called, whatever it gives, every
+Microphone shares one MicrophoneEnhancedOptions, copied in and out.
 NetConnection has its local mode, `connect(null)`, with Flash's status
 events and its properties, ArgumentError 2126 for those of a connection
 it does not have; an HTTP URI is kept, and a `call` over it, Flash
@@ -2131,9 +2721,18 @@ seconds so it can return without rebuilding. At most 64 groups that have never
 returned are parked; new one-off branches evict the oldest batches. Evicted
 batchers, up to 16 groups' worth (`render/batchers.ts`), go to the next group a view makes rather
 than being freed while a new group allocates its own; a root rendered once,
-as BitmapData.draw's, allocates its own, since Pixi destroys it after. A colour
-batcher whose buffers stay mostly empty for 120 rebuilds shrinks them; a
-default batcher keeps its largest buffers when it moves to a smaller group.
+as BitmapData.draw's, allocates its own, since Pixi destroys it after. On
+WebGL 2 the batches are kept on the GPU alone (the fork's
+`BatcherPipe.gpuResident`): every group's batchers pack into one set of
+buffers per batcher kind, lent for each build and grown to the largest,
+and what a build packed is written to the batcher's GPU buffers as it
+ends; an element updated in place is packed apart and written, runs of
+neighbours together, before the batches draw. A batcher kept its buffers
+for as long as it lived, grown to the most it ever packed, so a renderer
+of many groups held all their vertices on the CPU too: `bench.ts
+--branches 64` held 45 MB of them. A lost context has every group built
+again from the display list (the fork's `RenderGroupSystem`). Elsewhere a
+batcher keeps its own buffers, cut back once they stay mostly empty.
 The colour batcher's shader ignores Pixi's group colour, since
 its vertex colour transform already includes every ancestor. The
 `render-groups` case checks colours, masks moved between branches, scrolls,
@@ -2169,8 +2768,17 @@ stretch, and a line scaled both ways is as wide through any turn of it:
 such a layer's lines are stroked through the stretch alone and turned by
 their Graphics' matrix, so a limb that turns on every frame, or a
 squashed particle that spins, shares one context through every angle,
-and a turn that keeps the stretch leaves its lines as they are;
-one with a line scaled one way alone, which turns with it, or a
+and a turn that keeps the stretch leaves its lines as they are.
+The stretch is then settled on a grid of its logarithm, in a step of at
+most 1/64 and fine enough that the lines' edges stand within a fiftieth
+of a screen pixel of their place (`settledStretch`): stroked through the
+grid's stretch and taken back by its inverse, the lines follow the path
+exactly, and only their width sees the difference. A character that
+breathes, scaling a percent or two on every frame, had a stretch for
+each frame of each loop, and a crowd of them made its lines faster than
+the cache could keep them; settled, a pulse has a few (`bench.ts --town
+60`: 75,000 contexts in 300 frames, 2,500 settled, and a frame's sync
+and draw from 9 to 2.5 ms). One with a line scaled one way alone, which turns with it, or a
 transform near collapse, which rounding would distort, keeps the
 transform exactly. Contexts are counted as instances take and give
 them back. An object that leaves the list, and those of its
@@ -2191,7 +2799,15 @@ borrows the stage's fills and lines where they are still kept. A
 Graphics of a shared context (a shape's, a blend's or a glyph's fills,
 or lines) does not listen on it, as no such context changes once built:
 a listener a Graphics made each destroy search them all, so a text of n
-glyphs of one font took O(n²) to go.
+glyphs of one font took O(n²) to go. Once Pixi has built a view's fills
+or lines, their paths go altogether, the bounds measured and the vertices
+weighed first (`render/tessellate.ts`, `remakeable`): Pixi draws them from
+their tessellation, kept from its collection of what went unused for a
+minute, which would build them again from their paths, and a batched copy
+is made anew from the layer, which its shape keeps anyway. Kept, the
+flattened points were a second copy of every outline, some 8 MB in
+`bench.ts --town 200`. A glyph's fill, which every view shares, keeps
+them, for each renderer to build it.
 A line context no one holds stays idle 30
 s, by the clock, not renders, which a host may make many of between
 frames, at most 4096 of them and half a million of their vertices (some
@@ -2199,8 +2815,7 @@ frames, at most 4096 of them and half a million of their vertices (some
 room made were ones it had made before and dropped, an animation's
 rarer turns coming back after tens of seconds (`bench.ts --pulse 16
 --pace 150`, whose stretches come round again some 7 s apart, made 11
-contexts a frame kept 5 s and 2 kept 30). Longer would gain nothing, as
-Pixi lets an unused context's geometry go after a minute. A drawing's lines
+contexts a frame kept 5 s and 2 kept 30). A drawing's lines
 are its own, as it changes. No line is thinner than a pixel of the
 screen, which is how wide Flash draws a hairline however far its stage
 is zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
@@ -2253,7 +2868,7 @@ draw calls, but far fewer program switches and uploads, and `bench.ts
 software GL. But a crowded scene is mostly still: of some 4,400 draws a
 frame in a room of a dozen characters, half were in render groups no
 timeline had rebuilt for seconds. A render group not rebuilt for 2 s has
-its Graphics batched (`render/patches.ts`), each drawing a batched copy of its shared context,
+its Graphics batched (`render/settle.ts`), each drawing a batched copy of its shared context,
 as a colour transform does: packed once, as nothing rebuilds the group,
 and drawn in a few calls, which took a frame's render from 17–18 ms to
 15. Rebuilt again by anything but its batching, the group draws them
@@ -2275,13 +2890,18 @@ rounds to pixels, is drawn by Pixi's pipe in its place in the run, as is
 all of a run in a context restored without the extension, or past the
 rows a texture may hold. Contexts are placed on most frames of an
 animation, its lines stroked for a new stretch, so only the vertices and
-indices added since the last draw are uploaded, the atlas whole only as
-it grows or starts again: `bench.ts --rig 400 --fresh`, whose parts take
-a new size on every frame, uploads 0.5 MB a frame where uploading the
-atlas whole sent 7. A context rebuilt or destroyed leaves a hole, and
-between frames the atlas starts again from scratch once the holes pass
-65,536 vertices and the live ones; neither the atlas nor the table
-shrinks from its peak. On a desktop GPU the render's main-thread time
+indices added since the last draw are uploaded: `bench.ts --rig 400
+--fresh`, whose parts take a new size on every frame, uploads 0.5 MB a
+frame where uploading the atlas whole sent 7. The atlas is kept on the
+GPU alone: what a frame places is gathered in arrays of 65,536 vertices
+and written in a call or two, and a full atlas grows by half with the GPU
+copying what it held (the fork's `resizeOnGpu`), so no copy of it stays
+on the CPU, where `bench.ts --town 200` held 127 MB of one; a lost
+context's atlas starts again empty, its contexts copied in as they are
+drawn. A context rebuilt or destroyed leaves a hole, and between frames
+the atlas starts again from scratch once the holes pass 65,536 vertices
+and the live ones, at half again what is live; the table never shrinks
+from its peak. On a desktop GPU the render's main-thread time
 fell from 9–10 to 2 ms on `--rig 400` and `--rig 400 --fresh`, 0.7 to
 0.1 on `--rig 32`, 1.2 to 0.5 on `--rig 32 --swap`, 18 to 8 on `--rig
 400 --swap` and 2.5 to 0.2 on the 2,000 shapes, with GL's own time
@@ -2296,16 +2916,36 @@ before any row is written if its contexts' batches are fewer, and
 otherwise once a blend mode or a Graphics the table cannot draw has cut
 it short (`--min-run` times other thresholds). Under software GL the
 table won at every length, by 5 ms on runs of 6, but a player's GPU is
-what counts. A run of up to 48 draws takes its rows in a uniform array,
+what counts. A run of up to 40 draws takes its rows in a uniform array,
 not the table texture, as an upload between draws cost a few µs more a
 run (0.5 ms a frame on 128 runs of 22); a longer one uploads its rows in
 one call, the whole lines they span if more than one. The rows are
 uploaded between draws that read the table, which a driver may make wait
-for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). A Flash
-colour transform's batched copies stay with the colour batcher: drawn by
-the table, `--branches 64`'s few batches became 12,000 draws, which
-saved the main thread a millisecond and cost GL two on a GPU, fifteen
-under software GL. `bench.ts --no-table` draws without the table, and
+for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). Small
+Graphics under a Flash colour transform, and a settled group's, stay
+batched copies with the colour batcher: drawn by the table, `--branches
+64`'s few batches became 12,000 draws, which saved the main thread a
+millisecond and cost GL two on a GPU, fifteen under software GL. A large
+one, of 200 vertices or more as Pixi draws alone uncoloured, in a group
+that has not settled, is drawn alone instead (`render/color.ts`,
+`showFor`): a batched copy's vertices were packed and uploaded again with
+each rebuild and each change of the transform, and a busy monster SWF
+whose creatures, rebuilt on most frames, fade out under a tween packed
+some 55 MB a frame of them. A flat one takes its transform in its row,
+which grows to five texels with the multipliers, the offsets and a flag;
+a Graphics Pixi's pipe draws, of a gradient or a bitmap, a run too short
+or a table switched off, takes Pixi's graphics shader with the colour
+batcher's colour, the transform in uniforms. Both apply it as the colour
+batcher does, to the straight colour, the fill's times the Graphics' own
+tint rounded to a byte, clamped and premultiplied after, and leave out
+Pixi's group colour; where a renderer is not WebGL, every one is a
+batched copy, those already drawn alone too as one is made
+(`ColorAloneSystem`). A context is weighed before it is built, from its
+paths' points (a line's by its joins, round ones some ten vertices a
+point), as a part may keep the transform it first shows under. The
+`color-alone` case draws large discs, gradients and bitmaps under changing
+transforms each way, and `color-alone-runs` a run of 48 that the table
+draws from its texture. `bench.ts --no-table` draws without the table, and
 the `table-runs` case, with `draw-objects`, is played with the table
 drawing even its shortest runs and without it, and must draw the same
 pixels (`run.ts --table-ab` asks it of every case).
@@ -2377,10 +3017,58 @@ re-stroking as a shape's for their width under a transform. The drawing's
 points, and its lines' half widths, give the object its bounds, for
 `width`, `height`, `getBounds` and the hit tests to come. Gradient and
 bitmap fills are recorded as a shape's are, and drawn as far as a shape's
-are (the first stop); shader fills, `drawTriangles` and
-`drawGraphicsData` wait. An adl case draws in a `Shape` and in a
+are (the first stop); shader fills wait. An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
+
+`drawTriangles` draws as adl does (`display/drawing.ts`, the
+`draw-triangles` case). Its triangles, three vertices each by the indices
+or in order up to the first index past the vertices, go in a layer of
+their own: each a fill of its own, so overlapping triangles never cancel
+whichever way round they are, and the line, if one is set, around each,
+its outline closed and joined, over them all. They end the open fill's
+contour, whose closing line stays, and the line's path; both go on from
+the pen, which stays where it was, in a layer after them, the contour
+still closing to where it began. `culling` drops the triangles that turn
+one way, `positive` those clockwise on the y-down screen: as they turn on
+the screen, or in a BitmapData's draw, for what is drawn and the hit
+tests, so a mirror drops the others (the layer's `mirrored` parts, which
+`facing` puts in its place where the object's transform turns it over);
+as they turn in the drawing's own space for `readGraphicsData`; and in a
+3D object's own space within it, as its content is drawn into its bitmap
+(the `draw-triangles-culling` case). A bitmap fill without `uvtData` fills through its matrix, as any
+fill does. With `uvtData`, two or three numbers a vertex, only a bitmap
+fill draws, the triangles textured and its matrix ignored; any other fill
+draws nothing, nor its lines, though without a fill the lines draw. The
+textured triangles are a layer's `meshes`, drawn after its fills by a
+Pixi mesh of their own (`render/triangles.ts`, WebGL alone): u·t, v·t and
+t a vertex, which the GPU interpolates straight and each pixel divides,
+so t is a perspective. adl maps u and v from 0 to 1 onto the bitmap's
+first texel's centre to its last's, wrapped there when the fill repeats
+or clamped, a hair nearer 0 as its fixed-point steps come out, and
+samples once a pixel at the pixel's top left corner: the nearer texel,
+or the four around weighed when smoothed; a bitmap a texel high shows its
+first texel throughout. The shader reads the texels itself, so the
+texture's sampling counts for nothing, and every sample of a pixel the
+page draws finer takes the pixel's value. Flash colour transforms apply
+as the colour batcher's do. The bounds count every triangle given, culled
+or drawing nothing, with the line's width if a line was set; the hit
+tests count the textured triangles; `readGraphicsData` gives each
+untextured triangle as a fill, a path and an end, the lines all in one
+path, and leaves the textured ones out. Errors are adl's: vertices not in
+pairs, or not three a triangle without indices, indices not in threes and
+`uvtData` not two or three a vertex are ArgumentError 2004, a culling
+not one of the three 2008, after them; null vertices draw nothing; a
+`GraphicsTrianglePath` refuses a culling as it is set, 2008. Where an
+open contour went on after triangles, adl reads it back from the pen to
+where it began, and the player from where it began through the pen; and
+a filter's output or a cached bitmap over textured triangles adl keeps
+though the texture changes, which the player draws again; adl keeps them
+over a path's bitmap fill too, so this is any bitmap fill's limit, not
+the triangles'. adl hits a culled drawing's triangles where it last drew
+them on the screen, so a hit test asked after a flip, before the next
+frame is drawn, finds them where they were; the player's, where they
+now are.
 
 `readGraphicsData` reads a drawing back as Flash does, from the shape in
 twips rather than the commands (`display/graphicsdata.ts`): each fill as
@@ -2522,11 +3210,99 @@ touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
 one a transform gives reads and writes its object's, as Flash's does,
 which keeps the field of view in radians, the stage's 500 wide and the
 others' as wide as the stage; the stage and each SWF's root always have
-one, back to their defaults when set to null. The player keeps all this
-but does not draw in perspective: a 3D object draws, bounds and hits as
-its matrix3D's x and y rows, and `local3DToGlobal` and `globalToLocal3D`
-are not implemented. `transform.pixelBounds` is the bounds on the stage
-out to whole pixels.
+one, back to their defaults when set to null. `transform.pixelBounds` is
+the bounds on the stage out to whole pixels.
+
+### 3D display objects
+
+A 3D object is drawn, bounded and hit in perspective, as Flash Player 32
+(PepperFlash) and adl draw it (`display/perspective.ts`). Its projection is
+that of the nearest container above it with one set on its transform, or
+else its SWF's root's, or the stage's for one on the stage: the centre in
+that container's own space, the root's at the stage's centre, and the
+focal length the field of view's over the stage's width. Its matrix3D,
+those of the 3D objects above it and the 2D matrices between go into one
+3D transform to the container's space, which the projection divides, a
+point at depth z drawn at f / (f + z) of its distance from the centre: a
+3D object in another is in one 3D space with it, not flattened into the
+other's plane (the `three-d-scene` case's green card in the blue). Each
+object's plane is then a projective map of its space to that container's,
+and a 3D object's `placed` matrix is its plane in its parent's, the
+parent's inverse after its own: a `Projective` matrix, whose third row
+`geometry.ts`'s functions divide by, so bounds, hit tests, the pointer's
+pick, `mouseX`, `localToGlobal` and `globalToLocal` follow it as they
+follow any matrix, and 2D objects pay one test. It is kept on the object
+until anything is invalidated, as an ancestor's move changes it.
+`local3DToGlobal` projects a point of the object's 3D space so, which
+Flash reports to a quarter pixel; `globalToLocal3D` is the point of the
+object's plane under the stage's, at z 0.
+
+Bounds through a plane are out to whole pixels, as Flash reports them:
+a turned card's `width` is its drawn width (`three-d-flip`); Flash's are a
+pixel smaller here and there, as if its corners were nearer whole pixels
+than doubles put them, which the cases leave untraced. An object with a
+corner of its bounds at or behind the eye (f + z at most 0) Flash draws
+none of, takes no hit on and counts in no bounds; its own bounds are an
+empty rectangle at the origin. `hitTestPoint` without the shape flag
+tests the box around what is drawn on the stage, and the pointer picks
+where the plane is drawn (`pointer.test.ts`, against Flash Player 32's
+traces). Siblings are drawn in the list's order, whatever their depths.
+A 3D mask masks nothing, and is not drawn.
+
+Flash draws a 3D object from a bitmap of what it and its children draw in
+its own space, a texel a pixel of that space whatever its scale, its
+parent's or the stage's zoom, then draws the bitmap smoothed through its
+plane; so a 3D object scaled up is blurred, a texel magnified, where a 2D
+child scaled up inside it is sharp, and its filters are in its space and
+turn with it. The colour and alpha of all above it go into each of its
+fills in the bitmap, so a card under a half-transparent parent shows its
+own white square paler than its edge, not as a layer faded whole; its
+blend mode composites the drawn bitmap with what is behind it; and its
+scrollRect counts for nothing, Flash drawing, bounding and hitting all of
+it (`three-d-mixed`, the same in adl and Flash Player). The view does the
+same (`render/three.ts`): the object's container is in a holder of its
+own, coloured from the stage down, drawn before the stage into a texture
+of the object's bounds (filters' reach included) out to whole pixels, at
+4 samples a side averaged down to a texel a pixel in one pass, as the
+stage's edges are anti-aliased, with a texel of nothing around; in its
+place in its parent is a quad of the texture's four corners, each with
+the w its plane gives it, so that the GPU interpolates in perspective,
+which takes none of Pixi's colour and carries the blend mode. Where the
+samples would pass the GPU's largest texture or 4M texels, fewer are
+taken; past 2048 texels a side, the bitmap holds less than a texel a
+pixel, and its lines and filters are made for the units it is drawn at.
+Textures are kept in sizes of 32-texel steps, so an object whose
+children move each frame keeps its bitmap and the pool's intermediates.
+A 3D object in another draws its quad into the other's bitmap, by its
+plane in the other's space, so the two are drawn deepest first. Its
+hairlines are a texel. The bitmap is drawn again only when what is in it
+changes, not as the object moves or turns: 100 turning 3D rigs of 12
+parts each, all animated, take some 1.9 ms of sync a frame, and turning
+alone 0.1 ms. As adl and Flash Player measure it, the bitmap is drawn a
+texel wider and taller than it is, about its centre and half a stage
+pixel right and down, which at a texel a pixel keeps its left and top
+edges in place; and sampled once a pixel of the stage, at the pixel's
+centre, which the shader does for each of the target's samples of the
+pixel where the host says how many there are (`screenScale`), as the test
+page does; the evidence for that last is mixed, edges matching better
+with it and magnified bitmaps no worse. A BitmapData's draw of an object
+on no stage projects what is in 3D in it as on a stage the bitmap's
+size, centred on it, as Flash does. A mask set on a 3D object clips its
+quad on the stage, where Flash clips the bitmap in the object's space.
+Under WebGPU, which the quad's shader has no program for, a 3D object
+draws as its matrix3D's x and y rows.
+
+adl draws through a focal length for a stage 500 wide whatever the SWF's,
+and a projection set on the root as if it were not, where Flash Player
+draws as its bounds and `local3DToGlobal` say, in both: the player follows
+Flash Player, and the `three-d-*` cases, whose references adl draws, have
+stages 500 wide and leave the root's projection alone. Flash's
+anti-aliasing of the bitmap's edges and its hairlines' place in it (a
+pixel's row, where the view straddles two) differ by a level or a pixel
+at edges, within the cases' tolerance. For an object hidden behind the
+eye adl still projects its 2D children's bounds through the negative w,
+and `hitTestPoint(0, 0, false)` on it is true; the player gives such an
+object no bounds and no hits.
 
 ### Nine-slice scaling
 
@@ -2638,21 +3414,47 @@ premultiplied by alpha as Flash keeps them, so `setPixel32` premultiplies
 and `getPixel32` divides back, with the rounding Flash's does (Ruffle's
 `bitmapdata_accuracy` tabulates every alpha and value; adl is the judge of
 the rule); a bitmap made opaque keeps every alpha at 255, and `getPixel`
-answers without the alpha. The constructor refuses a side under 1 with
-ArgumentError 2015 and no more: Flash's old limits, 8191 a side and
-16,777,215 pixels, are gone (16384 by 1 and 4097 by 4096 both pass in
-adl); `dispose` empties the store, after which every read, the size
-included, throws 2015, and a second `dispose` is nothing. `copyPixels`
+answers without the alpha. The constructor refuses a side under 1 or
+past 2^31 / 20 (107,374,182 passes), and more than 536,625,144 pixels
+whatever the shape (32752 by 16384 and 65513 by 8191 pass in adl, 32753
+by 16384 and 65514 by 8191 not), with ArgumentError 2015, as it does an
+allocation the browser refuses: Flash's old limits, 8191 a side and
+16,777,215 pixels, are gone; `dispose`
+empties the store, after which every read, the size included, throws
+2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
-`mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels` and
-`setPixels` (ByteArrays of big-endian ARGB), `getVector` and `setVector`,
-`clone` and `rect` work on that store, clipped to it, a Rectangle's or
-Point's coordinates rounded to the nearest pixel and a half to the even
-one, as Flash rounds them (`bitmapdata_rectangle_rounding`). `copyPixels`
+`mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels`
+and `setPixels` (ByteArrays of big-endian ARGB), `getVector` and
+`setVector`, `clone` and `rect` work on that store, clipped to it, a
+Rectangle's edges rounded to the nearest pixel and a half to the even one,
+as Flash rounds them (`bitmapdata_rectangle_rounding`), each edge, x and
+x + width, clamped to 2^30 - 1 either way and NaN made int's least
+(`pixelEdge`): under adl an x of NaN or Infinity covers nothing, a width
+of Infinity reaches the bitmap's edge, and a copy's point moves by the
+clamped edge. `colorTransform` alone takes a height of NaN to the bitmap's
+foot from a top past 0, the height wrapping in int arithmetic; `merge`,
+`copyChannel`, `paletteMap`, `threshold` and `pixelDissolve` take a
+negative size as the rect it spans back over (`spanRect`), the others as
+none; `applyFilter` refuses with 2015 what adl cannot make the buffers for
+(`filterRefusal`). A Point's coordinates are truncated toward 0 (the
+destination, alpha and hit-test points of every operation alike, under
+adl: 3.7 is 3, -1.5 is -1; NaN, or past int's range, off the bitmap). A
+source rect past the source's edge is clipped and the point moved with it;
+`copyPixels` in place that moves right and down by no more than its rect's
+size writes the rect whole instead, and what lay left of or above the
+bitmap comes out empty (`copyGaps`; adl reads an opaque bitmap's as 0,
+alpha and all, and draws it black, which the store keeps as opaque black;
+a transparent one's are whatever its memory held, kept transparent; the
+`bitmap-rects` case).
+`copyPixels`
 copies in place in Flash's order, which within one store reads what it
 already wrote in one direction (rows bottom-up only when the copy moves
 down without moving left, columns right to left when it moves right;
-`bitmapdata_copypixels_self`); an alpha bitmap scales each premultiplied
+`bitmapdata_copypixels_self`); `merge`, `paletteMap`, `threshold` and
+`copyChannel` in place go rows down and pixels along, each pixel read as
+the ones before it left it, and a colour matrix's `applyFilter` by fours
+from each row's start; `pixelDissolve` in place dissolves the source
+rect, wherever the point is; an alpha bitmap scales each premultiplied
 channel by its alpha, 256 for 255, shifted down 8, and leaves the
 destination as it was where it does not reach; compositing is
 s + ((d * (256 - sa)) >> 8) a channel (`bitmapdata_copypixels_alpha_*`).
@@ -2684,7 +3486,13 @@ as c · (a + 1) >> 8, leaving a pixel of alpha 0 alone; `merge` is
 ((s · m + d · (256 − m)) >> 8) & 0xFF with the multiplier a uint and
 nothing clamped; `copyChannel` from more than one channel copies 0;
 `getColorBoundsRect` gives an empty rect where the one pixel found is the
-origin; a point or rect `hitTest` never hits alpha 0; `pixelDissolve`
+origin; a point or rect `hitTest` never hits alpha 0, and it refuses
+with ArgumentError 1508 a first point, or a second bitmap's, the bitmap
+would reach past int's range from; `draw` moves its matrix in twips in
+an int, so NaN draws at 0, and so does a move past the int's range,
+Infinity too, for a matrix that only moves (one that scales draws it
+nowhere), while one within 2^30 twips of the ends wraps round to near 0;
+`pixelDissolve`
 visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
 LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
 26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)
@@ -2750,7 +3558,8 @@ clamped to the source's edges; the translation is snapped down to
 quarter pixels before rasterising, which the 4 × 4 coverage reads exactly
 (a move of 0.49 covers three quarters of the left edge pixels); `normal`
 is the store's source-over; a Bitmap draws as its data, its own transform
-ignored, as any source's is; a BitmapData drawn into itself goes a row
+ignored, as any source's is, and its own colour transform too, though
+not its filters (`filtered-colors`); a BitmapData drawn into itself goes a row
 at a time, top down, every pixel of the row read before one is written,
 so a move right keeps the pixels and a move down smears rows, while
 through a Bitmap of itself it goes in plain scan order and smears both
@@ -3076,20 +3885,72 @@ vertex colour there too. A gradient there is
 transformed pixel by pixel, which clamps after the ramp where Flash clamps
 its stops, so the two part only where a transformed stop is clamped.
 
+A filtered object is the exception: adl colours the bitmap its filters
+make, the glow and the shadow too, not what they are run on. Its
+colour transform from the stage down, or from the filtered object it is
+in, is applied by its chain's last pass to the straight colour of each
+pixel the filters made, a clear one staying clear, and what is in it is
+drawn as though nothing above it, itself included, were coloured: the
+fork's `Container.colorRoot` keeps Pixi's tint and alpha, the render
+group's included, from reaching it. A glowing object faded to an alpha of
+0.6 had its glow drawn from its faded shape, 65 off, and offsets left the
+glow as it was, 139 off (`blend-filtered-alpha`). A filtered 3D object
+is coloured so in its bitmap: one at an alpha of 0.6 drew its glow from
+its faded shape, 77 off. Children's own colours, masks, text, bitmaps,
+filtered objects in filtered objects, render groups in and around them,
+filters taken off and put on, and the colours that leave one clear, are
+the `filtered-colors` case. A colour that changes
+draws the output it kept again in the new colour, with no filter run;
+one that leaves every pixel clear draws nothing and runs none, as Pixi
+skipped an object at an alpha of 0 before its colour went to the chain
+(a rig's faded glowing parts took 12 ms a frame for nothing, 2 skipped).
+
 ### Blend modes
 
 adl composites an object with a blend mode as a layer, its children
 together in the normal way, and blends that with what is below, the
 stage's colour included, where Pixi would blend each child on its own.
-A single fill with `screen`, or with `multiply` over an opaque stage,
-can use Pixi's direct blend when it has no filters, masks or isolated
-ancestor. Other blends use a filter (`render/blend.ts`): `layer`
+Where Pixi draws such a layer at once, as a single fill with no masks or
+as a filtered object's result, and the GPU's own blending computes
+Flash's blend, the GPU blends it, with no copy of what is below:
+`screen` and `add` over any ground, `subtract` and `multiply` while the
+stage's pixels are opaque, add and subtract under WebGL alone (WebGPU's
+add leaves an opaque target less than opaque, and it has no subtract),
+and none below a blended, filtered or clipped ancestor, which may draw it
+into a layer whose ground is clear. Over a clear pixel the GPU's multiply
+drops the object's own colour, which Flash keeps (off by up to 128), and
+its subtract the alpha. The stage's pixels may be clear while its
+background is (a host's transparent window mode, set at any time) or
+while an `erase` or `alpha` blend outside any layer is on the list, which
+clears what it covers of the stage as adl does; the view checks both
+before and after it brings the list up to date, and where that changes,
+each multiply and subtract blend outside a layer chooses again, so that
+it switches on the frame the change is drawn on (`blend-direct-clear`).
+Pixi drew its back buffer onto the canvas blended, over what the canvas
+held: with a drawing buffer kept, as the test page keeps it, the frame
+before showed through such cleared pixels, and an erase added after the
+first frame seemed to clear nothing. The fork copies it instead
+(`stage-erase`). A filtered object's chain draws
+its result with that blend (`FilterChain.blendOver`); the Pixi fork maps
+`subtract` to WebGL's reverse subtraction. adl's lighten, darken and
+difference blend the straight colours, which the GPU's min and max of
+premultiplied ones match only where the object is opaque, and overlay
+and hard light depend on what is below, so those keep the filter. The
+`blend-formulas` case puts each mode's formula against adl, at five
+alphas over five grounds, unfiltered and through a filter, and
+`blend-direct-filtered` draws filtered blends over the stage, in layers
+and as they change; the GPU's blends draw what the filter drew, byte for
+byte. On the bench (`--rig 300 --filtered 3 --added --glide
+--back-buffer --gpu`, an RX 7900 XTX) a frame fell from some 43 ms to
+37 ms, and on a busy page of 66 added fills the frame's framebuffer
+binds fell by an eighth. Other blends use a filter (`render/blend.ts`): `layer`
 one that only makes it a layer, any other one that reads the back buffer
 and computes the mode in premultiplied colour, its result replacing what
 is there. Multiply, screen, lighten, darken, difference, overlay and
 hardlight are the separable blends of the straight colours, composited
 source over; `add` adds and `subtract` takes the object from what is
-below, each clamped; `invert` inverts what is below as far as the
+below, each clamped, subtract's alpha the object's over what is below
+(over a layer's clear ground adl leaves the object's alpha in black); `invert` inverts what is below as far as the
 object covers it; `alpha` and `erase` scale the layer below by the
 object's alpha, or by what it leaves, only where the object has any.
 The `blend-modes` case draws each over two grounds against adl. Pixi
@@ -3130,17 +3991,15 @@ A renderer made with `antialias: true` draws into multisampled targets,
 which must be resolved before they are read, and Pixi resolves the whole
 target at each step: before a blend copies its backdrop, again in the
 copy, and after each filter pass drawn on the back buffer, a full-screen
-resolve for each small blend. `render/resolve.ts` resolves only the copy's
+resolve for each small blend. The Pixi fork resolves only the copy's
 clipped source rectangle when a backdrop is copied, skips the resolve
 before the copy, and leaves the back buffer unresolved after filter
 passes until it is presented; a filter's intermediate textures still
 resolve before they are sampled. On a scene of 100 nested blends and
 glows (RX 7900 XTX) the GPU's frame fell from some 4.1 ms to 3.3 ms, the
-frames unchanged. It wraps Pixi 8.21's `FilterSystem`
-(`_setupFilterTextures`, `_setupBindGroupsAndRender`) and its WebGL
-render target adaptor's `copyToTexture` and `finishRenderPass`, and
-relies on the order Pixi calls them in and the framebuffers it leaves
-bound: a Pixi upgrade must check those again. The `blend-antialias` case
+frames unchanged. It is in the fork's `FilterSystem` and WebGL render
+target adaptor (`finishRenderPass`), and relies on the order the filter
+system calls them in. The `blend-antialias` case
 draws nested blends, a blurred child of a blend and blends past the
 stage's edges multisampled against adl, the only case that runs these
 paths; a resolve skipped or of the wrong rectangle fails it, and
@@ -3189,7 +4048,11 @@ passes' reach, and cuts what they spread. A blur is a box of fractional width, i
 part, run along x and then y `quality` times, each value truncated to
 8 bits. A glow's alpha is that blur of the source's alpha (of 255 less
 it, for an inner one), truncated, times strength to 255 and alpha, over
-or under the source as the display's are; a shadow samples it from its
+or under the source as the display's are; inner, the source keeps its
+alpha and the glow lies on its straight colour, the glow's colour times
+that alpha in 255ths and the source's times what is left in 256ths,
+truncated, premultiplied again rounding, and knocked out the glow's
+alpha is times the source's, rounded; a shadow samples it from its
 offset between pixels, linearly with weights in 256ths. A colour matrix
 maps straight colour, rounded, the pixels about what the source has
 premultiplied truncated and the rest of the rect the map of a
@@ -3197,7 +4060,8 @@ transparent pixel. A bevel is the source's alpha so blurred, read from
 its offset on and back between pixels, as a shadow reads; their
 difference times strength, to 255, times the colour's alpha, rounded, in
 the highlight colour where on is more and the shadow colour where it is
-less. Inner, it lies atop the source, which keeps its alpha; outer,
+less. Inner, it lies atop the source, which keeps its alpha, on its
+straight colour as an inner glow does; outer,
 behind it; full, over it; knocked out, alone, masked to where the source
 is (inner) or is not (outer); each over another as the store draws it,
 s + d × (256 − sa) / 256 truncated. Off the axes adl reads the offset
@@ -3222,8 +4086,32 @@ place where the whole pixel it lands on is past it (ignore), or the
 filter's colour; where the map is not, or there is none, it keeps its
 own. Its rect grows by a quarter of each scale, whole, and none with no
 map; `generateFilterRect` takes any filter's rect within the bitmap first,
-and a displacement's result within it too. applyFilter writes the rect
-alone: adl, displacing a rect moved elsewhere, fills its grown rect from
+and a displacement's result, and an inner glow's, shadow's, bevel's or
+gradient filter's, within it too. adl keeps each part of a shadow's or a
+bevel's offset in 256ths in an int: 2^23 − 1 or more wraps round to
+−2^23 − 256 and less stops there (`shadowOffset`), so the rect reaches
+−8388866, as Infinity's does; and its angle is 6.79e-9 radians off, so the
+offset grows across the axes as the distance does, 4e9 at 0° reaching 30
+up (fitted from 5e5 to 1e11, taken from where it comes to a 512th). An
+outer shadow or gradient glow cast past the wrap writes its rect empty,
+the source too; a filter rect past the buffers adl makes is refused, 2015
+for an outer shadow or gradient glow (1e5 at 45°, or 8e9 at 0° as the
+part across grows), 2077 for an inner bevel and 2015 for an outer or
+full one, which is refused with 2077 from 2^31 / 10 pixels already; and a
+distance or angle of NaN
+refuses an outer shadow and is none for the rest (`filterRefusal`). Cast some 2^15 pixels left or up, adl draws
+an outer shadow in pieces as its 16-bit sums wrap, which swf2es leaves.
+However far the offset, the work is what the destination shows: the
+alpha read from the offset is blurred where it is read, not over all the
+offset spans (the `filter-distances` case). An inner filter writes its
+rect as generateFilterRect gives it, the rect within the bitmap grown
+and kept within it, and adl moves it by that rect's corner from the
+source rect's twice: the source rect (8, 8) at (10, 10) of an inner glow
+reaching 2, whose rect is (6, 6), writes at (6, 6), not (8, 8)
+(`apply-filter-inner`, every inner filter from a rect inside the
+source's content, past its edge and past the bitmap's, to the bit; it
+wrote the grown rect where an outer filter's goes). A displacement map
+writes the rect alone: adl, displacing a rect moved elsewhere, fills its grown rect from
 the rect's corner, shifted, and into an opaque destination leaves alpha,
 quirks swf2es does not take on. The map is read as it is when applied.
 The `apply-filter` case matches adl's numbers to the bit.
@@ -3310,8 +4198,8 @@ were stepped beside its unfiltered neighbours' smooth ones, for some
 As Flash caches a filtered object as a bitmap, an object's filters run
 as one chain (`FilterChain`) whose output is kept and drawn again until
 what it was run on changes: the object or anything below it, its
-transform other than a move, the colour and alpha it is drawn in, or how
-much of it the screen shows. Filters set again with the values they had,
+transform other than a move, or how much of it the screen shows (its
+colour colours the output as it is drawn). Filters set again with the values they had,
 as a tween writes them on each frame or a script sets them from their
 own, keep the chain and its output; a displacement's map is the same only
 as the same object, which setting it again takes anew. A wide blur's
@@ -3337,6 +4225,13 @@ its chain, unless given a `filterArea`; that measuring is some 1% of the
 main thread on a page of 32 animated creatures running 450 chains a
 frame, and 0.13 ms of a 3.3 ms draw on `bench.ts --rig 32 --blurred`
 (the `filterAreaMs` meter), less than the runs vary, so no area is set.
+In a busy town of an application, though, with hundreds of filtered
+characters and scenery, it was 1 ms of a 14 ms frame, so a chain keeps
+the area it was measured at with the object's transform on the stage,
+and gives it again, moved as the object moved, until the object changes
+as its kept output goes stale or its transform's linear part changes;
+one with a mask from outside it in it is measured each time, as that
+mask may move with nothing in it changing (`FilterChain.keptArea`).
 Each filter pass clears the texture it draws into: Pixi clears a chain's
 input as it binds it, and the box blur's runs and a chain's steps clear
 their pool textures, some 1,230 clears a frame on that page and 769 on
@@ -3400,8 +4295,8 @@ as Flash's sound-transform corpus trace shows, and the four gains reach the
 browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
 The player decodes MP3, uncompressed 8/16-bit or ADPCM sound on first play
-(ADPCM as Ruffle's decoder does, to 16-bit samples the browser host plays as
-uncompressed ones; `adpcmSound` in `media/audio.ts` does it for another host), sharing
+(ADPCM as Ruffle's decoder does, to 16-bit samples the browser host in
+`media/audio.ts` plays as uncompressed ones), sharing
 a decode when separate loads contain the same sound (`scripting/symbols.ts`). The shared cache holds
 decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
@@ -3474,10 +4369,10 @@ and a SoundStreamBlock a frame), and a button's DefineButtonSound. The
 library's `sounds` hook (`TimelineSounds`, made by `media/sounds.ts`
 for every AS3 library a `Scripting` loads) plays them through
 the page's `AudioHost`; a player without one plays none, and a SWF without
-them pays nothing. An AVM1 movie's library has none: its actions do not
-run, so its timeline loops where a `stop()` would have held it, and its
-StartSounds would start again on every loop; its sounds wait for AVM1
-actions.
+them pays nothing. An AVM1 SWF's library has none: in a `Loader` its
+actions do not run, so its timeline loops where a `stop()` would have
+held it, and its StartSounds would start again on every loop; its sounds
+wait for AVM1's later steps.
 
 A frame's StartSound tags play as the playhead enters it, played on to,
 looped to, or landed on by a goto, but a goto to the frame the clip is on,
@@ -3521,9 +4416,12 @@ drift.
 A button's change of state plays DefineButtonSound's sound for it, as
 Ruffle's button events pick them: up to over, over to down, down to over,
 and over to up, and a release outside plays over to up's (the pointer's
-up, with a button pressed and something else under it). Dragging off a
-pressed button, down to up here, and back on, up to down, play none, as
-Ruffle's DragOut and DragOver do.
+up, with a button pressed and something else under it). A pressed
+button dragged off shows its over state until the release, and its down
+state again when the pointer comes back, as Flash Player 32 shows them
+(`tests/unit/player/input/pointer.test.ts`); those two changes play
+none, as Ruffle's DragOut and DragOver do. A button pressed elsewhere and
+dragged onto stays up until the release over it, which shows over.
 
 A timeline sound's mix is the transforms of its clip or button and each
 ancestor, a sprite's `soundTransform`, concatenated from it up, then the
@@ -3603,8 +4501,14 @@ gives, as playerglobal is Adobe's and cannot ship with swf2es; `codegen`, codege
 default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused
-with #2031; and `cache`. The page fetches and compiles codegen.wasm once
-and the libraries once, and each player instantiates the compiled module
+with #2031; `sockets`, a SocketHost of the embedder's own that takes the
+relays' place, as the desktop app's, which reaches TCP itself; `fetch`,
+an embedder's fetch in place of the browser's for what the SWFs load and
+for the SWF the element plays (purpose `movie`), with `loadPolicyFile`
+and `sandboxType` for the player, as the desktop app judges requests by
+Flash's sandboxes and policy files rather than CORS; and
+`cache`. The page fetches and compiles codegen.wasm once and the
+libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting
 resets the compiler it is given, and its domains' numbers are its own,
 so two players on one instance would take each other's over. `cache:
@@ -3727,6 +4631,356 @@ calls come to nothing, but a call by a path still reaches any function
 a global path names, `eval` itself among them: script access is the
 page's whole, as it was in Flash.
 
+## The desktop app
+
+`apps/desktop` plays local SWFs, and SWFs by their http or https URL, in
+an Electron window. It is the web embedding with a shell around it: the
+page is one `<swf2es-player>` filling the window, configured with the
+IndexedDB module cache and the libraries the user pointed the app at,
+and the main process opens the files, keeps the settings and carries the
+sockets and the SWF's network requests. The page knows the shell only
+through `window.swf2esDesktop`, whose types are `src/shared/api.ts`:
+`start`, which hands the page the libraries' state and the SWF to play;
+`onOpen` and `onClose`; `openDialog`, `openUrlDialog`, `openDropped` and
+`chooseLibrary`, requests the main process answers with dialogs and
+`onOpen`; `sockets`; and `network`. The page (`src/renderer`, `static/`)
+imports nothing of Electron's, so a Tauri shell can serve it as it is.
+
+### Serving the page
+
+Nothing is loaded from `file:`. One privileged scheme, `swf2es:`,
+standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
+as https, has two hosts. `swf2es://app/` is the page,
+`static/index.html` and its stylesheet, the renderer's build,
+`/modules/<package>/` for the packages' builds and their libraries
+(pixi.js, pako, lzma1), which the page's import map names as
+`tests/player/serve.ts`'s does, and `/libraries/builtin.abc` and
+`/libraries/playerglobal.abc`, read from where the settings say.
+`swf2es://file/` is the local files the SWF playing may read, by its
+sandbox (below); its answers carry `Access-Control-Allow-Origin:
+swf2es://app`. The two hosts are two origins: a SWF's files are never
+the page's. Anything but GET and HEAD is refused, and a path with
+malformed %-escapes is a 400.
+
+### The sandbox
+
+A local SWF plays in the sandbox Flash Player gave it, chosen by its
+FileAttributes' UseNetwork bit (`fileAttributes` in `format`), and
+`src/main/sandbox.ts` holds it:
+
+- **local-with-filesystem**, without the bit: the SWF reads the files in
+  its own directory and below, its real directory, links followed, and
+  reaches no network. The main process refuses its http and https
+  requests (with a word on stderr), no socket is made, and navigateToURL
+  opens no page, as Flash refused it, since a URL can carry what the SWF
+  read.
+- **local-with-networking**, with it: the SWF reads no local file but
+  itself, reaches the network through the main process by Flash's rules
+  (see [The network](#the-network)), content from anywhere and data only
+  where a policy file grants every domain, and sockets as the user
+  allows (below).
+
+A SWF opened by its URL plays in Flash's **remote** sandbox: its
+security domain is its origin, the one its URL came to after redirects,
+which is also its `loaderInfo.url`; it reads no local file at all (the
+file host has no grant for it, and the page fetches nothing else), and
+reaches the network as [The network](#the-network) has it, sockets with
+a socket policy and the user's word. Its grant takes effect as the page
+asks the main process for that very URL as the movie, after the last
+player has gone, as a local SWF's does as the page fetches its file.
+
+So no SWF can both read the disk and send what it read away. A directory
+others share is never granted whole: the user's home, the one that holds
+every user's (`/home`, `/Users`, `C:\Users`), the temporary ones (the
+OS's, `/tmp`, `/var/tmp`) and a file system's root; a SWF there reads
+only itself. Only those directories themselves: a SWF one level below,
+in `C:\Users\Public` or a directory of `/tmp`, reads all that directory
+holds, which may be other programs' or users' files, so a SWF from
+elsewhere is best kept in a directory of its own.
+
+The main process chooses the sandbox from the SWF's first 64 KB, with
+`fileAttributes` (`format`), which decompresses only as far as the first
+tag: a SWF's header may name a length of 4 GB, which it never trusts.
+The page decompresses the SWF whole, with what `format`'s LZMA decoder
+bounds (see [Packages](#packages)).
+
+Only the SWF playing has a grant: opening another or closing it revokes
+it, so nothing accumulates over a run, and the next SWF's grant takes
+effect only as the page fetches it, which it does once the element has
+let the last player go, so that player never runs in the next one's
+sandbox. What the SWF loads, a child SWF among it, plays in its sandbox,
+which is the page's. The URL the page plays a SWF from, which is also
+its `loaderInfo.url`, names its directory by a token, a hash of the
+path, and the file by its name, so the SWF learns nothing of where it is
+or whose disk it is on, and the token, the same from run to run, keeps
+its SharedObjects.
+
+The page's Content-Security-Policy, a header the main process writes, is
+`default-src 'none'` and what the player needs: `script-src 'self'
+'unsafe-eval' 'wasm-unsafe-eval'` and the import map's hash, as the
+player evaluates the modules it compiles with `new Function` and codegen
+is WebAssembly; inline styles, for the element's shadow root; images,
+media and fonts from the page, the SWF's files, `data:` and `blob:`; and
+`connect-src` for the page and the SWF's files alone. The page never
+reaches the network itself: a SWF's http and https loads go through the
+main process (below), and every http, https, ws and wss request the page
+makes is cancelled in the session's `webRequest`, with a word on stderr,
+whatever the policy would allow. So `air.net.WebSocket`, AIR's and not
+Flash Player's, has no server here. Nothing may frame the page, and it
+frames nothing.
+
+### The network
+
+A SWF's http and https requests are the main process's to send
+(`src/main/network.ts`), not the page's: the element is configured with
+a fetch (`configure({ fetch })`, `src/renderer/network.ts`) that hands
+each one, with its purpose, over IPC, and the main process judges it as
+Flash Player judged it, by the SWF's sandbox and the policy files of the
+sites it reaches, not by CORS. So a SWF reaches `http:` and servers that
+never heard of CORS, as it did in Flash. A swf2es://file URL, a local
+SWF's own files, the page fetches as before, and any other scheme is
+refused.
+
+Flash's rules, from Adobe's security documentation (the ActionScript 3.0
+Developer's Guide's "Security sandboxes", "Loading data" and "Permission
+controls") and its Cross Domain Policy File Specification (2.0):
+
+- A **remote** SWF may load anything from its own origin (scheme, host
+  and port), and content, a Loader's or a Sound's, from anywhere; it
+  reads another origin's data, a URLLoader's or URLStream's, only as
+  that origin's policy files grant its domain; sendToURL sends anywhere.
+- A **local-with-networking** SWF has no domain: it loads content from
+  anywhere, sends anywhere, and reads data only where a policy file
+  grants every domain (`domain="*"`), as the Developer's Guide says.
+- **Policy files** (`src/main/policy.ts`) are read as the specification
+  defines them. The master policy file is `/crossdomain.xml`; others,
+  named with `Security.loadPolicyFile`, count only as the master's
+  meta-policy permits (site-control, or the
+  `X-Permitted-Cross-Domain-Policies` header, the stricter of the two
+  winning), and Flash Player 10's default is master-only: a site without
+  a master policy file has no other either. A policy covers its own
+  origin, and a non-master one only its directory and below. A policy
+  file must come as `text/*`, `application/xml` or
+  `application/xhtml+xml`, with a 200, without a redirect (the
+  specification ignores one to another domain; one within the site would
+  move the file's scope), and with a root of `<cross-domain-policy>`; a
+  DOCTYPE is skipped, so no entity of its own is expanded. Domains match
+  by the specification's table: `*.example.com` is example.com and every
+  name under it, an address is never its host's name, and only `*` names
+  a local SWF. An HTTPS policy's rule grants an HTTP SWF, or a local
+  one, only with `secure="false"`. Headers other than Content-Type go to
+  another origin only as its `allow-http-request-headers-from` lists
+  them. Each policy file is fetched once a movie and address, and
+  forgotten as the movie closes.
+- Flash Player outside AIR sent GET and POST only, and refused a SWF the
+  headers `URLRequestHeader` lists (Cookie, Host, Referer, User-Agent
+  and the rest); the main process refuses those too, and Proxy- and Sec-
+  headers, and any header value with a control character or beyond
+  Latin-1, which Node would throw for, saying so on stderr.
+
+What Flash never guarded, the machine's place on the network, is guarded
+here, since a request from the main process is one from this machine. No
+request carries the user's credentials: no cookies (a response's are
+dropped), no HTTP authentication, no client certificate, no proxy. The
+Referer is what a browser's default policy,
+strict-origin-when-cross-origin, sends: the SWF's URL to its own origin,
+its origin alone to another, and none from an https SWF to what is not
+potentially trustworthy (http, but for this machine's loopback addresses
+and localhost names), a URL past 4096 characters going as its origin; a
+local SWF sends none. `x-flash-version` goes as Flash Player 32 sent it.
+Every address is placed (`src/main/addresses.ts`): on this machine
+(127/8, ::1), on a private network (10/8, 172.16/12, 192.168/16,
+100.64/10, link-local 169.254/16, where clouds keep their metadata
+service, unique and link-local IPv6, the documentation blocks), or
+public; an IPv4 address inside an IPv6 one, mapped, translated
+(`::ffff:0:a.b.c.d`), compatible, by NAT64 or by 6to4, is that address.
+A request to a place more private than the SWF's own needs a policy file
+from that very address that grants the SWF, whatever its purpose and
+even within its origin, as Chromium's Private Network Access asks a
+server there before a public page may. A remote SWF's place is that of
+the address it came from; a local one stands for the internet, so it
+reaches this machine and the LAN only where a policy there grants every
+domain. Addresses no server has (0.0.0.0/8, ::, multicast, 240/4) are
+never reached, nor the ports the Fetch standard blocks (SMTP's, SSH's
+and the rest), as Flash in a browser never reached them either.
+
+Addresses are placed by their ranges alone, as a browser's Private
+Network Access places them: the app does not know which public addresses
+are this machine's own or its network's. So this machine's own public
+IPv4 address or global IPv6 one, and a LAN device reached by its global
+IPv6 address (as most on an IPv6 network are), count as the internet: a
+SWF from the internet reaches a service listening there as any web page
+in a browser could, though still without the user's credentials. A
+service that is to stay private should listen on loopback or a private
+address, or ask for authentication.
+
+Each request resolves its host once and connects to that address, its
+policy file fetched from the same one (Node's `lookup` pinned, the name
+kept for TLS's server name and the Host header), so DNS that changes its
+answer between the policy and the request, rebinding, gains nothing:
+same-origin by name, a request now at 127.0.0.1 is judged as one to this
+machine. Every redirect is judged as a request of its own, a POST
+redirected by a 301, 302 or 303 going on as a GET without its body, to
+http or https only and ten at most. HTTPS is verified against Node's
+roots and the system's. A response is read up to 128 MB, and a movie's
+responses under way hold 256 MB at most all told (no compression is
+asked for, and a body a server compresses anyway, gzip, deflate or br,
+is decompressed as it comes, the limits counting what comes out, so a
+small bomb stops at them; gzip's header is read by the main process and
+its stream inflated raw, so what follows the stream is ignored, as
+Chromium ignores it, deflate is zlib's or raw as its first two bytes
+tell, and a body coded twice is refused), past which the next is refused
+(each is copied once, into memory of its own, and counts until the main
+process has sent it to the page in a message of its own, which copies it
+there); a body is sent up to 32 MB, a URL up to 64 KB, 32 headers in 8
+KB; a request that hears nothing for 30 seconds fails, and one that
+takes five minutes all told, from its turn, however its bytes trickle
+in, its redirects and the policy files it waits on included, as does a
+socket's search for its policy (a policy file's whole fetch takes ten
+seconds at most, port 843's socket policy three); 16 requests run at
+once, a thousand more wait, and the rest are refused. A sendToURL's
+response is not read. Requests the page aborts are aborted, and a
+movie's all are as the next opens, closes, or the page reloads. A
+refused request is a failed load to the SWF (IOErrorEvent, or the
+player's error for the SWF itself) and a line on stderr saying why.
+
+The page says what a request is for, and the main process cannot check
+it; nor does the player keep Flash's other half of the content rule,
+which let a SWF show another domain's image but not read its pixels or
+bytes without a policy. So a content load's bytes are the SWF's to read,
+and the line that holds against a SWF, or a page that misbehaves, is the
+one above: nothing with the user's credentials, and nothing more private
+than the SWF without that place's own policy. What a SWF reads from the
+internet that way is what its author's own server could fetch. The page
+also tells the player the sandbox, which `Security.sandboxType` reports.
+
+### What the page may do
+
+The window's renderer is sandboxed (`app.enableSandbox()`), with context
+isolation, no node integration and web security on. The preload, a
+CommonJS script as a sandboxed one must be, puts the API on the page
+through `contextBridge` and passes the path of a dropped file
+(`webUtils.getPathForFile`) to the main process without showing it to
+the page. The main process answers a message only from the window's own
+top frame on `swf2es://app/`, and checks each argument: a path must be
+absolute and its file start with a SWF's signature, a library must be an
+ABC (major version 46), a socket's host a string and its port in range.
+The page never navigates: `will-navigate` is refused, and a new window,
+as a SWF's navigateToURL asks for, is refused too, its URL opened in the
+system's browser with `shell.openExternal` if it is http or https, the
+SWF has the network (local-with-networking or remote), and a click, key
+or tap in the window asked for it: one page a gesture, within five
+seconds of it and a second after the last, as a browser's popup blocker
+allows, so a SWF cannot launch the browser in a loop. `<webview>`s are
+refused, and the only permission granted is full screen.
+ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
+into the page would run beside the API.
+
+### Files, settings and libraries
+
+The main process opens a SWF from File › Open, a drop on the window, the
+command line (the last argument that is an http or https URL or names a
+.swf file there is, as a switch may take a value), macOS's `open-file`,
+a second start of the app, which hands its SWF to the first and quits,
+File › Open URL (Ctrl+L), and the recent list, and sends the page its
+swf2es://file URL, or the http or https one, which it plays with `load`
+in place of what played, the element letting the last player go. The URL
+dialog is a window of its own (`static/open-url.html`,
+`src/renderer/open-url.ts`), modal over the player's, with a preload of
+its own (`src/preload/prompt.cts`) whose only messages are what to show
+first and the user's answer, which the main process takes only from that
+window's own page; the player's page may only ask for the dialog
+(`openUrlDialog`). So nothing a SWF runs opens a URL: a SWF's movie
+fetch reaches any address, as the user chose it, and the dialog keeps
+that choice the user's. Only http and https URLs open, with a host and
+without credentials, their fragment dropped. It keeps `settings.json` in
+Electron's user data directory (`SWF2ES_DESKTOP_USER_DATA` names
+another, for the tests): the libraries' paths, the last ten SWFs, by
+path or URL, and the servers each SWF, by path or URL, may always reach.
+A settings file that cannot be written keeps them for the run, with a
+word. playerglobal.abc is the user's to give; builtin.abc is taken from
+beside it, else from the checkout's avmplus submodule, else given too.
+Without them, the page shows what is missing and why the app cannot
+include playerglobal, and an ActionScript 3 SWF that fails for want of
+them says so rather than showing the 404; choosing one reloads the page,
+which fetches the libraries once.
+
+### Sockets
+
+The element takes the shell's SocketHost through `configure({ sockets
+})`. Each `flash.net.Socket` is an id the preload numbers, and the main
+process connects it with `node:net`, as `player-hosts/node` does,
+relaying its bytes and events over IPC. Only a SWF with the network has
+sockets, and only as the user allows: the first connection to each host
+and port asks, Allow Once (until the SWF closes), Always Allow for This
+SWF (kept in the settings by the SWF's real path) or Deny (until it
+closes); connections there while the question is open wait on its
+answer, and where no one can be asked it is a refusal. A remote SWF then
+needs the server's socket policy too, as Flash Player 9.0.124 and later
+asked of every socket, its own server's included: the main process
+connects to port 843, sends `<policy-file-request/>` and its NUL and
+reads the policy up to its NUL (three seconds at most), and, as its
+meta-policy allows ("all" by default for sockets), tries the ports
+`Security.loadPolicyFile("xmlsocket://host:port")` named and the port
+itself; a policy grants the SWF's domain the ports its `to-ports` lists,
+one from a port of 1024 or above only ports of 1024 and above. The
+policy is asked only after the user allows the server, so no SWF makes
+the app speak to a server the user did not allow, and the socket then
+connects to the address the policy came from. A local SWF with
+networking needs no socket policy, as before. A refused socket fails
+with #2031, as one no server took. A page holds at most 64 at once, and
+one with more than 4 MB its peer has not read fails, so a peer that
+stops reading cannot fill the main process's memory. A page's sockets
+close, silently, as it navigates or reloads, and with it. TLS
+(`SecureSocket`) waits for the player to have it.
+
+### Running and testing
+
+`pnpm install` leaves Electron's binary undownloaded (pnpm's
+`ignoredBuiltDependencies`), so nothing else pays for it; `pnpm --filter
+@swf2es/desktop fetch-electron` fetches it, and `start` runs the app,
+`--trace` printing the page's console, a SWF's traces to stdout.
+`tests/desktop/smoke.ts`, part of `pnpm test`, skips with a word where
+there is no binary; with one, it runs the app in Chromium's headless
+mode with SwiftShader, so it needs no display, and checks that a SWF
+named on the command line, through a link, draws and traces; that in
+local-with-filesystem it reads the file beside it, nothing outside its
+directory, no network and no socket, and its URL tells nothing of its
+path; that playing it again leaves one canvas, that one dropped on the
+window opens, and that a second start hands the first its SWF, which, in
+local-with-networking, reads no file, the last SWF's grant gone, and
+talks to a TCP server it is allowed through the bridge; that no page
+opens without a gesture, and that the policy refuses nothing; that
+without playerglobal the page says what is missing; and that a SWF
+opened by its http URL, from the command line and then from the URL
+dialog, which starts with the URL playing, plays in the remote sandbox:
+it reads its own origin and one whose crossdomain.xml grants it, not one
+without, no local file by swf2es:// or file://, connects the socket
+whose server answers with a socket policy and not the one without, and
+both URLs join the recent list. `connections.test.ts` and
+`sandbox.test.ts` test the sockets' limits and the sandbox's grants in
+node, `addresses.test.ts` where each address is, in every form an IPv4
+address takes inside an IPv6 one, `policy.test.ts` the policy parser and
+what policies grant, by the specification's examples, and
+`network.test.ts` the network against servers of its own, each on
+127.0.0.2, which it takes for the internet, and on 127.0.0.1 at the same
+port: same-origin and cross-origin loads with and without policies,
+meta-policies and named policy files, redirects, this machine reached by
+address, by name, by redirect and by a name whose DNS turns to it, HTTPS
+with a certificate it makes with openssl (skipped without), socket
+policies on a stand-in for port 843 and on the port itself, and the
+limits. CI's `desktop` workflow fetches Electron and runs them.
+
+Not done yet: packaging and installers, `SecureSocket`, Flash's Settings
+Manager for trusting a SWF or directory (localTrusted), each loaded SWF
+in a sandbox of its own rather than its loader's, a POST from
+navigateToURL (the system's browser gets its URL alone), reading
+playerglobal from a `.swc`, Flash's SecurityErrorEvent for a load a
+policy refused (the SWF sees an IOErrorEvent), cookies for a SWF's own
+origin, the system's proxy, and Flash's checks within the player:
+`checkPolicyFile`, pixels and bytes of another domain's content, and
+`Security.allowDomain`.
+
 ## Testing against oracles
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
@@ -3755,7 +5009,9 @@ page's whole, as it was in Flash.
   `BitmapData.drawWithQuality` at the SWF's stage quality, and its traces.
   Frame 1 is the one its `INIT` follows and frame k the one after k - 1
   `EXIT_FRAME`s, a frame later for AVM1, whose movie in a `Loader` shows
-  its frame 2 a frame late. A frame's load completions (`INIT`,
+  its frame 2 a frame late; adl prints an AVM1 movie's first frame's
+  traces only with its second's, so a corpus test or case of one frame is
+  run for two. A frame's load completions (`INIT`,
   `COMPLETE`) follow its `EXIT_FRAME`, so what their listeners change
   shows in the next frame's capture (the `loads-init` case captures frame
   3 for its unload at frame 2's `INIT`). A SWF's clips taken off the
@@ -3819,6 +5075,18 @@ entry in the module. A seeded generator makes a run repeat; a failing case
 is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
 `pnpm test:checked` the same in the build that checks every array access,
 which catches a read past a table's end the release build lets through.
+
+`tests/fuzz/avm1.ts` does the same for AVM1's decoder and flow
+(`codegen/assembly/avm1/`): action blocks generated from the actions'
+grammar, nested bodies and branches among them, and shapes at the edges
+(bodies that jump back before their own start, long `WaitForFrame` chains,
+deep nesting, blocks that read the same bytes from many offsets), mutated
+a few bytes at a time or cut short. A block must decode without a trap, no
+region may hold an action in two of its blocks, and a block must decode
+the same again after others. The flow refuses a block whose regions would
+hold more than 2M actions or whose decoding would read more than eight
+bytes per byte of it (and a megabyte besides), so a crafted block costs
+time in proportion to its size.
 
 `tests/fuzz/domains.ts` gives two instances the same ABCs, child domains
 and findings in a seeded random order, and lets one of them also drop,

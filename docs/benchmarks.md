@@ -72,8 +72,9 @@ Ruffle, measured on 2026-10-02, plays that SWF the same way, its 0.6.0
 web build served beside it and read from screenshots: after its first
 run and after 4 more, about 6 and 7.5 times swf2es's totals. Its AVM2
 interprets the bytecode; swf2es's figures are node's, as above, since
-the player's getTimer follows its frame clock and cannot time within a
-frame.
+the player's getTimer then followed its frame clock and could not time
+within a frame (it tells real time now, unless a host asks for the frame
+clock).
 
 From step 7.4 on, a change is timed against the build before it with
 `tests/programs/ab.ts`: both builds run as3pb in turn, interleaved

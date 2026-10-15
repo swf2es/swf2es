@@ -1,5 +1,5 @@
 /**
- * Compiles ABC (and later AVM1) bytecode to ES modules.
+ * Compiles ABC and AVM1 bytecode to ES modules.
  *
  * The compiler itself is AssemblyScript (assembly/), built to codegen.wasm.
  * This wrapper instantiates it and gives its exports their types. The same wasm runs as the browser JIT
@@ -69,34 +69,31 @@ export function moduleKey(
   });
 }
 
-/** A finding as a cache key names it: the defining ABC by its hash (see FoundDefinition). */
-export interface FoundKey {
-  nsKind: number;
-  uri: string;
-  name: string;
-  hash: string;
-  asType: boolean;
+/**
+ * A SWF's AVM1 action blocks, as format's readActions lists them: the SWF's
+ * version and each block's range in its decompressed bytes.
+ */
+export interface ActionBlocks {
+  readonly version: number;
+  readonly blocks: readonly { readonly offset: number; readonly length: number }[];
+}
+
+/** What a SWF's action blocks compile to: one module, and each block's entry in it. */
+export interface CompiledActions {
+  module: string;
+  /** By block index: the block's entry in the module, as it compiles alone. */
+  entries: string[];
 }
 
 /**
- * Cache key for compiled output. Browser caches, the AOT server and the JIT
- * all use this key, so their results are interchangeable. `linked` are the
- * hashes of the ABCs loaded before this one, in order, whose layouts the
- * output depends on; `found`, what its application domain was recorded to
- * find (Codegen.found), which binds its names and types too.
+ * The text of the module cache key of a SWF's AVM1 module, whose UTF-8's
+ * SHA-256 is the key: the compiler's identity, the SWF's version, which
+ * picks the operations its code calls, and `hash`, the SHA-256 of the
+ * SWF's decompressed bytes, which hold its blocks. An AVM1 module links to
+ * nothing, so nothing else goes in.
  */
-export function cacheKey(abcHash: string, linked: string[] = [], found: FoundKey[] = []): string {
-  const key = `swf2es@${COMPILER_VERSION}:${[...linked, abcHash].join("+")}`;
-  if (found.length === 0) {
-    return key;
-  }
-
-  // In one order whatever order they were found in; JSON keeps a URI or a
-  // name that holds a separator from reading as two.
-  const findings = found
-    .map((f) => JSON.stringify([f.asType ? 1 : 0, f.nsKind, f.uri, f.name, f.hash]))
-    .sort();
-  return `${key}:found[${findings.join(",")}]`;
+export function actionsKey(codegen: Codegen, hash: string, version: number): string {
+  return JSON.stringify({ compiler: codegen.identity, avm1: version, swf: hash });
 }
 
 /**
@@ -233,7 +230,6 @@ export interface Codegen {
    * the cache key names them.
    */
   compile(hashes?: string[], index?: number): Compiled;
-  /** Method bodies of ABC `index` (the last added by default) compiled alone, as the JIT compiles each on its first call; a native, unverified or unknown one is left out. */
   /**
    * ABC `index`'s module alone, as `compile` writes it, for a host that
    * loads it and needs neither its source map nor its entries: writing
@@ -241,6 +237,13 @@ export interface Codegen {
    * never shrinks.
    */
   compileModule(hashes?: string[], index?: number): string;
+  /**
+   * Method bodies of ABC `index` (the last added by default) compiled
+   * alone, as the planned lazy JIT is to compile each on its first call; a
+   * native, unverified or unknown one is left out. No host calls it yet,
+   * but its tests hold each to its entry in the module, the JIT/AOT
+   * invariant that lazy compilation will rest on.
+   */
   compileMethods(bodies: number[], index?: number): Map<number, string>;
   /**
    * What ABC `index`'s module depends on beyond the ABCs' bytes, for a
@@ -266,6 +269,25 @@ export interface Codegen {
    * entry fails, after doing those before it.
    */
   replay(log: string, index?: number): boolean;
+  /**
+   * A SWF's AVM1 action blocks compiled to one module, `bytes` the SWF's
+   * decompressed bytes, which the blocks' ranges are of (format's
+   * `Swf.bytes`), with each block's entry in it. Needs no domain: AVM1 code
+   * links to nothing.
+   */
+  compileActions(bytes: Uint8Array, actions: ActionBlocks): CompiledActions;
+  /** compileActions' module alone. */
+  compileActionsModule(bytes: Uint8Array, actions: ActionBlocks): string;
+  /**
+   * Blocks of a SWF compiled alone, by index, as a JIT may compile each
+   * when it first runs: each byte for byte its entry in the SWF's module.
+   * An index with no block is left out.
+   */
+  compileActionBlocks(
+    bytes: Uint8Array,
+    actions: ActionBlocks,
+    blocks: number[],
+  ): Map<number, string>;
 }
 
 /**
@@ -317,12 +339,26 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       named.push(hashes[Number(i)] ?? "");
     }
 
-    const module = collected(wasm.domainModule(named.join("\n"), at, keep, true));
+    // Its bytes decoded here: lifted as a string, a module of megabytes took
+    // longer than compiling it. The emitter writes only well-formed UTF-8,
+    // which decodes alike either way.
+    const module = utf8.decode(collected(wasm.domainModuleBytes(named.join("\n"), at, keep, true)));
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
 
     return module;
+  };
+  const ranges = (actions: ActionBlocks) =>
+    [
+      Int32Array.from(actions.blocks, (b) => b.offset),
+      Int32Array.from(actions.blocks, (b) => b.length),
+    ] as const;
+  const actionsModule = (bytes: Uint8Array, actions: ActionBlocks, keep: boolean) => {
+    const [offsets, lengths] = ranges(actions);
+    return utf8.decode(
+      collected(wasm.actionsModuleBytes(bytes, offsets, lengths, actions.version, keep)),
+    );
   };
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
@@ -490,6 +526,27 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
       return parseEntries(collected(wasm.domainEmitEach(indices.join(","), true, indexOf(index))));
     },
+    compileActions(bytes, actions) {
+      const module = actionsModule(bytes, actions, true);
+      const entries = parseEntries(collected(wasm.actionsModuleEntries()));
+      return { module, entries: actions.blocks.map((_, k) => entries.get(k) ?? "") };
+    },
+    compileActionsModule(bytes, actions) {
+      return actionsModule(bytes, actions, false);
+    },
+    compileActionBlocks(bytes, actions, blocks) {
+      const indices = blocks.filter((b) => Number.isInteger(b) && b >= 0);
+      if (indices.length === 0) {
+        return new Map();
+      }
+
+      const [offsets, lengths] = ranges(actions);
+      return parseEntries(
+        collected(
+          wasm.actionsEmitEach(bytes, offsets, lengths, actions.version, indices.join(","), true),
+        ),
+      );
+    },
   };
 }
 
@@ -507,3 +564,9 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+
+// TextDecoder is the web's and node's alike, though not ECMAScript's,
+// whose library alone the compiler's wrapper is typed against.
+declare const TextDecoder: new () => { decode(bytes: Uint8Array): string };
+
+const utf8 = new TextDecoder();

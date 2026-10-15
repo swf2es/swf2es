@@ -2,7 +2,7 @@
 // them, over the player's render-ordered list.
 import { avm2 } from "@swf2es/runtime";
 import { hitsOwnPoint } from "../../../display/bounds.js";
-import { Container, type DisplayObject, MovieClip } from "../../../display/display.js";
+import { Container, type DisplayObject, MovieClip, pickWork } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -26,6 +26,20 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return d;
   };
+  /**
+   * Where `d` is in `c`'s list, or -1. One the timeline is taking out is
+   * out of the list while its removal is told of, its parent still `c`.
+   */
+  const indexOf = (c: Container, d: DisplayObject): number =>
+    d.parent === c ? c.children.indexOf(d) : -1;
+  const ownIndex = (c: Container, d: DisplayObject): number => {
+    const i = indexOf(c, d);
+    if (i < 0) {
+      throw s.rt.error("ArgumentError", 2025);
+    }
+
+    return i;
+  };
   const indexIn = (c: Container, v: Value, max = c.children.length - 1): number => {
     const i = s.rt.toInt(v);
     if (i < 0 || i > max) {
@@ -34,8 +48,8 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return i;
   };
-  const add = (c: Container, v: Value, index: number): Value => {
-    const d = childOf(v);
+  /** `d` put at `index` of `c`; `moved` if it is in `c`'s list already. */
+  const add = (c: Container, v: Value, d: DisplayObject, index: number, moved: boolean): Value => {
     // Adding an ancestor, or itself, would make a cycle.
     for (let o: DisplayObject | null = c; o; o = o.parent) {
       if (o === d) {
@@ -43,9 +57,9 @@ export function containerNatives(s: Scripting): avm2.Natives {
       }
     }
 
-    // Out of another parent first, with its events; within the same one, a move only.
-    const moved = d.parent === c;
-    if (d.parent && !moved) {
+    // Out of another parent first, with its events; within the same one, a move only. One the
+    // timeline is taking out of `c` is told of already.
+    if (d.parent && d.parent !== c) {
       s.lifecycle.removing(d);
     }
 
@@ -56,11 +70,6 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     return v;
   };
-  const remove = (c: Container, d: DisplayObject): void => {
-    s.lifecycle.removing(d);
-    c.removeChild(d);
-  };
-
   class DisplayObjectContainerNatives {
     declare $display: Container;
     declare $mouseChildren: boolean | undefined;
@@ -89,39 +98,48 @@ export function containerNatives(s: Scripting): avm2.Natives {
       const c = this.$display;
       const d = childOf(child);
       // Already a child: moved to the top.
-      return add(c, child, d.parent === c ? c.children.length - 1 : c.children.length);
+      const moved = indexOf(c, d) >= 0;
+      return add(c, child, d, c.children.length - (moved ? 1 : 0), moved);
     }
 
     addChildAt(child: Value, index: Value): Value {
       const c = this.$display;
       const d = childOf(child);
-      return add(c, child, indexIn(c, index, c.children.length - (d.parent === c ? 1 : 0)));
+      const moved = indexOf(c, d) >= 0;
+      return add(c, child, d, indexIn(c, index, c.children.length - (moved ? 1 : 0)), moved);
     }
 
     removeChild(child: Value): Value {
       const c = this.$display;
-      remove(c, ownChild(c, child));
+      s.lifecycle.remove(ownChild(c, child));
       return child;
     }
 
     removeChildAt(index: Value): Value {
       const c = this.$display;
       const d = c.children[indexIn(c, index)];
-      remove(c, d);
+      s.lifecycle.remove(d);
       return d.object;
     }
 
     removeChildren(begin: Value, end: Value): void {
       const c = this.$display;
+      const n = c.children.length;
       const from = begin === undefined ? 0 : s.rt.toInt(begin);
-      const to =
-        end === undefined || s.rt.toInt(end) === 0x7fffffff ? c.children.length : s.rt.toInt(end);
-      if (from < 0 || to > c.children.length || from > to) {
+      const to = end === undefined ? 0x7fffffff : s.rt.toInt(end);
+      // `end` is the last one removed. Its default, 0x7fffffff, stands for the last child, and
+      // with it a `begin` past the end removes nothing where Flash would otherwise throw.
+      const all = to === 0x7fffffff;
+      if (from < 0 || (!all && (to >= n || from > to))) {
         throw s.rt.error("RangeError", 2006);
       }
 
-      for (const d of c.children.slice(from, to)) {
-        remove(c, d);
+      // Those there when it began, each from wherever a listener put it meanwhile, as Flash's
+      // are; one a listener took off already is left be.
+      for (const d of c.children.slice(from, all ? n : to + 1)) {
+        if (d.parent) {
+          s.lifecycle.remove(d);
+        }
       }
     }
 
@@ -180,12 +198,13 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     getChildIndex(child: Value): number {
       const c = this.$display;
-      return c.children.indexOf(ownChild(c, child));
+      return ownIndex(c, childOf(child));
     }
 
     setChildIndex(child: Value, index: Value): void {
       const c = this.$display;
-      const d = ownChild(c, child);
+      const d = childOf(child);
+      ownIndex(c, d);
       c.addChildAt(d, indexIn(c, index));
     }
 
@@ -207,7 +226,11 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     swapChildren(a: Value, b: Value): void {
       const c = this.$display;
-      c.swapChildren(ownChild(c, a), ownChild(c, b));
+      const x = childOf(a);
+      ownIndex(c, x);
+      const y = childOf(b);
+      ownIndex(c, y);
+      c.swapChildren(x, y);
     }
 
     swapChildrenAt(a: Value, b: Value): void {
@@ -221,6 +244,7 @@ export function containerNatives(s: Scripting): avm2.Natives {
 
     set mouseChildren(v: Value) {
       this.$mouseChildren = !!v;
+      pickWork.changes++;
     }
 
     declare $tabChildren: boolean | undefined;

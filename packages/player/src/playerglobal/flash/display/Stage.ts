@@ -30,8 +30,18 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return s.stageWidth;
     }
 
+    /** The embedding page sizes the stage: a SWF's own sizes are taken and dropped, as in Ruffle. */
+    set stageWidth(_v: Value) {}
+
     get stageHeight(): number {
       return s.stageHeight;
+    }
+
+    set stageHeight(_v: Value) {}
+
+    /** Undocumented; null in AIR's adl, and in Flash Player as Ruffle found it. */
+    get displayContextInfo(): Value {
+      return null;
     }
 
     invalidate(): void {
@@ -235,6 +245,11 @@ export function stageNatives(s: Scripting): avm2.Natives {
     natives[`flash.display::Stage#${name}`] =
       container[`flash.display::DisplayObjectContainer#${name}`];
   }
+
+  // Undocumented accessors Stage declares: null, and a write that changes
+  // nothing, as adl gives them. A JavaScript class cannot spell them.
+  natives["flash.display::Stage#get:constructor"] = avm2.plain(() => null);
+  natives["flash.display::Stage#set:constructor"] = avm2.plain(() => undefined);
 
   return natives;
 }

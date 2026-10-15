@@ -6,7 +6,9 @@
 //   unloads it and loads the next, KINDS different children in turn;
 // - same: the same, the one child every time;
 // - fresh: each child played whole in a player of its own, in turn, as
-//   the corpus's runner plays its tests in one document.
+//   the corpus's runner plays its tests in one document;
+// - avm1: the same with AVM1 SWFs, each of frames of DoAction blocks; nor
+//   may the WebAssembly memories the page holds, codegen's, grow with them.
 //
 // And that what lives on still works once the rest is collected:
 //
@@ -30,6 +32,7 @@
 //   node tests/player/leak.ts [--loads N] [--snapshots DIR] [--cache] [mode...]
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { Avm1Assembler } from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
 import { bare, probeFont } from "./cases.ts";
 import { withSteppedPage } from "./chrome.ts";
@@ -241,6 +244,34 @@ writeFileSync(
   ]),
 );
 
+// AVM1 SWFs of KINDS kinds, each of frames whose DoAction blocks trace.
+const avm1Children = names.map((name, i) =>
+  w.swf({
+    version: 6 + (i % 4),
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [0, 1]
+      .flatMap((frame) => [
+        ...Array.from({ length: METHODS / 10 }, (_, k) =>
+          w.doAction([
+            ...new Avm1Assembler()
+              .constantPool(name, `${frame}`)
+              .push(`${name} ${frame} ${k}`, k * 0.1, k + i)
+              .trace()
+              .trace()
+              .trace()
+              .end()
+              .bytes(),
+          ]),
+        ),
+        w.showFrame(),
+      ])
+      .concat([w.end()]),
+  }),
+);
+
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 let failed = false;
 
@@ -263,7 +294,7 @@ await withSteppedPage(
       );
     }
 
-    for (const mode of ["loader", "same", "fresh"]) {
+    for (const mode of ["loader", "same", "fresh", "avm1"]) {
       if (modes.length && !modes.includes(mode)) {
         continue;
       }
@@ -272,19 +303,27 @@ await withSteppedPage(
       // where one player loads them all, and when the warm loads ended.
       const heaps: number[] = [];
       const codegen: number[] = [];
+      const memories: number[] = [];
       let warmed = 0;
       let error: string | null = null;
       const measure = async (n: number) => {
         heaps.push(await page.heap());
+        if (mode === "avm1") {
+          memories.push(await page.memories());
+        }
+
         warmed ||= performance.now();
         if (snapshots) {
           await page.snapshot(`${snapshots}/${mode}-${n}.heapsnapshot`);
         }
       };
-      if (mode === "fresh") {
+      if (mode === "fresh" || mode === "avm1") {
         for (let n = 1; n <= LOADS && !error; n++) {
           const kind = (n - 1) % KINDS;
-          error = await page.run(children[kind], `/leak/child-${kind}.swf`);
+          error = await page.run(
+            (mode === "avm1" ? avm1Children : children)[kind],
+            `/leak/child-${kind}.swf`,
+          );
           if (n === WARM || n === LOADS) {
             await measure(n);
           }
@@ -320,12 +359,16 @@ await withSteppedPage(
       const ms = (performance.now() - warmed) / loads;
       const ok = perLoad <= BOUND;
       const codegenOk = codegen.length < 2 || codegen[1] <= Math.max(codegen[0], CODEGEN_CEILING);
-      failed ||= !ok || !codegenOk;
+      const memoriesOk = memories.length < 2 || memories[1] <= memories[0];
+      failed ||= !ok || !codegenOk || !memoriesOk;
       console.log(
         `${mode}: heap ${mb(heaps[0])} after ${WARM} loads, ${mb(heaps[1])} after ${LOADS}, ` +
           `${(perLoad / 1024).toFixed(1)} KB a load${ok ? "" : ` (more than ${BOUND / 1024} KB)`}; ` +
           (codegen.length
             ? `codegen ${mb(codegen[0])} to ${mb(codegen[1])}${codegenOk ? "" : " (grew)"}; `
+            : "") +
+          (memories.length
+            ? `wasm memories ${memories[0]} to ${memories[1]}${memoriesOk ? "" : " (grew)"}; `
             : "") +
           `${ms.toFixed(1)} ms a load`,
       );

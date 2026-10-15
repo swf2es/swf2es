@@ -53,7 +53,6 @@ export const ATTR_Metadata: u8 = 0x40;
 
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
 // ABC fails the same way it does in avmshell. 1008 is a ReferenceError.
-export const kNotImplementedError: i32 = 1001;
 export const kAmbiguousBindingError: i32 = 1008;
 export const kIllegalOpcodeError: i32 = 1011;
 export const kLastInstExceedsCodeSizeError: i32 = 1012;
@@ -76,7 +75,6 @@ export const kScopeDepthUnbalancedError: i32 = 1031;
 export const kCpoolIndexRangeError: i32 = 1032;
 export const kCpoolEntryWrongTypeError: i32 = 1033;
 export const kIllegalSuperCallError: i32 = 1035;
-export const kCannotVerifyUntilReferencedError: i32 = 1039;
 export const kInvalidMagicError: i32 = 1042;
 export const kInvalidCodeLengthError: i32 = 1043;
 export const kUnsupportedTraitsKindError: i32 = 1045;
@@ -94,7 +92,6 @@ export const kZeroDispIdError: i32 = 1072;
 export const kIllegalOpMultinameError: i32 = 1078;
 export const kIllegalNativeMethodError: i32 = 1079;
 export const kIllegalNamespaceError: i32 = 1080;
-export const kNoScopeError: i32 = 1101;
 export const kIllegalDefaultValue: i32 = 1102;
 export const kCannotExtendFinalClass: i32 = 1103;
 export const kCorruptABCError: i32 = 1107;

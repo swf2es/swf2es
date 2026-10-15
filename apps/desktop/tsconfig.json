@@ -1,0 +1,11 @@
+{
+  // The main process, its preload and the page are built apart: each runs
+  // in a world of its own, with Node's types, Electron's renderer's or the DOM's.
+  "files": [],
+  "references": [
+    { "path": "src/shared" },
+    { "path": "src/main" },
+    { "path": "src/preload" },
+    { "path": "src/renderer" }
+  ]
+}

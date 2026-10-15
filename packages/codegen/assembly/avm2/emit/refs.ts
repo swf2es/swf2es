@@ -229,7 +229,7 @@ export function constant(e: MethodEmitter, value: u32, kind: u8, type: i32): voi
 }
 
 /** The value a slot or parameter of `type` has before anything is stored. */
-export function defaultOf(e: MethodEmitter, type: i32): void {
+function defaultOf(e: MethodEmitter, type: i32): void {
   const out = e.out;
   switch (e.domain.builtin(type)) {
     case BUILTIN_Any:

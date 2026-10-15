@@ -2,7 +2,7 @@
 // player's ButtonObject. The state it shows is the up one until the pointer
 // moves it (input/pointer.ts); a state set while shown takes its place at once.
 import { avm2 } from "@swf2es/runtime";
-import type { ButtonObject, ButtonState } from "../../../display/display.js";
+import { type ButtonObject, type ButtonState, pickWork } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
 import { mixerTransform, setMixerTransform } from "../media/Sound.js";
 import { displayOf } from "./DisplayObject.js";
@@ -25,8 +25,9 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
   const set = (o: AsObject, state: ButtonState | "hitTest", v: Value): void => {
     const b = buttonOf(o);
     const d = v === null || v === undefined ? null : displayOf(v);
-    // A state is the button's own: out of the container it was in.
-    if (d?.parent && d.parent !== b) {
+    // A state is the button's own: out of the container it was in. One that holds the button
+    // stays where it is: it cannot be the button's child (show).
+    if (d?.parent && d.parent !== b && !d.encloses(b)) {
       d.parent.removeChild(d);
     }
 
@@ -41,6 +42,11 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
     }
 
     b.show();
+    // adl reports #2150 as an error nothing caught, from the setter of the state the button
+    // shows, and the script goes on with the state set (`button-cycle`).
+    if (d?.encloses(b) && state === b.state) {
+      s.reportUncaught(s.rt.error("ArgumentError", 2150));
+    }
   };
 
   class SimpleButtonNatives {
@@ -86,6 +92,7 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
 
     set enabled(v: Value) {
       buttonOf(this).enabled = !!v;
+      pickWork.changes++;
     }
 
     get useHandCursor(): boolean {

@@ -1,13 +1,20 @@
 // flash.geom.Transform: a display object's matrix and color transform as
 // flash.geom's Matrix and ColorTransform, copies each time, as Flash gives
 // them, and set from either; and its 3D transform and perspective
-// projection, kept and reported as Flash's, though not drawn in perspective.
+// projection, kept and reported as Flash's, and drawn in perspective
+// (display/perspective.ts).
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { boundsIn, toStage } from "../../../display/bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display/display.js";
 import { concat } from "../../../display/geometry.js";
-import { identity3D, invert3D, multiply3D, type Raw } from "../../../display/matrix3d.js";
+import {
+  determinant3D,
+  identity3D,
+  invert3D,
+  multiply3D,
+  type Raw,
+} from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
 import { alwaysProjects, projectionFrom, projectionObject } from "./PerspectiveProjection.js";
 
@@ -41,7 +48,7 @@ const IDENTITY_COLOR: Color = {
 };
 
 /** A new flash.geom.Matrix of `m`. */
-export function matrixObject(s: Scripting, m: Linear): AsObject {
+function matrixObject(s: Scripting, m: Linear): AsObject {
   return s.rt.construct(
     s.rt.classNamed("flash.geom::Matrix"),
     m.a,
@@ -60,7 +67,7 @@ export function matrixOf(s: Scripting, o: AsObject): Linear {
 }
 
 /** A new flash.geom.ColorTransform of `c`. */
-export function colorObject(s: Scripting, c: Color): AsObject {
+function colorObject(s: Scripting, c: Color): AsObject {
   return s.rt.construct(
     s.rt.classNamed("flash.geom::ColorTransform"),
     c.rMul,
@@ -168,10 +175,29 @@ export function transformNatives(s: Scripting): avm2.Natives {
       return m;
     }
 
-    /** Taken as given, and apart into the 3D properties; null back to 2D, at the identity. */
+    /**
+     * Taken as given, and apart into the 3D properties; null back to 2D, at
+     * the identity. Flash's getter hands out the object's own matrix, and
+     * setting that same object back changes nothing, its properties kept as
+     * they were set rather than read from it again; our getter copies, so
+     * an equal matrix stands for it (a clone, which Flash takes apart
+     * again, is the difference). Any other whose float32 determinant is 0
+     * is refused.
+     */
     set matrix3D(v: Value) {
+      const raw = v ? ((v as AsObject).$matrix3D as Float32Array) : null;
+      const own = this.$display.space?.raw;
+      if (raw && own && raw.every((x, i) => x === own[i])) {
+        this.$display.touch();
+        return;
+      }
+
+      if (raw && determinant3D(raw) === 0) {
+        throw s.rt.error("ArgumentError", 2188);
+      }
+
       this.$display.touch();
-      this.$display.setMatrix3D(v ? ((v as AsObject).$matrix3D as Float32Array) : null);
+      this.$display.setMatrix3D(raw);
     }
 
     /**
@@ -204,6 +230,8 @@ export function transformNatives(s: Scripting): avm2.Natives {
 
     set perspectiveProjection(v: Value) {
       this.$display.projection = v ? projectionFrom(s, v as AsObject) : null;
+      // What is in it is drawn through it.
+      this.$display.invalidate(TRANSFORM);
     }
 
     /** The bounds on the stage, out to whole pixels. */

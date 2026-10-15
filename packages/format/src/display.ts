@@ -1,7 +1,9 @@
 // The display list's tags (SWF specification, chapter 3), and the ones that
 // tie a SWF's classes to its symbols: PlaceObject 1 to 3, RemoveObject 1
 // and 2, FrameLabel, DefineSprite, DefineScalingGrid, SymbolClass and
-// DoABC. Filters and clip actions are kept as their bytes for now.
+// DoABC. Filters are kept as their bytes for now, and clip actions are the
+// SWF's action blocks (actions.ts), which a place gives by their indices.
+import type { ActionList } from "./actions.js";
 import { type ColorTransform, type Matrix, readColorTransform, readMatrix } from "./shape.js";
 import { type Rect, readTags, SwfReader, type Tag } from "./swf.js";
 import { DoABC, PlaceObject, PlaceObject3, RemoveObject, RemoveObject2 } from "./tags.js";
@@ -30,8 +32,11 @@ export interface Place {
   opaqueBackground: number | null;
   /** The filter list's bytes, undecoded; null without one. */
   filters: Uint8Array | null;
-  /** AVM1 clip actions' bytes, undecoded; null without them. */
-  clipActions: Uint8Array | null;
+  /**
+   * The indices of its AVM1 clip actions in the SWF's ActionList; null
+   * without them, or when read without the list.
+   */
+  actions: number[] | null;
 }
 
 export function readString(r: SwfReader): string {
@@ -91,8 +96,23 @@ export function utf8(bytes: Uint8Array): string {
   return s;
 }
 
-/** A PlaceObject, PlaceObject2 or PlaceObject3 tag's body. */
-export function readPlace(bytes: Uint8Array, tag: Tag): Place {
+/**
+ * A PlaceObject, PlaceObject2 or PlaceObject3 tag's body; given the SWF's
+ * action list, with the indices of its clip actions.
+ */
+export function readPlace(bytes: Uint8Array, tag: Tag, actions?: ActionList): Place {
+  const { place } = parsePlace(bytes, tag);
+  place.actions = actions?.byTag.get(tag.offset) ?? null;
+  return place;
+}
+
+/** Where a PlaceObject2's or 3's clip actions start, -1 without them, and its depth. */
+export function clipActionsOffset(bytes: Uint8Array, tag: Tag): { depth: number; offset: number } {
+  const { place, clipActions } = parsePlace(bytes, tag);
+  return { depth: place.depth, offset: clipActions };
+}
+
+function parsePlace(bytes: Uint8Array, tag: Tag): { place: Place; clipActions: number } {
   const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
   const place: Place = {
     depth: 0,
@@ -110,7 +130,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
     visible: null,
     opaqueBackground: null,
     filters: null,
-    clipActions: null,
+    actions: null,
   };
 
   if (tag.code === PlaceObject) {
@@ -121,7 +141,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
       place.colorTransform = readColorTransform(r, false);
     }
 
-    return place;
+    return { place, clipActions: -1 };
   }
 
   const flags = r.u8();
@@ -184,11 +204,8 @@ export function readPlace(bytes: Uint8Array, tag: Tag): Place {
     place.opaqueBackground = ((a << 24) | rgb) >>> 0;
   }
 
-  if (flags & 0x80 && r.pos < r.end) {
-    place.clipActions = bytes.subarray(r.pos, r.end);
-  }
-
-  return place;
+  const clipActions = flags & 0x80 && r.pos < r.end ? r.pos : -1;
+  return { place, clipActions };
 }
 
 /** Filter sizes by id, as FILTER's variants lay them out (6 and 7 have variable length). */

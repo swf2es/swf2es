@@ -179,6 +179,8 @@ export interface PlatformCapabilities {
   version: string;
   /** A language code: "en", or with its country for Chinese and Portuguese ("zh-CN"). */
   language: string;
+  /** The user's locale, as a BCP 47 tag: flash.globalization's default. */
+  locale: string;
   /** "PlugIn", "ActiveX", "StandAlone", "External" or "Desktop". */
   playerType: string;
 }
@@ -195,10 +197,23 @@ export function platformCapabilities(): PlatformCapabilities {
       ? [`Mac OS ${mac[1]}.${mac[2]}${mac[3] ? `.${mac[3]}` : ""}`, "Adobe Macintosh", "MAC"]
       : ["Linux", "Adobe Linux", "LNX"];
   // Flash gives the country only where the language needs it.
-  const tag = navigator?.language ?? "en";
+  const tag = navigator?.language ?? new Intl.DateTimeFormat().resolvedOptions().locale;
   const [lang, country] = tag.split("-");
   const language = (lang === "zh" || lang === "pt") && country ? `${lang}-${country}` : lang;
-  return { os, manufacturer, version: `${platform} 32,0,0,465`, language, playerType: "PlugIn" };
+  return {
+    os,
+    manufacturer,
+    version: `${platform} 32,0,0,465`,
+    language,
+    locale: tag,
+    playerType: "PlugIn",
+  };
+}
+
+/** How many touches the browser's screen takes at once, as Multitouch.maxTouchPoints reports; 0 without a browser. */
+export function hostTouchPoints(): number {
+  const navigator = (globalThis as { navigator?: { maxTouchPoints?: number } }).navigator;
+  return navigator?.maxTouchPoints ?? 0;
 }
 
 /** The host side of playerglobal's synchronous ExternalInterface protocol. */
@@ -277,12 +292,24 @@ export interface FetchResult {
   url?: string;
 }
 
+/**
+ * What a request is for, as Flash's security model tells them apart: a
+ * Loader's or a Sound's "content", which Flash let a SWF load from any
+ * domain to display or play; a URLLoader's or URLStream's "data", which it
+ * let a SWF read from another domain only as that domain's policy file
+ * allowed; sendToURL's "send", whose response no one reads; and "movie",
+ * the SWF an embedding plays, which the player never asks for itself.
+ */
+export type FetchPurpose = "movie" | "content" | "data" | "send";
+
 /** The request the player asks its host to send. */
 export interface FetchRequest {
   url: string;
   method: string;
   headers: readonly (readonly [name: string, value: string])[];
   body: Uint8Array | null;
+  /** What it is for, for a host that judges requests as Flash did; a browser's fetch ignores it. */
+  purpose?: FetchPurpose;
 }
 
 /** A TCP connection supplied by the embedding host. */
@@ -407,4 +434,50 @@ export interface ModuleCache {
    * tell which of its members gave it.
    */
   delete(key: string, entry?: CachedModule): Promise<void>;
+}
+
+/** What goes to or comes from the system's clipboard: text, and HTML where there is some. */
+export interface ClipboardText {
+  text: string;
+  html?: string;
+}
+
+/**
+ * The system's clipboard, written outside a copy event: what a script
+ * puts there with System.setClipboard or Clipboard.setData in a mouse or
+ * key handler. A copy or cut event the host binds (bindKeyboard) carries
+ * its own data, and a paste brings the clipboard's with it, so nothing
+ * here reads, as Flash read only in a paste.
+ */
+export interface ClipboardHost {
+  /** Puts `data` on the clipboard; may fail quietly, as a browser refuses it without a user's gesture. */
+  write(data: ClipboardText): void;
+}
+
+/**
+ * The browser's async Clipboard API, which writes during a user's gesture
+ * without asking; HTML only where ClipboardItem takes it, else the text
+ * alone. Null where there is none, as in node.
+ */
+export function browserClipboard(): ClipboardHost | null {
+  const clipboard = (globalThis as { navigator?: { clipboard?: Clipboard } }).navigator?.clipboard;
+  if (!clipboard || typeof clipboard.writeText !== "function") {
+    return null;
+  }
+
+  const Item = (globalThis as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
+  return {
+    write: ({ text, html }) => {
+      const written =
+        html !== undefined && Item && typeof clipboard.write === "function"
+          ? clipboard.write([
+              new Item({
+                "text/plain": new Blob([text], { type: "text/plain" }),
+                "text/html": new Blob([html], { type: "text/html" }),
+              }),
+            ])
+          : clipboard.writeText(text);
+      written.catch(() => {});
+    },
+  };
 }

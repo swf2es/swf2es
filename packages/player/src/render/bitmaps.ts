@@ -9,11 +9,12 @@ import {
   Sprite,
   Texture,
 } from "pixi.js";
-import { BitmapStore, type GpuCopy } from "../bitmap/bitmap.js";
+import { BitmapStore, type GpuCopy, type PixelRect } from "../bitmap/bitmap.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import type { BitmapCharacter } from "../display/timeline.js";
 import { rgbaOf } from "./filters.js";
+import { drawTarget, releaseDrawTarget } from "./pools.js";
 
 /**
  * Make a texture source report "clamp" for addressMode: Pixi turns a
@@ -120,18 +121,70 @@ class StoreTexture implements GpuCopy {
       return;
     }
 
-    // Already premultiplied, as the texture holds them; a byte divided by 255 comes back exactly.
+    this.clear(this.texture, first);
+  }
+
+  /** `target` cleared to `pixel`: already premultiplied, as the texture holds it; a byte divided by 255 comes back exactly. */
+  private clear(target: Texture, pixel: number): void {
     this.renderer.render({
       container: EMPTY,
-      target: this.texture,
+      target,
       clear: true,
       clearColor: [
-        ((first >>> 16) & 0xff) / 255,
-        ((first >>> 8) & 0xff) / 255,
-        (first & 0xff) / 255,
-        (first >>> 24) / 255,
+        ((pixel >>> 16) & 0xff) / 255,
+        ((pixel >>> 8) & 0xff) / 255,
+        (pixel & 0xff) / 255,
+        (pixel >>> 24) / 255,
       ],
     });
+  }
+
+  copy(source: BitmapStore, rect: PixelRect, dx: number, dy: number): boolean {
+    const from = this.bitmaps.texture(source);
+    if (!from) {
+      return false;
+    }
+
+    // Pixi clips the objects it is given in place: each copy has its own.
+    const { x, y, width, height } = rect;
+    const targets = this.renderer.renderTarget;
+    if (from !== this.texture) {
+      targets.copyToTexture(from, this.texture, { x, y }, { width, height }, { x: dx, y: dy });
+      return true;
+    }
+
+    // Through a texture of its own: a texture copied into itself is GL's feedback loop.
+    const between = drawTarget(width, height);
+    targets.copyToTexture(from, between, { x, y }, { width, height }, { x: 0, y: 0 });
+    targets.copyToTexture(
+      between,
+      this.texture,
+      { x: 0, y: 0 },
+      { width, height },
+      { x: dx, y: dy },
+    );
+    releaseDrawTarget(between);
+    return true;
+  }
+
+  fill(rect: PixelRect, pixel: number): boolean {
+    if (rect.width === this.source.width && rect.height === this.source.height) {
+      this.clear(this.texture, pixel);
+      return true;
+    }
+
+    // A clear covers its whole target: the rect's is a texture of its size, copied in.
+    const filled = drawTarget(rect.width, rect.height);
+    this.clear(filled, pixel);
+    this.renderer.renderTarget.copyToTexture(
+      filled,
+      this.texture,
+      { x: 0, y: 0 },
+      { width: rect.width, height: rect.height },
+      { x: rect.x, y: rect.y },
+    );
+    releaseDrawTarget(filled);
+    return true;
   }
 
   /**
@@ -239,7 +292,6 @@ class GpuBitmaps {
     const copy = this.copies.get(store);
     if (copy) {
       store.drawnOnGpu(copy);
-      copy.version = store.version;
     }
   }
 
