@@ -1,2 +1,14 @@
-/** AVM1 (AS1/AS2) runtime. Nothing here yet; AVM2 comes first. */
-export {};
+/** The AVM1 (AS1 and AS2) runtime: values, their conversions by version, and what modules call. */
+export type { Host, Target } from "./host.js";
+export { numberToString, parseFloatAvm1, stringToNumber } from "./numbers.js";
+export {
+  Activation,
+  type Blocks,
+  type Factory,
+  Halt,
+  NotYet,
+  type Operations,
+  type Region,
+  Runtime,
+} from "./runtime.js";
+export { stringOf, toBoolean, type Value } from "./values.js";
