@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
-import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
+import { Avm1, type Avm1Options } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
 import { flashAssembler, script } from "../../../avm1-script.ts";
@@ -46,12 +46,13 @@ function movie(version: number, frames: Uint8Array[][], as3 = false): Uint8Array
 }
 
 /** The lines a SWF traces in `frames` frames, and the errors its blocks threw. */
-async function play(swf: Uint8Array, frames: number) {
+async function play(swf: Uint8Array, frames: number, options: Avm1Options = {}) {
   const lines: string[] = [];
   const errors: unknown[] = [];
   const avm1 = new Avm1(codegen, {
     print: (line) => lines.push(line),
     onUncaught: (error) => errors.push(error),
+    ...options,
   });
   const player = new Player(swf, null, avm1);
   await player.start();
@@ -186,7 +187,7 @@ test("an AS3 SWF's blocks never run", async () => {
 });
 
 test("an action not done yet is reported, and the frame's next block runs", async () => {
-  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x24])), traced("next")]]);
+  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x28])), traced("next")]]);
   const { lines, errors } = await play(swf, 1);
 
   assert.deepEqual(lines, ["next"]);
@@ -661,4 +662,115 @@ test("clip references are equal where they reach the same clip now (adl)", async
     "false false true",
     "true true false false",
   ]);
+});
+
+test("scripts that run past the script timeout disable the movie's actions, and the timeline plays on", async () => {
+  // A ScriptLimits of 1 second; and the player's own timeout, a loop of gotos in a frame's queue.
+  const limits = w.tag(65, Uint8Array.from([0, 1, 1, 0]));
+  const loop = movie(6, [
+    [limits, as1(`trace("before"); while (true) {} trace("after");`, 6)],
+    [as1(`trace("frame 2");`, 6)],
+  ]);
+  const looped = await play(loop, 2);
+
+  assert.deepEqual(looped.lines, ["before"]);
+  assert.ok(looped.avm1.rt.timedOut);
+  assert.equal(looped.player.root.currentFrame, 2);
+
+  const gotos = movie(6, [
+    [as1(`trace("one"); gotoAndPlay(2);`, 6)],
+    [as1(`gotoAndPlay(1);`, 6)],
+    [as1(`trace("three");`, 6)],
+  ]);
+  const ponged = await play(gotos, 2, { scriptTimeout: 0.2 });
+
+  assert.equal(ponged.lines[0], "one");
+  assert.ok(ponged.avm1.rt.timedOut);
+});
+
+test("the timers fire between frames by the frame clock, the earliest first, getTimer counting frames", async () => {
+  const swf = w.swf({
+    version: 6,
+    width: 10,
+    height: 10,
+    frameRate: 10,
+    frameCount: 4,
+    tags: [
+      as1(
+        `trace("ids " + setTimeout(function (s) { trace("timeout " + s + " " + getTimer()); }, 150, "a") + " " + setInterval(this, "tick", 100, "b"));
+n = 0; function tick(s) { n++; trace("tick " + s + n + " " + getTimer()); if (n == 3) { clearInterval(2); } }
+trace("frame 1 " + getTimer());`,
+        6,
+      ),
+      w.showFrame(),
+      as1(`trace("frame 2 " + getTimer());`, 6),
+      w.showFrame(),
+      as1(`trace("frame 3 " + getTimer());`, 6),
+      w.showFrame(),
+      as1(`trace("frame 4 " + getTimer()); stop();`, 6),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const { lines } = await play(swf, 5, { realTime: null });
+
+  assert.deepEqual(lines, [
+    "ids 1 2",
+    "frame 1 0",
+    "tick b1 100",
+    "frame 2 100",
+    "timeout a 150",
+    "tick b2 200",
+    "frame 3 200",
+    "tick b3 300",
+    "frame 4 300",
+  ]);
+});
+
+test("a frame clock that stands still moves for a script waiting on getTimer", async () => {
+  const swf = movie(6, [
+    [as1(`var t = getTimer(); var i = 0; while (getTimer() - t < 5) { i++; } trace(i > 0);`, 6)],
+  ]);
+  const { lines } = await play(swf, 1, { realTime: null });
+
+  assert.deepEqual(lines, ["true"]);
+});
+
+test("pointer and keyboard events reach every clip's clip actions, the newest first, and stop the SWF at clip actions Flash cannot read", async () => {
+  const mouseDown = 1 << 4;
+  const events = (name: string) =>
+    w.clipActions(6, [
+      {
+        events: mouseDown,
+        actions: [...script(`trace("down ${name}");`, 6)(flashAssembler()).end().bytes()],
+      },
+    ]);
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "a", clipActions: events("a") }),
+      w.place({ depth: 2, character: 1, name: "b", clipActions: events("b") }),
+      as1(`b.onMouseDown = function () { trace("onMouseDown b"); }; stop();`, 6),
+    ],
+  ]);
+  const { lines, avm1 } = await play(swf, 1);
+  avm1.clipEvent(mouseDown);
+
+  assert.deepEqual(lines, ["down b", "onMouseDown b", "down a"]);
+
+  // A place whose clip actions run past its tag, of a mouseDown: the SWF stops as one comes.
+  const u32 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, n >>> 24];
+  const bad = Uint8Array.from([0, 0, ...u32(mouseDown), ...u32(mouseDown), ...u32(100), 0x07]);
+  const broken = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "a", clipActions: bad }),
+      as1(`trace("placed"); stop();`, 6),
+    ],
+  ]);
+  const halted = await play(broken, 1);
+  halted.avm1.clipEvent(mouseDown);
+
+  assert.deepEqual(halted.lines, ["placed"]);
+  assert.ok(halted.avm1.halted);
 });

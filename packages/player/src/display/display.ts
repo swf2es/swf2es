@@ -1348,6 +1348,16 @@ export class Container extends DisplayObject {
       return null;
     }
 
+    // An AVM1 clip with an unload handler stays, drawn, at a depth below
+    // the timeline's until the next frame, as Flash keeps one (avm1/avm1.ts).
+    if (this.library?.avm1?.keeps(child)) {
+      const kept = -depth - 1;
+      this.depths.delete(depth);
+      this.depths.set(kept, child);
+      child.depth = kept;
+      return child;
+    }
+
     // The timeline's removal: a script's goes through the natives, which tell of it themselves.
     // Flash has the child out of the list while it tells of it, still its parent's: the
     // siblings' indexes have closed up, and the parent no longer finds it there (#2025).
@@ -1697,6 +1707,7 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
     opaqueBackground: null,
     filters: look ? record.filters : null,
     actions: null,
+    corrupt: 0,
   };
 }
 
@@ -2078,6 +2089,7 @@ export class MovieClip extends Container {
       const child = displayFor(character, this.library, place.hasImage);
       child.applyPlace(place);
       child.placeFrame = frame;
+      this.library.avm1?.placing(child, place);
       this.placeAtDepth(child, place.depth);
       if (later === "held" && this.library.construct) {
         this.held.push({ display: child, character });
@@ -2194,9 +2206,25 @@ export class MovieClip extends Container {
     // Ruffle removes.
     const kept = new Set<number>();
     if (rewind) {
+      const avm1 = this.library.avm1;
       for (const child of [...this.children]) {
         const depth = child.depth;
-        if (depth === null || child.placeFrame <= 0) {
+        if (depth === null) {
+          continue;
+        }
+
+        // In AVM1, what is at a script's depths stays, a timeline's clip swapped there
+        // too, and a script's clip at the timeline's goes (Ruffle's survives_rewind).
+        if (avm1) {
+          if (depth < 0 || depth >= AVM1_DEPTH_BIAS) {
+            continue;
+          }
+
+          if (child.placeFrame <= 0) {
+            this.removeAtDepth(depth);
+            continue;
+          }
+        } else if (child.placeFrame <= 0) {
           continue;
         }
 
@@ -2275,6 +2303,7 @@ export class MovieClip extends Container {
       const child = displayFor(character, this.library, jump.place.hasImage);
       child.applyPlace(jump.place);
       child.placeFrame = jump.frame;
+      this.library.avm1?.placing(child, jump.place);
       this.placeAtDepth(child, depth);
       if (looping && this.library.constructLater) {
         this.library.constructLater(child, character);
@@ -2472,6 +2501,9 @@ function mergePlace(previous: Place, next: Place): Place {
   };
 }
 
+/** The timeline depth AVM1's depths count from: a script's depths are from it, the timeline's below it. */
+const AVM1_DEPTH_BIAS = 16384;
+
 /** A display object for a character, before its first frame: a shape, or a clip. */
 /** `hasImage` is PlaceObject3's flag where a timeline places it, which a bitmap's construction reads. */
 export function displayFor(
@@ -2529,7 +2561,11 @@ export function displayFor(
  * and names it on its parent, else a clip's first frame entered. After the
  * placement, as Flash has it, so that the parent and the name are there.
  */
-function construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
+export function construct(
+  display: DisplayObject,
+  character: DisplayCharacter,
+  library: Library,
+): void {
   library.avm1?.made(display);
   if (library.construct) {
     library.construct(display, character);
