@@ -84,7 +84,16 @@ export async function serve(
 ): Promise<{ server: Server; url: string }> {
   const served = [...extra, ...mounts];
   const server = createServer((request, response) => {
-    const path = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
+    let path: string;
+    try {
+      path = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
+    } catch {
+      // A malformed escape, which a page may well ask for: not the server's end.
+      response.writeHead(400);
+      response.end();
+      return;
+    }
+
     if (path === "/") {
       response.writeHead(200, {
         "content-type": "text/html",
