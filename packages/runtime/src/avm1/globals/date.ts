@@ -8,8 +8,9 @@
 // standard offset in every year, and today's daylight saving rule applied
 // to every year, 1900 and 2050 alike, by its month, weekday and time, not
 // the zone's history (Ruffle adds a constant offset, no daylight saving).
-// A local time is taken back to UTC by the offset at it read as UTC, so a
-// time in the spring-forward gap is an hour earlier.
+// A local time is taken back to UTC by the rule's local times, so a time
+// in the spring-forward gap is an hour earlier and one in the hour that
+// repeats as it falls back the later one.
 
 import {
   type Avm1Function,
@@ -266,7 +267,14 @@ function offsetAt(t: number): number {
 }
 
 const localTime = (t: number) => t + offsetAt(t);
-const utcOf = (local: number) => local - offsetAt(local);
+
+/**
+ * A local time back to UTC, daylight saving's taken where the local time
+ * is past the rule's local standard time, as Windows compares them: a
+ * time in the spring-forward gap is an hour earlier, one in the hour
+ * that repeats as it falls back the later, standard one.
+ */
+const utcOf = (local: number) => local - offsetAt(local - hostZone().standard);
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

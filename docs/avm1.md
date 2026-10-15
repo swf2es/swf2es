@@ -947,14 +947,19 @@ standard offset in every year, plus daylight saving's by today's rule
 (its month, weekday and time, read from the host's offsets this year),
 1900, 1938 and 2050 alike, not the zone's history (Ruffle adds a constant
 offset, no daylight saving at all; AVM2's Date follows avmshell's
-`localtime_r` instead). Local fields go back to UTC by the offset at them
-read as UTC, so a time in the spring-forward gap comes out an hour
-earlier. From SWF 7, `setMonth` without a day keeps the day within the
+`localtime_r` instead). Local fields go back to UTC as Windows compares
+them with the rule's local standard times, so a time in the
+spring-forward gap comes out an hour earlier and one in the hour that
+repeats as it falls back is the later, standard one, east of UTC and
+west alike. From SWF 7, `setMonth` without a day keeps the day within the
 month it sets (Ruffle leaves this a TODO); `setMonth()` of nothing is
 January. ASnative(103, i) gives Date's methods, any index a function, as
 any table's does. The player's cases trace only what holds in any zone,
-as the tests run in the host's; `tests/unit/runtime/avm1-date-zone.test.ts`
-pins adl's local times in Helsinki's.
+as the tests run in the host's; `tests/unit/runtime/avm1-date-zone*.test.ts`
+pin adl's local times in Helsinki's and New York's. adl under Wine takes
+its zone from `TZ`, so `TZ=Australia/Sydney node oracle/flash.ts` shows
+another zone's (the oracle keys its cache by `TZ` where it is set);
+Sydney's and Kolkata's agree with the player's too.
 
 ### Classes
 
