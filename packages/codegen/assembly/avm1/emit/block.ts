@@ -17,10 +17,13 @@
 // which make a function of a region, StoreRegister and Return. A function's
 // region takes its `this` and its arguments, and a DefineFunction2's
 // registers are its `let`s; every other register is one of the movie's
-// four, `cx.g`. Every other action Flash knows is a call that throws,
-// V.notYet, and one it does not know is skipped, as Flash skips it. An
-// action Flash cannot read, cut short or a Push of a value type it does not
-// know, stops the SWF, V.halt, as adl does.
+// four, `cx.g`. With, Try and Throw are calls too, and a region that has a
+// With or a Try keeps what they hold on the activation, by ranges of its
+// blocks, which come off as control leaves them (see `heldRanges`). Every
+// other action Flash knows is a call that throws, V.notYet, and one it
+// does not know is skipped, as Flash skips it. An action Flash cannot read,
+// cut short or a Push of a value type it does not know, stops the SWF,
+// V.halt, as adl does.
 
 import { Output } from "../../output";
 import { Action, Actions, ERROR_None } from "../actions/decode";
@@ -39,6 +42,31 @@ export class BlockEmitter {
    * registers are the four global ones.
    */
   private registers: i32 = 0;
+  /** The block being written. */
+  private k: i32 = 0;
+  /** Whether the region has a With or a Try: without, it is written as before. */
+  private holds: bool = false;
+  /**
+   * The region's ranges of blocks, `from` and `to` (excluded) in pairs,
+   * that a Try's handlers or a finally's throw or Return hold over: control
+   * leaving one goes through V.leave.
+   */
+  private handled: i32[] = [];
+  /**
+   * The ranges that scopes hold over, With and catch bodies, and the first
+   * action past each: control going anywhere else goes through V.leave,
+   * and the block past one is `late`, V.scopes after its first action.
+   */
+  private scoped: i32[] = [];
+  private late: bool[] = [];
+  /** The finally bodies, which a throw or a Return may leave held to the exit. */
+  private finallies: i32[] = [];
+  /** The try and catch bodies of Trys with a finally, which a Return runs first. */
+  private returns: i32[] = [];
+  /** Whether the region has a Try, whose throws its dispatcher catches. */
+  private tries: bool = false;
+  /** The registers the region's catches take values into. */
+  private catchRegisters: i32[] = [];
 
   constructor(public out: Output) {}
 
@@ -86,11 +114,17 @@ export class BlockEmitter {
     }
 
     const pools = poolsOf(actions, region);
+    this.heldRanges(actions, region);
     const dispatch = n > 1 || jumpsWithin(actions, region);
     if (dispatch) {
       out.text("let b = ");
       out.uint(region.blockAt(region.start));
-      out.text(";\nfor (;;) switch (b) {\n");
+      out.text(
+        this.tries ? ";\nfor (;;) try { for (;;) switch (b) {\n" : ";\nfor (;;) switch (b) {\n",
+      );
+      if (this.holds) {
+        out.text("case -1:\nreturn cx.ret;\n");
+      }
     }
 
     for (let k = 0; k < n; k++) {
@@ -100,29 +134,160 @@ export class BlockEmitter {
         out.text(":\n");
       }
 
+      this.k = k;
       this.code(actions, region, k, pools[k]);
     }
 
-    out.text(dispatch ? "}\n}" : "}");
+    if (!dispatch) {
+      out.text("}");
+    } else if (this.tries) {
+      out.text("} } catch (e) {\nb = V.caught(cx, e, b);\n");
+      this.catchInto();
+      out.text("}\n}");
+    } else {
+      out.text("}\n}");
+    }
+  }
+
+  /**
+   * The ranges of blocks the region's Withs and Trys hold over. The blocks
+   * are in order of their offsets, and a body's bounds start blocks, so
+   * each body is the blocks from the first at or after its start to the
+   * first at or after its end.
+   */
+  private heldRanges(actions: Actions, region: Region): void {
+    const handled = this.handled;
+    const scoped = this.scoped;
+    const finallies = this.finallies;
+    const returns = this.returns;
+    const late = this.late;
+    handled.length = 0;
+    scoped.length = 0;
+    finallies.length = 0;
+    returns.length = 0;
+    late.length = 0;
+    this.catchRegisters.length = 0;
+    this.tries = false;
+    this.holds = false;
+    for (let i = 0; i < region.actions.length; i++) {
+      const action = actions.actions[region.actions[i]];
+      if (action.error !== ERROR_None) {
+        continue;
+      }
+
+      if (action.opcode === ops.OP_With) {
+        this.holds = true;
+        scoped.push(firstFrom(region, action.s0));
+        scoped.push(firstFrom(region, action.s1));
+      } else if (action.opcode === ops.OP_Try) {
+        this.holds = true;
+        this.tries = true;
+        const flags = <u32>action.a;
+        const from = firstFrom(region, action.s0);
+        const catchFrom = firstFrom(region, action.s1);
+        const finallyFrom = firstFrom(region, action.s2);
+        const finallyTo = flags & ops.TRY_Finally ? firstFrom(region, action.s3) : finallyFrom;
+        handled.push(from);
+        handled.push(finallyFrom);
+        if (flags & ops.TRY_Catch) {
+          // A throw's scopes and the catch's variable hold over the catch body.
+          scoped.push(catchFrom);
+          scoped.push(finallyFrom);
+          if (flags & ops.TRY_CatchInRegister && !this.catchRegisters.includes(action.b)) {
+            this.catchRegisters.push(action.b);
+          }
+        }
+
+        if (finallyFrom < finallyTo) {
+          handled.push(finallyFrom);
+          handled.push(finallyTo);
+          finallies.push(finallyFrom);
+          finallies.push(finallyTo);
+          returns.push(from);
+          returns.push(finallyFrom);
+        }
+      }
+    }
+
+    if (!this.holds) {
+      return;
+    }
+
+    // The block past each scope's body, whose first action runs in it.
+    const n = region.blocks.length;
+    for (let k = 0; k < n; k++) {
+      late.push(false);
+    }
+
+    for (let i = 1; i < scoped.length; i += 2) {
+      if (scoped[i] < n) {
+        late[scoped[i]] = true;
+      }
+    }
+  }
+
+  /** The catch handler's part that sets a register a catch took a value into. */
+  private catchInto(): void {
+    const out = this.out;
+    const registers = this.catchRegisters;
+    if (registers.length === 0) {
+      return;
+    }
+
+    out.text("switch (cx.into) {\n");
+    for (let i = 0; i < registers.length; i++) {
+      const r = registers[i];
+      if (r >= this.registers && r >= 4) {
+        continue;
+      }
+
+      out.text("case ");
+      out.uint(r);
+      out.text(": ");
+      this.register(r);
+      out.text(" = cx.thrown; break;\n");
+    }
+    out.text("}\n");
   }
 
   /** Block `k` of the region, which starts with pool `pool`. */
   private code(actions: Actions, region: Region, k: i32, pool: i32): void {
     const out = this.out;
+    const first = region.blockFirst[k];
     const last = region.blockFirst[k + 1] - 1;
-    for (let i = region.blockFirst[k]; i <= last; i++) {
+    // A late block's first action runs in the scopes whose body it is past, which come off
+    // after it, as control goes on in the block. A With there pushes its object over them, and
+    // they come off with it (adl); a Try's handlers go over them once they are off.
+    let late = this.holds && this.late[k];
+    for (let i = first; i <= last; i++) {
       const index = region.order[i];
-      this.action(actions, region, actions.actions[index], pool);
+      const action = actions.actions[index];
+      if (late && action.error === ERROR_None) {
+        if (action.opcode === ops.OP_Try) {
+          this.scopes(k);
+          late = false;
+        } else if (action.opcode === ops.OP_With || !fallsThrough(action)) {
+          late = false;
+        }
+      }
+
+      this.action(actions, region, action, pool);
       pool = poolAfter(actions, index, pool);
+      if (late) {
+        this.scopes(k);
+        late = false;
+      }
     }
 
     // Where control goes from the block's end; a Jump or a Return has gone already.
     const action = actions.actions[region.order[last]];
     if (!fallsThrough(action)) {
-      if (
-        action.error !== ERROR_None ||
-        (action.opcode !== ops.OP_Jump && action.opcode !== ops.OP_Return)
-      ) {
+      if (action.error !== ERROR_None) {
+        out.text("return;\n");
+      } else if (action.opcode === ops.OP_End) {
+        this.exit();
+        out.byte(0x0a);
+      } else if (action.opcode !== ops.OP_Jump && action.opcode !== ops.OP_Return) {
         out.text("return;\n");
       }
 
@@ -134,6 +299,15 @@ export class BlockEmitter {
     if (!region.runs(to) || region.blockAt(to) !== k + 1) {
       this.goto(region, to);
       out.byte(0x0a);
+    } else if (leaves(this.handled, k, k + 1)) {
+      out.text("b = V.leave(cx, ");
+      out.uint(k + 1);
+      out.text("); continue;\n");
+    } else if (this.tries) {
+      // A throw takes the block it is thrown in from `b`.
+      out.text("b = ");
+      out.uint(k + 1);
+      out.text(";\n");
     }
   }
 
@@ -353,7 +527,27 @@ export class BlockEmitter {
         out.text("st.pop());\n");
         break;
       case ops.OP_Return:
-        out.text("return st.pop();\n");
+        // A Try's finally runs first, where one holds.
+        if (within(this.returns, this.k)) {
+          out.text("b = V.ret(cx); continue;\n");
+        } else {
+          out.text("return st.pop();\n");
+        }
+        break;
+      case ops.OP_With:
+        out.text("if (!V.with(cx, st.pop(), ");
+        out.uint(firstFrom(region, action.s0));
+        out.text(", ");
+        out.uint(firstFrom(region, action.s1));
+        out.text(")) { ");
+        this.goto(region, action.next);
+        out.text(" }\n");
+        break;
+      case ops.OP_Try:
+        this.try(actions, region, action);
+        break;
+      case ops.OP_Throw:
+        out.text("V.throw(st.pop());\n");
         break;
       case ops.OP_PushDuplicate:
         out.text("{ const a = st.pop(); st.push(a, a); }\n");
@@ -367,7 +561,7 @@ export class BlockEmitter {
         break;
       case ops.OP_If:
         out.text("if (V.toBoolean(st.pop())) ");
-        if (region.runs(action.target)) {
+        if (region.runs(action.target) || within(this.finallies, this.k)) {
           out.text("{ ");
           this.goto(region, action.target);
           out.text(" }\n");
@@ -530,16 +724,78 @@ export class BlockEmitter {
     out.text(");\n");
   }
 
-  /** Control to `offset`, its block or out of the region, without a line's end. */
+  /**
+   * Control from the block being written to `offset`, its block or out of
+   * the region, without a line's end: through V.leave where it leaves
+   * what a With or a Try holds.
+   */
   private goto(region: Region, offset: i32): void {
     const out = this.out;
     if (!region.runs(offset)) {
-      out.text("return;");
+      this.exit();
+      return;
+    }
+
+    const to = region.blockAt(offset);
+    if (leaves(this.handled, this.k, to) || crosses(this.scoped, this.k, to)) {
+      out.text("b = V.leave(cx, ");
+      out.uint(to);
+      out.text("); continue;");
     } else {
       out.text("b = ");
-      out.uint(region.blockAt(offset));
+      out.uint(to);
       out.text("; continue;");
     }
+  }
+
+  /** Control out of the region: through V.leave where a finally may hold a throw or a Return. */
+  private exit(): void {
+    this.out.text(within(this.finallies, this.k) ? "b = V.leave(cx, -1); continue;" : "return;");
+  }
+
+  /** V.scopes after the first action of the late block `k`. */
+  private scopes(k: i32): void {
+    const out = this.out;
+    out.text("V.scopes(cx, ");
+    out.uint(k);
+    out.text(");\n");
+  }
+
+  /**
+   * Try: its bodies as ranges of blocks, where a throw lands for the catch
+   * (-1 out of the region, -2 for none), and the catch's variable or
+   * register.
+   */
+  private try(actions: Actions, region: Region, action: Action): void {
+    const out = this.out;
+    const flags = <u32>action.a;
+    const finallyFrom = firstFrom(region, action.s2);
+    out.text("V.try(cx, ");
+    out.uint(firstFrom(region, action.s0));
+    out.text(", ");
+    out.uint(firstFrom(region, action.s1));
+    out.text(", ");
+    out.uint(finallyFrom);
+    out.text(", ");
+    out.uint(flags & ops.TRY_Finally ? firstFrom(region, action.s3) : finallyFrom);
+    out.text(", ");
+    if (!(flags & ops.TRY_Catch)) {
+      out.text("-2");
+    } else if (region.runs(action.s1)) {
+      out.uint(region.blockAt(action.s1));
+    } else {
+      out.text("-1");
+    }
+    out.text(", ");
+    if (flags & ops.TRY_CatchInRegister) {
+      out.uint(action.b);
+    } else if (action.count > 0) {
+      this.string(actions, action.first);
+    } else {
+      // Too short for its header: no catch.
+      out.text('""');
+    }
+    out.text(");\n");
   }
 
   private push(actions: Actions, action: Action, pool: i32): void {
@@ -638,6 +894,59 @@ export class BlockEmitter {
     out.text(name);
     out.text('")');
   }
+}
+
+/** The index of the region's first block at or after `offset`, its count past them all. */
+function firstFrom(region: Region, offset: i32): i32 {
+  const blocks = region.blocks;
+  let low = 0;
+  let high = blocks.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (blocks[mid] < offset) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  return low;
+}
+
+/** Whether control from block `from` to block `to` leaves one of `ranges`. */
+function leaves(ranges: i32[], from: i32, to: i32): bool {
+  for (let i = 0; i < ranges.length; i += 2) {
+    if (ranges[i] <= from && from < ranges[i + 1] && !(ranges[i] <= to && to < ranges[i + 1])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Whether control from block `from` to block `to` leaves one of the scopes'
+ * `ranges`, which hold over the first block past them too, as it starts.
+ */
+function crosses(ranges: i32[], from: i32, to: i32): bool {
+  for (let i = 0; i < ranges.length; i += 2) {
+    if (ranges[i] <= from && from <= ranges[i + 1] && !(ranges[i] <= to && to <= ranges[i + 1])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Whether block `k` is in one of `ranges`, `from` and `to` (excluded) in pairs. */
+function within(ranges: i32[], k: i32): bool {
+  for (let i = 0; i < ranges.length; i += 2) {
+    if (ranges[i] <= k && k < ranges[i + 1]) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Whether a branch of the region goes to one of its blocks, as a loop to its only one. */

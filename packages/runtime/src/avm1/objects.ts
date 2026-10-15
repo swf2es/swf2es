@@ -13,6 +13,7 @@
 // on: none while all its names are lower case. A SWF from 7 never needs it.
 // `__proto__` is a property like any other, which the object also keeps
 // at hand for the walks up its prototypes.
+import { Avm1Throw } from "./errors.js";
 import { lowerCase } from "./lowercase.js";
 import { stringOf, toNumber, type Value } from "./values.js";
 
@@ -523,15 +524,34 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
     const count = w === undefined ? undefined : (o.own(name, version) ?? w);
     if (w !== undefined && count !== undefined && count.calls < propertyCalls(version)) {
       const old = stored(o, name, version);
+      let thrown: Avm1Throw | null = null;
       count.calls++;
       try {
         value = invoke(w.callback, o, [name, old, value, w.data], version);
+      } catch (error) {
+        if (!(error instanceof Avm1Throw)) {
+          throw error;
+        }
+
+        thrown = error;
+        value = undefined;
       } finally {
         count.calls--;
+      }
+
+      // A watcher that throws sets undefined, then the value is thrown (adl).
+      if (thrown !== null) {
+        store(o, name, value, version);
+        throw thrown;
       }
     }
   }
 
+  store(o, name, value, version);
+}
+
+/** A set past the watcher: the setter, or the value stored. */
+function store(o: Avm1Object, name: string, value: Value, version: number): void {
   const own = o.own(name, version);
   if (own === undefined) {
     let p: Value = o.protoFor(version);

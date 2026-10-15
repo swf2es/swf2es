@@ -2,7 +2,8 @@
 // takes the runtime, asks it for the operations of the SWF's version,
 // `V`, once, and each region of each block takes its activation, `cx`.
 import { Activation, type Blocks, type Region } from "./activation.js";
-import { Disabled, Halt, NotYet } from "./errors.js";
+import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.js";
+import { Avm1Throw, Disabled, Halt, NotYet } from "./errors.js";
 import { Avm1Super, argumentsOf, superOf } from "./functions.js";
 import type { Host, Target } from "./host.js";
 import {
@@ -43,7 +44,7 @@ import {
 } from "./scope.js";
 import { type Primitive, stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
 
-export { Activation, type Blocks, Disabled, Halt, NotYet, type Region };
+export { Activation, Avm1Throw, type Blocks, Disabled, Halt, NotYet, type Region };
 
 /** A module's default export. */
 export type Factory = (rt: Runtime) => Blocks;
@@ -151,6 +152,42 @@ export interface Operations {
   superOf(cx: Activation, self: Value): Value;
   root(cx: Activation): Value;
   parentOf(cx: Activation): Value;
+  /**
+   * With: `object` on the scope chain over the blocks of its body, from
+   * `from` to `to`; false where the body is skipped.
+   */
+  with(cx: Activation, object: Value, from: number, to: number): boolean;
+  /**
+   * Try: its handlers over its try and catch bodies, the blocks from
+   * `from` to `finallyFrom`, the catch's from `catchFrom`; a throw lands at
+   * block `catchAt` (-1 for the exit, -2 for no catch), its value into the
+   * variable or the register `into`, or at the finally's blocks, from
+   * `finallyFrom` to `finallyTo`.
+   */
+  try(
+    cx: Activation,
+    from: number,
+    catchFrom: number,
+    finallyFrom: number,
+    finallyTo: number,
+    catchAt: number,
+    into: string | number,
+  ): void;
+  throw(value: Value): never;
+  /**
+   * Where control goes after `error` was thrown in block `at`: a block, -1
+   * for the exit; a register catch's value is `cx.thrown`, into `cx.into`.
+   */
+  caught(cx: Activation, error: unknown, at: number): number;
+  /**
+   * Where control goes on its way to block `to` (-1: the exit) out of a
+   * Try's, a finally's or a scope's body.
+   */
+  leave(cx: Activation, to: number): number;
+  /** After the first action of block `at`, reached from a body: the scopes that do not hold over it come off. */
+  scopes(cx: Activation, at: number): void;
+  /** Return of the value on top of the stack: where control goes first, a finally's block, or -1 to return `cx.ret`. */
+  ret(cx: Activation): number;
   play(cx: Activation): void;
   stop(cx: Activation): void;
   /** An action Flash cannot read: the SWF stops there. */
@@ -181,8 +218,21 @@ function operations(version: number): Operations {
     },
     // undefined traces as "undefined" whatever the version, which converts it to "" up to SWF 6;
     // a SWF 5 string's bytes are UTF-8, as Flash's log writes them.
+    // A toString that throws gives what an object without one does, and
+    // the value is thrown once the trace is written (adl).
     trace(cx, value) {
-      const text = value === undefined ? "undefined" : stringOf(value, version);
+      let text: string;
+      try {
+        text = value === undefined ? "undefined" : stringOf(value, version);
+      } catch (error) {
+        if (!(error instanceof Avm1Throw)) {
+          throw error;
+        }
+
+        cx.host.trace(value instanceof Avm1Function ? "[type Function]" : "[type Object]");
+        throw error;
+      }
+
       cx.host.trace(written(text));
     },
     toBoolean: (value) => toBoolean(value, version),
@@ -441,6 +491,15 @@ function operations(version: number): Operations {
     superOf: (cx, self) => superOf(cx, self, version),
     root: (cx) => cx.host.root?.(),
     parentOf: (cx) => cx.host.parent?.(cx.clip),
+    with: (cx, object, from, to) => enterWith(cx, object, from, to, version),
+    try: enterTry,
+    throw(value) {
+      throw new Avm1Throw(value);
+    },
+    caught,
+    leave,
+    scopes,
+    ret: returned,
     play(cx) {
       cx.host.play(cx.target);
     },
@@ -658,9 +717,10 @@ export class Runtime {
   scriptTimeout = 15;
 
   /**
-   * Run a block's own region, `regions[0]`, in `cx`. Past the recursion
-   * limit, or where JavaScript's own stack runs out first, the movie's
-   * actions are disabled from there.
+   * Run a block's own region, `regions[0]`, in `cx`. A value thrown and
+   * not caught ends the block, as Flash ends it, writing nothing. Past the
+   * recursion limit, or where JavaScript's own stack runs out first, the
+   * movie's actions are disabled from there.
    */
   run(regions: Region[], cx: Activation): void {
     if (this.disabled || regions.length === 0) {
@@ -681,6 +741,10 @@ export class Runtime {
     try {
       regions[0](cx);
     } catch (error) {
+      if (error instanceof Avm1Throw) {
+        return;
+      }
+
       if (!(error instanceof Disabled || stackOverflow(error))) {
         throw error;
       }

@@ -32,11 +32,19 @@ export const SCOPE_Local = 2;
 /** A `with`'s object. */
 export const SCOPE_With = 3;
 
+/**
+ * How many scopes a chain may hold, `_global` included: a With that would
+ * make it longer skips its body, as adl does (docs/avm1.md, "With and Try").
+ */
+export const MAX_SCOPES = 15;
+
 export class Scope {
   constructor(
     readonly parent: Scope | null,
     readonly kind: number,
     readonly object: Avm1Object,
+    /** How many scopes the chain holds, as adl counts them for MAX_SCOPES. */
+    readonly depth: number = parent === null ? 1 : parent.depth + 1,
   ) {}
 }
 

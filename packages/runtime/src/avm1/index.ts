@@ -18,6 +18,7 @@ export {
 export { Realm } from "./realm.js";
 export {
   Activation,
+  Avm1Throw,
   type Blocks,
   Disabled,
   type Factory,

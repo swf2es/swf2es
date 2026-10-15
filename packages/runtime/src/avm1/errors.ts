@@ -1,5 +1,7 @@
 // What ends an AVM1 block other than its code: an action not done yet, the
-// SWF stopped at one Flash cannot read, or its actions disabled.
+// SWF stopped at one Flash cannot read, or its actions disabled; and a value
+// the code throws.
+import type { Value } from "./values.js";
 
 /** An action the runtime does not do yet: it ends the block it is in. */
 export class NotYet extends Error {
@@ -20,4 +22,16 @@ export class Halt extends Error {
  */
 export class Disabled extends Error {
   override name = "Avm1Disabled";
+}
+
+/**
+ * A value AVM1 code throws (Throw), which a Try's catch or finally takes
+ * and which, caught by none, ends the block as Flash ends it, silently.
+ */
+export class Avm1Throw extends Error {
+  override name = "Avm1Throw";
+
+  constructor(readonly value: Value) {
+    super("an AVM1 value thrown and not caught");
+  }
 }

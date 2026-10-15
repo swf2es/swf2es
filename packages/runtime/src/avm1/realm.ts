@@ -29,6 +29,7 @@ import {
   nameOf,
   type Property,
   READ_ONLY,
+  set,
   VERSION_6,
 } from "./objects.js";
 import { SCOPE_Global, Scope } from "./scope.js";
@@ -65,6 +66,7 @@ export class Realm implements Boxer {
   readonly Number: Class;
   readonly Boolean: Class;
   readonly Array: Class;
+  readonly Error: Class;
   /** The bottom of every scope chain. */
   readonly globalScope: Scope;
   /** The four registers outside DefineFunction2's own, which every activation shares. */
@@ -132,6 +134,7 @@ export class Realm implements Boxer {
       (self) => (typeof self.primitive === "boolean" ? String(self.primitive) : undefined),
     );
     this.Array = this.arrayClass();
+    this.Error = this.errorClass();
 
     const g = this.global;
     this.globalScope = new Scope(null, SCOPE_Global, g);
@@ -151,6 +154,7 @@ export class Realm implements Boxer {
     g.define("Boolean", this.Boolean.constr, DONT_ENUM);
     g.define("String", this.String.constr, DONT_ENUM);
     g.define("Array", this.Array.constr, DONT_ENUM);
+    g.define("Error", this.Error.constr, DONT_ENUM);
   }
 
   /** A property of `object` whose value a native getter gives, without a setter. */
@@ -356,6 +360,35 @@ export class Realm implements Boxer {
         ),
       ),
       DONT_ENUM | DONT_DELETE,
+    );
+    return { constr, proto };
+  }
+
+  /**
+   * Error, as far as Throw's values need it: a `message` and a `name`,
+   * both "Error" on the prototype and listed by for..in, as adl has them,
+   * and a `toString` that gives the message. Called as a function it gives
+   * undefined. Step 9 completes the classes.
+   */
+  private errorClass(): Class {
+    const proto = new Avm1Object(this.objectProto);
+    const constr = this.classOf(
+      proto,
+      (self, args, version) => {
+        if (args.length > 0 && args[0] !== undefined) {
+          set(self, "message", args[0], version);
+        }
+
+        return self;
+      },
+      () => undefined,
+    );
+    proto.define("message", "Error", 0);
+    proto.define("name", "Error", 0);
+    proto.define(
+      "toString",
+      this.method((self, _, version) => get(self, "message", version)),
+      0,
     );
     return { constr, proto };
   }

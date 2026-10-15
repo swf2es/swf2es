@@ -63,6 +63,13 @@ export const FunctionFlag = {
   preloadGlobal: 0x100,
 } as const;
 
+/** Try's flags: which bodies it has, and whether the catch's value goes to a register. */
+export const TryFlag = {
+  catch: 1,
+  finally: 2,
+  catchInRegister: 4,
+} as const;
+
 /** The opcodes of the actions without operands, by name. */
 export const Simple = {
   End: 0x00,
@@ -150,8 +157,20 @@ const str = (s: string) => [...new TextEncoder().encode(s), 0];
 export class Avm1Assembler {
   private code: number[] = [];
   private labels = new Map<string, number>();
-  /** Branches to patch: where their offset goes and the label it names. */
-  private fixups: { at: number; label: string }[] = [];
+  /** Try headers whose flags are known once the labels are. */
+  private tries: {
+    at: number;
+    catchAt: string;
+    finallyAt: string;
+    end: string;
+    flags: number | undefined;
+    named: boolean;
+  }[] = [];
+  /**
+   * Offsets and sizes to patch: where the u16 goes, the label it names and
+   * the offset it counts from (a branch's end, a body's start).
+   */
+  private fixups: { at: number; label: string; from: number | string }[] = [];
 
   /** An action by opcode, with its operands' bytes from 0x80. */
   action(op: number, operands: number[] = []): this {
@@ -238,6 +257,36 @@ export class Avm1Assembler {
     ]).raw([...code]);
   }
 
+  /** With: the object on the stack is the scope of the body up to `end`, which follows. */
+  with(end: string): this {
+    this.fixups.push({ at: this.code.length + 3, label: end, from: this.code.length + 5 });
+    return this.action(0x94, [0, 0]);
+  }
+
+  /**
+   * Try: the try body follows, up to the label `catchAt`, the catch's up to
+   * `finallyAt` and the finally's up to `end`; `into` the catch's variable
+   * or register. `flags` overrides which bodies the header says it has
+   * (TryFlag), by default a catch and a finally where they are not empty.
+   */
+  try(
+    into: string | TypedValue,
+    catchAt: string,
+    finallyAt: string,
+    end: string,
+    flags?: number,
+  ): this {
+    const named = typeof into === "string";
+    const header = named ? str(into) : [into.value & 0xff];
+    const start = this.code.length + 3 + 7 + header.length;
+    const at = this.code.length + 4;
+    this.fixups.push({ at, label: catchAt, from: start });
+    this.fixups.push({ at: at + 2, label: finallyAt, from: catchAt });
+    this.fixups.push({ at: at + 4, label: end, from: finallyAt });
+    this.tries.push({ at: at - 1, catchAt, finallyAt, end, flags, named });
+    return this.action(0x8f, [0, 0, 0, 0, 0, 0, 0, ...header]);
+  }
+
   storeRegister(register: number): this {
     return this.action(0x87, [register & 0xff]);
   }
@@ -278,23 +327,33 @@ export class Avm1Assembler {
   /** The block's bytes, every label it jumps to defined. */
   bytes(): Uint8Array {
     const code = [...this.code];
-    for (const { at, label } of this.fixups) {
-      const target = this.labels.get(label);
-      if (target === undefined) {
-        throw new Error(`no label ${label}`);
-      }
-
-      // Relative to the end of the branch, whose offset ends 2 bytes on.
-      const offset = target - (at + 2);
+    for (const { at, label, from } of this.fixups) {
+      const offset = this.at(label) - (typeof from === "number" ? from : this.at(from));
       code[at] = offset & 0xff;
       code[at + 1] = (offset >> 8) & 0xff;
+    }
+
+    for (const { at, catchAt, finallyAt, end, flags, named } of this.tries) {
+      const catches = this.at(finallyAt) > this.at(catchAt) ? TryFlag.catch : 0;
+      const finallies = this.at(end) > this.at(finallyAt) ? TryFlag.finally : 0;
+      code[at] = (flags ?? catches | finallies) | (named ? 0 : TryFlag.catchInRegister);
     }
 
     return new Uint8Array(code);
   }
 
+  private at(label: string): number {
+    const target = this.labels.get(label);
+    if (target === undefined) {
+      throw new Error(`no label ${label}`);
+    }
+
+    return target;
+  }
+
   private branch(op: number, label: string): this {
-    this.fixups.push({ at: this.code.length + 3, label });
+    // Relative to the end of the branch, whose offset ends 2 bytes on.
+    this.fixups.push({ at: this.code.length + 3, label, from: this.code.length + 5 });
     return this.action(op, [0, 0]);
   }
 }
