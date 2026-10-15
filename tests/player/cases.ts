@@ -2019,6 +2019,7 @@ function avm1Operators(version: number): Uint8Array {
     [double(2.7), double(1.5)],
     ["3", NAN],
     [undefined, undefined],
+    [double(-2147483648), 2],
   ];
   const unary = (action: SimpleAction, values: PushValue[]) =>
     traceEach(

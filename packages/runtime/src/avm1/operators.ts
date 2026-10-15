@@ -171,10 +171,12 @@ export function charOf(code: number, replace: boolean): string {
 /**
  * StringExtract and MBStringExtract: `count` units from the 1-based
  * `index`, a start below 1 the first, a count below 0 or past the end the
- * rest.
+ * rest. The start is `index - 1` in 32 bits, as adl takes it: an index of
+ * -2^31 wraps past the end.
  */
 export function extract(s: string, index: number, count: number): string {
-  const start = index >= 1 ? index - 1 : 0;
+  const from = (index - 1) | 0;
+  const start = from < 0 ? 0 : from;
   const end = count < 0 || start + count > s.length ? s.length : start + count;
   return s.slice(Math.min(start, end), end);
 }

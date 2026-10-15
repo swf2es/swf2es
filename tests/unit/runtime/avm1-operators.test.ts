@@ -207,6 +207,11 @@ test("StringExtract counts from 1, a start below it the first, a count below 0 t
   assert.equal(V.stringExtract(1, 7, "abcdef"), "");
   assert.equal(V.stringExtract(1.5, 2.7, "abcdef"), "b");
   assert.equal(V.stringExtract(Number.NaN, "3", "abcdef"), "");
+  // The start is index - 1 in 32 bits: -2^31 wraps to 2^31 - 1, past the end.
+  assert.equal(V.stringExtract(2, -2147483647, "abcdef"), "ab");
+  assert.equal(V.stringExtract(2, -2147483648, "abcdef"), "");
+  assert.equal(V.stringExtract(2, 6442450944, "abcdef"), "");
+  assert.equal(V.stringExtract(2, 4294967296, "abcdef"), "ab");
   assert.equal(V.mbStringExtract(undefined, undefined, 12345), "");
 });
 
