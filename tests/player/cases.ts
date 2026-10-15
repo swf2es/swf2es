@@ -12,6 +12,7 @@ import {
   type PushValue,
   register,
   type SimpleAction,
+  TryFlag,
 } from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
@@ -3401,8 +3402,9 @@ function avm1Functions(version: number): Uint8Array {
 }
 
 // Past the recursion limit, a ScriptLimits of 40 here, Flash disables the
-// movie's actions, the rest of the frame's and every later frame's, and
-// its timeline plays on: frame 2 places a square, which frame 3 shows.
+// movie's actions, the rest of the frame's and every later frame's, which
+// no catch or finally runs, and its timeline plays on: frame 2 places a
+// square, which frame 3 shows.
 function avm1Recursion(): Uint8Array {
   return w.swf({
     version: 6,
@@ -3424,7 +3426,7 @@ function avm1Recursion(): Uint8Array {
           drop(callFunction("deep")),
           note("unwound"),
         ),
-        drop(callFunction("deep")),
+        tryDo("e", [drop(callFunction("deep"))], traceCaught("e"), [note("not finally")]),
         note("after"),
       ),
       block(note("the next block")),
@@ -3476,6 +3478,593 @@ function avm1ScriptLimits(): Uint8Array {
       block(...recurse(60), note("unreached")),
       w.showFrame(),
       block(note("frame 3")),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+let controlLabels = 0;
+const label = () => `c${controlLabels++}`;
+const at =
+  (name: string): Avm1Statement =>
+  (a) =>
+    a.label(name);
+const goTo =
+  (name: string): Avm1Statement =>
+  (a) =>
+    a.jump(name);
+const throwOf =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).op("Throw");
+/** Bytes as they are, for the stack's cases. */
+const code =
+  (write: (a: Avm1Assembler) => Avm1Assembler): Avm1Statement =>
+  (a) =>
+    write(a);
+/** `with (o) { statements }`. */
+const withDo =
+  (o: Avm1Expr, ...statements: Avm1Statement[]): Avm1Statement =>
+  (a) => {
+    const end = label();
+    return statements.reduce((b, s) => s(b), o(a).with(end)).label(end);
+  };
+/**
+ * `try { body } catch (into) { caught } finally { always }`, as compilers
+ * write it: the try body and the catch go on at the finally. A null catch
+ * or finally is none; `runOff` leaves out the try body's jump past the
+ * catch, so that it runs off into the catch's bytes.
+ */
+const tryDo =
+  (
+    into: string | number,
+    body: Avm1Statement[],
+    caught: Avm1Statement[] | null,
+    always: Avm1Statement[] | null,
+    runOff = false,
+  ): Avm1Statement =>
+  (a) => {
+    const catchAt = label();
+    const finallyAt = label();
+    const end = label();
+    const flags =
+      (caught ? TryFlag.catch : 0) |
+      (always ? TryFlag.finally : 0) |
+      (typeof into === "number" ? TryFlag.catchInRegister : 0);
+    a.try(typeof into === "number" ? register(into) : into, catchAt, finallyAt, end, flags);
+    body.reduce((b, s) => s(b), a);
+    if (caught && !runOff) {
+      a.jump(finallyAt);
+    }
+
+    a.label(catchAt);
+    (caught ?? []).reduce((b, s) => s(b), a);
+    a.label(finallyAt);
+    (always ?? []).reduce((b, s) => s(b), a);
+    return a.label(end);
+  };
+const concat = (...parts: Avm1Expr[]): Avm1Expr => parts.reduce((x, y) => op("Add2", x, y));
+/** `catch (e) { trace("caught " + e) }`. */
+const traceCaught = (into: string) => [traceOf(concat(lit("caught "), getVar(into)))];
+/** `depth` Withs one in another, each of an object whose `v` is its depth, `v` traced in the last. */
+const withNest = (depth: number): Avm1Statement => {
+  let s: Avm1Statement = traceOf(concat(lit(`${depth} deep: `), getVar("v")));
+  for (let k = depth; k >= 1; k--) {
+    s = withDo(initObject(["v", lit(k)]), s, ...(k === depth - 1 ? [note(`left ${depth}`)] : []));
+  }
+
+  return s;
+};
+
+// What With, Try and Throw do in a SWF of `version`, as adl traces it
+// (docs/avm1.md, "With and Try"): a With's object on the scope chain while
+// control stays in its body, its body skipped for undefined, null, or a
+// chain already 15 deep; a jump out of a body, back before it or into it;
+// Try's catch, its variable the catch body's own or a register, the
+// finally after a throw, a Return or neither, and a throw again as control
+// leaves it; the operand stack a throw cuts back; throws through calls,
+// getters, watchers and conversions; Error; and a throw nothing catches,
+// which ends its block and nothing else.
+function avm1Control(version: number): Uint8Array {
+  const o = initObject(["a", lit("oa")], ["x", lit("ox")]);
+  const out = label();
+  const back = label();
+  const into = label();
+  const tryBack = label();
+  const tryInto = label();
+  const finallyOut = label();
+  const finallyOut2 = label();
+  const returnOut = label();
+  const i = getVar("i");
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      block(
+        note("-- with"),
+        setVar("o", o),
+        setVar("a", lit("root a")),
+        withDo(
+          getVar("o"),
+          traceOf(getVar("a")),
+          setVar("a", lit("set a")),
+          setVar("nb", lit("nb")),
+          local("dl", lit("dl")),
+          local("x", lit("set x")),
+        ),
+        traceOf(member(getVar("o"), "a")),
+        traceOf(member(getVar("o"), "nb")),
+        traceOf(getVar("nb")),
+        traceOf(member(getVar("o"), "dl")),
+        traceOf(getVar("dl")),
+        traceOf(member(getVar("o"), "x")),
+        traceOf(getVar("a")),
+        withDo(lit(undefined), note("not with undefined")),
+        withDo(lit(null), note("not with null")),
+        withDo(lit(5), traceOf(callFunction("toString")), traceOf(getVar("length"))),
+        withDo(lit("abc"), traceOf(getVar("length"))),
+        withDo(lit(true), traceOf(callFunction("toString"))),
+        note("-- with: jumps"),
+        setVar("i", lit(0)),
+        withDo(getVar("o"), traceOf(getVar("a")), goTo(out), note("not after the jump")),
+        at(out),
+        traceOf(getVar("x")),
+        at(back),
+        traceOf(getVar("x")),
+        setVar("i", op("Increment", i)),
+        withDo(
+          getVar("o"),
+          traceOf(getVar("x")),
+          code((a) => a.push("i").op("GetVariable").push(2).op("Less2").if(back)),
+          note("the body's end"),
+        ),
+        goTo(into),
+        withDo(getVar("o"), note("not run"), at(into), traceOf(getVar("x"))),
+        note("-- with: depth"),
+        withNest(13),
+        withNest(14),
+        note("in a function"),
+        defineFn("deeper", [], withNest(12), withNest(13)),
+        drop(callFunction("deeper")),
+        // A function defined in 5 Withs, which from SWF 6 it closes over.
+        [1, 2, 3, 4, 5].reduceRight<Avm1Statement>(
+          (inner, k) => withDo(initObject(["v", lit(`closed over ${k}`)]), inner),
+          defineFn("closure", [], withNest(7), withNest(8), traceOf(getVar("v"))),
+        ),
+        drop(callFunction("closure")),
+        note("-- with: one action late"),
+        withDo(
+          getVar("o"),
+          code((a) => a.push("a")),
+        ),
+        code((a) => a.op("GetVariable").trace()),
+        withDo(
+          getVar("o"),
+          code((a) => a.push("a")),
+        ),
+        traceOf(getVar("a")),
+        // A function defined by the first action past a body closes over its scope.
+        withDo(getVar("o")),
+        defineFn("late", [], traceOf(getVar("x"))),
+        drop(callFunction("late")),
+        withNest(13),
+        defineFn("full", [], traceOf(getVar("v")), withNest(1)),
+        drop(callFunction("full")),
+        note("-- with: functions"),
+        defineFn("g", [], withDo(getVar("o"), ret(getVar("x"))), note("not after return")),
+        traceOf(callFunction("g")),
+        defineFn(
+          "h",
+          [],
+          withDo(getVar("o"), local("loc", lit("local")), setVar("sv", lit("set"))),
+          traceOf(getVar("loc")),
+        ),
+        drop(callFunction("h")),
+        traceOf(op("TypeOf", getVar("loc"))),
+        traceOf(getVar("sv")),
+        tryDo(
+          "e",
+          [withDo(getVar("o"), throwOf(getVar("a")))],
+          [traceOf(getVar("e")), traceOf(getVar("x"))],
+          null,
+        ),
+      ),
+      block(
+        note("-- try"),
+        tryDo(
+          "e",
+          [note("try"), throwOf(lit("x")), note("not after the throw")],
+          traceCaught("e"),
+          [note("finally")],
+        ),
+        tryDo(
+          "e",
+          [note("runs off")],
+          [note("the catch's bytes"), traceOf(getVar("e"))],
+          [note("finally")],
+          true,
+        ),
+        tryDo("e", [throwOf(lit(3))], [traceOf(op("TypeOf", getVar("e")))], null),
+        tryDo(
+          "e",
+          [throwOf(initObject(["m", lit("an object")]))],
+          [traceOf(member(getVar("e"), "m"))],
+          null,
+        ),
+        tryDo("e", [throwOf(lit(undefined))], [traceOf(op("TypeOf", getVar("e")))], null),
+        tryDo("e", [code((a) => a.op("Throw"))], [traceOf(op("TypeOf", getVar("e")))], null),
+        note("-- try: finally"),
+        tryDo(
+          "o1",
+          [tryDo("i1", [throwOf(lit("A"))], null, [note("inner finally")])],
+          traceCaught("o1"),
+          null,
+        ),
+        tryDo(
+          "o2",
+          [
+            tryDo(
+              "i2",
+              [throwOf(lit("B"))],
+              [traceOf(getVar("i2")), throwOf(lit("C"))],
+              [note("inner finally")],
+            ),
+            note("not after"),
+          ],
+          traceCaught("o2"),
+          null,
+        ),
+        tryDo(
+          "o3",
+          [tryDo("i3", [throwOf(lit("D"))], [throwOf(lit("E"))], null)],
+          traceCaught("o3"),
+          null,
+        ),
+        tryDo(
+          "o4",
+          [
+            tryDo("i4", [throwOf(lit("F"))], null, [note("inner finally"), goTo(finallyOut)]),
+            at(finallyOut),
+            note("not after"),
+          ],
+          traceCaught("o4"),
+          null,
+        ),
+        tryDo(
+          "o5",
+          [
+            tryDo("i5", [note("no throw")], null, [note("inner finally"), goTo(finallyOut2)]),
+            at(finallyOut2),
+            note("after the jump"),
+          ],
+          traceCaught("o5"),
+          null,
+          true,
+        ),
+        note("-- try: return"),
+        defineFn(
+          "r1",
+          [],
+          tryDo("e", [ret(lit("from try"))], null, [note("finally")]),
+          note("not after"),
+        ),
+        traceOf(callFunction("r1")),
+        defineFn(
+          "r2",
+          [],
+          tryDo("e", [throwOf(lit("x"))], [ret(lit("from catch"))], [note("finally")]),
+        ),
+        traceOf(callFunction("r2")),
+        defineFn("r3", [], tryDo("e", [throwOf(lit("x"))], null, [ret(lit("from finally"))])),
+        traceOf(callFunction("r3")),
+        defineFn("r4", [], tryDo("e", [ret(lit("from try"))], null, [ret(lit("from finally"))])),
+        traceOf(callFunction("r4")),
+        defineFn(
+          "r5",
+          [],
+          tryDo("e", [ret(lit("from try"))], null, [note("finally"), goTo(returnOut)]),
+          at(returnOut),
+          note("not after the jump"),
+        ),
+        traceOf(callFunction("r5")),
+        defineFn(
+          "r6",
+          [],
+          tryDo(
+            "o",
+            [tryDo("e", [ret(lit("inner"))], null, [note("inner finally")]), note("not after")],
+            null,
+            [note("outer finally")],
+          ),
+        ),
+        traceOf(callFunction("r6")),
+        defineFn(
+          "r7",
+          [],
+          tryDo("e", [throwOf(lit("x"))], [ret(lit("from catch"))], [throwOf(lit("from finally"))]),
+        ),
+        tryDo("e", [traceOf(callFunction("r7"))], traceCaught("e"), null),
+      ),
+      block(
+        note("-- try: catch"),
+        setVar("e", lit("outer")),
+        tryDo(
+          "e",
+          [throwOf(lit("thrown"))],
+          [
+            traceOf(getVar("e")),
+            setVar("e", lit("set in the catch")),
+            local("cl", lit("local in the catch")),
+            defineFn("cf", [], traceOf(getVar("e"))),
+          ],
+          null,
+        ),
+        traceOf(getVar("e")),
+        traceOf(getVar("cl")),
+        drop(callFunction("cf")),
+        tryDo("x1", [throwOf(lit("x1"))], [], null),
+        traceOf(op("TypeOf", getVar("x1"))),
+        defineFn(
+          "f",
+          [],
+          local("e", lit("local e")),
+          tryDo("e", [throwOf(lit("in f"))], [traceOf(getVar("e"))], null),
+          traceOf(getVar("e")),
+        ),
+        drop(callFunction("f")),
+        tryDo("e", [throwOf(lit("x"))], [withNest(12), withNest(13)], null),
+        setVar("pp", initObject()),
+        tryDo("pp.q", [throwOf(lit("path"))], [traceOf(getVar("pp.q"))], null),
+        traceOf(member(getVar("pp"), "q")),
+        withDo(
+          getVar("o"),
+          tryDo("e", [throwOf(lit("in a with"))], [traceOf(getVar("e"))], null),
+          traceOf(getVar("e")),
+        ),
+        // A throw in a With body keeps the With's object over the catch body, an action past it,
+        // and an outer catch's body where the catch throws again.
+        tryDo("e", [withDo(getVar("o"), throwOf(lit("x")))], [code((a) => a.push("x"))], null),
+        code((a) => a.op("GetVariable").trace()),
+        traceOf(getVar("x")),
+        tryDo(
+          "e",
+          [tryDo("i", [withDo(getVar("o"), throwOf(lit("x")))], [throwOf(lit("y"))], null)],
+          [traceOf(getVar("x")), traceOf(getVar("e")), traceOf(getVar("i"))],
+          [traceOf(getVar("x"))],
+        ),
+        tryDo(1, [throwOf(lit("r1"))], [traceOf(reg(1))], null),
+        traceOf(reg(1)),
+        tryDo(7, [throwOf(lit("r7"))], [traceOf(reg(7))], null),
+        defineFn2(
+          "f2",
+          4,
+          0,
+          [],
+          tryDo(2, [throwOf(lit("local r2"))], [traceOf(reg(2))], null),
+          traceOf(reg(2)),
+          tryDo(5, [throwOf(lit("r5"))], [traceOf(reg(5))], null),
+          tryDo(0, [throwOf(lit("r0"))], [traceOf(reg(0))], null),
+        ),
+        drop(callFunction("f2")),
+        traceOf(reg(2)),
+        note("-- try: the stack"),
+        code((a) => a.push("below")),
+        tryDo(
+          "e",
+          [code((a) => a.push("t1", "t2")), throwOf(lit("x"))],
+          [code((a) => a.op("PushDuplicate").trace())],
+          null,
+        ),
+        code((a) => a.trace().trace()),
+        code((a) => a.push(1, 2, 3)),
+        tryDo(
+          "e",
+          [code((a) => a.pop().pop()), throwOf(lit("x"))],
+          [code((a) => a.op("PushDuplicate").trace())],
+          null,
+        ),
+        code((a) => a.trace().trace()),
+        defineFn(
+          "pusher",
+          [],
+          code((a) => a.push("f1", "f2")),
+          throwOf(lit("from pusher")),
+        ),
+        code((a) => a.push("under")),
+        tryDo(
+          "e",
+          [drop(callFunction("pusher"))],
+          [code((a) => a.op("PushDuplicate").trace())],
+          null,
+        ),
+        code((a) => a.trace().trace()),
+        code((a) => a.push("s1")),
+        tryDo(
+          "o",
+          [
+            code((a) => a.push("s2")),
+            tryDo("i", [code((a) => a.push("s3")), throwOf(lit("y"))], null, [
+              code((a) => a.op("PushDuplicate").trace()),
+            ]),
+          ],
+          [code((a) => a.op("PushDuplicate").trace())],
+          null,
+        ),
+        code((a) => a.trace().trace()),
+      ),
+      block(
+        note("-- try: through calls"),
+        defineFn("thrower", ["x"], throwOf(getVar("x"))),
+        defineFn("mid", [], drop(callFunction("thrower", lit("deep"))), note("not after")),
+        tryDo("e", [drop(callFunction("mid"))], traceCaught("e"), null),
+        setVar("p", initObject()),
+        drop(
+          callMethod(
+            getVar("p"),
+            "addProperty",
+            lit("got"),
+            fnExpr([], throwOf(lit("getter"))),
+            lit(null),
+          ),
+        ),
+        tryDo("e", [traceOf(member(getVar("p"), "got"))], traceCaught("e"), null),
+        drop(
+          callMethod(
+            getVar("p"),
+            "addProperty",
+            lit("put"),
+            fnExpr([], ret(lit("got"))),
+            fnExpr(["v"], throwOf(lit("setter"))),
+          ),
+        ),
+        tryDo("e", [setMember(getVar("p"), "put", lit(1))], traceCaught("e"), null),
+        traceOf(member(getVar("p"), "put")),
+        setVar("ts", initObject()),
+        setMember(getVar("ts"), "toString", fnExpr([], note("toString"), throwOf(lit("toString")))),
+        tryDo("e", [traceOf(getVar("ts"))], traceCaught("e"), null),
+        tryDo("e", [traceOf(concat(lit("in Add2 "), getVar("ts")))], traceCaught("e"), null),
+        setVar("fn", fnExpr([])),
+        setMember(getVar("fn"), "toString", fnExpr([], throwOf(lit("a function's toString")))),
+        tryDo("e", [traceOf(getVar("fn"))], traceCaught("e"), null),
+        setVar("ts2", initObject()),
+        setMember(getVar("ts2"), "toString", fnExpr([], note("not the second toString"))),
+        tryDo(
+          "e",
+          [traceOf(callMethod(initArray(getVar("ts"), getVar("ts2")), "join"))],
+          traceCaught("e"),
+          null,
+        ),
+        setMember(getVar("ts"), "valueOf", fnExpr([], throwOf(lit("valueOf")))),
+        tryDo("e", [traceOf(op("Add2", getVar("ts"), lit(1)))], traceCaught("e"), null),
+        tryDo(
+          "e",
+          [traceOf(callMethod(getVar("thrower"), "call", lit(null), lit("by call")))],
+          traceCaught("e"),
+          null,
+        ),
+        tryDo(
+          "e",
+          [traceOf(callMethod(getVar("thrower"), "apply", lit(null), initArray(lit("by apply"))))],
+          traceCaught("e"),
+          null,
+        ),
+        setVar("wt", initObject(["k", lit(1)])),
+        drop(callMethod(getVar("wt"), "watch", lit("k"), fnExpr([], throwOf(lit("watcher"))))),
+        tryDo("e", [setMember(getVar("wt"), "k", lit(2))], traceCaught("e"), null),
+        traceOf(member(getVar("wt"), "k")),
+        setVar("rs", initObject()),
+        setMember(getVar("rs"), "__resolve", fnExpr([], throwOf(lit("__resolve")))),
+        tryDo("e", [traceOf(member(getVar("rs"), "zz"))], traceCaught("e"), null),
+        defineFn("Thrower", [], throwOf(lit("a constructor"))),
+        tryDo("e", [traceOf(newObject("Thrower"))], traceCaught("e"), null),
+        tryDo(
+          "e",
+          [setVar("q", callFunction("thrower", lit("an argument")))],
+          traceCaught("e"),
+          null,
+        ),
+        traceOf(op("TypeOf", getVar("q"))),
+      ),
+      block(
+        note("-- Error"),
+        traceOf(op("TypeOf", getVar("Error"))),
+        keysOf(proto("Error")),
+        keysOf(getVar("Error")),
+        traceOf(member(proto("Error"), "message")),
+        traceOf(member(proto("Error"), "name")),
+        traceOf(op("Equals2", member(proto("Error"), "__proto__"), OBJECT_PROTO)),
+        setVar("err", newObject("Error", lit("a message"))),
+        traceOf(getVar("err")),
+        traceOf(member(getVar("err"), "message")),
+        traceOf(member(getVar("err"), "name")),
+        traceOf(callMethod(getVar("err"), "toString")),
+        keysOf(getVar("err")),
+        traceOf(callMethod(getVar("err"), "hasOwnProperty", lit("message"))),
+        traceOf(callMethod(getVar("err"), "hasOwnProperty", lit("name"))),
+        traceOf(op("Equals2", member(getVar("err"), "__constructor__"), getVar("Error"))),
+        traceOf(newObject("Error")),
+        traceOf(callMethod(newObject("Error"), "hasOwnProperty", lit("message"))),
+        traceOf(callMethod(newObject("Error", lit(undefined)), "hasOwnProperty", lit("message"))),
+        traceOf(newObject("Error", lit(null))),
+        traceOf(op("TypeOf", member(newObject("Error", lit(5)), "message"))),
+        setMember(getVar("err"), "name", initObject()),
+        traceOf(member(getVar("err"), "name")),
+        traceOf(callFunction("Error", lit("called"))),
+        traceOf(
+          callMethod(
+            member(proto("Error"), "toString"),
+            "call",
+            initObject(["message", lit("borrowed")]),
+          ),
+        ),
+        traceOf(callMethod(member(proto("Error"), "toString"), "call", lit(5))),
+        traceOf(concat(lit("in Add2: "), getVar("err"))),
+        setVar("Sub", fnExpr([])),
+        setMember(getVar("Sub"), "prototype", newObject("Error")),
+        setMember(proto("Sub"), "name", lit("SubError")),
+        traceOf(member(newObject("Sub", lit("not taken")), "name")),
+        tryDo(
+          "e",
+          [throwOf(newObject("Error", lit("thrown")))],
+          [traceOf(getVar("e")), traceOf(member(getVar("e"), "message"))],
+          null,
+        ),
+      ),
+      block(
+        note("-- try: jumps"),
+        setVar("i", lit(0)),
+        at(tryBack),
+        setVar("i", op("Increment", i)),
+        ifThen(op("Equals2", i, lit(2)), note("thrown with no handler"), throwOf(lit("back"))),
+        tryDo("e", [note("try"), goTo(tryBack)], traceCaught("e"), null),
+        note("not after the try"),
+      ),
+      block(
+        goTo(tryInto),
+        tryDo(
+          "e",
+          [note("not run"), at(tryInto), note("into the try body"), throwOf(lit("in"))],
+          traceCaught("e"),
+          null,
+        ),
+        note("not after the throw"),
+      ),
+      block(
+        note("-- uncaught"),
+        code((a) => a.push("left")),
+        throwOf(lit("U")),
+        note("not after the throw"),
+      ),
+      block(
+        note("the next block"),
+        code((a) => a.trace().trace()),
+      ),
+      w.showFrame(),
+      block(
+        note("-- frame 2"),
+        defineFn(
+          "uncaught",
+          [],
+          code((a) => a.push("pushed")),
+          throwOf(lit("U")),
+          note("not after the throw"),
+        ),
+        code((a) => a.push("under")),
+        drop(callFunction("uncaught")),
+        note("not after the call"),
+      ),
+      block(
+        note("the next block"),
+        code((a) => a.trace().trace()),
+      ),
+      w.showFrame(),
+      block(note("-- frame 3"), (a) => a.stop()),
       w.showFrame(),
       w.end(),
     ],
@@ -7784,6 +8373,17 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
       // Past its recursion limit Flash runs no AVM1 action again, a later SWF's neither.
       alone: true,
+    }),
+  ),
+  ...[5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-control-swf${version}`,
+      swf: avm1Control(version),
+      traced: true,
+      frames: 3,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
     }),
   ),
   {

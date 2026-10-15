@@ -1,0 +1,194 @@
+-- with
+oa
+set a
+undefined
+nb
+undefined
+dl
+set x
+root a
+5
+undefined
+3
+true
+-- with: jumps
+set a
+undefined
+undefined
+set x
+undefined
+set x
+the body's end
+undefined
+-- with: depth
+13 deep: 13
+left 13
+left 14
+in a function
+12 deep: 12
+left 12
+13 deep: 13
+left 13
+7 deep: 7
+left 7
+8 deep: 8
+left 8
+undefined
+-- with: one action late
+set a
+root a
+undefined
+13 deep: 13
+left 13
+undefined
+1 deep: 1
+-- with: functions
+set x
+local
+undefined
+set
+set a
+set x
+-- try
+try
+caught x
+finally
+runs off
+the catch's bytes
+undefined
+finally
+number
+an object
+undefined
+string
+-- try: finally
+inner finally
+caught A
+B
+inner finally
+caught C
+caught E
+inner finally
+caught F
+no throw
+inner finally
+after the jump
+caught 
+-- try: return
+finally
+from try
+finally
+from catch
+from finally
+from finally
+finally
+from try
+inner finally
+outer finally
+inner
+caught from finally
+-- try: catch
+thrown
+outer
+local in the catch
+outer
+undefined
+in f
+local e
+12 deep: 12
+left 12
+left 13
+undefined
+undefined
+in a with
+outer
+set x
+undefined
+set x
+y
+x
+undefined
+r1
+r1
+undefined
+local r2
+local r2
+undefined
+r0
+undefined
+-- try: the stack
+below
+below
+from try
+1
+1
+undefined
+under
+under
+undefined
+s2
+s1
+s1
+undefined
+-- try: through calls
+caught deep
+undefined
+1
+toString
+[type Object]
+caught toString
+toString
+caught toString
+[type Function]
+caught a function's toString
+toString
+caught toString
+caught valueOf
+undefined
+undefined
+2
+caught __resolve
+caught a constructor
+caught a constructor
+undefined
+-- Error
+function
+toString name message 
+
+Error
+Error
+true
+a message
+a message
+Error
+a message
+toString name message 
+undefined
+undefined
+true
+Error
+undefined
+undefined
+[type Object]
+number
+[object Object]
+undefined
+undefined
+undefined
+in Add2: a message
+SubError
+thrown
+thrown
+-- try: jumps
+try
+thrown with no handler
+into the try body
+-- uncaught
+the next block
+left
+undefined
+-- frame 2
+the next block
+pushed
+under
+-- frame 3
