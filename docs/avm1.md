@@ -445,9 +445,14 @@ cases), where it is not what Ruffle does:
   1 or 0 runs no action at all), in adl too; it takes effect as its frame
   comes, before the frame's actions, and of two in a frame the later
   (`avm1-script-limits`). Its script timeout, in seconds, is kept for when
-  scripts have one. JavaScript's own stack running out, which a limit set
-  very high, or a `toString` that calls itself, can do first, disables
-  the actions as well.
+  scripts have one. JavaScript's own stack running out, which a `toString`
+  that calls itself can do, disables the actions as well; so can a limit
+  set high, and a chain of calls near the default limit whose JavaScript
+  frames are large: in node, plain calls run out after some 1100 levels,
+  `apply` after some 680 and a DefineFunction2 of 64 registers after
+  some 730, where adl allows 999 (a smaller stack per call, or a call not
+  on JavaScript's stack, would be needed to match it). Any other
+  RangeError is an error like the rest.
 
 ### The constant pool
 

@@ -321,6 +321,37 @@ test("a ScriptLimits depth of 1 or 0 runs no action at all", async () => {
   }
 });
 
+test("a RangeError other than the stack's is an error, which disables nothing", async () => {
+  // A string doubled past the engine's longest.
+  const doubling = doAction((a) =>
+    a
+      .push("s", "s")
+      .op("SetVariable")
+      .push(0)
+      .storeRegister(0)
+      .pop()
+      .label("top")
+      .push("s", "s")
+      .op("GetVariable")
+      .push("s")
+      .op("GetVariable")
+      .op("Add2")
+      .op("SetVariable")
+      .push(register(0))
+      .op("Increment")
+      .storeRegister(0)
+      .push(40)
+      .op("Less2")
+      .if("top"),
+  );
+  const { lines, errors, avm1 } = await play(movie(6, [[doubling], [traced("2")]]), 2);
+
+  assert.equal(errors.length, 1);
+  assert.ok(errors[0] instanceof RangeError);
+  assert.ok(!avm1.rt.disabled);
+  assert.deepEqual(lines, ["2"]);
+});
+
 test("the global registers are the frame's, kept from block to block", async () => {
   const swf = movie(6, [
     [doAction((a) => a.push("r").storeRegister(1)), doAction((a) => a.push(register(1)).trace())],

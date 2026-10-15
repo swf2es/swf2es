@@ -611,6 +611,20 @@ function enumerate(cx: Activation, object: Value, version: number): void {
   }
 }
 
+/**
+ * Whether `error` is the engine's own stack running out: V8's and
+ * JavaScriptCore's RangeError, SpiderMonkey's InternalError. Any other
+ * RangeError, such as a string grown past the engine's longest, is an
+ * error like the rest.
+ */
+function stackOverflow(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "RangeError" || error.name === "InternalError") &&
+    /call stack|recursion/i.test(error.message)
+  );
+}
+
 /** The operations of each version asked for, made once and shared by every runtime. */
 const versions = new Map<number, Operations>();
 
@@ -664,7 +678,7 @@ export class Runtime {
     try {
       regions[0](cx);
     } catch (error) {
-      if (!(error instanceof Disabled || error instanceof RangeError)) {
+      if (!(error instanceof Disabled || stackOverflow(error))) {
         throw error;
       }
 
