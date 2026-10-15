@@ -8712,6 +8712,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 100,
   },
   {
+    name: "three-d-mask-handover",
+    swf: (abc) => bare(abc, 4, "ThreeDMaskHandover", 420, 420),
+    script: "ThreeDMaskHandover",
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    // The turned cards' edges fall a pixel apart, as in three-d-mask.
+    tolerance: 40,
+    maxOutliers: 2500,
+  },
+  {
     name: "three-d-filter-blend",
     swf: (abc) => bare(abc, 1, "ThreeDFilterBlend", 500, 400),
     script: "ThreeDFilterBlend",

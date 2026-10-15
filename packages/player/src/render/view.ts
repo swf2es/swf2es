@@ -406,6 +406,11 @@ export class PixiView {
    */
   private planeUnits = 0;
   private planeLeast = 1;
+  /**
+   * The outside masks planes let go of in this sync (`letGo`), which Pixi puts back in the
+   * build: those still another's mask are taken out again after it (`rebuildMasks`).
+   */
+  private readonly droppedMasks: PixiContainer[] = [];
   /** renderPlanes' scratch, the 3D objects to draw, deepest first. */
   private readonly planeOrder: { depth: number; node: Node; o: DisplayObject }[] = [];
   /** Whether the renderer was found to lack the back buffer that filter-backed blends read. */
@@ -2207,7 +2212,9 @@ export class PixiView {
     // mask's container on the object's, where it set one.
     const set = container.mask as PixiContainer | null;
     if (set !== plane.maskCopy) {
+      const before = plane.outsideMask;
       plane.maskWith(container, set && o.mask && !o.encloses(o.mask) ? set : null);
+      this.letGo(before, plane);
     }
 
     plane.stale ||= redrawn;
@@ -2249,9 +2256,34 @@ export class PixiView {
       return;
     }
 
+    const before = plane.outsideMask;
     plane.destroy(node.container);
+    this.letGo(before, plane);
     node.plane = null;
     this.planes.delete(node);
+  }
+
+  /** `mask`, a plane's outside mask before a change, noted where the plane has let go of it. */
+  private letGo(mask: PixiContainer | null, plane: Plane): void {
+    if (mask && plane.outsideMask !== mask) {
+      this.droppedMasks.push(mask);
+    }
+  }
+
+  /**
+   * The masks planes let go of in this sync kept out of the build where they still mask
+   * another object: Pixi puts a mask back as any that held it lets go, which may come after
+   * the next holder took it, as when a mask goes from one 3D object to another before it in
+   * the list (`three-d-mask-handover`).
+   */
+  private rebuildMasks(): void {
+    for (const mask of this.droppedMasks) {
+      if (this.containerNodes.get(mask)?.owner.deref()?.maskOf) {
+        mask.includeInBuild = false;
+      }
+    }
+
+    this.droppedMasks.length = 0;
   }
 
   /**
@@ -2751,6 +2783,7 @@ export class PixiView {
       this.dropSpares();
     }
 
+    this.rebuildMasks();
     // Their bitmaps are drawn now, as a host may draw the stage itself after.
     this.renderPlanes();
   }
@@ -2827,6 +2860,7 @@ export class PixiView {
       const masks = new PixiContainer();
       scaled.addChild(node, masks);
       view.placeMasks(o, masks);
+      view.rebuildMasks();
       view.renderPlanes();
       scaled.scale.set(n);
       this.renderer.render({ container: scaled, target, clear: true });
