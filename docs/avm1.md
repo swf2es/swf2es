@@ -330,6 +330,13 @@ what the specification says:
   standard's decoder has it (Ruffle reads a SWF 5 string as Windows-1252).
   A double-byte locale's MB actions (Shift-JIS) are left out. From SWF 6
   the char actions take UTF-16 units, a surrogate as U+FFFD, as in Ruffle.
+- `StringExtract` and `MBStringExtract` take their start as `index - 1`
+  in 32 bits, so an index of -2^31 starts past the end (Ruffle clamps it
+  to the first character). From SWF 6, each half of a surrogate pair they
+  cut is U+FFFD wherever it is compared or joined, so the halves joined
+  again are two U+FFFD, not the pair (Ruffle keeps the halves). adl's
+  trace of a cut low half alone writes three U+FFFD, the bytes it keeps;
+  swf2es writes one.
 - Numbers are written alike in every version, and read alike from SWF 6;
   adl hangs on a string such as `"1e2147483648"` as a number, scaling by
   ten once per unit of its exponent, which swf2es reads as `Infinity`.
