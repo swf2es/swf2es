@@ -8,8 +8,17 @@ import { avm1 } from "@swf2es/runtime";
 import { Container, type DisplayObject } from "../display/display.js";
 
 /** ASCII's lower case, as Flash compares instance names and frame labels without case. */
-export const asciiLower = (s: string): string =>
-  /[A-Z]/.test(s) ? s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32)) : s;
+export function asciiLower(s: string): string {
+  // A loop and not a regular expression's test, which allocates: clips' display properties are looked up so.
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0x41 && c <= 0x5a) {
+      return s.replace(/[A-Z]/g, (u) => String.fromCharCode(u.charCodeAt(0) + 32));
+    }
+  }
+
+  return s;
+}
 
 /** A display object's parent as AVM1 sees it: none above a level, the root of its movie. */
 export function parentOf(d: DisplayObject, root: DisplayObject): Container | null {
@@ -57,10 +66,13 @@ export function childByName(
     return null;
   }
 
-  // An object without a name, a shape's, has none to find it by.
+  // An object without a name, a shape's, has none to find it by. Folding
+  // keeps a name's length, so a name of another length is passed by
+  // unfolded: `_x` read on a clip asks each of its children.
   const key = caseSensitive ? name : avm1.fold(name);
   for (const child of d.children) {
-    if (child.name !== "" && (caseSensitive ? child.name : avm1.fold(child.name)) === key) {
+    const n = child.name;
+    if (n.length === key.length && n !== "" && (caseSensitive ? n : avm1.fold(n)) === key) {
       return child;
     }
   }

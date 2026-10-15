@@ -536,6 +536,14 @@ export let foundDepth = 0;
 const DEPTH = 255;
 
 /**
+ * What `find` gives for a display object's child or property, one object
+ * reused, as each name a script resolves on a clip comes through it: its
+ * callers read it at once, keep none and let go of its value
+ * (`foundValue`, `has`).
+ */
+const displayFound = new Property("", undefined, DONT_ENUM);
+
+/**
  * The first own property `name` names on `o` or its prototypes, whatever
  * its attributes: whether the name is there, as the scope chain asks.
  */
@@ -561,7 +569,8 @@ export function find(o: Avm1Object, name: string, version: number): Property | u
     if (p.display !== null) {
       const value = p.display.get(name, version);
       if (value !== ABSENT) {
-        return new Property(name, value, DONT_ENUM);
+        displayFound.value = value;
+        return displayFound;
       }
     }
 
@@ -1008,8 +1017,26 @@ export function keys(o: Avm1Object, version: number, out: string[] = [], depth =
 }
 
 /** Whether `name` is on `o` or its prototypes, whatever its attributes. */
-export const has = (o: Avm1Object, name: string, version: number): boolean =>
-  find(o, name, version) !== undefined;
+export function has(o: Avm1Object, name: string, version: number): boolean {
+  const found = find(o, name, version) !== undefined;
+  displayFound.value = undefined;
+  return found;
+}
+
+/**
+ * The value of `p`, which `find` found for `name` on `o`, as the scope
+ * chain reads it: a plain one's own, else as `get` gives it. The reused
+ * display property lets go of its value, a clip's AVM1 object perhaps.
+ */
+export function foundValue(p: Property, o: Avm1Object, name: string, version: number): Value {
+  if (p === displayFound) {
+    const value = p.value;
+    p.value = undefined;
+    return value;
+  }
+
+  return p.get === null && allowed(p.flags, version) ? p.value : get(o, name, version);
+}
 
 /** `name` as a property's name: the string a value converts to. */
 export const nameOf = (value: Value, version: number): string =>

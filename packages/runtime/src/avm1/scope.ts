@@ -13,9 +13,9 @@ import type { Host } from "./host.js";
 import { PRIMITIVE } from "./inheritance.js";
 import {
   type Avm1Object,
-  allowed,
   find,
   fold,
+  foundValue,
   get,
   has,
   Avm1Object as ObjectClass,
@@ -154,7 +154,7 @@ export function resolve(cx: Variables, name: string, version: number): Value {
     const p = find(s.object, name, version);
     if (p !== undefined) {
       // The first property found is what get finds too, where its version sees it.
-      return p.get === null && allowed(p.flags, version) ? p.value : get(s.object, name, version);
+      return foundValue(p, s.object, name, version);
     }
   }
 

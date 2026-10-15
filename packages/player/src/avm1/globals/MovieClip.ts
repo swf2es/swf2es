@@ -542,8 +542,7 @@ function pathProperty(face: ClipNative, name: string, version: number): Value | 
       return version >= 6 ? movie.realm.global : avm1.ABSENT;
   }
 
-  const prefix = key.slice(0, 6);
-  if (prefix !== "_level" && prefix !== "_flash") {
+  if (!key.startsWith("_level") && !key.startsWith("_flash")) {
     return avm1.ABSENT;
   }
 
