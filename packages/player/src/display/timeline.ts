@@ -51,7 +51,15 @@ import type { DisplayObject, MovieClip } from "./display.js";
 import type { Rect } from "./geometry.js";
 import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
 
-export type FrameCommand = { type: "place"; place: Place } | { type: "remove"; depth: number };
+/**
+ * What a frame does, in tag order: places, removals and, in an AVM1
+ * timeline, its DoAction tags by their bodies' offsets, which the clip
+ * queues as it reaches them (avm1/avm1.ts).
+ */
+export type FrameCommand =
+  | { type: "place"; place: Place }
+  | { type: "remove"; depth: number }
+  | { type: "actions"; tag: number };
 
 /** A frame's name, or a scene's, and its frame, 1 the first. */
 export interface FrameName {
@@ -79,10 +87,30 @@ export interface Timeline {
   /** Its SoundStreamHead's stream, if it has one with blocks. */
   stream: SoundStream | null;
   /**
-   * Whether it plays on from its last frame to its first: an AVM1 SWF's
-   * root without an End tag stays on its last, as Flash's does.
+   * Whether it plays on from its last frame to its first: an AVM1
+   * timeline without an End tag stays on its last, as Flash's does.
    */
   loops: boolean;
+  /**
+   * An AVM1 timeline's DoAction tags after its last ShowFrame, which Flash
+   * runs once, as the clip stays on its last frame.
+   */
+  tail?: FrameCommand[];
+  /** How many bytes its tags take, a sprite's in its DefineSprite, which AVM1's getBytesTotal gives; the root's are the SWF's. */
+  length?: number;
+}
+
+/**
+ * What an AVM1 movie's timelines tell its AVM1, as Flash's clips do in
+ * tag order: a display object made, before its first frame runs, a frame
+ * entered, before its tags run, each DoAction tag reached, and a place at
+ * a depth already taken, which Flash's log tells of.
+ */
+export interface TimelineActions {
+  made(display: DisplayObject): void;
+  entered(clip: MovieClip, frame: number): void;
+  actions(clip: MovieClip, tag: number): void;
+  occupied(depth: number): void;
 }
 
 /** A timeline's stream: the head, and each block with the frame it is on. */
@@ -263,9 +291,10 @@ export interface Library {
   constructPlaced:
     | ((placed: { display: DisplayObject; character: DisplayCharacter }[]) => void)
     | null;
-  /** Told before a timeline child goes, for the events a script sees; null in an AVM1 movie. */
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
+  /** What an AVM1 movie's timelines tell its AVM1 (avm1/avm1.ts); null in an AS3 movie. */
+  avm1?: TimelineActions | null;
   /** The SWF's embedded fonts, by name, which its fields lay their text out in. */
   fonts: FontSet;
   /** The application domain its code was loaded into, where its class names resolve; the root's if none. */
@@ -409,6 +438,11 @@ function timelineOf(
       case tags.RemoveObject2:
         frame.push({ type: "remove", depth: readRemove(bytes, t) });
         break;
+      case tags.DoAction:
+        if (avm1 && t.length > 0) {
+          frame.push({ type: "actions", tag: t.offset });
+        }
+        break;
       case tags.FrameLabel:
         frameLabels.set(frames.length, readFrameLabel(bytes, t));
         break;
@@ -466,7 +500,10 @@ function timelineOf(
         library.set(sprite.id, {
           type: "sprite",
           id: sprite.id,
-          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, avm1),
+          timeline: {
+            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, avm1),
+            length: t.length - 4,
+          },
           grid: null,
         });
         break;
@@ -580,10 +617,20 @@ function timelineOf(
 
   // An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
   // its header says, as Flash plays and loops one (the corpus's
-  // looping_real_*): what follows the last places nothing, its actions
-  // running with it (avm1/avm1.ts). An AS3 one has as many as its header says.
+  // looping_real_*): what follows the last places nothing, and its actions
+  // run with the last frame where the timeline loops, and once after it, as
+  // the clip stops there, where it does not (`tail`): a timeline of one
+  // frame, or without an End tag (adl, and the corpus's `looping_child_*`).
+  // An AS3 one has as many as its header says.
+  const loops = !avm1 || list.at(-1)?.code === tags.End;
+  let tail: FrameCommand[] = [];
   if (avm1) {
+    tail = frames.length > 1 ? frames[frames.length - 1].filter((c) => c.type === "actions") : [];
     frames.length = Math.max(1, frames.length - 1);
+    if (loops && frames.length > 1) {
+      frames[frames.length - 1].push(...tail);
+      tail = [];
+    }
   } else {
     frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
     while (frames.length < (frameCount || 1)) {
@@ -609,7 +656,8 @@ function timelineOf(
     scenes: sceneList,
     sounds,
     stream: head && blocks.length > 0 ? { head, blocks, byFrame } : null,
-    loops: true,
+    loops,
+    tail,
   };
 }
 
@@ -624,7 +672,6 @@ export function readLibrary(swf: Swf): Library {
     { tables: null },
     !isAs3(swf),
   );
-  root.loops = isAs3(swf) || swf.tags.at(-1)?.code === tags.End;
   const fonts = new FontSet();
   for (const c of characters.values()) {
     if (c.type === "font") {

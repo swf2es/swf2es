@@ -532,13 +532,13 @@ test("the variable and member actions take their operands as popped, the top fir
 });
 
 test("every other action throws that it is not yet supported", async () => {
-  const thrown = await run([asm().push("a").trace().push("x").action(0x22).trace().bytes()]);
+  const thrown = await run([asm().push("a").trace().push("x").action(0x24).trace().bytes()]);
   assert.deepEqual(thrown.calls, [["trace", "a"]]);
-  assert.equal(thrown.error, "not yet supported: GetProperty");
+  assert.equal(thrown.error, "not yet supported: CloneSprite");
 
   // An action with operands.
-  const goto = await run([asm().action(0x81, [1, 0]).bytes()]);
-  assert.equal(goto.error, "not yet supported: GotoFrame");
+  const url = await run([asm().getUrl("a", "b").bytes()]);
+  assert.equal(url.error, "not yet supported: GetUrl");
 });
 
 test("a block's registers are the movie's four, and StoreRegister leaves its value", async () => {
@@ -1137,3 +1137,87 @@ function alone(entries: string): string {
   const parts = entries.split("\u0002").filter(Boolean);
   return `${[2, 0, 1].map((k) => parts[k]).join("\u0002")}\u0002`;
 }
+
+test("the clip actions are calls of their operations, their operands as written or popped", async () => {
+  const block = asm()
+    .setTarget("a/b")
+    .push("/c")
+    .op("SetTarget2")
+    .push("x", 0)
+    .op("GetProperty")
+    .push("x", 2, 50)
+    .op("SetProperty")
+    .gotoFrame(4)
+    .gotoLabel("label")
+    .push("f")
+    .gotoFrame2(true, 3)
+    .push(2)
+    .gotoFrame2(false)
+    .op("NextFrame")
+    .op("PreviousFrame")
+    .push("p")
+    .op("TargetPath")
+    .push(1)
+    .op("Call")
+    .op("StopSounds")
+    .op("ToggleQuality")
+    .bytes();
+  const { calls, error } = await run([block], { version: 6 });
+
+  assert.equal(error, null);
+  assert.deepEqual(
+    calls.map(([name, , ...operands]) => [name, ...operands]),
+    [
+      ["setTarget", "a/b"],
+      ["setTarget2", "/c"],
+      ["getProperty", 0, "x"],
+      ["setProperty", 50, 2, "x"],
+      ["gotoFrame", 4],
+      ["gotoLabel", "label"],
+      ["gotoFrame2", "f", true, 3],
+      ["gotoFrame2", 2, false, 0],
+      ["nextFrame"],
+      ["prevFrame"],
+      ["targetPath", "p"],
+      ["callFrame", 1],
+      ["stopSounds"],
+      ["toggleQuality"],
+    ],
+  );
+});
+
+test("WaitForFrame skips its actions where the frame is not loaded", async () => {
+  const block = (loaded: boolean) =>
+    asm()
+      .waitForFrame(loaded ? 1 : 20000, "skip")
+      .push("in")
+      .trace()
+      .label("skip")
+      .push("after")
+      .trace()
+      .bytes();
+  const traces = async (loaded: boolean) => {
+    const { calls } = await run([block(loaded)]);
+    return calls.filter(([name]) => name === "trace").map(([, value]) => value);
+  };
+
+  // The stub's frameLoaded gives its name, which is true.
+  assert.deepEqual(await traces(true), ["in", "after"]);
+
+  const wait2 = asm().push(3).waitForFrame2("end").push("in").trace().label("end").bytes();
+  const { calls } = await run([wait2]);
+  assert.deepEqual(calls[0], ["frameLoaded2", calls[0][1], 3]);
+});
+
+test("a SWF 4's functions run with SWF 5's operations", async () => {
+  const body = asm().push("in").trace();
+  const block = asm().defineFunction("f", [], body).push("out").trace().bytes();
+  const module = moduleOf([block], 4);
+
+  assert.ok(
+    module.startsWith(
+      "export default function (rt) {\nconst V = rt.version(4);\nconst V5 = rt.version(5);\n",
+    ),
+  );
+  assert.ok(module.includes("function (cx, self, args) {\nconst st = cx.st;\nconst V = V5;\n"));
+});

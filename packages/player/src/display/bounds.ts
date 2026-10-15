@@ -359,7 +359,7 @@ function inMask(mask: DisplayObject, probe: Probe): boolean {
 /** Whether a SWF's root, the main one's or a loaded one's, is `d` or above it. */
 function underRoot(d: DisplayObject): boolean {
   for (let o: DisplayObject | null = d; o; o = o.parent) {
-    if (o.loaderInfo) {
+    if (o.loaderInfo || o.avm1Root) {
       return true;
     }
   }

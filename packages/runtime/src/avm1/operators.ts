@@ -9,6 +9,7 @@
 // add2 takes its operands as the module's code pops them, the top first;
 // lessThan and looselyEquals take theirs in reading order, `a < b`. Each
 // converts them in Ruffle's order, which only an object's valueOf can tell.
+import type { DisplayNative } from "./host.js";
 import {
   isPrimitive,
   objects,
@@ -38,17 +39,18 @@ function primitiveOf(value: Value, version: number): Value {
  * Whether `a < b`, as Less2 and Greater compare: strings by their code
  * units, but the empty string after every other, anything else as
  * numbers, undefined where either is NaN; an object whose valueOf gives
- * no primitive is never less, nor greater.
+ * no primitive is never less, nor greater, but a clip is NaN (the corpus's
+ * `greater_swf6`).
  */
 export function lessThan(a: Value, b: Value, version: number): boolean | undefined {
   const pa = primitiveOf(a, version);
   if (!isPrimitive(pa)) {
-    return false;
+    return objects.typeOf(pa) === "movieclip" ? undefined : false;
   }
 
   const pb = primitiveOf(b, version);
   if (!isPrimitive(pb)) {
-    return false;
+    return objects.typeOf(pb) === "movieclip" ? undefined : false;
   }
 
   if (typeof pa === "string" && typeof pb === "string") {
@@ -112,7 +114,7 @@ function abstractEquals(a: Value, b: Value, version: number): boolean {
   }
 
   if (!isPrimitive(a) && !isPrimitive(b)) {
-    return a === b;
+    return a === b || sameClip(a, b);
   }
 
   if (ta === "boolean") {
@@ -148,7 +150,23 @@ export function strictlyEquals(a: Value, b: Value): boolean {
     return a === b || (Number.isNaN(a) && Number.isNaN(b));
   }
 
-  return a === b;
+  return a === b || (!isPrimitive(a) && !isPrimitive(b) && sameClip(a, b));
+}
+
+/**
+ * Whether two clips' AVM1 objects reach the same clip now, as references
+ * do: one to a removed clip finds the clip at its path (adl); one that
+ * finds none equals no other.
+ */
+function sameClip(a: object, b: object): boolean {
+  const da = (a as { display?: DisplayNative | null }).display;
+  const db = (b as { display?: DisplayNative | null }).display;
+  if (!da || !db) {
+    return false;
+  }
+
+  const live = da.live();
+  return live !== null && live === db.live();
 }
 
 /** ToInt32, as the bitwise actions and ToInteger take a value: NaN and the infinities 0. */

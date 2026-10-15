@@ -22,7 +22,10 @@
 // `return`, `function f() {}` and blocks; expressions with JavaScript's
 // operators but assignment, literals of numbers, strings, arrays and
 // objects, function expressions, `new`, `typeof`, `delete`, `instanceof`.
-// `trace(e)` is the Trace action. A call of `__op("Name", ...values)`
+// `trace(e)` is the Trace action; the timeline's functions (`gotoAndStop`,
+// `play`, `nextFrame`, `setProperty`, `getProperty`, `eval`,
+// `targetPath`, `call`...), `tellTarget` and `ifFrameLoaded` are their
+// actions, a constant frame or target as an operand; `with` is With. A call of `__op("Name", ...values)`
 // pushes the values and writes the action of that name, for the actions
 // that no syntax writes (CastOp, ImplementsOp, Extends...).
 
@@ -416,6 +419,62 @@ class Parser {
       return fn;
     }
 
+    if (this.is("tellTarget") && this.peek(1).value === "(") {
+      this.next();
+      this.expect("(");
+      const t = this.peek();
+      const constantTarget = t.kind === "str" && this.peek(1).value === ")" ? t.value : null;
+      const target = this.expression();
+      this.expect(")");
+      const body = this.statement();
+      return (a) => {
+        if (constantTarget === null) {
+          target(a);
+          a.op("SetTarget2");
+        } else {
+          a.setTarget(constantTarget);
+        }
+        body(a);
+        a.setTarget("");
+      };
+    }
+
+    if (this.is("with") && this.peek(1).value === "(") {
+      this.next();
+      this.expect("(");
+      const object = this.expression();
+      this.expect(")");
+      const body = this.statement();
+      return (a) => {
+        const end = fresh("with");
+        object(a);
+        a.with(end);
+        body(a);
+        a.label(end);
+      };
+    }
+
+    if (this.is("ifFrameLoaded") && this.peek(1).value === "(") {
+      this.next();
+      this.expect("(");
+      const t = this.peek();
+      const constantFrame = t.kind === "num" && this.peek(1).value === ")" ? t.value : null;
+      const frame = this.expression();
+      this.expect(")");
+      const body = this.statement();
+      return (a) => {
+        const end = fresh("loaded");
+        if (constantFrame === null) {
+          frame(a);
+          a.waitForFrame2(end);
+        } else {
+          a.waitForFrame(constantFrame - 1, end);
+        }
+        body(a);
+        a.label(end);
+      };
+    }
+
     if (this.eat("if")) {
       this.expect("(");
       const cond = this.expression();
@@ -606,6 +665,13 @@ class Parser {
         value(a);
         a.op(local ? "DefineLocal" : "SetVariable");
       };
+    }
+
+    const clip = this.peek();
+    if (clip.kind === "id" && clip.value in TIMELINE && this.peek(1).value === "(") {
+      this.next();
+      const args = this.arguments();
+      return (a) => timeline(a, clip.value, args);
     }
 
     if (this.is("trace") && this.peek(1).value === "(") {
@@ -959,6 +1025,19 @@ class Parser {
         continue;
       }
 
+      if (this.is("(") && place?.kind === "var" && place.name in CLIP_FUNCTIONS) {
+        const args = this.arguments();
+        const action = CLIP_FUNCTIONS[place.name];
+        e = (a) => {
+          for (const v of args) {
+            v(a);
+          }
+          a.op(action);
+        };
+        place = null;
+        continue;
+      }
+
       if (this.is("(") && place?.kind === "var" && place.name === "__op") {
         this.expect("(");
         const name = this.next();
@@ -1151,6 +1230,109 @@ class Parser {
 
     throw new Error(`unexpected ${t.value} at token ${this.i - 1}`);
   }
+}
+
+/** Flash's global functions that are actions of a value, `getProperty(t, i)` the GetProperty action. */
+const CLIP_FUNCTIONS: Record<string, SimpleAction> = {
+  getProperty: "GetProperty",
+  eval: "GetVariable",
+  targetPath: "TargetPath",
+};
+
+/** Flash's timeline functions, each one or two actions of no value, as its compiler writes them. */
+const TIMELINE: Record<string, true> = {
+  gotoAndStop: true,
+  gotoAndPlay: true,
+  nextFrame: true,
+  prevFrame: true,
+  play: true,
+  stop: true,
+  stopAllSounds: true,
+  toggleHighQuality: true,
+  setProperty: true,
+  call: true,
+};
+
+/**
+ * A timeline function's actions: a goto to a constant frame GotoFrame, to
+ * a constant label GotoLabel, to anything else GotoFrame2, a Play after
+ * the first two for gotoAndPlay.
+ */
+function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
+  switch (name) {
+    case "gotoAndStop":
+    case "gotoAndPlay": {
+      const play = name === "gotoAndPlay";
+      const probe = new Avm1Assembler();
+      args[0](probe);
+      const bytes = probe.bytes();
+      const pushed = constantOf(bytes);
+      if (typeof pushed === "number" && pushed >= 1) {
+        a.gotoFrame(pushed - 1);
+      } else if (typeof pushed === "string") {
+        a.gotoLabel(pushed);
+      } else {
+        args[0](a);
+        a.gotoFrame2(play);
+        return;
+      }
+
+      if (play) {
+        a.play();
+      }
+      return;
+    }
+    case "nextFrame":
+      a.op("NextFrame");
+      return;
+    case "prevFrame":
+      a.op("PreviousFrame");
+      return;
+    case "play":
+      a.play();
+      return;
+    case "stop":
+      a.stop();
+      return;
+    case "stopAllSounds":
+      a.op("StopSounds");
+      return;
+    case "toggleHighQuality":
+      a.op("ToggleQuality");
+      return;
+    case "setProperty":
+      for (const v of args) {
+        v(a);
+      }
+      a.op("SetProperty");
+      return;
+    case "call":
+      args[0](a);
+      a.op("Call");
+      return;
+  }
+}
+
+/** The value of a block that is one Push of one integer or string, else undefined. */
+function constantOf(bytes: Uint8Array): number | string | undefined {
+  if (bytes[0] !== 0x96) {
+    return undefined;
+  }
+
+  const length = bytes[1] | (bytes[2] << 8);
+  if (bytes.length !== 3 + length) {
+    return undefined;
+  }
+
+  if (bytes[3] === 7 && length === 5) {
+    return new DataView(bytes.buffer, bytes.byteOffset + 4, 4).getInt32(0, true);
+  }
+
+  if (bytes[3] === 0 && bytes[bytes.length - 1] === 0 && !bytes.slice(4, -1).includes(0)) {
+    return new TextDecoder().decode(bytes.slice(4, -1));
+  }
+
+  return undefined;
 }
 
 function pushNumber(a: Avm1Assembler, n: number): void {

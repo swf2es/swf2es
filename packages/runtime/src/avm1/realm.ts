@@ -243,8 +243,8 @@ export class Realm implements Boxer {
       version,
       cx.scope,
       cx.pool,
-      cx.target,
-      cx.clip,
+      cx.base,
+      cx.host.objectOf?.(cx.base) ?? cx.clip,
       version < 6 ? undefined : cx.self,
     );
     const prototype = new Avm1Object(this.objectProto);
@@ -642,6 +642,11 @@ objects.toString = (object, version) => {
   const o = object as Avm1Object;
   if (typeof o.primitive === "string") {
     return o.primitive;
+  }
+
+  // A display object is its path, a clip's wherever its reference reaches now, "" where nothing.
+  if (o.display !== null) {
+    return o.display.live()?.display?.path() ?? "";
   }
 
   const value = callMethod(o, "toString", version);

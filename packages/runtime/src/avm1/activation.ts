@@ -49,22 +49,32 @@ export class Activation implements LazyLocals {
   into = -1;
   thrown: Value = undefined;
 
+  /**
+   * The clip timeline actions act on, which SetTarget changes; null where
+   * a SetTarget found none, where they do nothing.
+   */
+  target: Target | null;
+
   constructor(
     /** The operand stack, the frame's. */
     public st: Value[],
     /** The constant pool the region reads where the compiler cannot tell which: see V.constantPool. */
     public pool: Value[],
-    /** The clip timeline actions act on. */
-    public target: Target,
+    /** The clip whose code runs, the target a SetTarget of "" gives back. */
+    readonly base: Target,
     public host: Host,
     readonly realm: Realm,
     /** The scope chain, searched from here down to `_global`. */
     public scope: Scope,
     /** `this`. */
     public self: Value,
-    /** The target's AVM1 object: a function called by name without an object takes it as `this`. */
+    /**
+     * The target's AVM1 object, the root's where SetTarget found none: a
+     * function called by name without an object takes it as `this`.
+     */
     public clip: Avm1Object,
   ) {
+    this.target = base;
     this.g = realm.registers;
   }
 

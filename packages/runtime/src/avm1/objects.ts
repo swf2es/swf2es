@@ -22,6 +22,7 @@
 // order of its adding, which for..in lists in, elements among the rest.
 import { lowerCase } from "./case.js";
 import { Avm1Throw } from "./errors.js";
+import { ABSENT, type DisplayNative } from "./host.js";
 import { stringOf, toNumber, type Value } from "./values.js";
 
 /** Not listed by for..in. */
@@ -218,6 +219,8 @@ export class Avm1Object {
   lazy: LazyLocals | null = null;
   /** A prototype's interfaces' prototypes, which ImplementsOp gives it, for InstanceOf. */
   interfaces: Avm1Object[] | null = null;
+  /** A display object's side, where it is a clip's, a button's or a text field's AVM1 object (host.ts). */
+  display: DisplayNative | null = null;
 
   /** An object whose `__proto__` is `proto`, or without one. */
   constructor(proto?: Value) {
@@ -449,7 +452,7 @@ export class Avm1Object {
 
   /** What `typeof` says of it. */
   typeOf(): string {
-    return "object";
+    return this.display === null ? "object" : this.display.type;
   }
 
   private index(): Map<string, Property> {
@@ -533,6 +536,14 @@ export let foundDepth = 0;
 const DEPTH = 255;
 
 /**
+ * What `find` gives for a display object's child or property, one object
+ * reused, as each name a script resolves on a clip comes through it: its
+ * callers read it at once, keep none and let go of its value
+ * (`foundValue`, `has`).
+ */
+const displayFound = new Property("", undefined, DONT_ENUM);
+
+/**
  * The first own property `name` names on `o` or its prototypes, whatever
  * its attributes: whether the name is there, as the scope chain asks.
  */
@@ -552,6 +563,15 @@ export function find(o: Avm1Object, name: string, version: number): Property | u
 
     if (own !== undefined) {
       return own;
+    }
+
+    // A display object's children and properties, after its own (Ruffle's has_property).
+    if (p.display !== null) {
+      const value = p.display.get(name, version);
+      if (value !== ABSENT) {
+        displayFound.value = value;
+        return displayFound;
+      }
     }
 
     p = p.protoFor(version);
@@ -597,6 +617,14 @@ export function get(
       return value;
     }
 
+    if (own === undefined && p.display !== null) {
+      const value = p.display.get(name, version);
+      if (value !== ABSENT) {
+        foundDepth = depth;
+        return value;
+      }
+    }
+
     p = p.protoFor(version);
   }
 
@@ -636,8 +664,13 @@ function resolve(o: Avm1Object, name: string, version: number, self: Value): Val
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
     // adl calls a `__resolve` its version bits hide.
+    // A clip is skipped as a primitive is (the corpus's `object_resolve`).
     const own = p.own("__resolve", version);
-    if (own !== undefined && own.value instanceof Avm1Object) {
+    if (
+      own !== undefined &&
+      own.value instanceof Avm1Object &&
+      own.value.typeOf() !== "movieclip"
+    ) {
       return invoke(own.value, self, [name], version);
     }
 
@@ -733,6 +766,11 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
  */
 function store(o: Avm1Object, name: string, value: Value, version: number, early: boolean): void {
   const own = o.own(name, version);
+  // A display property takes the value where the object has no property of the name (Ruffle's set_local).
+  if (own === undefined && o.display !== null && o.display.set(name, value, version)) {
+    return;
+  }
+
   if (own === undefined) {
     const v = virtual(o, name, version);
     if (v !== undefined) {
@@ -970,12 +1008,35 @@ export function keys(o: Avm1Object, version: number, out: string[] = [], depth =
     }
   }
 
+  // A clip's children last, by depth, the highest first.
+  if (o.display !== null) {
+    o.display.keys(out);
+  }
+
   return out;
 }
 
 /** Whether `name` is on `o` or its prototypes, whatever its attributes. */
-export const has = (o: Avm1Object, name: string, version: number): boolean =>
-  find(o, name, version) !== undefined;
+export function has(o: Avm1Object, name: string, version: number): boolean {
+  const found = find(o, name, version) !== undefined;
+  displayFound.value = undefined;
+  return found;
+}
+
+/**
+ * The value of `p`, which `find` found for `name` on `o`, as the scope
+ * chain reads it: a plain one's own, else as `get` gives it. The reused
+ * display property lets go of its value, a clip's AVM1 object perhaps.
+ */
+export function foundValue(p: Property, o: Avm1Object, name: string, version: number): Value {
+  if (p === displayFound) {
+    const value = p.value;
+    p.value = undefined;
+    return value;
+  }
+
+  return p.get === null && allowed(p.flags, version) ? p.value : get(o, name, version);
+}
 
 /** `name` as a property's name: the string a value converts to. */
 export const nameOf = (value: Value, version: number): string =>

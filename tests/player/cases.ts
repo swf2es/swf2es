@@ -3424,6 +3424,184 @@ function avm1Script(name: string, version: number): Uint8Array {
   });
 }
 
+/** A DoAction of AS1 source, as Flash's compiler writes it for a SWF of `version`. */
+const as1 = (source: string, version: number) =>
+  w.doAction([...script(source, version)(flashAssembler()).end().bytes()]);
+
+/** A DefineSprite of the frames' tags, each frame ended by a ShowFrame. */
+const avm1Sprite = (id: number, frames: Uint8Array[][]) =>
+  w.sprite(id, frames.length, [...frames.flatMap((f) => [...f, w.showFrame()]), w.end()]);
+
+/** An AVM1 SWF of `version`, its root's frames' tags after the definitions. */
+function avm1Swf(version: number, defs: Uint8Array[], frames: Uint8Array[][]): Uint8Array {
+  return w.swf({
+    version,
+    width: 100,
+    height: 100,
+    frameRate: 24,
+    frameCount: frames.length,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      ...defs,
+      ...frames.flatMap((f) => [...f, w.showFrame()]),
+      w.end(),
+    ],
+  });
+}
+
+// Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
+// "Clips and paths"): `a` and `c` of a clip of three frames, which places
+// `b` of another, beside an unnamed square and `Beta`; each clip traces its
+// frames, which play in Flash's order, the newest clip first.
+function avm1Clips(version: number): Uint8Array {
+  const source = readFileSync(new URL("avm1/clips.as", import.meta.url), "utf8");
+  const inner = avm1Sprite(2, [
+    [w.place({ depth: 1, character: 1 }), as1(`trace("inner " + _target);`, version)],
+  ]);
+  const mover = avm1Sprite(3, [
+    [
+      w.frameLabel("one"),
+      w.place({ depth: 1, character: 2, name: "b" }),
+      as1(`trace("mover 1 " + _target);`, version),
+    ],
+    [w.frameLabel("Two"), as1(`trace("mover 2 " + _target);`, version)],
+    [as1(`trace("mover 3 " + _target); stop();`, version)],
+  ]);
+  return avm1Swf(
+    version,
+    [square(1, 0xff0000, 400), inner, mover],
+    [
+      [
+        w.place({ depth: 1, character: 3, name: "a", matrix: { tx: 200, ty: 100 } }),
+        w.place({ depth: 2, character: 3, name: "c", matrix: { tx: 600, ty: 100 } }),
+        w.place({ depth: 3, character: 1, matrix: { tx: 0, ty: 800 } }),
+        w.place({ depth: 4, character: 2, name: "Beta", matrix: { tx: 900, ty: 900 } }),
+        as1(source, version),
+      ],
+      [as1(`trace("root 2");`, version)],
+      [as1(`trace("root 3"); stop();`, version)],
+    ],
+  );
+}
+
+// Gotos in a SWF of `version`, avm1/gotos.as and the root's later frames:
+// a clip of four labelled frames whose frames 2 to 4 place clips before
+// and after their actions, which a goto makes and runs in tag order,
+// those of the frames before the target first; the frames a goto enters
+// queued and run in Flash's order.
+function avm1Gotos(version: number): Uint8Array {
+  const source = readFileSync(new URL("avm1/gotos.as", import.meta.url), "utf8");
+  const traced = (frame: number) =>
+    as1(`trace("leaf " + _parent._name + "." + _name + " ${frame}");`, version);
+  const leaf = avm1Sprite(2, [[traced(1)], [traced(2)]]);
+  const place = (depth: number, name: string) => w.place({ depth, character: 2, name });
+  const clip = avm1Sprite(3, [
+    [w.frameLabel("start"), as1(`trace("clip " + _name + " 1"); stop();`, version)],
+    [w.frameLabel("Middle"), place(1, "early"), as1(`trace("clip " + _name + " 2");`, version)],
+    [place(2, "before"), as1(`trace("clip " + _name + " 3");`, version), place(3, "after")],
+    [as1(`trace("clip " + _name + " 4"); stop();`, version), place(4, "four")],
+  ]);
+  return avm1Swf(
+    version,
+    [leaf, clip],
+    [
+      [
+        w.place({ depth: 1, character: 3, name: "a" }),
+        w.place({ depth: 2, character: 3, name: "b" }),
+        as1(source, version),
+        w.place({ depth: 3, character: 3, name: "c" }),
+      ],
+      [
+        as1(
+          `trace("root 2 " + a._currentframe + " " + b._currentframe); b.gotoAndStop(4); a.gotoAndStop(1);`,
+          version,
+        ),
+      ],
+      [
+        as1(
+          `trace("root 3 " + a._currentframe); a.gotoAndStop(4); a.prevFrame(); trace(a._currentframe); stop();`,
+          version,
+        ),
+      ],
+    ],
+  );
+}
+
+// Slash paths in a SWF 4 or 5, avm1/paths.as: variables of clips by
+// `/a:x`, GetProperty and SetProperty of slash paths, tellTarget.
+function avm1Paths(version: number): Uint8Array {
+  const source = readFileSync(new URL("avm1/paths.as", import.meta.url), "utf8");
+  const clip = avm1Sprite(3, [
+    [w.place({ depth: 1, character: 4, name: "inner" }), as1(`x = 1;`, version)],
+    [as1(`stop();`, version)],
+  ]);
+  return avm1Swf(
+    version,
+    [avm1Sprite(4, [[]]), clip],
+    [[w.place({ depth: 1, character: 3, name: "a" }), as1(source, version)]],
+  );
+}
+
+// Functions defined in clips in a SWF of `version`, avm1/scopes.as: their
+// targets, `this`, `_parent` and `_root`, called through clips, by name, in
+// tellTarget and with, as SWF 5's non-closures and later SWFs' closures.
+function avm1Scopes(version: number): Uint8Array {
+  const source = readFileSync(new URL("avm1/scopes.as", import.meta.url), "utf8");
+  const inner = avm1Sprite(2, [
+    [
+      as1(
+        `var where = "inner"; function who() { return _target + " " + where + " " + (this == _root ? "root" : this._name); }`,
+        version,
+      ),
+    ],
+  ]);
+  const clip = avm1Sprite(3, [
+    [
+      w.place({ depth: 1, character: 2, name: "kid" }),
+      as1(
+        `var where = "clip"; function f() { trace("f " + _target + " " + where + " " + typeof kid + " " + _parent._target + " " + _root._target + " " + (this == _root ? "root" : this._name)); return kid; } stop();`,
+        version,
+      ),
+    ],
+  ]);
+  return avm1Swf(
+    version,
+    [inner, clip],
+    [[w.place({ depth: 1, character: 3, name: "a" }), as1(source, version)]],
+  );
+}
+
+// Clips' properties as they draw (docs/avm1.md, "Clips and paths"): a
+// square's clip moved, scaled, turned, faded, hidden and sized by
+// SetProperty and SetMember.
+function avm1ClipDrawn(): Uint8Array {
+  const clip = avm1Sprite(2, [[w.place({ depth: 1, character: 1 })]]);
+  const place = (depth: number, name: string, tx: number) =>
+    w.place({ depth, character: 2, name, matrix: { tx, ty: 200 } });
+  return avm1Swf(
+    6,
+    [square(1, 0x3366cc, 400), clip],
+    [
+      [
+        place(1, "a", 100),
+        place(2, "b", 600),
+        place(3, "c", 1100),
+        place(4, "d", 1600),
+        place(5, "e", 100),
+        as1(
+          `a._x = 30.5; a._y = 40; a._rotation = 90;
+b._xscale = 150; b._yscale = 50; b._alpha = 40;
+c._visible = false; d._visible = 0; setProperty("d", 7, 1); setProperty("d", 0, 60); setProperty("d", 1, 30);
+e._width = 70; e._height = 12; e._y = 70;`,
+          6,
+        ),
+      ],
+      [as1(`stop();`, 6)],
+    ],
+  );
+}
+
 // Past the recursion limit, a ScriptLimits of 40 here, Flash disables the
 // movie's actions, the rest of the frame's and every later frame's, which
 // no catch or finally runs, and its timeline plays on: frame 2 places a
@@ -8541,6 +8719,58 @@ export const cases: PlayerCase[] = [
         }),
       ),
   ),
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-clips-swf${version}`,
+      swf: avm1Clips(version),
+      traced: true,
+      frames: 4,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7].map(
+    (version): PlayerCase => ({
+      name: `avm1-gotos-swf${version}`,
+      swf: avm1Gotos(version),
+      traced: true,
+      frames: 5,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[4, 5].map(
+    (version): PlayerCase => ({
+      name: `avm1-paths-swf${version}`,
+      swf: avm1Paths(version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-scopes-swf${version}`,
+      swf: avm1Scopes(version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  {
+    name: "avm1-clip-properties",
+    swf: avm1ClipDrawn(),
+    frames: 2,
+    capture: [2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "avm1-recursion",
     swf: avm1Recursion(),

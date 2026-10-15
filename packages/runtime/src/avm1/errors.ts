@@ -17,6 +17,19 @@ export class Halt extends Error {
 }
 
 /**
+ * Thrown after a call, a `new` or a CallFrame that took the clip whose
+ * code runs off the display list: that code's activation returns there,
+ * a function's with undefined, and the code that called it goes on to its
+ * own check (adl; Ruffle's continue_if_base_clip_exists). One instance,
+ * thrown as a signal and never shown.
+ */
+export class BaseRemoved extends Error {
+  override name = "Avm1BaseRemoved";
+}
+
+export const BASE_REMOVED = new BaseRemoved("the clip whose code runs was removed");
+
+/**
  * Thrown past Flash's recursion limit: Flash disables every action of the
  * movie from there, and its timelines play on.
  */

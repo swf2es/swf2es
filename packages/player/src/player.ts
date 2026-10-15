@@ -98,6 +98,8 @@ export class Player {
     }
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
+    // An AVM1 SWF's clips play through its AVM1, from the first frame on.
+    avm1?.attach(this.swf, this.library, this.root);
     if (!scripting) {
       this.root.enterFirstFrame();
     }
@@ -117,7 +119,6 @@ export class Player {
       // Its first frame's actions, once its code is loaded.
       if (this.avm1) {
         await this.avm1.load(this.swf);
-        this.avm1.frame(this.root);
       }
 
       return;
@@ -364,6 +365,12 @@ export class Player {
     }
 
     this.played++;
+    // An AVM1 SWF's clips play in its order, the newest first.
+    if (this.avm1 && !this.scripting) {
+      this.avm1.tick();
+      return;
+    }
+
     this.scripting?.timers.beginFrame(1000 / this.frameRate);
     const clips = this.ticking ?? [];
     this.ticking = null;
@@ -428,7 +435,5 @@ export class Player {
       this.scripting.frame(this.stage);
       this.frameRate = this.scripting.frameRate;
     }
-
-    this.avm1?.frame(this.root);
   }
 }
