@@ -213,6 +213,8 @@ export class Avm1Object {
   primitive: Value = undefined;
   /** A function's activation object's `arguments` and `super`, until it has made them. */
   lazy: LazyLocals | null = null;
+  /** A prototype's interfaces' prototypes, which ImplementsOp gives it, for InstanceOf. */
+  interfaces: Avm1Object[] | null = null;
 
   /** An object whose `__proto__` is `proto`, or without one. */
   constructor(proto?: Value) {

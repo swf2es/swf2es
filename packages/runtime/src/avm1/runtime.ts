@@ -6,6 +6,7 @@ import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.
 import { Avm1Throw, Disabled, Halt, NotYet } from "./errors.js";
 import { Avm1Super, argumentsOf, superOf } from "./functions.js";
 import type { Host, Target } from "./host.js";
+import { extend, implementsOp, instanceOf } from "./inheritance.js";
 import {
   Avm1Function,
   Avm1Object,
@@ -44,7 +45,15 @@ import {
   Scope,
   setVariable,
 } from "./scope.js";
-import { type Primitive, stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
+import {
+  isPrimitive,
+  type Primitive,
+  stringOf,
+  toBoolean,
+  toNumber,
+  typeOf,
+  type Value,
+} from "./values.js";
 
 export { Activation, Avm1Throw, type Blocks, Disabled, Halt, NotYet, type Region };
 
@@ -149,6 +158,16 @@ export interface Operations {
     params: (string | null)[],
     flags: number,
   ): void;
+  /** Extends: the subclass's `prototype` made one whose prototype is the superclass's. */
+  extends(cx: Activation, superclass: Value, subclass: Value): void;
+  /** InstanceOf: `object instanceof constr`. */
+  instanceOf(cx: Activation, constr: Value, object: Value): boolean;
+  /** CastOp: the object where it is an instance of the constructor, else null. */
+  castOp(cx: Activation, object: Value, constr: Value): Value;
+  /** ImplementsOp, which pops its operands itself. */
+  implementsOp(cx: Activation): void;
+  /** RandomNumber: an int from 0 below `max`, 0 for a max below 1. */
+  randomNumber(max: Value): number;
   /** What DefineFunction2 preloads: its `arguments`, its `super`, `_root` and `_parent`, undefined for none. */
   argumentsOf(cx: Activation, args: Value[]): Value;
   superOf(cx: Activation, self: Value): Value;
@@ -510,6 +529,27 @@ function operations(version: number): Operations {
     },
     defineFunction2(cx, region, name, params, flags) {
       defineFunction(cx, region, name, params, flags, version);
+    },
+    extends(cx, superclass, subclass) {
+      extend(cx, superclass, subclass, version);
+    },
+    instanceOf: (cx, constr, object) => instanceOf(cx.realm, object, constr, version),
+    castOp(cx, object, constr) {
+      // Flash boxes a primitive first, for nothing: a class replaced on _global sees it.
+      if (object !== undefined && object !== null && isPrimitive(object)) {
+        cx.realm.box(object, version);
+      }
+
+      return instanceOf(cx.realm, object, constr, version) ? object : null;
+    },
+    implementsOp(cx) {
+      implementsOp(cx, version);
+    },
+    randomNumber(max) {
+      // Rust's cast of the max: saturated, NaN 0.
+      const n = toNumber(max, version);
+      const m = Number.isNaN(n) ? 0 : Math.trunc(Math.min(Math.max(n, -2147483648), 2147483647));
+      return m > 0 ? Math.floor(Math.random() * 0x80000000) % m : 0;
     },
     argumentsOf: (cx, args) => argumentsOf(cx, args, version),
     superOf: (cx, self) => superOf(cx, self, version),

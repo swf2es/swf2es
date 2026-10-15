@@ -14,7 +14,8 @@
 // object and call actions, each a call that takes its operands as they are
 // popped, the top first, or pops them itself where their number is on the
 // stack (V.initObject, V.callMethod...); DefineFunction and DefineFunction2,
-// which make a function of a region, StoreRegister and Return. A function's
+// which make a function of a region, StoreRegister and Return; Extends,
+// InstanceOf, CastOp, ImplementsOp and RandomNumber. A function's
 // region takes its `this` and its arguments, and a DefineFunction2's
 // registers are its `let`s; every other register is one of the movie's
 // four, `cx.g`. With, Try and Throw are calls too, and a region that has a
@@ -513,6 +514,21 @@ export class BlockEmitter {
         break;
       case ops.OP_NewMethod:
         out.text("V.newMethod(cx);\n");
+        break;
+      case ops.OP_Extends:
+        out.text("V.extends(cx, st.pop(), st.pop());\n");
+        break;
+      case ops.OP_InstanceOf:
+        out.text("st.push(V.instanceOf(cx, st.pop(), st.pop()));\n");
+        break;
+      case ops.OP_CastOp:
+        out.text("st.push(V.castOp(cx, st.pop(), st.pop()));\n");
+        break;
+      case ops.OP_ImplementsOp:
+        out.text("V.implementsOp(cx);\n");
+        break;
+      case ops.OP_RandomNumber:
+        out.text("st.push(V.randomNumber(st.pop()));\n");
         break;
       case ops.OP_DefineFunction:
       case ops.OP_DefineFunction2:
