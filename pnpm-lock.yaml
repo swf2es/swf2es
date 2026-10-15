@@ -42,6 +42,15 @@ importers:
         specifier: 44.7.0
         version: 44.7.0
 
+  apps/site:
+    dependencies:
+      '@swf2es/format':
+        specifier: workspace:*
+        version: link:../../packages/format
+      '@swf2es/web':
+        specifier: workspace:*
+        version: link:../../packages/web
+
   packages/cli:
     dependencies:
       '@swf2es/codegen':

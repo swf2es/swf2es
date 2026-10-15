@@ -1,0 +1,15 @@
+{
+  "name": "@swf2es/site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "swf2es's demo site: a static page that plays the SWFs people open, for GitHub Pages",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.ts"
+  },
+  "dependencies": {
+    "@swf2es/format": "workspace:*",
+    "@swf2es/web": "workspace:*"
+  }
+}

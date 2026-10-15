@@ -18,6 +18,7 @@
   "include": [
     "tests/**/*.ts",
     "apps/desktop/*.ts",
+    "apps/site/*.ts",
     "oracle/*.ts",
     "tools/**/*.ts",
     "packages/codegen/src/webassembly.d.ts",
