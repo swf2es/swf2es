@@ -226,3 +226,18 @@ built 0,1,4,9,16 len 5 keys 4 3 2 1 0
 built 0,1,4,9,16,,,49 len 8 keys 7 4 3 2 1 0 
 keys after delete 7 4 3 2 1 
 arguments 3 1+2+3 3,2,1
+length = 2
+wl 2 12
+length = 6
+wl 6 1234
+push
+set 6
+pop
+shift
+unshift
+splice
+wl 0,x,y,3,4,5, 7 number
+push wo  2 number
+set 6 again
+reverse 5
+reverse object

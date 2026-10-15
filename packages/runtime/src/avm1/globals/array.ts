@@ -122,12 +122,14 @@ function replaceElement(a: Avm1Object, i: number, value: Value, version: number)
   setElement(a, i, value, version);
 }
 
-/** `length` set, its watcher told: an array's elements past it deleted. */
+/**
+ * `length` set, its watcher told, though what it gives is not kept (adl,
+ * an array or not): an array's elements past it deleted.
+ */
 export function setLength(a: Avm1Object, length: number, version: number): void {
   const p = a.props.get("length");
-  let value: Value = length;
   if (a.watchers !== null) {
-    value = watched(a, "length", p === undefined ? undefined : p.value, value, version);
+    watched(a, "length", p === undefined ? undefined : p.value, length, version);
   }
 
   if (a.array && p !== undefined && typeof p.value === "number") {
@@ -135,9 +137,9 @@ export function setLength(a: Avm1Object, length: number, version: number): void 
   }
 
   if (p === undefined) {
-    a.add("length", value, 0);
+    a.add("length", length, 0);
   } else {
-    p.value = value;
+    p.value = length;
   }
 }
 
@@ -404,17 +406,9 @@ export function arrayClass(realm: Realm): { constr: Avm1Function; proto: Avm1Obj
       const upper = length - lower - 1;
       const low = element(self, lower);
       const high = element(self, upper);
-      const elems = self.elems;
-      if (elems !== null && self.watchers === null && upper < elems.length) {
-        replaceElement(self, lower, high, version);
-        replaceElement(self, upper, low, version);
-        continue;
-      }
-
-      deleteElement(self, lower);
-      deleteElement(self, upper);
-      setElement(self, lower, high, version);
-      setElement(self, upper, low, version);
+      // Each set in turn, as a watcher of the second sees.
+      replaceElement(self, lower, high, version);
+      replaceElement(self, upper, low, version);
     }
 
     return self;

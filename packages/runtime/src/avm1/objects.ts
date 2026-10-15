@@ -651,14 +651,16 @@ export function watched(
   }
 
   // The calls count on the property, the getter's and setter's with them, else on the watcher.
-  const count = o.own(name, version) ?? w;
+  const own = o.own(name, version);
+  const count = own ?? w;
   if (count.calls >= propertyCalls(version)) {
     return value;
   }
 
   count.calls++;
   try {
-    return invoke(w.callback, o, [name, old, value, w.data], version);
+    // adl names the property as it was first set, where there is one (`FOO` sets `foo`).
+    return invoke(w.callback, o, [own?.name ?? name, old, value, w.data], version);
   } finally {
     count.calls--;
   }
@@ -689,6 +691,12 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
     return;
   }
 
+  // adl changes an array's `length`, telling its watcher, before the set's own watcher is told.
+  const early = o.array && o.watchers !== null;
+  if (early && virtual(o, name, version) === undefined) {
+    arraySet(o, name, value, version);
+  }
+
   if (o.watchers !== null) {
     try {
       value = watched(o, name, stored(o, name, version), value, version);
@@ -698,34 +706,32 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
       }
 
       // A watcher that throws sets undefined, then the value is thrown (adl).
-      store(o, name, undefined, version);
+      store(o, name, undefined, version, early);
       throw error;
     }
   }
 
-  store(o, name, value, version);
+  store(o, name, value, version, early);
 }
 
-/** A set past the watcher: the setter, or the value stored. */
-function store(o: Avm1Object, name: string, value: Value, version: number): void {
+/**
+ * A set past the watcher: the setter, or the value stored; an array's
+ * `length` changed with it unless `early`, before the watcher, did.
+ */
+function store(o: Avm1Object, name: string, value: Value, version: number, early: boolean): void {
   const own = o.own(name, version);
   if (own === undefined) {
-    let p: Value = o.protoFor(version);
-    for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
-      const virtual = p.own(name, version);
-      if (virtual !== undefined && virtual.get !== null && allowed(virtual.flags, version)) {
-        if (virtual.set !== null) {
-          callSetter(virtual, virtual.set, o, value, version);
-        }
-
-        return;
+    const v = virtual(o, name, version);
+    if (v !== undefined) {
+      if (v.set !== null) {
+        callSetter(v, v.set, o, value, version);
       }
 
-      p = p.protoFor(version);
+      return;
     }
   }
 
-  if (o.array) {
+  if (o.array && !early) {
     arraySet(o, name, value, version);
   }
 
@@ -746,12 +752,45 @@ function store(o: Avm1Object, name: string, value: Value, version: number): void
   }
 }
 
-/** An array's `length` as a set changes it: elements past a shorter one go, an index past it grows it. */
+/** The first getter on the prototypes of `o` that a set of `name` goes to, where `o` has no `name`. */
+function virtual(o: Avm1Object, name: string, version: number): Property | undefined {
+  if (o.own(name, version) !== undefined) {
+    return undefined;
+  }
+
+  let p: Value = o.protoFor(version);
+  for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
+    const v = p.own(name, version);
+    if (v !== undefined && v.get !== null && allowed(v.flags, version)) {
+      return v;
+    }
+
+    p = p.protoFor(version);
+  }
+
+  return undefined;
+}
+
+/**
+ * An array's `length` as a set changes it: elements past a shorter one go,
+ * an index past it grows it. Under a watcher, adl sets `length` twice, as
+ * the array and then as the set: the watcher is told of both, the first
+ * one's value is the length cut to and kept, the second's what is stored.
+ */
 export function arraySet(a: Avm1Object, name: string, value: Value, version: number): void {
   if ((caseSensitive(version) ? name : fold(name)) === "length") {
-    const old = a.props.get("length")?.value;
+    const p = a.props.get("length");
+    const old = p?.value;
+    if (a.watchers !== null) {
+      watched(a, "length", old, value, version);
+    }
+
     if (typeof old === "number") {
       truncate(a, toNumber(value, version) | 0, old | 0);
+    }
+
+    if (a.watchers !== null && p !== undefined && (p.flags & READ_ONLY) === 0) {
+      p.value = value;
     }
 
     return;
@@ -765,13 +804,13 @@ export function arraySet(a: Avm1Object, name: string, value: Value, version: num
 
 /**
  * An array's `length` grown to `length` by an element set past it, its
- * watcher told; past 2^31 - 1 the int wraps, shorter, and deletes.
+ * watcher told, though what it gives is not kept (adl); past 2^31 - 1 the
+ * int wraps, shorter, and deletes.
  */
 export function growTo(a: Avm1Object, length: number, version: number): void {
   const p = a.props.get("length");
-  let value: Value = length;
   if (a.watchers !== null) {
-    value = watched(a, "length", p === undefined ? undefined : p.value, value, version);
+    watched(a, "length", p === undefined ? undefined : p.value, length, version);
   }
 
   if (length < 0 && p !== undefined && typeof p.value === "number") {
@@ -779,9 +818,9 @@ export function growTo(a: Avm1Object, length: number, version: number): void {
   }
 
   if (p === undefined) {
-    a.add("length", value, 0);
+    a.add("length", length, 0);
   } else {
-    p.value = value;
+    p.value = length;
   }
 }
 

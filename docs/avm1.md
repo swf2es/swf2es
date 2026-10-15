@@ -719,7 +719,8 @@ where it is not what Ruffle does:
 - `watch(name, callback, data)` is false without a function callback; a
   second `watch` of the name replaces the first; `unwatch` is true where
   there was one, the name found by the version's case. The callback gets
-  the name, the old value (the stored one, no getter called), the new
+  the name (the property's own spelling where it has one, as a SWF 6
+  sets `FOO` over `foo`), the old value (the stored one, no getter called), the new
   one and the data, with the object as `this`.
 - InitObject's object has its own `constructor` (`_global.Object`, don't
   enum and don't delete) before its `__proto__`, in every version; `new`
@@ -863,12 +864,20 @@ Array's methods read and write an object's own elements as adl does
   last, sets the first ones undefined, sets `length` again and then the
   new ones, and does nothing with nothing to add; `push` sets each new
   element, an array's `length` growing with it; `pop` deletes the last
-  and sets `length`.
+  and sets `length`. adl's `shift` and `unshift` tell no watcher of an
+  element but the first's once an array has five elements, or four
+  after `sort` moved some: that is not reproduced.
+- `length`'s watcher is told of each of these sets of it, and of an
+  element set past the end (before the element's watcher), but what it
+  gives is not kept, an array's or not: the methods keep their number.
 - A `length` set shorter deletes the elements past it, but those that
   cannot be deleted, and only if the old `length` is a number; set
   longer it makes no elements; it is stored as given (`"3"` stays a
-  string, `1.9` a fraction). An element set at 2^31 - 1 wraps it to
-  -2^31, which deletes them all.
+  string, `1.9` a fraction). Under a watcher, adl sets an array's
+  `length` twice, as the array and then as the set: the watcher is told
+  of both, the elements are cut to the length set, and what the second
+  call gives is stored. An element set at 2^31 - 1 wraps it to -2^31,
+  which deletes them all.
 - `join`'s separator converts as the version converts it (`undefined` is
   `""` to a SWF 6 and `"undefined"` to a 7); `splice` gives undefined for
   no start, an undefined count or a negative one.

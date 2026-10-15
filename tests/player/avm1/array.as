@@ -392,3 +392,44 @@ delete built[0];
 trace("keys after delete " + keys(built));
 var args = (function () { return arguments; })(1, 2, 3);
 trace("arguments " + args.length + " " + args.join("+") + " " + args.reverse());
+
+// -- what a watcher of `length` gives: kept from a set of it, not from the methods
+var wl;
+var wcalls = 0;
+function wlog(k, o, v) { wcalls++; trace("  " + k + " " + o + " -> " + v + " [" + wl.join("") + "]"); return wcalls == 1 ? 7 : 1; }
+wl = [1, 2, 3, 4]; wl.watch("length", wlog); wcalls = 0;
+trace("length = 2"); wl.length = 2;
+trace("wl " + wl.length + " " + wl[0] + wl[1] + wl[2] + wl[3]);
+wl = [1, 2, 3, 4]; wl.watch("length", wlog); wcalls = 0;
+trace("length = 6"); wl.length = 6;
+trace("wl " + wl.length + " " + wl[0] + wl[1] + wl[2] + wl[3]);
+function wten(k, o, v) { trace("  " + k + " " + o + " -> " + v); return "10"; }
+wl = [1, 2, 3, 4]; wl.watch("length", wten);
+trace("push"); wl.push(5);
+trace("set 6"); wl[6] = 7;
+trace("pop"); wl.pop();
+trace("shift"); wl.shift();
+trace("unshift"); wl.unshift(0);
+trace("splice"); wl.splice(1, 1, "x", "y");
+trace("wl " + wl + " " + wl.length + " " + typeof wl.length);
+var wo = {length: 2, 0: "a", 1: "b"};
+wo.watch("length", wten);
+trace("push wo " + Array.prototype.push.call(wo, "c") + " " + wo.length + " " + typeof wo.length);
+wl = [1, 2, 3, 4];
+wl.watch("length", function (k, o, v) { trace("  len " + o + " -> " + v); return v; });
+wl.watch("6", function (k, o, v) { trace("  w6 " + o + " -> " + v + " [" + wl + "]"); return v; });
+trace("set 6 again"); wl[6] = 7;
+wl = [1, 2, 3, 4, 5];
+wl.watch("1", function (k, o, v) { trace("  w1 " + o + " -> " + v + " [" + wl + "]"); return v; });
+wl.watch("3", function (k, o, v) { trace("  w3 " + o + " -> " + v + " [" + wl + "]"); return v; });
+trace("reverse 5"); wl.reverse();
+wl = {length: 5, 0: "a", 1: "b", 2: "c", 3: "d", 4: "e"};
+wl.join = Array.prototype.join;
+wl.watch("1", function (k, o, v) { trace("  w1 " + o + " -> " + v + " [" + wl.join() + "]"); return v; });
+trace("reverse object"); Array.prototype.reverse.call(wl);
+var wn = {Bar: 1};
+wn.watch("Bar", function (k, o, v) { trace("  watched " + k + " " + o + " -> " + v); return v; });
+wn.BAR = 2;
+wn.watch("baz", function (k, o, v) { trace("  watched " + k + " " + o + " -> " + v); return v; });
+wn.bAz = 3;
+wn.BAZ = 4;

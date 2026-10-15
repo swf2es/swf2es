@@ -315,3 +315,42 @@ built 0,1,4,9,16 len 5 keys 4 3 2 1 0
 built 0,1,4,9,16,undefined,undefined,49 len 8 keys 7 4 3 2 1 0 
 keys after delete 7 4 3 2 1 
 arguments 3 1+2+3 3,2,1
+length = 2
+  length 4 -> 2 [1234]
+  length 2 -> 2 [12]
+wl 1 12undefinedundefined
+length = 6
+  length 4 -> 6 [1234]
+  length 6 -> 6 [1234undefinedundefined]
+wl 1 1234
+push
+  length 4 -> 5
+set 6
+  length 5 -> 7
+pop
+  length 7 -> 6
+shift
+  length 6 -> 5
+unshift
+  length 5 -> 6
+  length 6 -> 6
+splice
+  length 6 -> 0
+  length 0 -> 1
+  length 1 -> 2
+  length 2 -> 3
+  length 3 -> 4
+  length 4 -> 5
+  length 5 -> 6
+  length 6 -> 7
+wl 0,x,y,3,4,5,undefined 7 number
+  length 2 -> 3
+push wo 3 3 number
+set 6 again
+  len 4 -> 7
+  w6 undefined -> 7 [1,2,3,4,undefined,undefined,undefined]
+reverse 5
+  w1 undefined -> 4 [5,undefined,3,4,1]
+  w3 undefined -> 2 [5,4,3,undefined,1]
+reverse object
+  w1 undefined -> d [e,undefined,c,d,a]
