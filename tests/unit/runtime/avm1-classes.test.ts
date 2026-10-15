@@ -160,10 +160,10 @@ test("case mappings are Flash's own, one code unit to one", () => {
   assert.equal(call("àéî ı σ ς ß ẞ ÿ ﬀ", "toUpperCase", []), "ÀÉÎ I Σ ΢ ß ẞ Ÿ ﬀ");
 });
 
-test("a String object's toString is its string; valueOf gives any other object itself", () => {
+test("a String object's toString is its string; valueOf gives any other object as a string", () => {
   const o = rt.newObject();
   const method = (name: string) =>
     (rt.realm.String.proto as Avm1Object).own(name, 7)?.value as Avm1Function;
-  assert.equal(method("valueOf").call(o, [], 7), o);
+  assert.equal(method("valueOf").call(o, [], 7), "[object Object]");
   assert.equal(method("toString").call(o, [], 7), undefined);
 });

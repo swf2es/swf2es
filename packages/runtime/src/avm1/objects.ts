@@ -183,6 +183,14 @@ const bySeq = (a: Property, b: Property) => a.seq - b.seq;
 const UNCHANGED = new Map<string, Property>();
 
 export class Avm1Object {
+  /**
+   * What node's inspector shows: an object reaches the whole realm, so a
+   * failed assertion that printed it in full ran a test to tens of gigabytes.
+   */
+  [Symbol.for("nodejs.util.inspect.custom")](): string {
+    return `Avm1Object(${this.props.size} properties)`;
+  }
+
   /** By exact name, in the order they were added. */
   readonly props = new Map<string, Property>();
   /**
