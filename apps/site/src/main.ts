@@ -341,7 +341,11 @@ close.addEventListener("click", () => {
 });
 
 fullscreen.addEventListener("click", () => {
-  void stage.requestFullscreen?.().catch(() => showStatus("Full screen was refused.", true));
+  void stage
+    .requestFullscreen?.()
+    // The button had the focus: keys go to the SWF again, as they did before.
+    .then(() => !player.hidden && player.focus())
+    .catch(() => showStatus("Full screen was refused.", true));
 });
 
 /** What WebGL the player's canvas draws with, for the report. */
