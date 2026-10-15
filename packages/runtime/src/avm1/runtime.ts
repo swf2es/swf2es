@@ -14,8 +14,10 @@ import {
   invoke,
   keys,
   nameOf,
+  READ_ONLY,
   removeOwn,
   set,
+  VERSION_BITS,
 } from "./objects.js";
 import {
   add2,
@@ -201,7 +203,8 @@ export interface Operations {
 function operations(version: number): Operations {
   /** Whether strings are bytes, up to SWF 5, which the MB actions read as a single-byte locale's. */
   const bytes = version < 6;
-  const written = bytes ? bytesAsUtf8 : (text: string) => text;
+  // Flash's log writes half a surrogate pair as U+FFFD (adl a low half followed by more as three).
+  const written = bytes ? bytesAsUtf8 : wellFormed;
   const byZero = version < 5 ? () => "#ERROR#" : divideByZero;
   const stringLength = (a: Value) => stringOf(a, version).length;
   const stringExtract = (count: Value, index: Value, s: Value) => {
@@ -348,6 +351,14 @@ function operations(version: number): Operations {
       defineLocal2(cx, nameOf(name, version), version);
     },
     getMember(cx, name, object) {
+      // An array's element by its number, as loops read them: no name made.
+      if (typeof name === "number" && object instanceof Avm1Object && object.elems !== null) {
+        const p = name >= 0 && name < object.elems.length ? object.elems[name] : undefined;
+        if (p !== undefined && p.get === null && (p.flags & VERSION_BITS) === 0) {
+          return p.value;
+        }
+      }
+
       const key = nameOf(name, version);
       if (object instanceof Avm1Super) {
         return get(object, key, version, object.self);
@@ -362,6 +373,19 @@ function operations(version: number): Operations {
         : cx.realm.primitiveMember(object as Primitive, key, version);
     },
     setMember(cx, value, name, object) {
+      if (
+        typeof name === "number" &&
+        object instanceof Avm1Object &&
+        object.elems !== null &&
+        object.watchers === null
+      ) {
+        const p = name >= 0 && name < object.elems.length ? object.elems[name] : undefined;
+        if (p !== undefined && p.get === null && (p.flags & (READ_ONLY | VERSION_BITS)) === 0) {
+          p.value = value;
+          return;
+        }
+      }
+
       const key = nameOf(name, version);
       if (object instanceof Avm1Super) {
         set(object.self, key, value, version);

@@ -198,4 +198,7 @@ const unpaired = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00
  * extracted apart and joined again are "\ufffd\ufffd". (adl's trace of a
  * cut low half itself writes three U+FFFD, the bytes it keeps, not one.)
  */
-export const wellFormed = (s: string): string => s.replace(unpaired, "\ufffd");
+export const wellFormed = (s: string): string =>
+  surrogate.test(s) ? s.replace(unpaired, "\ufffd") : s;
+
+const surrogate = /[\ud800-\udfff]/;

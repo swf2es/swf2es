@@ -1,12 +1,14 @@
-// Flash's lower case of a UTF-16 code unit, which AVM1 folds names by up
-// to SWF 6 (and String's toLowerCase gives): an old Unicode's simple
-// mappings, one code unit to one, without JavaScript's later letters
-// (Cherokee, Glagolitic, Coptic, Latin Extended-C and -D...), with İ to i,
-// Georgian capitals to Mkhedruli and U+03A2 to ς. Measured in adl: every
-// code unit through String's toLowerCase, and each mapping through names.
+// Flash's lower and upper case of a UTF-16 code unit: the lower case AVM1
+// folds names by up to SWF 6, and String's toLowerCase and toUpperCase.
+// An old Unicode's simple mappings, one code unit to one, without
+// JavaScript's later letters (Cherokee, Glagolitic, Coptic, Latin
+// Extended-C and -D...), with İ to i, Georgian capitals to Mkhedruli and
+// U+03A2 to ς, and back, ß and ŉ left as they are. Measured in adl: every
+// code unit through String's toLowerCase and toUpperCase, and each lower
+// case mapping through names.
 
 /** Runs of mappings: their first code unit, how many, what each adds, and the step between them. */
-const RUNS: [number, number, number, number][] = [
+const LOWER: [number, number, number, number][] = [
   [0x0041, 26, 32, 1],
   [0x00c0, 23, 32, 1],
   [0x00d8, 7, 32, 1],
@@ -110,23 +112,146 @@ const RUNS: [number, number, number, number][] = [
   [0xff21, 26, 32, 1],
 ];
 
-let table: Uint16Array | null = null;
+/** The upper case's runs, as the lower case's. */
+const UPPER: [number, number, number, number][] = [
+  [0x0061, 26, -32, 1],
+  [0x00e0, 23, -32, 1],
+  [0x00f8, 7, -32, 1],
+  [0x00ff, 1, 121, 1],
+  [0x0101, 24, -1, 2],
+  [0x0131, 1, -232, 1],
+  [0x0133, 3, -1, 2],
+  [0x013a, 8, -1, 2],
+  [0x014b, 23, -1, 2],
+  [0x017a, 3, -1, 2],
+  [0x017f, 1, -300, 1],
+  [0x0183, 2, -1, 2],
+  [0x0188, 1, -1, 1],
+  [0x018c, 1, -1, 1],
+  [0x0192, 1, -1, 1],
+  [0x0195, 1, 97, 1],
+  [0x0199, 1, -1, 1],
+  [0x01a1, 3, -1, 2],
+  [0x01a8, 1, -1, 1],
+  [0x01ad, 1, -1, 1],
+  [0x01b0, 1, -1, 1],
+  [0x01b4, 2, -1, 2],
+  [0x01b9, 1, -1, 1],
+  [0x01bd, 1, -1, 1],
+  [0x01bf, 1, 56, 1],
+  [0x01c5, 1, -1, 1],
+  [0x01c6, 1, -2, 1],
+  [0x01c8, 1, -1, 1],
+  [0x01c9, 1, -2, 1],
+  [0x01cb, 1, -1, 1],
+  [0x01cc, 1, -2, 1],
+  [0x01ce, 8, -1, 2],
+  [0x01dd, 1, -79, 1],
+  [0x01df, 9, -1, 2],
+  [0x01f2, 1, -1, 1],
+  [0x01f3, 1, -2, 1],
+  [0x01f5, 1, -1, 1],
+  [0x01f9, 20, -1, 2],
+  [0x0223, 9, -1, 2],
+  [0x0253, 1, -210, 1],
+  [0x0254, 1, -206, 1],
+  [0x0256, 2, -205, 1],
+  [0x0259, 1, -202, 1],
+  [0x025b, 1, -203, 1],
+  [0x0260, 1, -205, 1],
+  [0x0263, 1, -207, 1],
+  [0x0268, 1, -209, 1],
+  [0x0269, 1, -211, 1],
+  [0x026f, 1, -211, 1],
+  [0x0272, 1, -213, 1],
+  [0x0275, 1, -214, 1],
+  [0x0280, 1, -218, 1],
+  [0x0283, 1, -218, 1],
+  [0x0288, 1, -218, 1],
+  [0x028a, 2, -217, 1],
+  [0x0292, 1, -219, 1],
+  [0x0345, 1, 84, 1],
+  [0x03ac, 1, -38, 1],
+  [0x03ad, 3, -37, 1],
+  [0x03b1, 27, -32, 1],
+  [0x03cc, 1, -64, 1],
+  [0x03cd, 2, -63, 1],
+  [0x03d0, 1, -62, 1],
+  [0x03d1, 1, -57, 1],
+  [0x03d5, 1, -47, 1],
+  [0x03d6, 1, -54, 1],
+  [0x03d9, 12, -1, 2],
+  [0x03f0, 1, -86, 1],
+  [0x03f1, 1, -80, 1],
+  [0x03f2, 1, -79, 1],
+  [0x03f5, 1, -96, 1],
+  [0x0430, 32, -32, 1],
+  [0x0450, 16, -80, 1],
+  [0x0461, 17, -1, 2],
+  [0x048b, 27, -1, 2],
+  [0x04c2, 2, -1, 2],
+  [0x04c8, 1, -1, 1],
+  [0x04cc, 1, -1, 1],
+  [0x04d1, 21, -1, 2],
+  [0x0561, 38, -48, 1],
+  [0x1e01, 75, -1, 2],
+  [0x1e9b, 1, -59, 1],
+  [0x1ea1, 45, -1, 2],
+  [0x1f00, 8, 8, 1],
+  [0x1f10, 6, 8, 1],
+  [0x1f20, 8, 8, 1],
+  [0x1f30, 8, 8, 1],
+  [0x1f40, 6, 8, 1],
+  [0x1f51, 4, 8, 2],
+  [0x1f60, 8, 8, 1],
+  [0x1f70, 2, 74, 1],
+  [0x1f72, 4, 86, 1],
+  [0x1f76, 2, 100, 1],
+  [0x1f78, 2, 128, 1],
+  [0x1f7a, 2, 112, 1],
+  [0x1f7c, 2, 126, 1],
+  [0x1f80, 8, 8, 1],
+  [0x1f90, 8, 8, 1],
+  [0x1fa0, 8, 8, 1],
+  [0x1fb0, 2, 8, 1],
+  [0x1fb3, 1, 9, 1],
+  [0x1fbe, 1, -7205, 1],
+  [0x1fc3, 1, 9, 1],
+  [0x1fd0, 2, 8, 1],
+  [0x1fe0, 2, 8, 1],
+  [0x1fe5, 1, 7, 1],
+  [0x1ff3, 1, 9, 1],
+  [0x2170, 16, -16, 1],
+  [0x24d0, 26, -26, 1],
+  [0xff41, 26, -32, 1],
+];
 
-/** The lower case of code unit `c`, as Flash has it. */
-export function lowerCase(c: number): number {
-  if (table === null) {
-    table = new Uint16Array(0x10000);
-    for (let i = 0; i < table.length; i++) {
-      table[i] = i;
-    }
+/** A table of every code unit's mapping, made as it is first needed. */
+function table(runs: [number, number, number, number][]): Uint16Array {
+  const t = new Uint16Array(0x10000);
+  for (let i = 0; i < t.length; i++) {
+    t[i] = i;
+  }
 
-    for (const [start, count, delta, step] of RUNS) {
-      for (let i = 0; i < count; i++) {
-        const u = start + i * step;
-        table[u] = u + delta;
-      }
+  for (const [start, count, delta, step] of runs) {
+    for (let i = 0; i < count; i++) {
+      const u = start + i * step;
+      t[u] = u + delta;
     }
   }
 
-  return table[c];
+  return t;
+}
+
+let lower: Uint16Array | null = null;
+let upper: Uint16Array | null = null;
+
+export function lowerCase(c: number): number {
+  lower ??= table(LOWER);
+  return lower[c];
+}
+
+export function upperCase(c: number): number {
+  upper ??= table(UPPER);
+  return upper[c];
 }
