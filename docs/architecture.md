@@ -3247,7 +3247,8 @@ empty rectangle at the origin. `hitTestPoint` without the shape flag
 tests the box around what is drawn on the stage, and the pointer picks
 where the plane is drawn (`pointer.test.ts`, against Flash Player 32's
 traces). Siblings are drawn in the list's order, whatever their depths.
-A 3D mask masks nothing, and is not drawn.
+A 3D mask masks nothing, and is not drawn; set on a 3D object, it leaves
+none of the object drawn.
 
 Flash draws a 3D object from a bitmap of what it and its children draw in
 its own space, a texel a pixel of that space whatever its scale, its
@@ -3287,9 +3288,22 @@ pixel where the host says how many there are (`screenScale`), as the test
 page does; the evidence for that last is mixed, edges matching better
 with it and magnified bitmaps no worse. A BitmapData's draw of an object
 on no stage projects what is in 3D in it as on a stage the bitmap's
-size, centred on it, as Flash does. A mask set on a 3D object clips its
-quad on the stage, where Flash clips the bitmap in the object's space.
-Under WebGPU, which the quad's shader has no program for, a 3D object
+size, centred on it, as Flash does.
+
+A 2D mask set on a 3D object clips the bitmap, in the object's space, as
+adl shows (`three-d-mask`). One in the object clips it there as it would a
+2D object. One outside it is placed by its matrices up to the nearest 3D
+object above it, or the stage, and then moved as if the bitmap's corner,
+the top left of the object's bounds in its own space, were where the top
+left of its bounds is on the stage, rounded to a pixel: so a band over a
+turned card leaves a strip of the card that is not under it, and a card
+nearer the eye has its part under the mask magnified. The view draws a
+copy of the mask's Graphics and sprites in the plane's holder, which
+clips the object's container there, and keeps the mask itself out of the
+stage's build; such an object's bitmap is drawn again each frame, as the
+mask's place in it follows the object's bounds. Flash's mask cuts at whole
+texels, the view's at a quarter of one, so the edges fall up to a texel
+apart. Under WebGPU, which the quad's shader has no program for, a 3D object
 draws as its matrix3D's x and y rows.
 
 adl draws through a focal length for a stage 500 wide whatever the SWF's,

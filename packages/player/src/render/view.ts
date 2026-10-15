@@ -3,7 +3,7 @@
 // display object says it changed. A shape's fills are GraphicsContexts its
 // instances share (tessellate.ts); its lines depend on its transform and are
 // shared by the instances that see them through the same one (strokes.ts).
-import type { ColorTransform } from "@swf2es/format";
+import type { ColorTransform, Matrix as FlatMatrix } from "@swf2es/format";
 import {
   type BLEND_MODES,
   type FederatedPointerEvent,
@@ -40,7 +40,7 @@ import {
   unloads,
 } from "../display/display.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
-import { shifted } from "../display/geometry.js";
+import { apply, concat, shifted } from "../display/geometry.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
@@ -92,6 +92,40 @@ import { TriangleView } from "./triangles.js";
 
 /** No transform, for a 3D object's container in its bitmap's space. */
 const IDENTITY_PLACE = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+
+/**
+ * The map from the space of `mask`, a 2D mask outside the 3D object `o`, to
+ * `o`'s, as Flash clips the bitmap it draws `o` into: the mask is placed by
+ * its matrices up to the nearest 3D object above it (or the stage), and then
+ * moved as if the bitmap's corner, `o`'s bounds' top left in its own space,
+ * were where `o`'s bounds' top left is on the stage. So a mask over a turned
+ * card clips a part of the card that is not under it (the `three-d-mask` case).
+ */
+function outsideMaskMap(o: DisplayObject, mask: DisplayObject): FlatMatrix {
+  let m = mask.placed;
+  for (let p = mask.parent; p && !p.space; p = p.parent) {
+    m = concat(m, p.placed);
+  }
+
+  const own = bounds(o, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+  const up = toStage(o, null);
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = apply(up, i & 1 ? own.xMax : own.xMin, i & 2 ? own.yMax : own.yMin);
+    left = Math.min(left, x);
+    top = Math.min(top, y);
+  }
+
+  return {
+    a: m.a,
+    b: m.b,
+    c: m.c,
+    d: m.d,
+    tx: m.tx + own.xMin - Math.round(left),
+    ty: m.ty + own.yMin - Math.round(top),
+  };
+}
 
 /** No transform, for a Graphics kept to be taken again (recycle). */
 const IDENTITY = new Matrix();
@@ -2128,7 +2162,7 @@ export class PixiView {
    * What a 3D object is drawn by in its parent, its quad, which takes its
    * container's place, the container going into the plane's holder; and
    * the container again for one no longer drawn in 3D. A mask set on it
-   * clips the quad, on the stage.
+   * clips its content in its bitmap (Plane.maskWith).
    */
   private planeOf(o: DisplayObject, node: Node, three: boolean, redrawn: boolean): PixiContainer {
     const { container } = node;
@@ -2162,13 +2196,12 @@ export class PixiView {
 
     this.blendQuad(node, plane);
 
-    const mask = container.mask;
-    if (mask) {
-      // Let go of first: Pixi gives a mask taken off a container back to the build, to be drawn.
-      container.mask = null;
-      quad.mask = mask;
-    } else if (!o.mask) {
-      quad.mask = null;
+    // A 2D mask in the object clips its content in its bitmap, as on a 2D object; one outside it
+    // clips the bitmap too, put there by Flash's rule (renderPlanes). clip() has just set the
+    // mask's container on the object's, where it set one.
+    const set = container.mask as PixiContainer | null;
+    if (set !== plane.maskCopy) {
+      plane.maskWith(container, set && o.mask && !o.encloses(o.mask) ? set : null);
     }
 
     plane.stale ||= redrawn;
@@ -2206,7 +2239,7 @@ export class PixiView {
       return;
     }
 
-    plane.destroy();
+    plane.destroy(node.container);
     node.plane = null;
     this.planes.delete(node);
   }
@@ -2260,7 +2293,8 @@ export class PixiView {
 
       const rect = plane.drawnRect;
       let shown = false;
-      if (rect && node.container.visible) {
+      // A 3D mask on a 3D object leaves nothing of it drawn in Flash.
+      if (rect && node.container.visible && !o.mask?.space) {
         shown = plane.place(
           o.placed,
           rect.x,
@@ -2274,6 +2308,10 @@ export class PixiView {
       plane.changed ||= plane.quad.visible !== shown;
       plane.quad.visible = shown;
       if (shown) {
+        if (plane.outsideMask && o.mask) {
+          plane.placeMask(outsideMaskMap(o, o.mask));
+        }
+
         plane.draw(this.renderer);
         // Drawn at other units than its content was made for, as an object grown past what the
         // GPU or the budget takes at full samples: its lines and filters made again for them.

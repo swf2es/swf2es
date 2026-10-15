@@ -8673,6 +8673,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 200,
   },
   {
+    name: "three-d-mask",
+    swf: (abc) => bare(abc, 1, "ThreeDMask", 500, 400),
+    script: "ThreeDMask",
+    frames: 1,
+    capture: [1],
+    // Flash's mask in a bitmap cuts at whole texels, ours at a quarter of one: an outside
+    // mask's edges fall up to a texel apart.
+    tolerance: 40,
+    maxOutliers: 700,
+  },
+  {
     name: "point-at",
     swf: (abc) => bare(abc, 1, "PointAt"),
     script: "PointAt",
