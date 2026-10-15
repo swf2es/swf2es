@@ -2,10 +2,11 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 4 are built: `format`'s list of action blocks, the
-decoder, the emitter of the first actions, and the runtime's values with
-a main AVM1 SWF's root frames run by the player; the rest is not. [architecture.md](architecture.md) describes what is, and this
-document is folded into it as each piece lands.
+there. Steps 1 to 5 are built: `format`'s list of action blocks, the
+decoder, the emitter, the runtime's values and its operators by version,
+and a main AVM1 SWF's root frames run by the player; the rest is not.
+[architecture.md](architecture.md) describes what is, and this document
+is folded into it as each piece lands.
 
 AVM1 is compiled, not interpreted. The same `codegen.wasm` that compiles
 ABCs compiles a SWF's action blocks to an ES module, in the browser as
@@ -263,7 +264,11 @@ return;
 ```
 
 Step 3 writes `Push` of constants, `ConstantPool`, `Trace`, `Pop`,
-`Jump`, `If`, `Play`, `Stop` and `End`. Every other action Flash knows,
+`Jump`, `If`, `Play`, `Stop` and `End`, and step 5 the arithmetic,
+comparison, logical, bitwise, string and conversion actions, each a call
+of its version's operation with the values it pops, the top first,
+`st.push(V.subtract(st.pop(), st.pop()));`, and `PushDuplicate` and
+`StackSwap` inline. Every other action Flash knows,
 and a `Push` of a register, is `V.notYet("<name>")`, which throws, so
 the steps after fill them in one at a time; an unknown opcode is
 skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
@@ -274,20 +279,67 @@ What an action does depends on the version of the SWF whose code runs it,
 not the version of the objects it touches: `Add2` of `undefined` is `0` up
 to SWF 6 and `NaN` from 7, `ToString(undefined)` is `""` up to 6 and
 `"undefined"` from 7, names are case-insensitive up to 6, a string is
-true by its number up to 6 and by its length from 7, SWF 4's `Equals` and
-`Less` push 1 and 0 where SWF 5's push booleans. A module is compiled for
-its SWF's version, so the emitter picks the operations then: `rt.version(v)`
+true by its number up to 6 and by its length from 7, a boolean is the
+string `1` or `0` up to SWF 4, and a string is bytes up to SWF 5. A module
+is compiled for its SWF's version, so the emitter picks the operations then: `rt.version(v)`
 gives a table of the operations for versions like `v`, `V.add2`,
 `V.equals2`, `V.toString`, `V.getVariable`, made once per version and
 shared, so a call site sees one function, never a version test. The
 corpus's version-specific quirks, each in Ruffle with a test, come with it:
 SWF 4's `Divide` by zero pushes `"#ERROR#"`, `-0x10` is `NaN` while `0x10`
-reads as hex from SWF 6, `NaN == NaN` holds in `Equals2` (Flash Player 7's behaviour, which the
-corpus records, whatever the SWF's version), `>>>` is signed in
+reads as hex from SWF 6, `>>>` is signed in
 SWF 8 and 9, `SetTarget2(undefined)` resets the target differently up to
 SWF 6, and `this` is case-insensitive up to SWF 5. Where an
 action's behaviour does not depend on the version, the emitter writes it
-inline (`ActionNot` of a boolean, `StringLength` of a literal).
+inline (`PushDuplicate`, `StackSwap`).
+
+What adl traces of the operators at SWF 4, 5, 6, 7, 8 and 10 (the
+`avm1-operators-swf*` player cases), where it is not what Ruffle does or
+what the specification says:
+
+- Every comparison and logical action pushes a boolean in every version,
+  SWF 4's `Equals`, `Less`, `And`, `Or`, `Not` and `StringEquals` too (as
+  Ruffle has it, not the specification's 1 and 0); a SWF 4 traces it as
+  `1` or `0`, as it writes any boolean.
+- Flash has a NaN equal to a copy of itself and to no other NaN, in
+  `Equals2` and `StrictEquals`: the global `NaN` read twice is equal, as
+  the corpus's `NaN == NaN` is, but `0/0 == 0/0`, and two pushed NaNs,
+  are not (its numbers are references to doubles, compared first by
+  reference). SWF 4's `Equals` has none equal. A JavaScript number has no
+  identity, so swf2es takes every NaN equal to every other in `Equals2`
+  and `StrictEquals`, as Ruffle does: the corpus's `NaN == NaN` and
+  `x != x` of a variable answer as Flash does, two NaNs computed apart do
+  not. The player cases compare no NaN with another.
+- A division by zero from SWF 5 takes the zero as unsigned: `1 / -0` is
+  `Infinity`, `-1 / -0` `-Infinity` (Ruffle divides as IEEE does).
+- `Less2` and `Greater` have the empty string after every other string:
+  `"" < "a"` is false and `"a" < ""` true (Ruffle compares them as
+  ECMAScript does). Other strings compare by code unit, a SWF 5 one by
+  byte, as Ruffle does.
+- Up to SWF 5, `StringLess` and `StringGreater` of the empty string and a
+  string from a byte 0x80 up have neither less than the other, and each
+  greater (Ruffle orders them).
+- A string with no digit is no number: `"."` is `NaN` from SWF 5, as `""`
+  is (Ruffle reads it as 0).
+- Up to SWF 5 a string is bytes: `AsciiToChar` takes the code's low byte
+  (Ruffle a UTF-16 unit), `MBAsciiToChar` writes a code past 0xFF as two
+  bytes, the high one first (Ruffle one character), `StringLength`,
+  `CharToAscii` and their MB actions count and read bytes, as a
+  single-byte locale such as adl's has the MB actions do, and `trace`
+  writes the bytes as UTF-8, what is not UTF-8 as U+FFFD, as the encoding
+  standard's decoder has it (Ruffle reads a SWF 5 string as Windows-1252).
+  A double-byte locale's MB actions (Shift-JIS) are left out. From SWF 6
+  the char actions take UTF-16 units, a surrogate as U+FFFD, as in Ruffle.
+- `StringExtract` and `MBStringExtract` take their start as `index - 1`
+  in 32 bits, so an index of -2^31 starts past the end (Ruffle clamps it
+  to the first character). From SWF 6, each half of a surrogate pair they
+  cut is U+FFFD wherever it is compared or joined, so the halves joined
+  again are two U+FFFD, not the pair (Ruffle keeps the halves). adl's
+  trace of a cut low half alone writes three U+FFFD, the bytes it keeps;
+  swf2es writes one.
+- Numbers are written alike in every version, and read alike from SWF 6;
+  adl hangs on a string such as `"1e2147483648"` as a number, scaling by
+  ten once per unit of its exponent, which swf2es reads as `Infinity`.
 
 ### Functions and registers
 
@@ -362,7 +414,9 @@ AVM1's own formatting (15 significant digits, its own exponent form),
 which `numbers.ts` writes, apart from AS3's avmplus-derived one. Both are
 Ruffle's, translated with the carry's bugs (-9999999999999996 is `-e+16`),
 and adl traces them alike (the `avm1-hello` case). `values.ts` has the
-conversions, `toBoolean` and `stringOf`; `runtime.ts` the `Activation`
+conversions, `toBoolean`, `toNumber` and `stringOf`; `operators.ts` the
+actions that take more than a conversion (`Add2`, `Equals2`, `Less2`,
+`StringExtract`...); `runtime.ts` the `Activation`
 (`st`, `pool`, `target`, `host`), the operations a version's `V` holds,
 and the errors: `NotYet`, an action not done yet, which ends its block
 and is reported, and `Halt`, thrown once the host has stopped the SWF at
@@ -373,6 +427,15 @@ at a carriage return as at a line feed (the corpus's `trace`, and AS3's
 tests' harnesses break lines so, in the player's traces and adl's alike,
 for AS3 as for AVM1 (`oracle/flash.ts`, `tests/player/page.ts`); a host
 writing a log does the same.
+
+Converting an object calls its `valueOf` or `toString`: `ToNumber`,
+`Less2` and `Equals2` (both sides first, up to SWF 5) ask `valueOf`, `Add2`
+asks it but a Date's `toString` from SWF 6, `ToString` asks `toString`, a
+clip writes its path. Step 5 does every primitive's conversion and leaves
+these to hooks, `objects` in `values.ts` (`valueOf`, `toPrimitive`,
+`toString`, `typeOf`), which throw `NotYet` until step 6 sets them with
+objects and step 9 with the classes' own (Date's, String's...); the
+version is their argument, so they are set once for all.
 
 ### Objects
 
@@ -696,6 +759,18 @@ determinism` green, and the corpus baseline may only go up.
    `swf4_actions_bool`, `equals*`, `lessthan*` and `undefined_to_string_swf6`;
    unit tests per version from their traces, `f64_to_string`'s cases among
    them.
+   Built: also `Subtract`, `Multiply`, `Divide`, `Modulo`, `And`, `Or`,
+   `Not`, `Increment`, `Decrement`, `ToInteger`, the char actions,
+   `PushDuplicate` and `StackSwap`; an object's conversions are hooks steps
+   6 and 9 fill (see "Values"). The `avm1-operators-swf4` to `-swf10`
+   cases trace some 2000 results each in adl, at SWF 4, 5, 6, 7, 8 and 10,
+   which the player matches line for line; what adl showed is under
+   "Version-dependent semantics". The corpus's tests named above also set
+   variables or define functions, so they pass with steps 6 and 7:
+   `swf6_string_as_bool` passes (11 of the 649), and `action_to_integer`,
+   `divide_swf4`, `logical_ops_swf8`, `strictly_equals` and
+   `undefined_to_string_swf6` match more of their lines, each up to an
+   action of those steps.
 6. **Variables, objects and the global object.** `Avm1Object` and its
    property map with case sensitivity by version, `GetVariable`,
    `SetVariable`, `DefineLocal`, `GetMember`, `SetMember`, `Delete`,

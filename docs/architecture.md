@@ -147,9 +147,12 @@ is in [avm1.md](avm1.md).
 
 `runtime/src/avm1/` has AVM1's values and their conversions by version
 (`numbers.ts`'s number formatting and string-to-number, Ruffle's,
-translated, which adl traces alike), the operations of each version that
-`rt.version(v)` gives, made once and shared, and the `Host` through which
-they reach the player's display list. The player's `Avm1`
+translated, which adl traces alike), its arithmetic, comparison, logical,
+bitwise and string actions (`operators.ts`), the operations of each version
+that `rt.version(v)` gives, made once and shared, and the `Host` through
+which they reach the player's display list. An object's `valueOf` and
+`toString`, which the conversions call, are hooks (`objects` in
+`values.ts`) that the steps bringing objects fill. The player's `Avm1`
 (`player/src/avm1/avm1.ts`) compiles a main AVM1 SWF's blocks with the
 same codegen, as `start` loads it, and runs its root's frame blocks as the
 root enters each frame: a `Player` given one, as the web element and the

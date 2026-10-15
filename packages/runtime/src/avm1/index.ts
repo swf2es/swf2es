@@ -11,4 +11,14 @@ export {
   type Region,
   Runtime,
 } from "./runtime.js";
-export { stringOf, toBoolean, type Value } from "./values.js";
+export {
+  isPrimitive,
+  type ObjectConversions,
+  objects,
+  type Primitive,
+  stringOf,
+  toBoolean,
+  toNumber,
+  typeOf,
+  type Value,
+} from "./values.js";

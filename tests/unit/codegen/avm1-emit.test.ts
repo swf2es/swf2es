@@ -74,11 +74,21 @@ function stub(conditions: boolean[] = []) {
       throw new Error("too large");
     },
   };
+  // Any other operation records its operands and gives its name.
+  const operations = new Proxy(V, {
+    get: (target, name: string) =>
+      Object.hasOwn(target, name)
+        ? target[name as keyof typeof V]
+        : (...operands: unknown[]) => {
+            calls.push([name, ...operands]);
+            return name;
+          },
+  });
   const versions: number[] = [];
   const rt = {
     version(v: number) {
       versions.push(v);
-      return V;
+      return operations;
     },
   };
   return { calls, rt, versions };
@@ -319,6 +329,128 @@ test("a push reads the activation's pool where none or several reach it", async 
       ["trace", "set"],
     ],
   );
+});
+
+test("an operator calls its version's operation with its operands, the top first", async () => {
+  const block = asm()
+    .push("b", "a")
+    .op("Subtract")
+    .trace()
+    .push(1)
+    .op("Not")
+    .trace()
+    .push("s", 2, 3)
+    .op("StringExtract")
+    .trace()
+    .push("x", "y")
+    .op("Less2")
+    .op("TypeOf")
+    .trace()
+    .bytes();
+  const { calls, error } = await run([block]);
+  assert.equal(error, null);
+  assert.deepEqual(calls, [
+    ["subtract", "a", "b"],
+    ["trace", "subtract"],
+    ["not", 1],
+    ["trace", "not"],
+    ["stringExtract", 3, 2, "s"],
+    ["trace", "stringExtract"],
+    ["less2", "y", "x"],
+    ["typeOf", "less2"],
+    ["trace", "typeOf"],
+  ]);
+});
+
+test("each operator is a call of its version's operation", async () => {
+  const names: [string, number, number][] = [
+    ["add", 0x0a, 2],
+    ["add2", 0x47, 2],
+    ["subtract", 0x0b, 2],
+    ["multiply", 0x0c, 2],
+    ["divide", 0x0d, 2],
+    ["modulo", 0x3f, 2],
+    ["equals", 0x0e, 2],
+    ["equals2", 0x49, 2],
+    ["strictEquals", 0x66, 2],
+    ["less", 0x0f, 2],
+    ["less2", 0x48, 2],
+    ["greater", 0x67, 2],
+    ["and", 0x10, 2],
+    ["or", 0x11, 2],
+    ["not", 0x12, 1],
+    ["bitAnd", 0x60, 2],
+    ["bitOr", 0x61, 2],
+    ["bitXor", 0x62, 2],
+    ["bitLShift", 0x63, 2],
+    ["bitRShift", 0x64, 2],
+    ["bitURShift", 0x65, 2],
+    ["increment", 0x50, 1],
+    ["decrement", 0x51, 1],
+    ["stringAdd", 0x21, 2],
+    ["stringEquals", 0x13, 2],
+    ["stringLess", 0x29, 2],
+    ["stringGreater", 0x68, 2],
+    ["stringLength", 0x14, 1],
+    ["mbStringLength", 0x31, 1],
+    ["stringExtract", 0x15, 3],
+    ["mbStringExtract", 0x35, 3],
+    ["charToAscii", 0x32, 1],
+    ["asciiToChar", 0x33, 1],
+    ["mbCharToAscii", 0x36, 1],
+    ["mbAsciiToChar", 0x37, 1],
+    ["toNumber", 0x4a, 1],
+    ["toString", 0x4b, 1],
+    ["toInteger", 0x18, 1],
+    ["typeOf", 0x44, 1],
+  ];
+  for (const [name, op, operands] of names) {
+    const values = [1, 2, 3].slice(0, operands);
+    const { calls, error } = await run([
+      asm()
+        .push(...values)
+        .action(op)
+        .trace()
+        .bytes(),
+    ]);
+    assert.equal(error, null, name);
+    assert.deepEqual(
+      calls,
+      [
+        [name, ...values.reverse()],
+        ["trace", name],
+      ],
+      name,
+    );
+  }
+});
+
+test("PushDuplicate and StackSwap work on the stack, its empty end undefined", async () => {
+  const block = asm()
+    .push("a", "b")
+    .op("StackSwap")
+    .trace()
+    .trace()
+    .push("c")
+    .op("PushDuplicate")
+    .trace()
+    .trace()
+    .op("PushDuplicate")
+    .op("StackSwap")
+    .trace()
+    .trace()
+    .trace()
+    .bytes();
+  const { calls } = await run([block]);
+  assert.deepEqual(calls, [
+    ["trace", "a"],
+    ["trace", "b"],
+    ["trace", "c"],
+    ["trace", "c"],
+    ["trace", undefined],
+    ["trace", undefined],
+    ["trace", undefined],
+  ]);
 });
 
 test("every other action throws that it is not yet supported", async () => {
