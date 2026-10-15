@@ -1690,7 +1690,11 @@ export class PixiView {
         this.parkedFirstGroups.delete(group.instructionSet.uid);
       }
 
-      dirty |= TRANSFORM | (o instanceof Container ? CHILDREN : 0);
+      // Those it drew are in its content after its art, as are their masks' groups.
+      const kids =
+        o instanceof Container &&
+        (o.children.length > 0 || (node.scroll?.content ?? node.container).children.length > 1);
+      dirty |= TRANSFORM | (kids ? CHILDREN : 0);
       if (node.emptied) {
         node.emptied = false;
         node.world.fill(Number.NaN);
