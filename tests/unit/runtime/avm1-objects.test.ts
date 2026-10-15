@@ -277,3 +277,22 @@ test("objects convert by valueOf and toString, a missing method giving undefined
   // A SWF 5 sees no prototype of a function, so no toString either.
   assert.equal(rt.version(5).getMember(frame(5).cx, "toString", rt.realm.Object), undefined);
 });
+
+test("names fold by Flash's lower case, code unit by code unit, not JavaScript's", () => {
+  const pairs: [string, string, boolean][] = [
+    ["É", "é", true],
+    ["İ", "i", true],
+    ["ΑΣ", "ασ", true],
+    ["XΣ", "xς", false],
+    ["ẞ", "ß", false],
+    ["Ⴀ", "ა", true],
+    ["Ⴀ", "ⴀ", false],
+    ["Ɐ", "ɐ", false],
+    ["Ａ", "ａ", true],
+  ];
+  for (const [upper, lower, same] of pairs) {
+    const o = rt.newObject();
+    set(o, lower, 1, 6);
+    assert.equal(get(o, upper, 6), same ? 1 : undefined, `${upper} ${lower}`);
+  }
+});

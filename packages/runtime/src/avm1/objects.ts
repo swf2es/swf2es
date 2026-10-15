@@ -12,6 +12,7 @@
 // lookup misses and keeps from then on. A SWF from 7 never needs it.
 // `__proto__` is a property like any other, which the object also keeps
 // at hand for the walks up its prototypes.
+import { lowerCase } from "./lowercase.js";
 import { stringOf, toNumber, type Value } from "./values.js";
 
 /** Not listed by for..in. */
@@ -38,14 +39,16 @@ export const allowed = (flags: number, version: number): boolean =>
 /** Whether a SWF of `version` finds names in their case: from 7. */
 export const caseSensitive = (version: number): boolean => version > 6;
 
+/** The code units folding may change. */
+const FOLDED = /[A-Z\u0080-\uffff]/g;
+
 /** Names folded by Flash's lower case, once each, as the same names come back. */
 const foldCache = new Map<string, string>();
 
 /**
- * A name as a SWF up to 6 compares it: ASCII letters folded to lower case,
- * and the other letters as Flash's table folds them, which JavaScript's
- * lower case agrees with for the Latin, Greek and Cyrillic letters adl
- * folds.
+ * A name as a SWF up to 6 compares it: each code unit folded to Flash's
+ * lower case (`lowercase.ts`), which is not JavaScript's: `ΑΣ` and `ασ`
+ * are one name, `İ` and `i` too, `ẞ` and `ß` are not.
  */
 export function fold(name: string): string {
   let i = 0;
@@ -62,7 +65,7 @@ export function fold(name: string): string {
 
   let folded = foldCache.get(name);
   if (folded === undefined) {
-    folded = name.toLowerCase();
+    folded = name.replace(FOLDED, (c) => String.fromCharCode(lowerCase(c.charCodeAt(0))));
     if (foldCache.size >= 4096) {
       foldCache.clear();
     }
