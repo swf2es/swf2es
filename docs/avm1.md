@@ -1178,6 +1178,10 @@ probes they came of), and the corpus, where it is not what Ruffle does:
   has it, and a SWF 4's functions run as a SWF 5's (`V5`).
 - A clip compares as NaN with anything, Less2 and Greater giving
   undefined, and a clip as `__resolve` is skipped as a primitive is.
+  Equals2 and StrictEquals take two clip references as equal where they
+  reach the same clip now: one kept past its clip's removal equals the
+  clip placed at its path since, and one that reaches none equals no
+  other reference, nor undefined.
 - Gotos run as "The frame" says; `gotoAndStop` takes a whole number as a
   frame, anything else as a string, a frame's number or label, after a
   path's last `:` or `.` (`b:start`), labels in any ASCII case; a frame

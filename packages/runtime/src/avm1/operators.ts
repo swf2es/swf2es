@@ -9,6 +9,7 @@
 // add2 takes its operands as the module's code pops them, the top first;
 // lessThan and looselyEquals take theirs in reading order, `a < b`. Each
 // converts them in Ruffle's order, which only an object's valueOf can tell.
+import type { DisplayNative } from "./host.js";
 import {
   isPrimitive,
   objects,
@@ -113,7 +114,7 @@ function abstractEquals(a: Value, b: Value, version: number): boolean {
   }
 
   if (!isPrimitive(a) && !isPrimitive(b)) {
-    return a === b;
+    return a === b || sameClip(a, b);
   }
 
   if (ta === "boolean") {
@@ -149,7 +150,23 @@ export function strictlyEquals(a: Value, b: Value): boolean {
     return a === b || (Number.isNaN(a) && Number.isNaN(b));
   }
 
-  return a === b;
+  return a === b || (!isPrimitive(a) && !isPrimitive(b) && sameClip(a, b));
+}
+
+/**
+ * Whether two clips' AVM1 objects reach the same clip now, as references
+ * do: one to a removed clip finds the clip at its path (adl); one that
+ * finds none equals no other.
+ */
+function sameClip(a: object, b: object): boolean {
+  const da = (a as { display?: DisplayNative | null }).display;
+  const db = (b as { display?: DisplayNative | null }).display;
+  if (!da || !db) {
+    return false;
+  }
+
+  const live = da.live();
+  return live !== null && live === db.live();
 }
 
 /** ToInt32, as the bitwise actions and ToInteger take a value: NaN and the infinities 0. */

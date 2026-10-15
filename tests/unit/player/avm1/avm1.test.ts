@@ -553,3 +553,24 @@ test("a removed clip's reference finds what is at its path since", async () => {
     "_level0.a",
   ]);
 });
+
+test("clip references are equal where they reach the same clip now (adl)", async () => {
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "a" }),
+      as1(`r = a; trace((r == a) + " " + (r === a));`, 6),
+    ],
+    [w.remove(1), as1(`trace((r == a) + " " + (r == undefined) + " " + (r == r));`, 6)],
+    [
+      w.place({ depth: 2, character: 1, name: "a" }),
+      as1(`trace((r == a) + " " + (r === a) + " " + (r != a) + " " + (r !== a)); stop();`, 6),
+    ],
+  ]);
+
+  assert.deepEqual((await play(swf, 3)).lines, [
+    "true true",
+    "false false true",
+    "true true false false",
+  ]);
+});
