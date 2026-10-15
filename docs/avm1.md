@@ -2,9 +2,10 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 5 are built: `format`'s list of action blocks, the
+there. Steps 1 to 6 are built: `format`'s list of action blocks, the
 decoder, the emitter, the runtime's values and its operators by version,
-and a main AVM1 SWF's root frames run by the player; the rest is not.
+its objects, variables and global object, and a main AVM1 SWF's root
+frames run by the player; the rest is not.
 [architecture.md](architecture.md) describes what is, and this document
 is folded into it as each piece lands.
 
@@ -268,7 +269,11 @@ Step 3 writes `Push` of constants, `ConstantPool`, `Trace`, `Pop`,
 comparison, logical, bitwise, string and conversion actions, each a call
 of its version's operation with the values it pops, the top first,
 `st.push(V.subtract(st.pop(), st.pop()));`, and `PushDuplicate` and
-`StackSwap` inline. Every other action Flash knows,
+`StackSwap` inline. Step 6 writes the variable, member, object and call
+actions as calls that take the activation and their operands as popped,
+`st.push(V.getMember(cx, st.pop(), st.pop()));` (the name, then the
+object), or that pop them themselves where their number is on the stack
+(`V.initObject(cx)`, `V.callMethod(cx)`...). Every other action Flash knows,
 and a `Push` of a register, is `V.notYet("<name>")`, which throws, so
 the steps after fill them in one at a time; an unknown opcode is
 skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
@@ -433,23 +438,128 @@ Converting an object calls its `valueOf` or `toString`: `ToNumber`,
 asks it but a Date's `toString` from SWF 6, `ToString` asks `toString`, a
 clip writes its path. Step 5 does every primitive's conversion and leaves
 these to hooks, `objects` in `values.ts` (`valueOf`, `toPrimitive`,
-`toString`, `typeOf`), which throw `NotYet` until step 6 sets them with
-objects and step 9 with the classes' own (Date's, String's...); the
-version is their argument, so they are set once for all.
+`toString`, `typeOf`), which `realm.ts` sets: each calls the object's
+method as Flash's "special" calls do, without `__resolve`, a method that is
+missing or no function giving undefined, so a bare object's `valueOf` is
+undefined and `_global == null` is true. Step 9 adds the classes' own
+(Date's `toString` in `Add2`); the version is their argument, so they are
+set once for all. An object compared with `null` or `undefined` by
+`Equals2` goes through its `valueOf` too, as in adl and Ruffle.
 
 ### Objects
 
-An `Avm1Object` keeps its properties in a property map of its own, in the
-order they were added: each property with its value or its getter and
-setter (`addProperty`), its attributes (`ASSetPropFlags`: don't enum,
-don't delete, read only, and the version flags that hide a builtin from
-SWFs before the version that introduced it) and its watcher (`watch`).
-Lookups take the caller's case sensitivity, so a SWF 6 and a SWF 7 that
-share an object each find names as their version does; the map keeps a
-lower-case index besides the exact names, as Ruffle's `PropertyMap` does.
-`__proto__` is the prototype, `__resolve` is asked for a name the chain
-lacks, and `for..in` (`Enumerate`, `Enumerate2`) visits names in Flash's
-order, which the map's order of insertion gives, as in Ruffle.
+An `Avm1Object` (`objects.ts`) keeps its properties in a JavaScript `Map`
+by their exact names, in the order they were added, each a `Property`
+with its value or its getter and setter (`addProperty`) and its
+attributes (`ASSetPropFlags`: don't enum 1, don't delete 2, read only 4,
+and the version bits that hide a builtin from SWFs before the version
+that introduced it). Lookups take the calling SWF's case sensitivity, so
+a SWF 6 and a SWF 7 that share an object each find names as their version
+does: a SWF from 7 asks the `Map` for the exact name and nothing else; a
+SWF up to 6 asks for the exact name first, as code mostly spells a name
+one way, and on a miss an index of the names folded to lower case, which
+the object builds the first time such a lookup misses and keeps up to
+date from then on, so an object only SWF 7 code touches never has one.
+Folding is ASCII's and JavaScript's lower case beyond it (adl folds `É`
+and `Ж`), cached by name. Where two spellings of a name exist (set by
+SWF 7 code), a SWF 6 finds the exact one, else the first added. Within
+one SWF, an object made by a SWF 6 and read by a SWF 7 behaves so by
+construction; adl's harness runs one SWF, so that is not checked against
+it yet (step 15 brings `loadMovie`).
+
+`__proto__` is a property like any other (it can be listed, flagged and
+set), which the object also keeps at hand for the walks up its chain. A
+walk takes `__proto__` only where its version sees it: a function's
+`__proto__` has the bit that hides it from SWF 5, so a SWF 5 finds nothing
+on a function's prototype, not even `toString` (adl: `Object.toString()`
+is undefined in a SWF 5, and `trace(Object)` writes `[type Function]`). A
+walk stops after 255 prototypes, as Ruffle's does.
+
+`get` (GetMember, a variable's value) takes the first property the
+version sees along the chain, calling its getter with the receiver as
+`this`; where none has it, the first `__resolve` on the chain that holds
+an object is called with the name (a primitive one is skipped, an object
+that is no function gives undefined). Until some object has had a
+property named `__resolve`, a miss skips that second walk. `set` calls the
+object's watcher of the name first, whose result is the value set; then a
+property of the object's own takes it (its setter called, the value kept
+unless read only, and a set over a hidden builtin clearing its version
+bits), else the first getter on the prototypes takes it through its
+setter, or ignores it without one, else the object gets a new property.
+A primitive's members are its class's: `"abc".length` and up to SWF 6
+`constructor` are the box's own, the rest is looked up from the class's
+`prototype` with the primitive as `this`, without making the box, as long
+as `_global`'s `String`, `Number` or `Boolean` is the builtin; one a SWF
+replaced boxes it as Flash does, by constructing it. A set on a primitive
+sets on a box made for it, which is then lost; `undefined` and `null`
+have no members. A native function's `this` is boxed as Flash boxes it.
+
+`for..in` (`Enumerate`, `Enumerate2`) pushes `undefined`, as adl and
+Ruffle do (not the specification's null), then the names, so that the
+first to visit is on top: a prototype's names first, the deepest
+prototype's first, then the object's own, the last added first, a name
+deleted and set again last added; DontEnum ones left out. A prototype's
+name is left out where the object lists the same name itself, but not
+where the object's own is DontEnum (adl lists `constructor` from an
+`Object.prototype` whose flags were cleared, though `{}` has its own,
+DontEnum; Ruffle leaves it out). An array's indices come as `2 1 0`, and
+`{10: 1, 2: 2, 1: 3}` as `10 2 1`, insertion order reversed, numbers or
+not.
+
+What adl showed of the rest (the `avm1-objects-swf5` to `-swf10` cases),
+where it is not what Ruffle does:
+
+- `ASSetPropFlags(o, names, set, clear)` finds the names whatever their
+  case, in every version; the names are a string split at commas, or what
+  an array converts to, and null is every property, `__proto__` and
+  `constructor` included. The version bits hide a property as Ruffle's
+  masks have it: 0x80 from SWF 5, 0x100 from SWF 6 alone, 0x400 from 5
+  and 6, 0x1000 up to 7, 0x2000 up to 8, 0x4000 up to 9; 0x200 and 0x8000
+  hide nothing. A set shows the property again, but a SWF 6's set leaves
+  0x400, so the property stays hidden from it. `hasOwnProperty` is false
+  for a property with 0x100, in every version. Bit 0x800 hangs adl's
+  script; `ASSetPropFlags` on an array, by name or with null, empties it
+  (its length 0): neither is reproduced.
+- `addProperty` takes a function as getter and a function or null as
+  setter (null: read only), and gives false for anything else, an object
+  that is no function included (Ruffle takes any object). The property is
+  listed by `for..in` and is `hasOwnProperty`'s.
+- `watch(name, callback, data)` is false without a function callback; a
+  second `watch` of the name replaces the first; `unwatch` is true where
+  there was one, the name found by the version's case. The callback gets
+  the name, the old value (the stored one, no getter called), the new
+  one and the data, with the object as `this`.
+- InitObject's object has its own `constructor` (`_global.Object`, don't
+  enum and don't delete) before its `__proto__`, in every version; `new`
+  gives `__proto__`, then `constructor` up to SWF 6, then
+  `__constructor__`, both deletable (Ruffle: none on InitObject's, and
+  `__constructor__` first).
+- `NaN` and `Infinity` are getters on `_global` that give undefined to a
+  SWF 4, so its `x == NaN` is `x == 0`; Flash's own globals leave a
+  variable `o`, null.
+
+Calls of functions from these, a getter, a setter, a watcher or
+`__resolve`, are calls of natives in this step: DefineFunction's functions
+come with step 7, which also brings the property recursion limit Ruffle
+has for a watcher or a getter that sets its own property. The natives so
+far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`, and
+what boxing, InitArray and the conversions need of `Function`, `Array`
+(`toString`, `join`), `String`, `Number` and `Boolean` (their constructors,
+`valueOf` and `toString`), which step 9 completes. `CallFunction`,
+`CallMethod`, `NewObject` and `NewMethod` call them; a name that holds no
+function gives undefined, as in Flash.
+
+Performance: a property read is a `Map` lookup per prototype walked, with
+no allocation for an object or a primitive; a SWF up to 6 pays a second
+lookup only on a miss of the exact spelling. Measured in node, a read of
+an own property takes about 5 to 10 ns, one of `Object.prototype`'s
+methods 15 ns, a miss 15 to 20 ns, and a root variable 15 ns, a global
+one 30 to 40 ns. Inline caches at the GetMember and GetVariable sites, as
+AVM2's untyped lookups have, are left for later: AVM1 objects have no
+shapes to key a cache on, so a site's cache would hold an object and a
+property and need invalidating as properties are added and deleted along
+chains; they come with the measurements on the corpus's heaviest SWFs
+the plan's end names.
 
 A function is an `Avm1Function`, an object with its compiled entry, the
 scope chain and constant pool it captured, and its `prototype`. From SWF 6
@@ -474,14 +584,34 @@ back the original, which the activation keeps for that.
 
 `GetVariable`, `SetVariable`, `GetProperty`, `SetProperty`, `CallFunction`
 and `eval` take names that may be paths: `/a/b:x` (slash syntax, SWF 4),
-`_root.a.b.x`, `_level1.a`, `../x`, `_parent._parent.x`, or `this.x`. The
-runtime splits a name into its path and its last part once, kept in a
-cache by string, since the same names come again and again, and asks the
-host to resolve the path from the target to a display object (the player
-walks its children by name, case-insensitively up to SWF 6). A name
-without a path walks the scope chain, top down. A clip's properties
+`_root.a.b.x`, `_level1.a`, `../x`, `_parent._parent.x`, or `this.x`
+(`scope.ts`, as Ruffle's `get_variable`, `set_variable` and
+`resolve_target_path`). A name with a `:`, or a `.` from SWF 5, is a path
+and a variable after its last one; the path is resolved from each scope in
+turn, top down, and the variable read where the first object it reaches
+has it (GetVariable) or set on the first object it reaches (SetVariable).
+A path's steps are a clip's children by name or else properties, `..` a
+clip's parent, a leading `/` the root, and `this`, `_root` and `_levelN`
+at its start; what needs the display list the host gives (`root`,
+`level`, `parent`, `child` in `host.ts`), which step 10 fills in, so for
+now a path walks objects' properties, `this` and the root. A name with a
+`/` and no variable, from SWF 5, is the object the path names. A name
+without a path walks the scope chain, top down, and is read from the
+first scope object that has it on its chain; a name none has is `_root`,
+`_parent`, `_global` (from SWF 6) or `_levelN`, else undefined: a
+variable is never resolved by `__resolve`. `this` is the activation's
+`this`, case-insensitively in SWF 6 (and SWF 5 outside a function). A
+variable set without a path goes where the chain has it, else on the
+target's clip; `DefineLocal` and `DefineLocal2` define it on the top
+scope, which at a frame's level is the clip. A clip's properties
 `_x` to `_ymouse` are also reachable by index (`GetProperty` and
 `SetProperty`'s 0 to 21), from a table shared with `globals/MovieClip.ts`.
+
+Until step 10 gives clips their class, the player gives the root a plain
+object for its AVM1 face, which holds the timeline's variables: `this`
+and `_root` are it, and what tells a clip from an object (`typeof` is
+`movieclip`, it converts to its path, compares as no number) is not there
+yet.
 
 ### Builtins
 
@@ -777,6 +907,19 @@ determinism` green, and the corpus baseline may only go up.
    `InitObject`, `InitArray`, `Enumerate`, `_global`, `Object`,
    `ASSetPropFlags`, `addProperty`, `watch` and `__resolve`. Passes
    `new_object_wrap`, `init_array_invalid`, `watch*`, `prototype*`.
+   Built: also `DefineLocal2`, `Delete2`, `Enumerate2`, `hasOwnProperty`,
+   `isPropertyEnumerable`, `isPrototypeOf`, paths of objects' properties,
+   and `CallFunction`, `CallMethod`, `NewObject` and `NewMethod` of native
+   functions, with what boxing, InitArray and the conversions need of
+   `Function`, `Array`, `String`, `Number` and `Boolean` (see "Objects").
+   The `avm1-objects-swf5` to `-swf10` cases trace some 200 lines each in
+   adl, which the player matches. `watch*`, `prototype*` and most of the
+   corpus's object tests define functions, so they wait for step 7: the
+   corpus goes from 11 to 47 of the 649 (`new_object_wrap`,
+   `init_array_invalid`, `init_object_invalid`, `delete`,
+   `global_is_bare`, `has_own_property`, `as_set_prop_flags_version_*`,
+   `equals_swf4`...), and DefineFunction, DefineFunction2 and StoreRegister
+   are what most of the rest stop at.
 7. **Functions.** `DefineFunction`, `DefineFunction2` with registers and
    preloads, `CallFunction`, `CallMethod`, `NewObject`, `NewMethod`,
    `Return`, `arguments`, `super`, `Function.call` and `apply`, recursion's
