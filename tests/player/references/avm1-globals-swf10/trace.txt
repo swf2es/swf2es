@@ -51,3 +51,4 @@ updateAfterEvent undefined
 [12abc] r=16 -> 76476
 [-ff] r=16 -> -255
 [+ff] r=16 -> 255
+ASnative categories 0:undefined 1:function 5:function 9:function 102:function 250:function 600:function 1000:undefined 2100:function 2401:function 2402:undefined 

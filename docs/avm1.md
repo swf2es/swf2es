@@ -1008,8 +1008,12 @@ which adl agrees with, `parseFloat` the conversions' own; `isNaN` and
 `isFinite` convert by version. `ASnative(category, index)` gives a new
 function of Flash's table each call: 4 ASSetNative and
 ASSetNativeAccessor, 100 escape, unescape, parseInt, parseFloat and trace,
-101 Object's methods, 103 Date's, 200 Math's, 252 Array's. An index past a table's natives gives a function of none, returning
-undefined (Math's NaN). `ASSetNative` and `ASSetNativeAccessor` set
+101 Object's methods, 103 Date's, 200 Math's, 252 Array's. An index past
+a table's natives gives a function of none, returning undefined (Math's
+NaN), and so does any index of Flash's other categories (1 to 5, 9, 11
+to 15, 102 to 107, 110 to 113, 250, 251, 253, the display, text, sound
+and I/O classes' up to 2401, as adl has them), until their steps bring
+their natives; any other category gives undefined. `ASSetNative` and `ASSetNativeAccessor` set
 methods and accessors from it as Ruffle has them, a version before a name
 hiding it from earlier SWFs. `_global.trace` and ASnative(100, 4) write to
 the log, as Flash's authoring tool shows them in its Output panel, where
