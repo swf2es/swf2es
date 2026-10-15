@@ -97,6 +97,7 @@ const IDENTITY_PLACE = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 const IDENTITY = new Matrix();
 
 const NO_RECORDS: readonly FilterRecord[] = [];
+const NO_KIDS: readonly DisplayObject[] = [];
 /** What an emptied node has drawn, shared by all: replaced as it draws, never added to. */
 const NO_LAYERS: ShapeLayer[] = [];
 const NO_FILLS: GraphicsContext[] = [];
@@ -1464,6 +1465,12 @@ export class PixiView {
         this.release(children[i]);
       }
     }
+
+    // Released, they need no keeping: a node kept spare held its last
+    // object's children, and through them their own children, scripts and
+    // timelines, after all had gone (some 6 MB in a crowd of 32 animated
+    // characters). Coming back, a container arranges its children anew.
+    node.kids = NO_KIDS;
   }
 
   /**
@@ -1670,9 +1677,9 @@ export class PixiView {
     let redrawn = three && o instanceof Container && o.descendantsDirty;
     if (node.released) {
       // Back from off the list: drawn again if its art was emptied, its transform as if unknown, so
-      // that it and all below draw their lines again; a parked one has kept its own. Its children,
-      // if it has or had any, are arranged again, as those that were emptied with it are drawn
-      // again.
+      // that it and all below draw their lines again; a parked one has kept its own. A container's
+      // children, if it has or had any, are arranged again, as those that were emptied with it are
+      // drawn again.
       node.released = false;
       node.reused = true;
       this.parked.delete(node);
@@ -1683,8 +1690,7 @@ export class PixiView {
         this.parkedFirstGroups.delete(group.instructionSet.uid);
       }
 
-      const kids = o instanceof Container && (o.children.length > 0 || node.kids.length > 0);
-      dirty |= TRANSFORM | (kids ? CHILDREN : 0);
+      dirty |= TRANSFORM | (o instanceof Container ? CHILDREN : 0);
       if (node.emptied) {
         node.emptied = false;
         node.world.fill(Number.NaN);

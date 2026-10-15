@@ -3182,6 +3182,33 @@ test("spare nodes are listed once, kept to the most, and dropped as a SWF unload
   });
 });
 
+test("a node off the list keeps none of its children, and arranges them anew as it comes back", async () => {
+  // A spare node kept its last object's children, and all below them, for as long as it was kept.
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const character = await outlinedSquare();
+  const view = new PixiView(standIn([]).renderer);
+  const nodes = (view as unknown as { nodes: WeakMap<object, { kids: readonly unknown[] }> }).nodes;
+  const root = new Container();
+  const branch = new Container();
+  const child = new ShapeObject(character);
+  branch.placeAtDepth(child, 1);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+  assert.equal(nodes.get(branch)?.kids.length, 1);
+
+  root.removeChild(branch);
+  view.prepare(root);
+  assert.equal(nodes.get(branch)?.kids.length, 0);
+
+  // Its child gone while it was off, it comes back with its art alone.
+  branch.removeChild(child);
+  root.placeAtDepth(branch, 1);
+  view.prepare(root);
+  const container = view.stage.children[0].children[1];
+  assert.equal(container.children.length, 1);
+  assert.equal(nodes.get(branch)?.kids.length, 0);
+});
+
 test("an unload takes the lines' budget back to its floor at the next prepare", async () => {
   const { unloads } = await import("../../../../packages/player/dist/display/display.js");
   const { LINES_IDLE_VERTICES } = await import("../../../../packages/player/dist/render/pools.js");
