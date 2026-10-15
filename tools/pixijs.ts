@@ -13,7 +13,8 @@
 //   node tools/pixijs.ts [--force]
 //
 // A build is skipped when the fork's commit, its uncommitted changes, the
-// lockfile and this file are those of the last one (lib/.swf2es-build); --force builds
+// lockfile and this file are those of the last one (lib/.swf2es-build) and
+// the bundle's files it wrote are all still there; --force builds
 // anyway. The bundle's "Compiled" date is the fork commit's, not the
 // clock's, so a build is the same each time.
 
@@ -26,6 +27,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -462,11 +464,16 @@ async function main(): Promise<void> {
     fail("vendor/pixijs has no build tools: run pnpm install");
   }
 
+  // The stamp is the key, then the files written to dist/: the chunks too,
+  // which a page without WebGL would fail to load if one were gone.
   const key = sourceKey();
+  const [stampKey, ...written] = existsSync(stampFile)
+    ? readFileSync(stampFile, "utf8").split("\n")
+    : [];
   const built =
-    existsSync(stampFile) &&
-    readFileSync(stampFile, "utf8") === key &&
-    BUNDLES.every((path) => existsSync(join(pixi, path)));
+    stampKey === key &&
+    BUNDLES.every((path) => written.includes(path)) &&
+    written.every((path) => existsSync(join(pixi, path)));
   if (built && !process.argv.includes("--force")) {
     console.log("pixi.js: up to date");
     return;
@@ -481,7 +488,11 @@ async function main(): Promise<void> {
   const builds = await rollupBuilds(rollup, compiled.replace("GMT", "UTC"));
   await Promise.all([declarations(), ...builds.map((build) => bundle(rollup, build))]);
 
-  writeFileSync(stampFile, key);
+  const dist = readdirSync(join(pixi, "dist"), { recursive: true, encoding: "utf8" })
+    .map((path) => join("dist", path))
+    .filter((path) => !path.endsWith(".map") && statSync(join(pixi, path)).isFile())
+    .sort();
+  writeFileSync(stampFile, [key, ...dist].join("\n"));
   console.log(`pixi.js: built lib/ and ${BUNDLES.join(", ")}`);
 }
 
