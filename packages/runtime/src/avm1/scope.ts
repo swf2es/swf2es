@@ -151,8 +151,9 @@ export function resolveCallable(cx: Variables, name: string, version: number): V
 
   for (let s: Scope | null = cx.scope; s !== null; s = s.parent) {
     if (has(s.object, name, version)) {
+      const value = get(s.object, name, version);
       foundOn = s.object;
-      return get(s.object, name, version);
+      return value;
     }
   }
 
@@ -176,8 +177,10 @@ export function getVariable(cx: Variables, name: string, version: number): Value
     for (let s: Scope | null = cx.scope; s !== null; s = s.parent) {
       const object = targetPath(cx, s.object, path, true, true, version);
       if (object !== null && has(object, variable, version)) {
+        // After the getter, which may call functions of its own.
+        const value = get(object, variable, version);
         foundOn = object;
-        return get(object, variable, version);
+        return value;
       }
     }
 
