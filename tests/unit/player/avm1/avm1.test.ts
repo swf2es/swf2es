@@ -167,7 +167,7 @@ test("an AS3 SWF's blocks never run", async () => {
 });
 
 test("an action not done yet is reported, and the frame's next block runs", async () => {
-  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x54])), traced("next")]]);
+  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x22])), traced("next")]]);
   const { lines, errors } = await play(swf, 1);
 
   assert.deepEqual(lines, ["next"]);

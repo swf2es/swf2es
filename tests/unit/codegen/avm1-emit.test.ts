@@ -532,9 +532,9 @@ test("the variable and member actions take their operands as popped, the top fir
 });
 
 test("every other action throws that it is not yet supported", async () => {
-  const thrown = await run([asm().push("a").trace().push("x").action(0x54).trace().bytes()]);
+  const thrown = await run([asm().push("a").trace().push("x").action(0x22).trace().bytes()]);
   assert.deepEqual(thrown.calls, [["trace", "a"]]);
-  assert.equal(thrown.error, "not yet supported: InstanceOf");
+  assert.equal(thrown.error, "not yet supported: GetProperty");
 
   // An action with operands.
   const goto = await run([asm().action(0x81, [1, 0]).bytes()]);
