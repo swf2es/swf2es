@@ -2,7 +2,14 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { bounds, boundsIn, hitsObject, hitsPoint, toStage } from "../../../display/bounds.js";
+import {
+  bounds,
+  boundsIn,
+  hitsObject,
+  hitsPoint,
+  placedRect,
+  toStage,
+} from "../../../display/bounds.js";
 import {
   ButtonObject,
   CONTENT,
@@ -14,7 +21,7 @@ import {
   TRANSFORM,
 } from "../../../display/display.js";
 import { copyFilter } from "../../../display/filters.js";
-import { apply, invert, type Rect, transformRect } from "../../../display/geometry.js";
+import { apply, invert, isProjective, type Rect } from "../../../display/geometry.js";
 import { stagePoint3D } from "../../../display/perspective.js";
 import { gridInside, sliceBounds } from "../../../display/scale9.js";
 import type { Scripting } from "../../../scripting.js";
@@ -79,7 +86,7 @@ const twips = (v: number) => Math.round(v * 20) / 20;
 
 /** The object's width and height in its parent's space, or what that would be for one with no parent: its bounds through its own matrix. */
 function size(d: DisplayObject): [number, number] {
-  const r = transformRect(bounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 }, d.placed);
+  const r = placedRect(d, bounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 });
   return [twips(r.xMax - r.xMin), twips(r.yMax - r.yMin)];
 }
 
@@ -660,17 +667,26 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     /** A point of this object's space in the stage's: through the matrices up to the stage. */
+    /** Through a plane, to a whole pixel, as adl gives it (the `three-d-bounds` case). */
     localToGlobal(p: Value): Value {
       const m = toStage(this.$display, s.stage);
       const x = Number(s.rt.getProperty(p as AsObject, name("x")));
       const y = Number(s.rt.getProperty(p as AsObject, name("y")));
-      return point(s, ...apply(m, x, y));
+      const [gx, gy] = apply(m, x, y);
+      return isProjective(m) ? point(s, Math.round(gx) + 0, Math.round(gy) + 0) : point(s, gx, gy);
     }
 
-    /** A point of the stage's space in this object's: the inverse of the way up. */
+    /**
+     * A point of the stage's space in this object's: the inverse of the way up. Through a plane,
+     * to a twip, as adl gives it.
+     */
     globalToLocal(p: Value): Value {
       const [x, y] = stageToLocal(s, this.$display, p);
-      return point(s, x, y);
+      if (!isProjective(toStage(this.$display, s.stage))) {
+        return point(s, x, y);
+      }
+
+      return point(s, Math.round(x * 20) / 20 + 0, Math.round(y * 20) / 20 + 0);
     }
 
     /**
@@ -708,7 +724,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         const t = v as AsObject;
         const from: DisplayObject = t.$display;
         if (from.space) {
-          this.$display.setMatrix3D(from.space.raw);
+          this.$display.setMatrix3D(from.space.shown);
         } else {
           this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
         }

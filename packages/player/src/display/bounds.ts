@@ -16,6 +16,7 @@ import {
 import {
   apply,
   behindEye,
+  boxThrough,
   concat,
   contains,
   invert,
@@ -89,8 +90,10 @@ export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
  * `d`'s bounds in its own space, its children's included: null for an
  * object with nothing in it. A scrolled object's are its scroll's size at
  * (0, 0), whatever it draws, as Flash reports them; masks clip none.
+ * `drawn` takes a 3D object in another as drawn, not as reported
+ * (placedRect), for the bitmap the other is drawn into.
  */
-export function bounds(d: DisplayObject, lines: boolean): Rect | null {
+export function bounds(d: DisplayObject, lines: boolean, drawn = false): Rect | null {
   const scroll = d.scroll;
   if (scroll) {
     return { xMin: 0, yMin: 0, xMax: scroll.xMax - scroll.xMin, yMax: scroll.yMax - scroll.yMin };
@@ -99,15 +102,39 @@ export function bounds(d: DisplayObject, lines: boolean): Rect | null {
   let r = ownBounds(d, lines);
   if (d instanceof Container) {
     for (const child of d.children) {
-      const b = bounds(child, lines);
+      const b = bounds(child, lines, drawn);
       // A 3D child with a corner behind the eye is not drawn, and counts for nothing.
       if (b && !(child.space && behindEye(b, child.placed))) {
-        r = union(r, transformRect(b, child.placed));
+        r = union(r, placedRect(child, b, drawn));
       }
     }
   }
 
   return r;
+}
+
+/**
+ * `r`, in the space of `d`, through `d`'s matrix into its parent's space.
+ * A 3D object's is the box around what its plane draws in its projector's
+ * space, out to whole pixels, taken back to its parent's as a box, as Flash
+ * measures it: so under a rotated 2D parent its box there is the box of a
+ * box, larger than what is drawn (the `three-d-bounds` case). In a 3D
+ * parent, it is its box through its matrix3D's x and y rows, without
+ * perspective, as its width is in adl; or, `drawn`, its plane's there,
+ * which the parent's bitmap must hold.
+ */
+export function placedRect(d: DisplayObject, r: Rect, drawn = false): Rect {
+  if (!d.space) {
+    return transformRect(r, d.placed);
+  }
+
+  if (d.parent?.space) {
+    return transformRect(r, drawn ? d.placed : d.flatPlaced);
+  }
+
+  const { own, back } = d.planes();
+  const box = transformRect(r, own);
+  return back ? boxThrough(box, back) : box;
 }
 
 /** `d`'s bounds in `target`'s space (its own for null), through the stage. */
@@ -124,7 +151,32 @@ export function boundsIn(
 
   const up = toStage(d, stage);
   const down = target === stage ? IDENTITY : (invert(toStage(target, stage)) ?? IDENTITY);
-  return transformRect(own, concat(up, down));
+  if (!isProjective(up)) {
+    return transformRect(own, concat(up, down));
+  }
+
+  // Through a plane: a 2D object's only up to where it and the target meet, so that a plane and
+  // its inverse do not both go into it, out to whole pixels where they cancel.
+  if (!d.space) {
+    let common: DisplayObject | null = target;
+    while (common && !common.encloses(d)) {
+      common = common.parent;
+    }
+
+    if (!common || common === stage) {
+      return transformRect(own, concat(up, down));
+    }
+
+    const toTarget = target === common ? IDENTITY : invert(toStage(target, common));
+    return toTarget
+      ? transformRect(own, concat(toStage(d, common), toTarget))
+      : transformRect(own, concat(up, down));
+  }
+
+  // A 3D object's, as Flash measures it: the box on the stage, out to whole pixels, then that
+  // box taken into the target's space, a box of a box (the `three-d-bounds` case).
+  const box = transformRect(own, up);
+  return target === stage ? box : boxThrough(box, down);
 }
 
 /**

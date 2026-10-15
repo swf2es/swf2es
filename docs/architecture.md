@@ -3207,13 +3207,26 @@ A display object goes into 3D once a script sets `z`, `rotationX`,
 `matrix3D` to null takes it back to 2D at the identity, and setting a
 matrix takes it back with that matrix (the `three-d` case, the corpus's
 `displayobject_z` and `geom_transform`). In 3D `transform.matrix` is null,
-`matrix3D` a copy of the 3D transform, and the properties are kept as
-set: a rotation is not brought within ±180, a NaN position or rotation
-is 0. A matrix3D set whole is kept as given and taken apart as
-`decompose` takes it; a position set moves it alone, and a scale or
+and the properties are kept as set: a rotation is not brought within
+±180, a NaN position or rotation is 0. `matrix3D` is the object's own
+Matrix3D, live as adl's (`three-d-matrix`): the getter gives the same one
+each time, which shares the object's matrix, so that what a script does
+to it moves the object, its properties taken apart from it again (the
+Matrix3D's natives tell its owner), and what the properties do shows in
+it. Its copyToMatrix3D, copyRowFrom and copyColumnFrom change the
+Matrix3D alone, as adl's do: the object is drawn and reports its
+properties as before, from a copy of its matrix the view goes by, until a
+property set writes that copy back into the Matrix3D (`three-d-matrix-shared`,
+`three-d-matrix-silent`). A matrix3D set whole becomes the object's own, a clone of the same
+values too, and is taken apart as `decompose` takes it; one that is
+another object's is ArgumentError 2189, until that object lets it go
+(set to null or another). A position set moves it alone, and a scale or
 rotation set makes it again from all the properties, translation ×
-rotation about x, then y, then z × scale. Each of these setters is a
-touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
+rotation about x, then y, then z × scale, the angles' sines and cosines
+taken of float32 radians, as adl's are to the last bit, and the
+translation put in its column, so an infinite scale's column is infinite
+where the rotation's is 1 and NaN elsewhere; an object with a NaN in its
+matrix is not drawn. Each of these setters is a touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
 one a transform gives reads and writes its object's, as Flash's does,
 which keeps the field of view in radians, the stage's 500 wide and the
 others' as wide as the stage; the stage and each SWF's root always have
@@ -3245,16 +3258,30 @@ Flash reports to a quarter pixel; `globalToLocal3D` is the point of the
 object's plane under the stage's, at z 0.
 
 Bounds through a plane are out to whole pixels, as Flash reports them:
-a turned card's `width` is its drawn width (`three-d-flip`); Flash's are a
-pixel smaller here and there, as if its corners were nearer whole pixels
-than doubles put them, which the cases leave untraced. An object with a
+a turned card's `width` is its drawn width (`three-d-flip`). An edge that
+passes a whole pixel by less than an eighth of one is not counted to the
+next, as adl reports fourteen edges of `three-d-bounds`. A 3D object's box
+in another space is that box on the stage (its projector's space), taken
+there as a box: so under a turned 2D parent, its box in the parent is the
+box of a box, larger than what is drawn; in a 3D parent, it is through
+its flat matrix, without perspective, as its `width` is. A 2D object's
+box in a space it shares a plane with is measured only up to where the two
+meet. adl reports a 3D object's `concatenatedMatrix` as null, and that of
+a 2D object in one in the space of the bitmap the 3D object is drawn into:
+up to the 3D object, then two pixels out from its bounds' top left out to
+whole pixels. `localToGlobal` through a plane is to a whole pixel and
+`globalToLocal` to a twip. Before a 3D object is first drawn, adl's bounds,
+concatenated matrices and points of anything on its list are not yet
+made, its concatenated matrices five times their size, and the cases read
+them a frame later. An object with a
 corner of its bounds at or behind the eye (f + z at most 0) Flash draws
 none of, takes no hit on and counts in no bounds; its own bounds are an
 empty rectangle at the origin. `hitTestPoint` without the shape flag
 tests the box around what is drawn on the stage, and the pointer picks
 where the plane is drawn (`pointer.test.ts`, against Flash Player 32's
 traces). Siblings are drawn in the list's order, whatever their depths.
-A 3D mask masks nothing, and is not drawn.
+A 3D mask masks nothing, and is not drawn; set on a 3D object, it leaves
+none of the object drawn.
 
 Flash draws a 3D object from a bitmap of what it and its children draw in
 its own space, a texel a pixel of that space whatever its scale, its
@@ -3264,7 +3291,8 @@ child scaled up inside it is sharp, and its filters are in its space and
 turn with it. The colour and alpha of all above it go into each of its
 fills in the bitmap, so a card under a half-transparent parent shows its
 own white square paler than its edge, not as a layer faded whole; its
-blend mode composites the drawn bitmap with what is behind it; and its
+blend mode composites the drawn bitmap, its filters' result included,
+with what is behind it (`three-d-filter-blend`); and its
 scrollRect counts for nothing, Flash drawing, bounding and hitting all of
 it (`three-d-mixed`, the same in adl and Flash Player). The view does the
 same (`render/three.ts`): the object's container is in a holder of its
@@ -3294,9 +3322,24 @@ pixel where the host says how many there are (`screenScale`), as the test
 page does; the evidence for that last is mixed, edges matching better
 with it and magnified bitmaps no worse. A BitmapData's draw of an object
 on no stage projects what is in 3D in it as on a stage the bitmap's
-size, centred on it, as Flash does. A mask set on a 3D object clips its
-quad on the stage, where Flash clips the bitmap in the object's space.
-Under WebGPU, which the quad's shader has no program for, a 3D object
+size, centred on it, as Flash does.
+
+A 2D mask set on a 3D object clips the bitmap, in the object's space, as
+adl shows (`three-d-mask`). One in the object clips it there as it would a
+2D object. One outside it is placed by its matrices up to the nearest 3D
+object above it, or the stage, and then moved as if the bitmap's corner,
+the top left of the object's bounds in its own space, were where the top
+left of its bounds is on the stage, rounded to a pixel: so a band over a
+turned card leaves a strip of the card that is not under it, and a card
+nearer the eye has its part under the mask magnified. The view draws a
+copy of the mask's Graphics and sprites in the plane's holder, which
+clips the object's container there, and keeps the mask itself out of the
+stage's build. The copy, and the object's bitmap, are made again only
+when the mask's place in it, which follows the object's bounds, or what the
+mask draws has changed (`three-d-mask-moving`): a still card under a still
+mask keeps its bitmap, as one with no mask does. Flash's mask cuts at whole
+texels, the view's at a quarter of one, so the edges fall up to a texel
+apart. Under WebGPU, which the quad's shader has no program for, a 3D object
 draws as its matrix3D's x and y rows.
 
 adl draws through a focal length for a stage 500 wide whatever the SWF's,
@@ -3310,6 +3353,18 @@ at edges, within the cases' tolerance. For an object hidden behind the
 eye adl still projects its 2D children's bounds through the negative w,
 and `hitTestPoint(0, 0, false)` on it is true; the player gives such an
 object no bounds and no hits.
+
+Left as they are: adl composes a 2D matrix a scale or rotation setter
+makes in 16.16 fixed point (scale cut, sines and cosines rounded, so
+`rotation = 30` reads `a` 0.86602783203125 and `scaleX = 0.1` reads
+0.0999908447265625, a scale below 2^-16 nothing), in 2D as well, and it
+goes into the matrix3D as the object enters 3D; a scale set after a whole
+matrix makes all four of its numbers again. The player keeps doubles, and
+stretches a column in proportion as the corpus's `displayobject_invalid_floats`
+has Flash Player do: matching it is a change to every 2D matrix, for
+differences below 2^-16 of a scale, and shows in bounds in a turned
+parent to a twip. A hairline in a 3D object's bitmap straddles two texel
+rows where Flash's covers one, as on the stage.
 
 ### Nine-slice scaling
 

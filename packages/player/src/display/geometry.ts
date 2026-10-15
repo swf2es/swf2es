@@ -149,6 +149,9 @@ export function transformRect(r: Rect, m: Matrix): Rect {
   };
 }
 
+/** How far past a whole pixel a projected edge may go and still be bounded by it. */
+const SLACK = 0.125;
+
 function projectRect(r: Rect, m: Projective): Rect {
   let xMin = Number.POSITIVE_INFINITY;
   let yMin = Number.POSITIVE_INFINITY;
@@ -170,12 +173,31 @@ function projectRect(r: Rect, m: Projective): Rect {
     yMax = Math.max(yMax, py);
   }
 
+  // Out to whole pixels, but for an eighth of one: an edge that passes a pixel by less is not
+  // counted to the next, as adl reports (the `three-d-bounds` case).
   return {
-    xMin: Math.floor(xMin),
-    yMin: Math.floor(yMin),
-    xMax: Math.ceil(xMax),
-    yMax: Math.ceil(yMax),
+    xMin: Math.floor(xMin + SLACK),
+    yMin: Math.floor(yMin + SLACK),
+    xMax: Math.ceil(xMax - SLACK),
+    yMax: Math.ceil(yMax - SLACK),
   };
+}
+
+/** The rectangle around `r`'s four corners through `m`, each divided where `m` is projective: not out to whole pixels. */
+export function boxThrough(r: Rect, m: Matrix): Rect {
+  let xMin = Number.POSITIVE_INFINITY;
+  let yMin = Number.POSITIVE_INFINITY;
+  let xMax = Number.NEGATIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = apply(m, i & 1 ? r.xMax : r.xMin, i & 2 ? r.yMax : r.yMin);
+    xMin = Math.min(xMin, x);
+    yMin = Math.min(yMin, y);
+    xMax = Math.max(xMax, x);
+    yMax = Math.max(yMax, y);
+  }
+
+  return { xMin, yMin, xMax, yMax };
 }
 
 /** Whether a corner of `r` goes behind the eye through `m`, or `m` is CULLED: Flash then draws none of it. */

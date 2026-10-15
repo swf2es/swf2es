@@ -8,6 +8,8 @@
 // flattened into the other's plane. The plane of each object, 2D or 3D,
 // is then a projective map of its space to the container's, and a 3D
 // object's in its parent's is the parent's inverse after its own.
+
+import type { Matrix } from "@swf2es/format";
 import type { DisplayObject, Projection } from "./display.js";
 import { apply, concat, invert, type Projective } from "./geometry.js";
 
@@ -99,7 +101,7 @@ function own3D(d: DisplayObject): M4 {
   const m = new Float64Array(16);
   const space = d.space;
   if (space) {
-    m.set(space.raw);
+    m.set(space.shown);
   } else {
     const p = d.placed;
     m.set([p.a, p.b, 0, 0, p.c, p.d, 0, 0, 0, 0, 1, 0, p.tx, p.ty, 0, 1]);
@@ -175,27 +177,41 @@ function planeOf(projector: DisplayObject, m: M4): Projective {
 }
 
 /**
- * A 3D object's plane in its parent's space, in perspective: through its
- * projector's projection, and back through the parent's plane, which is
- * flat but for a 3D object above it. An object off the list projects
- * through its topmost container's, as a root's.
+ * A 3D object's plane in its parent's space, in perspective (`placed`):
+ * through its projector's projection, its plane in the projector's space
+ * (`own`), and back through the parent's plane there (`back`, null where
+ * the parent is the projector), which is flat but for a 3D object above
+ * it. An object off the list projects through its topmost container's, as
+ * a root's.
  */
-export function placedInPerspective(o: DisplayObject): Projective {
+export function placedInPerspective(o: DisplayObject): {
+  placed: Projective;
+  own: Projective;
+  back: Matrix | null;
+} {
   const parent = o.parent;
   if (!parent) {
     const m = own3D(o);
-    return { a: m[0], b: m[1], c: m[4], d: m[5], tx: m[12], ty: m[13], u: 0, v: 0, w: 1 };
+    const placed = { a: m[0], b: m[1], c: m[4], d: m[5], tx: m[12], ty: m[13], u: 0, v: 0, w: 1 };
+    return { placed, own: placed, back: null };
   }
 
   const projector = projectorOf(o) as DisplayObject;
   const up = parent === projector ? null : toSpace(parent, projector);
-  const own = planeOf(projector, up ? multiply(up, own3D(o)) : own3D(o));
+  const m = up ? multiply(up, own3D(o)) : own3D(o);
+  // A NaN anywhere, as an infinite scale's column has, goes into all of Flash's projection, which
+  // then draws nothing: the plane's z column alone would leave it out.
+  if (m.some(Number.isNaN)) {
+    m.fill(Number.NaN);
+  }
+
+  const own = planeOf(projector, m);
   if (!up) {
-    return own;
+    return { placed: own, own, back: null };
   }
 
   const back = invert(planeOf(projector, up));
-  return (back ? concat(own, back) : own) as Projective;
+  return { placed: (back ? concat(own, back) : own) as Projective, own, back };
 }
 
 /**
