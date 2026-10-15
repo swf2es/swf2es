@@ -69,6 +69,8 @@ export function numberClass(realm: Realm): Class {
       return self;
     },
     (_, args, version) => (args.length > 0 ? toNumber(args[0], version) : 0),
+    // Read-only, as Object's is (adl), unlike Boolean's and String's.
+    READ_ONLY,
   );
   proto.define("__proto__", realm.objectProto, DONT_ENUM | DONT_DELETE);
 

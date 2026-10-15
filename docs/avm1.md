@@ -942,7 +942,9 @@ Math.random's are JavaScript's generator's, not Flash's.
 
 `Extends` gives the subclass a new `prototype` whose prototype is the
 superclass's, with `__constructor__` (hidden from SWF 5) and no
-`constructor` of its own (adl; Ruffle gives one). `InstanceOf` walks the
+`constructor` of its own (adl; Ruffle gives one), through a set, which
+leaves a read-only `prototype`: `Object`'s and `Number`'s are (adl), not
+`Function`'s, `Array`'s, `String`'s or `Boolean`'s. `InstanceOf` walks the
 object's prototypes for the class's own stored `prototype` (no getter, a
 primitive one boxed by `_global`'s class), and each prototype's
 interfaces, and theirs; a primitive is no instance. `CastOp` gives the

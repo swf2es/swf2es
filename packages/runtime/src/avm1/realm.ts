@@ -88,6 +88,7 @@ export class Realm implements Boxer {
   maxCalls = 1000;
 
   constructor() {
+    // Object's `prototype` is read-only (adl: Extends and a set leave it).
     const object = this.classOf(
       this.objectProto,
       (self, args, version) => {
@@ -98,6 +99,7 @@ export class Realm implements Boxer {
         const v = first(args);
         return v === undefined || v === null ? new Avm1Object() : this.box(v, version);
       },
+      READ_ONLY,
     );
     // Function() of nothing gives an object without a prototype, as Ruffle has it.
     const fn = this.classOf(
@@ -299,10 +301,13 @@ export class Realm implements Boxer {
     return proto instanceof Avm1Object ? get(proto, name, version, value) : undefined;
   }
 
-  /** A class with its own prototype object, in Flash's order: `prototype`, `constructor`, `__proto__`. */
-  classOf(proto: Avm1Object, construct: Native, call: Native): Avm1Function {
+  /**
+   * A class with its own prototype object, in Flash's order: `prototype`,
+   * `constructor`, `__proto__`; `flags` adds to `prototype`'s attributes.
+   */
+  classOf(proto: Avm1Object, construct: Native, call: Native, flags = 0): Avm1Function {
     const constr = new Avm1Function(undefined, this, call, construct);
-    constr.define("prototype", proto, DONT_ENUM | DONT_DELETE);
+    constr.define("prototype", proto, DONT_ENUM | DONT_DELETE | flags);
     constr.define("constructor", this.Function ?? constr, DONT_ENUM | DONT_DELETE);
     constr.define("__proto__", this.functionProto, DONT_ENUM | DONT_DELETE | VERSION_6);
     proto.define("constructor", constr, DONT_ENUM | DONT_DELETE);

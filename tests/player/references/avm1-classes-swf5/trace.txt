@@ -64,3 +64,6 @@ native fn props undefined undefined undefined
 new native object
 new escape object 
 new with prim proto object 5
+prototype set Object:kept Function:kept Array:kept String:kept Number:kept Boolean:kept AsBroadcaster:kept Math:kept 
+Object extends true true true
+Number extends true false true

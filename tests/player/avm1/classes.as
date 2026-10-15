@@ -160,3 +160,22 @@ var ne = new escape("a b");
 trace("new escape " + typeof ne + " " + ne);
 f.prototype = 5;
 trace("new with prim proto " + typeof new f() + " " + (new f()).__proto__);
+
+// Which classes' prototypes a set, and Extends, can replace
+var pnames = ["Object", "Function", "Array", "String", "Number", "Boolean", "AsBroadcaster", "Math"];
+var ps = "";
+for (var pi = 0; pi < pnames.length; pi++) {
+  var pc = _global[pnames[pi]];
+  var pbefore = pc.prototype;
+  pc.prototype = {marker: 1};
+  ps += pnames[pi] + ":" + (pc.prototype == pbefore ? "kept" : "set") + " ";
+  pc.prototype = pbefore;
+}
+trace("prototype set " + ps);
+var objectProto = Object.prototype;
+var Sub = function () {};
+__op("Extends", Object, Sub);
+trace("Object extends " + (Object.prototype == objectProto) + " " + (new Sub() instanceof Object) + " " + ({} instanceof Object));
+var numberProto = Number.prototype;
+__op("Extends", Number, Sub);
+trace("Number extends " + (Number.prototype == numberProto) + " " + (5 instanceof Number) + " " + (new Number(5) instanceof Number));
