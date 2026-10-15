@@ -1778,7 +1778,8 @@ The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
 movie go to its `Loader`, as Flash has them (the corpus's
 `mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
 frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
-many frames as its ShowFrame tags end, whatever its header says. The
+many frames as its ShowFrame tags end, whatever its header says, and stays
+on its last without an End tag. The
 player runs AVM1 actions only in a main AVM1 SWF so far, so what needs
 them is missing here: no AVM1 action runs, its
 DoAction, DoInitAction, clip and button actions read past; its buttons

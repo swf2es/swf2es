@@ -2335,7 +2335,10 @@ export class MovieClip extends Container {
     }
 
     if (this.currentFrame >= this.totalFrames) {
-      this.gotoFrame(1, true);
+      if (this.timeline.loops) {
+        this.gotoFrame(1, true);
+      }
+
       return;
     }
 
@@ -2483,4 +2486,5 @@ export const EMPTY_TIMELINE: Timeline = {
   scenes: [{ name: "", frame: 1 }],
   sounds: new Map(),
   stream: null,
+  loops: true,
 };

@@ -81,11 +81,15 @@ export class Avm1 {
     const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
     this.blocks = (factory as unknown as avm1.Factory)(this.rt);
 
+    // The root has a frame a ShowFrame tag ends; actions after the last
+    // run with it, as Flash runs them (its display tags there it leaves).
+    const last = Math.max(1, swf.tags.filter((t) => t.code === tags.ShowFrame).length);
     const frameOf = (frame: number) => {
-      let actions = this.frames.get(frame);
+      const at = Math.min(frame, last);
+      let actions = this.frames.get(at);
       if (!actions) {
         actions = { inits: [], actions: [], corrupt: false };
-        this.frames.set(frame, actions);
+        this.frames.set(at, actions);
       }
 
       return actions;

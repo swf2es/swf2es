@@ -64,6 +64,39 @@ test("each frame's blocks run in order as the root enters it, and the root loops
   assert.deepEqual(errors, []);
 });
 
+test("actions after the last ShowFrame run with the last frame, and a root without End stays on it", async () => {
+  const swf = (header: number, end: boolean) =>
+    w.swf({
+      version: 6,
+      width: 10,
+      height: 10,
+      frameCount: header,
+      tags: [
+        traced("1"),
+        w.showFrame(),
+        traced("2"),
+        w.showFrame(),
+        traced("tail"),
+        ...(end ? [w.end()] : []),
+      ],
+    });
+
+  for (const header of [1, 2, 5]) {
+    assert.deepEqual((await play(swf(header, true), 4)).lines, [
+      "1",
+      "2",
+      "tail",
+      "1",
+      "2",
+      "tail",
+    ]);
+  }
+
+  const { lines, player } = await play(swf(2, false), 5);
+  assert.deepEqual(lines, ["1", "2", "tail"]);
+  assert.equal(player.root.currentFrame, 2);
+});
+
 test("stop holds the root on its frame, whose actions do not run again", async () => {
   const swf = movie(6, [[traced("1")], [doAction((a) => a.push("2").trace().stop())]]);
   const { lines, player } = await play(swf, 5);

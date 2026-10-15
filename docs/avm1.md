@@ -493,8 +493,12 @@ An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
 its header says: Flash plays and loops one so (the corpus's
 `looping_real_1_declared_2` and `looping_real_2_declared_1`, as Ruffle's
 `determine_next_frame` has it), where an AS3 timeline has its header's
-count. Ruffle also has a timeline without an End tag not loop, which is
-not checked yet.
+count. What follows the last ShowFrame is no frame of its own: in adl its
+DoActions run with the last frame, after its others (late enough that the
+harness's last frame ends first), and its places place nothing. A root
+without an End tag stays on its last frame rather than loop, as Ruffle
+has it too; adl agrees, for a SWF loaded as an `AVM1Movie` as for a main
+one (adl's harness loads them all so).
 
 ### Clip events and buttons
 
