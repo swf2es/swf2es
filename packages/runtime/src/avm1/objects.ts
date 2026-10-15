@@ -209,7 +209,10 @@ export class Avm1Object {
    * of them in `props`; null once one is missing, and for any other object.
    */
   elems: Property[] | null = null;
-  /** The primitive a String, Number or Boolean object boxes, undefined for any other. */
+  /**
+   * The primitive a String, Number or Boolean object boxes, a Date's
+   * DateCell, undefined for any other.
+   */
   primitive: Value = undefined;
   /** A function's activation object's `arguments` and `super`, until it has made them. */
   lazy: LazyLocals | null = null;
