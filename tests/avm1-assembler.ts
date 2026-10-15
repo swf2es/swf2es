@@ -77,6 +77,8 @@ export const Simple = {
   PreviousFrame: 0x05,
   Play: 0x06,
   Stop: 0x07,
+  ToggleQuality: 0x08,
+  StopSounds: 0x09,
   Add: 0x0a,
   Subtract: 0x0b,
   Multiply: 0x0c,
@@ -97,7 +99,11 @@ export const Simple = {
   StringAdd: 0x21,
   GetProperty: 0x22,
   SetProperty: 0x23,
+  CloneSprite: 0x24,
+  RemoveSprite: 0x25,
   Trace: 0x26,
+  StartDrag: 0x27,
+  EndDrag: 0x28,
   StringLess: 0x29,
   Throw: 0x2a,
   CastOp: 0x2b,
@@ -148,6 +154,8 @@ export const Simple = {
   Greater: 0x67,
   StringGreater: 0x68,
   Extends: 0x69,
+  /** CallFrame: from 0x80, but with no operands. */
+  Call: 0x9e,
 } as const;
 
 export type SimpleAction = keyof typeof Simple;
@@ -184,6 +192,10 @@ export class Avm1Assembler {
    * the offset it counts from (a branch's end, a body's start).
    */
   private fixups: { at: number; label: string; from: number | string }[] = [];
+  /** Where each action starts, for WaitForFrame's count of the actions it skips. */
+  private starts: number[] = [];
+  /** WaitForFrame and WaitForFrame2 whose counts are known once the labels are: the count's offset, the next action's and the label. */
+  private waits: { at: number; from: number; label: string }[] = [];
   /** Where the last action starts, -1 after a label or raw bytes: a Push there takes a batched push's values. */
   private last = -1;
   private readonly options: AssemblerOptions;
@@ -206,6 +218,7 @@ export class Avm1Assembler {
   /** An action by opcode, with its operands' bytes from 0x80. */
   action(op: number, operands: number[] = []): this {
     this.last = this.code.length;
+    this.starts.push(this.code.length);
     this.code.push(op);
     if (op >= 0x80) {
       this.code.push(...u16(operands.length), ...operands);
@@ -339,6 +352,41 @@ export class Avm1Assembler {
     return this.action(0x8f, [0, 0, 0, 0, 0, 0, 0, ...header]);
   }
 
+  /** GotoFrame: frame `frame`, 0 the first. */
+  gotoFrame(frame: number): this {
+    return this.action(0x81, u16(frame));
+  }
+
+  gotoLabel(label: string): this {
+    return this.action(0x8c, str(label));
+  }
+
+  /** GotoFrame2 of the frame on the stack, a number or a label, playing or not, and with a scene bias where one is given. */
+  gotoFrame2(play: boolean, bias?: number): this {
+    const flags = (play ? 1 : 0) | (bias === undefined ? 0 : 2);
+    return this.action(0x9f, bias === undefined ? [flags] : [flags, ...u16(bias)]);
+  }
+
+  setTarget(target: string): this {
+    return this.action(0x8b, str(target));
+  }
+
+  getUrl(url: string, target: string): this {
+    return this.action(0x83, [...str(url), ...str(target)]);
+  }
+
+  /** WaitForFrame of frame `frame` (0 the first), skipping the actions up to `label` where it is not loaded. */
+  waitForFrame(frame: number, label: string): this {
+    this.waits.push({ at: this.code.length + 5, from: this.code.length + 6, label });
+    return this.action(0x8a, [...u16(frame), 0]);
+  }
+
+  /** WaitForFrame2 of the frame on the stack, as `waitForFrame`. */
+  waitForFrame2(label: string): this {
+    this.waits.push({ at: this.code.length + 3, from: this.code.length + 4, label });
+    return this.action(0x8d, [0]);
+  }
+
   storeRegister(register: number): this {
     return this.action(0x87, [register & 0xff]);
   }
@@ -383,6 +431,11 @@ export class Avm1Assembler {
       const offset = this.at(label) - (typeof from === "number" ? from : this.at(from));
       code[at] = offset & 0xff;
       code[at + 1] = (offset >> 8) & 0xff;
+    }
+
+    for (const { at, from, label } of this.waits) {
+      const to = this.at(label);
+      code[at] = this.starts.filter((p) => p >= from && p < to).length;
     }
 
     for (const { at, catchAt, finallyAt, end, flags, named } of this.tries) {

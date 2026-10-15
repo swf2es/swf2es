@@ -11,7 +11,7 @@ import type { Realm } from "./realm.js";
 import { isPrimitive, toNumber, type Value } from "./values.js";
 
 /** What Flash's log says of a primitive where an action takes an object. */
-const PRIMITIVE =
+export const PRIMITIVE =
   "Parameters of primitive types are no longer coerced into the required type - Object.";
 /** And of an object where it takes a number. */
 const OBJECT =

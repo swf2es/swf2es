@@ -15,7 +15,10 @@
 // popped, the top first, or pops them itself where their number is on the
 // stack (V.initObject, V.callMethod...); DefineFunction and DefineFunction2,
 // which make a function of a region, StoreRegister and Return; Extends,
-// InstanceOf, CastOp, ImplementsOp and RandomNumber. A function's
+// InstanceOf, CastOp, ImplementsOp and RandomNumber; the clip actions,
+// SetTarget, SetTarget2, GetProperty, SetProperty, the gotos, NextFrame,
+// PrevFrame, WaitForFrame and WaitForFrame2 (a branch on whether the frame
+// is loaded), TargetPath, Call, StopSounds and ToggleQuality. A function's
 // region takes its `this` and its arguments, and a DefineFunction2's
 // registers are its `let`s; every other register is one of the movie's
 // four, `cx.g`. With, Try and Throw are calls too, and a region that has a
@@ -99,8 +102,12 @@ export class BlockEmitter {
     if (region.kind !== REGION_Function) {
       out.text("function (cx) {\nconst st = cx.st;\n");
     } else {
-      // A body is called with its `this` and its arguments (docs/avm1.md, "Functions and registers").
+      // A body is called with its `this` and its arguments (docs/avm1.md, "Functions and
+      // registers"); a SWF 4's runs as a SWF 5's (the corpus's `swf4_function_calls`).
       out.text("function (cx, self, args) {\nconst st = cx.st;\n");
+      if (this.version < 5) {
+        out.text("const V = V5;\n");
+      }
       const opener = actions.actions[region.opener];
       if (opener.opcode === ops.OP_DefineFunction2) {
         this.registers = opener.a;
@@ -577,13 +584,69 @@ export class BlockEmitter {
         break;
       case ops.OP_If:
         out.text("if (V.toBoolean(st.pop())) ");
-        if (region.runs(action.target) || within(this.finallies, this.k)) {
-          out.text("{ ");
-          this.goto(region, action.target);
-          out.text(" }\n");
-        } else {
-          out.text("return;\n");
-        }
+        this.branch(region, action.target);
+        break;
+      case ops.OP_WaitForFrame:
+        // A frame not loaded skips the actions after.
+        out.text("if (!V.frameLoaded(cx, ");
+        out.uint(action.a);
+        out.text(")) ");
+        this.branch(region, action.target);
+        break;
+      case ops.OP_WaitForFrame2:
+        out.text("if (!V.frameLoaded2(cx, st.pop())) ");
+        this.branch(region, action.target);
+        break;
+      case ops.OP_GotoFrame:
+        out.text("V.gotoFrame(cx, ");
+        out.uint(action.a);
+        out.text(");\n");
+        break;
+      case ops.OP_GotoLabel:
+        out.text("V.gotoLabel(cx, ");
+        this.string(actions, action.first);
+        out.text(");\n");
+        break;
+      case ops.OP_GotoFrame2:
+        out.text(
+          action.a !== 0
+            ? "V.gotoFrame2(cx, st.pop(), true, "
+            : "V.gotoFrame2(cx, st.pop(), false, ",
+        );
+        out.uint(action.b);
+        out.text(");\n");
+        break;
+      case ops.OP_NextFrame:
+        out.text("V.nextFrame(cx);\n");
+        break;
+      case ops.OP_PreviousFrame:
+        out.text("V.prevFrame(cx);\n");
+        break;
+      case ops.OP_SetTarget:
+        out.text("V.setTarget(cx, ");
+        this.string(actions, action.first);
+        out.text(");\n");
+        break;
+      case ops.OP_SetTarget2:
+        out.text("V.setTarget2(cx, st.pop());\n");
+        break;
+      case ops.OP_GetProperty:
+        out.text("st.push(V.getProperty(cx, st.pop(), st.pop()));\n");
+        break;
+      case ops.OP_SetProperty:
+        out.text("V.setProperty(cx, st.pop(), st.pop(), st.pop());\n");
+        break;
+      case ops.OP_TargetPath:
+        out.text("st.push(V.targetPath(cx, st.pop()));\n");
+        break;
+      case ops.OP_Call:
+        out.text("V.callFrame(cx, st.pop());\n");
+        break;
+      case ops.OP_StopSounds:
+        out.text("V.stopSounds(cx);\n");
+        break;
+      case ops.OP_ToggleQuality:
+        out.text("V.toggleQuality(cx);\n");
         break;
       default:
         if (ops.opcodeKnown[op]) {
@@ -591,6 +654,18 @@ export class BlockEmitter {
           out.text(";\n");
         }
         break;
+    }
+  }
+
+  /** The branch of an If or a WaitForFrame to `target`: there, or the region's exit. */
+  private branch(region: Region, target: i32): void {
+    const out = this.out;
+    if (region.runs(target) || within(this.finallies, this.k)) {
+      out.text("{ ");
+      this.goto(region, target);
+      out.text(" }\n");
+    } else {
+      out.text("return;\n");
     }
   }
 

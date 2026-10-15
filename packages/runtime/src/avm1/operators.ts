@@ -38,17 +38,18 @@ function primitiveOf(value: Value, version: number): Value {
  * Whether `a < b`, as Less2 and Greater compare: strings by their code
  * units, but the empty string after every other, anything else as
  * numbers, undefined where either is NaN; an object whose valueOf gives
- * no primitive is never less, nor greater.
+ * no primitive is never less, nor greater, but a clip is NaN (the corpus's
+ * `greater_swf6`).
  */
 export function lessThan(a: Value, b: Value, version: number): boolean | undefined {
   const pa = primitiveOf(a, version);
   if (!isPrimitive(pa)) {
-    return false;
+    return objects.typeOf(pa) === "movieclip" ? undefined : false;
   }
 
   const pb = primitiveOf(b, version);
   if (!isPrimitive(pb)) {
-    return false;
+    return objects.typeOf(pb) === "movieclip" ? undefined : false;
   }
 
   if (typeof pa === "string" && typeof pb === "string") {

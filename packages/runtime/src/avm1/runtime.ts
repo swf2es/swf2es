@@ -2,6 +2,21 @@
 // takes the runtime, asks it for the operations of the SWF's version,
 // `V`, once, and each region of each block takes its activation, `cx`.
 import { Activation, type Blocks, type Region } from "./activation.js";
+import {
+  callFrame,
+  frameLoaded,
+  frameLoaded2,
+  getProperty,
+  gotoFrame,
+  gotoFrame2,
+  gotoLabel,
+  nextFrame,
+  prevFrame,
+  setProperty,
+  setTarget,
+  setTarget2,
+  targetPathOf,
+} from "./clips.js";
 import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.js";
 import { Avm1Throw, Disabled, Halt, NotYet } from "./errors.js";
 import { Avm1Super, argumentsOf, superOf } from "./functions.js";
@@ -211,6 +226,29 @@ export interface Operations {
   ret(cx: Activation): number;
   play(cx: Activation): void;
   stop(cx: Activation): void;
+  /** SetTarget: the clip `name` names the target, "" the code's own. */
+  setTarget(cx: Activation, name: string): void;
+  setTarget2(cx: Activation, target: Value): void;
+  /** GetProperty: property `index` of the clip `path` names. */
+  getProperty(cx: Activation, index: Value, path: Value): Value;
+  setProperty(cx: Activation, value: Value, index: Value, path: Value): void;
+  /** GotoFrame: frame `frame`, 0 the first, of the target. */
+  gotoFrame(cx: Activation, frame: number): void;
+  gotoLabel(cx: Activation, label: string): void;
+  /** GotoFrame2: the frame the value names, `bias` frames on, played or stopped. */
+  gotoFrame2(cx: Activation, frame: Value, play: boolean, bias: number): void;
+  nextFrame(cx: Activation): void;
+  prevFrame(cx: Activation): void;
+  /** WaitForFrame: whether frame `frame`, 0 the first, is loaded. */
+  frameLoaded(cx: Activation, frame: number): boolean;
+  /** WaitForFrame2: whether the frame the value names, 1 the first, is loaded. */
+  frameLoaded2(cx: Activation, frame: Value): boolean;
+  /** TargetPath: a clip's path, undefined for anything else. */
+  targetPath(cx: Activation, value: Value): Value;
+  /** CallFrame: the actions of the frame the value names run now. */
+  callFrame(cx: Activation, frame: Value): void;
+  stopSounds(cx: Activation): void;
+  toggleQuality(cx: Activation): void;
   /** An action Flash cannot read: the SWF stops there. */
   halt(cx: Activation): never;
   /** A block larger than the compiler takes. */
@@ -359,7 +397,14 @@ function operations(version: number): Operations {
             : charOf(code, false);
         }
       : (a) => charOf(toInt32(a, version) & 0xffff, true),
-    getVariable: (cx, name) => getVariable(cx, nameOf(name, version), version),
+    // A SWF 4's variables hold no display objects (Ruffle's as_swf4_variable).
+    getVariable:
+      version <= 4
+        ? (cx, name) => {
+            const value = getVariable(cx, nameOf(name, version), version);
+            return value instanceof Avm1Object && value.display !== null ? undefined : value;
+          }
+        : (cx, name) => getVariable(cx, nameOf(name, version), version),
     setVariable(cx, value, name) {
       setVariable(cx, nameOf(name, version), value, version);
     },
@@ -384,7 +429,8 @@ function operations(version: number): Operations {
       }
 
       if (object instanceof Avm1Object) {
-        return get(object, key, version);
+        const live = object.display === null ? object : object.display.live();
+        return live === null ? undefined : get(live, key, version);
       }
 
       return object === undefined || object === null
@@ -409,14 +455,18 @@ function operations(version: number): Operations {
       if (object instanceof Avm1Super) {
         set(object.self, key, value, version);
       } else if (object instanceof Avm1Object) {
-        set(object, key, value, version);
+        const live = object.display === null ? object : object.display.live();
+        if (live !== null) {
+          set(live, key, value, version);
+        }
       } else if (object !== undefined && object !== null) {
         set(cx.realm.box(object, version), key, value, version);
       }
     },
     deleteMember(_, name, object) {
       const key = nameOf(name, version);
-      return object instanceof Avm1Object && removeOwn(object, key, version);
+      const o = live(object);
+      return o instanceof Avm1Object && removeOwn(o, key, version);
     },
     deleteVariable: (cx, name) => deleteVariable(cx, nameOf(name, version), version),
     initObject(cx) {
@@ -459,7 +509,7 @@ function operations(version: number): Operations {
       enumerate(cx, getVariable(cx, nameOf(name, version), version), version);
     },
     enumerate2(cx, object) {
-      enumerate(cx, object, version);
+      enumerate(cx, live(object), version);
     },
     callFunction(cx) {
       const st = cx.st;
@@ -474,7 +524,7 @@ function operations(version: number): Operations {
     callMethod(cx) {
       const st = cx.st;
       const name = st.pop();
-      const object = st.pop();
+      const object = live(st.pop());
       const args = popArgs(st, version);
       if (object === undefined || object === null) {
         st.push(undefined);
@@ -565,10 +615,43 @@ function operations(version: number): Operations {
     scopes,
     ret: returned,
     play(cx) {
-      cx.host.play(cx.target);
+      if (cx.target !== null) {
+        cx.host.play(cx.target);
+      }
     },
     stop(cx) {
-      cx.host.stop(cx.target);
+      if (cx.target !== null) {
+        cx.host.stop(cx.target);
+      }
+    },
+    setTarget(cx, name) {
+      setTarget(cx, name, version);
+    },
+    setTarget2(cx, target) {
+      setTarget2(cx, target, version);
+    },
+    getProperty: (cx, index, path) => getProperty(cx, index, path, version),
+    setProperty(cx, value, index, path) {
+      setProperty(cx, value, index, path, version);
+    },
+    gotoFrame,
+    gotoLabel,
+    gotoFrame2(cx, frame, play, bias) {
+      gotoFrame2(cx, frame, play, bias, version);
+    },
+    nextFrame,
+    prevFrame,
+    frameLoaded: (_, frame) => frameLoaded(frame),
+    frameLoaded2: (_, frame) => frameLoaded2(frame, version),
+    targetPath: (_, value) => targetPathOf(value),
+    callFrame(cx, frame) {
+      callFrame(cx, frame, version);
+    },
+    stopSounds(cx) {
+      cx.host.stopSounds?.();
+    },
+    toggleQuality(cx) {
+      cx.host.toggleQuality?.();
     },
     halt(cx) {
       cx.host.halt();
@@ -581,6 +664,15 @@ function operations(version: number): Operations {
       throw new NotYet(name);
     },
   };
+}
+
+/** A value as a reference reaches it now: a clip's AVM1 object the one at its path, undefined for none. */
+function live(value: Value): Value {
+  if (value instanceof Avm1Object && value.display !== null) {
+    return value.display.live() ?? undefined;
+  }
+
+  return value;
 }
 
 /**
