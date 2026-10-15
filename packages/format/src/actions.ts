@@ -107,10 +107,13 @@ export interface ActionList {
   byTag: Map<number, number[]>;
   /**
    * The offsets of the PlaceObject2 and 3 tags' bodies whose clip actions
-   * run past the tag: Flash stops playing the whole SWF, every timeline of
-   * it, as it reaches one, so they have no blocks.
+   * run past the tag, which have no blocks: Flash reads a place's records
+   * as the first of its events comes, and stops playing the whole SWF,
+   * every timeline of it, there.
    */
   corrupt: number[];
+  /** The events of each of those tags' field of all events, by its offset: when Flash stops. */
+  corruptEvents: Map<number, number>;
 }
 
 /**
@@ -123,6 +126,7 @@ export function readActions(swf: Swf): ActionList {
     blocks: [],
     byTag: new Map(),
     corrupt: [],
+    corruptEvents: new Map(),
   };
   walk(swf.bytes, swf.tags, null, list);
   return list;
@@ -180,6 +184,11 @@ function add(list: ActionList, tag: Tag, owner: ActionOwner, offset: number, end
   }
 }
 
+function corrupt(list: ActionList, tag: Tag, events: number): void {
+  list.corrupt.push(tag.offset);
+  list.corruptEvents.set(tag.offset, events);
+}
+
 /** CLIPACTIONS: a reserved u16, the events Flash dispatches, then records to one of no events. */
 function clipActions(
   bytes: Uint8Array,
@@ -216,7 +225,7 @@ function clipActions(
 
     // A record cut short stops the whole SWF in Flash, before any of the place's records runs.
     if (r.pos + 4 > end) {
-      list.corrupt.push(tag.offset);
+      corrupt(list, tag, all);
       return;
     }
 
@@ -229,7 +238,7 @@ function clipActions(
     // goes on from there: that record keeps its key and has no actions.
     if (raw & ClipEvent.keyPress) {
       if (r.pos >= end) {
-        list.corrupt.push(tag.offset);
+        corrupt(list, tag, all);
         return;
       }
 
@@ -238,7 +247,7 @@ function clipActions(
     }
 
     if (length > end - r.pos) {
-      list.corrupt.push(tag.offset);
+      corrupt(list, tag, all);
       return;
     }
 

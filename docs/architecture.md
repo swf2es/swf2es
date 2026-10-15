@@ -129,8 +129,9 @@ the AOT compiler number blocks alike; `readPlace` and `readButton`, given the
 list, give the indices of their own. The records are read as adl reads
 them where it differs from Ruffle: only flags of 0 end a place's records, a
 record runs only for the events the place's field of all events also has,
-and a clip action that runs past its tag stops the whole SWF in Flash, so its
-tag has no blocks and is listed in `corrupt`. A malformed button action ends
+and a clip action that runs past its tag stops the whole SWF in Flash as
+the first event of the place's field of all events comes, so its tag has no
+blocks and is listed in `corrupt`, its events in `corruptEvents`. A malformed button action ends
 its button's list and keeps the records before it.
 
 `codegen` compiles that list to one ES module a SWF (`Codegen.compileActions`,

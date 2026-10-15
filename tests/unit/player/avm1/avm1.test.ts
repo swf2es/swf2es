@@ -189,13 +189,35 @@ test("an action Flash cannot read stops the SWF there, every frame after", async
   assert.equal(player.root.currentFrame, 1);
 });
 
-test("a place whose clip actions run past its tag stops the SWF as the root reaches it", async () => {
-  const past = new w.BitWriter().u16(0).u32(1).u32(1).u32(100).raw([0x07, 0x00]);
-  const place = w.tag(26, new w.BitWriter().u8(0x80).u16(1).raw(past.done()).done());
-  const swf = movie(6, [[traced("1")], [traced("2"), place], [traced("3")]]);
-  const { lines, avm1, player } = await play(swf, 4);
+test("a place whose clip actions run past its tag stops the SWF as the first of its events comes", async () => {
+  /** Frame 2: an init, an action, a place of `events` whose record runs past it, an init. */
+  const stopped = async (events: number) => {
+    const past = new w.BitWriter().u16(0).u32(events).u32(events).u32(100).raw([0x07, 0x00]);
+    const place = w.tag(26, new w.BitWriter().u8(0x80).u16(1).raw(past.done()).done());
+    const init = (id: number, text: string) =>
+      w.doInitAction(id, [...new Avm1Assembler().push(text).trace().end().bytes()]);
+    const swf = movie(7, [
+      [w.sprite(1, 1, [w.showFrame(), w.end()]), w.sprite(2, 1, [w.showFrame(), w.end()])],
+      [init(1, "init"), traced("2"), place, init(2, "init after")],
+      [traced("3")],
+    ]);
+    const { lines, avm1 } = await play(swf, 5);
+    return { lines, halted: avm1.halted };
+  };
 
-  assert.deepEqual(lines, ["1"]);
-  assert.ok(avm1.halted);
-  assert.equal(player.root.currentFrame, 2);
+  // load and initialize as the clip is placed, before the frame's actions.
+  assert.deepEqual(await stopped(1 << 0), { lines: [], halted: true });
+  assert.deepEqual(await stopped(1 << 9), { lines: [], halted: true });
+  // construct after the frame's DoInitActions.
+  assert.deepEqual(await stopped(1 << 18), { lines: ["init", "init after"], halted: true });
+  // enterFrame at the next frame, whether or not the root moves on.
+  assert.deepEqual(await stopped(1 << 1), {
+    lines: ["init", "init after", "2"],
+    halted: true,
+  });
+  // keyDown not until a key comes.
+  assert.deepEqual(await stopped(1 << 6), {
+    lines: ["init", "init after", "2", "3", "2"],
+    halted: false,
+  });
 });

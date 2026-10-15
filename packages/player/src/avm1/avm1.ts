@@ -6,7 +6,7 @@
 // DoAction to the frame's end. Clips' frames, clip events, buttons and the
 // action queue's order come with the later steps.
 import type { Codegen } from "@swf2es/codegen";
-import { type ActionBlock, isAs3, readActions, type Swf, tags } from "@swf2es/format";
+import { type ActionBlock, ClipEvent, isAs3, readActions, type Swf, tags } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import type { MovieClip } from "../display/display.js";
 import { evaluate } from "../scripting/evaluate.js";
@@ -21,12 +21,37 @@ export interface Avm1Options {
   onUncaught?: (error: unknown) => void;
 }
 
+/**
+ * Where in a frame Flash stops the SWF at a place whose clip actions it
+ * cannot read: it reads them as the first of the place's events comes, so
+ * as it places the clip for load and initialize, before any of the
+ * frame's actions; after the frame's DoInitActions for construct; at the
+ * next frame for enterFrame, the frame's actions run. A place of other
+ * events stops it as one comes, which the later steps' events do.
+ */
+type Stop = "place" | "construct" | "enterFrame";
+
+/** The first of `events`, a place's field of all events, by which Flash stops. */
+function stopOf(events: number): Stop | null {
+  if (events & (ClipEvent.load | ClipEvent.initialize)) {
+    return "place";
+  }
+
+  if (events & ClipEvent.construct) {
+    return "construct";
+  }
+
+  return events & ClipEvent.enterFrame ? "enterFrame" : null;
+}
+
+const STOPS: Stop[] = ["place", "construct", "enterFrame"];
+
 /** What runs as the root enters a frame: its DoInitAction blocks, then its DoAction blocks. */
 interface FrameActions {
   inits: ActionBlock[];
   actions: ActionBlock[];
-  /** Whether a tag Flash cannot read is in the frame, which stops the SWF there. */
-  corrupt: boolean;
+  /** Where a place in the frame whose clip actions Flash cannot read stops the SWF. */
+  stop: Stop | null;
 }
 
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
@@ -45,6 +70,8 @@ export class Avm1 {
   private readonly st: avm1.Value[] = [];
   /** The root's frame whose actions ran last. */
   private ranFrame = 0;
+  /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
+  private stopNext = false;
   private readonly host: avm1.Host;
   private readonly onUncaught: (error: unknown) => void;
 
@@ -88,7 +115,7 @@ export class Avm1 {
       const at = Math.min(frame, last);
       let actions = this.frames.get(at);
       if (!actions) {
-        actions = { inits: [], actions: [], corrupt: false };
+        actions = { inits: [], actions: [], stop: null };
         this.frames.set(at, actions);
       }
 
@@ -108,14 +135,19 @@ export class Avm1 {
       (owner.type === "init" ? frame.inits : frame.actions).push(block);
     }
 
-    // The root's tags Flash cannot read, by frame; a sprite's wait for clips' frames.
-    const corrupt = new Set(list.corrupt);
+    // The root's tags Flash cannot read, by frame, the earliest stop of
+    // each; a sprite's wait for clips' frames.
     let frame = 1;
     for (const tag of swf.tags) {
+      const events = list.corruptEvents.get(tag.offset);
       if (tag.code === tags.ShowFrame) {
         frame++;
-      } else if (corrupt.has(tag.offset)) {
-        frameOf(frame).corrupt = true;
+      } else if (events !== undefined) {
+        const actions = frameOf(frame);
+        const stop = stopOf(events);
+        if (stop && (!actions.stop || STOPS.indexOf(stop) < STOPS.indexOf(actions.stop))) {
+          actions.stop = stop;
+        }
       }
     }
   }
@@ -128,6 +160,11 @@ export class Avm1 {
    * constant pool, each starting with the one the block before left.
    */
   frame(root: MovieClip): void {
+    // A clip's enterFrame comes whether the root moved or not.
+    if (this.stopNext) {
+      this.halted = true;
+    }
+
     if (this.halted || root.currentFrame === this.ranFrame) {
       return;
     }
@@ -135,6 +172,11 @@ export class Avm1 {
     this.ranFrame = root.currentFrame;
     const frame = this.frames.get(root.currentFrame);
     if (!frame) {
+      return;
+    }
+
+    if (frame.stop === "place") {
+      this.halted = true;
       return;
     }
 
@@ -153,8 +195,7 @@ export class Avm1 {
       }
     }
 
-    // Flash stops at the tag, before the frame's end, where its DoActions would run.
-    if (frame.corrupt) {
+    if (frame.stop === "construct") {
       this.halted = true;
       return;
     }
@@ -166,6 +207,8 @@ export class Avm1 {
         return;
       }
     }
+
+    this.stopNext ||= frame.stop === "enterFrame";
   }
 
   /** Run `block` with `target` as its target, starting from constant pool `pool`; the pool it leaves. */

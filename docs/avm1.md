@@ -74,13 +74,19 @@ the indices of the blocks they own.
 Where adl reads clip actions otherwise than Ruffle, adl decides: only
 flags of 0 end a place's records (one of unknown events is skipped), a
 record runs only for the events the place's field of all events also has,
-and a record that runs past its tag stops the whole SWF as Flash reaches
-the tag, every timeline of it, none of the place's records run. Such a tag
-has no blocks and is in the list's `corrupt`, for the player to stop the
-SWF there (step 11). A malformed button action keeps the records before
-it; adl defines the button, and whether those run there is not checked
-yet (step 12). The list has the blocks of an ActionScript 3 SWF too,
-whose FileAttributes flag says it runs none of them.
+and a record that runs past its tag stops the whole SWF, every timeline
+of it, none of the place's records run. Flash reads a place's records as
+the first event of its field of all events comes, and stops there: as it
+places the clip for `load` and `initialize`, before any of the frame's
+actions; after the frame's DoInitActions for `construct`; at the next
+frame for `enterFrame`; and as an `unload`, a key, the pointer or `data`
+comes for those, never if none does (adl, the SWF's whole player hung).
+Such a tag has no blocks and is in the list's `corrupt`, its field of all
+events in `corruptEvents`, for the player to stop the SWF there. A
+malformed button action keeps the records before it; adl defines the
+button, and whether those run there is not checked yet (step 12). The
+list has the blocks of an ActionScript 3 SWF too, whose FileAttributes
+flag says it runs none of them.
 
 ## Compiling
 
@@ -483,11 +489,13 @@ pool, each starting with the one the block before left; a DoInitAction's
 pool is its own. The `avm1-hello` case has adl agree on each: an init
 whose tag comes after the frame's DoActions runs first, a value one block
 pushes the next pops, and the next frame's `trace` of the empty stack
-writes `undefined`. A root frame holding a tag in `corrupt` runs its
-DoInitActions before it and stops the SWF, none of the frame's DoActions
-running, as they would only at the frame's end; a sprite's waits for
-clips' frames (step 11). A stopped SWF, there or by `V.halt`, advances no
-timeline and runs no action again.
+writes `undefined`. A root frame holding a tag in `corrupt` stops the
+SWF where the tag's first event comes (above): before the frame's actions
+for `load` and `initialize`, after its DoInitActions for `construct`, as
+the next frame comes for `enterFrame`, whether the root moves on or not;
+those of other events wait for the steps that bring them (an `unload` as
+the clip is removed, step 11), and a sprite's for clips' frames. A stopped
+SWF, there or by `V.halt`, advances no timeline and runs no action again.
 
 An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
 its header says: Flash plays and loops one so (the corpus's

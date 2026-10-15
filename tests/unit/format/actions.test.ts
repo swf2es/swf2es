@@ -264,6 +264,15 @@ test("clip actions cut short or of odd flags are read as Flash reads them", () =
   );
   assert.equal(readPlace(swf.bytes, swf.tags[2], list).actions, null);
   assert.deepEqual(list.corrupt, [swf.tags[0].offset, swf.tags[2].offset, swf.tags[4].offset]);
+  // The events of each one's field of all events, at the first of which Flash stops.
+  assert.deepEqual(
+    [...list.corruptEvents],
+    [
+      [swf.tags[0].offset, 3],
+      [swf.tags[2].offset, 1 << 17],
+      [swf.tags[4].offset, 1],
+    ],
+  );
 });
 
 test("a malformed button action ends the button's list; an action offset of 0 has none", () => {
