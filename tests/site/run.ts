@@ -221,7 +221,7 @@ async function check(): Promise<void> {
           },
         ],
         [
-          "a URL loads, and one the browser may not fetch says why",
+          "a URL loads, and one the browser may not fetch, or a data: one, says why",
           async () => {
             await value(
               `(() => { document.getElementById('url').value = ${JSON.stringify(`${base}demos/crowd.swf`)}; document.getElementById('url-form').requestSubmit(); })()`,
@@ -232,6 +232,11 @@ async function check(): Promise<void> {
               "(() => { document.getElementById('url').value = 'http://127.0.0.1:9/movie.swf'; document.getElementById('url-form').requestSubmit(); })()",
             );
             await until("document.getElementById('status').textContent.includes('CORS')");
+            // A shared link plays a SWF from a server, never one in the link itself.
+            await navigate(
+              `index.html?swf=${encodeURIComponent("data:application/x-shockwave-flash;base64,RldT")}`,
+            );
+            await until("document.getElementById('status').textContent.startsWith('Only http')");
           },
         ],
         [
