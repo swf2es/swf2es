@@ -1,0 +1,228 @@
+push 5
+a: [1|2|3|4|5] len=5
+pop 5
+shift 1
+unshift 5
+a: [x|y|2|3|4] len=5
+reverse true
+a: [4|3|2|y|x] len=5
+pop empty 
+shift empty 
+push none 0
+unshift none 0
+e: [] len=0
+slice(): [0|1|2|3|4] len=5
+slice(1): [1|2|3|4] len=4
+slice(1,3): [1|2] len=2
+slice(-2): [3|4] len=2
+slice(-2,-1): [3] len=1
+slice(3,1): [] len=0
+slice(undefined,2): [0|1] len=2
+slice(1,undefined): [1|2|3|4] len=4
+slice('1','3'): [1|2] len=2
+slice(1.7,3.9): [1|2] len=2
+slice(-100): [0|1|2|3|4] len=5
+slice(100): [] len=0
+slice(NaN): [0|1|2|3|4] len=5
+slice(0,null): [] len=0
+splice(1,2): [1|2] len=2
+p: [0|3|4] len=3
+splice(1,0,a,b): [] len=0
+p: [0|a|b|1|2|3|4] len=7
+splice(1,1,a,b,c): [1] len=1
+p: [0|a|b|c|2|3|4] len=7
+splice(-2): [3|4] len=2
+p: [0|1|2] len=3
+splice() 
+p: [0|1|2|3|4] len=5
+splice(undefined) 
+p: [0|1|2|3|4] len=5
+splice(1,undefined) 
+p: [0|1|2|3|4] len=5
+splice(1,-1) 
+p: [0|1|2|3|4] len=5
+splice(1,100): [1|2|3|4] len=4
+p: [0] len=1
+splice(10,1,z): [] len=0
+p: [0|1|2|3|4|z] len=6
+splice(1,null): [] len=0
+p: [0|1|2|3|4] len=5
+splice('1','2'): [1|2] len=2
+p: [0|3|4] len=3
+concat(): [1|2] len=2
+concat(3,[4,5],[[6]]): [1|2|3|4|5|6,7] len=6
+concat len 4
+concat(obj): [1|2|[object Object]] len=3
+concat str: [1|2|ab] len=3
+join() 1,2
+join(undefined) 12
+join(null) 1null2
+join('') 12
+join(1) 112
+join mixed ,null,true,1.5,s,[object Object],1,2,3
+toString ,null,true,1.5,s,[object Object],1,2,3
+String ,null,true,1.5,s,[object Object],1,2,3
+empty join []
+hole: [|||d] len=4
+keys 3 
+has0  has3 
+keys 4 3 
+rev: [e|d|||] len=5
+keys rev 3 1 4 0 
+has0  has1  has4 
+del: [0||2|3] len=4
+splice del: [|2|3] len=3
+keys 2 1 0 
+keys un 0 1 2 3 
+keys sh 1 0  len 2
+pop hole  len 2
+len2: [0|1] len=2
+keys 1 0 
+len4: [0|1||] len=4
+keys 1 0 
+len str 3 string
+len -1 -1 keys 1 0 
+len 1.9 1.9
+len NaN NaN
+new Array(5) 5 keys  [,,,,]
+new Array('5') 1 5
+new Array(2.5) 2
+new Array(-1) -1
+Array(3) 3
+Array(1,2) 1,2
+new Array() 0
+proto elems: [|] len=2
+pa[0] P
+getter: [1|2|3] len=3
+g[1] 2
+getter rev: [3|2|1] len=3
+g[1] after 2
+watched rev: [4|3|2|1] len=4
+ro[0] 1
+ro rev: [3|2|1] len=3
+dontdelete pop: [1|2] len=2
+keys dd 2 1 0 
+set 5
+push
+set 0
+delete 0
+set 0 again
+pop
+splice
+sort
+length
+w ,
+push x
+x 1,2,3,4
+rev x
+x 4,3,2,1
+push y
+pop y
+set y
+y 1,2,3,,,1 6
+push z 
+rev z
+z ab 2
+splice(1,1,s)
+splice(1,2)
+splice(1,0,x,y)
+splice(3)
+sort desc
+sort
+unshift(x)
+shift
+pop
+push(x,y)
+reverse
+slice
+concat
+setter reverse
+s 3,2,1
+setter sort
+s 1,2,3
+setter slice 1
+setter concat 1,2,3
+setter pop 3
+setter shift 1
+s 2
+unshift(x,y)
+unshift()
+unshift(x) empty
+shift empty
+splice(0,0)
+unshift obj
+shift obj 
+o 2 a b
+splice obj
+o 2 a b
+cmp 53 58 52 52 51 59 58 59 51 13 12 13 32 98 
+b 1,2,3,5,8,9
+sort 10,100,9,A,B,a,b,c
+sort 1 10,100,9,A,a,b,B,c
+sort 2 c,b,a,B,A,9,100,10
+sort 3 c,B,b,a,A,9,100,10
+sort 16 -3,1.5,9,10,100,7
+sort 18 7,100,10,9,1.5,-3
+sort 8 1,2,0 / 3,1,2
+sort 4 0 / 3,1,3
+sort 4 uniq 1,2,3 / 1,2,3
+sort 5 0 / a,A
+sort(undefined)  / 3,1,2
+sort('x')  / 3,1,2
+sort(null)  / 3,1,2
+sort(fn, 2) 3,2,1
+sort(fn, 8) 1,2,0 / 3,1,2
+sort(fn, 4) 3,1,2 / 3,1,2
+sort(fn str) 1,2,3
+sort(fn bool) 1,2,3
+sort undef ,1,2,3,null
+sort holes ,,1,3 len 4
+sort ret true
+sort obj 1,2,3
+sort 1.9 a,b
+sortOn n: {C,1} {a,9} {a,10} {b,2} 
+sortOn v: {C,1} {a,10} {b,2} {a,9} 
+sortOn v 16: {C,1} {b,2} {a,9} {a,10} 
+sortOn v 18: {a,10} {a,9} {b,2} {C,1} 
+sortOn n 1: {a,10} {a,9} {b,2} {C,1} 
+sortOn [n,v]: {C,1} {a,10} {a,9} {b,2} 
+sortOn [n,v] [0,16]: {C,1} {a,9} {a,10} {b,2} 
+sortOn [n,v] [2,18]: {b,2} {a,10} {a,9} {C,1} 
+sortOn [n,v] 2: {b,2} {a,9} {a,10} {C,1} 
+sortOn n 8 3,1,2,0
+sortOn n 4 0
+sortOn v 4 [object Object],[object Object],[object Object],[object Object]
+sortOn () 
+sortOn [] true
+sortOn missing: {C,1} {a,10} {b,2} {a,9} 
+sortOn obj: {C,1} {a,10} {b,2} {a,9} 
+sortOn mixed: 3 {b,0} {a,1} x 
+sortOn inherited: {b,1} {a,2} 
+sortOn N case: {B,1} {a,2} 
+CASEINSENSITIVE 1 DESCENDING 2 UNIQUESORT 4 RETURNINDEXEDARRAY 8 NUMERIC 16
+slice holes 4 keys 
+slice keys 3 2 1 0 
+concat keys 4 3 2 1 0 5
+nested 1,2,3,4,x 3
+join arraylike 
+slice arraylike 
+concat arraylike 
+toString arraylike 
+keys foo foo 1 0 
+keys foo push 2 foo 1 0 
+keys foo rev 2 0 foo 1 
+keys sorted 2 0 1 
+self len 2
+typeof object
+constructor true
+arr == arr false
+arr + 1 NaN
+arr num NaN
+arr less false
+n[1] 20 n[1.5]  n[-1]  n['01']  n[3] 
+n 10,21,30,40 len 4 keys 01 1.5 3 2 1 0 
+sum 101
+built 0,1,4,9,16 len 5 keys 4 3 2 1 0 
+built 0,1,4,9,16,,,49 len 8 keys 7 4 3 2 1 0 
+keys after delete 7 4 3 2 1 
+arguments 3 1+2+3 3,2,1

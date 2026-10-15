@@ -1,0 +1,56 @@
+len 12
+charAt e|||H|l|e|H
+charCodeAt 101 NaN 0 72 72
+concat Hello, World!1nulltrue Hello, World
+indexOf 4 8 4 -1 0 -1  -1 4 0
+lastIndexOf 8 4 -1 4 12  8 3 8 3
+slice ell|World|Wor|||llo, World|llo, World|Hel|
+substring ell|ell|He|lo, World||lo, World|Hel|Hel|lo, World
+substr ell|Wo|lo, World|||llo, World||He||Hel
+upper HELLO, WORLD lower hello, world
+split 1 Hello, World|Hello, World|Hello, World|2|2|Hell,, W|0||Hello, World|Hello, World|1|1|3|Hello, World|1
+split num 1,2 a,b,c
+fromCharCode Hi||H|A|A|A|2
+valueOf Hello, World toString Hello, World
+obj object 3 abc true b abc
+String() |5|null||true|string
+num methods 5 x12345
+generic B 2 OBJ O,J BJ BJ 0
+generic valueOf OBJ 
+len prop 3 3
+set len 10
+3 3
+prim set 
+case 
+strobj add ab
+strobj eq true
+toLowerCase ÀÉÎ İ Σ ß ẞ ��� � � � ẞ àéî ı σ ς ß ��� ÿ Ϭ�
+[a--b--c].split(--) 1 <a--b--c>
+[a-b-c].split(-) 3 <a|b|c>
+[a,b,c].split(,) 3 <a|b|c>
+[a,b,c].split() 1 <a,b,c>
+[a,b,c].split() 3 <a|b|c>
+[a b].split( ) 2 <a|b>
+[abc].split(b) 2 <a|c>
+[abcbd].split(bc) 1 <abcbd>
+[aXbXc].split(X) 3 <a|b|c>
+[a,,b].split(,) 3 <a||b>
+[,a,].split(,) 3 <|a|>
+[].split() 1 <>
+[].split(,) 1 <>
+[].split(x) 1 <>
+[a].split(a) 2 <|>
+[aa].split(a) 3 <||>
+[abab].split(ab) 1 <abab>
+[a,b].split(, ) 1 <a,b>
+limit a,b
+limit 1.5 a
+limit x 0
+limit null 0
+empty limit abc
+undef limit abc
+typeof split function
+pair 6 � � a� 159 4 1 a😋b
+halves � false
+fromCharCode pair �=� half 2 false �=
+split undefined 0 0 a
