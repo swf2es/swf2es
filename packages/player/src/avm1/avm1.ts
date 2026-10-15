@@ -82,6 +82,9 @@ interface Queued {
   entry: number;
 }
 
+/** How many queued actions run before those run are dropped from the queue. */
+const COMPACT_AT = 4096;
+
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
@@ -465,6 +468,16 @@ export class Avm1 implements Movie {
     let pool: avm1.Value[] = [];
     let last: Queued | null = null;
     while (this.next < queue.length) {
+      // Gotos that go back and forth queue each other's frames for as long
+      // as they run, which is forever in a SWF that never stops them: what
+      // has run goes, and so do the clips they removed, so that such a
+      // SWF hangs as Flash's would, without its memory growing.
+      if (this.next >= COMPACT_AT) {
+        queue.splice(0, this.next);
+        this.next = 0;
+        this.clips = this.clips.filter((clip) => !this.removed(clip));
+      }
+
       const q = queue[this.next++];
       if (this.halted || this.rt.disabled) {
         continue;

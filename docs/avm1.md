@@ -1244,8 +1244,10 @@ The first steps leave out: `loadMovie` into levels other than 0, `print`,
 `fscommand` beyond ExternalInterface's, `NetStream` and video, the
 context menu, `TextSnapshot`, `CloneSprite` of a sprite with clip events
 (it clones without them, as a first approach), the 15-second script
-timeout (a block that loops forever hangs the page; the corpus runner
-stops one at its test's timeout), and structured output and stack
+timeout (a block that loops forever hangs the page, as do gotos that
+queue each other's frames forever, though in bounded memory: the queue
+drops what has run as it goes; the corpus runner stops one at its test's
+timeout), and structured output and stack
 registers in the compiler.
 
 ## Testing against Flash

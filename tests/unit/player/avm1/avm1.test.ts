@@ -554,6 +554,21 @@ test("a removed clip's reference finds what is at its path since", async () => {
   ]);
 });
 
+test("gotos that go back and forth in a frame keep no more than a few thousand of what they queued and made", async () => {
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "k" }),
+      as1(`n += 1; if (n < 20000) { gotoAndPlay(2); } else { trace(n); stop(); }`, 6),
+    ],
+    [w.remove(1), w.place({ depth: 2, character: 1, name: "j" }), as1(`gotoAndPlay(1);`, 6)],
+  ]);
+  const { lines, avm1 } = await play(swf, 1);
+
+  assert.deepEqual(lines, ["20000"]);
+  assert.ok((avm1 as unknown as { clips: unknown[] }).clips.length < 10000);
+});
+
 test("clip references are equal where they reach the same clip now (adl)", async () => {
   const swf = movie(6, [
     [
