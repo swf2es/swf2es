@@ -3200,10 +3200,16 @@ A display object goes into 3D once a script sets `z`, `rotationX`,
 `matrix3D` to null takes it back to 2D at the identity, and setting a
 matrix takes it back with that matrix (the `three-d` case, the corpus's
 `displayobject_z` and `geom_transform`). In 3D `transform.matrix` is null,
-`matrix3D` a copy of the 3D transform, and the properties are kept as
-set: a rotation is not brought within ±180, a NaN position or rotation
-is 0. A matrix3D set whole is kept as given and taken apart as
-`decompose` takes it; a position set moves it alone, and a scale or
+and the properties are kept as set: a rotation is not brought within
+±180, a NaN position or rotation is 0. `matrix3D` is the object's own
+Matrix3D, live as adl's (`three-d-matrix`): the getter gives the same one
+each time, which shares the object's matrix, so that what a script does
+to it moves the object, its properties taken apart from it again (the
+Matrix3D's natives tell its owner), and what the properties do shows in
+it. A matrix3D set whole becomes the object's own, a clone of the same
+values too, and is taken apart as `decompose` takes it; one that is
+another object's is ArgumentError 2189, until that object lets it go
+(set to null or another). A position set moves it alone, and a scale or
 rotation set makes it again from all the properties, translation ×
 rotation about x, then y, then z × scale. Each of these setters is a
 touch. A `PerspectiveProjection` of its own measures 500 pixels wide;

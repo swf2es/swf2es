@@ -1,0 +1,14 @@
+same true
+moved 100 0 Vector3D(100, 50, 0)
+turned 30.000000834826057 86.6025390625 -50
+set 0.9848077297210693,0,-0.1736481785774231,0,0,1,0,0,0.1736481785774231,0,0.9848077297210693,0,86.6025390625,50,-50,1 true
+x set Vector3D(120, 50, -50)
+kept true false
+given 31 40 Vector3D(31, 40, 0)
+x set Vector3D(100, 40, 0)
+another's 2189 null
+another's 2189
+let go true
+moved 0 200
+clone 10.000000562866568 true
+2D 0 null Vector3D(360, 50, 0)

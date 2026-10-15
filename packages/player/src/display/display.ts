@@ -628,11 +628,14 @@ export class DisplayObject {
     const radians = [space.rotationX, space.rotationY, space.rotationZ].map(
       (r) => (r * Math.PI) / 180,
     );
-    space.raw = compose3D(
-      [space.x, space.y, space.z],
-      radians,
-      [space.scaleX, space.scaleY, space.scaleZ],
-      "eulerAngles",
+    // In place: a Matrix3D a script holds of it shows the change (transform.matrix3D).
+    space.raw.set(
+      compose3D(
+        [space.x, space.y, space.z],
+        radians,
+        [space.scaleX, space.scaleY, space.scaleZ],
+        "eulerAngles",
+      ),
     );
     space.composed = true;
     this.flatten();
@@ -644,9 +647,11 @@ export class DisplayObject {
    * scales and rotation it had before it went 3D. Null in 2D changes
    * nothing. One made from the 2D matrix (`flat`) with a column of no
    * length reads as the identity at its position, as in Flash, where a
-   * matrix3D set so reads as NaN.
+   * matrix3D set so reads as NaN. The values go into the matrix it has,
+   * which a script's Matrix3D may share (transform.matrix3D), unless it
+   * `adopt`s `raw` itself, a Matrix3D's that a script set.
    */
-  setMatrix3D(raw: Float32Array | null, flat = false): void {
+  setMatrix3D(raw: Float32Array | null, flat = false, adopt = false): void {
     const before = this.space?.flat ?? [this.scaleX, this.scaleY, this.rotation, this.skew];
     if (!raw) {
       if (this.space) {
@@ -658,11 +663,20 @@ export class DisplayObject {
       return;
     }
 
+    const kept = this.space?.raw;
     const [[x, y, z], rotation, [scaleX, scaleY, scaleZ]] = decompose3D(raw, "eulerAngles");
     const singular = flat && (scaleX === 0 || scaleY === 0);
     const [rotationX, rotationY, rotationZ] = singular
       ? [0, 0, 0]
       : rotation.map((r) => r * DEGREES);
+    let held = raw;
+    if (!adopt && kept) {
+      kept.set(raw);
+      held = kept;
+    } else if (!adopt) {
+      held = Float32Array.from(raw);
+    }
+
     this.space = {
       x,
       y,
@@ -673,12 +687,24 @@ export class DisplayObject {
       rotationX,
       rotationY,
       rotationZ,
-      raw: Float32Array.from(raw),
+      raw: held,
       singular,
       composed: false,
       flat: before,
     };
     this.flatten();
+  }
+
+  /**
+   * Its matrix, `raw`, changed in place through a Matrix3D a script holds of
+   * it, which Flash's getter hands out live: taken apart again, as adl reads
+   * the properties after; nothing if it is no longer its matrix.
+   */
+  matrix3DChanged(raw: Float32Array): void {
+    if (this.space?.raw === raw) {
+      this.touch();
+      this.setMatrix3D(raw);
+    }
   }
 
   /** The 2D fields from the 3D transform: the matrix its x and y rows, which a mask draws by (`flatPlaced`). */

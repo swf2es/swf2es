@@ -8693,6 +8693,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 100,
   },
   {
+    name: "three-d-matrix",
+    swf: (abc) => bare(abc, 1, "ThreeDMatrix", 500, 400),
+    script: "ThreeDMatrix",
+    frames: 1,
+    capture: [1],
+    tolerance: 24,
+    maxOutliers: 50,
+  },
+  {
     name: "point-at",
     swf: (abc) => bare(abc, 1, "PointAt"),
     script: "PointAt",

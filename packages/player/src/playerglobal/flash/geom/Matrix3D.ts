@@ -1,6 +1,7 @@
 // flash.geom.Matrix3D's 16 float32 values, in column-major rawData order,
 // and its arithmetic, display/matrix3d.ts's float32 as Flash's.
 import { avm2 } from "@swf2es/runtime";
+import type { DisplayObject } from "../../../display/display.js";
 import {
   compose3D,
   decompose3D,
@@ -34,6 +35,31 @@ function data(o: AsObject): Float32Array {
 }
 
 const ORIENTATIONS = ["eulerAngles", "axisAngle", "quaternion"];
+
+/** The members that change a Matrix3D in place: copyToMatrix3D its argument, the others itself. */
+const CHANGES = [
+  "rawData",
+  "copyFrom",
+  "copyToMatrix3D",
+  "copyRawDataFrom",
+  "copyRowFrom",
+  "copyColumnFrom",
+  "identity",
+  "transpose",
+  "appendTranslation",
+  "prependTranslation",
+  "appendScale",
+  "prependScale",
+  "appendRotation",
+  "prependRotation",
+  "append",
+  "prepend",
+  "invert",
+  "position",
+  "pointAt",
+  "recompose",
+  "interpolateTo",
+];
 
 export function matrix3DNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
@@ -407,6 +433,33 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const b = data(nonNull(to, "toMat"));
       return matrix3D(interpolate3D(a, b, s.rt.toNumber(percent)));
     }
+  }
+
+  // A display object's own Matrix3D (Transform's matrix3D) shares its matrix: one changed in place
+  // has the object take it apart again, as it moves the object in Flash.
+  const told = (o: Value): void => {
+    const owner = (o as AsObject | null)?.$owner as DisplayObject | null | undefined;
+    owner?.matrix3DChanged(data(o as AsObject));
+  };
+  const proto = Matrix3DNatives.prototype as unknown as Record<string, unknown>;
+  for (const name of CHANGES) {
+    const d = Object.getOwnPropertyDescriptor(proto, name) as PropertyDescriptor;
+    if (d.set) {
+      const set = d.set;
+      d.set = function (this: AsObject, v: Value) {
+        set.call(this, v);
+        told(this);
+      };
+    } else {
+      const method = d.value as (this: AsObject, ...args: Value[]) => Value;
+      d.value = function (this: AsObject, ...args: Value[]) {
+        const result = method.apply(this, args);
+        told(name === "copyToMatrix3D" ? args[0] : this);
+        return result;
+      };
+    }
+
+    Object.defineProperty(proto, name, d);
   }
 
   avm2.registerNativeClass(natives, "flash.geom::Matrix3D", Matrix3DNatives);
