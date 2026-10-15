@@ -4,6 +4,7 @@
  * @swf2es/codegen as the SWF loads (its JIT), or takes their modules from a
  * module cache, those the swf2es command compiled ahead of time included.
  */
+export { Avm1, type Avm1Options } from "./avm1/avm1.js";
 export {
   Container,
   DisplayObject,

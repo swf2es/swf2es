@@ -1,8 +1,8 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
-import { isAs3, readSwf, tags } from "@swf2es/format";
-import { type FetchRequest, type FetchResult, Player, Scripting } from "@swf2es/player";
+import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { Avm1, type FetchRequest, type FetchResult, Player, Scripting } from "@swf2es/player";
 import {
   codegenForPlayer,
   configuration,
@@ -374,7 +374,18 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       }
 
-      session.player = new Player(bytes, session.scripting);
+      // An AVM1 SWF's actions, compiled by the same codegen.
+      let avm1: Avm1 | null = null;
+      if (!isAs3(swf) && readActions(swf).blocks.length > 0) {
+        const codegen = await codegenForPlayer();
+        if (!current()) {
+          return;
+        }
+
+        avm1 = new Avm1(codegen, { onUncaught: (error) => this.#report(session, error) });
+      }
+
+      session.player = new Player(bytes, session.scripting, avm1);
       const playback = await Playback.create(
         this.#box,
         session.player,

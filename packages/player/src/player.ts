@@ -2,8 +2,9 @@
 // a frame on, in the order Flash runs one: the clips that were on the
 // display list advance their timelines (a clip made in this frame does not
 // advance until the next); with scripts, the frame's events and scripts
-// follow; then the frame is drawn.
+// follow, or an AVM1 SWF's actions; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
+import type { Avm1 } from "./avm1/avm1.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import {
   BUTTON,
@@ -72,11 +73,14 @@ export class Player {
   /**
    * Without scripts the player is ready at once, but for the images of
    * its bitmap fills, which `start` decodes; with them, `start` loads the
-   * SWF's code and constructs the root, which is asynchronous.
+   * SWF's code and constructs the root, which is asynchronous. An AVM1
+   * SWF's actions run with `avm1`, which `start` compiles them for; an
+   * ActionScript 3 SWF's never do.
    */
   constructor(
     readonly bytes: Uint8Array,
     readonly scripting: Scripting | null = null,
+    readonly avm1: Avm1 | null = null,
   ) {
     this.swf = readSwf(bytes);
     this.library = readLibrary(this.swf);
@@ -110,6 +114,12 @@ export class Player {
     if (!s) {
       // Its bitmap fills' images, which a SWF with scripts decodes as it links.
       await decodeImages(this.library, decodeInBrowser);
+      // Its first frame's actions, once its code is loaded.
+      if (this.avm1) {
+        await this.avm1.load(this.swf);
+        this.avm1.frame(this.root);
+      }
+
       return;
     }
 
@@ -348,7 +358,8 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
-    if (this.stopped) {
+    // An AVM1 SWF halted at what Flash cannot read plays no more.
+    if (this.stopped || this.avm1?.halted) {
       return;
     }
 
@@ -417,5 +428,7 @@ export class Player {
       this.scripting.frame(this.stage);
       this.frameRate = this.scripting.frameRate;
     }
+
+    this.avm1?.frame(this.root);
   }
 }
