@@ -1,0 +1,35 @@
+a initialize a
+kid initialize kid
+a construct a
+kid construct kid
+root 1
+a load a
+kid load kid
+kid frame kid
+clip frame 1 a
+root 1 after movieclip
+kid initialize kid
+kid construct kid
+kid enterFrame kid
+a enterFrame a
+a onEnterFrame 2
+clip frame 2 a
+root onEnterFrame 2
+root 2
+kid load kid
+kid frame kid
+clip frame 1 b
+kid enterFrame kid
+clip frame 2 b
+root onEnterFrame 3
+kid unload kid
+a unload a
+a onUnload a
+root 3 movieclip a movieclip
+clip frame 1 b
+root onEnterFrame 4
+kid unload kid
+b onUnload b movieclip
+root 4 undefined movieclip
+root onEnterFrame 5
+root 5

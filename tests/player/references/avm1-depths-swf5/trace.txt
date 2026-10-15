@@ -1,0 +1,15 @@
+attach none none none none none
+depths   
+removed undefined undefined undefined undefined
+timeline movieclip 
+swapped 
+removed a undefined
+by name  
+by clip  
+by depth 
+duplicate undefined undefined 
+not duplicated undefined undefined
+global movieclip 
+global removed undefined undefined
+replaced undefined undefined 
+root 2 undefined undefined

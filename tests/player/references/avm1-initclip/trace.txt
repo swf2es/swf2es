@@ -1,0 +1,10 @@
+init two
+init four
+root 1
+sprite 2 placed
+sprite 3 early
+init three
+root 2
+sprite 3 late
+root 3
+sprite 4 four
