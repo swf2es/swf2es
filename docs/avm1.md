@@ -719,7 +719,8 @@ where it is not what Ruffle does:
 - `watch(name, callback, data)` is false without a function callback; a
   second `watch` of the name replaces the first; `unwatch` is true where
   there was one, the name found by the version's case. The callback gets
-  the name, the old value (the stored one, no getter called), the new
+  the name (the property's own spelling where it has one, as a SWF 6
+  sets `FOO` over `foo`), the old value (the stored one, no getter called), the new
   one and the data, with the object as `this`.
 - InitObject's object has its own `constructor` (`_global.Object`, don't
   enum and don't delete) before its `__proto__`, in every version; `new`
@@ -741,11 +742,10 @@ A getter, a setter, a watcher or `__resolve` is a native or a function
 of the SWF's, called with the depth a method call has (a getter's and a
 setter's `super` is their object's prototype's), each under the property
 recursion limit (see "Functions and registers"). The natives so far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`,
-`Function.prototype`'s `call` and `apply`, `Error` as `Throw`'s values
-need it, and what boxing, InitArray and the conversions need of
-`Function`, `Array`
-(`toString`, `join`), `String`, `Number` and `Boolean` (their constructors,
-`valueOf` and `toString`), which step 9 completes. `CallFunction`,
+`Function.prototype`'s `call` and `apply`, `Array` and `String` (see
+"Array and String"), `Error` as `Throw`'s values need it, and what
+boxing and the conversions need of `Function`, `Number` and `Boolean`
+(their constructors, `valueOf` and `toString`), which step 9 completes. `CallFunction`,
 `CallMethod`, `NewObject` and `NewMethod` call them; a name that holds no
 function gives undefined, as in Flash.
 
@@ -828,7 +828,88 @@ and is the player's), `Function`, `Array`,
 and the global functions (`parseInt`, `parseFloat`, `isNaN`, `escape`,
 `ASSetPropFlags`, `setInterval` through the host's clock). Each is
 installed on `_global` with the version flags Flash gives it, so a SWF 5
-does not see what SWF 6 added.
+does not see what SWF 6 added. They are in `runtime/src/avm1/globals/`, a
+file per class (`array.ts`, `string.ts`...), each under Ruffle's header
+where it translates Ruffle's; a class's properties are defined in the
+order adl lists them once `ASSetPropFlags` shows them all (a prototype's
+`constructor` before its `__proto__`).
+
+### Array and String
+
+An array keeps its elements apart from its other properties while it is
+dense, each of 0 to n - 1 there: `Avm1Object.elems`, by index, a
+`Property` each, so that `a[i]` with a number (GetMember and SetMember's
+fast paths), `push`, `join` and the other methods need no name and no
+`Map`. Its first hole, an element deleted from the middle or set past the
+end, moves them into the `Map`. Each property has the sequence number of
+its adding, which for..in lists them by, elements among the rest: adl
+lists an array's names in the order they were set, and its methods set
+elements again in their own orders.
+
+Array's methods read and write an object's own elements as adl does
+(the `avm1-array-swf*` cases trace what follows at SWF 5, 6, 7, 8 and 10):
+
+- A read takes the element's stored value: no getter is called, nothing
+  is inherited (`Array.prototype[0]` is not an array's), a hole is
+  undefined; `length` is the own `length` as an int, whatever the object.
+- A write tells the element's watcher, and before it an array's
+  `length`'s watcher where it grows, then stores the value unless the
+  element is read-only; no setter is called (Ruffle calls no watcher).
+  Most writes delete the element first, so it comes last in for..in's
+  order and loses its attributes, unless it cannot be deleted: `reverse`
+  sets each pair in turn, `shift` each element down then `length`,
+  `sort` only the elements that moved; `splice` sets `length` to 0, which
+  deletes all, then sets every element again (Ruffle moves only those
+  past the cut); `unshift` sets `length`, moves the elements up from the
+  last, sets the first ones undefined, sets `length` again and then the
+  new ones, and does nothing with nothing to add; `push` sets each new
+  element, an array's `length` growing with it; `pop` deletes the last
+  and sets `length`. adl's `shift` and `unshift` tell no watcher of an
+  element but the first's once an array has five elements, or four
+  after `sort` moved some: that is not reproduced.
+- `length`'s watcher is told of each of these sets of it, and of an
+  element set past the end (before the element's watcher), but what it
+  gives is not kept, an array's or not: the methods keep their number.
+- A `length` set shorter deletes the elements past it, but those that
+  cannot be deleted, and only if the old `length` is a number; set
+  longer it makes no elements; it is stored as given (`"3"` stays a
+  string, `1.9` a fraction). Under a watcher, adl sets an array's
+  `length` twice, as the array and then as the set: the watcher is told
+  of both, the elements are cut to the length set, and what the second
+  call gives is stored. An element set at 2^31 - 1 wraps it to -2^31,
+  which deletes them all.
+- `join`'s separator converts as the version converts it (`undefined` is
+  `""` to a SWF 6 and `"undefined"` to a 7); `splice` gives undefined for
+  no start, an undefined count or a negative one.
+- `sort` and `sortOn` sort as Flash's quicksort does, as Ruffle has it
+  (the leftmost element the pivot), which a comparator that traces its
+  calls shows; an object that is no function sorts by the default order
+  (Ruffle compares nothing then). `sortOn` reads its fields as own stored
+  values.
+
+What a non-array object's watchers see of Array's methods called on it
+(`Array.prototype.push.call(o)`) is left as Ruffle has it: adl's order
+there is its own.
+
+String's methods take `this` unboxed, so a string's method call makes no
+String object (`Avm1Function`'s `raw`). Up to SWF 5 a string is its
+bytes: the methods count and cut bytes, the case mappings map a byte only
+to a byte, `fromCharCode` writes a code past 0xFF as two bytes,
+`charCodeAt` past the end is 0, and `split` splits only at one character:
+at a comma by default, an empty or longer delimiter leaving the string
+whole, an empty one whatever the limit (Ruffle: an empty one is a comma
+too). From SWF 6, `split` without a delimiter gives the string whole
+whatever its limit, and so does an empty string by any but `""`.
+`substring` from the end on is `""`, whatever its end (Ruffle swaps the
+two first: `"abcdef".substring(10, 2)` is `cdef`). From SWF 6 the methods cut
+UTF-16 code units, keeping half a surrogate pair as it is, so the halves
+joined again are the pair (adl; StringExtract's halves are U+FFFD each).
+Flash's log writes half a pair as U+FFFD, which `trace` does; adl writes
+a low half followed by more as three. `toUpperCase` and `toLowerCase` are
+Flash's own tables (`case.ts`, measured in adl over every code unit), one
+code unit to one. `String.prototype.valueOf` of anything that is no
+String gives it as a string, by its `toString` (Ruffle: undefined),
+`toString` undefined.
 
 ## The player
 
@@ -979,7 +1060,15 @@ registers in the compiler.
   own count (`check-references.ts`, and `run.ts --update` for a case). A player
   case of its own (`tests/player/cases.ts`) is an AVM1 SWF the test
   assembles from actions, through a small assembler in the tests
-  (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`.
+  (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`;
+  the classes' cases are AS1 source (`tests/player/avm1/*.as`), which a
+  small compiler in the tests (`tests/avm1-script.ts`) turns into the
+  actions Flash's own compiler writes for it, in its shape: a constant
+  pool, batched pushes, and from SWF 7 DefineFunction2 with what it
+  preloads and its variables in registers (each case traces the same
+  in adl and the player as one push per value and DefineFunction gave).
+  The cases of the earlier steps stay assembled by hand, so that the
+  actions no compiler writes stay covered.
   What only a main AVM1 SWF shows, `_level0` as the root of the stage or
   `Stage.width`, comes from the corpus, as adl cannot run one as the main
   movie.
@@ -1028,10 +1117,11 @@ AVM1, so nothing is expected from it.
 
 ## Open questions
 
-- **Writing AVM1 test cases.** Nothing in the repository compiles AS1 or
-  AS2. The tests assemble actions (`tests/avm1-assembler.ts`);
+- **Writing AVM1 test cases.** The tests assemble actions
+  (`tests/avm1-assembler.ts`), or compile a subset of AS1
+  (`tests/avm1-script.ts`: no classes, `with`, `try` or `tellTarget`);
   an AS2 compiler in the oracle's image (MTASC, or Ruffle's test
-  compiler) would let cases be written as source instead.
+  compiler) would take AS2's classes too.
 - **A main AVM1 SWF without `Scripting`.** The pointer and keyboard take
   `Scripting` today. Either they report through an interface both VMs
   implement (the plan), or an AVM1 SWF gets a `Scripting` with
@@ -1174,6 +1264,14 @@ determinism` green, and the corpus baseline may only go up.
    `Math`, `Date`, `AsBroadcaster`, `Extends`, `InstanceOf`, `CastOp`,
    `ImplementsOp`, the global functions. Corpus tests of each; the
    largest step, and may split by class.
+   Built in three: 9a `Array` and `String` (see "Array and String"),
+   with arrays' dense elements, and `tests/avm1-script.ts`, a small
+   compiler of AS1 source to actions for the cases, whose
+   `avm1-array-swf*` and `avm1-string-swf*` trace some 300 and 55 lines
+   each in adl, which the player matches. The 21 tests that looped
+   forever without Array's methods finish, and the corpus goes from 104
+   to 112 of the 649; most of the rest of those reach `InstanceOf` (28),
+   `Extends` (21) and `GetUrl` (34).
 10. **Clips and paths.** `MovieClip`'s AS2 face, targets, `SetTarget`,
     `SetTarget2`, path resolution (slash, dot, `_root`, `_levelN`,
     `_parent`), `GetProperty` and `SetProperty` by index, `eval`, timeline

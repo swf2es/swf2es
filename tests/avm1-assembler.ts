@@ -154,6 +154,17 @@ const u16 = (n: number) => [n & 0xff, (n >> 8) & 0xff];
 const i32 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
 const str = (s: string) => [...new TextEncoder().encode(s), 0];
 
+/** How an assembler writes what Flash's compiler would write otherwise. */
+export interface AssemblerOptions {
+  /**
+   * Strings pushed as constants of a pool, which the block declares first
+   * and its functions' bodies (`child()`) share, as Flash's compiler does.
+   */
+  pool?: boolean;
+  /** A push straight after a push added to it, one Push of all the values, as Flash's compiler writes them. */
+  batch?: boolean;
+}
+
 export class Avm1Assembler {
   private code: number[] = [];
   private labels = new Map<string, number>();
@@ -171,9 +182,28 @@ export class Avm1Assembler {
    * the offset it counts from (a branch's end, a body's start).
    */
   private fixups: { at: number; label: string; from: number | string }[] = [];
+  /** Where the last action starts, -1 after a label or raw bytes: a Push there takes a batched push's values. */
+  private last = -1;
+  private readonly options: AssemblerOptions;
+  /** The pool's strings and their indices, shared with the children; null without a pool. */
+  private readonly strings: Map<string, number> | null;
+  /** Whether the block declares the pool: the root's, not a function body's. */
+  private readonly root: boolean;
+
+  constructor(options: AssemblerOptions = {}, strings?: Map<string, number>) {
+    this.options = options;
+    this.root = strings === undefined;
+    this.strings = strings ?? (options.pool ? new Map() : null);
+  }
+
+  /** An assembler for a function's body, written as this one writes and sharing its pool. */
+  child(): Avm1Assembler {
+    return new Avm1Assembler(this.options, this.strings ?? undefined);
+  }
 
   /** An action by opcode, with its operands' bytes from 0x80. */
   action(op: number, operands: number[] = []): this {
+    this.last = this.code.length;
     this.code.push(op);
     if (op >= 0x80) {
       this.code.push(...u16(operands.length), ...operands);
@@ -185,18 +215,28 @@ export class Avm1Assembler {
   /** Bytes as they are, for actions this does not write. */
   raw(bytes: number[]): this {
     this.code.push(...bytes);
+    this.last = -1;
     return this;
   }
 
   label(name: string): this {
     this.labels.set(name, this.code.length);
+    this.last = -1;
     return this;
   }
 
   push(...values: PushValue[]): this {
     const operands: number[] = [];
     for (const v of values) {
-      if (typeof v === "string") {
+      if (typeof v === "string" && this.strings !== null) {
+        let index = this.strings.get(v);
+        if (index === undefined) {
+          index = this.strings.size;
+          this.strings.set(v, index);
+        }
+
+        operands.push(...number(constant(index)));
+      } else if (typeof v === "string") {
         operands.push(PushType.string, ...str(v));
       } else if (v && typeof v === "object" && "bytes" in v) {
         operands.push(PushType.string, ...v.bytes, 0);
@@ -210,6 +250,16 @@ export class Avm1Assembler {
         operands.push(...(Object.is(v, -0) || (v | 0) !== v ? number(double(v)) : number(v)));
       } else {
         operands.push(...number(v));
+      }
+    }
+
+    const last = this.last;
+    if (this.options.batch && last >= 0 && this.code[last] === 0x96) {
+      const length = this.code[last + 1] | (this.code[last + 2] << 8);
+      if (length + operands.length <= 0xffff) {
+        this.code.push(...operands);
+        [this.code[last + 1], this.code[last + 2]] = u16(length + operands.length);
+        return this;
       }
     }
 
@@ -324,7 +374,7 @@ export class Avm1Assembler {
     return this.action(Simple.End);
   }
 
-  /** The block's bytes, every label it jumps to defined. */
+  /** The block's bytes, every label it jumps to defined, its pool first where it has one. */
   bytes(): Uint8Array {
     const code = [...this.code];
     for (const { at, label, from } of this.fixups) {
@@ -337,6 +387,12 @@ export class Avm1Assembler {
       const catches = this.at(finallyAt) > this.at(catchAt) ? TryFlag.catch : 0;
       const finallies = this.at(end) > this.at(finallyAt) ? TryFlag.finally : 0;
       code[at] = (flags ?? catches | finallies) | (named ? 0 : TryFlag.catchInRegister);
+    }
+
+    if (this.root && this.strings !== null && this.strings.size > 0) {
+      const strings = [...this.strings.keys()];
+      const pool = [...u16(strings.length), ...strings.flatMap(str)];
+      return new Uint8Array([0x88, ...u16(pool.length), ...pool, ...code]);
     }
 
     return new Uint8Array(code);

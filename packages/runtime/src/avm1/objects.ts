@@ -13,8 +13,15 @@
 // on: none while all its names are lower case. A SWF from 7 never needs it.
 // `__proto__` is a property like any other, which the object also keeps
 // at hand for the walks up its prototypes.
+//
+// An array keeps its elements apart, by index in a JavaScript array, while
+// they are 0 to n - 1 each there, as arrays mostly are: a read or write of
+// an element by its number, and Array's methods, then need no Map and no
+// name. A hole, an element deleted from the middle or set past the end,
+// moves them all into the Map. Each property has its sequence number, the
+// order of its adding, which for..in lists in, elements among the rest.
+import { lowerCase } from "./case.js";
 import { Avm1Throw } from "./errors.js";
-import { lowerCase } from "./lowercase.js";
 import { stringOf, toNumber, type Value } from "./values.js";
 
 /** Not listed by for..in. */
@@ -49,7 +56,7 @@ const foldCache = new Map<string, string>();
 
 /**
  * A name as a SWF up to 6 compares it: each code unit folded to Flash's
- * lower case (`lowercase.ts`), which is not JavaScript's: `ΑΣ` and `ασ`
+ * lower case (`case.ts`), which is not JavaScript's: `ΑΣ` and `ασ`
  * are one name, `İ` and `i` too, `ẞ` and `ß` are not.
  */
 export function fold(name: string): string {
@@ -84,12 +91,17 @@ export function fold(name: string): string {
  */
 let resolvers = false;
 
+/** The sequence number the next property added takes. */
+let added = 0;
+
 /** A property: a value, or a getter and maybe a setter (addProperty), and its attributes. */
 export class Property {
   get: Avm1Object | null = null;
   set: Avm1Object | null = null;
   /** How many calls of its getter, setter or watcher are running, for the recursion limit. */
   calls = 0;
+  /** When it was added: for..in lists an object's properties in this order, reversed. */
+  seq = added++;
 
   constructor(
     /** As it was first set, which for..in lists. */
@@ -127,15 +139,58 @@ export interface LazyLocals {
 /** A native function: `self` is an object (a primitive boxed), as Flash gives natives. */
 export type Native = (self: Avm1Object, args: Value[], version: number) => Value;
 
+/**
+ * A native that takes `this` as it is, a primitive unboxed: String's
+ * methods, which would otherwise box every string they are called on.
+ */
+export type RawNative = (self: Value, args: Value[], version: number) => Value;
+
 /** Boxing primitives as natives' `this`: the realm's. */
 export interface Boxer {
   box(value: Value, version: number): Avm1Object;
 }
 
+/**
+ * `name` as an index of an array's elements: digits with no leading zero
+ * (`0` itself, `12`, not `012` nor `1.0`), -1 for any other name.
+ */
+export function elementIndex(name: string): number {
+  const n = name.length;
+  if (n === 0 || n > 10) {
+    return -1;
+  }
+
+  let index = name.charCodeAt(0) - 0x30;
+  if (index < 0 || index > 9 || (index === 0 && n > 1)) {
+    return -1;
+  }
+
+  for (let i = 1; i < n; i++) {
+    const d = name.charCodeAt(i) - 0x30;
+    if (d < 0 || d > 9) {
+      return -1;
+    }
+
+    index = index * 10 + d;
+  }
+
+  return index;
+}
+
+const bySeq = (a: Property, b: Property) => a.seq - b.seq;
+
 /** The index of an object none of whose names folding changes, shared. */
 const UNCHANGED = new Map<string, Property>();
 
 export class Avm1Object {
+  /**
+   * What node's inspector shows: an object reaches the whole realm, so a
+   * failed assertion that printed it in full ran a test to tens of gigabytes.
+   */
+  [Symbol.for("nodejs.util.inspect.custom")](): string {
+    return `Avm1Object(${this.props.size} properties)`;
+  }
+
   /** By exact name, in the order they were added. */
   readonly props = new Map<string, Property>();
   /**
@@ -149,6 +204,11 @@ export class Avm1Object {
   watchers: Watcher[] | null = null;
   /** Whether it is an array, whose `length` follows its elements: what Array's constructor makes. */
   array = false;
+  /**
+   * An array's elements by index while each of 0 to n - 1 is there, none
+   * of them in `props`; null once one is missing, and for any other object.
+   */
+  elems: Property[] | null = null;
   /** The primitive a String, Number or Boolean object boxes, undefined for any other. */
   primitive: Value = undefined;
   /** A function's activation object's `arguments` and `super`, until it has made them. */
@@ -175,9 +235,22 @@ export class Avm1Object {
     return p === null || !allowed(p.flags, version) ? undefined : p.value;
   }
 
+  /** The own property of exactly `name`, an element or in `props`. */
+  exact(name: string): Property | undefined {
+    const elems = this.elems;
+    if (elems !== null) {
+      const i = elementIndex(name);
+      if (i >= 0) {
+        return i < elems.length ? elems[i] : undefined;
+      }
+    }
+
+    return this.props.get(name);
+  }
+
   /** The own property `name` names for a SWF of `version`, whatever its attributes. */
   own(name: string, version: number): Property | undefined {
-    const p = this.props.get(name);
+    const p = this.exact(name);
     if (p !== undefined) {
       return p;
     }
@@ -214,7 +287,7 @@ export class Avm1Object {
    * case, replacing what it had, a getter included, where it was.
    */
   define(name: string, value: Value, flags: number): Property {
-    const p = this.props.get(name);
+    const p = this.exact(name);
     if (p !== undefined) {
       p.value = value;
       p.flags = flags;
@@ -229,6 +302,19 @@ export class Avm1Object {
   /** A new property, last in the order: the prototype where `proto`. */
   add(name: string, value: Value, flags: number, proto = name === "__proto__"): Property {
     const p = new Property(name, value, flags);
+    const elems = this.elems;
+    if (elems !== null) {
+      const i = elementIndex(name);
+      if (i === elems.length) {
+        elems.push(p);
+        return p;
+      }
+
+      if (i >= 0) {
+        this.sparse();
+      }
+    }
+
     this.props.set(name, p);
     if (proto) {
       this.protoProp = p;
@@ -254,6 +340,19 @@ export class Avm1Object {
   }
 
   remove(p: Property): void {
+    const elems = this.elems;
+    if (elems !== null) {
+      const i = elementIndex(p.name);
+      if (i >= 0 && i < elems.length && elems[i] === p) {
+        if (i === elems.length - 1) {
+          elems.pop();
+          return;
+        }
+
+        this.sparse();
+      }
+    }
+
     this.props.delete(p.name);
     if (p === this.protoProp) {
       this.protoProp = null;
@@ -273,6 +372,52 @@ export class Avm1Object {
           break;
         }
       }
+    }
+  }
+
+  /** Its own properties in the order they were added: its elements among the rest. */
+  ownProperties(): Property[] {
+    const own = [...this.props.values()];
+    const elems = this.elems;
+    if (elems === null || elems.length === 0) {
+      return own;
+    }
+
+    for (const p of elems) {
+      own.push(p);
+    }
+
+    return own.sort(bySeq);
+  }
+
+  /**
+   * An own property set as Array's methods set an element they delete
+   * first: its value, no attributes, last in the order.
+   */
+  renew(p: Property, value: Value): void {
+    p.value = value;
+    p.flags = 0;
+    p.get = null;
+    p.set = null;
+    p.seq = added++;
+  }
+
+  /** Its elements moved into `props`, as a hole needs: in the order they were added. */
+  sparse(): void {
+    const elems = this.elems;
+    if (elems === null) {
+      return;
+    }
+
+    this.elems = null;
+    if (elems.length === 0) {
+      return;
+    }
+
+    const all = [...this.props.values(), ...elems].sort(bySeq);
+    this.props.clear();
+    for (const p of all) {
+      this.props.set(p.name, p);
     }
   }
 
@@ -336,6 +481,8 @@ export class Avm1Function extends Avm1Object {
     readonly realm: Boxer,
     readonly native: Native,
     readonly construct: Native | null = null,
+    /** Whether `native` takes `this` unboxed, a RawNative. */
+    readonly raw = false,
   ) {
     super();
     // A SWF 5 sees no prototype of a function, as adl has it.
@@ -353,7 +500,9 @@ export class Avm1Function extends Avm1Object {
    * it was found, is what `super` starts from in a ScriptFunction.
    */
   call(self: Value, args: Value[], version: number, _depth = 0): Value {
-    return this.native(this.realm.box(self, version), args, version);
+    return this.raw
+      ? (this.native as RawNative)(self, args, version)
+      : this.native(this.realm.box(self, version), args, version);
   }
 
   /** Run it on `self`, the object `new` made, where it has no `construct`. */
@@ -386,7 +535,7 @@ export function find(o: Avm1Object, name: string, version: number): Property | u
   let key: string | null = null;
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
-    let own = p.props.get(name);
+    let own = p.exact(name);
     if (own === undefined && p.lazy !== null) {
       own = p.lazy.local(p, name, version);
     }
@@ -421,7 +570,7 @@ export function get(
   let key: string | null = null;
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
-    let own = p.props.get(name);
+    let own = p.exact(name);
     if (own === undefined && p.lazy !== null) {
       own = p.lazy.local(p, name, version);
     }
@@ -493,6 +642,38 @@ function resolve(o: Avm1Object, name: string, version: number, self: Value): Val
   return undefined;
 }
 
+/**
+ * What the watcher of `name` on `o` gives for a set of `value` over `old`,
+ * `value` where it has none, or where as many of its calls run as may.
+ */
+export function watched(
+  o: Avm1Object,
+  name: string,
+  old: Value,
+  value: Value,
+  version: number,
+): Value {
+  const w = o.watcher(name, version);
+  if (w === undefined) {
+    return value;
+  }
+
+  // The calls count on the property, the getter's and setter's with them, else on the watcher.
+  const own = o.own(name, version);
+  const count = own ?? w;
+  if (count.calls >= propertyCalls(version)) {
+    return value;
+  }
+
+  count.calls++;
+  try {
+    // adl names the property as it was first set, where there is one (`FOO` sets `foo`).
+    return invoke(w.callback, o, [own?.name ?? name, old, value, w.data], version);
+  } finally {
+    count.calls--;
+  }
+}
+
 /** `name`'s stored value on `o` or its prototypes, no getter called: what a watcher is told was there. */
 function stored(o: Avm1Object, name: string, version: number): Value {
   let p: Value = o;
@@ -518,58 +699,47 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
     return;
   }
 
-  if (o.watchers !== null) {
-    const w = o.watcher(name, version);
-    // The calls count on the property, the getter's and setter's with them, else on the watcher.
-    const count = w === undefined ? undefined : (o.own(name, version) ?? w);
-    if (w !== undefined && count !== undefined && count.calls < propertyCalls(version)) {
-      const old = stored(o, name, version);
-      let thrown: Avm1Throw | null = null;
-      count.calls++;
-      try {
-        value = invoke(w.callback, o, [name, old, value, w.data], version);
-      } catch (error) {
-        if (!(error instanceof Avm1Throw)) {
-          throw error;
-        }
+  // adl changes an array's `length`, telling its watcher, before the set's own watcher is told.
+  const early = o.array && o.watchers !== null;
+  if (early && virtual(o, name, version) === undefined) {
+    arraySet(o, name, value, version);
+  }
 
-        thrown = error;
-        value = undefined;
-      } finally {
-        count.calls--;
+  if (o.watchers !== null) {
+    try {
+      value = watched(o, name, stored(o, name, version), value, version);
+    } catch (error) {
+      if (!(error instanceof Avm1Throw)) {
+        throw error;
       }
 
       // A watcher that throws sets undefined, then the value is thrown (adl).
-      if (thrown !== null) {
-        store(o, name, value, version);
-        throw thrown;
-      }
+      store(o, name, undefined, version, early);
+      throw error;
     }
   }
 
-  store(o, name, value, version);
+  store(o, name, value, version, early);
 }
 
-/** A set past the watcher: the setter, or the value stored. */
-function store(o: Avm1Object, name: string, value: Value, version: number): void {
+/**
+ * A set past the watcher: the setter, or the value stored; an array's
+ * `length` changed with it unless `early`, before the watcher, did.
+ */
+function store(o: Avm1Object, name: string, value: Value, version: number, early: boolean): void {
   const own = o.own(name, version);
   if (own === undefined) {
-    let p: Value = o.protoFor(version);
-    for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
-      const virtual = p.own(name, version);
-      if (virtual !== undefined && virtual.get !== null && allowed(virtual.flags, version)) {
-        if (virtual.set !== null) {
-          callSetter(virtual, virtual.set, o, value, version);
-        }
-
-        return;
+    const v = virtual(o, name, version);
+    if (v !== undefined) {
+      if (v.set !== null) {
+        callSetter(v, v.set, o, value, version);
       }
 
-      p = p.protoFor(version);
+      return;
     }
   }
 
-  if (o.array) {
+  if (o.array && !early) {
     arraySet(o, name, value, version);
   }
 
@@ -590,15 +760,45 @@ function store(o: Avm1Object, name: string, value: Value, version: number): void
   }
 }
 
-/** An array's `length` as a set changes it: elements past a shorter one go, an index past it grows it. */
+/** The first getter on the prototypes of `o` that a set of `name` goes to, where `o` has no `name`. */
+function virtual(o: Avm1Object, name: string, version: number): Property | undefined {
+  if (o.own(name, version) !== undefined) {
+    return undefined;
+  }
+
+  let p: Value = o.protoFor(version);
+  for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
+    const v = p.own(name, version);
+    if (v !== undefined && v.get !== null && allowed(v.flags, version)) {
+      return v;
+    }
+
+    p = p.protoFor(version);
+  }
+
+  return undefined;
+}
+
+/**
+ * An array's `length` as a set changes it: elements past a shorter one go,
+ * an index past it grows it. Under a watcher, adl sets `length` twice, as
+ * the array and then as the set: the watcher is told of both, the first
+ * one's value is the length cut to and kept, the second's what is stored.
+ */
 export function arraySet(a: Avm1Object, name: string, value: Value, version: number): void {
   if ((caseSensitive(version) ? name : fold(name)) === "length") {
-    const length = toNumber(value, version) | 0;
-    const old = a.props.get("length")?.value;
+    const p = a.props.get("length");
+    const old = p?.value;
+    if (a.watchers !== null) {
+      watched(a, "length", old, value, version);
+    }
+
     if (typeof old === "number") {
-      for (let i = Math.max(length, 0); i < (old | 0); i++) {
-        removeOwn(a, String(i), version);
-      }
+      truncate(a, toNumber(value, version) | 0, old | 0);
+    }
+
+    if (a.watchers !== null && p !== undefined && (p.flags & READ_ONLY) === 0) {
+      p.value = value;
     }
 
     return;
@@ -606,18 +806,85 @@ export function arraySet(a: Avm1Object, name: string, value: Value, version: num
 
   const index = arrayIndex(name, version);
   if (index !== null && index >= lengthOf(a)) {
-    const p = a.props.get("length");
-    if (p === undefined) {
-      a.add("length", index + 1, 0);
-    } else {
-      p.value = (index + 1) | 0;
+    growTo(a, (index + 1) | 0, version);
+  }
+}
+
+/**
+ * An array's `length` grown to `length` by an element set past it, its
+ * watcher told, though what it gives is not kept (adl); past 2^31 - 1 the
+ * int wraps, shorter, and deletes.
+ */
+export function growTo(a: Avm1Object, length: number, version: number): void {
+  const p = a.props.get("length");
+  if (a.watchers !== null) {
+    watched(a, "length", p === undefined ? undefined : p.value, length, version);
+  }
+
+  if (length < 0 && p !== undefined && typeof p.value === "number") {
+    truncate(a, length, p.value | 0);
+  }
+
+  if (p === undefined) {
+    a.add("length", length, 0);
+  } else {
+    p.value = length;
+  }
+}
+
+/**
+ * The elements of `a` from `length` to `old` deleted, as a shorter
+ * `length` deletes them; those that cannot be deleted stay.
+ */
+export function truncate(a: Avm1Object, length: number, old: number): void {
+  const from = Math.max(length, 0);
+  if (old <= from) {
+    return;
+  }
+
+  let i = old - 1;
+  const elems = a.elems;
+  if (elems !== null) {
+    // No index past a dense array's elements is there.
+    i = Math.min(i, elems.length - 1);
+    while (i >= from && a.elems !== null) {
+      const p = a.elems[i];
+      if ((p.flags & DONT_DELETE) === 0) {
+        a.remove(p);
+      }
+
+      i--;
+    }
+  }
+
+  if (i < from) {
+    return;
+  }
+
+  // Past what the object holds, its names are fewer than the indices.
+  if (i - from > a.props.size) {
+    for (const p of [...a.props.values()]) {
+      const index = elementIndex(p.name);
+      if (index >= from && index <= i && (p.flags & DONT_DELETE) === 0) {
+        a.remove(p);
+      }
+    }
+
+    return;
+  }
+
+  for (; i >= from; i--) {
+    const p = a.props.get(String(i));
+    if (p !== undefined && (p.flags & DONT_DELETE) === 0) {
+      a.remove(p);
     }
   }
 }
 
-/** An array's own `length`, as an int. */
-export function lengthOf(o: Avm1Object): number {
-  return toNumber(o.props.get("length")?.value, 7) | 0;
+/** An array's own `length`, as an int, converted as a SWF of `version` converts it. */
+export function lengthOf(o: Avm1Object, version = 7): number {
+  const length = o.props.get("length")?.value;
+  return typeof length === "number" ? length | 0 : toNumber(length, version) | 0;
 }
 
 /**
@@ -691,7 +958,7 @@ export function keys(o: Avm1Object, version: number, out: string[] = [], depth =
     out.length = n;
   }
 
-  const own = [...o.props.values()];
+  const own = o.ownProperties();
   for (let i = own.length - 1; i >= 0; i--) {
     if ((own[i].flags & DONT_ENUM) === 0) {
       out.push(own[i].name);
