@@ -33,7 +33,10 @@ package flash.display
 		}
 		public function set culling(value:String):void
 		{
-			// TODO do validation
+			if (value != TriangleCulling.NONE && value != TriangleCulling.POSITIVE && value != TriangleCulling.NEGATIVE)
+			{
+				Error.throwError(ArgumentError, 2008, "culling");
+			}
 			this._culling = value;
 		}
 	}

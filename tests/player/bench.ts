@@ -108,6 +108,12 @@
 // draw on the GPU followed by an operation on the store's pixels, which
 // must not bring them back from the GPU each frame (perFrame.readbacks).
 //
+// --triangles N plays instead a script that clears a Graphics and draws N
+// textured triangles again on every frame, their vertices turning, with
+// drawTriangles and a smoothed, repeating bitmap fill, as a 3D engine draws
+// its meshes: what drawing them anew each frame costs, and whether it
+// leaks. --culled has it cull half of them.
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -127,7 +133,8 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
+//     | --triangles N [--culled]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
@@ -162,6 +169,7 @@ const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
 const scrolled = option("scroll", 0);
+const triangles = option("triangles", 0);
 const cpuProfile = args.includes("--cpu-profile")
   ? args[args.indexOf("--cpu-profile") + 1]
   : undefined;
@@ -835,6 +843,99 @@ function scrollSwf(size: number): Uint8Array {
   });
 }
 
+/** The triangles' class (--triangles): a grid of textured triangles drawn anew each frame. */
+const TRIANGLES_SOURCE = `package {
+  import flash.display.BitmapData;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Main extends Sprite {
+    private var shape:Shape = new Shape();
+    private var texture:BitmapData = new BitmapData(64, 64, false, 0);
+    private var vertices:Vector.<Number> = new Vector.<Number>();
+    private var indices:Vector.<int> = new Vector.<int>();
+    private var uvt:Vector.<Number> = new Vector.<Number>();
+    private var side:int;
+    private var frame:int = 0;
+
+    public function Main() {
+      texture.perlinNoise(16, 16, 2, 7, true, true);
+      // Two triangles a square of a grid of side by side squares.
+      side = Math.ceil(Math.sqrt(COUNT / 2));
+      for (var y:int = 0; y <= side; y++) {
+        for (var x:int = 0; x <= side; x++) {
+          vertices.push(0, 0);
+          uvt.push(x / 8, y / 8, 1);
+        }
+      }
+
+      for (var i:int = 0; i < COUNT; i++) {
+        var square:int = i >> 1;
+        var at:int = (square / side) * (side + 1) + square % side;
+        if (i & 1) {
+          indices.push(at + 1, at + side + 2, at + side + 1);
+        } else {
+          indices.push(at, at + 1, at + side + 1);
+        }
+      }
+
+      addChild(shape);
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      var turn:Number = frame / 48;
+      var c:Number = Math.cos(turn);
+      var s:Number = Math.sin(turn);
+      var cell:Number = 560 / side;
+      var k:int = 0;
+      for (var y:int = 0; y <= side; y++) {
+        for (var x:int = 0; x <= side; x++) {
+          var px:Number = (x - side / 2) * cell;
+          var py:Number = (y - side / 2) * cell;
+          vertices[k++] = 400 + px * c - py * s;
+          vertices[k++] = 300 + px * s + py * c;
+        }
+      }
+
+      shape.graphics.clear();
+      shape.graphics.beginBitmapFill(texture, null, true, true);
+      shape.graphics.drawTriangles(vertices, indices, uvt, CULLING);
+      shape.graphics.endFill();
+    }
+  }
+}
+`;
+
+/** The triangles (--triangles): `count` textured triangles a script draws anew each frame. */
+function trianglesSwf(count: number, culled: boolean): Uint8Array {
+  const name = `BenchTriangles${count}${culled ? "Culled" : ""}`;
+  const abc = compiler()(
+    name,
+    TRIANGLES_SOURCE.replaceAll("COUNT", String(count)).replace(
+      "CULLING",
+      culled ? '"positive"' : '"none"',
+    ),
+  );
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x102040),
+      w.doAbc(abc, name),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** The town's classes: the root, and each character's, whose frame scripts count its loops. */
 const TOWN_SOURCE = `package {
   import flash.display.MovieClip;
@@ -1128,33 +1229,35 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  scrolled > 0
-    ? scrollSwf(scrolled)
-    : town > 0
-      ? townSwf(town)
-      : toggleBranches > 0
-        ? branchSwf(toggleBranches)
-        : toggle > 0
-          ? toggleSwf(toggle)
-          : toggleStatic > 0
-            ? toggleStaticSwf(toggleStatic)
-            : scripted > 0
-              ? scriptedSwf(scripted, args.includes("--still"))
-              : pulse > 0
-                ? pulseSwf(pulse, option("loop", 96), option("line", 1))
-                : masks > 0
-                  ? masksSwf(masks, args.includes("--unmasked"))
-                  : branches > 0
-                    ? branchSwf(branches)
-                    : rig > 0
-                      ? rigSwf(
-                          rig,
-                          args.includes("--swap"),
-                          args.includes("--fresh"),
-                          args.includes("--blurred") || filtered > 0,
-                          args.includes("--glide"),
-                        )
-                      : synthetic();
+  triangles > 0
+    ? trianglesSwf(triangles, args.includes("--culled"))
+    : scrolled > 0
+      ? scrollSwf(scrolled)
+      : town > 0
+        ? townSwf(town)
+        : toggleBranches > 0
+          ? branchSwf(toggleBranches)
+          : toggle > 0
+            ? toggleSwf(toggle)
+            : toggleStatic > 0
+              ? toggleStaticSwf(toggleStatic)
+              : scripted > 0
+                ? scriptedSwf(scripted, args.includes("--still"))
+                : pulse > 0
+                  ? pulseSwf(pulse, option("loop", 96), option("line", 1))
+                  : masks > 0
+                    ? masksSwf(masks, args.includes("--unmasked"))
+                    : branches > 0
+                      ? branchSwf(branches)
+                      : rig > 0
+                        ? rigSwf(
+                            rig,
+                            args.includes("--swap"),
+                            args.includes("--fresh"),
+                            args.includes("--blurred") || filtered > 0,
+                            args.includes("--glide"),
+                          )
+                        : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1207,27 +1310,29 @@ const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    scrolled > 0
-      ? `scrolled bitmap of ${scrolled}`
-      : town > 0
-        ? `town of ${town}`
-        : toggleBranches > 0
-          ? `toggle of ${toggleBranches} branches`
-          : toggle > 0
-            ? `toggle of ${toggle}`
-            : toggleStatic > 0
-              ? `static toggle of ${toggleStatic}`
-              : scripted > 0
-                ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                : pulse > 0
-                  ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                  : masks > 0
-                    ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                    : branches > 0
-                      ? `${branches} branches`
-                      : rig > 0
-                        ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                        : shapes,
+    triangles > 0
+      ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+      : scrolled > 0
+        ? `scrolled bitmap of ${scrolled}`
+        : town > 0
+          ? `town of ${town}`
+          : toggleBranches > 0
+            ? `toggle of ${toggleBranches} branches`
+            : toggle > 0
+              ? `toggle of ${toggle}`
+              : toggleStatic > 0
+                ? `static toggle of ${toggleStatic}`
+                : scripted > 0
+                  ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                  : pulse > 0
+                    ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                    : masks > 0
+                      ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                      : branches > 0
+                        ? `${branches} branches`
+                        : rig > 0
+                          ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                          : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {

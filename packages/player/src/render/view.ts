@@ -42,7 +42,7 @@ import {
 import type { Filter as FilterRecord } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import type { ShapeLayer } from "../display/shapes.js";
+import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
@@ -88,6 +88,7 @@ import {
 } from "./tessellate.js";
 import { drawStaticText, drawText } from "./text.js";
 import { Plane, SAMPLES } from "./three.js";
+import { TriangleView } from "./triangles.js";
 
 /** No transform, for a 3D object's container in its bitmap's space. */
 const IDENTITY_PLACE = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -142,6 +143,17 @@ function clearsAll(ct: ColorTransform | null): boolean {
   return ct !== null && ct.aAdd <= 0 && ct.aMul * 255 + ct.aAdd <= 0;
 }
 
+/** Whether any of the layers has drawTriangles' textured triangles. */
+function meshed(layers: readonly ShapeLayer[]): boolean {
+  for (let i = 0; i < layers.length; i++) {
+    if (layers[i].meshes) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Whether any layer has lines of the node's own to stroke. */
 function hasLines(strokes: readonly (SharedGraphics | null)[]): boolean {
   for (let i = 0; i < strokes.length; i++) {
@@ -169,6 +181,8 @@ interface Node {
   art: PixiContainer;
   /** The layers drawn, a shape's or a drawing's, as of the last redraw. */
   layers: ShapeLayer[];
+  /** Whether they were drawn turned over, which decides the triangles a culled drawTriangles keeps. */
+  mirrored: boolean;
   /** Their fills, one context a layer. */
   fills: GraphicsContext[];
   /**
@@ -423,6 +437,9 @@ export class PixiView {
    * which are the stage's, so its thinnest line is a pixel.
    */
   screenScale: number | null = null;
+  /** Its drawings' textured triangles drawn, and the target's pixels a side of one of Flash's they were last told. */
+  private readonly meshes = new Set<TriangleView>();
+  private meshPixel = 1;
   /** The thinnest line it last drew the stage's lines with; a change draws them all again. */
   private strokedAt = 0;
   /** The filter units it last drew the stage's filters with; the stage's own scale changes them too. */
@@ -795,6 +812,7 @@ export class PixiView {
       node = {
         container: new PixiContainer(),
         world: [0, 0, 0, 0],
+        mirrored: false,
         stale: null,
         art,
         layers: [],
@@ -1222,7 +1240,12 @@ export class PixiView {
     }
 
     const shape = o instanceof ShapeObject ? this.shapeOf(o, node) : null;
-    node.layers = o.drawing?.layers ?? shape?.layers ?? [];
+    // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
+    const w = node.world;
+    node.mirrored = w[0] * w[3] - w[1] * w[2] < 0;
+    node.layers = o.drawing
+      ? facing(o.drawing.layers, node.mirrored, o.drawing.version)
+      : (shape?.layers ?? []);
     const slicing = this.slicing(o, node);
     if (slicing) {
       node.layers = sliceLayers(node.layers, slicing.slice, slicing.m, o.drawing?.version);
@@ -1260,8 +1283,9 @@ export class PixiView {
         : null;
     // The Graphics the last content left, taken in place where it laid out
     // its fills and lines alike.
+    // Textured triangles are meshes among the Graphics, which a spare's places do not allow for.
     const spare =
-      node.spared && node.spare && laidOutAs(node.spare.lines, node.layers)
+      node.spared && node.spare && laidOutAs(node.spare.lines, node.layers) && !meshed(node.layers)
         ? node.spare.graphics
         : null;
     if (!spare) {
@@ -1280,6 +1304,13 @@ export class PixiView {
       }
 
       this.graphic(node, spare, next++, fills[i]);
+      const meshes = layer.meshes;
+      if (meshes) {
+        for (let k = 0; k < meshes.length; k++) {
+          this.drawMesh(node, meshes[k]);
+        }
+      }
+
       const borrowed = lines?.[i];
       const strokes = layer.strokes.length
         ? this.graphic(node, spare, next++, borrowed?.shared)
@@ -1296,6 +1327,17 @@ export class PixiView {
     }
 
     this.restroke(node);
+  }
+
+  /** Textured triangles, after what the node draws so far; none where the renderer is not WebGL's. */
+  private drawMesh(node: Node, mesh: TriangleMesh): void {
+    const texture =
+      this.renderer.type === RendererType.WEBGL
+        ? gpuBitmaps(this.renderer).texture(mesh.image)
+        : null;
+    if (texture && mesh.positions.length) {
+      node.art.addChild(new TriangleView(mesh, texture, this.flashPixel, this.meshes));
+    }
   }
 
   /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
@@ -1842,6 +1884,13 @@ export class PixiView {
       }
     }
 
+    if (o.drawing?.culled && !(dirty & CONTENT)) {
+      const w = node.world;
+      if (w[0] * w[3] - w[1] * w[2] < 0 !== node.mirrored) {
+        dirty |= CONTENT;
+      }
+    }
+
     if (dirty & CONTENT) {
       this.redraw(o, node);
     } else if ((moved || node.strokedAt !== this.leastWidth) && hasLines(node.strokes)) {
@@ -1871,6 +1920,16 @@ export class PixiView {
         for (const { fill } of layer.fills) {
           if (fill.type === "image" && fill.image instanceof BitmapStore) {
             bitmaps.fillTexture(fill.image, fill.repeat, fill.smooth);
+          }
+        }
+      }
+
+      for (const leaf of node.art.children) {
+        if (leaf instanceof TriangleView) {
+          const texture = bitmaps.texture(leaf.source.image);
+          leaf.visible = texture !== null;
+          if (texture) {
+            leaf.show(texture);
           }
         }
       }
@@ -2175,15 +2234,7 @@ export class PixiView {
     }
 
     drawn.sort((a, b) => b.depth - a.depth);
-    // The target's pixels a side of a pixel of Flash's, which the quad samples once: in another's
-    // bitmap, its samples; on the stage, a pixel of the screen, where the host says what that is.
-    const scale = this.stage.scale.x;
-    const onStage = this.fresh
-      ? this.samples
-      : this.screenScale
-        ? ((this.renderer.resolution ?? 1) * (Number.isFinite(scale) && scale > 0 ? scale : 1)) /
-          this.screenScale
-        : 1;
+    const onStage = this.flashPixel;
     for (const { depth, node, o } of drawn) {
       const plane = node.plane as Plane;
       // What it draws is measured again only when it may have changed, as its bitmap is drawn.
@@ -2535,6 +2586,24 @@ export class PixiView {
     }
   }
 
+  /**
+   * The target's pixels a side of a pixel of Flash's, which a 3D object's
+   * quad and textured triangles sample once: in a BitmapData's draw, its
+   * samples; on the stage, a pixel of the screen, where the host says what
+   * that is.
+   */
+  private get flashPixel(): number {
+    if (this.fresh) {
+      return this.samples;
+    }
+
+    const scale = this.stage.scale.x;
+    return this.screenScale
+      ? ((this.renderer.resolution ?? 1) * (Number.isFinite(scale) && scale > 0 ? scale : 1)) /
+          this.screenScale
+      : 1;
+  }
+
   /** Bring the stage up to date with `root`'s display list, without drawing. */
   /** The thinnest line, in stage pixels: a pixel of the screen. */
   private get leastWidth(): number {
@@ -2586,6 +2655,14 @@ export class PixiView {
 
     trimPools();
     trimBatchers(this.renderer, now);
+    const pixel = this.flashPixel;
+    if (pixel !== this.meshPixel) {
+      this.meshPixel = pixel;
+      for (const mesh of this.meshes) {
+        mesh.pixel = pixel;
+      }
+    }
+
     const units = this.filterUnits;
     this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
     this.strokedAt = this.leastWidth;

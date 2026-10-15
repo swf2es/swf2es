@@ -6,7 +6,6 @@
       "flash.accessibility::AccessibilityImplementation#get_selectionActiveIndex",
       "flash.accessibility::AccessibilityImplementation#get_selectionAnchorIndex",
       "flash.display::DisplayObjectContainer#get:textSnapshot",
-      "flash.display::Graphics#drawTriangles",
       "flash.display::Sprite#startTouchDrag",
       "flash.display::Sprite#stopTouchDrag",
       "flash.net::SecureSocket#addBinaryChainBuildingCertificate",

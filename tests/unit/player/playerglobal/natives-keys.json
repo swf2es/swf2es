@@ -166,6 +166,7 @@
     "flash.display::Graphics#drawRect",
     "flash.display::Graphics#drawRoundRect",
     "flash.display::Graphics#drawRoundRectComplex",
+    "flash.display::Graphics#drawTriangles",
     "flash.display::Graphics#endFill",
     "flash.display::Graphics#lineBitmapStyle",
     "flash.display::Graphics#lineGradientStyle",
