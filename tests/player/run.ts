@@ -13,6 +13,7 @@
 //   node tests/player/run.ts --update [case...]       draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { isAs3, readSwf } from "../../packages/format/dist/index.js";
 import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
 import { compareImages, decodePng, differenceImage, encodePng } from "./image.ts";
@@ -44,22 +45,31 @@ const swfOf = (c: PlayerCase): Uint8Array => {
     ? c.swf(scripts.get(c.script ?? "") as Uint8Array)
     : (c.swf as Uint8Array);
 };
-const traced = (c: PlayerCase) => Boolean(c.script || c.build);
+/** Whether `swf` is an AVM1 SWF; one that does not read is not. */
+const isAvm1 = (swf: Uint8Array): boolean => {
+  try {
+    return !isAs3(readSwf(swf));
+  } catch {
+    return false;
+  }
+};
+const traced = (c: PlayerCase) => Boolean(c.script || c.build || c.traced);
 const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), tableMinRun: c.table ? 1 : undefined }));
 
 if (update) {
   // The oracle needs adl, which only this mode does.
   const { runFlash } = await import("../../oracle/flash.ts");
+  // The harness loads each SWF with a Loader, where an AVM1 SWF runs as an
+  // AVM1Movie, whose first frame's traces adl prints only with its second:
+  // it is given two frames at least.
   const results = await runFlash(
     jobs.map((job, i) => {
       const flash = chosen[i].flash;
-      return {
-        ...job,
-        swf:
-          typeof flash === "function"
-            ? flash(scripts.get(chosen[i].script ?? "") as Uint8Array)
-            : (flash ?? job.swf),
-      };
+      const swf =
+        typeof flash === "function"
+          ? flash(scripts.get(chosen[i].script ?? "") as Uint8Array)
+          : (flash ?? job.swf);
+      return { ...job, swf, frames: isAvm1(swf) ? Math.max(job.frames, 2) : job.frames };
     }),
   );
   for (const [i, c] of chosen.entries()) {
