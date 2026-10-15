@@ -362,6 +362,31 @@ async function churn(n: number) {
   return { ...counts };
 }
 
+/**
+ * Make an element for the AVM1 SWF, play it until its actions stop its
+ * root on frame 2, and take it away, `n` times; how many stopped there.
+ */
+async function avm1Churn(n: number) {
+  let stopped = 0;
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("swf2es-player") as Player;
+    p.setAttribute("src", "/web-test/avm1.swf");
+    document.body.append(p);
+    await p.ready;
+    await frames(4);
+    const player = p.player as { root: { currentFrame: number; playing: boolean } } | null;
+    if (player) {
+      stopped += player.root.currentFrame === 2 && !player.root.playing ? 1 : 0;
+      gone.push(new WeakRef(player));
+    }
+
+    p.remove();
+    await new Promise((done) => setTimeout(done, 0));
+  }
+
+  return stopped;
+}
+
 /** What a collection left: players made and destroyed still alive, and codegen instances. */
 function survivors() {
   return {
@@ -487,6 +512,7 @@ Object.assign(globalThis, {
   embedderFetch,
   watched,
   churn,
+  avm1Churn,
   survivors,
   webCounts: () => ({ ...counts }),
 });

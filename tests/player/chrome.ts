@@ -638,6 +638,8 @@ export interface SteppedPage {
   close(): Promise<void>;
   /** The JS heap in use after a full collection, in bytes. */
   heap(): Promise<number>;
+  /** How many WebAssembly memories the page holds, after a full collection. */
+  memories(): Promise<number>;
   /** A heap snapshot written to `path`, for DevTools' Memory panel to open. */
   snapshot(path: string): Promise<void>;
 }
@@ -677,6 +679,25 @@ export function withSteppedPage<T>(
           await send("HeapProfiler.collectGarbage");
           await send("HeapProfiler.collectGarbage");
           return (await send<{ usedSize: number }>("Runtime.getHeapUsage")).usedSize;
+        },
+        memories: async () => {
+          await send("HeapProfiler.collectGarbage");
+          await send("HeapProfiler.collectGarbage");
+          const prototype = await send<{ result: { objectId: string } }>("Runtime.evaluate", {
+            expression: "WebAssembly.Memory.prototype",
+          });
+          const { objects } = await send<{ objects: { objectId: string } }>(
+            "Runtime.queryObjects",
+            { prototypeObjectId: prototype.result.objectId },
+          );
+          const { result } = await send<{ result: { value: number } }>("Runtime.callFunctionOn", {
+            objectId: objects.objectId,
+            functionDeclaration: "function () { return this.length; }",
+            returnByValue: true,
+          });
+          await send("Runtime.releaseObject", { objectId: objects.objectId });
+          await send("Runtime.releaseObject", { objectId: prototype.result.objectId });
+          return result.value;
         },
         snapshot: async (path) => {
           const chunks: string[] = [];
