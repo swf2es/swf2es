@@ -15,6 +15,10 @@ does not run yet: an AVM1 SWF plays its timeline with no actions. Video,
 Stage3D and the clipboard are not there either.
 [docs/architecture.md](docs/architecture.md) describes how it all works.
 
+**Try it** at https://swf2es.github.io/swf2es/: open or drop a SWF (it is
+read in your browser, never uploaded), or play a demo. The site is
+`apps/site`, built from `main`.
+
 ## Libraries
 
 A SWF's ActionScript 3 links against `builtin.abc` (avmplus' standard
@@ -219,6 +223,7 @@ packages/
   cli/           the swf2es ahead-of-time compiler
 apps/
   desktop/       the desktop app: an Electron shell around <swf2es-player>
+  site/          the demo site on GitHub Pages: <swf2es-player> on a static page
 vendor/
   pixijs/        the swf2es fork of PixiJS (MIT), a submodule built by pnpm build
 oracle/          avmshell and Flash (adl) references
