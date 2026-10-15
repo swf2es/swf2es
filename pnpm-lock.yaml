@@ -168,6 +168,8 @@ importers:
 
   tests/programs: {}
 
+  tests/site: {}
+
   tests/tamarin: {}
 
   tests/unit:
