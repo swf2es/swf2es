@@ -8684,6 +8684,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 700,
   },
   {
+    name: "three-d-filter-blend",
+    swf: (abc) => bare(abc, 1, "ThreeDFilterBlend", 500, 400),
+    script: "ThreeDFilterBlend",
+    frames: 1,
+    capture: [1],
+    tolerance: 24,
+    maxOutliers: 100,
+  },
+  {
     name: "point-at",
     swf: (abc) => bare(abc, 1, "PointAt"),
     script: "PointAt",

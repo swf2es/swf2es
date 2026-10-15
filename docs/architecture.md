@@ -3258,7 +3258,8 @@ child scaled up inside it is sharp, and its filters are in its space and
 turn with it. The colour and alpha of all above it go into each of its
 fills in the bitmap, so a card under a half-transparent parent shows its
 own white square paler than its edge, not as a layer faded whole; its
-blend mode composites the drawn bitmap with what is behind it; and its
+blend mode composites the drawn bitmap, its filters' result included,
+with what is behind it (`three-d-filter-blend`); and its
 scrollRect counts for nothing, Flash drawing, bounding and hitting all of
 it (`three-d-mixed`, the same in adl and Flash Player). The view does the
 same (`render/three.ts`): the object's container is in a holder of its

@@ -2175,6 +2175,12 @@ export class PixiView {
       }
 
       this.dropPlane(node);
+      // Its chain blends it again, as a 2D object's does.
+      const chain = node.filters[0];
+      if (chain instanceof FilterChain) {
+        chain.blendOver((node.directBlend as BLEND_MODES | null) ?? "normal");
+      }
+
       return container;
     }
 
@@ -2211,8 +2217,8 @@ export class PixiView {
   /**
    * A 3D object's blend mode put on its quad, which Flash composites with what is behind it, not
    * on its content within its bitmap: the blend's filters, or the GPU's own blending, from the
-   * node's state, as blendDirectly may change them outside a sync. One with filters that blends
-   * directly is blended by its chain (FilterChain.blendOver), in its bitmap.
+   * node's state, as blendDirectly may change them outside a sync. Its filters' chain draws
+   * their result into the bitmap as it is, the quad blending it (`three-d-filter-blend`).
    */
   private blendQuad(node: Node, plane: Plane): void {
     const { container } = node;
@@ -2221,14 +2227,18 @@ export class PixiView {
       container.filters = node.filters.length > 0 ? node.filters : null;
     }
 
+    const chain = node.filters[0];
+    if (chain instanceof FilterChain) {
+      chain.blendOver("normal");
+    }
+
     const blending = node.directBlend === null ? blendFilters(node.blend) : null;
     if (blending !== plane.blending) {
       plane.blending = blending;
       plane.quad.filters = blending;
     }
 
-    const direct = node.filters[0] instanceof FilterChain ? null : node.directBlend;
-    plane.quad.blendMode = (direct as BLEND_MODES | null) ?? "inherit";
+    plane.quad.blendMode = (node.directBlend as BLEND_MODES | null) ?? "inherit";
     container.blendMode = "inherit";
   }
 
