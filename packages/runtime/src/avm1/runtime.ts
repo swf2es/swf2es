@@ -68,11 +68,9 @@ function operations(version: number): Operations {
     constantPool(cx, pool) {
       cx.pool = pool;
     },
-    // undefined traces as "undefined" whatever the version, which converts it to "" up to SWF 6;
-    // a carriage return breaks the line, as Flash's log writes it.
+    // undefined traces as "undefined" whatever the version, which converts it to "" up to SWF 6.
     trace(cx, value) {
-      const text = value === undefined ? "undefined" : stringOf(value, version);
-      cx.host.trace(text.replaceAll("\r", "\n"));
+      cx.host.trace(value === undefined ? "undefined" : stringOf(value, version));
     },
     toBoolean: (value) => toBoolean(value, version),
     toString: (value) => stringOf(value, version),

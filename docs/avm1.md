@@ -361,8 +361,12 @@ conversions, `toBoolean` and `stringOf`; `runtime.ts` the `Activation`
 and the errors: `NotYet`, an action not done yet, which ends its block
 and is reported, and `Halt`, thrown once the host has stopped the SWF at
 an action Flash cannot read. `trace` writes `undefined` whatever the
-version, as Flash does, and a carriage return as a line break, as Flash's
-log writes it (the corpus's `trace`; adl's stderr keeps the `\r`).
+version, as Flash does, and its text as it is: Flash's log breaks a line
+at a carriage return as at a line feed (the corpus's `trace`, and AS3's
+`edittext_newline_stripping`), where adl's stderr keeps the `\r`, so the
+tests' harnesses break lines so, in the player's traces and adl's alike,
+for AS3 as for AVM1 (`oracle/flash.ts`, `tests/player/page.ts`); a host
+writing a log does the same.
 
 ### Objects
 

@@ -12,7 +12,10 @@ import type { MovieClip } from "../display/display.js";
 import { evaluate } from "../scripting/evaluate.js";
 
 export interface Avm1Options {
-  /** Where trace's lines go: the console's log by default. */
+  /**
+   * Where trace's text goes, as it is, the console's log by default: a
+   * "\r" in it breaks Flash's log's line as a "\n" does.
+   */
   print?: (line: string) => void;
   /** An error a block threw that nothing caught: the console's by default. The SWF plays on. */
   onUncaught?: (error: unknown) => void;

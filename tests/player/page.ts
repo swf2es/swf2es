@@ -91,8 +91,8 @@ async function scriptingFor(
 
   const scripting = new Scripting(codegen, {
     moduleCache,
-    // A trace of several lines is several lines of Flash's output.
-    print: (line) => trace.push(...line.split("\n")),
+    // A trace of several lines is several lines of Flash's log, which breaks at "\r" as at "\n".
+    print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
     debugger: true,
     // The frame clock: traces that tell getTimer are the same on every run.
@@ -163,7 +163,7 @@ async function avm1For(
   // domain, and an instance each would hold a wasm memory each until collected.
   avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
   return new Avm1(await avm1Codegen, {
-    print: (line) => trace.push(...line.split("\n")),
+    print: (line) => trace.push(...line.split(/\r|\n/)),
     onUncaught: (error) => uncaught.push(error),
   });
 }

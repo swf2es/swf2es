@@ -109,7 +109,9 @@ if (update) {
 
     rmSync(`${here}out/${c.name}`, { recursive: true, force: true });
     if (traced(c)) {
-      const expected = readFileSync(traceReference(c.name), "utf8").replace(/\n$/, "").split("\n");
+      const expected = readFileSync(traceReference(c.name), "utf8")
+        .replace(/\n$/, "")
+        .split(/\r|\n/);
       const got = r.trace;
       const at = got.findIndex((line, i) => line !== expected[i]);
       if (at >= 0 || got.length !== expected.length) {

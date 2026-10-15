@@ -147,7 +147,7 @@ test("the operations of a version are made once, and act through the activation'
   assert.throws(() => V.tooLarge());
   assert.deepEqual(calls, [
     ["trace", "undefined"],
-    ["trace", "a\nb"],
+    ["trace", "a\rb"],
     ["play", target],
     ["stop", target],
     ["halt"],

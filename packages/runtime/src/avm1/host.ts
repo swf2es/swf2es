@@ -6,7 +6,10 @@
 export type Target = object;
 
 export interface Host {
-  /** A trace's text, a line of Flash's output. */
+  /**
+   * A trace's text, as it is: Flash's log breaks its lines at a carriage
+   * return as at a line feed, which is the host's to do where it writes one.
+   */
   trace(text: string): void;
   /** Play or stop `target`'s timeline. */
   play(target: Target): void;

@@ -115,7 +115,7 @@ test("values trace as AVM1 writes them, by version", async () => {
     "1",
     "0",
     "0.1",
-    "a\nb",
+    "a\rb",
   ]);
   assert.deepEqual((await play(movie(6, [[traced(...values)]]), 1)).lines, [
     "undefined",
@@ -123,7 +123,7 @@ test("values trace as AVM1 writes them, by version", async () => {
     "true",
     "false",
     "0.1",
-    "a\nb",
+    "a\rb",
   ]);
 });
 
