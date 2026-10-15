@@ -326,14 +326,16 @@ function operations(version: number): Operations {
     deleteVariable: (cx, name) => deleteVariable(cx, nameOf(name, version), version),
     initObject(cx) {
       const st = cx.st;
-      const n = toNumber(st.pop(), version);
-      if (n < 0 || n > 0x7fffffff) {
+      const n = countOf(st.pop(), version);
+      if (n < 0) {
         st.push(undefined);
         return;
       }
 
+      // Pairs past the stack's are all undefined, which set the same name each time: one does.
       const object = cx.realm.newObject(version);
-      for (let i = 0; i < n; i++) {
+      const pairs = Math.min(n, (st.length >> 1) + 2);
+      for (let i = 0; i < pairs; i++) {
         const value = st.pop();
         set(object, nameOf(st.pop(), version), value, version);
       }
@@ -342,15 +344,15 @@ function operations(version: number): Operations {
     },
     initArray(cx) {
       const st = cx.st;
-      const n = toNumber(st.pop(), version);
-      if (n < 0 || n > 0x7fffffff) {
+      const n = countOf(st.pop(), version);
+      if (n < 0) {
         st.push(undefined);
         return;
       }
 
       // Past the stack's values, undefined ones; a count far past it is cut short, as no
       // compiler writes one and Flash would make billions of elements.
-      const count = Math.min(Math.trunc(n) || 0, st.length + 0x10000);
+      const count = Math.min(n, st.length + 0x10000);
       const elements: Value[] = new Array(count);
       for (let i = 0; i < count; i++) {
         elements[i] = st.pop();
@@ -488,6 +490,12 @@ function bytesAsUtf8(text: string): string {
   }
 
   return decoder.decode(new Uint8Array(bytes));
+}
+
+/** InitObject's and InitArray's count: truncated, then -1 where it is not an int from 0 (adl). */
+function countOf(value: Value, version: number): number {
+  const n = Math.trunc(toNumber(value, version));
+  return n >= 0 && n <= 0x7fffffff ? n : -1;
 }
 
 /**

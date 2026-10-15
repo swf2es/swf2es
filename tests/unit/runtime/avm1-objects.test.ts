@@ -314,3 +314,22 @@ test("ASSetPropFlags takes its bits as an int's low 16", () => {
     assert.equal(V.deleteMember(cx, "v", o), deletable, `${bits}`);
   }
 });
+
+test("InitObject and InitArray truncate their counts", () => {
+  const { V, cx, st } = frame(7);
+  st.push("kept", -0.5);
+  V.initObject(cx);
+  assert.ok(st.pop() instanceof Avm1Object);
+  st.push(Number.NaN);
+  V.initArray(cx);
+  assert.equal(st.pop(), undefined);
+  st.push("a", 1, "b", 2, 1.7);
+  V.initObject(cx);
+  assert.deepEqual(keys(st.pop() as Avm1Object, 7), ["b"]);
+  assert.deepEqual(st.splice(0), ["kept", "a", 1]);
+
+  // A count far past the stack ends with it, as more pairs of undefined change nothing.
+  st.push("a", 1, 0x7fffffff);
+  V.initObject(cx);
+  assert.deepEqual(keys(st.pop() as Avm1Object, 7), ["undefined", "a"]);
+});
