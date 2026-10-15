@@ -221,7 +221,7 @@ async function check(): Promise<void> {
           },
         ],
         [
-          "a URL loads, and one the browser may not fetch, or a data: one, says why",
+          "a URL loads, one the browser may not fetch or a data: one says why, a link asks first",
           async () => {
             await value(
               `(() => { document.getElementById('url').value = ${JSON.stringify(`${base}demos/crowd.swf`)}; document.getElementById('url-form').requestSubmit(); })()`,
@@ -237,6 +237,27 @@ async function check(): Promise<void> {
               `index.html?swf=${encodeURIComponent("data:application/x-shockwave-flash;base64,RldT")}`,
             );
             await until("document.getElementById('status').textContent.startsWith('Only http')");
+
+            // A link to any other SWF waits for the one who followed it to say play.
+            await navigate(`index.html?swf=${encodeURIComponent(`${base}demos/crowd.swf`)}`);
+            await until("!document.getElementById('ask').hidden");
+            assert.equal(
+              await value<string>("document.getElementById('ask-file').textContent"),
+              "crowd.swf",
+            );
+            assert.equal(
+              await value<string>("document.getElementById('ask-host').textContent"),
+              new URL(base).host,
+            );
+            await new Promise((done) => setTimeout(done, 500));
+            assert.ok(await value<boolean>("document.getElementById('player').hidden"));
+            assert.doesNotMatch(
+              await value<string>("document.getElementById('log').innerText"),
+              /Loading/,
+            );
+            await value("document.getElementById('ask-play').click()");
+            await until(playing("crowd.swf"));
+            assert.ok(await value<boolean>("document.getElementById('ask').hidden"));
           },
         ],
         [

@@ -21,6 +21,10 @@ const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) 
 const player = byId<Swf2esPlayerElement>("player");
 const stage = byId<HTMLElement>("stage");
 const empty = byId<HTMLElement>("empty");
+const ask = byId<HTMLElement>("ask");
+const askFile = byId<HTMLElement>("ask-file");
+const askHost = byId<HTMLElement>("ask-host");
+const askPlay = byId<HTMLButtonElement>("ask-play");
 const status = byId<HTMLElement>("status");
 const fileInput = byId<HTMLInputElement>("file");
 const urlForm = byId<HTMLFormElement>("url-form");
@@ -186,6 +190,7 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
   }
 
   current = { bytes, name, facts: f, base };
+  ask.hidden = true;
   showFacts(name, f);
   stage.style.setProperty("--w", String(f.width || 550));
   stage.style.setProperty("--h", String(f.height || 400));
@@ -222,30 +227,44 @@ async function playFile(file: File): Promise<void> {
   await play(new Uint8Array(await file.arrayBuffer()), file.name, "a local file", null);
 }
 
-async function playUrl(url: string, origin?: string): Promise<void> {
+/** `url` resolved against the page, or null, said why, for one the page does not load. */
+function swfUrl(url: string): URL | null {
   let absolute: URL;
   try {
     absolute = new URL(url, document.baseURI);
   } catch {
     showStatus(`Not a URL: ${url}`, true);
-    return;
+    return null;
   }
 
   // Only what fetch can take from a server: a data: URL in a shared link
   // would play its bytes and name, and the others fail as if refused.
   if (absolute.protocol !== "https:" && absolute.protocol !== "http:") {
     showStatus(`Only http: and https: URLs load, not ${absolute.protocol}`, true);
+    return null;
+  }
+
+  return absolute;
+}
+
+/** The file name a URL ends in, or its host. */
+function fileName(url: URL): string {
+  const last = url.pathname.split("/").pop() || url.host;
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    // A malformed escape: the name as it is written.
+    return last;
+  }
+}
+
+async function playUrl(url: string, origin?: string): Promise<void> {
+  const absolute = swfUrl(url);
+  if (!absolute) {
     return;
   }
 
-  const last = absolute.pathname.split("/").pop() || absolute.host;
-  let name = last;
-  try {
-    name = decodeURIComponent(last);
-  } catch {
-    // A malformed escape: the name as it is written.
-  }
-
+  const name = fileName(absolute);
   showStatus(`Fetching ${absolute.href}…`);
   let bytes: Uint8Array;
   let finalUrl = absolute.href;
@@ -414,7 +433,24 @@ if (asked) {
     urlInput.value = asked;
   }
 
-  void playUrl(asked, demo ? `the demo ${asked.slice(6)}` : undefined);
+  if (demo) {
+    void playUrl(asked, `the demo ${asked.slice(6)}`);
+  } else {
+    // Anyone can make a link to any SWF, and it plays on this site's
+    // origin: whoever follows one says so before it plays.
+    const absolute = swfUrl(asked);
+    if (absolute) {
+      askFile.textContent = fileName(absolute);
+      askHost.textContent = absolute.host;
+      empty.hidden = true;
+      ask.hidden = false;
+      showStatus("A link asks to play this SWF: press Play if you trust it.");
+      askPlay.addEventListener("click", () => {
+        ask.hidden = true;
+        void playUrl(asked);
+      });
+    }
+  }
 }
 
 updateReport();

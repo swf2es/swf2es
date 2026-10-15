@@ -39,6 +39,14 @@
     <div id="empty" class="empty">
       <p><strong>Drop a SWF here</strong>, open one, or try a demo below.</p>
     </div>
+    <div id="ask" class="empty ask" hidden>
+      <div>
+        <p>Play <strong id="ask-file"></strong>?</p>
+        <p class="warning">This SWF comes from <strong id="ask-host"></strong>; it can draw
+          anything, including fake login forms. Only play SWFs you trust.</p>
+        <button id="ask-play" class="primary" type="button">Play</button>
+      </div>
+    </div>
     <swf2es-player id="player" width="100%" height="100%" scale="showAll" allowscriptaccess="never" hidden></swf2es-player>
   </div>
 

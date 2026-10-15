@@ -194,6 +194,22 @@ swf2es-player[hidden] {
   color: var(--muted);
 }
 
+.ask {
+  overflow: auto;
+  color: var(--fg);
+}
+
+.ask p {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.ask .warning {
+  color: var(--muted);
+  max-width: 44ch;
+  margin-inline: auto;
+}
+
 .empty[hidden] {
   display: none;
 }
