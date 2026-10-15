@@ -13,14 +13,13 @@ import * as w from "../../tests/swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const SOURCE = "https://github.com/swf2es/swf2es/blob/main/";
 
 export interface Demo {
   /** Its file under demos/, and what ?swf= names. */
   file: string;
   title: string;
   description: string;
-  /** Where it is made, on GitHub. */
+  /** The file it is made from, by its path in the repository. */
   source: string;
   bytes: Uint8Array;
 }
@@ -49,7 +48,7 @@ function bounce(out: string): Demo {
     title: "Bounce (ActionScript 3)",
     description:
       "Gradients, glow filters and additive blending; click to add balls, space pauses, E throws an error.",
-    source: `${SOURCE}apps/site/demos/Bounce.as`,
+    source: "apps/site/demos/Bounce.as",
     bytes,
   };
 }
@@ -158,7 +157,7 @@ function orbit(): Demo {
     title: "Orbit (ActionScript 1 and 2)",
     description:
       "A SWF 8 timeline whose frame actions trace objects, prototypes, arrays, strings, Math and Date.",
-    source: `${SOURCE}apps/site/demos.ts`,
+    source: "apps/site/demos.ts",
     bytes: w.swf({ version, width: 480, height: 320, frameRate: 30, frameCount: frames, tags }),
   };
 }
@@ -176,7 +175,7 @@ function crowd(out: string): Demo {
     title: "Crowd (timeline only)",
     description:
       "The player benchmark's crowd: 24 characters of 12 outlined parts each, no ActionScript.",
-    source: `${SOURCE}tests/player/bench.ts`,
+    source: "tests/player/bench.ts",
     bytes: new Uint8Array(readFileSync(file)),
   };
 }

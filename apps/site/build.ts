@@ -175,7 +175,8 @@ writeFileSync(
       file,
       title,
       description,
-      source,
+      // At the commit the site is built from, which is what it plays.
+      source: `${SOURCE}${commit === "unknown" ? "main" : commit}/${source}`,
       bytes: bytes.length,
     })),
     null,

@@ -117,6 +117,11 @@ async function check(): Promise<void> {
             assert.match(facts, /480 × 320/);
             const demos = await value<number>("document.querySelectorAll('#demos li').length");
             assert.equal(demos, 3);
+            const source = await value<string>("document.querySelector('#demos a').href");
+            assert.match(
+              source,
+              /^https:\/\/github\.com\/swf2es\/swf2es\/blob\/[0-9a-f]{40}\/apps\/site\//,
+            );
             const box = await value<number[]>(
               "(() => { const r = document.getElementById('stage').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()",
             );
