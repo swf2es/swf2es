@@ -154,10 +154,12 @@ which they reach the player's display list. An object's `valueOf` and
 `toString`, which the conversions call, are hooks (`objects` in
 `values.ts`) that the steps bringing objects fill. The player's `Avm1`
 (`player/src/avm1/avm1.ts`) compiles a main AVM1 SWF's blocks with the
-same codegen, as `start` loads it, and runs its root's frame blocks as the
-root enters each frame: a `Player` given one, as the web element and the
-test page give an AVM1 SWF with actions, runs them; an ActionScript 3
-SWF's never run.
+same codegen, as `start` loads it, gives each clip, button and text field
+its AS2 face (`player/src/avm1/globals/MovieClip.ts`, a `DisplayNative`
+of the runtime's), plays the clips the newest first and runs the blocks
+their frames queue, in Flash's order: a `Player` given one, as the web
+element and the test page give an AVM1 SWF with actions, runs them; an
+ActionScript 3 SWF's never run.
 
 Apps, in `apps/`, are what people run rather than import: `desktop`, the
 Electron app (see [The desktop app](#the-desktop-app)), and later a browser

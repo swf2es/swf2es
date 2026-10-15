@@ -2,11 +2,12 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 8 are built: `format`'s list of action blocks, the
+there. Steps 1 to 10 are built: `format`'s list of action blocks, the
 decoder, the emitter, the runtime's values and its operators by version,
 its objects, variables and global object, its functions and registers,
-`With`, `Try` and `Throw`, and a main AVM1 SWF's root frames run by the
-player; the rest is not.
+`With`, `Try` and `Throw`, the language's classes, and a main AVM1 SWF's
+clips, their AS2 face, paths, targets and timeline actions, played in
+Flash's order by the player; the rest is not.
 [architecture.md](architecture.md) describes what is, and this document
 is folded into it as each piece lands.
 
@@ -790,8 +791,7 @@ has it (GetVariable) or set on the first object it reaches (SetVariable).
 A path's steps are a clip's children by name or else properties, `..` a
 clip's parent, a leading `/` the root, and `this`, `_root` and `_levelN`
 at its start; what needs the display list the host gives (`root`,
-`level`, `parent`, `child` in `host.ts`), which step 10 fills in, so for
-now a path walks objects' properties, `this` and the root. A name with a
+`level`, `parent`, `child` in `host.ts`). A name with a
 `/` and no variable, from SWF 5, is the object the path names. A name
 without a path walks the scope chain, top down, and is read from the
 first scope object that has it on its chain; a name none has is `_root`,
@@ -800,22 +800,17 @@ variable is never resolved by `__resolve`. `this` is the activation's
 `this`, case-insensitively in SWF 5 and 6, in a function too (adl; Ruffle
 has it case-sensitive in a SWF 5 function), and
 so is a path's first step (with `_root`, and `_global` from SWF 6),
-though a SetVariable path takes no `this`: adl sets nothing for
-`this.x`. adl keeps a frame's `this` as a variable that `Delete2` can
+though a SetVariable path in a timeline's code takes no `this`: adl sets
+nothing for `this.x` there, where a function's sets it (the corpus's
+`path_string`). adl keeps a frame's `this` as a variable that `Delete2` can
 remove, after which a SetVariable of `this` makes a property of the clip;
-that is not reproduced. A slash path without a variable (`/a/b`) names a
-clip in adl, never another object, which waits for step 10. A
+that is not reproduced. A
 variable set without a path goes where the chain has it, else on the
 target's clip; `DefineLocal` and `DefineLocal2` define it on the top
 scope, which at a frame's level is the clip. A clip's properties
 `_x` to `_ymouse` are also reachable by index (`GetProperty` and
-`SetProperty`'s 0 to 21), from a table shared with `globals/MovieClip.ts`.
-
-Until step 10 gives clips their class, the player gives the root a plain
-object for its AVM1 face, which holds the timeline's variables: `this`
-and `_root` are it, and what tells a clip from an object (`typeof` is
-`movieclip`, it converts to its path, compares as no number) is not there
-yet.
+`SetProperty`'s 0 to 21), from the table of `globals/MovieClip.ts`.
+"Clips and paths" below has the rest.
 
 ### Builtins
 
@@ -1037,11 +1032,29 @@ natives read and write the display object as playerglobal's do. Nothing in
 `display/` or `render/` changes for it: the display list, the timeline,
 text layout and drawing are the same for both VMs.
 
+The runtime knows a display object's AS2 object by its `display`, a
+`DisplayNative` (`runtime/src/avm1/host.ts`) the player gives it
+(`globals/MovieClip.ts`'s `ClipNative`): after the object's own
+properties, and before its prototypes', it has `_root`, `_parent`,
+`_global` and `_levelN`, its children by instance name, then the display
+properties `_x` to `_ymouse` in any case, as Ruffle's `stage_object.rs`
+orders them; a set of a display property's name goes to the display
+object where the object has no property of its own of the name; for..in
+lists its children last, the highest depth first. `typeof` a clip is
+`movieclip`, a button's or a text field's `object`; any of them converts
+to its path, `_level0.a.b`. A clip, a button, a text field and a video
+get one as they are made; a shape, a morph, a bitmap or static text has
+none, and its name finds its parent's. A clip or a button without a name
+is named `instance1`, `instance2`... as it is made, the root never.
+
 AVM1 references to clips are by path in Flash: a variable holding a clip
 finds the clip that has its path now, if the one it was taken from was
 removed and another placed by the same name. The AS2 object of a clip
-keeps its display object and, once that is removed, resolves its path
-again on its next use, as Ruffle's `MovieClipReference` does.
+keeps its display object and the path it had as it was removed, and an
+action taking it as a value (GetMember, SetMember, CallMethod, Delete,
+Enumerate2, converting it to a string) reaches the object placed at that
+path since, or nothing, as Ruffle's `MovieClipReference` does; its
+`typeof` stays `movieclip`.
 
 A text field with a variable name (DefineEditText's `VariableName`)
 shows a variable on the clip its path names, and a change to either
@@ -1070,7 +1083,31 @@ it enters. Intervals run by the clock between frames, as AS3's timers do.
 The player keeps AVM1's execution list beside the display list, as its
 clips are made and removed, not by walking the tree each frame.
 
-Step 4 runs the root's frames only, and without the queue: the `Player`
+Step 10 plays an AVM1 SWF's clips so (`Avm1.tick`): the player tells its
+AVM1 of each display object made, each frame a clip enters and each
+DoAction tag it reaches, in tag order (the timeline's `actions` commands,
+`TimelineActions` in `display/timeline.ts`), so a child placed before a
+frame's actions runs its first frame first. The clips advance the newest
+first, each queueing its frame's blocks; then the queue runs, and a goto
+from it queues the frames it enters. A goto queues the frame it lands on
+(none past the last frame, nor one to the frame it is on), the children
+it makes on frames before it running their first frames first, then the
+frame's places and actions in tag order, as adl orders them (Ruffle runs
+the target frame's actions before every child the frame places). The
+clip events, `#initclip`'s order against them and the queue's passes come
+with step 11; a root frame's DoInitAction blocks run before its DoAction
+blocks, as before.
+
+What follows a timeline's last ShowFrame runs with its last frame where
+the timeline loops, one of two frames or more ending in an End tag; a
+timeline of one frame, or without an End tag, stops on its last frame,
+and runs what follows once, as the next frame comes (the corpus's
+`looping_child_*`, as Ruffle's `determine_next_frame` has it). A place at
+a depth already taken writes `Warning: Failed to place object at depth
+N.` to the log, as Flash's does (the corpus's
+`placeobject_occupied_depth`).
+
+Step 4 ran the root's frames only, and without the queue: the `Player`
 takes an `Avm1` beside its `Scripting` (null for an AVM1 SWF), which
 `start` has compile the SWF's blocks into one module and run the first
 frame's actions, and each tick after the clips advance runs those of the
@@ -1095,12 +1132,67 @@ An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
 its header says: Flash plays and loops one so (the corpus's
 `looping_real_1_declared_2` and `looping_real_2_declared_1`, as Ruffle's
 `determine_next_frame` has it), where an AS3 timeline has its header's
-count. What follows the last ShowFrame is no frame of its own: in adl its
-DoActions run with the last frame, after its others (late enough that the
-harness's last frame ends first), and its places place nothing. A root
+count. What follows the last ShowFrame is no frame of its own: its
+places place nothing, and its DoActions run as above. A root
 without an End tag stays on its last frame rather than loop, as Ruffle
 has it too; adl agrees, for a SWF loaded as an `AVM1Movie` as for a main
 one (adl's harness loads them all so).
+
+### Clips and paths
+
+What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
+`avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases, and the
+probes they came of), and the corpus, where it is not what Ruffle does:
+
+- `_x` and `_y` are whole twips, cut toward zero (`1.234` is `1.2`), and
+  what does not fit an int, an infinity included, -2^31 twips; `_alpha`
+  is an 8.8 multiplier, the percentage's 256ths cut toward zero (`33` is
+  `32.8125`); `_xscale` and `_yscale` give back what was set; `_rotation`
+  is set modulo 360 into -180 to 180; `_width` and `_height` are the
+  bounds through the clip's matrix with each corner rounded to twips, and
+  set as Ruffle's `set_width` works them out, a negative one ignored;
+  undefined, null and NaN leave any of them be. `_visible` takes a
+  number. `_droptarget` is `""` in every version (Ruffle: undefined up to
+  SWF 5). `_quality` is `HIGH`, `_soundbuftime` 5 and `_focusrect` a SWF
+  5's 1, a later one's null on a clip.
+- SetTarget and SetTarget2 resolve their path from the code's own clip,
+  not from the target, so a tellTarget inside another names from there;
+  one that finds nothing leaves no target, and names then resolve on the
+  root. SetTarget2 of undefined is the code's own clip up to SWF 6 and no
+  target from 7. GetProperty and SetProperty name from the target, or from
+  the code's own clip where there is none, a property's index truncated.
+- A path's empty step names nothing first or after a slash (`//a`, `.a`)
+  or at the end after a colon (`a::`), and is no step at all after a dot
+  or a colon (`a..`, `a:/`); `..` of a level is the level, but where a
+  slash follows; `_levelN` is any name starting so, its N the digits that
+  follow, none 0 (`_level0..:_flash0` is the root). Ruffle fails these
+  (its `target_paths` are known failures). A step at a primitive, where a
+  clip's path is taken as an object (GetProperty, SetProperty, tellTarget)
+  or Delete2's path is, writes `Parameters of primitive types are no
+  longer coerced into the required type - Object.` to the log from SWF 5.
+- A SWF 4's GetVariable gives no clip, undefined in its place, as Ruffle
+  has it, and a SWF 4's functions run as a SWF 5's (`V5`).
+- A clip compares as NaN with anything, Less2 and Greater giving
+  undefined, and a clip as `__resolve` is skipped as a primitive is.
+- Gotos run as "The frame" says; `gotoAndStop` takes a whole number as a
+  frame, anything else as a string, a frame's number or label, after a
+  path's last `:` or `.` (`b:start`), labels in any ASCII case; a frame
+  past the last goes there, its actions not run, 0 and below nothing.
+- `hitTest(x, y)` is in the root's space against the clip's bounds on the
+  stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
+  Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.
+- StopSounds and ToggleQuality are minimal: no sound is stopped yet, and
+  the quality toggles `_quality` without changing how anything is drawn.
+
+adl's harness loads a SWF as an `AVM1Movie`, whose root traces as
+`_root`, its dot paths so, with a name and a parent of the harness's, and
+no `_level0`; a main movie's root is `_level0`, which the corpus shows.
+The cases trace no root's dot path or name, and no level.
+
+What is not reproduced yet: `_width` of some turned clips is off by a
+twip (Flash's corners round otherwise at some angles), the corpus's
+`[approximations]` are not read by its runner, and a function's clip,
+once removed and placed again, is not found again by its path.
 
 ### Clip events and buttons
 
@@ -1233,7 +1325,7 @@ AVM1, so nothing is expected from it.
 
 - **Writing AVM1 test cases.** The tests assemble actions
   (`tests/avm1-assembler.ts`), or compile a subset of AS1
-  (`tests/avm1-script.ts`: no classes, `with`, `try` or `tellTarget`);
+  (`tests/avm1-script.ts`: no classes or `try`);
   an AS2 compiler in the oracle's image (MTASC, or Ruffle's test
   compiler) would take AS2's classes too.
 - **A main AVM1 SWF without `Scripting`.** The pointer and keyboard take
@@ -1400,6 +1492,22 @@ determinism` green, and the corpus baseline may only go up.
     Passes `target_*`, `tell_target*`, `this_scoping`, `goto*` (15) and
     `movieclip*` that need no events; adl cases for gotos in the frame
     order.
+    Built: clips' AS2 faces (`DisplayNative`, `globals/MovieClip.ts`),
+    references by path, the clips played in Flash's order with a queue of
+    their frames' actions, gotos queueing what they enter, the timeline's
+    tail after its last ShowFrame, and the actions above (see "Clips and
+    paths"). The
+    `avm1-clips`, `avm1-gotos`, `avm1-paths` and `avm1-scopes` cases trace
+    some 15 to 80 lines each at SWF 4 to 8 in adl, which the player matches,
+    and `avm1-clip-properties` draws them. The corpus goes from 138 to 239
+    of the 649 (`target_paths/*`, `path_string`, `goto*`, `tell_target*`,
+    `this_swf5` to `swf7`, `getproperty*`, `set_property_values/swf5` to
+    `swf7`, `execution_order1` to `4`, `waitforframe*`, `with`,
+    `try_catch_finally`, `delete2`, `swf4_function_calls`,
+    `looping_child_*`, `object_resolve`...), and `timeline/` from 4 to 5
+    of 17. Most of the rest wait for
+    `createEmptyMovieClip`, `attachMovie` and clip events (step 11), text
+    fields (13) and `getURL` (15).
 11. **The frame: DoInitAction, clip events and the queue.** The action
     queue in Flash's order, `onClipEvent`, `on*` handlers, `onEnterFrame`,
     `#initclip`, `Object.registerClass`, `attachMovie`,
