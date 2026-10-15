@@ -33,3 +33,8 @@ trace("generic " + o.g() + " " + o.t() + " " + o.u());
 trace("compare " + (new Date(5) < new Date(6)) + " " + (new Date(5) == new Date(5)) + " " + (new Date(5) == 5) + " " + (new Date(5) + 0 == new Date(5).toString() + "0"));
 trace("invalid " + new Date(0/0) + " " + (new Date(0/0) + 1));
 trace("ASnative " + ASnative(103, 16).call(new Date(7)) + " " + ASnative(103, 257)(2000, 0) + " " + typeof ASnative(103, 999));
+var dateProto = Date.prototype;
+Date.prototype = {};
+var DateSub = function () {};
+__op("Extends", Date, DateSub);
+trace("prototype " + (Date.prototype == dateProto) + " " + (new Date(0) instanceof Date));

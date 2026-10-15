@@ -521,8 +521,12 @@ const PROTO: [string, number][] = [
 
 export function dateClass(realm: Realm): Class {
   const proto = new Avm1Object();
-  const constr: Avm1Function = realm.classOf(proto, dateNative(CONSTRUCTOR), (_, __, version) =>
-    dateString(now(version)),
+  // Its `prototype` read-only, as Object's and Number's are (adl).
+  const constr: Avm1Function = realm.classOf(
+    proto,
+    dateNative(CONSTRUCTOR),
+    (_, __, version) => dateString(now(version)),
+    READ_ONLY,
   );
   proto.define("__proto__", realm.objectProto, DONT_ENUM | DONT_DELETE);
   for (const [name, index] of PROTO) {

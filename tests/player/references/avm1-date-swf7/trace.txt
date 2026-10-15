@@ -32,3 +32,4 @@ generic undefined undefined undefined
 compare true false true true
 invalid Invalid Date Invalid Date1
 ASnative 7 946684800000 function
+prototype true true

@@ -32,3 +32,4 @@ generic
 compare true true true false
 invalid NaN NaN
 ASnative  946684800000 function
+prototype true true
