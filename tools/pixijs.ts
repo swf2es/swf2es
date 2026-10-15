@@ -1,18 +1,21 @@
 // Builds vendor/pixijs, the swf2es fork of PixiJS, into what swf2es takes of
 // it: lib/ (the modules and declarations that "pixi.js" and its subpaths
-// resolve to, ES and CommonJS as in the npm package), dist/pixi.mjs (the
-// bundle the test pages and the desktop app import) and
-// dist/packages/unsafe-eval.js (Pixi's polyfills for a page without
-// 'unsafe-eval'). It runs the fork's own rollup configuration and
-// declaration build, as its scripts/build.mts does, but leaves out the
-// bundles nothing here loads (minified ones, the other plugins', the
-// webworker build) and the bundled pixi.js.d.ts.
+// resolve to, ES and CommonJS as in the npm package) and the bundle the test
+// pages and the desktop app import, dist/pixi.mjs with its chunks and
+// dist/packages/unsafe-eval.mjs (Pixi's polyfills for a page without
+// 'unsafe-eval'). lib/ comes from the fork's own rollup configuration and
+// declaration build, as its scripts/build.mts does, leaving out the bundled
+// pixi.js.d.ts. The bundle is swf2es's own: the fork's plugins over an entry
+// that exports only BROWSER_EXPORTS and registers only what the player draws
+// with (BROWSER_INITS), tree-shaken, where Pixi's bundles take the whole
+// library untouched.
 //
 //   node tools/pixijs.ts [--force]
 //
 // A build is skipped when the fork's commit, its uncommitted changes, the
-// lockfile and this file are those of the last one (lib/.swf2es-build); --force builds
-// anyway. The bundles' "Compiled" date is the fork commit's, not the
+// lockfile and this file are those of the last one (lib/.swf2es-build) and
+// the bundle's files it wrote are all still there; --force builds
+// anyway. The bundle's "Compiled" date is the fork commit's, not the
 // clock's, so a build is the same each time.
 
 import { execFileSync, spawn } from "node:child_process";
@@ -24,6 +27,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -33,24 +37,153 @@ const self = fileURLToPath(import.meta.url);
 const pixi = fileURLToPath(new URL("../vendor/pixijs/", import.meta.url));
 const stampFile = join(pixi, "lib/.swf2es-build");
 
-// What swf2es loads of the bundles; any other output is dropped.
-const BUNDLES = ["dist/pixi.mjs", "dist/packages/unsafe-eval.js"];
+// The bundle's entries: what the pages import, as "pixi.js" and for Pixi's polyfills.
+const BUNDLES = ["dist/pixi.mjs", "dist/packages/unsafe-eval.mjs"];
+
+/**
+ * What the player, @swf2es/web and the test page import from "pixi.js" as
+ * values; the bundle exports these alone, and a unit test holds the list to
+ * what those sources import. The rest of Pixi is in the bundle only as far
+ * as these reach it.
+ */
+export const BROWSER_EXPORTS = [
+  "AlphaFilter",
+  "BatchableGraphics",
+  "BatchableSprite",
+  "Batcher",
+  "BatcherPipe",
+  "BigPool",
+  "BlendModeFilter",
+  "Buffer",
+  "BufferImageSource",
+  "BufferUsage",
+  "CanvasTextMetrics",
+  "Container",
+  "ExtensionType",
+  "Filter",
+  "FilterSystem",
+  "Geometry",
+  "GlProgram",
+  "GpuGraphicsContext",
+  "Graphics",
+  "GraphicsContext",
+  "GraphicsContextRenderData",
+  "GraphicsContextSystem",
+  "GraphicsPipe",
+  "Matrix",
+  "Mesh",
+  "MeshGeometry",
+  "Rectangle",
+  "RenderGroupSystem",
+  "RenderTexture",
+  "RendererType",
+  "Shader",
+  "Sprite",
+  "State",
+  "Text",
+  "Texture",
+  "TexturePool",
+  "TextureSource",
+  "UniformGroup",
+  "autoDetectRenderer",
+  "color32BitToUniform",
+  "compileHighShaderGlProgram",
+  "compileHighShaderGpuProgram",
+  "extensions",
+  "fastGlobalBoundsHooks",
+  "fontStringFromTextStyle",
+  "generateTextureBatchBit",
+  "generateTextureBatchBitGl",
+  "getBatchSamplersUniformGroup",
+  "localUniformBitGl",
+  "roundPixelsBit",
+  "roundPixelsBitGl",
+];
+
+/**
+ * The modules of the fork's src/ the bundle runs for their side effects, in
+ * the order Pixi's own bundle runs them, which is the order a renderer's
+ * systems and pipes take and are called in. They are those of
+ * environment-browser/browserAll.ts, which Pixi's bundle runs and
+ * autoDetectRenderer imports, but for accessibility/init (an overlay for
+ * screen readers that takes the Tab key, which Flash content handles
+ * itself), dom/init (DOMContainer) and spritesheet/init (an Assets loader),
+ * none of which the player uses; Pixi's environment extensions, which
+ * would import that file, are left out with them. Then the inits of the
+ * display objects the player draws, which their classes import too but
+ * later, and the WebGL renderer, which autoDetectRenderer would import()
+ * only after the player's extensions had registered. The WebGPU and Canvas
+ * renderers, which the player falls back to only without WebGL, stay
+ * behind their import()s, in chunks loaded only then.
+ */
+const BROWSER_INITS = [
+  "events/init",
+  "rendering/init",
+  "filters/init",
+  "scene/graphics/init",
+  "scene/mesh/init",
+  "scene/text/init",
+  "rendering/renderers/gl/WebGLRenderer",
+];
+
+const ENTRY = "\0swf2es:pixi";
+const LIBRARY = "\0swf2es:pixi-library";
 
 /** The subset of rollup's options this script reads or changes. */
 interface Output {
   dir?: string;
   file?: string;
   banner?: string;
+  format?: string;
+  entryFileNames?: string;
+  chunkFileNames?: string;
+  freeze?: boolean;
+  sourcemap?: boolean;
+  manualChunks?: unknown;
+}
+
+interface Resolved {
+  id: string;
+  external?: boolean | string;
+  moduleSideEffects?: boolean | string;
+}
+
+interface PluginContext {
+  resolve(id: string, importer: string | undefined, options: object): Promise<Resolved | null>;
+}
+
+interface Plugin {
+  name: string;
+  resolveId?(
+    this: PluginContext,
+    id: string,
+    importer: string | undefined,
+    options: object,
+  ): Promise<string | Resolved | null>;
+  load?(id: string): string | null;
 }
 
 interface Options {
   input: unknown;
   output: (Output | false)[];
+  plugins?: unknown[];
+  treeshake?: boolean;
+  preserveEntrySignatures?: string;
   onwarn?: (warning: { message: string }) => void;
+}
+
+interface Chunk {
+  type: string;
+  fileName: string;
+  name?: string;
+  imports?: string[];
+  isEntry?: boolean;
+  modules?: Record<string, unknown>;
 }
 
 interface Rollup {
   rollup(options: Options): Promise<{
+    generate(output: Output): Promise<{ output: Chunk[] }>;
     write(output: Output): Promise<unknown>;
     close(): Promise<void>;
   }>;
@@ -95,31 +228,163 @@ function outputPath(output: Output): string {
   return relative(pixi, output.file ?? output.dir ?? "");
 }
 
-/** The fork's rollup builds, narrowed to lib/ and BUNDLES. */
-async function rollupBuilds(compiled: string): Promise<Options[]> {
-  // The configuration resolves its paths against the working directory.
-  process.chdir(pixi);
-  const config = pathToFileURL(join(pixi, ".configs/rollup.config.mjs")).href;
-  // It exports a promise of the builds.
-  const builds: Options[] = await (await import(config)).default;
-  const kept: Options[] = [];
-  for (const build of builds) {
-    const outputs = build.output.filter(
-      (output): output is Output =>
-        output !== false && (outputPath(output) === "lib" || BUNDLES.includes(outputPath(output))),
-    );
-    if (outputs.length === 0) {
-      continue;
-    }
+/**
+ * The entry's modules: ENTRY runs BROWSER_INITS and exports BROWSER_EXPORTS
+ * from LIBRARY, which is src/index.ts's exports without its side effects
+ * (its inits and Pixi's environment extensions).
+ */
+function entryPlugin(): Plugin {
+  const src = (path: string) => JSON.stringify(join(pixi, "src", path));
+  const index = readFileSync(join(pixi, "src/index.ts"), "utf8");
+  const library = [...index.matchAll(/^export \* from '\.\/([\w-]+)';$/gm)]
+    .map(([, dir]) => `export * from ${src(`${dir}/index.ts`)};`)
+    .join("\n");
+  const entry = [
+    ...BROWSER_INITS.map((path) => `import ${src(`${path}.ts`)};`),
+    `export { ${BROWSER_EXPORTS.join(", ")} } from ${JSON.stringify(LIBRARY)};`,
+  ].join("\n");
+  // The modules of src/ that have side effects: those Pixi's package.json
+  // names under lib/, as a bundler of the npm package takes them, and
+  // BROWSER_INITS. Rollup's node-resolve would read that list as it stands,
+  // of lib/ paths, and so take every module of src/ to have none.
+  const manifest = JSON.parse(readFileSync(join(pixi, "package.json"), "utf8"));
+  const effects = new Set<string>([
+    ...(manifest.sideEffects as string[]).map((path) =>
+      join(pixi, path.replace(/^\.\/lib\//, "src/").replace(/\.\*$/, "")),
+    ),
+    ...BROWSER_INITS.map((path) => join(pixi, "src", path)),
+  ]);
+  const srcDir = join(pixi, "src/");
+  return {
+    name: "swf2es-entry",
+    async resolveId(id, importer, options) {
+      if (id === ENTRY || id === LIBRARY) {
+        return id;
+      }
 
-    for (const output of outputs) {
-      output.banner = output.banner?.replace(/Compiled .*/, `Compiled ${compiled}`);
-    }
+      const resolved = await this.resolve(id, importer, { ...options, skipSelf: true });
+      if (!resolved || resolved.external || !resolved.id.startsWith(srcDir)) {
+        return resolved;
+      }
 
-    kept.push({ ...build, output: outputs });
+      return { ...resolved, moduleSideEffects: effects.has(resolved.id.replace(/\.ts$/, "")) };
+    },
+    load: (id) => {
+      switch (id) {
+        case ENTRY:
+          return entry;
+        case LIBRARY:
+          return library;
+        default:
+          return null;
+      }
+    },
+  };
+}
+
+/**
+ * swf2es's bundle, in two passes. The first builds the entry alone, to
+ * learn which modules load with it and which wait behind the renderers'
+ * import()s. The second adds packages/unsafe-eval.mjs and keeps the first
+ * pass's chunks, those that load with the entry as one file,
+ * dist/pixi.mjs, where rollup would split modules by what the entries and
+ * import()s share into chunks the page loads at once.
+ */
+async function browserBuild(rollup: Rollup, compiled: string): Promise<Options> {
+  const { o, build } = await forkBuild("dist/pixi.mjs", "first");
+  const banner = o.banner?.replace(/Compiled .*/, `Compiled ${compiled}`);
+  const output: Output = {
+    dir: join(pixi, "dist"),
+    format: "es",
+    entryFileNames: "[name].mjs",
+    chunkFileNames: "chunks/[name]-[hash].mjs",
+    banner,
+    freeze: false,
+    sourcemap: true,
+  };
+  const warnings: string[] = [];
+  const first = await rollup.rollup({
+    input: { pixi: ENTRY },
+    output: [output],
+    plugins: [entryPlugin(), ...(build.plugins ?? [])],
+    treeshake: true,
+    onwarn: (warning) => warnings.push(warning.message),
+  });
+  const generated = await first.generate(output);
+  await first.close();
+  if (warnings.length > 0) {
+    throw new Error(`rollup warned:\n${warnings.join("\n")}`);
   }
 
-  return kept;
+  // The entry's chunk and those it imports statically, which load with it,
+  // are one; each other chunk stays as it was. Every module is given its
+  // chunk, since rollup would pull those reached from a manual chunk's
+  // modules into it, and the entry's export * reaches all of Pixi.
+  const byFile = new Map(generated.output.map((chunk) => [chunk.fileName, chunk]));
+  const chunkOf = new Map<string, string>();
+  const queue = generated.output.filter((chunk) => chunk.isEntry).map((chunk) => chunk.fileName);
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    const chunk = byFile.get(file);
+    if (chunk && !Object.keys(chunk.modules ?? {}).some((id) => chunkOf.has(id))) {
+      for (const id of Object.keys(chunk.modules ?? {})) {
+        chunkOf.set(id, "pixi");
+      }
+
+      queue.push(...(chunk.imports ?? []));
+    }
+  }
+
+  for (const chunk of generated.output) {
+    for (const id of Object.keys(chunk.modules ?? {})) {
+      if (!chunkOf.has(id)) {
+        chunkOf.set(id, chunk.name ?? chunk.fileName);
+      }
+    }
+  }
+
+  return {
+    input: {
+      pixi: ENTRY,
+      "packages/unsafe-eval": join(pixi, "src/unsafe-eval/init.ts"),
+    },
+    output: [{ ...output, manualChunks: (id: string) => chunkOf.get(id) }],
+    plugins: [entryPlugin(), ...((await forkBuild("dist/pixi.mjs", "second")).build.plugins ?? [])],
+    treeshake: true,
+    // So that dist/pixi.mjs is that chunk, exporting what the other entry needs too, not a facade.
+    preserveEntrySignatures: "allow-extension",
+  };
+}
+
+/**
+ * The build of the fork's rollup configuration that writes `path`, from a
+ * copy of the configuration of its own, `copy`: rollup's plugins keep
+ * state, which builds running at once or one after another must not share.
+ */
+async function forkBuild(path: string, copy: string): Promise<{ build: Options; o: Output }> {
+  // The configuration resolves its paths against the working directory.
+  process.chdir(pixi);
+  const config = pathToFileURL(join(pixi, ".configs/rollup.config.mjs"));
+  config.search = copy;
+  // It exports a promise of the builds.
+  const builds: Options[] = await (await import(config.href)).default;
+  for (const build of builds) {
+    for (const o of build.output) {
+      if (o !== false && outputPath(o) === path) {
+        return { build, o };
+      }
+    }
+  }
+
+  fail(`the fork's rollup configuration has no build of ${path}`);
+}
+
+/** The fork's rollup build of lib/, and swf2es's bundle. */
+async function rollupBuilds(rollup: Rollup, compiled: string): Promise<Options[]> {
+  const lib = (await forkBuild("lib", "lib")).build;
+  return [
+    { ...lib, output: lib.output.filter((o) => o !== false && outputPath(o) === "lib") },
+    await browserBuild(rollup, compiled),
+  ];
 }
 
 async function bundle(rollup: Rollup, build: Options): Promise<void> {
@@ -199,11 +464,16 @@ async function main(): Promise<void> {
     fail("vendor/pixijs has no build tools: run pnpm install");
   }
 
+  // The stamp is the key, then the files written to dist/: the chunks too,
+  // which a page without WebGL would fail to load if one were gone.
   const key = sourceKey();
+  const [stampKey, ...written] = existsSync(stampFile)
+    ? readFileSync(stampFile, "utf8").split("\n")
+    : [];
   const built =
-    existsSync(stampFile) &&
-    readFileSync(stampFile, "utf8") === key &&
-    BUNDLES.every((path) => existsSync(join(pixi, path)));
+    stampKey === key &&
+    BUNDLES.every((path) => written.includes(path)) &&
+    written.every((path) => existsSync(join(pixi, path)));
   if (built && !process.argv.includes("--force")) {
     console.log("pixi.js: up to date");
     return;
@@ -215,11 +485,17 @@ async function main(): Promise<void> {
   const compiled = new Date(git("log", "-1", "--format=%cI").trim()).toUTCString();
   const rollupUrl = pathToFileURL(join(pixi, "node_modules/rollup/dist/es/rollup.js")).href;
   const rollup: Rollup = await import(rollupUrl);
-  const builds = await rollupBuilds(compiled.replace("GMT", "UTC"));
+  const builds = await rollupBuilds(rollup, compiled.replace("GMT", "UTC"));
   await Promise.all([declarations(), ...builds.map((build) => bundle(rollup, build))]);
 
-  writeFileSync(stampFile, key);
+  const dist = readdirSync(join(pixi, "dist"), { recursive: true, encoding: "utf8" })
+    .map((path) => join("dist", path))
+    .filter((path) => !path.endsWith(".map") && statSync(join(pixi, path)).isFile())
+    .sort();
+  writeFileSync(stampFile, [key, ...dist].join("\n"));
   console.log(`pixi.js: built lib/ and ${BUNDLES.join(", ")}`);
 }
 
-await main();
+if (import.meta.main) {
+  await main();
+}

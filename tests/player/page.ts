@@ -1235,24 +1235,12 @@ interface PrecompiledRun {
 /**
  * Pixi's own polyfills for the code it would otherwise build with
  * `new Function`, as pixi.js/unsafe-eval installs them. A bundling host
- * imports that; this page has Pixi's bundle unbundled, so it installs
- * them as Pixi's global build does, its script patching what the global
- * PIXI names, the classes of the bundle the player draws with.
+ * imports that; this page imports the entry tools/pixijs.ts builds of it
+ * beside the bundle, which patches the classes the player draws with.
  */
 async function pixiWithoutEval(): Promise<void> {
-  const global = globalThis as { PIXI?: object };
-  if (global.PIXI) {
-    return;
-  }
-
-  global.PIXI = { ...(await import("pixi.js")) };
-  await new Promise((done, fail) => {
-    const script = document.createElement("script");
-    script.src = "/pixi/packages/unsafe-eval.js";
-    script.onload = done;
-    script.onerror = () => fail(new Error("no /pixi/packages/unsafe-eval.js"));
-    document.head.append(script);
-  });
+  const polyfills = "/pixi/packages/unsafe-eval.mjs";
+  await import(polyfills);
 }
 
 /**

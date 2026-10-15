@@ -175,9 +175,16 @@ it, import `"pixi.js"` as from npm and declare it as `workspace:*`; the
 boundaries test checks both. `.pnpmfile.cjs` trims its manifest to the
 tools its build needs, at the versions of its own `package-lock.json`, and
 `tools/pixijs.ts`, the first step of `pnpm build`, runs its rollup and
-declaration builds for `lib/` and the two bundles the pages load. At the
-fork's first commit the output is byte for byte npm's `pixi.js` 8.21.0 but
-for the bundles' build date, which is the fork commit's.
+declaration builds for `lib/`, byte for byte what npm's `pixi.js` would
+hold at the fork's commit. The bundle the pages load as `"pixi.js"`
+(`dist/pixi.mjs`) is swf2es's own instead: the fork's bundle plugins over
+an entry that exports only the names the player, `web` and the test page
+import (`BROWSER_EXPORTS`, held to their imports by a unit test) and runs
+only the side-effect modules they need, tree-shaken. Pixi's accessibility
+overlay, DOMContainer and the Assets loaders are left out; the WebGPU and
+Canvas renderers, the player's fallbacks without WebGL, are chunks loaded
+only then. A host that bundles `@swf2es/web` itself takes Pixi from
+`lib/` and its own bundler decides the same.
 
 The player overwrites no method of Pixi's. What is Pixi's own
 behaviour, a bug fix or a memory or speed fix any user of Pixi would
@@ -1137,9 +1144,9 @@ command did not compile for, or a module of another compiler's.
 
 Pixi too builds code with `new Function` unless its `pixi.js/unsafe-eval`
 is imported, which a host drawing on such a page
-imports with Pixi (`tests/player/precompiled.ts`, whose page installs
-Pixi's global build of it into the bundle it draws with, plays a SWF so
-under that policy and draws it as without one).
+imports with Pixi (`tests/player/precompiled.ts`, whose page imports the
+bundle's `packages/unsafe-eval.mjs`, which patches the classes the player
+draws with, plays a SWF so under that policy and draws it as without one).
 
 ## The player
 
