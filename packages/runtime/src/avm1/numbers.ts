@@ -231,14 +231,19 @@ export function parseFloatAvm1(s: string, strict: boolean): number {
   }
 
   let exp = i - afterSign - 1;
+  let digits = i - afterSign;
   if (s[i] === ".") {
     i++;
+    const afterDot = i;
     while (i < s.length && isDigit(s.charCodeAt(i))) {
       i++;
     }
+
+    digits += i - afterDot;
   }
 
-  if (i === afterSign) {
+  // Ruffle takes "." for 0; adl, as without any digit, for NaN.
+  if (digits === 0) {
     return Number.NaN;
   }
 

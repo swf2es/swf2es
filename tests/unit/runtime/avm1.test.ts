@@ -88,6 +88,11 @@ test("a string is a number by the SWF's version: hex and octal from 6, 0 for non
     ["abc", 5, Number.NaN],
     ["abc", 4, 0],
     ["12abc", 4, 12],
+    // A string with no digit, as adl reads it; Ruffle reads "." as 0.
+    [".", 5, Number.NaN],
+    ["-.", 6, Number.NaN],
+    [".5", 6, 0.5],
+    ["5.", 6, 5],
   ];
 
   for (const [text, version, n] of cases) {
