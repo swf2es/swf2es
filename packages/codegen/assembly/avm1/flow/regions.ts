@@ -8,10 +8,12 @@
 // running whatever bytes are there. So a region's code is every action
 // reachable from its start by offsets below its end, which may include
 // actions outside its bytes, and an offset two regions reach is in both.
-// Regions are the same for every DefineFunction of the same bytes: a body
-// that jumps back before its DefineFunction defines itself again, so
-// regions form a graph, cycles included, which the emitter writes a region
-// at a time. A target before the block's start (a negative offset) is not
+// A DefineFunction's body is a region of its own, one for each
+// DefineFunction action, since its header (DefineFunction2's registers and
+// preloads) shapes its code: a body that jumps back before its
+// DefineFunction defines itself again, with the same region, so regions
+// form a graph, cycles included, which the emitter writes a region at a
+// time. A target before the block's start (a negative offset) is not
 // in the block's bytes at all; it is taken as an exit, where Flash runs
 // the SWF's bytes before the block.
 //
@@ -147,8 +149,6 @@ export class Flow {
    */
   tooLarge: bool = false;
   private visits: i32 = 0;
-  /** Function regions by their bodies' start and end. */
-  private functions: Map<u64, i32> = new Map<u64, i32>();
   // Per offset, the region (plus one) that last visited it, made it a block
   // start, or counted its fall-through predecessors, which `preds` holds.
   private visited: StaticArray<i32>;
@@ -255,16 +255,9 @@ export class Flow {
     }
   }
 
-  /** The region of a function's body, made if it is new. */
+  /** The region of a DefineFunction's body, which the action, decoded once, makes once. */
   private function(action: Action, parent: i32, opener: i32): i32 {
-    const key = ((<u64>action.s0) << 32) | <u64>action.s1;
-    const functions = this.functions;
-    if (functions.has(key)) {
-      return functions.get(key);
-    }
-
     const r = this.regions.length;
-    functions.set(key, r);
     this.regions.push(new Region(REGION_Function, action.s0, action.s1, parent, opener));
     return r;
   }

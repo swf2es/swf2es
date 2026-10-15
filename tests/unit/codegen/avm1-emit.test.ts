@@ -8,6 +8,7 @@ import {
   constant,
   constant16,
   double,
+  FunctionFlag,
   float,
   register,
 } from "../../avm1-assembler.ts";
@@ -43,11 +44,13 @@ function moduleOf(blocks: Uint8Array[], version: number): string {
   return utf8.decode(testing.actionsModuleBytes(bytes, offsets, lengths, version, false));
 }
 
-type Region = (cx: Activation, st?: unknown[]) => void;
+type Region = (cx: Activation, self?: unknown, args?: unknown[]) => unknown;
 
 interface Activation {
   pool: unknown[];
   st: unknown[];
+  g?: unknown[];
+  global?: unknown;
 }
 
 /** A stub runtime: what the code calls, in order. */
@@ -514,14 +517,149 @@ test("every other action throws that it is not yet supported", async () => {
   assert.deepEqual(thrown.calls, [["trace", "a"]]);
   assert.equal(thrown.error, "not yet supported: Throw");
 
-  const pushRegister = await run([asm().push("a", register(1)).trace().bytes()]);
-  assert.equal(pushRegister.error, "not yet supported: Push of a register");
-
-  // An action with operands, and one that ends the block.
+  // An action with operands.
   const goto = await run([asm().action(0x81, [1, 0]).bytes()]);
   assert.equal(goto.error, "not yet supported: GotoFrame");
-  const ret = await run([asm().action(0x3e).push("after").trace().bytes()]);
-  assert.equal(ret.error, "not yet supported: Return");
+});
+
+test("a block's registers are the movie's four, and StoreRegister leaves its value", async () => {
+  const block = asm()
+    .push("a")
+    .storeRegister(1)
+    .storeRegister(7)
+    .trace()
+    .push(register(1), register(3), register(4))
+    .trace()
+    .trace()
+    .trace()
+    .storeRegister(2)
+    .trace()
+    .bytes();
+  const { calls, rt } = stub();
+  const g = ["g0", "g1", "g2", "g3"];
+  const st: unknown[] = [];
+  (await load(moduleOf([block], 6), rt))[0][0]({ pool: [], st, g });
+
+  // Register 4 is none, a store to it the value kept; a store on an empty stack stores undefined.
+  assert.deepEqual(calls, [
+    ["trace", "a"],
+    ["trace", undefined],
+    ["trace", "g3"],
+    ["trace", "a"],
+    ["trace", undefined],
+  ]);
+  assert.deepEqual(g, ["g0", "a", undefined, "g3"]);
+  assert.deepEqual(st, []);
+});
+
+test("Return gives the value it pops, and ends a block", async () => {
+  const body = asm().push("kept", "returned").action(0x3e).push("after").trace().bytes();
+  const block = asm()
+    .defineFunction("", [], new Avm1Assembler().raw([...body]))
+    .bytes();
+  const { rt } = stub();
+  const regions = await load(moduleOf([block, body], 6), rt);
+  const st: unknown[] = [];
+  assert.equal(regions[0][1]({ pool: [], st }, undefined, []), "returned");
+  assert.deepEqual(st, ["kept"]);
+  assert.equal(regions[1][0]({ pool: [], st }), "returned");
+  assert.deepEqual(st, ["kept", "kept"]);
+});
+
+test("DefineFunction makes a function of its region, its parameters' names given", async () => {
+  const block = asm()
+    .defineFunction("f", ["a", "b"], asm().push("f").trace())
+    .defineFunction("", [], asm())
+    .bytes();
+  const { calls, entries } = await run([block], { version: 6 });
+  assert.equal(entries[0].length, 3);
+  assert.deepEqual(
+    calls.map((c) => c.slice(2)),
+    [
+      [1, "f", ["a", "b"]],
+      [2, "", []],
+    ],
+  );
+});
+
+test("DefineFunction2's registers are its own, its preloads in order from r1, then its parameters", async () => {
+  const all =
+    FunctionFlag.preloadThis |
+    FunctionFlag.preloadArguments |
+    FunctionFlag.preloadSuper |
+    FunctionFlag.preloadRoot |
+    FunctionFlag.preloadParent |
+    FunctionFlag.preloadGlobal;
+  const reads = (n: number) => {
+    const body = asm();
+    for (let r = 0; r < n; r++) {
+      body.push(register(r)).trace();
+    }
+
+    return body;
+  };
+  const defined = async (registers: number, flags: number, params: [string, number][]) => {
+    const block = asm().defineFunction2("f", registers, flags, params, reads(9)).bytes();
+    const { calls, rt } = stub();
+    const regions = (await load(moduleOf([block], 7), rt))[0];
+    regions[0]({ pool: [], st: [] });
+    const definition = calls.splice(0);
+    regions[1]({ pool: [], st: [], g: ["g0", "g1", "g2", "g3"], global: "G" }, "this", ["x", "y"]);
+    return { definition: definition[0].slice(2), calls };
+  };
+
+  // r1 this, r2 arguments, r3 super, r4 _root, r5 _parent, r6 _global, and y in r7.
+  const full = await defined(9, all, [
+    ["x", 0],
+    ["y", 7],
+  ]);
+  assert.deepEqual(full.definition, [1, "f", ["x", null], all]);
+  assert.deepEqual(
+    full.calls.filter((c) => c[0] === "trace").map((c) => c[1]),
+    [undefined, "this", "argumentsOf", "superOf", "root", "parentOf", "G", "y", undefined],
+  );
+
+  // Suppressed, `this` and `super` are undefined and `arguments` still loaded; past the count,
+  // registers are the global ones up to 3; a parameter's register past it is none.
+  const suppressed = await defined(
+    3,
+    FunctionFlag.preloadThis |
+      FunctionFlag.suppressThis |
+      FunctionFlag.preloadArguments |
+      FunctionFlag.suppressArguments,
+    [["z", 5]],
+  );
+  assert.deepEqual(suppressed.definition, [1, "f", [null], 0x0f]);
+  assert.deepEqual(
+    suppressed.calls.filter((c) => c[0] === "trace").map((c) => c[1]),
+    [
+      undefined,
+      undefined,
+      "argumentsOf",
+      "g3",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ],
+  );
+
+  // Without a parent, _global takes the parent's register.
+  const block = asm()
+    .defineFunction2("", 3, FunctionFlag.preloadParent | FunctionFlag.preloadGlobal, [], reads(3))
+    .bytes();
+  const { calls, rt } = stub();
+  const parentless = new Proxy(rt.version(7), {
+    get: (target, name: string) =>
+      name === "parentOf" ? () => undefined : target[name as keyof typeof target],
+  });
+  const regions = (await load(moduleOf([block], 7), { version: () => parentless }))[0];
+  regions[1]({ pool: [], st: [], g: [], global: "G" }, undefined, []);
+  assert.deepEqual(
+    calls.filter((c) => c[0] === "trace").map((c) => c[1]),
+    [undefined, "G", undefined],
+  );
 });
 
 test("an action Flash does not know is skipped, and one cut short stops the SWF", async () => {
@@ -733,7 +871,7 @@ test("a function's body is an entry of its own, not inlined; a With's body is th
     .raw([...body])
     .bytes();
   const { entries, error, module } = await run([block]);
-  assert.equal(error, "not yet supported: DefineFunction");
+  assert.equal(error, "not yet supported: With");
   assert.equal(entries[0].length, 2);
   assert.equal(module.match(/"in the body"/g)?.length, 2);
 

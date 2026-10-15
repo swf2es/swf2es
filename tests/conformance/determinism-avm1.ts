@@ -87,6 +87,36 @@ function testBlocks(): Uint8Array[] {
       .action(0x1c)
       .bytes(),
     reopening,
+    // DefineFunction2 with its registers, preloads and parameters, a nested one, StoreRegister
+    // and Return; and a function whose body jumps back before its DefineFunction.
+    asm()
+      .defineFunction2(
+        "f",
+        5,
+        0x1ff,
+        [
+          ["a", 4],
+          ["b", 0],
+          ["c", 9],
+        ],
+        asm()
+          .push(register(1), register(4), register(6))
+          .storeRegister(2)
+          .storeRegister(7)
+          .defineFunction2(
+            "",
+            2,
+            0x05,
+            [["x", 1]],
+            asm().push(register(1), register(3)).op("Return"),
+          )
+          .op("Return"),
+      )
+      .push(register(2))
+      .storeRegister(0)
+      .op("Return")
+      .bytes(),
+    asm().action(0x9b, [0, 0, 0, 5, 0]).raw([0x99, 2, 0, 0xf3, 0xff]).bytes(),
     // Every action without operands that goes on to the next, each operator among them.
     Object.entries(Simple)
       .filter(([name]) => !["End", "Return", "Throw"].includes(name))

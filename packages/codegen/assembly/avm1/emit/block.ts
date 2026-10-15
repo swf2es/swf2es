@@ -7,28 +7,38 @@
 // is one block that nothing jumps into is written straight, without the
 // dispatcher.
 //
-// The actions written so far: Push of constants, ConstantPool, Trace, Pop,
-// Jump, If, Play, Stop, End, PushDuplicate and StackSwap, and the
-// arithmetic, comparison, logical, bitwise, string and conversion actions,
-// each a call of its version's operation (V.add2, V.less2...), and the
-// variable, member, object and call actions, each a call that takes its
-// operands as they are popped, the top first, or pops them itself where
-// their number is on the stack (V.initObject, V.callMethod...). Every other
-// action Flash knows is a call that throws, V.notYet, and one it does not
-// know is skipped, as Flash skips it. An action Flash cannot read, cut short or a Push of a value
-// type it does not know, stops the SWF, V.halt, as adl does.
+// The actions written so far: Push, ConstantPool, Trace, Pop, Jump, If,
+// Play, Stop, End, PushDuplicate and StackSwap, and the arithmetic,
+// comparison, logical, bitwise, string and conversion actions, each a call
+// of its version's operation (V.add2, V.less2...), and the variable, member,
+// object and call actions, each a call that takes its operands as they are
+// popped, the top first, or pops them itself where their number is on the
+// stack (V.initObject, V.callMethod...); DefineFunction and DefineFunction2,
+// which make a function of a region, StoreRegister and Return. A function's
+// region takes its `this` and its arguments, and a DefineFunction2's
+// registers are its `let`s; every other register is one of the movie's
+// four, `cx.g`. Every other action Flash knows is a call that throws,
+// V.notYet, and one it does not know is skipped, as Flash skips it. An
+// action Flash cannot read, cut short or a Push of a value type it does not
+// know, stops the SWF, V.halt, as adl does.
 
 import { Output } from "../../output";
 import { Action, Actions, ERROR_None } from "../actions/decode";
 import * as ops from "../actions/opcodes";
 import { POOL_Unknown, poolAfter, poolsOf } from "../flow/pool";
-import { branches, Flow, fallsThrough, fallsTo, Region } from "../flow/regions";
+import { branches, Flow, fallsThrough, fallsTo, REGION_Function, Region } from "../flow/regions";
 import { avm1String } from "./strings";
 
 @final
 export class BlockEmitter {
   /** The SWF's version, which decides how its strings read (strings.ts). */
   version: i32 = 0;
+  /**
+   * The registers of the region being written, its own `let`s `r0` up to
+   * this: a DefineFunction2's count, 0 for any other region, whose
+   * registers are the four global ones.
+   */
+  private registers: i32 = 0;
 
   constructor(public out: Output) {}
 
@@ -56,7 +66,18 @@ export class BlockEmitter {
 
   private region(actions: Actions, region: Region): void {
     const out = this.out;
-    out.text("function (cx) {\nconst st = cx.st;\n");
+    this.registers = 0;
+    if (region.kind !== REGION_Function) {
+      out.text("function (cx) {\nconst st = cx.st;\n");
+    } else {
+      // A body is called with its `this` and its arguments (docs/avm1.md, "Functions and registers").
+      out.text("function (cx, self, args) {\nconst st = cx.st;\n");
+      const opener = actions.actions[region.opener];
+      if (opener.opcode === ops.OP_DefineFunction2) {
+        this.registers = opener.a;
+        this.preload(actions, opener);
+      }
+    }
 
     const n = region.blocks.length;
     if (n === 0) {
@@ -95,10 +116,13 @@ export class BlockEmitter {
       pool = poolAfter(actions, index, pool);
     }
 
-    // Where control goes from the block's end; a Jump has gone already.
+    // Where control goes from the block's end; a Jump or a Return has gone already.
     const action = actions.actions[region.order[last]];
     if (!fallsThrough(action)) {
-      if (action.error !== ERROR_None || action.opcode !== ops.OP_Jump) {
+      if (
+        action.error !== ERROR_None ||
+        (action.opcode !== ops.OP_Jump && action.opcode !== ops.OP_Return)
+      ) {
         out.text("return;\n");
       }
 
@@ -316,6 +340,21 @@ export class BlockEmitter {
       case ops.OP_NewMethod:
         out.text("V.newMethod(cx);\n");
         break;
+      case ops.OP_DefineFunction:
+      case ops.OP_DefineFunction2:
+        this.defineFunction(actions, action);
+        break;
+      case ops.OP_StoreRegister:
+        // The value stays: popped and pushed again, undefined on an empty stack.
+        out.text("st.push(");
+        if (this.register(action.a)) {
+          out.text(" = ");
+        }
+        out.text("st.pop());\n");
+        break;
+      case ops.OP_Return:
+        out.text("return st.pop();\n");
+        break;
       case ops.OP_PushDuplicate:
         out.text("{ const a = st.pop(); st.push(a, a); }\n");
         break;
@@ -343,6 +382,152 @@ export class BlockEmitter {
         }
         break;
     }
+  }
+
+  /**
+   * A DefineFunction2's registers, `let`s, and what it loads into them as
+   * it is called: its preloads in order from r1, each where its flag is
+   * set (one that is also suppressed undefined, but `arguments`), then its
+   * parameters that have one. A register past the count takes nothing.
+   */
+  private preload(actions: Actions, action: Action): void {
+    const out = this.out;
+    const count = this.registers;
+    if (count === 0) {
+      return;
+    }
+
+    out.text("let ");
+    for (let r = 0; r < count; r++) {
+      if (r > 0) {
+        out.text(", ");
+      }
+
+      out.byte(0x72);
+      out.uint(r);
+    }
+    out.text(";\n");
+
+    const flags = <u32>action.b;
+    let r = 1;
+    if (flags & ops.FUNCTION_PreloadThis) {
+      this.load(r++, flags & ops.FUNCTION_SuppressThis ? "undefined" : "self");
+    }
+
+    if (flags & ops.FUNCTION_PreloadArguments) {
+      this.load(r++, "V.argumentsOf(cx, args)");
+    }
+
+    if (flags & ops.FUNCTION_PreloadSuper) {
+      this.load(r++, flags & ops.FUNCTION_SuppressSuper ? "undefined" : "V.superOf(cx, self)");
+    }
+
+    if (flags & ops.FUNCTION_PreloadRoot) {
+      this.load(r++, "V.root(cx)");
+    }
+
+    // A clip without a parent, the root, has no register for it: _global takes it.
+    const parent = (flags & ops.FUNCTION_PreloadParent) !== 0;
+    const global = (flags & ops.FUNCTION_PreloadGlobal) !== 0;
+    if (parent && r < count) {
+      out.text("{ const p = V.parentOf(cx); if (p !== undefined) { r");
+      out.uint(r);
+      out.text(" = p;");
+      if (global && r + 1 < count) {
+        out.text(" r");
+        out.uint(r + 1);
+        out.text(" = cx.global;");
+      }
+      out.text(" }");
+      if (global) {
+        out.text(" else { r");
+        out.uint(r);
+        out.text(" = cx.global; }");
+      }
+      out.text(" }\n");
+    } else if (global && !parent) {
+      this.load(r, "cx.global");
+    }
+
+    for (let i = 1; i < action.count; i++) {
+      const register = <i32>actions.stringRegister[action.first + i];
+      if (register > 0 && register < count) {
+        out.byte(0x72);
+        out.uint(register);
+        out.text(" = args[");
+        out.uint(i - 1);
+        out.text("];\n");
+      }
+    }
+  }
+
+  /** `r<register> = <value>;`, where the region has the register. */
+  private load(register: i32, value: string): void {
+    const out = this.out;
+    if (register >= this.registers) {
+      return;
+    }
+
+    out.byte(0x72);
+    out.uint(register);
+    out.text(" = ");
+    out.text(value);
+    out.text(";\n");
+  }
+
+  /**
+   * Register `register` as an expression: the region's own, or one of the
+   * four global ones, the movie's; any other is none.
+   */
+  private register(register: i32): bool {
+    const out = this.out;
+    if (register < this.registers) {
+      out.byte(0x72);
+      out.uint(register);
+      return true;
+    }
+
+    if (register < 4) {
+      out.text("cx.g[");
+      out.uint(register);
+      out.byte(0x5d);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * DefineFunction and DefineFunction2: the function made of region
+   * `action.region`, with its name, and its parameters that are variables,
+   * null for those in a register; a DefineFunction2's flags.
+   */
+  private defineFunction(actions: Actions, action: Action): void {
+    const out = this.out;
+    const two = action.opcode === ops.OP_DefineFunction2;
+    out.text(two ? "V.defineFunction2(cx, " : "V.defineFunction(cx, ");
+    out.uint(action.region);
+    out.text(", ");
+    this.string(actions, action.first);
+    out.text(", [");
+    for (let i = 1; i < action.count; i++) {
+      if (i > 1) {
+        out.text(", ");
+      }
+
+      const index = action.first + i;
+      if (two && actions.stringRegister[index] !== 0) {
+        out.text("null");
+      } else {
+        this.string(actions, index);
+      }
+    }
+    out.byte(0x5d);
+    if (two) {
+      out.text(", ");
+      out.uint(<u32>action.b);
+    }
+    out.text(");\n");
   }
 
   /** Control to `offset`, its block or out of the region, without a line's end. */
@@ -394,7 +579,9 @@ export class BlockEmitter {
           this.constant(actions, pool, index);
           break;
         default:
-          this.notYet("Push of a register");
+          if (!this.register(index)) {
+            out.text("undefined");
+          }
           break;
       }
     }
