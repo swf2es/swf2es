@@ -349,8 +349,9 @@ export function get(
 function resolve(o: Avm1Object, name: string, version: number, self: Value): Value {
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
+    // adl calls a `__resolve` its version bits hide.
     const own = p.own("__resolve", version);
-    if (own !== undefined && allowed(own.flags, version) && own.value instanceof Avm1Object) {
+    if (own !== undefined && own.value instanceof Avm1Object) {
       return invoke(own.value, self, [name], version);
     }
 
