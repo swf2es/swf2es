@@ -12,6 +12,7 @@ import {
   looselyEquals,
   strictlyEquals,
   toInt32,
+  wellFormed,
 } from "./operators.js";
 import { stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
 
@@ -124,7 +125,8 @@ function operations(version: number): Operations {
   const stringExtract = (count: Value, index: Value, s: Value) => {
     const n = toInt32(count, version);
     const i = toInt32(index, version);
-    return extract(stringOf(s, version), i, n);
+    const text = extract(stringOf(s, version), i, n);
+    return bytes ? text : wellFormed(text);
   };
 
   return {

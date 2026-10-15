@@ -2081,6 +2081,34 @@ function avm1Operators(version: number): Uint8Array {
           ),
         ),
       ),
+      // Each half of a surrogate pair StringExtract cuts is U+FFFD from SWF 6,
+      // when compared or joined: the halves joined again are not the pair.
+      w.doAction(
+        avm1((a) =>
+          a
+            .push("a😀b", 2, 1)
+            .op("StringExtract")
+            .push("a😀b", 3, 1)
+            .op("StringExtract")
+            .op("StringAdd")
+            .op("PushDuplicate")
+            .trace()
+            .push("😀")
+            .op("StringEquals")
+            .trace()
+            .push("a😀b", 3, 1)
+            .op("MBStringExtract")
+            .push(0xfffd)
+            .op("AsciiToChar")
+            .op("StringEquals")
+            .trace()
+            .push("😀😀", 2, 2)
+            .op("StringExtract")
+            .push("c")
+            .op("StringAdd")
+            .trace(),
+        ),
+      ),
       // PushDuplicate and StackSwap of the empty stack's undefined.
       w.doAction(
         avm1((a) =>

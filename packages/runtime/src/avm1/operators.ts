@@ -180,3 +180,13 @@ export function extract(s: string, index: number, count: number): string {
   const end = count < 0 || start + count > s.length ? s.length : start + count;
   return s.slice(Math.min(start, end), end);
 }
+
+const unpaired = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * An extract from SWF 6 on, where each half of a surrogate pair it cuts
+ * is U+FFFD, as adl compares, joins and measures it: the halves of "😀"
+ * extracted apart and joined again are "\ufffd\ufffd". (adl's trace of a
+ * cut low half itself writes three U+FFFD, the bytes it keeps, not one.)
+ */
+export const wellFormed = (s: string): string => s.replace(unpaired, "\ufffd");

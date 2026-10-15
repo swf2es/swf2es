@@ -213,6 +213,13 @@ test("StringExtract counts from 1, a start below it the first, a count below 0 t
   assert.equal(V.stringExtract(2, 6442450944, "abcdef"), "");
   assert.equal(V.stringExtract(2, 4294967296, "abcdef"), "ab");
   assert.equal(V.mbStringExtract(undefined, undefined, 12345), "");
+
+  // From SWF 6 each half of a pair cut is U+FFFD; up to 5 a string is bytes.
+  assert.equal(V.stringExtract(1, 2, "a😀b"), "\ufffd");
+  assert.equal(V.mbStringExtract(2, 3, "a😀b"), "\ufffdb");
+  assert.equal(V.stringExtract(2, 2, "😀😀"), "\ufffd\ufffd");
+  assert.equal(V.stringExtract(2, 2, "a😀b"), "😀");
+  assert.equal(rt.version(5).stringExtract(1, 2, "a\ud83d\ude00b"), "\ud83d");
 });
 
 test("an object's conversions are the later steps': until then they end the block", () => {
