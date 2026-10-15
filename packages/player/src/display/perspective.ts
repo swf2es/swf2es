@@ -101,7 +101,7 @@ function own3D(d: DisplayObject): M4 {
   const m = new Float64Array(16);
   const space = d.space;
   if (space) {
-    m.set(space.raw);
+    m.set(space.shown);
   } else {
     const p = d.placed;
     m.set([p.a, p.b, 0, 0, p.c, p.d, 0, 0, 0, 0, 1, 0, p.tx, p.ty, 0, 1]);

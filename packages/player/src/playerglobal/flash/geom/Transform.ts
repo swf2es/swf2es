@@ -305,7 +305,7 @@ export function transformNatives(s: Scripting): avm2.Natives {
     let m = identity3D();
     for (let o: DisplayObject | null = d; o && o !== s.stage; o = o.parent) {
       const local = o.space
-        ? o.space.raw
+        ? o.space.shown
         : Float32Array.of(
             o.matrix.a,
             o.matrix.b,

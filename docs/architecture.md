@@ -3206,7 +3206,11 @@ Matrix3D, live as adl's (`three-d-matrix`): the getter gives the same one
 each time, which shares the object's matrix, so that what a script does
 to it moves the object, its properties taken apart from it again (the
 Matrix3D's natives tell its owner), and what the properties do shows in
-it. A matrix3D set whole becomes the object's own, a clone of the same
+it. Its copyToMatrix3D, copyRowFrom and copyColumnFrom change the
+Matrix3D alone, as adl's do: the object is drawn and reports its
+properties as before, from a copy of its matrix the view goes by, until a
+property set writes that copy back into the Matrix3D (`three-d-matrix-shared`,
+`three-d-matrix-silent`). A matrix3D set whole becomes the object's own, a clone of the same
 values too, and is taken apart as `decompose` takes it; one that is
 another object's is ArgumentError 2189, until that object lets it go
 (set to null or another). A position set moves it alone, and a scale or

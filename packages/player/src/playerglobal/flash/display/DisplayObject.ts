@@ -724,7 +724,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         const t = v as AsObject;
         const from: DisplayObject = t.$display;
         if (from.space) {
-          this.$display.setMatrix3D(from.space.raw);
+          this.$display.setMatrix3D(from.space.shown);
         } else {
           this.$display.setMatrix(matrixOf(s, s.rt.getProperty(t, MATRIX_NAME) as AsObject));
         }

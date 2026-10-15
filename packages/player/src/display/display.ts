@@ -166,6 +166,14 @@ export interface Space {
   rotationZ: number;
   raw: Float32Array;
   /**
+   * The matrix it is drawn, bounded and hit by: `raw` as the object last
+   * made or took it. A Matrix3D a script holds of it (transform.matrix3D)
+   * shares `raw`, and its copyColumnFrom, copyRowFrom and copyToMatrix3D
+   * change that alone, as Flash's do: the object stays where it was until
+   * a property set writes all of `shown` back into `raw` (`three-d-matrix`).
+   */
+  shown: Float32Array;
+  /**
    * Whether its matrix could not be taken apart, a column of it of no
    * length: Flash then reads the properties as the identity's, at the
    * position, until a scale or rotation set makes it the identity.
@@ -185,7 +193,7 @@ export interface Space {
 
 export type SpaceProperty = Exclude<
   keyof Space,
-  "raw" | "singular" | "composed" | "flat" | "planes" | "planeAt"
+  "raw" | "shown" | "singular" | "composed" | "flat" | "planes" | "planeAt"
 >;
 
 /**
@@ -617,7 +625,8 @@ export class DisplayObject {
     const at = ["x", "y", "z"].indexOf(key);
     if (at >= 0) {
       space[key] = Number.isNaN(v) ? 0 : v;
-      space.raw[12 + at] = space[key];
+      space.shown[12 + at] = space[key];
+      space.raw.set(space.shown);
       this.flatten();
       return;
     }
@@ -638,8 +647,7 @@ export class DisplayObject {
     const radians = [space.rotationX, space.rotationY, space.rotationZ].map((r) =>
       Math.fround((r * Math.PI) / 180),
     );
-    // In place: a Matrix3D a script holds of it shows the change (transform.matrix3D).
-    space.raw.set(
+    space.shown.set(
       compose3D(
         [space.x, space.y, space.z],
         radians,
@@ -647,6 +655,8 @@ export class DisplayObject {
         "eulerAngles",
       ),
     );
+    // In place: a Matrix3D a script holds of it shows the change (transform.matrix3D).
+    space.raw.set(space.shown);
     space.composed = true;
     this.flatten();
   }
@@ -698,6 +708,7 @@ export class DisplayObject {
       rotationY,
       rotationZ,
       raw: held,
+      shown: Float32Array.from(held),
       singular,
       composed: false,
       flat: before,
@@ -720,7 +731,7 @@ export class DisplayObject {
   /** The 2D fields from the 3D transform: the matrix its x and y rows, which a mask draws by (`flatPlaced`). */
   private flatten(): void {
     const space = this.space as Space;
-    const m = space.raw;
+    const m = space.shown;
     this.matrix = { a: m[0], b: m[1], c: m[4], d: m[5], tx: m[12], ty: m[13] };
     this.scaleX = space.scaleX;
     this.scaleY = space.scaleY;

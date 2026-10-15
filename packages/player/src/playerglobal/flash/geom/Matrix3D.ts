@@ -36,14 +36,15 @@ function data(o: AsObject): Float32Array {
 
 const ORIENTATIONS = ["eulerAngles", "axisAngle", "quaternion"];
 
-/** The members that change a Matrix3D in place: copyToMatrix3D its argument, the others itself. */
+/**
+ * The members that change a Matrix3D in place and tell a display object that holds it. Flash's
+ * copyToMatrix3D, copyRowFrom and copyColumnFrom change it without telling it: the object stays
+ * where it was (Space.shown), its properties as they were (`three-d-matrix`).
+ */
 const CHANGES = [
   "rawData",
   "copyFrom",
-  "copyToMatrix3D",
   "copyRawDataFrom",
-  "copyRowFrom",
-  "copyColumnFrom",
   "identity",
   "transpose",
   "appendTranslation",
@@ -454,7 +455,7 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const method = d.value as (this: AsObject, ...args: Value[]) => Value;
       d.value = function (this: AsObject, ...args: Value[]) {
         const result = method.apply(this, args);
-        told(name === "copyToMatrix3D" ? args[0] : this);
+        told(this);
         return result;
       };
     }

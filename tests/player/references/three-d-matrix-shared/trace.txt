@@ -1,0 +1,43 @@
+same getter true true
+after null 0  10
+back 3D false 0 0
+old after back 0
+shared 2189
+adopted 7 8 9 true
+identity 0 0
+appendRotation 30
+prependRotation 10 30
+appendScale 1.803
+prependScale 3.01
+prependTranslation 5.728 5.388 2.961
+copyFrom 20 30 40 1
+copyToMatrix3D 20 30 40
+append 42
+prepend 63
+invert -63
+transpose 0 0
+position 4 5 6
+rawData 50
+copyRawDataFrom 60
+copyColumnFrom 60 5 6
+copyRowFrom 60
+recompose 90
+interpolateTo 55.5
+pointAt 55.5 125.876 -51.911
+static interpolate true
+clone true
+singular threw 2183
+after singular 1 true
+property 0.866 0.5
+x 33
+matrix on 3D 
+matrix set  5
+after matrix set 5 
+again false
+removed 11
+old after set 0 true
+steal fresh 2189
+transform copy false 0
+transform copy moved 0 1
+own back 370
+clone back 10
