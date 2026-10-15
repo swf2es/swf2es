@@ -76,7 +76,7 @@ export function stringClass(realm: Realm): { constr: Avm1Function; proto: Avm1Ob
     proto.define(name, realm.rawMethod(native), DONT_ENUM | DONT_DELETE);
 
   // A String's own string, but undefined for anything else; valueOf gives
-  // the object itself, as Object's would (adl; Ruffle gives undefined).
+  // anything else as a string, by its toString (adl; Ruffle gives undefined).
   const own = (self: Value): Value => {
     if (typeof self === "string") {
       return self;
@@ -86,7 +86,7 @@ export function stringClass(realm: Realm): { constr: Avm1Function; proto: Avm1Ob
       ? self.primitive
       : undefined;
   };
-  define("valueOf", (self, _, version) => own(self) ?? realm.box(self, version));
+  define("valueOf", (self, _, version) => own(self) ?? text(self, version));
   define("toString", (self) => own(self));
   define("toUpperCase", (self, _, version) => mapped(text(self, version), upperCase, version < 6));
   define("toLowerCase", (self, _, version) => mapped(text(self, version), lowerCase, version < 6));

@@ -56,3 +56,4 @@ fromCharCode pair �=� half 2 false �=
 split undefined 0 0 a
 substring end ||cde|||cdef
 split limits 1:<a,b> 0: 0: 1:<> 1:<> 1:<>
+valueOf of an object string T false undefined 

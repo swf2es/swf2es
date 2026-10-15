@@ -79,3 +79,7 @@ var se = "abcdef";
 trace("substring end " + se.substring(10, 2) + "|" + se.substring(6, 2) + "|" + se.substring(5, 2) + "|" + se.substring(6) + "|" + se.substring(10, -5) + "|" + se.substring(2, 10));
 function parts(a) { var r = a.length + ":"; for (var i = 0; i < a.length; i++) { r += "<" + a[i] + ">"; } return r; }
 trace("split limits " + parts("a,b".split("", 0)) + " " + parts("a,b".split(",,", 0)) + " " + parts("".split(",", 0)) + " " + parts("".split(",")) + " " + parts("".split("")) + " " + parts("".split("", 0)));
+var sv = {toString: function () { return "T"; }, valueOf: function () { return 9; }};
+sv.vo = String.prototype.valueOf;
+var svr = sv.vo();
+trace("valueOf of an object " + typeof svr + " " + svr + " " + (svr === sv) + " " + typeof String.prototype.valueOf.call(5) + " " + String.prototype.valueOf.call([1, 2]));

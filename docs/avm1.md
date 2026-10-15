@@ -907,8 +907,9 @@ joined again are the pair (adl; StringExtract's halves are U+FFFD each).
 Flash's log writes half a pair as U+FFFD, which `trace` does; adl writes
 a low half followed by more as three. `toUpperCase` and `toLowerCase` are
 Flash's own tables (`case.ts`, measured in adl over every code unit), one
-code unit to one. `String.prototype.valueOf` of an object that is no
-String gives the object itself (Ruffle: undefined), `toString` undefined.
+code unit to one. `String.prototype.valueOf` of anything that is no
+String gives it as a string, by its `toString` (Ruffle: undefined),
+`toString` undefined.
 
 ## The player
 
