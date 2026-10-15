@@ -30,7 +30,7 @@ import {
   lengthOf,
   type Native,
   nameOf,
-  type Property,
+  Property,
   type RawNative,
   READ_ONLY,
   set,
@@ -376,12 +376,20 @@ export class Realm implements Boxer {
   /** `self` made an array of `elements`, then its `length`. */
   fillArray(self: Avm1Object, elements: Value[], _version: number): Avm1Object {
     self.array = true;
-    if (self.elems === null && ![...self.props.keys()].some((name) => elementIndex(name) >= 0)) {
+    if (self.elems === null && !hasIndex(self)) {
       self.elems = [];
     }
 
-    for (let i = 0; i < elements.length; i++) {
-      self.define(String(i), elements[i], 0);
+    const elems = self.elems;
+    if (elems !== null && elems.length === 0) {
+      // A new array's elements, straight to their places.
+      for (let i = 0; i < elements.length; i++) {
+        elems.push(new Property(String(i), elements[i], 0));
+      }
+    } else {
+      for (let i = 0; i < elements.length; i++) {
+        self.define(String(i), elements[i], 0);
+      }
     }
 
     self.define("length", elements.length, DONT_ENUM | DONT_DELETE);
@@ -638,3 +646,14 @@ objects.toString = (object, version) => {
   return o instanceof Avm1Function ? "[type Function]" : "[type Object]";
 };
 objects.typeOf = (object) => (object as Avm1Object).typeOf();
+
+/** Whether `o` has a property named as an element. */
+function hasIndex(o: Avm1Object): boolean {
+  for (const name of o.props.keys()) {
+    if (elementIndex(name) >= 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
