@@ -946,15 +946,34 @@ export class Runtime {
    * stop them: a SWF's ScriptLimits sets it (Flash's default 15). Past
    * it, the movie's actions are disabled, as Flash's are once stopped.
    */
-  scriptTimeout = 15;
+  get scriptTimeout(): number {
+    return this.timeout;
+  }
+
+  /**
+   * Set while scripts run, as a ScriptLimits their gotos reach is, it
+   * counts from when they began, not from now: gotos that enter its
+   * frame again and again still run into it.
+   */
+  set scriptTimeout(seconds: number) {
+    this.timeout = seconds;
+    if (this.realm.deadline !== Number.POSITIVE_INFINITY) {
+      this.realm.deadline = this.began + seconds * 1000;
+    }
+  }
+
+  private timeout = 15;
+  /** When the scripts running began, on the player's clock. */
+  private began = 0;
 
   /**
    * The player starts running scripts, a frame's or its timers', at `now`
    * on its clock, `clock`: they have the script timeout from there.
    */
   begin(now: number, clock: () => number): void {
+    this.began = now;
     this.realm.clock = clock;
-    this.realm.deadline = now + this.scriptTimeout * 1000;
+    this.realm.deadline = now + this.timeout * 1000;
   }
 
   /** The player's scripts are done until it begins again. */

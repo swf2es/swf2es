@@ -1120,7 +1120,6 @@ export class Avm1 implements Movie {
 
     if (actions.limits !== null) {
       [this.rt.maxRecursion, this.rt.scriptTimeout] = actions.limits;
-      this.begin();
     }
 
     for (const { id, name } of actions.exports) {
