@@ -1,0 +1,12 @@
+{
+  // The page's scripts; build.ts and demos.ts are node's, checked by the root tsconfig.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/js",
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "../../packages/format" }, { "path": "../../packages/web" }]
+}

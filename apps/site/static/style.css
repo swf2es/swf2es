@@ -1,0 +1,407 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f5;
+  --fg: #1d1f21;
+  --muted: #5d6166;
+  --panel: #ffffff;
+  --border: #d9dad6;
+  --accent: #1f5fbf;
+  --accent-fg: #ffffff;
+  --stage: #e9e9e4;
+  --error: #b3261e;
+  --warn: #8a5a00;
+  --info: #5d6166;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --fg: #e6e6e3;
+    --muted: #a0a4a8;
+    --panel: #1d2024;
+    --border: #33373c;
+    --accent: #6ea8fe;
+    --accent-fg: #0b1220;
+    --stage: #0e0f11;
+    --error: #ff8a80;
+    --warn: #f2c063;
+    --info: #a0a4a8;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.45;
+}
+
+a {
+  color: var(--accent);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.bar h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex: 1 1 16rem;
+}
+
+.bar nav {
+  display: flex;
+  gap: 16px;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 16px 32px;
+}
+
+button,
+.button,
+select,
+input {
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  min-height: 36px;
+}
+
+button,
+.button {
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.open {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.url {
+  display: flex;
+  flex: 1 1 18rem;
+  gap: 8px;
+  min-width: 0;
+}
+
+.url input {
+  flex: 1;
+  min-width: 0;
+}
+
+.note {
+  margin: 8px 0 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.stage {
+  --w: 550;
+  --h: 400;
+  position: relative;
+  aspect-ratio: var(--w) / var(--h);
+  width: min(100%, calc(70vh * var(--w) / var(--h)));
+  margin: 0 auto;
+  background: var(--stage);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.stage:fullscreen {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+}
+
+body.dragging .stage {
+  outline: 3px dashed var(--accent);
+  outline-offset: 4px;
+}
+
+swf2es-player {
+  display: block;
+  position: absolute;
+  inset: 0;
+}
+
+swf2es-player[hidden] {
+  display: none;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.ask {
+  overflow: auto;
+  color: var(--fg);
+}
+
+.ask p {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.ask .warning {
+  color: var(--muted);
+  max-width: 44ch;
+  margin-inline: auto;
+}
+
+.empty[hidden] {
+  display: none;
+}
+
+.status {
+  min-height: 1.45em;
+  margin: 8px 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.status.error {
+  color: var(--error);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.controls label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  margin: 0 0 0 auto;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.stats dt {
+  color: var(--muted);
+}
+
+.stats dd {
+  margin: 0 10px 0 0;
+  min-width: 4.5em;
+}
+
+.panels {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stats {
+    margin-left: 0;
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.panels .panel {
+  margin-top: 0;
+}
+
+.panel h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.panel-head h2 {
+  margin: 0 auto 0 0;
+}
+
+.panel-head button,
+.panel-head .button {
+  min-height: 30px;
+  padding: 3px 10px;
+  font-size: 0.85rem;
+}
+
+.log {
+  height: 16rem;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+.log .error {
+  color: var(--error);
+}
+
+.log .warn {
+  color: var(--warn);
+}
+
+.log .info {
+  color: var(--info);
+  font-style: italic;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.demos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.demos li {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.demos button {
+  margin-right: 4px;
+}
+
+.about ul {
+  padding-left: 1.2em;
+  margin: 0;
+}
+
+.about li {
+  margin: 4px 0;
+}
+
+.build {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 8px 0 0;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.notices section {
+  margin-top: 12px;
+}
+
+.notices pre {
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+}
+
+/* Last, as the most specific: the hidden file input lends its focus ring to its label. */
+:focus-visible,
+#file:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
