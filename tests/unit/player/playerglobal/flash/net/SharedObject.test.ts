@@ -69,7 +69,6 @@ function mapStorage(refuse = false) {
     remove: (key: string) => {
       stored.delete(key);
     },
-    keys: () => [...stored.keys()],
   };
 
   return { stored, storage };
@@ -119,6 +118,56 @@ test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol 
     "0",
   ]);
   assert.ok(!stored.has("example.test/games/main.swf/kept"));
+});
+
+test("deleteAll and getDiskUsage reach no SWF's saves, its own or another site's, as Flash refuses them", {
+  skip,
+}, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedSave",
+        `var so:SharedObject = SharedObject.getLocal("prefs");
+      so.data.n = 1;
+      so.flush();
+      SharedObject.getLocal("prefs", "/").data.n = 2;
+      SharedObject.getLocal("prefs", "/").flush();`,
+      ),
+      script(
+        "SharedSweep",
+        `var urls:Array = ["", "/", "a.example", "a.example/", "b.example", "http://b.example/",
+        "http://b.example/two/b.swf", null];
+      for each (var url:* in urls) {
+        for each (var f:Function in [SharedObject.deleteAll, SharedObject.getDiskUsage]) {
+          try {
+            trace(f(url));
+          } catch (e:Error) {
+            trace(e.errorID);
+          }
+        }
+      }`,
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const save = abcs.get("SharedSave") as Uint8Array;
+  await run(save, "http://a.example/one/a.swf", storage);
+  await run(save, "http://b.example/two/b.swf", storage);
+  const before = new Map(stored);
+  assert.equal(before.size, 4);
+
+  // Two SWFs of the same page's origin, from either site: "" or another
+  // host's name would have matched every save, or the other site's.
+  for (const url of ["http://a.example/one/a.swf", "http://b.example/two/b.swf"]) {
+    assert.deepEqual(await run(abcs.get("SharedSweep") as Uint8Array, url, storage), [
+      ...Array(14).fill("2014"),
+      "2007",
+      "2007",
+    ]);
+  }
+
+  assert.deepEqual(stored, before);
 });
 
 test("a SharedObject holds values too large to spread into one call", { skip }, async () => {
