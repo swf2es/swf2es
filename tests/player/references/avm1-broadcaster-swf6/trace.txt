@@ -1,0 +1,36 @@
+init 
+listeners object 0 true
+add true true true len 2
+l2 onEvent 2
+l1 onEvent 1 2 this l1
+broadcast true
+broadcast missing true
+broadcast none 
+broadcast undefined true
+remove true false len 1
+l2 onEvent 1
+broadcast2 true
+broadcast empty 
+prims 3 str,5,
+broadcast prims true
+same fns true false
+bad listeners true  false
+no listeners true 
+statics function true 1
+l1 onEvent s  this l1
+new object object function 
+abstract eq 2
+r1
+r2
+fn onE
+fn listener 7
+removed 1 left e2
+bcast in swf function function
+first
+ra
+second 1
+rb
+aa
+again
+aa
+ab
