@@ -11,6 +11,7 @@
 // The realm also holds what runs AVM1 code across calls: the activation
 // running, how many function calls are, and the movie's global registers.
 import type { Activation, Region } from "./activation.js";
+import { TimedOut } from "./errors.js";
 import { pendingLocal, ScriptFunction } from "./functions.js";
 import { arrayClass } from "./globals/array.js";
 import { broadcasterClass } from "./globals/broadcaster.js";
@@ -19,6 +20,7 @@ import { asnative, globalFunctions } from "./globals/global.js";
 import { mathNative, mathObject } from "./globals/math.js";
 import { booleanClass, numberClass } from "./globals/number.js";
 import { stringClass } from "./globals/string.js";
+import { Timers } from "./globals/timers.js";
 import {
   Avm1Function,
   Avm1Object,
@@ -55,6 +57,9 @@ const first = (args: Value[]): Value => (args.length > 0 ? args[0] : undefined);
 /** A value as ASSetPropFlags takes its bits: an int's low 16, as adl wraps them. */
 const u16 = (value: Value, version: number): number => (toNumber(value, version) | 0) & 0xffff;
 
+/** Jumps back and calls between two readings of the clock for the script timeout. */
+export const BUDGET = 100_000;
+
 export class Realm implements Boxer {
   /** `_global`: no prototype, as Flash's has none. */
   readonly global = new Avm1Object();
@@ -88,6 +93,25 @@ export class Realm implements Boxer {
    * movie's actions: a SWF's ScriptLimits sets it, adl's is 1000.
    */
   maxCalls = 1000;
+  /**
+   * How many clips the player has removed: code whose own clip may be one
+   * of them checks it only after a call, where this moved on.
+   */
+  removals = 0;
+  /** setInterval's and setTimeout's timers, which the player fires by its clock. */
+  readonly timers = new Timers();
+  /**
+   * When the scripts running must have stopped by, on `clock`, the script
+   * timeout's ms after the player started them; Infinity while none run.
+   */
+  deadline = Number.POSITIVE_INFINITY;
+  /** The player's clock, in ms, which the script timeout reads. */
+  clock: () => number = () => 0;
+  /**
+   * What code counts down as it jumps back or calls: the clock is read
+   * only as it runs out, so a loop pays a decrement for the timeout.
+   */
+  budget = BUDGET;
 
   constructor() {
     // Object's `prototype` is read-only (adl: Extends and a set leave it).
@@ -160,6 +184,14 @@ export class Realm implements Boxer {
     g.define("Array", this.Array.constr, DONT_ENUM);
     g.define("Math", this.Math, DONT_ENUM);
     g.define("Error", this.Error.constr, DONT_ENUM);
+  }
+
+  /** The budget ran out: read the clock, and past the deadline, disable the movie's actions. */
+  timeout(): void {
+    this.budget = BUDGET;
+    if (this.clock() > this.deadline) {
+      throw new TimedOut("a script ran past the script timeout");
+    }
   }
 
   /** A property of `object` whose value a native getter gives, without a setter. */
