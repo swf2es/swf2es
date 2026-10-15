@@ -2,10 +2,10 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 6 are built: `format`'s list of action blocks, the
+there. Steps 1 to 7 are built: `format`'s list of action blocks, the
 decoder, the emitter, the runtime's values and its operators by version,
-its objects, variables and global object, and a main AVM1 SWF's root
-frames run by the player; the rest is not.
+its objects, variables and global object, its functions and registers, and
+a main AVM1 SWF's root frames run by the player; the rest is not.
 [architecture.md](architecture.md) describes what is, and this document
 is folded into it as each piece lands.
 
@@ -132,10 +132,12 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   jumps back before its `DefineFunction`, and Ruffle's `run_actions` over
   a subslice does the same). So a region's blocks are its own, and an
   offset reached from two regions is in each (decoded once, emitted in
-  each). A region is the same for every `DefineFunction` of the same
-  bytes, so a body that jumps back before its own `DefineFunction` defines
-  itself again: regions form a graph, cycles included, and the emitter
-  writes each once, not inlined into its parent. A target before the
+  each). Each `DefineFunction` action has a region, since a
+  `DefineFunction2`'s header (its registers and preloads) shapes its body's
+  code, and an action is decoded once, so a body that jumps back before its
+  own `DefineFunction` defines itself again with the same region: regions
+  form a graph, cycles included, and the emitter writes each once, not
+  inlined into its parent. A target before the
   block's first byte is taken as the block's exit; adl, as Ruffle, runs
   the SWF's bytes before the block there, which a block compiled alone
   does not have. The constant pool is tracked along
@@ -222,8 +224,9 @@ can prove, spilling to `st` at calls and at the region's ends.
   (adl); without a finally it goes on to the handler outside. Leaving a
   try or catch body by a jump runs no finally. An error of the host's, a
   bug, passes through.
-- **Return** returns from the function's region; in a frame's block it
-  ends the block. Every region ends in `return`.
+- **Return** pops the value it returns, `return st.pop();`, from a
+  function's region; in a frame's block it ends the block, the value
+  popped all the same. A region that runs off its end returns undefined.
 
 A region's function takes the activation, `cx`: its scope chain, target,
 `this`, the constant pool, the operand stack, the registers, the
@@ -273,9 +276,10 @@ of its version's operation with the values it pops, the top first,
 actions as calls that take the activation and their operands as popped,
 `st.push(V.getMember(cx, st.pop(), st.pop()));` (the name, then the
 object), or that pop them themselves where their number is on the stack
-(`V.initObject(cx)`, `V.callMethod(cx)`...). Every other action Flash knows,
-and a `Push` of a register, is `V.notYet("<name>")`, which throws, so
-the steps after fill them in one at a time; an unknown opcode is
+(`V.initObject(cx)`, `V.callMethod(cx)`...), and step 7 `DefineFunction`,
+`DefineFunction2`, `StoreRegister`, a `Push` of a register and `Return`
+(below). Every other action Flash knows is `V.notYet("<name>")`, which
+throws, so the steps after fill them in one at a time; an unknown opcode is
 skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
 
 ### Version-dependent semantics
@@ -348,14 +352,94 @@ what the specification says:
 
 ### Functions and registers
 
-`DefineFunction` and `DefineFunction2` make a function object whose code
-is a region compiled as an entry of its own in the module, `F[k]`,
-`function (cx, self, args) { ... }`, not a JavaScript closure: an AVM1
-closure captures the scope chain, which the function object keeps, so
-the entry needs nothing of the JavaScript frame it was defined in, and
-each entry is written alone, as the JIT/AOT invariant asks of AVM2's
-methods. The function object also keeps the constant pool of the
-activation that defined it.
+`DefineFunction` and `DefineFunction2` make a function of a region of the
+block, `V.defineFunction(cx, k, "name", ["a", "b"])`, the region `k` of
+the block's entry, `function (cx, self, args) { ... }`, not a JavaScript
+closure: an AVM1 closure captures the scope chain, which the function
+object keeps, so the region needs nothing of the JavaScript frame it was
+defined in, and each block is written alone, as the JIT/AOT invariant
+asks of AVM2's methods. The function object keeps the activation's scope
+chain, its constant pool (see below), its target and its `this`; a named
+one is defined as `DefineLocal` defines a variable, an anonymous one
+pushed. A call (`functions.ts`'s `ScriptFunction`) makes the activation:
+an activation object for its local variables above the chain it closes
+over, its parameters without a register set on it (undefined past the
+arguments given, the later of two of a name), and the caller's operand
+stack, so a body pops its caller's values and leaves what it does not
+pop under the value the call pushes.
+
+A DefineFunction2's registers below its register count are the region's
+own `let`s, `r0` to `rN`, since their indices are in the code: its preloads
+(`this`, `arguments`, `super`, `_root`, `_parent`, `_global`, in that
+order from `r1`, each where its flag is set, one also suppressed
+undefined but `arguments`, which preload and suppress loads) and then its
+parameters with a register are set on entry, a later parameter over an
+earlier one of the same register. A parameter whose register is at or
+past the count is neither a register nor a variable, and a preload past
+it is dropped. A root, which has no parent, takes no register for
+`_parent`: `_global` takes its place (the corpus's
+`define_function2_preload_order`; adl, whose harness loads the SWF, gives
+its root a parent, whose register is undefined). Every other register,
+of a frame's block, a DefineFunction's or one past a DefineFunction2's
+count, is one of the movie's four, `cx.g[i]`, which the frame's blocks
+share and which are undefined again as the next frame starts; a register
+from 4 is none, undefined, and `StoreRegister` to it stores nothing.
+`StoreRegister` leaves its value on the stack (popped and pushed again,
+undefined on an empty one).
+
+Local variables (`DefineLocal`, a parameter without a register) live on
+the activation object, since `eval` and `GetVariable` of a computed name
+can reach them; a later step can make them `let`s in a function that
+names all its variables with constants and has no `eval`, `with` or
+nested function. `arguments` and `super` are variables on it too, which
+most functions never read, so the object makes each as a lookup first
+misses it (`Avm1Object.lazy`): a call allocates the activation, its
+object and the arguments' array, nothing else.
+
+What adl traces of them at SWF 5 to 10 (the `avm1-functions-swf*` player
+cases), where it is not what Ruffle does:
+
+- `this` is the object a method was found on (`CallMethod`), the object a
+  path names (`CallFunction("o.f")`), and for a name the scope that had
+  it, a function's activation object too (a function called by name
+  inside another gets that one's activation object); in a SWF 5 a
+  function found on an activation object gets the target's clip.
+  `CallMethod` of an empty name calls the object with `this` undefined.
+  A primitive's method gets the primitive boxed.
+- A DefineFunction2 that preloads or suppresses `this` has, as its
+  `this`, the `this` of the activation that defined it, undefined in a
+  SWF 5 (Ruffle: its caller's).
+- From SWF 6 a function closes over the scope chain it was defined in; a
+  SWF 5 function runs above the clip of its `this`, or else of its
+  caller's target, as Flash 5 did, its variables not found reaching the
+  timeline (`counter()` of a SWF 5 counts on the root).
+- `arguments` is an array of the arguments, `callee` and `caller`
+  DontEnum on it, `caller` the function that called, null from a block; a
+  new one each call, not tied to the parameters. `Delete2` removes it.
+- `super` is made where a method is called on an object: by
+  `CallMethod`, `new`, a getter or setter, `Function.call` and `apply`; a
+  function called by name has none, and a SWF 5 none at all (Ruffle makes
+  one wherever `this` is an object). `super(...)` runs the
+  `__constructor__` of the prototype above the one the method was found
+  on, with the method's `this`; `super.m()` finds `m` from the prototype
+  above, a method on the object itself counting as on its prototype, so a
+  chain of three classes calls each level once.
+- `new` gives the object it made, whatever the constructor returns;
+  `Function.call` and `apply` take null or undefined as the global
+  object, a primitive boxed, and `apply` an array or anything with a
+  `length`; `Function()` of nothing is an object without a prototype.
+- A SWF up to 6 runs no getter, setter or watcher of a property inside
+  another of the same property: the getter gives the stored value, the
+  setter and watcher are skipped. From SWF 7, 65 run one inside another,
+  as Ruffle has it for every version (the corpus's `*_recursion_swf6`
+  are Ruffle's known failures).
+- Function calls go 999 deep, the 1000th disabling every action of the
+  movie, the rest of its frame and every frame after, while its
+  timelines play on (Flash Player's documentation says 256, Ruffle stops
+  at 255). A SWF's `ScriptLimits` tag sets the depth, `n` allowing
+  `n - 1` calls, in adl too. JavaScript's own stack running out, which a
+  limit set very high, or a `toString` that calls itself, can do first,
+  disables the actions as well.
 
 ### The constant pool
 
@@ -381,22 +465,6 @@ What adl does with `ConstantPool`, for the runtime (steps 4 and 7):
   bytes of other strings, `undefined` past a few indices, and in a
   `Push` of several values it can end the block. No compiler writes
   that; swf2es reads `undefined` there, as past a pool's end.
-
-A DefineFunction2's registers below its register count are JavaScript
-`let`s, `r1` to `rN`, since their indices are in the code: its preloads
-(`this`, `arguments`, `super`, `_root`, `_parent`, `_global`, in that order
-from `r1`, each skipped where its flag is clear and the suppress flags
-leave the name out of the activation) and its parameters with a register
-are set on entry, the rest of its parameters are local variables. A
-register at or past the count, and every register of a frame's block or
-a DefineFunction's, which have none of their own, is one of the four the
-movie's top activation holds, `cx.g[i]`, as Ruffle has it.
-
-Local variables (`DefineLocal`, a parameter without a register) live on
-the activation's scope object, since `eval` and `GetVariable` of a computed
-name can reach them; a later step can make them `let`s in a function that
-names all its variables with constants and has no `eval`, `with` or nested
-function.
 
 ## The runtime
 
@@ -533,7 +601,8 @@ where it is not what Ruffle does:
 - `addProperty` takes a function as getter and a function or null as
   setter (null: read only), and gives false for anything else, an object
   that is no function included (Ruffle takes any object). The property is
-  listed by `for..in` and is `hasOwnProperty`'s.
+  listed by `for..in` and is `hasOwnProperty`'s, and on an array an index's
+  property lengthens it as its element would.
 - `watch(name, callback, data)` is false without a function callback; a
   second `watch` of the name replaces the first; `unwatch` is true where
   there was one, the name found by the version's case. The callback gets
@@ -555,12 +624,12 @@ where it is not what Ruffle does:
   SWF 4, so its `x == NaN` is `x == 0`; Flash's own globals leave a
   variable `o`, null.
 
-Calls of functions from these, a getter, a setter, a watcher or
-`__resolve`, are calls of natives in this step: DefineFunction's functions
-come with step 7, which also brings the property recursion limit Ruffle
-has for a watcher or a getter that sets its own property. The natives so
-far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`, and
-what boxing, InitArray and the conversions need of `Function`, `Array`
+A getter, a setter, a watcher or `__resolve` is a native or a function
+of the SWF's, called with the depth a method call has (a getter's and a
+setter's `super` is their object's prototype's), each under the property
+recursion limit (see "Functions and registers"). The natives so far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`,
+`Function.prototype`'s `call` and `apply`, and what boxing, InitArray and
+the conversions need of `Function`, `Array`
 (`toString`, `join`), `String`, `Number` and `Boolean` (their constructors,
 `valueOf` and `toString`), which step 9 completes. `CallFunction`,
 `CallMethod`, `NewObject` and `NewMethod` call them; a name that holds no
@@ -578,14 +647,13 @@ property and need invalidating as properties are added and deleted along
 chains; they come with the measurements on the corpus's heaviest SWFs
 the plan's end names.
 
-A function is an `Avm1Function`, an object with its compiled entry, the
-scope chain and constant pool it captured, and its `prototype`. From SWF 6
-a function closes over the scope it was defined in; a SWF 5 function does
-not, and runs in a scope made from its `this`'s clip, as Flash 5 did; a native
-function is one whose entry is TypeScript. `new` makes an object whose
-`__proto__` is the constructor's `prototype`, then calls it; AS2's
-classes, which the AS2 compiler turns into prototypes, `Extends`,
-`ImplementsOp` and `CastOp`, need nothing more.
+A function is an `Avm1Function`: a native one's code is TypeScript, and a
+`ScriptFunction` (`functions.ts`) has its region, the scope chain and
+constant pool it captured, and a `prototype` of its own, an object whose
+`constructor` it is. `new` makes an object whose `__proto__` is the
+constructor's `prototype`, then calls it; AS2's classes, which the AS2
+compiler turns into prototypes, `Extends`, `ImplementsOp` and `CastOp`,
+need nothing more.
 
 ### Scopes, targets and names
 
@@ -617,7 +685,8 @@ without a path walks the scope chain, top down, and is read from the
 first scope object that has it on its chain; a name none has is `_root`,
 `_parent`, `_global` (from SWF 6) or `_levelN`, else undefined: a
 variable is never resolved by `__resolve`. `this` is the activation's
-`this`, case-insensitively in SWF 6 (and SWF 5 outside a function), and
+`this`, case-insensitively in SWF 5 and 6, in a function too (adl; Ruffle
+has it case-sensitive in a SWF 5 function), and
 so is a path's first step (with `_root`, and `_global` from SWF 6),
 though a SetVariable path takes no `this`: adl sets nothing for
 `this.x`. adl keeps a frame's `this` as a variable that `Delete2` can
@@ -766,7 +835,9 @@ The first steps leave out: `loadMovie` into levels other than 0, `print`,
 `fscommand` beyond ExternalInterface's, `NetStream` and video, the
 context menu, `TextSnapshot`, `CloneSprite` of a sprite with clip events
 (it clones without them, as a first approach), the 15-second script
-timeout (a block that loops forever hangs the page), and structured output and stack registers in the compiler.
+timeout (a block that loops forever hangs the page; the corpus runner
+stops one at its test's timeout), and structured output and stack
+registers in the compiler.
 
 ## Testing against Flash
 
@@ -950,6 +1021,24 @@ determinism` green, and the corpus baseline may only go up.
    `define_function_case_sensitive`, `define_function2*`, `define_local*`,
    `register_underflow`, `register_globals_across_frames`, `this_swf5` to
    `this_swf7`; determinism of function entries compiled alone.
+   Built: also `StoreRegister`, the global registers by frame, the
+   property recursion limit by version, `Function()`, and `ScriptLimits`'
+   depth; what adl showed is under "Functions and registers". The
+   `avm1-functions-swf5` to `-swf10` cases trace some 1100 lines each in
+   adl, which the player matches, and `avm1-recursion` shows a
+   `ScriptLimits` depth disabling the actions while the timeline plays on.
+   The corpus goes from 47 to 104 of the 649 (`call_method_empty_name`,
+   `define_function2`, `define_function_case_sensitive`,
+   `register_underflow`, `function_as_function`, `timeline_function_def`,
+   the `*_recursion*` tests but `watch_recursion_swf6`, and many of steps
+   5 and 6 that define functions). The rest stop mostly at `GetUrl` and
+   `GetUrl2` (54), `Extends` (21), `Try` (20), the clip actions of step 10
+   (`GotoFrame`, `GetProperty`, `SetProperty`, `SetTarget2`), `With` and
+   `InstanceOf`; `this_swf*` and `define_local*` need clips, and
+   `register_globals_across_frames` traces every line, then stops at a
+   `GetUrl`. 21 tests loop forever
+   without Array's methods (step 9), where Flash's script timeout would
+   stop them: the corpus runner stops a test's script at its timeout.
 8. **`With`, `Try` and `Throw`.** Regions entered and left as Flash runs
    them, `Error`. Passes `with`, `with_return`, `with_variable_scopes`,
    `try_catch_finally`, `try_catch_stack`, `try_finally_simple`; an adl
