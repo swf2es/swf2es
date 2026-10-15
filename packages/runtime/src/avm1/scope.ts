@@ -68,8 +68,8 @@ function lastSeparator(name: string, version: number): number {
 const sameName = (a: string, b: string, version: number) =>
   a === b || (version <= 6 && fold(a) === fold(b));
 
-/** Whether `name` is `this` for the activation: case-insensitively up to SWF 6, but in a function's scope in SWF 5. */
-function isThis(cx: Variables, name: string, version: number): boolean {
+/** Whether `name` is `this`: case-insensitively up to SWF 6, in a function too (adl; Ruffle has a SWF 5 function's case-sensitive). */
+function isThis(name: string, version: number): boolean {
   if (name.length !== 4 || version < 5) {
     return false;
   }
@@ -78,8 +78,7 @@ function isThis(cx: Variables, name: string, version: number): boolean {
     return true;
   }
 
-  const insensitive = version === 6 || (version === 5 && cx.scope.kind !== SCOPE_Local);
-  return insensitive && fold(name) === "this";
+  return version < 7 && fold(name) === "this";
 }
 
 /**
@@ -119,7 +118,7 @@ function level(cx: Variables, name: string, version: number): Value {
 
 /** A name without a path along the scope chain, as GetVariable and NewObject find it. */
 export function resolve(cx: Variables, name: string, version: number): Value {
-  if (isThis(cx, name, version)) {
+  if (isThis(name, version)) {
     return cx.self;
   }
 
@@ -136,16 +135,19 @@ export function resolve(cx: Variables, name: string, version: number): Value {
 
 /** What `resolveCallable` found a function on, for CallFunction's `this`. */
 export let foundOn: Value;
+/** Whether that was a function's activation object. */
+export let foundLocal = false;
 
 /** As `resolve`, setting `foundOn` to the object that had the name, undefined for none. */
 export function resolveCallable(cx: Variables, name: string, version: number): Value {
   foundOn = undefined;
+  foundLocal = false;
   const separator = lastSeparator(name, version);
   if (separator >= 0 || (version >= 5 && name.includes("/"))) {
     return getVariable(cx, name, version);
   }
 
-  if (isThis(cx, name, version)) {
+  if (isThis(name, version)) {
     return cx.self;
   }
 
@@ -153,6 +155,7 @@ export function resolveCallable(cx: Variables, name: string, version: number): V
     if (has(s.object, name, version)) {
       const value = get(s.object, name, version);
       foundOn = s.object;
+      foundLocal = s.kind === SCOPE_Local;
       return value;
     }
   }
@@ -209,7 +212,7 @@ export function setVariable(cx: Variables, name: string, value: Value, version: 
     return;
   }
 
-  if (isThis(cx, name, version)) {
+  if (isThis(name, version)) {
     cx.self = value;
     return;
   }

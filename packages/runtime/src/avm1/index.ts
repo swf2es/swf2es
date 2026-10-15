@@ -1,4 +1,6 @@
 /** The AVM1 (AS1 and AS2) runtime: values, their conversions by version, and what modules call. */
+
+export { Avm1Super, ScriptFunction } from "./functions.js";
 export type { Host, Target } from "./host.js";
 export { numberToString, parseFloatAvm1, stringToNumber } from "./numbers.js";
 export {
@@ -17,6 +19,7 @@ export { Realm } from "./realm.js";
 export {
   Activation,
   type Blocks,
+  Disabled,
   type Factory,
   Halt,
   NotYet,

@@ -1,9 +1,21 @@
 // What a SWF's AVM1 module calls (docs/avm1.md, "Compiling"): its factory
 // takes the runtime, asks it for the operations of the SWF's version,
 // `V`, once, and each region of each block takes its activation, `cx`.
-import { Halt, NotYet } from "./errors.js";
+import { Activation, type Blocks, type Region } from "./activation.js";
+import { Disabled, Halt, NotYet } from "./errors.js";
+import { Avm1Super, argumentsOf, superOf } from "./functions.js";
 import type { Host, Target } from "./host.js";
-import { Avm1Object, get, invoke, keys, nameOf, removeOwn, set } from "./objects.js";
+import {
+  Avm1Function,
+  Avm1Object,
+  foundDepth,
+  get,
+  invoke,
+  keys,
+  nameOf,
+  removeOwn,
+  set,
+} from "./objects.js";
 import {
   add2,
   charOf,
@@ -20,53 +32,18 @@ import {
   defineLocal,
   defineLocal2,
   deleteVariable,
+  foundLocal,
   foundOn,
   getVariable,
   resolve,
   resolveCallable,
-  SCOPE_Global,
   SCOPE_Target,
   Scope,
   setVariable,
 } from "./scope.js";
 import { type Primitive, stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
 
-export { Halt, NotYet };
-
-/**
- * What a region runs in: the operand stack, the constant pool, the target
- * and the host. Flash has one operand stack, not one an activation: every
- * activation of a frame's actions shares the frame's, which the player
- * empties between frames.
- */
-export class Activation {
-  constructor(
-    /** The operand stack, the frame's. */
-    public st: Value[],
-    /** The constant pool the region reads where the compiler cannot tell which: see V.constantPool. */
-    public pool: Value[],
-    /** The clip timeline actions act on. */
-    public target: Target,
-    public host: Host,
-    readonly realm: Realm,
-    /** The scope chain, searched from here down to `_global`. */
-    public scope: Scope,
-    /** `this`. */
-    public self: Value,
-    /** The target's AVM1 object: a function called by name without an object takes it as `this`. */
-    public clip: Avm1Object,
-  ) {}
-
-  get global(): Avm1Object {
-    return this.realm.global;
-  }
-}
-
-/** A region of a block, the block's own code or a function's body. */
-export type Region = (cx: Activation) => void;
-
-/** What the factory of a SWF's module gives: by block, its regions, its own code first. */
-export type Blocks = Region[][];
+export { Activation, type Blocks, Disabled, Halt, NotYet, type Region };
 
 /** A module's default export. */
 export type Factory = (rt: Runtime) => Blocks;
@@ -155,6 +132,25 @@ export interface Operations {
   callMethod(cx: Activation): void;
   newObject(cx: Activation): void;
   newMethod(cx: Activation): void;
+  /**
+   * DefineFunction: the function of region `region` of the activation's
+   * block, defined as a local variable, or pushed where it has no name;
+   * `params` its parameters' names.
+   */
+  defineFunction(cx: Activation, region: number, name: Value, params: string[]): void;
+  /** DefineFunction2: as DefineFunction, null for a parameter in a register, and its flags. */
+  defineFunction2(
+    cx: Activation,
+    region: number,
+    name: Value,
+    params: (string | null)[],
+    flags: number,
+  ): void;
+  /** What DefineFunction2 preloads: its `arguments`, its `super`, `_root` and `_parent`, undefined for none. */
+  argumentsOf(cx: Activation, args: Value[]): Value;
+  superOf(cx: Activation, self: Value): Value;
+  root(cx: Activation): Value;
+  parentOf(cx: Activation): Value;
   play(cx: Activation): void;
   stop(cx: Activation): void;
   /** An action Flash cannot read: the SWF stops there. */
@@ -303,6 +299,10 @@ function operations(version: number): Operations {
     },
     getMember(cx, name, object) {
       const key = nameOf(name, version);
+      if (object instanceof Avm1Super) {
+        return get(object, key, version, object.self);
+      }
+
       if (object instanceof Avm1Object) {
         return get(object, key, version);
       }
@@ -313,7 +313,9 @@ function operations(version: number): Operations {
     },
     setMember(cx, value, name, object) {
       const key = nameOf(name, version);
-      if (object instanceof Avm1Object) {
+      if (object instanceof Avm1Super) {
+        set(object.self, key, value, version);
+      } else if (object instanceof Avm1Object) {
         set(object, key, value, version);
       } else if (object !== undefined && object !== null) {
         set(cx.realm.box(object, version), key, value, version);
@@ -371,7 +373,10 @@ function operations(version: number): Operations {
       const name = nameOf(st.pop(), version);
       const args = popArgs(st, version);
       const fn = resolveCallable(cx, name, version);
-      st.push(invoke(fn, foundOn === undefined ? cx.clip : foundOn, args, version));
+      // `this` is what had the name, a function's activation object too,
+      // but in a SWF 5, which takes the target's clip for it (adl).
+      const self = foundOn === undefined || (version < 6 && foundLocal) ? cx.clip : foundOn;
+      st.push(invoke(fn, self, args, version));
     },
     callMethod(cx) {
       const st = cx.st;
@@ -384,16 +389,25 @@ function operations(version: number): Operations {
       }
 
       const key = name === undefined ? "" : nameOf(name, version);
+      if (object instanceof Avm1Super) {
+        st.push(superCall(object, key, args, version));
+        return;
+      }
+
       if (key === "") {
         st.push(invoke(object, undefined, args, version));
         return;
       }
 
-      const method =
-        object instanceof Avm1Object
-          ? get(object, key, version)
-          : cx.realm.primitiveMember(object as Primitive, key, version);
-      st.push(invoke(method, object, args, version));
+      if (!(object instanceof Avm1Object)) {
+        const method = cx.realm.primitiveMember(object as Primitive, key, version);
+        st.push(invoke(method, object, args, version, 1));
+        return;
+      }
+
+      // A method found on the object itself is called as if found on its prototype.
+      const method = get(object, key, version);
+      st.push(invoke(method, object, args, version, Math.max(foundDepth, 1)));
     },
     newObject(cx) {
       const st = cx.st;
@@ -416,6 +430,16 @@ function operations(version: number): Operations {
       const constr = key === "" ? boxed : get(boxed, key, version);
       st.push(cx.realm.construct(constr, args, version));
     },
+    defineFunction(cx, region, name, params) {
+      defineFunction(cx, region, name, params, 0, version);
+    },
+    defineFunction2(cx, region, name, params, flags) {
+      defineFunction(cx, region, name, params, flags, version);
+    },
+    argumentsOf: (cx, args) => argumentsOf(cx, args, version),
+    superOf: (cx, self) => superOf(cx, self, version),
+    root: (cx) => cx.host.root?.(),
+    parentOf: (cx) => cx.host.parent?.(cx.clip),
     play(cx) {
       cx.host.play(cx.target);
     },
@@ -512,6 +536,55 @@ function popArgs(st: Value[], version: number): Value[] {
   return args;
 }
 
+function defineFunction(
+  cx: Activation,
+  region: number,
+  name: Value,
+  params: (string | null)[],
+  flags: number,
+  version: number,
+): void {
+  const fn = cx.realm.newFunction(cx, cx.code[region], params, flags, version);
+  const key = nameOf(name, version);
+  if (key === "") {
+    cx.st.push(fn);
+  } else {
+    defineLocal(cx, key, fn, version);
+  }
+}
+
+/**
+ * CallMethod of `super`: `super()` its prototype's `__constructor__` on
+ * `this`, `super.name()` the method above the one running, with its `this`.
+ */
+function superCall(zuper: Avm1Super, key: string, args: Value[], version: number): Value {
+  if (key === "") {
+    let base: Value = zuper.self;
+    for (let i = 0; i < zuper.depth && base instanceof Avm1Object; i++) {
+      base = base.protoFor(version);
+    }
+
+    if (!(base instanceof Avm1Object)) {
+      return undefined;
+    }
+
+    const constr = get(base, "__constructor__", version, base, false);
+    if (constr instanceof Avm1Function) {
+      return constr.callConstructor(zuper.self, args, version, zuper.depth + 1);
+    }
+
+    return undefined;
+  }
+
+  const proto = zuper.proto;
+  if (!(proto instanceof Avm1Object)) {
+    return undefined;
+  }
+
+  const method = get(proto, key, version, zuper.self);
+  return invoke(method, zuper.self, args, version, zuper.depth + foundDepth + 1);
+}
+
 /** Enumerate's and Enumerate2's pushes: a terminator, then the names, the first to visit on top. */
 function enumerate(cx: Activation, object: Value, version: number): void {
   const st = cx.st;
@@ -531,6 +604,49 @@ const versions = new Map<number, Operations>();
 export class Runtime {
   /** The builtins and `_global`, which every SWF the player runs shares. */
   readonly realm = new Realm();
+  /**
+   * Whether the movie's actions are disabled, as Flash disables them past
+   * its recursion limit: no action of it runs again, its timelines play on.
+   */
+  disabled = false;
+
+  /** How deep function calls may go: a SWF's ScriptLimits sets it (Flash's default 1000, adl's). */
+  get maxRecursion(): number {
+    return this.realm.maxCalls;
+  }
+
+  set maxRecursion(depth: number) {
+    this.realm.maxCalls = depth;
+  }
+
+  /**
+   * Run a block's own region, `regions[0]`, in `cx`. Past the recursion
+   * limit, or where JavaScript's own stack runs out first, the movie's
+   * actions are disabled from there.
+   */
+  run(regions: Region[], cx: Activation): void {
+    if (this.disabled || regions.length === 0) {
+      return;
+    }
+
+    const realm = this.realm;
+    const outer = realm.current;
+    const calls = realm.calls;
+    cx.code = regions;
+    realm.current = cx;
+    try {
+      regions[0](cx);
+    } catch (error) {
+      if (!(error instanceof Disabled || error instanceof RangeError)) {
+        throw error;
+      }
+
+      this.disabled = true;
+    } finally {
+      realm.current = outer;
+      realm.calls = calls;
+    }
+  }
 
   /** A new object, as `{}` makes one: what the player gives a clip until clips have their class. */
   newObject(): Avm1Object {
@@ -542,14 +658,13 @@ export class Runtime {
    * above `_global` on the scope chain, and `this`.
    */
   activation(st: Value[], pool: Value[], target: Target, clip: Avm1Object, host: Host): Activation {
-    const global = new Scope(null, SCOPE_Global, this.realm.global);
     return new Activation(
       st,
       pool,
       target,
       host,
       this.realm,
-      new Scope(global, SCOPE_Target, clip),
+      new Scope(this.realm.globalScope, SCOPE_Target, clip),
       clip,
       clip,
     );

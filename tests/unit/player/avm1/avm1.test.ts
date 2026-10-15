@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
-import { Avm1Assembler, constant, type PushValue } from "../../../avm1-assembler.ts";
+import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
 import * as w from "../../../swf-writer.ts";
 
 const codegen = await createCodegen(
@@ -220,4 +220,51 @@ test("a place whose clip actions run past its tag stops the SWF as the first of 
     lines: ["init", "init after", "2", "3", "2"],
     halted: false,
   });
+});
+
+/** `function deep() { trace(++depth); deep(); }`, called, then a trace that never comes. */
+const recursing = () =>
+  doAction((a) =>
+    a
+      .defineFunction(
+        "deep",
+        [],
+        new Avm1Assembler()
+          .push("depth", "depth")
+          .op("GetVariable")
+          .op("Increment")
+          .op("SetVariable")
+          .push("depth")
+          .op("GetVariable")
+          .trace()
+          .push(0, "deep")
+          .op("CallFunction"),
+      )
+      .push("depth", 0)
+      .op("SetVariable")
+      .push(0, "deep")
+      .op("CallFunction")
+      .push("unreached")
+      .trace(),
+  );
+
+test("past the recursion limit, a SWF's ScriptLimits, every action is disabled and the timeline plays on", async () => {
+  const limits = w.tag(65, Uint8Array.from([4, 0, 15, 0]));
+  const swf = movie(6, [[limits, recursing(), traced("next block")], [traced("2")], []]);
+  const { lines, errors, player, avm1 } = await play(swf, 3);
+
+  assert.deepEqual(lines, ["1", "2", "3"]);
+  assert.deepEqual(errors, []);
+  assert.ok(avm1.rt.disabled);
+  assert.ok(!avm1.halted);
+  assert.equal(player.root.currentFrame, 3);
+});
+
+test("the global registers are the frame's, kept from block to block", async () => {
+  const swf = movie(6, [
+    [doAction((a) => a.push("r").storeRegister(1)), doAction((a) => a.push(register(1)).trace())],
+    [doAction((a) => a.push(register(1)).trace().stop())],
+  ]);
+
+  assert.deepEqual((await play(swf, 3)).lines, ["r", "undefined"]);
 });

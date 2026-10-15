@@ -87,6 +87,8 @@ let resolvers = false;
 export class Property {
   get: Avm1Object | null = null;
   set: Avm1Object | null = null;
+  /** How many calls of its getter, setter or watcher are running, for the recursion limit. */
+  calls = 0;
 
   constructor(
     /** As it was first set, which for..in lists. */
@@ -101,6 +103,24 @@ export interface Watcher {
   readonly name: string;
   callback: Avm1Object;
   data: Value;
+  /** How many of its calls are running, where the name has no property to count them. */
+  calls: number;
+}
+
+/**
+ * How many calls of a property's getter, setter or watcher may run at once,
+ * one inside another, for a SWF of `version`: past that the getter gives
+ * the stored value and the setter and watcher are skipped. A SWF up to 6
+ * runs none inside another (adl, the corpus's `*_recursion_swf6`).
+ */
+const propertyCalls = (version: number): number => (version > 6 ? 65 : 1);
+
+/**
+ * What a function's activation object makes as it is first asked for:
+ * `arguments` and `super`, which most functions never read.
+ */
+export interface LazyLocals {
+  local(o: Avm1Object, name: string, version: number): Property | undefined;
 }
 
 /** A native function: `self` is an object (a primitive boxed), as Flash gives natives. */
@@ -130,6 +150,8 @@ export class Avm1Object {
   array = false;
   /** The primitive a String, Number or Boolean object boxes, undefined for any other. */
   primitive: Value = undefined;
+  /** A function's activation object's `arguments` and `super`, until it has made them. */
+  lazy: LazyLocals | null = null;
 
   /** An object whose `__proto__` is `proto`, or without one. */
   constructor(proto?: Value) {
@@ -155,11 +177,18 @@ export class Avm1Object {
   /** The own property `name` names for a SWF of `version`, whatever its attributes. */
   own(name: string, version: number): Property | undefined {
     const p = this.props.get(name);
-    if (p !== undefined || version > 6) {
+    if (p !== undefined) {
       return p;
     }
 
-    return this.ownFolded(name, fold(name));
+    if (this.lazy !== null) {
+      const made = this.lazy.local(this, name, version);
+      if (made !== undefined) {
+        return made;
+      }
+    }
+
+    return version > 6 ? undefined : this.ownFolded(name, fold(name));
   }
 
   /**
@@ -297,8 +326,8 @@ export class Avm1Object {
 /**
  * A function. Natives are TypeScript; one called with `new` runs
  * `construct` where it has one, as Flash's native constructors (Object,
- * Array...) do otherwise than when called. The functions DefineFunction
- * makes come with step 7 (docs/avm1.md).
+ * Array...) do otherwise than when called. Those DefineFunction makes are
+ * functions.ts's ScriptFunction.
  */
 export class Avm1Function extends Avm1Object {
   constructor(
@@ -318,16 +347,32 @@ export class Avm1Function extends Avm1Object {
     return "function";
   }
 
-  /** Call it with `self` as `this`. */
-  call(self: Value, args: Value[], version: number): Value {
+  /**
+   * Call it with `self` as `this`; `depth`, how far up `this`'s prototypes
+   * it was found, is what `super` starts from in a ScriptFunction.
+   */
+  call(self: Value, args: Value[], version: number, _depth = 0): Value {
     return this.native(this.realm.box(self, version), args, version);
+  }
+
+  /** Run it on `self`, the object `new` made, where it has no `construct`. */
+  initialize(self: Avm1Object, args: Value[], version: number): void {
+    this.native(self, args, version);
+  }
+
+  /** Run it as a constructor of `self`, made already, as `super()` runs its class's. */
+  callConstructor(self: Avm1Object, args: Value[], version: number, _depth: number): Value {
+    return (this.construct ?? this.native)(self, args, version);
   }
 }
 
 /** Call `fn` if it is a function; anything else gives undefined, as Flash does. */
-export function invoke(fn: Value, self: Value, args: Value[], version: number): Value {
-  return fn instanceof Avm1Function ? fn.call(self, args, version) : undefined;
+export function invoke(fn: Value, self: Value, args: Value[], version: number, depth = 0): Value {
+  return fn instanceof Avm1Function ? fn.call(self, args, version, depth) : undefined;
 }
+
+/** How far up its object's prototypes `get` found what it gave last: 0 its own. */
+export let foundDepth = 0;
 
 /** The deepest a prototype chain is walked, as Ruffle stops: no further. */
 const DEPTH = 255;
@@ -341,6 +386,10 @@ export function find(o: Avm1Object, name: string, version: number): Property | u
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
     let own = p.props.get(name);
+    if (own === undefined && p.lazy !== null) {
+      own = p.lazy.local(p, name, version);
+    }
+
     if (own === undefined && version <= 6) {
       key ??= fold(name);
       own = p.ownFolded(name, key);
@@ -372,19 +421,50 @@ export function get(
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
     let own = p.props.get(name);
+    if (own === undefined && p.lazy !== null) {
+      own = p.lazy.local(p, name, version);
+    }
+
     if (own === undefined && version <= 6) {
       key ??= fold(name);
       own = p.ownFolded(name, key);
     }
 
     if (own !== undefined && allowed(own.flags, version)) {
-      return own.get === null ? own.value : invoke(own.get, self, [], version);
+      foundDepth = depth;
+      return own.get === null || own.calls >= propertyCalls(version)
+        ? own.value
+        : callGetter(own, self, version);
     }
 
     p = p.protoFor(version);
   }
 
+  foundDepth = 0;
   return resolving && resolvers ? resolve(o, name, version, self) : undefined;
+}
+
+function callGetter(p: Property, self: Value, version: number): Value {
+  p.calls++;
+  try {
+    return invoke(p.get, self, [], version, 1);
+  } finally {
+    p.calls--;
+  }
+}
+
+/** A setter's call, unless as many of the property's calls are running as may (propertyCalls). */
+function callSetter(p: Property, setter: Avm1Object, self: Value, value: Value, version: number) {
+  if (p.calls >= propertyCalls(version)) {
+    return;
+  }
+
+  p.calls++;
+  try {
+    invoke(setter, self, [value], version, 1);
+  } finally {
+    p.calls--;
+  }
 }
 
 /**
@@ -434,9 +514,16 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
 
   if (o.watchers !== null) {
     const w = o.watcher(name, version);
-    if (w !== undefined) {
+    // The calls count on the property, the getter's and setter's with them, else on the watcher.
+    const count = w === undefined ? undefined : (o.own(name, version) ?? w);
+    if (w !== undefined && count !== undefined && count.calls < propertyCalls(version)) {
       const old = stored(o, name, version);
-      value = invoke(w.callback, o, [name, old, value, w.data], version);
+      count.calls++;
+      try {
+        value = invoke(w.callback, o, [name, old, value, w.data], version);
+      } finally {
+        count.calls--;
+      }
     }
   }
 
@@ -447,7 +534,7 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
       const virtual = p.own(name, version);
       if (virtual !== undefined && virtual.get !== null && allowed(virtual.flags, version)) {
         if (virtual.set !== null) {
-          invoke(virtual.set, o, [value], version);
+          callSetter(virtual, virtual.set, o, value, version);
         }
 
         return;
@@ -468,7 +555,7 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
   }
 
   if (own.set !== null) {
-    invoke(own.set, o, [value], version);
+    callSetter(own, own.set, o, value, version);
   }
 
   // A value set over a builtin's shows it to every version; but adl's SWF 6 keeps bit 0x400.
