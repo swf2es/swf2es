@@ -304,7 +304,7 @@ function within<T>(answer: Promise<T>, ms: number, late: string): Promise<T> {
 export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<PlayerResult[]> {
   return withPage(
     "runSwf",
-    async (evaluate, _send, fresh) => {
+    async (evaluate, send, fresh) => {
       const results: PlayerResult[] = [];
       let run = 0;
       // A document a job crashed or left running is of no use to the next.
@@ -346,6 +346,10 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
             exception = CRASHED;
             stale = true;
           } else if (message === UNANSWERED) {
+            // A script that loops forever in a later task, as a frame's AVM1
+            // code without Flash's script timeout can, holds the page past
+            // the evaluation's timeout: stopping it lets the page navigate.
+            await send("Runtime.terminateExecution");
             exception = "timed out";
             stale = true;
           } else if (!options.timeout || performance.now() - begun < options.timeout) {
