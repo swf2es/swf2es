@@ -925,10 +925,16 @@ Math's methods are ASnative(200, i): each converts its first two arguments
 whether it uses them or not, and a SWF up to 6 gets NaN from one given
 fewer than it takes (min and max of none are the infinities); `round` is
 `floor(x + 0.5)`, and min and max take two arguments, NaN from either.
-`pow` is C's, as the corpus's Flash Player has it: 1 to any power and -1
-to an infinite one are 1, where adl's and JavaScript's are NaN; adl's is
-also a last bit off JavaScript's elsewhere (`Math.pow(2, 0.5)`), which
-swf2es does not follow. RandomNumber (`random(n)`) is an int below its
+`pow` is C's, as the corpus's math tests have it: 1 to any power is 1
+(`Math.pow(true)`, NaN's power, is 1 in `math_swf6` to `math_swf8`, Flash
+Player's own traces), and so, by C's rules, is -1 to an infinite one,
+which no test shows, where adl's and JavaScript's are NaN. adl is AIR's
+runtime under Wine, whose pow is not the Flash Player's that recorded the
+corpus: it is also off JavaScript's elsewhere, by a last bit
+(`Math.pow(2, 0.5)`) or from the ninth digit (`Math.pow(1.0000001,
+1e9)`), which the corpus's tests leave to their tolerance. So swf2es
+takes the corpus's special cases and JavaScript's precision, and the
+cases trace no result adl and Flash Player may differ in. RandomNumber (`random(n)`) is an int below its
 max cast as Rust casts one (saturated), 0 for a max below 1; its values and
 Math.random's are JavaScript's generator's, not Flash's.
 
@@ -981,8 +987,12 @@ ASSetNativeAccessor, 100 escape, unescape, parseInt, parseFloat and trace,
 Date's (103) come with Date. `ASSetNative` and `ASSetNativeAccessor` set
 methods and accessors from it as Ruffle has them, a version before a name
 hiding it from earlier SWFs. `_global.trace` and ASnative(100, 4) write to
-the log, as the corpus's Flash Player writes (`asnative`); adl's write
-nothing. `getTimer` (GetTime), `setInterval`, `clearInterval` and
+the log, as Flash's authoring tool shows them in its Output panel, where
+the corpus's `asnative` was recorded (its `test.toml` says so); Flash
+Player's `flashlog.txt`, and adl, get nothing from them, unlike the Trace
+action. swf2es writes them, as Ruffle does: the log is for debugging,
+where a line more hides nothing, and content that calls them means them
+to be seen. `getTimer` (GetTime), `setInterval`, `clearInterval` and
 `setTimeout` need the player's clock and frames, and come with step 11;
 `ASconstructor`, which adl has, is left out.
 

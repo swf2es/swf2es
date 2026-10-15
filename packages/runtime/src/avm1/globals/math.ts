@@ -61,8 +61,9 @@ function enough(index: number, count: number, x: number): boolean {
 
 /**
  * C's pow, as Flash Player's is (the corpus's math tests): 1 to any power
- * and -1 to an infinite one are 1, where JavaScript's are NaN. adl's is
- * JavaScript's there, and a last bit off elsewhere (2^0.5).
+ * and -1 to an infinite one are 1, where JavaScript's are NaN. adl's, AIR's
+ * under Wine, is JavaScript's there, and off it elsewhere (2^0.5's last
+ * bit, 1.0000001^1e9 from the ninth digit): JavaScript's precision stays.
  */
 function pow(x: number, y: number): number {
   if (x === 1 || (x === -1 && (y === Number.POSITIVE_INFINITY || y === Number.NEGATIVE_INFINITY))) {

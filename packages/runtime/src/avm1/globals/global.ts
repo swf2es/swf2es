@@ -341,6 +341,8 @@ export function globalFunctions(realm: Realm, define: (name: string, native: Nat
   const parseFloatFn: Native = (_, args, version) =>
     args.length > 0 ? parseFloatAvm1(stringOf(args[0], version), false) : undefined;
   // _global.trace: undefined is "" up to SWF 6, as any string conversion has it.
+  // Flash's authoring tool shows it, where Flash Player's log and adl's do
+  // not; the log is for debugging, so it writes, as Ruffle's does.
   const traceFn: Native = (_, args, version) => {
     realm.current?.host.trace(stringOf(args.length > 0 ? args[0] : undefined, version));
     return undefined;
