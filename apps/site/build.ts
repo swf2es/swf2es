@@ -115,6 +115,18 @@ try {
 
 const build = commit === "unknown" ? commit : commit.slice(0, 12);
 
+// The avmplus commit builtin.abc and the translated files come from: the
+// MPL asks that recipients be told where its source form is.
+let avmplus = "";
+try {
+  avmplus = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: join(root, "oracle/avmplus"),
+    encoding: "utf8",
+  }).trim();
+} catch {
+  // Not a checkout: the notices link to the fork's default branch.
+}
+
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
@@ -182,11 +194,49 @@ copyFileSync(
   join(root, "packages/format/node_modules/lzma1/LICENSE"),
   join(licenses, "lzma1-MIT.txt"),
 );
+// What Pixi's bundle takes in of its dependencies, each under its own
+// licence, whose notice goes with it; a package with no licence file of its
+// own is under the MIT licence its package.json names, as its author.
+const mitText = readFileSync(join(root, "vendor/pixijs/LICENSE"), "utf8");
+const PIXI_DEPENDENCIES = [
+  "earcut",
+  "eventemitter3",
+  "tiny-lru",
+  "ismobilejs",
+  "@pixi/colord",
+  "parse-svg-path",
+];
+const pixiDependencies = PIXI_DEPENDENCIES.map((name) => {
+  const dir = join(root, "vendor/pixijs/node_modules", name);
+  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+    version: string;
+    license: string;
+    author?: string | { name: string };
+  };
+  const file = `pixi-${name.replace("@pixi/", "")}.txt`;
+  const own = readdirSync(dir).find((f) => /^licen[cs]e/i.test(f));
+  if (own) {
+    copyFileSync(join(dir, own), join(licenses, file));
+  } else if (manifest.license === "MIT" && manifest.author) {
+    const author = typeof manifest.author === "string" ? manifest.author : manifest.author.name;
+    writeFileSync(
+      join(licenses, file),
+      mitText.replace(/Copyright \(c\) .*/, `Copyright (c) ${author}`),
+    );
+  } else {
+    throw new Error(`${name}: no licence file to copy`);
+  }
+
+  return `<li><code>${html(name)}</code> ${html(manifest.version)}, ${html(manifest.license)}: <a href="licenses/${file}">licence text</a></li>`;
+});
+
 // Ruffle's MIT terms are the MIT licence's, under Ruffle's copyright, as its files give it.
-const mit = readFileSync(join(root, "vendor/pixijs/LICENSE"), "utf8");
 writeFileSync(
   join(licenses, "ruffle-MIT.txt"),
-  mit.replace(/Copyright \(c\) .*/, "Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors"),
+  mitText.replace(
+    /Copyright \(c\) .*/,
+    "Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors",
+  ),
 );
 
 const list = (files: string[]) =>
@@ -204,8 +254,12 @@ const fill = (template: string, values: Record<string, string>) =>
       () => `<script type="importmap">${JSON.stringify(importMap)}</script>`,
     )
     .replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] ?? "");
+const AVMPLUS = "https://github.com/swf2es/avmplus";
 const values = {
   BUILD: build,
+  AVMPLUS_SOURCE: html(avmplus ? `${AVMPLUS}/tree/${avmplus}` : AVMPLUS),
+  AVMPLUS_COMMIT: html(avmplus ? avmplus.slice(0, 12) : "its default branch"),
+  PIXI_DEPENDENCIES: pixiDependencies.join(""),
   MPL_COUNT: String(mpl.length),
   MPL_FILES: list(mpl),
   RUFFLE_COUNT: String(ruffle.length),

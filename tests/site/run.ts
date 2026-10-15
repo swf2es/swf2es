@@ -249,6 +249,9 @@ async function check(): Promise<void> {
             const notices = await value<string>("fetch('notices.html').then((r) => r.text())");
             assert.match(notices, /Mozilla Public License/);
             assert.match(notices, /packages\/runtime\/src\/avm2\/numbers\.ts/);
+            // The MPL's source form at the very commit, and what Pixi's bundle takes in.
+            assert.match(notices, /github\.com\/swf2es\/avmplus\/tree\/[0-9a-f]{40}/);
+            assert.match(notices, /licenses\/pixi-earcut\.txt/);
             assert.doesNotMatch(notices, /\{\{/);
           },
         ],
