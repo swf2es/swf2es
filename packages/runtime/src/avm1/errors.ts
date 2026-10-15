@@ -38,6 +38,16 @@ export class Disabled extends Error {
 }
 
 /**
+ * Thrown as scripts run past the script timeout, Flash's 15 seconds or a
+ * ScriptLimits tag's: Flash asks whether to stop them, and stopped, the
+ * movie's actions are disabled as past the recursion limit (Ruffle halts
+ * its AVM1 so too).
+ */
+export class TimedOut extends Disabled {
+  override name = "Avm1TimedOut";
+}
+
+/**
  * A value AVM1 code throws (Throw), which a Try's catch or finally takes
  * and which, caught by none, ends the block as Flash ends it, silently.
  */

@@ -77,6 +77,11 @@ export class ScriptFunction extends Avm1Function {
       throw new Disabled(`${realm.maxCalls} levels of recursion were exceeded`);
     }
 
+    // Calls count down to the script timeout's check, as jumps back do.
+    if (--realm.budget < 0) {
+      realm.timeout();
+    }
+
     if (self !== undefined && self !== null && isPrimitive(self)) {
       self = realm.box(self, version);
     }

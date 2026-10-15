@@ -372,3 +372,39 @@ export function callFrame(cx: Activation, value: Value, version: number): void {
     timelineOf(cx, found[0])?.call(found[1]);
   }
 }
+
+/**
+ * CloneSprite: the display object `source` names from the target, or the
+ * root's where there is none, duplicated as `name` at timeline depth
+ * `depth`, which compilers bias as duplicateMovieClip's own depth is.
+ */
+export function cloneSprite(
+  cx: Activation,
+  depth: Value,
+  name: Value,
+  source: Value,
+  version: number,
+): void {
+  const d = toInt32(depth, version);
+  const n = stringOf(name, version);
+  const target = displayOf(cx, targetOrRoot(cx), source, true, version);
+  if (target !== null) {
+    cx.host.duplicate?.(target, n, d);
+  }
+}
+
+/**
+ * RemoveSprite: the display object `value` names from the target, or the
+ * root's, removed; a target it removes gives way to the code's own clip.
+ */
+export function removeSprite(cx: Activation, value: Value, version: number): void {
+  const target = displayOf(cx, targetOrRoot(cx), value, true, version);
+  if (target === null) {
+    return;
+  }
+
+  cx.host.remove?.(target);
+  if (cx.target !== null && cx.host.removed?.(cx.target)) {
+    setTargetClip(cx, cx.base);
+  }
+}
