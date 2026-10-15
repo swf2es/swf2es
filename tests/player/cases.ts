@@ -3424,6 +3424,50 @@ function avm1Recursion(): Uint8Array {
   });
 }
 
+// A ScriptLimits takes effect as its frame comes, before the frame's
+// actions, and of two in a frame the later: frame 1 recurses 100 deep
+// under Flash's default limit, frame 2 sets 80 then 40, under which 30
+// deep runs and 60 disables the actions, frame 3's too.
+function avm1ScriptLimits(): Uint8Array {
+  const limits = (depth: number) => w.tag(tags.ScriptLimits, Uint8Array.from([depth, 0, 15, 0]));
+  const recurse = (n: number) => [
+    setVar("depth", lit(0)),
+    drop(callFunction("deep", lit(n))),
+    traceOf(op("Add2", lit("reached "), getVar("depth"))),
+  ];
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.backgroundColor(0xffffff),
+      block(
+        defineFn(
+          "deep",
+          ["n"],
+          setVar("depth", op("Increment", getVar("depth"))),
+          ifThen(
+            op("Less2", getVar("depth"), getVar("n")),
+            drop(callFunction("deep", getVar("n"))),
+          ),
+        ),
+        ...recurse(100),
+      ),
+      w.showFrame(),
+      block(note("frame 2"), ...recurse(30)),
+      limits(80),
+      limits(40),
+      block(...recurse(60), note("unreached")),
+      w.showFrame(),
+      block(note("frame 3")),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 SWFs an AS3 one loads (scripts/Avm1Movie.as.template): one of
 // version 8 whose FileAttributes leaves out ActionScript 3, three frames
 // that move a square and add another, and one of version 6 without
@@ -7734,6 +7778,16 @@ export const cases: PlayerCase[] = [
     traced: true,
     frames: 3,
     capture: [3],
+    tolerance: 0,
+    maxOutliers: 0,
+    alone: true,
+  },
+  {
+    name: "avm1-script-limits",
+    swf: avm1ScriptLimits(),
+    traced: true,
+    frames: 3,
+    capture: [],
     tolerance: 0,
     maxOutliers: 0,
     alone: true,

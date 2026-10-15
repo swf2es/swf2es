@@ -260,6 +260,67 @@ test("past the recursion limit, a SWF's ScriptLimits, every action is disabled a
   assert.equal(player.root.currentFrame, 3);
 });
 
+/** `depth = 0; function deep(n) { trace(++depth); if (depth < n) deep(n); } deep(n); trace("back")`. */
+const recursingTo = (n: number) =>
+  doAction((a) =>
+    a
+      .defineFunction(
+        "deep",
+        ["n"],
+        new Avm1Assembler()
+          .push("depth", "depth")
+          .op("GetVariable")
+          .op("Increment")
+          .op("SetVariable")
+          .push("depth")
+          .op("GetVariable")
+          .trace()
+          .push("depth")
+          .op("GetVariable")
+          .push("n")
+          .op("GetVariable")
+          .op("Less2")
+          .op("Not")
+          .if("done")
+          .push("n")
+          .op("GetVariable")
+          .push(1, "deep")
+          .op("CallFunction")
+          .pop()
+          .label("done"),
+      )
+      .push("depth", 0)
+      .op("SetVariable")
+      .push(n, 1, "deep")
+      .op("CallFunction")
+      .pop()
+      .push("back")
+      .trace(),
+  );
+
+test("a ScriptLimits takes effect as its frame comes, the frame's last of two", async () => {
+  const limits = (depth: number) => w.tag(65, Uint8Array.from([depth, 0, 10, 0]));
+  const swf = movie(6, [[recursingTo(50)], [limits(9), limits(3), recursingTo(5)], [traced("3")]]);
+  const { lines, avm1 } = await play(swf, 3);
+
+  // Frame 1 recurses 50 deep under the default limit, frame 2 two deep under its own.
+  assert.equal(lines.length, 50 + 1 + 2);
+  assert.deepEqual(lines.slice(-4), ["50", "back", "1", "2"]);
+  assert.ok(avm1.rt.disabled);
+  assert.equal(avm1.rt.maxRecursion, 3);
+  assert.equal(avm1.rt.scriptTimeout, 10);
+});
+
+test("a ScriptLimits depth of 1 or 0 runs no action at all", async () => {
+  for (const depth of [0, 1]) {
+    const limits = w.tag(65, Uint8Array.from([depth, 0, 15, 0]));
+    const { lines, avm1 } = await play(movie(6, [[limits, traced("1")], [traced("2")]]), 2);
+
+    assert.deepEqual(lines, []);
+    assert.ok(avm1.rt.disabled);
+  }
+});
+
 test("the global registers are the frame's, kept from block to block", async () => {
   const swf = movie(6, [
     [doAction((a) => a.push("r").storeRegister(1)), doAction((a) => a.push(register(1)).trace())],

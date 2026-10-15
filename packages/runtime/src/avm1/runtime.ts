@@ -634,6 +634,13 @@ export class Runtime {
   }
 
   /**
+   * How long, in seconds, a frame's actions may run before Flash offers to
+   * stop them: a SWF's ScriptLimits sets it (Flash's default 15). Nothing
+   * stops them yet.
+   */
+  scriptTimeout = 15;
+
+  /**
    * Run a block's own region, `regions[0]`, in `cx`. Past the recursion
    * limit, or where JavaScript's own stack runs out first, the movie's
    * actions are disabled from there.
@@ -643,7 +650,13 @@ export class Runtime {
       return;
     }
 
+    // The block is a level of the limit itself: a depth of 1 or 0 runs nothing (adl).
     const realm = this.realm;
+    if (realm.maxCalls <= 1) {
+      this.disabled = true;
+      return;
+    }
+
     const outer = realm.current;
     const calls = realm.calls;
     cx.code = regions;

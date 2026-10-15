@@ -441,9 +441,13 @@ cases), where it is not what Ruffle does:
   at 255). In adl the actions of every AVM1 SWF loaded after it stay
   disabled too, so the player cases that reach the limit are drawn in an
   adl of their own. A SWF's `ScriptLimits` tag sets the depth, `n`
-  allowing `n - 1` calls, in adl too. JavaScript's own stack running out,
-  which a limit set very high, or a `toString` that calls itself, can do
-  first, disables the actions as well.
+  allowing `n - 1` calls (the frame's actions are a level of their own:
+  1 or 0 runs no action at all), in adl too; it takes effect as its frame
+  comes, before the frame's actions, and of two in a frame the later
+  (`avm1-script-limits`). Its script timeout, in seconds, is kept for when
+  scripts have one. JavaScript's own stack running out, which a limit set
+  very high, or a `toString` that calls itself, can do first, disables
+  the actions as well.
 
 ### The constant pool
 
@@ -1029,8 +1033,9 @@ determinism` green, and the corpus baseline may only go up.
    property recursion limit by version, `Function()`, and `ScriptLimits`'
    depth; what adl showed is under "Functions and registers". The
    `avm1-functions-swf5` to `-swf10` cases trace some 1100 lines each in
-   adl, which the player matches, and `avm1-recursion` shows a
-   `ScriptLimits` depth disabling the actions while the timeline plays on.
+   adl, which the player matches, `avm1-recursion` shows a
+   `ScriptLimits` depth disabling the actions while the timeline plays on,
+   and `avm1-script-limits` when a frame's `ScriptLimits` takes effect.
    The corpus goes from 47 to 104 of the 649 (`call_method_empty_name`,
    `define_function2`, `define_function_case_sensitive`,
    `register_underflow`, `function_as_function`, `timeline_function_def`,
