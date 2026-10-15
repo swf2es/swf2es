@@ -7,9 +7,10 @@
 // An object keeps its properties in a Map by their exact names, in the
 // order they were added, which is Flash's order of enumeration reversed.
 // A SWF up to 6 finds names whatever their case: it asks the exact name
-// first, as code mostly spells a name one way, and else an index by the
-// names folded to lower case, which an object builds the first time such a
-// lookup misses and keeps from then on. A SWF from 7 never needs it.
+// first, as code mostly spells a name one way, then the name folded to
+// lower case, and else an index of the names folding changes, which an
+// object builds the first time such a lookup misses and keeps from then
+// on: none while all its names are lower case. A SWF from 7 never needs it.
 // `__proto__` is a property like any other, which the object also keeps
 // at hand for the walks up its prototypes.
 import { lowerCase } from "./lowercase.js";
@@ -110,10 +111,16 @@ export interface Boxer {
   box(value: Value, version: number): Avm1Object;
 }
 
+/** The index of an object none of whose names folding changes, shared. */
+const UNCHANGED = new Map<string, Property>();
+
 export class Avm1Object {
   /** By exact name, in the order they were added. */
   readonly props = new Map<string, Property>();
-  /** By folded name, the first added of each fold, once a SWF up to 6 needs it. */
+  /**
+   * By folded name, the first added of each name folding changes, once a
+   * SWF up to 6 needs it; UNCHANGED while there is none.
+   */
   private folded: Map<string, Property> | null = null;
   /** The property named `__proto__`, if any. */
   private protoProp: Property | null = null;
@@ -152,7 +159,24 @@ export class Avm1Object {
       return p;
     }
 
-    return this.foldedIndex().get(fold(name));
+    return this.ownFolded(name, fold(name));
+  }
+
+  /**
+   * The own property a SWF up to 6 finds for `name`, folded `key`, once
+   * the exact name missed: the one spelt `key`, else the first added
+   * whose name folds to it.
+   */
+  ownFolded(name: string, key: string): Property | undefined {
+    if (key !== name) {
+      const p = this.props.get(key);
+      if (p !== undefined) {
+        return p;
+      }
+    }
+
+    const folded = this.folded ?? this.index();
+    return folded === UNCHANGED ? undefined : folded.get(key);
   }
 
   /**
@@ -185,7 +209,13 @@ export class Avm1Object {
     const folded = this.folded;
     if (folded !== null) {
       const key = fold(name);
-      if (!folded.has(key)) {
+      if (key === name) {
+        return p;
+      }
+
+      if (folded === UNCHANGED) {
+        this.folded = new Map([[key, p]]);
+      } else if (!folded.has(key)) {
         folded.set(key, p);
       }
     }
@@ -200,7 +230,7 @@ export class Avm1Object {
     }
 
     const folded = this.folded;
-    if (folded === null) {
+    if (folded === null || folded === UNCHANGED) {
       return;
     }
 
@@ -208,7 +238,7 @@ export class Avm1Object {
     if (folded.get(key) === p) {
       folded.delete(key);
       for (const other of this.props.values()) {
-        if (fold(other.name) === key) {
+        if (other.name !== key && fold(other.name) === key) {
           folded.set(key, other);
           break;
         }
@@ -242,20 +272,24 @@ export class Avm1Object {
     return "object";
   }
 
-  private foldedIndex(): Map<string, Property> {
-    let folded = this.folded;
-    if (folded === null) {
-      folded = new Map();
-      for (const p of this.props.values()) {
-        const key = fold(p.name);
-        if (!folded.has(key)) {
-          folded.set(key, p);
-        }
+  private index(): Map<string, Property> {
+    let folded = UNCHANGED;
+    for (const p of this.props.values()) {
+      const key = fold(p.name);
+      if (key === p.name) {
+        continue;
       }
 
-      this.folded = folded;
+      if (folded === UNCHANGED) {
+        folded = new Map();
+      }
+
+      if (!folded.has(key)) {
+        folded.set(key, p);
+      }
     }
 
+    this.folded = folded;
     return folded;
   }
 }
@@ -303,9 +337,15 @@ const DEPTH = 255;
  * its attributes: whether the name is there, as the scope chain asks.
  */
 export function find(o: Avm1Object, name: string, version: number): Property | undefined {
+  let key: string | null = null;
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
-    const own = p.own(name, version);
+    let own = p.props.get(name);
+    if (own === undefined && version <= 6) {
+      key ??= fold(name);
+      own = p.ownFolded(name, key);
+    }
+
     if (own !== undefined) {
       return own;
     }
@@ -328,9 +368,15 @@ export function get(
   self: Value = o,
   resolving = true,
 ): Value {
+  let key: string | null = null;
   let p: Value = o;
   for (let depth = 0; p instanceof Avm1Object && depth < DEPTH; depth++) {
-    const own = p.own(name, version);
+    let own = p.props.get(name);
+    if (own === undefined && version <= 6) {
+      key ??= fold(name);
+      own = p.ownFolded(name, key);
+    }
+
     if (own !== undefined && allowed(own.flags, version)) {
       return own.get === null ? own.value : invoke(own.get, self, [], version);
     }

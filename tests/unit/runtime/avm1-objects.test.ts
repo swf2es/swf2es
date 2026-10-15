@@ -347,3 +347,20 @@ test("a path's first step is this, _root or _global; SetVariable's takes no this
   V.setVariable(cx, 8, "THIS");
   assert.equal(cx.self, 8);
 });
+
+test("the folded index follows names added after it, and objects share none", () => {
+  const plain = rt.newObject();
+  set(plain, "lower", 1, 6);
+  const other = rt.newObject();
+  set(other, "lower", 1, 6);
+  assert.equal(get(plain, "missing", 6), undefined);
+  assert.equal(get(other, "missing", 6), undefined);
+
+  set(plain, "Camel", 2, 7);
+  assert.equal(get(plain, "CAMEL", 6), 2);
+  assert.equal(get(plain, "LOWER", 6), 1);
+  assert.equal(get(other, "CAMEL", 6), undefined);
+  const { V, cx } = frame(6);
+  assert.equal(V.deleteMember(cx, "camel", plain), true);
+  assert.equal(get(plain, "Camel", 6), undefined);
+});
