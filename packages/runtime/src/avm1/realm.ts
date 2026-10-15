@@ -43,9 +43,8 @@ interface Class {
 /** The arguments' first, undefined where there is none. */
 const first = (args: Value[]): Value => (args.length > 0 ? args[0] : undefined);
 
-/** A number as Rust's `as u16` takes it: NaN 0, saturating. */
-const u16 = (n: number): number =>
-  Number.isNaN(n) ? 0 : Math.max(0, Math.min(0xffff, Math.trunc(n)));
+/** A value as ASSetPropFlags takes its bits: an int's low 16, as adl wraps them. */
+const u16 = (value: Value, version: number): number => (toNumber(value, version) | 0) & 0xffff;
 
 export class Realm implements Boxer {
   /** `_global`: no prototype, as Flash's has none. */
@@ -492,8 +491,8 @@ function setPropFlags(realm: Realm, args: Value[], version: number): Value {
   }
 
   const object = realm.box(args[0], version);
-  const set = args.length > 2 ? u16(toNumber(args[2], version)) : 0;
-  const clear = args.length > 3 ? u16(toNumber(args[3], version)) : 0;
+  const set = args.length > 2 ? u16(args[2], version) : 0;
+  const clear = args.length > 3 ? u16(args[3], version) : 0;
   const change = (p: { flags: number }) => {
     p.flags = (p.flags & ~clear) | set;
   };

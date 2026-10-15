@@ -296,3 +296,21 @@ test("names fold by Flash's lower case, code unit by code unit, not JavaScript's
     assert.equal(get(o, upper, 6), same ? 1 : undefined, `${upper} ${lower}`);
   }
 });
+
+test("ASSetPropFlags takes its bits as an int's low 16", () => {
+  const { V, cx, st } = frame(7);
+  for (const [bits, deletable] of [
+    [65537, true],
+    [-65534, false],
+    [-1.5, false],
+    [4294967297, true],
+    [Number.NaN, true],
+  ] as const) {
+    const o = rt.newObject();
+    set(o, "v", 1, 7);
+    st.push(bits, "v", o, 3, "ASSetPropFlags");
+    V.callFunction(cx);
+    st.pop();
+    assert.equal(V.deleteMember(cx, "v", o), deletable, `${bits}`);
+  }
+});
