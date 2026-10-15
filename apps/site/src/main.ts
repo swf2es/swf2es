@@ -206,7 +206,8 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
     player.focus();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    write("error", `${name} did not play: ${message}`);
+    // The errors go into the report, which never names a local file.
+    write("error", `${base === null ? "The SWF" : name} did not play: ${message}`);
     showStatus(`${name} did not play: ${message}`, true);
   }
 

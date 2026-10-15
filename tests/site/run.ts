@@ -13,6 +13,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withPage } from "../player/chrome.ts";
 import { serve } from "../player/serve.ts";
+import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -190,6 +191,33 @@ async function check(): Promise<void> {
             // A local file's name stays with its owner.
             assert.match(body ?? "", /From: a local file/);
             assert.doesNotMatch(body ?? "", /orbit/);
+
+            // Nor does one that fails to play name it among the errors.
+            const broken = `${out}private-name.swf`;
+            writeFileSync(
+              broken,
+              w.swf({
+                width: 100,
+                height: 100,
+                frameRate: 30,
+                frameCount: 1,
+                tags: [
+                  w.fileAttributes(true),
+                  w.doAbc(new Uint8Array([16, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 99]), "X"),
+                  w.showFrame(),
+                  w.end(),
+                ],
+              }),
+            );
+            await send("DOM.setFileInputFiles", { objectId: result.objectId, files: [broken] });
+            await until("document.getElementById('status').textContent.includes('did not play')");
+            const failed = new URL(
+              await value<string>(
+                "(() => { const a = document.getElementById('report'); a.dispatchEvent(new Event('focus')); return a.href; })()",
+              ),
+            ).searchParams.get("body");
+            assert.match(failed ?? "", /did not play/);
+            assert.doesNotMatch(failed ?? "", /private-name/);
           },
         ],
         [

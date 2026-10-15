@@ -31,6 +31,19 @@ export interface ReportFacts {
   errors: string[];
 }
 
+/** A URL as the report gives it: no query or fragment, which may hold a token, and not too long. */
+function shortOrigin(origin: string): string {
+  let text = origin;
+  try {
+    const url = new URL(origin);
+    text = `${url.origin}${url.pathname}`;
+  } catch {
+    // Not a URL: "a local file" or a demo's name.
+  }
+
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
 function body(facts: ReportFacts, errors: string[]): string {
   const swf = facts.swf;
   const lines = [
@@ -43,7 +56,7 @@ function body(facts: ReportFacts, errors: string[]): string {
   ];
   if (swf) {
     lines.push(
-      `- From: ${swf.origin}`,
+      `- From: ${shortOrigin(swf.origin)}`,
       `- ActionScript: ${swf.avm === "AVM2" ? "3 (AVM2)" : "1 or 2 (AVM1)"}`,
       `- SWF version: ${swf.version}, compression: ${swf.compression}`,
       `- File size: ${swf.bytes} bytes`,
