@@ -10,7 +10,10 @@
 // The actions written so far: Push of constants, ConstantPool, Trace, Pop,
 // Jump, If, Play, Stop, End, PushDuplicate and StackSwap, and the
 // arithmetic, comparison, logical, bitwise, string and conversion actions,
-// each a call of its version's operation (V.add2, V.less2...). Every other
+// each a call of its version's operation (V.add2, V.less2...), and the
+// variable, member, object and call actions, each a call that takes its
+// operands as they are popped, the top first, or pops them itself where
+// their number is on the stack (V.initObject, V.callMethod...). Every other
 // action Flash knows is a call that throws, V.notYet, and one it does not
 // know is skipped, as Flash skips it. An action Flash cannot read, cut short or a Push of a value
 // type it does not know, stops the SWF, V.halt, as adl does.
@@ -264,6 +267,54 @@ export class BlockEmitter {
         break;
       case ops.OP_TypeOf:
         this.operation("typeOf", 1);
+        break;
+      case ops.OP_GetVariable:
+        out.text("st.push(V.getVariable(cx, st.pop()));\n");
+        break;
+      case ops.OP_SetVariable:
+        out.text("V.setVariable(cx, st.pop(), st.pop());\n");
+        break;
+      case ops.OP_DefineLocal:
+        out.text("V.defineLocal(cx, st.pop(), st.pop());\n");
+        break;
+      case ops.OP_DefineLocal2:
+        out.text("V.defineLocal2(cx, st.pop());\n");
+        break;
+      case ops.OP_GetMember:
+        out.text("st.push(V.getMember(cx, st.pop(), st.pop()));\n");
+        break;
+      case ops.OP_SetMember:
+        out.text("V.setMember(cx, st.pop(), st.pop(), st.pop());\n");
+        break;
+      case ops.OP_Delete:
+        out.text("st.push(V.deleteMember(cx, st.pop(), st.pop()));\n");
+        break;
+      case ops.OP_Delete2:
+        out.text("st.push(V.deleteVariable(cx, st.pop()));\n");
+        break;
+      case ops.OP_Enumerate:
+        out.text("V.enumerate(cx, st.pop());\n");
+        break;
+      case ops.OP_Enumerate2:
+        out.text("V.enumerate2(cx, st.pop());\n");
+        break;
+      case ops.OP_InitObject:
+        out.text("V.initObject(cx);\n");
+        break;
+      case ops.OP_InitArray:
+        out.text("V.initArray(cx);\n");
+        break;
+      case ops.OP_CallFunction:
+        out.text("V.callFunction(cx);\n");
+        break;
+      case ops.OP_CallMethod:
+        out.text("V.callMethod(cx);\n");
+        break;
+      case ops.OP_NewObject:
+        out.text("V.newObject(cx);\n");
+        break;
+      case ops.OP_NewMethod:
+        out.text("V.newMethod(cx);\n");
         break;
       case ops.OP_PushDuplicate:
         out.text("{ const a = st.pop(); st.push(a, a); }\n");

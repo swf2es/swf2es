@@ -3,6 +3,7 @@
 // `V`, once, and each region of each block takes its activation, `cx`.
 import { Halt, NotYet } from "./errors.js";
 import type { Host, Target } from "./host.js";
+import { Avm1Object, get, invoke, keys, nameOf, removeOwn, set } from "./objects.js";
 import {
   add2,
   charOf,
@@ -14,7 +15,21 @@ import {
   toInt32,
   wellFormed,
 } from "./operators.js";
-import { stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
+import { Realm } from "./realm.js";
+import {
+  defineLocal,
+  defineLocal2,
+  deleteVariable,
+  foundOn,
+  getVariable,
+  resolve,
+  resolveCallable,
+  SCOPE_Global,
+  SCOPE_Target,
+  Scope,
+  setVariable,
+} from "./scope.js";
+import { type Primitive, stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
 
 export { Halt, NotYet };
 
@@ -33,7 +48,18 @@ export class Activation {
     /** The clip timeline actions act on. */
     public target: Target,
     public host: Host,
+    readonly realm: Realm,
+    /** The scope chain, searched from here down to `_global`. */
+    public scope: Scope,
+    /** `this`. */
+    public self: Value,
+    /** The target's AVM1 object: a function called by name without an object takes it as `this`. */
+    public clip: Avm1Object,
   ) {}
+
+  get global(): Avm1Object {
+    return this.realm.global;
+  }
 }
 
 /** A region of a block, the block's own code or a function's body. */
@@ -106,6 +132,29 @@ export interface Operations {
   asciiToChar(a: Value): string;
   mbCharToAscii(a: Value): number;
   mbAsciiToChar(a: Value): string;
+  /** GetVariable of `name`, a path or not. */
+  getVariable(cx: Activation, name: Value): Value;
+  setVariable(cx: Activation, value: Value, name: Value): void;
+  defineLocal(cx: Activation, value: Value, name: Value): void;
+  defineLocal2(cx: Activation, name: Value): void;
+  /** `object[name]`. */
+  getMember(cx: Activation, name: Value, object: Value): Value;
+  setMember(cx: Activation, value: Value, name: Value, object: Value): void;
+  /** Delete: whether `object[name]` went. */
+  deleteMember(cx: Activation, name: Value, object: Value): boolean;
+  /** Delete2: whether the variable went. */
+  deleteVariable(cx: Activation, name: Value): boolean;
+  /** InitObject and InitArray, which pop their counts and their values themselves. */
+  initObject(cx: Activation): void;
+  initArray(cx: Activation): void;
+  /** Enumerate: a terminator, then the names of the variable's object, the first to visit on top. */
+  enumerate(cx: Activation, name: Value): void;
+  enumerate2(cx: Activation, object: Value): void;
+  /** CallFunction, CallMethod, NewObject and NewMethod, which pop their operands themselves. */
+  callFunction(cx: Activation): void;
+  callMethod(cx: Activation): void;
+  newObject(cx: Activation): void;
+  newMethod(cx: Activation): void;
   play(cx: Activation): void;
   stop(cx: Activation): void;
   /** An action Flash cannot read: the SWF stops there. */
@@ -242,6 +291,131 @@ function operations(version: number): Operations {
             : charOf(code, false);
         }
       : (a) => charOf(toInt32(a, version) & 0xffff, true),
+    getVariable: (cx, name) => getVariable(cx, nameOf(name, version), version),
+    setVariable(cx, value, name) {
+      setVariable(cx, nameOf(name, version), value, version);
+    },
+    defineLocal(cx, value, name) {
+      defineLocal(cx, nameOf(name, version), value, version);
+    },
+    defineLocal2(cx, name) {
+      defineLocal2(cx, nameOf(name, version), version);
+    },
+    getMember(cx, name, object) {
+      const key = nameOf(name, version);
+      if (object instanceof Avm1Object) {
+        return get(object, key, version);
+      }
+
+      return object === undefined || object === null
+        ? undefined
+        : cx.realm.primitiveMember(object as Primitive, key, version);
+    },
+    setMember(cx, value, name, object) {
+      const key = nameOf(name, version);
+      if (object instanceof Avm1Object) {
+        set(object, key, value, version);
+      } else if (object !== undefined && object !== null) {
+        set(cx.realm.box(object, version), key, value, version);
+      }
+    },
+    deleteMember(_, name, object) {
+      const key = nameOf(name, version);
+      return object instanceof Avm1Object && removeOwn(object, key, version);
+    },
+    deleteVariable: (cx, name) => deleteVariable(cx, nameOf(name, version), version),
+    initObject(cx) {
+      const st = cx.st;
+      const n = countOf(st.pop(), version);
+      if (n < 0) {
+        st.push(undefined);
+        return;
+      }
+
+      // Pairs past the stack's are all undefined, which set the same name each time: one does.
+      const object = cx.realm.newObject(version);
+      const pairs = Math.min(n, (st.length >> 1) + 2);
+      for (let i = 0; i < pairs; i++) {
+        const value = st.pop();
+        set(object, nameOf(st.pop(), version), value, version);
+      }
+
+      st.push(object);
+    },
+    initArray(cx) {
+      const st = cx.st;
+      const n = countOf(st.pop(), version);
+      if (n < 0) {
+        st.push(undefined);
+        return;
+      }
+
+      // Past the stack's values, undefined ones; a count far past it is cut short, as no
+      // compiler writes one and Flash would make billions of elements.
+      const count = Math.min(n, st.length + 0x10000);
+      const elements: Value[] = new Array(count);
+      for (let i = 0; i < count; i++) {
+        elements[i] = st.pop();
+      }
+
+      st.push(cx.realm.newArray(elements, version));
+    },
+    enumerate(cx, name) {
+      enumerate(cx, getVariable(cx, nameOf(name, version), version), version);
+    },
+    enumerate2(cx, object) {
+      enumerate(cx, object, version);
+    },
+    callFunction(cx) {
+      const st = cx.st;
+      const name = nameOf(st.pop(), version);
+      const args = popArgs(st, version);
+      const fn = resolveCallable(cx, name, version);
+      st.push(invoke(fn, foundOn === undefined ? cx.clip : foundOn, args, version));
+    },
+    callMethod(cx) {
+      const st = cx.st;
+      const name = st.pop();
+      const object = st.pop();
+      const args = popArgs(st, version);
+      if (object === undefined || object === null) {
+        st.push(undefined);
+        return;
+      }
+
+      const key = name === undefined ? "" : nameOf(name, version);
+      if (key === "") {
+        st.push(invoke(object, undefined, args, version));
+        return;
+      }
+
+      const method =
+        object instanceof Avm1Object
+          ? get(object, key, version)
+          : cx.realm.primitiveMember(object as Primitive, key, version);
+      st.push(invoke(method, object, args, version));
+    },
+    newObject(cx) {
+      const st = cx.st;
+      const name = nameOf(st.pop(), version);
+      const args = popArgs(st, version);
+      st.push(cx.realm.construct(resolve(cx, name, version), args, version));
+    },
+    newMethod(cx) {
+      const st = cx.st;
+      const name = st.pop();
+      const object = st.pop();
+      const args = popArgs(st, version);
+      if (object === undefined || object === null) {
+        st.push(undefined);
+        return;
+      }
+
+      const key = name === undefined ? "" : nameOf(name, version);
+      const boxed = cx.realm.box(object, version);
+      const constr = key === "" ? boxed : get(boxed, key, version);
+      st.push(cx.realm.construct(constr, args, version));
+    },
     play(cx) {
       cx.host.play(cx.target);
     },
@@ -318,11 +492,69 @@ function bytesAsUtf8(text: string): string {
   return decoder.decode(new Uint8Array(bytes));
 }
 
+/** InitObject's and InitArray's count: truncated, then -1 where it is not an int from 0 (adl). */
+function countOf(value: Value, version: number): number {
+  const n = Math.trunc(toNumber(value, version));
+  return n >= 0 && n <= 0x7fffffff ? n : -1;
+}
+
+/**
+ * A call's arguments, their count on top and the first argument under it:
+ * as many as the stack has, the count taken as a u32.
+ */
+function popArgs(st: Value[], version: number): Value[] {
+  const n = Math.min(toNumber(st.pop(), version) >>> 0, st.length);
+  const args: Value[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    args[i] = st.pop();
+  }
+
+  return args;
+}
+
+/** Enumerate's and Enumerate2's pushes: a terminator, then the names, the first to visit on top. */
+function enumerate(cx: Activation, object: Value, version: number): void {
+  const st = cx.st;
+  st.push(undefined);
+  if (object instanceof Avm1Object) {
+    const names = keys(object, version);
+    for (let i = names.length - 1; i >= 0; i--) {
+      st.push(names[i]);
+    }
+  }
+}
+
 /** The operations of each version asked for, made once and shared by every runtime. */
 const versions = new Map<number, Operations>();
 
 /** A player's AVM1 runtime, which its SWFs' modules are loaded into. */
 export class Runtime {
+  /** The builtins and `_global`, which every SWF the player runs shares. */
+  readonly realm = new Realm();
+
+  /** A new object, as `{}` makes one: what the player gives a clip until clips have their class. */
+  newObject(): Avm1Object {
+    return new Avm1Object(this.realm.objectProto);
+  }
+
+  /**
+   * An activation of a timeline's code: `clip`, the target's AVM1 object,
+   * above `_global` on the scope chain, and `this`.
+   */
+  activation(st: Value[], pool: Value[], target: Target, clip: Avm1Object, host: Host): Activation {
+    const global = new Scope(null, SCOPE_Global, this.realm.global);
+    return new Activation(
+      st,
+      pool,
+      target,
+      host,
+      this.realm,
+      new Scope(global, SCOPE_Target, clip),
+      clip,
+      clip,
+    );
+  }
+
   /** The operations of SWF version `version`. */
   version(version: number): Operations {
     let ops = versions.get(version);

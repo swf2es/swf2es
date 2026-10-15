@@ -453,10 +453,66 @@ test("PushDuplicate and StackSwap work on the stack, its empty end undefined", a
   ]);
 });
 
+test("the variable and member actions take their operands as popped, the top first", async () => {
+  const block = asm()
+    .push("x")
+    .op("GetVariable")
+    .trace()
+    .push("y", 1)
+    .op("SetVariable")
+    .push("l", 2)
+    .op("DefineLocal")
+    .push("m")
+    .op("DefineLocal2")
+    .push("o", "n")
+    .op("GetMember")
+    .trace()
+    .push("o", "n", 3)
+    .op("SetMember")
+    .push("o", "n")
+    .op("Delete")
+    .push("v")
+    .op("Delete2")
+    .push("e")
+    .op("Enumerate")
+    .push("o")
+    .op("Enumerate2")
+    .op("InitObject")
+    .op("InitArray")
+    .op("CallFunction")
+    .op("CallMethod")
+    .op("NewObject")
+    .op("NewMethod")
+    .bytes();
+  const { calls, error } = await run([block]);
+  assert.equal(error, null);
+  const cx = calls[0][1];
+  assert.deepEqual(calls, [
+    ["getVariable", cx, "x"],
+    ["trace", "getVariable"],
+    ["setVariable", cx, 1, "y"],
+    ["defineLocal", cx, 2, "l"],
+    ["defineLocal2", cx, "m"],
+    ["getMember", cx, "n", "o"],
+    ["trace", "getMember"],
+    ["setMember", cx, 3, "n", "o"],
+    ["deleteMember", cx, "n", "o"],
+    ["deleteVariable", cx, "v"],
+    ["enumerate", cx, "e"],
+    ["enumerate2", cx, "o"],
+    ["initObject", cx],
+    ["initArray", cx],
+    ["callFunction", cx],
+    ["callMethod", cx],
+    ["newObject", cx],
+    ["newMethod", cx],
+  ]);
+});
+
 test("every other action throws that it is not yet supported", async () => {
-  const getVariable = await run([asm().push("a").trace().push("x").action(0x1c).trace().bytes()]);
-  assert.deepEqual(getVariable.calls, [["trace", "a"]]);
-  assert.equal(getVariable.error, "not yet supported: GetVariable");
+  const thrown = await run([asm().push("a").trace().push("x").action(0x2a).trace().bytes()]);
+  assert.deepEqual(thrown.calls, [["trace", "a"]]);
+  assert.equal(thrown.error, "not yet supported: Throw");
 
   const pushRegister = await run([asm().push("a", register(1)).trace().bytes()]);
   assert.equal(pushRegister.error, "not yet supported: Push of a register");
