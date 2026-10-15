@@ -50,6 +50,9 @@ const types: Record<string, string> = {
   ".mjs": "text/javascript",
   ".ts": "text/javascript",
   ".html": "text/html",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".json": "application/json",
   ".map": "application/json",
   ".wasm": "application/wasm",
 };
