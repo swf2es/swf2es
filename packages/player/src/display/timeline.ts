@@ -3,6 +3,7 @@
 // the frames' labels. Definitions are read once, at load, as the whole
 // file is there.
 import {
+  type ActionList,
   type Bitmap,
   type ButtonRecord,
   type EditText,
@@ -13,6 +14,7 @@ import {
   isBitmapTag,
   type MorphShape,
   type Place,
+  readActions,
   readBinaryData,
   readBitmap,
   readButton,
@@ -102,15 +104,24 @@ export interface Timeline {
 
 /**
  * What an AVM1 movie's timelines tell its AVM1, as Flash's clips do in
- * tag order: a display object made, before its first frame runs, a frame
- * entered, before its tags run, each DoAction tag reached, and a place at
- * a depth already taken, which Flash's log tells of.
+ * tag order: a display object placed and made, before its first frame
+ * runs, a frame entered, before its tags run, each DoAction tag reached,
+ * a place at a depth already taken, which Flash's log tells of, and a
+ * removal, which a clip with an unload handler outlives for a frame.
  */
 export interface TimelineActions {
+  /** A display object about to be placed by `place`, before it is made: its clip actions. */
+  placing(display: DisplayObject, place: Place): void;
   made(display: DisplayObject): void;
   entered(clip: MovieClip, frame: number): void;
   actions(clip: MovieClip, tag: number): void;
   occupied(depth: number): void;
+  /**
+   * Whether `display`, about to be removed, stays until the next frame at
+   * a depth below the timeline's, as Flash keeps a clip with an unload
+   * handler; its unload comes now all the same.
+   */
+  keeps(display: DisplayObject): boolean;
 }
 
 /** A timeline's stream: the head, and each block with the frame it is on. */
@@ -295,6 +306,8 @@ export interface Library {
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
   /** What an AVM1 movie's timelines tell its AVM1 (avm1/avm1.ts); null in an AS3 movie. */
   avm1?: TimelineActions | null;
+  /** An AVM1 SWF's action blocks (format's readActions), which its places give the indices of theirs in; null in an AS3 SWF. */
+  actions?: ActionList | null;
   /** The SWF's embedded fonts, by name, which its fields lay their text out in. */
   fonts: FontSet;
   /** The application domain its code was loaded into, where its class names resolve; the root's if none. */
@@ -414,8 +427,9 @@ function timelineOf(
   frameCount: number,
   library: Map<number, Character>,
   jpeg: { tables: Uint8Array | null },
-  avm1: boolean,
+  actions: ActionList | null,
 ): Timeline {
+  const avm1 = actions !== null;
   const frames: FrameCommand[][] = [[]];
   const frameLabels = new Map<number, string>();
   const sounds = new Map<number, StartSound[]>();
@@ -432,7 +446,7 @@ function timelineOf(
       case tags.PlaceObject:
       case tags.PlaceObject2:
       case tags.PlaceObject3:
-        frame.push({ type: "place", place: readPlace(bytes, t) });
+        frame.push({ type: "place", place: readPlace(bytes, t, actions ?? undefined) });
         break;
       case tags.RemoveObject:
       case tags.RemoveObject2:
@@ -501,7 +515,7 @@ function timelineOf(
           type: "sprite",
           id: sprite.id,
           timeline: {
-            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, avm1),
+            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, actions),
             length: t.length - 4,
           },
           grid: null,
@@ -664,13 +678,15 @@ function timelineOf(
 /** The characters a SWF defines, and its root timeline. */
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
+  // An AVM1 SWF's action blocks, which its places' clip actions are among.
+  const actions = isAs3(swf) ? null : readActions(swf);
   const root = timelineOf(
     swf.bytes,
     swf.tags,
     swf.frameCount,
     characters,
     { tables: null },
-    !isAs3(swf),
+    actions,
   );
   const fonts = new FontSet();
   for (const c of characters.values()) {
@@ -691,5 +707,6 @@ export function readLibrary(swf: Swf): Library {
     fonts,
     version: swf.header.version,
     sounds: null,
+    actions,
   };
 }

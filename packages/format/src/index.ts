@@ -40,6 +40,7 @@ export {
   type Place,
   readBinaryData,
   readDoAbc,
+  readExports,
   readFrameLabel,
   readPlace,
   readRemove,
