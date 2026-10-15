@@ -123,3 +123,24 @@ trace(renamed.hasOwnProperty("_x"));`,
     ],
   );
 });
+
+test("_width and _height scale a turned clip by its turned, unscaled bounds, and a scale past 32768 draws at that (adl)", async () => {
+  assert.deepEqual(
+    await traces(
+      `function show() { trace(a._width + "," + a._height + " " + a._xscale + "," + a._yscale); }
+a._rotation = 30; a._width = 37.3; show(); a._height = 11.15; show();
+a._rotation = 0; a._xscale = -50; a._yscale = 100; a._height = 30; show();
+a._xscale = Infinity; show(); a._xscale = 1e6; show(); a._xscale = -1e10; show();
+a._xscale = 100; a._yscale = 100; a._rotation = 30; a._xscale = 200; a._yscale = 50; a._width = 30; show();`,
+    ),
+    [
+      "33.65,31 136.630036630037,100",
+      "25.45,19.4 123.260073260073,40.8424908424908",
+      "10,30 50,150",
+      "655360,30 Infinity,150",
+      "200000,30 1000000,150",
+      "655360,30 -10000000000,150",
+      "29.55,29.15 109.89010989011,104.945054945055",
+    ],
+  );
+});

@@ -1148,9 +1148,13 @@ probes they came of), and the corpus, where it is not what Ruffle does:
   what does not fit an int, an infinity included, -2^31 twips; `_alpha`
   is an 8.8 multiplier, the percentage's 256ths cut toward zero (`33` is
   `32.8125`); `_xscale` and `_yscale` give back what was set; `_rotation`
-  is set modulo 360 into -180 to 180; `_width` and `_height` are the
-  bounds through the clip's matrix with each corner rounded to twips, and
-  set as Ruffle's `set_width` works them out, a negative one ignored;
+  is set modulo 360 into -180 to 180; `_xscale` and `_yscale` past
+  32768 times, infinities included, draw at that; `_width` and `_height`
+  are the bounds through the clip's matrix with each corner rounded to
+  twips, and set over a base, the content's own bounds turned by the
+  clip's rotation, unscaled, in whole twips: the side set scales to the
+  value over its base, the other to its size now over its base, both
+  positive (not Ruffle's `set_width`), a negative one ignored;
   undefined, null and NaN leave any of them be. `_visible` takes a
   number. `_droptarget` is `""` in every version (Ruffle: undefined up to
   SWF 5). `_quality` is `HIGH`, `_soundbuftime` 5 and `_focusrect` a SWF
@@ -1189,8 +1193,8 @@ adl's harness loads a SWF as an `AVM1Movie`, whose root traces as
 no `_level0`; a main movie's root is `_level0`, which the corpus shows.
 The cases trace no root's dot path or name, and no level.
 
-What is not reproduced yet: `_width` of some turned clips is off by a
-twip (Flash's corners round otherwise at some angles), the corpus's
+What is not reproduced yet: `_width` of a turned clip scaled past
+32768 times is off by a few twips (Flash's corners round otherwise), the corpus's
 `[approximations]` are not read by its runner, and a function's clip,
 once removed and placed again, is not found again by its path.
 

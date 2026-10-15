@@ -126,13 +126,14 @@ const PROPERTIES: [string, DisplayProperty][] = [
     "_xscale",
     {
       get: (f) =>
-        f.xscale !== null && f.target.scaleX === f.xscale / 100 ? f.xscale : f.target.scaleX * 100,
+        f.xscale !== null && f.target.scaleX === clampScale(f.xscale / 100)
+          ? f.xscale
+          : f.target.scaleX * 100,
       set(f, value, version) {
         const n = numberOf(value, version);
         if (n !== null) {
           f.target.touch();
-          f.target.setScaleX(n / 100);
-          f.xscale = n;
+          setScaleX(f, n / 100);
         }
       },
     },
@@ -141,13 +142,14 @@ const PROPERTIES: [string, DisplayProperty][] = [
     "_yscale",
     {
       get: (f) =>
-        f.yscale !== null && f.target.scaleY === f.yscale / 100 ? f.yscale : f.target.scaleY * 100,
+        f.yscale !== null && f.target.scaleY === clampScale(f.yscale / 100)
+          ? f.yscale
+          : f.target.scaleY * 100,
       set(f, value, version) {
         const n = numberOf(value, version);
         if (n !== null) {
           f.target.touch();
-          f.target.setScaleY(n / 100);
-          f.yscale = n;
+          setScaleY(f, n / 100);
         }
       },
     },
@@ -197,7 +199,7 @@ const PROPERTIES: [string, DisplayProperty][] = [
       set(f, value, version) {
         const n = numberOf(value, version);
         if (n !== null) {
-          setSize(f.target, n, true);
+          setSize(f, n, true);
         }
       },
     },
@@ -209,7 +211,7 @@ const PROPERTIES: [string, DisplayProperty][] = [
       set(f, value, version) {
         const n = numberOf(value, version);
         if (n !== null) {
-          setSize(f.target, n, false);
+          setSize(f, n, false);
         }
       },
     },
@@ -343,15 +345,36 @@ function mouse(d: DisplayObject, movie: Movie): [number, number] {
 }
 
 /**
- * `_width` or `_height` set, as Flash sets them, which Ruffle's set_width
- * and set_height work out: both scales change on a turned object, from
- * its own bounds' aspect; a negative value changes nothing.
+ * The largest scale Flash's matrix holds, either way: a larger `_xscale`
+ * or `_yscale` is given back as set but draws at this (adl).
  */
-function setSize(d: DisplayObject, value: number, horizontal: boolean): void {
+const MAX_SCALE = 32768;
+
+const clampScale = (s: number): number => Math.max(-MAX_SCALE, Math.min(MAX_SCALE, s));
+
+/** `_xscale` set, as a fraction: kept as set, the matrix's clamped. */
+function setScaleX(f: ClipNative, s: number): void {
+  f.target.setScaleX(clampScale(s));
+  f.xscale = s * 100;
+}
+
+function setScaleY(f: ClipNative, s: number): void {
+  f.target.setScaleY(clampScale(s));
+  f.yscale = s * 100;
+}
+
+/**
+ * `_width` or `_height` set, as adl sets them: the bounds of the object's
+ * own content turned by its rotation, unscaled, in whole twips, are the
+ * base; the side set scales to the value over its base, the other to its
+ * size now over its base, both positive. A negative value changes nothing.
+ */
+function setSize(f: ClipNative, value: number, horizontal: boolean): void {
   if (value < 0) {
     return;
   }
 
+  const d = f.target;
   d.touch();
   if (d instanceof TextObject) {
     if (horizontal) {
@@ -365,30 +388,18 @@ function setSize(d: DisplayObject, value: number, horizontal: boolean): void {
   }
 
   const r = twipsBounds(d, null);
-  const width = r === null ? 0 : (r.xMax - r.xMin) / 20;
-  const height = r === null ? 0 : (r.yMax - r.yMin) / 20;
-  const v = Number.isFinite(value) ? value : 0x7fffffff / 20;
-  const side = horizontal ? width : height;
-  const tx = side !== 0 ? v / width : 0;
-  const ty = side !== 0 ? v / height : 0;
+  const width = r === null ? 0 : r.xMax - r.xMin;
+  const height = r === null ? 0 : r.yMax - r.yMin;
   const radians = ((d.rotation || 0) * Math.PI) / 180;
   const cos = Math.abs(Math.cos(radians));
   const sin = Math.abs(Math.sin(radians));
-  const finite = (n: number) => (Number.isFinite(n) ? Math.min(n, 32768) : 0);
-  let sx: number;
-  let sy: number;
-  if (horizontal) {
-    const ar = height / width;
-    sx = (ar * (cos * tx + sin * ty)) / ((cos + ar * sin) * (ar * cos + sin));
-    sy = (sin * d.scaleX + ar * cos * d.scaleY) / (ar * cos + sin);
-  } else {
-    const ar = width / height;
-    sx = (ar * cos * d.scaleX + sin * d.scaleY) / (ar * cos + sin);
-    sy = (ar * (sin * tx + cos * ty)) / ((cos + ar * sin) * (ar * cos + sin));
-  }
-
-  d.setScaleX(finite(sx));
-  d.setScaleY(finite(sy));
+  const baseWidth = Math.round(cos * width + sin * height) / 20;
+  const baseHeight = Math.round(sin * width + cos * height) / 20;
+  const [w, h] = size(d);
+  const sx = baseWidth !== 0 ? (horizontal ? value : w) / baseWidth : 0;
+  const sy = baseHeight !== 0 ? (horizontal ? h : value) / baseHeight : 0;
+  setScaleX(f, sx);
+  setScaleY(f, sy);
 }
 
 /** A number rounded to the nearest whole one, a half to the even one, as Rust's round_ties_even. */
