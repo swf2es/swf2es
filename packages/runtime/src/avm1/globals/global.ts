@@ -275,7 +275,7 @@ function versioned(name: string): [string, number] {
   }
 }
 
-/** ASnative(category, index): a new function of the table's native, undefined for none. */
+/** ASnative(category, index): a new function of the table's native, undefined for no table. */
 export function asnative(realm: Realm, category: number, index: number): Value {
   const table = realm.natives.get(category);
   if (table === undefined) {
@@ -283,8 +283,8 @@ export function asnative(realm: Realm, category: number, index: number): Value {
   }
 
   // An index past a u16 is no native's.
-  const native = table(index > 0xffff ? 0xffff : index);
-  return native === null ? undefined : realm.method(native);
+  // Any index of a table is a function, one of none giving undefined.
+  return realm.method(table(index > 0xffff ? 0xffff : index) ?? none);
 }
 
 /** ASSetNative (`accessor` false) and ASSetNativeAccessor. */
