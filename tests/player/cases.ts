@@ -3,7 +3,14 @@
 // made by run.ts --update with the Flash oracle.
 import { readFileSync } from "node:fs";
 import { tags, zlibCompress } from "../../packages/format/dist/index.js";
-import { Avm1Assembler, constant, double } from "../avm1-assembler.ts";
+import {
+  Avm1Assembler,
+  byteString,
+  constant,
+  double,
+  type PushValue,
+  type SimpleAction,
+} from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
 
@@ -1891,6 +1898,202 @@ function avm1Hello(): Uint8Array {
       ),
       w.showFrame(),
       w.doAction(avm1((a) => a.trace().push("frame 2").trace().stop())),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** Every pair of `values`, each pushed in turn, but NaN with NaN (see `avm1Operators`). */
+function pairs(left: PushValue[], right: PushValue[] = left): [PushValue, PushValue][] {
+  const nan = (v: PushValue) =>
+    typeof v === "object" && v !== null && "value" in v && Number.isNaN(v.value);
+  return left.flatMap((a) =>
+    right.flatMap((b): [PushValue, PushValue][] => (nan(a) && nan(b) ? [] : [[a, b]])),
+  );
+}
+
+/** A DoAction that traces `action` of each of `operands`, pushed in order. */
+function traceEach(action: SimpleAction, operands: PushValue[][]): Uint8Array {
+  return w.doAction(
+    avm1((a) =>
+      operands.reduce(
+        (b, values) =>
+          b
+            .push(...values)
+            .op(action)
+            .trace(),
+        a,
+      ),
+    ),
+  );
+}
+
+const NAN = double(Number.NaN);
+const INFINITY = double(Number.POSITIVE_INFINITY);
+
+/** Values to convert, as SWF 4 to 10 read strings, numbers and their edges. */
+const AVM1_CONVERTED: PushValue[] = [
+  undefined,
+  null,
+  true,
+  false,
+  0,
+  double(-0),
+  1,
+  double(-2.5),
+  NAN,
+  INFINITY,
+  double(2147483648),
+  double(4294967295),
+  double(1e21),
+  "",
+  " 12",
+  "12 ",
+  "0x1A",
+  "-0x10",
+  "012",
+  "1e3",
+  ".",
+  "abc",
+  "\t5",
+  "é",
+  "😀",
+  byteString(0xc3, 0xa9),
+  byteString(0x80),
+];
+
+// What AVM1's arithmetic, comparison, logical, bitwise, string and
+// conversion actions push in a SWF of `version`, as adl traces them: the
+// conversions of each version (undefined and strings as numbers, hex from
+// SWF 6, booleans as 1 and 0 up to 4), SWF 4's "#ERROR#" for a division by
+// zero, Less2's undefined for NaN and its empty string after every other,
+// >>> signed in SWF 8 and 9, and up to SWF 5 strings as bytes, which the
+// log writes as UTF-8. A NaN is never compared with another: Flash has
+// one equal to a copy of itself and not to another, which values cannot
+// tell (docs/avm1.md).
+function avm1Operators(version: number): Uint8Array {
+  const arithmetic: PushValue[] = [
+    undefined,
+    null,
+    true,
+    0,
+    double(-0),
+    double(2.5),
+    NAN,
+    INFINITY,
+    "",
+    "2",
+    "abc",
+    "0x10",
+  ];
+  const divisors: PushValue[] = [undefined, true, 0, double(-0), 2, "3", "abc", "0x10"];
+  const compared: PushValue[] = [undefined, null, true, 0, 1, NAN, "", "1", "abc", "0x1"];
+  const strings: PushValue[] = ["", "a", "B", "ab", "é", "中", byteString(0x80)];
+  const codes = [0, 65, 233, 256, 321, 1000, 0xc3a9, 0xd800, 65535, 65601, -191];
+  const shifted: [PushValue, PushValue][] = [
+    [-1, 0],
+    [-1, 1],
+    [-1, 31],
+    [-1, 32],
+    [-1, 33],
+    [double(2147483648), 0],
+    [double(4294967295), 1],
+    [double(1e21), 0],
+    [double(1.9), 1],
+    [double(-1.9), 1],
+    [NAN, 1],
+    [INFINITY, 1],
+    ["0x80000000", 1],
+    [5, -1],
+    [1, 31],
+  ];
+  const extracted: [PushValue, PushValue][] = [
+    [0, 2],
+    [1, 2],
+    [2, 2],
+    [-1, -1],
+    [2, -1],
+    [6, 10],
+    [7, 1],
+    [double(2.7), double(1.5)],
+    ["3", NAN],
+    [undefined, undefined],
+  ];
+  const unary = (action: SimpleAction, values: PushValue[]) =>
+    traceEach(
+      action,
+      values.map((v) => [v]),
+    );
+  const binary = (action: SimpleAction, operands: [PushValue, PushValue][]) =>
+    traceEach(action, operands);
+
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      ...(
+        ["ToNumber", "ToString", "ToInteger", "Not", "Increment", "Decrement", "TypeOf"] as const
+      ).map((action) => unary(action, AVM1_CONVERTED)),
+      ...(["StringLength", "MBStringLength", "CharToAscii", "MBCharToAscii"] as const).map(
+        (action) => unary(action, [...strings, 7, true, undefined]),
+      ),
+      ...(["AsciiToChar", "MBAsciiToChar"] as const).map((action) => unary(action, codes)),
+      w.doAction(
+        avm1((a) =>
+          codes.reduce((b, c) => b.push(c).op("MBAsciiToChar").op("StringLength").trace(), a),
+        ),
+      ),
+      ...(["Add", "Add2", "Subtract", "Multiply", "Divide", "Modulo"] as const).map((action) =>
+        binary(action, pairs(arithmetic, divisors)),
+      ),
+      ...(
+        ["Equals", "Equals2", "StrictEquals", "Less", "Less2", "Greater", "And", "Or"] as const
+      ).map((action) => binary(action, pairs(compared))),
+      // Whether a comparison pushes a boolean, even in SWF 4.
+      w.doAction(
+        avm1((a) =>
+          (["Equals", "Less", "And", "StringEquals"] as const)
+            .reduce((b, action) => b.push(1, 1).op(action).op("TypeOf").trace(), a)
+            .push(1)
+            .op("Not")
+            .op("TypeOf")
+            .trace(),
+        ),
+      ),
+      ...(["StringAdd", "StringEquals", "StringLess", "StringGreater", "Less2"] as const).map(
+        (action) => binary(action, pairs(strings)),
+      ),
+      ...(["BitAnd", "BitOr", "BitXor", "BitLShift", "BitRShift", "BitURShift"] as const).map(
+        (action) => binary(action, shifted),
+      ),
+      ...(["StringExtract", "MBStringExtract"] as const).map((action) =>
+        traceEach(
+          action,
+          ["abcdef", byteString(0xc3, 0xa9, 0x41)].flatMap((text) =>
+            extracted.map(([index, count]) => [text, index, count]),
+          ),
+        ),
+      ),
+      // PushDuplicate and StackSwap of the empty stack's undefined.
+      w.doAction(
+        avm1((a) =>
+          a
+            .push("a", "b")
+            .op("StackSwap")
+            .trace()
+            .trace()
+            .op("PushDuplicate")
+            .op("TypeOf")
+            .trace()
+            .trace(),
+        ),
+      ),
       w.showFrame(),
       w.end(),
     ],
@@ -6166,6 +6369,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[4, 5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-operators-swf${version}`,
+      swf: avm1Operators(version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   {
     name: "avm1-movie",
     build: avm1Movie,
