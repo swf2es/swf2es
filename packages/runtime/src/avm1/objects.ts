@@ -479,7 +479,7 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
 
 /** An array's `length` as a set changes it: elements past a shorter one go, an index past it grows it. */
 function arraySet(a: Avm1Object, name: string, value: Value, version: number): void {
-  if (name === "length") {
+  if ((caseSensitive(version) ? name : fold(name)) === "length") {
     const length = toNumber(value, version) | 0;
     const old = a.props.get("length")?.value;
     if (typeof old === "number") {
@@ -491,7 +491,7 @@ function arraySet(a: Avm1Object, name: string, value: Value, version: number): v
     return;
   }
 
-  const index = arrayIndex(name);
+  const index = arrayIndex(name, version);
   if (index !== null && index >= lengthOf(a)) {
     const p = a.props.get("length");
     if (p === undefined) {
@@ -507,15 +507,42 @@ export function lengthOf(o: Avm1Object): number {
   return toNumber(o.props.get("length")?.value, 7) | 0;
 }
 
-/** A name as an array index: an int, after spaces, or null. */
-function arrayIndex(name: string): number | null {
-  const m = /^[ \t\n\r\f\v]*([+-]?\d+)$/.exec(name);
-  if (m === null) {
+/**
+ * A name as an array index, as adl reads one: spaces, a sign and digits,
+ * wrapped to 32 bits; a SWF up to 6 takes them before anything else
+ * (`3abc` and `1.9` are 3 and 1), a later one only alone. Null for none.
+ */
+function arrayIndex(name: string, version: number): number | null {
+  const n = name.length;
+  let i = 0;
+  for (; i < n; i++) {
+    const c = name.charCodeAt(i);
+    if (c !== 0x20 && (c < 0x09 || c > 0x0d)) {
+      break;
+    }
+  }
+
+  const negative = name.charCodeAt(i) === 0x2d;
+  if (negative || name.charCodeAt(i) === 0x2b) {
+    i++;
+  }
+
+  const start = i;
+  let index = 0;
+  for (; i < n; i++) {
+    const d = name.charCodeAt(i) - 0x30;
+    if (d < 0 || d > 9) {
+      break;
+    }
+
+    index = (Math.imul(index, 10) + d) | 0;
+  }
+
+  if (i === start || (i < n && version > 6)) {
     return null;
   }
 
-  const n = Number(m[1]);
-  return n >= -2147483648 && n <= 2147483647 ? n : null;
+  return negative ? -index | 0 : index;
 }
 
 /** `delete o[name]`: whether an own property went, which DontDelete keeps. */

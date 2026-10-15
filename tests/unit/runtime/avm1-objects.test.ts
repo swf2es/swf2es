@@ -364,3 +364,29 @@ test("the folded index follows names added after it, and objects share none", ()
   assert.equal(V.deleteMember(cx, "camel", plain), true);
   assert.equal(get(plain, "Camel", 6), undefined);
 });
+
+test("an array's indices and length follow adl's reading of names by version", () => {
+  for (const [version, name, length] of [
+    [6, "3abc", 4],
+    [7, "3abc", 1],
+    [6, "1.9", 2],
+    [7, " +3", 4],
+    [7, "4294967298", 3],
+    [7, "2147483648", 1],
+    [7, "-1", 1],
+  ] as const) {
+    const { V, cx, st } = frame(version);
+    st.push("x", 1);
+    V.initArray(cx);
+    const a = st.pop() as Avm1Object;
+    V.setMember(cx, 1, name, a);
+    assert.equal(get(a, "length", version), length, `${version} ${name}`);
+  }
+
+  const { V, cx, st } = frame(6);
+  st.push("c", "b", "a", 3);
+  V.initArray(cx);
+  const a = st.pop() as Avm1Object;
+  V.setMember(cx, 1, "LENGTH", a);
+  assert.deepEqual(keys(a, 6), ["0"]);
+});
