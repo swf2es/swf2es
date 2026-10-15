@@ -105,7 +105,8 @@ export class ScriptFunction extends Avm1Function {
       target,
       caller.host,
       realm,
-      new Scope(scope, SCOPE_Local, local),
+      // adl counts a SWF 5 function's chain as a timeline's, for the With's limit.
+      new Scope(scope, SCOPE_Local, local, this.version < 6 ? scope.depth : scope.depth + 1),
       inherited ? this.definer : self,
       clip,
     );

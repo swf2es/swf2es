@@ -1,5 +1,6 @@
 // What a region of AVM1 code runs in (docs/avm1.md, "Compiling"): a block's
 // or a function's activation.
+import type { Held } from "./control.js";
 import type { Host, Target } from "./host.js";
 import type { Avm1Function, Avm1Object, LazyLocals, Property } from "./objects.js";
 import type { Realm } from "./realm.js";
@@ -40,6 +41,13 @@ export class Activation implements LazyLocals {
   pending = 0;
   /** The movie's four global registers. */
   readonly g: Value[];
+  /** What its Withs and Trys hold while control stays in their bodies (control.ts), the latest last. */
+  held: Held[] | null = null;
+  /** What the region returns where control goes to its exit through a Try (control.ts). */
+  ret: Value = undefined;
+  /** The register a catch just took a value into, -1 for none, and the value, which the region sets. */
+  into = -1;
+  thrown: Value = undefined;
 
   constructor(
     /** The operand stack, the frame's. */
