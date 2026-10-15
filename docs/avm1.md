@@ -2,10 +2,11 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 7 are built: `format`'s list of action blocks, the
+there. Steps 1 to 8 are built: `format`'s list of action blocks, the
 decoder, the emitter, the runtime's values and its operators by version,
-its objects, variables and global object, its functions and registers, and
-a main AVM1 SWF's root frames run by the player; the rest is not.
+its objects, variables and global object, its functions and registers,
+`With`, `Try` and `Throw`, and a main AVM1 SWF's root frames run by the
+player; the rest is not.
 [architecture.md](architecture.md) describes what is, and this document
 is folded into it as each piece lands.
 
@@ -163,7 +164,8 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   has no scope or handler either. So for the flow a `With` branches to
   its body and past it, a `Try` to its try body and, where a throw lands,
   to its catch's or finally's bytes, and their bodies' bounds start
-  blocks, where the emitter drops what is no longer held.
+  blocks, where the emitter drops what is no longer held (see "With and
+  Try" below for when exactly).
 - `emit/`: a block as an array of its regions' functions (`block.ts`),
   the block's own code first, then the bodies of the functions it
   defines, in the order the flow finds them; the module around them
@@ -209,24 +211,40 @@ can prove, spilling to `st` at calls and at the region's ends.
   actions, which the decoder turns into an offset; the branch asks the
   host whether the frame is loaded. The player has the whole SWF before it
   plays, so every frame is, but the branch stays for SWFs that test it.
-- **With**: the object goes on the activation's scope chain with the
-  body's bounds, and comes off at the first block outside them, however
-  control got there. A `with (undefined)` or `null` skips the body, in
-  adl as in Ruffle (`action_with`): the action's length covers its body,
-  so the code after it goes on past it.
-- **Try**: a handler goes on the activation with the try and catch
-  bodies' bounds, and comes off as a With's scope does; the dispatcher's
-  loop runs in a JavaScript `try`/`catch`. `Throw` throws the runtime's
-  `Avm1Throw` with the value; a throw in the try body with a catch sets
-  its register or variable and goes on at the catch's bytes. A throw in
-  the try body without a catch, or in the catch body, goes on at the
-  finally's bytes and throws again as control leaves them, even by a jump
-  (adl); without a finally it goes on to the handler outside. Leaving a
-  try or catch body by a jump runs no finally. An error of the host's, a
-  bug, passes through.
+- **With**: `V.with(cx, st.pop(), from, to)` puts the object on the
+  activation's scope chain, held over the body's blocks, from `from` to
+  `to`: a region's blocks are in the order of their offsets, and a body's
+  bounds start blocks, so each body is a range of them. It gives false,
+  and the code goes on past the body, for `undefined` and `null`, in adl
+  as in Ruffle (`action_with`), and where the chain is full (below).
+- **Try**: `V.try(cx, ...)` puts its handlers on the activation, held over
+  the try and catch bodies' blocks, with where a throw lands and the
+  catch's variable or register. The dispatcher's loop of a region with a
+  `Try` runs in a JavaScript `try`/`catch` whose catch asks `V.caught`
+  which block to go on at, and sets the register a catch took the value
+  into, a DefineFunction2's own `let` among them; so in such a region
+  every block sets `b` as control falls into it, for a throw to know
+  where it was. `Throw` throws the runtime's `Avm1Throw` with the value.
+  An error of the host's, a bug's, or the recursion limit's passes
+  through every catch and finally.
+- **Leaving a body**: what is held is the activation's (`control.ts`),
+  each entry over a range of blocks. A branch or a fall-through from a
+  block in a try, catch or finally body to one outside it goes through
+  `b = V.leave(cx, k); continue;`, which takes off the Trys that do not
+  hold over block `k`, and where a finally that a throw or a Return
+  reached is left, throws or returns instead. A scope comes off one action
+  late, as adl has it (below): a block that an edge out of a With's or a
+  catch's body reaches calls `V.scopes(cx, k)` after its first action,
+  before it where that action branches, ends the block or opens a body.
+  The other blocks, and every region without a `With` or a `Try`, are
+  written as before, with no cost of either.
 - **Return** pops the value it returns, `return st.pop();`, from a
   function's region; in a frame's block it ends the block, the value
   popped all the same. A region that runs off its end returns undefined.
+  In a try or catch body of a `Try` with a finally it is
+  `b = V.ret(cx); continue;`: the finally runs first, and the region
+  returns the stack's top as control leaves it, through the case `-1`,
+  `return cx.ret;`, that such a region's dispatcher has for its exit.
 
 A region's function takes the activation, `cx`: its scope chain, target,
 `this`, the constant pool, the operand stack, the registers, the
@@ -464,6 +482,69 @@ cases), where it is not what Ruffle does:
   on JavaScript's stack, would be needed to match it). Any other
   RangeError is an error like the rest.
 
+### With and Try
+
+What adl traces of them at SWF 5 to 10 (the `avm1-control-swf*` player
+cases), where it is not what Ruffle does, which runs each body as an
+activation of its own:
+
+- A With's object, a primitive boxed, is above the chain while control
+  is in its body, and for one action past it: the first action control
+  reaches outside the body, by a jump or running off its end, still runs
+  in the object's scope, and then it comes off. So `with (o) { ... }`
+  followed at once by a function's definition gives the function `o` in
+  the chain it closes over, and a GetVariable that is the first action
+  past a body finds `o`'s properties. A jump back before the `With` finds
+  the scope for that action only, and a jump into a body from outside
+  finds none.
+- A With is skipped, as `with (undefined)` is, where the scope chain
+  already holds 15 scopes, `_global` and the clip included: 13 Withs one
+  in another in a frame's code, 12 in a function's from SWF 6 (its
+  activation object is one more), but 13 in a SWF 5 function's, and fewer
+  in a function that closes over Withs or a catch. Ruffle has no limit.
+- `DefineLocal` in a With's body defines the variable on the scope under
+  the With's object where the object lacks it, as in Ruffle; `SetVariable`
+  sets it where the chain has it, else on the timeline.
+- A catch into a variable makes an object for it, held over the catch
+  body above the chain, as a With's object is (Ruffle sets the variable
+  as SetVariable does): the variable is gone after the catch, an outer
+  one of the name is unchanged, a function defined in the catch closes
+  over it, and the name is taken as it is, never as a path. A catch into
+  a register sets a DefineFunction2's own, else one of the movie's four,
+  else none, as StoreRegister does. A throw in a With's body, caught by a
+  catch outside it, keeps the With's object over the catch body, under
+  the variable's; a catch that throws again keeps them over the next
+  catch's.
+- A throw cuts the operand stack back to its height as the `Try` ran, as
+  Ruffle does, landing in a catch or a finally; a value nothing catches
+  leaves the stack as it is.
+- Code running off a try body runs the catch's bytes, the variable not
+  set, then the finally's. A jump out of a try or catch body runs no
+  finally; a `Return` in one runs the finally, the value left on the
+  stack while it runs, and then returns what is on top of the stack: what
+  a finally pushes is returned, the value under it left on the stack, and
+  a finally's own `Return` returns its value and leaves the first. A
+  finally reached by a throw or a `Return` throws or returns as control
+  leaves it, at once, even by a jump; a throw or a `Return` in it takes
+  their place.
+- A thrown value nothing catches ends its block, function calls included,
+  and writes nothing: the frame's next block runs, and the next frame.
+  Every value can be thrown, `undefined` too, as `Throw` on an empty stack
+  does. Past the recursion limit no catch or finally runs.
+- A throw in a function a native calls, a getter, a setter, `__resolve`,
+  `valueOf`, `toString`, `Function.call` or `apply`, a constructor, goes
+  through the native to the caller's catch, the rest of the native's work
+  undone (`Array.join` calls no other `toString`). `trace` of an object
+  whose `toString` throws writes `[type Object]`, or `[type Function]`,
+  then throws; a watcher that throws sets the property to undefined, then
+  throws. Ruffle does neither.
+- `Try` and `Throw` run in a SWF 5 and 6 too, and `Error` is there in
+  every version, on `_global` and not enumerated: `new Error(m)` has its
+  own `message` where `m` is given and not undefined, the prototype's
+  `message` and `name` are `"Error"` and listed by `for..in`, with its
+  `toString`, which gives `this.message`, and `Error(...)` called as a
+  function gives undefined. Step 9 completes the classes.
+
 ### The constant pool
 
 What adl does with `ConstantPool`, for the runtime (steps 4 and 7):
@@ -515,8 +596,10 @@ actions that take more than a conversion (`Add2`, `Equals2`, `Less2`,
 `StringExtract`...); `runtime.ts` the `Activation`
 (`st`, `pool`, `target`, `host`), the operations a version's `V` holds,
 and the errors: `NotYet`, an action not done yet, which ends its block
-and is reported, and `Halt`, thrown once the host has stopped the SWF at
-an action Flash cannot read. `trace` writes `undefined` whatever the
+and is reported, `Halt`, thrown once the host has stopped the SWF at
+an action Flash cannot read, and `Avm1Throw`, a value `Throw` throws,
+which ends its block where nothing catches it (`control.ts` has what
+`With` and `Try` hold). `trace` writes `undefined` whatever the
 version, as Flash does, and its text as it is: Flash's log breaks a line
 at a carriage return as at a line feed (the corpus's `trace`, and AS3's
 `edittext_newline_stripping`), where adl's stderr keeps the `\r`, so the
@@ -651,8 +734,9 @@ A getter, a setter, a watcher or `__resolve` is a native or a function
 of the SWF's, called with the depth a method call has (a getter's and a
 setter's `super` is their object's prototype's), each under the property
 recursion limit (see "Functions and registers"). The natives so far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`,
-`Function.prototype`'s `call` and `apply`, and what boxing, InitArray and
-the conversions need of `Function`, `Array`
+`Function.prototype`'s `call` and `apply`, `Error` as `Throw`'s values
+need it, and what boxing, InitArray and the conversions need of
+`Function`, `Array`
 (`toString`, `join`), `String`, `Number` and `Boolean` (their constructors,
 `valueOf` and `toString`), which step 9 completes. `CallFunction`,
 `CallMethod`, `NewObject` and `NewMethod` call them; a name that holds no
@@ -683,7 +767,7 @@ need nothing more.
 An activation's scope chain is a list, searched from the top: a frame's
 or an event's block has the clip it belongs to above `_global`; a
 function has its own activation object above the chain it captured; a
-`With` puts its object above either. The activation also has a
+`With`, or a catch into a variable, puts its object above either. The activation also has a
 **target**, the clip that timeline actions (`Play`, `GotoFrame`,
 `GetProperty` with an empty path) act on and names without a path
 resolve in. It starts as the clip the code belongs to, `SetTarget` and
@@ -1067,6 +1151,18 @@ determinism` green, and the corpus baseline may only go up.
    them, `Error`. Passes `with`, `with_return`, `with_variable_scopes`,
    `try_catch_finally`, `try_catch_stack`, `try_finally_simple`; an adl
    case for a jump out of a `with` body and back before its start.
+   Built: With and Try bodies as ranges of a region's blocks, held on the
+   activation (`control.ts`), not regions; the limit of 15 scopes; the
+   scope one action late; a catch's variable as its body's own scope; the
+   finally after a throw or a Return; `Error` as far as `Throw` needs it.
+   What adl showed is under "With and Try". The `avm1-control-swf5` to
+   `-swf10` cases trace some 190 lines each in adl, which the player
+   matches. The corpus goes from 104 to 111 of the 649 (`with_return`,
+   `with_variable_scopes`, `try_finally_simple`,
+   `catch_references_registers`, `error`, `watch`,
+   `infinite_recursion_function`); `with` waits for `GetProperty` (step
+   10), `try_catch_finally` for `CastOp` (step 9), and `try_catch_stack`
+   traces every line, then stops at a `GetUrl` (step 15).
 9. **The language's classes.** `Array`, `String`, `Number`, `Boolean`,
    `Math`, `Date`, `AsBroadcaster`, `Extends`, `InstanceOf`, `CastOp`,
    `ImplementsOp`, the global functions. Corpus tests of each; the
