@@ -16,7 +16,7 @@ import {
   type Place,
   readFilters,
 } from "@swf2es/format";
-import type { avm2 } from "@swf2es/runtime";
+import type { avm1, avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import type { FontSet } from "../text/fonts.js";
 import { GUTTER, layoutText, type TextLayout } from "../text/layout.js";
@@ -275,6 +275,8 @@ export class DisplayObject {
   transformed = false;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
+  /** In an AVM1 movie, its AS2 face, a clip's, a button's or a text field's (avm1/avm1.ts); null otherwise. */
+  avm1: avm1.Avm1Object | null = null;
   /** The root of an AVM1 movie an AS3 Loader loaded: its other face, an AVM1Movie, is no InteractiveObject. */
   avm1Root = false;
   /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
@@ -1919,6 +1921,8 @@ export class MovieClip extends Container {
    * From version 10 a goto leaves its frames as they were.
    */
   skipsAfter = -1;
+  /** Whether an AVM1 clip ran the actions after its last ShowFrame, which it does once. */
+  private tailed = false;
 
   constructor(
     readonly timeline: Timeline,
@@ -2021,15 +2025,22 @@ export class MovieClip extends Container {
    * held, for a clip's first frame.
    */
   private runFrame(frame: number, later: "frame" | "held" | null = null): void {
+    this.library.avm1?.entered(this, frame);
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
         this.removeAtDepth(command.depth);
         continue;
       }
 
+      if (command.type === "actions") {
+        this.library.avm1?.actions(this, command.tag);
+        continue;
+      }
+
       const place = command.place;
       const existing = this.depths.get(place.depth);
       if (!place.move && existing) {
+        this.library.avm1?.occupied(place.depth);
         continue;
       }
 
@@ -2111,6 +2122,10 @@ export class MovieClip extends Container {
     const jumps = new Map<number, Jump>();
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
+        if (command.type === "actions") {
+          continue;
+        }
+
         if (command.type === "remove") {
           jumps.delete(command.depth);
           // Going forward, a removal between the frames takes effect.
@@ -2192,7 +2207,9 @@ export class MovieClip extends Container {
         } else if (
           child.placeFrame > target &&
           jump.placed &&
-          madeAs(child, id === null ? undefined : this.library.characters.get(id))
+          madeAs(child, id === null ? undefined : this.library.characters.get(id)) &&
+          // An AVM1 clip of another character goes, to be made anew (Ruffle's survives_rewind).
+          !(this.library.avm1 && child instanceof MovieClip && child.character?.id !== id)
         ) {
           kept.add(depth);
         } else if (child.placeFrame > target) {
@@ -2268,6 +2285,43 @@ export class MovieClip extends Container {
 
     if (this.library.constructPlaced) {
       this.library.constructPlaced(placed);
+    } else if (this.library.avm1 && target !== from) {
+      // As playing would order them: the children placed before the frame
+      // run their first frames, then the frame's places and actions in tag
+      // order, a place's child its first frame, the actions queued (adl); a
+      // frame past the last queues none (Ruffle's run_goto).
+      const avm1 = this.library.avm1;
+      const made = new Set<DisplayObject>();
+      const make = (display: DisplayObject, character: DisplayCharacter) => {
+        made.add(display);
+        construct(display, character, this.library);
+      };
+      for (const { display, character } of placed) {
+        if (display.placeFrame < target) {
+          make(display, character);
+        }
+      }
+
+      if (target === frame) {
+        avm1.entered(this, target);
+        for (const command of this.timeline.frames[target - 1] ?? []) {
+          if (command.type === "actions") {
+            avm1.actions(this, command.tag);
+          } else if (command.type === "place") {
+            const child = this.depths.get(command.place.depth);
+            const at = placed.find((p) => p.display === child);
+            if (at && !made.has(at.display)) {
+              make(at.display, at.character);
+            }
+          }
+        }
+      }
+
+      for (const { display, character } of placed) {
+        if (!made.has(display)) {
+          make(display, character);
+        }
+      }
     } else {
       for (const { display, character } of placed) {
         construct(display, character, this.library);
@@ -2322,6 +2376,27 @@ export class MovieClip extends Container {
   advance(): void {
     if (this.fresh) {
       this.fresh = false;
+      return;
+    }
+
+    // An AVM1 clip on its last frame that does not loop, one of a single
+    // frame or without an End tag, stops there, and the DoAction tags
+    // after its last ShowFrame run, once (Ruffle's determine_next_frame).
+    const avm1 = this.library.avm1;
+    if (
+      avm1 &&
+      this.playing &&
+      this.currentFrame >= this.totalFrames &&
+      !(this.timeline.loops && this.totalFrames > 1)
+    ) {
+      this.playing = false;
+      for (const command of this.tailed ? [] : (this.timeline.tail ?? [])) {
+        if (command.type === "actions") {
+          avm1.actions(this, command.tag);
+        }
+      }
+
+      this.tailed = true;
       return;
     }
 
@@ -2455,6 +2530,7 @@ export function displayFor(
  * placement, as Flash has it, so that the parent and the name are there.
  */
 function construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
+  library.avm1?.made(display);
   if (library.construct) {
     library.construct(display, character);
   } else if (display instanceof MovieClip) {

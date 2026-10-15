@@ -9,6 +9,7 @@ import { createCodegen } from "@swf2es/codegen";
 import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
+import { flashAssembler, script } from "../../../avm1-script.ts";
 import * as w from "../../../swf-writer.ts";
 
 const codegen = await createCodegen(
@@ -64,7 +65,7 @@ test("each frame's blocks run in order as the root enters it, and the root loops
   assert.deepEqual(errors, []);
 });
 
-test("actions after the last ShowFrame run with the last frame, and a root without End stays on it", async () => {
+test("actions after the last ShowFrame run with the last frame where it loops, and once after it where it stops", async () => {
   const swf = (header: number, end: boolean) =>
     w.swf({
       version: 6,
@@ -95,6 +96,19 @@ test("actions after the last ShowFrame run with the last frame, and a root witho
   const { lines, player } = await play(swf(2, false), 5);
   assert.deepEqual(lines, ["1", "2", "tail"]);
   assert.equal(player.root.currentFrame, 2);
+
+  // A root of one frame stops on it, End or not, and runs its tail as the next frame comes.
+  for (const end of [true, false]) {
+    const one = w.swf({
+      version: 6,
+      width: 10,
+      height: 10,
+      frameCount: 1,
+      tags: [traced("1"), w.showFrame(), traced("tail"), ...(end ? [w.end()] : [])],
+    });
+    assert.deepEqual((await play(one, 1)).lines, ["1"]);
+    assert.deepEqual((await play(one, 4)).lines, ["1", "tail"]);
+  }
 });
 
 test("stop holds the root on its frame, whose actions do not run again", async () => {
@@ -167,7 +181,7 @@ test("an AS3 SWF's blocks never run", async () => {
 });
 
 test("an action not done yet is reported, and the frame's next block runs", async () => {
-  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x22])), traced("next")]]);
+  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x24])), traced("next")]]);
   const { lines, errors } = await play(swf, 1);
 
   assert.deepEqual(lines, ["next"]);
@@ -359,4 +373,183 @@ test("the global registers are the frame's, kept from block to block", async () 
   ]);
 
   assert.deepEqual((await play(swf, 3)).lines, ["r", "undefined"]);
+});
+
+/** A DoAction of AS1 source, as Flash's compiler writes it. */
+const as1 = (source: string, version: number) =>
+  w.doAction([...script(source, version)(flashAssembler()).end().bytes()]);
+
+/** A DefineSprite of the frames' tags. */
+const sprite = (id: number, frames: Uint8Array[][]) =>
+  w.sprite(id, frames.length, [...frames.flatMap((f) => [...f, w.showFrame()]), w.end()]);
+
+/** A clip of `frames` frames that traces "<name> <frame>" on each. */
+const counting = (id: number, frames: number, version = 6) =>
+  sprite(
+    id,
+    Array.from({ length: frames }, () => [as1(`trace(_name + " " + _currentframe);`, version)]),
+  );
+
+test("clips play the newest first, each frame's actions in tag order, a child's first frame as it is placed", async () => {
+  const swf = movie(6, [
+    [
+      counting(1, 2),
+      w.place({ depth: 1, character: 1, name: "a" }),
+      as1(`trace("root 1");`, 6),
+      w.place({ depth: 2, character: 1, name: "b" }),
+    ],
+    [as1(`trace("root 2"); stop();`, 6)],
+  ]);
+  const { lines, errors } = await play(swf, 3);
+
+  assert.deepEqual(lines, ["a 1", "root 1", "b 1", "b 2", "a 2", "root 2", "b 1", "a 1"]);
+  assert.deepEqual(errors, []);
+});
+
+test("a clip is a movieclip, which converts to its path, and the root is _level0", async () => {
+  const swf = movie(7, [
+    [
+      sprite(2, [[]]),
+      sprite(1, [[w.place({ depth: 1, character: 2, name: "b" })]]),
+      w.place({ depth: 1, character: 1, name: "a" }),
+      w.place({ depth: 2, character: 1 }),
+      as1(
+        `trace(typeof a); trace(a); trace(a.b); trace(this); trace(_root._name == ""); trace(instance1._name); trace(a.b._target); trace(_level0 == this); trace(a.b._parent == a); trace(Number(a)); trace(a < 1);`,
+        7,
+      ),
+    ],
+  ]);
+
+  assert.deepEqual((await play(swf, 1)).lines, [
+    "movieclip",
+    "_level0.a",
+    "_level0.a.b",
+    "_level0",
+    "true",
+    "instance1",
+    "/a/b",
+    "true",
+    "true",
+    "NaN",
+    "undefined",
+  ]);
+});
+
+test("instance names are found whatever their case up to SWF 6, a shape's not at all", async () => {
+  const shape = w.shape({
+    id: 3,
+    bounds: [0, 20, 0, 20],
+    fills: [0xff0000],
+    paths: [{ fill1: 1, commands: [{ move: [0, 0] }, { line: [20, 0] }, { line: [0, 20] }] }],
+  });
+  const swf = (version: number) =>
+    movie(version, [
+      [
+        shape,
+        sprite(1, [[]]),
+        w.place({ depth: 1, character: 1, name: "Ball" }),
+        w.place({ depth: 2, character: 3, name: "shape" }),
+        as1(`trace(typeof ball); trace(typeof Ball); trace(shape == this);`, version),
+      ],
+    ]);
+
+  assert.deepEqual((await play(swf(6), 1)).lines, ["movieclip", "movieclip", "true"]);
+  assert.deepEqual((await play(swf(7), 1)).lines, ["undefined", "movieclip", "true"]);
+});
+
+test("a goto queues the frame it enters, the children it places before the frame's actions or after by their tags", async () => {
+  const clip = sprite(1, [
+    [as1(`stop();`, 6)],
+    [
+      w.place({ depth: 1, character: 2, name: "before" }),
+      as1(`trace("clip 2");`, 6),
+      w.place({ depth: 2, character: 2, name: "after" }),
+    ],
+  ]);
+  const swf = movie(6, [
+    [
+      counting(2, 1),
+      clip,
+      w.place({ depth: 1, character: 1, name: "a" }),
+      as1(`a.gotoAndStop(2); trace("goto " + a._currentframe); a.gotoAndStop(99);`, 6),
+    ],
+  ]);
+
+  assert.deepEqual((await play(swf, 1)).lines, ["goto 2", "before 1", "clip 2", "after 1"]);
+});
+
+test("tellTarget targets a clip from the code's own, its names resolving on it, and none where it finds none", async () => {
+  const swf = movie(6, [
+    [
+      counting(2, 1),
+      sprite(1, [[w.place({ depth: 1, character: 2, name: "b" }), as1(`var v = "a's";`, 6)]]),
+      w.place({ depth: 1, character: 1, name: "a" }),
+      as1(
+        `tellTarget ("a") { trace(_target + " " + v); tellTarget ("b") { trace(_target); } }
+tellTarget ("/a/b") { trace(_name); }
+tellTarget ("nowhere") { trace(_target); }
+trace(_target);`,
+        6,
+      ),
+    ],
+  ]);
+
+  assert.deepEqual((await play(swf, 1)).lines, ["b 1", "/a a's", "/", "b", "/", "/"]);
+});
+
+test("GetProperty and SetProperty take a property by index, a twip's precision, an alpha's 256ths", async () => {
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "a" }),
+      as1(
+        `setProperty("a", 0, 12.34); trace(getProperty("a", 0)); setProperty("/a", 6, 33); trace(a._alpha);
+trace(getProperty("a", 13)); trace(getProperty("a", 21.5) == a._ymouse); trace(getProperty("a", 22)); trace(getProperty("nothing", 0));
+a._rotation = 270; trace(a._rotation); a._x = Infinity; trace(a._x); a._x = NaN; trace(a._x);`,
+        6,
+      ),
+    ],
+  ]);
+
+  assert.deepEqual((await play(swf, 1)).lines, [
+    "12.3",
+    "32.8125",
+    "a",
+    "true",
+    "undefined",
+    "undefined",
+    "-90",
+    "-107374182.4",
+    "-107374182.4",
+  ]);
+});
+
+test("a place at a taken depth tells Flash's log", async () => {
+  const swf = movie(6, [
+    [sprite(1, [[]]), w.place({ depth: 1, character: 1 }), w.place({ depth: 1, character: 1 })],
+  ]);
+
+  assert.deepEqual((await play(swf, 1)).lines, ["Warning: Failed to place object at depth 1."]);
+});
+
+test("a removed clip's reference finds what is at its path since", async () => {
+  const swf = movie(6, [
+    [sprite(1, [[as1(`var n = "first";`, 6)]]), w.place({ depth: 1, character: 1, name: "a" })],
+    [as1(`saved = a; trace(saved.n);`, 6)],
+    [w.remove(1), as1(`trace(typeof saved); trace(saved.n); trace(saved);`, 6)],
+    [
+      sprite(2, [[as1(`var n = "second";`, 6)]]),
+      w.place({ depth: 1, character: 2, name: "a" }),
+      as1(`trace(saved.n); trace(saved); stop();`, 6),
+    ],
+  ]);
+
+  assert.deepEqual((await play(swf, 4)).lines, [
+    "first",
+    "movieclip",
+    "undefined",
+    "",
+    "second",
+    "_level0.a",
+  ]);
 });
