@@ -73,19 +73,34 @@ export const Simple = {
   ToInteger: 0x18,
   GetVariable: 0x1c,
   SetVariable: 0x1d,
+  SetTarget2: 0x20,
   StringAdd: 0x21,
+  GetProperty: 0x22,
+  SetProperty: 0x23,
   Trace: 0x26,
   StringLess: 0x29,
   Throw: 0x2a,
+  CastOp: 0x2b,
+  ImplementsOp: 0x2c,
   MBStringLength: 0x31,
   CharToAscii: 0x32,
   AsciiToChar: 0x33,
   MBStringExtract: 0x35,
   MBCharToAscii: 0x36,
   MBAsciiToChar: 0x37,
+  Delete: 0x3a,
+  Delete2: 0x3b,
+  DefineLocal: 0x3c,
+  CallFunction: 0x3d,
   Return: 0x3e,
   Modulo: 0x3f,
+  NewObject: 0x40,
+  DefineLocal2: 0x41,
+  InitArray: 0x42,
+  InitObject: 0x43,
   TypeOf: 0x44,
+  TargetPath: 0x45,
+  Enumerate: 0x46,
   Add2: 0x47,
   Less2: 0x48,
   Equals2: 0x49,
@@ -93,8 +108,14 @@ export const Simple = {
   ToString: 0x4b,
   PushDuplicate: 0x4c,
   StackSwap: 0x4d,
+  GetMember: 0x4e,
+  SetMember: 0x4f,
   Increment: 0x50,
   Decrement: 0x51,
+  CallMethod: 0x52,
+  NewMethod: 0x53,
+  InstanceOf: 0x54,
+  Enumerate2: 0x55,
   BitAnd: 0x60,
   BitOr: 0x61,
   BitXor: 0x62,
@@ -104,6 +125,7 @@ export const Simple = {
   StrictEquals: 0x66,
   Greater: 0x67,
   StringGreater: 0x68,
+  Extends: 0x69,
 } as const;
 
 export type SimpleAction = keyof typeof Simple;
@@ -164,6 +186,20 @@ export class Avm1Assembler {
 
   constantPool(...strings: string[]): this {
     return this.action(0x88, [...u16(strings.length), ...strings.flatMap(str)]);
+  }
+
+  /**
+   * DefineFunction: `name` ("" for an anonymous one, which it pushes), its
+   * parameters, and its body as another assembler writes it.
+   */
+  defineFunction(name: string, params: string[], body: Avm1Assembler): this {
+    const code = body.bytes();
+    return this.action(0x9b, [
+      ...str(name),
+      ...u16(params.length),
+      ...params.flatMap(str),
+      ...u16(code.length),
+    ]).raw([...code]);
   }
 
   jump(label: string): this {

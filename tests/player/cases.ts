@@ -2129,6 +2129,468 @@ function avm1Operators(version: number): Uint8Array {
   });
 }
 
+/** AVM1 code that leaves a value on the stack, for the cases of objects. */
+type Avm1Expr = (a: Avm1Assembler) => Avm1Assembler;
+
+const lit =
+  (v: PushValue): Avm1Expr =>
+  (a) =>
+    a.push(v);
+const getVar =
+  (name: string): Avm1Expr =>
+  (a) =>
+    a.push(name).op("GetVariable");
+const member =
+  (o: Avm1Expr, name: string): Avm1Expr =>
+  (a) =>
+    o(a).push(name).op("GetMember");
+const op =
+  (action: SimpleAction, ...operands: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    operands.reduce((b, e) => e(b), a).op(action);
+/** Arguments as calls take them: the last first, then their count. */
+const args = (a: Avm1Assembler, values: Avm1Expr[]) =>
+  [...values]
+    .reverse()
+    .reduce((b, e) => e(b), a)
+    .push(values.length);
+const callMethod =
+  (o: Avm1Expr, name: string | undefined, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    o(args(a, values)).push(name).op("CallMethod");
+const callFunction =
+  (name: string, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    args(a, values).push(name).op("CallFunction");
+const newObject =
+  (name: string, ...values: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    args(a, values).push(name).op("NewObject");
+const initObject =
+  (...pairs: [string, Avm1Expr][]): Avm1Expr =>
+  (a) =>
+    pairs
+      .reduce((b, [name, e]) => e(b.push(name)), a)
+      .push(pairs.length)
+      .op("InitObject");
+const initArray =
+  (...elements: Avm1Expr[]): Avm1Expr =>
+  (a) =>
+    [...elements]
+      .reverse()
+      .reduce((b, e) => e(b), a)
+      .push(elements.length)
+      .op("InitArray");
+
+/** Statements of the cases of objects, each a function of the assembler. */
+type Avm1Statement = (a: Avm1Assembler) => Avm1Assembler;
+
+const setVar =
+  (name: string, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a.push(name)).op("SetVariable");
+const setMember =
+  (o: Avm1Expr, name: string, e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(o(a).push(name)).op("SetMember");
+const traceOf =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).trace();
+const note =
+  (text: string): Avm1Statement =>
+  (a) =>
+    a.push(text).trace();
+const drop =
+  (e: Avm1Expr): Avm1Statement =>
+  (a) =>
+    e(a).pop();
+let forInLabels = 0;
+/** `for (k in o) trace(k)`, by Enumerate2: the names up to the terminator. */
+const forIn =
+  (o: Avm1Expr): Avm1Statement =>
+  (a) => {
+    const n = forInLabels++;
+    return o(a)
+      .op("Enumerate2")
+      .label(`in${n}`)
+      .op("PushDuplicate")
+      .push(null)
+      .op("Equals2")
+      .if(`out${n}`)
+      .trace()
+      .jump(`in${n}`)
+      .label(`out${n}`)
+      .pop();
+  };
+/** `for (k in o)` the names joined in one line, so that a line stands for an enumeration. */
+const keysOf =
+  (o: Avm1Expr): Avm1Statement =>
+  (a) => {
+    const n = forInLabels++;
+    a.push("k", "").op("SetVariable");
+    return o(a)
+      .op("Enumerate2")
+      .label(`in${n}`)
+      .op("PushDuplicate")
+      .push(null)
+      .op("Equals2")
+      .if(`out${n}`)
+      .push("k")
+      .op("StackSwap")
+      .push("k")
+      .op("GetVariable")
+      .op("StackSwap")
+      .op("Add2")
+      .push(" ")
+      .op("Add2")
+      .op("SetVariable")
+      .jump(`in${n}`)
+      .label(`out${n}`)
+      .pop()
+      .push("k")
+      .op("GetVariable")
+      .trace();
+  };
+const block = (...statements: Avm1Statement[]) =>
+  w.doAction(avm1((a) => statements.reduce((b, s) => s(b), a)));
+
+const o = getVar("o");
+const OBJECT_PROTO = member(getVar("Object"), "prototype");
+
+// What AVM1's objects do in a SWF of `version`, as adl traces it
+// (docs/avm1.md, "Objects"): for..in's order and its terminator, names by
+// the version's case, ASSetPropFlags' attributes and version bits,
+// addProperty, watch and __resolve with native functions, which are all a
+// SWF can call before step 7 brings its own, delete, the prototypes of
+// primitives, _global, Object, and variables and paths on the root.
+function avm1Objects(version: number): Uint8Array {
+  const v6 = version >= 6;
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      // for..in: the last added first, a name deleted and set again last.
+      block(
+        note("-- enumeration"),
+        setVar("o", initObject(["a", lit(1)], ["b", lit(2)])),
+        setMember(o, "c", lit(3)),
+        setMember(o, "d", lit(4)),
+        traceOf(op("Delete", o, lit("b"))),
+        setMember(o, "b", lit(5)),
+        keysOf(o),
+        // A prototype's names come first, but those the object has.
+        setVar("p", initObject(["x", lit(1)], ["c", lit(2)], ["y", lit(3)])),
+        setMember(o, "__proto__", getVar("p")),
+        keysOf(o),
+        setVar("q", initObject(["z", lit(1)])),
+        setMember(getVar("q"), "__proto__", o),
+        keysOf(getVar("q")),
+        // The terminator, and an enumeration of no object.
+        (a) => a.push("t").op("Enumerate").op("TypeOf").trace(),
+        (a) => a.push(7).op("Enumerate2").op("TypeOf").trace(),
+        keysOf(initArray(lit("a"), lit("b"), lit("c"))),
+        keysOf(initObject(["10", lit(1)], ["2", lit(2)], ["1", lit(3)])),
+        forIn(initObject(["only", lit(1)])),
+      ),
+      // Names by the version's case: up to SWF 6 the first spelling stays.
+      block(
+        note("-- case"),
+        setVar("c", initObject()),
+        setMember(getVar("c"), "Ab", lit(1)),
+        setMember(getVar("c"), "aB", lit(2)),
+        traceOf(member(getVar("c"), "ab")),
+        traceOf(member(getVar("c"), "Ab")),
+        traceOf(member(getVar("c"), "aB")),
+        keysOf(getVar("c")),
+        setVar("Vx", lit(7)),
+        traceOf(getVar("vX")),
+        traceOf(getVar("Vx")),
+        traceOf(callMethod(getVar("c"), "HASOWNPROPERTY", lit("AB"))),
+        traceOf(op("Delete", getVar("c"), lit("AB"))),
+        keysOf(getVar("c")),
+        ...(v6
+          ? [
+              setMember(getVar("c"), "é", lit(1)),
+              traceOf(member(getVar("c"), "É")),
+              setMember(getVar("c"), "ж", lit(2)),
+              traceOf(member(getVar("c"), "Ж")),
+            ]
+          : []),
+        traceOf(op("Equals2", getVar("THIS"), getVar("this"))),
+      ),
+      // ASSetPropFlags: don't enum 1, don't delete 2, read only 4, and the
+      // bits that hide a property from SWFs before a version.
+      block(
+        note("-- flags"),
+        setVar("f", initObject(["a", lit(1)], ["b", lit(2)], ["c", lit(3)], ["d", lit(4)])),
+        drop(callFunction("ASSetPropFlags", getVar("f"), lit("a"), lit(1))),
+        drop(callFunction("ASSetPropFlags", getVar("f"), lit("b,C"), lit(2))),
+        drop(callFunction("ASSetPropFlags", getVar("f"), initArray(lit("d")), lit(4))),
+        keysOf(getVar("f")),
+        traceOf(op("Delete", getVar("f"), lit("b"))),
+        traceOf(op("Delete", getVar("f"), lit("a"))),
+        setMember(getVar("f"), "d", lit(40)),
+        traceOf(member(getVar("f"), "d")),
+        traceOf(callMethod(getVar("f"), "isPropertyEnumerable", lit("c"))),
+        traceOf(callMethod(getVar("f"), "isPropertyEnumerable", lit("d"))),
+        drop(callFunction("ASSetPropFlags", getVar("f"), lit(null), lit(0), lit(7))),
+        keysOf(getVar("f")),
+        // Every property, __proto__ and constructor included, shown.
+        drop(callFunction("ASSetPropFlags", OBJECT_PROTO, lit(null), lit(0), lit(1))),
+        keysOf(initObject()),
+        drop(callFunction("ASSetPropFlags", OBJECT_PROTO, lit(null), lit(1))),
+        setVar("g", initObject(["k", lit(1)])),
+        drop(callFunction("ASSetPropFlags", getVar("g"), lit(null), lit(0), lit(1))),
+        keysOf(getVar("g")),
+        // The version bits.
+        ...[0x80, 0x100, 0x400, 0x500, 0x1000, 0x2000, 0x4000, 0x8000].flatMap((bits) => [
+          setVar("h", initObject(["v", lit(bits)])),
+          drop(callFunction("ASSetPropFlags", getVar("h"), lit("v"), lit(bits))),
+          traceOf(member(getVar("h"), "v")),
+          traceOf(callMethod(getVar("h"), "hasOwnProperty", lit("v"))),
+          keysOf(getVar("h")),
+          setMember(getVar("h"), "v", lit("set")),
+          traceOf(member(getVar("h"), "v")),
+        ]),
+        traceOf(op("TypeOf", getVar("Function"))),
+        traceOf(op("TypeOf", member(initObject(), "watch"))),
+        traceOf(op("TypeOf", member(initObject(), "toString"))),
+      ),
+      // addProperty, with natives as getter and setter.
+      block(
+        note("-- addProperty"),
+        setVar("a", initObject(["s", lit(1)])),
+        traceOf(callMethod(getVar("a"), "addProperty")),
+        traceOf(callMethod(getVar("a"), "addProperty", lit("p"))),
+        traceOf(callMethod(getVar("a"), "addProperty", lit(""), member(OBJECT_PROTO, "valueOf"))),
+        traceOf(callMethod(getVar("a"), "addProperty", lit("p"), lit(5), lit(null))),
+        traceOf(callMethod(getVar("a"), "addProperty", lit("p"), member(OBJECT_PROTO, "valueOf"))),
+        traceOf(
+          callMethod(getVar("a"), "addProperty", lit("p"), member(OBJECT_PROTO, "valueOf"), lit(7)),
+        ),
+        traceOf(op("TypeOf", member(getVar("a"), "p"))),
+        traceOf(
+          callMethod(
+            getVar("a"),
+            "addProperty",
+            lit("p"),
+            member(OBJECT_PROTO, "valueOf"),
+            lit(null),
+          ),
+        ),
+        traceOf(op("Equals2", member(getVar("a"), "p"), getVar("a"))),
+        setMember(getVar("a"), "p", lit(9)),
+        traceOf(op("Equals2", member(getVar("a"), "p"), getVar("a"))),
+        traceOf(callMethod(getVar("a"), "hasOwnProperty", lit("p"))),
+        keysOf(getVar("a")),
+        // A getter or a setter that is an object but no function is refused.
+        traceOf(callMethod(getVar("a"), "addProperty", lit("n"), initObject(), initObject())),
+        traceOf(member(getVar("a"), "n")),
+        traceOf(
+          callMethod(
+            getVar("a"),
+            "addProperty",
+            lit("n"),
+            member(OBJECT_PROTO, "valueOf"),
+            initObject(),
+          ),
+        ),
+        // A getter over a value, and a toString getter.
+        traceOf(
+          callMethod(
+            getVar("a"),
+            "addProperty",
+            lit("s"),
+            member(OBJECT_PROTO, "toString"),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("a"), "s")),
+        // A getter on the prototype, seen through an object and a primitive.
+        setVar("b", initObject()),
+        setMember(getVar("b"), "__proto__", getVar("a")),
+        traceOf(member(getVar("b"), "s")),
+        setMember(getVar("b"), "s", lit("own")),
+        traceOf(member(getVar("b"), "s")),
+        traceOf(callMethod(getVar("b"), "hasOwnProperty", lit("s"))),
+      ),
+      // watch: what each call gives, and a native callback's value set.
+      block(
+        note("-- watch"),
+        setVar("w", initObject(["x", lit(1)])),
+        traceOf(callMethod(getVar("w"), "watch")),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"))),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), lit(5))),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), initObject())),
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), member(OBJECT_PROTO, "valueOf"))),
+        setMember(getVar("w"), "x", lit(2)),
+        traceOf(op("Equals2", member(getVar("w"), "x"), getVar("w"))),
+        // A second watch replaces the first: Object called with the name boxes it.
+        traceOf(callMethod(getVar("w"), "watch", lit("x"), getVar("Object"), lit("data"))),
+        setMember(getVar("w"), "x", lit(3)),
+        traceOf(member(getVar("w"), "x")),
+        traceOf(op("TypeOf", member(getVar("w"), "x"))),
+        traceOf(callMethod(getVar("w"), "unwatch", lit("X"))),
+        traceOf(callMethod(getVar("w"), "unwatch", lit("x"))),
+        traceOf(callMethod(getVar("w"), "unwatch")),
+        setMember(getVar("w"), "x", lit(4)),
+        traceOf(member(getVar("w"), "x")),
+        // A name not set yet, then set through SetVariable's path.
+        traceOf(callMethod(getVar("w"), "watch", lit("later"), getVar("Object"))),
+        setVar("w.later", lit(1)),
+        traceOf(member(getVar("w"), "later")),
+        // A watched read-only property.
+        drop(callFunction("ASSetPropFlags", getVar("w"), lit("later"), lit(4))),
+        setMember(getVar("w"), "later", lit(2)),
+        traceOf(member(getVar("w"), "later")),
+      ),
+      // __resolve: asked for a name the chain lacks, with the name.
+      block(
+        note("-- __resolve"),
+        setVar("r", initObject(["here", lit("here")])),
+        setMember(getVar("r"), "__resolve", getVar("Object")),
+        traceOf(member(getVar("r"), "missing")),
+        traceOf(op("TypeOf", member(getVar("r"), "missing"))),
+        traceOf(member(getVar("r"), "here")),
+        traceOf(callMethod(getVar("r"), "hasOwnProperty", lit("missing"))),
+        setMember(getVar("r"), "__resolve", lit(5)),
+        traceOf(member(getVar("r"), "missing")),
+        setMember(getVar("r"), "__resolve", initObject()),
+        traceOf(member(getVar("r"), "missing")),
+        setMember(getVar("r"), "__resolve", member(OBJECT_PROTO, "toString")),
+        traceOf(member(getVar("r"), "missing")),
+        // On the prototype; and not for a conversion's valueOf.
+        setVar("s", initObject()),
+        setMember(getVar("s"), "__proto__", getVar("r")),
+        traceOf(member(getVar("s"), "missing")),
+        setVar("bare", callFunction("Object")),
+        setMember(getVar("bare"), "__resolve", getVar("Object")),
+        traceOf(op("Add2", getVar("bare"), lit(""))),
+        traceOf(getVar("bare")),
+        // Through the scope chain: a variable missing is not resolved.
+        traceOf(op("TypeOf", getVar("noSuchVariable"))),
+      ),
+      // delete, Delete2, and variables at the root.
+      block(
+        note("-- delete"),
+        setVar("d", initObject(["x", lit(1)])),
+        traceOf(op("Delete", getVar("d"), lit("x"))),
+        traceOf(op("Delete", getVar("d"), lit("x"))),
+        traceOf(op("Delete", lit("str"), lit("length"))),
+        traceOf(op("Delete", getVar("d"), lit("__proto__"))),
+        traceOf(op("Delete", OBJECT_PROTO, lit("toString"))),
+        setVar("gone", lit(1)),
+        traceOf(op("Delete2", lit("gone"))),
+        traceOf(op("Delete2", lit("gone"))),
+        traceOf(op("TypeOf", getVar("gone"))),
+        setVar("dd", initObject(["y", lit(2)])),
+        traceOf(op("Delete2", lit("dd.y"))),
+        traceOf(op("TypeOf", member(getVar("dd"), "y"))),
+        (a) => a.push("loc", 1).op("DefineLocal"),
+        traceOf(getVar("loc")),
+        (a) => a.push("loc").op("DefineLocal2"),
+        traceOf(getVar("loc")),
+        (a) => a.push("loc2").op("DefineLocal2"),
+        traceOf(op("TypeOf", getVar("loc2"))),
+        traceOf(callMethod(getVar("this"), "hasOwnProperty", lit("loc2"))),
+        // Paths to objects' properties.
+        setVar("pa", initObject(["b", initObject(["c", lit("deep")])])),
+        traceOf(getVar("pa.b.c")),
+        traceOf(getVar("pa:b")),
+        traceOf(getVar("pa.b:c")),
+        setVar("pa.b.e", lit("set")),
+        traceOf(member(member(getVar("pa"), "b"), "e")),
+        setVar("nopath.x", lit(1)),
+        traceOf(op("TypeOf", getVar("nopath"))),
+        traceOf(getVar("this.loc")),
+        traceOf(getVar(".x")),
+      ),
+      // The prototypes of primitives, which GetMember and CallMethod box.
+      block(
+        note("-- primitives"),
+        traceOf(member(lit("abc"), "length")),
+        traceOf(member(lit("abc"), "LENGTH")),
+        traceOf(
+          op("Equals2", member(lit("abc"), "__proto__"), member(getVar("String"), "prototype")),
+        ),
+        traceOf(op("Equals2", member(lit("abc"), "constructor"), getVar("String"))),
+        traceOf(op("Equals2", member(lit(5), "__constructor__"), getVar("Number"))),
+        traceOf(callMethod(lit(5), "toString")),
+        traceOf(callMethod(lit(true), "toString")),
+        traceOf(callMethod(lit("s"), "valueOf")),
+        traceOf(op("TypeOf", callMethod(lit("s"), "valueOf"))),
+        setMember(member(getVar("String"), "prototype"), "extra", lit("on String")),
+        traceOf(member(lit("x"), "extra")),
+        traceOf(member(lit(1), "extra")),
+        setMember(member(getVar("Object"), "prototype"), "everywhere", lit("on Object")),
+        traceOf(member(lit(1), "everywhere")),
+        traceOf(member(lit(false), "everywhere")),
+        setMember(lit("x"), "bar", lit(1)),
+        traceOf(member(lit("x"), "bar")),
+        traceOf(member(lit(undefined), "x")),
+        traceOf(member(lit(null), "x")),
+        traceOf(callMethod(lit("x"), "hasOwnProperty", lit("length"))),
+        traceOf(callMethod(lit(1), "hasOwnProperty", lit("length"))),
+        traceOf(op("Delete", member(getVar("Object"), "prototype"), lit("everywhere"))),
+        traceOf(op("Delete", member(getVar("String"), "prototype"), lit("extra"))),
+        traceOf(callMethod(lit(undefined), "toString")),
+      ),
+      // _global, Object and the builtins' conversions.
+      block(
+        note("-- global"),
+        traceOf(op("TypeOf", getVar("_global"))),
+        setMember(getVar("_global"), "gv", lit("global")),
+        traceOf(getVar("gv")),
+        setVar("gv", lit("root")),
+        traceOf(getVar("gv")),
+        traceOf(member(getVar("_global"), "gv")),
+        traceOf(op("TypeOf", member(getVar("_global"), "__proto__"))),
+        traceOf(op("Equals2", getVar("_global"), lit(null))),
+        traceOf(op("TypeOf", getVar("Object"))),
+        // A SWF 5 sees no prototype of a function.
+        traceOf(op("TypeOf", member(getVar("Object"), "__proto__"))),
+        traceOf(getVar("Object")),
+        traceOf(getVar("NaN")),
+        traceOf(getVar("o")),
+        traceOf(op("TypeOf", newObject("Object"))),
+        traceOf(op("TypeOf", callFunction("Object"))),
+        traceOf(op("TypeOf", member(callFunction("Object"), "toString"))),
+        traceOf(newObject("Object", lit("boxed"))),
+        traceOf(op("TypeOf", newObject("Object", lit(5)))),
+        traceOf(op("Add2", newObject("Object", lit(5)), lit(1))),
+        traceOf(callFunction("Object", lit(true))),
+        traceOf(callMethod(newObject("Object"), "hasOwnProperty", lit("constructor"))),
+        traceOf(callMethod(newObject("Object"), "hasOwnProperty", lit("__constructor__"))),
+        traceOf(callMethod(initObject(), "hasOwnProperty", lit("constructor"))),
+        traceOf(callMethod(initObject(), "isPrototypeOf", initObject())),
+        traceOf(callMethod(OBJECT_PROTO, "isPrototypeOf", initObject())),
+        traceOf(callMethod(OBJECT_PROTO, "isPrototypeOf", lit("s"))),
+        traceOf(initObject(["a", lit(1)])),
+        traceOf(callMethod(initObject(), "toString")),
+        traceOf(callMethod(getVar("Object"), "toString")),
+        traceOf(op("Equals2", callMethod(o, "valueOf"), o)),
+        traceOf(op("Add2", initObject(), lit(1))),
+        traceOf(initArray(lit(1), lit(undefined), lit("c"))),
+        traceOf(op("TypeOf", initArray())),
+        traceOf(member(initArray(lit(1), lit(2)), "length")),
+        // InitObject's later pairs are set first; a count out of range pops none.
+        keysOf(initObject(["a", lit(1)], ["b", lit(2)], ["a", lit(3)])),
+        traceOf(member(initObject(["a", lit(1)], ["b", lit(2)], ["a", lit(3)]), "a")),
+        (a) => a.push("kept", -1).op("InitObject").op("TypeOf").trace().trace(),
+        (a) => a.push("kept", -1).op("InitArray").op("TypeOf").trace().trace(),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 SWFs an AS3 one loads (scripts/Avm1Movie.as.template): one of
 // version 8 whose FileAttributes leaves out ActionScript 3, three frames
 // that move a square and add another, and one of version 6 without
@@ -6402,6 +6864,17 @@ export const cases: PlayerCase[] = [
     (version): PlayerCase => ({
       name: `avm1-operators-swf${version}`,
       swf: avm1Operators(version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7, 8, 10].map(
+    (version): PlayerCase => ({
+      name: `avm1-objects-swf${version}`,
+      swf: avm1Objects(version),
       traced: true,
       frames: 2,
       capture: [],

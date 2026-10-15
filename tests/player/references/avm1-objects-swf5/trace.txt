@@ -1,0 +1,199 @@
+-- enumeration
+true
+b d c a 
+x y b d c a 
+x y b d c a z 
+undefined
+undefined
+2 1 0 
+10 2 1 
+only
+-- case
+2
+2
+2
+Ab 
+7
+7
+undefined
+true
+
+true
+-- flags
+b c d 
+false
+true
+4
+undefined
+undefined
+b c d __proto__ constructor 
+toLocaleString isPropertyEnumerable isPrototypeOf hasOwnProperty toString valueOf addProperty unwatch watch constructor 
+k __proto__ constructor 
+undefined
+undefined
+v 
+set
+256
+undefined
+v 
+set
+undefined
+undefined
+v 
+set
+undefined
+undefined
+v 
+set
+undefined
+undefined
+v 
+set
+undefined
+undefined
+v 
+set
+undefined
+undefined
+v 
+set
+32768
+undefined
+v 
+set
+undefined
+undefined
+function
+-- addProperty
+undefined
+undefined
+undefined
+undefined
+undefined
+undefined
+undefined
+undefined
+false
+false
+undefined
+p s 
+undefined
+undefined
+undefined
+undefined
+1
+1
+own
+undefined
+-- watch
+undefined
+undefined
+undefined
+undefined
+undefined
+false
+undefined
+3
+number
+undefined
+undefined
+undefined
+4
+undefined
+1
+1
+-- __resolve
+missing
+object
+here
+undefined
+undefined
+undefined
+[object Object]
+[object Object]
+
+[type Object]
+undefined
+-- delete
+true
+false
+false
+false
+false
+true
+false
+undefined
+true
+undefined
+1
+1
+undefined
+undefined
+deep
+[object Object]
+deep
+set
+undefined
+1
+undefined
+-- primitives
+3
+3
+true
+true
+true
+5
+true
+s
+string
+on String
+undefined
+on Object
+on Object
+undefined
+undefined
+undefined
+undefined
+undefined
+true
+true
+undefined
+-- global
+undefined
+undefined
+root
+undefined
+undefined
+true
+function
+undefined
+[type Function]
+NaN
+[object Object]
+object
+object
+undefined
+boxed
+object
+6
+true
+undefined
+undefined
+undefined
+undefined
+undefined
+undefined
+[object Object]
+[object Object]
+undefined
+true
+NaN
+1,,c
+object
+2
+b a 
+1
+undefined
+kept
+undefined
+kept
