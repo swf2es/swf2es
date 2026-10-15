@@ -90,7 +90,6 @@ export interface SharedObjectStorage {
   get(key: string): Uint8Array | null;
   set(key: string, bytes: Uint8Array): void;
   remove(key: string): void;
-  keys(): string[];
 }
 
 /**
@@ -110,7 +109,6 @@ export function defaultStorage(): SharedObjectStorage {
     remove: (key) => {
       memory.delete(key);
     },
-    keys: () => [...memory.keys()],
   };
   let chosen: SharedObjectStorage | undefined;
   const storage = (): SharedObjectStorage => {
@@ -133,7 +131,6 @@ export function defaultStorage(): SharedObjectStorage {
     get: (key) => storage().get(key),
     set: (key, bytes) => storage().set(key, bytes),
     remove: (key) => storage().remove(key),
-    keys: () => storage().keys(),
   };
 }
 
@@ -155,17 +152,6 @@ function localStorageOf(local: Storage): SharedObjectStorage {
       local.setItem(PREFIX + key, btoa(parts.join("")));
     },
     remove: (key) => local.removeItem(PREFIX + key),
-    keys: () => {
-      const keys: string[] = [];
-      for (let i = 0; i < local.length; i++) {
-        const k = local.key(i);
-        if (k?.startsWith(PREFIX)) {
-          keys.push(k.slice(PREFIX.length));
-        }
-      }
-
-      return keys;
-    },
   };
 }
 

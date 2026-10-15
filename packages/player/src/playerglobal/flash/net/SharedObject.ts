@@ -154,6 +154,14 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     return data;
   };
 
+  const unavailable = (url: Value): never => {
+    if (url === null || url === undefined) {
+      throw s.rt.error("TypeError", 2007, "url");
+    }
+
+    throw s.rt.error("Error", 2014);
+  };
+
   class SharedObjectNatives {
     declare $data: AsObject;
     declare $key: string;
@@ -214,29 +222,17 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       return o;
     }
 
+    // Hidden from authoring tools, and refused to content: a SWF in the
+    // browser's Flash Player 32 or in adl gets Error #2014 whatever it
+    // names, its own site included, and nothing is deleted. Taking them
+    // as named would let any SWF on a page's origin measure or wipe every
+    // other SWF's saves there.
     static deleteAll(url: Value): number {
-      const prefix = s.rt.toString(url);
-      let n = 0;
-      for (const key of s.storage.keys()) {
-        if (key.startsWith(prefix)) {
-          s.storage.remove(key);
-          n++;
-        }
-      }
-
-      return n;
+      return unavailable(url);
     }
 
     static getDiskUsage(url: Value): number {
-      const prefix = s.rt.toString(url);
-      let n = 0;
-      for (const key of s.storage.keys()) {
-        if (key.startsWith(prefix)) {
-          n += s.storage.get(key)?.length ?? 0;
-        }
-      }
-
-      return n;
+      return unavailable(url);
     }
 
     static get defaultObjectEncoding(): number {

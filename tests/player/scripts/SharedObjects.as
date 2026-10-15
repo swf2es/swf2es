@@ -1,6 +1,8 @@
 // Local SharedObjects: one object for a name, its data as it starts, its
 // size as values go in, flush and clear, the names getLocal refuses, a
 // property set through setProperty, its client, and another local path.
+// deleteAll and getDiskUsage, which content may not use, refuse whatever they
+// are given, and leave the saves as they were.
 package {
   import flash.display.Sprite;
   import flash.net.SharedObject;
@@ -49,6 +51,15 @@ package {
       } catch (e:Error) {
         trace("name null", e.errorID);
       }
+
+      so.data.kept = 1;
+      so.flush();
+      for each (var url:* in ["", "/", "localhost", "other.example", "http://other.example/", null]) {
+        probe("deleteAll " + url, function():* { return SharedObject.deleteAll(url); });
+        probe("getDiskUsage " + url, function():* { return SharedObject.getDiskUsage(url); });
+      }
+      trace("kept", SharedObject.getLocal("swf2esTest").data.kept, so.size);
+      so.clear();
     }
 
     private static function probe(name:String, f:Function):void {
