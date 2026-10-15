@@ -3316,6 +3316,20 @@ function avm1Functions(version: number): Uint8Array {
         setMember(getVar("ws"), "p", lit(0)),
         traceOf(member(getVar("ws"), "p")),
         traceOf(getVar("count")),
+        // A native getter that reads itself: join of an array whose element it is.
+        setVar("ja", initArray()),
+        drop(
+          callMethod(
+            getVar("ja"),
+            "addProperty",
+            lit("0"),
+            member(proto("Array"), "join"),
+            lit(null),
+          ),
+        ),
+        traceOf(member(getVar("ja"), "length")),
+        traceOf(callMethod(getVar("ja"), "join")),
+        traceOf(member(getVar("ja"), "0")),
       ),
       block(
         note("-- constant pool"),

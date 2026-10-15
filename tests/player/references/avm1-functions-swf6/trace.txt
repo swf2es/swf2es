@@ -357,6 +357,9 @@ undefined
 1
 0
 1
+1
+
+
 -- constant pool
 pool A
 pool B

@@ -566,7 +566,7 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
 }
 
 /** An array's `length` as a set changes it: elements past a shorter one go, an index past it grows it. */
-function arraySet(a: Avm1Object, name: string, value: Value, version: number): void {
+export function arraySet(a: Avm1Object, name: string, value: Value, version: number): void {
   if ((caseSensitive(version) ? name : fold(name)) === "length") {
     const length = toNumber(value, version) | 0;
     const old = a.props.get("length")?.value;

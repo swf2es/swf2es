@@ -294,6 +294,9 @@ undefined
 0
 0
 0
+0
+
+undefined
 -- constant pool
 pool A
 pool B

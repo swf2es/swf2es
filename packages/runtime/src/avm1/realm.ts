@@ -16,6 +16,7 @@ import { numberToString } from "./numbers.js";
 import {
   Avm1Function,
   Avm1Object,
+  arraySet,
   type Boxer,
   caseSensitive,
   DONT_DELETE,
@@ -516,6 +517,11 @@ export class Realm implements Boxer {
 
       p.get = getter;
       p.set = setter;
+      // An index's property lengthens an array as its element would (adl).
+      if (self.array && p.get !== null && fold(name) !== "length") {
+        arraySet(self, name, undefined, version);
+      }
+
       return true;
     });
     define("valueOf", DONT_ENUM | DONT_DELETE, (self) => self);
