@@ -520,10 +520,11 @@ activation of its own:
   leaves the stack as it is.
 - Code running off a try body runs the catch's bytes, the variable not
   set, then the finally's. A jump out of a try or catch body runs no
-  finally; a `Return` in one runs the finally, the value left on the
-  stack while it runs, and then returns what is on top of the stack: what
-  a finally pushes is returned, the value under it left on the stack, and
-  a finally's own `Return` returns its value and leaves the first. A
+  finally; a `Return` in one runs the finally, the stack cut back to its
+  height as the `Try` ran and the value left on top of it while it runs,
+  and then returns what is on top of the stack: what a finally pushes is
+  returned, the value under it left on the stack, and a finally's own
+  `Return` returns its value and leaves the first. A
   finally reached by a throw or a `Return` throws or returns as control
   leaves it, at once, even by a jump; a throw or a `Return` in it takes
   their place.

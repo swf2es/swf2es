@@ -3790,6 +3790,18 @@ function avm1Control(version: number): Uint8Array {
           tryDo("e", [throwOf(lit("x"))], [ret(lit("from catch"))], [throwOf(lit("from finally"))]),
         ),
         tryDo("e", [traceOf(callFunction("r7"))], traceCaught("e"), null),
+        // A Return cuts the stack back to the Try's height, its value left on top, for the finally.
+        defineFn(
+          "r8",
+          [],
+          code((a) => a.push("f0")),
+          tryDo("e", [code((a) => a.push("j1", "j2", "from try").op("Return"))], null, [
+            note("finally"),
+          ]),
+        ),
+        code((a) => a.push("c1")),
+        traceOf(callFunction("r8")),
+        code((a) => a.trace().trace()),
       ),
       block(
         note("-- try: catch"),

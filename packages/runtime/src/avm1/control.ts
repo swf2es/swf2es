@@ -280,7 +280,8 @@ export function scopes(cx: Activation, at: number): void {
 
 /**
  * Return, its value on top of the stack: the finally of the first Try
- * whose try or catch body holds control runs first, and the value is
+ * whose try or catch body holds control runs first, the stack cut back to
+ * its height as that Try ran with the value left on top, and the value is
  * popped as control leaves it, the stack's top then (adl); a finally's own
  * throw or Return gives way to this one.
  */
@@ -290,6 +291,10 @@ export function returned(cx: Activation): number {
     for (let i = held.length - 1; i >= 0; i--) {
       const h = held[i];
       if (h instanceof TryHeld && h.finallyFrom < h.finallyTo) {
+        const st = cx.st;
+        const value = st.pop();
+        cut(st, h.height);
+        st.push(value);
         keepFrom(cx, held, i, () => false);
         held.push(new Held(HELD_Returned, h.finallyFrom, h.finallyTo));
         return h.finallyFrom;

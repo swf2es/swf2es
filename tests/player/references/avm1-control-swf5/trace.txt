@@ -87,6 +87,10 @@ inner finally
 outer finally
 inner
 caught from finally
+finally
+from try
+f0
+c1
 -- try: catch
 thrown
 outer
