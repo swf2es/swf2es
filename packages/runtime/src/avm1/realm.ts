@@ -13,8 +13,11 @@
 import type { Activation, Region } from "./activation.js";
 import { pendingLocal, ScriptFunction } from "./functions.js";
 import { arrayClass } from "./globals/array.js";
+import { broadcasterClass } from "./globals/broadcaster.js";
+import { asnative, globalFunctions } from "./globals/global.js";
+import { mathNative, mathObject } from "./globals/math.js";
+import { booleanClass, numberClass } from "./globals/number.js";
 import { stringClass } from "./globals/string.js";
-import { numberToString } from "./numbers.js";
 import {
   Avm1Function,
   Avm1Object,
@@ -37,18 +40,10 @@ import {
   VERSION_6,
 } from "./objects.js";
 import { SCOPE_Global, Scope } from "./scope.js";
-import {
-  isPrimitive,
-  objects,
-  type Primitive,
-  stringOf,
-  toBoolean,
-  toNumber,
-  type Value,
-} from "./values.js";
+import { isPrimitive, objects, type Primitive, stringOf, toNumber, type Value } from "./values.js";
 
 /** A class's constructor and its prototype. */
-interface Class {
+export interface Class {
   constr: Avm1Function;
   proto: Avm1Object;
 }
@@ -71,6 +66,13 @@ export class Realm implements Boxer {
   readonly Boolean: Class;
   readonly Array: Class;
   readonly Error: Class;
+  readonly AsBroadcaster: Class;
+  readonly Math: Avm1Object;
+  /**
+   * ASnative's tables: by category, the native at an index, null for none
+   * (an index past its natives is undefined's, but Math's, NaN's).
+   */
+  readonly natives = new Map<number, (index: number) => Native | null>();
   /** The bottom of every scope chain. */
   readonly globalScope: Scope;
   /** The four registers outside DefineFunction2's own, which every activation shares. */
@@ -112,43 +114,45 @@ export class Realm implements Boxer {
     this.functionPrototype();
 
     this.String = stringClass(this);
-    this.Number = this.boxClass(
-      (self, args, version) => {
-        self.primitive = args.length > 0 ? toNumber(args[0], version) : 0;
-        return self;
-      },
-      (_, args, version) => (args.length > 0 ? toNumber(args[0], version) : 0),
-      (self) => (typeof self.primitive === "number" ? numberToString(self.primitive) : undefined),
-    );
-    this.Boolean = this.boxClass(
-      (self, args, version) => {
-        self.primitive = args.length > 0 ? toBoolean(args[0], version) : false;
-        return self;
-      },
-      (_, args, version) => (args.length > 0 ? toBoolean(args[0], version) : false),
-      (self) => (typeof self.primitive === "boolean" ? String(self.primitive) : undefined),
-    );
+    this.Number = numberClass(this);
+    this.Boolean = booleanClass(this);
     this.Array = arrayClass(this);
     this.Error = this.errorClass();
+    this.AsBroadcaster = broadcasterClass(this);
+    this.Math = mathObject(this);
+    this.natives.set(200, (i) => mathNative(i));
 
+    // In Flash's order (Ruffle's globals.rs), each DontEnum.
     const g = this.global;
     this.globalScope = new Scope(null, SCOPE_Global, g);
+    g.define(
+      "ASnative",
+      this.method((_, args, version) =>
+        args.length === 2
+          ? asnative(this, toNumber(args[0], version) >>> 0, toNumber(args[1], version) >>> 0)
+          : undefined,
+      ),
+      DONT_ENUM,
+    );
     g.define("Object", object, DONT_ENUM);
     g.define("Function", fn, DONT_ENUM | VERSION_6);
     // Getters, which give undefined to a SWF 4.
     this.getter(g, "NaN", (version) => (version > 4 ? Number.NaN : undefined));
     this.getter(g, "Infinity", (version) => (version > 4 ? Number.POSITIVE_INFINITY : undefined));
+    g.define("AsBroadcaster", this.AsBroadcaster.constr, DONT_ENUM);
     g.define(
       "ASSetPropFlags",
       this.method((_, args, version) => setPropFlags(this, args, version)),
       DONT_ENUM,
     );
+    globalFunctions(this, (name, native) => g.define(name, this.method(native), DONT_ENUM));
     // Flash's own globals leave a variable `o`, set to null.
     g.define("o", null, 0);
     g.define("Number", this.Number.constr, DONT_ENUM);
     g.define("Boolean", this.Boolean.constr, DONT_ENUM);
     g.define("String", this.String.constr, DONT_ENUM);
     g.define("Array", this.Array.constr, DONT_ENUM);
+    g.define("Math", this.Math, DONT_ENUM);
     g.define("Error", this.Error.constr, DONT_ENUM);
   }
 
@@ -305,29 +309,6 @@ export class Realm implements Boxer {
     return constr;
   }
 
-  /** A class whose objects box a primitive, with `valueOf` and `toString` of it. */
-  private boxClass(
-    construct: Native,
-    call: Native,
-    text: (self: Avm1Object, version: number) => Value,
-  ): Class {
-    const proto = new Avm1Object(this.objectProto);
-    const constr = this.classOf(proto, construct, call);
-    proto.define(
-      "valueOf",
-      this.method((self) =>
-        isPrimitive(self.primitive) && self.primitive !== undefined ? self.primitive : self,
-      ),
-      DONT_ENUM | DONT_DELETE,
-    );
-    proto.define(
-      "toString",
-      this.method((self, _, version) => text(self, version)),
-      DONT_ENUM | DONT_DELETE,
-    );
-    return { constr, proto };
-  }
-
   /**
    * Error, as far as Throw's values need it: a `message` and a `name`,
    * both "Error" on the prototype and listed by for..in, as adl has them,
@@ -453,8 +434,18 @@ export class Realm implements Boxer {
   private objectPrototype(): void {
     const proto = this.objectProto;
     const v6 = DONT_ENUM | DONT_DELETE | VERSION_6;
-    const define = (name: string, flags: number, native: Native) =>
+    // ASnative(101, i): the methods in the order defined, then registerClass (the player's) and Object.
+    const table: (Native | null)[] = [];
+    const define = (name: string, flags: number, native: Native) => {
+      if (name !== "toLocaleString") {
+        table.push(native);
+      }
+
       proto.define(name, this.method(native), flags);
+    };
+    this.natives.set(101, (i) =>
+      i === 9 ? (this.Object.construct as Native) : i === 8 ? () => undefined : (table[i] ?? null),
+    );
 
     define("watch", v6, (self, args, version) => {
       if (args.length === 0) {
