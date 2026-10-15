@@ -3247,9 +3247,22 @@ Flash reports to a quarter pixel; `globalToLocal3D` is the point of the
 object's plane under the stage's, at z 0.
 
 Bounds through a plane are out to whole pixels, as Flash reports them:
-a turned card's `width` is its drawn width (`three-d-flip`); Flash's are a
-pixel smaller here and there, as if its corners were nearer whole pixels
-than doubles put them, which the cases leave untraced. An object with a
+a turned card's `width` is its drawn width (`three-d-flip`). An edge that
+passes a whole pixel by less than an eighth of one is not counted to the
+next, as adl reports fourteen edges of `three-d-bounds`. A 3D object's box
+in another space is that box on the stage (its projector's space), taken
+there as a box: so under a turned 2D parent, its box in the parent is the
+box of a box, larger than what is drawn; in a 3D parent, it is through
+its flat matrix, without perspective, as its `width` is. A 2D object's
+box in a space it shares a plane with is measured only up to where the two
+meet. adl reports a 3D object's `concatenatedMatrix` as null, and that of
+a 2D object in one in the space of the bitmap the 3D object is drawn into:
+up to the 3D object, then two pixels out from its bounds' top left out to
+whole pixels. `localToGlobal` through a plane is to a whole pixel and
+`globalToLocal` to a twip. Before a 3D object is first drawn, adl's bounds,
+concatenated matrices and points of anything on its list are not yet
+made, its concatenated matrices five times their size, and the cases read
+them a frame later. An object with a
 corner of its bounds at or behind the eye (f + z at most 0) Flash draws
 none of, takes no hit on and counts in no bounds; its own bounds are an
 empty rectangle at the origin. `hitTestPoint` without the shape flag

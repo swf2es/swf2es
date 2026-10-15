@@ -2292,7 +2292,7 @@ export class PixiView {
       const plane = node.plane as Plane;
       // What it draws is measured again only when it may have changed, as its bitmap is drawn.
       if (plane.stale || plane.drawnRect === undefined) {
-        const r = bounds(o, true);
+        const r = bounds(o, true, true);
         let rect = r && { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
         for (const f of node.filterRecords) {
           rect = rect && filterRect(rect, f);

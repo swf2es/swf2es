@@ -8702,6 +8702,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 50,
   },
   {
+    name: "three-d-bounds",
+    swf: (abc) => bare(abc, 3, "ThreeDBounds", 500, 400),
+    script: "ThreeDBounds",
+    frames: 3,
+    capture: [2],
+    // The edges of the cards under turned parents fall a pixel apart.
+    tolerance: 40,
+    maxOutliers: 700,
+  },
+  {
     name: "point-at",
     swf: (abc) => bare(abc, 1, "PointAt"),
     script: "PointAt",

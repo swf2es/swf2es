@@ -178,14 +178,14 @@ export interface Space {
   composed: boolean;
   /** The 2D scales, rotation and skew from before it went 3D, which matrix3D set to null gives back. */
   flat: readonly number[];
-  /** Its plane in perspective in its parent's (`placed`), and the changes (pickWork) it was made at. */
-  plane?: Matrix | null;
+  /** Its planes in perspective (`planes`), and the changes (pickWork) they were made at. */
+  planes?: { placed: Matrix; own: Matrix; back: Matrix | null } | null;
   planeAt?: number;
 }
 
 export type SpaceProperty = Exclude<
   keyof Space,
-  "raw" | "singular" | "composed" | "flat" | "plane" | "planeAt"
+  "raw" | "singular" | "composed" | "flat" | "planes" | "planeAt"
 >;
 
 /**
@@ -413,13 +413,22 @@ export class DisplayObject {
   }
 
   private perspective(): Matrix {
+    return this.planes().placed;
+  }
+
+  /**
+   * A 3D object's planes (display/perspective.ts): in its parent's space,
+   * in its projector's, and the way back from the projector's to its
+   * parent's, kept as `placed` is.
+   */
+  planes(): { placed: Matrix; own: Matrix; back: Matrix | null } {
     const space = this.space as Space;
-    if (space.planeAt !== pickWork.changes || !space.plane) {
-      space.plane = placedInPerspective(this);
+    if (space.planeAt !== pickWork.changes || !space.planes) {
+      space.planes = placedInPerspective(this);
       space.planeAt = pickWork.changes;
     }
 
-    return space.plane;
+    return space.planes;
   }
 
   /** Its 2D matrix after its scroll's shift, a 3D object's its matrix3D's x and y rows: what a mask draws by. */

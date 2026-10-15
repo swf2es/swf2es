@@ -5,7 +5,7 @@
 // drawn in perspective (display/perspective.ts).
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { boundsIn, toStage } from "../../../display/bounds.js";
+import { bounds, boundsIn } from "../../../display/bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display/display.js";
 import { concat } from "../../../display/geometry.js";
 import {
@@ -135,11 +135,30 @@ export function transformNatives(s: Scripting): avm2.Natives {
       }
     }
 
-    /** Its own scroll's shift left out, as Flash's does, its parents' taken in. */
+    /**
+     * Its own scroll's shift left out, as Flash's does, its parents' taken in; null for a 3D
+     * object. Under one, adl gives it in the space of the bitmap that object is drawn into: up
+     * to the 3D object, then moved by the bitmap's corner, two pixels out from its bounds'
+     * top left out to whole pixels (the `three-d-bounds` case).
+     */
     get concatenatedMatrix(): Value {
       const d = this.$display;
-      const up = d.parent && d.parent !== s.stage ? toStage(d.parent, s.stage) : null;
-      return matrixObject(s, up ? concat(d.matrix, up) : d.matrix);
+      if (d.space) {
+        return null;
+      }
+
+      let m = d.matrix;
+      let p = d.parent;
+      for (; p && p !== s.stage && !p.space; p = p.parent) {
+        m = concat(m, p.placed);
+      }
+
+      const r = p?.space ? bounds(p, true) : null;
+      if (r) {
+        m = { ...m, tx: m.tx + 2 - Math.floor(r.xMin), ty: m.ty + 2 - Math.floor(r.yMin) };
+      }
+
+      return matrixObject(s, m);
     }
 
     /** The color transform to the stage: multipliers multiplied, offsets carried through the parents' multipliers. */
