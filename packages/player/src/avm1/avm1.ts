@@ -72,6 +72,11 @@ export class Avm1 {
   private ranFrame = 0;
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
   private stopNext = false;
+  /**
+   * The root's AVM1 object, which holds its timeline's variables: a plain
+   * object until clips have their class (docs/avm1.md, step 10).
+   */
+  private rootObject: avm1.Avm1Object | null = null;
   private readonly host: avm1.Host;
   private readonly onUncaught: (error: unknown) => void;
 
@@ -92,6 +97,8 @@ export class Avm1 {
       halt: () => {
         this.halted = true;
       },
+      root: () => this.rootObject ?? undefined,
+      level: (level) => (level === 0 ? (this.rootObject ?? undefined) : undefined),
     };
   }
 
@@ -213,7 +220,8 @@ export class Avm1 {
 
   /** Run `block` with `target` as its target, starting from constant pool `pool`; the pool it leaves. */
   private run(block: ActionBlock, pool: avm1.Value[], target: MovieClip): avm1.Value[] {
-    const cx = new avm1.Activation(this.st, pool, target, this.host);
+    this.rootObject ??= this.rt.newObject();
+    const cx = this.rt.activation(this.st, pool, target, this.rootObject, this.host);
     const code = this.blocks[block.index]?.[0];
     if (!code) {
       return pool;

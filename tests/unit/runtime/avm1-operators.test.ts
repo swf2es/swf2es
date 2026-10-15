@@ -4,9 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  Activation,
   type Host,
-  NotYet,
   objects,
   Runtime,
   type Value,
@@ -18,7 +16,7 @@ const rt = new Runtime();
 function traced(version: number, value: Value): string {
   const lines: string[] = [];
   const host: Host = { trace: (t) => lines.push(t), play() {}, stop() {}, halt() {} };
-  rt.version(version).trace(new Activation([], [], {}, host), value);
+  rt.version(version).trace(rt.activation([], [], {}, rt.newObject(), host), value);
   return lines[0];
 }
 
@@ -222,12 +220,14 @@ test("StringExtract counts from 1, a start below it the first, a count below 0 t
   assert.equal(rt.version(5).stringExtract(1, 2, "a\ud83d\ude00b"), "\ud83d");
 });
 
-test("an object's conversions are the later steps': until then they end the block", () => {
+test("an object converts by its valueOf and toString, which the hooks call", () => {
   const V = rt.version(6);
-  const object = {};
-  assert.throws(() => V.toNumber(object), NotYet);
-  assert.throws(() => V.add2(object, 1), NotYet);
-  assert.throws(() => V.toString(object), NotYet);
+  const object = rt.newObject();
+  assert.ok(Number.isNaN(V.toNumber(object)));
+  // valueOf gives the object, which adds as a number.
+  assert.ok(Number.isNaN(V.add2(object, 1) as number));
+  assert.equal(V.toString(object), "[object Object]");
+  assert.equal(V.typeOf(object), "object");
   assert.equal(V.toBoolean(object), true);
 
   const saved = { ...objects };

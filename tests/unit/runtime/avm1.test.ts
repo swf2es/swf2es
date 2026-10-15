@@ -5,7 +5,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  Activation,
   Halt,
   type Host,
   NotYet,
@@ -140,7 +139,7 @@ test("the operations of a version are made once, and act through the activation'
     stop: (t) => calls.push(["stop", t]),
     halt: () => calls.push(["halt"]),
   };
-  const cx = new Activation([], [], target, host);
+  const cx = rt.activation([], [], target, rt.newObject(), host);
   V.trace(cx, undefined);
   V.trace(cx, "a\rb");
   V.play(cx);

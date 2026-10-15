@@ -84,12 +84,21 @@ export function looselyEquals(a: Value, b: Value, version: number): boolean {
 }
 
 function abstractEquals(a: Value, b: Value, version: number): boolean {
-  if (a === undefined || a === null) {
-    return b === undefined || b === null;
-  }
+  const aNull = a === undefined || a === null;
+  const bNull = b === undefined || b === null;
+  if (aNull || bNull) {
+    // null and undefined equal each other, and an object whose valueOf gives either.
+    if (aNull && bNull) {
+      return true;
+    }
 
-  if (b === undefined || b === null) {
-    return false;
+    const object = aNull ? b : a;
+    if (isPrimitive(object)) {
+      return false;
+    }
+
+    const p = objects.valueOf(object, version);
+    return p === undefined || p === null;
   }
 
   const ta = typeof a;
