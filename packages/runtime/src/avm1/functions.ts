@@ -245,7 +245,8 @@ export function pendingLocal(
     p = o.add("arguments", argumentsOf(cx, cx.args, version), 0);
   } else if (cx.pending & PENDING_Super && named(name, "super", version)) {
     cx.pending &= ~PENDING_Super;
-    p = o.add("super", superOf(cx, cx.receiver, version), 0);
+    // Not listed by for..in, as `arguments` is (adl).
+    p = o.add("super", superOf(cx, cx.receiver, version), DONT_ENUM);
   }
 
   if (cx.pending === 0) {

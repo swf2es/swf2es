@@ -426,6 +426,13 @@ cases), where it is not what Ruffle does:
   on, with the method's `this`; `super.m()` finds `m` from the prototype
   above, a method on the object itself counting as on its prototype, so a
   chain of three classes calls each level once.
+- What the player does not do yet: the activation object a function
+  called by name inside another gets as `this` lists `arguments` in
+  `for..in`, after its variables, but not `super`, and its `arguments`
+  read from the inner function is the inner function's; a parameter named
+  `arguments` given null or undefined leaves `arguments` there, one named
+  `super` gives way to `super`, and a local variable named `this`, a
+  parameter too, is what `this` reads in the function.
 - `new` gives the object it made, whatever the constructor returns;
   `Function.call` and `apply` take null or undefined as the global
   object, a primitive boxed, and `apply` an array or anything with a
