@@ -45,6 +45,7 @@ const abcs = compileScripts(
 mkdirSync(site, { recursive: true });
 const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
+writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 writeFileSync(
   `${site}embed.swf`,
@@ -301,6 +302,19 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
   assert.equal(left.codegens, 2);
   assert.ok(after - warm < BOUND * CHURN, `the heap grew by ${after - warm} bytes`);
 });
+
+check(
+  "an AVM1 SWF's actions run, and its players and compilers go with them",
+  async (evaluate, send) => {
+    const stopped = await call<number>(evaluate, "avm1Churn(5)");
+    assert.equal(stopped, 5, "the actions' stop held the root on frame 2");
+    await send("HeapProfiler.collectGarbage");
+    await send("HeapProfiler.collectGarbage");
+    const left = await call<{ players: number; codegens: number }>(evaluate, "survivors()");
+    assert.equal(left.players, 0, "a destroyed AVM1 player is still alive");
+    assert.equal(left.codegens, 2);
+  },
+);
 
 /** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
 async function ctrl(send: Send, letter: string, command?: string) {

@@ -9,6 +9,7 @@ import {
   type Font,
   type Font4,
   type FontName,
+  isAs3,
   isBitmapTag,
   type MorphShape,
   type Place,
@@ -77,6 +78,11 @@ export interface Timeline {
   sounds: Map<number, StartSound[]>;
   /** Its SoundStreamHead's stream, if it has one with blocks. */
   stream: SoundStream | null;
+  /**
+   * Whether it plays on from its last frame to its first: an AVM1 SWF's
+   * root without an End tag stays on its last, as Flash's does.
+   */
+  loops: boolean;
 }
 
 /** A timeline's stream: the head, and each block with the frame it is on. */
@@ -379,6 +385,7 @@ function timelineOf(
   frameCount: number,
   library: Map<number, Character>,
   jpeg: { tables: Uint8Array | null },
+  avm1: boolean,
 ): Timeline {
   const frames: FrameCommand[][] = [[]];
   const frameLabels = new Map<number, string>();
@@ -459,7 +466,7 @@ function timelineOf(
         library.set(sprite.id, {
           type: "sprite",
           id: sprite.id,
-          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg),
+          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, avm1),
           grid: null,
         });
         break;
@@ -571,10 +578,17 @@ function timelineOf(
     }
   }
 
-  // The frames after the last ShowFrame hold nothing; a timeline has as many as its header says.
-  frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
-  while (frames.length < (frameCount || 1)) {
-    frames.push([]);
+  // An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
+  // its header says, as Flash plays and loops one (the corpus's
+  // looping_real_*): what follows the last places nothing, its actions
+  // running with it (avm1/avm1.ts). An AS3 one has as many as its header says.
+  if (avm1) {
+    frames.length = Math.max(1, frames.length - 1);
+  } else {
+    frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
+    while (frames.length < (frameCount || 1)) {
+      frames.push([]);
+    }
   }
 
   // Scene data counts frames from 0; a frame name from 1, as scripts do.
@@ -595,13 +609,22 @@ function timelineOf(
     scenes: sceneList,
     sounds,
     stream: head && blocks.length > 0 ? { head, blocks, byFrame } : null,
+    loops: true,
   };
 }
 
 /** The characters a SWF defines, and its root timeline. */
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
-  const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters, { tables: null });
+  const root = timelineOf(
+    swf.bytes,
+    swf.tags,
+    swf.frameCount,
+    characters,
+    { tables: null },
+    !isAs3(swf),
+  );
+  root.loops = isAs3(swf) || swf.tags.at(-1)?.code === tags.End;
   const fonts = new FontSet();
   for (const c of characters.values()) {
     if (c.type === "font") {

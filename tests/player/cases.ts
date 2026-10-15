@@ -3,6 +3,7 @@
 // made by run.ts --update with the Flash oracle.
 import { readFileSync } from "node:fs";
 import { tags, zlibCompress } from "../../packages/format/dist/index.js";
+import { Avm1Assembler, constant, double } from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
 
@@ -36,6 +37,8 @@ export interface PlayerCase {
   flash?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
+  /** An AVM1 SWF whose trace must match Flash's. */
+  traced?: boolean;
   /**
    * The transform table (render/table.ts) must draw some of it, and played
    * again without the table it must draw the same pixels.
@@ -1826,6 +1829,68 @@ function loading(compile: Compile, script: string, innerFrames: number): Uint8Ar
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
       w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** An AVM1 block of what `write` assembles, and End. */
+const avm1 = (write: (a: Avm1Assembler) => Avm1Assembler): number[] => [
+  ...write(new Avm1Assembler()).end().bytes(),
+];
+
+/** Values as AVM1 traces them, in adl: a number to 15 digits, with Flash's own exponents. */
+const AVM1_VALUES = [
+  undefined,
+  null,
+  true,
+  false,
+  7,
+  double(-0),
+  double(Number.NaN),
+  double(Number.POSITIVE_INFINITY),
+  double(Number.NEGATIVE_INFINITY),
+  1e21,
+  0.1,
+  1.5,
+  -990.123,
+  1e-7,
+  1e15,
+  1e-5,
+  123456789012345680000,
+  0.8000000000000005,
+  9.999999999999998,
+  -9999999999999996,
+  -0.000009999999999999996,
+];
+
+// An AVM1 SWF of version 6 (player/src/avm1/avm1.ts): frame 1's DoAction
+// blocks share the operand stack and the constant pool, its DoInitAction
+// runs before them though its tag comes after, and values trace as AVM1
+// writes them; frame 2 finds the stack empty, traces and stops, so
+// frame 1's actions never run again.
+function avm1Hello(): Uint8Array {
+  return w.swf({
+    version: 6,
+    width: 40,
+    height: 40,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.backgroundColor(0xffffff),
+      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      w.doAction(avm1((a) => a.push("left on the stack"))),
+      w.doAction(avm1((a) => a.push("frame 1").trace().trace())),
+      w.doAction(avm1((a) => a.constantPool("pooled"))),
+      w.doAction(avm1((a) => a.push(constant(0)).trace())),
+      w.doAction(avm1((a) => AVM1_VALUES.reduce((b, v) => b.push(v).trace(), a))),
+      w.doInitAction(
+        1,
+        avm1((a) => a.push("init").trace()),
+      ),
+      w.showFrame(),
+      w.doAction(avm1((a) => a.trace().push("frame 2").trace().stop())),
       w.showFrame(),
       w.end(),
     ],
@@ -6092,6 +6157,15 @@ export const cases: PlayerCase[] = [
   },
   // Frame 1 is drawn at the outer SWF's INIT, before the AVM1 movies come at
   // that frame's end; the player draws the frame whole, with them.
+  {
+    name: "avm1-hello",
+    swf: avm1Hello(),
+    traced: true,
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "avm1-movie",
     build: avm1Movie,

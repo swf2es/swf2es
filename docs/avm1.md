@@ -2,8 +2,9 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 3 are built: `format`'s list of action blocks, the
-decoder and the emitter of the first actions; the rest is not. [architecture.md](architecture.md) describes what is, and this
+there. Steps 1 to 4 are built: `format`'s list of action blocks, the
+decoder, the emitter of the first actions, and the runtime's values with
+a main AVM1 SWF's root frames run by the player; the rest is not. [architecture.md](architecture.md) describes what is, and this
 document is folded into it as each piece lands.
 
 AVM1 is compiled, not interpreted. The same `codegen.wasm` that compiles
@@ -73,13 +74,19 @@ the indices of the blocks they own.
 Where adl reads clip actions otherwise than Ruffle, adl decides: only
 flags of 0 end a place's records (one of unknown events is skipped), a
 record runs only for the events the place's field of all events also has,
-and a record that runs past its tag stops the whole SWF as Flash reaches
-the tag, every timeline of it, none of the place's records run. Such a tag
-has no blocks and is in the list's `corrupt`, for the player to stop the
-SWF there (step 11). A malformed button action keeps the records before
-it; adl defines the button, and whether those run there is not checked
-yet (step 12). The list has the blocks of an ActionScript 3 SWF too,
-whose FileAttributes flag says it runs none of them.
+and a record that runs past its tag stops the whole SWF, every timeline
+of it, none of the place's records run. Flash reads a place's records as
+the first event of its field of all events comes, and stops there: as it
+places the clip for `load` and `initialize`, before any of the frame's
+actions; after the frame's DoInitActions for `construct`; at the next
+frame for `enterFrame`; and as an `unload`, a key, the pointer or `data`
+comes for those, never if none does (adl, the SWF's whole player hung).
+Such a tag has no blocks and is in the list's `corrupt`, its field of all
+events in `corruptEvents`, for the player to stop the SWF there. A
+malformed button action keeps the records before it; adl defines the
+button, and whether those run there is not checked yet (step 12). The
+list has the blocks of an ActionScript 3 SWF too, whose FileAttributes
+flag says it runs none of them.
 
 ## Compiling
 
@@ -352,7 +359,20 @@ The conversions are per version, as Ruffle's `Value` has them
 string to a number reads hex, an exponent and spaces as Flash does, which
 is neither JavaScript's `Number` nor AS3's, and a number to a string has
 AVM1's own formatting (15 significant digits, its own exponent form),
-which `numbers.ts` writes, apart from AS3's avmplus-derived one.
+which `numbers.ts` writes, apart from AS3's avmplus-derived one. Both are
+Ruffle's, translated with the carry's bugs (-9999999999999996 is `-e+16`),
+and adl traces them alike (the `avm1-hello` case). `values.ts` has the
+conversions, `toBoolean` and `stringOf`; `runtime.ts` the `Activation`
+(`st`, `pool`, `target`, `host`), the operations a version's `V` holds,
+and the errors: `NotYet`, an action not done yet, which ends its block
+and is reported, and `Halt`, thrown once the host has stopped the SWF at
+an action Flash cannot read. `trace` writes `undefined` whatever the
+version, as Flash does, and its text as it is: Flash's log breaks a line
+at a carriage return as at a line feed (the corpus's `trace`, and AS3's
+`edittext_newline_stripping`), where adl's stderr keeps the `\r`, so the
+tests' harnesses break lines so, in the player's traces and adl's alike,
+for AS3 as for AVM1 (`oracle/flash.ts`, `tests/player/page.ts`); a host
+writing a log does the same.
 
 ### Objects
 
@@ -456,6 +476,38 @@ it enters. Intervals run by the clock between frames, as AS3's timers do.
 The player keeps AVM1's execution list beside the display list, as its
 clips are made and removed, not by walking the tree each frame.
 
+Step 4 runs the root's frames only, and without the queue: the `Player`
+takes an `Avm1` beside its `Scripting` (null for an AVM1 SWF), which
+`start` has compile the SWF's blocks into one module and run the first
+frame's actions, and each tick after the clips advance runs those of the
+frame the root entered, if it entered one: a stopped root, or one of one
+frame, runs nothing again. A frame runs its DoInitAction blocks first, each
+sprite's once, in tag order, then its DoAction blocks in tag order; empty
+blocks are skipped. Every activation of the frame shares the operand
+stack, which the frame starts empty, and the DoAction blocks the constant
+pool, each starting with the one the block before left; a DoInitAction's
+pool is its own. The `avm1-hello` case has adl agree on each: an init
+whose tag comes after the frame's DoActions runs first, a value one block
+pushes the next pops, and the next frame's `trace` of the empty stack
+writes `undefined`. A root frame holding a tag in `corrupt` stops the
+SWF where the tag's first event comes (above): before the frame's actions
+for `load` and `initialize`, after its DoInitActions for `construct`, as
+the next frame comes for `enterFrame`, whether the root moves on or not;
+those of other events wait for the steps that bring them (an `unload` as
+the clip is removed, step 11), and a sprite's for clips' frames. A stopped
+SWF, there or by `V.halt`, advances no timeline and runs no action again.
+
+An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
+its header says: Flash plays and loops one so (the corpus's
+`looping_real_1_declared_2` and `looping_real_2_declared_1`, as Ruffle's
+`determine_next_frame` has it), where an AS3 timeline has its header's
+count. What follows the last ShowFrame is no frame of its own: in adl its
+DoActions run with the last frame, after its others (late enough that the
+harness's last frame ends first), and its places place nothing. A root
+without an End tag stays on its last frame rather than loop, as Ruffle
+has it too; adl agrees, for a SWF loaded as an `AVM1Movie` as for a main
+one (adl's harness loads them all so).
+
 ### Clip events and buttons
 
 A place's clip actions are registered on the clip it places, by event:
@@ -511,15 +563,19 @@ timeout (a block that loops forever hangs the page), and structured output and s
   as it runs `avm2/` and `timeline/` (`run.ts` takes `avm1/` among its
   default prefixes), in Chrome, the trace compared line by line, each
   test's standing in `baseline.json`, which a change may not lower; the
-  first baseline records them all failing. `mixed_avm/` (12 tests, AS3
+  first baseline, step 4's, has 10 of the 649 passing (`looping*`,
+  `single_frame`, `trace`, and three whose traces need no action run), most
+  stopping at their first action not done yet. `mixed_avm/` (12 tests, AS3
   loading AS2 and the reverse) and `from_gnash/` (404) join later. The tests with `[approximations]` (16) compare numbers within
   their tolerance once the runner reads it.
 - **adl**: the harness loads a SWF with a `Loader`, so an AVM1 SWF runs
   as an `AVM1Movie`, and adl prints its AVM1 traces with AS3's: the
   corpus's `looping_real_1_declared_1`, `undefined_to_string_swf6` and
   `call_method_empty_name` trace their `output.txt` exactly under adl,
-  given a frame more than their `num_frames`, as the AVM1 movie runs its
-  frames one late in a `Loader`. A player
+  given two frames at least: adl prints nothing of the movie's first frame
+  until its second, which prints both frames' traces, and from there a
+  frame each, so a test of one frame takes two and one of more frames its
+  own count (`check-references.ts`, and `run.ts --update` for a case). A player
   case of its own (`tests/player/cases.ts`) is an AVM1 SWF the test
   assembles from actions, through a small assembler in the tests
   (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`.
@@ -619,10 +675,19 @@ determinism` green, and the corpus baseline may only go up.
    AVM1 SWF's frame blocks in order, never an ActionScript 3 SWF's; the web element and the corpus page
    giving an AVM1 SWF codegen. `pnpm corpus` takes `avm1/` among its
    default prefixes and records every AVM1 test's standing, and
-   `check-references.ts` gives an AVM1 SWF its frame more. Passes the
+   `check-references.ts` gives an AVM1 SWF two frames at least. Passes the
    corpus's `looping_real_1_declared_*`, a constant traced from a frame
    script. Verified: the corpus, and an adl case of a trace in each of two
    frames and a `stop`, assembled by `tests/avm1-assembler.ts`.
+   Built: the root's frames only (see "The frame"), DoInitAction before
+   the frame's DoActions as adl orders them, and AVM1 timelines counting
+   their ShowFrame tags, which also passes `looping_real_2_declared_*` and
+   two of `timeline/`; 10 of the 649 `avm1/` tests pass. `numbers.ts`'s
+   number formatting and string-to-number came with it, `trace` needing
+   the one and `toBoolean` the other; step 5 adds the rest of the
+   conversions. The `avm1-hello` case traces a frame's blocks sharing the
+   stack and the pool, an init first, AVM1's number formats and the
+   empty stack of the next frame, as adl does.
 5. **Arithmetic, comparison and strings, by version.** `Add`, `Add2`,
    `Equals`, `Equals2`, `StrictEquals`, `Less`, `Less2`, `Greater`, the
    bitwise and string actions, `ToNumber`, `ToString`, `TypeOf`;

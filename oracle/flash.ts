@@ -393,7 +393,13 @@ export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<Flas
     todo = [...rest, ...later];
   }
 
-  return results as FlashResult[];
+  // Flash's log breaks a trace's lines at a carriage return as at a line
+  // feed, as Ruffle's corpus has it recorded; adl's standard error keeps the
+  // "\r", and writes "\r\n" for a "\n", which reads as a line's end.
+  return (results as FlashResult[]).map((r) => ({
+    ...r,
+    output: r.output.flatMap((line) => line.split("\r")),
+  }));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

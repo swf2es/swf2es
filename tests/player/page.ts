@@ -20,8 +20,9 @@
 // blends' backdrops and the back buffer alike (the Pixi fork's bounded resolves), before
 // the page averages them.
 import { createCodegen } from "@swf2es/codegen";
-import { isAs3, readSwf, tags } from "@swf2es/format";
+import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
+  Avm1,
   Container,
   type DisplayObject,
   type ModuleCache,
@@ -90,8 +91,8 @@ async function scriptingFor(
 
   const scripting = new Scripting(codegen, {
     moduleCache,
-    // A trace of several lines is several lines of Flash's output.
-    print: (line) => trace.push(...line.split("\n")),
+    // A trace of several lines is several lines of Flash's log, which breaks at "\r" as at "\n".
+    print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
     debugger: true,
     // The frame clock: traces that tell getTimer are the same on every run.
@@ -139,6 +140,32 @@ async function scriptingFor(
   );
   await scripting.loadLibraries(libraries);
   return scripting;
+}
+
+let avm1Codegen: Promise<Awaited<ReturnType<typeof createCodegen>>> | null = null;
+
+/**
+ * The AVM1 of `bytes`, an AVM1 SWF with actions, through the served
+ * codegen; null for any other. Its traces and uncaught errors go where a
+ * scripting's do.
+ */
+async function avm1For(
+  bytes: Uint8Array,
+  trace: string[],
+  uncaught: unknown[],
+): Promise<Avm1 | null> {
+  const swf = readSwf(bytes);
+  if (isAs3(swf) || readActions(swf).blocks.length === 0) {
+    return null;
+  }
+
+  // One codegen for every AVM1 SWF the page plays: its actions need no
+  // domain, and an instance each would hold a wasm memory each until collected.
+  avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
+  return new Avm1(await avm1Codegen, {
+    print: (line) => trace.push(...line.split(/\r|\n/)),
+    onUncaught: (error) => uncaught.push(error),
+  });
 }
 
 const GRID = [1, 2, 4, 4];
@@ -197,7 +224,7 @@ async function runSwf(
   };
   try {
     scripting = await scriptingFor(bytes, trace, url, uncaught);
-    const player = new Player(bytes, scripting);
+    const player = new Player(bytes, scripting, await avm1For(bytes, trace, uncaught));
     const n = GRID[quality] ?? 4;
     setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
