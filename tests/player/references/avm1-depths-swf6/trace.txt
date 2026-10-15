@@ -1,0 +1,15 @@
+attach lo none hi none none
+depths -16384 2130690044 -16383
+removed movieclip movieclip movieclip movieclip
+timeline movieclip -16383
+swapped 10
+removed a undefined
+by name 1 2
+by clip 2 1
+by depth 5
+duplicate movieclip movieclip 20
+not duplicated undefined undefined
+global movieclip 40
+global removed undefined movieclip
+replaced movieclip movieclip 5
+root 2 movieclip movieclip

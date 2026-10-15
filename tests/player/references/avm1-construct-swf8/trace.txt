@@ -1,0 +1,52 @@
+initialize a p=undefined q=undefined kid=movieclip hello=undefined own=false
+kid initialize a
+registered true
+construct a p=undefined q=undefined kid=movieclip hello=function own=false
+C a p=undefined kid=movieclip
+kid construct a
+load a p=undefined q=1 kid=movieclip hello=function own=false
+kid load a
+kid frame 1 a
+clip frame 1 a 1
+root 1 hi 1 movieclip
+construct d p=undefined q=undefined kid=movieclip hello=function own=false
+C d p=7 kid=movieclip
+dup 1 7 function
+in f
+initialize d p=7 q=1 kid=movieclip hello=function own=true
+kid initialize d
+kid construct d
+after f
+C m p=8 kid=movieclip
+att 1 8 movieclip
+after new
+onConstruct n
+unregistered undefined undefined
+register false false true
+onConstruct e
+empty e 8 1
+construct x p=undefined q=undefined kid=movieclip hello=undefined own=false
+onConstruct x
+root 1 end
+kid initialize m
+kid initialize n
+initialize x p=undefined q=undefined kid=movieclip hello=undefined own=false
+kid initialize x
+kid construct m
+kid construct n
+kid construct x
+load d p=7 q=1 kid=movieclip hello=function own=true
+kid load d
+kid frame 1 d
+clip frame 1 d 1
+kid load m
+kid frame 1 m
+clip frame 1 m 1
+kid load n
+kid frame 1 n
+clip frame 1 n undefined
+load x p=undefined q=undefined kid=movieclip hello=undefined own=false
+kid load x
+kid frame 1 x
+clip frame 1 x undefined
+root 2
