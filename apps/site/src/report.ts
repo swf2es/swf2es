@@ -78,7 +78,13 @@ function body(facts: ReportFacts, errors: string[]): string {
     `- Quality: ${facts.quality}, scale: ${facts.scale}`,
   );
   if (errors.length > 0) {
-    lines.push("", "### Last errors", "", "```", ...errors, "```");
+    // A fence longer than any run of backticks in them, which would end a shorter one.
+    const longest = Math.max(
+      2,
+      ...errors.flatMap((e) => (e.match(/`+/g) ?? []).map((r) => r.length)),
+    );
+    const fence = "`".repeat(longest + 1);
+    lines.push("", "### Last errors", "", fence, ...errors, fence);
   }
 
   return lines.join("\n");
