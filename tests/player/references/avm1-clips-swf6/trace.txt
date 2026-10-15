@@ -1,0 +1,64 @@
+inner /a/b
+mover 1 /a
+inner /c/b
+mover 1 /c
+inner /Beta
+typeof a: movieclip, movieclip, movieclip
+targets: /a /a/b / /c
+names: a b Beta
+same: true true true true
+string: true true
+number: NaN  
+case: movieclip movieclip movieclip movieclip
+frames: 1 3 3 1 3
+x: 10 5 30
+x set: 12.3 -7.75
+x again: 40 -7.75
+scale: 150 33.3333 30 6.65
+rotation: -90 6.65 30
+rotation: 170
+width: 50 250 20 100
+height: 10 50
+width: 50
+alpha: 32.8125
+alpha: 150
+visible: false
+visible: false
+visible: true
+quality: HIGH 1 null 5
+droptarget: string
+own: false
+key b
+getProperty: 40 b /a / 
+setProperty: 20 200
+read-only: 1
+eval: movieclip b b 
+vars: variable variable variable
+set: set by path
+tell: a /a variable a
+nested tell: /
+slash tell: /a/b
+no target: string
+tell object: /a/b
+back: /
+depth: -16383 -16382 -16380
+swapped: -16382 -16383
+swapped: -16380
+root key t
+root key k
+root key a
+root key Beta
+root key c
+local to global: 25 -2.75
+global to local: 5 5
+bounds: 0 20 0 20
+bounds: 20 40 -7.75 12.25
+hit: false false true false
+version: 6
+loaded: true
+mover 2 /c
+mover 2 /a
+root 2
+mover 3 /c
+mover 3 /a
+root 3
