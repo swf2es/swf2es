@@ -165,6 +165,8 @@ interface Transition {
 interface Zone {
   /** The year it was read in. */
   year: number;
+  /** When that year ends, in ms since 1970 UTC: it is read again from then. */
+  until: number;
   /** Today's standard offset east of UTC, in ms. */
   standard: number;
   /** What daylight saving adds, 0 for a zone without it. */
@@ -210,11 +212,11 @@ function ruleOf(t: number, standard: number): Transition {
 /** The host's zone, read from its offsets this year, again as the year changes. */
 function hostZone(): Zone {
   const now = Date.now();
-  const year = new Date(now).getUTCFullYear();
-  if (zone !== null && zone.year === year) {
+  if (zone !== null && now < zone.until) {
     return zone;
   }
 
+  const year = new Date(now).getUTCFullYear();
   const months: number[] = [];
   for (let m = 0; m <= 12; m++) {
     months.push(Date.UTC(year, m, 1));
@@ -236,7 +238,7 @@ function hostZone(): Zone {
     }
   }
 
-  zone = { year, standard, saving, start, end };
+  zone = { year, until: months[12], standard, saving, start, end };
   return zone;
 }
 
