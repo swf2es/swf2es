@@ -339,6 +339,8 @@ false
 undefined
 undefined
 Base.hello d
+undefined
+undefined
 -- properties
 true
 got

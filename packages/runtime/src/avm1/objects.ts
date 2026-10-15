@@ -371,7 +371,7 @@ export function invoke(fn: Value, self: Value, args: Value[], version: number, d
   return fn instanceof Avm1Function ? fn.call(self, args, version, depth) : undefined;
 }
 
-/** How far up its object's prototypes `get` found what it gave last: 0 its own. */
+/** How far up its object's prototypes `get` found what it gave last, a getter's value too: 0 its own. */
 export let foundDepth = 0;
 
 /** The deepest a prototype chain is walked, as Ruffle stops: no further. */
@@ -431,10 +431,15 @@ export function get(
     }
 
     if (own !== undefined && allowed(own.flags, version)) {
+      if (own.get === null || own.calls >= propertyCalls(version)) {
+        foundDepth = depth;
+        return own.value;
+      }
+
+      // Where the getter was found, not where its own lookups were.
+      const value = callGetter(own, self, version);
       foundDepth = depth;
-      return own.get === null || own.calls >= propertyCalls(version)
-        ? own.value
-        : callGetter(own, self, version);
+      return value;
     }
 
     p = p.protoFor(version);

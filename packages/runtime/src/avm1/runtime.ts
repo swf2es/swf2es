@@ -405,9 +405,10 @@ function operations(version: number): Operations {
         return;
       }
 
-      // A method found on the object itself is called as if found on its prototype.
+      // A method found on the object itself is called as if found on its
+      // prototype; up to SWF 6 wherever it was found (adl).
       const method = get(object, key, version);
-      st.push(invoke(method, object, args, version, Math.max(foundDepth, 1)));
+      st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
     },
     newObject(cx) {
       const st = cx.st;
@@ -596,7 +597,9 @@ function superCall(zuper: Avm1Super, key: string, args: Value[], version: number
   }
 
   const method = get(proto, key, version, zuper.self);
-  return invoke(method, zuper.self, args, version, zuper.depth + foundDepth + 1);
+  // Up to SWF 6 the method's `super` is one above this one's, wherever it was found (adl).
+  const depth = zuper.depth + (version < 7 ? 0 : foundDepth) + 1;
+  return invoke(method, zuper.self, args, version, depth);
 }
 
 /** Enumerate's and Enumerate2's pushes: a terminator, then the names, the first to visit on top. */

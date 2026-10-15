@@ -3240,6 +3240,20 @@ function avm1Functions(version: number): Uint8Array {
         drop(callFunction("plainSuper")),
         setMember(getVar("d"), "own", fnExpr([], ret(callMethod(getVar("super"), "hello")))),
         traceOf(callMethod(getVar("d"), "own")),
+        // A method found two prototypes up, and one a getter gives: up to SWF 6
+        // its `super` is above `this`'s prototype, from SWF 7 above where it was found.
+        setMember(proto("Base"), "inh", fnExpr([], ret(callMethod(getVar("super"), "hello")))),
+        traceOf(callMethod(getVar("t3"), "inh")),
+        drop(
+          callMethod(
+            proto("Base"),
+            "addProperty",
+            lit("viaGetter"),
+            fnExpr([], ret(member(proto("Base"), "inh"))),
+            lit(null),
+          ),
+        ),
+        traceOf(callMethod(getVar("t3"), "viaGetter")),
       ),
       block(
         note("-- properties"),

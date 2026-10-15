@@ -339,6 +339,8 @@ false
 undefined
 undefined
 Base.hello d
+Derived.hello Base.hello t3
+Derived.hello Base.hello t3
 -- properties
 true
 got

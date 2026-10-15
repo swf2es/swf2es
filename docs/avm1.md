@@ -425,7 +425,10 @@ cases), where it is not what Ruffle does:
   `__constructor__` of the prototype above the one the method was found
   on, with the method's `this`; `super.m()` finds `m` from the prototype
   above, a method on the object itself counting as on its prototype, so a
-  chain of three classes calls each level once.
+  chain of three classes calls each level once. That is from SWF 7, a
+  method a getter gives counting as found where the getter was; up to
+  SWF 6 a method's `super` is the prototype above `this`'s wherever the
+  method was found, and `super.m()`'s one above that.
 - What the player does not do yet: the activation object a function
   called by name inside another gets as `this` lists `arguments` in
   `for..in`, after its variables, but not `super`, and its `arguments`
