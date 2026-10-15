@@ -3323,8 +3323,10 @@ turned card leaves a strip of the card that is not under it, and a card
 nearer the eye has its part under the mask magnified. The view draws a
 copy of the mask's Graphics and sprites in the plane's holder, which
 clips the object's container there, and keeps the mask itself out of the
-stage's build; such an object's bitmap is drawn again each frame, as the
-mask's place in it follows the object's bounds. Flash's mask cuts at whole
+stage's build. The copy, and the object's bitmap, are made again only
+when the mask's place in it, which follows the object's bounds, or what the
+mask draws has changed (`three-d-mask-moving`): a still card under a still
+mask keeps its bitmap, as one with no mask does. Flash's mask cuts at whole
 texels, the view's at a quarter of one, so the edges fall up to a texel
 apart. Under WebGPU, which the quad's shader has no program for, a 3D object
 draws as its matrix3D's x and y rows.

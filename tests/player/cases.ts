@@ -8684,6 +8684,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 700,
   },
   {
+    name: "three-d-mask-moving",
+    swf: (abc) => bare(abc, 4, "ThreeDMaskMoving", 500, 400),
+    script: "ThreeDMaskMoving",
+    frames: 4,
+    capture: [1, 2, 4],
+    // As three-d-mask's: an outside mask's edges fall up to a texel apart.
+    tolerance: 40,
+    maxOutliers: 700,
+  },
+  {
     name: "three-d-filter-blend",
     swf: (abc) => bare(abc, 1, "ThreeDFilterBlend", 500, 400),
     script: "ThreeDFilterBlend",

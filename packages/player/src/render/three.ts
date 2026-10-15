@@ -222,12 +222,56 @@ function contextOf(renderer: Renderer): number {
   return context.count;
 }
 
+/** What drawing a child of a mask's container depends on, put on `out` in the order `mirror` copies it. */
+function traits(child: PixiContainer, out: unknown[]): void {
+  child.updateLocalTransform();
+  const { a, b, c, d, tx, ty } = child.localTransform;
+  const drawn =
+    child instanceof Graphics ? child.context : child instanceof Sprite ? child.texture : null;
+  const anchor = child instanceof Sprite ? child.anchor : null;
+  out.push(child, drawn, a, b, c, d, tx, ty, child.visible, anchor?.x, anchor?.y);
+}
+
+/** A child's traits as they are now, kept between calls so that a comparison allocates nothing. */
+const now: unknown[] = [];
+
+/**
+ * Whether `source` would be copied as `from` (`mirror`) recorded it from
+ * `at` on: the index past its record, or -1 where anything differs.
+ */
+function copiedAs(source: PixiContainer, from: unknown[], at: number): number {
+  let i = at;
+  for (const child of source.children) {
+    if (!child.includeInBuild) {
+      continue;
+    }
+
+    now.length = 0;
+    traits(child, now);
+    for (const value of now) {
+      if (i >= from.length || from[i++] !== value) {
+        return -1;
+      }
+    }
+
+    i = copiedAs(child, from, i);
+    if (i < 0) {
+      return -1;
+    }
+  }
+
+  // A child it had and has no longer leaves its record to be read as the next one's, whose
+  // child is another: the comparison fails there, or the whole falls short of the record.
+  return i;
+}
+
 /**
  * A copy of what a mask's container draws, its transform left out: its
  * Graphics' contexts and its sprites' textures shared, its other containers
  * and their transforms copied. Masks hold such and nothing else to draw.
+ * What each copy was made from goes on `from`, for `copiedAs`.
  */
-function mirror(source: PixiContainer, into: PixiContainer): void {
+function mirror(source: PixiContainer, into: PixiContainer, from: unknown[]): void {
   for (const child of source.children) {
     // A mask's own masks, which are not drawn, are left out.
     if (!child.includeInBuild) {
@@ -250,11 +294,11 @@ function mirror(source: PixiContainer, into: PixiContainer): void {
       copy.anchor.copyFrom(child.anchor);
     }
 
-    child.updateLocalTransform();
+    traits(child, from);
     copy.setFromMatrix(child.localTransform);
     copy.visible = child.visible;
     into.addChild(copy);
-    mirror(child, copy);
+    mirror(child, copy, from);
   }
 }
 
@@ -297,6 +341,8 @@ export class Plane {
   outsideMask: PixiContainer | null = null;
   private readonly keeper = new PixiContainer();
   readonly maskCopy = new PixiContainer();
+  /** What the mask's copy was made from (`mirror`), its map first: the same again needs no new copy. */
+  private readonly copied: unknown[] = [];
 
   constructor() {
     program ??= new GlProgram({ vertex, fragment, name: "flash-plane" });
@@ -446,7 +492,8 @@ export class Plane {
 
   /**
    * The outside mask copied again, `m` the map from its container's space to the object's,
-   * and the bitmap marked to be drawn again with it.
+   * and the bitmap marked to be drawn again with it; nothing where neither the map nor what the
+   * mask draws changed, as a still object under a still mask keeps its bitmap.
    */
   placeMask(m: Affine): void {
     const mask = this.outsideMask;
@@ -454,13 +501,39 @@ export class Plane {
       return;
     }
 
-    this.clearMaskCopy();
+    const copied = this.copied;
+    const same = copied.length >= 6 && copiedAs(mask, copied, 6) === copied.length;
+    if (
+      same &&
+      copied[0] === m.a &&
+      copied[1] === m.b &&
+      copied[2] === m.c &&
+      copied[3] === m.d &&
+      copied[4] === m.tx &&
+      copied[5] === m.ty
+    ) {
+      return;
+    }
+
+    // Moved alone, as under a turning object: the copy is kept and placed again.
+    if (!same) {
+      this.clearMaskCopy();
+      copied.push(0, 0, 0, 0, 0, 0);
+      mirror(mask, this.maskCopy, copied);
+    }
+
+    copied[0] = m.a;
+    copied[1] = m.b;
+    copied[2] = m.c;
+    copied[3] = m.d;
+    copied[4] = m.tx;
+    copied[5] = m.ty;
     this.maskCopy.setFromMatrix(this.at.set(m.a, m.b, m.c, m.d, m.tx, m.ty));
-    mirror(mask, this.maskCopy);
     this.stale = true;
   }
 
   private clearMaskCopy(): void {
+    this.copied.length = 0;
     for (const child of this.maskCopy.removeChildren()) {
       child.destroy({ children: true });
     }
