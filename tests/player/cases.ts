@@ -7714,6 +7714,8 @@ export const cases: PlayerCase[] = [
       capture: [],
       tolerance: 0,
       maxOutliers: 0,
+      // Past its recursion limit Flash runs no AVM1 action again, a later SWF's neither.
+      alone: true,
     }),
   ),
   {
@@ -7724,6 +7726,7 @@ export const cases: PlayerCase[] = [
     capture: [3],
     tolerance: 0,
     maxOutliers: 0,
+    alone: true,
   },
   {
     name: "avm1-movie",

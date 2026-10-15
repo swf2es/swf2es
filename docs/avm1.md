@@ -436,10 +436,12 @@ cases), where it is not what Ruffle does:
 - Function calls go 999 deep, the 1000th disabling every action of the
   movie, the rest of its frame and every frame after, while its
   timelines play on (Flash Player's documentation says 256, Ruffle stops
-  at 255). A SWF's `ScriptLimits` tag sets the depth, `n` allowing
-  `n - 1` calls, in adl too. JavaScript's own stack running out, which a
-  limit set very high, or a `toString` that calls itself, can do first,
-  disables the actions as well.
+  at 255). In adl the actions of every AVM1 SWF loaded after it stay
+  disabled too, so the player cases that reach the limit are drawn in an
+  adl of their own. A SWF's `ScriptLimits` tag sets the depth, `n`
+  allowing `n - 1` calls, in adl too. JavaScript's own stack running out,
+  which a limit set very high, or a `toString` that calls itself, can do
+  first, disables the actions as well.
 
 ### The constant pool
 
