@@ -230,7 +230,21 @@ async function playUrl(url: string, origin?: string): Promise<void> {
     return;
   }
 
-  const name = decodeURIComponent(absolute.pathname.split("/").pop() || absolute.host);
+  // Only what fetch can take from a server: a data: URL in a shared link
+  // would play its bytes and name, and the others fail as if refused.
+  if (absolute.protocol !== "https:" && absolute.protocol !== "http:") {
+    showStatus(`Only http: and https: URLs load, not ${absolute.protocol}`, true);
+    return;
+  }
+
+  const last = absolute.pathname.split("/").pop() || absolute.host;
+  let name = last;
+  try {
+    name = decodeURIComponent(last);
+  } catch {
+    // A malformed escape: the name as it is written.
+  }
+
   showStatus(`Fetching ${absolute.href}…`);
   let bytes: Uint8Array;
   let finalUrl = absolute.href;
