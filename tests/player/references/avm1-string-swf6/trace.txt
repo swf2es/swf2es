@@ -54,3 +54,5 @@ pair 4 😋 � a� 56843 2 4 a,b
 halves 😋 true
 fromCharCode pair 😋 half 1 false �
 split undefined 0 1 a,b
+substring end ||cde|||cdef
+split limits 0: 0: 1:<> 1:<> 0: 0:

@@ -54,3 +54,5 @@ pair 6 � � a� 159 4 1 a😋b
 halves � false
 fromCharCode pair �=� half 2 false �=
 split undefined 0 0 a
+substring end ||cde|||cdef
+split limits 1:<a,b> 0: 0: 1:<> 1:<> 1:<>

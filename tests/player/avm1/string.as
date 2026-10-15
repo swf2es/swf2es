@@ -73,3 +73,9 @@ trace("pair " + e.length + " " + e.charAt(1) + e.charAt(2) + " " + e.slice(1, 2)
 trace("halves " + e.slice(1, 2) + e.substr(2, 1) + " " + (e.charAt(1) + e.charAt(2) == "\ud83d\ude0b"));
 trace("fromCharCode pair " + String.fromCharCode(0xd83d, 0xde0b) + " half " + String.fromCharCode(0xd83d).length + " " + (String.fromCharCode(0xde0b) == "\ufffd") + " " + String.fromCharCode(0xd83d));
 trace("split undefined 0 " + "a,b".split(undefined, 0).length + " " + "a,b".split(undefined, 1));
+
+// substring from the end on, and split's limit with an empty delimiter or string
+var se = "abcdef";
+trace("substring end " + se.substring(10, 2) + "|" + se.substring(6, 2) + "|" + se.substring(5, 2) + "|" + se.substring(6) + "|" + se.substring(10, -5) + "|" + se.substring(2, 10));
+function parts(a) { var r = a.length + ":"; for (var i = 0; i < a.length; i++) { r += "<" + a[i] + ">"; } return r; }
+trace("split limits " + parts("a,b".split("", 0)) + " " + parts("a,b".split(",,", 0)) + " " + parts("".split(",", 0)) + " " + parts("".split(",")) + " " + parts("".split("")) + " " + parts("".split("", 0)));

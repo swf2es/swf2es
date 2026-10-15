@@ -168,6 +168,11 @@ export function stringClass(realm: Realm): { constr: Avm1Function; proto: Avm1Ob
 
     const s = text(self, version);
     let start = clamped(toInt(args[0], version), s.length);
+    // adl: nothing from the end on, whatever the end (Ruffle swaps first).
+    if (start >= s.length) {
+      return "";
+    }
+
     let end =
       args.length > 1 && args[1] !== undefined
         ? clamped(toInt(args[1], version), s.length)
@@ -187,18 +192,28 @@ export function stringClass(realm: Realm): { constr: Avm1Function; proto: Avm1Ob
     const take = (parts: string[]) =>
       realm.newArray(limit < parts.length ? parts.slice(0, limit) : parts, version);
     // A SWF 5 splits at commas by default, and only at one character: an
-    // empty or longer delimiter leaves the string whole (adl).
+    // empty delimiter leaves the string whole whatever the limit, a longer
+    // one within it (adl).
     if (version < 6) {
       const delimiter = d === undefined ? "," : stringOf(d, version);
+      if (delimiter === "") {
+        return realm.newArray([s], version);
+      }
+
       return take(delimiter.length === 1 ? s.split(delimiter) : [s]);
     }
 
-    // Without a delimiter, the string whole, whatever the limit.
+    // Without a delimiter, the string whole whatever the limit; an empty
+    // string so too, but split by "" (adl).
     if (d === undefined) {
       return realm.newArray([s], version);
     }
 
     const delimiter = stringOf(d, version);
+    if (s === "" && delimiter !== "") {
+      return realm.newArray([s], version);
+    }
+
     return take(delimiter === "" ? s.split("") : s.split(delimiter));
   });
   define("substr", (self, args, version) => {

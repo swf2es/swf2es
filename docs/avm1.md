@@ -897,8 +897,11 @@ bytes: the methods count and cut bytes, the case mappings map a byte only
 to a byte, `fromCharCode` writes a code past 0xFF as two bytes,
 `charCodeAt` past the end is 0, and `split` splits only at one character:
 at a comma by default, an empty or longer delimiter leaving the string
-whole (Ruffle: an empty one is a comma too). From SWF 6, `split` without a
-delimiter gives the string whole whatever its limit, and the methods cut
+whole, an empty one whatever the limit (Ruffle: an empty one is a comma
+too). From SWF 6, `split` without a delimiter gives the string whole
+whatever its limit, and so does an empty string by any but `""`.
+`substring` from the end on is `""`, whatever its end (Ruffle swaps the
+two first: `"abcdef".substring(10, 2)` is `cdef`). From SWF 6 the methods cut
 UTF-16 code units, keeping half a surrogate pair as it is, so the halves
 joined again are the pair (adl; StringExtract's halves are U+FFFD each).
 Flash's log writes half a pair as U+FFFD, which `trace` does; adl writes
