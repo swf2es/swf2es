@@ -2,12 +2,19 @@
 // cases of the language's classes are hundreds of statements each, which
 // read as source where the assembler's calls would not. It writes what
 // Flash's own compiler writes for the same source, as far as a case can
-// tell: DefineFunction for functions, DefineLocal for `var` in a function
-// and SetVariable outside one, CallMethod for `o.m()`, Less2 and Greater
-// for comparisons, and the short-circuit of `&&` and `||` by
-// PushDuplicate and If.
+// tell: given `flashAssembler()`, a constant pool of the block's strings,
+// which its functions share, and consecutive pushes as one Push; up to
+// SWF 6 DefineFunction, DefineLocal for `var` in a function and
+// SetVariable outside one; from SWF 7 DefineFunction2, which preloads
+// `this`, `arguments`, `super`, `_root`, `_parent` and `_global` into
+// registers where the function names them and leaves the others out, and
+// keeps its parameters and variables in registers unless it defines a
+// function of its own; CallMethod for `o.m()`, Less2 and Greater for
+// comparisons, and the short-circuit of `&&` and `||` by PushDuplicate
+// and If. Without a pool or batching (`new Avm1Assembler()`) the actions
+// are the same, each push a Push of its own and each string in it.
 //
-//   script(`var a = [3, 1, 2]; trace(a.sort().join("-"));`)(new Avm1Assembler())
+//   script(`var a = [3, 1, 2]; trace(a.sort().join("-"));`, 8)(flashAssembler())
 //
 // The subset: statements `var`, assignments (`=`, `+=` and the other
 // compound ones, `++` and `--` as statements), `if`/`else`, `while`, `do`,
@@ -19,7 +26,13 @@
 // pushes the values and writes the action of that name, for the actions
 // that no syntax writes (CastOp, ImplementsOp, Extends...).
 
-import { Avm1Assembler, double, type SimpleAction } from "./avm1-assembler.ts";
+import {
+  Avm1Assembler,
+  double,
+  FunctionFlag,
+  register,
+  type SimpleAction,
+} from "./avm1-assembler.ts";
 
 type Token =
   | { kind: "num"; value: number }
@@ -194,6 +207,54 @@ interface Loop {
   continueLabel: string;
 }
 
+/** What a function's body declares and names, for its registers. */
+interface FunctionScope {
+  params: string[];
+  /** Its `var`s. */
+  locals: Set<string>;
+  /** The names it reads, writes or calls, outside the functions it defines. */
+  used: Set<string>;
+  /** Whether it defines a function, which may read its variables: they stay variables then. */
+  nested: boolean;
+}
+
+/** What DefineFunction2 preloads, in the order of its registers, and its flags to preload or leave each out. */
+const PRELOADS: [string, number, number][] = [
+  ["this", FunctionFlag.preloadThis, FunctionFlag.suppressThis],
+  ["arguments", FunctionFlag.preloadArguments, FunctionFlag.suppressArguments],
+  ["super", FunctionFlag.preloadSuper, FunctionFlag.suppressSuper],
+  ["_root", FunctionFlag.preloadRoot, 0],
+  ["_parent", FunctionFlag.preloadParent, 0],
+  ["_global", FunctionFlag.preloadGlobal, 0],
+];
+
+/**
+ * A function's registers as Flash's compiler gives them: what it preloads
+ * from 1, then its parameters and its variables, unless it defines a function.
+ */
+function registersOf(scope: FunctionScope): { names: Map<string, number>; flags: number } {
+  const names = new Map<string, number>();
+  let flags = 0;
+  for (const [name, preload, suppress] of PRELOADS) {
+    if (scope.used.has(name) && !scope.params.includes(name) && !scope.locals.has(name)) {
+      names.set(name, names.size + 1);
+      flags |= preload;
+    } else {
+      flags |= suppress;
+    }
+  }
+
+  if (!scope.nested) {
+    for (const name of [...scope.params, ...scope.locals]) {
+      if (!names.has(name)) {
+        names.set(name, names.size + 1);
+      }
+    }
+  }
+
+  return { names, flags };
+}
+
 let labels = 0;
 const fresh = (what: string) => `${what}${labels++}`;
 
@@ -201,11 +262,43 @@ class Parser {
   private i = 0;
   private loops: Loop[] = [];
   private inFunction = false;
+  /** The function being parsed, null at the top level. */
+  private scope: FunctionScope | null = null;
+  /** Each function body's registers by name, as it is written. */
+  private readonly registers = new WeakMap<Avm1Assembler, Map<string, number>>();
 
   private readonly tokens: Token[];
+  /** From 7, functions are DefineFunction2, their variables in registers. */
+  private readonly version: number;
 
-  constructor(tokens: Token[]) {
+  constructor(tokens: Token[], version: number) {
     this.tokens = tokens;
+    this.version = version;
+  }
+
+  /** The register holding `name` in the body `a` writes, if it has one. */
+  private register(a: Avm1Assembler, name: string): number | undefined {
+    return this.registers.get(a)?.get(name);
+  }
+
+  /** `name`'s value pushed: its register's, or the variable's. */
+  private getVariable(a: Avm1Assembler, name: string): void {
+    const r = this.register(a, name);
+    if (r === undefined) {
+      a.push(name).op("GetVariable");
+    } else {
+      a.push(register(r));
+    }
+  }
+
+  /** A name read, written or called in the function being parsed. */
+  private use(name: string): void {
+    this.scope?.used.add(name);
+  }
+
+  /** A `var` of the function being parsed. */
+  private declareVar(name: string): void {
+    this.scope?.locals.add(name);
   }
 
   program(): Emit[] {
@@ -283,7 +376,19 @@ class Parser {
         const name = this.identifier();
         const value = this.eat("=") ? this.expression() : null;
         const local = this.inFunction;
+        this.declareVar(name);
         decls.push((a) => {
+          const r = this.register(a, name);
+          if (r !== undefined) {
+            // A register starts undefined: a `var` without a value writes nothing.
+            if (value) {
+              value(a);
+              a.storeRegister(r).pop();
+            }
+
+            return;
+          }
+
           a.push(name);
           if (value) {
             value(a);
@@ -372,8 +477,13 @@ class Parser {
         (this.peek().kind === "id" && this.peek(1).value === "in") ||
         (this.is("var") && this.peek(2).value === "in")
       ) {
-        this.eat("var");
+        const declared = this.eat("var");
         const name = this.identifier();
+        if (declared) {
+          this.declareVar(name);
+        }
+        this.use(name);
+        const local = declared && this.inFunction;
         this.expect("in");
         const object = this.expression();
         this.expect(")");
@@ -381,11 +491,20 @@ class Parser {
         const body = this.loopBody(loop);
         return (a) => {
           const out = fresh("out");
+          const r = this.register(a, name);
+          if (local && r === undefined) {
+            a.push(name).op("DefineLocal2");
+          }
+
           object(a);
           a.op("Enumerate2").label(loop.continueLabel);
           // The terminator, undefined, equals null: what is left of the names is popped there.
           a.op("PushDuplicate").push(null).op("Equals2").if(out);
-          a.push(name).op("StackSwap").op("SetVariable");
+          if (r === undefined) {
+            a.push(name).op("StackSwap").op("SetVariable");
+          } else {
+            a.storeRegister(r).pop();
+          }
           body(a);
           a.jump(loop.continueLabel).label(out).op("Pop");
         };
@@ -473,7 +592,15 @@ class Parser {
       this.expect("=");
       const value = this.expression();
       const local = this.inFunction;
+      this.declareVar(name);
       return (a) => {
+        const r = this.register(a, name);
+        if (r !== undefined) {
+          value(a);
+          a.storeRegister(r).pop();
+          return;
+        }
+
         a.push(name);
         value(a);
         a.op(local ? "DefineLocal" : "SetVariable");
@@ -533,7 +660,11 @@ class Parser {
   private lastPlace: Place | null = null;
 
   private store(a: Avm1Assembler, place: Place, value: Emit): void {
-    if (place.kind === "var") {
+    const r = place.kind === "var" ? this.register(a, place.name) : undefined;
+    if (r !== undefined) {
+      value(a);
+      a.storeRegister(r).pop();
+    } else if (place.kind === "var") {
       a.push(place.name);
       value(a);
       a.op("SetVariable");
@@ -547,7 +678,7 @@ class Parser {
 
   private load(a: Avm1Assembler, place: Place): void {
     if (place.kind === "var") {
-      a.push(place.name).op("GetVariable");
+      this.getVariable(a, place.name);
     } else {
       place.object(a);
       place.key(a);
@@ -565,8 +696,15 @@ class Parser {
 
     this.expect("{");
     const outer = this.inFunction;
+    const outerScope = this.scope;
     const loops = this.loops;
+    if (outerScope !== null) {
+      outerScope.nested = true;
+    }
+
+    const scope: FunctionScope = { params, locals: new Set(), used: new Set(), nested: false };
     this.inFunction = true;
+    this.scope = scope;
     this.loops = [];
     const body: Emit[] = [];
     while (!this.eat("}")) {
@@ -574,13 +712,33 @@ class Parser {
     }
 
     this.inFunction = outer;
+    this.scope = outerScope;
     this.loops = loops;
     return (a) => {
-      const b = new Avm1Assembler();
+      const b = a.child();
+      if (this.version < 7) {
+        for (const s of body) {
+          s(b);
+        }
+
+        a.defineFunction(name, params, b);
+        return;
+      }
+
+      const { names, flags } = registersOf(scope);
+      this.registers.set(b, names);
       for (const s of body) {
         s(b);
       }
-      a.defineFunction(name, params, b);
+
+      const count = names.size === 0 ? 0 : names.size + 1;
+      a.defineFunction2(
+        name,
+        count,
+        flags,
+        params.map((p) => [p, names.get(p) ?? 0]),
+        b,
+      );
     };
   }
 
@@ -757,21 +915,25 @@ class Parser {
               a.op("GetMember");
             })(object, key)
           : ((name) => (a: Avm1Assembler) => {
-              a.push(name).op("GetVariable");
+              this.getVariable(a, name);
             })(t.value);
         object = o;
         key = this.memberKey();
       }
 
+      this.use(t.value);
       const args = this.is("(") ? this.arguments() : [];
       const obj = object;
       const k = key;
       e = (a) => {
         pushArgs(a, args);
+        const r = obj ? undefined : this.register(a, t.value);
         if (obj) {
           obj(a);
           k(a);
           a.op("NewMethod");
+        } else if (r !== undefined) {
+          a.push(register(r), undefined).op("NewMethod");
         } else {
           k(a);
           a.op("NewObject");
@@ -825,7 +987,12 @@ class Parser {
         if (callee?.kind === "var") {
           e = (a) => {
             pushArgs(a, args);
-            a.push(callee.name).op("CallFunction");
+            const r = this.register(a, callee.name);
+            if (r === undefined) {
+              a.push(callee.name).op("CallFunction");
+            } else {
+              a.push(register(r), undefined).op("CallMethod");
+            }
           };
         } else if (callee?.kind === "member") {
           e = (a) => {
@@ -918,9 +1085,10 @@ class Parser {
             return { emit: this.functionRest(""), place: null };
         }
 
+        this.use(t.value);
         return {
           emit: (a) => {
-            a.push(t.value).op("GetVariable");
+            this.getVariable(a, t.value);
           },
           place: { kind: "var", name: t.value },
         };
@@ -993,9 +1161,14 @@ function pushArgs(a: Avm1Assembler, args: Emit[]): void {
   a.push(args.length);
 }
 
-/** The statements of `source`, written to the assembler they are given. */
-export function script(source: string): (a: Avm1Assembler) => Avm1Assembler {
-  const statements = new Parser(tokenize(source)).program();
+/**
+ * The statements of `source`, written to the assembler they are given as
+ * Flash's compiler writes them for a SWF of `version`: DefineFunction2
+ * from 7. Give it an assembler with a pool and batched pushes
+ * (`flashAssembler()`) for the rest of Flash's shape.
+ */
+export function script(source: string, version = 6): (a: Avm1Assembler) => Avm1Assembler {
+  const statements = new Parser(tokenize(source), version).program();
   return (a) => {
     for (const s of statements) {
       s(a);
@@ -1003,3 +1176,6 @@ export function script(source: string): (a: Avm1Assembler) => Avm1Assembler {
     return a;
   };
 }
+
+/** An assembler that writes as Flash's compiler does: a constant pool, and pushes batched. */
+export const flashAssembler = (): Avm1Assembler => new Avm1Assembler({ pool: true, batch: true });

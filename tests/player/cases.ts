@@ -14,7 +14,7 @@ import {
   type SimpleAction,
   TryFlag,
 } from "../avm1-assembler.ts";
-import { script } from "../avm1-script.ts";
+import { flashAssembler, script } from "../avm1-script.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
 
@@ -3403,8 +3403,9 @@ function avm1Functions(version: number): Uint8Array {
 }
 
 // A SWF of `version` whose frame runs avm1/<name>.as, compiled by
-// tests/avm1-script.ts: the cases of the language's classes, too long to
-// read as the assembler's calls.
+// tests/avm1-script.ts as Flash's compiler writes it (a constant pool,
+// batched pushes, DefineFunction2 from SWF 7): the cases of the language's
+// classes, too long to read as the assembler's calls.
 function avm1Script(name: string, version: number): Uint8Array {
   const source = readFileSync(new URL(`avm1/${name}.as`, import.meta.url), "utf8");
   return w.swf({
@@ -3416,7 +3417,7 @@ function avm1Script(name: string, version: number): Uint8Array {
     tags: [
       ...(version >= 8 ? [w.fileAttributes(false)] : []),
       w.backgroundColor(0xffffff),
-      w.doAction(avm1(script(source))),
+      w.doAction([...script(source, version)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
     ],

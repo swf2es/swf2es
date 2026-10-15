@@ -1062,7 +1062,12 @@ registers in the compiler.
   (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`;
   the classes' cases are AS1 source (`tests/player/avm1/*.as`), which a
   small compiler in the tests (`tests/avm1-script.ts`) turns into the
-  actions Flash's own compiler writes for it.
+  actions Flash's own compiler writes for it, in its shape: a constant
+  pool, batched pushes, and from SWF 7 DefineFunction2 with what it
+  preloads and its variables in registers (each case traces the same
+  in adl and the player as one push per value and DefineFunction gave).
+  The cases of the earlier steps stay assembled by hand, so that the
+  actions no compiler writes stay covered.
   What only a main AVM1 SWF shows, `_level0` as the root of the stage or
   `Stage.width`, comes from the corpus, as adl cannot run one as the main
   movie.
