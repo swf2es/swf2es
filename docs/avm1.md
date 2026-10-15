@@ -1186,6 +1186,15 @@ probes they came of), and the corpus, where it is not what Ruffle does:
   frame, anything else as a string, a frame's number or label, after a
   path's last `:` or `.` (`b:start`), labels in any ASCII case; a frame
   past the last goes there, its actions not run, 0 and below nothing.
+- Code whose clip a call, a `new` or a CallFrame takes off the display
+  list returns right after it, as Ruffle's `continue_if_base_clip_exists`
+  has it: a block ends, a function returns undefined, and the code that
+  called it goes on unless its own clip went too. A function's clip is
+  the one it was defined in, from SWF 6, and in a SWF 5 the clip of its
+  `this` or of the caller's target. A goto action, in a tellTarget
+  too, is no such call, nor a method of undefined or null, which calls
+  nothing: the code after them runs (adl, and the corpus's
+  `removed_clip_halts_script`).
 - `hitTest(x, y)` is in the root's space against the clip's bounds on the
   stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
   Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.

@@ -13,7 +13,7 @@
 // `arguments` and `super`, made only if the code asks for them.
 import { Activation, PENDING_Arguments, PENDING_Super, type Region } from "./activation.js";
 import { targetOrRoot } from "./clips.js";
-import { Disabled } from "./errors.js";
+import { BASE_REMOVED, Disabled } from "./errors.js";
 import type { Target } from "./host.js";
 import { Avm1Function, Avm1Object, DONT_ENUM, fold, type Property } from "./objects.js";
 import type { Realm } from "./realm.js";
@@ -149,6 +149,13 @@ export class ScriptFunction extends Avm1Function {
     realm.current = cx;
     try {
       return this.region(cx, self, args);
+    } catch (error) {
+      // Its clip was removed under it: it returns undefined there.
+      if (error === BASE_REMOVED) {
+        return undefined;
+      }
+
+      throw error;
     } finally {
       realm.calls--;
       realm.current = caller;

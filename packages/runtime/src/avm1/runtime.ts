@@ -18,7 +18,7 @@ import {
   targetPathOf,
 } from "./clips.js";
 import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.js";
-import { Avm1Throw, Disabled, Halt, NotYet } from "./errors.js";
+import { Avm1Throw, BASE_REMOVED, Disabled, Halt, NotYet } from "./errors.js";
 import { Avm1Super, argumentsOf, superOf } from "./functions.js";
 import type { Host, Target } from "./host.js";
 import { extend, implementsOp, instanceOf } from "./inheritance.js";
@@ -520,59 +520,24 @@ function operations(version: number): Operations {
       // but in a SWF 5, which takes the target's clip for it (adl).
       const self = foundOn === undefined || (version < 6 && foundLocal) ? cx.clip : foundOn;
       st.push(invoke(fn, self, args, version));
+      returnIfRemoved(cx);
     },
     callMethod(cx) {
-      const st = cx.st;
-      const name = st.pop();
-      const object = live(st.pop());
-      const args = popArgs(st, version);
-      if (object === undefined || object === null) {
-        st.push(undefined);
-        return;
+      if (callMethod(cx, version)) {
+        returnIfRemoved(cx);
       }
-
-      const key = name === undefined ? "" : nameOf(name, version);
-      if (object instanceof Avm1Super) {
-        st.push(superCall(object, key, args, version));
-        return;
-      }
-
-      if (key === "") {
-        st.push(invoke(object, undefined, args, version));
-        return;
-      }
-
-      if (!(object instanceof Avm1Object)) {
-        const method = cx.realm.primitiveMember(object as Primitive, key, version);
-        st.push(invoke(method, object, args, version, 1));
-        return;
-      }
-
-      // A method found on the object itself is called as if found on its
-      // prototype; up to SWF 6 wherever it was found (adl).
-      const method = get(object, key, version);
-      st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
     },
     newObject(cx) {
       const st = cx.st;
       const name = nameOf(st.pop(), version);
       const args = popArgs(st, version);
       st.push(cx.realm.construct(resolve(cx, name, version), args, version));
+      returnIfRemoved(cx);
     },
     newMethod(cx) {
-      const st = cx.st;
-      const name = st.pop();
-      const object = st.pop();
-      const args = popArgs(st, version);
-      if (object === undefined || object === null) {
-        st.push(undefined);
-        return;
+      if (newMethod(cx, version)) {
+        returnIfRemoved(cx);
       }
-
-      const key = name === undefined ? "" : nameOf(name, version);
-      const boxed = cx.realm.box(object, version);
-      const constr = key === "" ? boxed : get(boxed, key, version);
-      st.push(cx.realm.construct(constr, args, version));
     },
     defineFunction(cx, region, name, params) {
       defineFunction(cx, region, name, params, 0, version);
@@ -646,6 +611,7 @@ function operations(version: number): Operations {
     targetPath: (_, value) => targetPathOf(value),
     callFrame(cx, frame) {
       callFrame(cx, frame, version);
+      returnIfRemoved(cx);
     },
     stopSounds(cx) {
       cx.host.stopSounds?.();
@@ -664,6 +630,71 @@ function operations(version: number): Operations {
       throw new NotYet(name);
     },
   };
+}
+
+/** CallMethod: `object[name](args)`, `object(args)` for an empty name; false for no object, which calls nothing. */
+function callMethod(cx: Activation, version: number): boolean {
+  const st = cx.st;
+  const name = st.pop();
+  const object = live(st.pop());
+  const args = popArgs(st, version);
+  if (object === undefined || object === null) {
+    st.push(undefined);
+    return false;
+  }
+
+  const key = name === undefined ? "" : nameOf(name, version);
+  if (object instanceof Avm1Super) {
+    st.push(superCall(object, key, args, version));
+    return true;
+  }
+
+  if (key === "") {
+    st.push(invoke(object, undefined, args, version));
+    return true;
+  }
+
+  if (!(object instanceof Avm1Object)) {
+    const method = cx.realm.primitiveMember(object as Primitive, key, version);
+    st.push(invoke(method, object, args, version, 1));
+    return true;
+  }
+
+  // A method found on the object itself is called as if found on its
+  // prototype; up to SWF 6 wherever it was found (adl).
+  const method = get(object, key, version);
+  st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
+  return true;
+}
+
+/** NewMethod: `new object[name](args)`, `new object(args)` for an empty name; false for no object. */
+function newMethod(cx: Activation, version: number): boolean {
+  const st = cx.st;
+  const name = st.pop();
+  const object = st.pop();
+  const args = popArgs(st, version);
+  if (object === undefined || object === null) {
+    st.push(undefined);
+    return false;
+  }
+
+  const key = name === undefined ? "" : nameOf(name, version);
+  const boxed = cx.realm.box(object, version);
+  const constr = key === "" ? boxed : get(boxed, key, version);
+  st.push(cx.realm.construct(constr, args, version));
+  return true;
+}
+
+/**
+ * After a call, a `new` or a CallFrame: if it took the clip whose code
+ * runs off the display list, that code returns here (BaseRemoved). A
+ * method of undefined or null calls nothing and returns nothing, even
+ * where the clip went before it (the corpus's removed_clip_halts_script).
+ */
+function returnIfRemoved(cx: Activation): void {
+  if (cx.host.removed?.(cx.base) === true) {
+    throw BASE_REMOVED;
+  }
 }
 
 /** A value as a reference reaches it now: a clip's AVM1 object the one at its path, undefined for none. */
@@ -897,7 +928,7 @@ export class Runtime {
     try {
       regions[0](cx);
     } catch (error) {
-      if (error instanceof Avm1Throw) {
+      if (error instanceof Avm1Throw || error === BASE_REMOVED) {
         return;
       }
 

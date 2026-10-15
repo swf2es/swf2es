@@ -603,6 +603,45 @@ test("a clip the timeline removes, and its AVM1 object, are collected where no s
   );
 });
 
+test("code whose clip a call removes returns after the call, a function of the clip's too (adl)", async () => {
+  const cases: [string, string[]][] = [
+    [`trace("before"); _parent.gotoAndStop(1); trace("after");`, ["before"]],
+    [`trace("before"); _root.f(); trace("after f");`, ["before", "f before", "f after"]],
+    [
+      `function g() { trace("g before"); _parent.gotoAndStop(1); trace("g after"); } g(); trace("after g");`,
+      ["g before"],
+    ],
+    [
+      `function C() { _parent.gotoAndStop(1); trace("C after"); } var c = new C(); trace("after new");`,
+      [],
+    ],
+    [`tellTarget ("_parent") { gotoAndStop(1); } trace("after tellTarget");`, ["after tellTarget"]],
+    // A method of nothing calls nothing, and returns not; a function call does (the corpus's removed_clip_halts_script).
+    [
+      `tellTarget ("_parent") { gotoAndStop(1); } nothing.f(); trace("a"); bogus(); trace("b");`,
+      ["a"],
+    ],
+  ];
+  for (const [code, lines] of cases) {
+    const swf = movie(6, [
+      [
+        sprite(1, [[], [as1(code, 6)]]),
+        sprite(2, [
+          [as1(`stop();`, 6)],
+          [w.place({ depth: 1, character: 1, name: "kid" }), as1(`stop();`, 6)],
+        ]),
+        w.place({ depth: 1, character: 2, name: "m" }),
+        as1(
+          `function f() { trace("f before"); m.gotoAndStop(1); trace("f after"); } stop(); m.gotoAndPlay(2);`,
+          6,
+        ),
+      ],
+    ]);
+
+    assert.deepEqual((await play(swf, 3)).lines, lines, code);
+  }
+});
+
 test("clip references are equal where they reach the same clip now (adl)", async () => {
   const swf = movie(6, [
     [
