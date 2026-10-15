@@ -97,7 +97,7 @@ over the builtins, then each conformance case (also compiled with asc's
 |-----------|-----------------------------------------------------------------|---------------------------|
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
-| `runtime` | AS3 language semantics called by generated code (AVM1 a placeholder) | format               |
+| `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
@@ -143,6 +143,17 @@ the dispatcher form. A block compiles alone to its entry byte for byte
 (`actionsKey`) names the compiler, the version and the SHA-256 of the SWF's
 decompressed bytes. What the module calls, and what is built of it so far,
 is in [avm1.md](avm1.md).
+
+`runtime/src/avm1/` has AVM1's values and their conversions by version
+(`numbers.ts`'s number formatting and string-to-number, Ruffle's,
+translated, which adl traces alike), the operations of each version that
+`rt.version(v)` gives, made once and shared, and the `Host` through which
+they reach the player's display list. The player's `Avm1`
+(`player/src/avm1/avm1.ts`) compiles a main AVM1 SWF's blocks with the
+same codegen, as `start` loads it, and runs its root's frame blocks as the
+root enters each frame: a `Player` given one, as the web element and the
+test page give an AVM1 SWF with actions, runs them; an ActionScript 3
+SWF's never run.
 
 Apps, in `apps/`, are what people run rather than import: `desktop`, the
 Electron app (see [The desktop app](#the-desktop-app)), and later a browser
@@ -1675,8 +1686,8 @@ query (Ruffle passes that on). A `LoaderContext`'s `parameters` take the place o
 query from the call on, and a value in them that is not a String, null
 included, is refused at the call with `IllegalOperationError` #2196. An
 unload leaves none (the `loader-parameters` case and the node tests).
-The player runs no AVM1, so an AVM1 root's `_root` variables get no
-flashvars.
+The player's AVM1 has no variables yet, so an AVM1 root's `_root`
+variables get no flashvars.
 
 The order is Flash's, traced by adl (the `loads` case; the Flash Player
 traces in Ruffle's corpus agree where they overlap). `loadBytes` tells
@@ -1766,8 +1777,10 @@ loads both kinds alike, not adl, whose harness loads only from bytes.
 The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
 movie go to its `Loader`, as Flash has them (the corpus's
 `mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
-frame rate as an AVM1 main SWF's does without scripts. The player has no
-AVM1 interpreter, so what needs one is missing: no AVM1 action runs, its
+frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
+many frames as its ShowFrame tags end, whatever its header says. The
+player runs AVM1 actions only in a main AVM1 SWF so far, so what needs
+them is missing here: no AVM1 action runs, its
 DoAction, DoInitAction, clip and button actions read past; its buttons
 show their up state and are inert, with no other state, sound or hand
 cursor; and `AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
@@ -4303,10 +4316,10 @@ and a SoundStreamBlock a frame), and a button's DefineButtonSound. The
 library's `sounds` hook (`TimelineSounds`, made by `media/sounds.ts`
 for every AS3 library a `Scripting` loads) plays them through
 the page's `AudioHost`; a player without one plays none, and a SWF without
-them pays nothing. An AVM1 movie's library has none: its actions do not
-run, so its timeline loops where a `stop()` would have held it, and its
-StartSounds would start again on every loop; its sounds wait for AVM1
-actions.
+them pays nothing. An AVM1 SWF's library has none: in a `Loader` its
+actions do not run, so its timeline loops where a `stop()` would have
+held it, and its StartSounds would start again on every loop; its sounds
+wait for AVM1's later steps.
 
 A frame's StartSound tags play as the playhead enters it, played on to,
 looped to, or landed on by a goto, but a goto to the frame the clip is on,
@@ -4943,7 +4956,9 @@ origin, the system's proxy, and Flash's checks within the player:
   `BitmapData.drawWithQuality` at the SWF's stage quality, and its traces.
   Frame 1 is the one its `INIT` follows and frame k the one after k - 1
   `EXIT_FRAME`s, a frame later for AVM1, whose movie in a `Loader` shows
-  its frame 2 a frame late. A frame's load completions (`INIT`,
+  its frame 2 a frame late; adl prints an AVM1 movie's first frame's
+  traces only with its second's, so a corpus test or case of one frame is
+  run for two. A frame's load completions (`INIT`,
   `COMPLETE`) follow its `EXIT_FRAME`, so what their listeners change
   shows in the next frame's capture (the `loads-init` case captures frame
   3 for its unload at frame 2's `INIT`). A SWF's clips taken off the
