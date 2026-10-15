@@ -209,18 +209,19 @@ export function setVariable(cx: Variables, name: string, value: Value, version: 
     return;
   }
 
-  if (name === "this" && version >= 5) {
+  if (isThis(cx, name, version)) {
     cx.self = value;
     return;
   }
 
-  // A path's separators are `:` and `.` here in every version.
+  // A path's separators are `:` and `.` here in every version, and its
+  // `this` is no object: adl sets nothing for `this.x`.
   const separator = lastSeparator(name, 5);
   if (separator >= 0) {
     const path = name.slice(0, separator);
     const variable = name.slice(separator + 1);
     for (let s: Scope | null = cx.scope; s !== null; s = s.parent) {
-      const object = targetPath(cx, s.object, path, true, true, version);
+      const object = targetPath(cx, s.object, path, true, false, version);
       if (object !== null) {
         set(object, variable, value, version);
         return;
@@ -382,10 +383,12 @@ export function targetPath(
 
       const name = path.slice(i, end);
       i = end + 1;
-      if (swf5 && handleThis && name === "this") {
+      if (swf5 && handleThis && sameName(name, "this", version)) {
         value = cx.self;
-      } else if (swf5 && firstElement && name === "_root") {
+      } else if (swf5 && firstElement && sameName(name, "_root", version)) {
         value = cx.host.root?.();
+      } else if (version >= 6 && firstElement && sameName(name, "_global", version)) {
+        value = cx.global;
       } else if (firstElement && level(cx, name, version) !== undefined) {
         value = level(cx, name, version);
       } else {

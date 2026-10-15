@@ -333,3 +333,17 @@ test("InitObject and InitArray truncate their counts", () => {
   V.initObject(cx);
   assert.deepEqual(keys(st.pop() as Avm1Object, 7), ["undefined", "a"]);
 });
+
+test("a path's first step is this, _root or _global; SetVariable's takes no this", () => {
+  const { V, cx, root } = frame(6);
+  set(root, "x", "root's", 6);
+  assert.equal(V.getVariable(cx, "THIS.x"), "root's");
+  assert.equal(V.getVariable(cx, "_global.Object"), rt.realm.Object);
+  assert.equal(rt.version(5).getVariable(frame(5).cx, "_global.Object"), undefined);
+  V.setVariable(cx, 1, "_global.reviewed");
+  assert.equal(get(rt.realm.global, "reviewed", 6), 1);
+  V.setVariable(cx, 1, "this.pt");
+  assert.equal(get(root, "pt", 6), undefined);
+  V.setVariable(cx, 8, "THIS");
+  assert.equal(cx.self, 8);
+});
