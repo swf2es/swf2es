@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
@@ -22,6 +24,9 @@ const codegen = await createCodegen(
 function doAction(write: (a: Avm1Assembler) => Avm1Assembler): Uint8Array {
   return w.doAction([...write(new Avm1Assembler()).end().bytes()]);
 }
+
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
 
 const traced = (...values: PushValue[]) =>
   doAction((a) => values.reduce<Avm1Assembler>((b, v) => b.push(v).trace(), a));
@@ -567,6 +572,35 @@ test("gotos that go back and forth in a frame keep no more than a few thousand o
 
   assert.deepEqual(lines, ["20000"]);
   assert.ok((avm1 as unknown as { clips: unknown[] }).clips.length < 10000);
+});
+
+test("a clip the timeline removes, and its AVM1 object, are collected where no script keeps them", async () => {
+  const swf = movie(6, [
+    [
+      sprite(1, [[as1(`x = 1;`, 6)], [as1(`x = 2;`, 6)]]),
+      w.place({ depth: 1, character: 1, name: "k" }),
+      as1(`trace(k._x);`, 6),
+    ],
+    [w.remove(1), as1(`trace(typeof k);`, 6)],
+  ]);
+  const { player, avm1 } = await play(swf, 1);
+  const refs = (() => {
+    const first = avm1.root.children.find((c) => c.name === "k");
+    return [new WeakRef(first as object), new WeakRef(first?.avm1 as object)];
+  })();
+  for (let i = 0; i < 20; i++) {
+    player.tick();
+  }
+
+  for (let i = 0; i < 3; i++) {
+    gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  assert.deepEqual(
+    refs.map((r) => r.deref() === undefined),
+    [true, true],
+  );
 });
 
 test("clip references are equal where they reach the same clip now (adl)", async () => {
