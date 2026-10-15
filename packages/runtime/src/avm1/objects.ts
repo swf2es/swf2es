@@ -196,11 +196,11 @@ export class Avm1Object {
     return this.add(name, value, flags);
   }
 
-  /** A new property, last in the order. */
-  add(name: string, value: Value, flags: number): Property {
+  /** A new property, last in the order: the prototype where `proto`. */
+  add(name: string, value: Value, flags: number, proto = name === "__proto__"): Property {
     const p = new Property(name, value, flags);
     this.props.set(name, p);
-    if (name === "__proto__") {
+    if (proto) {
       this.protoProp = p;
     } else if (name.length === 9 && !resolvers && fold(name) === "__resolve") {
       resolvers = true;
@@ -462,7 +462,8 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
   }
 
   if (own === undefined) {
-    o.add(name, value, 0);
+    // Up to SWF 6, `__PROTO__` is the prototype too, where there is no `__proto__`.
+    o.add(name, value, 0, version > 6 ? name === "__proto__" : fold(name) === "__proto__");
     return;
   }
 

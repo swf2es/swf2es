@@ -390,3 +390,13 @@ test("an array's indices and length follow adl's reading of names by version", (
   V.setMember(cx, 1, "LENGTH", a);
   assert.deepEqual(keys(a, 6), ["0"]);
 });
+
+test("up to SWF 6, a __PROTO__ set where there is no __proto__ is the prototype", () => {
+  for (const version of [6, 7]) {
+    const p = rt.newObject();
+    set(p, "pp", 1, version);
+    const o = new Avm1Object();
+    set(o, "__PROTO__", p, version);
+    assert.equal(get(o, "pp", version), version === 6 ? 1 : undefined);
+  }
+});
