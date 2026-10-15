@@ -76,6 +76,31 @@ package {
       c.transform.matrix3D = null;
       held.appendTranslation(10, 0, 0);
       trace("2D", c.x, c.transform.matrix3D, held.position);
+
+      // The rotation setters' sines and cosines, of float32 radians.
+      for each (var d:Number in [40, 25, 77.7, -123.4, 370, 1000.5]) {
+        var t:Shape = new Shape();
+        addChild(t);
+        t.rotationY = d;
+        var u:Shape = new Shape();
+        addChild(u);
+        u.rotationX = d;
+        u.rotationZ = d / 3;
+        trace(d, t.transform.matrix3D.rawData.slice(0, 3), u.transform.matrix3D.rawData.slice(0, 11));
+      }
+
+      // Infinite scales: their columns infinite where the rotation's is 1, NaN elsewhere, and an
+      // object with a NaN in its matrix not drawn.
+      var w:Sprite = box(300, 300);
+      w.z = 0;
+      w.scaleX = Infinity;
+      trace("infinite", w.transform.matrix3D.rawData, w.scaleX);
+      w.scaleY = -Infinity;
+      trace("infinite", w.transform.matrix3D.rawData, w.scaleY);
+      var v:Sprite = box(400, 300);
+      v.z = 0;
+      v.scaleZ = Infinity;
+      trace("infinite", v.transform.matrix3D.rawData, v.scaleZ);
     }
   }
 }

@@ -3211,8 +3211,11 @@ values too, and is taken apart as `decompose` takes it; one that is
 another object's is ArgumentError 2189, until that object lets it go
 (set to null or another). A position set moves it alone, and a scale or
 rotation set makes it again from all the properties, translation ×
-rotation about x, then y, then z × scale. Each of these setters is a
-touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
+rotation about x, then y, then z × scale, the angles' sines and cosines
+taken of float32 radians, as adl's are to the last bit, and the
+translation put in its column, so an infinite scale's column is infinite
+where the rotation's is 1 and NaN elsewhere; an object with a NaN in its
+matrix is not drawn. Each of these setters is a touch. A `PerspectiveProjection` of its own measures 500 pixels wide;
 one a transform gives reads and writes its object's, as Flash's does,
 which keeps the field of view in radians, the stage's 500 wide and the
 others' as wide as the stage; the stage and each SWF's root always have

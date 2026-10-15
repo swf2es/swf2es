@@ -625,8 +625,9 @@ export class DisplayObject {
       space[key] = space.composed ? kept : Math.fround(kept);
     }
 
-    const radians = [space.rotationX, space.rotationY, space.rotationZ].map(
-      (r) => (r * Math.PI) / 180,
+    // In float32 radians, as adl's sines and cosines of them are, to the last bit.
+    const radians = [space.rotationX, space.rotationY, space.rotationZ].map((r) =>
+      Math.fround((r * Math.PI) / 180),
     );
     // In place: a Matrix3D a script holds of it shows the change (transform.matrix3D).
     space.raw.set(

@@ -189,7 +189,14 @@ export function placedInPerspective(o: DisplayObject): Projective {
 
   const projector = projectorOf(o) as DisplayObject;
   const up = parent === projector ? null : toSpace(parent, projector);
-  const own = planeOf(projector, up ? multiply(up, own3D(o)) : own3D(o));
+  const m = up ? multiply(up, own3D(o)) : own3D(o);
+  // A NaN anywhere, as an infinite scale's column has, goes into all of Flash's projection, which
+  // then draws nothing: the plane's z column alone would leave it out.
+  if (m.some(Number.isNaN)) {
+    m.fill(Number.NaN);
+  }
+
+  const own = planeOf(projector, m);
   if (!up) {
     return own;
   }
