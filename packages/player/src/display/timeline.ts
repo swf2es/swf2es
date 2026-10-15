@@ -9,6 +9,7 @@ import {
   type Font,
   type Font4,
   type FontName,
+  isAs3,
   isBitmapTag,
   type MorphShape,
   type Place,
@@ -379,6 +380,7 @@ function timelineOf(
   frameCount: number,
   library: Map<number, Character>,
   jpeg: { tables: Uint8Array | null },
+  avm1: boolean,
 ): Timeline {
   const frames: FrameCommand[][] = [[]];
   const frameLabels = new Map<number, string>();
@@ -459,7 +461,7 @@ function timelineOf(
         library.set(sprite.id, {
           type: "sprite",
           id: sprite.id,
-          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg),
+          timeline: timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, avm1),
           grid: null,
         });
         break;
@@ -571,10 +573,17 @@ function timelineOf(
     }
   }
 
-  // The frames after the last ShowFrame hold nothing; a timeline has as many as its header says.
-  frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
-  while (frames.length < (frameCount || 1)) {
-    frames.push([]);
+  // The frames after the last ShowFrame hold nothing. An AVM1 timeline has
+  // as many as its ShowFrame tags end, whatever its header says, as Flash
+  // plays and loops one (the corpus's looping_real_*); an AS3 one as many
+  // as its header says.
+  if (avm1) {
+    frames.length = Math.max(1, frames.length - 1);
+  } else {
+    frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
+    while (frames.length < (frameCount || 1)) {
+      frames.push([]);
+    }
   }
 
   // Scene data counts frames from 0; a frame name from 1, as scripts do.
@@ -601,7 +610,14 @@ function timelineOf(
 /** The characters a SWF defines, and its root timeline. */
 export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
-  const root = timelineOf(swf.bytes, swf.tags, swf.frameCount, characters, { tables: null });
+  const root = timelineOf(
+    swf.bytes,
+    swf.tags,
+    swf.frameCount,
+    characters,
+    { tables: null },
+    !isAs3(swf),
+  );
   const fonts = new FontSet();
   for (const c of characters.values()) {
     if (c.type === "font") {
