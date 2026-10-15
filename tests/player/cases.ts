@@ -5306,11 +5306,12 @@ export const cases: PlayerCase[] = [
     frames: 2,
     capture: [1, 2],
     // The textures are adl's to a level where flat or smoothed, and to the texel but at a few
-    // pixels where a perspective puts a pixel's corner on a texel's edge. The rest are edges:
-    // adl covers a 45° edge's pixel with 10 of its 16 samples where the page takes 6, and
-    // strokes' ends and joins, as in the other cases.
+    // pixels where a perspective puts a pixel's corner exactly on a texel's edge, which adl's
+    // fixed point rounds either way. The rest are edges: adl covers a 45° edge's pixel with 10
+    // of its 16 samples where the page takes 6, as it does a path's fill, and strokes' ends and
+    // joins, as in the other cases: some 680.
     tolerance: 32,
-    maxOutliers: 760,
+    maxOutliers: 700,
   },
   {
     name: "draw-triangles-culling",
