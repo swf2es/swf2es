@@ -199,3 +199,34 @@ undefined
 kept
 undefined
 kept
+object
+kept
+undefined
+kept
+b
+undefined
+1
+a
+kept
+-- more names
+İ
+ΑΣ
+undefined
+undefined
+ა
+undefined
+true
+false
+object
+root's
+root's
+[type Function]
+global's
+undefined
+4
+2
+4
+3
+0 
+true
+yes

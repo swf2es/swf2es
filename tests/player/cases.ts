@@ -2584,6 +2584,60 @@ function avm1Objects(version: number): Uint8Array {
         traceOf(member(initObject(["a", lit(1)], ["b", lit(2)], ["a", lit(3)]), "a")),
         (a) => a.push("kept", -1).op("InitObject").op("TypeOf").trace().trace(),
         (a) => a.push("kept", -1).op("InitArray").op("TypeOf").trace().trace(),
+        // Counts are truncated: -0.5 is 0, NaN none, 1.7 pairs one.
+        (a) => a.push("kept", -0.5).op("InitObject").op("TypeOf").trace().trace(),
+        (a) => a.push("kept", Number.NaN).op("InitArray").op("TypeOf").trace().trace(),
+        (a) => a.push("kept", "a", 1, "b", 2, 1.7).op("InitObject").op("Enumerate2"),
+        (a) => a.trace().trace().trace().trace().trace(),
+      ),
+      // Flash's lower case, ASSetPropFlags' bits as an int's low 16, and paths' first steps.
+      block(
+        note("-- more names"),
+        ...(v6
+          ? (
+              [
+                ["İ", "i"],
+                ["ΑΣ", "ασ"],
+                ["xς", "XΣ"],
+                ["ß", "ẞ"],
+                ["ა", "Ⴀ"],
+                ["ɐ", "Ɐ"],
+              ] as const
+            ).map(([stored, asked]) => traceOf(member(initObject([stored, lit(stored)]), asked)))
+          : []),
+        setVar("h", initObject(["v", lit(1)])),
+        drop(callFunction("ASSetPropFlags", getVar("h"), lit("v"), lit(65537))),
+        traceOf(op("Delete", getVar("h"), lit("v"))),
+        setVar("h", initObject(["v", lit(1)])),
+        drop(callFunction("ASSetPropFlags", getVar("h"), lit("v"), lit(-65534))),
+        traceOf(op("Delete", getVar("h"), lit("v"))),
+        setVar("h", initObject()),
+        setMember(getVar("h"), "__resolve", getVar("Object")),
+        drop(callFunction("ASSetPropFlags", getVar("h"), lit("__resolve"), lit(0x4000))),
+        traceOf(op("TypeOf", member(getVar("h"), "missing"))),
+        setVar("px", lit("root's")),
+        traceOf(getVar("_ROOT.px")),
+        traceOf(getVar("THIS.px")),
+        traceOf(getVar("_global.ASSetPropFlags")),
+        setVar("_global.pg", lit("global's")),
+        traceOf(member(getVar("_global"), "pg")),
+        setVar("this.pt", lit(1)),
+        traceOf(getVar("pt")),
+        // An array's indices: up to SWF 6 the digits before anything else; its length by case.
+        ...["3abc", "1.9", " +3", "4294967298"].flatMap((name) => [
+          setVar("ar", initArray(lit("x"))),
+          setMember(getVar("ar"), name, lit(1)),
+          traceOf(member(getVar("ar"), "length")),
+        ]),
+        setVar("ar", initArray(lit("x"), lit("y"), lit("z"))),
+        setMember(getVar("ar"), "LENGTH", lit(1)),
+        keysOf(getVar("ar")),
+        // A __PROTO__ where __proto__ was deleted.
+        setVar("pr", initObject()),
+        drop(callFunction("ASSetPropFlags", getVar("pr"), lit("__proto__"), lit(0), lit(2))),
+        traceOf(op("Delete", getVar("pr"), lit("__proto__"))),
+        setMember(getVar("pr"), "__PROTO__", initObject(["inherited", lit("yes")])),
+        traceOf(member(getVar("pr"), "inherited")),
       ),
       w.showFrame(),
       w.end(),

@@ -457,12 +457,17 @@ that introduced it). Lookups take the calling SWF's case sensitivity, so
 a SWF 6 and a SWF 7 that share an object each find names as their version
 does: a SWF from 7 asks the `Map` for the exact name and nothing else; a
 SWF up to 6 asks for the exact name first, as code mostly spells a name
-one way, and on a miss an index of the names folded to lower case, which
-the object builds the first time such a lookup misses and keeps up to
-date from then on, so an object only SWF 7 code touches never has one.
-Folding is ASCII's and JavaScript's lower case beyond it (adl folds `É`
-and `Ж`), cached by name. Where two spellings of a name exist (set by
-SWF 7 code), a SWF 6 finds the exact one, else the first added. Within
+one way, then the name folded to lower case, and on a miss an index of
+the names that folding changes (`Beta`, not `alpha`), which the object
+builds the first time such a lookup misses and keeps up to date from then
+on, so an object only SWF 7 code touches never has one, and one whose
+names are all lower case has none. Folding is Flash's lower case, code
+unit by code unit (`lowercase.ts`), cached by name: not JavaScript's, as
+adl folds `İ` to `i` and `Σ` to `σ` alone, and leaves `ẞ`, Cherokee,
+Glagolitic and the later Latin letters as they are; adl's names fold as
+its `String.toLowerCase` does, which gave the table. Where two spellings
+of a name exist (set by SWF 7 code), a SWF 6 finds the exact one, else
+the lower-case one, else the first added. Within
 one SWF, an object made by a SWF 6 and read by a SWF 7 behaves so by
 construction; adl's harness runs one SWF, so that is not checked against
 it yet (step 15 brings `loadMovie`).
@@ -479,7 +484,7 @@ walk stops after 255 prototypes, as Ruffle's does.
 version sees along the chain, calling its getter with the receiver as
 `this`; where none has it, the first `__resolve` on the chain that holds
 an object is called with the name (a primitive one is skipped, an object
-that is no function gives undefined). Until some object has had a
+that is no function gives undefined), whatever version bits it has. Until some object has had a
 property named `__resolve`, a miss skips that second walk. `set` calls the
 object's watcher of the name first, whose result is the value set; then a
 property of the object's own takes it (its setter called, the value kept
@@ -515,11 +520,16 @@ where it is not what Ruffle does:
   `constructor` included. The version bits hide a property as Ruffle's
   masks have it: 0x80 from SWF 5, 0x100 from SWF 6 alone, 0x400 from 5
   and 6, 0x1000 up to 7, 0x2000 up to 8, 0x4000 up to 9; 0x200 and 0x8000
-  hide nothing. A set shows the property again, but a SWF 6's set leaves
+  hide nothing. `set` and `clear` are ints whose low 16 bits are taken
+  (65537 is 1, -1 is 0xffff, NaN 0). A set shows the property again, but a SWF 6's set leaves
   0x400, so the property stays hidden from it. `hasOwnProperty` is false
   for a property with 0x100, in every version. Bit 0x800 hangs adl's
   script; `ASSetPropFlags` on an array, by name or with null, empties it
-  (its length 0): neither is reproduced.
+  (its length 0): neither is reproduced. Nor is what version bits on
+  `__proto__` do to the walk up it, which adl has its own way: a SWF 5
+  stops at any bit that hides from it, a SWF 6 only at 0x400, a later
+  SWF at none, though `o.__proto__` itself is hidden as any property is
+  (adl hangs on a cycle of prototypes, where swf2es stops after 255).
 - `addProperty` takes a function as getter and a function or null as
   setter (null: read only), and gives false for anything else, an object
   that is no function included (Ruffle takes any object). The property is
@@ -533,7 +543,14 @@ where it is not what Ruffle does:
   enum and don't delete) before its `__proto__`, in every version; `new`
   gives `__proto__`, then `constructor` up to SWF 6, then
   `__constructor__`, both deletable (Ruffle: none on InitObject's, and
-  `__constructor__` first).
+  `__constructor__` first). InitObject's and InitArray's count is
+  truncated, then taken where it is from 0 to 2^31 - 1: -0.5 makes an
+  empty one, NaN, -1 and 2^31 undefined, popping nothing; 1.7 pairs are 1.
+- A set of an index past an array's `length` grows it: up to SWF 6 a
+  name's leading spaces, sign and digits are its index whatever follows
+  (`3abc` is 3, `1.9` is 1), from SWF 7 only alone; the digits wrap to 32
+  bits (`4294967298` is 2). Up to SWF 6, `LENGTH` is `length`, and a
+  `__PROTO__` set on an object without `__proto__` is its prototype.
 - `NaN` and `Infinity` are getters on `_global` that give undefined to a
   SWF 4, so its `x == NaN` is `x == 0`; Flash's own globals leave a
   variable `o`, null.
@@ -552,9 +569,9 @@ function gives undefined, as in Flash.
 Performance: a property read is a `Map` lookup per prototype walked, with
 no allocation for an object or a primitive; a SWF up to 6 pays a second
 lookup only on a miss of the exact spelling. Measured in node, a read of
-an own property takes about 5 to 10 ns, one of `Object.prototype`'s
-methods 15 ns, a miss 15 to 20 ns, and a root variable 15 ns, a global
-one 30 to 40 ns. Inline caches at the GetMember and GetVariable sites, as
+an own property takes about 5 to 7 ns, one of `Object.prototype`'s
+methods 12 ns (22 in a SWF 6, which folds the name), a miss 12 to 21 ns,
+a root variable 11 to 16 ns and a global one 28 to 38 ns. Inline caches at the GetMember and GetVariable sites, as
 AVM2's untyped lookups have, are left for later: AVM1 objects have no
 shapes to key a cache on, so a site's cache would hold an object and a
 property and need invalidating as properties are added and deleted along
@@ -600,7 +617,13 @@ without a path walks the scope chain, top down, and is read from the
 first scope object that has it on its chain; a name none has is `_root`,
 `_parent`, `_global` (from SWF 6) or `_levelN`, else undefined: a
 variable is never resolved by `__resolve`. `this` is the activation's
-`this`, case-insensitively in SWF 6 (and SWF 5 outside a function). A
+`this`, case-insensitively in SWF 6 (and SWF 5 outside a function), and
+so is a path's first step (with `_root`, and `_global` from SWF 6),
+though a SetVariable path takes no `this`: adl sets nothing for
+`this.x`. adl keeps a frame's `this` as a variable that `Delete2` can
+remove, after which a SetVariable of `this` makes a property of the clip;
+that is not reproduced. A slash path without a variable (`/a/b`) names a
+clip in adl, never another object, which waits for step 10. A
 variable set without a path goes where the chain has it, else on the
 target's clip; `DefineLocal` and `DefineLocal2` define it on the top
 scope, which at a frame's level is the clip. A clip's properties

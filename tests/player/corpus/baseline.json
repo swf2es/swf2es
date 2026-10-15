@@ -529,7 +529,7 @@
   "avm1/swf5_no_closure": {"matched":0,"lines":20,"traced":0,"error":"Avm1NotYet: DefineFunction"},
   "avm1/swf5_to_6_cross_call": {"matched":0,"lines":30,"traced":0,"error":"Avm1NotYet: DefineFunction"},
   "avm1/swf5_xml_event_handler_context": {"matched":0,"lines":2,"traced":0,"error":"Avm1NotYet: GetUrl2"},
-  "avm1/swf6_case_insensitive": {"matched":16,"lines":43,"traced":39,"error":"Avm1NotYet: StoreRegister"},
+  "avm1/swf6_case_insensitive": {"matched":22,"lines":43,"traced":39,"error":"Avm1NotYet: StoreRegister"},
   "avm1/swf6_global_funcs": {"matched":0,"lines":232,"traced":0,"error":"Avm1NotYet: StoreRegister"},
   "avm1/swf6_string_as_bool": {"matched":15,"lines":15,"traced":15,"error":null},
   "avm1/swf6_to_5_cross_call": {"matched":0,"lines":30,"traced":0,"error":"Avm1NotYet: DefineFunction2"},

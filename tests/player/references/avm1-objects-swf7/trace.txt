@@ -199,3 +199,34 @@ undefined
 kept
 undefined
 kept
+object
+kept
+undefined
+kept
+b
+undefined
+1
+a
+kept
+-- more names
+undefined
+undefined
+undefined
+undefined
+undefined
+undefined
+true
+false
+object
+undefined
+undefined
+[type Function]
+global's
+undefined
+1
+1
+4
+3
+LENGTH 2 1 0 
+true
+undefined
