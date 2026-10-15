@@ -489,14 +489,17 @@ cases), where it is not what Ruffle does, which runs each body as an
 activation of its own:
 
 - A With's object, a primitive boxed, is above the chain while control
-  is in its body, and for one action past it: the first action control
-  reaches outside the body, by a jump or running off its end, still runs
-  in the object's scope, and then it comes off. So `with (o) { ... }`
-  followed at once by a function's definition gives the function `o` in
-  the chain it closes over, and a GetVariable that is the first action
-  past a body finds `o`'s properties. A jump back before the `With` finds
-  the scope for that action only, and a jump into a body from outside
-  finds none.
+  is in its body and at the first action past it, which control reaches
+  by running off the body's end or by a jump to it, and comes off after
+  that action. So `with (o) { ... }` followed at once by a function's
+  definition gives the function `o` in the chain it closes over, and a
+  GetVariable that is the first action past a body finds `o`'s
+  properties. Control going anywhere else, by a jump forward past that
+  action or back before the `With`, takes the scope off at once, and a
+  jump into a body from outside finds none; a branch at that first action
+  back into the body keeps it. adl looks only at the scope on top: a With
+  that is the first action past a body puts its object over the scope,
+  which stays under it until both come off past the second body.
 - A With is skipped, as `with (undefined)` is, where the scope chain
   already holds 15 scopes, `_global` and the clip included: 13 Withs one
   in another in a frame's code, 12 in a function's from SWF 6 (its
@@ -511,10 +514,13 @@ activation of its own:
   one of the name is unchanged, a function defined in the catch closes
   over it, and the name is taken as it is, never as a path. A catch into
   a register sets a DefineFunction2's own, else one of the movie's four,
-  else none, as StoreRegister does. A throw in a With's body, caught by a
-  catch outside it, keeps the With's object over the catch body, under
-  the variable's; a catch that throws again keeps them over the next
-  catch's.
+  else none, as StoreRegister does. A throw in a With's body, or at the
+  first action past it, caught by a catch outside it, keeps the With's
+  object over the catch body, under the variable's, whether the catch
+  takes a variable or a register; a catch that throws again keeps them
+  over the next catch's. A finally reached by a throw or a `Return` keeps
+  a scope only as a jump there would, for its first action where that is
+  the first past the scope's body.
 - A throw cuts the operand stack back to its height as the `Try` ran, as
   Ruffle does, landing in a catch or a finally; a value nothing catches
   leaves the stack as it is.
@@ -1154,7 +1160,7 @@ determinism` green, and the corpus baseline may only go up.
    case for a jump out of a `with` body and back before its start.
    Built: With and Try bodies as ranges of a region's blocks, held on the
    activation (`control.ts`), not regions; the limit of 15 scopes; the
-   scope one action late; a catch's variable as its body's own scope; the
+   scope over the first action past its body; a catch's variable as its body's own scope; the
    finally after a throw or a Return; `Error` as far as `Throw` needs it.
    What adl showed is under "With and Try". The `avm1-control-swf5` to
    `-swf10` cases trace some 190 lines each in adl, which the player

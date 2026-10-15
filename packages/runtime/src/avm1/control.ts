@@ -11,11 +11,15 @@
 // control leaves it. Where control goes is a block of the region, -1 for
 // its exit, whose value is `cx.ret`.
 //
-// What adl shows of when they come off: a scope one action late, so the
-// first action past a body still runs in it (V.scopes, after that action),
-// a Try's handlers and a finally's throw or Return at once (V.leave, as
-// control goes); a throw in a With body caught by a catch outside it keeps
-// the With's object, and any catch's variable, over the catch body.
+// What adl shows of when they come off: a scope holds over its body's
+// bytes and the first action past them, where control runs off the body's
+// end or jumps, and comes off as control goes anywhere else (V.leave), or
+// after that action (V.scopes); only the scope on top is looked at, so one
+// a With pushes as that action keeps the one under it until both come off.
+// A Try's handlers and a finally's throw or Return come off at once
+// (V.leave, as control goes). A throw caught by a catch keeps every scope
+// over the catch body; a finally reached by a throw or a Return keeps them
+// only as control's going there keeps them.
 import type { Activation } from "./activation.js";
 import { Avm1Throw } from "./errors.js";
 import { Avm1Object } from "./objects.js";
@@ -46,7 +50,14 @@ export class Held {
   holds(block: number): boolean {
     return this.from <= block && block < this.to;
   }
+
+  /** Whether a scope holds as control goes to `block`: one of its body's, or the first past it. */
+  admits(block: number): boolean {
+    return this.from <= block && block <= this.to;
+  }
 }
+
+const isScope = (h: Held): boolean => h.kind === HELD_Scope;
 
 /** A scope: the chain it made, and the chain under it, which it gives back as it comes off. */
 class ScopeHeld extends Held {
@@ -126,6 +137,21 @@ function keepFrom(cx: Activation, held: Held[], from: number, keep: (h: Held) =>
   }
 }
 
+/**
+ * Control going to the start of block `at`: the scopes on top that do not
+ * hold there come off at once, as adl looks only at the top one.
+ */
+function reach(cx: Activation, held: Held[], at: number): void {
+  let n = held.length;
+  while (n > 0 && held[n - 1].kind === HELD_Scope && !held[n - 1].admits(at)) {
+    n--;
+  }
+
+  if (n < held.length) {
+    keepFrom(cx, held, n, () => false);
+  }
+}
+
 function cut(st: Value[], height: number): void {
   if (st.length > height) {
     st.length = height;
@@ -189,11 +215,11 @@ export function caught(cx: Activation, error: unknown, at: number): number {
     }
 
     if (at < h.catchFrom && h.catchAt !== NO_CATCH) {
-      // The scopes that hold where it was thrown hold over the catch body
-      // too, under its variable's (adl).
+      // The scopes where it was thrown hold over the catch body too, under
+      // its variable's (adl).
       const from = h.catchFrom;
       const to = h.finallyFrom;
-      keepFrom(cx, held, i + 1, (s) => s instanceof ScopeHeld && s.holds(at));
+      keepFrom(cx, held, i + 1, isScope);
       for (let j = i + 1; j < held.length; j++) {
         held[j].from = from;
         held[j].to = to;
@@ -214,9 +240,11 @@ export function caught(cx: Activation, error: unknown, at: number): number {
     }
 
     if (h.finallyFrom < h.finallyTo) {
-      keepFrom(cx, held, i, () => false);
+      // The finally's mark goes under the scopes, which come off as control goes there.
+      held[i] = new Held(HELD_Thrown, h.finallyFrom, h.finallyTo, error.value);
+      keepFrom(cx, held, i + 1, isScope);
       cut(cx.st, h.height);
-      held.push(new Held(HELD_Thrown, h.finallyFrom, h.finallyTo, error.value));
+      reach(cx, held, h.finallyFrom);
       return h.finallyFrom;
     }
   }
@@ -228,7 +256,8 @@ export function caught(cx: Activation, error: unknown, at: number): number {
  * Control going to block `to` (-1: the exit) across the bounds of a body:
  * the Trys that do not hold over it come off, and a finally that a throw
  * or a Return reached throws or returns as control leaves it, even by a
- * jump. Scopes come off after the first action there (V.scopes).
+ * jump. The scopes on top that do not hold there come off; those whose
+ * body it is the first block past, after its first action (V.scopes).
  */
 export function leave(cx: Activation, to: number): number {
   const held = cx.held;
@@ -256,6 +285,8 @@ export function leave(cx: Activation, to: number): number {
 
   if (to < 0) {
     cx.ret = undefined;
+  } else if (held !== null) {
+    reach(cx, held, to);
   }
 
   return to;
@@ -295,8 +326,9 @@ export function returned(cx: Activation): number {
         const value = st.pop();
         cut(st, h.height);
         st.push(value);
-        keepFrom(cx, held, i, () => false);
-        held.push(new Held(HELD_Returned, h.finallyFrom, h.finallyTo));
+        held[i] = new Held(HELD_Returned, h.finallyFrom, h.finallyTo);
+        keepFrom(cx, held, i + 1, isScope);
+        reach(cx, held, h.finallyFrom);
         return h.finallyFrom;
       }
     }

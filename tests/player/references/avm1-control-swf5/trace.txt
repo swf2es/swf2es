@@ -42,6 +42,24 @@ undefined
 left 13
 undefined
 1 deep: 1
+-- with: where control goes past a body
+undefined
+set x
+undefined
+undefined
+set x
+set x
+undefined
+set x
+set x
+undefined
+set x
+set x
+undefined
+undefined
+set x
+undefined
+returned
 -- with: functions
 set x
 local

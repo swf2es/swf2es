@@ -179,7 +179,10 @@ export interface Operations {
    * for the exit; a register catch's value is `cx.thrown`, into `cx.into`.
    */
   caught(cx: Activation, error: unknown, at: number): number;
-  /** Where control goes on its way to block `to` (-1: the exit) out of a Try's or finally's body. */
+  /**
+   * Where control goes on its way to block `to` (-1: the exit) out of a
+   * Try's, a finally's or a scope's body.
+   */
   leave(cx: Activation, to: number): number;
   /** After the first action of block `at`, reached from a body: the scopes that do not hold over it come off. */
   scopes(cx: Activation, at: number): void;

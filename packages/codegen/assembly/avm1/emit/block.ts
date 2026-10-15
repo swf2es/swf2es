@@ -53,9 +53,9 @@ export class BlockEmitter {
    */
   private handled: i32[] = [];
   /**
-   * The ranges that scopes hold over, With and catch bodies: the first
-   * action control reaches past one runs in them, then V.scopes takes them
-   * off, so the blocks such an edge reaches are `late`.
+   * The ranges that scopes hold over, With and catch bodies, and the first
+   * action past each: control going anywhere else goes through V.leave,
+   * and the block past one is `late`, V.scopes after its first action.
    */
   private scoped: i32[] = [];
   private late: bool[] = [];
@@ -213,59 +213,16 @@ export class BlockEmitter {
       return;
     }
 
-    // The blocks an edge out of a scope's range reaches, where its scopes hold for an action.
+    // The block past each scope's body, whose first action runs in it.
     const n = region.blocks.length;
     for (let k = 0; k < n; k++) {
       late.push(false);
     }
 
-    for (let k = 0; k < n; k++) {
-      const action = actions.actions[region.order[region.blockFirst[k + 1] - 1]];
-      if (action.error !== ERROR_None) {
-        continue;
+    for (let i = 1; i < scoped.length; i += 2) {
+      if (scoped[i] < n) {
+        late[scoped[i]] = true;
       }
-
-      if (branches(action)) {
-        this.lateAt(region, k, action.target);
-      }
-
-      if (fallsThrough(action)) {
-        this.lateAt(region, k, fallsTo(action));
-      }
-
-      if (action.opcode === ops.OP_With) {
-        this.lateAt(region, k, action.next);
-      }
-    }
-
-    // An empty With body's first action past it, and a catch's landing past an empty catch body.
-    for (let i = 0; i < region.actions.length; i++) {
-      const action = actions.actions[region.actions[i]];
-      if (action.error !== ERROR_None || !region.runs(action.s1)) {
-        continue;
-      }
-
-      const empty =
-        action.opcode === ops.OP_With
-          ? firstFrom(region, action.s0) === firstFrom(region, action.s1)
-          : action.opcode === ops.OP_Try &&
-            (<u32>action.a & ops.TRY_Catch) !== 0 &&
-            firstFrom(region, action.s1) === firstFrom(region, action.s2);
-      if (empty) {
-        late[region.blockAt(action.s1)] = true;
-      }
-    }
-  }
-
-  /** Marks the block at `offset` late where control from block `from` leaves a scope's range for it. */
-  private lateAt(region: Region, from: i32, offset: i32): void {
-    if (!region.runs(offset)) {
-      return;
-    }
-
-    const to = region.blockAt(offset);
-    if (leaves(this.scoped, from, to)) {
-      this.late[to] = true;
     }
   }
 
@@ -298,15 +255,20 @@ export class BlockEmitter {
     const out = this.out;
     const first = region.blockFirst[k];
     const last = region.blockFirst[k + 1] - 1;
-    // A late block's first action runs in the scopes control left, then they come off,
-    // before an action that leaves the block or opens a body.
+    // A late block's first action runs in the scopes whose body it is past, which come off
+    // after it, as control goes on in the block. A With there pushes its object over them, and
+    // they come off with it (adl); a Try's handlers go over them once they are off.
     let late = this.holds && this.late[k];
     for (let i = first; i <= last; i++) {
       const index = region.order[i];
       const action = actions.actions[index];
-      if (late && controls(action)) {
-        this.scopes(k);
-        late = false;
+      if (late && action.error === ERROR_None) {
+        if (action.opcode === ops.OP_Try) {
+          this.scopes(k);
+          late = false;
+        } else if (action.opcode === ops.OP_With || !fallsThrough(action)) {
+          late = false;
+        }
       }
 
       this.action(actions, region, action, pool);
@@ -775,7 +737,7 @@ export class BlockEmitter {
     }
 
     const to = region.blockAt(offset);
-    if (leaves(this.handled, this.k, to)) {
+    if (leaves(this.handled, this.k, to) || crosses(this.scoped, this.k, to)) {
       out.text("b = V.leave(cx, ");
       out.uint(to);
       out.text("); continue;");
@@ -963,15 +925,17 @@ function leaves(ranges: i32[], from: i32, to: i32): bool {
 }
 
 /**
- * Whether the action ends its block, branches or opens a body: a late
- * block's scopes come off before it rather than after.
+ * Whether control from block `from` to block `to` leaves one of the scopes'
+ * `ranges`, which hold over the first block past them too, as it starts.
  */
-function controls(action: Action): bool {
-  if (!fallsThrough(action) || branches(action)) {
-    return true;
+function crosses(ranges: i32[], from: i32, to: i32): bool {
+  for (let i = 0; i < ranges.length; i += 2) {
+    if (ranges[i] <= from && from <= ranges[i + 1] && !(ranges[i] <= to && to <= ranges[i + 1])) {
+      return true;
+    }
   }
 
-  return action.opcode === ops.OP_With || action.opcode === ops.OP_Try;
+  return false;
 }
 
 /** Whether block `k` is in one of `ranges`, `from` and `to` (excluded) in pairs. */

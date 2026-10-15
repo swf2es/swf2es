@@ -39,6 +39,24 @@ set x
 13 deep: 13
 left 13
 12
+-- with: where control goes past a body
+undefined
+set x
+undefined
+undefined
+set x
+set x
+undefined
+set x
+set x
+undefined
+set x
+set x
+undefined
+undefined
+set x
+undefined
+returned
 -- with: functions
 set x
 local

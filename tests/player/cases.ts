@@ -3576,6 +3576,10 @@ function avm1Control(version: number): Uint8Array {
   const finallyOut = label();
   const finallyOut2 = label();
   const returnOut = label();
+  const pastOut = label();
+  const pastEnd = label();
+  const pastBack = label();
+  const pastDone = label();
   const i = getVar("i");
   return w.swf({
     version,
@@ -3656,6 +3660,108 @@ function avm1Control(version: number): Uint8Array {
         withNest(13),
         defineFn("full", [], traceOf(getVar("v")), withNest(1)),
         drop(callFunction("full")),
+        note("-- with: where control goes past a body"),
+        // Only the first action past a body runs in its scope: one a jump reaches does not.
+        withDo(
+          getVar("o"),
+          code((a) => a.push("x")),
+          goTo(pastOut),
+        ),
+        note("not run"),
+        at(pastOut),
+        code((a) => a.op("GetVariable").trace()),
+        withDo(
+          getVar("o"),
+          code((a) => a.push("x")),
+          goTo(pastEnd),
+        ),
+        at(pastEnd),
+        code((a) => a.op("GetVariable").trace()),
+        // A jump back before the With finds no scope.
+        setVar("i", lit(0)),
+        code((a) => a.push("x")),
+        at(pastBack),
+        code((a) => a.op("GetVariable").trace()),
+        setVar("i", op("Increment", i)),
+        code((a) => a.push("i").op("GetVariable").push(2).op("Less2").op("Not").if(pastDone)),
+        withDo(
+          getVar("o"),
+          code((a) => a.push("x")),
+          goTo(pastBack),
+        ),
+        at(pastDone),
+        // A With as the first action past a body keeps that scope under its own, and both come
+        // off together; a jump from there back into the body keeps it too.
+        setVar("p", initObject(["q", lit("pq")])),
+        withDo(
+          getVar("o"),
+          code((a) => a.push("p").op("GetVariable")),
+        ),
+        withDo(
+          code((a) => a),
+          traceOf(getVar("x")),
+          code((a) => a.push("x")),
+        ),
+        code((a) => a.op("GetVariable").trace()),
+        traceOf(getVar("x")),
+        setVar("i", lit(0)),
+        code((a) => {
+          const body = label();
+          const end = label();
+          a.push("o").op("GetVariable").with(end).label(body);
+          a.push("x").op("GetVariable").trace();
+          a.push("i", "i").op("GetVariable").op("Increment").op("SetVariable");
+          return a.push("i").op("GetVariable").push(2).op("Less2").label(end).if(body);
+        }),
+        traceOf(getVar("x")),
+        // A throw as the first action past a body keeps its scope over the catch body; a finally
+        // reached by a throw or a Return keeps a scope only for its first action, and only where
+        // that is the first action past the scope's body.
+        tryDo(
+          "e",
+          [
+            withDo(
+              getVar("o"),
+              code((a) => a.push("t")),
+            ),
+            code((a) => a.op("Throw")),
+          ],
+          [traceOf(getVar("x"))],
+          null,
+        ),
+        tryDo(
+          "e",
+          [
+            code((a) => a.push("x")),
+            tryDo("i", [withDo(getVar("o"), throwOf(lit(1)))], null, [
+              code((a) => a.op("GetVariable").trace()),
+              traceOf(getVar("x")),
+            ]),
+          ],
+          [],
+          null,
+        ),
+        tryDo(
+          "e",
+          [
+            code((a) => a.push("x")),
+            tryDo("i", [withDo(getVar("o"), throwOf(lit(1))), note("not run")], null, [
+              code((a) => a.op("GetVariable").trace()),
+            ]),
+          ],
+          [],
+          null,
+        ),
+        defineFn(
+          "pastReturn",
+          [],
+          tryDo("e", [withDo(getVar("o"), ret(lit("x")))], null, [
+            code((a) => a.op("GetVariable").trace()),
+            traceOf(getVar("x")),
+            code((a) => a.push("returned")),
+          ]),
+        ),
+        traceOf(callFunction("pastReturn")),
         note("-- with: functions"),
         defineFn("g", [], withDo(getVar("o"), ret(getVar("x"))), note("not after return")),
         traceOf(callFunction("g")),
