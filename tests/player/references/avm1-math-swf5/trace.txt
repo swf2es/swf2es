@@ -1,0 +1,23 @@
+consts 2.71828182845905 2.30258509299405 0.693147180559945 0.434294481903252 1.44269504088896 3.14159265358979 0.707106781186548 1.4142135623731
+abs 3.5 NaN NaN 0 0
+min 1 Infinity NaN NaN NaN 1 0 2
+max 2 -Infinity NaN NaN 3 0
+trig 0.841470984807897 0.54030230586814 1.5574077246549 0.523598775598299 1.0471975511966 0.785398163397448 0.463647609000806 NaN NaN
+exp 2.71828182845905 2.30258509299405 1.4142135623731 NaN -Infinity NaN
+round 3 -2 -3 1 0 NaN 9.99999999999999e+299
+floor -2 1 ceil -1 2 0 NaN
+pow 1024 NaN 1 NaN NaN 11.3137084989848
+random true number number
+random action number true 0 0 0 0 0 true
+Math object [object Object] true true
+readonly PI 3.14159265358979
+readonly abs function
+delete false
+call  
+new Math undefined
+typeof fn function function function
+math arity NaN 1 number NaN NaN NaN NaN
+valueOf
+valueOf
+valueOf
+both converted 2 0.841470984807897

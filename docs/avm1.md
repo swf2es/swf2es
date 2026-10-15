@@ -742,10 +742,8 @@ A getter, a setter, a watcher or `__resolve` is a native or a function
 of the SWF's, called with the depth a method call has (a getter's and a
 setter's `super` is their object's prototype's), each under the property
 recursion limit (see "Functions and registers"). The natives so far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`,
-`Function.prototype`'s `call` and `apply`, `Array` and `String` (see
-"Array and String"), `Error` as `Throw`'s values need it, and what
-boxing and the conversions need of `Function`, `Number` and `Boolean`
-(their constructors, `valueOf` and `toString`), which step 9 completes. `CallFunction`,
+`Function.prototype`'s `call` and `apply`, `Error` as `Throw`'s values
+need it, and the classes and functions of "Builtins" below. `CallFunction`,
 `CallMethod`, `NewObject` and `NewMethod` call them; a name that holds no
 function gives undefined, as in Flash.
 
@@ -910,6 +908,95 @@ Flash's own tables (`case.ts`, measured in adl over every code unit), one
 code unit to one. `String.prototype.valueOf` of anything that is no
 String gives it as a string, by its `toString` (Ruffle: undefined),
 `toString` undefined.
+
+### Number, Boolean and Math
+
+Number's and Boolean's methods take `this` unboxed and give undefined for
+anything but their own kind (Number's `valueOf` too, unlike String's);
+`Boolean()` of nothing is undefined. `toString(radix)` from 2 to 36 but 10
+casts the number to an int as Flash casts one where it clamps (x86's
+cast: NaN, the infinities and anything out of range are -2^31), whose
+digits Flash writes as the remainders it takes, each negative:
+`(1e20).toString(16)` is `-(0000000`, NaN's in base 3
+`-/.//./..././/0.0./0.`, adl and the corpus alike. Number's constants are
+read-only, as Math's are.
+
+Math's methods are ASnative(200, i): each converts its first two arguments
+whether it uses them or not, and a SWF up to 6 gets NaN from one given
+fewer than it takes (min and max of none are the infinities); `round` is
+`floor(x + 0.5)`, and min and max take two arguments, NaN from either.
+`pow` is C's, as the corpus's math tests have it: 1 to any power is 1
+(`Math.pow(true)`, NaN's power, is 1 in `math_swf6` to `math_swf8`, Flash
+Player's own traces), and so, by C's rules, is -1 to an infinite one,
+which no test shows, where adl's and JavaScript's are NaN. adl is AIR's
+runtime under Wine, whose pow is not the Flash Player's that recorded the
+corpus: it is also off JavaScript's elsewhere, by a last bit
+(`Math.pow(2, 0.5)`) or from the ninth digit (`Math.pow(1.0000001,
+1e9)`), which the corpus's tests leave to their tolerance. So swf2es
+takes the corpus's special cases and JavaScript's precision, and the
+cases trace no result adl and Flash Player may differ in. RandomNumber (`random(n)`) is an int below its
+max cast as Rust casts one (saturated), 0 for a max below 1; its values and
+Math.random's are JavaScript's generator's, not Flash's.
+
+### Classes
+
+`Extends` gives the subclass a new `prototype` whose prototype is the
+superclass's, with `__constructor__` (hidden from SWF 5) and no
+`constructor` of its own (adl; Ruffle gives one), through a set, which
+leaves a read-only `prototype`: `Object`'s and `Number`'s are (adl), not
+`Function`'s, `Array`'s, `String`'s or `Boolean`'s. `InstanceOf` walks the
+object's prototypes for the class's own stored `prototype` (no getter, a
+primitive one boxed by `_global`'s class), and each prototype's
+interfaces, and theirs; a primitive is no instance. `CastOp` gives the
+object or null, boxing a primitive first for nothing, as Flash does.
+`ImplementsOp` gives the constructor's prototype its interfaces' prototypes
+only the first time, even in a SWF 6 (Ruffle: each time replaces them, from
+SWF 7). A primitive where these take an object, but undefined and null,
+changes nothing and writes Flash's line to the log, `Parameters of
+primitive types are no longer coerced into the required type - Object.`,
+and an object for ImplementsOp's count `Parameters of type Object are no
+longer coerced into the required primitive type - number.`, as adl writes
+them (`inheritance.ts`).
+
+### AsBroadcaster
+
+Flash writes AsBroadcaster in ActionScript, Ruffle in Rust, swf2es in
+TypeScript as adl runs it: `addListener` calls the object's
+`removeListener`, then pushes the listener, so a listener added again comes
+last (Ruffle keeps its place); `removeListener` splices out the first
+listener equal to it by `==`; `broadcastMessage` calls each listener's
+method of the name, or the listener itself for an empty name, with the
+listener as `this`, and gives true, or undefined without listeners or a
+name. From SWF 7 it calls the listeners as they were when it was called;
+up to SWF 6 the array as it is by then, so that a listener another removes
+is not called (Ruffle: by index, a removed one's place skipped).
+`initialize` sets a new `broadcastMessage` each time and AsBroadcaster's
+own `addListener` and `removeListener` on the object, and a new
+`_listeners`, each hidden from SWF 5, as AsBroadcaster's own are.
+
+### The global functions
+
+`escape` writes each byte but a letter or digit as `%XX`, of a SWF 5's
+string its bytes, of a later one's its UTF-8; `unescape` reads them back,
+`+` a space, a `%` before what is no hex digit dropping that character,
+and a SWF 6's bytes as its strings' UTF-8 is read (leniently: `%e9%C3%A9`
+is U+A0E9; Ruffle replaces what is not UTF-8). `parseInt` is Ruffle's,
+which adl agrees with, `parseFloat` the conversions' own; `isNaN` and
+`isFinite` convert by version. `ASnative(category, index)` gives a new
+function of Flash's table each call: 4 ASSetNative and
+ASSetNativeAccessor, 100 escape, unescape, parseInt, parseFloat and trace,
+101 Object's methods, 200 Math's (NaN for an index of none), 252 Array's;
+Date's (103) come with Date. `ASSetNative` and `ASSetNativeAccessor` set
+methods and accessors from it as Ruffle has them, a version before a name
+hiding it from earlier SWFs. `_global.trace` and ASnative(100, 4) write to
+the log, as Flash's authoring tool shows them in its Output panel, where
+the corpus's `asnative` was recorded (its `test.toml` says so); Flash
+Player's `flashlog.txt`, and adl, get nothing from them, unlike the Trace
+action. swf2es writes them, as Ruffle does: the log is for debugging,
+where a line more hides nothing, and content that calls them means them
+to be seen. `getTimer` (GetTime), `setInterval`, `clearInterval` and
+`setTimeout` need the player's clock and frames, and come with step 11;
+`ASconstructor`, which adl has, is left out.
 
 ## The player
 
@@ -1271,7 +1358,11 @@ determinism` green, and the corpus baseline may only go up.
    each in adl, which the player matches. The 21 tests that looped
    forever without Array's methods finish, and the corpus goes from 104
    to 112 of the 649; most of the rest of those reach `InstanceOf` (28),
-   `Extends` (21) and `GetUrl` (34).
+   `Extends` (21) and `GetUrl` (34). 9b `Number`, `Boolean`, `Math`,
+   `AsBroadcaster`, `Extends`, `InstanceOf`, `CastOp`, `ImplementsOp`,
+   `RandomNumber`, the global functions and `ASnative` (see the sections
+   above), whose `avm1-number`, `-math`, `-classes`, `-broadcaster` and
+   `-globals` cases at SWF 5 to 10 adl traces and the player matches.
 10. **Clips and paths.** `MovieClip`'s AS2 face, targets, `SetTarget`,
     `SetTarget2`, path resolution (slash, dot, `_root`, `_levelN`,
     `_parent`), `GetProperty` and `SetProperty` by index, `eval`, timeline

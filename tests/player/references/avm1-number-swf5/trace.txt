@@ -1,0 +1,20 @@
+toString 255 ff 11111111 73 255 255 255 ff ff 255 255
+neg -ff frac 11 -3 big -(0000000 -(0000000 -(0000000 -(0000000
+nan -(0000000 inf -(0000000 -/0000000000000000000000000000000 zero 0 0
+nan10 NaN NaN Infinity
+NaN 3 -/.//./..././/0.0./0.
+MAX 1.79769313486231e+308 MIN 4.94065645841247e-324 NaN NaN -inf -Infinity inf Infinity
+readonly 1.79769313486231e+308
+delete false NaN
+Number() 0 12 NaN 1 0 0 NaN number
+obj object 5 6 5 true false
+new Number() 0
+new Number('7') 7 number
+generic   
+prim call true
+Boolean()  true false false false false boolean
+bool obj object true true true true truthy
+new Boolean() false false false
+bool generic  
+true.toString true false
+num len  bool 

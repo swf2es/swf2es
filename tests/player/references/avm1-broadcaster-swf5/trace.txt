@@ -1,0 +1,23 @@
+init 
+listeners undefined  false
+add    len 
+broadcast 
+broadcast missing 
+broadcast none 
+broadcast undefined 
+remove   len 
+broadcast2 
+broadcast empty 
+prims  
+broadcast prims 
+same fns true true
+bad listeners   
+no listeners  
+statics undefined  0
+new object undefined function 
+abstract eq 
+removed  left 
+bcast in swf function undefined
+first
+second 
+again

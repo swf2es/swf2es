@@ -154,6 +154,13 @@ export function strictlyEquals(a: Value, b: Value): boolean {
 /** ToInt32, as the bitwise actions and ToInteger take a value: NaN and the infinities 0. */
 export const toInt32 = (value: Value, version: number): number => toNumber(value, version) | 0;
 
+/**
+ * A number as Flash casts it to an int where it clamps one (x86's cast):
+ * NaN, the infinities and anything out of range are -2^31.
+ */
+export const clampInt = (n: number): number =>
+  n >= -2147483648 && n <= 2147483647 ? Math.trunc(n) | 0 : -2147483648;
+
 /** The first code unit of a string, an unpaired surrogate as U+FFFD, 0 for none. */
 export function firstCode(s: string): number {
   if (s.length === 0) {

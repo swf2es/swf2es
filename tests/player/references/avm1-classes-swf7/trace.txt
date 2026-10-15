@@ -1,0 +1,70 @@
+B.prototype keys hello __constructor__ __proto__ 
+B.prototype.constructor true __constructor__ true __proto__ true
+A ctor 5
+B ctor
+b.hello A.hello 5
+instanceof true true true false true true
+prim instanceof false false true false
+instanceof non-fn false false false false false
+instanceof obj with prototype true
+fn instanceof true true
+cast true null null null null
+implements true true true true
+cast iface true [object Object]
+inherited iface true true
+implements none true true
+replaced true true
+Parameters of primitive types are no longer coerced into the required type - Object.
+extends 5 object [object Object]
+extends undef object
+A ctor 1
+typeof function object object object object function
+a true false true false
+b true true
+c true true false
+d true
+e false
+f true
+g true true
+h false
+Parameters of primitive types are no longer coerced into the required type - Object.
+i true
+Parameters of primitive types are no longer coerced into the required type - Object.
+j
+Parameters of type Object are no longer coerced into the required primitive type - number.
+k false
+l true
+m done
+n true true
+o cast true null null null null
+1 new P instanceof P true Object true
+2 manual proto true
+3 P2 replaced proto true
+4 P3 chain true true
+5 P.prototype instanceof Object true
+6 {} instanceof Object true
+7 typeof Q.prototype object true
+8 qq.__proto__ == Q.prototype true instanceof true
+9 after member true true
+10 R true
+11 R set again true true
+12 S new Object true
+13 T array true
+extends {} object undefined object
+Parameters of primitive types are no longer coerced into the required type - Object.
+extends prim sub
+extends prim proto object 7
+typeof function function object object function function function function
+f [type Function] [type Function] [type Function] [type Function] len undefined name undefined
+Function [type Function] [type Function] object object true
+Function.prototype [object Object] [type Function] true true true
+call apply 3 7 NaN NaN 11 NaN 15
+instanceof true true true true true
+valueOf true function
+native fn props undefined undefined undefined
+new native object
+new escape object undefined
+new with prim proto object 5
+prototype set Object:kept Function:set Array:set String:set Number:kept Boolean:set AsBroadcaster:set Math:set 
+Object extends true true true
+Number extends true false true

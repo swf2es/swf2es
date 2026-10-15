@@ -31,6 +31,7 @@ import {
   double,
   FunctionFlag,
   register,
+  Simple,
   type SimpleAction,
 } from "./avm1-assembler.ts";
 
@@ -961,8 +962,8 @@ class Parser {
       if (this.is("(") && place?.kind === "var" && place.name === "__op") {
         this.expect("(");
         const name = this.next();
-        if (name.kind !== "str") {
-          throw new Error("__op takes an action's name first");
+        if (name.kind !== "str" || !Object.hasOwn(Simple, name.value)) {
+          throw new Error("__op takes the name of an action without operands first");
         }
 
         const values: Emit[] = [];
@@ -984,7 +985,14 @@ class Parser {
         const args = this.arguments();
         const callee = place;
         const fn = e;
-        if (callee?.kind === "var") {
+        if (callee?.kind === "var" && callee.name === "super") {
+          // super(...) calls the super object, as Flash's compiler writes it.
+          e = (a) => {
+            pushArgs(a, args);
+            this.getVariable(a, "super");
+            a.push(undefined).op("CallMethod");
+          };
+        } else if (callee?.kind === "var") {
           e = (a) => {
             pushArgs(a, args);
             const r = this.register(a, callee.name);

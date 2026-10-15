@@ -27,6 +27,7 @@ import {
   truncate,
   watched,
 } from "../objects.js";
+import { clampInt } from "../operators.js";
 import type { Realm } from "../realm.js";
 import { isPrimitive, stringOf, toNumber, type Value } from "../values.js";
 
@@ -182,8 +183,13 @@ export function arrayClass(realm: Realm): { constr: Avm1Function; proto: Avm1Obj
     constr.define(name, value, 0);
   }
 
-  const define = (name: string, native: Native) =>
+  // ASnative(252, i): Array called as a function, then the methods in the order defined.
+  const table: Native[] = [constr.native];
+  realm.natives.set(252, (i) => table[i] ?? null);
+  const define = (name: string, native: Native) => {
+    table.push(native);
     proto.define(name, realm.method(native), DONT_ENUM | DONT_DELETE);
+  };
 
   const join = (self: Avm1Object, separator: string, version: number): string => {
     const n = lengthOf(self, version);
@@ -491,7 +497,7 @@ export function initArray(
 ): Avm1Object {
   if (args.length === 1 && typeof args[0] === "number") {
     realm.fillArray(self, [], version);
-    setLength(self, toInt(args[0], version), version);
+    setLength(self, clampInt(args[0]), version);
     return self;
   }
 

@@ -8527,7 +8527,7 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
-  ...["array", "string"].flatMap((name) =>
+  ...["array", "string", "number", "math", "classes", "broadcaster", "globals"].flatMap((name) =>
     [5, 6, 7, 8, 10].map(
       (version): PlayerCase => ({
         name: `avm1-${name}-swf${version}`,
