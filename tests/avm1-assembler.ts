@@ -27,11 +27,18 @@ export interface TypedValue {
   value: number;
 }
 
+/** A string pushed as these bytes, for SWF 5's strings, which are bytes, not UTF-8. */
+export interface ByteString {
+  bytes: number[];
+}
+
 /**
  * A value to push: a string, a boolean, null or undefined as themselves, a
  * number as an integer where it is an i32 (but -0) and as a double else.
  */
-export type PushValue = string | number | boolean | null | undefined | TypedValue;
+export type PushValue = string | number | boolean | null | undefined | TypedValue | ByteString;
+
+export const byteString = (...bytes: number[]): ByteString => ({ bytes });
 
 export const float = (value: number): TypedValue => ({ type: PushType.float, value });
 export const double = (value: number): TypedValue => ({ type: PushType.double, value });
@@ -51,16 +58,55 @@ export const Simple = {
   Play: 0x06,
   Stop: 0x07,
   Add: 0x0a,
+  Subtract: 0x0b,
+  Multiply: 0x0c,
+  Divide: 0x0d,
+  Equals: 0x0e,
+  Less: 0x0f,
+  And: 0x10,
+  Or: 0x11,
   Not: 0x12,
+  StringEquals: 0x13,
+  StringLength: 0x14,
+  StringExtract: 0x15,
   Pop: 0x17,
+  ToInteger: 0x18,
   GetVariable: 0x1c,
   SetVariable: 0x1d,
+  StringAdd: 0x21,
   Trace: 0x26,
+  StringLess: 0x29,
   Throw: 0x2a,
+  MBStringLength: 0x31,
+  CharToAscii: 0x32,
+  AsciiToChar: 0x33,
+  MBStringExtract: 0x35,
+  MBCharToAscii: 0x36,
+  MBAsciiToChar: 0x37,
   Return: 0x3e,
+  Modulo: 0x3f,
+  TypeOf: 0x44,
   Add2: 0x47,
+  Less2: 0x48,
   Equals2: 0x49,
+  ToNumber: 0x4a,
+  ToString: 0x4b,
+  PushDuplicate: 0x4c,
+  StackSwap: 0x4d,
+  Increment: 0x50,
+  Decrement: 0x51,
+  BitAnd: 0x60,
+  BitOr: 0x61,
+  BitXor: 0x62,
+  BitLShift: 0x63,
+  BitRShift: 0x64,
+  BitURShift: 0x65,
+  StrictEquals: 0x66,
+  Greater: 0x67,
+  StringGreater: 0x68,
 } as const;
+
+export type SimpleAction = keyof typeof Simple;
 
 const u16 = (n: number) => [n & 0xff, (n >> 8) & 0xff];
 const i32 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
@@ -98,6 +144,8 @@ export class Avm1Assembler {
     for (const v of values) {
       if (typeof v === "string") {
         operands.push(PushType.string, ...str(v));
+      } else if (v && typeof v === "object" && "bytes" in v) {
+        operands.push(PushType.string, ...v.bytes, 0);
       } else if (typeof v === "boolean") {
         operands.push(PushType.boolean, v ? 1 : 0);
       } else if (v === null) {
@@ -124,6 +172,11 @@ export class Avm1Assembler {
 
   if(label: string): this {
     return this.branch(0x9d, label);
+  }
+
+  /** An action without operands, by name. */
+  op(name: SimpleAction): this {
+    return this.action(Simple[name]);
   }
 
   trace(): this {

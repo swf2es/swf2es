@@ -8,9 +8,11 @@
 // dispatcher.
 //
 // The actions written so far: Push of constants, ConstantPool, Trace, Pop,
-// Jump, If, Play, Stop and End. Every other action Flash knows is a call
-// that throws, V.notYet, and one it does not know is skipped, as Flash
-// skips it. An action Flash cannot read, cut short or a Push of a value
+// Jump, If, Play, Stop, End, PushDuplicate and StackSwap, and the
+// arithmetic, comparison, logical, bitwise, string and conversion actions,
+// each a call of its version's operation (V.add2, V.less2...). Every other
+// action Flash knows is a call that throws, V.notYet, and one it does not
+// know is skipped, as Flash skips it. An action Flash cannot read, cut short or a Push of a value
 // type it does not know, stops the SWF, V.halt, as adl does.
 
 import { Output } from "../../output";
@@ -146,6 +148,129 @@ export class BlockEmitter {
       case ops.OP_Stop:
         out.text("V.stop(cx);\n");
         break;
+      case ops.OP_Add:
+        this.operation("add", 2);
+        break;
+      case ops.OP_Add2:
+        this.operation("add2", 2);
+        break;
+      case ops.OP_Subtract:
+        this.operation("subtract", 2);
+        break;
+      case ops.OP_Multiply:
+        this.operation("multiply", 2);
+        break;
+      case ops.OP_Divide:
+        this.operation("divide", 2);
+        break;
+      case ops.OP_Modulo:
+        this.operation("modulo", 2);
+        break;
+      case ops.OP_Equals:
+        this.operation("equals", 2);
+        break;
+      case ops.OP_Equals2:
+        this.operation("equals2", 2);
+        break;
+      case ops.OP_StrictEquals:
+        this.operation("strictEquals", 2);
+        break;
+      case ops.OP_Less:
+        this.operation("less", 2);
+        break;
+      case ops.OP_Less2:
+        this.operation("less2", 2);
+        break;
+      case ops.OP_Greater:
+        this.operation("greater", 2);
+        break;
+      case ops.OP_And:
+        this.operation("and", 2);
+        break;
+      case ops.OP_Or:
+        this.operation("or", 2);
+        break;
+      case ops.OP_Not:
+        this.operation("not", 1);
+        break;
+      case ops.OP_BitAnd:
+        this.operation("bitAnd", 2);
+        break;
+      case ops.OP_BitOr:
+        this.operation("bitOr", 2);
+        break;
+      case ops.OP_BitXor:
+        this.operation("bitXor", 2);
+        break;
+      case ops.OP_BitLShift:
+        this.operation("bitLShift", 2);
+        break;
+      case ops.OP_BitRShift:
+        this.operation("bitRShift", 2);
+        break;
+      case ops.OP_BitURShift:
+        this.operation("bitURShift", 2);
+        break;
+      case ops.OP_Increment:
+        this.operation("increment", 1);
+        break;
+      case ops.OP_Decrement:
+        this.operation("decrement", 1);
+        break;
+      case ops.OP_StringAdd:
+        this.operation("stringAdd", 2);
+        break;
+      case ops.OP_StringEquals:
+        this.operation("stringEquals", 2);
+        break;
+      case ops.OP_StringLess:
+        this.operation("stringLess", 2);
+        break;
+      case ops.OP_StringGreater:
+        this.operation("stringGreater", 2);
+        break;
+      case ops.OP_StringLength:
+        this.operation("stringLength", 1);
+        break;
+      case ops.OP_MBStringLength:
+        this.operation("mbStringLength", 1);
+        break;
+      case ops.OP_StringExtract:
+        this.operation("stringExtract", 3);
+        break;
+      case ops.OP_MBStringExtract:
+        this.operation("mbStringExtract", 3);
+        break;
+      case ops.OP_CharToAscii:
+        this.operation("charToAscii", 1);
+        break;
+      case ops.OP_AsciiToChar:
+        this.operation("asciiToChar", 1);
+        break;
+      case ops.OP_MBCharToAscii:
+        this.operation("mbCharToAscii", 1);
+        break;
+      case ops.OP_MBAsciiToChar:
+        this.operation("mbAsciiToChar", 1);
+        break;
+      case ops.OP_ToNumber:
+        this.operation("toNumber", 1);
+        break;
+      case ops.OP_ToString:
+        this.operation("toString", 1);
+        break;
+      case ops.OP_ToInteger:
+        this.operation("toInteger", 1);
+        break;
+      case ops.OP_TypeOf:
+        this.operation("typeOf", 1);
+        break;
+      case ops.OP_PushDuplicate:
+        out.text("{ const a = st.pop(); st.push(a, a); }\n");
+        break;
+      case ops.OP_StackSwap:
+        out.text("{ const a = st.pop(), b = st.pop(); st.push(a, b); }\n");
+        break;
       case ops.OP_Jump:
         this.goto(region, action.target);
         out.byte(0x0a);
@@ -251,6 +376,22 @@ export class BlockEmitter {
       <u32>actions.stringLength[index],
       this.version >= 6,
     );
+  }
+
+  /**
+   * `V.<name>` of the `operands` values on top of the stack, the top first,
+   * its result pushed.
+   */
+  private operation(name: string, operands: i32): void {
+    const out = this.out;
+    out.text("st.push(V.");
+    out.text(name);
+    out.byte(0x28);
+    for (let i = 0; i < operands; i++) {
+      out.text(i > 0 ? ", st.pop()" : "st.pop()");
+    }
+
+    out.text("));\n");
   }
 
   private notYet(name: string): void {

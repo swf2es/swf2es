@@ -16,7 +16,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { isAs3, readActions, readSwf } from "../../packages/format/dist/index.js";
-import { Avm1Assembler, constant, register } from "../avm1-assembler.ts";
+import { Avm1Assembler, constant, register, Simple } from "../avm1-assembler.ts";
 import { testingInstances } from "../unit/codegen/testing-module.ts";
 
 interface Avm1Swf {
@@ -87,6 +87,11 @@ function testBlocks(): Uint8Array[] {
       .action(0x1c)
       .bytes(),
     reopening,
+    // Every action without operands that goes on to the next, each operator among them.
+    Object.entries(Simple)
+      .filter(([name]) => !["End", "Return", "Throw"].includes(name))
+      .reduce((a, [, op]) => a.push(1, "2", 3).action(op), asm())
+      .bytes(),
     new Uint8Array([0xc3, 0xa9, 0x80, 0x96, 4, 0, 0, 0xe2, 0x82, 0, 0x26, 0x96, 9, 0, 7, 1]),
     new Uint8Array(0),
   ];
