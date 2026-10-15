@@ -938,12 +938,35 @@ cases trace no result adl and Flash Player may differ in. RandomNumber (`random(
 max cast as Rust casts one (saturated), 0 for a max below 1; its values and
 Math.random's are JavaScript's generator's, not Flash's.
 
+### Date
+
+Date's calendar and methods are Ruffle's (`globals/date.ts`), its time a
+`DateCell` in the object's `primitive`, which Add2 converts by `toString`
+from SWF 6. Local time is Flash's on Windows, as adl has it: today's
+standard offset in every year, plus daylight saving's by today's rule
+(its month, weekday and time, read from the host's offsets this year),
+1900, 1938 and 2050 alike, not the zone's history (Ruffle adds a constant
+offset, no daylight saving at all; AVM2's Date follows avmshell's
+`localtime_r` instead). Local fields go back to UTC as Windows compares
+them with the rule's local standard times, so a time in the
+spring-forward gap comes out an hour earlier and one in the hour that
+repeats as it falls back is the later, standard one, east of UTC and
+west alike. From SWF 7, `setMonth` without a day keeps the day within the
+month it sets (Ruffle leaves this a TODO); `setMonth()` of nothing is
+January. ASnative(103, i) gives Date's methods, any index a function, as
+any table's does. The player's cases trace only what holds in any zone,
+as the tests run in the host's; `tests/unit/runtime/avm1-date-zone*.test.ts`
+pin adl's local times in Helsinki's and New York's. adl under Wine takes
+its zone from `TZ`, so `TZ=Australia/Sydney node oracle/flash.ts` shows
+another zone's (the oracle keys its cache by `TZ` where it is set);
+Sydney's and Kolkata's agree with the player's too.
+
 ### Classes
 
 `Extends` gives the subclass a new `prototype` whose prototype is the
 superclass's, with `__constructor__` (hidden from SWF 5) and no
 `constructor` of its own (adl; Ruffle gives one), through a set, which
-leaves a read-only `prototype`: `Object`'s and `Number`'s are (adl), not
+leaves a read-only `prototype`: `Object`'s, `Number`'s and `Date`'s are (adl), not
 `Function`'s, `Array`'s, `String`'s or `Boolean`'s. `InstanceOf` walks the
 object's prototypes for the class's own stored `prototype` (no getter, a
 primitive one boxed by `_global`'s class), and each prototype's
@@ -985,8 +1008,12 @@ which adl agrees with, `parseFloat` the conversions' own; `isNaN` and
 `isFinite` convert by version. `ASnative(category, index)` gives a new
 function of Flash's table each call: 4 ASSetNative and
 ASSetNativeAccessor, 100 escape, unescape, parseInt, parseFloat and trace,
-101 Object's methods, 200 Math's (NaN for an index of none), 252 Array's;
-Date's (103) come with Date. `ASSetNative` and `ASSetNativeAccessor` set
+101 Object's methods, 103 Date's, 200 Math's, 252 Array's. An index past
+a table's natives gives a function of none, returning undefined (Math's
+NaN), and so does any index of Flash's other categories (1 to 5, 9, 11
+to 15, 102 to 107, 110 to 113, 250, 251, 253, the display, text, sound
+and I/O classes' up to 2401, as adl has them), until their steps bring
+their natives; any other category gives undefined. `ASSetNative` and `ASSetNativeAccessor` set
 methods and accessors from it as Ruffle has them, a version before a name
 hiding it from earlier SWFs. `_global.trace` and ASnative(100, 4) write to
 the log, as Flash's authoring tool shows them in its Output panel, where
@@ -1363,6 +1390,8 @@ determinism` green, and the corpus baseline may only go up.
    `RandomNumber`, the global functions and `ASnative` (see the sections
    above), whose `avm1-number`, `-math`, `-classes`, `-broadcaster` and
    `-globals` cases at SWF 5 to 10 adl traces and the player matches.
+   9c `Date` (see "Date"), with its `avm1-date` cases and the zone's unit
+   tests.
 10. **Clips and paths.** `MovieClip`'s AS2 face, targets, `SetTarget`,
     `SetTarget2`, path resolution (slash, dot, `_root`, `_levelN`,
     `_parent`), `GetProperty` and `SetProperty` by index, `eval`, timeline

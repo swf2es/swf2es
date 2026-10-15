@@ -8527,18 +8527,19 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
-  ...["array", "string", "number", "math", "classes", "broadcaster", "globals"].flatMap((name) =>
-    [5, 6, 7, 8, 10].map(
-      (version): PlayerCase => ({
-        name: `avm1-${name}-swf${version}`,
-        swf: avm1Script(name, version),
-        traced: true,
-        frames: 2,
-        capture: [],
-        tolerance: 0,
-        maxOutliers: 0,
-      }),
-    ),
+  ...["array", "string", "number", "math", "classes", "broadcaster", "globals", "date"].flatMap(
+    (name) =>
+      [5, 6, 7, 8, 10].map(
+        (version): PlayerCase => ({
+          name: `avm1-${name}-swf${version}`,
+          swf: avm1Script(name, version),
+          traced: true,
+          frames: 2,
+          capture: [],
+          tolerance: 0,
+          maxOutliers: 0,
+        }),
+      ),
   ),
   {
     name: "avm1-recursion",

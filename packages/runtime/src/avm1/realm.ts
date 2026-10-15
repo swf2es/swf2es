@@ -14,6 +14,7 @@ import type { Activation, Region } from "./activation.js";
 import { pendingLocal, ScriptFunction } from "./functions.js";
 import { arrayClass } from "./globals/array.js";
 import { broadcasterClass } from "./globals/broadcaster.js";
+import { DateCell, dateClass } from "./globals/date.js";
 import { asnative, globalFunctions } from "./globals/global.js";
 import { mathNative, mathObject } from "./globals/math.js";
 import { booleanClass, numberClass } from "./globals/number.js";
@@ -67,6 +68,7 @@ export class Realm implements Boxer {
   readonly Array: Class;
   readonly Error: Class;
   readonly AsBroadcaster: Class;
+  readonly Date: Class;
   readonly Math: Avm1Object;
   /**
    * ASnative's tables: by category, the native at an index, null for none
@@ -121,6 +123,7 @@ export class Realm implements Boxer {
     this.Array = arrayClass(this);
     this.Error = this.errorClass();
     this.AsBroadcaster = broadcasterClass(this);
+    this.Date = dateClass(this);
     this.Math = mathObject(this);
     this.natives.set(200, (i) => mathNative(i));
 
@@ -152,6 +155,7 @@ export class Realm implements Boxer {
     g.define("o", null, 0);
     g.define("Number", this.Number.constr, DONT_ENUM);
     g.define("Boolean", this.Boolean.constr, DONT_ENUM);
+    g.define("Date", this.Date.constr, DONT_ENUM);
     g.define("String", this.String.constr, DONT_ENUM);
     g.define("Array", this.Array.constr, DONT_ENUM);
     g.define("Math", this.Math, DONT_ENUM);
@@ -625,7 +629,13 @@ function callMethod(object: Avm1Object, name: string, version: number): Value {
 
 objects.valueOf = (object, version) => callMethod(object as Avm1Object, "valueOf", version);
 objects.toPrimitive = (object, version) => {
-  const value = callMethod(object as Avm1Object, "valueOf", version);
+  // A Date adds as its string from SWF 6.
+  const o = object as Avm1Object;
+  const value = callMethod(
+    o,
+    version > 5 && o.primitive instanceof DateCell ? "toString" : "valueOf",
+    version,
+  );
   return isPrimitive(value) ? value : object;
 };
 objects.toString = (object, version) => {

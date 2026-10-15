@@ -275,16 +275,56 @@ function versioned(name: string): [string, number] {
   }
 }
 
-/** ASnative(category, index): a new function of the table's native, undefined for none. */
+/**
+ * The categories Flash Player has a table of natives for, as ranges: adl
+ * gives a function for any index of these, and undefined for any other.
+ * Those of the classes swf2es has no natives of yet give functions of none.
+ */
+const CATEGORIES = [
+  [1, 5],
+  [9, 9],
+  [11, 15],
+  [100, 107],
+  [110, 113],
+  [200, 200],
+  [250, 253],
+  [300, 301],
+  [400, 400],
+  [500, 500],
+  [600, 600],
+  [666, 667],
+  [700, 700],
+  [800, 800],
+  [900, 901],
+  [1021, 1021],
+  [1066, 1067],
+  [1100, 1103],
+  [1105, 1112],
+  [1999, 1999],
+  [2100, 2102],
+  [2104, 2104],
+  [2106, 2108],
+  [2150, 2151],
+  [2198, 2198],
+  [2200, 2201],
+  [2204, 2205],
+  [2341, 2341],
+  [2401, 2401],
+];
+
+const isCategory = (category: number) =>
+  CATEGORIES.some(([first, last]) => category >= first && category <= last);
+
+/** ASnative(category, index): a new function of the table's native, undefined for no table. */
 export function asnative(realm: Realm, category: number, index: number): Value {
   const table = realm.natives.get(category);
   if (table === undefined) {
-    return undefined;
+    return isCategory(category) ? realm.method(none) : undefined;
   }
 
   // An index past a u16 is no native's.
-  const native = table(index > 0xffff ? 0xffff : index);
-  return native === null ? undefined : realm.method(native);
+  // Any index of a table is a function, one of none giving undefined.
+  return realm.method(table(index > 0xffff ? 0xffff : index) ?? none);
 }
 
 /** ASSetNative (`accessor` false) and ASSetNativeAccessor. */

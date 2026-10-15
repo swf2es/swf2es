@@ -108,7 +108,9 @@ function descriptor(content: string, id: string): string {
 
 /**
  * A job's cache key: what decides what Flash gives for it, the adl it runs
- * in among it. A job run alone is keyed apart, and one not, as before.
+ * in among it. A job run alone is keyed apart, and one not, as before;
+ * and the zone where TZ names one, which adl under Wine takes Flash's
+ * local time from.
  */
 export function jobKey(job: FlashJob): string {
   return createHash("sha256")
@@ -117,6 +119,7 @@ export function jobKey(job: FlashJob): string {
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
     )
     .update(job.alone ? "\nalone" : "")
+    .update(process.env.TZ ? `\nTZ=${process.env.TZ}` : "")
     .digest("hex");
 }
 
