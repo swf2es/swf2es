@@ -21,11 +21,12 @@ import {
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import type { Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 
 type Value = avm1.Value;
 
 /** What the clips' AVM1 faces ask of the player's AVM1 (avm1.ts). */
-export interface Movie {
+export interface Movie extends GeomHost {
   readonly root: MovieClip;
   readonly realm: avm1.Realm;
   /** The SWF's version, its URL and its length, which `getSWFVersion`, `_url` and `getBytesTotal` give. */
@@ -963,6 +964,21 @@ export function movieClipClass(movie: Movie): {
   method("prevFrame", 0, (clip) => {
     if (clip.currentFrame > 1) {
       movie.timeline(clip).goto(clip.currentFrame - 1, false);
+    }
+
+    return undefined;
+  });
+  // A new Transform of it each read; one given takes the matrix and colour transform of its clip.
+  const transform = proto.add("transform", undefined, avm1.DONT_ENUM | avm1.VERSION_8);
+  transform.get = realm.method((self, _, version) => {
+    const clip = clipOf(self);
+    const face = clip === null ? null : movie.faceOf(clip);
+    return face === null ? undefined : transformOf(movie, face, version);
+  });
+  transform.set = realm.method((self, args) => {
+    const clip = clipOf(self);
+    if (clip !== null) {
+      assignTransform(clip, args[0]);
     }
 
     return undefined;

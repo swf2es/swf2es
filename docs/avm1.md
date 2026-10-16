@@ -1469,6 +1469,40 @@ other's frames forever) `realm.budget`, and only as one runs out, every
 same time with the check and without (648 and 645 ms in node, the median
 of seven).
 
+### flash.geom
+
+`_global.flash` (from SWF 8, DONT_ENUM) holds `geom`'s classes
+(`globals/geom.ts`), as Ruffle's point.rs, rectangle.rs, matrix.rs,
+color_transform.rs and transform.rs have them, checked against the
+corpus's Flash traces. `Point`, `Rectangle` and `Matrix` are plain
+objects, as Flash writes them in ActionScript: their methods read and
+write `x`, `y`, `width`, `a`... by name, so any object with them will do,
+and a constructor keeps its arguments as given, NaN, undefined and `{}`
+among them (`new Point()` is (0, 0), `new Matrix()` the identity). What a
+method makes is made by the class `flash.geom` has then, a script's own
+among them, -1 where it has none. In doubles where Ruffle works in floats:
+`rotate`, `scale` and `translate` apply after the matrix, `concat`
+applies its argument after; `invert` of a singular matrix is the
+identity; `createBox` without a rotation is NaN; `createGradientBox`
+scales by 1/1638.4. A rectangle's `topLeft` and `size` are points of its
+values as they are; `contains*` of a NaN is undefined; `union` treats a
+size not above 0 as empty, so NaNs go into it; `equals` asks for a
+Rectangle. `normalize` leaves a point of no length as it is.
+`ColorTransform` holds its eight values natively, kept as given (the
+constructor's eight, one ColorTransform to copy, else the identity), its
+accessors defined alpha first, as for..in lists them backwards; `rgb`
+gives and sets the offsets, zeroing the multipliers. `Transform` holds a
+clip's AVM1 object, read again as it is used, so it follows the clip:
+`matrix` a new Matrix in pixels, set where all six fields are its own,
+the translation to whole twips; `colorTransform` set from a
+ColorTransform as a clip keeps one, the multipliers in 8.8 fixed point
+and the offsets whole, 16 bits each and wrapped, which the
+concatenation up the parents keeps at each step too
+(`concatenatedColorTransform`: -523 × 127.5 is -1147); `concatenatedMatrix`
+to the stage; `pixelBounds` the box on the stage. A clip's `transform` is
+a new Transform of it each read, and one assigned gives it the matrix and
+colour transform of the Transform's clip.
+
 ### AVM1 and AVM2
 
 Two VMs meet in three places, each its own step in the plan:
@@ -1823,6 +1857,10 @@ determinism` green, and the corpus baseline may only go up.
     `Transform`, `ColorTransform`, `Matrix`, `Point`, `Rectangle`,
     `BitmapData`, filters, `Stage`, `Sound`, timeline sounds that
     `stop()` now stops. Corpus tests and the visual tests' traces.
+    First `flash.geom` and a clip's `transform` (see "flash.geom"): 317
+    (`matrix`, `point`, `rectangle`, `color_transform`, `transform`),
+    then `BitmapData`, which real content caches its art in, so it comes
+    before text.
 15. **Loading and I/O.** `loadMovie`, `loadVariables`, `MovieClipLoader`,
     `LoadVars`, `XML`, `XMLNode`, `SharedObject`, `XMLSocket`,
     `getURL`, `ExternalInterface`. Corpus tests of each.
