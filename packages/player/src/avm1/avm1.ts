@@ -43,6 +43,7 @@ import type { DisplayCharacter, Library } from "../display/timeline.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { buttonClass } from "./globals/Button.js";
+import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
 import {
   ClipNative,
@@ -480,6 +481,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
     realm.global.define("Mouse", this.mouseFace, avm1.DONT_ENUM);
     this.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
+    flashPackage(this);
     realm.Object.define(
       "registerClass",
       realm.method((_, args, version) => this.registerClass(args, version)),
@@ -1147,6 +1149,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
 
     this.markPaths(d);
     this.unload(d);
+  }
+
+  /** The stage a clip is on, which flash.geom.Transform measures to. */
+  stageOf(_d: DisplayObject): DisplayObject | null {
+    return this.root?.parent ?? null;
   }
 
   dropTargetOf(d: DisplayObject): DisplayObject | null {
