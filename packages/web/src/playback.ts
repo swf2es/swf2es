@@ -18,6 +18,8 @@ export interface Look {
 export class Playback {
   private frame = 0;
   private last: number | null = null;
+  /** The ms the last frame spent playing and drawing, which the player tells overrunning frames by. */
+  private busy = 0;
   private drawn = -1;
   /** Something the host changed, a size or a look, which the next frame draws though the player has not. */
   private dirty = true;
@@ -109,8 +111,9 @@ export class Playback {
       this.layout();
     }
 
+    const start = performance.now();
     try {
-      this.player.advance(dt);
+      this.player.advance(dt, this.busy);
     } catch (error) {
       this.report(error);
     }
@@ -122,6 +125,8 @@ export class Playback {
     if (this.player.changes !== this.drawn || this.dirty) {
       this.draw();
     }
+
+    this.busy = performance.now() - start;
   };
 
   /**
