@@ -688,6 +688,22 @@ test("scripts that run past the script timeout disable the movie's actions, and 
   assert.ok(ponged.avm1.rt.timedOut);
 });
 
+test("a goto loop through a frame with a ScriptLimits times out, its timeout counted from the scripts' start", {
+  timeout: 20000,
+}, async () => {
+  // Entering the limits' frame again must not give the loop a fresh second.
+  const limits = w.tag(65, Uint8Array.from([0, 1, 1, 0]));
+  const swf = movie(6, [
+    [limits, as1(`gotoAndPlay(2);`, 6)],
+    [as1(`gotoAndPlay(1);`, 6)],
+    [as1(`trace("three");`, 6)],
+  ]);
+  const looped = await play(swf, 1);
+
+  assert.ok(looped.avm1.rt.timedOut);
+  assert.ok(!looped.lines.includes("three"));
+});
+
 test("the timers fire between frames by the frame clock, the earliest first, getTimer counting frames", async () => {
   const swf = w.swf({
     version: 6,

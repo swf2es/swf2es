@@ -260,7 +260,7 @@ test("Jump and If loop back, and leave the block past its end or before its star
     ],
   );
   assert.match(looped.module, /for \(;;\) switch \(b\)/);
-  // Only the jump back counts down to the script timeout's check: twice here, not the If's fall-through.
+  // Only the jump back counts down to the script timeout's check: once here, not the If's fall-through.
   assert.equal(looped.calls.filter((c) => c[0] === "timeout").length, 0);
   assert.equal(looped.module.match(/if \(--V\.budget < 0\) V\.timeout\(cx\);/g)?.length, 1);
 

@@ -1333,7 +1333,10 @@ SWF's ScriptLimits', have the movie's actions disabled from there, its
 timelines playing on, as past the recursion limit: Flash Player asks
 whether to stop them, Ruffle stops them, and adl hangs (an AVM1 loop in
 it never ends, its ScriptLimits or not). The time counts from when the
-player starts running scripts, a frame or a pass of the timers. The
+player starts running scripts, a frame or a pass of the timers, not from
+when a frame's ScriptLimits is reached: a goto loop through that frame
+times out by the new limit counted from the frame's start, and the timers
+fired after a frame's actions share its budget. The
 check costs a loop almost nothing: a jump back in compiled code counts
 down `V.budget`, a call and a step of the queue (gotos that queue each
 other's frames forever) `realm.budget`, and only as one runs out, every

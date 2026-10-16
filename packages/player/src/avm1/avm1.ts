@@ -383,16 +383,18 @@ export class Avm1 implements Movie {
 
     this.frameStart();
     this.begin();
+    try {
+      // The main movie's root gets its load once its first frame's actions
+      // have run: an onLoad they set is called (the corpus's root_onload).
+      if (this.movieRoot !== null) {
+        this.method(this.movieRoot, ClipEvent.load, false);
+      }
 
-    // The main movie's root gets its load once its first frame's actions
-    // have run: an onLoad they set is called (the corpus's root_onload).
-    if (this.movieRoot !== null) {
-      this.method(this.movieRoot, ClipEvent.load, false);
+      this.runQueue();
+      this.afterFrame();
+    } finally {
+      this.end();
     }
-
-    this.runQueue();
-    this.afterFrame();
-    this.end();
   }
 
   /** A frame's actions have run: until the next frame, its time passes and the timers due fire. */
@@ -418,28 +420,30 @@ export class Avm1 implements Movie {
     }
 
     this.begin();
-    this.frameStart();
-    this.dropPending();
-    const clips = this.clips;
-    const root = this.root;
-    for (let i = clips.length - 1; i >= 0; i--) {
-      const clip = clips[i];
-      if (clip !== root && !under(clip, root)) {
-        continue;
+    try {
+      this.frameStart();
+      this.dropPending();
+      const clips = this.clips;
+      const root = this.root;
+      for (let i = clips.length - 1; i >= 0; i--) {
+        const clip = clips[i];
+        if (clip !== root && !under(clip, root)) {
+          continue;
+        }
+
+        this.dispatch(clip, ClipEvent.enterFrame);
+        clip.advance();
+        if (this.halted) {
+          return;
+        }
       }
 
-      this.dispatch(clip, ClipEvent.enterFrame);
-      clip.advance();
-      if (this.halted) {
-        this.end();
-        return;
-      }
+      this.clips = clips.filter((clip) => clip === root || under(clip, root));
+      this.runQueue();
+      this.afterFrame();
+    } finally {
+      this.end();
     }
-
-    this.clips = clips.filter((clip) => clip === root || under(clip, root));
-    this.runQueue();
-    this.afterFrame();
-    this.end();
   }
 
   /** Between frames: the timers due by the real clock fire. */
@@ -449,8 +453,11 @@ export class Avm1 implements Movie {
     }
 
     this.begin();
-    this.fireTimers();
-    this.end();
+    try {
+      this.fireTimers();
+    } finally {
+      this.end();
+    }
   }
 
   /** Whether `d` is off the display list, no longer a clip scripts reach but by its path. */
@@ -1190,15 +1197,18 @@ export class Avm1 implements Movie {
     }
 
     this.begin();
-    for (let i = this.clips.length - 1; i >= 0; i--) {
-      const clip = this.clips[i];
-      if (!this.removed(clip)) {
-        this.dispatch(clip, event);
+    try {
+      for (let i = this.clips.length - 1; i >= 0; i--) {
+        const clip = this.clips[i];
+        if (!this.removed(clip)) {
+          this.dispatch(clip, event);
+        }
       }
-    }
 
-    this.runQueue();
-    this.end();
+      this.runQueue();
+    } finally {
+      this.end();
+    }
   }
 
   private enqueue(priority: number, q: Queued): void {
