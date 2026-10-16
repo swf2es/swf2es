@@ -199,6 +199,22 @@ test("a SWF that spins on getTimer to hold a slower rate plays a frame a call on
   assert.ok(spin(false).some((n) => n > 1));
 });
 
+test("cheap frames told by busy keep two a call, and one overrun costs one call", () => {
+  // A 120 fps SWF on a 60 Hz display whose frames take 1 ms of script.
+  const player = playerAt(120);
+  const counts: number[] = [];
+  let busy = 0;
+  for (let i = 0; i < 120; i++) {
+    const n = player.advance(1000 / 60, i === 60 ? 30 : busy);
+    busy = n;
+    counts.push(n);
+  }
+
+  assert.ok(counts.slice(10, 60).every((n) => n === 2));
+  assert.equal(counts[60], 1);
+  assert.ok(counts.slice(62).every((n) => n === 2));
+});
+
 test("repeated hitches longer than a display's interval play a frame a call", () => {
   // Five calls of 100 ms in every nine: the typical interval is no display's.
   const player = playerAt(24);

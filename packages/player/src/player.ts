@@ -261,13 +261,13 @@ export class Player {
    * lower median of its recent calls and never the current one, so a
    * hitch does not become a burst: one where the SWF's frame is as long
    * as the display's or longer, more for a SWF faster than the display,
-   * and one while the interval is longer than a display's, or while the
-   * last call's frames each took longer than a frame by `busy`, the ms the
-   * host spent on that call and on drawing what it played: a host that
-   * keeps time can tell its display's interval from frames that overran,
-   * and a SWF that waits out its own frames, as some hold themselves to a
-   * slower rate by spinning on getTimer, plays as Flash plays it, rather
-   * than two frames' waits to a call. A `dt` that is
+   * and one while the interval is longer than a display's. `busy` is the
+   * ms the host's last call took, by its own clock: where its frames each
+   * took longer than a frame, they overran, and the call runs one, as
+   * Flash runs the frame after an overrun alone. The interval cannot tell
+   * that from a display's: a SWF that spins on getTimer to hold itself to
+   * a slower rate makes the calls a display's interval apart, and two
+   * frames a call would wait twice as long. A `dt` that is
    * not a finite positive number counts as none. A host playing in real
    * time calls this each animation frame; the tests step frames with
    * tick(). Returns how many frames it played.
