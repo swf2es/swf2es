@@ -177,6 +177,11 @@ export class Playback {
       this.renderer.resize(this.player.width, this.player.height, placed.resolution);
     }
 
+    // AVM1's _xmouse is measured in the screen's pixels, as Flash Player measures it.
+    if (this.player.avm1) {
+      this.player.avm1.pixelRatio = placed.resolution;
+    }
+
     this.placed = placed;
     this.dirty = true;
   }
