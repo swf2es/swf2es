@@ -164,6 +164,57 @@ test("frames that cost more than the display's interval slow the SWF down, not s
   assert.ok(thirty.every((n) => n <= 1));
 });
 
+test("a SWF that spins on getTimer to hold a slower rate plays a frame a call on a host that tells", () => {
+  // A 60 fps SWF whose ENTER_FRAME waits until 33 ms after the last one
+  // ended, to hold itself to 30 fps. The calls come about 34 ms apart, a
+  // display's interval by the time alone, where two frames a call would
+  // wait 66 ms; the time the host was busy says the frames overran.
+  const refresh = 1000 / 60;
+  const spin = (busyKnown: boolean) => {
+    const player = playerAt(60);
+    const counts: number[] = [];
+    let now = 0;
+    let last = 0;
+    let lastEnd = -33;
+    let busy = 0;
+    for (let i = 0; i < 300; i++) {
+      const start = Math.ceil((now + 1e-9) / refresh) * refresh;
+      const n = player.advance(i === 0 ? refresh : start - last, busyKnown ? busy : 0);
+      let t = start;
+      for (let f = 0; f < n; f++) {
+        t = Math.max(t, lastEnd + 33) + 1;
+        lastEnd = t;
+      }
+
+      busy = t - start;
+      counts.push(n);
+      last = start;
+      now = t;
+    }
+
+    return counts.slice(20);
+  };
+
+  assert.ok(spin(true).every((n) => n <= 1));
+  assert.ok(spin(false).some((n) => n > 1));
+});
+
+test("cheap frames told by busy keep two a call, and one overrun costs one call", () => {
+  // A 120 fps SWF on a 60 Hz display whose frames take 1 ms of script.
+  const player = playerAt(120);
+  const counts: number[] = [];
+  let busy = 0;
+  for (let i = 0; i < 120; i++) {
+    const n = player.advance(1000 / 60, i === 60 ? 30 : busy);
+    busy = n;
+    counts.push(n);
+  }
+
+  assert.ok(counts.slice(10, 60).every((n) => n === 2));
+  assert.equal(counts[60], 1);
+  assert.ok(counts.slice(62).every((n) => n === 2));
+});
+
 test("repeated hitches longer than a display's interval play a frame a call", () => {
   // Five calls of 100 ms in every nine: the typical interval is no display's.
   const player = playerAt(24);

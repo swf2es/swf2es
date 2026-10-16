@@ -219,6 +219,8 @@ export class Player {
   /** The last INTERVALS times passed to advance(), a ring, for the host's typical interval. */
   private readonly intervals: number[] = [];
   private nextInterval = 0;
+  /** Frames the last call to advance() played. */
+  private lastRan = 0;
   private readonly sortedIntervals: number[] = [];
   /** Frames played. */
   private played = 0;
@@ -259,12 +261,18 @@ export class Player {
    * lower median of its recent calls and never the current one, so a
    * hitch does not become a burst: one where the SWF's frame is as long
    * as the display's or longer, more for a SWF faster than the display,
-   * and one while the interval is longer than a display's. A `dt` that is
+   * and one while the interval is longer than a display's. `busy` is the
+   * ms the host's last call took, by its own clock: where its frames each
+   * took longer than a frame, they overran, and the call runs one, as
+   * Flash runs the frame after an overrun alone. The interval cannot tell
+   * that from a display's: a SWF that spins on getTimer to hold itself to
+   * a slower rate makes the calls a display's interval apart, and two
+   * frames a call would wait twice as long. A `dt` that is
    * not a finite positive number counts as none. A host playing in real
    * time calls this each animation frame; the tests step frames with
    * tick(). Returns how many frames it played.
    */
-  advance(dt: number): number {
+  advance(dt: number, busy = 0): number {
     if (this.stopped) {
       return 0;
     }
@@ -275,8 +283,9 @@ export class Player {
     const passed = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const frame = 1000 / this.frameRate;
     const typical = this.typicalInterval(passed);
+    const overran = this.lastRan > 0 && busy / this.lastRan > frame;
     let most =
-      typical > DISPLAY_INTERVAL
+      typical > DISPLAY_INTERVAL || overran
         ? 1
         : Math.min(MAX_FRAMES_PER_CALL, Math.max(1, Math.round(typical / frame)));
     // A frame that waits for a load from bytes plays once it is ready, as
@@ -339,6 +348,7 @@ export class Player {
       }
     } finally {
       timers?.frameAt(Number.NaN, Number.NaN);
+      this.lastRan = n;
       if (resuming) {
         timers?.release();
       }

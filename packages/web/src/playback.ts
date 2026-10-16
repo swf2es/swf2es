@@ -18,6 +18,12 @@ export interface Look {
 export class Playback {
   private frame = 0;
   private last: number | null = null;
+  /**
+   * The ms the last call to advance took, by which the player tells frames
+   * that overran. Drawing is left out: it costs the same however many frames
+   * a call plays, and counted with one it would keep the player at one a call.
+   */
+  private busy = 0;
   private drawn = -1;
   /** Something the host changed, a size or a look, which the next frame draws though the player has not. */
   private dirty = true;
@@ -109,11 +115,14 @@ export class Playback {
       this.layout();
     }
 
+    const start = performance.now();
     try {
-      this.player.advance(dt);
+      this.player.advance(dt, this.busy);
     } catch (error) {
       this.report(error);
     }
+
+    this.busy = performance.now() - start;
 
     if (this.player.quality !== this.quality) {
       this.requality();
