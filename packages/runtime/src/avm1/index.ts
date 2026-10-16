@@ -11,6 +11,7 @@ export {
   caseSensitive,
   DONT_DELETE,
   DONT_ENUM,
+  find,
   fold,
   get,
   keys,
@@ -34,6 +35,7 @@ export {
   type Operations,
   type Region,
   Runtime,
+  TimedOut,
 } from "./runtime.js";
 export { Scope, targetPath } from "./scope.js";
 export {

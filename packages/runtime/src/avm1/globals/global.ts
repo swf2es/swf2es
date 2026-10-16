@@ -22,6 +22,7 @@ import {
 } from "../objects.js";
 import type { Realm } from "../realm.js";
 import { stringOf, toNumber, type Value } from "../values.js";
+import { timerFunctions } from "./timers.js";
 
 const HEX = "0123456789ABCDEF";
 
@@ -410,6 +411,9 @@ export function globalFunctions(realm: Realm, define: (name: string, native: Nat
   define("isFinite", (_, args, version) =>
     args.length > 0 ? Number.isFinite(toNumber(args[0], version)) : false,
   );
+  for (const [name, native] of timerFunctions(realm)) {
+    define(name, native);
+  }
 }
 
 /** A table's native for an index it has none at: undefined. */

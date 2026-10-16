@@ -2,12 +2,15 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 10 are built: `format`'s list of action blocks, the
+there. Steps 1 to 11 are built: `format`'s list of action blocks, the
 decoder, the emitter, the runtime's values and its operators by version,
 its objects, variables and global object, its functions and registers,
-`With`, `Try` and `Throw`, the language's classes, and a main AVM1 SWF's
+`With`, `Try` and `Throw`, the language's classes, a main AVM1 SWF's
 clips, their AS2 face, paths, targets and timeline actions, played in
-Flash's order by the player; the rest is not.
+Flash's order by the player, and the frame: clip events and their
+handlers, the action queue's passes, `#initclip`, registered classes,
+clips scripts make and remove, the timers and the script timeout; the
+rest is not.
 [architecture.md](architecture.md) describes what is, and this document
 is folded into it as each piece lands.
 
@@ -473,10 +476,10 @@ cases), where it is not what Ruffle does:
   allowing `n - 1` calls (the frame's actions are a level of their own:
   1 or 0 runs no action at all), in adl too; it takes effect as its frame
   comes, before the frame's actions, and of two in a frame the later
-  (`avm1-script-limits`). Its script timeout, in seconds, is kept for when
-  scripts have one. JavaScript's own stack running out, which a `toString`
-  that calls itself can do, disables the actions as well; so can a limit
-  set high, and a chain of calls near the default limit whose JavaScript
+  (`avm1-script-limits`). Its script timeout, in seconds, holds from
+  then on (see "Time and the script timeout"). JavaScript's own stack
+  running out, which a `toString` that calls itself can do, disables the
+  actions as well; so can a limit set high, and a chain of calls near the default limit whose JavaScript
   frames are large: in node, plain calls run out after some 1100 levels,
   `apply` after some 680 and a DefineFunction2 of 64 registers after
   some 730, where adl allows 999 (a smaller stack per call, or a call not
@@ -1017,8 +1020,8 @@ Player's `flashlog.txt`, and adl, get nothing from them, unlike the Trace
 action. swf2es writes them, as Ruffle does: the log is for debugging,
 where a line more hides nothing, and content that calls them means them
 to be seen. `getTimer` (GetTime), `setInterval`, `clearInterval` and
-`setTimeout` need the player's clock and frames, and come with step 11;
-`ASconstructor`, which adl has, is left out.
+`setTimeout` go by the player's clock (see "Time and the script
+timeout"); `ASconstructor`, which adl has, is left out.
 
 ## The player
 
@@ -1074,14 +1077,18 @@ The order of a frame is Flash's, as Ruffle has it (`Avm1::run_frame`,
 is not AS3's: AVM1 clips run in the reverse of the order they were made,
 the newest first, each dispatching `load` on its first frame and
 `enterFrame` after, then running its timeline's tags, which queue its
-DoAction blocks (a DoInitAction runs at once). Then the queue runs in
-three passes: initialisation (`onClipEvent(initialize)`), construction (a
-registered class's constructor, then `construct`), then the rest, frame
-actions and events in the order queued, skipping what belongs to a clip
-removed meanwhile but its `unload`. A goto from the queue queues the frames
-it enters. Intervals run by the clock between frames, as AS3's timers do.
-The player keeps AVM1's execution list beside the display list, as its
-clips are made and removed, not by walking the tree each frame.
+DoAction blocks. Then the queue runs, by priority, each time the most
+urgent first (Ruffle's `ActionQueue`): initialization
+(`onClipEvent(initialize)`), the root's DoInitAction blocks, construction
+(a registered class's prototype, `construct`, then the class's
+constructor), then the rest, frame actions, events and the AS2 methods
+in the order queued, skipping what belongs to a clip removed meanwhile
+but its `unload`. A goto from the queue queues the frames it enters.
+setInterval's timers run by the clock between frames (see "Time and the
+script timeout"). The player keeps AVM1's execution list beside the
+display list, as its clips are made and removed, not by walking the tree
+each frame. "Clip events and buttons" below has what adl showed of the
+events' order.
 
 Step 10 plays an AVM1 SWF's clips so (`Avm1.tick`): the player tells its
 AVM1 of each display object made, each frame a clip enters and each
@@ -1093,10 +1100,10 @@ from it queues the frames it enters. A goto queues the frame it lands on
 (none past the last frame, nor one to the frame it is on), the children
 it makes on frames before it running their first frames first, then the
 frame's places and actions in tag order, as adl orders them (Ruffle runs
-the target frame's actions before every child the frame places). The
-clip events, `#initclip`'s order against them and the queue's passes come
-with step 11; a root frame's DoInitAction blocks run before its DoAction
-blocks, as before.
+the target frame's actions before every child the frame places). A rewind
+in AVM1 keeps what is at a script's depths, a timeline's clip swapped
+there too, and removes a script's clip at the timeline's depths (Ruffle's
+`survives_rewind`; the corpus's `rewind_depth`).
 
 What follows a timeline's last ShowFrame runs with its last frame where
 the timeline loops, one of two frames or more ending in an End tag; a
@@ -1124,9 +1131,10 @@ writes `undefined`. A root frame holding a tag in `corrupt` stops the
 SWF where the tag's first event comes (above): before the frame's actions
 for `load` and `initialize`, after its DoInitActions for `construct`, as
 the next frame comes for `enterFrame`, whether the root moves on or not;
-those of other events wait for the steps that bring them (an `unload` as
-the clip is removed, step 11), and a sprite's for clips' frames. A stopped
-SWF, there or by `V.halt`, advances no timeline and runs no action again.
+a sprite's likewise as its clip is placed, and those of other events as
+one comes to the clip (an `unload` as it is removed; the pointer's, the
+keyboard's and `data` with the steps that bring them). A stopped SWF,
+there or by `V.halt`, advances no timeline and runs no action again.
 
 An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
 its header says: Flash plays and loops one so (the corpus's
@@ -1217,18 +1225,124 @@ A place's clip actions are registered on the clip it places, by event:
 `load`, `enterFrame`, `unload`, `mouseMove`, `mouseDown`, `mouseUp`,
 `keyDown`, `keyUp`, `keyPress` with its key, `data`, `initialize`,
 `construct`, and the button-like `press`, `release`, `releaseOutside`,
-`rollOver`, `rollOut`, `dragOver`, `dragOut`. Each runs its block with
-the clip as target and `this`, and the handler functions of the same names
-(`onLoad`, `onEnterFrame`, `onPress`...) run after it. A clip with a
-button event, or with a handler such as `onPress` set, is a button to the
-pointer: it takes the hand cursor and the pointer's hits, as a
-SimpleButton does in AS3.
+`rollOver`, `rollOut`, `dragOver`, `dragOut`. From SWF 5 each runs its
+block with the clip as target and `this`, and from SWF 6 the methods of
+the same names (`onLoad`, `onEnterFrame`, `onPress`...), looked up as the
+queue reaches them, without `__resolve`, run after it; `initialize`,
+`construct`, `keyPress` and `data` have none. A clip gets its `load` as
+it enters its first frame, before its tags run, and its `enterFrame`
+each frame after, before it plays, whether it plays or not.
+`Avm1.clipEvent` brings the pointer's and the keyboard's to every clip,
+the newest first; step 12 calls it, and gives button events to the clip
+under the pointer. A clip with a button event, or with a handler such as
+`onPress` set, will be a button to the pointer: it takes the hand cursor
+and the pointer's hits, as a SimpleButton does in AS3.
+
+What adl traces of them at SWF 5 to 8 (the `avm1-events-swf*`,
+`avm1-construct-swf*`, `avm1-depths-swf*` and `avm1-initclip` cases, and
+the probes they came of), and the corpus, where it is not what Ruffle
+does:
+
+- A clip the timeline places has its `initialize` events queued as it is
+  made, before its children's, and its construction after: the class
+  `Object.registerClass` binds to its symbol's export name as the queue
+  reaches it, which its prototype becomes, then its `construct` events,
+  then the class's constructor on it, with `__constructor__` (and
+  `constructor` up to SWF 6) as `new` gives them. Its `initialize` events
+  see MovieClip's prototype, not the class's (Ruffle gives the class's as
+  the clip is made). Only a sprite's clip takes a class: a button of a
+  registered symbol stays a Button.
+- The root's DoInitAction blocks run as the root enters their frame, in
+  tag order, a sprite's once, after the `initialize` events of what the
+  frame places and before its constructions, in the queue's own pass
+  (Ruffle runs them all as the SWF loads), so a class an `#initclip`
+  registers after its frame's places is theirs. An attachMovie of a
+  sprite whose `#initclip` has not run attaches it all the same. An
+  ExportAssets name is found as the root reaches its frame (the corpus's
+  `attach_movie_export_not_yet_run`).
+- A clip a script makes, by `attachMovie`, `duplicateMovieClip` (with the
+  source's matrix, colour and clip actions) or `createEmptyMovieClip`, is
+  placed, its first frame entered and its `load` and first frame's actions
+  queued; then at once its class's prototype, its `construct` events, the
+  init object's properties (before the `construct` events up to SWF 6,
+  after them from 7), set in the reverse of for..in's order, its class's
+  constructor and its `onConstruct`, which nothing it throws leaves; its
+  `initialize` events wait in the queue. Ruffle runs neither event for
+  such a clip, and `onConstruct` only for `createEmptyMovieClip`'s.
+  `attachMovie`, like `duplicateMovieClip`, gives a SWF 5 nothing back.
+- Where a function of the SWF's, called by CallFunction or CallMethod,
+  returns to code the queue runs, the initializations and constructions
+  queued by then run, before the code goes on (Ruffle runs them only in
+  the queue's order).
+- `removeMovieClip` and RemoveSprite remove only what is at a script's
+  depths, below Ruffle's 2130706416 (a timeline's clip swapped there
+  too); `attachMovie`, `duplicateMovieClip` and CloneSprite place at a
+  script's depths up to 2130706428, and `createEmptyMovieClip` anywhere,
+  its depth wrapped as an int (the corpus's `create_empty_movie_clip`).
+  CloneSprite takes its depth as it is, which Flash's compiler biases.
+- A clip removed with an `unload` handler, a clip event's or an
+  `onUnload` anywhere on its object, or with such a clip in it, gets its
+  `unload` now, the children's first, and stays, drawn and found by its
+  name, at a depth below the timeline's until the next frame, as Ruffle
+  keeps it. What it queued before runs where it has no clip actions of
+  its own, and does not where it has (adl; Ruffle runs none of it); a clip
+  removed without such a handler runs none of it.
+- The main movie's root gets its `load` once its first frame's actions
+  have run, so an `onLoad` they set is called (the corpus's `root_onload`,
+  a known failure of Ruffle's); adl's harness, whose root is a loaded
+  movie's, calls none.
+- A text field without an instance name is named `instanceN` as a clip
+  is (the corpus's `default_names`, and adl).
+- `super(...)` by name, CallFunction of `super`, runs the class above's
+  constructor, as CallMethod of it does.
+
+What is not reproduced yet: Flash Player's log writes `Warning: Uncaught
+exception, ...` for a value thrown that nothing catches, where adl
+writes nothing (the corpus's `uncaught_exception*` and
+`movieclip_onconstruct`), and the cases follow adl.
 
 A button's condition blocks run on the state change their flags name
 (idle to over down, over down to over up...) or on their key, with the
 button's parent as target, as Flash runs them. The player's buttons
 already change state and play their sounds for AS3; for AVM1 the pointer
-gives them the same transitions.
+gives them the same transitions (step 12). A button's AS2 object has
+`Button`'s prototype (`globals/Button.ts`), with `enabled`,
+`useHandCursor` and `getDepth` so far.
+
+### Time and the script timeout
+
+The timers of `setInterval` and `setTimeout` (`runtime/src/avm1/globals/
+timers.ts`) are the runtime's, their clock the player's: a function with
+its arguments, or an object and its method's name, every interval of at
+least 10 ms (Ruffle's minimum), with ids from 1; neither without an
+object or an interval. They fire between frames, the earliest first, a
+timeout once, each with the root's clip as its target and what it queued
+run after it, at most 10 a pass (Ruffle's `MAX_TICKS`), and a method's
+on a removed clip stops its timer. adl fires them by its clock as they
+fall due, an interval shorter than a frame several times a frame (the
+`avm1-timers` cases trace what does not depend on the host's timing).
+The player's clock is the real one by default; with `realTime: null`, as
+the tests have it, a frame's duration passes after each frame's actions,
+and the timers due by then fire. `getTimer` (GetTime) gives whole ms
+since the start: on that frame clock, which stands still through a frame,
+a script asking it again and again sees a ms pass every fifth call from
+the twentieth, as Ruffle has it, so a wait for it ends.
+
+Scripts that run past the script timeout, Flash's 15 seconds or the
+SWF's ScriptLimits', have the movie's actions disabled from there, its
+timelines playing on, as past the recursion limit: Flash Player asks
+whether to stop them, Ruffle stops them, and adl hangs (an AVM1 loop in
+it never ends, its ScriptLimits or not). The time counts from when the
+player starts running scripts, a frame or a pass of the timers, not from
+when a frame's ScriptLimits is reached: a goto loop through that frame
+times out by the new limit counted from the frame's start, and the timers
+fired after a frame's actions share its budget. The
+check costs a loop almost nothing: a jump back in compiled code counts
+down `V.budget`, a call and a step of the queue (gotos that queue each
+other's frames forever) `realm.budget`, and only as one runs out, every
+100000, is the clock read. A loop of ten million iterations runs in the
+same time with the check and without (648 and 645 ms in node, the median
+of seven).
 
 ### AVM1 and AVM2
 
@@ -1251,13 +1365,9 @@ An AS3 SWF loaded by AS2 (`loadMovie`, the corpus's
 
 The first steps leave out: `loadMovie` into levels other than 0, `print`,
 `fscommand` beyond ExternalInterface's, `NetStream` and video, the
-context menu, `TextSnapshot`, `CloneSprite` of a sprite with clip events
-(it clones without them, as a first approach), the 15-second script
-timeout (a block that loops forever hangs the page, as do gotos that
-queue each other's frames forever, though in bounded memory: the queue
-drops what has run as it goes; the corpus runner stops one at its test's
-timeout), and structured output and stack
-registers in the compiler.
+context menu, `TextSnapshot`, a duplicate of a script's drawing or text
+field's properties, and structured output and stack registers in the
+compiler.
 
 ## Testing against Flash
 
@@ -1534,6 +1644,25 @@ determinism` green, and the corpus baseline may only go up.
     depths, and the SWF stopped at a tag in `ActionList.corrupt`. Passes
     `register_class*`, `register_and_init_order` and the corpus's
     event-order tests.
+    Built: the queue's passes, clip events and their methods, the clips
+    kept a frame for their unload handlers, `#initclip` and exports by
+    frame, registered classes, the clips scripts make and remove with
+    CloneSprite and RemoveSprite, `Button`'s prototype, the timers and
+    `getTimer`, and the script timeout (see "Clip events and buttons" and
+    "Time and the script timeout"); the pointer's and the keyboard's
+    events reach clips through `Avm1.clipEvent` for step 12 to call. The
+    `avm1-events`, `avm1-construct`, `avm1-depths`, `avm1-initclip` and
+    `avm1-timers` cases trace some 10 to 50 lines each at SWF 5 to 8 in
+    adl, which the player matches. The corpus goes from 240 to 281 of the
+    649 (`clip_events`, `on_construct`, `register_and_init_order`,
+    `clip_constructors`, `attach_movie*`, `create_empty_movie_clip`,
+    `duplicate_movie_clip`, `remove_movie_clip`, `unload*`,
+    `set_interval`, `timer_run_actions`, `timeout`, `root_onload`,
+    `removed_target_clip_scope`, `string_paths_*`, `default_names`,
+    `placeobject_all_event_flags`...); `register_class` waits for
+    `loadClip` (step 15), `movieclip_get_instance_at_depth` for text fields
+    (13), and `movieclip_library_state_values` now runs to a `getURL`
+    (15).
 12. **Buttons, the pointer and the keyboard.** Button conditions, clips as
     buttons, `Key`, `Mouse`, `Selection`, `startDrag`, `hitTest`,
     `_droptarget`. Corpus tests that run without input, adl cases for

@@ -37,6 +37,12 @@ export interface Place {
    * without them, or when read without the list.
    */
   actions: number[] | null;
+  /**
+   * The field of all events of clip actions that run past the tag, which
+   * Flash cannot read: it stops the SWF as the first of them comes; 0 for
+   * none (ActionList.corrupt).
+   */
+  corrupt: number;
 }
 
 export function readString(r: SwfReader): string {
@@ -103,6 +109,7 @@ export function utf8(bytes: Uint8Array): string {
 export function readPlace(bytes: Uint8Array, tag: Tag, actions?: ActionList): Place {
   const { place } = parsePlace(bytes, tag);
   place.actions = actions?.byTag.get(tag.offset) ?? null;
+  place.corrupt = actions?.corruptEvents.get(tag.offset) ?? 0;
   return place;
 }
 
@@ -131,6 +138,7 @@ function parsePlace(bytes: Uint8Array, tag: Tag): { place: Place; clipActions: n
     opaqueBackground: null,
     filters: null,
     actions: null,
+    corrupt: 0,
   };
 
   if (tag.code === PlaceObject) {
@@ -363,4 +371,17 @@ export function readDoAbc(
   const flags = r.u32();
   const name = readString(r);
   return { name, lazy: (flags & 1) !== 0, abc: bytes.subarray(r.pos, tag.offset + tag.length) };
+}
+
+/** ExportAssets: the characters it names, each id with its name, in tag order. */
+export function readExports(bytes: Uint8Array, tag: Tag): { id: number; name: string }[] {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const exports: { id: number; name: string }[] = [];
+  const n = r.end - r.pos >= 2 ? r.u16() : 0;
+  for (let i = 0; i < n && r.end - r.pos >= 2; i++) {
+    const id = r.u16();
+    exports.push({ id, name: readString(r) });
+  }
+
+  return exports;
 }

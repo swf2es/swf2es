@@ -670,6 +670,16 @@ export function doAction(actions: number[]): Uint8Array {
   return tag(12, new Uint8Array(actions));
 }
 
+/** ExportAssets: each character's id with the name AVM1's attachMovie finds it by. */
+export function exportAssets(exports: [number, string][]): Uint8Array {
+  const w = new BitWriter().u16(exports.length);
+  for (const [id, name] of exports) {
+    w.u16(id).string(name);
+  }
+
+  return tag(56, w.done());
+}
+
 /** DoInitAction: `sprite`'s #initclip actions. */
 export function doInitAction(sprite: number, actions: number[]): Uint8Array {
   return tag(59, new BitWriter().u16(sprite).raw(actions).done());

@@ -95,6 +95,20 @@ export interface Host {
   timeline?(target: Target): Timeline | null;
   /** StopSounds: every sound playing stops. */
   stopSounds?(): void;
+  /** GetTime: ms since the movie started, on the player's clock. */
+  time?(): number;
+  /**
+   * CloneSprite: `target` duplicated as `name` at timeline depth `depth`,
+   * as duplicateMovieClip does it, without an init object.
+   */
+  duplicate?(target: Target, name: string, depth: number): void;
+  /** RemoveSprite: `target` removed, where it is at a depth a script may remove. */
+  remove?(target: Target): void;
+  /**
+   * A function of the SWF's that code called by CallFunction or
+   * CallMethod returned: Flash runs the initialize events queued by then.
+   */
+  returned?(): void;
   /** ToggleQuality: the stage's quality from high or best to low, or back. */
   toggleQuality?(): void;
 }

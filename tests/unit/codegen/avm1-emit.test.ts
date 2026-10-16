@@ -260,6 +260,9 @@ test("Jump and If loop back, and leave the block past its end or before its star
     ],
   );
   assert.match(looped.module, /for \(;;\) switch \(b\)/);
+  // Only the jump back counts down to the script timeout's check: once here, not the If's fall-through.
+  assert.equal(looped.calls.filter((c) => c[0] === "timeout").length, 0);
+  assert.equal(looped.module.match(/if \(--V\.budget < 0\) V\.timeout\(cx\);/g)?.length, 1);
 
   // A jump past the end, and one before the block's first byte, end it.
   const past = asm().push("a").trace().raw([0x99, 2, 0, 0x10, 0]).push("b").trace().bytes();
@@ -531,10 +534,33 @@ test("the variable and member actions take their operands as popped, the top fir
   ]);
 });
 
+test("GetTime, CloneSprite and RemoveSprite are calls of their operations", async () => {
+  const block = asm()
+    .op("GetTime")
+    .trace()
+    .push("a", "b", 3)
+    .op("CloneSprite")
+    .push("b")
+    .op("RemoveSprite")
+    .bytes();
+  const { calls, error } = await run([block]);
+
+  assert.equal(error, null);
+  assert.deepEqual(
+    calls.filter((c) => c[0] !== "constantPool"),
+    [
+      ["getTime", { pool: [], st: [] }],
+      ["trace", "getTime"],
+      ["cloneSprite", { pool: [], st: [] }, 3, "b", "a"],
+      ["removeSprite", { pool: [], st: [] }, "b"],
+    ],
+  );
+});
+
 test("every other action throws that it is not yet supported", async () => {
-  const thrown = await run([asm().push("a").trace().push("x").action(0x24).trace().bytes()]);
+  const thrown = await run([asm().push("a").trace().push("x").action(0x28).trace().bytes()]);
   assert.deepEqual(thrown.calls, [["trace", "a"]]);
-  assert.equal(thrown.error, "not yet supported: CloneSprite");
+  assert.equal(thrown.error, "not yet supported: EndDrag");
 
   // An action with operands.
   const url = await run([asm().getUrl("a", "b").bytes()]);

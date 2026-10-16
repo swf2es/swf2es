@@ -4,6 +4,7 @@
 import { Activation, type Blocks, type Region } from "./activation.js";
 import {
   callFrame,
+  cloneSprite,
   frameLoaded,
   frameLoaded2,
   getProperty,
@@ -12,14 +13,15 @@ import {
   gotoLabel,
   nextFrame,
   prevFrame,
+  removeSprite,
   setProperty,
   setTarget,
   setTarget2,
   targetPathOf,
 } from "./clips.js";
 import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.js";
-import { Avm1Throw, BASE_REMOVED, Disabled, Halt, NotYet } from "./errors.js";
-import { Avm1Super, argumentsOf, superOf } from "./functions.js";
+import { Avm1Throw, BASE_REMOVED, Disabled, Halt, NotYet, TimedOut } from "./errors.js";
+import { Avm1Super, argumentsOf, ScriptFunction, superOf } from "./functions.js";
 import type { Host, Target } from "./host.js";
 import { extend, implementsOp, instanceOf } from "./inheritance.js";
 import {
@@ -46,7 +48,7 @@ import {
   toInt32,
   wellFormed,
 } from "./operators.js";
-import { Realm } from "./realm.js";
+import { BUDGET, Realm } from "./realm.js";
 import {
   defineLocal,
   defineLocal2,
@@ -70,7 +72,10 @@ import {
   type Value,
 } from "./values.js";
 
-export { Activation, Avm1Throw, type Blocks, Disabled, Halt, NotYet, type Region };
+export { Activation, Avm1Throw, type Blocks, Disabled, Halt, NotYet, type Region, TimedOut };
+
+/** The most timers a pass fires, as Ruffle's MAX_TICKS: a timer far behind catches up over frames. */
+const MAX_TICKS = 10;
 
 /** A module's default export. */
 export type Factory = (rt: Runtime) => Blocks;
@@ -249,6 +254,19 @@ export interface Operations {
   callFrame(cx: Activation, frame: Value): void;
   stopSounds(cx: Activation): void;
   toggleQuality(cx: Activation): void;
+  /** GetTime: ms since the movie started, on the player's clock. */
+  getTime(cx: Activation): number;
+  /** CloneSprite: the clip `source` names duplicated as `name` at timeline depth `depth`. */
+  cloneSprite(cx: Activation, depth: Value, name: Value, source: Value): void;
+  /** RemoveSprite: the clip `target` names removed, where a script may remove it. */
+  removeSprite(cx: Activation, target: Value): void;
+  /**
+   * What a jump back counts down, shared by every activation of the
+   * version: as it runs out, `timeout` reads the clock.
+   */
+  budget: number;
+  /** The budget ran out: past the script timeout, the movie's actions are disabled. */
+  timeout(cx: Activation): void;
   /** An action Flash cannot read: the SWF stops there. */
   halt(cx: Activation): never;
   /** A block larger than the compiler takes. */
@@ -519,10 +537,20 @@ function operations(version: number): Operations {
       // `this` is what had the name, a function's activation object too,
       // but in a SWF 5, which takes the target's clip for it (adl).
       const self = foundOn === undefined || (version < 6 && foundLocal) ? cx.clip : foundOn;
-      st.push(invoke(fn, self, args, version));
+      // `super(...)` called by name runs the class above's constructor, as CallMethod of it does.
+      st.push(
+        fn instanceof Avm1Super
+          ? superCall(fn, "", args, version)
+          : invoke(fn, self, args, version),
+      );
+      if (fn instanceof ScriptFunction) {
+        cx.host.returned?.();
+      }
+
       returnIfRemoved(cx);
     },
     callMethod(cx) {
+      // A method of undefined or null is no call: its code goes on (Ruffle).
       if (callMethod(cx, version)) {
         returnIfRemoved(cx);
       }
@@ -619,6 +647,18 @@ function operations(version: number): Operations {
     toggleQuality(cx) {
       cx.host.toggleQuality?.();
     },
+    getTime: (cx) => cx.host.time?.() ?? 0,
+    cloneSprite(cx, depth, name, source) {
+      cloneSprite(cx, depth, name, source, version);
+    },
+    removeSprite(cx, target) {
+      removeSprite(cx, target, version);
+    },
+    budget: BUDGET,
+    timeout(cx) {
+      this.budget = BUDGET;
+      cx.realm.timeout();
+    },
     halt(cx) {
       cx.host.halt();
       throw new Halt("the SWF stopped at an action Flash cannot read");
@@ -632,7 +672,10 @@ function operations(version: number): Operations {
   };
 }
 
-/** CallMethod: `object[name](args)`, `object(args)` for an empty name; false for no object, which calls nothing. */
+/**
+ * CallMethod, which pops its operands and pushes what the method gives:
+ * false where there was no object to call it on.
+ */
 function callMethod(cx: Activation, version: number): boolean {
   const st = cx.st;
   const name = st.pop();
@@ -646,24 +689,21 @@ function callMethod(cx: Activation, version: number): boolean {
   const key = name === undefined ? "" : nameOf(name, version);
   if (object instanceof Avm1Super) {
     st.push(superCall(object, key, args, version));
-    return true;
-  }
-
-  if (key === "") {
+  } else if (key === "") {
     st.push(invoke(object, undefined, args, version));
-    return true;
-  }
-
-  if (!(object instanceof Avm1Object)) {
+  } else if (!(object instanceof Avm1Object)) {
     const method = cx.realm.primitiveMember(object as Primitive, key, version);
     st.push(invoke(method, object, args, version, 1));
-    return true;
+  } else {
+    // A method found on the object itself is called as if found on its
+    // prototype; up to SWF 6 wherever it was found (adl).
+    const method = get(object, key, version);
+    st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
+    if (method instanceof ScriptFunction) {
+      cx.host.returned?.();
+    }
   }
 
-  // A method found on the object itself is called as if found on its
-  // prototype; up to SWF 6 wherever it was found (adl).
-  const method = get(object, key, version);
-  st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
   return true;
 }
 
@@ -686,14 +726,17 @@ function newMethod(cx: Activation, version: number): boolean {
 }
 
 /**
- * After a call, a `new` or a CallFrame: if it took the clip whose code
- * runs off the display list, that code returns here (BaseRemoved). A
- * method of undefined or null calls nothing and returns nothing, even
- * where the clip went before it (the corpus's removed_clip_halts_script).
+ * After a call: where it removed the clip whose code made it, that code
+ * returns, as Flash's does. The clip is looked at only where a clip was
+ * removed since the code last looked.
  */
 function returnIfRemoved(cx: Activation): void {
-  if (cx.host.removed?.(cx.base) === true) {
-    throw BASE_REMOVED;
+  const removals = cx.realm.removals;
+  if (removals !== cx.removals) {
+    cx.removals = removals;
+    if (cx.host.removed?.(cx.base)) {
+      throw BASE_REMOVED;
+    }
   }
 }
 
@@ -886,6 +929,8 @@ export class Runtime {
    * its recursion limit: no action of it runs again, its timelines play on.
    */
   disabled = false;
+  /** Whether that was the script timeout's doing. */
+  timedOut = false;
 
   /** How deep function calls may go: a SWF's ScriptLimits sets it (Flash's default 1000, adl's). */
   get maxRecursion(): number {
@@ -898,19 +943,66 @@ export class Runtime {
 
   /**
    * How long, in seconds, a frame's actions may run before Flash offers to
-   * stop them: a SWF's ScriptLimits sets it (Flash's default 15). Nothing
-   * stops them yet.
+   * stop them: a SWF's ScriptLimits sets it (Flash's default 15). Past
+   * it, the movie's actions are disabled, as Flash's are once stopped.
    */
-  scriptTimeout = 15;
+  get scriptTimeout(): number {
+    return this.timeout;
+  }
+
+  /**
+   * Set while scripts run, as a ScriptLimits their gotos reach is, it
+   * counts from when they began, not from now: gotos that enter its
+   * frame again and again still run into it.
+   */
+  set scriptTimeout(seconds: number) {
+    this.timeout = seconds;
+    if (this.realm.deadline !== Number.POSITIVE_INFINITY) {
+      this.realm.deadline = this.began + seconds * 1000;
+    }
+  }
+
+  private timeout = 15;
+  /** When the scripts running began, on the player's clock. */
+  private began = 0;
+
+  /**
+   * The player starts running scripts, a frame's or its timers', at `now`
+   * on its clock, `clock`: they have the script timeout from there.
+   */
+  begin(now: number, clock: () => number): void {
+    this.began = now;
+    this.realm.clock = clock;
+    this.realm.deadline = now + this.timeout * 1000;
+  }
+
+  /** The player's scripts are done until it begins again. */
+  end(): void {
+    this.realm.deadline = Number.POSITIVE_INFINITY;
+  }
 
   /**
    * Run a block's own region, `regions[0]`, in `cx`. A value thrown and
    * not caught ends the block, as Flash ends it, writing nothing. Past the
-   * recursion limit, or where JavaScript's own stack runs out first, the
-   * movie's actions are disabled from there.
+   * recursion limit or the script timeout, or where JavaScript's own stack
+   * runs out first, the movie's actions are disabled from there.
    */
   run(regions: Region[], cx: Activation): void {
-    if (this.disabled || regions.length === 0) {
+    if (regions.length === 0) {
+      return;
+    }
+
+    cx.code = regions;
+    this.call(cx, () => regions[0](cx));
+  }
+
+  /**
+   * Run `body` in `cx`, as a block runs: what the player calls into AVM1
+   * other than a block, an event's method, a class's constructor, a
+   * timer's callback, which the limits and an uncaught throw end alike.
+   */
+  call(cx: Activation, body: () => void): void {
+    if (this.disabled) {
       return;
     }
 
@@ -923,10 +1015,9 @@ export class Runtime {
 
     const outer = realm.current;
     const calls = realm.calls;
-    cx.code = regions;
     realm.current = cx;
     try {
-      regions[0](cx);
+      body();
     } catch (error) {
       if (error instanceof Avm1Throw || error === BASE_REMOVED) {
         return;
@@ -937,10 +1028,74 @@ export class Runtime {
       }
 
       this.disabled = true;
+      this.timedOut ||= error instanceof TimedOut;
     } finally {
       realm.current = outer;
       realm.calls = calls;
     }
+  }
+
+  /**
+   * `object`'s method `name` called with `args`, as Flash calls an event's
+   * (`onEnterFrame`...) and a timer's: found without `__resolve`, nothing
+   * where it is no function.
+   */
+  callMethod(
+    cx: Activation,
+    object: Avm1Object,
+    name: string,
+    args: Value[],
+    version: number,
+  ): void {
+    this.call(cx, () => {
+      const method = get(object, name, version, object, false);
+      invoke(method, object, args, version, Math.max(foundDepth, 1));
+    });
+  }
+
+  /**
+   * Fire the timers due by `time` on the player's clock, the earliest
+   * first, at most `MAX_TICKS` of them, each in the activation `cx` gives
+   * (the root's), `after` running what each queued; while one runs, the
+   * clock reads its time.
+   */
+  fireTimers(
+    time: number,
+    version: number,
+    cx: () => Activation | null,
+    after: () => void,
+    removed: (object: Avm1Object) => boolean,
+  ): void {
+    const timers = this.realm.timers;
+    for (let ticks = 0; ticks < MAX_TICKS && !this.disabled; ticks++) {
+      const timer = timers.due(time);
+      if (timer === null) {
+        break;
+      }
+
+      timers.now = timer.due;
+      timers.fired(timer);
+      // A method's object a removed clip: the timer stops, as Ruffle has it.
+      if (timer.method !== null && removed(timer.callback)) {
+        timers.remove(timer.id);
+        continue;
+      }
+
+      const activation = cx();
+      if (activation !== null) {
+        if (timer.method === null) {
+          this.call(activation, () => {
+            invoke(timer.callback, undefined, timer.args, version);
+          });
+        } else {
+          this.callMethod(activation, timer.callback, timer.method, timer.args, version);
+        }
+      }
+
+      after();
+    }
+
+    timers.now = time;
   }
 
   /** A new object, as `{}` makes one: what the player gives a clip until clips have their class. */

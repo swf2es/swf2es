@@ -162,9 +162,11 @@ async function avm1For(
   // One codegen for every AVM1 SWF the page plays: its actions need no
   // domain, and an instance each would hold a wasm memory each until collected.
   avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
+  // Timers and getTimer go by the frames, as the tests step them.
   return new Avm1(await avm1Codegen, {
     print: (line) => trace.push(...line.split(/\r|\n/)),
     onUncaught: (error) => uncaught.push(error),
+    realTime: null,
   });
 }
 

@@ -3602,6 +3602,255 @@ e._width = 70; e._height = 12; e._y = 70;`,
   );
 }
 
+/** Clip actions for a place in a SWF of `version`: each record's events and its AS1 source. */
+const clipEvents = (version: number, records: [number, string][]) =>
+  w.clipActions(
+    version,
+    records.map(([events, source]) => ({
+      events,
+      actions: [...script(source, version)(flashAssembler()).end().bytes()],
+    })),
+  );
+
+// The clip events' bits (format's ClipEvent).
+const EVENT = {
+  load: 1 << 0,
+  enterFrame: 1 << 1,
+  unload: 1 << 2,
+  mouseDown: 1 << 4,
+  data: 1 << 8,
+  initialize: 1 << 9,
+  construct: 1 << 18,
+};
+
+/** Clip actions that trace each event's name, `tag` and the clip's name. */
+const tracedEvents = (version: number, tag: string, events: (keyof typeof EVENT)[]) =>
+  clipEvents(
+    version,
+    events.map((e) => [EVENT[e], `trace("${tag} ${e} " + this._name);`]),
+  );
+
+// Clip events in a SWF of `version` (docs/avm1.md, "Clip events"): a
+// clip's initialize, construct, load, enterFrame and unload, its child's
+// first, the events nothing brings (mouseDown, data) never; from SWF 6
+// the handlers set as methods, onLoad, onEnterFrame and onUnload, after
+// the clip actions; and a clip removed with an unload handler, kept a
+// frame at a depth below the timeline's.
+function avm1Events(version: number): Uint8Array {
+  const handlers = version >= 6;
+  const kid = avm1Sprite(2, [
+    [w.place({ depth: 1, character: 1 }), as1(`trace("kid frame " + _name);`, version)],
+  ]);
+  const clip = avm1Sprite(3, [
+    [
+      w.place({
+        depth: 1,
+        character: 2,
+        name: "kid",
+        clipActions: tracedEvents(version, "kid", [
+          "initialize",
+          "construct",
+          "load",
+          "enterFrame",
+          "unload",
+        ]),
+      }),
+      as1(`trace("clip frame 1 " + _name);`, version),
+    ],
+    [as1(`trace("clip frame 2 " + _name);`, version)],
+  ]);
+  return avm1Swf(
+    version,
+    [square(1, 0x3366cc, 200), kid, clip],
+    [
+      [
+        as1(`trace("root 1");`, version),
+        w.place({
+          depth: 1,
+          character: 3,
+          name: "a",
+          clipActions: tracedEvents(version, "a", [
+            "initialize",
+            "construct",
+            "load",
+            "enterFrame",
+            "unload",
+            "mouseDown",
+            "data",
+          ]),
+        }),
+        as1(
+          handlers
+            ? `trace("root 1 after " + typeof a.kid);
+a.onLoad = function () { trace("a onLoad"); };
+a.onEnterFrame = function () { trace("a onEnterFrame " + this._currentframe); };
+a.onUnload = function () { trace("a onUnload " + this._name); };
+_root.onEnterFrame = function () { trace("root onEnterFrame " + _currentframe); };`
+            : `trace("root 1 after " + typeof a.kid);`,
+          version,
+        ),
+      ],
+      [
+        as1(`trace("root 2");`, version),
+        w.place({ depth: 2, character: 3, name: "b" }),
+        as1(
+          handlers
+            ? `b.onUnload = function () { trace("b onUnload " + this._name + " " + typeof this.kid); };`
+            : `trace("b " + typeof b);`,
+          version,
+        ),
+      ],
+      [
+        w.remove(1),
+        as1(`trace("root 3 " + typeof a + " " + a._name + " " + typeof a.kid);`, version),
+      ],
+      [w.remove(2), as1(`trace("root 4 " + typeof a + " " + typeof b);`, version)],
+      [as1(`trace("root 5"); delete _root.onEnterFrame; stop();`, version)],
+    ],
+  );
+}
+
+// Clips made with a class Object.registerClass binds to their symbol, in a
+// SWF of `version`, avm1/construct.as: by the timeline, by
+// duplicateMovieClip, attachMovie and createEmptyMovieClip, with their
+// clip events' and constructors' order.
+function avm1Construct(version: number): Uint8Array {
+  const source = readFileSync(new URL("avm1/construct.as", import.meta.url), "utf8");
+  const show = (what: string) =>
+    `trace("${what} " + this._name + " p=" + this.p + " q=" + this.q + " kid=" + typeof this.kid + " hello=" + typeof this.hello + " own=" + this.hasOwnProperty("p"));`;
+  const kid = avm1Sprite(3, [[as1(`trace("kid frame 1 " + _parent._name);`, version)]]);
+  const clip = avm1Sprite(2, [
+    [
+      w.place({
+        depth: 1,
+        character: 3,
+        name: "kid",
+        clipActions: clipEvents(version, [
+          [EVENT.initialize, `trace("kid initialize " + _parent._name);`],
+          [EVENT.construct, `trace("kid construct " + _parent._name);`],
+          [EVENT.load, `trace("kid load " + _parent._name);`],
+        ]),
+      }),
+      as1(`trace("clip frame 1 " + this._name + " " + this.q);`, version),
+    ],
+  ]);
+  const register = `_global.C = function () { trace("C " + this._name + " p=" + this.p + " kid=" + typeof this.kid); this.q = 1; };
+C.prototype = new MovieClip();
+C.prototype.hello = function () { return "hi"; };
+trace("registered " + Object.registerClass("clip", C));`;
+  return avm1Swf(
+    version,
+    [kid, clip, w.exportAssets([[2, "clip"]])],
+    [
+      [
+        w.place({
+          depth: 1,
+          character: 2,
+          name: "a",
+          clipActions: clipEvents(version, [
+            [EVENT.initialize, show("initialize")],
+            [EVENT.construct, show("construct")],
+            [EVENT.load, show("load")],
+          ]),
+        }),
+        w.doInitAction(2, [...script(register, version)(flashAssembler()).end().bytes()]),
+        as1(source, version),
+      ],
+      [as1(`trace("root 2"); stop();`, version)],
+    ],
+  );
+}
+
+// Clips a script makes and removes by depth in a SWF of `version`,
+// avm1/depths.as, and from SWF 7 avm1/depths7.as.
+function avm1Depths(version: number): Uint8Array {
+  const read = (name: string) => readFileSync(new URL(`avm1/${name}.as`, import.meta.url), "utf8");
+  const clip = avm1Sprite(2, [[w.place({ depth: 1, character: 1 })]]);
+  return avm1Swf(
+    version,
+    [square(1, 0x3366cc, 200), clip, w.exportAssets([[2, "clip"]])],
+    [
+      [
+        w.place({ depth: 1, character: 2, name: "a" }),
+        as1(read("depths"), version),
+        ...(version >= 7 ? [as1(read("depths7"), version)] : []),
+      ],
+      [as1(`trace("root 2 " + typeof _root.y + " " + typeof _root.c1); stop();`, version)],
+    ],
+  );
+}
+
+// #initclip, the root's DoInitAction blocks (docs/avm1.md, "The frame"):
+// a frame's run as the root enters it, before its places and its actions,
+// in tag order, a sprite's once; a sprite attached before its own runs.
+function avm1Initclip(): Uint8Array {
+  const version = 6;
+  const init = (sprite: number, source: string) =>
+    w.doInitAction(sprite, [...script(source, version)(flashAssembler()).end().bytes()]);
+  const sprite = (id: number) =>
+    avm1Sprite(id, [[as1(`trace("sprite ${id} " + _name);`, version)]]);
+  return avm1Swf(
+    version,
+    [
+      sprite(2),
+      sprite(3),
+      sprite(4),
+      w.exportAssets([
+        [2, "two"],
+        [3, "three"],
+        [4, "four"],
+      ]),
+    ],
+    [
+      [
+        as1(`trace("root 1"); attachMovie("three", "early", 1);`, version),
+        w.place({ depth: 2, character: 2, name: "placed" }),
+        init(2, `trace("init two");`),
+        init(4, `trace("init four");`),
+      ],
+      [
+        init(3, `trace("init three");`),
+        as1(`trace("root 2");`, version),
+        init(2, `trace("init two again");`),
+        w.place({ depth: 3, character: 3, name: "late" }),
+      ],
+      [as1(`trace("root 3"); attachMovie("four", "four", 4); stop();`, version)],
+    ],
+  );
+}
+
+// setTimeout and setInterval in a SWF of `version` at 2 frames a second,
+// avm1/timers.as: what they fire between frames, by Flash's clock and the
+// tests' frame clock alike.
+function avm1Timers(version: number): Uint8Array {
+  const source = readFileSync(new URL("avm1/timers.as", import.meta.url), "utf8");
+  return w.swf({
+    version,
+    width: 40,
+    height: 40,
+    frameRate: 2,
+    frameCount: 7,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      as1(source, version),
+      w.showFrame(),
+      as1(`trace("root 2");`, version),
+      w.showFrame(),
+      as1(`trace("root 3");`, version),
+      w.showFrame(),
+      as1(`trace("root 4");`, version),
+      w.showFrame(),
+      as1(`trace("root 5"); delete _root.onEnterFrame;`, version),
+      w.showFrame(),
+      w.showFrame(),
+      as1(`trace("root 7 " + later.join(", ")); stop();`, version),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Past the recursion limit, a ScriptLimits of 40 here, Flash disables the
 // movie's actions, the rest of the frame's and every later frame's, which
 // no catch or finally runs, and its timeline plays on: frame 2 places a
@@ -8771,6 +9020,59 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[5, 6, 7].map(
+    (version): PlayerCase => ({
+      name: `avm1-events-swf${version}`,
+      swf: avm1Events(version),
+      traced: true,
+      frames: 6,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-construct-swf${version}`,
+      swf: avm1Construct(version),
+      traced: true,
+      frames: 3,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7].map(
+    (version): PlayerCase => ({
+      name: `avm1-depths-swf${version}`,
+      swf: avm1Depths(version),
+      traced: true,
+      frames: 3,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  {
+    name: "avm1-initclip",
+    swf: avm1Initclip(),
+    traced: true,
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  ...[6, 7].map(
+    (version): PlayerCase => ({
+      name: `avm1-timers-swf${version}`,
+      swf: avm1Timers(version),
+      traced: true,
+      frames: 8,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   {
     name: "avm1-recursion",
     swf: avm1Recursion(),
