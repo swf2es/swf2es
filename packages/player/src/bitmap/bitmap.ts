@@ -146,6 +146,12 @@ export interface GpuCopy {
 
 export class BitmapStore {
   private cpu: Uint32Array;
+  /**
+   * Whether `cpu` is a library bitmap's pixels, which every store made of it
+   * shares: copied before it is first written, so an atlas a SWF only reads
+   * from is one array, not one for the library and one for each BitmapData.
+   */
+  private shared = false;
   /** The renderers' copies of the store, one each, for `dispose` to free. */
   readonly copies = new Set<GpuCopy>();
   /** The copy a draw wrote last, which reading `pixels` brings back while it is newer; null for none. */
@@ -162,33 +168,59 @@ export class BitmapStore {
    */
   readonly views = new Set<WeakRef<{ pixelsChanged(disposed: boolean): void }>>();
 
+  /** `shared`, where given, is the pixels it holds, its own until written: see `of`. */
   constructor(
     readonly width: number,
     readonly height: number,
     readonly transparent: boolean,
     fill: number,
+    shared?: Uint32Array,
   ) {
+    if (shared) {
+      this.cpu = shared;
+      this.shared = true;
+      return;
+    }
+
     this.cpu = new Uint32Array(width * height);
     this.cpu.fill(this.premultiplied(fill));
   }
 
   /**
-   * Premultiplied ARGB, row by row. Reading them brings the GPU's copy
-   * back first if a draw wrote it last, once: every CPU operation reads
-   * them, so each sees the store as the GPU left it.
+   * Premultiplied ARGB, row by row, to read and write. Reading them brings
+   * the GPU's copy back first if a draw wrote it last, once: every CPU
+   * operation reads them, so each sees the store as the GPU left it. Shared
+   * pixels are copied first, as they may be written.
    */
   get pixels(): Uint32Array {
-    if (this.gpuNewer && this.gpu) {
-      this.cpu = this.gpu.read();
+    const pixels = this.readable;
+    if (this.shared) {
+      this.cpu = pixels.slice();
+      this.shared = false;
     }
 
-    this.gpuNewer = false;
     return this.cpu;
   }
 
   set pixels(pixels: Uint32Array) {
     this.cpu = pixels;
+    this.shared = false;
     this.gpuNewer = false;
+  }
+
+  /**
+   * The pixels as `pixels` gives them, to read only, never to write: shared
+   * pixels stay shared. An operation that writes a store and reads another,
+   * which may be the same, takes the one it writes first, so both are one array.
+   */
+  get readable(): Uint32Array {
+    if (this.gpuNewer && this.gpu) {
+      this.cpu = this.gpu.read();
+      this.shared = false;
+    }
+
+    this.gpuNewer = false;
+    return this.cpu;
   }
 
   /** Whether the GPU's copy is newer than the CPU's, which a read of `pixels` would bring back. */
@@ -215,7 +247,7 @@ export class BitmapStore {
       this.gpuNewer = false;
     }
 
-    return this.pixels;
+    return this.readable;
   }
 
   /**
@@ -240,16 +272,17 @@ export class BitmapStore {
     return true;
   }
 
-  /** A store of its own holding `pixels`, premultiplied already. */
+  /**
+   * A store of its own holding `pixels`, premultiplied already, which are
+   * never written: the store shares them until it is.
+   */
   static of(pixels: {
     width: number;
     height: number;
     transparent: boolean;
     pixels: Uint32Array;
   }): BitmapStore {
-    const store = new BitmapStore(pixels.width, pixels.height, pixels.transparent, 0);
-    store.pixels.set(pixels.pixels);
-    return store;
+    return new BitmapStore(pixels.width, pixels.height, pixels.transparent, 0, pixels.pixels);
   }
 
   /** `argb` as this store keeps it: premultiplied, and opaque where the store is. */
@@ -275,7 +308,7 @@ export class BitmapStore {
       return 0;
     }
 
-    return unmultiply(this.pixels[y * this.width + x]);
+    return unmultiply(this.readable[y * this.width + x]);
   }
 
   getPixel(x: number, y: number): number {
@@ -394,13 +427,16 @@ export class BitmapStore {
     // it moves right.
     const up = source === this && d.y > sy && d.x >= sx;
     const left = source === this && d.x > sx;
+    // The array written, taken once: a source or alpha that is this store reads it too.
+    const into = this.pixels;
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
       const to = (d.y + row) * this.width + d.x;
       const from = (sy + row) * source.width + sx;
       for (let c = 0; c < d.width; c++) {
         const i = left ? d.width - 1 - c : c;
-        let p = source.pixels[from + i];
+        // Read again each pixel: a copy within the store reads what it wrote.
+        let p = source.readable[from + i];
         if (alpha) {
           const mx = ax + i;
           const my = ay + row;
@@ -408,10 +444,10 @@ export class BitmapStore {
             continue;
           }
 
-          p = scale(p, alpha.pixels[my * alpha.width + mx] >>> 24);
+          p = scale(p, alpha.readable[my * alpha.width + mx] >>> 24);
         }
 
-        this.pixels[to + i] = this.composite(p, this.pixels[to + i], mergeAlpha);
+        into[to + i] = this.composite(p, into[to + i], mergeAlpha);
       }
     }
 
@@ -478,7 +514,7 @@ export class BitmapStore {
               continue;
             }
 
-            p = scale(p, alpha.pixels[my * alpha.width + mx] >>> 24);
+            p = scale(p, alpha.readable[my * alpha.width + mx] >>> 24);
           }
 
           const i = y * this.width + x;
@@ -507,7 +543,7 @@ export class BitmapStore {
 
     for (let y = c.y; y < c.y + c.height; y++) {
       for (let x = c.x; x < c.x + c.width; x++) {
-        out.push(unmultiply(this.pixels[y * this.width + x]));
+        out.push(unmultiply(this.readable[y * this.width + x]));
       }
     }
 
@@ -521,7 +557,7 @@ export class BitmapStore {
       return new Uint8Array(0);
     }
 
-    const pixels = this.pixels;
+    const pixels = this.readable;
     const out = new Uint8Array(c.width * c.height * 4);
     let j = 0;
     for (let y = c.y; y < c.y + c.height; y++) {
@@ -558,7 +594,7 @@ export class BitmapStore {
 
   clone(): BitmapStore {
     const copy = new BitmapStore(this.width, this.height, this.transparent, 0);
-    copy.pixels.set(this.pixels);
+    copy.pixels.set(this.readable);
     return copy;
   }
 
