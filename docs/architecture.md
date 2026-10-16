@@ -5174,6 +5174,10 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   moves focus with Tab, and only the recorded text and editing keys edit
   a field, as Ruffle's input keeps them apart; a press is a first click
   unless its `index` counts it as a second, as Ruffle's runner has it.
+  A test that gives its window (`viewport_dimensions`) recorded its
+  positions in it, the stage shown whole and centred: they are scaled
+  back to the stage's, and an AVM1 movie told the window's pixels to a
+  stage pixel, which `_xmouse` is measured in.
   Flash's harness plays no input, so `check-references.ts` leaves these
   tests out.
   A test that does not finish in its time is a timeout, a standing of its

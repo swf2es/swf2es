@@ -27,6 +27,8 @@ export interface PlayerJob {
   shown?: boolean;
   /** Ruffle's recorded input, played after each frame (replay.ts). */
   input?: unknown[];
+  /** The window the input was recorded in, in its pixels, the stage shown whole (replay.ts). */
+  viewport?: { width: number; height: number };
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -331,7 +333,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           const answer = evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
           ({ value, exception } = await (options.timeout

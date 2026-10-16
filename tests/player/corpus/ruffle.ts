@@ -43,6 +43,11 @@ export interface RuffleTest {
   ignore: boolean;
   /** Its input.json, the input Ruffle plays into it (replay.ts), if it has one. */
   input: string | null;
+  /**
+   * The window Ruffle plays it in, in its pixels, where the test gives
+   * one: the stage shown in it whole.
+   */
+  viewport: { width: number; height: number } | null;
 }
 
 /**
@@ -156,6 +161,9 @@ function test(path: string): RuffleTest | null {
   );
   const input = join(dir, "input.json");
   const quality = /quality\s*=\s*"(\w+)"/.exec(values.get("player_options.with_renderer") ?? "");
+  const viewport = values.get("player_options.viewport_dimensions") ?? "";
+  const width = /width\s*=\s*([\d.]+)/.exec(viewport);
+  const height = /height\s*=\s*([\d.]+)/.exec(viewport);
   return {
     path,
     swf: join(dir, "test.swf"),
@@ -166,6 +174,7 @@ function test(path: string): RuffleTest | null {
     quality: quality?.[1] ?? "high",
     ignore: values.get("ignore") === "true" || needs,
     input: existsSync(input) ? input : null,
+    viewport: width && height ? { width: Number(width[1]), height: Number(height[1]) } : null,
   };
 }
 
