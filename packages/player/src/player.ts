@@ -5,6 +5,7 @@
 // follow, or an AVM1 SWF's actions; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import type { Avm1 } from "./avm1/avm1.js";
+import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import {
   BUTTON,
@@ -20,7 +21,7 @@ import {
 import { setStageSize } from "./display/perspective.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { KeyboardInput } from "./input/keyboard.js";
-import { PointerInput } from "./input/pointer.js";
+import { type Pointer, PointerInput } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
 import type { Scripting } from "./scripting.js";
 
@@ -83,7 +84,8 @@ export class Player {
   }
 
   /** Renderer-independent mouse routing, once scripts have been loaded. */
-  readonly pointer: PointerInput | null;
+  readonly pointer: Pointer | null;
+  private readonly avm1Pointer: Avm1Pointer | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
   readonly keyboard: KeyboardInput | null;
   /** Touches, likewise: TouchEvents, and the mouse the primary touch moves. */
@@ -109,11 +111,13 @@ export class Player {
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
     this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
-    this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
-    this.touch =
-      this.pointer && scripting ? new TouchInput(this.stage, scripting, this.pointer) : null;
+    const pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
+    // An AVM1 SWF's buttons and clips take the pointer by AVM1's rules.
+    this.avm1Pointer = avm1 && !scripting ? new Avm1Pointer(this.stage, avm1) : null;
+    this.pointer = pointer ?? this.avm1Pointer;
+    this.touch = pointer && scripting ? new TouchInput(this.stage, scripting, pointer) : null;
     if (scripting) {
-      scripting.pointer = this.pointer;
+      scripting.pointer = pointer;
     }
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
@@ -389,6 +393,7 @@ export class Player {
     // An AVM1 SWF's clips play in its order, the newest first.
     if (this.avm1 && !this.scripting) {
       this.avm1.tick();
+      this.avm1Pointer?.frameEnded();
       return;
     }
 

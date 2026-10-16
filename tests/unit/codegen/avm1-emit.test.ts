@@ -557,10 +557,27 @@ test("GetTime, CloneSprite and RemoveSprite are calls of their operations", asyn
   );
 });
 
+test("StartDrag and EndDrag are calls that take their operands off the stack themselves", async () => {
+  // StartDrag's bounds are on the stack only where its constrain flag is true.
+  const block = asm().push(1, 2, 3, 4, true, false, "a").op("StartDrag").op("EndDrag").bytes();
+  const { calls, error } = await run([block]);
+
+  assert.equal(error, null);
+  assert.deepEqual(
+    calls.filter((c) => c[0] !== "constantPool"),
+    [
+      ["startDrag", { pool: [], st: [1, 2, 3, 4, true, false, "a"] }],
+      ["stopDrag", { pool: [], st: [1, 2, 3, 4, true, false, "a"] }],
+    ],
+  );
+});
+
 test("every other action throws that it is not yet supported", async () => {
-  const thrown = await run([asm().push("a").trace().push("x").action(0x28).trace().bytes()]);
+  const thrown = await run([
+    asm().push("a").trace().push("x", "y").raw([0x9a, 1, 0, 0]).trace().bytes(),
+  ]);
   assert.deepEqual(thrown.calls, [["trace", "a"]]);
-  assert.equal(thrown.error, "not yet supported: EndDrag");
+  assert.equal(thrown.error, "not yet supported: GetUrl2");
 
   // An action with operands.
   const url = await run([asm().getUrl("a", "b").bytes()]);

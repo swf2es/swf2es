@@ -14,6 +14,7 @@ export {
   find,
   fold,
   get,
+  has,
   keys,
   type Native,
   Property,

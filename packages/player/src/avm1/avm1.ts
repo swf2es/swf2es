@@ -18,6 +18,7 @@
 import type { Codegen } from "@swf2es/codegen";
 import {
   type ActionList,
+  ButtonCondition,
   ClipEvent,
   isAs3,
   type Place,
@@ -121,6 +122,57 @@ const METHODS = new Map<number, string>([
   [ClipEvent.dragOut, "onDragOut"],
 ]);
 
+/** The pointer's events that make a clip a button where its clip actions have one (Ruffle's BUTTON_EVENT_FLAGS). */
+const BUTTON_EVENTS =
+  ClipEvent.press |
+  ClipEvent.release |
+  ClipEvent.releaseOutside |
+  ClipEvent.rollOver |
+  ClipEvent.rollOut |
+  ClipEvent.dragOver |
+  ClipEvent.dragOut |
+  ClipEvent.keyPress;
+
+/** The AS2 methods that make a clip a button where its object, or what it inherits, has one. */
+const BUTTON_METHODS = [
+  "onPress",
+  "onRelease",
+  "onReleaseOutside",
+  "onRollOver",
+  "onRollOut",
+  "onDragOver",
+  "onDragOut",
+];
+
+/** The button transition each of the pointer's events is, by the event's bit (Ruffle's Avm1Button). */
+const CONDITIONS = new Map<number, number>([
+  [ClipEvent.rollOver, ButtonCondition.idleToOverUp],
+  [ClipEvent.rollOut, ButtonCondition.overUpToIdle],
+  [ClipEvent.press, ButtonCondition.overUpToOverDown],
+  [ClipEvent.release, ButtonCondition.overDownToOverUp],
+  [ClipEvent.releaseOutside, ButtonCondition.outDownToIdle],
+  [ClipEvent.dragOut, ButtonCondition.overDownToOutDown],
+  [ClipEvent.dragOver, ButtonCondition.outDownToOverDown],
+]);
+
+/** The frame label a clip in button mode goes to and stops at on each of the pointer's events. */
+const LABELS = new Map<number, string>([
+  [ClipEvent.rollOut, "_up"],
+  [ClipEvent.releaseOutside, "_up"],
+  [ClipEvent.rollOver, "_over"],
+  [ClipEvent.release, "_over"],
+  [ClipEvent.dragOut, "_over"],
+  [ClipEvent.press, "_down"],
+  [ClipEvent.dragOver, "_down"],
+]);
+
+/** A button's condition block: the transitions it runs on, and its key (0 for none). */
+interface ButtonHandler {
+  conditions: number;
+  key: number;
+  block: number;
+}
+
 // The queue's priorities, which it runs in order: initialize clip events
 // first, then the root's DoInitAction blocks, then constructions, then the
 // rest, frame actions, events and methods, each in the order queued
@@ -159,6 +211,19 @@ class Queued {
 }
 
 const NO_BLOCKS: number[] = [];
+
+const NO_BUTTON_HANDLERS: readonly ButtonHandler[] = [];
+
+/** The state a button goes to on each of the pointer's events (Ruffle's Avm1Button: a drag out shows over). */
+const BUTTON_STATES = new Map<number, "up" | "over" | "down">([
+  [ClipEvent.rollOver, "over"],
+  [ClipEvent.rollOut, "up"],
+  [ClipEvent.press, "down"],
+  [ClipEvent.release, "over"],
+  [ClipEvent.releaseOutside, "up"],
+  [ClipEvent.dragOut, "over"],
+  [ClipEvent.dragOver, "down"],
+]);
 
 /** How many queued actions of a priority run before those run are dropped from its queue. */
 const COMPACT_AT = 4096;
@@ -240,8 +305,16 @@ export class Avm1 implements Movie {
   quality = "HIGH";
   focusRect = true;
   soundBufferTime = 5;
-  readonly mouseX = 0;
-  readonly mouseY = 0;
+  /** Where the pointer last was, in the stage's coordinates (avm1/pointer.ts). */
+  mouseX = 0;
+  mouseY = 0;
+  /** What drags a clip for StartDrag and startDrag: the pointer, where the host gives one. */
+  dragger: {
+    startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;
+    stopDrag(): void;
+  } | null = null;
+  /** Each button character's condition blocks, by its id, gathered from the action list once. */
+  private buttonHandlers: Map<number, ButtonHandler[]> | null = null;
   readonly url: string;
 
   constructor(
@@ -301,6 +374,9 @@ export class Avm1 implements Movie {
         this.duplicate(target as DisplayObject, name, depth, null);
       },
       remove: (target) => this.remove(target as DisplayObject),
+      startDrag: (target, lockCenter, bounds) =>
+        this.startDrag(target as DisplayObject, lockCenter, bounds),
+      stopDrag: () => this.stopDrag(),
       returned: () => this.returned(),
     };
   }
@@ -1179,11 +1255,169 @@ export class Avm1 implements Movie {
   }
 
   /** From SWF 6, the AS2 method of `event` on `clip`'s object, queued. */
-  private method(clip: MovieClip, event: number, unload: boolean): void {
+  private method(clip: DisplayObject, event: number, unload: boolean): void {
     const name = METHODS.get(event);
     if (this.swfVersion >= 6 && name !== undefined) {
       this.enqueue(NORMAL, new Queued(METHOD, clip, 0, 0, unload, name));
     }
+  }
+
+  startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void {
+    this.dragger?.startDrag(d, lockCenter, bounds);
+  }
+
+  stopDrag(): void {
+    this.dragger?.stopDrag();
+  }
+
+  /**
+   * Whether the pointer takes `clip` as a button (Ruffle's is_button_mode):
+   * its clip actions have one of the pointer's button events, or, below
+   * the root, its object has one of their AS2 methods, its own or
+   * inherited, a class's among them.
+   */
+  buttonMode(clip: MovieClip): boolean {
+    const native = nativeOf(clip);
+    for (const h of native?.handlers ?? NO_HANDLERS) {
+      if (h.events & BUTTON_EVENTS) {
+        return true;
+      }
+    }
+
+    const face = clip.avm1;
+    if (face === null || clip === this.root || this.swfVersion < 6) {
+      return false;
+    }
+
+    for (const name of BUTTON_METHODS) {
+      if (avm1.has(face, name, this.swfVersion)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** A button's or clip's AS2 flag, `enabled` or `useHandCursor`: true where it is undefined, as Flash reads it. */
+  flag(d: DisplayObject, name: "enabled" | "useHandCursor"): boolean {
+    const value = this.read(d, name);
+    return value === undefined || avm1.toBoolean(value, this.swfVersion);
+  }
+
+  /** What a clip's `hitArea` names, a clip or button the pointer tests in its place; null for none. */
+  hitArea(clip: MovieClip): DisplayObject | null {
+    if (this.swfVersion < 6) {
+      return null;
+    }
+
+    const area = this.read(clip, "hitArea");
+    const display = area instanceof avm1.Avm1Object ? area.display : null;
+    return display instanceof ClipNative ? display.target : null;
+  }
+
+  /**
+   * `d`'s AVM1 object's property `name`, read as code reads it, in an
+   * activation of `d`'s, as a getter `addProperty` gave it may be AVM1
+   * code; undefined where it has no object, or the read throws. Only the
+   * pointer reads so, between scripts: its begin and end would reset a
+   * running script's timeout.
+   */
+  private read(d: DisplayObject, name: string): avm1.Value {
+    const face = d.avm1;
+    const cx = this.halted ? null : this.activationOf(d);
+    if (face === null || cx === null) {
+      return undefined;
+    }
+
+    let value: avm1.Value;
+    this.begin();
+    try {
+      this.rt.call(cx, () => {
+        value = avm1.get(face, name, this.swfVersion);
+      });
+    } finally {
+      this.end();
+    }
+
+    return value;
+  }
+
+  /**
+   * The pointer's button events, each to its object, in the order given,
+   * then the queue runs once. A button runs its condition blocks for the
+   * transition, with its parent as target, plays the transition's sound
+   * and changes state, then, from SWF 6, its AS2 method; a clip in button
+   * mode goes to the event's frame label, if it has one, and stops, then
+   * runs its clip actions and method for it. Ruffle's order (Avm1Button
+   * and MovieClip's event_dispatch).
+   */
+  buttonEvents(events: readonly (readonly [DisplayObject, number])[]): void {
+    if (this.halted || !this.loaded || events.length === 0) {
+      return;
+    }
+
+    this.begin();
+    try {
+      for (const [d, event] of events) {
+        if (this.removed(d)) {
+          continue;
+        }
+
+        if (d instanceof ButtonObject) {
+          this.buttonEvent(d, event);
+        } else if (d instanceof MovieClip) {
+          const label = LABELS.get(event);
+          const timeline = this.timeline(d);
+          const frame = label === undefined ? undefined : timeline.labelFrame(label);
+          if (frame !== undefined) {
+            timeline.goto(frame, false);
+          }
+
+          this.dispatch(d, event);
+        }
+      }
+
+      this.runQueue();
+    } finally {
+      this.end();
+    }
+  }
+
+  private buttonEvent(button: ButtonObject, event: number): void {
+    const condition = CONDITIONS.get(event) ?? 0;
+    const parent = button.parent;
+    const id = button.character?.id;
+    if (parent !== null && id !== undefined) {
+      for (const h of this.handlersOfButton(id)) {
+        if (h.conditions & condition) {
+          this.enqueue(NORMAL, new Queued(BLOCK, parent, h.block));
+        }
+      }
+    }
+
+    const state = BUTTON_STATES.get(event);
+    if (state !== undefined && state !== button.state) {
+      // A drag's transitions are silent.
+      button.setState(state, event !== ClipEvent.dragOut && event !== ClipEvent.dragOver);
+    }
+
+    this.method(button, event, false);
+  }
+
+  /** `id`'s condition blocks: a DefineButton's one, or a DefineButton2's, one a BUTTONCONDACTION. */
+  private handlersOfButton(id: number): readonly ButtonHandler[] {
+    if (this.buttonHandlers === null) {
+      this.buttonHandlers = new Map();
+      for (const [block, { owner }] of (this.list?.blocks ?? []).entries()) {
+        if (owner.type === "button") {
+          const list = this.buttonHandlers.get(owner.button) ?? [];
+          list.push({ conditions: owner.conditions, key: owner.key, block });
+          this.buttonHandlers.set(owner.button, list);
+        }
+      }
+    }
+
+    return this.buttonHandlers.get(id) ?? NO_BUTTON_HANDLERS;
   }
 
   /**

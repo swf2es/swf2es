@@ -105,6 +105,14 @@ export interface Host {
   /** RemoveSprite: `target` removed, where it is at a depth a script may remove. */
   remove?(target: Target): void;
   /**
+   * StartDrag: `target` follows the pointer, its registration point under
+   * it where `lockCenter`, kept within `bounds` (left, top, right, bottom
+   * in its parent's space) where given; one drag at a time.
+   */
+  startDrag?(target: Target, lockCenter: boolean, bounds: number[] | null): void;
+  /** EndDrag: the drag ends. */
+  stopDrag?(): void;
+  /**
    * A function of the SWF's that code called by CallFunction or
    * CallMethod returned: Flash runs the initialize events queued by then.
    */

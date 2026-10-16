@@ -15,7 +15,7 @@ import { PRIMITIVE } from "./inheritance.js";
 import { Avm1Object } from "./objects.js";
 import { toInt32 } from "./operators.js";
 import { SCOPE_Target, Scope, stoppedAtPrimitive, targetPath } from "./scope.js";
-import { stringOf, toNumber, type Value } from "./values.js";
+import { stringOf, toBoolean, toNumber, type Value } from "./values.js";
 
 /** The target, or where SetTarget found none, the root: where GotoFrame2 and a function's `this` go. */
 export function targetOrRoot(cx: Activation): Target {
@@ -390,6 +390,31 @@ export function cloneSprite(
   const target = displayOf(cx, targetOrRoot(cx), source, true, version);
   if (target !== null) {
     cx.host.duplicate?.(target, n, d);
+  }
+}
+
+/**
+ * StartDrag, its operands on the stack: the target, whether to lock the
+ * centre, whether to constrain, and if so the bounds' right-to-left
+ * bottom, right, top and left. The display object the target names, or
+ * the code's own clip for an empty one, is dragged.
+ */
+export function startDrag(cx: Activation, version: number): void {
+  const st = cx.st;
+  const value = st.pop();
+  const lockCenter = toBoolean(st.pop(), version);
+  let bounds: number[] | null = null;
+  if (toBoolean(st.pop(), version)) {
+    const bottom = toNumber(st.pop(), version);
+    const right = toNumber(st.pop(), version);
+    const top = toNumber(st.pop(), version);
+    const left = toNumber(st.pop(), version);
+    bounds = [left, top, right, bottom];
+  }
+
+  const target = displayOf(cx, targetOrRoot(cx), value, true, version);
+  if (target !== null) {
+    cx.host.startDrag?.(target, lockCenter, bounds);
   }
 }
 
