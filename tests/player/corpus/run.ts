@@ -68,6 +68,7 @@ const results = await runPlayer(
     frames: Math.min(t.frames, MAX_FRAMES),
     capture: [],
     url: `/corpus/${t.path}/test.swf`,
+    input: t.input ? JSON.parse(readFileSync(t.input, "utf8")) : undefined,
   })),
   {
     timeout: TIMEOUT,

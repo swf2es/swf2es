@@ -87,7 +87,7 @@ function setUp(...names: string[]) {
 
 // What Flash keeps of TYPED under each restrict, from Ruffle's corpus
 // (avm2/edittext_restrict, recorded in Flash), which the corpus runner
-// cannot type into.
+// also types into now (tests/player/replay.ts).
 const TYPED = "abcABC012^\\-* &ąδłĄΔŁß";
 const RESTRICTED: [string | null, string][] = [
   [null, "abcABC012^\\-* &ąδłĄΔŁß"],
@@ -200,6 +200,25 @@ test("backspace, delete, the arrows and shift's selection edit as a field's keys
   assert.deepEqual(field.selection, [0, 1]);
   type("z");
   assert.equal(field.model.text, "zb");
+});
+
+test("a key without edits sends its events and moves focus; text edits with no key events", () => {
+  const { fields, scripting, keyboard, heard, listen } = setUp("first", "second");
+  const [first, second] = fields;
+  setFocus(scripting, first);
+  listen(first, "keyDown", (e) => heard.push(`down ${e.args[1]}`));
+  listen(first, "change", () => heard.push("change"));
+
+  keyboard.handle("down", { keyCode: 65, charCode: 97 }, false);
+  assert.equal(first.model.text, "");
+  assert.ok(keyboard.text({ keyCode: 0, charCode: 97 }));
+  assert.ok(keyboard.text({ keyCode: 0, charCode: 98 }));
+  assert.ok(keyboard.text({ keyCode: 8, charCode: 8 }));
+  assert.equal(first.model.text, "a");
+  assert.deepEqual(heard, ["down 65", "change", "change", "change"]);
+
+  keyboard.handle("down", { keyCode: 9, charCode: 9 }, false);
+  assert.equal(scripting.focus, second);
 });
 
 test("maxChars cuts what is typed to the room left, and a full field hears nothing", () => {

@@ -5166,8 +5166,16 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   standing, and one that raises it updates the baseline with
   `--update-baseline`; a test whose standing varies from run to run is
   set to null and not compared. Only the traces are compared: the frames
-  Flash drew are the oracle's matter (above), and a test needing input,
-  audio, video or a default font is ignored, as the collector marks it.
+  Flash drew are the oracle's matter (above), and a test needing audio,
+  video or a default font is ignored, as the collector marks it. A test's
+  `input.json`, the mouse, keys and text Ruffle's runner plays into it, is
+  played as Ruffle plays it (`tests/player/replay.ts`): after each frame,
+  the events up to the next `Wait`. A key's press sends its events and
+  moves focus with Tab, and only the recorded text and editing keys edit
+  a field, as Ruffle's input keeps them apart; a press is a first click
+  unless its `index` counts it as a second, as Ruffle's runner has it.
+  Flash's harness plays no input, so `check-references.ts` leaves these
+  tests out.
   A test that does not finish in its time is a timeout, a standing of its
   own. The corpus is fetched, not committed, so the baseline runs where
   the corpus is, like adl, not in CI; it is what says, in order of what

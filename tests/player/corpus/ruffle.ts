@@ -39,8 +39,10 @@ export interface RuffleTest {
   knownFailure: boolean;
   /** Stage quality its renderer runs at: "low", "medium", "high" or "best". */
   quality: string;
-  /** Tests Ruffle skips, or that need what this runner does not do yet (audio, video, fonts, input). */
+  /** Tests Ruffle skips, or that need what this runner does not do yet (audio, video, fonts). */
   ignore: boolean;
+  /** Its input.json, the input Ruffle plays into it (replay.ts), if it has one. */
+  input: string | null;
 }
 
 /**
@@ -149,10 +151,10 @@ function test(path: string): RuffleTest | null {
     });
   }
 
-  const needs =
-    ["with_audio", "with_video", "with_default_font"].some(
-      (k) => values.get(`player_options.${k}`) === "true",
-    ) || existsSync(join(dir, "input.json"));
+  const needs = ["with_audio", "with_video", "with_default_font"].some(
+    (k) => values.get(`player_options.${k}`) === "true",
+  );
+  const input = join(dir, "input.json");
   const quality = /quality\s*=\s*"(\w+)"/.exec(values.get("player_options.with_renderer") ?? "");
   return {
     path,
@@ -163,6 +165,7 @@ function test(path: string): RuffleTest | null {
     knownFailure: values.get("known_failure") === "true",
     quality: quality?.[1] ?? "high",
     ignore: values.get("ignore") === "true" || needs,
+    input: existsSync(input) ? input : null,
   };
 }
 

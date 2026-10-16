@@ -1373,11 +1373,12 @@ compiler.
 ## Testing against Flash
 
 - **Ruffle's corpus**: `avm1/` has 715 tests at the pinned commit, every
-  one with Flash's `output.txt`; 649 pass the collector's filters (no
-  input, audio, video or default font), 41 of those Ruffle's own known
-  failures. Most were built by Flash's authoring tool, a `.fla` beside
-  them, at versions 4 to 10, AVM1 as content has it; some 250 are version
-  15, built by other compilers. `pnpm corpus` runs them
+  one with Flash's `output.txt` and none needing audio, video or a default
+  font, so the collector keeps them all; 66 have recorded input, which
+  `replay.ts` plays, and 41 are Ruffle's own known failures. Most were
+  built by Flash's authoring tool, a `.fla` beside them, at versions 4 to
+  10, AVM1 as content has it; some 250 are version 15, built by other
+  compilers. `pnpm corpus` runs them
   as it runs `avm2/` and `timeline/` (`run.ts` takes `avm1/` among its
   default prefixes), in Chrome, the trace compared line by line, each
   test's standing in `baseline.json`, which a change may not lower; the
