@@ -662,7 +662,7 @@ function colorObject(host: GeomHost, c: avm1.Value[] | null, v: number): Value {
 }
 
 /** A 16-bit integer, wrapped, as a clip's colour transform keeps each value. */
-const int16 = (n: number) => ((n | 0) << 16) >> 16;
+export const int16 = (n: number) => ((n | 0) << 16) >> 16;
 
 /** A multiplier as a clip keeps it, in 8.8 fixed point, 16 bits. */
 const fixed8 = (n: number) => int16(Math.trunc(n * 256)) / 256;

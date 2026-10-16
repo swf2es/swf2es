@@ -47,6 +47,7 @@ import { evaluate } from "../scripting/evaluate.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
+import { colorClass } from "./globals/Color.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
 import {
@@ -485,6 +486,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     realm.global.define("Mouse", this.mouseFace, avm1.DONT_ENUM);
     this.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
+    realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
     const flash = flashPackage(this);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
