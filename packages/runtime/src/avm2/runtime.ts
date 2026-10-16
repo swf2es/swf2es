@@ -1337,7 +1337,7 @@ export class Runtime {
       );
     }
 
-    return this.hasProperty(o, this.publicName(name));
+    return this.hasProperty(o, publicQname(typeof name === "string" ? name : this.toString(name)));
   }
 
   /** Whether `o` itself has element `i`: its class's indexing, an Array's, or a dynamic property. */
@@ -1441,8 +1441,13 @@ export class Runtime {
     return this.traitsOf(o).proto.$p;
   }
 
+  /**
+   * A public name seen at every version, as the host and the natives reach
+   * members, slots and all; what AS3 itself looks up by a string goes by
+   * publicQname, at user code's version.
+   */
   publicName(name: Value): Multiname {
-    return publicQname(typeof name === "string" ? name : this.toString(name));
+    return qname(publicNs, typeof name === "string" ? name : this.toString(name));
   }
 
   // Calls.
