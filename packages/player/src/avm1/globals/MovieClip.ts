@@ -19,6 +19,7 @@ import {
   TRANSFORM,
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
+import type { Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 
 type Value = avm1.Value;
@@ -46,6 +47,25 @@ export interface Movie {
   atPath(path: string): DisplayObject | null;
   /** What timeline actions do to `clip`. */
   timeline(clip: MovieClip): avm1.Timeline;
+  /** attachMovie: the character exported as `name` placed as `instance` at AVM1 depth `depth`. */
+  attachMovie(
+    parent: MovieClip,
+    name: string,
+    instance: string,
+    depth: number,
+    init: avm1.Avm1Object | null,
+  ): DisplayObject | null;
+  /** createEmptyMovieClip: an empty clip as `instance` at AVM1 depth `depth`. */
+  createEmptyMovieClip(parent: MovieClip, instance: string, depth: number): DisplayObject;
+  /** duplicateMovieClip: `d` again as `name` at timeline depth `depth`. */
+  duplicate(
+    d: DisplayObject,
+    name: string,
+    depth: number,
+    init: avm1.Avm1Object | null,
+  ): DisplayObject | null;
+  /** removeMovieClip: `d` removed, where a script may remove it. */
+  remove(d: DisplayObject): void;
 }
 
 /** AVM1's depths are the timeline's less this, as Flash gives them to scripts. */
@@ -579,6 +599,16 @@ export class ClipNative implements avm1.DisplayNative {
   focusRect: boolean | null = null;
   /** Where it was as it was removed, the path its references find a clip at from then on. */
   removedAt: string | null = null;
+  /** A clip's clip actions, from its place or the clip it duplicates; null for none. */
+  handlers: Handler[] | null = null;
+  /** The events of clip actions Flash could not read, which stop the SWF as one comes. */
+  corrupt = 0;
+  /** Whether a clip's load came, on its first frame. */
+  loaded = false;
+  /** Whether its unload came. */
+  unloaded = false;
+  /** Whether it was removed with an unload handler, and stays until the next frame. */
+  pending = false;
 
   constructor(
     readonly movie: Movie,
@@ -794,6 +824,19 @@ export function movieClipClass(movie: Movie): {
 
   proto.define("useHandCursor", true, avm1.DONT_ENUM);
   proto.define("enabled", true, avm1.DONT_ENUM);
+  method("attachMovie", 0, (clip, args, version) => {
+    if (args.length < 3) {
+      return undefined;
+    }
+
+    const name = avm1.stringOf(args[0], version);
+    const instance = avm1.stringOf(args[1], version);
+    const depth = avm1.toNumber(args[2], version) | 0;
+    const init = args.length > 3 && args[3] instanceof avm1.Avm1Object ? args[3] : null;
+    const child = movie.attachMovie(clip, name, instance, depth, init);
+    // A SWF 5 gets nothing back, as from duplicateMovieClip (adl).
+    return version < 6 || child === null ? undefined : (movie.faceOf(child) ?? undefined);
+  });
   method("swapDepths", 0, (clip, args, version) => {
     swapDepths(movie, clip, args[0], version);
     return undefined;
@@ -857,8 +900,9 @@ export function movieClipClass(movie: Movie): {
     clip === movie.root ? movie.length : (clip.timeline.length ?? 0);
   method("getBytesTotal", 0, bytes);
   method("getBytesLoaded", 0, bytes);
+  // The root is level 0's, at depth 0 (the corpus's movieclip_get_instance_at_depth).
   method("getDepth", avm1.READ_ONLY | avm1.VERSION_6, (clip) =>
-    clip.depth === null ? undefined : clip.depth - DEPTH_BIAS,
+    clip.depth !== null ? clip.depth - DEPTH_BIAS : clip === movie.root ? -DEPTH_BIAS : undefined,
   );
   method("play", 0, (clip) => {
     clip.playing = true;
@@ -898,6 +942,32 @@ export function movieClipClass(movie: Movie): {
 
     return undefined;
   });
+  method("duplicateMovieClip", 0, (clip, args, version) => {
+    if (args.length === 0) {
+      return undefined;
+    }
+
+    // Any init object, as Flash takes it, an object made of a primitive (Ruffle: not version-gated).
+    const name = avm1.stringOf(args[0], version);
+    const depth = args.length > 1 ? avm1.toNumber(args[1], version) | 0 : 0;
+    const init = args.length > 2 ? realm.box(args[2], version) : null;
+    const child = movie.duplicate(clip, name, (depth + DEPTH_BIAS) | 0, init);
+    // A SWF 5 gets nothing back.
+    return version < 6 || child === null ? undefined : (movie.faceOf(child) ?? undefined);
+  });
+  proto.define(
+    "removeMovieClip",
+    realm.method((self) => {
+      // Any display object's, as removeMovieClip.call(field) takes a text field.
+      const d = self instanceof avm1.Avm1Object ? self.display?.live()?.display?.target : undefined;
+      if (d !== undefined) {
+        movie.remove(d as DisplayObject);
+      }
+
+      return undefined;
+    }),
+    avm1.DONT_ENUM | avm1.DONT_DELETE,
+  );
   method("getNextHighestDepth", avm1.VERSION_7, (clip) => {
     let highest = -1;
     for (const depth of clip.depths.keys()) {
@@ -920,6 +990,15 @@ export function movieClipClass(movie: Movie): {
   method("getRect", avm1.VERSION_8, (clip, args, version) => {
     const target = args.length > 0 ? targetOf(movie, clip, args[0], version) : clip;
     return target === null ? undefined : boundsObject(movie, clip, target, false, version);
+  });
+  method("createEmptyMovieClip", avm1.VERSION_6, (clip, args, version) => {
+    if (args.length < 2) {
+      return undefined;
+    }
+
+    const instance = avm1.stringOf(args[0], version);
+    const depth = avm1.toNumber(args[1], version) | 0;
+    return movie.faceOf(movie.createEmptyMovieClip(clip, instance, depth)) ?? undefined;
   });
   return { constr, proto };
 }

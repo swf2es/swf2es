@@ -1,0 +1,16 @@
+a initialize a
+kid initialize kid
+root 1
+kid frame kid
+clip frame 1 a
+root 1 after movieclip
+kid initialize kid
+clip frame 2 a
+root 2
+kid frame kid
+clip frame 1 b
+b movieclip
+clip frame 2 b
+root 3 undefined  undefined
+root 4 undefined undefined
+root 5

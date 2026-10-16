@@ -24,7 +24,8 @@
 // objects, function expressions, `new`, `typeof`, `delete`, `instanceof`.
 // `trace(e)` is the Trace action; the timeline's functions (`gotoAndStop`,
 // `play`, `nextFrame`, `setProperty`, `getProperty`, `eval`,
-// `targetPath`, `call`...), `tellTarget` and `ifFrameLoaded` are their
+// `targetPath`, `call`, `getTimer`, `duplicateMovieClip`,
+// `removeMovieClip`...), `tellTarget` and `ifFrameLoaded` are their
 // actions, a constant frame or target as an operand; `with` is With. A call of `__op("Name", ...values)`
 // pushes the values and writes the action of that name, for the actions
 // that no syntax writes (CastOp, ImplementsOp, Extends...).
@@ -1237,6 +1238,7 @@ const CLIP_FUNCTIONS: Record<string, SimpleAction> = {
   getProperty: "GetProperty",
   eval: "GetVariable",
   targetPath: "TargetPath",
+  getTimer: "GetTime",
 };
 
 /** Flash's timeline functions, each one or two actions of no value, as its compiler writes them. */
@@ -1251,6 +1253,8 @@ const TIMELINE: Record<string, true> = {
   toggleHighQuality: true,
   setProperty: true,
   call: true,
+  duplicateMovieClip: true,
+  removeMovieClip: true,
 };
 
 /**
@@ -1309,6 +1313,19 @@ function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
     case "call":
       args[0](a);
       a.op("Call");
+      return;
+    // The depth biased as MovieClip's own duplicateMovieClip biases it, which CloneSprite does not.
+    case "duplicateMovieClip":
+      for (const v of args) {
+        v(a);
+      }
+      a.push(16384);
+      a.op("Add2");
+      a.op("CloneSprite");
+      return;
+    case "removeMovieClip":
+      args[0](a);
+      a.op("RemoveSprite");
       return;
   }
 }

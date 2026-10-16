@@ -45,6 +45,11 @@ export class Activation implements LazyLocals {
   held: Held[] | null = null;
   /** What the region returns where control goes to its exit through a Try (control.ts). */
   ret: Value = undefined;
+  /**
+   * The realm's count of removals as this last looked at its clip, which a
+   * call may have removed only where the count moved on; none at first.
+   */
+  removals: number;
   /** The register a catch just took a value into, -1 for none, and the value, which the region sets. */
   into = -1;
   thrown: Value = undefined;
@@ -76,6 +81,7 @@ export class Activation implements LazyLocals {
   ) {
     this.target = base;
     this.g = realm.registers;
+    this.removals = -1;
   }
 
   get global(): Avm1Object {

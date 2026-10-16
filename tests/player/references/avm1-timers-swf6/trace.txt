@@ -1,0 +1,14 @@
+ids 1 1 1
+none undefined undefined undefined undefined
+time number true
+timeout 0 1
+timeout 1 xy 1
+enterFrame 2 true
+root 2
+enterFrame 3 true
+root 3
+enterFrame 4 true
+root 4
+enterFrame 5 true
+root 5
+root 7 tick s 1 true, timeout 1250, tick s 2 true
