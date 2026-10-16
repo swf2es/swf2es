@@ -40,6 +40,8 @@ export interface Movie {
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
+  /** What `d` was last dragged over, its `_droptarget`; null for nothing. */
+  dropTargetOf(d: DisplayObject): DisplayObject | null;
   /** `d` hidden by its `_visible`: the focus, if it has it, goes. */
   hidden(d: DisplayObject): void;
   /** startDrag: `d` follows the pointer, within `bounds` (left, top, right, bottom) where given. */
@@ -277,8 +279,12 @@ const PROPERTIES: [string, DisplayProperty][] = [
   [
     "_droptarget",
     {
-      // "" in every version (adl; Ruffle: undefined up to SWF 5).
-      get: () => "",
+      // The slash path of what it was last dragged over; "" for nothing, in every version (adl;
+      // Ruffle: undefined up to SWF 5).
+      get: (f) => {
+        const over = f.movie.dropTargetOf(f.target);
+        return over === null ? "" : slashPathOf(over, f.movie.root);
+      },
       set: null,
     },
   ],
