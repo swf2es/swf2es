@@ -363,12 +363,13 @@ const SHARED_BITMAP_MOST = 1 << 20;
 
 /** The bitmap tag `t` defines, the one a SWF read before defined alike where there is one. */
 function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bitmap {
-  if (t.code === tags.DefineBits || t.length > SHARED_BITMAP_MOST) {
+  // A short header is a bitmap Flash refuses: read as invalid, never shared with a long one.
+  if (t.code === tags.DefineBits || !t.long || t.length > SHARED_BITMAP_MOST) {
     return readBitmap(bytes, t, tables);
   }
 
   const tag = bytes.subarray(t.offset, t.offset + t.length);
-  const hash = tagHash(t.code, tag);
+  const hash = sampledHash(t.code, tag);
   for (const entry of sharedBitmaps.get(hash) ?? []) {
     const definition = entry.definition.deref();
     if (definition && sameBytes(entry.tag, tag)) {
@@ -377,12 +378,29 @@ function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bit
   }
 
   const definition = readBitmap(bytes, t, tables);
-  const own = tag.slice();
+  // An image's definition holds its bytes in the SWF's already; a lossless one only its pixels.
+  const own = definition.type === "image" ? tag : tag.slice();
   const list = sharedBitmaps.get(hash) ?? [];
   list.push({ tag: own, definition: new WeakRef(definition) });
   sharedBitmaps.set(hash, list);
   bitmapsGone.register(definition, { hash, tag: own });
   return definition;
+}
+
+/**
+ * FNV-1a over the tag's code, its length and up to 256 of its bytes, evenly
+ * apart: a match is told by comparing the bytes, so the hash need only
+ * spread the tags, and a large one costs no pass of its own.
+ */
+function sampledHash(code: number, tag: Uint8Array): number {
+  let hash = Math.imul(0x811c9dc5 ^ code, 0x01000193);
+  hash = Math.imul(hash ^ tag.length, 0x01000193);
+  const step = Math.max(1, Math.floor(tag.length / 256));
+  for (let i = 0; i < tag.length; i += step) {
+    hash = Math.imul(hash ^ tag[i], 0x01000193);
+  }
+
+  return hash >>> 0;
 }
 
 /** FNV-1a over the tag's code and bytes. */

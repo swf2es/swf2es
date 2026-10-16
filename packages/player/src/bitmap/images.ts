@@ -152,8 +152,15 @@ async function decodeOne(character: BitmapCharacter, decode: ImageDecode | null)
 
   let pixels = byDefinition.get(definition);
   if (!pixels) {
-    pixels = decode(definition.data, definition.format).then((image) =>
-      image && image.width > 0 && image.height > 0 ? pixelsOf(definition, image) : INVALID_PIXELS,
+    const cache = byDefinition;
+    pixels = decode(definition.data, definition.format).then(
+      (image) =>
+        image && image.width > 0 && image.height > 0 ? pixelsOf(definition, image) : INVALID_PIXELS,
+      // A decoder that failed is asked again by the next load, as before it was shared.
+      (error) => {
+        cache.delete(definition);
+        throw error;
+      },
     );
     byDefinition.set(definition, pixels);
   }

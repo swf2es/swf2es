@@ -99,6 +99,25 @@ test("a store shown by two renderers has a copy in each, and what one drew reach
   assert.equal(store.copies.size, 0);
 });
 
+test("a renderer destroyed lets go of its copies of the stores it showed, which may outlive it", () => {
+  const destroyers: { destroy(): void }[] = [];
+  const renderer = {
+    ...standIn([]).renderer,
+    runners: { destroy: { add: (runner: { destroy(): void }) => destroyers.push(runner) } },
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const store = new BitmapStore(2, 1, true, 0);
+  store.setPixel32(0, 0, 0xff102030);
+  view.render(new BitmapObject(store));
+  assert.equal(store.copies.size, 1);
+
+  for (const runner of destroyers) {
+    runner.destroy();
+  }
+
+  assert.equal(store.copies.size, 0);
+});
+
 test("a timeline mask's range goes in a container it masks, a scroll clips the rest, and a mask off the list sits beside the root", () => {
   const view = new PixiView(standIn([]).renderer);
   const root = new Container();

@@ -270,6 +270,15 @@ class StoreTexture implements GpuCopy {
   }
 
   destroy(): void {
+    // Out of the store, which other SWFs' fills may share, so that it does not hold this renderer.
+    const store = this.store.deref();
+    if (store) {
+      store.copies.delete(this);
+      if (store.gpu === this) {
+        store.lostOnGpu(this);
+      }
+    }
+
     this.bitmaps.forget(this);
     destroyTexture(this.texture);
     for (const { texture } of this.variants.values()) {
@@ -309,6 +318,14 @@ class GpuBitmaps {
             copy.restore();
           }
         }),
+    });
+    // A renderer destroyed lets go of its copies, which stores that outlive it would hold.
+    renderer.runners?.destroy?.add({
+      destroy: () => {
+        for (const copy of [...this.live]) {
+          copy.destroy();
+        }
+      },
     });
   }
 
