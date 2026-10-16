@@ -803,6 +803,58 @@ test("a key goes to the clips' keyDown as drawn, then Key's listeners, then the 
   ]);
 });
 
+test("Selection focuses a clip, its kill, set and listeners' events at once, and Tab moves the focus by place", async () => {
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "a", matrix: { tx: 0, ty: 0 } }),
+      w.place({ depth: 2, character: 1, name: "b", matrix: { tx: 1000, ty: 0 } }),
+      as1(
+        `a.focusEnabled = true; a.tabEnabled = true; b.tabEnabled = true;
+        a.onSetFocus = function (o) { trace("a.onSetFocus " + o); };
+        a.onKillFocus = function (n) { trace("a.onKillFocus " + n); };
+        b.onSetFocus = function (o) { trace("b.onSetFocus " + o); };
+        Selection.addListener({ onSetFocus: function (o, n) { trace("Selection " + o + " -> " + n); } });
+        trace(Selection.setFocus(a)); trace(Selection.getFocus()); trace(Selection.setFocus(a));
+        trace(Selection.setFocus(_root)); trace(Selection.setFocus()); stop();`,
+        6,
+      ),
+    ],
+  ]);
+  const { lines, player } = await play(swf, 1);
+
+  assert.deepEqual(lines, [
+    "a.onSetFocus null",
+    "Selection null -> _level0.a",
+    "true",
+    "_level0.a",
+    "true",
+    "false",
+    "false",
+  ]);
+
+  // Tab: the next by place, round to the first past the last.
+  lines.length = 0;
+  player.keyboard?.handle("down", { keyCode: 9, charCode: 9 });
+  player.keyboard?.handle("down", { keyCode: 9, charCode: 9 });
+  assert.deepEqual(lines, [
+    "a.onKillFocus _level0.b",
+    "b.onSetFocus _level0.a",
+    "Selection _level0.a -> _level0.b",
+    "a.onSetFocus _level0.b",
+    "Selection _level0.b -> _level0.a",
+  ]);
+});
+
+test("Tab is the page's where nothing in the movie takes the focus", async () => {
+  const swf = movie(6, [
+    [sprite(1, [[]]), w.place({ depth: 1, character: 1, name: "a" }), as1("stop();", 6)],
+  ]);
+  const { player } = await play(swf, 1);
+
+  assert.equal(player.keyboard?.handle("down", { keyCode: 9, charCode: 9 }), false);
+});
+
 test("the pointer's events reach every clip's clip actions, the newest first, and stop the SWF at clip actions Flash cannot read", async () => {
   const mouseDown = 1 << 4;
   const events = (name: string) =>

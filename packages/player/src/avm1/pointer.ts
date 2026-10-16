@@ -194,6 +194,9 @@ export class Avm1Pointer implements Pointer {
     }
 
     this.send(events);
+
+    // After the input and what it ran, as Ruffle resets the focus's highlight.
+    this.avm1.pointerInput(type, p.button ?? 0);
   }
 
   /**

@@ -44,8 +44,9 @@ export class Avm1Keyboard implements Keyboard {
       return false;
     }
 
-    const press = KEY_PRESSES.get(k.keyCode) ?? (edits ? printable(k.charCode) : 0);
-    return this.avm1.key(true, k.keyCode, k.charCode, press);
+    const typed = edits ? printable(k.charCode) : 0;
+    const press = KEY_PRESSES.get(k.keyCode) ?? typed;
+    return this.avm1.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
   }
 
   text(k: KeyState): boolean {

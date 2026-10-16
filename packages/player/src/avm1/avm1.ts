@@ -27,6 +27,7 @@ import {
   tags,
 } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
+import { boundsIn } from "../display/bounds.js";
 import {
   ButtonObject,
   Container,
@@ -40,9 +41,17 @@ import {
 } from "../display/display.js";
 import type { DisplayCharacter, Library } from "../display/timeline.js";
 import { evaluate } from "../scripting/evaluate.js";
+import { type TabHost, tabOrder } from "./focus.js";
 import { buttonClass } from "./globals/Button.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
-import { ClipNative, DEPTH_BIAS, type Movie, movieClipClass } from "./globals/MovieClip.js";
+import {
+  ClipNative,
+  DEPTH_BIAS,
+  type Movie,
+  movieClipClass,
+  targetOf,
+} from "./globals/MovieClip.js";
+import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 
 type Value = avm1.Value;
@@ -254,7 +263,7 @@ const timeoutClock =
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState {
+export class Avm1 implements Movie, InputState, FocusState, TabHost {
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -341,6 +350,17 @@ export class Avm1 implements Movie, InputState {
   /** `_global.Key` and `_global.Mouse`, whose listeners the player sends their messages. */
   private keyFace: avm1.Avm1Object | null = null;
   private mouseFace: avm1.Avm1Object | null = null;
+  private selectionFace: avm1.Avm1Object | null = null;
+  /** The button or clip with the focus. */
+  private focusedObject: DisplayObject | null = null;
+  /**
+   * Whether keyboard navigation shows the focus (Ruffle's highlight): a
+   * focused object's onKeyDown and onKeyUp fire while it is not inactive,
+   * and Enter and Space press it while it is visible.
+   */
+  private highlight: "inactive" | "visible" | "hidden" = "inactive";
+  /** How deep begin() is: only the outermost begin and end start and stop the scripts' clock. */
+  private beginDepth = 0;
   /** Each button character's condition blocks, by its id, gathered from the action list once. */
   private buttonHandlers: Map<number, ButtonHandler[]> | null = null;
   readonly url: string;
@@ -454,6 +474,8 @@ export class Avm1 implements Movie, InputState {
     realm.global.define("Key", this.keyFace, avm1.DONT_ENUM);
     this.mouseFace = mouseObject(realm, this, this.swfVersion);
     realm.global.define("Mouse", this.mouseFace, avm1.DONT_ENUM);
+    this.selectionFace = selectionObject(realm, this, this.swfVersion);
+    realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
     realm.Object.define(
       "registerClass",
       realm.method((_, args, version) => this.registerClass(args, version)),
@@ -743,11 +765,19 @@ export class Avm1 implements Movie, InputState {
 
   /** Scripts start running: the script timeout counts from now. */
   private begin(): void {
+    if (this.beginDepth++ > 0) {
+      return;
+    }
+
     this.realm.timers.now = this.now();
     this.rt.begin(timeoutClock(), timeoutClock);
   }
 
   private end(): void {
+    if (--this.beginDepth > 0) {
+      return;
+    }
+
     this.rt.end();
   }
 
@@ -1106,8 +1136,188 @@ export class Avm1 implements Movie, InputState {
 
   /** A display object about to leave the display list: its unload, and where it and what is in it are. */
   private removing(d: DisplayObject): void {
+    const focused = this.focusedObject;
+    if (focused !== null && (focused === d || under(focused, d))) {
+      this.focus(null);
+    }
+
     this.markPaths(d);
     this.unload(d);
+  }
+
+  hidden(d: DisplayObject): void {
+    if (this.focusedObject === d) {
+      this.focus(null);
+    }
+  }
+
+  get focused(): DisplayObject | null {
+    return this.focusedObject;
+  }
+
+  /**
+   * Focus `d`, or none: where it changes, the one that had it hears
+   * onKillFocus(new), `d` onSetFocus(old), then Selection's listeners
+   * onSetFocus(old, new), at once, not queued (Ruffle's FocusTracker). The
+   * highlight shows where `d` may show it.
+   */
+  focus(d: DisplayObject | null): void {
+    const old = this.focusedObject;
+    this.focusedObject = d;
+    this.highlight = d === null ? "inactive" : this.highlightable(d) ? "visible" : "hidden";
+    if (d === old) {
+      return;
+    }
+
+    // Each object's method in an activation of its own, as its other event methods run.
+    const version = this.swfVersion;
+    const oldFace = old?.avm1 ?? null;
+    const newFace = d?.avm1 ?? null;
+    this.begin();
+    try {
+      const oldCx = old === null ? null : this.activationOf(old);
+      if (oldFace !== null && oldCx !== null) {
+        this.rt.callMethod(oldCx, oldFace, "onKillFocus", [newFace], version);
+      }
+
+      const newCx = d === null ? null : this.activationOf(d);
+      if (newFace !== null && newCx !== null) {
+        this.rt.callMethod(newCx, newFace, "onSetFocus", [oldFace], version);
+      }
+
+      const selection = this.selectionFace;
+      const cx = this.root !== null ? this.activationOf(this.root) : null;
+      if (selection !== null && cx !== null) {
+        this.rt.call(cx, () => {
+          avm1.broadcastMessage(selection, "onSetFocus", [oldFace, newFace], version);
+        });
+      }
+    } finally {
+      this.end();
+    }
+  }
+
+  /** Whether a script may focus `d`: a button, or a clip below the root in button mode or with focusEnabled true. */
+  focusable(d: DisplayObject): boolean {
+    if (d instanceof ButtonObject) {
+      return true;
+    }
+
+    return (
+      d instanceof MovieClip &&
+      d !== this.root &&
+      (this.buttonMode(d) || avm1.toBoolean(this.read(d, "focusEnabled"), this.swfVersion))
+    );
+  }
+
+  pathOf(d: DisplayObject): string {
+    return pathOf(d, this.root);
+  }
+
+  resolve(value: avm1.Value, version: number): DisplayObject | null {
+    const target = this.rt.realm.current?.target as DisplayObject | null | undefined;
+    return targetOf(this, target ?? this.root, value, version);
+  }
+
+  /**
+   * Whether the focus shows on `d`: not the root, something drawn, and its
+   * `_focusrect`, from SWF 6 its own where it has one, else the stage's.
+   */
+  private highlightable(d: DisplayObject): boolean {
+    if (d === this.root || d.parent === null) {
+      return false;
+    }
+
+    const own = this.swfVersion >= 6 ? (nativeOf(d)?.focusRect ?? null) : null;
+    if (!(own ?? this.focusRect)) {
+      return false;
+    }
+
+    // A button's by its hit area, which it is tested by whatever it shows.
+    const area = d instanceof ButtonObject ? d.hitTestState : null;
+    const parent = area?.parent ?? null;
+    if (area) {
+      area.parent = d as ButtonObject;
+    }
+
+    try {
+      const r = boundsIn(area ?? d, d.parent, null, true);
+      return r.xMax > r.xMin || r.yMax > r.yMin;
+    } finally {
+      if (area) {
+        area.parent = parent;
+      }
+    }
+  }
+
+  tabEnabled(d: DisplayObject): boolean | undefined {
+    const value = this.read(d, "tabEnabled");
+    return value === undefined ? undefined : avm1.toBoolean(value, this.swfVersion);
+  }
+
+  tabChildren(d: DisplayObject): boolean {
+    const value = this.read(d, "tabChildren");
+    return value === undefined || avm1.toBoolean(value, this.swfVersion);
+  }
+
+  /** A tabIndex as an int: a number's or a boolean's, any other value's the least; -1 is none (Ruffle). */
+  tabIndex(d: DisplayObject): number | undefined {
+    const value = this.read(d, "tabIndex");
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    const index =
+      typeof value === "number" || typeof value === "boolean"
+        ? avm1.toNumber(value, this.swfVersion) | 0
+        : -2147483648;
+    return index === -1 ? undefined : index;
+  }
+
+  /** Tab, or Shift+Tab: the focus to the next object in the tab order, or the one before, round. */
+  private tab(reverse: boolean): boolean {
+    const root = this.movieRoot;
+    const stage = root?.parent;
+    if (!(root instanceof MovieClip) || !stage) {
+      return false;
+    }
+
+    const order = tabOrder(root, stage, this);
+    if (order.length === 0) {
+      return false;
+    }
+
+    const at = this.focusedObject === null ? -1 : order.indexOf(this.focusedObject);
+    const step = reverse ? order.length - 1 : 1;
+    const next = at < 0 ? (reverse ? order.length - 1 : 0) : (at + step) % order.length;
+    this.focus(order[next]);
+    return true;
+  }
+
+  /** Enter or Space on what has the focus, where the highlight shows: a press and a release of it. */
+  private activate(): void {
+    const d = this.focusedObject;
+    if (this.highlight !== "visible" || d === null || this.removed(d) || !this.flag(d, "enabled")) {
+      return;
+    }
+
+    this.buttonDispatch(d, ClipEvent.press);
+    this.buttonDispatch(d, ClipEvent.release);
+  }
+
+  /**
+   * The pointer's input, which hides the focus's highlight until Tab moves
+   * the focus again: a left press always, and, below SWF 9, any press,
+   * release or move.
+   */
+  pointerInput(type: "move" | "down" | "up", button: number): void {
+    const left = button === 0;
+    if (
+      (type === "down" && left) ||
+      (this.swfVersion < 9 && (left || button === 2 || type === "move"))
+    ) {
+      this.highlight = "inactive";
+    }
   }
 
   /** Where `d` and what is in it are, the paths their references keep. */
@@ -1362,7 +1572,14 @@ export class Avm1 implements Movie, InputState {
    * are drawn whose keyPress it is runs its actions for it. The queue runs
    * once. Whether a keyPress ran.
    */
-  key(down: boolean, keyCode: number, charCode: number, press: number): boolean {
+  key(
+    down: boolean,
+    keyCode: number,
+    charCode: number,
+    press: number,
+    typed = 0,
+    shift = false,
+  ): boolean {
     if (this.halted || !this.loaded) {
       return false;
     }
@@ -1372,7 +1589,16 @@ export class Avm1 implements Movie, InputState {
     this.begin();
     try {
       // To the clips as they are drawn, the lowest first, what is in one before it (Ruffle's order).
+      // What has the focus also hears onKeyDown or onKeyUp, from SWF 6, while the highlight is active.
       const event = down ? ClipEvent.keyDown : ClipEvent.keyUp;
+      const focused = this.focusedObject;
+      const heard =
+        this.swfVersion >= 6 &&
+        this.highlight !== "inactive" &&
+        focused !== null &&
+        this.flag(focused, "enabled")
+          ? focused
+          : null;
       const visit = (d: DisplayObject) => {
         if (d instanceof Container) {
           for (const child of d.children) {
@@ -1381,7 +1607,9 @@ export class Avm1 implements Movie, InputState {
         }
 
         if (d instanceof MovieClip) {
-          this.dispatch(d, event, false);
+          this.dispatch(d, event, d === heard);
+        } else if (d instanceof ButtonObject && d === heard) {
+          this.method(d, event, false);
         }
       };
       if (this.movieRoot !== null) {
@@ -1390,8 +1618,20 @@ export class Avm1 implements Movie, InputState {
 
       this.notify(this.keyFace, down ? "onKeyDown" : "onKeyUp");
       const pressed = down && press !== 0 && this.queueKeyPress(press);
+
+      // A key no keyPress took: Tab moves the focus, after what is queued runs; Enter and Space
+      // press what has it.
+      let used = pressed;
+      if (down && !pressed && keyCode === 9) {
+        this.runQueue();
+        // A movie with nothing to tab to leaves Tab to the page.
+        used = this.tab(shift);
+      } else if (down && !pressed && (keyCode === 13 || typed === 32)) {
+        this.activate();
+      }
+
       this.runQueue();
-      return pressed;
+      return used;
     } finally {
       this.end();
     }
@@ -1406,6 +1646,10 @@ export class Avm1 implements Movie, InputState {
     this.begin();
     try {
       const pressed = this.queueKeyPress(press);
+      if (!pressed && press === 32) {
+        this.activate();
+      }
+
       this.runQueue();
       return pressed;
     } finally {
@@ -1552,9 +1796,8 @@ export class Avm1 implements Movie, InputState {
   /**
    * `d`'s AVM1 object's property `name`, read as code reads it, in an
    * activation of `d`'s, as a getter `addProperty` gave it may be AVM1
-   * code; undefined where it has no object, or the read throws. Only the
-   * pointer reads so, between scripts: its begin and end would reset a
-   * running script's timeout.
+   * code; undefined where it has no object, or the read throws. Within
+   * a script, the begin and end go for nothing: the script's own hold.
    */
   private read(d: DisplayObject, name: string): avm1.Value {
     const face = d.avm1;
@@ -1593,27 +1836,32 @@ export class Avm1 implements Movie, InputState {
     this.begin();
     try {
       for (const [d, event] of events) {
-        if (this.removed(d)) {
-          continue;
-        }
-
-        if (d instanceof ButtonObject) {
-          this.buttonEvent(d, event);
-        } else if (d instanceof MovieClip) {
-          const label = LABELS.get(event);
-          const timeline = this.timeline(d);
-          const frame = label === undefined ? undefined : timeline.labelFrame(label);
-          if (frame !== undefined) {
-            timeline.goto(frame, false);
-          }
-
-          this.dispatch(d, event);
-        }
+        this.buttonDispatch(d, event);
       }
 
       this.runQueue();
     } finally {
       this.end();
+    }
+  }
+
+  /** One of the pointer's button events to `d`, a button or a clip in button mode, queued. */
+  private buttonDispatch(d: DisplayObject, event: number): void {
+    if (this.removed(d)) {
+      return;
+    }
+
+    if (d instanceof ButtonObject) {
+      this.buttonEvent(d, event);
+    } else if (d instanceof MovieClip) {
+      const label = LABELS.get(event);
+      const timeline = this.timeline(d);
+      const frame = label === undefined ? undefined : timeline.labelFrame(label);
+      if (frame !== undefined) {
+        timeline.goto(frame, false);
+      }
+
+      this.dispatch(d, event);
     }
   }
 
