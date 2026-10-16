@@ -330,6 +330,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
   /** Where the pointer last was, in the stage's coordinates (avm1/pointer.ts). */
   mouseX = 0;
   mouseY = 0;
+  /** The screen's pixels to a stage pixel, as the host shows the stage; `_xmouse` is in them. */
+  pixelRatio = 1;
   /** The pointer, where the host gives one: what drags a clip, and shows or hides itself. */
   pointer: {
     startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;

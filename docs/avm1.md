@@ -1272,7 +1272,15 @@ perhaps) has it, whose `useHandCursor` and `enabled` are true. `enabled`,
 activation, so a getter `addProperty` gave runs. `startDrag` and
 StartDrag drag one clip at a time, its centre on the pointer where they
 lock it, within their bounds in its parent's space, at whole twips, as
-an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it. As it
+an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it.
+`_xmouse` and `_ymouse` are the pointer in a clip's space as Flash gives
+them (Ruffle's `local_mouse_position`): through the matrix from the
+clip's twips to the screen's pixels (`Avm1.pixelRatio` of them a stage
+pixel, as the host shows the stage), whose translation a matrix keeps in
+whole units, so a whole screen pixel, and back to whole twips, each
+rounded half to even; where that matrix cannot be inverted, as for a
+clip scaled to nothing, the pointer's screen pixels are taken as its
+twips (the corpus's `mouse_pos` and `mouse_pos_with_scale_factor`). As it
 moves, a dragged clip's `_droptarget` becomes the slash path of what is
 under the pointer, the clip left out (`""` for nothing), picked as the
 pointer picks but where a clip's own drawing counts too, the topmost of
@@ -1803,11 +1811,10 @@ determinism` green, and the corpus baseline may only go up.
     `button_keypress_vs_press`, `button_keypress_vs_tab`,
     `movieclip_focusenabled`, `selection_asbroadcaster`, three of
     `tab_ordering_*`...). Then `_droptarget`: 309 (`drag_drop`,
-    `text_blocks_clicks`). Left: text fields' focus (step 13, which most
-    of the focus and tab tests begin with), the highlight drawn,
-    `_xmouse` in device pixels as Ruffle reads it
-    (`mouse_pos`), the viewport's scale factor a test gives
-    (`mouse_pos_with_scale_factor`), and touches, which reach only an AS3
+    `text_blocks_clicks`). Then `_xmouse` and `_ymouse` as Flash gives
+    them: 311 (`mouse_pos`, `mouse_pos_with_scale_factor`). Left: text
+    fields' focus (step 13, which most of the focus and tab tests begin
+    with), the highlight drawn, and touches, which reach only an AS3
     movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.

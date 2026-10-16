@@ -40,6 +40,8 @@ export interface Movie {
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
+  /** The screen's pixels to a stage pixel, which `_xmouse` is measured in. */
+  readonly pixelRatio: number;
   /** What `d` was last dragged over, its `_droptarget`; null for nothing. */
   dropTargetOf(d: DisplayObject): DisplayObject | null;
   /** `d` hidden by its `_visible`: the focus, if it has it, goes. */
@@ -371,11 +373,36 @@ const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, b
 /** The display properties by name in lower case, which they are found by in any case. */
 const BY_NAME = new Map(PROPERTIES.map(([name, p]) => [name, p]));
 
-/** The pointer in `d`'s space, in whole twips. */
+/**
+ * The pointer in `d`'s space, as Flash gives it (Ruffle's
+ * local_mouse_position): through the matrix from `d`'s twips to the
+ * screen's pixels (`pixelRatio` of them a stage pixel), whose translation
+ * a matrix keeps whole, so a whole pixel, and back to whole twips, each
+ * rounded half to even; where that matrix cannot be inverted, as for a
+ * clip scaled to nothing, the pointer's pixels are taken as twips (the
+ * corpus's `mouse_pos`).
+ */
 function mouse(d: DisplayObject, movie: Movie): [number, number] {
-  const m = invert(toStage(d, movie.root.parent));
-  const [x, y] = m ? apply(m, movie.mouseX, movie.mouseY) : [0, 0];
-  return [Math.round(x * 20) / 20, Math.round(y * 20) / 20];
+  const m = toStage(d, movie.root.parent);
+  const ratio = movie.pixelRatio;
+  const px = movie.mouseX * ratio;
+  const py = movie.mouseY * ratio;
+  const device = {
+    a: (m.a * ratio) / 20,
+    b: (m.b * ratio) / 20,
+    c: (m.c * ratio) / 20,
+    d: (m.d * ratio) / 20,
+    tx: roundEven(m.tx * ratio),
+    ty: roundEven(m.ty * ratio),
+  };
+  const back = invert(device);
+  if (back === null) {
+    return [roundEven(px) / 20, roundEven(py) / 20];
+  }
+
+  const x = back.a * px + back.c * py + roundEven(back.tx);
+  const y = back.b * px + back.d * py + roundEven(back.ty);
+  return [roundEven(x) / 20, roundEven(y) / 20];
 }
 
 /**
