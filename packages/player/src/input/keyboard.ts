@@ -260,8 +260,26 @@ function parseRestrict(restrict: string): { allowed: Interval[]; disallowed: Int
   return { allowed, disallowed };
 }
 
+/**
+ * The keyboard as a host drives it (bindKeyboard, and the corpus's input
+ * replay): an AS3 movie's KeyboardInput, or an AVM1 movie's
+ * (avm1/keyboard.ts), whose keys go to Key, buttons and clips.
+ */
+export interface Keyboard {
+  /** How many key events it has handled: each may run scripts and change what is drawn. */
+  readonly handled: number;
+  /** A key pressed or let go; without `edits`, its events alone. Whether the SWF used it. */
+  handle(type: "down" | "up", k: KeyState, edits?: boolean): boolean;
+  /** Text typed, or a field's editing key, with no key events. Whether the SWF used it. */
+  text(k: KeyState): boolean;
+  /** A copy or cut: what goes to the system's clipboard, or null for nothing. */
+  copy(cut?: boolean): ClipboardText | null;
+  /** A paste of the system's clipboard. Whether the SWF used it. */
+  paste(data?: ClipboardText | null): boolean;
+}
+
 /** The keyboard on the player's display list, independent of a renderer. */
-export class KeyboardInput {
+export class KeyboardInput implements Keyboard {
   /** How many key events it has handled: each may run scripts and change a field. */
   handled = 0;
   /** The field the pointer was pressed on, where, and by which click, whose selection a drag extends. */
@@ -859,7 +877,7 @@ function pagesOwn(e: Event): boolean {
  */
 export function bindKeyboard(
   player: {
-    keyboard: KeyboardInput | null;
+    keyboard: Keyboard | null;
     pointer?: { flush(): void } | null;
     touch?: { flush(): void } | null;
   },

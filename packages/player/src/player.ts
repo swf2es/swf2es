@@ -5,6 +5,7 @@
 // follow, or an AVM1 SWF's actions; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import type { Avm1 } from "./avm1/avm1.js";
+import { Avm1Keyboard } from "./avm1/keyboard.js";
 import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import {
@@ -20,7 +21,7 @@ import {
 } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
 import { type Library, readLibrary } from "./display/timeline.js";
-import { KeyboardInput } from "./input/keyboard.js";
+import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
 import { type Pointer, PointerInput } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
 import type { Scripting } from "./scripting.js";
@@ -87,7 +88,7 @@ export class Player {
   readonly pointer: Pointer | null;
   private readonly avm1Pointer: Avm1Pointer | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
-  readonly keyboard: KeyboardInput | null;
+  readonly keyboard: Keyboard | null;
   /** Touches, likewise: TouchEvents, and the mouse the primary touch moves. */
   readonly touch: TouchInput | null;
 
@@ -110,8 +111,10 @@ export class Player {
     setStageSize(this.stage, this.width, this.height);
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
-    this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
-    const pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
+    const keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
+    // An AVM1 SWF's keys go to Key, its buttons and its clips.
+    this.keyboard = keyboard ?? (avm1 && !scripting ? new Avm1Keyboard(avm1) : null);
+    const pointer = scripting ? new PointerInput(this.stage, scripting, keyboard) : null;
     // An AVM1 SWF's buttons and clips take the pointer by AVM1's rules.
     this.avm1Pointer = avm1 && !scripting ? new Avm1Pointer(this.stage, avm1) : null;
     this.pointer = pointer ?? this.avm1Pointer;

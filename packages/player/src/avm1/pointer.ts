@@ -47,7 +47,7 @@ export class Avm1Pointer implements Pointer {
     private readonly stage: Container,
     private readonly avm1: Avm1,
   ) {
-    avm1.dragger = this;
+    avm1.pointer = this;
   }
 
   /** One drag at a time: a new one takes over from any other. */
@@ -104,9 +104,19 @@ export class Avm1Pointer implements Pointer {
     }
   }
 
-  /** AVM1's Mouse.onMouseWheel is not given yet: the page keeps the wheel. */
-  wheel(_p: PointerState, _delta: number): boolean {
-    return false;
+  /**
+   * The wheel over the player: a move to `p` first, then Mouse's listeners'
+   * onMouseWheel with the delta and what is under the pointer. The SWF
+   * takes it where Mouse has listeners; the page scrolls otherwise.
+   */
+  wheel(p: PointerState, delta: number): boolean {
+    this.handle("move", p);
+    if (delta === 0 || !this.avm1.mouseHeard) {
+      return false;
+    }
+
+    this.avm1.mouseWheel(delta, this.hover);
+    return true;
   }
 
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
@@ -138,6 +148,9 @@ export class Avm1Pointer implements Pointer {
     this.avm1.mouseX = p.x;
     this.avm1.mouseY = p.y;
     const left = (p.button ?? 0) === 0;
+    if (type !== "move") {
+      this.avm1.mouseButton(p.button ?? 0, type === "down");
+    }
 
     // Every clip's clip event first, and what they queue runs, before the pick.
     if (type === "move") {
@@ -414,11 +427,11 @@ export class Avm1Pointer implements Pointer {
   /**
    * The hand over a button whose useHandCursor and enabled are true, and
    * over a clip whose nearest ancestor in button mode, itself perhaps, has
-   * them so; the arrow elsewhere.
+   * them so; the arrow elsewhere, and nothing while Mouse.hide holds.
    */
-  private updateCursor(): void {
-    let cursor: Cursor = "default";
-    const hover = this.hover;
+  updateCursor(): void {
+    let cursor: Cursor = this.avm1.mouseShown ? "default" : "none";
+    const hover = this.avm1.mouseShown ? this.hover : null;
     if (hover instanceof ButtonObject) {
       cursor = this.hand(hover) ? "pointer" : "default";
     } else {
