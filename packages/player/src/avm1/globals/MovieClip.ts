@@ -10,6 +10,7 @@
 
 import type { Matrix } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
+import type { BitmapStore } from "../../bitmap/bitmap.js";
 import { bounds, hitsObject, hitsPoint, toStage } from "../../display/bounds.js";
 import {
   ButtonObject,
@@ -21,6 +22,7 @@ import {
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import type { Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import { storeOf } from "./BitmapData.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 
 type Value = avm1.Value;
@@ -47,6 +49,8 @@ export interface Movie extends GeomHost {
   dropTargetOf(d: DisplayObject): DisplayObject | null;
   /** `d` hidden by its `_visible`: the focus, if it has it, goes. */
   hidden(d: DisplayObject): void;
+  /** attachBitmap: `store` shown in `parent` at AVM1 depth `depth`. */
+  attachBitmap(parent: MovieClip, store: BitmapStore, depth: number, smoothing: boolean): void;
   /** startDrag: `d` follows the pointer, within `bounds` (left, top, right, bottom) where given. */
   startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;
   stopDrag(): void;
@@ -979,6 +983,17 @@ export function movieClipClass(movie: Movie): {
     const clip = clipOf(self);
     if (clip !== null) {
       assignTransform(clip, args[0]);
+    }
+
+    return undefined;
+  });
+  // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
+  // not read (Ruffle).
+  method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {
+    const store = storeOf(args[0]);
+    if (store !== null && args.length > 1) {
+      const depth = avm1.toNumber(args[1], version) | 0;
+      movie.attachBitmap(clip, store, depth, args.length > 3 && avm1.toBoolean(args[3], version));
     }
 
     return undefined;

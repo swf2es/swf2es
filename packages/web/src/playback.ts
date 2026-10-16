@@ -47,6 +47,11 @@ export class Playback {
       scripting.drawer = this.view;
     }
 
+    // An AVM1 movie's BitmapData draws display objects by it too.
+    if (player.avm1) {
+      player.avm1.drawer = this.view;
+    }
+
     this.unbind.push(this.view.bindPointer(player));
     // The element's keys alone, as a plug-in had them only while focused.
     const host = (box.getRootNode() as ShadowRoot).host ?? box;
@@ -201,6 +206,10 @@ export class Playback {
 
     if (this.scripting?.drawer === this.view) {
       this.scripting.drawer = null;
+    }
+
+    if (this.player.avm1?.drawer === this.view) {
+      this.player.avm1.drawer = null;
     }
 
     this.view.dropSpares();
