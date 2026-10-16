@@ -8,6 +8,7 @@
 import { avm1 } from "@swf2es/runtime";
 import { type DisplayObject, TRANSFORM } from "../../display/display.js";
 import { int16 } from "./geom.js";
+import { IDENTITY_COLOR as IDENTITY } from "./MovieClip.js";
 
 /** What Color reads of the movie. */
 export interface ColorHost {
@@ -16,7 +17,6 @@ export interface ColorHost {
   resolve(value: avm1.Value, version: number): DisplayObject | null;
 }
 
-const IDENTITY = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
 const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY;
 
 /** `_global.Color`. */
@@ -97,12 +97,14 @@ export function colorClass(host: ColorHost): avm1.Avm1Object {
     return out;
   });
   // Only the fields the object has of its own; each wrapped to 16 bits, as Flash keeps them.
+  // Without an object, none: the clip is still the script's, the timeline's transforms no longer its.
   method("setTransform", (self, args, v) => {
     const d = target(self, v);
-    const t = args.length > 0 ? realm.box(args[0], v) : null;
-    if (d === null || t === null) {
+    if (d === null) {
       return undefined;
     }
+
+    const t = realm.box(args[0], v);
 
     const c = { ...(d.colorTransform ?? IDENTITY) };
     const field = (name: string) => {
@@ -128,7 +130,9 @@ export function colorClass(host: ColorHost): avm1.Avm1Object {
       aAdd: add("ab", c.aAdd),
     };
     changed(d);
+
     return undefined;
   });
+
   return constr;
 }
