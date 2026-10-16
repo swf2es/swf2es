@@ -27,8 +27,10 @@ import {
   tags,
 } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
+import { BitmapStore } from "../bitmap/bitmap.js";
 import { boundsIn } from "../display/bounds.js";
 import {
+  BitmapObject,
   ButtonObject,
   Container,
   construct,
@@ -40,8 +42,10 @@ import {
   VideoObject,
 } from "../display/display.js";
 import type { DisplayCharacter, Library } from "../display/timeline.js";
+import type { Drawer } from "../hosts.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { type TabHost, tabOrder } from "./focus.js";
+import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
@@ -264,7 +268,7 @@ const timeoutClock =
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState, FocusState, TabHost {
+export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost {
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -481,7 +485,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
     realm.global.define("Mouse", this.mouseFace, avm1.DONT_ENUM);
     this.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
-    flashPackage(this);
+    const flash = flashPackage(this);
+    const display = avm1.get(flash, "display", this.swfVersion);
+    if (display instanceof avm1.Avm1Object) {
+      display.define("BitmapData", bitmapDataClass(this), 0);
+    }
     realm.Object.define(
       "registerClass",
       realm.method((_, args, version) => this.registerClass(args, version)),
@@ -1149,6 +1157,27 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
 
     this.markPaths(d);
     this.unload(d);
+  }
+
+  /** The host's renderer, which BitmapData's draw of a display object draws by; null where there is none. */
+  drawer: Drawer | null = null;
+
+  /** The library's bitmap exported as `name`, as a new transparent store, as loadBitmap makes one. */
+  libraryBitmap(name: string): BitmapStore | null {
+    const id = this.exports.get(asciiLower(name));
+    const character = id === undefined ? undefined : this.library?.characters.get(id);
+    if (character?.type !== "bitmap" || character.pixels === null) {
+      return null;
+    }
+
+    return BitmapStore.of({ ...character.pixels, transparent: true });
+  }
+
+  /** attachBitmap: `store` shown in `parent` at AVM1 depth `depth`, as a bitmap with no AVM1 object of its own. */
+  attachBitmap(parent: MovieClip, store: BitmapStore, depth: number, smoothing: boolean): void {
+    const bitmap = new BitmapObject(store);
+    bitmap.smoothing = smoothing;
+    parent.placeAtDepth(bitmap, (depth + DEPTH_BIAS) | 0);
   }
 
   /** The stage a clip is on, which flash.geom.Transform measures to. */

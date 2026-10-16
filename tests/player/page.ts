@@ -273,6 +273,10 @@ async function runSwf(
       scripting.drawer = view;
     }
 
+    if (player.avm1) {
+      player.avm1.drawer = view;
+    }
+
     await player.start();
     stopOnUncaught();
     const replay = input ? new Replay(player, input, viewport) : null;
@@ -537,6 +541,10 @@ async function benchSwf(
     const view = new PixiView(renderer);
     if (scripting) {
       scripting.drawer = view;
+    }
+
+    if (player.avm1) {
+      player.avm1.drawer = view;
     }
 
     await player.start();

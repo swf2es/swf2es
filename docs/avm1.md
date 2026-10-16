@@ -1503,6 +1503,33 @@ to the stage; `pixelBounds` the box on the stage. A clip's `transform` is
 a new Transform of it each read, and one assigned gives it the matrix and
 colour transform of the Transform's clip.
 
+### BitmapData
+
+`flash.display.BitmapData` (`globals/BitmapData.ts`), as Ruffle's
+bitmap_data.rs has it: each object holds a BitmapStore, the player's
+bitmap, whose operations AS3's BitmapData shares (bitmap/bitmap.ts,
+bitmap/ops.ts). What AS3 throws, AS2 answers with a number: -1 for too
+few arguments or a disposed bitmap, -2 for a source that is none, -3 for a
+disposed one, -4 for a rectangle that is none. The constructor takes at
+least two arguments and sizes Flash makes (0 never; up to SWF 9 2880 a
+side; to 12 under 8192 a side and 2^24 pixels; then up to 0x6666666 a
+side and under 2^29), else `new` gives undefined; a transparent or fill
+given as undefined is false or 0, one not given true or 0xFFFFFFFF.
+`width`, `height`, `transparent` and `rectangle` are -1 once disposed.
+`getPixel` and `getPixel32` are signed; `setPixel`, `setPixel32`,
+`fillRect` (a rectangle's x, y, width and height, own or inherited, as
+ints) and `copyPixels` (its mergeAlpha false without an alpha bitmap)
+give 0; `draw` takes a BitmapData, composited on the CPU, or a clip or
+button, drawn by the host's renderer at the stage's quality (`Avm1.drawer`,
+which the element and the test page give, as Scripting's for AS3), its
+matrix's fields by name; `clone` keeps the prototype; `floodFill`,
+`scroll`, `colorTransform` (-1 even done, as Flash) and the static
+`loadBitmap`, the library's bitmap exported by a name, transparent. A
+clip's `attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
+BitmapData at a depth as a bitmap with no AVM1 object of its own, which
+the bitmap's later changes show on. Real content caches its art in them:
+a level's tiles drawn from its clips once, then attached.
+
 ### AVM1 and AVM2
 
 Two VMs meet in three places, each its own step in the plan:
@@ -1860,7 +1887,13 @@ determinism` green, and the corpus baseline may only go up.
     First `flash.geom` and a clip's `transform` (see "flash.geom"): 317
     (`matrix`, `point`, `rectangle`, `color_transform`, `transform`),
     then `BitmapData`, which real content caches its art in, so it comes
-    before text.
+    before text: 329 (`bitmap_data_thorough/` `constructor`, `getPixel`,
+    `getPixel32`, `setPixel`, `setPixel32`, `fillRect`, `colorTransform`,
+    `bitmap_data_copypixels`, `bitmapdata_copypixels_self`, the
+    `max_size` tests, `issue_2030`). Left of BitmapData: `noise`,
+    `perlinNoise`, `threshold`, `merge`, `paletteMap`, `copyChannel`,
+    `pixelDissolve`, `hitTest`, `getColorBoundsRect`, `compare`,
+    `applyFilter`, `generateFilterRect`.
 15. **Loading and I/O.** `loadMovie`, `loadVariables`, `MovieClipLoader`,
     `LoadVars`, `XML`, `XMLNode`, `SharedObject`, `XMLSocket`,
     `getURL`, `ExternalInterface`. Corpus tests of each.
