@@ -266,7 +266,8 @@ class GpuBitmaps {
   constructor(private readonly renderer: Renderer) {
     const gl = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
     this.limit = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 8192;
-    renderer.runners.contextChange.add({ contextChange: () => this.context++ });
+    // A renderer the tests stand in for has no runners, nor a context to lose.
+    renderer.runners?.contextChange?.add({ contextChange: () => this.context++ });
   }
 
   /** Whether a Bitmap or a fill asking to be smoothed is: not at Flash's low quality. */
