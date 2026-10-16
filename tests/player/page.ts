@@ -34,6 +34,7 @@ import {
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { autoDetectRenderer } from "pixi.js";
+import { type RecordedEvent, Replay } from "./replay.ts";
 
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
 // (chrome.ts, libraries.ts).
@@ -211,6 +212,7 @@ async function runSwf(
   table = true,
   tableMinRun?: number,
   shown = false,
+  input: RecordedEvent[] | null = null,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -272,11 +274,18 @@ async function runSwf(
 
     await player.start();
     stopOnUncaught();
+    const replay = input ? new Replay(player, input) : null;
     for (let frame = 1; frame <= frames; frame++) {
       if (frame > 1) {
         // What a frame asked to load is linked between frames, as in a browser's.
         await scripting?.settled();
         player.tick();
+        stopOnUncaught();
+      }
+
+      // Ruffle plays a frame's input after the frame, before it draws.
+      if (replay) {
+        replay.frame();
         stopOnUncaught();
       }
 

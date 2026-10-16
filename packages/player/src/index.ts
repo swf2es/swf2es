@@ -38,6 +38,7 @@ export type {
 } from "./hosts.js";
 export { browserClipboard, globalWebSocketHost } from "./hosts.js";
 export { bindKeyboard, type KeyState } from "./input/keyboard.js";
+export type { PointerState } from "./input/pointer.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";
 export { PixiView } from "./render/view.js";

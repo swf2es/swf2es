@@ -8,6 +8,7 @@
 // The harness loads each SWF with a Loader, where an AVM1 SWF runs as an
 // AVM1Movie, whose first frame's traces adl prints only with its second
 // (docs/avm1.md, "Testing against Flash"): it is given two frames at least.
+// A test with recorded input is left out: the harness gives Flash none.
 import { readFileSync } from "node:fs";
 import { runFlash } from "../../../oracle/flash.ts";
 import { isAs3, readSwf } from "../../../packages/format/dist/index.js";
@@ -15,7 +16,7 @@ import { compareImages, compareImagesNear, decodePng } from "../image.ts";
 import { collectRuffle } from "./ruffle.ts";
 
 const prefixes = process.argv.slice(2);
-const tests = collectRuffle(prefixes).filter((t) => !t.ignore);
+const tests = collectRuffle(prefixes).filter((t) => !t.ignore && !t.input);
 const avm1 = tests.map((t) => !isAs3(readSwf(new Uint8Array(readFileSync(t.swf)))));
 const results = await runFlash(
   tests.map((t, i) => ({
