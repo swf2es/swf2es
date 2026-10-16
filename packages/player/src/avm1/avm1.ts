@@ -1294,15 +1294,19 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
     return true;
   }
 
-  /** Enter or Space on what has the focus, where the highlight shows: a press and a release of it. */
-  private activate(): void {
+  /**
+   * Enter or Space on what has the focus, where the highlight shows: a press
+   * and a release of it. Whether it was pressed, the key then the SWF's.
+   */
+  private activate(): boolean {
     const d = this.focusedObject;
     if (this.highlight !== "visible" || d === null || this.removed(d) || !this.flag(d, "enabled")) {
-      return;
+      return false;
     }
 
     this.buttonDispatch(d, ClipEvent.press);
     this.buttonDispatch(d, ClipEvent.release);
+    return true;
   }
 
   /**
@@ -1627,7 +1631,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
         // A movie with nothing to tab to leaves Tab to the page.
         used = this.tab(shift);
       } else if (down && !pressed && (keyCode === 13 || typed === 32)) {
-        this.activate();
+        // A press it made keeps the page from acting on the key too: Space would scroll it.
+        used = this.activate();
       }
 
       this.runQueue();
@@ -1645,11 +1650,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
 
     this.begin();
     try {
-      const pressed = this.queueKeyPress(press);
-      if (!pressed && press === 32) {
-        this.activate();
-      }
-
+      const pressed = this.queueKeyPress(press) || (press === 32 && this.activate());
       this.runQueue();
       return pressed;
     } finally {
