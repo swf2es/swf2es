@@ -13,7 +13,7 @@ import {
 import { BitmapStore, type GpuCopy, type PixelRect } from "../bitmap/bitmap.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
-import type { BitmapCharacter } from "../display/timeline.js";
+import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
 import { rgbaOf } from "./filters.js";
 import { drawTarget, releaseDrawTarget } from "./pools.js";
 
@@ -42,13 +42,30 @@ function destroyTexture(texture: Texture): void {
   (source as unknown as { options: { resource?: unknown } }).options.resource = undefined;
 }
 
-/** The store a SWF bitmap's fills draw from, one for all its shapes; null until its image is decoded. */
+/** Each bitmap's fill store, by its pixels, which the SWFs that define the bitmap alike share. */
+const fillStores = new WeakMap<BitmapPixels, BitmapStore>();
+
+/**
+ * The store a SWF bitmap's fills draw from, one for all its shapes and for
+ * every SWF that defines it alike, so one texture; null until its image is
+ * decoded. Nothing writes it.
+ */
 export function characterStore(character: BitmapCharacter): BitmapStore | null {
-  if (!character.pixels) {
+  const pixels = character.pixels;
+  if (!pixels) {
     return null;
   }
 
-  character.store ??= BitmapStore.of(character.pixels);
+  if (!character.store) {
+    let store = fillStores.get(pixels);
+    if (!store) {
+      store = BitmapStore.of(pixels);
+      fillStores.set(pixels, store);
+    }
+
+    character.store = store;
+  }
+
   return character.store;
 }
 

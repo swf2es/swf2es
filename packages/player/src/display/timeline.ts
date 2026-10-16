@@ -336,6 +336,55 @@ const sharedGone = new FinalizationRegistry<{ hash: number; tag: Uint8Array }>((
   }
 });
 
+/**
+ * Bitmaps by their tag's bytes, as shapes are: a SWF loaded again reads
+ * the first's pixels rather than inflating its own and keeping them, its
+ * images decode once (images.ts), and its fills draw from one store and
+ * one texture of them (characterStore), as an animation a crowd of loads
+ * plays holds a copy of each frame's bitmap, not one a load. DefineBits
+ * keeps to its SWF, as it is read with that SWF's JPEGTables.
+ */
+const sharedBitmaps = new Map<number, { tag: Uint8Array; definition: WeakRef<Bitmap> }[]>();
+const bitmapsGone = new FinalizationRegistry<{ hash: number; tag: Uint8Array }>(({ hash, tag }) => {
+  const list = sharedBitmaps.get(hash)?.filter((entry) => entry.tag !== tag) ?? [];
+  if (list.length > 0) {
+    sharedBitmaps.set(hash, list);
+  } else {
+    sharedBitmaps.delete(hash);
+  }
+});
+
+/**
+ * The largest bitmap tag shared, in bytes: each entry keeps a copy of its
+ * tag to tell it from another of the same hash, and hashes it at each read,
+ * which pays for a crowd of small ones, not for one large atlas.
+ */
+const SHARED_BITMAP_MOST = 1 << 20;
+
+/** The bitmap tag `t` defines, the one a SWF read before defined alike where there is one. */
+function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bitmap {
+  if (t.code === tags.DefineBits || t.length > SHARED_BITMAP_MOST) {
+    return readBitmap(bytes, t, tables);
+  }
+
+  const tag = bytes.subarray(t.offset, t.offset + t.length);
+  const hash = tagHash(t.code, tag);
+  for (const entry of sharedBitmaps.get(hash) ?? []) {
+    const definition = entry.definition.deref();
+    if (definition && sameBytes(entry.tag, tag)) {
+      return definition;
+    }
+  }
+
+  const definition = readBitmap(bytes, t, tables);
+  const own = tag.slice();
+  const list = sharedBitmaps.get(hash) ?? [];
+  list.push({ tag: own, definition: new WeakRef(definition) });
+  sharedBitmaps.set(hash, list);
+  bitmapsGone.register(definition, { hash, tag: own });
+  return definition;
+}
+
 /** FNV-1a over the tag's code and bytes. */
 function tagHash(code: number, tag: Uint8Array): number {
   let hash = Math.imul(0x811c9dc5 ^ code, 0x01000193);
@@ -613,7 +662,7 @@ function timelineOf(
         break;
       default:
         if (isBitmapTag(t.code)) {
-          const definition = readBitmap(bytes, t, jpeg.tables);
+          const definition = sharedBitmap(bytes, t, jpeg.tables);
           library.set(definition.id, {
             type: "bitmap",
             id: definition.id,
