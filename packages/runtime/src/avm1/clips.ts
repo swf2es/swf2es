@@ -396,8 +396,8 @@ export function cloneSprite(
 /**
  * StartDrag, its operands on the stack: the target, whether to lock the
  * centre, whether to constrain, and if so the bounds' right-to-left
- * bottom, right, top and left. The display object the target names, or
- * the code's own clip for an empty one, is dragged.
+ * bottom, right, top and left. The display object the target names, from
+ * the code's target or the root, is dragged; an empty one is that target.
  */
 export function startDrag(cx: Activation, version: number): void {
   const st = cx.st;
