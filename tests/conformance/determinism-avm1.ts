@@ -117,6 +117,50 @@ function testBlocks(): Uint8Array[] {
       .op("Return")
       .bytes(),
     asm().action(0x9b, [0, 0, 0, 5, 0]).raw([0x99, 2, 0, 0xf3, 0xff]).bytes(),
+    // Withs and Trys: jumps out of their bodies, a catch into a variable and one into a
+    // register of a DefineFunction2, a Return through a finally, and a Throw.
+    asm()
+      .label("top")
+      .push("o")
+      .with("w")
+      .push("in")
+      .trace()
+      .push(true)
+      .if("top")
+      .jump("out")
+      .label("w")
+      .try("e", "c", "f", "t")
+      .push("x")
+      .op("Throw")
+      .label("c")
+      .push("e")
+      .with("cw")
+      .push(1)
+      .label("cw")
+      .label("f")
+      .push(2)
+      .jump("out")
+      .label("t")
+      .defineFunction2(
+        "g",
+        3,
+        0,
+        [],
+        asm()
+          .try(register(2), "gc", "gf", "gt")
+          .push("r")
+          .op("Return")
+          .label("gc")
+          .push(register(2))
+          .trace()
+          .label("gf")
+          .push("finally")
+          .trace()
+          .label("gt"),
+      )
+      .label("out")
+      .trace()
+      .bytes(),
     // Every action without operands that goes on to the next, each operator among them.
     Object.entries(Simple)
       .filter(([name]) => !["End", "Return", "Throw"].includes(name))

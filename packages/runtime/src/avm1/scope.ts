@@ -10,11 +10,12 @@
 // `level`), as step 10 of docs/avm1.md fills in; until then a path walks
 // objects' properties only.
 import type { Host } from "./host.js";
+import { PRIMITIVE } from "./inheritance.js";
 import {
   type Avm1Object,
-  allowed,
   find,
   fold,
+  foundValue,
   get,
   has,
   Avm1Object as ObjectClass,
@@ -32,11 +33,19 @@ export const SCOPE_Local = 2;
 /** A `with`'s object. */
 export const SCOPE_With = 3;
 
+/**
+ * How many scopes a chain may hold, `_global` included: a With that would
+ * make it longer skips its body, as adl does (docs/avm1.md, "With and Try").
+ */
+export const MAX_SCOPES = 15;
+
 export class Scope {
   constructor(
     readonly parent: Scope | null,
     readonly kind: number,
     readonly object: Avm1Object,
+    /** How many scopes the chain holds, as adl counts them for MAX_SCOPES. */
+    readonly depth: number = parent === null ? 1 : parent.depth + 1,
   ) {}
 }
 
@@ -105,15 +114,34 @@ function pathProperty(cx: Variables, name: string, version: number): Value {
   return level(cx, name, version);
 }
 
-/** `_levelN` or `_flashN`: level N, if the host has it. */
-function level(cx: Variables, name: string, version: number): Value {
+/** Whether `name` starts `_level` or `_flash`, a level's name whatever follows. */
+function isLevel(name: string, version: number): boolean {
   const prefix = name.slice(0, 6);
-  if (!sameName(prefix, "_level", version) && !sameName(prefix, "_flash", version)) {
+  return sameName(prefix, "_level", version) || sameName(prefix, "_flash", version);
+}
+
+/**
+ * `_levelN` or `_flashN`: level N, if the host has it. N is a sign and the
+ * digits up to anything else, wrapping, none 0, as Ruffle's parse_level
+ * reads it: `_level0:x` and `_levelx` are level 0.
+ */
+function level(cx: Variables, name: string, version: number): Value {
+  if (!isLevel(name, version)) {
     return undefined;
   }
 
-  const digits = /^\d+$/.exec(name.slice(6));
-  return digits === null ? undefined : cx.host.level?.(Number(digits[0]));
+  const negative = name.charCodeAt(6) === 0x2d;
+  let n = 0;
+  for (let i = negative ? 7 : 6; i < name.length; i++) {
+    const d = name.charCodeAt(i) - 0x30;
+    if (d < 0 || d > 9) {
+      break;
+    }
+
+    n = (Math.imul(n, 10) + d) | 0;
+  }
+
+  return cx.host.level?.(negative ? -n | 0 : n);
 }
 
 /** A name without a path along the scope chain, as GetVariable and NewObject find it. */
@@ -126,7 +154,7 @@ export function resolve(cx: Variables, name: string, version: number): Value {
     const p = find(s.object, name, version);
     if (p !== undefined) {
       // The first property found is what get finds too, where its version sees it.
-      return p.get === null && allowed(p.flags, version) ? p.value : get(s.object, name, version);
+      return foundValue(p, s.object, name, version);
     }
   }
 
@@ -218,13 +246,15 @@ export function setVariable(cx: Variables, name: string, value: Value, version: 
   }
 
   // A path's separators are `:` and `.` here in every version, and its
-  // `this` is no object: adl sets nothing for `this.x`.
+  // `this` is no object in a timeline's code (adl sets nothing for `this.x`
+  // there), but is in a function's (the corpus's `path_string`).
   const separator = lastSeparator(name, 5);
   if (separator >= 0) {
     const path = name.slice(0, separator);
     const variable = name.slice(separator + 1);
+    const handleThis = inLocalScope(cx);
     for (let s: Scope | null = cx.scope; s !== null; s = s.parent) {
-      const object = targetPath(cx, s.object, path, true, false, version);
+      const object = targetPath(cx, s.object, path, true, handleThis, version);
       if (object !== null) {
         set(object, variable, value, version);
         return;
@@ -298,7 +328,16 @@ export function deleteVariable(cx: Variables, name: string, version: number): bo
   const separator = lastSeparator(name, 5);
   if (separator >= 0) {
     const object = getVariable(cx, name.slice(0, separator), version);
-    return object instanceof ObjectClass && removeOwn(object, name.slice(separator + 1), version);
+    // A primitive where the object would be writes Flash's line of it (the corpus's `delete2`).
+    if (!(object instanceof ObjectClass)) {
+      if (object !== undefined && object !== null && version >= 5) {
+        cx.host.trace(PRIMITIVE);
+      }
+
+      return false;
+    }
+
+    return removeOwn(object, name.slice(separator + 1), version);
   }
 
   for (let s: Scope | null = cx.scope; s !== null; s = s.parent) {
@@ -324,6 +363,7 @@ export function targetPath(
   handleThis: boolean,
   version: number,
 ): Avm1Object | null {
+  stoppedAtPrimitive = false;
   if (path === "") {
     return start;
   }
@@ -332,8 +372,11 @@ export function targetPath(
   let object: Value = start;
   let slash = false;
   let i = 0;
+  /** The delimiter that ended the last step, 0 for none. */
+  let prev = 0;
   if (path.charCodeAt(0) === 0x2f) {
     i = 1;
+    prev = 0x2f;
     firstElement = false;
     slash = true;
     object = cx.host.root?.();
@@ -345,12 +388,9 @@ export function targetPath(
   const n = path.length;
   while (i < n) {
     if (swf5) {
+      // A path that ends in one goes on to an empty name, as Ruffle's does: none.
       while (i < n && path.charCodeAt(i) === 0x3a) {
         i++;
-      }
-
-      if (i === n) {
-        break;
       }
     }
 
@@ -366,9 +406,15 @@ export function targetPath(
       }
 
       i += 3;
+      prev = c2;
       value = cx.host.parent?.(object as Avm1Object);
+      // A level's parent is the level, but where a slash follows (the corpus's `target_paths`).
       if (value === undefined) {
-        return null;
+        if (c2 === 0x2f) {
+          return null;
+        }
+
+        value = object;
       }
     } else {
       let end = i;
@@ -385,14 +431,25 @@ export function targetPath(
       }
 
       const name = path.slice(i, end);
+      const after = prev;
+      prev = end < n ? path.charCodeAt(end) : 0;
       i = end + 1;
-      if (swf5 && handleThis && sameName(name, "this", version)) {
+      // An empty name is nothing first, after a slash, or at the end after a
+      // colon, else no step at all (`//a`, `.a` and `a::` name nothing, `a:/`
+      // and `a..` name `a`: the corpus's `target_paths` and `path_string`).
+      if (name === "") {
+        if (after === 0x2f || after === 0 || (end >= n && after === 0x3a)) {
+          return null;
+        }
+
+        value = object;
+      } else if (swf5 && handleThis && sameName(name, "this", version)) {
         value = cx.self;
       } else if (swf5 && firstElement && sameName(name, "_root", version)) {
         value = cx.host.root?.();
       } else if (version >= 6 && firstElement && sameName(name, "_global", version)) {
         value = cx.global;
-      } else if (firstElement && level(cx, name, version) !== undefined) {
+      } else if (firstElement && isLevel(name, version)) {
         value = level(cx, name, version);
       } else {
         const o = object as Avm1Object;
@@ -405,6 +462,7 @@ export function targetPath(
 
     firstElement = false;
     if (!(value instanceof ObjectClass)) {
+      stoppedAtPrimitive = value !== undefined && value !== null;
       return null;
     }
 
@@ -413,3 +471,10 @@ export function targetPath(
 
   return object as Avm1Object;
 }
+
+/**
+ * Whether the last `targetPath` that named no object stopped at a
+ * primitive, which a clip's path taken as an object writes Flash's line
+ * of to the log for (the corpus's `target_paths`).
+ */
+export let stoppedAtPrimitive = false;

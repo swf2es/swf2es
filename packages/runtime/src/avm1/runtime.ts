@@ -2,9 +2,26 @@
 // takes the runtime, asks it for the operations of the SWF's version,
 // `V`, once, and each region of each block takes its activation, `cx`.
 import { Activation, type Blocks, type Region } from "./activation.js";
-import { Disabled, Halt, NotYet } from "./errors.js";
+import {
+  callFrame,
+  frameLoaded,
+  frameLoaded2,
+  getProperty,
+  gotoFrame,
+  gotoFrame2,
+  gotoLabel,
+  nextFrame,
+  prevFrame,
+  setProperty,
+  setTarget,
+  setTarget2,
+  targetPathOf,
+} from "./clips.js";
+import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.js";
+import { Avm1Throw, BASE_REMOVED, Disabled, Halt, NotYet } from "./errors.js";
 import { Avm1Super, argumentsOf, superOf } from "./functions.js";
 import type { Host, Target } from "./host.js";
+import { extend, implementsOp, instanceOf } from "./inheritance.js";
 import {
   Avm1Function,
   Avm1Object,
@@ -13,8 +30,10 @@ import {
   invoke,
   keys,
   nameOf,
+  READ_ONLY,
   removeOwn,
   set,
+  VERSION_BITS,
 } from "./objects.js";
 import {
   add2,
@@ -41,9 +60,17 @@ import {
   Scope,
   setVariable,
 } from "./scope.js";
-import { type Primitive, stringOf, toBoolean, toNumber, typeOf, type Value } from "./values.js";
+import {
+  isPrimitive,
+  type Primitive,
+  stringOf,
+  toBoolean,
+  toNumber,
+  typeOf,
+  type Value,
+} from "./values.js";
 
-export { Activation, type Blocks, Disabled, Halt, NotYet, type Region };
+export { Activation, Avm1Throw, type Blocks, Disabled, Halt, NotYet, type Region };
 
 /** A module's default export. */
 export type Factory = (rt: Runtime) => Blocks;
@@ -146,13 +173,82 @@ export interface Operations {
     params: (string | null)[],
     flags: number,
   ): void;
+  /** Extends: the subclass's `prototype` made one whose prototype is the superclass's. */
+  extends(cx: Activation, superclass: Value, subclass: Value): void;
+  /** InstanceOf: `object instanceof constr`. */
+  instanceOf(cx: Activation, constr: Value, object: Value): boolean;
+  /** CastOp: the object where it is an instance of the constructor, else null. */
+  castOp(cx: Activation, object: Value, constr: Value): Value;
+  /** ImplementsOp, which pops its operands itself. */
+  implementsOp(cx: Activation): void;
+  /** RandomNumber: an int from 0 below `max`, 0 for a max below 1. */
+  randomNumber(max: Value): number;
   /** What DefineFunction2 preloads: its `arguments`, its `super`, `_root` and `_parent`, undefined for none. */
   argumentsOf(cx: Activation, args: Value[]): Value;
   superOf(cx: Activation, self: Value): Value;
   root(cx: Activation): Value;
   parentOf(cx: Activation): Value;
+  /**
+   * With: `object` on the scope chain over the blocks of its body, from
+   * `from` to `to`; false where the body is skipped.
+   */
+  with(cx: Activation, object: Value, from: number, to: number): boolean;
+  /**
+   * Try: its handlers over its try and catch bodies, the blocks from
+   * `from` to `finallyFrom`, the catch's from `catchFrom`; a throw lands at
+   * block `catchAt` (-1 for the exit, -2 for no catch), its value into the
+   * variable or the register `into`, or at the finally's blocks, from
+   * `finallyFrom` to `finallyTo`.
+   */
+  try(
+    cx: Activation,
+    from: number,
+    catchFrom: number,
+    finallyFrom: number,
+    finallyTo: number,
+    catchAt: number,
+    into: string | number,
+  ): void;
+  throw(value: Value): never;
+  /**
+   * Where control goes after `error` was thrown in block `at`: a block, -1
+   * for the exit; a register catch's value is `cx.thrown`, into `cx.into`.
+   */
+  caught(cx: Activation, error: unknown, at: number): number;
+  /**
+   * Where control goes on its way to block `to` (-1: the exit) out of a
+   * Try's, a finally's or a scope's body.
+   */
+  leave(cx: Activation, to: number): number;
+  /** After the first action of block `at`, reached from a body: the scopes that do not hold over it come off. */
+  scopes(cx: Activation, at: number): void;
+  /** Return of the value on top of the stack: where control goes first, a finally's block, or -1 to return `cx.ret`. */
+  ret(cx: Activation): number;
   play(cx: Activation): void;
   stop(cx: Activation): void;
+  /** SetTarget: the clip `name` names the target, "" the code's own. */
+  setTarget(cx: Activation, name: string): void;
+  setTarget2(cx: Activation, target: Value): void;
+  /** GetProperty: property `index` of the clip `path` names. */
+  getProperty(cx: Activation, index: Value, path: Value): Value;
+  setProperty(cx: Activation, value: Value, index: Value, path: Value): void;
+  /** GotoFrame: frame `frame`, 0 the first, of the target. */
+  gotoFrame(cx: Activation, frame: number): void;
+  gotoLabel(cx: Activation, label: string): void;
+  /** GotoFrame2: the frame the value names, `bias` frames on, played or stopped. */
+  gotoFrame2(cx: Activation, frame: Value, play: boolean, bias: number): void;
+  nextFrame(cx: Activation): void;
+  prevFrame(cx: Activation): void;
+  /** WaitForFrame: whether frame `frame`, 0 the first, is loaded. */
+  frameLoaded(cx: Activation, frame: number): boolean;
+  /** WaitForFrame2: whether the frame the value names, 1 the first, is loaded. */
+  frameLoaded2(cx: Activation, frame: Value): boolean;
+  /** TargetPath: a clip's path, undefined for anything else. */
+  targetPath(cx: Activation, value: Value): Value;
+  /** CallFrame: the actions of the frame the value names run now. */
+  callFrame(cx: Activation, frame: Value): void;
+  stopSounds(cx: Activation): void;
+  toggleQuality(cx: Activation): void;
   /** An action Flash cannot read: the SWF stops there. */
   halt(cx: Activation): never;
   /** A block larger than the compiler takes. */
@@ -164,7 +260,8 @@ export interface Operations {
 function operations(version: number): Operations {
   /** Whether strings are bytes, up to SWF 5, which the MB actions read as a single-byte locale's. */
   const bytes = version < 6;
-  const written = bytes ? bytesAsUtf8 : (text: string) => text;
+  // Flash's log writes half a surrogate pair as U+FFFD (adl a low half followed by more as three).
+  const written = bytes ? bytesAsUtf8 : wellFormed;
   const byZero = version < 5 ? () => "#ERROR#" : divideByZero;
   const stringLength = (a: Value) => stringOf(a, version).length;
   const stringExtract = (count: Value, index: Value, s: Value) => {
@@ -181,8 +278,21 @@ function operations(version: number): Operations {
     },
     // undefined traces as "undefined" whatever the version, which converts it to "" up to SWF 6;
     // a SWF 5 string's bytes are UTF-8, as Flash's log writes them.
+    // A toString that throws gives what an object without one does, and
+    // the value is thrown once the trace is written (adl).
     trace(cx, value) {
-      const text = value === undefined ? "undefined" : stringOf(value, version);
+      let text: string;
+      try {
+        text = value === undefined ? "undefined" : stringOf(value, version);
+      } catch (error) {
+        if (!(error instanceof Avm1Throw)) {
+          throw error;
+        }
+
+        cx.host.trace(value instanceof Avm1Function ? "[type Function]" : "[type Object]");
+        throw error;
+      }
+
       cx.host.trace(written(text));
     },
     toBoolean: (value) => toBoolean(value, version),
@@ -287,7 +397,14 @@ function operations(version: number): Operations {
             : charOf(code, false);
         }
       : (a) => charOf(toInt32(a, version) & 0xffff, true),
-    getVariable: (cx, name) => getVariable(cx, nameOf(name, version), version),
+    // A SWF 4's variables hold no display objects (Ruffle's as_swf4_variable).
+    getVariable:
+      version <= 4
+        ? (cx, name) => {
+            const value = getVariable(cx, nameOf(name, version), version);
+            return value instanceof Avm1Object && value.display !== null ? undefined : value;
+          }
+        : (cx, name) => getVariable(cx, nameOf(name, version), version),
     setVariable(cx, value, name) {
       setVariable(cx, nameOf(name, version), value, version);
     },
@@ -298,13 +415,22 @@ function operations(version: number): Operations {
       defineLocal2(cx, nameOf(name, version), version);
     },
     getMember(cx, name, object) {
+      // An array's element by its number, as loops read them: no name made.
+      if (typeof name === "number" && object instanceof Avm1Object && object.elems !== null) {
+        const p = name >= 0 && name < object.elems.length ? object.elems[name] : undefined;
+        if (p !== undefined && p.get === null && (p.flags & VERSION_BITS) === 0) {
+          return p.value;
+        }
+      }
+
       const key = nameOf(name, version);
       if (object instanceof Avm1Super) {
         return get(object, key, version, object.self);
       }
 
       if (object instanceof Avm1Object) {
-        return get(object, key, version);
+        const live = object.display === null ? object : object.display.live();
+        return live === null ? undefined : get(live, key, version);
       }
 
       return object === undefined || object === null
@@ -312,18 +438,35 @@ function operations(version: number): Operations {
         : cx.realm.primitiveMember(object as Primitive, key, version);
     },
     setMember(cx, value, name, object) {
+      if (
+        typeof name === "number" &&
+        object instanceof Avm1Object &&
+        object.elems !== null &&
+        object.watchers === null
+      ) {
+        const p = name >= 0 && name < object.elems.length ? object.elems[name] : undefined;
+        if (p !== undefined && p.get === null && (p.flags & (READ_ONLY | VERSION_BITS)) === 0) {
+          p.value = value;
+          return;
+        }
+      }
+
       const key = nameOf(name, version);
       if (object instanceof Avm1Super) {
         set(object.self, key, value, version);
       } else if (object instanceof Avm1Object) {
-        set(object, key, value, version);
+        const live = object.display === null ? object : object.display.live();
+        if (live !== null) {
+          set(live, key, value, version);
+        }
       } else if (object !== undefined && object !== null) {
         set(cx.realm.box(object, version), key, value, version);
       }
     },
     deleteMember(_, name, object) {
       const key = nameOf(name, version);
-      return object instanceof Avm1Object && removeOwn(object, key, version);
+      const o = live(object);
+      return o instanceof Avm1Object && removeOwn(o, key, version);
     },
     deleteVariable: (cx, name) => deleteVariable(cx, nameOf(name, version), version),
     initObject(cx) {
@@ -366,7 +509,7 @@ function operations(version: number): Operations {
       enumerate(cx, getVariable(cx, nameOf(name, version), version), version);
     },
     enumerate2(cx, object) {
-      enumerate(cx, object, version);
+      enumerate(cx, live(object), version);
     },
     callFunction(cx) {
       const st = cx.st;
@@ -377,59 +520,24 @@ function operations(version: number): Operations {
       // but in a SWF 5, which takes the target's clip for it (adl).
       const self = foundOn === undefined || (version < 6 && foundLocal) ? cx.clip : foundOn;
       st.push(invoke(fn, self, args, version));
+      returnIfRemoved(cx);
     },
     callMethod(cx) {
-      const st = cx.st;
-      const name = st.pop();
-      const object = st.pop();
-      const args = popArgs(st, version);
-      if (object === undefined || object === null) {
-        st.push(undefined);
-        return;
+      if (callMethod(cx, version)) {
+        returnIfRemoved(cx);
       }
-
-      const key = name === undefined ? "" : nameOf(name, version);
-      if (object instanceof Avm1Super) {
-        st.push(superCall(object, key, args, version));
-        return;
-      }
-
-      if (key === "") {
-        st.push(invoke(object, undefined, args, version));
-        return;
-      }
-
-      if (!(object instanceof Avm1Object)) {
-        const method = cx.realm.primitiveMember(object as Primitive, key, version);
-        st.push(invoke(method, object, args, version, 1));
-        return;
-      }
-
-      // A method found on the object itself is called as if found on its
-      // prototype; up to SWF 6 wherever it was found (adl).
-      const method = get(object, key, version);
-      st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
     },
     newObject(cx) {
       const st = cx.st;
       const name = nameOf(st.pop(), version);
       const args = popArgs(st, version);
       st.push(cx.realm.construct(resolve(cx, name, version), args, version));
+      returnIfRemoved(cx);
     },
     newMethod(cx) {
-      const st = cx.st;
-      const name = st.pop();
-      const object = st.pop();
-      const args = popArgs(st, version);
-      if (object === undefined || object === null) {
-        st.push(undefined);
-        return;
+      if (newMethod(cx, version)) {
+        returnIfRemoved(cx);
       }
-
-      const key = name === undefined ? "" : nameOf(name, version);
-      const boxed = cx.realm.box(object, version);
-      const constr = key === "" ? boxed : get(boxed, key, version);
-      st.push(cx.realm.construct(constr, args, version));
     },
     defineFunction(cx, region, name, params) {
       defineFunction(cx, region, name, params, 0, version);
@@ -437,15 +545,79 @@ function operations(version: number): Operations {
     defineFunction2(cx, region, name, params, flags) {
       defineFunction(cx, region, name, params, flags, version);
     },
+    extends(cx, superclass, subclass) {
+      extend(cx, superclass, subclass, version);
+    },
+    instanceOf: (cx, constr, object) => instanceOf(cx.realm, object, constr, version),
+    castOp(cx, object, constr) {
+      // Flash boxes a primitive first, for nothing: a class replaced on _global sees it.
+      if (object !== undefined && object !== null && isPrimitive(object)) {
+        cx.realm.box(object, version);
+      }
+
+      return instanceOf(cx.realm, object, constr, version) ? object : null;
+    },
+    implementsOp(cx) {
+      implementsOp(cx, version);
+    },
+    randomNumber(max) {
+      // Rust's cast of the max: saturated, NaN 0.
+      const n = toNumber(max, version);
+      const m = Number.isNaN(n) ? 0 : Math.trunc(Math.min(Math.max(n, -2147483648), 2147483647));
+      return m > 0 ? Math.floor(Math.random() * 0x80000000) % m : 0;
+    },
     argumentsOf: (cx, args) => argumentsOf(cx, args, version),
     superOf: (cx, self) => superOf(cx, self, version),
     root: (cx) => cx.host.root?.(),
     parentOf: (cx) => cx.host.parent?.(cx.clip),
+    with: (cx, object, from, to) => enterWith(cx, object, from, to, version),
+    try: enterTry,
+    throw(value) {
+      throw new Avm1Throw(value);
+    },
+    caught,
+    leave,
+    scopes,
+    ret: returned,
     play(cx) {
-      cx.host.play(cx.target);
+      if (cx.target !== null) {
+        cx.host.play(cx.target);
+      }
     },
     stop(cx) {
-      cx.host.stop(cx.target);
+      if (cx.target !== null) {
+        cx.host.stop(cx.target);
+      }
+    },
+    setTarget(cx, name) {
+      setTarget(cx, name, version);
+    },
+    setTarget2(cx, target) {
+      setTarget2(cx, target, version);
+    },
+    getProperty: (cx, index, path) => getProperty(cx, index, path, version),
+    setProperty(cx, value, index, path) {
+      setProperty(cx, value, index, path, version);
+    },
+    gotoFrame,
+    gotoLabel,
+    gotoFrame2(cx, frame, play, bias) {
+      gotoFrame2(cx, frame, play, bias, version);
+    },
+    nextFrame,
+    prevFrame,
+    frameLoaded: (_, frame) => frameLoaded(frame),
+    frameLoaded2: (_, frame) => frameLoaded2(frame, version),
+    targetPath: (_, value) => targetPathOf(value),
+    callFrame(cx, frame) {
+      callFrame(cx, frame, version);
+      returnIfRemoved(cx);
+    },
+    stopSounds(cx) {
+      cx.host.stopSounds?.();
+    },
+    toggleQuality(cx) {
+      cx.host.toggleQuality?.();
     },
     halt(cx) {
       cx.host.halt();
@@ -458,6 +630,80 @@ function operations(version: number): Operations {
       throw new NotYet(name);
     },
   };
+}
+
+/** CallMethod: `object[name](args)`, `object(args)` for an empty name; false for no object, which calls nothing. */
+function callMethod(cx: Activation, version: number): boolean {
+  const st = cx.st;
+  const name = st.pop();
+  const object = live(st.pop());
+  const args = popArgs(st, version);
+  if (object === undefined || object === null) {
+    st.push(undefined);
+    return false;
+  }
+
+  const key = name === undefined ? "" : nameOf(name, version);
+  if (object instanceof Avm1Super) {
+    st.push(superCall(object, key, args, version));
+    return true;
+  }
+
+  if (key === "") {
+    st.push(invoke(object, undefined, args, version));
+    return true;
+  }
+
+  if (!(object instanceof Avm1Object)) {
+    const method = cx.realm.primitiveMember(object as Primitive, key, version);
+    st.push(invoke(method, object, args, version, 1));
+    return true;
+  }
+
+  // A method found on the object itself is called as if found on its
+  // prototype; up to SWF 6 wherever it was found (adl).
+  const method = get(object, key, version);
+  st.push(invoke(method, object, args, version, version < 7 ? 1 : Math.max(foundDepth, 1)));
+  return true;
+}
+
+/** NewMethod: `new object[name](args)`, `new object(args)` for an empty name; false for no object. */
+function newMethod(cx: Activation, version: number): boolean {
+  const st = cx.st;
+  const name = st.pop();
+  const object = st.pop();
+  const args = popArgs(st, version);
+  if (object === undefined || object === null) {
+    st.push(undefined);
+    return false;
+  }
+
+  const key = name === undefined ? "" : nameOf(name, version);
+  const boxed = cx.realm.box(object, version);
+  const constr = key === "" ? boxed : get(boxed, key, version);
+  st.push(cx.realm.construct(constr, args, version));
+  return true;
+}
+
+/**
+ * After a call, a `new` or a CallFrame: if it took the clip whose code
+ * runs off the display list, that code returns here (BaseRemoved). A
+ * method of undefined or null calls nothing and returns nothing, even
+ * where the clip went before it (the corpus's removed_clip_halts_script).
+ */
+function returnIfRemoved(cx: Activation): void {
+  if (cx.host.removed?.(cx.base) === true) {
+    throw BASE_REMOVED;
+  }
+}
+
+/** A value as a reference reaches it now: a clip's AVM1 object the one at its path, undefined for none. */
+function live(value: Value): Value {
+  if (value instanceof Avm1Object && value.display !== null) {
+    return value.display.live() ?? undefined;
+  }
+
+  return value;
 }
 
 /**
@@ -658,9 +904,10 @@ export class Runtime {
   scriptTimeout = 15;
 
   /**
-   * Run a block's own region, `regions[0]`, in `cx`. Past the recursion
-   * limit, or where JavaScript's own stack runs out first, the movie's
-   * actions are disabled from there.
+   * Run a block's own region, `regions[0]`, in `cx`. A value thrown and
+   * not caught ends the block, as Flash ends it, writing nothing. Past the
+   * recursion limit, or where JavaScript's own stack runs out first, the
+   * movie's actions are disabled from there.
    */
   run(regions: Region[], cx: Activation): void {
     if (this.disabled || regions.length === 0) {
@@ -681,6 +928,10 @@ export class Runtime {
     try {
       regions[0](cx);
     } catch (error) {
+      if (error instanceof Avm1Throw || error === BASE_REMOVED) {
+        return;
+      }
+
       if (!(error instanceof Disabled || stackOverflow(error))) {
         throw error;
       }

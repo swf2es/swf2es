@@ -40,3 +40,16 @@ name a@b ok
 name a=b ok
 name a$b ok
 name null 2007
+deleteAll  2014 Error: Error #2014: Feature is not available at this time.
+getDiskUsage  2014 Error: Error #2014: Feature is not available at this time.
+deleteAll / 2014 Error: Error #2014: Feature is not available at this time.
+getDiskUsage / 2014 Error: Error #2014: Feature is not available at this time.
+deleteAll localhost 2014 Error: Error #2014: Feature is not available at this time.
+getDiskUsage localhost 2014 Error: Error #2014: Feature is not available at this time.
+deleteAll other.example 2014 Error: Error #2014: Feature is not available at this time.
+getDiskUsage other.example 2014 Error: Error #2014: Feature is not available at this time.
+deleteAll http://other.example/ 2014 Error: Error #2014: Feature is not available at this time.
+getDiskUsage http://other.example/ 2014 Error: Error #2014: Feature is not available at this time.
+deleteAll null 2007 TypeError: Error #2007: Parameter url must be non-null.
+getDiskUsage null 2007 TypeError: Error #2007: Parameter url must be non-null.
+kept 1 45

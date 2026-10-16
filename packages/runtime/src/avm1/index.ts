@@ -1,23 +1,31 @@
 /** The AVM1 (AS1 and AS2) runtime: values, their conversions by version, and what modules call. */
 
+export { goto } from "./clips.js";
 export { Avm1Super, ScriptFunction } from "./functions.js";
-export type { Host, Target } from "./host.js";
+export { ABSENT, type DisplayNative, type Host, type Target, type Timeline } from "./host.js";
 export { numberToString, parseFloatAvm1, stringToNumber } from "./numbers.js";
 export {
   Avm1Function,
   Avm1Object,
+  allowed,
+  caseSensitive,
   DONT_DELETE,
   DONT_ENUM,
+  fold,
   get,
   keys,
   type Native,
   Property,
   READ_ONLY,
   set,
+  VERSION_6,
+  VERSION_7,
+  VERSION_8,
 } from "./objects.js";
 export { Realm } from "./realm.js";
 export {
   Activation,
+  Avm1Throw,
   type Blocks,
   Disabled,
   type Factory,
@@ -27,7 +35,7 @@ export {
   type Region,
   Runtime,
 } from "./runtime.js";
-export { Scope } from "./scope.js";
+export { Scope, targetPath } from "./scope.js";
 export {
   isPrimitive,
   type ObjectConversions,

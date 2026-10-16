@@ -2,10 +2,12 @@
 
 The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
 compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 7 are built: `format`'s list of action blocks, the
+there. Steps 1 to 10 are built: `format`'s list of action blocks, the
 decoder, the emitter, the runtime's values and its operators by version,
-its objects, variables and global object, its functions and registers, and
-a main AVM1 SWF's root frames run by the player; the rest is not.
+its objects, variables and global object, its functions and registers,
+`With`, `Try` and `Throw`, the language's classes, and a main AVM1 SWF's
+clips, their AS2 face, paths, targets and timeline actions, played in
+Flash's order by the player; the rest is not.
 [architecture.md](architecture.md) describes what is, and this document
 is folded into it as each piece lands.
 
@@ -163,7 +165,8 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   has no scope or handler either. So for the flow a `With` branches to
   its body and past it, a `Try` to its try body and, where a throw lands,
   to its catch's or finally's bytes, and their bodies' bounds start
-  blocks, where the emitter drops what is no longer held.
+  blocks, where the emitter drops what is no longer held (see "With and
+  Try" below for when exactly).
 - `emit/`: a block as an array of its regions' functions (`block.ts`),
   the block's own code first, then the bodies of the functions it
   defines, in the order the flow finds them; the module around them
@@ -209,24 +212,40 @@ can prove, spilling to `st` at calls and at the region's ends.
   actions, which the decoder turns into an offset; the branch asks the
   host whether the frame is loaded. The player has the whole SWF before it
   plays, so every frame is, but the branch stays for SWFs that test it.
-- **With**: the object goes on the activation's scope chain with the
-  body's bounds, and comes off at the first block outside them, however
-  control got there. A `with (undefined)` or `null` skips the body, in
-  adl as in Ruffle (`action_with`): the action's length covers its body,
-  so the code after it goes on past it.
-- **Try**: a handler goes on the activation with the try and catch
-  bodies' bounds, and comes off as a With's scope does; the dispatcher's
-  loop runs in a JavaScript `try`/`catch`. `Throw` throws the runtime's
-  `Avm1Throw` with the value; a throw in the try body with a catch sets
-  its register or variable and goes on at the catch's bytes. A throw in
-  the try body without a catch, or in the catch body, goes on at the
-  finally's bytes and throws again as control leaves them, even by a jump
-  (adl); without a finally it goes on to the handler outside. Leaving a
-  try or catch body by a jump runs no finally. An error of the host's, a
-  bug, passes through.
+- **With**: `V.with(cx, st.pop(), from, to)` puts the object on the
+  activation's scope chain, held over the body's blocks, from `from` to
+  `to`: a region's blocks are in the order of their offsets, and a body's
+  bounds start blocks, so each body is a range of them. It gives false,
+  and the code goes on past the body, for `undefined` and `null`, in adl
+  as in Ruffle (`action_with`), and where the chain is full (below).
+- **Try**: `V.try(cx, ...)` puts its handlers on the activation, held over
+  the try and catch bodies' blocks, with where a throw lands and the
+  catch's variable or register. The dispatcher's loop of a region with a
+  `Try` runs in a JavaScript `try`/`catch` whose catch asks `V.caught`
+  which block to go on at, and sets the register a catch took the value
+  into, a DefineFunction2's own `let` among them; so in such a region
+  every block sets `b` as control falls into it, for a throw to know
+  where it was. `Throw` throws the runtime's `Avm1Throw` with the value.
+  An error of the host's, a bug's, or the recursion limit's passes
+  through every catch and finally.
+- **Leaving a body**: what is held is the activation's (`control.ts`),
+  each entry over a range of blocks. A branch or a fall-through from a
+  block in a try, catch or finally body to one outside it goes through
+  `b = V.leave(cx, k); continue;`, which takes off the Trys that do not
+  hold over block `k`, and where a finally that a throw or a Return
+  reached is left, throws or returns instead. A scope comes off one action
+  late, as adl has it (below): a block that an edge out of a With's or a
+  catch's body reaches calls `V.scopes(cx, k)` after its first action,
+  before it where that action branches, ends the block or opens a body.
+  The other blocks, and every region without a `With` or a `Try`, are
+  written as before, with no cost of either.
 - **Return** pops the value it returns, `return st.pop();`, from a
   function's region; in a frame's block it ends the block, the value
   popped all the same. A region that runs off its end returns undefined.
+  In a try or catch body of a `Try` with a finally it is
+  `b = V.ret(cx); continue;`: the finally runs first, and the region
+  returns the stack's top as control leaves it, through the case `-1`,
+  `return cx.ret;`, that such a region's dispatcher has for its exit.
 
 A region's function takes the activation, `cx`: its scope chain, target,
 `this`, the constant pool, the operand stack, the registers, the
@@ -464,6 +483,76 @@ cases), where it is not what Ruffle does:
   on JavaScript's stack, would be needed to match it). Any other
   RangeError is an error like the rest.
 
+### With and Try
+
+What adl traces of them at SWF 5 to 10 (the `avm1-control-swf*` player
+cases), where it is not what Ruffle does, which runs each body as an
+activation of its own:
+
+- A With's object, a primitive boxed, is above the chain while control
+  is in its body and at the first action past it, which control reaches
+  by running off the body's end or by a jump to it, and comes off after
+  that action. So `with (o) { ... }` followed at once by a function's
+  definition gives the function `o` in the chain it closes over, and a
+  GetVariable that is the first action past a body finds `o`'s
+  properties. Control going anywhere else, by a jump forward past that
+  action or back before the `With`, takes the scope off at once, and a
+  jump into a body from outside finds none; a branch at that first action
+  back into the body keeps it. adl looks only at the scope on top: a With
+  that is the first action past a body puts its object over the scope,
+  which stays under it until both come off past the second body.
+- A With is skipped, as `with (undefined)` is, where the scope chain
+  already holds 15 scopes, `_global` and the clip included: 13 Withs one
+  in another in a frame's code, 12 in a function's from SWF 6 (its
+  activation object is one more), but 13 in a SWF 5 function's, and fewer
+  in a function that closes over Withs or a catch. Ruffle has no limit.
+- `DefineLocal` in a With's body defines the variable on the scope under
+  the With's object where the object lacks it, as in Ruffle; `SetVariable`
+  sets it where the chain has it, else on the timeline.
+- A catch into a variable makes an object for it, held over the catch
+  body above the chain, as a With's object is (Ruffle sets the variable
+  as SetVariable does): the variable is gone after the catch, an outer
+  one of the name is unchanged, a function defined in the catch closes
+  over it, and the name is taken as it is, never as a path. A catch into
+  a register sets a DefineFunction2's own, else one of the movie's four,
+  else none, as StoreRegister does. A throw in a With's body, or at the
+  first action past it, caught by a catch outside it, keeps the With's
+  object over the catch body, under the variable's, whether the catch
+  takes a variable or a register; a catch that throws again keeps them
+  over the next catch's. A finally reached by a throw or a `Return` keeps
+  a scope only as a jump there would, for its first action where that is
+  the first past the scope's body.
+- A throw cuts the operand stack back to its height as the `Try` ran, as
+  Ruffle does, landing in a catch or a finally; a value nothing catches
+  leaves the stack as it is.
+- Code running off a try body runs the catch's bytes, the variable not
+  set, then the finally's. A jump out of a try or catch body runs no
+  finally; a `Return` in one runs the finally, the stack cut back to its
+  height as the `Try` ran and the value left on top of it while it runs,
+  and then returns what is on top of the stack: what a finally pushes is
+  returned, the value under it left on the stack, and a finally's own
+  `Return` returns its value and leaves the first. A
+  finally reached by a throw or a `Return` throws or returns as control
+  leaves it, at once, even by a jump; a throw or a `Return` in it takes
+  their place.
+- A thrown value nothing catches ends its block, function calls included,
+  and writes nothing: the frame's next block runs, and the next frame.
+  Every value can be thrown, `undefined` too, as `Throw` on an empty stack
+  does. Past the recursion limit no catch or finally runs.
+- A throw in a function a native calls, a getter, a setter, `__resolve`,
+  `valueOf`, `toString`, `Function.call` or `apply`, a constructor, goes
+  through the native to the caller's catch, the rest of the native's work
+  undone (`Array.join` calls no other `toString`). `trace` of an object
+  whose `toString` throws writes `[type Object]`, or `[type Function]`,
+  then throws; a watcher that throws sets the property to undefined, then
+  throws. Ruffle does neither.
+- `Try` and `Throw` run in a SWF 5 and 6 too, and `Error` is there in
+  every version, on `_global` and not enumerated: `new Error(m)` has its
+  own `message` where `m` is given and not undefined, the prototype's
+  `message` and `name` are `"Error"` and listed by `for..in`, with its
+  `toString`, which gives `this.message`, and `Error(...)` called as a
+  function gives undefined. Step 9 completes the classes.
+
 ### The constant pool
 
 What adl does with `ConstantPool`, for the runtime (steps 4 and 7):
@@ -515,8 +604,10 @@ actions that take more than a conversion (`Add2`, `Equals2`, `Less2`,
 `StringExtract`...); `runtime.ts` the `Activation`
 (`st`, `pool`, `target`, `host`), the operations a version's `V` holds,
 and the errors: `NotYet`, an action not done yet, which ends its block
-and is reported, and `Halt`, thrown once the host has stopped the SWF at
-an action Flash cannot read. `trace` writes `undefined` whatever the
+and is reported, `Halt`, thrown once the host has stopped the SWF at
+an action Flash cannot read, and `Avm1Throw`, a value `Throw` throws,
+which ends its block where nothing catches it (`control.ts` has what
+`With` and `Try` hold). `trace` writes `undefined` whatever the
 version, as Flash does, and its text as it is: Flash's log breaks a line
 at a carriage return as at a line feed (the corpus's `trace`, and AS3's
 `edittext_newline_stripping`), where adl's stderr keeps the `\r`, so the
@@ -629,7 +720,8 @@ where it is not what Ruffle does:
 - `watch(name, callback, data)` is false without a function callback; a
   second `watch` of the name replaces the first; `unwatch` is true where
   there was one, the name found by the version's case. The callback gets
-  the name, the old value (the stored one, no getter called), the new
+  the name (the property's own spelling where it has one, as a SWF 6
+  sets `FOO` over `foo`), the old value (the stored one, no getter called), the new
   one and the data, with the object as `this`.
 - InitObject's object has its own `constructor` (`_global.Object`, don't
   enum and don't delete) before its `__proto__`, in every version; `new`
@@ -651,10 +743,8 @@ A getter, a setter, a watcher or `__resolve` is a native or a function
 of the SWF's, called with the depth a method call has (a getter's and a
 setter's `super` is their object's prototype's), each under the property
 recursion limit (see "Functions and registers"). The natives so far are `Object` and `Object.prototype`'s methods, `ASSetPropFlags`,
-`Function.prototype`'s `call` and `apply`, and what boxing, InitArray and
-the conversions need of `Function`, `Array`
-(`toString`, `join`), `String`, `Number` and `Boolean` (their constructors,
-`valueOf` and `toString`), which step 9 completes. `CallFunction`,
+`Function.prototype`'s `call` and `apply`, `Error` as `Throw`'s values
+need it, and the classes and functions of "Builtins" below. `CallFunction`,
 `CallMethod`, `NewObject` and `NewMethod` call them; a name that holds no
 function gives undefined, as in Flash.
 
@@ -683,7 +773,7 @@ need nothing more.
 An activation's scope chain is a list, searched from the top: a frame's
 or an event's block has the clip it belongs to above `_global`; a
 function has its own activation object above the chain it captured; a
-`With` puts its object above either. The activation also has a
+`With`, or a catch into a variable, puts its object above either. The activation also has a
 **target**, the clip that timeline actions (`Play`, `GotoFrame`,
 `GetProperty` with an empty path) act on and names without a path
 resolve in. It starts as the clip the code belongs to, `SetTarget` and
@@ -701,8 +791,7 @@ has it (GetVariable) or set on the first object it reaches (SetVariable).
 A path's steps are a clip's children by name or else properties, `..` a
 clip's parent, a leading `/` the root, and `this`, `_root` and `_levelN`
 at its start; what needs the display list the host gives (`root`,
-`level`, `parent`, `child` in `host.ts`), which step 10 fills in, so for
-now a path walks objects' properties, `this` and the root. A name with a
+`level`, `parent`, `child` in `host.ts`). A name with a
 `/` and no variable, from SWF 5, is the object the path names. A name
 without a path walks the scope chain, top down, and is read from the
 first scope object that has it on its chain; a name none has is `_root`,
@@ -711,22 +800,17 @@ variable is never resolved by `__resolve`. `this` is the activation's
 `this`, case-insensitively in SWF 5 and 6, in a function too (adl; Ruffle
 has it case-sensitive in a SWF 5 function), and
 so is a path's first step (with `_root`, and `_global` from SWF 6),
-though a SetVariable path takes no `this`: adl sets nothing for
-`this.x`. adl keeps a frame's `this` as a variable that `Delete2` can
+though a SetVariable path in a timeline's code takes no `this`: adl sets
+nothing for `this.x` there, where a function's sets it (the corpus's
+`path_string`). adl keeps a frame's `this` as a variable that `Delete2` can
 remove, after which a SetVariable of `this` makes a property of the clip;
-that is not reproduced. A slash path without a variable (`/a/b`) names a
-clip in adl, never another object, which waits for step 10. A
+that is not reproduced. A
 variable set without a path goes where the chain has it, else on the
 target's clip; `DefineLocal` and `DefineLocal2` define it on the top
 scope, which at a frame's level is the clip. A clip's properties
 `_x` to `_ymouse` are also reachable by index (`GetProperty` and
-`SetProperty`'s 0 to 21), from a table shared with `globals/MovieClip.ts`.
-
-Until step 10 gives clips their class, the player gives the root a plain
-object for its AVM1 face, which holds the timeline's variables: `this`
-and `_root` are it, and what tells a clip from an object (`typeof` is
-`movieclip`, it converts to its path, compares as no number) is not there
-yet.
+`SetProperty`'s 0 to 21), from the table of `globals/MovieClip.ts`.
+"Clips and paths" below has the rest.
 
 ### Builtins
 
@@ -737,7 +821,204 @@ and is the player's), `Function`, `Array`,
 and the global functions (`parseInt`, `parseFloat`, `isNaN`, `escape`,
 `ASSetPropFlags`, `setInterval` through the host's clock). Each is
 installed on `_global` with the version flags Flash gives it, so a SWF 5
-does not see what SWF 6 added.
+does not see what SWF 6 added. They are in `runtime/src/avm1/globals/`, a
+file per class (`array.ts`, `string.ts`...), each under Ruffle's header
+where it translates Ruffle's; a class's properties are defined in the
+order adl lists them once `ASSetPropFlags` shows them all (a prototype's
+`constructor` before its `__proto__`).
+
+### Array and String
+
+An array keeps its elements apart from its other properties while it is
+dense, each of 0 to n - 1 there: `Avm1Object.elems`, by index, a
+`Property` each, so that `a[i]` with a number (GetMember and SetMember's
+fast paths), `push`, `join` and the other methods need no name and no
+`Map`. Its first hole, an element deleted from the middle or set past the
+end, moves them into the `Map`. Each property has the sequence number of
+its adding, which for..in lists them by, elements among the rest: adl
+lists an array's names in the order they were set, and its methods set
+elements again in their own orders.
+
+Array's methods read and write an object's own elements as adl does
+(the `avm1-array-swf*` cases trace what follows at SWF 5, 6, 7, 8 and 10):
+
+- A read takes the element's stored value: no getter is called, nothing
+  is inherited (`Array.prototype[0]` is not an array's), a hole is
+  undefined; `length` is the own `length` as an int, whatever the object.
+- A write tells the element's watcher, and before it an array's
+  `length`'s watcher where it grows, then stores the value unless the
+  element is read-only; no setter is called (Ruffle calls no watcher).
+  Most writes delete the element first, so it comes last in for..in's
+  order and loses its attributes, unless it cannot be deleted: `reverse`
+  sets each pair in turn, `shift` each element down then `length`,
+  `sort` only the elements that moved; `splice` sets `length` to 0, which
+  deletes all, then sets every element again (Ruffle moves only those
+  past the cut); `unshift` sets `length`, moves the elements up from the
+  last, sets the first ones undefined, sets `length` again and then the
+  new ones, and does nothing with nothing to add; `push` sets each new
+  element, an array's `length` growing with it; `pop` deletes the last
+  and sets `length`. adl's `shift` and `unshift` tell no watcher of an
+  element but the first's once an array has five elements, or four
+  after `sort` moved some: that is not reproduced.
+- `length`'s watcher is told of each of these sets of it, and of an
+  element set past the end (before the element's watcher), but what it
+  gives is not kept, an array's or not: the methods keep their number.
+- A `length` set shorter deletes the elements past it, but those that
+  cannot be deleted, and only if the old `length` is a number; set
+  longer it makes no elements; it is stored as given (`"3"` stays a
+  string, `1.9` a fraction). Under a watcher, adl sets an array's
+  `length` twice, as the array and then as the set: the watcher is told
+  of both, the elements are cut to the length set, and what the second
+  call gives is stored. An element set at 2^31 - 1 wraps it to -2^31,
+  which deletes them all.
+- `join`'s separator converts as the version converts it (`undefined` is
+  `""` to a SWF 6 and `"undefined"` to a 7); `splice` gives undefined for
+  no start, an undefined count or a negative one.
+- `sort` and `sortOn` sort as Flash's quicksort does, as Ruffle has it
+  (the leftmost element the pivot), which a comparator that traces its
+  calls shows; an object that is no function sorts by the default order
+  (Ruffle compares nothing then). `sortOn` reads its fields as own stored
+  values.
+
+What a non-array object's watchers see of Array's methods called on it
+(`Array.prototype.push.call(o)`) is left as Ruffle has it: adl's order
+there is its own.
+
+String's methods take `this` unboxed, so a string's method call makes no
+String object (`Avm1Function`'s `raw`). Up to SWF 5 a string is its
+bytes: the methods count and cut bytes, the case mappings map a byte only
+to a byte, `fromCharCode` writes a code past 0xFF as two bytes,
+`charCodeAt` past the end is 0, and `split` splits only at one character:
+at a comma by default, an empty or longer delimiter leaving the string
+whole, an empty one whatever the limit (Ruffle: an empty one is a comma
+too). From SWF 6, `split` without a delimiter gives the string whole
+whatever its limit, and so does an empty string by any but `""`.
+`substring` from the end on is `""`, whatever its end (Ruffle swaps the
+two first: `"abcdef".substring(10, 2)` is `cdef`). From SWF 6 the methods cut
+UTF-16 code units, keeping half a surrogate pair as it is, so the halves
+joined again are the pair (adl; StringExtract's halves are U+FFFD each).
+Flash's log writes half a pair as U+FFFD, which `trace` does; adl writes
+a low half followed by more as three. `toUpperCase` and `toLowerCase` are
+Flash's own tables (`case.ts`, measured in adl over every code unit), one
+code unit to one. `String.prototype.valueOf` of anything that is no
+String gives it as a string, by its `toString` (Ruffle: undefined),
+`toString` undefined.
+
+### Number, Boolean and Math
+
+Number's and Boolean's methods take `this` unboxed and give undefined for
+anything but their own kind (Number's `valueOf` too, unlike String's);
+`Boolean()` of nothing is undefined. `toString(radix)` from 2 to 36 but 10
+casts the number to an int as Flash casts one where it clamps (x86's
+cast: NaN, the infinities and anything out of range are -2^31), whose
+digits Flash writes as the remainders it takes, each negative:
+`(1e20).toString(16)` is `-(0000000`, NaN's in base 3
+`-/.//./..././/0.0./0.`, adl and the corpus alike. Number's constants are
+read-only, as Math's are.
+
+Math's methods are ASnative(200, i): each converts its first two arguments
+whether it uses them or not, and a SWF up to 6 gets NaN from one given
+fewer than it takes (min and max of none are the infinities); `round` is
+`floor(x + 0.5)`, and min and max take two arguments, NaN from either.
+`pow` is C's, as the corpus's math tests have it: 1 to any power is 1
+(`Math.pow(true)`, NaN's power, is 1 in `math_swf6` to `math_swf8`, Flash
+Player's own traces), and so, by C's rules, is -1 to an infinite one,
+which no test shows, where adl's and JavaScript's are NaN. adl is AIR's
+runtime under Wine, whose pow is not the Flash Player's that recorded the
+corpus: it is also off JavaScript's elsewhere, by a last bit
+(`Math.pow(2, 0.5)`) or from the ninth digit (`Math.pow(1.0000001,
+1e9)`), which the corpus's tests leave to their tolerance. So swf2es
+takes the corpus's special cases and JavaScript's precision, and the
+cases trace no result adl and Flash Player may differ in. RandomNumber (`random(n)`) is an int below its
+max cast as Rust casts one (saturated), 0 for a max below 1; its values and
+Math.random's are JavaScript's generator's, not Flash's.
+
+### Date
+
+Date's calendar and methods are Ruffle's (`globals/date.ts`), its time a
+`DateCell` in the object's `primitive`, which Add2 converts by `toString`
+from SWF 6. Local time is Flash's on Windows, as adl has it: today's
+standard offset in every year, plus daylight saving's by today's rule
+(its month, weekday and time, read from the host's offsets this year),
+1900, 1938 and 2050 alike, not the zone's history (Ruffle adds a constant
+offset, no daylight saving at all; AVM2's Date follows avmshell's
+`localtime_r` instead). Local fields go back to UTC as Windows compares
+them with the rule's local standard times, so a time in the
+spring-forward gap comes out an hour earlier and one in the hour that
+repeats as it falls back is the later, standard one, east of UTC and
+west alike. From SWF 7, `setMonth` without a day keeps the day within the
+month it sets (Ruffle leaves this a TODO); `setMonth()` of nothing is
+January. ASnative(103, i) gives Date's methods, any index a function, as
+any table's does. The player's cases trace only what holds in any zone,
+as the tests run in the host's; `tests/unit/runtime/avm1-date-zone*.test.ts`
+pin adl's local times in Helsinki's and New York's. adl under Wine takes
+its zone from `TZ`, so `TZ=Australia/Sydney node oracle/flash.ts` shows
+another zone's (the oracle keys its cache by `TZ` where it is set);
+Sydney's and Kolkata's agree with the player's too.
+
+### Classes
+
+`Extends` gives the subclass a new `prototype` whose prototype is the
+superclass's, with `__constructor__` (hidden from SWF 5) and no
+`constructor` of its own (adl; Ruffle gives one), through a set, which
+leaves a read-only `prototype`: `Object`'s, `Number`'s and `Date`'s are (adl), not
+`Function`'s, `Array`'s, `String`'s or `Boolean`'s. `InstanceOf` walks the
+object's prototypes for the class's own stored `prototype` (no getter, a
+primitive one boxed by `_global`'s class), and each prototype's
+interfaces, and theirs; a primitive is no instance. `CastOp` gives the
+object or null, boxing a primitive first for nothing, as Flash does.
+`ImplementsOp` gives the constructor's prototype its interfaces' prototypes
+only the first time, even in a SWF 6 (Ruffle: each time replaces them, from
+SWF 7). A primitive where these take an object, but undefined and null,
+changes nothing and writes Flash's line to the log, `Parameters of
+primitive types are no longer coerced into the required type - Object.`,
+and an object for ImplementsOp's count `Parameters of type Object are no
+longer coerced into the required primitive type - number.`, as adl writes
+them (`inheritance.ts`).
+
+### AsBroadcaster
+
+Flash writes AsBroadcaster in ActionScript, Ruffle in Rust, swf2es in
+TypeScript as adl runs it: `addListener` calls the object's
+`removeListener`, then pushes the listener, so a listener added again comes
+last (Ruffle keeps its place); `removeListener` splices out the first
+listener equal to it by `==`; `broadcastMessage` calls each listener's
+method of the name, or the listener itself for an empty name, with the
+listener as `this`, and gives true, or undefined without listeners or a
+name. From SWF 7 it calls the listeners as they were when it was called;
+up to SWF 6 the array as it is by then, so that a listener another removes
+is not called (Ruffle: by index, a removed one's place skipped).
+`initialize` sets a new `broadcastMessage` each time and AsBroadcaster's
+own `addListener` and `removeListener` on the object, and a new
+`_listeners`, each hidden from SWF 5, as AsBroadcaster's own are.
+
+### The global functions
+
+`escape` writes each byte but a letter or digit as `%XX`, of a SWF 5's
+string its bytes, of a later one's its UTF-8; `unescape` reads them back,
+`+` a space, a `%` before what is no hex digit dropping that character,
+and a SWF 6's bytes as its strings' UTF-8 is read (leniently: `%e9%C3%A9`
+is U+A0E9; Ruffle replaces what is not UTF-8). `parseInt` is Ruffle's,
+which adl agrees with, `parseFloat` the conversions' own; `isNaN` and
+`isFinite` convert by version. `ASnative(category, index)` gives a new
+function of Flash's table each call: 4 ASSetNative and
+ASSetNativeAccessor, 100 escape, unescape, parseInt, parseFloat and trace,
+101 Object's methods, 103 Date's, 200 Math's, 252 Array's. An index past
+a table's natives gives a function of none, returning undefined (Math's
+NaN), and so does any index of Flash's other categories (1 to 5, 9, 11
+to 15, 102 to 107, 110 to 113, 250, 251, 253, the display, text, sound
+and I/O classes' up to 2401, as adl has them), until their steps bring
+their natives; any other category gives undefined. `ASSetNative` and `ASSetNativeAccessor` set
+methods and accessors from it as Ruffle has them, a version before a name
+hiding it from earlier SWFs. `_global.trace` and ASnative(100, 4) write to
+the log, as Flash's authoring tool shows them in its Output panel, where
+the corpus's `asnative` was recorded (its `test.toml` says so); Flash
+Player's `flashlog.txt`, and adl, get nothing from them, unlike the Trace
+action. swf2es writes them, as Ruffle does: the log is for debugging,
+where a line more hides nothing, and content that calls them means them
+to be seen. `getTimer` (GetTime), `setInterval`, `clearInterval` and
+`setTimeout` need the player's clock and frames, and come with step 11;
+`ASconstructor`, which adl has, is left out.
 
 ## The player
 
@@ -751,11 +1032,29 @@ natives read and write the display object as playerglobal's do. Nothing in
 `display/` or `render/` changes for it: the display list, the timeline,
 text layout and drawing are the same for both VMs.
 
+The runtime knows a display object's AS2 object by its `display`, a
+`DisplayNative` (`runtime/src/avm1/host.ts`) the player gives it
+(`globals/MovieClip.ts`'s `ClipNative`): after the object's own
+properties, and before its prototypes', it has `_root`, `_parent`,
+`_global` and `_levelN`, its children by instance name, then the display
+properties `_x` to `_ymouse` in any case, as Ruffle's `stage_object.rs`
+orders them; a set of a display property's name goes to the display
+object where the object has no property of its own of the name; for..in
+lists its children last, the highest depth first. `typeof` a clip is
+`movieclip`, a button's or a text field's `object`; any of them converts
+to its path, `_level0.a.b`. A clip, a button, a text field and a video
+get one as they are made; a shape, a morph, a bitmap or static text has
+none, and its name finds its parent's. A clip or a button without a name
+is named `instance1`, `instance2`... as it is made, the root never.
+
 AVM1 references to clips are by path in Flash: a variable holding a clip
 finds the clip that has its path now, if the one it was taken from was
 removed and another placed by the same name. The AS2 object of a clip
-keeps its display object and, once that is removed, resolves its path
-again on its next use, as Ruffle's `MovieClipReference` does.
+keeps its display object and the path it had as it was removed, and an
+action taking it as a value (GetMember, SetMember, CallMethod, Delete,
+Enumerate2, converting it to a string) reaches the object placed at that
+path since, or nothing, as Ruffle's `MovieClipReference` does; its
+`typeof` stays `movieclip`.
 
 A text field with a variable name (DefineEditText's `VariableName`)
 shows a variable on the clip its path names, and a change to either
@@ -784,7 +1083,31 @@ it enters. Intervals run by the clock between frames, as AS3's timers do.
 The player keeps AVM1's execution list beside the display list, as its
 clips are made and removed, not by walking the tree each frame.
 
-Step 4 runs the root's frames only, and without the queue: the `Player`
+Step 10 plays an AVM1 SWF's clips so (`Avm1.tick`): the player tells its
+AVM1 of each display object made, each frame a clip enters and each
+DoAction tag it reaches, in tag order (the timeline's `actions` commands,
+`TimelineActions` in `display/timeline.ts`), so a child placed before a
+frame's actions runs its first frame first. The clips advance the newest
+first, each queueing its frame's blocks; then the queue runs, and a goto
+from it queues the frames it enters. A goto queues the frame it lands on
+(none past the last frame, nor one to the frame it is on), the children
+it makes on frames before it running their first frames first, then the
+frame's places and actions in tag order, as adl orders them (Ruffle runs
+the target frame's actions before every child the frame places). The
+clip events, `#initclip`'s order against them and the queue's passes come
+with step 11; a root frame's DoInitAction blocks run before its DoAction
+blocks, as before.
+
+What follows a timeline's last ShowFrame runs with its last frame where
+the timeline loops, one of two frames or more ending in an End tag; a
+timeline of one frame, or without an End tag, stops on its last frame,
+and runs what follows once, as the next frame comes (the corpus's
+`looping_child_*`, as Ruffle's `determine_next_frame` has it). A place at
+a depth already taken writes `Warning: Failed to place object at depth
+N.` to the log, as Flash's does (the corpus's
+`placeobject_occupied_depth`).
+
+Step 4 ran the root's frames only, and without the queue: the `Player`
 takes an `Avm1` beside its `Scripting` (null for an AVM1 SWF), which
 `start` has compile the SWF's blocks into one module and run the first
 frame's actions, and each tick after the clips advance runs those of the
@@ -809,12 +1132,84 @@ An AVM1 timeline has as many frames as its ShowFrame tags end, whatever
 its header says: Flash plays and loops one so (the corpus's
 `looping_real_1_declared_2` and `looping_real_2_declared_1`, as Ruffle's
 `determine_next_frame` has it), where an AS3 timeline has its header's
-count. What follows the last ShowFrame is no frame of its own: in adl its
-DoActions run with the last frame, after its others (late enough that the
-harness's last frame ends first), and its places place nothing. A root
+count. What follows the last ShowFrame is no frame of its own: its
+places place nothing, and its DoActions run as above. A root
 without an End tag stays on its last frame rather than loop, as Ruffle
 has it too; adl agrees, for a SWF loaded as an `AVM1Movie` as for a main
 one (adl's harness loads them all so).
+
+### Clips and paths
+
+What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
+`avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases, and the
+probes they came of), and the corpus, where it is not what Ruffle does:
+
+- `_x` and `_y` are whole twips, cut toward zero (`1.234` is `1.2`), and
+  what does not fit an int, an infinity included, -2^31 twips; `_alpha`
+  is an 8.8 multiplier, the percentage's 256ths cut toward zero (`33` is
+  `32.8125`); `_xscale` and `_yscale` give back what was set; `_rotation`
+  is set modulo 360 into -180 to 180; `_xscale` and `_yscale` past
+  32768 times, infinities included, draw at that; `_width` and `_height`
+  are the bounds through the clip's matrix with each corner rounded to
+  twips, and set over a base, the content's own bounds turned by the
+  clip's rotation, unscaled, in whole twips: the side set scales to the
+  value over its base, the other to its size now over its base, both
+  positive (not Ruffle's `set_width`), a negative one ignored;
+  undefined, null and NaN leave any of them be. `_visible` takes a
+  number. `_droptarget` is `""` in every version (Ruffle: undefined up to
+  SWF 5). `_quality` is `HIGH`, `_soundbuftime` 5 and `_focusrect` a SWF
+  5's 1, a later one's null on a clip.
+- SetTarget and SetTarget2 resolve their path from the code's own clip,
+  not from the target, so a tellTarget inside another names from there;
+  one that finds nothing leaves no target, and names then resolve on the
+  root. SetTarget2 of undefined is the code's own clip up to SWF 6 and no
+  target from 7. GetProperty and SetProperty name from the target, or from
+  the code's own clip where there is none, a property's index truncated.
+- A path's empty step names nothing first or after a slash (`//a`, `.a`)
+  or at the end after a colon (`a::`), and is no step at all after a dot
+  or a colon (`a..`, `a:/`); `..` of a level is the level, but where a
+  slash follows; `_levelN` is any name starting so, its N the digits that
+  follow, none 0 (`_level0..:_flash0` is the root). Ruffle fails these
+  (its `target_paths` are known failures). A step at a primitive, where a
+  clip's path is taken as an object (GetProperty, SetProperty, tellTarget)
+  or Delete2's path is, writes `Parameters of primitive types are no
+  longer coerced into the required type - Object.` to the log from SWF 5.
+- A SWF 4's GetVariable gives no clip, undefined in its place, as Ruffle
+  has it, and a SWF 4's functions run as a SWF 5's (`V5`).
+- A clip compares as NaN with anything, Less2 and Greater giving
+  undefined, and a clip as `__resolve` is skipped as a primitive is.
+  Equals2 and StrictEquals take two clip references as equal where they
+  reach the same clip now: one kept past its clip's removal equals the
+  clip placed at its path since, and one that reaches none equals no
+  other reference, nor undefined.
+- Gotos run as "The frame" says; `gotoAndStop` takes a whole number as a
+  frame, anything else as a string, a frame's number or label, after a
+  path's last `:` or `.` (`b:start`), labels in any ASCII case; a frame
+  past the last goes there, its actions not run, 0 and below nothing.
+- Code whose clip a call, a `new` or a CallFrame takes off the display
+  list returns right after it, as Ruffle's `continue_if_base_clip_exists`
+  has it: a block ends, a function returns undefined, and the code that
+  called it goes on unless its own clip went too. A function's clip is
+  the one it was defined in, from SWF 6, and in a SWF 5 the clip of its
+  `this` or of the caller's target. A goto action, in a tellTarget
+  too, is no such call, nor a method of undefined or null, which calls
+  nothing: the code after them runs (adl, and the corpus's
+  `removed_clip_halts_script`).
+- `hitTest(x, y)` is in the root's space against the clip's bounds on the
+  stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
+  Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.
+- StopSounds and ToggleQuality are minimal: no sound is stopped yet, and
+  the quality toggles `_quality` without changing how anything is drawn.
+
+adl's harness loads a SWF as an `AVM1Movie`, whose root traces as
+`_root`, its dot paths so, with a name and a parent of the harness's, and
+no `_level0`; a main movie's root is `_level0`, which the corpus shows.
+The cases trace no root's dot path or name, and no level.
+
+What is not reproduced yet: `_width` of a turned clip scaled past
+32768 times is off by a few twips (Flash's corners round otherwise), the corpus's
+`[approximations]` are not read by its runner, and a function's clip,
+once removed and placed again, is not found again by its path.
 
 ### Clip events and buttons
 
@@ -858,8 +1253,10 @@ The first steps leave out: `loadMovie` into levels other than 0, `print`,
 `fscommand` beyond ExternalInterface's, `NetStream` and video, the
 context menu, `TextSnapshot`, `CloneSprite` of a sprite with clip events
 (it clones without them, as a first approach), the 15-second script
-timeout (a block that loops forever hangs the page; the corpus runner
-stops one at its test's timeout), and structured output and stack
+timeout (a block that loops forever hangs the page, as do gotos that
+queue each other's frames forever, though in bounded memory: the queue
+drops what has run as it goes; the corpus runner stops one at its test's
+timeout), and structured output and stack
 registers in the compiler.
 
 ## Testing against Flash
@@ -888,7 +1285,15 @@ registers in the compiler.
   own count (`check-references.ts`, and `run.ts --update` for a case). A player
   case of its own (`tests/player/cases.ts`) is an AVM1 SWF the test
   assembles from actions, through a small assembler in the tests
-  (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`.
+  (`tests/avm1-assembler.ts`), traced and drawn by adl with `--update`;
+  the classes' cases are AS1 source (`tests/player/avm1/*.as`), which a
+  small compiler in the tests (`tests/avm1-script.ts`) turns into the
+  actions Flash's own compiler writes for it, in its shape: a constant
+  pool, batched pushes, and from SWF 7 DefineFunction2 with what it
+  preloads and its variables in registers (each case traces the same
+  in adl and the player as one push per value and DefineFunction gave).
+  The cases of the earlier steps stay assembled by hand, so that the
+  actions no compiler writes stay covered.
   What only a main AVM1 SWF shows, `_level0` as the root of the stage or
   `Stage.width`, comes from the corpus, as adl cannot run one as the main
   movie.
@@ -937,10 +1342,11 @@ AVM1, so nothing is expected from it.
 
 ## Open questions
 
-- **Writing AVM1 test cases.** Nothing in the repository compiles AS1 or
-  AS2. The tests assemble actions (`tests/avm1-assembler.ts`);
+- **Writing AVM1 test cases.** The tests assemble actions
+  (`tests/avm1-assembler.ts`), or compile a subset of AS1
+  (`tests/avm1-script.ts`: no classes or `try`);
   an AS2 compiler in the oracle's image (MTASC, or Ruffle's test
-  compiler) would let cases be written as source instead.
+  compiler) would take AS2's classes too.
 - **A main AVM1 SWF without `Scripting`.** The pointer and keyboard take
   `Scripting` today. Either they report through an interface both VMs
   implement (the plan), or an AVM1 SWF gets a `Scripting` with
@@ -1067,10 +1473,36 @@ determinism` green, and the corpus baseline may only go up.
    them, `Error`. Passes `with`, `with_return`, `with_variable_scopes`,
    `try_catch_finally`, `try_catch_stack`, `try_finally_simple`; an adl
    case for a jump out of a `with` body and back before its start.
+   Built: With and Try bodies as ranges of a region's blocks, held on the
+   activation (`control.ts`), not regions; the limit of 15 scopes; the
+   scope over the first action past its body; a catch's variable as its body's own scope; the
+   finally after a throw or a Return; `Error` as far as `Throw` needs it.
+   What adl showed is under "With and Try". The `avm1-control-swf5` to
+   `-swf10` cases trace some 190 lines each in adl, which the player
+   matches. The corpus goes from 104 to 111 of the 649 (`with_return`,
+   `with_variable_scopes`, `try_finally_simple`,
+   `catch_references_registers`, `error`, `watch`,
+   `infinite_recursion_function`); `with` waits for `GetProperty` (step
+   10), `try_catch_finally` for `CastOp` (step 9), and `try_catch_stack`
+   traces every line, then stops at a `GetUrl` (step 15).
 9. **The language's classes.** `Array`, `String`, `Number`, `Boolean`,
    `Math`, `Date`, `AsBroadcaster`, `Extends`, `InstanceOf`, `CastOp`,
    `ImplementsOp`, the global functions. Corpus tests of each; the
    largest step, and may split by class.
+   Built in three: 9a `Array` and `String` (see "Array and String"),
+   with arrays' dense elements, and `tests/avm1-script.ts`, a small
+   compiler of AS1 source to actions for the cases, whose
+   `avm1-array-swf*` and `avm1-string-swf*` trace some 300 and 55 lines
+   each in adl, which the player matches. The 21 tests that looped
+   forever without Array's methods finish, and the corpus goes from 104
+   to 112 of the 649; most of the rest of those reach `InstanceOf` (28),
+   `Extends` (21) and `GetUrl` (34). 9b `Number`, `Boolean`, `Math`,
+   `AsBroadcaster`, `Extends`, `InstanceOf`, `CastOp`, `ImplementsOp`,
+   `RandomNumber`, the global functions and `ASnative` (see the sections
+   above), whose `avm1-number`, `-math`, `-classes`, `-broadcaster` and
+   `-globals` cases at SWF 5 to 10 adl traces and the player matches.
+   9c `Date` (see "Date"), with its `avm1-date` cases and the zone's unit
+   tests.
 10. **Clips and paths.** `MovieClip`'s AS2 face, targets, `SetTarget`,
     `SetTarget2`, path resolution (slash, dot, `_root`, `_levelN`,
     `_parent`), `GetProperty` and `SetProperty` by index, `eval`, timeline
@@ -1079,6 +1511,22 @@ determinism` green, and the corpus baseline may only go up.
     Passes `target_*`, `tell_target*`, `this_scoping`, `goto*` (15) and
     `movieclip*` that need no events; adl cases for gotos in the frame
     order.
+    Built: clips' AS2 faces (`DisplayNative`, `globals/MovieClip.ts`),
+    references by path, the clips played in Flash's order with a queue of
+    their frames' actions, gotos queueing what they enter, the timeline's
+    tail after its last ShowFrame, and the actions above (see "Clips and
+    paths"). The
+    `avm1-clips`, `avm1-gotos`, `avm1-paths` and `avm1-scopes` cases trace
+    some 15 to 80 lines each at SWF 4 to 8 in adl, which the player matches,
+    and `avm1-clip-properties` draws them. The corpus goes from 138 to 239
+    of the 649 (`target_paths/*`, `path_string`, `goto*`, `tell_target*`,
+    `this_swf5` to `swf7`, `getproperty*`, `set_property_values/swf5` to
+    `swf7`, `execution_order1` to `4`, `waitforframe*`, `with`,
+    `try_catch_finally`, `delete2`, `swf4_function_calls`,
+    `looping_child_*`, `object_resolve`...), and `timeline/` from 4 to 5
+    of 17. Most of the rest wait for
+    `createEmptyMovieClip`, `attachMovie` and clip events (step 11), text
+    fields (13) and `getURL` (15).
 11. **The frame: DoInitAction, clip events and the queue.** The action
     queue in Flash's order, `onClipEvent`, `on*` handlers, `onEnterFrame`,
     `#initclip`, `Object.registerClass`, `attachMovie`,

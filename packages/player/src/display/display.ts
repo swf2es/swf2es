@@ -16,7 +16,7 @@ import {
   type Place,
   readFilters,
 } from "@swf2es/format";
-import type { avm2 } from "@swf2es/runtime";
+import type { avm1, avm2 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import type { FontSet } from "../text/fonts.js";
 import { GUTTER, layoutText, type TextLayout } from "../text/layout.js";
@@ -166,6 +166,14 @@ export interface Space {
   rotationZ: number;
   raw: Float32Array;
   /**
+   * The matrix it is drawn, bounded and hit by: `raw` as the object last
+   * made or took it. A Matrix3D a script holds of it (transform.matrix3D)
+   * shares `raw`, and its copyColumnFrom, copyRowFrom and copyToMatrix3D
+   * change that alone, as Flash's do: the object stays where it was until
+   * a property set writes all of `shown` back into `raw` (`three-d-matrix`).
+   */
+  shown: Float32Array;
+  /**
    * Whether its matrix could not be taken apart, a column of it of no
    * length: Flash then reads the properties as the identity's, at the
    * position, until a scale or rotation set makes it the identity.
@@ -178,14 +186,14 @@ export interface Space {
   composed: boolean;
   /** The 2D scales, rotation and skew from before it went 3D, which matrix3D set to null gives back. */
   flat: readonly number[];
-  /** Its plane in perspective in its parent's (`placed`), and the changes (pickWork) it was made at. */
-  plane?: Matrix | null;
+  /** Its planes in perspective (`planes`), and the changes (pickWork) they were made at. */
+  planes?: { placed: Matrix; own: Matrix; back: Matrix | null } | null;
   planeAt?: number;
 }
 
 export type SpaceProperty = Exclude<
   keyof Space,
-  "raw" | "singular" | "composed" | "flat" | "plane" | "planeAt"
+  "raw" | "shown" | "singular" | "composed" | "flat" | "planes" | "planeAt"
 >;
 
 /**
@@ -275,6 +283,8 @@ export class DisplayObject {
   transformed = false;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
+  /** In an AVM1 movie, its AS2 face, a clip's, a button's or a text field's (avm1/avm1.ts); null otherwise. */
+  avm1: avm1.Avm1Object | null = null;
   /** The root of an AVM1 movie an AS3 Loader loaded: its other face, an AVM1Movie, is no InteractiveObject. */
   avm1Root = false;
   /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
@@ -413,13 +423,22 @@ export class DisplayObject {
   }
 
   private perspective(): Matrix {
+    return this.planes().placed;
+  }
+
+  /**
+   * A 3D object's planes (display/perspective.ts): in its parent's space,
+   * in its projector's, and the way back from the projector's to its
+   * parent's, kept as `placed` is.
+   */
+  planes(): { placed: Matrix; own: Matrix; back: Matrix | null } {
     const space = this.space as Space;
-    if (space.planeAt !== pickWork.changes || !space.plane) {
-      space.plane = placedInPerspective(this);
+    if (space.planeAt !== pickWork.changes || !space.planes) {
+      space.planes = placedInPerspective(this);
       space.planeAt = pickWork.changes;
     }
 
-    return space.plane;
+    return space.planes;
   }
 
   /** Its 2D matrix after its scroll's shift, a 3D object's its matrix3D's x and y rows: what a mask draws by. */
@@ -608,7 +627,8 @@ export class DisplayObject {
     const at = ["x", "y", "z"].indexOf(key);
     if (at >= 0) {
       space[key] = Number.isNaN(v) ? 0 : v;
-      space.raw[12 + at] = space[key];
+      space.shown[12 + at] = space[key];
+      space.raw.set(space.shown);
       this.flatten();
       return;
     }
@@ -625,15 +645,20 @@ export class DisplayObject {
       space[key] = space.composed ? kept : Math.fround(kept);
     }
 
-    const radians = [space.rotationX, space.rotationY, space.rotationZ].map(
-      (r) => (r * Math.PI) / 180,
+    // In float32 radians, as adl's sines and cosines of them are, to the last bit.
+    const radians = [space.rotationX, space.rotationY, space.rotationZ].map((r) =>
+      Math.fround((r * Math.PI) / 180),
     );
-    space.raw = compose3D(
-      [space.x, space.y, space.z],
-      radians,
-      [space.scaleX, space.scaleY, space.scaleZ],
-      "eulerAngles",
+    space.shown.set(
+      compose3D(
+        [space.x, space.y, space.z],
+        radians,
+        [space.scaleX, space.scaleY, space.scaleZ],
+        "eulerAngles",
+      ),
     );
+    // In place: a Matrix3D a script holds of it shows the change (transform.matrix3D).
+    space.raw.set(space.shown);
     space.composed = true;
     this.flatten();
   }
@@ -644,9 +669,11 @@ export class DisplayObject {
    * scales and rotation it had before it went 3D. Null in 2D changes
    * nothing. One made from the 2D matrix (`flat`) with a column of no
    * length reads as the identity at its position, as in Flash, where a
-   * matrix3D set so reads as NaN.
+   * matrix3D set so reads as NaN. The values go into the matrix it has,
+   * which a script's Matrix3D may share (transform.matrix3D), unless it
+   * `adopt`s `raw` itself, a Matrix3D's that a script set.
    */
-  setMatrix3D(raw: Float32Array | null, flat = false): void {
+  setMatrix3D(raw: Float32Array | null, flat = false, adopt = false): void {
     const before = this.space?.flat ?? [this.scaleX, this.scaleY, this.rotation, this.skew];
     if (!raw) {
       if (this.space) {
@@ -658,11 +685,20 @@ export class DisplayObject {
       return;
     }
 
+    const kept = this.space?.raw;
     const [[x, y, z], rotation, [scaleX, scaleY, scaleZ]] = decompose3D(raw, "eulerAngles");
     const singular = flat && (scaleX === 0 || scaleY === 0);
     const [rotationX, rotationY, rotationZ] = singular
       ? [0, 0, 0]
       : rotation.map((r) => r * DEGREES);
+    let held = raw;
+    if (!adopt && kept) {
+      kept.set(raw);
+      held = kept;
+    } else if (!adopt) {
+      held = Float32Array.from(raw);
+    }
+
     this.space = {
       x,
       y,
@@ -673,7 +709,8 @@ export class DisplayObject {
       rotationX,
       rotationY,
       rotationZ,
-      raw: Float32Array.from(raw),
+      raw: held,
+      shown: Float32Array.from(held),
       singular,
       composed: false,
       flat: before,
@@ -681,10 +718,22 @@ export class DisplayObject {
     this.flatten();
   }
 
+  /**
+   * Its matrix, `raw`, changed in place through a Matrix3D a script holds of
+   * it, which Flash's getter hands out live: taken apart again, as adl reads
+   * the properties after; nothing if it is no longer its matrix.
+   */
+  matrix3DChanged(raw: Float32Array): void {
+    if (this.space?.raw === raw) {
+      this.touch();
+      this.setMatrix3D(raw);
+    }
+  }
+
   /** The 2D fields from the 3D transform: the matrix its x and y rows, which a mask draws by (`flatPlaced`). */
   private flatten(): void {
     const space = this.space as Space;
-    const m = space.raw;
+    const m = space.shown;
     this.matrix = { a: m[0], b: m[1], c: m[4], d: m[5], tx: m[12], ty: m[13] };
     this.scaleX = space.scaleX;
     this.scaleY = space.scaleY;
@@ -1919,6 +1968,8 @@ export class MovieClip extends Container {
    * From version 10 a goto leaves its frames as they were.
    */
   skipsAfter = -1;
+  /** Whether an AVM1 clip ran the actions after its last ShowFrame, which it does once. */
+  private tailed = false;
 
   constructor(
     readonly timeline: Timeline,
@@ -2021,15 +2072,22 @@ export class MovieClip extends Container {
    * held, for a clip's first frame.
    */
   private runFrame(frame: number, later: "frame" | "held" | null = null): void {
+    this.library.avm1?.entered(this, frame);
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
         this.removeAtDepth(command.depth);
         continue;
       }
 
+      if (command.type === "actions") {
+        this.library.avm1?.actions(this, command.tag);
+        continue;
+      }
+
       const place = command.place;
       const existing = this.depths.get(place.depth);
       if (!place.move && existing) {
+        this.library.avm1?.occupied(place.depth);
         continue;
       }
 
@@ -2111,6 +2169,10 @@ export class MovieClip extends Container {
     const jumps = new Map<number, Jump>();
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
+        if (command.type === "actions") {
+          continue;
+        }
+
         if (command.type === "remove") {
           jumps.delete(command.depth);
           // Going forward, a removal between the frames takes effect.
@@ -2192,7 +2254,9 @@ export class MovieClip extends Container {
         } else if (
           child.placeFrame > target &&
           jump.placed &&
-          madeAs(child, id === null ? undefined : this.library.characters.get(id))
+          madeAs(child, id === null ? undefined : this.library.characters.get(id)) &&
+          // An AVM1 clip of another character goes, to be made anew (Ruffle's survives_rewind).
+          !(this.library.avm1 && child instanceof MovieClip && child.character?.id !== id)
         ) {
           kept.add(depth);
         } else if (child.placeFrame > target) {
@@ -2268,6 +2332,43 @@ export class MovieClip extends Container {
 
     if (this.library.constructPlaced) {
       this.library.constructPlaced(placed);
+    } else if (this.library.avm1 && target !== from) {
+      // As playing would order them: the children placed before the frame
+      // run their first frames, then the frame's places and actions in tag
+      // order, a place's child its first frame, the actions queued (adl); a
+      // frame past the last queues none (Ruffle's run_goto).
+      const avm1 = this.library.avm1;
+      const made = new Set<DisplayObject>();
+      const make = (display: DisplayObject, character: DisplayCharacter) => {
+        made.add(display);
+        construct(display, character, this.library);
+      };
+      for (const { display, character } of placed) {
+        if (display.placeFrame < target) {
+          make(display, character);
+        }
+      }
+
+      if (target === frame) {
+        avm1.entered(this, target);
+        for (const command of this.timeline.frames[target - 1] ?? []) {
+          if (command.type === "actions") {
+            avm1.actions(this, command.tag);
+          } else if (command.type === "place") {
+            const child = this.depths.get(command.place.depth);
+            const at = placed.find((p) => p.display === child);
+            if (at && !made.has(at.display)) {
+              make(at.display, at.character);
+            }
+          }
+        }
+      }
+
+      for (const { display, character } of placed) {
+        if (!made.has(display)) {
+          make(display, character);
+        }
+      }
     } else {
       for (const { display, character } of placed) {
         construct(display, character, this.library);
@@ -2322,6 +2423,27 @@ export class MovieClip extends Container {
   advance(): void {
     if (this.fresh) {
       this.fresh = false;
+      return;
+    }
+
+    // An AVM1 clip on its last frame that does not loop, one of a single
+    // frame or without an End tag, stops there, and the DoAction tags
+    // after its last ShowFrame run, once (Ruffle's determine_next_frame).
+    const avm1 = this.library.avm1;
+    if (
+      avm1 &&
+      this.playing &&
+      this.currentFrame >= this.totalFrames &&
+      !(this.timeline.loops && this.totalFrames > 1)
+    ) {
+      this.playing = false;
+      for (const command of this.tailed ? [] : (this.timeline.tail ?? [])) {
+        if (command.type === "actions") {
+          avm1.actions(this, command.tag);
+        }
+      }
+
+      this.tailed = true;
       return;
     }
 
@@ -2455,6 +2577,7 @@ export function displayFor(
  * placement, as Flash has it, so that the parent and the name are there.
  */
 function construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
+  library.avm1?.made(display);
   if (library.construct) {
     library.construct(display, character);
   } else if (display instanceof MovieClip) {

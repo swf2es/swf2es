@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { type Region as Avm1Region, Runtime } from "../../../packages/runtime/dist/avm1/index.js";
 import {
   Avm1Assembler,
   constant,
@@ -11,6 +12,7 @@ import {
   FunctionFlag,
   float,
   register,
+  TryFlag,
 } from "../../avm1-assembler.ts";
 import { testing } from "./testing-module.ts";
 
@@ -125,6 +127,23 @@ async function run(
 }
 
 const asm = () => new Avm1Assembler();
+
+/**
+ * Block 0 of `blocks` run by the runtime, the objects and functions it
+ * defines on the root as it runs: what it traces.
+ */
+async function traced(blocks: Uint8Array[], version = 7): Promise<string[]> {
+  const lines: string[] = [];
+  const rt = new Runtime();
+  const entries = (await load(moduleOf(blocks, version), rt)) as unknown as Avm1Region[][];
+  const host = { trace: (text: string) => lines.push(text), play() {}, stop() {}, halt() {} };
+  const root = rt.newObject();
+  rt.run(entries[0], rt.activation([], [], {}, root, host));
+  return lines;
+}
+
+/** `{a: "oa"}` on the stack. */
+const object = (a: Avm1Assembler) => a.push("a", "oa", 1).op("InitObject");
 
 test("a module asks for its SWF's version's operations once, and has an entry per block", async () => {
   const blocks = [asm().push("one").trace().bytes(), asm().push("two").trace().bytes()];
@@ -513,13 +532,13 @@ test("the variable and member actions take their operands as popped, the top fir
 });
 
 test("every other action throws that it is not yet supported", async () => {
-  const thrown = await run([asm().push("a").trace().push("x").action(0x2a).trace().bytes()]);
+  const thrown = await run([asm().push("a").trace().push("x").action(0x24).trace().bytes()]);
   assert.deepEqual(thrown.calls, [["trace", "a"]]);
-  assert.equal(thrown.error, "not yet supported: Throw");
+  assert.equal(thrown.error, "not yet supported: CloneSprite");
 
   // An action with operands.
-  const goto = await run([asm().action(0x81, [1, 0]).bytes()]);
-  assert.equal(goto.error, "not yet supported: GotoFrame");
+  const url = await run([asm().getUrl("a", "b").bytes()]);
+  assert.equal(url.error, "not yet supported: GetUrl");
 });
 
 test("a block's registers are the movie's four, and StoreRegister leaves its value", async () => {
@@ -871,7 +890,7 @@ test("a function's body is an entry of its own, not inlined; a With's body is th
     .raw([...body])
     .bytes();
   const { entries, error, module } = await run([block]);
-  assert.equal(error, "not yet supported: With");
+  assert.equal(error, null);
   assert.equal(entries[0].length, 2);
   assert.equal(module.match(/"in the body"/g)?.length, 2);
 
@@ -879,6 +898,190 @@ test("a function's body is an entry of its own, not inlined; a With's body is th
   const regions = (await load(moduleOf([block], 10), rt))[0];
   regions[1]({ pool: [], st: [] });
   assert.deepEqual(calls, [["trace", "in the body"]]);
+});
+
+test("a With's object is on the scope chain over its body, and for one action past it", async () => {
+  const lines = await traced([
+    object(asm())
+      .with("end")
+      .push("a")
+      .op("GetVariable")
+      .trace()
+      .push("a")
+      .label("end")
+      // The first action past the body runs in its scope, the next does not.
+      .op("GetVariable")
+      .trace()
+      .push("a")
+      .op("GetVariable")
+      .trace()
+      .push(undefined)
+      .with("skipped")
+      .push("not run")
+      .trace()
+      .label("skipped")
+      .bytes(),
+  ]);
+  assert.deepEqual(lines, ["oa", "oa", "undefined"]);
+});
+
+test("a jump out of a With's body leaves it; one back before it finds no scope there", async () => {
+  const lines = await traced([
+    asm()
+      .push("i", 0)
+      .op("SetVariable")
+      .label("top")
+      .push(0)
+      .pop()
+      .push("a")
+      .op("GetVariable")
+      .trace()
+      .push("i", "i")
+      .op("GetVariable")
+      .op("Increment")
+      .op("SetVariable")
+      .raw([...object(asm()).bytes()])
+      .with("end")
+      .push("a")
+      .op("GetVariable")
+      .trace()
+      .push("i")
+      .op("GetVariable")
+      .push(2)
+      .op("Less2")
+      .if("top")
+      .label("end")
+      .bytes(),
+  ]);
+  assert.deepEqual(lines, ["undefined", "oa", "undefined", "oa"]);
+});
+
+test("a Try's catch takes the value into its body's own variable, its finally after", async () => {
+  const lines = await traced([
+    asm()
+      .push("e", "outer")
+      .op("SetVariable")
+      .push(1, 2)
+      .try("e", "catch", "finally", "end")
+      .push("t1", "x")
+      .op("Throw")
+      .label("catch")
+      // The stack is cut back to its height at the Try.
+      .push("e")
+      .op("GetVariable")
+      .trace()
+      .op("PushDuplicate")
+      .trace()
+      .label("finally")
+      .push("finally")
+      .trace()
+      .label("end")
+      .push("e")
+      .op("GetVariable")
+      .trace()
+      .bytes(),
+  ]);
+  assert.deepEqual(lines, ["x", "2", "finally", "outer"]);
+});
+
+test("a throw in a try body without a catch, or in a catch, runs the finally and throws again", async () => {
+  const inner = (a: Avm1Assembler) =>
+    a
+      .try("i", "ic", "if", "ie")
+      .push("thrown")
+      .op("Throw")
+      .label("ic")
+      .push("again")
+      .op("Throw")
+      .label("if")
+      .push("inner finally")
+      .trace()
+      .jump("out")
+      .label("ie");
+  const lines = await traced([
+    inner(asm().try("o", "oc", "of", "oe"))
+      .label("out")
+      .push("not run")
+      .trace()
+      .label("oc")
+      .push("o")
+      .op("GetVariable")
+      .trace()
+      .label("of")
+      .label("oe")
+      .bytes(),
+  ]);
+  assert.deepEqual(lines, ["inner finally", "again"]);
+});
+
+test("a Return in a try body runs the finally, and returns the stack's top as it ends", async () => {
+  const body = asm()
+    .try("e", "c", "f", "end")
+    .push("from try")
+    .op("Return")
+    .label("c")
+    .label("f")
+    .push("from finally")
+    .label("end")
+    .bytes();
+  const lines = await traced([
+    asm()
+      .action(0x9b, [0x66, 0, 0, 0, body.length & 0xff, body.length >> 8])
+      .raw([...body])
+      .push(0, "f")
+      .op("CallFunction")
+      .trace()
+      .trace()
+      .bytes(),
+  ]);
+  assert.deepEqual(lines, ["from finally", "from try"]);
+});
+
+test("a catch into a register sets a DefineFunction2's own or the movie's", async () => {
+  const body = asm()
+    .try(register(1), "c", "f", "end")
+    .push("local")
+    .op("Throw")
+    .label("c")
+    .push(register(1))
+    .trace()
+    .label("f")
+    .label("end");
+  const lines = await traced([
+    asm()
+      .defineFunction2("f", 2, 0, [], body)
+      .push(0, "f")
+      .op("CallFunction")
+      .pop()
+      .try(register(1), "c", "f", "end", TryFlag.catch)
+      .push("global")
+      .op("Throw")
+      .label("c")
+      .label("f")
+      .label("end")
+      .push(register(1))
+      .trace()
+      .bytes(),
+  ]);
+  assert.deepEqual(lines, ["local", "global"]);
+});
+
+test("a thrown value nothing catches ends the block, writing nothing", async () => {
+  const lines = await traced([asm().push("x").op("Throw").push("not run").trace().bytes()]);
+  assert.deepEqual(lines, []);
+});
+
+test("a region without a With or a Try neither catches nor leaves", async () => {
+  const plain = moduleOf([asm().label("top").push(true).if("top").bytes()], 7);
+  assert.ok(!/try|V\.leave|V\.scopes|case -1/.test(plain));
+
+  const held = moduleOf(
+    [object(asm()).with("end").push(1).pop().label("end").push(2).pop().bytes()],
+    7,
+  );
+  assert.ok(held.includes("V.with(cx, st.pop(), "));
+  assert.ok(held.includes("V.scopes(cx, "));
+  assert.ok(!held.includes("try {"));
 });
 
 test("an empty block is a region that does nothing", async () => {
@@ -934,3 +1137,87 @@ function alone(entries: string): string {
   const parts = entries.split("\u0002").filter(Boolean);
   return `${[2, 0, 1].map((k) => parts[k]).join("\u0002")}\u0002`;
 }
+
+test("the clip actions are calls of their operations, their operands as written or popped", async () => {
+  const block = asm()
+    .setTarget("a/b")
+    .push("/c")
+    .op("SetTarget2")
+    .push("x", 0)
+    .op("GetProperty")
+    .push("x", 2, 50)
+    .op("SetProperty")
+    .gotoFrame(4)
+    .gotoLabel("label")
+    .push("f")
+    .gotoFrame2(true, 3)
+    .push(2)
+    .gotoFrame2(false)
+    .op("NextFrame")
+    .op("PreviousFrame")
+    .push("p")
+    .op("TargetPath")
+    .push(1)
+    .op("Call")
+    .op("StopSounds")
+    .op("ToggleQuality")
+    .bytes();
+  const { calls, error } = await run([block], { version: 6 });
+
+  assert.equal(error, null);
+  assert.deepEqual(
+    calls.map(([name, , ...operands]) => [name, ...operands]),
+    [
+      ["setTarget", "a/b"],
+      ["setTarget2", "/c"],
+      ["getProperty", 0, "x"],
+      ["setProperty", 50, 2, "x"],
+      ["gotoFrame", 4],
+      ["gotoLabel", "label"],
+      ["gotoFrame2", "f", true, 3],
+      ["gotoFrame2", 2, false, 0],
+      ["nextFrame"],
+      ["prevFrame"],
+      ["targetPath", "p"],
+      ["callFrame", 1],
+      ["stopSounds"],
+      ["toggleQuality"],
+    ],
+  );
+});
+
+test("WaitForFrame skips its actions where the frame is not loaded", async () => {
+  const block = (loaded: boolean) =>
+    asm()
+      .waitForFrame(loaded ? 1 : 20000, "skip")
+      .push("in")
+      .trace()
+      .label("skip")
+      .push("after")
+      .trace()
+      .bytes();
+  const traces = async (loaded: boolean) => {
+    const { calls } = await run([block(loaded)]);
+    return calls.filter(([name]) => name === "trace").map(([, value]) => value);
+  };
+
+  // The stub's frameLoaded gives its name, which is true.
+  assert.deepEqual(await traces(true), ["in", "after"]);
+
+  const wait2 = asm().push(3).waitForFrame2("end").push("in").trace().label("end").bytes();
+  const { calls } = await run([wait2]);
+  assert.deepEqual(calls[0], ["frameLoaded2", calls[0][1], 3]);
+});
+
+test("a SWF 4's functions run with SWF 5's operations", async () => {
+  const body = asm().push("in").trace();
+  const block = asm().defineFunction("f", [], body).push("out").trace().bytes();
+  const module = moduleOf([block], 4);
+
+  assert.ok(
+    module.startsWith(
+      "export default function (rt) {\nconst V = rt.version(4);\nconst V5 = rt.version(5);\n",
+    ),
+  );
+  assert.ok(module.includes("function (cx, self, args) {\nconst st = cx.st;\nconst V = V5;\n"));
+});

@@ -10,7 +10,8 @@
 //
 // an entry per block, in the order format's readActions lists them, each
 // the array of its regions' functions. The SWF's version picks the
-// operations, `V`, once for the module, so the code never tests it.
+// operations, `V`, once for the module, so the code never tests it; a
+// SWF 4's module has SWF 5's too, `V5`, which its functions run with.
 
 import { Output } from "../../output";
 import { BlockEmitter } from "./block";
@@ -41,7 +42,8 @@ export class ModuleEmitter {
     this.blocks.version = version;
     out.text("export default function (rt) {\nconst V = rt.version(");
     out.int(version);
-    out.text(");\nreturn [\n");
+    // A SWF 4's functions run as a SWF 5's, as Flash runs them (block.ts).
+    out.text(version < 5 ? ");\nconst V5 = rt.version(5);\nreturn [\n" : ");\nreturn [\n");
     const count = min(offsets.length, lengths.length);
     for (let k = 0; k < count; k++) {
       this.entryStart.push(out.length);

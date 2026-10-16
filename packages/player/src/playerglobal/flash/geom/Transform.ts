@@ -1,11 +1,11 @@
 // flash.geom.Transform: a display object's matrix and color transform as
 // flash.geom's Matrix and ColorTransform, copies each time, as Flash gives
-// them, and set from either; and its 3D transform and perspective
-// projection, kept and reported as Flash's, and drawn in perspective
-// (display/perspective.ts).
+// them, and set from either; and its 3D transform, the object's own
+// Matrix3D, and perspective projection, kept and reported as Flash's, and
+// drawn in perspective (display/perspective.ts).
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { boundsIn, toStage } from "../../../display/bounds.js";
+import { bounds, boundsIn } from "../../../display/bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../../display/display.js";
 import { concat } from "../../../display/geometry.js";
 import {
@@ -98,6 +98,8 @@ export function colorOf(s: Scripting, o: AsObject): Color {
 
 export function transformNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
+  /** Each 3D object's own Matrix3D, while it shares the object's matrix (`matrix3D`). */
+  const bound = new WeakMap<DisplayObject, AsObject>();
 
   class TransformNatives {
     declare $display: DisplayObject;
@@ -133,11 +135,30 @@ export function transformNatives(s: Scripting): avm2.Natives {
       }
     }
 
-    /** Its own scroll's shift left out, as Flash's does, its parents' taken in. */
+    /**
+     * Its own scroll's shift left out, as Flash's does, its parents' taken in; null for a 3D
+     * object. Under one, adl gives it in the space of the bitmap that object is drawn into: up
+     * to the 3D object, then moved by the bitmap's corner, two pixels out from its bounds'
+     * top left out to whole pixels (the `three-d-bounds` case).
+     */
     get concatenatedMatrix(): Value {
       const d = this.$display;
-      const up = d.parent && d.parent !== s.stage ? toStage(d.parent, s.stage) : null;
-      return matrixObject(s, up ? concat(d.matrix, up) : d.matrix);
+      if (d.space) {
+        return null;
+      }
+
+      let m = d.matrix;
+      let p = d.parent;
+      for (; p && p !== s.stage && !p.space; p = p.parent) {
+        m = concat(m, p.placed);
+      }
+
+      const r = p?.space ? bounds(p, true) : null;
+      if (r) {
+        m = { ...m, tx: m.tx + 2 - Math.floor(r.xMin), ty: m.ty + 2 - Math.floor(r.yMin) };
+      }
+
+      return matrixObject(s, m);
     }
 
     /** The color transform to the stage: multipliers multiplied, offsets carried through the parents' multipliers. */
@@ -163,41 +184,74 @@ export function transformNatives(s: Scripting): avm2.Natives {
       return colorObject(s, c);
     }
 
-    /** A copy of the 3D transform, null in 2D. */
+    /**
+     * The object's own Matrix3D, null in 2D: one, which shares its matrix, so that what a script
+     * does to it moves the object and what the object's properties do shows in it, as adl's
+     * does (Matrix3D's natives tell its `$owner`). A new one once the object leaves 3D.
+     */
     get matrix3D(): Value {
-      const space = this.$display.space;
+      const d = this.$display;
+      const space = d.space;
       if (!space) {
         return null;
       }
 
-      const m = s.rt.construct(s.rt.classNamed("flash.geom::Matrix3D")) as AsObject;
-      (m.$matrix3D as Float32Array).set(space.raw);
+      let m = bound.get(d);
+      if (!m || m.$matrix3D !== space.raw) {
+        m = s.rt.construct(s.rt.classNamed("flash.geom::Matrix3D")) as AsObject;
+        m.$matrix3D = space.raw;
+        m.$owner = d;
+        bound.set(d, m);
+      }
+
       return m;
     }
 
     /**
-     * Taken as given, and apart into the 3D properties; null back to 2D, at
-     * the identity. Flash's getter hands out the object's own matrix, and
-     * setting that same object back changes nothing, its properties kept as
-     * they were set rather than read from it again; our getter copies, so
-     * an equal matrix stands for it (a clone, which Flash takes apart
-     * again, is the difference). Any other whose float32 determinant is 0
-     * is refused.
+     * Taken as the object's own, and apart into the 3D properties, as adl
+     * does, even one of the same values; null back to 2D, at the identity.
+     * The object's own Matrix3D set back changes nothing, its properties
+     * kept as they were set. One that is another object's is refused, as is
+     * any whose float32 determinant is 0.
      */
     set matrix3D(v: Value) {
-      const raw = v ? ((v as AsObject).$matrix3D as Float32Array) : null;
-      const own = this.$display.space?.raw;
-      if (raw && own && raw.every((x, i) => x === own[i])) {
-        this.$display.touch();
+      const d = this.$display;
+      const held = bound.get(d);
+      if (!v) {
+        if (held) {
+          held.$owner = null;
+          bound.delete(d);
+        }
+
+        d.touch();
+        d.setMatrix3D(null);
         return;
       }
 
-      if (raw && determinant3D(raw) === 0) {
+      const m = v as AsObject;
+      const raw = m.$matrix3D as Float32Array;
+      if (m === held && d.space?.raw === raw) {
+        d.touch();
+        return;
+      }
+
+      const owner = m.$owner as DisplayObject | null | undefined;
+      if (owner && owner !== d && owner.space?.raw === raw) {
+        throw s.rt.error("ArgumentError", 2189);
+      }
+
+      if (determinant3D(raw) === 0) {
         throw s.rt.error("ArgumentError", 2188);
       }
 
-      this.$display.touch();
-      this.$display.setMatrix3D(raw);
+      if (held) {
+        held.$owner = null;
+      }
+
+      d.touch();
+      d.setMatrix3D(raw, false, true);
+      m.$owner = d;
+      bound.set(d, m);
     }
 
     /**
@@ -251,7 +305,7 @@ export function transformNatives(s: Scripting): avm2.Natives {
     let m = identity3D();
     for (let o: DisplayObject | null = d; o && o !== s.stage; o = o.parent) {
       const local = o.space
-        ? o.space.raw
+        ? o.space.shown
         : Float32Array.of(
             o.matrix.a,
             o.matrix.b,

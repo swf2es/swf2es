@@ -12,7 +12,13 @@
 // running, how many function calls are, and the movie's global registers.
 import type { Activation, Region } from "./activation.js";
 import { pendingLocal, ScriptFunction } from "./functions.js";
-import { numberToString } from "./numbers.js";
+import { arrayClass } from "./globals/array.js";
+import { broadcasterClass } from "./globals/broadcaster.js";
+import { DateCell, dateClass } from "./globals/date.js";
+import { asnative, globalFunctions } from "./globals/global.js";
+import { mathNative, mathObject } from "./globals/math.js";
+import { booleanClass, numberClass } from "./globals/number.js";
+import { stringClass } from "./globals/string.js";
 import {
   Avm1Function,
   Avm1Object,
@@ -21,29 +27,24 @@ import {
   caseSensitive,
   DONT_DELETE,
   DONT_ENUM,
+  elementIndex,
   fold,
   get,
   invoke,
   lengthOf,
   type Native,
   nameOf,
-  type Property,
+  Property,
+  type RawNative,
   READ_ONLY,
+  set,
   VERSION_6,
 } from "./objects.js";
 import { SCOPE_Global, Scope } from "./scope.js";
-import {
-  isPrimitive,
-  objects,
-  type Primitive,
-  stringOf,
-  toBoolean,
-  toNumber,
-  type Value,
-} from "./values.js";
+import { isPrimitive, objects, type Primitive, stringOf, toNumber, type Value } from "./values.js";
 
 /** A class's constructor and its prototype. */
-interface Class {
+export interface Class {
   constr: Avm1Function;
   proto: Avm1Object;
 }
@@ -65,6 +66,15 @@ export class Realm implements Boxer {
   readonly Number: Class;
   readonly Boolean: Class;
   readonly Array: Class;
+  readonly Error: Class;
+  readonly AsBroadcaster: Class;
+  readonly Date: Class;
+  readonly Math: Avm1Object;
+  /**
+   * ASnative's tables: by category, the native at an index, null for none
+   * (an index past its natives is undefined's, but Math's, NaN's).
+   */
+  readonly natives = new Map<number, (index: number) => Native | null>();
   /** The bottom of every scope chain. */
   readonly globalScope: Scope;
   /** The four registers outside DefineFunction2's own, which every activation shares. */
@@ -80,6 +90,7 @@ export class Realm implements Boxer {
   maxCalls = 1000;
 
   constructor() {
+    // Object's `prototype` is read-only (adl: Extends and a set leave it).
     const object = this.classOf(
       this.objectProto,
       (self, args, version) => {
@@ -90,6 +101,7 @@ export class Realm implements Boxer {
         const v = first(args);
         return v === undefined || v === null ? new Avm1Object() : this.box(v, version);
       },
+      READ_ONLY,
     );
     // Function() of nothing gives an object without a prototype, as Ruffle has it.
     const fn = this.classOf(
@@ -105,52 +117,49 @@ export class Realm implements Boxer {
     this.objectPrototype();
     this.functionPrototype();
 
-    this.String = this.boxClass(
-      (self, args, version) => {
-        const s = args.length > 0 ? stringOf(args[0], version) : "";
-        self.primitive = s;
-        self.define("length", s.length, DONT_ENUM | DONT_DELETE);
-        return self;
-      },
-      (_, args, version) => (args.length > 0 ? stringOf(args[0], version) : ""),
-      (self, version) => stringOf(self.primitive, version),
-    );
-    this.Number = this.boxClass(
-      (self, args, version) => {
-        self.primitive = args.length > 0 ? toNumber(args[0], version) : 0;
-        return self;
-      },
-      (_, args, version) => (args.length > 0 ? toNumber(args[0], version) : 0),
-      (self) => (typeof self.primitive === "number" ? numberToString(self.primitive) : undefined),
-    );
-    this.Boolean = this.boxClass(
-      (self, args, version) => {
-        self.primitive = args.length > 0 ? toBoolean(args[0], version) : false;
-        return self;
-      },
-      (_, args, version) => (args.length > 0 ? toBoolean(args[0], version) : false),
-      (self) => (typeof self.primitive === "boolean" ? String(self.primitive) : undefined),
-    );
-    this.Array = this.arrayClass();
+    this.String = stringClass(this);
+    this.Number = numberClass(this);
+    this.Boolean = booleanClass(this);
+    this.Array = arrayClass(this);
+    this.Error = this.errorClass();
+    this.AsBroadcaster = broadcasterClass(this);
+    this.Date = dateClass(this);
+    this.Math = mathObject(this);
+    this.natives.set(200, (i) => mathNative(i));
 
+    // In Flash's order (Ruffle's globals.rs), each DontEnum.
     const g = this.global;
     this.globalScope = new Scope(null, SCOPE_Global, g);
+    g.define(
+      "ASnative",
+      this.method((_, args, version) =>
+        args.length === 2
+          ? asnative(this, toNumber(args[0], version) >>> 0, toNumber(args[1], version) >>> 0)
+          : undefined,
+      ),
+      DONT_ENUM,
+    );
     g.define("Object", object, DONT_ENUM);
     g.define("Function", fn, DONT_ENUM | VERSION_6);
     // Getters, which give undefined to a SWF 4.
     this.getter(g, "NaN", (version) => (version > 4 ? Number.NaN : undefined));
     this.getter(g, "Infinity", (version) => (version > 4 ? Number.POSITIVE_INFINITY : undefined));
+    g.define("AsBroadcaster", this.AsBroadcaster.constr, DONT_ENUM);
     g.define(
       "ASSetPropFlags",
       this.method((_, args, version) => setPropFlags(this, args, version)),
       DONT_ENUM,
     );
+    globalFunctions(this, (name, native) => g.define(name, this.method(native), DONT_ENUM));
     // Flash's own globals leave a variable `o`, set to null.
     g.define("o", null, 0);
     g.define("Number", this.Number.constr, DONT_ENUM);
     g.define("Boolean", this.Boolean.constr, DONT_ENUM);
+    g.define("Date", this.Date.constr, DONT_ENUM);
     g.define("String", this.String.constr, DONT_ENUM);
     g.define("Array", this.Array.constr, DONT_ENUM);
+    g.define("Math", this.Math, DONT_ENUM);
+    g.define("Error", this.Error.constr, DONT_ENUM);
   }
 
   /** A property of `object` whose value a native getter gives, without a setter. */
@@ -161,6 +170,11 @@ export class Realm implements Boxer {
   /** A native function, a method's: no `prototype`. */
   method(native: Native): Avm1Function {
     return new Avm1Function(this.functionProto, this, native);
+  }
+
+  /** A native method that takes `this` unboxed. */
+  rawMethod(native: RawNative): Avm1Function {
+    return new Avm1Function(this.functionProto, this, native as Native, null, true);
   }
 
   /** `value` as an object, as a native's `this`: a primitive boxed by its class on `_global`. */
@@ -229,8 +243,8 @@ export class Realm implements Boxer {
       version,
       cx.scope,
       cx.pool,
-      cx.target,
-      cx.clip,
+      cx.base,
+      cx.host.objectOf?.(cx.base) ?? cx.clip,
       version < 6 ? undefined : cx.self,
     );
     const prototype = new Avm1Object(this.objectProto);
@@ -291,84 +305,46 @@ export class Realm implements Boxer {
     return proto instanceof Avm1Object ? get(proto, name, version, value) : undefined;
   }
 
-  /** A class with its own prototype object, in Flash's order: `prototype`, `constructor`, `__proto__`. */
-  private classOf(proto: Avm1Object, construct: Native, call: Native): Avm1Function {
+  /**
+   * A class with its own prototype object, in Flash's order: `prototype`,
+   * `constructor`, `__proto__`; `flags` adds to `prototype`'s attributes.
+   */
+  classOf(proto: Avm1Object, construct: Native, call: Native, flags = 0): Avm1Function {
     const constr = new Avm1Function(undefined, this, call, construct);
-    constr.define("prototype", proto, DONT_ENUM | DONT_DELETE);
+    constr.define("prototype", proto, DONT_ENUM | DONT_DELETE | flags);
     constr.define("constructor", this.Function ?? constr, DONT_ENUM | DONT_DELETE);
     constr.define("__proto__", this.functionProto, DONT_ENUM | DONT_DELETE | VERSION_6);
     proto.define("constructor", constr, DONT_ENUM | DONT_DELETE);
     return constr;
   }
 
-  /** A class whose objects box a primitive, with `valueOf` and `toString` of it. */
-  private boxClass(
-    construct: Native,
-    call: Native,
-    text: (self: Avm1Object, version: number) => Value,
-  ): Class {
-    const proto = new Avm1Object(this.objectProto);
-    const constr = this.classOf(proto, construct, call);
-    proto.define(
-      "valueOf",
-      this.method((self) =>
-        isPrimitive(self.primitive) && self.primitive !== undefined ? self.primitive : self,
-      ),
-      DONT_ENUM | DONT_DELETE,
-    );
-    proto.define(
-      "toString",
-      this.method((self, _, version) => text(self, version)),
-      DONT_ENUM | DONT_DELETE,
-    );
-    return { constr, proto };
-  }
-
-  /** Array, as far as InitArray and the conversions need it: step 9 brings the rest. */
-  private arrayClass(): Class {
+  /**
+   * Error, as far as Throw's values need it: a `message` and a `name`,
+   * both "Error" on the prototype and listed by for..in, as adl has them,
+   * and a `toString` that gives the message. Called as a function it gives
+   * undefined. Step 9 completes the classes.
+   */
+  private errorClass(): Class {
     const proto = new Avm1Object(this.objectProto);
     const constr = this.classOf(
       proto,
-      (self, args, version) => this.initArray(self, args, version),
-      (_, args, version) => this.construct(this.Array.constr, args, version),
-    );
-    const join = (self: Avm1Object, separator: string, version: number) => {
-      const n = toNumber(self.own("length", version)?.value, version) | 0;
-      const parts: string[] = [];
-      for (let i = 0; i < n; i++) {
-        parts.push(stringOf(get(self, String(i), version), version));
-      }
+      (self, args, version) => {
+        if (args.length > 0 && args[0] !== undefined) {
+          set(self, "message", args[0], version);
+        }
 
-      return parts.join(separator);
-    };
+        return self;
+      },
+      () => undefined,
+    );
+    proto.define("message", "Error", 0);
+    proto.define("name", "Error", 0);
     proto.define(
       "toString",
-      this.method((self, _, version) => join(self, ",", version)),
-      DONT_ENUM | DONT_DELETE,
-    );
-    proto.define(
-      "join",
-      this.method((self, args, version) =>
-        join(
-          self,
-          args.length > 0 && args[0] !== undefined ? stringOf(args[0], version) : ",",
-          version,
-        ),
-      ),
-      DONT_ENUM | DONT_DELETE,
+      this.method((self, _, version) => get(self, "message", version)),
+      0,
     );
     return { constr, proto };
-  }
-
-  /** `self` made an array of `args`, or of a length where the one argument is a number. */
-  private initArray(self: Avm1Object, args: Value[], version: number): Avm1Object {
-    if (args.length === 1 && typeof args[0] === "number") {
-      self.array = true;
-      self.define("length", args[0] | 0, DONT_ENUM | DONT_DELETE);
-      return self;
-    }
-
-    return this.fillArray(self, args, version);
   }
 
   /** A new array of `elements`, as InitArray makes it. */
@@ -387,13 +363,26 @@ export class Realm implements Boxer {
     return this.fillArray(self, elements, version);
   }
 
-  private fillArray(self: Avm1Object, elements: Value[], _version: number): Avm1Object {
-    for (let i = 0; i < elements.length; i++) {
-      self.define(String(i), elements[i], 0);
+  /** `self` made an array of `elements`, then its `length`. */
+  fillArray(self: Avm1Object, elements: Value[], _version: number): Avm1Object {
+    self.array = true;
+    if (self.elems === null && !hasIndex(self)) {
+      self.elems = [];
+    }
+
+    const elems = self.elems;
+    if (elems !== null && elems.length === 0) {
+      // A new array's elements, straight to their places.
+      for (let i = 0; i < elements.length; i++) {
+        elems.push(new Property(String(i), elements[i], 0));
+      }
+    } else {
+      for (let i = 0; i < elements.length; i++) {
+        self.define(String(i), elements[i], 0);
+      }
     }
 
     self.define("length", elements.length, DONT_ENUM | DONT_DELETE);
-    self.array = true;
     return self;
   }
 
@@ -454,8 +443,18 @@ export class Realm implements Boxer {
   private objectPrototype(): void {
     const proto = this.objectProto;
     const v6 = DONT_ENUM | DONT_DELETE | VERSION_6;
-    const define = (name: string, flags: number, native: Native) =>
+    // ASnative(101, i): the methods in the order defined, then registerClass (the player's) and Object.
+    const table: (Native | null)[] = [];
+    const define = (name: string, flags: number, native: Native) => {
+      if (name !== "toLocaleString") {
+        table.push(native);
+      }
+
       proto.define(name, this.method(native), flags);
+    };
+    this.natives.set(101, (i) =>
+      i === 9 ? (this.Object.construct as Native) : i === 8 ? () => undefined : (table[i] ?? null),
+    );
 
     define("watch", v6, (self, args, version) => {
       if (args.length === 0) {
@@ -603,7 +602,7 @@ function setPropFlags(realm: Realm, args: Value[], version: number): Value {
   }
 
   if (args[1] === null) {
-    for (const p of object.props.values()) {
+    for (const p of object.ownProperties()) {
       change(p);
     }
 
@@ -630,13 +629,24 @@ function callMethod(object: Avm1Object, name: string, version: number): Value {
 
 objects.valueOf = (object, version) => callMethod(object as Avm1Object, "valueOf", version);
 objects.toPrimitive = (object, version) => {
-  const value = callMethod(object as Avm1Object, "valueOf", version);
+  // A Date adds as its string from SWF 6.
+  const o = object as Avm1Object;
+  const value = callMethod(
+    o,
+    version > 5 && o.primitive instanceof DateCell ? "toString" : "valueOf",
+    version,
+  );
   return isPrimitive(value) ? value : object;
 };
 objects.toString = (object, version) => {
   const o = object as Avm1Object;
   if (typeof o.primitive === "string") {
     return o.primitive;
+  }
+
+  // A display object is its path, a clip's wherever its reference reaches now, "" where nothing.
+  if (o.display !== null) {
+    return o.display.live()?.display?.path() ?? "";
   }
 
   const value = callMethod(o, "toString", version);
@@ -647,3 +657,14 @@ objects.toString = (object, version) => {
   return o instanceof Avm1Function ? "[type Function]" : "[type Object]";
 };
 objects.typeOf = (object) => (object as Avm1Object).typeOf();
+
+/** Whether `o` has a property named as an element. */
+function hasIndex(o: Avm1Object): boolean {
+  for (const name of o.props.keys()) {
+    if (elementIndex(name) >= 0) {
+      return true;
+    }
+  }
+
+  return false;
+}

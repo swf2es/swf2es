@@ -400,3 +400,29 @@ test("up to SWF 6, a __PROTO__ set where there is no __proto__ is the prototype"
     assert.equal(get(o, "pp", version), version === 6 ? 1 : undefined);
   }
 });
+
+test("Error has a message and a name on its prototype, listed, and gives its message", () => {
+  const { V, cx, st } = frame(7);
+  assert.equal(get(rt.realm.global, "Error", 7), rt.realm.Error.constr);
+  assert.deepEqual(keys(rt.realm.Error.proto, 7), ["toString", "name", "message"]);
+
+  st.push("a message", 1, "Error");
+  V.newObject(cx);
+  const e = st.pop() as Avm1Object;
+  assert.equal(V.toString(e), "a message");
+  assert.equal(get(e, "name", 7), "Error");
+  assert.deepEqual(keys(e, 7), ["toString", "name", "message"]);
+
+  // No message, or undefined, leaves the prototype's; null is a message, and no string.
+  st.push(undefined, 1, "Error");
+  V.newObject(cx);
+  assert.equal(V.toString(st.pop()), "Error");
+  st.push(null, 1, "Error");
+  V.newObject(cx);
+  assert.equal(V.toString(st.pop()), "[type Object]");
+
+  // Called as a function, it gives undefined.
+  st.push("called", 1, "Error");
+  V.callFunction(cx);
+  assert.equal(st.pop(), undefined);
+});

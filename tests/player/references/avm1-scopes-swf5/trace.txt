@@ -1,0 +1,14 @@
+f /a clip movieclip / / a
+kid
+/a/kid inner kid
+f / root undefined  / root
+/ root root
+in tell clip function
+f /a clip movieclip / / a
+/a/kid
+in with clip /a kid
+/a clip
+undefined
+/
+/
+true

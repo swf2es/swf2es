@@ -77,6 +77,10 @@ node tests/web/run.ts               # @swf2es/web's element, replaceFlash and Ex
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
 pnpm --filter @swf2es/desktop start [--trace] [file.swf]   # the desktop app (apps/desktop);
                               # --trace prints the SWF's trace() to the terminal
+pnpm --filter @swf2es/site build   # the demo site (apps/site) into apps/site/dist/site/, as
+                              # GitHub Pages serves it (after pnpm build; ASC in the oracle's image)
+node tests/site/run.ts [--serve]   # the built site in Chrome under /swf2es/, or served to look at
+                              # (part of pnpm test)
 node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
                               # socket, a drop (part of pnpm test; skipped without Electron's binary)
 node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic

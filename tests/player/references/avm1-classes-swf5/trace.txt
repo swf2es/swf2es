@@ -1,0 +1,69 @@
+B.prototype keys hello __constructor__ __proto__ 
+B.prototype.constructor true __constructor__ true __proto__ true
+B ctor
+b.hello A.hello 
+instanceof true true true false true true
+prim instanceof false false true false
+instanceof non-fn false false false false false
+instanceof obj with prototype true
+fn instanceof false false
+cast true null null null null
+implements true true true true
+cast iface true [object Object]
+inherited iface true true
+implements none true true
+replaced true true
+Parameters of primitive types are no longer coerced into the required type - Object.
+extends 5 object [object Object]
+extends undef object
+A ctor 1
+typeof function object object undefined object function
+a true false true false
+b true true
+c true true false
+d true
+e false
+f true
+g true true
+h false
+Parameters of primitive types are no longer coerced into the required type - Object.
+i true
+Parameters of primitive types are no longer coerced into the required type - Object.
+j
+Parameters of type Object are no longer coerced into the required primitive type - number.
+k false
+l true
+m done
+n true true
+o cast true null null null null
+1 new P instanceof P false Object true
+2 manual proto false
+3 P2 replaced proto true
+4 P3 chain false false
+5 P.prototype instanceof Object false
+6 {} instanceof Object true
+7 typeof Q.prototype object true
+8 qq.__proto__ == Q.prototype true instanceof true
+9 after member true true
+10 R false
+11 R set again true false
+12 S new Object true
+13 T array true
+extends {} object undefined undefined
+Parameters of primitive types are no longer coerced into the required type - Object.
+extends prim sub
+extends prim proto object 7
+typeof function undefined undefined object undefined function function function
+f    [type Function] len  name 
+Function   undefined undefined true
+Function.prototype   true true true
+call apply       
+instanceof false false false false false
+valueOf true undefined
+native fn props undefined undefined undefined
+new native object
+new escape object 
+new with prim proto object 5
+prototype set Object:kept Function:kept Array:kept String:kept Number:kept Boolean:kept AsBroadcaster:kept Math:kept 
+Object extends true true true
+Number extends true false true

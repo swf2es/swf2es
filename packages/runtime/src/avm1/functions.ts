@@ -12,7 +12,8 @@
 // local variables, its parameters without a register among them, and
 // `arguments` and `super`, made only if the code asks for them.
 import { Activation, PENDING_Arguments, PENDING_Super, type Region } from "./activation.js";
-import { Disabled } from "./errors.js";
+import { targetOrRoot } from "./clips.js";
+import { BASE_REMOVED, Disabled } from "./errors.js";
 import type { Target } from "./host.js";
 import { Avm1Function, Avm1Object, DONT_ENUM, fold, type Property } from "./objects.js";
 import type { Realm } from "./realm.js";
@@ -46,7 +47,7 @@ export class ScriptFunction extends Avm1Function {
     readonly scope: Scope,
     /** The constant pool of the activation that defined it, as it was then. */
     readonly pool: Value[],
-    /** The clip whose code defined it, its target from SWF 6. */
+    /** The clip whose code defined it, its activation's base clip, its target from SWF 6. */
     readonly target: Target,
     readonly clip: Avm1Object,
     /**
@@ -89,7 +90,7 @@ export class ScriptFunction extends Avm1Function {
         target = own;
         clip = self as Avm1Object;
       } else {
-        target = caller.target;
+        target = targetOrRoot(caller);
         clip = caller.clip;
       }
 
@@ -105,7 +106,8 @@ export class ScriptFunction extends Avm1Function {
       target,
       caller.host,
       realm,
-      new Scope(scope, SCOPE_Local, local),
+      // adl counts a SWF 5 function's chain as a timeline's, for the With's limit.
+      new Scope(scope, SCOPE_Local, local, this.version < 6 ? scope.depth : scope.depth + 1),
       inherited ? this.definer : self,
       clip,
     );
@@ -147,6 +149,13 @@ export class ScriptFunction extends Avm1Function {
     realm.current = cx;
     try {
       return this.region(cx, self, args);
+    } catch (error) {
+      // Its clip was removed under it: it returns undefined there.
+      if (error === BASE_REMOVED) {
+        return undefined;
+      }
+
+      throw error;
     } finally {
       realm.calls--;
       realm.current = caller;

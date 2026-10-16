@@ -63,6 +63,13 @@ export const FunctionFlag = {
   preloadGlobal: 0x100,
 } as const;
 
+/** Try's flags: which bodies it has, and whether the catch's value goes to a register. */
+export const TryFlag = {
+  catch: 1,
+  finally: 2,
+  catchInRegister: 4,
+} as const;
+
 /** The opcodes of the actions without operands, by name. */
 export const Simple = {
   End: 0x00,
@@ -70,6 +77,8 @@ export const Simple = {
   PreviousFrame: 0x05,
   Play: 0x06,
   Stop: 0x07,
+  ToggleQuality: 0x08,
+  StopSounds: 0x09,
   Add: 0x0a,
   Subtract: 0x0b,
   Multiply: 0x0c,
@@ -90,14 +99,20 @@ export const Simple = {
   StringAdd: 0x21,
   GetProperty: 0x22,
   SetProperty: 0x23,
+  CloneSprite: 0x24,
+  RemoveSprite: 0x25,
   Trace: 0x26,
+  StartDrag: 0x27,
+  EndDrag: 0x28,
   StringLess: 0x29,
   Throw: 0x2a,
   CastOp: 0x2b,
   ImplementsOp: 0x2c,
+  RandomNumber: 0x30,
   MBStringLength: 0x31,
   CharToAscii: 0x32,
   AsciiToChar: 0x33,
+  GetTime: 0x34,
   MBStringExtract: 0x35,
   MBCharToAscii: 0x36,
   MBAsciiToChar: 0x37,
@@ -139,6 +154,8 @@ export const Simple = {
   Greater: 0x67,
   StringGreater: 0x68,
   Extends: 0x69,
+  /** CallFrame: from 0x80, but with no operands. */
+  Call: 0x9e,
 } as const;
 
 export type SimpleAction = keyof typeof Simple;
@@ -147,14 +164,61 @@ const u16 = (n: number) => [n & 0xff, (n >> 8) & 0xff];
 const i32 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
 const str = (s: string) => [...new TextEncoder().encode(s), 0];
 
+/** How an assembler writes what Flash's compiler would write otherwise. */
+export interface AssemblerOptions {
+  /**
+   * Strings pushed as constants of a pool, which the block declares first
+   * and its functions' bodies (`child()`) share, as Flash's compiler does.
+   */
+  pool?: boolean;
+  /** A push straight after a push added to it, one Push of all the values, as Flash's compiler writes them. */
+  batch?: boolean;
+}
+
 export class Avm1Assembler {
   private code: number[] = [];
   private labels = new Map<string, number>();
-  /** Branches to patch: where their offset goes and the label it names. */
-  private fixups: { at: number; label: string }[] = [];
+  /** Try headers whose flags are known once the labels are. */
+  private tries: {
+    at: number;
+    catchAt: string;
+    finallyAt: string;
+    end: string;
+    flags: number | undefined;
+    named: boolean;
+  }[] = [];
+  /**
+   * Offsets and sizes to patch: where the u16 goes, the label it names and
+   * the offset it counts from (a branch's end, a body's start).
+   */
+  private fixups: { at: number; label: string; from: number | string }[] = [];
+  /** Where each action starts, for WaitForFrame's count of the actions it skips. */
+  private starts: number[] = [];
+  /** WaitForFrame and WaitForFrame2 whose counts are known once the labels are: the count's offset, the next action's and the label. */
+  private waits: { at: number; from: number; label: string }[] = [];
+  /** Where the last action starts, -1 after a label or raw bytes: a Push there takes a batched push's values. */
+  private last = -1;
+  private readonly options: AssemblerOptions;
+  /** The pool's strings and their indices, shared with the children; null without a pool. */
+  private readonly strings: Map<string, number> | null;
+  /** Whether the block declares the pool: the root's, not a function body's. */
+  private readonly root: boolean;
+
+  constructor(options: AssemblerOptions = {}, strings?: Map<string, number>) {
+    this.options = options;
+    this.root = strings === undefined;
+    this.strings = strings ?? (options.pool ? new Map() : null);
+  }
+
+  /** An assembler for a function's body, written as this one writes and sharing its pool. */
+  child(): Avm1Assembler {
+    return new Avm1Assembler(this.options, this.strings ?? undefined);
+  }
 
   /** An action by opcode, with its operands' bytes from 0x80. */
   action(op: number, operands: number[] = []): this {
+    this.last = this.code.length;
+    this.starts.push(this.code.length);
     this.code.push(op);
     if (op >= 0x80) {
       this.code.push(...u16(operands.length), ...operands);
@@ -166,18 +230,28 @@ export class Avm1Assembler {
   /** Bytes as they are, for actions this does not write. */
   raw(bytes: number[]): this {
     this.code.push(...bytes);
+    this.last = -1;
     return this;
   }
 
   label(name: string): this {
     this.labels.set(name, this.code.length);
+    this.last = -1;
     return this;
   }
 
   push(...values: PushValue[]): this {
     const operands: number[] = [];
     for (const v of values) {
-      if (typeof v === "string") {
+      if (typeof v === "string" && this.strings !== null) {
+        let index = this.strings.get(v);
+        if (index === undefined) {
+          index = this.strings.size;
+          this.strings.set(v, index);
+        }
+
+        operands.push(...number(constant(index)));
+      } else if (typeof v === "string") {
         operands.push(PushType.string, ...str(v));
       } else if (v && typeof v === "object" && "bytes" in v) {
         operands.push(PushType.string, ...v.bytes, 0);
@@ -191,6 +265,16 @@ export class Avm1Assembler {
         operands.push(...(Object.is(v, -0) || (v | 0) !== v ? number(double(v)) : number(v)));
       } else {
         operands.push(...number(v));
+      }
+    }
+
+    const last = this.last;
+    if (this.options.batch && last >= 0 && this.code[last] === 0x96) {
+      const length = this.code[last + 1] | (this.code[last + 2] << 8);
+      if (length + operands.length <= 0xffff) {
+        this.code.push(...operands);
+        [this.code[last + 1], this.code[last + 2]] = u16(length + operands.length);
+        return this;
       }
     }
 
@@ -238,6 +322,71 @@ export class Avm1Assembler {
     ]).raw([...code]);
   }
 
+  /** With: the object on the stack is the scope of the body up to `end`, which follows. */
+  with(end: string): this {
+    this.fixups.push({ at: this.code.length + 3, label: end, from: this.code.length + 5 });
+    return this.action(0x94, [0, 0]);
+  }
+
+  /**
+   * Try: the try body follows, up to the label `catchAt`, the catch's up to
+   * `finallyAt` and the finally's up to `end`; `into` the catch's variable
+   * or register. `flags` overrides which bodies the header says it has
+   * (TryFlag), by default a catch and a finally where they are not empty.
+   */
+  try(
+    into: string | TypedValue,
+    catchAt: string,
+    finallyAt: string,
+    end: string,
+    flags?: number,
+  ): this {
+    const named = typeof into === "string";
+    const header = named ? str(into) : [into.value & 0xff];
+    const start = this.code.length + 3 + 7 + header.length;
+    const at = this.code.length + 4;
+    this.fixups.push({ at, label: catchAt, from: start });
+    this.fixups.push({ at: at + 2, label: finallyAt, from: catchAt });
+    this.fixups.push({ at: at + 4, label: end, from: finallyAt });
+    this.tries.push({ at: at - 1, catchAt, finallyAt, end, flags, named });
+    return this.action(0x8f, [0, 0, 0, 0, 0, 0, 0, ...header]);
+  }
+
+  /** GotoFrame: frame `frame`, 0 the first. */
+  gotoFrame(frame: number): this {
+    return this.action(0x81, u16(frame));
+  }
+
+  gotoLabel(label: string): this {
+    return this.action(0x8c, str(label));
+  }
+
+  /** GotoFrame2 of the frame on the stack, a number or a label, playing or not, and with a scene bias where one is given. */
+  gotoFrame2(play: boolean, bias?: number): this {
+    const flags = (play ? 1 : 0) | (bias === undefined ? 0 : 2);
+    return this.action(0x9f, bias === undefined ? [flags] : [flags, ...u16(bias)]);
+  }
+
+  setTarget(target: string): this {
+    return this.action(0x8b, str(target));
+  }
+
+  getUrl(url: string, target: string): this {
+    return this.action(0x83, [...str(url), ...str(target)]);
+  }
+
+  /** WaitForFrame of frame `frame` (0 the first), skipping the actions up to `label` where it is not loaded. */
+  waitForFrame(frame: number, label: string): this {
+    this.waits.push({ at: this.code.length + 5, from: this.code.length + 6, label });
+    return this.action(0x8a, [...u16(frame), 0]);
+  }
+
+  /** WaitForFrame2 of the frame on the stack, as `waitForFrame`. */
+  waitForFrame2(label: string): this {
+    this.waits.push({ at: this.code.length + 3, from: this.code.length + 4, label });
+    return this.action(0x8d, [0]);
+  }
+
   storeRegister(register: number): this {
     return this.action(0x87, [register & 0xff]);
   }
@@ -275,26 +424,47 @@ export class Avm1Assembler {
     return this.action(Simple.End);
   }
 
-  /** The block's bytes, every label it jumps to defined. */
+  /** The block's bytes, every label it jumps to defined, its pool first where it has one. */
   bytes(): Uint8Array {
     const code = [...this.code];
-    for (const { at, label } of this.fixups) {
-      const target = this.labels.get(label);
-      if (target === undefined) {
-        throw new Error(`no label ${label}`);
-      }
-
-      // Relative to the end of the branch, whose offset ends 2 bytes on.
-      const offset = target - (at + 2);
+    for (const { at, label, from } of this.fixups) {
+      const offset = this.at(label) - (typeof from === "number" ? from : this.at(from));
       code[at] = offset & 0xff;
       code[at + 1] = (offset >> 8) & 0xff;
+    }
+
+    for (const { at, from, label } of this.waits) {
+      const to = this.at(label);
+      code[at] = this.starts.filter((p) => p >= from && p < to).length;
+    }
+
+    for (const { at, catchAt, finallyAt, end, flags, named } of this.tries) {
+      const catches = this.at(finallyAt) > this.at(catchAt) ? TryFlag.catch : 0;
+      const finallies = this.at(end) > this.at(finallyAt) ? TryFlag.finally : 0;
+      code[at] = (flags ?? catches | finallies) | (named ? 0 : TryFlag.catchInRegister);
+    }
+
+    if (this.root && this.strings !== null && this.strings.size > 0) {
+      const strings = [...this.strings.keys()];
+      const pool = [...u16(strings.length), ...strings.flatMap(str)];
+      return new Uint8Array([0x88, ...u16(pool.length), ...pool, ...code]);
     }
 
     return new Uint8Array(code);
   }
 
+  private at(label: string): number {
+    const target = this.labels.get(label);
+    if (target === undefined) {
+      throw new Error(`no label ${label}`);
+    }
+
+    return target;
+  }
+
   private branch(op: number, label: string): this {
-    this.fixups.push({ at: this.code.length + 3, label });
+    // Relative to the end of the branch, whose offset ends 2 bytes on.
+    this.fixups.push({ at: this.code.length + 3, label, from: this.code.length + 5 });
     return this.action(op, [0, 0]);
   }
 }

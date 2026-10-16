@@ -1,0 +1,44 @@
+name: Pages
+# The demo site (apps/site), built from main and published to
+# https://swf2es.github.io/swf2es/. Its ActionScript 3 demo compiles with
+# ASC in the oracle's image, so the job pulls it as CI's does.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+# One deployment at a time; a newer push waits rather than cancels one under way.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm oracle:pull
+      - run: pnpm --filter @swf2es/site build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/site/dist/site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

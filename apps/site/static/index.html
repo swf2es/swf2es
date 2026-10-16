@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-build="{{BUILD}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>swf2es player</title>
+<meta name="description" content="Play SWF files in your browser with swf2es, which compiles their ActionScript to JavaScript. Files you open stay on your device.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{}</script>
+<script type="module" src="app/main.js"></script>
+</head>
+<body>
+<header class="bar">
+  <h1>swf2es</h1>
+  <p class="tagline">Plays SWF files in your browser, their ActionScript compiled to JavaScript.</p>
+  <nav>
+    <a href="https://github.com/swf2es/swf2es">GitHub</a>
+    <a href="notices.html">Licences</a>
+  </nav>
+</header>
+
+<main>
+  <section class="open" aria-label="Open a SWF">
+    <input id="file" type="file" accept=".swf,application/x-shockwave-flash" class="visually-hidden">
+    <label class="button primary" for="file">Open a SWF…</label>
+    <form id="url-form" class="url">
+      <label class="visually-hidden" for="url">SWF URL</label>
+      <input id="url" type="url" placeholder="https://example.com/movie.swf" inputmode="url" autocomplete="url">
+      <button type="submit">Load URL</button>
+    </form>
+  </section>
+  <p class="note">
+    Files you open or drop are read in this browser: <strong>nothing is uploaded</strong>.
+    A URL loads only where its server allows other sites to load it (CORS).
+  </p>
+
+  <div id="stage" class="stage">
+    <div id="empty" class="empty">
+      <p><strong>Drop a SWF here</strong>, open one, or try a demo below.</p>
+    </div>
+    <div id="ask" class="empty ask" hidden>
+      <div>
+        <p>Play <strong id="ask-file"></strong>?</p>
+        <p class="warning">This SWF comes from <strong id="ask-host"></strong>; it can draw
+          anything, including fake login forms. Only play SWFs you trust.</p>
+        <button id="ask-play" class="primary" type="button">Play</button>
+      </div>
+    </div>
+    <swf2es-player id="player" width="100%" height="100%" scale="showAll" allowscriptaccess="never" hidden></swf2es-player>
+  </div>
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <section class="controls" aria-label="Player controls">
+    <label>Quality
+      <select id="quality">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high" selected>High</option>
+        <option value="best">Best</option>
+      </select>
+    </label>
+    <label>Scale
+      <select id="scale">
+        <option value="showAll" selected>Show all</option>
+        <option value="noBorder">No border</option>
+        <option value="exactFit">Exact fit</option>
+        <option value="noScale">No scale</option>
+      </select>
+    </label>
+    <button id="reload" type="button" disabled>Restart</button>
+    <button id="close" type="button" disabled>Close</button>
+    <button id="fullscreen" type="button">Full screen</button>
+    <dl class="stats" aria-label="Performance">
+      <dt>fps</dt><dd id="fps">–</dd>
+      <dt>frame</dt><dd id="frame-time">–</dd>
+      <dt>heap</dt><dd id="heap">–</dd>
+    </dl>
+  </section>
+
+  <div class="panels">
+    <section class="panel console" aria-labelledby="console-title">
+      <div class="panel-head">
+        <h2 id="console-title">Console</h2>
+        <button id="copy-log" type="button">Copy</button>
+        <button id="clear-log" type="button">Clear</button>
+        <a id="report" class="button" href="https://github.com/swf2es/swf2es/issues/new" target="_blank" rel="noopener">Report a problem</a>
+      </div>
+      <div id="log" class="log" role="log" aria-live="off"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="facts-title">
+      <h2 id="facts-title">This SWF</h2>
+      <dl id="facts" class="facts"><dt>File</dt><dd>none yet</dd></dl>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="demos-title">
+    <h2 id="demos-title">Demos</h2>
+    <p>Built from the swf2es repository's own sources at this site's build.</p>
+    <ul id="demos" class="demos"></ul>
+  </section>
+
+  <section class="panel about" aria-labelledby="about-title">
+    <h2 id="about-title">What to expect</h2>
+    <ul>
+      <li><strong>ActionScript 3</strong> (AVM2) runs, compiled to JavaScript as the SWF loads. Video and Stage3D are not there yet.</li>
+      <li><strong>ActionScript 1 and 2</strong> (AVM1) support is in progress: the language and its classes run, while clips, buttons, text and drawing from AS2 do not yet, so many AS2 SWFs play only their timelines.</li>
+      <li><strong>No sockets.</strong> A browser cannot open TCP connections and this static site runs no relay, so <code>Socket</code> and <code>XMLSocket</code> fail as refused.</li>
+      <li><strong>Cross-origin loads.</strong> A SWF by URL, and whatever it loads from another site, arrive only where that server allows it (CORS headers).</li>
+      <li><strong>Files you open</strong> play as if from this site's <code>local/</code> folder, by their names: what one loads by a relative URL is not there, and each name keeps its own saved data (SharedObjects) in this browser.</li>
+      <li>The page keeps the code it compiled in this browser's IndexedDB, so a SWF starts faster next time.</li>
+      <li>ActionScript 3 links against avmplus' <code>builtin.abc</code> (MPL-2.0) and swf2es's own playerglobal, never Adobe's. See the <a href="notices.html">licences</a>.</li>
+    </ul>
+    <p class="build">Build <code>{{BUILD}}</code></p>
+  </section>
+</main>
+</body>
+</html>
