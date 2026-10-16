@@ -49,6 +49,27 @@ export interface PointerState {
 }
 
 /**
+ * The pointer as a host drives it (PixiView.bindPointer, bindKeyboard): an
+ * AS3 movie's PointerInput, or an AVM1 movie's (avm1/pointer.ts), whose
+ * buttons and clips take the pointer by AVM1's rules.
+ */
+export interface Pointer {
+  /** How many of its events may show before the next frame: a button's state changed, say. */
+  readonly redraws: number;
+  /** Whether a press here holds the mouse, wherever it goes, until the release. */
+  readonly captured: boolean;
+  /** Told the cursor to show whenever it changes. */
+  onCursor: ((cursor: Cursor) => void) | null;
+  cursor(): Cursor;
+  /** A move to handle at the next flush; several a frame come to one. */
+  post(p: PointerState): void;
+  flush(): void;
+  handle(type: "move" | "down" | "up" | "leave", p: PointerState): void;
+  /** The wheel turned by `delta` lines over `p`; whether the SWF takes it there. */
+  wheel(p: PointerState, delta: number): boolean;
+}
+
+/**
  * What a pick finds: an interactive object hit, a hit that goes up to the
  * first ancestor with mouseEnabled, or nothing.
  */
@@ -442,6 +463,49 @@ function extend(box: Float64Array, r: Rect | null, m: Matrix | null, scale = 1):
 /** What each sprite dragged was last over, which Sprite.dropTarget reads. */
 const dropTargets = new WeakMap<DisplayObject, DisplayObject | null>();
 
+/** A drag in progress: what follows the pointer, how, and where the pointer was last. */
+export interface Drag {
+  target: DisplayObject;
+  lockCenter: boolean;
+  bounds: Rect | null;
+  lastX: number;
+  lastY: number;
+}
+
+/**
+ * The drag's target moved with the pointer to (x, y) on the stage, in its
+ * parent's space: its registration point there where it locks its centre,
+ * else on by as much as the pointer moved, kept within its bounds and at
+ * whole twips, as Flash keeps a translation. Whether it moved.
+ */
+export function dragTo(stage: Container, drag: Drag, x: number, y: number): boolean {
+  const d = drag.target;
+  const parent = d.parent;
+  const inverse = parent ? invert(toStage(parent, stage)) : null;
+  const [atX, atY] = inverse ? apply(inverse, x, y) : [x, y];
+  const [lastX, lastY] = inverse
+    ? apply(inverse, drag.lastX, drag.lastY)
+    : [drag.lastX, drag.lastY];
+  let nextX = drag.lockCenter ? atX : d.matrix.tx + atX - lastX;
+  let nextY = drag.lockCenter ? atY : d.matrix.ty + atY - lastY;
+  if (drag.bounds) {
+    nextX = Math.max(drag.bounds.xMin, Math.min(nextX, drag.bounds.xMax));
+    nextY = Math.max(drag.bounds.yMin, Math.min(nextY, drag.bounds.yMax));
+  }
+
+  nextX = Math.round(nextX * 20) / 20;
+  nextY = Math.round(nextY * 20) / 20;
+  drag.lastX = x;
+  drag.lastY = y;
+  if (nextX === d.matrix.tx && nextY === d.matrix.ty) {
+    return false;
+  }
+
+  d.setMatrix({ ...d.matrix, tx: nextX, ty: nextY });
+  d.touch();
+  return true;
+}
+
 export function dropTargetOf(d: DisplayObject): DisplayObject | null {
   return dropTargets.get(d) ?? null;
 }
@@ -480,7 +544,7 @@ function objectUnder(
 }
 
 /** Mouse events on the player's display list, independent of a renderer. */
-export class PointerInput {
+export class PointerInput implements Pointer {
   /** How many pointer events it has handled. */
   handled = 0;
   /**
@@ -511,13 +575,7 @@ export class PointerInput {
   } | null = null;
   private moved: PointerState | null = null;
   private shown: Cursor = "default";
-  private drag: {
-    target: DisplayObject;
-    lockCenter: boolean;
-    bounds: Rect | null;
-    lastX: number;
-    lastY: number;
-  } | null = null;
+  private drag: Drag | null = null;
   /** Told the cursor to show whenever it changes. */
   onCursor: ((cursor: Cursor) => void) | null = null;
 
@@ -552,32 +610,12 @@ export class PointerInput {
     }
 
     const d = drag.target;
-    const parent = d.parent;
-    const inverse = parent ? invert(toStage(parent, this.stage)) : null;
     const x = this.scripting.mouseStageX;
     const y = this.scripting.mouseStageY;
-    const [atX, atY] = inverse ? apply(inverse, x, y) : [x, y];
-    const [lastX, lastY] = inverse
-      ? apply(inverse, drag.lastX, drag.lastY)
-      : [drag.lastX, drag.lastY];
-    let nextX = drag.lockCenter ? atX : d.matrix.tx + atX - lastX;
-    let nextY = drag.lockCenter ? atY : d.matrix.ty + atY - lastY;
-    if (drag.bounds) {
-      nextX = Math.max(drag.bounds.xMin, Math.min(nextX, drag.bounds.xMax));
-      nextY = Math.max(drag.bounds.yMin, Math.min(nextY, drag.bounds.yMax));
-    }
-
-    // Flash stores translations in twips, including positions reached by dragging.
-    nextX = Math.round(nextX * 20) / 20;
-    nextY = Math.round(nextY * 20) / 20;
-    if (nextX !== d.matrix.tx || nextY !== d.matrix.ty) {
-      d.setMatrix({ ...d.matrix, tx: nextX, ty: nextY });
-      d.touch();
+    if (dragTo(this.stage, drag, x, y)) {
       this.redraws++;
     }
 
-    drag.lastX = x;
-    drag.lastY = y;
     let under = objectUnder(this.stage, x, y, d);
     while (under && !under.object) {
       under = under.parent;

@@ -657,6 +657,12 @@ export class BlockEmitter {
       case ops.OP_RemoveSprite:
         out.text("V.removeSprite(cx, st.pop());\n");
         break;
+      case ops.OP_StartDrag:
+        out.text("V.startDrag(cx);\n");
+        break;
+      case ops.OP_EndDrag:
+        out.text("V.stopDrag(cx);\n");
+        break;
       case ops.OP_ToggleQuality:
         out.text("V.toggleQuality(cx);\n");
         break;
