@@ -75,13 +75,35 @@ export class Avm1Pointer implements Pointer {
     this.drag = null;
   }
 
-  /** The dragged clip brought to where the pointer is; a drag of one taken off the stage ends. */
+  /**
+   * The dragged clip brought to where the pointer is, and its `_droptarget`
+   * the topmost clip or button under the pointer, the dragged clip left
+   * out, as Ruffle picks it; a drag of one taken off the stage ends.
+   */
   private dragged(): void {
     const drag = this.drag;
-    if (drag && !this.onStage(drag.target)) {
+    if (drag === null) {
+      return;
+    }
+
+    const d = drag.target;
+    if (!this.onStage(d)) {
       this.drag = null;
-    } else if (drag && dragTo(this.stage, drag, this.avm1.mouseX, this.avm1.mouseY)) {
+      return;
+    }
+
+    if (dragTo(this.stage, drag, this.avm1.mouseX, this.avm1.mouseY)) {
       this.redraws++;
+    }
+
+    if (d instanceof MovieClip) {
+      const visible = d.visible;
+      d.visible = false;
+      try {
+        this.avm1.dropTargets.set(d, this.pick(this.avm1.mouseX, this.avm1.mouseY, true));
+      } finally {
+        d.visible = visible;
+      }
     }
   }
 
@@ -348,10 +370,10 @@ export class Avm1Pointer implements Pointer {
    * clip in button mode there, searched from the topmost level down
    * (Ruffle's mouse_pick_avm1).
    */
-  private pick(x: number, y: number): DisplayObject | null {
+  private pick(x: number, y: number, any = false): DisplayObject | null {
     const children = this.stage.children;
     for (let i = children.length - 1; i >= 0; i--) {
-      const found = this.pickIn(children[i], x, y);
+      const found = this.pickIn(children[i], x, y, any);
       if (found) {
         return found;
       }
@@ -360,7 +382,12 @@ export class Avm1Pointer implements Pointer {
     return null;
   }
 
-  private pickIn(d: DisplayObject, x: number, y: number): DisplayObject | null {
+  /**
+   * What `d` picks at (x, y): with `any`, as `_droptarget` names it, also
+   * a clip whose own drawing is there, the topmost of what is in it
+   * deciding, and one in button mode by its own drawing, not its hitArea.
+   */
+  private pickIn(d: DisplayObject, x: number, y: number, any = false): DisplayObject | null {
     if (!d.visible || d.clipDepth > 0 || d.maskOf) {
       return null;
     }
@@ -369,7 +396,7 @@ export class Avm1Pointer implements Pointer {
     // there taking the pointer from it, then its hit test state, tested as
     // its child, whatever state it shows.
     if (d instanceof ButtonObject) {
-      const shown = this.pickChildren(d, x, y);
+      const shown = this.pickChildren(d, x, y, any);
       if (shown) {
         return shown;
       }
@@ -396,25 +423,36 @@ export class Avm1Pointer implements Pointer {
     // buttons with it, where its hitArea, or else it, is drawn; where it
     // misses, its children may still be hit.
     if (this.avm1.buttonMode(d)) {
-      const area = this.avm1.hitArea(d);
+      const area = any ? null : this.avm1.hitArea(d);
       if (hitsPoint(area ?? d, x, y, true, this.stage)) {
         return d;
       }
     }
 
-    return this.pickChildren(d, x, y);
+    return this.pickChildren(d, x, y, any);
   }
 
-  private pickChildren(d: Container, x: number, y: number): DisplayObject | null {
+  private pickChildren(d: Container, x: number, y: number, any: boolean): DisplayObject | null {
     const children = d.children;
     for (let i = children.length - 1; i >= 0; i--) {
-      const found = this.pickIn(children[i], x, y);
+      const child = children[i];
+      const found =
+        child instanceof MovieClip || child instanceof ButtonObject
+          ? this.pickIn(child, x, y, any)
+          : any && d instanceof MovieClip && this.drawnAt(child, x, y)
+            ? d
+            : null;
       if (found) {
         return found;
       }
     }
 
     return null;
+  }
+
+  /** Whether `d`, a shape or anything but a clip or button, draws at (x, y), shown and no mask. */
+  private drawnAt(d: DisplayObject, x: number, y: number): boolean {
+    return d.visible && d.clipDepth === 0 && !d.maskOf && hitsPoint(d, x, y, true, this.stage);
   }
 
   /** Whether `d` is still on the stage, not taken off since it was picked. */

@@ -336,6 +336,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
     stopDrag(): void;
     updateCursor(): void;
   } | null = null;
+  /** A dragged clip's `_droptarget`: what is under the pointer as it was last dragged. */
+  readonly dropTargets = new WeakMap<DisplayObject, DisplayObject | null>();
   /** The keys down by Flash's codes, the mouse's buttons among them as 1, 2 and 4. */
   private readonly keysDown = new Set<number>();
   /**
@@ -1143,6 +1145,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost {
 
     this.markPaths(d);
     this.unload(d);
+  }
+
+  dropTargetOf(d: DisplayObject): DisplayObject | null {
+    return this.dropTargets.get(d) ?? null;
   }
 
   hidden(d: DisplayObject): void {

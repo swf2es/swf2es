@@ -1272,7 +1272,12 @@ perhaps) has it, whose `useHandCursor` and `enabled` are true. `enabled`,
 activation, so a getter `addProperty` gave runs. `startDrag` and
 StartDrag drag one clip at a time, its centre on the pointer where they
 lock it, within their bounds in its parent's space, at whole twips, as
-an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it. Ruffle's
+an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it. As it
+moves, a dragged clip's `_droptarget` becomes the slash path of what is
+under the pointer, the clip left out (`""` for nothing), picked as the
+pointer picks but where a clip's own drawing counts too, the topmost of
+what is in it deciding, and a clip in button mode by its drawing, not
+its `hitArea` (the corpus's `drag_drop`). Ruffle's
 order throughout (player.rs's `update_mouse_state`, `mouse_pick_avm1`,
 and Avm1Button's and MovieClip's `event_dispatch`).
 
@@ -1797,9 +1802,10 @@ determinism` green, and the corpus baseline may only go up.
     (`button_key_events`, `button_key_events_special`,
     `button_keypress_vs_press`, `button_keypress_vs_tab`,
     `movieclip_focusenabled`, `selection_asbroadcaster`, three of
-    `tab_ordering_*`...). Left: text fields' focus (step 13, which most of
-    the focus and tab tests begin with), the highlight drawn,
-    `_droptarget`, `_xmouse` in device pixels as Ruffle reads it
+    `tab_ordering_*`...). Then `_droptarget`: 309 (`drag_drop`,
+    `text_blocks_clicks`). Left: text fields' focus (step 13, which most
+    of the focus and tab tests begin with), the highlight drawn,
+    `_xmouse` in device pixels as Ruffle reads it
     (`mouse_pos`), the viewport's scale factor a test gives
     (`mouse_pos_with_scale_factor`), and touches, which reach only an AS3
     movie's pointer.
