@@ -373,7 +373,17 @@ const PROPERTIES: [string, DisplayProperty][] = [
 
 const QUALITIES = ["LOW", "MEDIUM", "HIGH", "BEST"];
 
-const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
+/** A clip's colour transform where it has none. */
+export const IDENTITY_COLOR = {
+  rMul: 1,
+  gMul: 1,
+  bMul: 1,
+  aMul: 1,
+  rAdd: 0,
+  gAdd: 0,
+  bAdd: 0,
+  aAdd: 0,
+};
 
 /** The display properties by name in lower case, which they are found by in any case. */
 const BY_NAME = new Map(PROPERTIES.map(([name, p]) => [name, p]));
