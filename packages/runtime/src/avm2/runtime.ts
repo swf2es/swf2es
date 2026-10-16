@@ -66,6 +66,7 @@ import {
   prefixedNamespace,
   prefixOf,
   publicNs,
+  publicQname,
   qname,
   TypeName,
 } from "./names.js";
@@ -514,7 +515,7 @@ export class Runtime {
     // one defining Object makes XML while XML's needs Object.
     if (!this.toplevelReady) {
       this.toplevelReady = true;
-      const toplevel = this.findScript(qname(publicNs, "Object"));
+      const toplevel = this.findScript(publicQname("Object"));
       if (toplevel && toplevel !== script) {
         this.initScript(toplevel);
       }
@@ -1441,7 +1442,7 @@ export class Runtime {
   }
 
   publicName(name: Value): Multiname {
-    return qname(publicNs, typeof name === "string" ? name : this.toString(name));
+    return publicQname(typeof name === "string" ? name : this.toString(name));
   }
 
   // Calls.
@@ -2333,7 +2334,7 @@ export class Runtime {
     // that is not a function is TypeError 1006; a Namespace is a primitive.
     const order = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
     for (const name of order) {
-      const v = this.callProperty(o, qname(publicNs, name));
+      const v = this.callProperty(o, publicQname(name));
       if (v === null || typeof v !== "object" || v instanceof Namespace) {
         return v;
       }

@@ -7,7 +7,7 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook, PropertyHook } from "../hooks.js";
-import { type Multiname, NS_Public, namespace, publicNs, qname } from "../names.js";
+import { type Multiname, NS_Public, namespace, publicNs, publicQname, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import type { Natives } from "./define.js";
 
@@ -81,9 +81,9 @@ const proxyHook: PropertyHook = {
   add: () => undefined,
   // toString is a call like any other the traits do not bind: callProperty answers it.
   toString: (rt, o) =>
-    rt.toString(call(rt, o, "callProperty", nameFor(rt, qname(publicNs, "toString")))),
+    rt.toString(call(rt, o, "callProperty", nameFor(rt, publicQname("toString")))),
   toXMLString: (rt, o) =>
-    rt.toString(call(rt, o, "callProperty", nameFor(rt, qname(publicNs, "toString")))),
+    rt.toString(call(rt, o, "callProperty", nameFor(rt, publicQname("toString")))),
 };
 
 export const proxyHooks: Record<string, ClassHook> = {

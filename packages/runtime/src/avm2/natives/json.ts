@@ -8,12 +8,12 @@
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
-import { NS_Public, publicNs, qname } from "../names.js";
+import { API_USER, NS_Public, publicQname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import type { Traits } from "../traits.js";
 import type { Natives } from "./define.js";
 
-const TO_JSON = qname(publicNs, "toJSON");
+const TO_JSON = publicQname("toJSON");
 
 /** Whether each traits binds a public toJSON, found once. */
 const boundToJSON = new WeakMap<Traits, boolean>();
@@ -316,7 +316,7 @@ function parse(rt: Runtime, text: string): Value {
             }
 
             advance();
-            rt.setProperty(o, qname(publicNs, name), parseValue());
+            rt.setProperty(o, publicQname(name), parseValue());
             if (current() !== ",") {
               break;
             }
@@ -353,7 +353,13 @@ function describedNames(traits: Traits): [string[], string[]] {
   for (let t: Traits | null = traits; t && t.name !== "Object"; t = t.base) {
     for (const [name, list] of t.bindings) {
       for (const b of list) {
-        if (b.ns.kind !== NS_Public || b.ns.uri !== "" || traits.isTransient(b.value)) {
+        // A member of a later version, AIR-only or VM-internal, is not the code's to see.
+        if (
+          b.ns.kind !== NS_Public ||
+          b.ns.uri !== "" ||
+          b.version > API_USER ||
+          traits.isTransient(b.value)
+        ) {
           continue;
         }
 
@@ -496,7 +502,7 @@ class Serializer {
     const own: Map<string, Value> | null = value.$d;
     const prop = (name: string) => {
       // A dynamic property of its own is where getProperty would find it.
-      const v = own?.has(name) ? own.get(name) : rt.getProperty(value, qname(publicNs, name));
+      const v = own?.has(name) ? own.get(name) : rt.getProperty(value, publicQname(name));
       const written = this.str(name, v, value);
       if (written === undefined) {
         return;
