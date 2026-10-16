@@ -40,6 +40,8 @@ export interface Movie {
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
+  /** `d` hidden by its `_visible`: the focus, if it has it, goes. */
+  hidden(d: DisplayObject): void;
   /** startDrag: `d` follows the pointer, within `bounds` (left, top, right, bottom) where given. */
   startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;
   stopDrag(): void;
@@ -211,6 +213,9 @@ const PROPERTIES: [string, DisplayProperty][] = [
         if (n !== null) {
           f.target.visible = n !== 0;
           f.target.invalidate(TRANSFORM);
+          if (n === 0) {
+            f.movie.hidden(f.target);
+          }
         }
       },
     },
@@ -755,7 +760,7 @@ function boundsObject(
 }
 
 /** The display object a method's argument names from `start`: a clip's AVM1 object, or a path. */
-function targetOf(
+export function targetOf(
   movie: Movie,
   start: DisplayObject,
   value: Value,

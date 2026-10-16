@@ -1388,6 +1388,39 @@ showed before, else 0, as adl gives them (Ruffle gives the opposite). A listener
 list hears nothing: a clip is found by its path (the corpus's
 `string_paths_keyevents`).
 
+The focus (`Avm1.focus`, the tab order in `avm1/focus.ts`, `Selection` in
+`globals/Selection.ts`), as Ruffle's FocusTracker has it. A button, or a
+clip below the root in button mode or whose `focusEnabled` is true, may
+be focused; `Selection.setFocus` of nothing gives false, of undefined or
+null takes the focus away, and of anything else, an object or a path
+from the code's target, focuses it where it may be and gives true, else
+false; `getFocus` gives the focus's target path, or null. As the focus
+changes, at once and not queued, the object that had it hears
+`onKillFocus(new)`, the one that has it `onSetFocus(old)`, then
+Selection's listeners `onSetFocus(old, new)`; focusing it again tells
+none. A focused object removed, or hidden by its own `_visible`, loses
+the focus so. The highlight, Ruffle's: as the focus moves it shows where
+the object draws something and its `_focusrect` (from SWF 6 its own
+where set, else the stage's) is true, and is hidden otherwise; a left
+press makes it inactive, and below SWF 9 any press, release or move does,
+until the focus moves again. While it is not inactive, the focused
+button or clip hears `onKeyDown` and `onKeyUp` (from SWF 6), its clip
+actions' keyDown first; while it shows, Enter, and Space, that no
+keyPress took press and release what has the focus, enabled. Tab, and
+Shift+Tab, that no keyPress took moves the focus through the tab order,
+after what the key queued runs, round past the end, from the first (or
+the last) where nothing in it has the focus; the order is walked as the
+list is drawn, each object before what is in it, leaving out what is
+hidden and what is in a clip whose `tabChildren` is false: a button
+unless its `tabEnabled` is false, a clip whose `tabEnabled` is true or,
+not set, one in button mode or with a `tabIndex`. Once any has a
+`tabIndex` (an int; -1 none; a value but a number or boolean the least),
+the order is by it, equal ones as walked, those without one left out;
+else by place, 6 × y + x of the top left corner on the stage in twips (a
+button's hit area's), the first walked at a place alone kept. Text
+fields take the focus with their AS2 face (step 13), and so the
+corpus's tests that begin by focusing one wait for it.
+
 ### Time and the script timeout
 
 The timers of `setInterval` and `setTimeout` (`runtime/src/avm1/globals/
@@ -1758,12 +1791,18 @@ determinism` green, and the corpus baseline may only go up.
     (`avm1/keyboard.ts`), `Key` and `Mouse` and their listeners, and
     keyPress (see "Clip events and buttons"); the corpus goes to 296
     (`mouse_listeners`, `button_keypress`, `key_isToggled`,
-    `mouse_events_visible_enabled`). Left: focus and `Selection` (a
-    focused button's or clip's `onKeyDown` and `onKeyUp`, Tab, Enter and
-    Space on what has focus), `_droptarget`, `_xmouse` in device pixels
-    as Ruffle reads it (`mouse_pos`), the viewport's scale factor a test
-    gives (`mouse_pos_with_scale_factor`), and touches, which reach only
-    an AS3 movie's pointer.
+    `mouse_events_visible_enabled`). Then the focus: `Selection`, focus
+    events, a focused object's keys, Tab and its order, Enter and Space
+    (see "Clip events and buttons"); the corpus goes to 307
+    (`button_key_events`, `button_key_events_special`,
+    `button_keypress_vs_press`, `button_keypress_vs_tab`,
+    `movieclip_focusenabled`, `selection_asbroadcaster`, three of
+    `tab_ordering_*`...). Left: text fields' focus (step 13, which most of
+    the focus and tab tests begin with), the highlight drawn,
+    `_droptarget`, `_xmouse` in device pixels as Ruffle reads it
+    (`mouse_pos`), the viewport's scale factor a test gives
+    (`mouse_pos_with_scale_factor`), and touches, which reach only an AS3
+    movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
     Corpus tests of text fields.
