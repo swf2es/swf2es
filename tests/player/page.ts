@@ -259,7 +259,9 @@ async function runSwf(
     output.width = Math.round(player.width * shownAt);
     output.height = Math.round(player.height * shownAt);
     document.body.replaceChildren(output);
+    player.quality = ["LOW", "MEDIUM", "HIGH", "BEST"][quality] ?? "HIGH";
     const view = new PixiView(renderer);
+    view.quality = player.quality;
     // Drawn n times finer to be averaged down: the screen is the output canvas.
     view.screenScale = shownAt;
     view.stage.scale.set(shownAt / zoom);

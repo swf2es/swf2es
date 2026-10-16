@@ -297,8 +297,8 @@ export class Swf2esPlayerElement extends ElementBase {
       this.#size();
     }
 
-    if (name === "quality" && this.#session?.scripting) {
-      this.#session.scripting.quality = quality(value);
+    if (name === "quality" && this.#session?.player) {
+      this.#session.player.quality = quality(value);
     }
 
     this.#session?.playback?.changed();
@@ -386,11 +386,11 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.player = new Player(bytes, session.scripting, avm1);
+      session.player.quality = quality(attribute(this, "quality"));
       const playback = await Playback.create(
         this.#box,
         session.player,
         session.scripting,
-        quality(attribute(this, "quality")) !== "LOW",
         () => this.#look(),
         (error) => this.#report(session, error),
       );
@@ -467,7 +467,6 @@ export class Swf2esPlayerElement extends ElementBase {
       onUncaught: (error) => this.#report(session, error),
       ...moduleCacheOptions(),
     });
-    scripting.quality = quality(attribute(this, "quality"));
     return scripting;
   }
 

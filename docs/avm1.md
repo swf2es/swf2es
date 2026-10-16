@@ -1206,8 +1206,9 @@ probes they came of), and the corpus, where it is not what Ruffle does:
 - `hitTest(x, y)` is in the root's space against the clip's bounds on the
   stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
   Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.
-- StopSounds and ToggleQuality are minimal: no sound is stopped yet, and
-  the quality toggles `_quality` without changing how anything is drawn.
+- StopSounds is minimal: no sound is stopped yet. ToggleQuality toggles
+  `_quality`, which the element draws by from the next frame (see
+  architecture.md, "Showing a player").
 
 adl's harness loads a SWF as an `AVM1Movie`, whose root traces as
 `_root`, its dot paths so, with a name and a parent of the harness's, and
