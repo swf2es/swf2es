@@ -307,6 +307,20 @@ async function embedderFetch() {
   return { asked, played };
 }
 
+/** The shapes element playing `src` if given, then its quality attribute set while it plays: where it is drawn. */
+async function requality(quality: string, src?: string) {
+  const shapes = element("shapes");
+  if (src) {
+    shapes.setAttribute("src", src);
+    await shapes.ready;
+  }
+
+  shapes.setAttribute("quality", quality);
+  await frames(3);
+  const r = shapes.getBoundingClientRect();
+  return [r.x, r.y, r.width, r.height];
+}
+
 /** Pixels per CSS pixel and the scripted SWF's canvas after the page widens it. */
 async function resize() {
   const movie = element("movie");
@@ -509,6 +523,7 @@ Object.assign(globalThis, {
   externalInterface,
   destroyMovie,
   resize,
+  requality,
   embedderFetch,
   watched,
   churn,

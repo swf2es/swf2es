@@ -8,6 +8,7 @@ import {
   RenderTexture,
   Sprite,
   Texture,
+  type TextureSource,
 } from "pixi.js";
 import { BitmapStore, type GpuCopy, type PixelRect } from "../bitmap/bitmap.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "../display/gradients.js";
@@ -198,12 +199,16 @@ class StoreTexture implements GpuCopy {
       const texture = RenderTexture.create({
         width: this.source.width,
         height: this.source.height,
-        scaleMode: linear ? "linear" : "nearest",
+        scaleMode: linear && this.bitmaps.smoothing ? "linear" : "nearest",
         addressMode: repeat ? "repeat" : "clamp-to-edge",
         autoGarbageCollect: false,
       });
       if (!repeat) {
         keepClamped(texture.source);
+      }
+
+      if (linear) {
+        this.bitmaps.smoothed.add(texture.source);
       }
 
       variant = { texture, version: -1 };
@@ -224,6 +229,7 @@ class StoreTexture implements GpuCopy {
     this.bitmaps.forget(this);
     destroyTexture(this.texture);
     for (const { texture } of this.variants.values()) {
+      this.bitmaps.smoothed.delete(texture.source);
       destroyTexture(texture);
     }
   }
@@ -239,10 +245,31 @@ class GpuBitmaps {
   private readonly limit: number;
   private readonly copies = new WeakMap<BitmapStore, StoreTexture>();
   private readonly collected = new FinalizationRegistry<StoreTexture>((copy) => copy.destroy());
+  /** The sources of the copies sampled linearly where bitmaps are smoothed. */
+  readonly smoothed = new Set<TextureSource>();
+  private smooth = true;
 
   constructor(private readonly renderer: Renderer) {
     const gl = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
     this.limit = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 8192;
+  }
+
+  /** Whether a Bitmap or a fill asking to be smoothed is: not at Flash's low quality. */
+  get smoothing(): boolean {
+    return this.smooth;
+  }
+
+  set smoothing(smooth: boolean) {
+    if (smooth === this.smooth) {
+      return;
+    }
+
+    // Sampled otherwise in place: the fills and sprites that draw with the copies keep them.
+    this.smooth = smooth;
+    for (const source of this.smoothed) {
+      source.scaleMode = smooth ? "linear" : "nearest";
+      source.style.update();
+    }
   }
 
   /**

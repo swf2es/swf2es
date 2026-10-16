@@ -477,9 +477,19 @@ export class PixiView {
    * which are the stage's, so its thinnest line is a pixel.
    */
   screenScale: number | null = null;
+  /**
+   * The stage's quality, Flash's "LOW" to "BEST": at low, no bitmap is
+   * smoothed. Its edges' anti-aliasing is the host's, which makes the
+   * renderer and draws on it.
+   */
+  set quality(quality: string) {
+    gpuBitmaps(this.renderer).smoothing = quality !== "LOW";
+  }
+
   /** Its drawings' textured triangles drawn, and the target's pixels a side of one of Flash's they were last told. */
   private readonly meshes = new Set<TriangleView>();
   private meshPixel = 1;
+  private meshSmoothing = true;
   /** The thinnest line it last drew the stage's lines with; a change draws them all again. */
   private strokedAt = 0;
   /** The filter units it last drew the stage's filters with; the stage's own scale changes them too. */
@@ -1371,12 +1381,12 @@ export class PixiView {
 
   /** Textured triangles, after what the node draws so far; none where the renderer is not WebGL's. */
   private drawMesh(node: Node, mesh: TriangleMesh): void {
-    const texture =
-      this.renderer.type === RendererType.WEBGL
-        ? gpuBitmaps(this.renderer).texture(mesh.image)
-        : null;
+    const bitmaps = gpuBitmaps(this.renderer);
+    const texture = this.renderer.type === RendererType.WEBGL ? bitmaps.texture(mesh.image) : null;
     if (texture && mesh.positions.length) {
-      node.art.addChild(new TriangleView(mesh, texture, this.flashPixel, this.meshes));
+      const view = new TriangleView(mesh, texture, this.flashPixel, this.meshes);
+      view.smoothing = bitmaps.smoothing;
+      node.art.addChild(view);
     }
   }
 
@@ -2753,8 +2763,18 @@ export class PixiView {
       }
     }
 
+    // Smoothed or not, the bitmaps in kept filter outputs are drawn again, as a new scale's are.
+    const smoothing = gpuBitmaps(this.renderer).smoothing;
+    const resmoothed = smoothing !== this.meshSmoothing;
+    if (resmoothed) {
+      this.meshSmoothing = smoothing;
+      for (const mesh of this.meshes) {
+        mesh.smoothing = smoothing;
+      }
+    }
+
     const units = this.filterUnits;
-    this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt;
+    this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt || resmoothed;
     this.strokedAt = this.leastWidth;
     this.filteredAt = units;
     if (!this.fresh) {
@@ -2848,6 +2868,8 @@ export class PixiView {
     const n = samples;
     const view = new PixiView(this.renderer, true, this);
     view.samples = n;
+    const bitmaps = gpuBitmaps(this.renderer);
+    const smoothing = bitmaps.smoothing;
     view.drawRoot = o;
     // Built at the draw's own scale, lines included, as the stage's are,
     // then rendered n times larger: the curves are no finer than on the
@@ -2856,6 +2878,8 @@ export class PixiView {
     const scaled = new PixiContainer();
     let target = drawTarget(width * n, height * n);
     try {
+      // At low quality, a sample a pixel, as the stage's at low, no bitmap is smoothed.
+      bitmaps.smoothing = n > 1;
       const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
       const masks = new PixiContainer();
       scaled.addChild(node, masks);
@@ -2869,6 +2893,7 @@ export class PixiView {
       throw error;
     } finally {
       view.dispose(scaled);
+      bitmaps.smoothing = smoothing;
     }
 
     // Halved until a sample a pixel: a linear sample at the corner four texels share is their mean.

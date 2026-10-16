@@ -63,6 +63,25 @@ export class Player {
     return this.scripting?.stageColor ?? this.swfBackground;
   }
 
+  /**
+   * The stage's quality, "LOW" to "BEST": the host's at the start, then what
+   * a script sets, Stage.quality or AVM1's _quality; a host that reads it
+   * each frame draws by it.
+   */
+  get quality(): string {
+    return this.scripting?.quality ?? this.avm1?.quality ?? "HIGH";
+  }
+
+  set quality(quality: string) {
+    if (this.scripting) {
+      this.scripting.quality = quality;
+    }
+
+    if (this.avm1) {
+      this.avm1.quality = quality;
+    }
+  }
+
   /** Renderer-independent mouse routing, once scripts have been loaded. */
   readonly pointer: PointerInput | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */

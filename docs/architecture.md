@@ -4558,6 +4558,21 @@ time passed and draws when `changes` moved or the element did. The keys
 go to the element, focusable and focused as it is pressed, as a plug-in
 had them only while focused.
 
+It draws by the stage's quality (`Player.quality`): the element's
+`quality` attribute at the start and as the page changes it, then what a
+script sets, `Stage.quality` or AVM1's `_quality`, from the next frame.
+Flash draws edges aliased and smooths no bitmap at low, a Bitmap's or a
+bitmap fill's that asks for it among them, and supersamples on a grid
+of 2×2 at medium and 4×4 at high and best (the `stage-quality-*` cases).
+The canvas is not multisampled; the back buffer the stage is drawn into
+is, but at low (the Pixi fork's `GlBackBufferSystem.antialias`, which
+makes it anew), and `PixiView.quality` at low samples the smoothed copies
+of the stores' textures, and drawTriangles' fills, nearest. Medium is the
+GPU's multisampling as high is: the four samples it takes are near
+enough to either grid that supersampling, 4 or 16 times the pixels, would
+cost more than the edges show. A BitmapData's draw at low quality
+smooths no bitmap either.
+
 ### The page's configuration
 
 `configure` (`config.ts`) sets what every player on the page shares:
