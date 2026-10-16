@@ -9,7 +9,7 @@
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Metadata, Signature, TypeRef, Value } from "../descriptors.js";
-import { formatClassName, type Namespace, NS_Public } from "../names.js";
+import { API_USER, formatClassName, type Namespace, NS_Public } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import {
   BIND_Const,
@@ -35,15 +35,6 @@ const INCLUDE_CONSTRUCTOR = 0x0080;
 const INCLUDE_TRAITS = 0x0100;
 const USE_ITRAITS = 0x0200;
 const HIDE_OBJECT = 0x0400;
-
-/**
- * The API version the caller sees, which a binding above is hidden at, as
- * avmplus hides what the calling code's pool is not versioned for: the
- * latest player's, as avmshell runs everything; a SWF's own version is
- * not yet taken into account. The builtins' internal members are above it
- * (API_Internal, 52, in the compiler's table).
- */
-const CURRENT_API = 50;
 
 /** A binding seen from the traits described: its name and namespace, its value, and the traits that bind it. */
 interface Member {
@@ -340,10 +331,7 @@ function members(t: Traits, flags: number): Member[] {
       : new Set([...owner.interfaces].flatMap((i) => [i.name, i.name.replace("::", ":")]));
     for (const [name, list] of owner.bindings) {
       for (const b of list) {
-        if (
-          b.version > CURRENT_API ||
-          (interfaceNames && b.ns.uri && interfaceNames.has(b.ns.uri))
-        ) {
+        if (b.version > API_USER || (interfaceNames && b.ns.uri && interfaceNames.has(b.ns.uri))) {
           continue;
         }
 
