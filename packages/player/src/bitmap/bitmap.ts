@@ -205,6 +205,20 @@ export class BitmapStore {
   }
 
   /**
+   * The pixels for `copy` to upload once its context was lost and given
+   * back: the CPU's, a draw only the copy held lost with it, not read back
+   * from the texture, which is empty now.
+   */
+  lostOnGpu(copy: GpuCopy): Uint32Array {
+    if (this.gpu === copy) {
+      this.gpu = null;
+      this.gpuNewer = false;
+    }
+
+    return this.pixels;
+  }
+
+  /**
    * `op` done on the GPU's copy where that is newer, so the pixels stay
    * there: an operation after a draw would otherwise wait for the GPU and
    * bring the whole store back, on every frame of a SWF that draws and then
