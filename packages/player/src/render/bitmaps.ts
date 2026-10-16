@@ -74,6 +74,11 @@ class StoreTexture implements GpuCopy {
   /** The store's version the texture holds. */
   version = -1;
   /**
+   * The renderer's context the texture holds its pixels in (GpuBitmaps.context):
+   * the one it was made in, which a draw into it keeps.
+   */
+  context: number;
+  /**
    * The same pixels sampled otherwise, copied on the GPU as the texture
    * changes: linearly for a smoothed Bitmap, and repeating or clamped,
    * either way, for bitmap fills; by "linear repeat".
@@ -99,6 +104,7 @@ class StoreTexture implements GpuCopy {
     // texture without an upload, and a store of one colour is cleared to it.
     this.source.resource = null as unknown as Uint8Array;
     this.texture = new Texture({ source: this.source });
+    this.context = bitmaps.context;
   }
 
   read(): Uint32Array {
@@ -117,8 +123,13 @@ class StoreTexture implements GpuCopy {
     }
 
     if (!uniform) {
+      // Uploaded now, the texture made first if it has none, and the bytes let go
+      // of: Pixi would keep a copy of every bitmap's pixels beside the store's.
+      // A context lost and given back has the stores upload again (GpuBitmaps).
       this.source.resource = rgbaOf(pixels);
       this.source.update();
+      this.renderer.texture.initSource(this.source);
+      this.source.resource = null as unknown as Uint8Array;
       return;
     }
 
@@ -249,9 +260,13 @@ class GpuBitmaps {
   readonly smoothed = new Set<TextureSource>();
   private smooth = true;
 
+  /** Counts the renderer's contexts: a new one lost what the textures held, and they upload again. */
+  context = 0;
+
   constructor(private readonly renderer: Renderer) {
     const gl = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
     this.limit = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 8192;
+    renderer.runners.contextChange.add({ contextChange: () => this.context++ });
   }
 
   /** Whether a Bitmap or a fill asking to be smoothed is: not at Flash's low quality. */
@@ -297,9 +312,10 @@ class GpuBitmaps {
     }
 
     // Behind the store: its pixels, read back first if another renderer's draw wrote them.
-    if (copy.version !== store.version) {
+    if (copy.version !== store.version || copy.context !== this.context) {
       copy.upload(store.pixels);
       copy.version = store.version;
+      copy.context = this.context;
     }
 
     return smoothing ? copy.sampled(true, false) : copy.texture;
