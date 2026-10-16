@@ -1337,7 +1337,7 @@ export class Runtime {
       );
     }
 
-    return this.hasProperty(o, publicQname(typeof name === "string" ? name : this.toString(name)));
+    return this.hasProperty(o, publicQname(this.nameString(name)));
   }
 
   /** Whether `o` itself has element `i`: its class's indexing, an Array's, or a dynamic property. */
@@ -1447,7 +1447,12 @@ export class Runtime {
    * publicQname, at user code's version.
    */
   publicName(name: Value): Multiname {
-    return qname(publicNs, typeof name === "string" ? name : this.toString(name));
+    return qname(publicNs, this.nameString(name));
+  }
+
+  /** A property name as a string, as ToString makes one. */
+  private nameString(name: Value): string {
+    return typeof name === "string" ? name : this.toString(name);
   }
 
   // Calls.
