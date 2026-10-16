@@ -1355,7 +1355,38 @@ there, where it has one (`_up` for `rollOut` and `releaseOutside`,
 `dragOver`), then queues its clip actions and method for it, itself
 their target. A button's AS2 object has `Button`'s prototype
 (`globals/Button.ts`), with `enabled`, `useHandCursor` and `getDepth` so
-far. A key's `keyPress` conditions wait for `Key` (step 12's next part).
+far.
+
+An AVM1 movie's keyboard is `avm1/keyboard.ts`'s (the host's `Keyboard`,
+as `input/keyboard.ts`'s is an AS3 movie's). A key pressed goes, as Ruffle
+orders it, to every clip's `keyDown` clip actions, as they are drawn,
+the lowest first and what is in one before it (a clip's `onKeyDown`
+waits for focus), then to Key's listeners'
+`onKeyDown`, both queued; then, if the key is a keyPress, to the first
+button or clip, in the order they are drawn, whose keyPress it is: a
+button's condition blocks with that key, enabled or not, its parent
+their target, or a clip's `on (keyPress)` clip actions. A hidden clip
+takes none, nor what is in it, a hidden button none while it is up, and
+a button in a button none. Then the queue runs. A key let go goes to the
+clips' `keyUp` and Key's listeners' `onKeyUp`. A keyPress's key is
+Flash's own code (Ruffle's `ButtonKeyCode`): a printable ASCII
+character's code, or one below 20 for an editing key (Left 1, Right 2,
+Home 3, End 4, Insert 5, Delete 6, Backspace 8, Enter 13, Up 14, Down 15,
+Page Up 16, Page Down 17, Tab 18, Escape 19); a host whose text comes
+apart from its keys, as the corpus's replay, gives the character by
+`text`. `Key` (`globals/Key.ts`) is a broadcaster with Flash's key
+constants, `isDown` (the mouse's buttons are keys 1, 2 and 4),
+`isToggled` (each press of a key, a mouse button's too, turns it on or
+off, a held key's repeats not: the corpus's `key_isToggled`), and
+`getCode` and `getAscii`, the last key pressed or let go, a mouse
+button's 1, 2 or 4 among them. `Mouse` is
+a broadcaster whose listeners hear `onMouseMove`, `onMouseDown` and
+`onMouseUp` after every clip's clip events for them, and
+`onMouseWheel(delta, target)`, the wheel the SWF's where Mouse has
+listeners; `hide` and `show` hide and show the pointer, giving 1 where it
+showed before, else 0, as adl gives them (Ruffle gives the opposite). A listener that is a clip taken off the display
+list hears nothing: a clip is found by its path (the corpus's
+`string_paths_keyevents`).
 
 ### Time and the script timeout
 
@@ -1723,11 +1754,16 @@ determinism` green, and the corpus baseline may only go up.
     The corpus goes to 292 of the 715 (`mouse_events`,
     `clip_event_propagation_order`, `button_goto`, `click_block`,
     `button_properties_special_cases`, `string_paths_eval`); 13 more
-    match further. Left for the keys' part: `Key` and `Mouse` and their
-    listeners, `keyPress`, focus and `Selection`, `_droptarget`,
-    `_xmouse` in device pixels as Ruffle reads it (`mouse_pos`), the
-    viewport's scale factor a test gives (`mouse_pos_with_scale_factor`),
-    and touches, which reach only an AS3 movie's pointer.
+    match further. Then the keys: AVM1's own keyboard
+    (`avm1/keyboard.ts`), `Key` and `Mouse` and their listeners, and
+    keyPress (see "Clip events and buttons"); the corpus goes to 296
+    (`mouse_listeners`, `button_keypress`, `key_isToggled`,
+    `mouse_events_visible_enabled`). Left: focus and `Selection` (a
+    focused button's or clip's `onKeyDown` and `onKeyUp`, Tab, Enter and
+    Space on what has focus), `_droptarget`, `_xmouse` in device pixels
+    as Ruffle reads it (`mouse_pos`), the viewport's scale factor a test
+    gives (`mouse_pos_with_scale_factor`), and touches, which reach only
+    an AS3 movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
     Corpus tests of text fields.

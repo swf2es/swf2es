@@ -753,7 +753,57 @@ test("a frame clock that stands still moves for a script waiting on getTimer", a
   assert.deepEqual(lines, ["true"]);
 });
 
-test("pointer and keyboard events reach every clip's clip actions, the newest first, and stop the SWF at clip actions Flash cannot read", async () => {
+test("a key goes to the clips' keyDown as drawn, then Key's listeners, then the first keyPress, and Key keeps its state", async () => {
+  const keyDown = 1 << 6;
+  const keyPress = 1 << 17;
+  const traced = (source: string) => [...script(source, 6)(flashAssembler()).end().bytes()];
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({
+        depth: 1,
+        character: 1,
+        name: "a",
+        clipActions: w.clipActions(6, [
+          { events: keyDown, actions: traced(`trace("keyDown a " + Key.getCode());`) },
+          { events: keyPress, key: 65, actions: traced(`trace("keyPress a");`) },
+        ]),
+      }),
+      w.place({
+        depth: 2,
+        character: 1,
+        name: "b",
+        clipActions: w.clipActions(6, [
+          { events: keyPress, key: 65, actions: traced(`trace("keyPress b");`) },
+        ]),
+      }),
+      as1(
+        `Key.addListener({ onKeyDown: function () { trace("listener " + Key.isDown(65) + " " + Key.getAscii()); }, onKeyUp: function () { trace("up " + Key.isDown(65) + " " + Key.isToggled(65)); } }); stop();`,
+        6,
+      ),
+    ],
+  ]);
+  const { lines, player } = await play(swf, 1);
+  const keyboard = player.keyboard;
+  assert.ok(keyboard);
+
+  // Its press toggles A on once: a held key's repeated press does not again.
+  keyboard.handle("down", { keyCode: 65, charCode: 65 });
+  keyboard.handle("down", { keyCode: 65, charCode: 65 });
+  keyboard.handle("up", { keyCode: 65, charCode: 65 });
+
+  assert.deepEqual(lines, [
+    "keyDown a 65",
+    "listener true 65",
+    "keyPress a",
+    "keyDown a 65",
+    "listener true 65",
+    "keyPress a",
+    "up false true",
+  ]);
+});
+
+test("the pointer's events reach every clip's clip actions, the newest first, and stop the SWF at clip actions Flash cannot read", async () => {
   const mouseDown = 1 << 4;
   const events = (name: string) =>
     w.clipActions(6, [

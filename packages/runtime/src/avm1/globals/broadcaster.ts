@@ -45,43 +45,79 @@ function broadcast(): Native {
       return undefined;
     }
 
-    const name = stringOf(args[0], version);
-    const rest = args.slice(1);
-    const listeners = get(self, "_listeners", version);
-    if (!(listeners instanceof Avm1Object)) {
-      return undefined;
-    }
-
-    const n = lengthOf(listeners, version);
-    if (n <= 0) {
-      return undefined;
-    }
-
-    // From SWF 7 the listeners as the call found them; up to 6 the array as it is
-    // by then, so that one a listener removes is not called (adl).
-    const snapshot: Value[] | null = version >= 7 ? [] : null;
-    if (snapshot !== null) {
-      for (let i = 0; i < n; i++) {
-        snapshot.push(get(listeners, String(i), version));
-      }
-    }
-
-    for (let i = 0; i < n; i++) {
-      const listener = snapshot === null ? get(listeners, String(i), version) : snapshot[i];
-      if (!(listener instanceof Avm1Object)) {
-        continue;
-      }
-
-      if (name === "") {
-        invoke(listener, listener, rest, version);
-      } else {
-        const method = get(listener, name, version, listener, false);
-        invoke(method, listener, rest, version, Math.max(foundDepth, 1));
-      }
-    }
-
-    return true;
+    return broadcastMessage(self, stringOf(args[0], version), args.slice(1), version);
   };
+}
+
+/**
+ * `self`'s broadcastMessage of `name` with `rest`, as the player sends Key's
+ * and Mouse's: undefined where it has no listeners, else true. A listener
+ * `removed` says is a clip taken off the display list hears nothing: a
+ * clip is found by its path, at which there is none (the corpus's
+ * `string_paths_keyevents`).
+ */
+export function broadcastMessage(
+  self: Avm1Object,
+  name: string,
+  rest: Value[],
+  version: number,
+  removed?: (listener: Avm1Object) => boolean,
+): Value {
+  const listeners = get(self, "_listeners", version);
+  if (!(listeners instanceof Avm1Object)) {
+    return undefined;
+  }
+
+  const n = lengthOf(listeners, version);
+  if (n <= 0) {
+    return undefined;
+  }
+
+  // From SWF 7 the listeners as the call found them; up to 6 the array as it is
+  // by then, so that one a listener removes is not called (adl).
+  const snapshot: Value[] | null = version >= 7 ? [] : null;
+  if (snapshot !== null) {
+    for (let i = 0; i < n; i++) {
+      snapshot.push(get(listeners, String(i), version));
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
+    const listener = snapshot === null ? get(listeners, String(i), version) : snapshot[i];
+    if (!(listener instanceof Avm1Object) || removed?.(listener)) {
+      continue;
+    }
+
+    if (name === "") {
+      invoke(listener, listener, rest, version);
+    } else {
+      const method = get(listener, name, version, listener, false);
+      invoke(method, listener, rest, version, Math.max(foundDepth, 1));
+    }
+  }
+
+  return true;
+}
+
+/**
+ * `o` made a broadcaster, as AsBroadcaster.initialize makes it: its
+ * broadcastMessage, addListener, removeListener and an empty `_listeners`,
+ * hidden from SWF 5 as ASSetPropFlags(o, names, 131) hides them.
+ */
+export function initializeBroadcaster(o: Avm1Object, realm: Realm, version: number): void {
+  const constr = realm.AsBroadcaster.constr;
+  const hidden = DONT_ENUM | DONT_DELETE | VERSION_6;
+  const install = (name: string, value: Value) => {
+    set(o, name, value, version);
+    const p = o.own(name, version);
+    if (p !== undefined) {
+      p.flags |= hidden;
+    }
+  };
+  install("broadcastMessage", realm.method(broadcast()));
+  install("addListener", get(constr, "addListener", version));
+  install("removeListener", get(constr, "removeListener", version));
+  install("_listeners", realm.newArray([], version));
 }
 
 export function broadcasterClass(realm: Realm): { constr: Avm1Function; proto: Avm1Object } {
@@ -136,23 +172,10 @@ export function broadcasterClass(realm: Realm): { constr: Avm1Function; proto: A
     "initialize",
     realm.method((_, args, version) => {
       const o = args.length > 0 ? args[0] : undefined;
-      if (!(o instanceof Avm1Object)) {
-        return undefined;
+      if (o instanceof Avm1Object) {
+        initializeBroadcaster(o, realm, version);
       }
 
-      // As ASSetPropFlags(o, names, 131) sets them: hidden from SWF 5.
-      const hidden = DONT_ENUM | DONT_DELETE | VERSION_6;
-      const install = (name: string, value: Value) => {
-        set(o, name, value, version);
-        const p = o.own(name, version);
-        if (p !== undefined) {
-          p.flags |= hidden;
-        }
-      };
-      install("broadcastMessage", realm.method(broadcast()));
-      install("addListener", get(constr, "addListener", version));
-      install("removeListener", get(constr, "removeListener", version));
-      install("_listeners", realm.newArray([], version));
       return undefined;
     }),
     flags,
