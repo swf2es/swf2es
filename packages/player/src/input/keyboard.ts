@@ -260,8 +260,26 @@ function parseRestrict(restrict: string): { allowed: Interval[]; disallowed: Int
   return { allowed, disallowed };
 }
 
+/**
+ * The keyboard as a host drives it (bindKeyboard, and the corpus's input
+ * replay): an AS3 movie's KeyboardInput, or an AVM1 movie's
+ * (avm1/keyboard.ts), whose keys go to Key, buttons and clips.
+ */
+export interface Keyboard {
+  /** How many key events it has handled: each may run scripts and change what is drawn. */
+  readonly handled: number;
+  /** A key pressed or let go; without `edits`, its events alone. Whether the SWF used it. */
+  handle(type: "down" | "up", k: KeyState, edits?: boolean): boolean;
+  /** Text typed, or a field's editing key, with no key events. Whether the SWF used it. */
+  text(k: KeyState): boolean;
+  /** A copy or cut: what goes to the system's clipboard, or null for nothing. */
+  copy(cut?: boolean): ClipboardText | null;
+  /** A paste of the system's clipboard. Whether the SWF used it. */
+  paste(data?: ClipboardText | null): boolean;
+}
+
 /** The keyboard on the player's display list, independent of a renderer. */
-export class KeyboardInput {
+export class KeyboardInput implements Keyboard {
   /** How many key events it has handled: each may run scripts and change a field. */
   handled = 0;
   /** The field the pointer was pressed on, where, and by which click, whose selection a drag extends. */
@@ -275,14 +293,36 @@ export class KeyboardInput {
   /**
    * A key pressed or let go: whether the SWF used it, a field's edit or
    * caret, or Tab moving focus, which a host then keeps from the browser.
+   * Without `edits`, it sends the key's events and moves focus, and edits
+   * nothing, for a host whose text comes apart from its keys (`text`).
    */
-  handle(type: "down" | "up", k: KeyState): boolean {
+  handle(type: "down" | "up", k: KeyState, edits = true): boolean {
     this.handled++;
     // A key is a user's gesture, in whose handlers a script may write to the clipboard.
-    return this.scripting.clipboard.gesture(() => this.key(type, k));
+    return this.scripting.clipboard.gesture(() => this.key(type, k, edits));
   }
 
-  private key(type: "down" | "up", k: KeyState): boolean {
+  /**
+   * Text typed, or a field's editing key (Backspace, an arrow, Ctrl+A),
+   * with no key events: the field with focus edits by it as by its key.
+   * Whether a field used it.
+   */
+  text(k: KeyState): boolean {
+    this.handled++;
+    // A user's gesture, as a key is: a listener may write to the clipboard.
+    return this.scripting.clipboard.gesture(() => {
+      const focus = this.focused();
+      if (k.ctrlKey && !k.altKey && k.keyCode === 65) {
+        return this.selectAll(focus);
+      }
+
+      return focus instanceof TextObject && (focus.type === "input" || focus.selectable)
+        ? this.edit(focus, k)
+        : false;
+    });
+  }
+
+  private key(type: "down" | "up", k: KeyState, edits: boolean): boolean {
     const s = this.scripting;
     const focus = this.focused();
     const target = focus ?? this.stage;
@@ -308,6 +348,10 @@ export class KeyboardInput {
 
     if (k.keyCode === TAB) {
       return this.tab(!!k.shiftKey);
+    }
+
+    if (!edits) {
+      return false;
     }
 
     // Ctrl with Alt is AltGr on some layouts, which types characters.
@@ -833,7 +877,7 @@ function pagesOwn(e: Event): boolean {
  */
 export function bindKeyboard(
   player: {
-    keyboard: KeyboardInput | null;
+    keyboard: Keyboard | null;
     pointer?: { flush(): void } | null;
     touch?: { flush(): void } | null;
   },

@@ -40,6 +40,11 @@ export interface Movie {
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
+  /** `d` hidden by its `_visible`: the focus, if it has it, goes. */
+  hidden(d: DisplayObject): void;
+  /** startDrag: `d` follows the pointer, within `bounds` (left, top, right, bottom) where given. */
+  startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;
+  stopDrag(): void;
   faceOf(d: DisplayObject): avm1.Avm1Object | null;
   /** Whether `d` was removed from the display list, its AVM1 object a reference by path from then on. */
   removed(d: DisplayObject): boolean;
@@ -208,6 +213,9 @@ const PROPERTIES: [string, DisplayProperty][] = [
         if (n !== null) {
           f.target.visible = n !== 0;
           f.target.invalidate(TRANSFORM);
+          if (n === 0) {
+            f.movie.hidden(f.target);
+          }
         }
       },
     },
@@ -752,7 +760,7 @@ function boundsObject(
 }
 
 /** The display object a method's argument names from `start`: a clip's AVM1 object, or a path. */
-function targetOf(
+export function targetOf(
   movie: Movie,
   start: DisplayObject,
   value: Value,
@@ -924,6 +932,16 @@ export function movieClipClass(movie: Movie): {
       movie.timeline(clip).goto(clip.currentFrame - 1, false);
     }
 
+    return undefined;
+  });
+  method("startDrag", 0, (clip, args, version) => {
+    const lockCenter = args.length > 0 && avm1.toBoolean(args[0], version);
+    const bounds = args.length > 4 ? args.slice(1, 5).map((a) => avm1.toNumber(a, version)) : null;
+    movie.startDrag(clip, lockCenter, bounds);
+    return undefined;
+  });
+  method("stopDrag", 0, () => {
+    movie.stopDrag();
     return undefined;
   });
   method("gotoAndPlay", 0, (clip, args, version) => {

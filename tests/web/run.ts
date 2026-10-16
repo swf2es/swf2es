@@ -39,6 +39,10 @@ const abcs = compileScripts(
     { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
+    {
+      name: "StageQuality",
+      source: readFileSync(`${here}../player/scripts/StageQuality.as`, "utf8"),
+    },
   ],
   out,
 );
@@ -54,6 +58,10 @@ writeFileSync(
 writeFileSync(
   `${site}clipboard.swf`,
   bare(abcs.get("ClipboardTest") as Uint8Array, 1, "ClipboardTest", 160, 120),
+);
+writeFileSync(
+  `${site}quality.swf`,
+  bare(abcs.get("StageQuality") as Uint8Array, 1, "StageQuality", 290, 60),
 );
 writeFileSync(
   `${site}touch.swf`,
@@ -157,6 +165,26 @@ check("each element boots and draws", async (evaluate, send) => {
   // Drawn at the device's pixels: two a CSS pixel here.
   assert.deepEqual(byId("shapes").canvas, [400, 120]);
 });
+
+check(
+  "the quality attribute draws aliased and unsmoothed at low, while it plays",
+  async (evaluate, send) => {
+    const shown = async (rect: number[]) => {
+      const shot = await send<{ data: string }>("Page.captureScreenshot", { format: "png" });
+      const image = decodePng(new Uint8Array(Buffer.from(shot.data, "base64")));
+      return colours(image, rect, 2).size;
+    };
+    const rect = await call<number[]>(evaluate, 'requality("high", "/web-test/quality.swf")');
+    const high = await shown(rect);
+    await call(evaluate, 'requality("low")');
+    const low = await shown(rect);
+    await call(evaluate, 'requality("high")');
+    // Edges and smoothed bitmaps blend colours at high quality; at low, the fills' and texels' alone.
+    assert.ok(low * 4 < high, `${low} colours at low, ${high} at high`);
+    assert.equal(await shown(rect), high);
+    await call(evaluate, 'requality("high", "/web-test/shapes.swf")');
+  },
+);
 
 check("replaceFlash swaps each Flash tag once, its parameters carried over", async (evaluate) => {
   const r = await call<Record<string, unknown>>(evaluate, "replacement()");

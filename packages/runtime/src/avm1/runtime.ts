@@ -17,6 +17,7 @@ import {
   setProperty,
   setTarget,
   setTarget2,
+  startDrag,
   targetPathOf,
 } from "./clips.js";
 import { caught, enterTry, enterWith, leave, returned, scopes } from "./control.js";
@@ -260,6 +261,10 @@ export interface Operations {
   cloneSprite(cx: Activation, depth: Value, name: Value, source: Value): void;
   /** RemoveSprite: the clip `target` names removed, where a script may remove it. */
   removeSprite(cx: Activation, target: Value): void;
+  /** StartDrag: the clip on the stack dragged, its lock and bounds below it. */
+  startDrag(cx: Activation): void;
+  /** EndDrag: the drag ends. */
+  stopDrag(cx: Activation): void;
   /**
    * What a jump back counts down, shared by every activation of the
    * version: as it runs out, `timeout` reads the clock.
@@ -653,6 +658,12 @@ function operations(version: number): Operations {
     },
     removeSprite(cx, target) {
       removeSprite(cx, target, version);
+    },
+    startDrag(cx) {
+      startDrag(cx, version);
+    },
+    stopDrag(cx) {
+      cx.host.stopDrag?.();
     },
     budget: BUDGET,
     timeout(cx) {

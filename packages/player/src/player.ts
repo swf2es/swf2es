@@ -5,6 +5,8 @@
 // follow, or an AVM1 SWF's actions; then the frame is drawn.
 import { backgroundColor, readSwf, type Swf } from "@swf2es/format";
 import type { Avm1 } from "./avm1/avm1.js";
+import { Avm1Keyboard } from "./avm1/keyboard.js";
+import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import {
   BUTTON,
@@ -19,8 +21,8 @@ import {
 } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
 import { type Library, readLibrary } from "./display/timeline.js";
-import { KeyboardInput } from "./input/keyboard.js";
-import { PointerInput } from "./input/pointer.js";
+import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
+import { type Pointer, PointerInput } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
 import type { Scripting } from "./scripting.js";
 
@@ -63,10 +65,30 @@ export class Player {
     return this.scripting?.stageColor ?? this.swfBackground;
   }
 
+  /**
+   * The stage's quality, "LOW" to "BEST": the host's at the start, then what
+   * a script sets, Stage.quality or AVM1's _quality; a host that reads it
+   * each frame draws by it.
+   */
+  get quality(): string {
+    return this.scripting?.quality ?? this.avm1?.quality ?? "HIGH";
+  }
+
+  set quality(quality: string) {
+    if (this.scripting) {
+      this.scripting.quality = quality;
+    }
+
+    if (this.avm1) {
+      this.avm1.quality = quality;
+    }
+  }
+
   /** Renderer-independent mouse routing, once scripts have been loaded. */
-  readonly pointer: PointerInput | null;
+  readonly pointer: Pointer | null;
+  private readonly avm1Pointer: Avm1Pointer | null;
   /** The keyboard's, likewise: keys to the focused object, and typing into a focused field. */
-  readonly keyboard: KeyboardInput | null;
+  readonly keyboard: Keyboard | null;
   /** Touches, likewise: TouchEvents, and the mouse the primary touch moves. */
   readonly touch: TouchInput | null;
 
@@ -89,12 +111,16 @@ export class Player {
     setStageSize(this.stage, this.width, this.height);
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
-    this.keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
-    this.pointer = scripting ? new PointerInput(this.stage, scripting, this.keyboard) : null;
-    this.touch =
-      this.pointer && scripting ? new TouchInput(this.stage, scripting, this.pointer) : null;
+    const keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
+    // An AVM1 SWF's keys go to Key, its buttons and its clips.
+    this.keyboard = keyboard ?? (avm1 && !scripting ? new Avm1Keyboard(avm1) : null);
+    const pointer = scripting ? new PointerInput(this.stage, scripting, keyboard) : null;
+    // An AVM1 SWF's buttons and clips take the pointer by AVM1's rules.
+    this.avm1Pointer = avm1 && !scripting ? new Avm1Pointer(this.stage, avm1) : null;
+    this.pointer = pointer ?? this.avm1Pointer;
+    this.touch = pointer && scripting ? new TouchInput(this.stage, scripting, pointer) : null;
     if (scripting) {
-      scripting.pointer = this.pointer;
+      scripting.pointer = pointer;
     }
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
@@ -370,6 +396,7 @@ export class Player {
     // An AVM1 SWF's clips play in its order, the newest first.
     if (this.avm1 && !this.scripting) {
       this.avm1.tick();
+      this.avm1Pointer?.frameEnded();
       return;
     }
 

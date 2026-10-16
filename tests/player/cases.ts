@@ -8734,6 +8734,54 @@ export const cases: PlayerCase[] = [
     maxOutliers: 768,
   },
   {
+    // Edges and bitmaps at the stage's low quality (scripts/StageQuality.as). The bitmaps
+    // are Flash's to 4 a channel; the edges are each rasteriser's own, up to some 500 outliers.
+    name: "stage-quality-low",
+    swf: (abc) => bare(abc, 1, "StageQuality", 290, 60),
+    script: "StageQuality",
+    frames: 1,
+    capture: [1],
+    quality: "low",
+    tolerance: 4,
+    maxOutliers: 640,
+  },
+  {
+    // Edges and bitmaps at the stage's medium quality (scripts/StageQuality.as). The bitmaps
+    // are Flash's to 4 a channel; the edges are each rasteriser's own, up to some 500 outliers.
+    name: "stage-quality-medium",
+    swf: (abc) => bare(abc, 1, "StageQuality", 290, 60),
+    script: "StageQuality",
+    frames: 1,
+    capture: [1],
+    quality: "medium",
+    tolerance: 4,
+    maxOutliers: 640,
+  },
+  {
+    // Edges and bitmaps at the stage's high quality (scripts/StageQuality.as). The bitmaps
+    // are Flash's to 4 a channel; the edges are each rasteriser's own, up to some 500 outliers.
+    name: "stage-quality-high",
+    swf: (abc) => bare(abc, 1, "StageQuality", 290, 60),
+    script: "StageQuality",
+    frames: 1,
+    capture: [1],
+    quality: "high",
+    tolerance: 4,
+    maxOutliers: 640,
+  },
+  {
+    // Edges and bitmaps at the stage's best quality (scripts/StageQuality.as). The bitmaps
+    // are Flash's to 4 a channel; the edges are each rasteriser's own, up to some 500 outliers.
+    name: "stage-quality-best",
+    swf: (abc) => bare(abc, 1, "StageQuality", 290, 60),
+    script: "StageQuality",
+    frames: 1,
+    capture: [1],
+    quality: "best",
+    tolerance: 4,
+    maxOutliers: 640,
+  },
+  {
     name: "addChild",
     swf: added,
     script: "AddChild",

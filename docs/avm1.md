@@ -1206,8 +1206,9 @@ probes they came of), and the corpus, where it is not what Ruffle does:
 - `hitTest(x, y)` is in the root's space against the clip's bounds on the
   stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
   Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.
-- StopSounds and ToggleQuality are minimal: no sound is stopped yet, and
-  the quality toggles `_quality` without changing how anything is drawn.
+- StopSounds is minimal: no sound is stopped yet. ToggleQuality toggles
+  `_quality`, which the element draws by from the next frame (see
+  architecture.md, "Showing a player").
 
 adl's harness loads a SWF as an `AVM1Movie`, whose root traces as
 `_root`, its dot paths so, with a name and a parent of the harness's, and
@@ -1233,10 +1234,47 @@ queue reaches them, without `__resolve`, run after it; `initialize`,
 it enters its first frame, before its tags run, and its `enterFrame`
 each frame after, before it plays, whether it plays or not.
 `Avm1.clipEvent` brings the pointer's and the keyboard's to every clip,
-the newest first; step 12 calls it, and gives button events to the clip
-under the pointer. A clip with a button event, or with a handler such as
-`onPress` set, will be a button to the pointer: it takes the hand cursor
-and the pointer's hits, as a SimpleButton does in AS3.
+the newest first.
+
+An AVM1 movie's pointer is `avm1/pointer.ts`'s, by AVM1's rules, where
+an AS3 movie's is `input/pointer.ts`'s (both are the host's `Pointer`).
+Each input first goes to every clip as its clip event, `mouseMove`,
+`mouseDown` or `mouseUp` (the left button's alone), and what they queue
+runs; then the object under the pointer is picked again, and gets its
+button events, all queued in this order before the queue runs once: as
+the hover moves with the button up, `rollOut` of what it was over and
+`rollOver` of what it is over; with it down, `dragOut` of the one and
+`dragOver` of the other, any button's as a menu's items have them, none
+while a script drags a clip; then `press`, or a `release` where the
+pointer is over what it pressed (or what a goto made again in its place,
+at its depth, of its character), else `releaseOutside` of that and a
+`rollOver` of what it is over. Only a button, or a clip in button mode,
+takes the pointer: one whose clip actions have a button event, or, below
+the root and from SWF 6, whose object has or inherits one of the seven
+button methods (`onPress`, `onRelease`, `onReleaseOutside`, `onRollOver`,
+`onRollOut`, `onDragOver`, `onDragOut`), a class's among them. Levels
+are searched from the top: in a button, what its state shows first, then
+its hit test state; a clip in button mode takes the pointer itself, its
+buttons with it, where its `hitArea` or it is drawn; another clip's
+children are searched, the topmost first, as are a clip in button mode's
+where the pointer misses it. A hidden button that is up gets no button
+event, one not up all of them, and a hidden clip only its
+`releaseOutside`; one whose `enabled` is false gets none, and a button
+so goes up unless the event would show it over (a `rollOver`, `release`
+or `dragOut`) and the pointer lets go of it, so that enabled again under
+the pointer it gets its `rollOver`. After each
+frame, the pointer is picked again where nothing was under it or what
+was is hidden or gone, so a button that comes under an idle pointer gets
+its `rollOver`, one hidden from under it its `rollOut`. The hand shows
+over a button, or a clip whose nearest ancestor in button mode (itself
+perhaps) has it, whose `useHandCursor` and `enabled` are true. `enabled`,
+`useHandCursor` and `hitArea` are read as code reads them, in an
+activation, so a getter `addProperty` gave runs. `startDrag` and
+StartDrag drag one clip at a time, its centre on the pointer where they
+lock it, within their bounds in its parent's space, at whole twips, as
+an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it. Ruffle's
+order throughout (player.rs's `update_mouse_state`, `mouse_pick_avm1`,
+and Avm1Button's and MovieClip's `event_dispatch`).
 
 What adl traces of them at SWF 5 to 8 (the `avm1-events-swf*`,
 `avm1-construct-swf*`, `avm1-depths-swf*` and `avm1-initclip` cases, and
@@ -1301,13 +1339,87 @@ exception, ...` for a value thrown that nothing catches, where adl
 writes nothing (the corpus's `uncaught_exception*` and
 `movieclip_onconstruct`), and the cases follow adl.
 
-A button's condition blocks run on the state change their flags name
-(idle to over down, over down to over up...) or on their key, with the
-button's parent as target, as Flash runs them. The player's buttons
-already change state and play their sounds for AS3; for AVM1 the pointer
-gives them the same transitions (step 12). A button's AS2 object has
-`Button`'s prototype (`globals/Button.ts`), with `enabled`,
-`useHandCursor` and `getDepth` so far.
+A button's condition blocks run on the transition their flags name,
+with the button's parent as target, as Flash runs them; `Avm1` gathers
+each button character's from the action list. Each of the pointer's
+events is one: `rollOver` idle to over up, `rollOut` over up to idle,
+`press` over up to over down, `release` over down to over up,
+`releaseOutside` out down to idle, `dragOut` over down to out down,
+`dragOver` out down to over down; idle to over down and over down to idle
+come of none (Ruffle). The button's blocks for it are queued, it plays
+the transition's sound, the drags' none, and goes to the state, over for
+`dragOut` as Ruffle shows it, then, from SWF 6, its AS2 method is
+queued. A clip in button mode goes to the event's frame label and stops
+there, where it has one (`_up` for `rollOut` and `releaseOutside`,
+`_over` for `rollOver`, `release` and `dragOut`, `_down` for `press` and
+`dragOver`), then queues its clip actions and method for it, itself
+their target. A button's AS2 object has `Button`'s prototype
+(`globals/Button.ts`), with `enabled`, `useHandCursor` and `getDepth` so
+far.
+
+An AVM1 movie's keyboard is `avm1/keyboard.ts`'s (the host's `Keyboard`,
+as `input/keyboard.ts`'s is an AS3 movie's). A key pressed goes, as Ruffle
+orders it, to every clip's `keyDown` clip actions, as they are drawn,
+the lowest first and what is in one before it (a clip's `onKeyDown`
+waits for focus), then to Key's listeners'
+`onKeyDown`, both queued; then, if the key is a keyPress, to the first
+button or clip, in the order they are drawn, whose keyPress it is: a
+button's condition blocks with that key, enabled or not, its parent
+their target, or a clip's `on (keyPress)` clip actions. A hidden clip
+takes none, nor what is in it, a hidden button none while it is up, and
+a button in a button none. Then the queue runs. A key let go goes to the
+clips' `keyUp` and Key's listeners' `onKeyUp`. A keyPress's key is
+Flash's own code (Ruffle's `ButtonKeyCode`): a printable ASCII
+character's code, or one below 20 for an editing key (Left 1, Right 2,
+Home 3, End 4, Insert 5, Delete 6, Backspace 8, Enter 13, Up 14, Down 15,
+Page Up 16, Page Down 17, Tab 18, Escape 19); a host whose text comes
+apart from its keys, as the corpus's replay, gives the character by
+`text`. `Key` (`globals/Key.ts`) is a broadcaster with Flash's key
+constants, `isDown` (the mouse's buttons are keys 1, 2 and 4),
+`isToggled` (each press of a key, a mouse button's too, turns it on or
+off, a held key's repeats not: the corpus's `key_isToggled`), and
+`getCode` and `getAscii`, the last key pressed or let go, a mouse
+button's 1, 2 or 4 among them. `Mouse` is
+a broadcaster whose listeners hear `onMouseMove`, `onMouseDown` and
+`onMouseUp` after every clip's clip events for them, and
+`onMouseWheel(delta, target)`, the wheel the SWF's where Mouse has
+listeners; `hide` and `show` hide and show the pointer, giving 1 where it
+showed before, else 0, as adl gives them (Ruffle gives the opposite). A listener that is a clip taken off the display
+list hears nothing: a clip is found by its path (the corpus's
+`string_paths_keyevents`).
+
+The focus (`Avm1.focus`, the tab order in `avm1/focus.ts`, `Selection` in
+`globals/Selection.ts`), as Ruffle's FocusTracker has it. A button, or a
+clip below the root in button mode or whose `focusEnabled` is true, may
+be focused; `Selection.setFocus` of nothing gives false, of undefined or
+null takes the focus away, and of anything else, an object or a path
+from the code's target, focuses it where it may be and gives true, else
+false; `getFocus` gives the focus's target path, or null. As the focus
+changes, at once and not queued, the object that had it hears
+`onKillFocus(new)`, the one that has it `onSetFocus(old)`, then
+Selection's listeners `onSetFocus(old, new)`; focusing it again tells
+none. A focused object removed, or hidden by its own `_visible`, loses
+the focus so. The highlight, Ruffle's: as the focus moves it shows where
+the object draws something and its `_focusrect` (from SWF 6 its own
+where set, else the stage's) is true, and is hidden otherwise; a left
+press makes it inactive, and below SWF 9 any press, release or move does,
+until the focus moves again. While it is not inactive, the focused
+button or clip hears `onKeyDown` and `onKeyUp` (from SWF 6), its clip
+actions' keyDown first; while it shows, Enter, and Space, that no
+keyPress took press and release what has the focus, enabled. Tab, and
+Shift+Tab, that no keyPress took moves the focus through the tab order,
+after what the key queued runs, round past the end, from the first (or
+the last) where nothing in it has the focus; the order is walked as the
+list is drawn, each object before what is in it, leaving out what is
+hidden and what is in a clip whose `tabChildren` is false: a button
+unless its `tabEnabled` is false, a clip whose `tabEnabled` is true or,
+not set, one in button mode or with a `tabIndex`. Once any has a
+`tabIndex` (an int; -1 none; a value but a number or boolean the least),
+the order is by it, equal ones as walked, those without one left out;
+else by place, 6 × y + x of the top left corner on the stage in twips (a
+button's hit area's), the first walked at a place alone kept. Text
+fields take the focus with their AS2 face (step 13), and so the
+corpus's tests that begin by focusing one wait for it.
 
 ### Time and the script timeout
 
@@ -1372,11 +1484,12 @@ compiler.
 ## Testing against Flash
 
 - **Ruffle's corpus**: `avm1/` has 715 tests at the pinned commit, every
-  one with Flash's `output.txt`; 649 pass the collector's filters (no
-  input, audio, video or default font), 41 of those Ruffle's own known
-  failures. Most were built by Flash's authoring tool, a `.fla` beside
-  them, at versions 4 to 10, AVM1 as content has it; some 250 are version
-  15, built by other compilers. `pnpm corpus` runs them
+  one with Flash's `output.txt` and none needing audio, video or a default
+  font, so the collector keeps them all; 66 have recorded input, which
+  `replay.ts` plays, and 41 are Ruffle's own known failures. Most were
+  built by Flash's authoring tool, a `.fla` beside them, at versions 4 to
+  10, AVM1 as content has it; some 250 are version 15, built by other
+  compilers. `pnpm corpus` runs them
   as it runs `avm2/` and `timeline/` (`run.ts` takes `avm1/` among its
   default prefixes), in Chrome, the trace compared line by line, each
   test's standing in `baseline.json`, which a change may not lower; the
@@ -1666,7 +1779,30 @@ determinism` green, and the corpus baseline may only go up.
 12. **Buttons, the pointer and the keyboard.** Button conditions, clips as
     buttons, `Key`, `Mouse`, `Selection`, `startDrag`, `hitTest`,
     `_droptarget`. Corpus tests that run without input, adl cases for
-    the rest, as AS3's pointer cases do.
+    the rest, as AS3's pointer cases do. The corpus runner plays the
+    input Ruffle recorded for 66 of them (`tests/player/replay.ts`).
+    First the pointer: AVM1's own (`avm1/pointer.ts`), button conditions
+    and states, clips in button mode and their frame labels, the hand
+    cursor, `startDrag` and `stopDrag` (see "Clip events and buttons").
+    The corpus goes to 292 of the 715 (`mouse_events`,
+    `clip_event_propagation_order`, `button_goto`, `click_block`,
+    `button_properties_special_cases`, `string_paths_eval`); 13 more
+    match further. Then the keys: AVM1's own keyboard
+    (`avm1/keyboard.ts`), `Key` and `Mouse` and their listeners, and
+    keyPress (see "Clip events and buttons"); the corpus goes to 296
+    (`mouse_listeners`, `button_keypress`, `key_isToggled`,
+    `mouse_events_visible_enabled`). Then the focus: `Selection`, focus
+    events, a focused object's keys, Tab and its order, Enter and Space
+    (see "Clip events and buttons"); the corpus goes to 307
+    (`button_key_events`, `button_key_events_special`,
+    `button_keypress_vs_press`, `button_keypress_vs_tab`,
+    `movieclip_focusenabled`, `selection_asbroadcaster`, three of
+    `tab_ordering_*`...). Left: text fields' focus (step 13, which most of
+    the focus and tab tests begin with), the highlight drawn,
+    `_droptarget`, `_xmouse` in device pixels as Ruffle reads it
+    (`mouse_pos`), the viewport's scale factor a test gives
+    (`mouse_pos_with_scale_factor`), and touches, which reach only an AS3
+    movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
     Corpus tests of text fields.

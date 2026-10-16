@@ -176,6 +176,16 @@ export class TriangleView extends Mesh<MeshGeometry, Shader> {
     }
   }
 
+  /** Whether the stage's quality lets it smooth where its fill asks to be: not at Flash's low. */
+  set smoothing(smoothing: boolean) {
+    const mode = this.uniforms.uniforms.uMode as Float32Array;
+    const smooth = smoothing && this.source.smooth ? 1 : 0;
+    if (mode[1] !== smooth) {
+      mode[1] = smooth;
+      this.uniforms.update();
+    }
+  }
+
   /** The Flash colour transform it draws under, in place of Pixi's colour (render/color.ts). */
   get flashColor(): ColorTransform | null {
     return this.flash;

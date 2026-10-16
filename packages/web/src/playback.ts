@@ -27,6 +27,8 @@ export class Playback {
   private readonly unbind: (() => void)[] = [];
   private destroyed = false;
   private readonly view: PixiView;
+  /** The stage's quality it last drew by. */
+  private quality = "";
 
   private constructor(
     private readonly box: HTMLElement,
@@ -54,12 +56,15 @@ export class Playback {
     this.layout();
   }
 
-  /** A renderer for `player` in `box`, anti-aliased but at low quality, which Flash draws unsmoothed. */
+  /**
+   * A renderer for `player` in `box`. The canvas is not multisampled: the
+   * stage is drawn into the back buffer, which is, but at low quality,
+   * which Flash draws aliased.
+   */
   static async create(
     box: HTMLElement,
     player: Player,
     scripting: Scripting | null,
-    antialias: boolean,
     look: () => Look,
     report: (error: unknown) => void,
   ): Promise<Playback> {
@@ -69,7 +74,7 @@ export class Playback {
       height: player.height,
       resolution: 1,
       autoDensity: false,
-      antialias,
+      antialias: false,
       backgroundAlpha: look().wmode === "transparent" ? 0 : 1,
       // Filter-backed blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
@@ -105,10 +110,32 @@ export class Playback {
       this.report(error);
     }
 
+    if (this.player.quality !== this.quality) {
+      this.requality();
+    }
+
     if (this.player.changes !== this.drawn || this.dirty) {
       this.draw();
     }
   };
+
+  /**
+   * Drawn by the stage's quality as a script or the page changes it:
+   * Flash's low draws edges aliased and smooths no bitmap; medium, high and
+   * best anti-alias the edges, as the GPU's multisampling does.
+   */
+  private requality(): void {
+    const quality = this.player.quality;
+    this.quality = quality;
+    this.view.quality = quality;
+
+    const gl = this.renderer as unknown as { backBuffer?: { antialias: boolean } };
+    if (gl.backBuffer) {
+      gl.backBuffer.antialias = quality !== "LOW";
+    }
+
+    this.dirty = true;
+  }
 
   private draw(): void {
     const look = this.look();

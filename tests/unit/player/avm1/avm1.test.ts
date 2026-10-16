@@ -187,7 +187,8 @@ test("an AS3 SWF's blocks never run", async () => {
 });
 
 test("an action not done yet is reported, and the frame's next block runs", async () => {
-  const swf = movie(6, [[doAction((a) => a.push("x").raw([0x28])), traced("next")]]);
+  // GetUrl2, which waits for loading (step 15).
+  const swf = movie(6, [[doAction((a) => a.push("x", "y").raw([0x9a, 1, 0, 0])), traced("next")]]);
   const { lines, errors } = await play(swf, 1);
 
   assert.deepEqual(lines, ["next"]);
@@ -752,7 +753,109 @@ test("a frame clock that stands still moves for a script waiting on getTimer", a
   assert.deepEqual(lines, ["true"]);
 });
 
-test("pointer and keyboard events reach every clip's clip actions, the newest first, and stop the SWF at clip actions Flash cannot read", async () => {
+test("a key goes to the clips' keyDown as drawn, then Key's listeners, then the first keyPress, and Key keeps its state", async () => {
+  const keyDown = 1 << 6;
+  const keyPress = 1 << 17;
+  const traced = (source: string) => [...script(source, 6)(flashAssembler()).end().bytes()];
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({
+        depth: 1,
+        character: 1,
+        name: "a",
+        clipActions: w.clipActions(6, [
+          { events: keyDown, actions: traced(`trace("keyDown a " + Key.getCode());`) },
+          { events: keyPress, key: 65, actions: traced(`trace("keyPress a");`) },
+        ]),
+      }),
+      w.place({
+        depth: 2,
+        character: 1,
+        name: "b",
+        clipActions: w.clipActions(6, [
+          { events: keyPress, key: 65, actions: traced(`trace("keyPress b");`) },
+        ]),
+      }),
+      as1(
+        `Key.addListener({ onKeyDown: function () { trace("listener " + Key.isDown(65) + " " + Key.getAscii()); }, onKeyUp: function () { trace("up " + Key.isDown(65) + " " + Key.isToggled(65)); } }); stop();`,
+        6,
+      ),
+    ],
+  ]);
+  const { lines, player } = await play(swf, 1);
+  const keyboard = player.keyboard;
+  assert.ok(keyboard);
+
+  // Its press toggles A on once: a held key's repeated press does not again.
+  keyboard.handle("down", { keyCode: 65, charCode: 65 });
+  keyboard.handle("down", { keyCode: 65, charCode: 65 });
+  keyboard.handle("up", { keyCode: 65, charCode: 65 });
+
+  assert.deepEqual(lines, [
+    "keyDown a 65",
+    "listener true 65",
+    "keyPress a",
+    "keyDown a 65",
+    "listener true 65",
+    "keyPress a",
+    "up false true",
+  ]);
+});
+
+test("Selection focuses a clip, its kill, set and listeners' events at once, and Tab moves the focus by place", async () => {
+  const swf = movie(6, [
+    [
+      sprite(1, [[]]),
+      w.place({ depth: 1, character: 1, name: "a", matrix: { tx: 0, ty: 0 } }),
+      w.place({ depth: 2, character: 1, name: "b", matrix: { tx: 1000, ty: 0 } }),
+      as1(
+        `a.focusEnabled = true; a.tabEnabled = true; b.tabEnabled = true;
+        a.onSetFocus = function (o) { trace("a.onSetFocus " + o); };
+        a.onKillFocus = function (n) { trace("a.onKillFocus " + n); };
+        b.onSetFocus = function (o) { trace("b.onSetFocus " + o); };
+        Selection.addListener({ onSetFocus: function (o, n) { trace("Selection " + o + " -> " + n); } });
+        trace(Selection.setFocus(a)); trace(Selection.getFocus()); trace(Selection.setFocus(a));
+        trace(Selection.setFocus(_root)); trace(Selection.setFocus()); stop();`,
+        6,
+      ),
+    ],
+  ]);
+  const { lines, player } = await play(swf, 1);
+
+  assert.deepEqual(lines, [
+    "a.onSetFocus null",
+    "Selection null -> _level0.a",
+    "true",
+    "_level0.a",
+    "true",
+    "false",
+    "false",
+  ]);
+
+  // Tab: the next by place, round to the first past the last.
+  lines.length = 0;
+  player.keyboard?.handle("down", { keyCode: 9, charCode: 9 });
+  player.keyboard?.handle("down", { keyCode: 9, charCode: 9 });
+  assert.deepEqual(lines, [
+    "a.onKillFocus _level0.b",
+    "b.onSetFocus _level0.a",
+    "Selection _level0.a -> _level0.b",
+    "a.onSetFocus _level0.b",
+    "Selection _level0.b -> _level0.a",
+  ]);
+});
+
+test("Tab is the page's where nothing in the movie takes the focus", async () => {
+  const swf = movie(6, [
+    [sprite(1, [[]]), w.place({ depth: 1, character: 1, name: "a" }), as1("stop();", 6)],
+  ]);
+  const { player } = await play(swf, 1);
+
+  assert.equal(player.keyboard?.handle("down", { keyCode: 9, charCode: 9 }), false);
+});
+
+test("the pointer's events reach every clip's clip actions, the newest first, and stop the SWF at clip actions Flash cannot read", async () => {
   const mouseDown = 1 << 4;
   const events = (name: string) =>
     w.clipActions(6, [
