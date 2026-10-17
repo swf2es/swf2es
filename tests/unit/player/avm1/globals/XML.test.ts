@@ -117,3 +117,66 @@ trace(x.load(null));`,
     "POST http://example.test/games/send.php <q />",
   ]);
 });
+
+test("send goes as sendToURL does, and allowNetworking internal refuses it", async () => {
+  const sent: string[] = [];
+  const source = `trace(new XML("<a/>").send("log.php") + " " + new XML().send());`;
+  const fetch = async (request: { method: string; url: string }) => {
+    sent.push(`${request.method} ${request.url}`);
+    return { bytes: null, status: 200, headers: [] };
+  };
+
+  const open = await play(source, { fetch });
+  assert.deepEqual(take(open), ["true false"]);
+  assert.deepEqual(sent.splice(0), ["POST file:///t/log.php"]);
+
+  const internal = await play(source, { fetch, sendToUrl: false });
+  assert.deepEqual(take(internal), ["false false"]);
+  assert.deepEqual(sent, []);
+});
+
+test("a deep or a wide document parses, prints, clones and sends in linear time, without the stack", async () => {
+  const n = 100_000;
+  const deep = `${"<a>".repeat(n)}x${"</a>".repeat(n)}`;
+  const wide = `<r>${"<b/>".repeat(n)}</r>`;
+  const documents = [deep, wide];
+  const sent: number[] = [];
+  const played = await play(
+    `var d = new XML(); var w = new XML();
+d.onLoad = function (ok) {
+  var c = this.cloneNode(true);
+  trace(ok + " " + this.status + " " + this.toString().length + " " + c.toString().length);
+  this.send("echo.php");
+};
+w.onLoad = function (ok) {
+  var kids = this.firstChild.childNodes;
+  trace(ok + " " + this.status + " " + kids.length + " " + this.toString().length);
+  this.parseXML("<z/>");
+  trace(kids.length + " " + this.firstChild.nodeName);
+};
+d.load("deep.xml"); w.load("wide.xml");`,
+    {
+      fetch: async (request) => {
+        if (request.body) {
+          sent.push(request.body.length);
+          return { bytes: null, status: 200, headers: [] };
+        }
+
+        return { bytes: new TextEncoder().encode(documents.shift()), status: 0, headers: [] };
+      },
+    },
+  );
+
+  const started = performance.now();
+  await played.deliver();
+  const elapsed = performance.now() - started;
+
+  const wideText = `<r>${"<b />".repeat(n)}</r>`.length;
+  assert.deepEqual(take(played), [
+    `true 0 ${deep.length} ${deep.length}`,
+    `true 0 ${n} ${wideText}`,
+    `${n} z`,
+  ]);
+  assert.deepEqual(sent, [deep.length]);
+  assert.ok(elapsed < 5000, `${Math.round(elapsed)} ms`);
+});

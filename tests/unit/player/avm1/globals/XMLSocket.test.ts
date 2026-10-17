@@ -118,3 +118,72 @@ trace(s.connect("example.test", 1024));`);
   await closing.deliver();
   assert.deepEqual(take(closing), ["connect false"]);
 });
+
+test("a port out of range is refused at once, and a connection not open by the timeout fails", async () => {
+  const { connections, socket } = fakeSockets();
+  const played = await play(
+    `var s = new XMLSocket();
+s.onConnect = function (ok) { trace("connect " + ok); };
+trace(s.connect("a", 65536) + " " + s.connect("a", -1));
+s.timeout = 50;
+trace(s.timeout + " " + s.connect("a", 65535));`,
+    { socket },
+  );
+  assert.deepEqual(take(played), ["false false", "50 true"]);
+  assert.deepEqual(
+    connections.map((c) => c.port),
+    [65535],
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await played.deliver();
+  assert.deepEqual(take(played), ["connect false"]);
+  assert.ok(connections[0].closed);
+
+  // Opening after the timeout is too late.
+  connections[0].events.open();
+  await played.deliver();
+  assert.deepEqual(take(played), []);
+});
+
+test("a message past the limit without its zero byte closes the connection", async () => {
+  const { connections, socket } = fakeSockets();
+  const played = await play(
+    `var s = new XMLSocket();
+s.onData = function (d) { trace("data " + d.length); };
+s.onClose = function () { trace("close"); };
+s.connect("a", 1024);`,
+    { socket },
+  );
+  const [c] = connections;
+  c.events.open();
+  c.events.data(new Uint8Array(1024).fill(0x41));
+  c.events.data(Uint8Array.of(0x41, 0));
+  c.events.data(new Uint8Array(16 * 1024 * 1024 + 1).fill(0x41));
+  c.events.data(Uint8Array.of(0));
+  await played.deliver();
+
+  assert.deepEqual(take(played), ["data 1025", "close"]);
+  assert.ok(c.closed);
+});
+
+test("a SWF stopped for good closes its connections and holds nothing more", async () => {
+  const { connections, socket } = fakeSockets();
+  const played = await play(
+    `var s = new XMLSocket();
+s.onData = function (d) { trace("data " + d); };
+s.connect("a", 1024);`,
+    { socket },
+  );
+  const [c] = connections;
+  c.events.open();
+  // As an action Flash cannot read stops it.
+  played.avm1.halted = true;
+  played.player.tick();
+  played.avm1.network();
+  assert.ok(c.closed);
+
+  c.events.data(Uint8Array.of(0x41, 0));
+  await played.deliver();
+  assert.deepEqual(take(played), []);
+});

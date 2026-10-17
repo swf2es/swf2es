@@ -44,21 +44,32 @@ export class XmlNode {
     }
   }
 
-  /** `child` put at `position` among the children, out of any other parent; nothing where it is an ancestor. */
-  insert(position: number, child: XmlNode, version: number): void {
-    for (const ancestor of this.ancestors()) {
-      if (ancestor === child) {
-        return;
+  /** Whether `node` is this node or one of its ancestors. */
+  private within(node: XmlNode): boolean {
+    for (let n: XmlNode | null = this; n !== null; n = n.parent) {
+      if (n === node) {
+        return true;
       }
     }
 
+    return false;
+  }
+
+  /** `child` put at `position` among the children, out of any other parent; nothing where it is an ancestor. */
+  insert(position: number, child: XmlNode, version: number): void {
+    // Only a node with children can be an ancestor but this one.
+    if (child === this || (child.children.length > 0 && this.within(child))) {
+      return;
+    }
+
     const old = child.parent;
-    if (old !== null && old !== this) {
+    if (old !== null) {
       old.orphan(child, version);
-    } else if (old === this) {
-      // Moved within its parent: its old place is gone first.
-      this.children.splice(this.children.indexOf(child), 1);
-      child.unlink();
+    }
+
+    if (position >= this.children.length) {
+      this.adopt(child, version);
+      return;
     }
 
     child.parent = this;
@@ -80,9 +91,42 @@ export class XmlNode {
     this.insert(this.children.length, child, version);
   }
 
+  /**
+   * `child`, which has no parent, made the last child: no ancestor to
+   * check, and `childNodes`, where a script has it, takes it in place.
+   */
+  adopt(child: XmlNode, version: number): void {
+    const last = this.children.length > 0 ? this.children[this.children.length - 1] : null;
+    child.parent = this;
+    child.prev = last;
+    child.next = null;
+    if (last !== null) {
+      last.next = child;
+    }
+
+    this.children.push(child);
+    const cached = this.childNodes;
+    if (cached !== null) {
+      const i = this.children.length - 1;
+      avm1.set(cached.array, String(i), cached.objectOf(child, version), version);
+    }
+  }
+
   /** Out of its parent's children. */
   remove(version: number): void {
     this.parent?.orphan(this, version);
+  }
+
+  /** Every child out, at once. */
+  clear(version: number): void {
+    for (const child of this.children) {
+      child.parent = null;
+      child.prev = null;
+      child.next = null;
+    }
+
+    this.children.length = 0;
+    this.refresh(version);
   }
 
   private orphan(child: XmlNode, version: number): void {
@@ -110,7 +154,10 @@ export class XmlNode {
     this.next = null;
   }
 
-  /** `childNodes`, where a script has it, made the children's objects again. */
+  /**
+   * `childNodes`, where a script has it, made the children's objects again,
+   * in place, so that an array a script holds follows, as Flash's does.
+   */
   refresh(version: number): void {
     const cached = this.childNodes;
     if (cached === null) {
@@ -128,17 +175,29 @@ export class XmlNode {
     return avm1.keys(this.attributes, version);
   }
 
-  /** A copy, without a parent or an object, of its children too where `deep`. */
+  /** A copy, without a parent or an object, of its children too where `deep`; a loop, however deep. */
   duplicate(version: number, deep: boolean): XmlNode {
-    const clone = new XmlNode(this.type, this.value);
-    copyAttributes(this.attributes, clone.attributes, version);
-    if (deep) {
-      for (const child of this.children) {
-        clone.append(child.duplicate(version, true), version);
+    const copy = (node: XmlNode) => {
+      const clone = new XmlNode(node.type, node.value);
+      copyAttributes(node.attributes, clone.attributes, version);
+      return clone;
+    };
+    const root = copy(this);
+    if (!deep) {
+      return root;
+    }
+
+    const stack: [XmlNode, XmlNode][] = [[this, root]];
+    for (let pair = stack.pop(); pair !== undefined; pair = stack.pop()) {
+      const [from, to] = pair;
+      for (const child of from.children) {
+        const clone = copy(child);
+        to.adopt(clone, version);
+        stack.push([child, clone]);
       }
     }
 
-    return clone;
+    return root;
   }
 
   /**
@@ -197,39 +256,43 @@ export function serialize(node: XmlNode, version: number): string {
     out.push(node.docTypeDecl);
   }
 
-  write(node, out, version);
+  // A loop over a stack of what is left to write, however deep the tree:
+  // a node to open, or the end tag of an element whose children are written.
+  const stack: (XmlNode | string)[] = [node];
+  for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
+    if (typeof item === "string") {
+      out.push(item);
+      continue;
+    }
+
+    if (item.type !== ELEMENT_NODE) {
+      out.push(escapeXml(item.value ?? ""));
+      continue;
+    }
+
+    const name = item.value;
+    if (name !== null) {
+      out.push("<", name);
+      for (const key of item.attributeNames(version)) {
+        const value = avm1.stringOf(avm1.get(item.attributes, key, version), version);
+        out.push(" ", key, '="', escapeXml(value), '"');
+      }
+
+      if (item.children.length === 0) {
+        out.push(" />");
+        continue;
+      }
+
+      out.push(">");
+      stack.push(`</${name}>`);
+    }
+
+    for (let i = item.children.length - 1; i >= 0; i--) {
+      stack.push(item.children[i]);
+    }
+  }
+
   return out.join("");
-}
-
-function write(node: XmlNode, out: string[], version: number): void {
-  if (node.type !== ELEMENT_NODE) {
-    out.push(escapeXml(node.value ?? ""));
-    return;
-  }
-
-  const name = node.value;
-  if (name !== null) {
-    out.push("<", name);
-    for (const key of node.attributeNames(version)) {
-      const value = avm1.stringOf(avm1.get(node.attributes, key, version), version);
-      out.push(" ", key, '="', escapeXml(value), '"');
-    }
-
-    if (node.children.length === 0) {
-      out.push(" />");
-      return;
-    }
-
-    out.push(">");
-  }
-
-  for (const child of node.children) {
-    write(child, out, version);
-  }
-
-  if (name !== null) {
-    out.push("</", name, ">");
-  }
 }
 
 /** What XMLNode needs of the movie. */

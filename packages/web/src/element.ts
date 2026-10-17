@@ -395,6 +395,7 @@ export class Swf2esPlayerElement extends ElementBase {
             ? () => Promise.reject(new Error("allowNetworking is none"))
             : (configuration().fetch ?? browserFetch),
           socket: offline ? undefined : socketHost(),
+          sendToUrl: !internal,
           onUncaught: (error) => this.#report(session, error),
           fsCommand: (command, args) => {
             if (allows(url)) {

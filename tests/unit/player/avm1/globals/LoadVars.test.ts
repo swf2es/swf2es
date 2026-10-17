@@ -97,3 +97,38 @@ this.loadVariables("vars.txt", "GET");`,
   assert.deepEqual(take(played), ["data Hurray The test"]);
   assert.match(asked[0], /^file:\/\/\/t\/vars\.txt\?/);
 });
+
+test("a delivery whose setter runs past the script timeout is caught in it, and nothing escapes the frame", async () => {
+  const played = await play(
+    `var bad = new LoadVars(); var good = new LoadVars();
+good.onLoad = function (ok) { trace("good " + ok + " " + this.v); };
+good.load("b.txt");
+bad.load("a.txt");
+bad.addProperty("_bytesTotal", function () { return 0; }, function () { while (true) {} });
+bad.onLoad = function () { trace("never"); };`,
+    {
+      scriptTimeout: 1,
+      fetch: async () => ({ bytes: new TextEncoder().encode("v=1"), status: 0, headers: [] }),
+    },
+  );
+
+  await played.deliver();
+  played.player.tick();
+  // Past the timeout Flash disables the movie's actions: the one before it came.
+  assert.deepEqual(take(played), ["good true 1"]);
+});
+
+test("loadVariables into a clip removed meanwhile sets nothing and sends it no data event", async () => {
+  const played = await play(
+    `var c = this.createEmptyMovieClip("c", 1);
+c.onData = function () { trace("never"); };
+c.loadVariables("vars.txt");
+c.removeMovieClip();
+this.onData = function () { trace("root " + this.v); };
+this.loadVariables("vars.txt");`,
+    { fetch: async () => ({ bytes: new TextEncoder().encode("v=1"), status: 0, headers: [] }) },
+  );
+
+  await played.deliver();
+  assert.deepEqual(take(played), ["root 1"]);
+});

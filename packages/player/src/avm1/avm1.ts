@@ -134,6 +134,12 @@ export interface Avm1Options {
   socket?: SocketHost;
   /** Where relative URLs resolve, as a page's `base` parameter has it: the SWF's URL by default. */
   base?: string;
+  /**
+   * Whether XML.send, which sends without a window, sends: true by
+   * default; false refuses it, as allowNetworking "internal" refuses AS3's
+   * sendToURL.
+   */
+  sendToUrl?: boolean;
 }
 
 /**
@@ -495,7 +501,12 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.url = options.url ?? "";
     this.storage = options.storage ?? defaultStorage();
-    this.net = new Avm1Net(options.fetch ?? null, options.socket ?? null, options.base ?? this.url);
+    this.net = new Avm1Net(
+      options.fetch ?? null,
+      options.socket ?? null,
+      options.base ?? this.url,
+      options.sendToUrl ?? true,
+    );
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     const movie = this;
     this.sounds = {
@@ -728,6 +739,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
 
     if (this.halted) {
+      this.net.destroy();
       return;
     }
 
@@ -1324,7 +1336,13 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * callbacks run and what they queued, as Flash's come between frames.
    */
   network(): void {
-    if (this.halted || !this.loaded) {
+    // A SWF stopped for good takes nothing more: its loads and connections end.
+    if (this.halted) {
+      this.net.destroy();
+      return;
+    }
+
+    if (!this.loaded) {
       return;
     }
 
@@ -1338,12 +1356,25 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
   }
 
-  /** The network's answers since the last frame delivered: whether there were any. */
+  /**
+   * The network's answers since the last frame delivered, each in the
+   * root's activation as a callback runs, so that a setter or watcher it
+   * sets off that throws or runs out of time ends that one alone, and an
+   * error of the player's own goes to onUncaught and the rest go on:
+   * whether there were any.
+   */
   private netDelivered(): boolean {
     const ready = this.net.take();
+    const cx = this.movieRoot === null ? null : this.activationOf(this.movieRoot);
     for (const deliver of ready) {
-      if (!this.halted) {
-        deliver();
+      if (this.halted || cx === null) {
+        break;
+      }
+
+      try {
+        this.rt.call(cx, deliver);
+      } catch (error) {
+        this.onUncaught(error);
       }
     }
 
@@ -1363,7 +1394,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
         : formRequest(url, form.method, form.vars);
     this.net.fetch(request, (result) => {
       const face = into.avm1;
-      if (result.bytes === null || face === null) {
+      if (result.bytes === null || face === null || this.removed(into)) {
         return;
       }
 

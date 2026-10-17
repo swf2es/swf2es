@@ -115,7 +115,7 @@ export function parseXml(
   const top = () => open[open.length - 1];
   const addText = (value: string) => {
     if (value !== "" && !(ignoreWhite && allWhite(value))) {
-      top().append(new XmlNode(TEXT_NODE, value), version);
+      top().adopt(new XmlNode(TEXT_NODE, value), version);
     }
   };
   const fail = (status: number): Parsed => {
@@ -236,6 +236,7 @@ export function parseXml(
 
     const element = new XmlNode(ELEMENT_NODE, text.slice(i + 1, j));
     const names: string[] = [];
+    const seen = new Set<string>();
     const values: string[] = [];
     let empty = false;
     for (;;) {
@@ -287,7 +288,8 @@ export function parseXml(
         return fail(ATTRIBUTE_NOT_TERMINATED);
       }
 
-      if (!names.includes(name)) {
+      if (!seen.has(name)) {
+        seen.add(name);
         names.push(name);
         values.push(unescapeXml(text.slice(j + 1, close)));
       }
@@ -306,7 +308,7 @@ export function parseXml(
       }
     }
 
-    top().append(element, version);
+    top().adopt(element, version);
     if (!empty) {
       open.push(element);
     }
@@ -421,9 +423,7 @@ export function xmlClass(host: XmlClassHost, nodes: XmlNodes): avm1.Avm1Function
       return undefined;
     }
 
-    for (let i = doc.root.children.length - 1; i >= 0; i--) {
-      doc.root.children[i].remove(v);
-    }
+    doc.root.clear(v);
 
     if (args.length > 0) {
       parse(self, doc, avm1.stringOf(args[0], v), v);
@@ -447,8 +447,7 @@ export function xmlClass(host: XmlClassHost, nodes: XmlNodes): avm1.Avm1Function
       return false;
     }
 
-    host.net.send(postOf(self, args[0], doc.root, v));
-    return true;
+    return host.net.send(postOf(self, args[0], doc.root, v));
   });
   method("sendAndLoad", (self, args, v) => {
     const doc = documents.get(self);

@@ -43,10 +43,17 @@ interface Connection {
   open: boolean;
   /** What was sent before the connection opened, sent as it does. */
   queued: Uint8Array[];
-  /** The bytes of a message not yet ended by its zero byte. */
-  partial: Uint8Array;
+  /** The bytes of a message not yet ended by its zero byte, as they came, and how many. */
+  partial: Uint8Array[];
+  partialLength: number;
   timeout: number;
 }
+
+/**
+ * The most a message may hold before its zero byte: a server that never
+ * ends one has its connection closed, rather than the player's memory fill.
+ */
+export const MAX_MESSAGE = 16 * 1024 * 1024;
 
 const decoder = new TextDecoder();
 
@@ -63,7 +70,8 @@ export function xmlSocketClass(host: XmlSocketHost, xml: avm1.Avm1Function): avm
         generation: 0,
         open: false,
         queued: [],
-        partial: new Uint8Array(0),
+        partial: [],
+        partialLength: 0,
         // Flash's default, 20 seconds.
         timeout: 20000,
       });
@@ -85,28 +93,46 @@ export function xmlSocketClass(host: XmlSocketHost, xml: avm1.Avm1Function): avm
     c.transport = null;
     c.open = false;
     c.queued = [];
-    c.partial = new Uint8Array(0);
+    c.partial = [];
+    c.partialLength = 0;
   };
 
-  /** `bytes` come: each message they end to onData, while the connection is the one they came on. */
+  /**
+   * `bytes` come: each message they end to onData, while the connection is
+   * the one they came on. Only the new bytes are searched for a zero byte;
+   * what comes before one waits, up to MAX_MESSAGE.
+   */
   const received = (self: Obj, c: Connection, generation: number, bytes: Uint8Array) => {
-    const joined = new Uint8Array(c.partial.length + bytes.length);
-    joined.set(c.partial);
-    joined.set(bytes, c.partial.length);
-    c.partial = joined;
-    for (;;) {
+    let start = 0;
+    for (let end = bytes.indexOf(0); end >= 0; end = bytes.indexOf(0, start)) {
+      let message: Uint8Array = bytes.subarray(start, end);
+      if (c.partialLength > 0) {
+        c.partial.push(message);
+        message = new Uint8Array(c.partialLength + message.length);
+        let at = 0;
+        for (const part of c.partial) {
+          message.set(part, at);
+          at += part.length;
+        }
+
+        c.partial = [];
+        c.partialLength = 0;
+      }
+
+      start = end + 1;
+      host.callback(self, "onData", [textFor(decoder.decode(message), host.version)]);
       if (c.generation !== generation) {
         return;
       }
+    }
 
-      const end = c.partial.indexOf(0);
-      if (end < 0) {
-        return;
+    if (start < bytes.length) {
+      c.partial.push(bytes.slice(start));
+      c.partialLength += bytes.length - start;
+      if (c.partialLength > MAX_MESSAGE) {
+        drop(c);
+        host.callback(self, "onClose", []);
       }
-
-      const message = textFor(decoder.decode(c.partial.subarray(0, end)), host.version);
-      c.partial = c.partial.slice(end + 1);
-      host.callback(self, "onData", [message]);
     }
   };
 
@@ -137,8 +163,12 @@ export function xmlSocketClass(host: XmlSocketHost, xml: avm1.Avm1Function): avm
     const given = args[0];
     const name =
       given === undefined || given === null ? swfDomain(host.url) : avm1.stringOf(given, v);
-    const port = avm1.toNumber(args[1], v);
-    const port16 = Number.isFinite(port) ? Math.trunc(port) & 0xffff : 0;
+    // A port out of range is refused, as AS3's Socket refuses it, and nothing connects.
+    const port = avm1.toNumber(args[1], v) | 0;
+    if (port < 0 || port > 0xffff) {
+      return false;
+    }
+
     drop(c);
     const generation = c.generation;
     const current = () => c.generation === generation;
@@ -150,7 +180,7 @@ export function xmlSocketClass(host: XmlSocketHost, xml: avm1.Avm1Function): avm
     };
     c.transport = host.net.connect(
       name,
-      port16,
+      port,
       {
         open: () => {
           if (!current()) {
@@ -183,7 +213,8 @@ export function xmlSocketClass(host: XmlSocketHost, xml: avm1.Avm1Function): avm
           c.generation++;
           c.transport = null;
           c.open = false;
-          c.partial = new Uint8Array(0);
+          c.partial = [];
+          c.partialLength = 0;
           host.callback(self, "onClose", []);
         },
         error: () => {
@@ -201,6 +232,7 @@ export function xmlSocketClass(host: XmlSocketHost, xml: avm1.Avm1Function): avm
         },
       },
       failed,
+      c.timeout,
     );
     // Whether it connects is known only later: true says it was asked.
     return true;

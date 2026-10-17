@@ -1613,7 +1613,16 @@ Without either, a load fails as a missing file does (`onHTTPStatus(0)`,
 error. What the host answers is held and delivered between frames
 (`Avm1.network`, which `tick` and `idle` call), in the root's activation,
 and what that queues runs then, as Flash's network callbacks come
-between frames; the test page delivers after each frame, as Ruffle's
+between frames. Each delivery runs inside the runtime's call, so a
+setter, watcher or timeout it sets off ends that one alone and never
+escapes the frame; a SWF stopped for good has its loads aborted and its
+connections closed. `XML.send`, which sends without a window, is refused
+under `sendToUrl: false`, as the web element sets it for allowNetworking
+"internal" as it does AS3's sendToURL. `XMLSocket` refuses a port outside
+0 to 65535 as AS3's Socket does, fails a connection not open by its
+`timeout` with `onConnect(false)`, and closes one whose message passes
+16 MB without its zero byte. The tree builds, prints and clones in loops,
+however deep, in time linear in its size; the test page delivers after each frame, as Ruffle's
 runner does, and plays a test's `socket.json` as Ruffle's test navigator
 does.
 

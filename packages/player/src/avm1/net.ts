@@ -10,6 +10,7 @@ import type {
   SocketHost,
   SocketTransport,
 } from "../hosts.js";
+import { resolve } from "../scripting/loads.js";
 
 export type Fetch = (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
 
@@ -76,15 +77,13 @@ export class Avm1Net {
     private readonly socketHost: SocketHost | null,
     /** Where relative URLs resolve: the page's base where it gives one, else the SWF's URL. */
     private readonly base: string,
+    /** Whether a send without a window goes, as allowNetworking "internal" or "none" has it not. */
+    private readonly sends = true,
   ) {}
 
   /** `url` as the request goes out: against the base, as a load's URL resolves in AS3. */
   resolve(url: string): string {
-    try {
-      return new URL(url, this.base).href;
-    } catch {
-      return url;
-    }
+    return resolve(this.base, url);
   }
 
   /**
@@ -102,24 +101,36 @@ export class Avm1Net {
     this.track(fetched.then((result) => this.defer(() => deliver(result))));
   }
 
-  /** `request` sent and its answer dropped, as a send without a window is. */
-  send(request: NetRequest): void {
+  /**
+   * `request` sent and its answer dropped, as a send without a window is,
+   * as AS3's sendToURL is: whether it went, which allowNetworking
+   * "internal" refuses as it refuses sendToURL.
+   */
+  send(request: NetRequest): boolean {
+    if (!this.sends || this.destroyed) {
+      return false;
+    }
+
     this.fetchHost?.(
       { ...request, url: this.resolve(request.url), purpose: "send" },
       this.stopped.signal,
     ).catch(() => {});
+    return true;
   }
 
   /**
    * A connection to `host` and `port` through the host's sockets, its
    * events held for the next frame; null where there are none, or the host
    * refused at once, which `refused` is then called for in a frame after.
+   * One that has not opened `timeout` ms on (none for 0) is closed, and
+   * fails as a refused one does, as XMLSocket.timeout has it.
    */
   connect(
     host: string,
     port: number,
     events: SocketEvents,
     refused: () => void,
+    timeout = 0,
   ): SocketTransport | null {
     const sockets = this.socketHost;
     if (sockets === null || this.destroyed) {
@@ -128,24 +139,40 @@ export class Avm1Net {
     }
 
     let transport: SocketTransport | null = null;
-    const forget = () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let opened = false;
+    let ended = false;
+    const stopTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    // Closed or failed, by either end or the timeout: forgotten, and the timeout has nothing to do.
+    const end = () => {
+      ended = true;
+      stopTimer();
       if (transport !== null) {
         this.connections.delete(transport);
       }
     };
     try {
       transport = sockets.connect(host, port, {
-        open: (endpoints) => this.defer(() => events.open(endpoints)),
+        open: (endpoints) => {
+          opened = true;
+          stopTimer();
+          this.defer(() => events.open(endpoints));
+        },
         data: (bytes) => {
           const copy = bytes.slice();
           this.defer(() => events.data(copy));
         },
         close: () => {
-          forget();
+          end();
           this.defer(() => events.close());
         },
         error: (message) => {
-          forget();
+          end();
           this.defer(() => events.error(message));
         },
       });
@@ -154,7 +181,26 @@ export class Avm1Net {
       return null;
     }
 
+    if (ended) {
+      return transport;
+    }
+
     this.connections.add(transport);
+    if (!opened && timeout > 0) {
+      const opening = transport;
+      timer = setTimeout(() => {
+        timer = null;
+        // Closed by the script, or the player gone, meanwhile: nothing to time out.
+        if (opened || ended || !this.connections.has(opening)) {
+          return;
+        }
+
+        end();
+        opening.close();
+        this.defer(() => events.error("timeout"));
+      }, timeout);
+    }
+
     return transport;
   }
 
@@ -176,8 +222,15 @@ export class Avm1Net {
     return Promise.all([...this.pending]).then(() => {});
   }
 
-  /** The player gone: the fetches under way are aborted and the connections closed. */
+  /**
+   * The player gone, or its SWF stopped for good: the fetches under way are
+   * aborted, the connections closed, and nothing more is held.
+   */
   destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+
     this.destroyed = true;
     this.ready = [];
     this.stopped.abort();
