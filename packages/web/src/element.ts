@@ -382,7 +382,8 @@ export class Swf2esPlayerElement extends ElementBase {
           return;
         }
 
-        avm1 = new Avm1(codegen, { onUncaught: (error) => this.#report(session, error) });
+        // Its URL keys its SharedObjects, as a page's AS3 SWFs' are.
+        avm1 = new Avm1(codegen, { url, onUncaught: (error) => this.#report(session, error) });
       }
 
       session.player = new Player(bytes, session.scripting, avm1);

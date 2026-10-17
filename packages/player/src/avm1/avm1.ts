@@ -1009,7 +1009,6 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     return this.swfVersion > 6 ? name : avm1.fold(name);
   }
 
-  /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
   /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */
   registeredName(constr: Value): string | null {
     if (!(constr instanceof avm1.Avm1Function)) {
@@ -1030,6 +1029,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     this.sharedObjects?.flush(this.swfVersion);
   }
 
+  /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
   private registerClass(args: Value[], version: number): Value {
     if (args.length < 2) {
       return false;

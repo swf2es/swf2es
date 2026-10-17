@@ -139,3 +139,100 @@ test("an empty SharedObject writes nothing, clear removes its file, and a destro
   const { lines: read } = await play(`trace(SharedObject.getLocal("save").data.coins);`, storage);
   assert.deepEqual(read, ["7"]);
 });
+
+test("the data inside itself is written unsupported and a getter never called, as Flash writes them", async () => {
+  const fixture = async (name: string) =>
+    new Uint8Array(await readFile(new URL(`fixtures/shared-object-${name}.sol`, import.meta.url)));
+  const { stored, storage } = memory();
+  const { lines } = await play(
+    `var s = SharedObject.getLocal("selfq"); s.data.me = s.data; s.data.n = 1;
+    trace(s.getSize() + " " + s.flush());
+    var h = SharedObject.getLocal("selfq2"); h.data.me = h.data; h.data.holes = new Array(5); var o = {}; o.back = h.data; h.data.o = o;
+    h.flush();
+    var g = SharedObject.getLocal("getq"); var proto = {};
+    proto.addProperty("v", function () { _root.called = 1; return 7; }, null);
+    var go = {}; go.__proto__ = proto; g.data.go = go; g.data.ownv = 1;
+    g.data.addProperty("own", function () { _root.called = 1; return 8; }, null);
+    g.flush();
+    trace(_root.called);`,
+    storage,
+  );
+  assert.deepEqual(lines, ["46 true", "undefined"]);
+  assert.deepEqual(stored.get("/C:/so-test.swf/selfq"), await fixture("self"));
+  assert.deepEqual(stored.get("/C:/so-test.swf/getq"), await fixture("getters"));
+  // adl's file of the second is named selfq: only its name differs.
+  assert.deepEqual(
+    stored.get("/C:/so-test.swf/selfq2")?.subarray(24),
+    (await fixture("holes")).subarray(23),
+  );
+
+  const { lines: read } = await play(
+    `var d = SharedObject.getLocal("selfq2").data;
+    trace(typeof d.me + " " + d.holes.length + " " + typeof d.o.back);`,
+    storage,
+  );
+  assert.deepEqual(read, ["undefined 5 undefined"]);
+});
+
+test("a stored file that cannot be read starts empty, and one read back runs no setter", async () => {
+  const { stored, storage } = memory();
+  const header = [0x00, 0xbf, 0, 0, 0, 14, 0x54, 0x43, 0x53, 0x4f, 0, 4, 0, 0, 0, 0];
+  stored.set("/C:/so-test.swf/short", Uint8Array.from([...header, 0, 9, 0x61]));
+  stored.set("/C:/so-test.swf/long", Uint8Array.from([...header, 0xff, 0xff, 0x61, 0x62, 0, 0]));
+  // A property "__proto__" holding the number 1, then "x" holding 2.
+  const proto = [
+    0,
+    9,
+    ...new TextEncoder().encode("__proto__"),
+    0,
+    0x3f,
+    0xf0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ];
+  stored.set(
+    "/C:/so-test.swf/set",
+    Uint8Array.from([
+      ...header,
+      0,
+      3,
+      0x73,
+      0x65,
+      0x74,
+      0,
+      0,
+      0,
+      0,
+      ...proto,
+      0,
+      1,
+      0x78,
+      0,
+      0x40,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]),
+  );
+  const { lines } = await play(
+    `var out = [];
+    out.push(typeof SharedObject.getLocal("short").data + SharedObject.getLocal("short").getSize());
+    out.push(typeof SharedObject.getLocal("long").data);
+    Object.prototype.addProperty("x", function () { return "getter"; }, function () { _root.set = 1; });
+    var d = SharedObject.getLocal("set").data;
+    out.push(d.x + " " + _root.set + " " + (d.__proto__ == Object.prototype));
+    trace(out.join(" | "));`,
+    storage,
+  );
+  assert.deepEqual(lines, ["object0 | object | 2 undefined true"]);
+});

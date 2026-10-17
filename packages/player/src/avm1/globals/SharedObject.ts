@@ -25,7 +25,7 @@ export interface SharedObjectHost {
   registeredName(constr: Value): string | null;
 }
 
-/** What a name may not hold: getLocal then gives null (Ruffle's INVALID_CHARS). */
+/** What a name may not hold, white space included: getLocal then gives null (adl; Ruffle's INVALID_CHARS). */
 const BAD_NAME = /[~%&\\;:"',<>?#\s]/;
 
 // AMF0's markers.
@@ -38,6 +38,7 @@ const UNDEFINED = 0x06;
 const REFERENCE = 0x07;
 const ECMA_ARRAY = 0x08;
 const OBJECT_END = 0x09;
+const UNSUPPORTED = 0x0d;
 const STRICT_ARRAY = 0x0a;
 const DATE = 0x0b;
 const LONG_STRING = 0x0c;
@@ -61,6 +62,8 @@ class Writer {
   constructor(
     private readonly host: SharedObjectHost,
     private readonly version: number,
+    /** The data object, which Flash writes as unsupported wherever it is inside itself (adl). */
+    private readonly data: Obj,
   ) {}
 
   get size(): number {
@@ -99,9 +102,9 @@ class Writer {
     this.push(b);
   }
 
-  /** A name, a u16-long UTF-8 string without a marker. */
+  /** A name, a u16-long UTF-8 string without a marker, cut to fit one. */
   name(text: string): void {
-    const b = encoder.encode(text);
+    const b = encoder.encode(text).subarray(0, 0xffff);
     this.u16(b.length);
     this.push(b);
   }
@@ -156,6 +159,11 @@ class Writer {
       return;
     }
 
+    if (o === this.data) {
+      this.bytes(UNSUPPORTED);
+      return;
+    }
+
     const seen = this.references.get(o);
     if (seen !== undefined) {
       this.bytes(REFERENCE);
@@ -183,12 +191,12 @@ class Writer {
 
   /**
    * `o`'s properties as for..in lists them, reversed, as Flash writes them:
-   * a function left out, a getter's never called, written undefined.
+   * a function left out, a getter, own or inherited, never called but
+   * written undefined (adl).
    */
   properties(o: Obj): void {
     for (const key of avm1.keys(o, this.version).reverse()) {
-      const own = o.own(key, this.version);
-      if (own?.get) {
+      if (avm1.find(o, key, this.version)?.get) {
         this.name(key);
         this.bytes(UNDEFINED);
         continue;
@@ -219,7 +227,7 @@ function constructorOf(o: Obj, version: number): Value {
 class Reader {
   at = 0;
   private readonly view: DataView;
-  /** As the writer's: the data object is the first, which no value refers to. */
+  /** As the writer's: the data object is the first, which Flash never refers to but marks unsupported. */
   private readonly references: Value[] = [undefined];
 
   constructor(
@@ -273,6 +281,7 @@ class Reader {
       case NULL:
         return null;
       case UNDEFINED:
+      case UNSUPPORTED:
         return undefined;
       case REFERENCE:
         return this.references[this.u16()];
@@ -288,10 +297,15 @@ class Reader {
         return o;
       }
       case ECMA_ARRAY: {
-        this.u32();
+        // Its length, which holes at its end leave longer than its entries (adl: new Array(5)).
+        const length = this.u32();
         const a = this.realm.newArray([], this.version);
         this.references.push(a);
         this.entries(a);
+        if (length > avm1.toNumber(avm1.get(a, "length", this.version), this.version)) {
+          avm1.set(a, "length", length, this.version);
+        }
+
         return a;
       }
       case STRICT_ARRAY: {
@@ -299,7 +313,7 @@ class Reader {
         this.references.push(a);
         const count = this.u32();
         for (let i = 0; i < count; i++) {
-          avm1.set(a, String(i), this.value(), this.version);
+          put(a, String(i), this.value(), this.version);
         }
 
         return a;
@@ -328,9 +342,22 @@ class Reader {
         return;
       }
 
-      avm1.set(o, key, this.value(), this.version);
+      put(o, key, this.value(), this.version);
     }
   }
+}
+
+/**
+ * A property read back, defined as it is rather than set: no setter or
+ * watcher a script added to a prototype runs, and no key makes itself the
+ * object's prototype.
+ */
+function put(o: Obj, key: string, value: Value, version: number): void {
+  if (key.toLowerCase() === "__proto__" && (version <= 6 || key === "__proto__")) {
+    return;
+  }
+
+  o.define(key, value, 0);
 }
 
 /** The .sol file of `data` under `name`: empty for no properties, as Flash writes none. */
@@ -339,12 +366,11 @@ function serialize(host: SharedObjectHost, name: string, data: Value, version: n
     return new Uint8Array(0);
   }
 
-  const body = new Writer(host, version);
+  const body = new Writer(host, version, data);
   // Each property a name, a value and a 0, the object's own references shared across them.
-  const entry = new Writer(host, version);
+  const entry = new Writer(host, version, data);
   for (const key of avm1.keys(data, version).reverse()) {
-    const own = data.own(key, version);
-    const v = own?.get ? undefined : avm1.get(data, key, version);
+    const v = avm1.find(data, key, version)?.get ? undefined : avm1.get(data, key, version);
     if (v instanceof avm1.Avm1Function) {
       continue;
     }
@@ -358,7 +384,7 @@ function serialize(host: SharedObjectHost, name: string, data: Value, version: n
     return new Uint8Array(0);
   }
 
-  const title = encoder.encode(name);
+  const title = encoder.encode(name).subarray(0, 0xffff);
   body.bytes(0x00, 0xbf);
   body.u32(0);
   body.bytes(0x54, 0x43, 0x53, 0x4f, 0, 4, 0, 0, 0, 0);
@@ -387,18 +413,18 @@ function deserialize(bytes: Uint8Array, realm: avm1.Realm, version: number): Obj
   }
 
   const reader = new Reader(bytes, realm, version);
-  reader.at = 16;
-  reader.name();
-  // An AMF3 file, AS3's, is not AS2's to read.
-  if (reader.u32() !== 0) {
-    return null;
-  }
-
   const data = realm.newObject(version);
   try {
+    reader.at = 16;
+    reader.name();
+    // An AMF3 file, AS3's, is not AS2's to read.
+    if (reader.u32() !== 0) {
+      return null;
+    }
+
     while (reader.at < bytes.length) {
       const key = reader.name();
-      avm1.set(data, key, reader.value(), version);
+      put(data, key, reader.value(), version);
       // The 0 after each value.
       reader.at++;
     }
@@ -509,7 +535,14 @@ export function sharedObjectClass(host: SharedObjectHost): {
       return undefined;
     }
 
-    const file = serialize(host, entry.name, avm1.get(self, "data", v), v);
+    // Data nested too deep to write fails as a refused write does.
+    let file: Uint8Array;
+    try {
+      file = serialize(host, entry.name, avm1.get(self, "data", v), v);
+    } catch {
+      return false;
+    }
+
     if (file.length === 0) {
       return true;
     }
@@ -530,7 +563,15 @@ export function sharedObjectClass(host: SharedObjectHost): {
   // The file's size, header and all; 0 for none.
   method("getSize", (self, _, v) => {
     const entry = entryOf(self);
-    return entry ? serialize(host, entry.name, avm1.get(self, "data", v), v).length : undefined;
+    if (!entry) {
+      return undefined;
+    }
+
+    try {
+      return serialize(host, entry.name, avm1.get(self, "data", v), v).length;
+    } catch {
+      return 0;
+    }
   });
   // Every property of the data deleted, and the file with them.
   method("clear", (self, _, v) => {
