@@ -2,9 +2,10 @@
 // ruffle) core/src/avm1/globals/selection.rs has it: MIT OR Apache-2.0,
 // Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors. A
 // broadcaster, whose listeners hear onSetFocus(old, new) as the focus moves
-// (avm1.ts). The text selection's methods wait for text fields (step 13).
+// (avm1.ts). The text selection is the focused text field's.
 import { avm1 } from "@swf2es/runtime";
-import type { DisplayObject } from "../../display/display.js";
+import { type DisplayObject, TextObject } from "../../display/display.js";
+import { stateOf } from "./TextField.js";
 
 /** What Selection reads and changes of the player's focus. */
 export interface FocusState {
@@ -60,17 +61,42 @@ export function selectionObject(
     realm.method(() => (focus.focused ? focus.pathOf(focus.focused) : null)),
     FIXED,
   );
-  for (const name of ["getBeginIndex", "getEndIndex", "getCaretIndex"]) {
+  // The focused field's selection, -1 without one.
+  const field = () => (focus.focused instanceof TextObject ? focus.focused : null);
+  const selected = () => {
+    const f = field();
+    return f !== null && stateOf(f).selected ? f : null;
+  };
+  const indices: [string, (f: TextObject) => number][] = [
+    ["getBeginIndex", (f) => f.selection[0]],
+    ["getEndIndex", (f) => f.selection[1]],
+    ["getCaretIndex", (f) => f.caret],
+  ];
+  for (const [name, index] of indices) {
     selection.define(
       name,
-      realm.method(() => -1),
+      realm.method(() => {
+        const f = selected();
+        return f === null ? -1 : index(f);
+      }),
       FIXED,
     );
   }
 
+  // From begin to end, each at least 0; no end is the text's.
   selection.define(
     "setSelection",
-    realm.method(() => undefined),
+    realm.method((_, args, v) => {
+      const f = field();
+      if (f !== null && args.length > 0) {
+        const begin = Math.max(0, avm1.toNumber(args[0], v) | 0);
+        const end = args.length > 1 ? Math.max(0, avm1.toNumber(args[1], v) | 0) : 0x7fffffff;
+        stateOf(f).selected = true;
+        f.select(begin, end);
+      }
+
+      return undefined;
+    }),
     FIXED,
   );
   return selection;

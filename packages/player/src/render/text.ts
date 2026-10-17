@@ -268,7 +268,7 @@ function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number)
     fill: f.color & 0xffffff,
     fontWeight: f.bold ? ("bold" as const) : ("normal" as const),
     fontStyle: f.italic ? ("italic" as const) : ("normal" as const),
-    letterSpacing: f.letterSpacing,
+    letterSpacing: Number.isFinite(f.letterSpacing) ? f.letterSpacing : 0,
   };
   const t = new Text({ text: chars, style });
   // Pixi's Text puts its top at its font's ascent above the baseline; without a DOM (node) there is no font to measure.

@@ -4,6 +4,7 @@ export { goto } from "./clips.js";
 export { Avm1Super, ScriptFunction } from "./functions.js";
 export { broadcastMessage, initializeBroadcaster } from "./globals/broadcaster.js";
 export { DateCell } from "./globals/date.js";
+export { parseIntAvm1 } from "./globals/global.js";
 export {
   ABSENT,
   type DisplayNative,

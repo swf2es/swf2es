@@ -32,6 +32,7 @@ import { boundsIn } from "../display/bounds.js";
 import {
   BitmapObject,
   ButtonObject,
+  CONTENT,
   Container,
   construct,
   type DisplayObject,
@@ -58,6 +59,7 @@ import {
   updateMixes,
 } from "../media/sounds.js";
 import { evaluate } from "../scripting/evaluate.js";
+import { type BindingHost, VariableBindings } from "./bindings.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
@@ -74,6 +76,9 @@ import {
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./globals/Sound.js";
+import { styleSheetClass } from "./globals/StyleSheet.js";
+import { stateOf, textFieldClass } from "./globals/TextField.js";
+import { textFormatClass } from "./globals/TextFormat.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 
 type Value = avm1.Value;
@@ -341,7 +346,7 @@ const timeoutClock =
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost {
+export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost {
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -382,6 +387,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   private readonly timelines = new WeakMap<MovieClip, avm1.Timeline>();
   private clipProto: avm1.Avm1Object | null = null;
   private buttonProto: avm1.Avm1Object | null = null;
+  private textFieldProto: avm1.Avm1Object | null = null;
   /** The places of display objects being placed, until they are made. */
   private readonly places = new WeakMap<DisplayObject, Place>();
   /** The clips removed with an unload handler, kept until the next frame. */
@@ -602,6 +608,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     const button = buttonClass(this);
     this.buttonProto = button.proto;
     realm.global.define("Button", button.constr, avm1.DONT_ENUM);
+    const textField = textFieldClass(this);
+    this.textFieldProto = textField.proto;
+    realm.global.define("TextField", textField.constr, avm1.DONT_ENUM);
+    textField.constr.define("StyleSheet", styleSheetClass(this), avm1.DONT_ENUM | avm1.VERSION_7);
+    realm.global.define("TextFormat", textFormatClass(this).constr, avm1.DONT_ENUM);
     this.keyFace = keyObject(realm, this, this.swfVersion);
     realm.global.define("Key", this.keyFace, avm1.DONT_ENUM);
     this.mouseFace = mouseObject(realm, this, this.swfVersion);
@@ -815,6 +826,51 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   createEmptyMovieClip(parent: MovieClip, instance: string, depth: number): DisplayObject {
     const child = new MovieClip(EMPTY_TIMELINE, parent.library);
     return this.scriptPlace(parent, child, null, instance, (depth + DEPTH_BIAS) | 0, null);
+  }
+
+  /** createTextField: an empty field in `parent` at AVM1 depth `depth` as `instance`. */
+  createTextField(
+    parent: MovieClip,
+    instance: string,
+    depth: number,
+    [x, y, width, height]: [number, number, number, number],
+  ): DisplayObject {
+    const field = new TextObject(null);
+    field.fonts = parent.library.fonts;
+    field.width = width;
+    field.height = height;
+    field.matrix = { ...field.matrix, tx: x, ty: y };
+    return this.scriptPlace(parent, field, null, instance, (depth + DEPTH_BIAS) | 0, null);
+  }
+
+  textChanged(field: TextObject): void {
+    this.bindings.textChanged(field);
+  }
+
+  variableChanged(field: TextObject): void {
+    this.bindings.variableChanged(field);
+  }
+
+  propertyChanged(d: DisplayObject, name: string, value: avm1.Value, version: number): void {
+    this.bindings.propertyChanged(d, name, value, version);
+  }
+
+  /** The text fields bound to variables. */
+  private readonly bindings = new VariableBindings(this);
+
+  /** `body` run in an activation of `d`, as `d`'s code would run. */
+  inActivation(d: DisplayObject, body: (cx: avm1.Activation) => void): void {
+    const cx = this.halted ? null : this.activationOf(d);
+    if (cx === null) {
+      return;
+    }
+
+    this.begin();
+    try {
+      this.rt.call(cx, () => body(cx));
+    } finally {
+      this.end();
+    }
   }
 
   /**
@@ -1031,11 +1087,19 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
         ? this.clipProto
         : d instanceof ButtonObject
           ? this.buttonProto
-          : this.rt.realm.objectProto,
+          : d instanceof TextObject
+            ? this.textFieldPrototype()
+            : this.rt.realm.objectProto,
     );
     const native = new ClipNative(this, d);
     face.display = native;
     d.avm1 = face;
+    if (d instanceof TextObject) {
+      this.madeField(d, face);
+    }
+
+    this.bindings.retry(d);
+
     if (!clip) {
       return;
     }
@@ -1072,6 +1136,30 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     const constructs = constructBlocks(native);
     if (constructs.length > 0 || this.exported(d)) {
       this.enqueue(CONSTRUCT, new Queued(CONSTRUCTION, d, 0, 0, false, "", constructs));
+    }
+  }
+
+  /** `_global.TextField.prototype` as it is now, the class's own where a script took it away. */
+  private textFieldPrototype(): avm1.Value {
+    const version = this.swfVersion;
+    const constr = avm1.get(this.rt.realm.global, "TextField", version);
+    const proto = constr instanceof avm1.Avm1Object ? avm1.get(constr, "prototype", version) : null;
+    return proto instanceof avm1.Avm1Object ? proto : this.textFieldProto;
+  }
+
+  /**
+   * A text field's AVM1 object made: a broadcaster, itself its first
+   * listener, so that its own onChanged and onScroller come before the
+   * others' (Ruffle's initialize_as_broadcaster).
+   */
+  private madeField(field: TextObject, face: avm1.Avm1Object): void {
+    this.bindings.made(field);
+
+    const version = this.swfVersion;
+    avm1.initializeBroadcaster(face, this.rt.realm, version);
+    const listeners = avm1.get(face, "_listeners", version);
+    if (listeners instanceof avm1.Avm1Object) {
+      avm1.set(listeners, "0", face, version);
     }
   }
 
@@ -1427,9 +1515,27 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   focus(d: DisplayObject | null): void {
     const old = this.focusedObject;
     this.focusedObject = d;
-    this.highlight = d === null ? "inactive" : this.highlightable(d) ? "visible" : "hidden";
+    this.highlight =
+      d === null
+        ? "inactive"
+        : !(d instanceof TextObject) && this.highlightable(d)
+          ? "visible"
+          : "hidden";
     if (d === old) {
+      this.selectFocused();
       return;
+    }
+
+    // A field that loses the focus loses its selection.
+    if (old instanceof TextObject) {
+      old.focused = false;
+      stateOf(old).selected = false;
+      old.invalidate(CONTENT);
+    }
+
+    if (d instanceof TextObject) {
+      d.focused = true;
+      d.invalidate(CONTENT);
     }
 
     // Each object's method in an activation of its own, as its other event methods run.
@@ -1458,11 +1564,27 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     } finally {
       this.end();
     }
+
+    this.selectFocused();
+  }
+
+  /**
+   * A field given the focus, again too, has all its text selected, after
+   * the focus's events, which see none (Ruffle's update_edittext_selection;
+   * the corpus's `selection` and `edittext_programmatic_focus`).
+   */
+  private selectFocused(): void {
+    const d = this.focusedObject;
+    if (d instanceof TextObject) {
+      stateOf(d).selected = true;
+      d.select(0, d.model.text.length);
+    }
   }
 
   /** Whether a script may focus `d`: a button, or a clip below the root in button mode or with focusEnabled true. */
   focusable(d: DisplayObject): boolean {
-    if (d instanceof ButtonObject) {
+    // A field, selectable or not, as a script may focus any (Ruffle).
+    if (d instanceof ButtonObject || d instanceof TextObject) {
       return true;
     }
 
@@ -1608,6 +1730,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   private unload(d: DisplayObject): void {
     // Code running on a clip in it returns after the call that removed it.
     this.realm.removals++;
+    this.bindings.unloaded(d);
     if (d instanceof Container) {
       for (const child of [...d.children]) {
         this.unload(child);
