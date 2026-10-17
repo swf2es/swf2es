@@ -42,6 +42,9 @@
 // turn: each frame a new stretch for the lines, coming round again only
 // with the loop, of --loop K frames (96). Their lines are --line W twips
 // wide (1, a hairline's width on the screen, as most of a game's are).
+// --squash F places each rig squashed to F of its height, so that its
+// parts turn inside a parent scaled unevenly, as a game's limbs do inside
+// a body squashed for a pose: each turn a stretch of its own.
 // --pace MS waits that many milliseconds after each frame, so that what is
 // kept by age (lines idle, render/strokes.ts) ages between the loop's turns.
 //
@@ -131,7 +134,7 @@
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
 //     [--colored [--fade]]
-//     | --pulse N [--loop K] [--line W]
+//     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
 //     | --triangles N [--culled]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
@@ -456,7 +459,7 @@ function curvedPart(id: number, line: number, bulge: number): Uint8Array {
  * turn on a loop of `loop` frames, the even ones swelling and shrinking a
  * little, the odd ones squashed across, flipping as they turn about.
  */
-function pulseSwf(count: number, loop: number, line: number): Uint8Array {
+function pulseSwf(count: number, loop: number, line: number, squash = 1): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
   for (let i = 0; i < 4; i++) {
     tags.push(curvedPart(11 + i, line, 150 + 60 * i));
@@ -499,7 +502,7 @@ function pulseSwf(count: number, loop: number, line: number): Uint8Array {
         character: 20,
         matrix: {
           a: 2 / columns,
-          d: 2 / columns,
+          d: (2 / columns) * squash,
           tx: Math.round(((i % columns) + 0.5) * (WIDTH / columns) * TWIPS),
           ty: Math.round((Math.floor(i / columns) + 0.5) * (HEIGHT / columns) * TWIPS),
         },
@@ -1244,7 +1247,7 @@ const swf =
               : scripted > 0
                 ? scriptedSwf(scripted, args.includes("--still"))
                 : pulse > 0
-                  ? pulseSwf(pulse, option("loop", 96), option("line", 1))
+                  ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
                   : masks > 0
                     ? masksSwf(masks, args.includes("--unmasked"))
                     : branches > 0

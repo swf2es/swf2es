@@ -2496,8 +2496,8 @@ test("a shape's lines share a context through every turn and mirror of one stret
   assert.ok(lines(7).instructions.length > 0);
 
   // Each one's lines reach the stage through a turn or a mirror alone, but for the grid it was
-  // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/128 or less:
-  // the stroke is not stretched.
+  // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/32 or less,
+  // their edges within a tenth of a pixel: the stroke is barely stretched.
   shapes.forEach((shape, i) => {
     const m = shape.matrix;
     // Pixi works its local transform out of its scale, turn and skew as it renders.
@@ -2514,15 +2514,15 @@ test("a shape's lines share a context through every turn and mirror of one stret
     }
 
     assert.ok(
-      Math.abs(Math.hypot(w[0], w[1]) - 1) < 0.01,
+      Math.abs(Math.hypot(w[0], w[1]) - 1) < 1 / 32,
       `shape ${i}: column 1 is ${w[0]},${w[1]}`,
     );
     assert.ok(
-      Math.abs(Math.hypot(w[2], w[3]) - 1) < 0.01,
+      Math.abs(Math.hypot(w[2], w[3]) - 1) < 1 / 32,
       `shape ${i}: column 2 is ${w[2]},${w[3]}`,
     );
     assert.ok(
-      Math.abs(w[0] * w[2] + w[1] * w[3]) < 0.02,
+      Math.abs(w[0] * w[2] + w[1] * w[3]) < 1 / 16,
       `shape ${i}: columns not at right angles`,
     );
   });
@@ -2577,33 +2577,39 @@ test("a shape that pulses a little shares its lines between the frames of the pu
       ty: 0,
     });
     view.prepare(root);
-    // Its 2 pixel lines, under the stretch's inverse, reach the stage within a few hundredths of
-    // a pixel of their width: their path is the shape's exactly.
+    // Its 2 pixel lines, under the stretch's inverse, reach the stage stretched by a few hundredths,
+    // the even stretch's and the grid's together: their path is the shape's exactly.
     const lines = strokes();
     lines.updateLocalTransform();
     const l = lines.localTransform;
     const m = shape.matrix;
     const column = Math.hypot(m.a * l.a + m.c * l.b, m.b * l.a + m.d * l.b);
-    assert.ok(Math.abs(column - 1) < 0.02, `frame ${f}: column 1 is ${column} long`);
+    assert.ok(Math.abs(column - 1) < 1 / 32, `frame ${f}: column 1 is ${column} long`);
   }
 
-  // 48 frames of a pulse of 2% and a squash of 1%: a few stretches.
-  assert.ok(view.counts.strokeContexts <= 6, `${view.counts.strokeContexts} contexts`);
+  // 48 frames of a pulse of 2% and a squash of 1%: a stretch or two.
+  assert.ok(view.counts.strokeContexts <= 3, `${view.counts.strokeContexts} contexts`);
 });
 
-test("a wide line settles on a finer grid, and one too wide on none", async () => {
+test("a wide line settles within its edges' slack, and one too wide on none", async () => {
   const { settledStretch } = await import("../../../../packages/player/dist/render/strokes.js");
   const pulse: [number, number, number, number] = [1.013, 0.002, 0.002, 1.007];
-  // A hairline moves to a grid of 64ths of its logarithm.
+  // A hairline, nearly even, moves to an even stretch on a coarse grid of its logarithm.
   const hair = settledStretch(pulse, 1, 1);
   assert.notDeepEqual(hair, pulse);
-  // Its lines' edges, half a pixel out, stand where the pulse's put them within a fiftieth.
+  assert.equal(hair[1], 0);
+  assert.equal(hair[0], hair[3]);
+  // Its lines' edges, half a pixel out, stand where the pulse's put them within a tenth.
   const det = hair[0] * hair[3] - hair[1] * hair[2];
   const e0 = (pulse[0] * hair[3] - pulse[2] * hair[1]) / det;
-  assert.ok(Math.abs(e0 - 1) * 0.5 < 0.02);
-  // A line of 20 pixels needs a grid 20 times finer, which a near pulse may still reach.
+  assert.ok(Math.abs(e0 - 1) * 0.5 < 0.1);
+  // A line of 20 pixels settles too, but on a grid fine enough that its edges, ten pixels out,
+  // stand within the slack and the grid's own fiftieth.
   const wide = settledStretch(pulse, 400, 1);
-  assert.ok(Math.abs(wide[0] - pulse[0]) < Math.abs(hair[0] - pulse[0]) || wide[0] === pulse[0]);
+  const wideDet = wide[0] * wide[3] - wide[1] * wide[2];
+  const w0 = (pulse[0] * wide[3] - pulse[2] * wide[1]) / wideDet;
+  const w3 = (pulse[3] * wide[0] - pulse[1] * wide[2]) / wideDet;
+  assert.ok(Math.max(Math.abs(w0 - 1), Math.abs(w3 - 1)) * 10 < 0.12);
   // One of 2000 pixels is its own stretch.
   assert.deepEqual(settledStretch(pulse, 40000, 1), pulse);
   // Stretches a step apart on the grid's scale settle alike.
@@ -2611,6 +2617,34 @@ test("a wide line settles on a finer grid, and one too wide on none", async () =
     settledStretch([1.0101, 0, 0, 1.0101], 1, 1),
     settledStretch([1.0102, 0, 0, 1.0102], 1, 1),
   );
+});
+
+test("a part turning inside a parent squashed a little strokes through one stretch at every angle", async () => {
+  const { settledStretch, stretchOf } = await import(
+    "../../../../packages/player/dist/render/strokes.js"
+  );
+  // A parent squashed to 0.9 of its height, a part in it turned: each angle's stretch differs.
+  const turned = (angle: number, squash: number): [number, number, number, number] => {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [c, squash * s, -s, squash * c];
+  };
+  const settled = (angle: number, squash: number, widest: number) =>
+    settledStretch(stretchOf(turned(angle, squash)) as [number, number, number, number], widest, 1);
+  assert.notDeepEqual(stretchOf(turned(0.3, 0.9)), stretchOf(turned(1.1, 0.9)));
+  // Its hairlines, and lines of a pixel and a half, settle on one even stretch whatever the angle.
+  for (const widest of [1, 30]) {
+    const first = settled(0.3, 0.9, widest);
+    assert.equal(first[1], 0);
+    for (const angle of [0.7, 1.1, 2.5, -0.4]) {
+      assert.deepEqual(settled(angle, 0.9, widest), first);
+    }
+  }
+
+  // Squashed to a twentieth, a hairline is no pixel wide through an even stretch: its own.
+  assert.notEqual(settled(0.3, 0.05, 1)[1], 0);
+  // A line of 20 pixels in the 0.9 parent would stand a pixel off: its own as well.
+  assert.notEqual(settled(0.3, 0.9, 400)[1], 0);
 });
 
 test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", async () => {
