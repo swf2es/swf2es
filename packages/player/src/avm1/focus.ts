@@ -9,7 +9,13 @@
 // top left corner on the stage in twips, of which only the first walked at
 // a place is kept, as Ruffle keeps it.
 import { boundsIn } from "../display/bounds.js";
-import { ButtonObject, Container, type DisplayObject, MovieClip } from "../display/display.js";
+import {
+  ButtonObject,
+  Container,
+  type DisplayObject,
+  MovieClip,
+  TextObject,
+} from "../display/display.js";
 
 /** What the tab order reads of the movie's objects, their AS2 properties as code reads them. */
 export interface TabHost {
@@ -65,11 +71,15 @@ export function tabOrder(root: MovieClip, stage: Container, host: TabHost): Disp
 }
 
 /**
- * Whether Tab reaches `d`: a button unless its tabEnabled is false; a clip
- * whose tabEnabled is true, or, where it is not set, one in button mode or
- * with a tabIndex.
+ * Whether Tab reaches `d`: a button, or an input field, unless its
+ * tabEnabled is false; a clip whose tabEnabled is true, or, where it is not
+ * set, one in button mode or with a tabIndex.
  */
 function tabbable(d: DisplayObject, host: TabHost): boolean {
+  if (d instanceof TextObject) {
+    return d.type === "input" && (host.tabEnabled(d) ?? true);
+  }
+
   if (d instanceof ButtonObject) {
     return host.tabEnabled(d) ?? true;
   }

@@ -810,6 +810,8 @@ export function editText(
     readOnly?: boolean;
     /** In twips; the indent may be negative, as the tag's 16 bits hold it. */
     layout?: { leftMargin: number; rightMargin: number; indent: number; leading: number };
+    /** The AVM1 variable the field shows. */
+    variable?: string;
   } = {},
 ): Uint8Array {
   const w = new BitWriter().u16(id);
@@ -845,7 +847,7 @@ export function editText(
       .u16((layout?.leading ?? 0) & 0xffff);
   }
 
-  w.string("").string(text);
+  w.string(options.variable ?? "").string(text);
   return tag(37, w.done());
 }
 
