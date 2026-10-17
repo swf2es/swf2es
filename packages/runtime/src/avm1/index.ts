@@ -3,6 +3,7 @@
 export { goto } from "./clips.js";
 export { Avm1Super, ScriptFunction } from "./functions.js";
 export { broadcastMessage, initializeBroadcaster } from "./globals/broadcaster.js";
+export { DateCell } from "./globals/date.js";
 export { ABSENT, type DisplayNative, type Host, type Target, type Timeline } from "./host.js";
 export { numberToString, parseFloatAvm1, stringToNumber } from "./numbers.js";
 export {
@@ -20,6 +21,7 @@ export {
   type Native,
   Property,
   READ_ONLY,
+  removeOwn,
   set,
   VERSION_6,
   VERSION_7,

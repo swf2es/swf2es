@@ -42,7 +42,7 @@ import {
   VideoObject,
 } from "../display/display.js";
 import type { DisplayCharacter, Library } from "../display/timeline.js";
-import type { Drawer } from "../hosts.js";
+import { type Drawer, defaultStorage, type SharedObjectStorage } from "../hosts.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
@@ -58,6 +58,7 @@ import {
   targetOf,
 } from "./globals/MovieClip.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
+import { sharedObjectClass } from "./globals/SharedObject.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 
 type Value = avm1.Value;
@@ -80,6 +81,8 @@ export interface Avm1Options {
   realTime?: (() => number) | null;
   /** The script timeout in seconds where the SWF sets none: Flash's 15 by default. */
   scriptTimeout?: number;
+  /** Where SharedObject keeps its .sol files: the browser's localStorage by default, AS3's own. */
+  storage?: SharedObjectStorage;
 }
 
 /**
@@ -374,6 +377,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   /** Each button character's condition blocks, by its id, gathered from the action list once. */
   private buttonHandlers: Map<number, ButtonHandler[]> | null = null;
   readonly url: string;
+  readonly storage: SharedObjectStorage;
+  /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
+  private sharedObjects: { flush(version: number): void } | null = null;
 
   constructor(
     readonly codegen: Codegen,
@@ -382,6 +388,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     const print = options.print ?? ((line: string) => console.log(line));
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.url = options.url ?? "";
+    this.storage = options.storage ?? defaultStorage();
     this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
     this.start = this.realTime?.() ?? 0;
     if (options.scriptTimeout !== undefined) {
@@ -487,6 +494,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     this.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
     realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
+    const sharedObjects = sharedObjectClass(this);
+    this.sharedObjects = sharedObjects;
+    realm.global.define("SharedObject", sharedObjects.constr, avm1.DONT_ENUM);
     const flash = flashPackage(this);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
@@ -997,6 +1007,26 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
 
   private classKey(name: string): string {
     return this.swfVersion > 6 ? name : avm1.fold(name);
+  }
+
+  /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */
+  registeredName(constr: Value): string | null {
+    if (!(constr instanceof avm1.Avm1Function)) {
+      return null;
+    }
+
+    for (const [name, registered] of this.registered) {
+      if (registered === constr) {
+        return name;
+      }
+    }
+
+    return null;
+  }
+
+  /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
+  destroy(): void {
+    this.sharedObjects?.flush(this.swfVersion);
   }
 
   /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
