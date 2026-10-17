@@ -382,6 +382,8 @@ export class BodyDecoder {
     this.captured.length = 0;
     const ir = this.ir;
     ir.reset(this.localCount, this.maxScope, this.frameSize);
+    // The IR adds a coercion or check here and there to the ABC's instructions.
+    ir.reserve(this.instructions + (this.instructions >> 2) + 16);
     ir.outerSize = this.outer.size;
     let blocks: u32 = 0;
     for (let pc: u32 = 0; pc < this.length; pc++) {
