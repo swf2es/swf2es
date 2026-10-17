@@ -14,7 +14,7 @@
 // entry state changes is walked again, until none changes. That is avmplus'
 // first verifier phase, and the type checks are its.
 //
-// A BodyDecoder is made once per ABC and reused for every body: its scratch
+// One BodyDecoder serves every body of every ABC (bodyDecoder): its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
 import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
 import { Domain, LOG_None, LOG_Verify } from "../link/domain";
@@ -2365,6 +2365,11 @@ export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
  * time: nothing decodes while another's IR is read.
  */
 let sharedDecoder: BodyDecoder | null = null;
+
+/** Let go of the decoder, and the domain and ABC it was last made for, as a domain is replaced. */
+export function releaseDecoder(): void {
+  sharedDecoder = null;
+}
 
 export function bodyDecoder(domain: Domain, index: u32): BodyDecoder {
   const abc = domain.abcs[index];

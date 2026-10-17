@@ -3,7 +3,7 @@
 // to, and the module, the source map and the method entries the last one
 // compiles to, whole, as the JIT and ahead-of-time compilation take them,
 // or a method at a time, as lazy compilation will (see docs/architecture.md).
-import { bodyDecoder, verifyMethods } from "./avm2/abc/code";
+import { bodyDecoder, releaseDecoder, verifyMethods } from "./avm2/abc/code";
 import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
@@ -39,6 +39,7 @@ export function domainReset(apiVersion: i32): void {
   domain.apiVersion = <u8>apiVersion;
   verified = null;
   written = null;
+  releaseDecoder();
 }
 
 /**
@@ -172,6 +173,8 @@ export function domainRebuild(): bool {
   domain = fresh;
   verified = null;
   written = null;
+  // The decoder may still be made for the old domain, which it would keep.
+  releaseDecoder();
   return true;
 }
 
