@@ -1140,6 +1140,23 @@ function sameInput(a: Input, b: Input): boolean {
  * One changing frame after frame is filtered straight to the target,
  * with no copy kept; so is one that `keeps` not, drawn once.
  */
+/** A pass that draws its input as it is, made once: an empty chain's (FilterChain.run). */
+let plainCopyFilter: Filter | null = null;
+
+function plainCopy(): Filter {
+  plainCopyFilter ??= new Filter({
+    glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
+    resources: {
+      colorUniforms: {
+        uColored: { value: 0, type: "f32" },
+        uMul: { value: new Float32Array([1, 1, 1, 1]), type: "vec4<f32>" },
+        uAdd: { value: new Float32Array(4), type: "vec4<f32>" },
+      },
+    },
+  });
+  return plainCopyFilter;
+}
+
 /** Each renderer's largest texture side, asked once. */
 const textureLimits = new WeakMap<object, number>();
 
@@ -1489,6 +1506,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
   private run(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const filters = this.filters;
+    // A layer kept for a blend (render/view.ts, layerBlend): what was drawn, as it was drawn.
+    if (filters.length === 0) {
+      plainCopy().apply(system, input, output, clear);
+      return;
+    }
+
     if (filters.length === 1) {
       filters[0].apply(system, input, output, clear);
       return;

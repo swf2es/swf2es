@@ -1822,7 +1822,9 @@ export class PixiView {
     // other is what is drawn's own (render/color.ts), and the tint stays white.
     let recolor = false;
     // A 3D one's chain runs in its bitmap, where it colours what its filters make as any does.
-    const rooted = node.filters[0] instanceof FilterChain && !masking;
+    // A chain of filters colours what it makes; an empty one (layerBlend) leaves its children their colours.
+    const rooted =
+      node.filters[0] instanceof FilterChain && node.filters[0].filters.length > 0 && !masking;
     const rerooted = rooted !== node.rooted;
     if (rerooted) {
       node.rooted = rooted;
@@ -2079,7 +2081,8 @@ export class PixiView {
         this.overOpaque.delete(node);
       }
 
-      this.blendDirectly(node, isolated ? null : this.directBlend(node), refilled);
+      const layered = this.layerBlend(node, isolated);
+      this.blendDirectly(node, isolated ? null : this.directBlend(node), refilled || layered);
       o.dirty = CLEAN;
     }
 
@@ -2095,6 +2098,59 @@ export class PixiView {
     }
 
     return container;
+  }
+
+  /**
+   * Give a blend the GPU draws a layer of its own, kept while nothing in it changes: an empty
+   * chain, through which the object is drawn once into a texture and the texture blended by the
+   * GPU over what is behind (directBlend), and then only the texture while it stands, as a filtered
+   * object's output is. Without one, a blend filter drew the object into a layer of its own and
+   * copied what is behind it on every frame. Only a blend the GPU draws as Flash does, of an
+   * object of more than one draw (a single fill
+   * blends as it is drawn), with no filters of its own, outside any layer; the chain goes again
+   * once that no longer holds. Multiply and subtract are the GPU's only over an opaque stage
+   * (directBlend), which their layer is blended by while it is; else by a blend filter after its
+   * chain. Whether the object's chain was made or dropped: a new one is
+   * stale, so draws the object afresh.
+   */
+  private layerBlend(node: Node, isolated: boolean): boolean {
+    const chain = node.filters[0];
+    const empty = chain instanceof FilterChain && chain.filters.length === 0;
+    const wanted =
+      !this.fresh &&
+      !isolated &&
+      node.singleDraw !== 1 &&
+      (chain === undefined || empty) &&
+      this.gpuBlends(node.blend);
+    if (wanted === empty) {
+      return false;
+    }
+
+    if (empty) {
+      chain.destroy();
+      node.filters = [];
+    } else {
+      node.filters = [new FilterChain([], node.container, true, this.filterUnits)];
+    }
+
+    return true;
+  }
+
+  /** Whether the GPU blends `mode` as Flash does here, as directBlend has it for a layer. */
+  private gpuBlends(mode: string): boolean {
+    const webgl = this.renderer.type === RendererType.WEBGL;
+    switch (mode) {
+      case "screen":
+        return true;
+      case "add":
+        return webgl;
+      case "multiply":
+        return !this.stageClear;
+      case "subtract":
+        return webgl && !this.stageClear;
+      default:
+        return false;
+    }
   }
 
   /** Blend `node` in `direct` by the GPU's own blending, or by its blend filter for null. */
