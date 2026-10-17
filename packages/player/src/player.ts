@@ -209,6 +209,7 @@ export class Player {
   destroy(): void {
     this.stopped = true;
     this.scripting?.destroy();
+    this.avm1?.destroy();
     unloads.count++;
   }
 

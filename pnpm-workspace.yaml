@@ -10,3 +10,7 @@ packages:
 ignoredBuiltDependencies:
   - electron
   - esbuild
+# Rollup before 4.59 writes outside its output directory for crafted names
+# (GHSA-mw96-cpmx-2vgc); the Pixi fork's range would still take 4.55.
+overrides:
+  rollup: ^4.59.0
