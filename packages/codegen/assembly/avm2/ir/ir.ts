@@ -122,6 +122,29 @@ export class Ir {
     this.frameSize = frameSize;
   }
 
+  /**
+   * Room for `count` instructions before the next add grows the arrays,
+   * after a reset: none of the old are kept. A body's instructions are
+   * known before its IR is written, and growing by doubling instead left
+   * each smaller copy as garbage until the call ended, where garbage stays.
+   */
+  reserve(count: u32): void {
+    if (count <= <u32>this.op.length) {
+      return;
+    }
+
+    this.op = new StaticArray<u16>(count);
+    this.dst = new StaticArray<i32>(count);
+    this.src = new StaticArray<i32>(count);
+    this.srcCount = new StaticArray<u32>(count);
+    this.a = new StaticArray<u32>(count);
+    this.b = new StaticArray<u32>(count);
+    this.c = new StaticArray<i32>(count);
+    this.type = new StaticArray<i32>(count);
+    this.notNull = new StaticArray<u8>(count);
+    this.pc = new StaticArray<u32>(count);
+  }
+
   /** Append an instruction; its type is filled in once the verifier knows it. */
   add(op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32, pc: u32): u32 {
     if (this.count === <u32>this.op.length) {
