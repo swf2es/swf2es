@@ -1,7 +1,13 @@
 // A player shown in its element: the renderer and its canvas, sized to
-// the element and the device's pixels, the pointer and the keys, and the
-// loop that plays and draws, all of which destroy lets go.
-import { bindKeyboard, PixiView, type Player, type Scripting } from "@swf2es/player";
+// the element and the device's pixels, the pointer, the keys and the
+// focus, and the loop that plays and draws, all of which destroy lets go.
+import {
+  bindActivation,
+  bindKeyboard,
+  PixiView,
+  type Player,
+  type Scripting,
+} from "@swf2es/player";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
 import { type Placement, place, type ScaleMode } from "./layout.js";
 
@@ -62,6 +68,8 @@ export class Playback {
     // The element's keys alone, as a plug-in had them only while focused.
     const host = (box.getRootNode() as ShadowRoot).host ?? box;
     this.unbind.push(bindKeyboard(player, host));
+    // Its keys' releases are lost when the window or the element loses focus: the player lets them go.
+    this.unbind.push(bindActivation(player, window, host as HTMLElement));
     this.resize = new ResizeObserver(() => this.layout());
     this.resize.observe(box);
     this.layout();

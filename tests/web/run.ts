@@ -40,6 +40,10 @@ const abcs = compileScripts(
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
     {
+      name: "ActivationTest",
+      source: readFileSync(`${here}scripts/ActivationTest.as`, "utf8"),
+    },
+    {
       name: "StageQuality",
       source: readFileSync(`${here}../player/scripts/StageQuality.as`, "utf8"),
     },
@@ -66,6 +70,10 @@ writeFileSync(
 writeFileSync(
   `${site}touch.swf`,
   bare(abcs.get("TouchTest") as Uint8Array, 1, "TouchTest", 200, 100),
+);
+writeFileSync(
+  `${site}activation.swf`,
+  bare(abcs.get("ActivationTest") as Uint8Array, 1, "ActivationTest", 100, 100),
 );
 writeFileSync(
   `${site}index.html`,
@@ -423,6 +431,45 @@ check(
 
     assert.deepEqual([log, pressed.seed], [["press"], "set on a press"]);
     await call(evaluate, "clipDestroy()");
+  },
+);
+
+check(
+  "the window's blur and focus and the page taking the focus deactivate and activate the SWF",
+  async (evaluate, send) => {
+    await call(evaluate, "activationPlayer()");
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    const log = () => call<string[]>(evaluate, "activationLog()");
+    const shift = { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 8 };
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...shift });
+
+    // The window's blur, then its focus: the shift held through it is let go with no keyUp.
+    await call(evaluate, `activationWindow("blur")`);
+    await call(evaluate, `activationWindow("blur")`);
+    await call(evaluate, `activationWindow("focus")`);
+    assert.deepEqual(await log(), [
+      "keyDown 16 true",
+      "deactivate root1",
+      "deactivate orphan",
+      "activate root1",
+      "activate orphan",
+    ]);
+
+    // The page's textarea takes the focus, and the element takes it back.
+    await call(evaluate, "activationFocus(false)");
+    await call(evaluate, "activationFocus(true)");
+    const a = { key: "a", code: "KeyA", windowsVirtualKeyCode: 65 };
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...a });
+    assert.deepEqual(await log(), [
+      "deactivate root1",
+      "deactivate orphan",
+      "activate root1",
+      "activate orphan",
+      "keyDown 65 false",
+    ]);
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...a });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...shift, modifiers: 0 });
+    await call(evaluate, "activationDestroy()");
   },
 );
 
