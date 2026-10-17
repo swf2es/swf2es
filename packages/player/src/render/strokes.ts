@@ -372,6 +372,15 @@ const roundStretch = (x: number, t: number) => Math.round((x / t) * 65536) / 655
  * a fiftieth of a pixel, under the twentieth a SWF's twips can tell.
  */
 const EDGE_SLACK = 0.02;
+/**
+ * How far, in pixels of the screen, a line's edge may stand from its own
+ * stretch's place when stroked through an even one (settledStretch): two
+ * twips, a tenth of a pixel. A part that turns inside a parent scaled a
+ * little unevenly, as a limb in a squashed body, has a stretch that turns
+ * with it, a new one each frame, and its lines were tessellated each frame;
+ * stroked through one even scale, every angle shares them.
+ */
+const EVEN_SLACK = 0.1;
 /** The coarsest step of the stretches' grid: about 1.5% of a scale. */
 const COARSEST_STEP = 1 / 64;
 /** The finest: a line wider than this allows is stroked through its own stretch. */
@@ -403,6 +412,29 @@ export function settledStretch(s: Linear, widest: number, least: number, out?: L
   const r = Math.sqrt(half * half + off * off);
   if (!(mean - r > 0)) {
     return s;
+  }
+
+  // Nearly even: stroked through the even stretch of the same area, k, which no turn changes,
+  // and taken back through its inverse, a line is as wide as k makes it times what s q⁻¹ = s / k
+  // stretches each way, between the smaller scale over k and the larger. Through s itself it is
+  // one width all along, as screenWidth reads s; its edges share the difference, which must stay
+  // within the slack. A hairline, a pixel wide however small its scale, cannot: s / k would
+  // stretch the pixel itself.
+  if (r > 0) {
+    const width = widest / 20;
+    const k = Math.sqrt((mean + r) * (mean - r));
+    const stroked = Math.max(least, width * k);
+    const own = Math.max(least, (width * Math.hypot(s[0] + s[2], s[1] + s[3])) / Math.SQRT2);
+    const wide = (stroked * (mean + r)) / k - own;
+    const narrow = own - (stroked * (mean - r)) / k;
+    if (Math.max(wide, narrow) <= 2 * EVEN_SLACK * least) {
+      const even = out ?? [0, 0, 0, 0];
+      even[0] = k;
+      even[1] = 0;
+      even[2] = 0;
+      even[3] = k;
+      return settledStretch(even, widest, least, even);
+    }
   }
 
   // Half the widest line's width on the screen, at most as the larger scale makes it, times the

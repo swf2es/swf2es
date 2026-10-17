@@ -2591,19 +2591,25 @@ test("a shape that pulses a little shares its lines between the frames of the pu
   assert.ok(view.counts.strokeContexts <= 6, `${view.counts.strokeContexts} contexts`);
 });
 
-test("a wide line settles on a finer grid, and one too wide on none", async () => {
+test("a wide line settles within its edges' slack, and one too wide on none", async () => {
   const { settledStretch } = await import("../../../../packages/player/dist/render/strokes.js");
   const pulse: [number, number, number, number] = [1.013, 0.002, 0.002, 1.007];
-  // A hairline moves to a grid of 64ths of its logarithm.
+  // A hairline, nearly even, moves to an even stretch on a grid of 64ths of its logarithm.
   const hair = settledStretch(pulse, 1, 1);
   assert.notDeepEqual(hair, pulse);
-  // Its lines' edges, half a pixel out, stand where the pulse's put them within a fiftieth.
+  assert.equal(hair[1], 0);
+  assert.equal(hair[0], hair[3]);
+  // Its lines' edges, half a pixel out, stand where the pulse's put them within a tenth.
   const det = hair[0] * hair[3] - hair[1] * hair[2];
   const e0 = (pulse[0] * hair[3] - pulse[2] * hair[1]) / det;
-  assert.ok(Math.abs(e0 - 1) * 0.5 < 0.02);
-  // A line of 20 pixels needs a grid 20 times finer, which a near pulse may still reach.
+  assert.ok(Math.abs(e0 - 1) * 0.5 < 0.1);
+  // A line of 20 pixels settles too, but on a grid fine enough that its edges, ten pixels out,
+  // stand within the slack and the grid's own fiftieth.
   const wide = settledStretch(pulse, 400, 1);
-  assert.ok(Math.abs(wide[0] - pulse[0]) < Math.abs(hair[0] - pulse[0]) || wide[0] === pulse[0]);
+  const wideDet = wide[0] * wide[3] - wide[1] * wide[2];
+  const w0 = (pulse[0] * wide[3] - pulse[2] * wide[1]) / wideDet;
+  const w3 = (pulse[3] * wide[0] - pulse[1] * wide[2]) / wideDet;
+  assert.ok(Math.max(Math.abs(w0 - 1), Math.abs(w3 - 1)) * 10 < 0.12);
   // One of 2000 pixels is its own stretch.
   assert.deepEqual(settledStretch(pulse, 40000, 1), pulse);
   // Stretches a step apart on the grid's scale settle alike.
@@ -2611,6 +2617,34 @@ test("a wide line settles on a finer grid, and one too wide on none", async () =
     settledStretch([1.0101, 0, 0, 1.0101], 1, 1),
     settledStretch([1.0102, 0, 0, 1.0102], 1, 1),
   );
+});
+
+test("a part turning inside a parent squashed a little strokes through one stretch at every angle", async () => {
+  const { settledStretch, stretchOf } = await import(
+    "../../../../packages/player/dist/render/strokes.js"
+  );
+  // A parent squashed to 0.9 of its height, a part in it turned: each angle's stretch differs.
+  const turned = (angle: number, squash: number): [number, number, number, number] => {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [c, squash * s, -s, squash * c];
+  };
+  const settled = (angle: number, squash: number, widest: number) =>
+    settledStretch(stretchOf(turned(angle, squash)) as [number, number, number, number], widest, 1);
+  assert.notDeepEqual(stretchOf(turned(0.3, 0.9)), stretchOf(turned(1.1, 0.9)));
+  // Its hairlines, and lines of two pixels, settle on one even stretch whatever the angle.
+  for (const widest of [1, 40]) {
+    const first = settled(0.3, 0.9, widest);
+    assert.equal(first[1], 0);
+    for (const angle of [0.7, 1.1, 2.5, -0.4]) {
+      assert.deepEqual(settled(angle, 0.9, widest), first);
+    }
+  }
+
+  // Squashed to a twentieth, a hairline is no pixel wide through an even stretch: its own.
+  assert.notEqual(settled(0.3, 0.05, 1)[1], 0);
+  // A line of 20 pixels in the 0.9 parent would stand a pixel off: its own as well.
+  assert.notEqual(settled(0.3, 0.9, 400)[1], 0);
 });
 
 test("Pixi's pool of Graphics' batch elements is cut back as a view prepares", async () => {
