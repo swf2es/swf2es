@@ -1060,10 +1060,41 @@ Enumerate2, converting it to a string) reaches the object placed at that
 path since, or nothing, as Ruffle's `MovieClipReference` does; its
 `typeof` stays `movieclip`.
 
-A text field with a variable name (DefineEditText's `VariableName`)
-shows a variable on the clip its path names, and a change to either
-updates the other; the player keeps the binding on the field, and the
-runtime tells the player when a variable it binds is set.
+A text field with a variable name (DefineEditText's `VariableName`, or
+`variable` set) shows a variable on the clip its path names, and a change
+to either updates the other (`avm1/bindings.ts`, after Ruffle's
+`try_bind_text_field_variable`). The path is resolved from the field's
+parent, past any button. A field bound to a display object's property is
+kept in that object's list, and the runtime calls the object's
+`DisplayNative.changed` before it stores any property, a set through
+SetVariable, DefineLocal, SetMember or a setter alike; the field shows
+the value as HTML. A script's set of the field's text sets the variable,
+its path resolved again each time. As a field is made it takes the
+variable's value, or gives it its text where the variable has none; one
+whose path names no object yet waits and is tried again as each display
+object is made, and the fields bound to a clip that is unloaded wait
+again for one at its path.
+
+### Text fields
+
+A text field's AS2 object has `TextField.prototype` (`globals/TextField.ts`,
+after Ruffle's `text_field.rs`), whose accessors read and write the
+player's `TextObject` and its `TextModel`, the same text, formats and
+layout AS3's `TextField` has; they find the field each time, so another
+object given them reads undefined. Each field is a broadcaster that hears
+itself first. What only AVM1 has, the `html` flag, the variable, the
+`tabIndex`, the style sheet and whether the field has a selection, is
+kept beside the field. `TextFormat` (`globals/TextFormat.ts`) holds a
+`PartialFormat`, null for what it does not set, its numbers ints from
+SWF 8 rounded half to even and out of range -2^31, before it wrapped.
+`createTextField` makes a field in whole pixels, which only a SWF 8 gets
+back; `_width` and `_height` set a field's own size in whole twips,
+whatever its scale. Setting the text or HTML a field already has changes
+nothing, its formats included. `TextField.StyleSheet`
+(`globals/StyleSheet.ts`) keeps each style copied in `_css` and its
+transform's TextFormat in `_styles`; a field with a sheet reads its text
+as HTML styled by it and gives back the HTML as set, and a new sheet
+styles that HTML again.
 
 ### The frame
 
@@ -1431,9 +1462,12 @@ not set, one in button mode or with a `tabIndex`. Once any has a
 `tabIndex` (an int; -1 none; a value but a number or boolean the least),
 the order is by it, equal ones as walked, those without one left out;
 else by place, 6 × y + x of the top left corner on the stage in twips (a
-button's hit area's), the first walked at a place alone kept. Text
-fields take the focus with their AS2 face (step 13), and so the
-corpus's tests that begin by focusing one wait for it.
+button's hit area's), the first walked at a place alone kept. An input
+text field is in the order unless its `tabEnabled` is false; a script may
+focus any field. A field given the focus, again too, has all its text
+selected once the focus's events have run, which see no selection, and
+loses its selection with the focus (Ruffle's `update_edittext_selection`);
+Selection's indices are the focused field's, -1 without one.
 
 ### Time and the script timeout
 
@@ -1914,7 +1948,16 @@ determinism` green, and the corpus baseline may only go up.
     movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
-    Corpus tests of text fields.
+    Corpus tests of text fields. Done (see "Text fields"): the corpus goes
+    from 371 to 421 of 715 (`text_format`, `textfield_variable`,
+    `textfield_props_swf6`-`8`, `edittext_stylesheet`, `stylesheet`,
+    `stylesheet_transform`, `selection`, `edittext_programmatic_focus`...).
+    Left: typing into an input field (`edittext_input`, `edittext_restrict`,
+    the paste and IME tests), `onChanged` and `onScroller` from the user,
+    `asfunction:` links, `StyleSheet.load` with loading (step 15), the
+    HTML of SWF 6 and 7 fields as Flash reads it, and layout metrics
+    (`textWidth`, `maxscroll`) where they part from Flash's, which AS3's
+    fields share.
 14. **Drawing, display and sound classes.** The drawing API, `Color`,
     `Transform`, `ColorTransform`, `Matrix`, `Point`, `Rectangle`,
     `BitmapData`, filters, `Stage`, `Sound`, timeline sounds that
