@@ -41,7 +41,7 @@ import {
   TextObject,
   VideoObject,
 } from "../display/display.js";
-import type { DisplayCharacter, Library } from "../display/timeline.js";
+import type { DisplayCharacter, Library, SoundCharacter } from "../display/timeline.js";
 import {
   browserNavigate,
   type Drawer,
@@ -49,6 +49,14 @@ import {
   type Navigate,
   type SharedObjectStorage,
 } from "../hosts.js";
+import { type AudioHost, browserAudioHost, type DecodedSound } from "../media/audio.js";
+import {
+  finishTimelineSounds,
+  type SoundHost,
+  stopTimelineSounds,
+  timelineSoundsOf,
+  updateMixes,
+} from "../media/sounds.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
@@ -65,6 +73,7 @@ import {
 } from "./globals/MovieClip.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
+import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./globals/Sound.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 
 type Value = avm1.Value;
@@ -89,6 +98,8 @@ export interface Avm1Options {
   scriptTimeout?: number;
   /** Where SharedObject keeps its .sol files: the browser's localStorage by default, AS3's own. */
   storage?: SharedObjectStorage;
+  /** What plays the timeline's sounds and Sound's: the browser's Web Audio by default; null for none. */
+  audio?: AudioHost | null;
   /**
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
@@ -438,6 +449,17 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   readonly storage: SharedObjectStorage;
   /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
   private sharedObjects: { flush(version: number): void } | null = null;
+  readonly audio: AudioHost | null;
+  /** What the timeline's sounds, and Sound's, play by. */
+  readonly sounds: SoundHost;
+  /** Each sound decoded once for the device. */
+  private readonly decodes = new WeakMap<SoundCharacter, Promise<DecodedSound>>();
+  /** The transforms Sound gave clips, and the global one. */
+  private readonly soundTransforms = new WeakMap<DisplayObject, Avm1SoundTransform>();
+  private globalSoundTransform: Avm1SoundTransform = FULL;
+  /** The Sounds whose sound ended, for their onSoundComplete after the frame's actions. */
+  private completed: avm1.Avm1Object[] = [];
+  private frameCount = 0;
 
   constructor(
     readonly codegen: Codegen,
@@ -447,6 +469,28 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.url = options.url ?? "";
     this.storage = options.storage ?? defaultStorage();
+    this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
+    const movie = this;
+    this.sounds = {
+      get audio() {
+        return movie.audio;
+      },
+      get now() {
+        return movie.now();
+      },
+      get frames() {
+        return movie.frameCount;
+      },
+      soundClip: (character) => this.soundClip(character),
+      ownMix: (d) => {
+        const t = this.soundTransforms.get(d);
+        return t === undefined ? undefined : mixOfTransform(t);
+      },
+      get mixer() {
+        return mixOfTransform(movie.globalSoundTransform);
+      },
+      scriptSounds: () => 0,
+    };
     this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
     this.start = this.realTime?.() ?? 0;
     if (options.scriptTimeout !== undefined) {
@@ -501,6 +545,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
         this.startDrag(target as DisplayObject, lockCenter, bounds),
       stopDrag: () => this.stopDrag(),
       returned: () => this.returned(),
+      stopSounds: () => stopTimelineSounds(this.sounds),
       fsCommand: options.fsCommand ?? ((command) => this.fsCommand(command)),
       navigate:
         (options.navigate === undefined
@@ -567,6 +612,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     const sharedObjects = sharedObjectClass(this);
     this.sharedObjects = sharedObjects;
     realm.global.define("SharedObject", sharedObjects.constr, avm1.DONT_ENUM);
+    realm.global.define("Sound", soundClass(this), avm1.DONT_ENUM);
     const flash = flashPackage(this);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
@@ -586,6 +632,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
       keeps: (display) => this.keeps(display),
     };
     library.removing = (display) => this.removing(display);
+    library.sounds = timelineSoundsOf(this.sounds);
     this.made(root);
   }
 
@@ -649,6 +696,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     try {
       this.frameStart();
       this.dropPending();
+      // Sounds whose time has run are over before the clips play on, as AS3's are: a stream
+      // starts again at its first block, a NoMultiple may start again.
+      this.frameCount++;
+      finishTimelineSounds(this.sounds);
       const clips = this.clips;
       const root = this.root;
       for (let i = clips.length - 1; i >= 0; i--) {
@@ -666,6 +717,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
 
       this.clips = clips.filter((clip) => clip === root || under(clip, root));
       this.runQueue();
+      // onSoundComplete runs with the frame's actions, and what it queues runs with them too.
+      if (this.soundsCompleted()) {
+        this.runQueue();
+      }
+
       this.afterFrame();
     } finally {
       this.end();
@@ -1097,6 +1153,67 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(): void {
     this.sharedObjects?.flush(this.swfVersion);
+    stopTimelineSounds(this.sounds);
+    this.audio?.close?.();
+  }
+
+  /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
+  exportedSound(name: string): SoundCharacter | null {
+    const id = this.exports.get(asciiLower(name));
+    const character = id === undefined ? undefined : this.library?.characters.get(id);
+    return character?.type === "sound" ? character : null;
+  }
+
+  soundTransform(d: DisplayObject | null): Avm1SoundTransform {
+    return d === null ? this.globalSoundTransform : (this.soundTransforms.get(d) ?? FULL);
+  }
+
+  setSoundTransform(d: DisplayObject | null, transform: Avm1SoundTransform): void {
+    if (d === null) {
+      this.globalSoundTransform = transform;
+    } else {
+      this.soundTransforms.set(d, transform);
+    }
+
+    updateMixes(this.sounds);
+  }
+
+  /** A Sound's sound has ended: its onSoundComplete runs once the frame's actions have. */
+  complete(o: avm1.Avm1Object): void {
+    this.completed.push(o);
+  }
+
+  /** Each ended Sound's onSoundComplete, in the root's activation: whether any ran. */
+  private soundsCompleted(): boolean {
+    const completed = this.completed;
+    this.completed = [];
+    if (completed.length === 0 || this.movieRoot === null) {
+      return false;
+    }
+
+    const cx = this.activationOf(this.movieRoot);
+    for (const o of completed) {
+      if (cx !== null && !this.halted) {
+        this.rt.callMethod(cx, o, "onSoundComplete", NO_ARGS, this.swfVersion);
+      }
+    }
+
+    return true;
+  }
+
+  private soundClip(character: SoundCharacter): Promise<DecodedSound> | null {
+    const audio = this.audio;
+    if (audio === null) {
+      return null;
+    }
+
+    let clip = this.decodes.get(character);
+    if (clip === undefined) {
+      clip = Promise.resolve().then(() => audio.decode(character.definition));
+      this.decodes.set(character, clip);
+    }
+
+    return clip;
   }
 
   /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
