@@ -50,7 +50,7 @@ import {
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
-import { finishSounds, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
+import { finishSounds, soundHostOf, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import {
   airLibrary,
   playerglobalLibrary,
@@ -172,7 +172,7 @@ export class Scripting {
   /** Takes what fscommand sends, or nothing does. */
   readonly fsCommand: ((command: string, args: string, callers: string[]) => void) | null;
   /** What plays every library's timeline and button sounds. */
-  private readonly timelineSounds = timelineSoundsOf(this);
+  private readonly timelineSounds = timelineSoundsOf(soundHostOf(this));
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
   fetch: ((request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>) | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
