@@ -24,6 +24,7 @@ import type { Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import { storeOf } from "./BitmapData.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
+import { formVars } from "./LoadVars.js";
 
 type Value = avm1.Value;
 
@@ -89,6 +90,8 @@ export interface Movie extends GeomHost {
   remove(d: DisplayObject): void;
   /** A property of `d`'s AVM1 object set, which a text field bound to it shows. */
   propertyChanged(d: DisplayObject, name: string, value: Value, version: number): void;
+  /** loadVariables: the variables at `url` set on `d`, `form`'s sent with them. */
+  loadVariables(d: DisplayObject, url: string, form: avm1.UrlForm | null): void;
 }
 
 /** AVM1's depths are the timeline's less this, as Flash gives them to scripts. */
@@ -986,6 +989,19 @@ export function movieClipClass(movie: Movie): {
       avm1.getUrlMethod(cx, args, version);
     }
 
+    return undefined;
+  });
+  // The clip's own variables sent where a method is "GET" or "POST", in any case.
+  method("loadVariables", 0, (clip, args, version) => {
+    const face = clip.avm1;
+    if (args.length === 0 || face === null) {
+      return undefined;
+    }
+
+    const method = args.length > 1 ? avm1.stringOf(args[1], version).toUpperCase() : "";
+    const form: avm1.UrlForm | null =
+      method === "GET" || method === "POST" ? { method, vars: formVars(face, version) } : null;
+    movie.loadVariables(clip, avm1.stringOf(args[0], version), form);
     return undefined;
   });
   method("stop", 0, (clip) => {
