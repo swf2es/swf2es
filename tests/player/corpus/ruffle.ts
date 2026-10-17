@@ -48,6 +48,8 @@ export interface RuffleTest {
    * one: the stage shown in it whole.
    */
   viewport: { width: number; height: number } | null;
+  /** Whether Ruffle traces its navigator's requests into the output. */
+  logFetch: boolean;
 }
 
 /**
@@ -175,6 +177,7 @@ function test(path: string): RuffleTest | null {
     ignore: values.get("ignore") === "true" || needs,
     input: existsSync(input) ? input : null,
     viewport: width && height ? { width: Number(width[1]), height: Number(height[1]) } : null,
+    logFetch: values.get("log_fetch") === "true",
   };
 }
 

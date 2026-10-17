@@ -53,7 +53,12 @@ function setTargetClip(cx: Activation, target: Target | null): void {
 }
 
 /** The display object a path from `start`'s AVM1 object names, null for none or no display object. */
-function pathTarget(cx: Activation, start: Target, path: string, version: number): Target | null {
+export function pathTarget(
+  cx: Activation,
+  start: Target,
+  path: string,
+  version: number,
+): Target | null {
   const from = cx.host.objectOf?.(start);
   if (from === undefined) {
     return null;

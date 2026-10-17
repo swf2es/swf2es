@@ -213,6 +213,60 @@ export class Player {
     unloads.count++;
   }
 
+  private active = true;
+  /** The activation the host last asked for, applied once no script runs. */
+  private wanted = true;
+  private applying = false;
+  /** How many times the player has been activated or deactivated: each may run listeners. */
+  private activations = 0;
+
+  /** Whether the player has the system's focus, as last applied; true until a host says otherwise. */
+  get isActive(): boolean {
+    return this.active;
+  }
+
+  /**
+   * The host's window or page gained or lost focus, or was hidden or shown.
+   * Losing it, the keys held are let go, the AVM1 Key's too, and then
+   * DEACTIVATE is broadcast to every EventDispatcher that listens, display
+   * object or not; gaining it back, ACTIVATE. Keys are let go with no
+   * keyUp: Flash sends none when it loses focus, which is why content
+   * clears its own keys on DEACTIVATE, and a keyUp the user never made
+   * could fire an action in a game. The mouse's buttons stay the
+   * pointer's, which finds a release it never saw at its next move.
+   *
+   * It applies once the JavaScript that called it has returned, or at the
+   * next frame, whichever comes first: the page may move its focus in a
+   * call a script made, an ExternalInterface call's, and no listener runs
+   * inside another script. Only the last state asked for counts, so a blur
+   * and a focus in one call send nothing, and a host may call this on
+   * every focus, blur and visibility change it sees.
+   */
+  setActive(active: boolean): void {
+    this.wanted = active;
+    if (!this.applying && active !== this.active) {
+      this.applying = true;
+      queueMicrotask(() => this.applyActive());
+    }
+  }
+
+  /** The activation asked for, if it changed; once per change. */
+  private applyActive(): void {
+    this.applying = false;
+    const active = this.wanted;
+    if (this.stopped || active === this.active) {
+      return;
+    }
+
+    this.active = active;
+    this.activations++;
+    if (!active) {
+      this.avm1?.releaseKeys();
+    }
+
+    this.scripting?.broadcastActivation(active ? "activate" : "deactivate");
+  }
+
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
   /** The host's time the frame due has waited for a load from bytes so far. */
@@ -231,14 +285,14 @@ export class Player {
   /**
    * A count that moves whenever what the player shows may have changed: a
    * frame played, a key, a pointer event that changes a button, focus or a
-   * selection, a script's updateAfterEvent, or a call from the page into
-   * one of the SWF's ExternalInterface callbacks. A plain pointer move
-   * does not: what its listeners change shows at the next frame, as Flash
-   * and Ruffle draw it, so a fast mouse does not draw faster than the SWF.
-   * Loads and socket data arrive in a frame. A host that draws only when
-   * this moved draws every frame Flash would, and none in between, once it
-   * has drawn after start; what the host itself changes, a resize, it
-   * draws for itself.
+   * selection, a script's updateAfterEvent, a call from the page into
+   * one of the SWF's ExternalInterface callbacks, or the player activated
+   * or deactivated. A plain pointer move does not: what its listeners
+   * change shows at the next frame, as Flash and Ruffle draw it, so a fast
+   * mouse does not draw faster than the SWF. Loads and socket data arrive
+   * in a frame. A host that draws only when this moved draws every frame
+   * Flash would, and none in between, once it has drawn after start; what
+   * the host itself changes, a resize, it draws for itself.
    */
   get changes(): number {
     return (
@@ -247,7 +301,8 @@ export class Player {
       (this.touch?.redraws ?? 0) +
       (this.scripting?.updates ?? 0) +
       (this.keyboard?.handled ?? 0) +
-      (this.scripting?.hostCalls ?? 0)
+      (this.scripting?.hostCalls ?? 0) +
+      this.activations
     );
   }
 
@@ -398,6 +453,7 @@ export class Player {
    * takes off still has its frame, as in Flash. Then the frame's scripts.
    */
   tick(): void {
+    this.applyActive();
     // An AVM1 SWF halted at what Flash cannot read plays no more.
     if (this.stopped || this.avm1?.halted) {
       return;

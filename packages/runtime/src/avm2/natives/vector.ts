@@ -139,9 +139,9 @@ for (const [kind] of VECTORS) {
       // Room made first, then each converted and written in its place.
       const cls = this.$traits.cls;
       this.$a.unshift(...args.map(() => cls.$fill));
-      args.forEach((v, k) => {
-        writeElement(this, k, cls.$convert(rt, cls, v));
-      });
+      for (let k = 0; k < args.length; k++) {
+        writeElement(this, k, cls.$convert(rt, cls, args[k]));
+      }
       return this.$a.length;
     };
   vectorNatives[`${c}#${own}::newThisType`] = (rt) =>

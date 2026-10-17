@@ -382,6 +382,9 @@ function batched(context: GraphicsContext): GraphicsContext {
   if (!copy) {
     copy = copyContext(context);
     copy.batchMode = "batch";
+    // Its triangles are the original's, built already where it was drawn alone: earcut, at
+    // the most a frame of a crowded room took building shapes, runs once for both.
+    copy.tessellationOf = context;
     batchedCopies.set(context, copy);
   }
 

@@ -499,7 +499,38 @@ async function touchLog() {
   return element("touch").takeLog();
 }
 
+/** A player of the activation SWF, focused, and a textarea of the page's beside it. */
+async function activationPlayer() {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "activation";
+  p.setAttribute("src", "/web-test/activation.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  document.body.append(p);
+  const seed = document.createElement("textarea");
+  seed.id = "seed";
+  document.body.append(seed);
+  await p.ready;
+  await frames(2);
+  p.focus();
+  return true;
+}
+
 Object.assign(globalThis, {
+  activationPlayer,
+  /** The window's own focus or blur, which a headless page is never sent. */
+  activationWindow: (type: string) => window.dispatchEvent(new Event(type)),
+  /** The focus to the element, or to the page's textarea. */
+  activationFocus: (own: boolean) => {
+    (own ? element("activation") : (document.getElementById("seed") as HTMLElement)).focus();
+    return true;
+  },
+  activationLog: () => element("activation").takeLog(),
+  activationDestroy: () => {
+    element("activation").destroy();
+    element("activation").remove();
+    document.getElementById("seed")?.remove();
+    return true;
+  },
   touchPlayer,
   touchLog,
   touchCall: (name: string, ...args: unknown[]) => element("touch")[name](...args),

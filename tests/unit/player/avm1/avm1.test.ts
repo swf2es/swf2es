@@ -186,14 +186,19 @@ test("an AS3 SWF's blocks never run", async () => {
   assert.deepEqual(lines, []);
 });
 
-test("an action not done yet is reported, and the frame's next block runs", async () => {
-  // GetUrl2, which waits for loading (step 15).
-  const swf = movie(6, [[doAction((a) => a.push("x", "y").raw([0x9a, 1, 0, 0])), traced("next")]]);
-  const { lines, errors } = await play(swf, 1);
+test("an error a block throws is reported, and the frame's next block runs", async () => {
+  const swf = movie(6, [
+    [doAction((a) => a.getUrl("http://a.example/", "_blank")), traced("next")],
+  ]);
+  const failure = new Error("the host failed");
+  const { lines, errors } = await play(swf, 1, {
+    navigate: () => {
+      throw failure;
+    },
+  });
 
   assert.deepEqual(lines, ["next"]);
-  assert.equal(errors.length, 1);
-  assert.equal((errors[0] as Error).name, "Avm1NotYet");
+  assert.deepEqual(errors, [failure]);
 });
 
 test("an action Flash cannot read stops the SWF there, every frame after", async () => {
@@ -803,6 +808,40 @@ test("a key goes to the clips' keyDown as drawn, then Key's listeners, then the 
   ]);
 });
 
+test("a focus loss lets go of the keys held, with no onKeyUp, and keeps what is toggled and the mouse's buttons", async () => {
+  const swf = movie(6, [
+    [
+      as1(
+        `Key.addListener({ onKeyDown: function () { trace("down " + Key.getCode() + " " + Key.isDown(65) + " " + Key.isToggled(65) + " " + Key.isDown(16) + " " + Key.isDown(1)); }, onKeyUp: function () { trace("up " + Key.getCode()); } }); stop();`,
+        6,
+      ),
+    ],
+  ]);
+  const { lines, player } = await play(swf, 1);
+  const keyboard = player.keyboard;
+  assert.ok(keyboard);
+
+  player.pointer?.handle("down", { x: 1, y: 1, button: 0, buttons: 1 });
+  keyboard.handle("down", { keyCode: 16, charCode: 0, shiftKey: true });
+  keyboard.handle("down", { keyCode: 65, charCode: 65, shiftKey: true });
+  // It applies once this JavaScript has returned.
+  player.setActive(false);
+  await Promise.resolve();
+  player.setActive(true);
+  await Promise.resolve();
+  // Neither A nor Shift is down after; A's press is a new one, which toggles it off.
+  // The mouse's button is the pointer's, still down.
+  keyboard.handle("down", { keyCode: 66, charCode: 98 });
+  keyboard.handle("down", { keyCode: 65, charCode: 97 });
+
+  assert.deepEqual(lines, [
+    "down 16 false false true true",
+    "down 65 true true true true",
+    "down 66 false true false true",
+    "down 65 true false false true",
+  ]);
+});
+
 test("Selection focuses a clip, its kill, set and listeners' events at once, and Tab moves the focus by place", async () => {
   const swf = movie(6, [
     [
@@ -892,4 +931,66 @@ test("the pointer's events reach every clip's clip actions, the newest first, an
 
   assert.deepEqual(halted.lines, ["placed"]);
   assert.ok(halted.avm1.halted);
+});
+
+test("fscommand quit stops the SWF once its frame has run, as Ruffle's harness ends a test", async () => {
+  const quits = (url: string) =>
+    doAction((a) => a.push("1").trace().getUrl(url, "").push("after").trace());
+  for (const url of ["FSCommand:quit", "fscommand:QUIT"]) {
+    const swf = movie(6, [[quits(url)], [traced("2")]]);
+    const { lines, errors, avm1 } = await play(swf, 3);
+
+    assert.deepEqual(lines, ["1", "after"]);
+    assert.deepEqual(errors, []);
+    assert.ok(avm1.halted);
+  }
+
+  // Any other command is dropped.
+  const other = movie(6, [[quits("FSCommand:fullscreen")], [traced("2")]]);
+  assert.deepEqual((await play(other, 2)).lines, ["1", "after", "2"]);
+});
+
+test("a host's fsCommand takes every command, quit too, and getURL's pages go to its navigate", async () => {
+  const swf = movie(7, [
+    [
+      doAction((a) =>
+        a
+          .getUrl("FSCommand:quit", "")
+          .getUrl("FSCommand:Show", "a b")
+          .getUrl("http://a.example/", "blank")
+          .getUrl("x.swf", "_level1")
+          .push("v", 1)
+          .op("SetVariable")
+          .push("http://b.example/", "_self")
+          .action(0x9a, [2])
+          .push("FSCommand:two", "args")
+          .action(0x9a, [0]),
+      ),
+      as1(
+        `this.getURL("http://c.example/", "_BLANK", "get"); this.getURL("FSCommand:clip", 5);`,
+        7,
+      ),
+    ],
+    [traced("2")],
+  ]);
+  const commands: string[][] = [];
+  const pages: unknown[][] = [];
+  const { lines, errors } = await play(swf, 2, {
+    fsCommand: (command, args) => commands.push([command, args]),
+    navigate: (url, window, form) => pages.push([url, window, form]),
+  });
+
+  assert.deepEqual(errors, []);
+  assert.deepEqual(lines, ["2"]);
+  assert.deepEqual(commands, [
+    ["quit", ""],
+    ["Show", "a b"],
+    ["two", "args"],
+    ["clip", "5"],
+  ]);
+  assert.deepEqual(pages, [
+    ["http://a.example/", "_blank", null],
+    ["http://b.example/", "_self", { method: "POST", vars: [["v", "1"]] }],
+    ["http://c.example/", "_blank", { method: "GET", vars: [["v", "1"]] }],
+  ]);
 });

@@ -50,7 +50,7 @@ import {
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
-import { finishSounds, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
+import { finishSounds, soundHostOf, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import {
   airLibrary,
   playerglobalLibrary,
@@ -59,7 +59,7 @@ import {
 } from "./playerglobal/index.js";
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
-import { dispatchTo, type EventFields } from "./scripting/events.js";
+import { dispatchTo, type EventFields, WeakTargets } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
@@ -172,7 +172,7 @@ export class Scripting {
   /** Takes what fscommand sends, or nothing does. */
   readonly fsCommand: ((command: string, args: string, callers: string[]) => void) | null;
   /** What plays every library's timeline and button sounds. */
-  private readonly timelineSounds = timelineSoundsOf(this);
+  private readonly timelineSounds = timelineSoundsOf(soundHostOf(this));
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
   fetch: ((request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>) | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
@@ -228,6 +228,8 @@ export class Scripting {
   inFrameScript: MovieClip | null = null;
   /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
   readonly broadcasts = new Map<string, Set<AsObject>>();
+  /** The dispatchers listening for ACTIVATE or DEACTIVATE, held weakly. */
+  private readonly activation = new Map<string, WeakTargets>();
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
@@ -665,6 +667,29 @@ export class Scripting {
     }
 
     return targets;
+  }
+
+  /** The dispatchers a broadcast of ACTIVATE or DEACTIVATE reaches, for EventDispatcher to keep. */
+  activationTargets(type: string): WeakTargets {
+    let targets = this.activation.get(type);
+    if (!targets) {
+      targets = new WeakTargets();
+      this.activation.set(type, targets);
+    }
+
+    return targets;
+  }
+
+  /**
+   * Dispatch ACTIVATE or DEACTIVATE to every EventDispatcher that listens
+   * for it and is still alive, display object or not, in the order they
+   * first listened, each its own event and its own target only. Flash
+   * documents them on EventDispatcher itself, unlike a frame's events.
+   */
+  broadcastActivation(type: "activate" | "deactivate"): void {
+    for (const target of this.activation.get(type)?.live() ?? []) {
+      dispatchTo(this, target, this.event(type));
+    }
   }
 
   /**

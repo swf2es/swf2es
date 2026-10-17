@@ -2,7 +2,8 @@
 // (StartSound, a clip's stream, a button's), and the channels a script's
 // Sound opens, all held to Flash's 32 at once, mixed under the mixer's
 // transform, and finished with the frame. playerglobal's Sound and
-// SoundMixer are their AS3 side.
+// SoundMixer are their AS3 side; AVM1's Sound starts its sounds as the
+// timeline does, through a SoundHost of its own.
 import type { SoundInfo, StartSound } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
 import type { DisplayObject, MovieClip } from "../display/display.js";
@@ -10,6 +11,7 @@ import type { Library, SoundCharacter, SoundStream, TimelineSounds } from "../di
 import { dispatchEvent } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import {
+  type AudioHost,
   type DecodedSound,
   type PlayingSound,
   type PlayShape,
@@ -19,6 +21,23 @@ import {
 import type { Mp3Frames } from "./mp3.js";
 
 type AsObject = avm2.AsObject;
+
+/** What the timeline's sounds play by: an AS3 movie's Scripting, or AVM1's movie. */
+export interface SoundHost {
+  readonly audio: AudioHost | null;
+  /** The player's clock, in ms. */
+  readonly now: number;
+  /** The SWF frames played: what the timeline took off this frame plays its streams no more. */
+  readonly frames: number;
+  /** A sound decoded for the device, once; null where there is no device. */
+  soundClip(character: SoundCharacter): Promise<DecodedSound> | null;
+  /** A display object's own transform, where a script gave it one. */
+  ownMix(o: DisplayObject): SoundMix | undefined;
+  /** The transform over every sound. */
+  readonly mixer: SoundMix;
+  /** The channels a script opened that hold a sound, outside the timeline's. */
+  scriptSounds(): number;
+}
 
 export interface SoundState {
   character: SoundCharacter | null;
@@ -84,6 +103,44 @@ export function outputMix(local: SoundMix, global: SoundMix): SoundMix {
 
 export const mixerMix = (s: Scripting): SoundMix => mixerMixes.get(s) ?? mixOf(null);
 
+const hosts = new WeakMap<Scripting, SoundHost>();
+
+/** An AS3 movie's SoundHost: its device, clock and symbols, its sprites' and SoundMixer's transforms. */
+export function soundHostOf(s: Scripting): SoundHost {
+  let host = hosts.get(s);
+  if (!host) {
+    host = {
+      get audio() {
+        return s.audio;
+      },
+      get now() {
+        return s.timers.now;
+      },
+      get frames() {
+        return s.frames;
+      },
+      soundClip: (character) => s.symbols.soundClip(character),
+      ownMix: (o) => o.object?.$soundMix,
+      get mixer() {
+        return mixerMix(s);
+      },
+      scriptSounds() {
+        let n = 0;
+        for (const channel of channels.get(s) ?? []) {
+          if ((channel.$channel as ChannelState).sound.length > 0) {
+            n++;
+          }
+        }
+
+        return n;
+      },
+    };
+    hosts.set(s, host);
+  }
+
+  return host;
+}
+
 export const positionOf = (s: Scripting, state: ChannelState): number =>
   state.stopped
     ? state.stoppedAt
@@ -107,14 +164,20 @@ export function stopAllSounds(s: Scripting): void {
   }
 
   active?.clear();
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    stopTimelineSound(s, sound);
+  stopTimelineSounds(soundHostOf(s));
+}
+
+/** Every sound the timeline, or AVM1's Sound, started stops, none completing. */
+export function stopTimelineSounds(h: SoundHost): void {
+  for (const sound of [...(timelineSounds.get(h) ?? [])]) {
+    stopTimelineSound(h, sound);
   }
 }
 
-/** A sound the timeline started: an event sound, a button's, or a clip's stream. */
-interface TimelineSound {
-  owner: DisplayObject;
+/** A sound the timeline started: an event sound, a button's, a clip's stream, or AVM1 Sound's. */
+export interface TimelineSound {
+  /** The display object it plays under, whose transforms it takes; null for AVM1's global Sound. */
+  owner: DisplayObject | null;
   character: SoundCharacter;
   /** The clip whose stream it is; null for an event sound. */
   clip: MovieClip | null;
@@ -134,9 +197,13 @@ interface TimelineSound {
    * TAIL has passed and it is stopped for good.
    */
   endedAt: number | null;
+  /** What hears that its time has run, with the frame: AVM1's onSoundComplete. */
+  onEnd: (() => void) | null;
+  /** When it was stopped, by the clock, for AVM1 Sound's position; null while it plays. */
+  stoppedAt: number | null;
 }
 
-const timelineSounds = new WeakMap<Scripting, Set<TimelineSound>>();
+const timelineSounds = new WeakMap<SoundHost, Set<TimelineSound>>();
 
 /** How long a sound over by the clock may still sound on the device before it is stopped. */
 const TAIL = 100;
@@ -161,14 +228,12 @@ function onDevice(sound: TimelineSound): boolean {
  * the device has or will have.
  */
 export function liveSounds(s: Scripting): number {
-  let n = 0;
-  for (const channel of channels.get(s) ?? []) {
-    if ((channel.$channel as ChannelState).sound.length > 0) {
-      n++;
-    }
-  }
+  return liveSoundsOf(soundHostOf(s));
+}
 
-  for (const sound of timelineSounds.get(s) ?? []) {
+function liveSoundsOf(h: SoundHost): number {
+  let n = h.scriptSounds();
+  for (const sound of timelineSounds.get(h) ?? []) {
     if (onDevice(sound)) {
       n++;
     }
@@ -186,37 +251,42 @@ const ENVELOPE_RATE = 44.1;
  * transform_for_sound does. A sprite's is its soundTransform; a button's
  * is the mixer's, so it has none of its own.
  */
-function timelineMix(s: Scripting, owner: DisplayObject): SoundMix {
+function timelineMix(h: SoundHost, owner: DisplayObject | null): SoundMix {
   let mix = mixOf(null);
   for (let o: DisplayObject | null = owner; o; o = o.parent) {
-    const own: SoundMix | undefined = o.object?.$soundMix;
+    const own = h.ownMix(o);
     if (own) {
       mix = outputMix(mix, own);
     }
   }
 
-  return outputMix(mix, mixerMix(s));
+  return outputMix(mix, h.mixer);
 }
 
 /** A sprite's transform or the mixer's changed: every timeline sound's mix follows. */
 export function updateTimelineMixes(s: Scripting): void {
-  for (const sound of timelineSounds.get(s) ?? []) {
-    sound.playing?.setMix(timelineMix(s, sound.owner));
+  updateMixes(soundHostOf(s));
+}
+
+export function updateMixes(h: SoundHost): void {
+  for (const sound of timelineSounds.get(h) ?? []) {
+    sound.playing?.setMix(timelineMix(h, sound.owner));
   }
 }
 
-function stopTimelineSound(s: Scripting, sound: TimelineSound): void {
+export function stopTimelineSound(h: SoundHost, sound: TimelineSound): void {
+  sound.stoppedAt ??= h.now;
   sound.stopped = true;
   sound.playing?.stop();
-  timelineSounds.get(s)?.delete(sound);
+  timelineSounds.get(h)?.delete(sound);
   if (sound.clip?.stream === sound) {
     sound.clip.stream = null;
   }
 }
 
 function playTimelineSound(
-  s: Scripting,
-  owner: DisplayObject,
+  h: SoundHost,
+  owner: DisplayObject | null,
   character: SoundCharacter,
   clip: MovieClip | null,
   start: number,
@@ -224,8 +294,8 @@ function playTimelineSound(
   shape: PlayShape,
   duration: number,
 ): TimelineSound | null {
-  const task = s.symbols.soundClip(character);
-  if (!task || liveSounds(s) >= MAX_SOUNDS) {
+  const task = h.soundClip(character);
+  if (!task || liveSoundsOf(h) >= MAX_SOUNDS) {
     return null;
   }
 
@@ -233,17 +303,19 @@ function playTimelineSound(
     owner,
     character,
     clip,
-    started: s.timers.now,
+    started: h.now,
     duration,
     playing: null,
     stopped: false,
     decoding: true,
     endedAt: null,
+    onEnd: null,
+    stoppedAt: null,
   };
-  let active = timelineSounds.get(s);
+  let active = timelineSounds.get(h);
   if (!active) {
     active = new Set();
-    timelineSounds.set(s, active);
+    timelineSounds.set(h, active);
   }
 
   active.add(sound);
@@ -252,12 +324,12 @@ function playTimelineSound(
       sound.decoding = false;
       // A stream whose decode took frames starts as far in as the clock has
       // run, to keep with its timeline; an event sound plays whole, late.
-      const late = Math.max(0, s.timers.now - sound.started);
+      const late = Math.max(0, h.now - sound.started);
       if (!sound.stopped && (!clip || late < sound.duration)) {
         sound.playing = decoded.play(
           start,
           loops,
-          timelineMix(s, owner),
+          timelineMix(h, owner),
           clip ? { ...shape, atMs: late } : shape,
         );
       }
@@ -277,16 +349,16 @@ function playTimelineSound(
  * of the sound are left be: adl plays one on through a SyncStop of it.
  */
 function startEventSound(
-  s: Scripting,
+  h: SoundHost,
   owner: DisplayObject,
   character: SoundCharacter,
   info: SoundInfo,
 ): void {
-  const active = timelineSounds.get(s);
+  const active = timelineSounds.get(h);
   if (info.stop) {
     for (const sound of [...(active ?? [])]) {
       if (sound.character === character) {
-        stopTimelineSound(s, sound);
+        stopTimelineSound(h, sound);
       }
     }
 
@@ -320,7 +392,7 @@ function startEventSound(
   }
 
   playTimelineSound(
-    s,
+    h,
     owner,
     character,
     null,
@@ -329,6 +401,53 @@ function startEventSound(
     shape,
     Math.max(0, end - start) * loops,
   );
+}
+
+/**
+ * AVM1's Sound.start: an event sound of `character` from `offset` ms, `loops`
+ * times, under `owner`'s transforms (none for the global Sound), whose end
+ * `onEnd` hears with the frame; null where it cannot play.
+ */
+export function startScriptSound(
+  h: SoundHost,
+  owner: DisplayObject | null,
+  character: SoundCharacter,
+  offset: number,
+  loops: number,
+  onEnd: () => void,
+): TimelineSound | null {
+  const definition = character.definition;
+  const length = (definition.sampleCount * 1000) / definition.sampleRate;
+  const start = Math.min(length, Math.max(0, offset));
+  const sound = playTimelineSound(
+    h,
+    owner,
+    character,
+    null,
+    start,
+    loops,
+    {},
+    (length - start) * loops,
+  );
+  if (sound) {
+    sound.onEnd = onEnd;
+  }
+
+  return sound;
+}
+
+/** The sounds playing under exactly `owner`, as AVM1's Sound.stop() of a clip stops them; null for the global Sound's. */
+export function soundsOf(h: SoundHost, owner: DisplayObject | null): TimelineSound[] {
+  return [...(timelineSounds.get(h) ?? [])].filter((sound) => sound.owner === owner);
+}
+
+/** Every sound of `character` stops, whoever started it, as AVM1's Sound.stop(name) does. */
+export function stopSoundsOf(h: SoundHost, character: SoundCharacter): void {
+  for (const sound of [...(timelineSounds.get(h) ?? [])]) {
+    if (sound.character === character) {
+      stopTimelineSound(h, sound);
+    }
+  }
 }
 
 /** The DefineSound a StartSound names, by id or, for StartSound2, by the class bound to it. */
@@ -370,7 +489,7 @@ function streamOf(stream: SoundStream): NonNullable<SoundStream["sound"]> {
  * over gaps, to its last block. It keeps on as the clip plays on; Flash's
  * skipping of frames to keep the timeline with it is not done.
  */
-function startStream(s: Scripting, clip: MovieClip, stream: SoundStream, frame: number): void {
+function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: number): void {
   const block = stream.byFrame.get(frame);
   if (block === undefined || !clip.playing || clip.stream) {
     return;
@@ -382,14 +501,14 @@ function startStream(s: Scripting, clip: MovieClip, stream: SoundStream, frame: 
     top = top.parent;
   }
 
-  if (unloaded.get(top) === s.frames) {
+  if (unloaded.get(top) === h.frames) {
     return;
   }
 
   // The last moments of its stream before, over by the clock, give way to this one.
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+  for (const sound of [...(timelineSounds.get(h) ?? [])]) {
     if (sound.clip === clip) {
-      stopTimelineSound(s, sound);
+      stopTimelineSound(h, sound);
     }
   }
 
@@ -406,14 +525,14 @@ function startStream(s: Scripting, clip: MovieClip, stream: SoundStream, frame: 
   const rate = character.definition.sampleRate;
   const start = (starts[block] * 1000) / rate;
   const end = (starts[last] * 1000) / rate;
-  clip.stream = playTimelineSound(s, clip, character, clip, start, 1, { endMs: end }, end - start);
+  clip.stream = playTimelineSound(h, clip, character, clip, start, 1, { endMs: end }, end - start);
 }
 
 /** What the timeline took off, by the frame it did. */
 const unloaded = new WeakMap<DisplayObject, number>();
 
 /** Whether `inner` is `outer` or under it. */
-function within(inner: DisplayObject, outer: DisplayObject): boolean {
+function within(inner: DisplayObject | null, outer: DisplayObject): boolean {
   for (let o: DisplayObject | null = inner; o; o = o.parent) {
     if (o === outer) {
       return true;
@@ -425,18 +544,19 @@ function within(inner: DisplayObject, outer: DisplayObject): boolean {
 
 /** unloadAndStop: the sounds of the timelines under `display` stop, its event sounds too. */
 export function stopTimelineSoundsUnder(s: Scripting, display: DisplayObject): void {
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+  const h = soundHostOf(s);
+  for (const sound of [...(timelineSounds.get(h) ?? [])]) {
     if (within(sound.owner, display)) {
-      stopTimelineSound(s, sound);
+      stopTimelineSound(h, sound);
     }
   }
 }
 
-/** What plays the timelines' sounds of every library a Scripting loads. */
-export function timelineSoundsOf(s: Scripting): TimelineSounds {
+/** What plays the timelines' sounds of every library a host loads. */
+export function timelineSoundsOf(h: SoundHost): TimelineSounds {
   return {
     frame(clip, frame) {
-      if (!s.audio) {
+      if (!h.audio) {
         return;
       }
 
@@ -444,64 +564,79 @@ export function timelineSoundsOf(s: Scripting): TimelineSounds {
       for (const start of timeline.sounds.get(frame) ?? []) {
         const character = startSoundCharacter(clip.library, start);
         if (character) {
-          startEventSound(s, clip, character, start.info);
+          startEventSound(h, clip, character, start.info);
         }
       }
 
       if (timeline.stream) {
-        startStream(s, clip, timeline.stream, frame);
+        startStream(h, clip, timeline.stream, frame);
       }
     },
     stopStream(clip) {
       clip.stream = null;
-      for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+      for (const sound of [...(timelineSounds.get(h) ?? [])]) {
         if (sound.clip === clip) {
-          stopTimelineSound(s, sound);
+          stopTimelineSound(h, sound);
         }
       }
     },
     start(owner, library, id, info) {
       const character = library.characters.get(id);
-      if (s.audio && character?.type === "sound") {
-        startEventSound(s, owner, character, info);
+      if (h.audio && character?.type === "sound") {
+        startEventSound(h, owner, character, info);
       }
     },
     removed(display) {
-      if (!s.audio) {
+      if (!h.audio) {
         return;
       }
 
-      unloaded.set(display, s.frames);
-      for (const sound of [...(timelineSounds.get(s) ?? [])]) {
+      unloaded.set(display, h.frames);
+      for (const sound of [...(timelineSounds.get(h) ?? [])]) {
         if (sound.clip && within(sound.clip, display)) {
-          stopTimelineSound(s, sound);
+          stopTimelineSound(h, sound);
         }
       }
     },
   };
 }
 
-/** Sound completions run with the next SWF frame, even if the device ended between frames. */
-export function finishSounds(s: Scripting): void {
-  // A timeline sound that has played its time is over: a NoMultiple may start
-  // it again, and its clip's stream at the next block.
-  for (const sound of [...(timelineSounds.get(s) ?? [])]) {
-    if (sound.endedAt === null && s.timers.now - sound.started >= sound.duration) {
-      sound.endedAt = s.timers.now;
+/**
+ * The timeline's sounds that have played their time are over, with the
+ * frame: a NoMultiple may start one again, its clip's stream at the next
+ * block, and AVM1 Sound's hears it.
+ */
+export function finishTimelineSounds(h: SoundHost): void {
+  const ended: TimelineSound[] = [];
+  for (const sound of [...(timelineSounds.get(h) ?? [])]) {
+    if (sound.endedAt === null && h.now - sound.started >= sound.duration) {
+      sound.endedAt = h.now;
       if (sound.clip?.stream === sound) {
         sound.clip.stream = null;
       }
+
+      if (sound.onEnd) {
+        ended.push(sound);
+      }
     } else if (sound.endedAt !== null && !onDevice(sound)) {
-      stopTimelineSound(s, sound);
+      stopTimelineSound(h, sound);
     } else if (
       sound.endedAt !== null &&
       sound.playing?.ended === undefined &&
-      s.timers.now - sound.endedAt >= TAIL
+      h.now - sound.endedAt >= TAIL
     ) {
-      stopTimelineSound(s, sound);
+      stopTimelineSound(h, sound);
     }
   }
 
+  for (const sound of ended) {
+    sound.onEnd?.();
+  }
+}
+
+/** Sound completions run with the next SWF frame, even if the device ended between frames. */
+export function finishSounds(s: Scripting): void {
+  finishTimelineSounds(soundHostOf(s));
   const active = channels.get(s);
   if (!active) {
     return;

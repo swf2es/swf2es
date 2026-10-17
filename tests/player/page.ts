@@ -154,6 +154,7 @@ async function avm1For(
   bytes: Uint8Array,
   trace: string[],
   uncaught: unknown[],
+  logFetch: boolean,
 ): Promise<Avm1 | null> {
   const swf = readSwf(bytes);
   if (isAs3(swf) || readActions(swf).blocks.length === 0) {
@@ -168,6 +169,18 @@ async function avm1For(
     print: (line) => trace.push(...line.split(/\r|\n/)),
     onUncaught: (error) => uncaught.push(error),
     realTime: null,
+    // A page is never opened: a test that logs fetches traces it as Ruffle's navigator logs it.
+    navigate: logFetch
+      ? (url, window, form) => {
+          trace.push("Navigator::navigate_to_url:", `  URL: ${url}`, `  Target: ${window}`);
+          if (form) {
+            trace.push(`  Method: ${form.method}`);
+            for (const [name, value] of form.vars) {
+              trace.push(`  Param: ${name}=${value}`);
+            }
+          }
+        }
+      : null,
   });
 }
 
@@ -214,6 +227,7 @@ async function runSwf(
   shown = false,
   input: RecordedEvent[] | null = null,
   viewport: { width: number; height: number } | null = null,
+  logFetch = false,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -229,7 +243,7 @@ async function runSwf(
   };
   try {
     scripting = await scriptingFor(bytes, trace, url, uncaught);
-    const player = new Player(bytes, scripting, await avm1For(bytes, trace, uncaught));
+    const player = new Player(bytes, scripting, await avm1For(bytes, trace, uncaught, logFetch));
     const n = GRID[quality] ?? 4;
     setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
