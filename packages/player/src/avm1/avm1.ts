@@ -42,7 +42,13 @@ import {
   VideoObject,
 } from "../display/display.js";
 import type { DisplayCharacter, Library } from "../display/timeline.js";
-import { type Drawer, defaultStorage, type SharedObjectStorage } from "../hosts.js";
+import {
+  browserNavigate,
+  type Drawer,
+  defaultStorage,
+  type Navigate,
+  type SharedObjectStorage,
+} from "../hosts.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
@@ -83,6 +89,58 @@ export interface Avm1Options {
   scriptTimeout?: number;
   /** Where SharedObject keeps its .sol files: the browser's localStorage by default, AS3's own. */
   storage?: SharedObjectStorage;
+  /**
+   * fscommand's commands, as a plug-in passed them to its page. Without
+   * one, "quit" stops the SWF after its frame, as a projector quits and
+   * as Ruffle's test harness ends a test, and the rest are dropped.
+   */
+  fsCommand?: (command: string, args: string) => void;
+  /**
+   * Opens getURL's pages: the browser's navigation by default (hosts.ts's
+   * browserNavigate), null for none.
+   */
+  navigate?: Avm1Navigate | null;
+}
+
+/**
+ * getURL's page: the URL as the SWF gave it, the window or frame named,
+ * and with a method, the variables the SWF sends.
+ */
+export type Avm1Navigate = (url: string, window: string, form: avm1.UrlForm | null) => void;
+
+/**
+ * `navigate` as getURL's: the URL resolved against the SWF's, a GET's
+ * variables in its query and a POST's in its body as a form's, as Ruffle's
+ * object_into_request has them; an empty URL opens nothing, as Ruffle's
+ * navigators ignore it.
+ */
+function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1Navigate | null {
+  if (navigate === null) {
+    return null;
+  }
+
+  return (url, window, form) => {
+    if (url === "") {
+      return;
+    }
+
+    let resolved = url;
+    try {
+      resolved = new URL(url, swfUrl).href;
+    } catch {
+      // Against a relative SWF URL, or none: the host resolves it against its page.
+    }
+
+    const query = form === null ? "" : new URLSearchParams(form.vars).toString();
+    if (form?.method === "POST") {
+      const headers: [string, string][] = [["Content-Type", "application/x-www-form-urlencoded"]];
+      const body = new TextEncoder().encode(query);
+      navigate({ url: resolved, method: "POST", headers, body }, window);
+    } else {
+      const sent = form === null ? resolved : `${resolved}${url.includes("?") ? "&" : "?"}${query}`;
+      navigate({ url: sent, method: "GET", headers: [], body: null }, window);
+    }
+  };
 }
 
 /**
@@ -443,7 +501,19 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
         this.startDrag(target as DisplayObject, lockCenter, bounds),
       stopDrag: () => this.stopDrag(),
       returned: () => this.returned(),
+      fsCommand: options.fsCommand ?? ((command) => this.fsCommand(command)),
+      navigate:
+        (options.navigate === undefined
+          ? getUrlNavigate(browserNavigate(), this.url)
+          : options.navigate) ?? undefined,
     };
+  }
+
+  /** fscommand without a host's handler: "quit" stops the SWF after its frame, as a projector quits. */
+  private fsCommand(command: string): void {
+    if (asciiLower(command) === "quit") {
+      this.stopNext = true;
+    }
   }
 
   get root(): MovieClip {
