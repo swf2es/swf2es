@@ -4,7 +4,14 @@ export { goto } from "./clips.js";
 export { Avm1Super, ScriptFunction } from "./functions.js";
 export { broadcastMessage, initializeBroadcaster } from "./globals/broadcaster.js";
 export { DateCell } from "./globals/date.js";
-export { ABSENT, type DisplayNative, type Host, type Target, type Timeline } from "./host.js";
+export {
+  ABSENT,
+  type DisplayNative,
+  type Host,
+  type Target,
+  type Timeline,
+  type UrlForm,
+} from "./host.js";
 export { numberToString, parseFloatAvm1, stringToNumber } from "./numbers.js";
 export {
   Avm1Function,
@@ -42,6 +49,7 @@ export {
   TimedOut,
 } from "./runtime.js";
 export { Scope, targetPath } from "./scope.js";
+export { getUrlMethod } from "./urls.js";
 export {
   isPrimitive,
   type ObjectConversions,

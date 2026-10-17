@@ -106,7 +106,7 @@
     <h2 id="about-title">What to expect</h2>
     <ul>
       <li><strong>ActionScript 3</strong> (AVM2) runs, compiled to JavaScript as the SWF loads. Video and Stage3D are not there yet.</li>
-      <li><strong>ActionScript 1 and 2</strong> (AVM1) support is in progress: the language and its classes run, while clips, buttons, text and drawing from AS2 do not yet, so many AS2 SWFs play only their timelines.</li>
+      <li><strong>ActionScript 1 and 2</strong> (AVM1) support is in progress: the language, clips and their events, buttons, the mouse and keyboard, <code>Color</code>, <code>flash.geom</code>, <code>BitmapData</code> and <code>SharedObject</code> run. AS2's drawing methods, its <code>TextField</code> class, sound and loading (<code>loadMovie</code>, <code>LoadVars</code>) do not yet, so an AS2 SWF that needs them plays silent or in part.</li>
       <li><strong>No sockets.</strong> A browser cannot open TCP connections and this static site runs no relay, so <code>Socket</code> and <code>XMLSocket</code> fail as refused.</li>
       <li><strong>Cross-origin loads.</strong> A SWF by URL, and whatever it loads from another site, arrive only where that server allows it (CORS headers).</li>
       <li><strong>Files you open</strong> play as if from this site's <code>local/</code> folder, by their names: what one loads by a relative URL is not there, and each name keeps its own saved data (SharedObjects) in this browser.</li>

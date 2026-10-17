@@ -63,6 +63,7 @@ import {
   Scope,
   setVariable,
 } from "./scope.js";
+import { getUrl, getUrl2 } from "./urls.js";
 import {
   isPrimitive,
   type Primitive,
@@ -265,6 +266,10 @@ export interface Operations {
   startDrag(cx: Activation): void;
   /** EndDrag: the drag ends. */
   stopDrag(cx: Activation): void;
+  /** GetURL: fscommand, a load into a level, or a page to open. */
+  getUrl(cx: Activation, url: string, target: string): void;
+  /** GetURL2 of the target and the URL on the stack, the target on top, by its flags. */
+  getUrl2(cx: Activation, target: Value, url: Value, flags: number): void;
   /**
    * What a jump back counts down, shared by every activation of the
    * version: as it runs out, `timeout` reads the clock.
@@ -664,6 +669,10 @@ function operations(version: number): Operations {
     },
     stopDrag(cx) {
       cx.host.stopDrag?.();
+    },
+    getUrl,
+    getUrl2(cx, target, url, flags) {
+      getUrl2(cx, target, url, flags, version);
     },
     budget: BUDGET,
     timeout(cx) {
