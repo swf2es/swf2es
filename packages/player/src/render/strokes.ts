@@ -368,12 +368,27 @@ const roundStretch = (x: number, t: number) => Math.round((x / t) * 65536) / 655
 
 /**
  * How far, in pixels of the screen, a line's edge may stand from where its
- * own stretch puts it when stroked through a nearby one (settledStretch):
- * a fiftieth of a pixel, under the twentieth a SWF's twips can tell.
+ * own stretch puts it when stroked through a nearby one on the grid
+ * (settledStretch): a twentieth of a pixel, a twip, for a hairline, whose
+ * width the stretch does not change; a wider line's width moves with the
+ * stretch as well as its stroke, and its edges up to twice as far. A
+ * fiftieth gave a hairline a step of 1/64 of its scale, and a crowded
+ * room's hairlines, scaled a little more or less on each frame by their
+ * tweens, a stretch of their own on most frames: nine in ten lines stroked
+ * anew each frame were such hairlines.
  */
-const EDGE_SLACK = 0.02;
-/** The coarsest step of the stretches' grid: about 1.5% of a scale. */
-const COARSEST_STEP = 1 / 64;
+const EDGE_SLACK = 0.05;
+/**
+ * How far, in pixels of the screen, a line's edge may stand from its own
+ * stretch's place when stroked through an even one (settledStretch): two
+ * twips, a tenth of a pixel. A part that turns inside a parent scaled a
+ * little unevenly, as a limb in a squashed body, has a stretch that turns
+ * with it, a new one each frame, and its lines were tessellated each frame;
+ * stroked through one even scale, every angle shares them.
+ */
+const EVEN_SLACK = 0.1;
+/** The coarsest step of the stretches' grid, a hairline's: about 6% of a scale. */
+const COARSEST_STEP = 1 / 16;
 /** The finest: a line wider than this allows is stroked through its own stretch. */
 const FINEST_STEP = 1 / 4096;
 
@@ -403,6 +418,26 @@ export function settledStretch(s: Linear, widest: number, least: number, out?: L
   const r = Math.sqrt(half * half + off * off);
   if (!(mean - r > 0)) {
     return s;
+  }
+
+  // Nearly even: stroked through the even stretch of the same area, k, which no turn changes,
+  // and taken back through its inverse, a line is as wide as k makes it times what s q⁻¹ = s / k
+  // stretches each way, between the smaller scale over k and the larger. Through s itself it is
+  // one width all along, somewhere in that span as screenWidth reads s at its angle; its edges
+  // share the difference, which must stay within the slack at every angle, so that a part
+  // turning does not flip between the even stretch and its own. A hairline, a pixel wide however
+  // small its scale, stretches with s / k as any line: a part squashed far keeps its own.
+  if (r > 0) {
+    const k = Math.sqrt((mean + r) * (mean - r));
+    const stroked = Math.max(least, (widest / 20) * k);
+    if ((stroked * 2 * r) / k <= 2 * EVEN_SLACK * least) {
+      const even = out ?? [0, 0, 0, 0];
+      even[0] = k;
+      even[1] = 0;
+      even[2] = 0;
+      even[3] = k;
+      return settledStretch(even, widest, least, even);
+    }
   }
 
   // Half the widest line's width on the screen, at most as the larger scale makes it, times the

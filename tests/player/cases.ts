@@ -237,6 +237,85 @@ function sharedLines(): Uint8Array {
   });
 }
 
+// Outlined parts turning inside parents squashed to 0.9 and 0.6 of their
+// height, as a game's limbs inside a squashed body: through a stretch that
+// turns with each, or, nearly even, through one even stretch (strokes.ts,
+// settledStretch), lines of 1, 2 and 4 pixels as wide as Flash draws them.
+function squashedTurns(): Uint8Array {
+  const part = (id: number, width: number) =>
+    w.shape({
+      id,
+      bounds: [-1020 - width, 1020 + width, -820 - width, 820 + width],
+      fills: [0xcc3300],
+      lines: [{ width, color: 0x000080 }],
+      paths: [
+        {
+          fill1: 1,
+          line: 1,
+          commands: [
+            { move: [-1000, -800] },
+            { line: [1000, -800] },
+            { curve: [1400, 0, 1000, 800] },
+            { line: [-1000, 800] },
+            { line: [-1000, -800] },
+          ],
+        },
+      ],
+    });
+  const angles = [0.3, 1.1, 2.5];
+  const turning = (id: number, character: number) =>
+    w.sprite(id, angles.length, [
+      ...angles.flatMap((angle, f) => {
+        const matrix = {
+          a: 0.6 * Math.cos(angle),
+          b: 0.6 * Math.sin(angle),
+          c: -0.6 * Math.sin(angle),
+          d: 0.6 * Math.cos(angle),
+          tx: 0,
+          ty: 0,
+        };
+        return [
+          f === 0
+            ? w.place({ depth: 1, character, matrix })
+            : w.place({ depth: 1, move: true, matrix }),
+          w.showFrame(),
+        ];
+      }),
+      w.end(),
+    ]);
+  const placed = [
+    [11, 0.9],
+    [12, 0.9],
+    [13, 0.9],
+    [13, 0.6],
+  ] as const;
+  return w.swf({
+    width: 480,
+    height: 160,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      part(1, 20),
+      part(2, 40),
+      part(3, 80),
+      turning(11, 1),
+      turning(12, 2),
+      turning(13, 3),
+      ...placed.map(([character, squash], i) =>
+        w.place({
+          depth: i + 1,
+          character,
+          matrix: { a: 1, d: squash, tx: 1200 + i * 2400, ty: 1600 },
+        }),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Frame 1 places a square with no matrix and frame 2 moves it: when the
 // root loops, Flash shows frame 3 as it showed frame 1, the square back at
 // the origin, though frame 1's place says nothing about where.
@@ -7424,6 +7503,16 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3, 4, 5],
     // The curved, turned lines anti-alias within a quarter pixel of Flash's,
     // as for `moves`; frames 4 and 5 come out as 1 and 2 did.
+    tolerance: 32,
+    maxOutliers: 1300,
+  },
+  {
+    name: "squashed-turns",
+    swf: squashedTurns(),
+    frames: 3,
+    capture: [1, 2, 3],
+    // The curved, turned lines anti-alias within a quarter pixel of Flash's, as for
+    // `shared-lines`: 770 to 1050 pixels, through each part's own stretch or an even one alike.
     tolerance: 32,
     maxOutliers: 1300,
   },
