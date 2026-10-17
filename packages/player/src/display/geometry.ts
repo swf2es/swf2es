@@ -128,24 +128,20 @@ export function transformRect(r: Rect, m: Matrix): Rect {
     return projectRect(r, m);
   }
 
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (const [x, y] of [
-    [r.xMin, r.yMin],
-    [r.xMax, r.yMin],
-    [r.xMin, r.yMax],
-    [r.xMax, r.yMax],
-  ]) {
-    const [px, py] = apply(m, x, y);
-    xs.push(px);
-    ys.push(py);
-  }
-
+  // The corners as apply places them, without its arrays: every bounds, width and hitTest asks.
+  const x0 = m.a * r.xMin + m.c * r.yMin + m.tx;
+  const y0 = m.b * r.xMin + m.d * r.yMin + m.ty;
+  const x1 = m.a * r.xMax + m.c * r.yMin + m.tx;
+  const y1 = m.b * r.xMax + m.d * r.yMin + m.ty;
+  const x2 = m.a * r.xMin + m.c * r.yMax + m.tx;
+  const y2 = m.b * r.xMin + m.d * r.yMax + m.ty;
+  const x3 = m.a * r.xMax + m.c * r.yMax + m.tx;
+  const y3 = m.b * r.xMax + m.d * r.yMax + m.ty;
   return {
-    xMin: Math.min(...xs),
-    yMin: Math.min(...ys),
-    xMax: Math.max(...xs),
-    yMax: Math.max(...ys),
+    xMin: Math.min(x0, x1, x2, x3),
+    yMin: Math.min(y0, y1, y2, y3),
+    xMax: Math.max(x0, x1, x2, x3),
+    yMax: Math.max(y0, y1, y2, y3),
   };
 }
 

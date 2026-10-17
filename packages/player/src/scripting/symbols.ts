@@ -431,8 +431,10 @@ function soundHash(sound: Sound): number {
     hash = Math.imul(hash ^ value, 0x01000193);
   }
 
-  for (const byte of sound.data) {
-    hash = Math.imul(hash ^ byte, 0x01000193);
+  // By index: a sound's data runs to megabytes.
+  const data = sound.data;
+  for (let i = 0; i < data.length; i++) {
+    hash = Math.imul(hash ^ data[i], 0x01000193);
   }
 
   return hash >>> 0;

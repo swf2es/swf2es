@@ -78,16 +78,19 @@ function startEnumeration(
     return names;
   }
 
+  // By index, not forEach: every for-in over the same object again comes here.
   const free: number[] = [];
-  e.names.forEach((name, i) => {
+  const known = e.names;
+  for (let i = 0; i < known.length; i++) {
+    const name = known[i];
     if (name === null) {
       free.push(i);
     } else if (!stillThere(o, name)) {
       e.slot.delete(name);
-      e.names[i] = null;
+      known[i] = null;
       free.push(i);
     }
-  });
+  }
 
   let next = 0;
   for (const name of names) {
