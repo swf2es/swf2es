@@ -10,6 +10,7 @@ import { CONTENT, type DisplayObject, TextObject } from "../../display/display.j
 import { maxScrollV, shownLines } from "../../text/layout.js";
 import { applied, emptyFormat } from "../../text/text.js";
 import { DEPTH_BIAS } from "./MovieClip.js";
+import { stylesOf } from "./StyleSheet.js";
 import { formatOf, newTextFormat } from "./TextFormat.js";
 
 type Value = avm1.Value;
@@ -75,20 +76,70 @@ function changed(field: TextObject): void {
   field.fit();
 }
 
-/** `field`'s text set as HTML, as htmlText and a bound variable set it. */
-export function setHtmlText(field: TextObject, html: string): void {
-  if (stateOf(field).html) {
+/** Whether the field's text is read as HTML: an HTML field's, or one with a style sheet. */
+const isHtml = (field: TextObject) => {
+  const state = stateOf(field);
+  return state.html || state.styleSheet !== undefined;
+};
+
+/**
+ * HTML read into the field: under a style sheet, styled by it, and kept,
+ * as htmlText gives it back and a new sheet styles it again.
+ */
+function parseHtml(field: TextObject, html: string): void {
+  const styles = stylesOf(stateOf(field).styleSheet);
+  if (styles === null) {
     field.model.setHtml(html, field.multiline);
+    return;
+  }
+
+  field.htmlSource = html;
+  field.model.setHtml(html, field.multiline, false, (selector) => styles.get(selector) ?? null);
+}
+
+/**
+ * `field`'s text set: as HTML under a style sheet. The text it has already
+ * changes nothing, its formats included (Ruffle's set_text).
+ */
+function setText(field: TextObject, text: string): void {
+  if (text === field.model.text) {
+    return;
+  }
+
+  if (stateOf(field).styleSheet !== undefined) {
+    parseHtml(field, text);
   } else {
-    field.model.setText(html);
+    field.model.setText(text);
   }
 
   changed(field);
 }
 
-/** The field's text as HTML where it is HTML, else its text. */
+/**
+ * `field`'s text set as HTML, as htmlText and a bound variable set it, in
+ * a field not HTML as its text. The HTML it has already changes nothing.
+ */
+export function setHtmlText(field: TextObject, html: string): void {
+  if (html === htmlTextOf(field)) {
+    return;
+  }
+
+  if (!isHtml(field)) {
+    setText(field, html);
+    return;
+  }
+
+  parseHtml(field, html);
+  changed(field);
+}
+
+/** The field's text as HTML, the HTML a sheet styled as it was set, where it is HTML; else its text. */
 export function htmlTextOf(field: TextObject): string {
-  return stateOf(field).html ? field.model.toHtml() : field.model.text;
+  if (!isHtml(field)) {
+    return field.model.text;
+  }
+
+  return field.htmlSource ?? field.model.toHtml();
 }
 
 /** An index as Rust's `as usize` makes a u32 of a value: wrapped to 32 bits. */
@@ -374,8 +425,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     "text",
     (field) => field.model.text,
     (field, value, version) => {
-      field.model.setText(avm1.stringOf(value, version));
-      changed(field);
+      setText(field, avm1.stringOf(value, version));
       host.textChanged(field);
     },
   );
@@ -512,12 +562,22 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       field.mouseWheelEnabled = v;
     },
   );
-  // Any object, and nothing for anything else.
+  // Any object but a clip, and nothing for anything else (Ruffle, whose clips are values of
+  // their own). The HTML a sheet styled is styled again by a new one, and forgotten with
+  // none (Ruffle's set_style_sheet).
   property(
     "styleSheet",
     (field) => stateOf(field).styleSheet,
     (field, value) => {
-      stateOf(field).styleSheet = value instanceof avm1.Avm1Object ? value : undefined;
+      const sheet = value instanceof avm1.Avm1Object && value.typeOf() !== "movieclip";
+      stateOf(field).styleSheet = sheet ? value : undefined;
+      if (stateOf(field).styleSheet === undefined) {
+        field.htmlSource = null;
+      } else if (field.htmlSource !== null) {
+        parseHtml(field, field.htmlSource);
+      }
+
+      changed(field);
     },
   );
 

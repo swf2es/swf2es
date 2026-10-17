@@ -76,6 +76,7 @@ import {
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./globals/Sound.js";
+import { styleSheetClass } from "./globals/StyleSheet.js";
 import { stateOf, textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
@@ -610,6 +611,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     const textField = textFieldClass(this);
     this.textFieldProto = textField.proto;
     realm.global.define("TextField", textField.constr, avm1.DONT_ENUM);
+    textField.constr.define("StyleSheet", styleSheetClass(this), avm1.DONT_ENUM | avm1.VERSION_7);
     realm.global.define("TextFormat", textFormatClass(this).constr, avm1.DONT_ENUM);
     this.keyFace = keyObject(realm, this, this.swfVersion);
     realm.global.define("Key", this.keyFace, avm1.DONT_ENUM);
