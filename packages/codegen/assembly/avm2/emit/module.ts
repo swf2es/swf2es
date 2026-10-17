@@ -30,7 +30,7 @@
 // compile it, it comes out as it is in the module.
 
 import { Output } from "../../output";
-import { BodyDecoder, verifyMethods } from "../abc/code";
+import { BodyDecoder, bodyDecoder, verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
 import { TRAITS_Class, TRAITS_Instance } from "../link/traits";
@@ -247,7 +247,7 @@ export class ModuleEmitter {
     const domain = this.domain;
     const abc = domain.abcs[this.index];
     const results = verifyMethods(domain, this.index);
-    const decoder = new BodyDecoder(abc, domain.abcBase[this.index], domain, this.index);
+    const decoder = bodyDecoder(domain, this.index);
     const start = domain.methodStart[this.index];
     out.text("  const F = [");
     for (let m: u32 = 0; m < abc.methodCount; m++) {
