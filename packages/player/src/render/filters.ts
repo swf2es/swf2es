@@ -17,6 +17,7 @@ import {
   BufferImageSource,
   type Container,
   Filter,
+  type FilterData,
   type FilterSystem,
   type FilterWithShader,
   GlProgram,
@@ -1390,6 +1391,35 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     this.release();
     this.ran = null;
     this.area = null;
+  }
+
+  /**
+   * Its kept output, while it would draw it again: before its object is drawn into an input,
+   * which is then not drawn at all, nor the filters run. The input `apply` would compare is the
+   * one the system sizes from the bounds it measured.
+   */
+  override reusedOutput(_system: FilterSystem, data: FilterData): Texture | null {
+    const kept = this.kept;
+    if (!this.keeps || this.stale || !kept || !this.ran) {
+      return null;
+    }
+
+    const bounds = data.bounds;
+    const resolution = data.resolution;
+    const m = this.owner.worldTransform;
+    const now = this.next;
+    now.width = bounds.width;
+    now.height = bounds.height;
+    now.resolution = resolution;
+    now.dx = (bounds.minX - m.tx) * resolution;
+    now.dy = (bounds.minY - m.ty) * resolution;
+    now.colorAlpha = this.owner.groupColorAlpha;
+    if (!sameInput(this.ran, now)) {
+      return null;
+    }
+
+    this.changing = 0;
+    return kept;
   }
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
