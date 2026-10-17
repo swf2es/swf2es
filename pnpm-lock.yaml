@@ -211,8 +211,8 @@ importers:
         specifier: 0.8.15
         version: 0.8.15
       earcut:
-        specifier: 3.0.2
-        version: 3.0.2
+        specifier: 3.2.4
+        version: 3.2.4
       eventemitter3:
         specifier: 5.0.1
         version: 5.0.1
@@ -877,8 +877,8 @@ packages:
     resolution: {integrity: sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A==}
     engines: {node: '>=0.10.0'}
 
-  earcut@3.0.2:
-    resolution: {integrity: sha512-X7hshQbLyMJ/3RPhyObLARM2sNxxmRALLKx1+NVFFnQ9gKzmCrxm9+uLIAdBcvc8FNLpctqlQ2V6AE92Ol9UDQ==}
+  earcut@3.2.4:
+    resolution: {integrity: sha512-FHc6yNpnTORB0tM5kmZ03iD2mDuNakDE2lvf4Hw1XkfxtEHIGVi01B/GqUSwx+NcC1WGjidAfpTXzeALtPtfpg==}
 
   electron@44.7.0:
     resolution: {integrity: sha512-aUq9/zLAAFYc+a9gy6cd0C3Y/N/RmovLCD8TV8LhIzNhuND6HEgsu96jJz9cbAxvckSPv+Trf2PKEjktoZgFkw==}
@@ -1505,7 +1505,7 @@ snapshots:
 
   deepmerge@4.3.1: {}
 
-  earcut@3.0.2: {}
+  earcut@3.2.4: {}
 
   electron@44.7.0:
     dependencies:
