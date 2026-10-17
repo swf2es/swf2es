@@ -172,7 +172,7 @@ export class Lifecycle {
     return roots.sort((a, b) => b.serial - a.serial);
   }
 
-  /** Whether `display` or anything under it listens for a broadcast event, a frame's or activation's. */
+  /** Whether `display` or anything under it listens for a frame's broadcast events. */
   private hearsFrames(display: DisplayObject): boolean {
     if (display.object) {
       for (const targets of this.s.broadcasts.values()) {
@@ -245,7 +245,7 @@ export class Lifecycle {
   afterScripts(): void {
     // What the timeline took off this frame has had its frame; it stops here. So
     // does one that has played ORPHAN_FRAMES off the list, but for one that
-    // listens for a broadcast event, which holds it in Flash too.
+    // listens for a frame's events, which hold it in Flash too.
     for (const [serial, orphan] of this.orphans) {
       if (!orphan.keep) {
         this.orphans.delete(serial);

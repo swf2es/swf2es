@@ -808,7 +808,7 @@ test("a key goes to the clips' keyDown as drawn, then Key's listeners, then the 
   ]);
 });
 
-test("a focus loss lets go of the keys and mouse buttons held, with no onKeyUp, and keeps what is toggled", async () => {
+test("a focus loss lets go of the keys held, with no onKeyUp, and keeps what is toggled and the mouse's buttons", async () => {
   const swf = movie(6, [
     [
       as1(
@@ -824,17 +824,21 @@ test("a focus loss lets go of the keys and mouse buttons held, with no onKeyUp, 
   player.pointer?.handle("down", { x: 1, y: 1, button: 0, buttons: 1 });
   keyboard.handle("down", { keyCode: 16, charCode: 0, shiftKey: true });
   keyboard.handle("down", { keyCode: 65, charCode: 65, shiftKey: true });
+  // It applies once this JavaScript has returned.
   player.setActive(false);
+  await Promise.resolve();
   player.setActive(true);
+  await Promise.resolve();
   // Neither A nor Shift is down after; A's press is a new one, which toggles it off.
+  // The mouse's button is the pointer's, still down.
   keyboard.handle("down", { keyCode: 66, charCode: 98 });
   keyboard.handle("down", { keyCode: 65, charCode: 97 });
 
   assert.deepEqual(lines, [
     "down 16 false false true true",
     "down 65 true true true true",
-    "down 66 false true false false",
-    "down 65 true false false false",
+    "down 66 false true false true",
+    "down 65 true false false true",
   ]);
 });
 

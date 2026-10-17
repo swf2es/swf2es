@@ -167,3 +167,49 @@ export function dispatchEvent(s: Scripting, target: AsObject, event: AsObject): 
 
   return !event[f.prevented];
 }
+
+/**
+ * Broadcast targets held weakly, in the order first added: a listener for
+ * ACTIVATE or DEACTIVATE keeps no object alive, nor its timeline playing.
+ * One collected drops out as it goes.
+ */
+export class WeakTargets {
+  private readonly refs = new Set<WeakRef<AsObject>>();
+  private readonly byObject = new WeakMap<AsObject, WeakRef<AsObject>>();
+  private readonly collected = new FinalizationRegistry<WeakRef<AsObject>>((ref) =>
+    this.refs.delete(ref),
+  );
+
+  add(o: AsObject): void {
+    if (this.byObject.has(o)) {
+      return;
+    }
+
+    const ref = new WeakRef(o);
+    this.byObject.set(o, ref);
+    this.refs.add(ref);
+    this.collected.register(o, ref, ref);
+  }
+
+  delete(o: AsObject): void {
+    const ref = this.byObject.get(o);
+    if (ref) {
+      this.byObject.delete(o);
+      this.refs.delete(ref);
+      this.collected.unregister(ref);
+    }
+  }
+
+  /** Those still alive, in order, found first: a listener may add or remove others. */
+  live(): AsObject[] {
+    const live: AsObject[] = [];
+    for (const ref of this.refs) {
+      const o = ref.deref();
+      if (o) {
+        live.push(o);
+      }
+    }
+
+    return live;
+  }
+}
