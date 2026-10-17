@@ -47,8 +47,11 @@ import {
   browserNavigate,
   type Drawer,
   defaultStorage,
+  type FetchRequest,
+  type FetchResult,
   type Navigate,
   type SharedObjectStorage,
+  type SocketHost,
 } from "../hosts.js";
 import { type AudioHost, browserAudioHost, type DecodedSound } from "../media/audio.js";
 import {
@@ -66,6 +69,7 @@ import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
+import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
 import {
   ClipNative,
   DEPTH_BIAS,
@@ -79,6 +83,10 @@ import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./glo
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { stateOf, textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
+import { xmlClass } from "./globals/XML.js";
+import { xmlNodeClass } from "./globals/XMLNode.js";
+import { xmlSocketClass } from "./globals/XMLSocket.js";
+import { Avm1Net, textFor } from "./net.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 
 type Value = avm1.Value;
@@ -116,6 +124,22 @@ export interface Avm1Options {
    * browserNavigate), null for none.
    */
   navigate?: Avm1Navigate | null;
+  /**
+   * What XML, LoadVars and loadVariables load by, the same fetch AS3's
+   * URLLoader goes through; without one, every load fails as a missing
+   * file does.
+   */
+  fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+  /** XMLSocket's TCP, AS3's Socket's host; without one, every connect fails with onConnect(false). */
+  socket?: SocketHost;
+  /** Where relative URLs resolve, as a page's `base` parameter has it: the SWF's URL by default. */
+  base?: string;
+  /**
+   * Whether XML.send, which sends without a window, sends: true by
+   * default; false refuses it, as allowNetworking "internal" refuses AS3's
+   * sendToURL.
+   */
+  sendToUrl?: boolean;
 }
 
 /**
@@ -463,6 +487,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   /** The transforms Sound gave clips, and the global one. */
   private readonly soundTransforms = new WeakMap<DisplayObject, Avm1SoundTransform>();
   private globalSoundTransform: Avm1SoundTransform = FULL;
+  /** What XML, LoadVars, loadVariables and XMLSocket ask of the network, and its answers for the next frame. */
+  readonly net: Avm1Net;
   /** The Sounds whose sound ended, for their onSoundComplete after the frame's actions. */
   private completed: avm1.Avm1Object[] = [];
   private frameCount = 0;
@@ -475,6 +501,12 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.url = options.url ?? "";
     this.storage = options.storage ?? defaultStorage();
+    this.net = new Avm1Net(
+      options.fetch ?? null,
+      options.socket ?? null,
+      options.base ?? this.url,
+      options.sendToUrl ?? true,
+    );
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     const movie = this;
     this.sounds = {
@@ -552,6 +584,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       stopDrag: () => this.stopDrag(),
       returned: () => this.returned(),
       stopSounds: () => stopTimelineSounds(this.sounds),
+      loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
       fsCommand: options.fsCommand ?? ((command) => this.fsCommand(command)),
       navigate:
         (options.navigate === undefined
@@ -624,6 +657,12 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     this.sharedObjects = sharedObjects;
     realm.global.define("SharedObject", sharedObjects.constr, avm1.DONT_ENUM);
     realm.global.define("Sound", soundClass(this), avm1.DONT_ENUM);
+    const xmlNodes = xmlNodeClass(this);
+    realm.global.define("XMLNode", xmlNodes.constr, avm1.DONT_ENUM);
+    const xml = xmlClass(this, xmlNodes);
+    realm.global.define("XML", xml, avm1.DONT_ENUM);
+    realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
+    realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     const flash = flashPackage(this);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
@@ -700,6 +739,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
 
     if (this.halted) {
+      this.net.destroy();
       return;
     }
 
@@ -710,6 +750,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       // Sounds whose time has run are over before the clips play on, as AS3's are: a stream
       // starts again at its first block, a NoMultiple may start again.
       this.frameCount++;
+      // What the network answered since the last frame, before the clips play on.
+      if (this.netDelivered()) {
+        this.runQueue();
+      }
+
       finishTimelineSounds(this.sounds);
       const clips = this.clips;
       const root = this.root;
@@ -739,8 +784,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
   }
 
-  /** Between frames: the timers due by the real clock fire. */
+  /** Between frames: what the network answered is delivered, and the timers due by the real clock fire. */
   idle(): void {
+    this.network();
     if (this.halted || !this.loaded || this.realm.timers.size === 0) {
       return;
     }
@@ -1240,6 +1286,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(): void {
+    this.net.destroy();
     this.sharedObjects?.flush(this.swfVersion);
     stopTimelineSounds(this.sounds);
     this.audio?.close?.();
@@ -1264,6 +1311,104 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
 
     updateMixes(this.sounds);
+  }
+
+  /** Resolves once every request the SWF has made so far has come back, for the next frame. */
+  settled(): Promise<void> {
+    return this.net.settled();
+  }
+
+  /** `o[name](...args)` in the root's activation, as a network callback between frames runs it. */
+  callback(o: avm1.Avm1Object, name: string, args: Value[]): void {
+    const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
+    if (cx !== null) {
+      this.rt.callMethod(cx, o, name, args, this.swfVersion);
+    }
+  }
+
+  /** LoadVars.send's page, as getURL's opens it. */
+  navigate(url: string, window: string, form: avm1.UrlForm): void {
+    this.host.navigate?.(url, window, form);
+  }
+
+  /**
+   * Between frames: what the network has answered since delivered, its
+   * callbacks run and what they queued, as Flash's come between frames.
+   */
+  network(): void {
+    // A SWF stopped for good takes nothing more: its loads and connections end.
+    if (this.halted) {
+      this.net.destroy();
+      return;
+    }
+
+    if (!this.loaded) {
+      return;
+    }
+
+    this.begin();
+    try {
+      if (this.netDelivered()) {
+        this.runQueue();
+      }
+    } finally {
+      this.end();
+    }
+  }
+
+  /**
+   * The network's answers since the last frame delivered, each in the
+   * root's activation as a callback runs, so that a setter or watcher it
+   * sets off that throws or runs out of time ends that one alone, and an
+   * error of the player's own goes to onUncaught and the rest go on:
+   * whether there were any.
+   */
+  private netDelivered(): boolean {
+    const ready = this.net.take();
+    const cx = this.movieRoot === null ? null : this.activationOf(this.movieRoot);
+    for (const deliver of ready) {
+      if (this.halted || cx === null) {
+        break;
+      }
+
+      try {
+        this.rt.call(cx, deliver);
+      } catch (error) {
+        this.onUncaught(error);
+      }
+    }
+
+    return ready.length > 0;
+  }
+
+  /**
+   * loadVariables and loadVariablesNum: the variables at `url` set on
+   * `into` between frames, then a clip's onData and its data event, as
+   * Ruffle's load_form_into_object has them. A SWF up to 5 reads the text
+   * as Windows-1252, a later one as UTF-8.
+   */
+  loadVariables(into: DisplayObject, url: string, form: avm1.UrlForm | null): void {
+    const request =
+      form === null
+        ? { url, method: "GET" as const, headers: [], body: null }
+        : formRequest(url, form.method, form.vars);
+    this.net.fetch(request, (result) => {
+      const face = into.avm1;
+      if (result.bytes === null || face === null || this.removed(into)) {
+        return;
+      }
+
+      const v = this.swfVersion;
+      const text = new TextDecoder(v <= 5 ? "windows-1252" : "utf-8").decode(result.bytes);
+      for (const [name, value] of parseForm(textFor(text, v), v)) {
+        avm1.set(face, name, value, v);
+      }
+
+      if (into instanceof MovieClip) {
+        this.enqueue(NORMAL, new Queued(METHOD, into, 0, 0, false, "onData"));
+        this.dispatch(into, ClipEvent.data, false);
+      }
+    });
   }
 
   /** A Sound's sound has ended: its onSoundComplete runs once the frame's actions have. */

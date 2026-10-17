@@ -948,7 +948,8 @@ function originOf(url: string): string {
  * scheme is itself, one from the root keeps the base's origin, and any
  * other replaces the base's last segment.
  */
-function resolve(base: string, url: string): string {
+/** `url` against `base`, as Flash resolves a load's URL: AVM1's loads resolve by it too. */
+export function resolve(base: string, url: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) {
     return url;
   }

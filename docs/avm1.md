@@ -1595,9 +1595,50 @@ a level's tiles drawn from its clips once, then attached.
   would replace the page; the test page opens none, and for a corpus
   test with `log_fetch` traces them as Ruffle's test navigator does.
 
-The player has no `loadMovie` or `loadVariables` yet, so those requests
-are dropped; `$version`, which Flash defines on `_level0` and a GET or
-POST from the root sends, is not defined yet either.
+`loadVariables`, `loadVariablesNum` and `MovieClip.loadVariables` load
+through the network below; the player has no `loadMovie` yet, so those
+requests are dropped; `$version`, which Flash defines on `_level0` and a
+GET or POST from the root sends, is not defined yet either.
+
+### The network: XML, LoadVars, loadVariables and XMLSocket
+
+`player/src/avm1/net.ts` is what these ask of the host: requests go
+through the `fetch` option, the same host fetch AS3's `URLLoader` uses,
+resolved against `base` (the SWF's URL by default) and marked "data" for
+a host that judges requests as Flash did; `XMLSocket` connects through the
+`socket` option, the `SocketHost` AS3's `Socket` and `XMLSocket` use, so
+the browser's relay or refusal and the desktop app's TCP serve both.
+Without either, a load fails as a missing file does (`onHTTPStatus(0)`,
+`onData(undefined)`) and a connect with `onConnect(false)`, never an
+error. What the host answers is held and delivered between frames
+(`Avm1.network`, which `tick` and `idle` call), in the root's activation,
+and what that queues runs then, as Flash's network callbacks come
+between frames. Each delivery runs inside the runtime's call, so a
+setter, watcher or timeout it sets off ends that one alone and never
+escapes the frame; a SWF stopped for good has its loads aborted and its
+connections closed. `XML.send`, which sends without a window, is refused
+under `sendToUrl: false`, as the web element sets it for allowNetworking
+"internal" as it does AS3's sendToURL. `XMLSocket` refuses a port outside
+0 to 65535 as AS3's Socket does, fails a connection not open by its
+`timeout` with `onConnect(false)`, and closes one whose message passes
+16 MB without its zero byte. The tree builds, prints and clones in loops,
+however deep, in time linear in its size; the test page delivers after each frame, as Ruffle's
+runner does, and plays a test's `socket.json` as Ruffle's test navigator
+does.
+
+`globals/XMLNode.ts` and `globals/XML.ts` follow Ruffle's `xml.rs`,
+`xml_node.rs` and `tree.rs`, and adl where they part (cases written to a
+SharedObject, adl tracing no AVM1): the parser's statuses are Flash 8's
+list (an unclosed element -9, an end tag of an element further up -9 and
+closes those within it, an unquoted value -6, an unterminated one -8, any
+`<?` but the declaration -6); `<!x>` is an element; attributes need no
+space between them and keep a name's first value; `&nbsp;` decodes, and
+`&#0;` is nothing; the declaration and DOCTYPE are found in any case and
+toString writes them first; `new XML(undefined)` parses nothing; an
+`XMLNode` without a type and a value is no node; and the prototypes'
+properties are in Flash's for..in order, XMLSocket's hidden. Up to SWF 5,
+where a string is bytes, text loaded or received is its UTF-8's bytes,
+and `loadVariables` reads Windows-1252.
 
 ### AVM1 and AVM2
 
@@ -1978,6 +2019,12 @@ determinism` green, and the corpus baseline may only go up.
     Begun: `GetURL`, `GetURL2` and `MovieClip.getURL` (see "getURL and
     fscommand"), routed to the host. The corpus's avm1/ goes from 331 to
     362 of 715, most of the rise tests that end with `fscommand("quit")`.
+    Then `XML`, `XMLNode`, `LoadVars`, `XMLSocket` and `loadVariables`
+    (see "The network"): avm1/ from 421 to 462 of 715, every `xml*`,
+    `xml_socket*`, `load_vars`, `loadvars_tostring` and `loadvariables*`
+    test passing. Left: `loadMovie` and `MovieClipLoader`, which
+    `swf5_xml_event_handler_context` needs too, and `System.useCodepage`'s
+    guess of a file's encoding (`form_loader_encoding_3` and `_4`).
 16. **AVM1 in AS3.** An `AVM1Movie` runs its actions, `LocalConnection`
     across the VMs, `AVM1Movie.call` and `addCallback`; the `avm1-movie`
     case's AVM1 then traces, recorded again with adl. Passes
