@@ -368,10 +368,14 @@ const roundStretch = (x: number, t: number) => Math.round((x / t) * 65536) / 655
 
 /**
  * How far, in pixels of the screen, a line's edge may stand from where its
- * own stretch puts it when stroked through a nearby one (settledStretch):
- * a fiftieth of a pixel, under the twentieth a SWF's twips can tell.
+ * own stretch puts it when stroked through a nearby one on the grid
+ * (settledStretch): a twentieth of a pixel, a twip. A fiftieth gave a
+ * hairline a step of 1/64 of its scale, and a crowded room's hairlines,
+ * scaled a little more or less on each frame by their tweens, a stretch
+ * of their own on most frames: nine in ten lines stroked anew each frame
+ * were such hairlines.
  */
-const EDGE_SLACK = 0.02;
+const EDGE_SLACK = 0.05;
 /**
  * How far, in pixels of the screen, a line's edge may stand from its own
  * stretch's place when stroked through an even one (settledStretch): two
@@ -381,8 +385,8 @@ const EDGE_SLACK = 0.02;
  * stroked through one even scale, every angle shares them.
  */
 const EVEN_SLACK = 0.1;
-/** The coarsest step of the stretches' grid: about 1.5% of a scale. */
-const COARSEST_STEP = 1 / 64;
+/** The coarsest step of the stretches' grid: about 12% of a scale, which only a hairline's slack reaches. */
+const COARSEST_STEP = 1 / 8;
 /** The finest: a line wider than this allows is stroked through its own stretch. */
 const FINEST_STEP = 1 / 4096;
 

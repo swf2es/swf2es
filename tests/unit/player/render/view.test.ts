@@ -2496,8 +2496,8 @@ test("a shape's lines share a context through every turn and mirror of one stret
   assert.ok(lines(7).instructions.length > 0);
 
   // Each one's lines reach the stage through a turn or a mirror alone, but for the grid it was
-  // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/128 or less:
-  // the stroke is not stretched.
+  // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/32 or less,
+  // their edges within a twentieth of a pixel: the stroke is barely stretched.
   shapes.forEach((shape, i) => {
     const m = shape.matrix;
     // Pixi works its local transform out of its scale, turn and skew as it renders.
@@ -2514,15 +2514,15 @@ test("a shape's lines share a context through every turn and mirror of one stret
     }
 
     assert.ok(
-      Math.abs(Math.hypot(w[0], w[1]) - 1) < 0.01,
+      Math.abs(Math.hypot(w[0], w[1]) - 1) < 1 / 32,
       `shape ${i}: column 1 is ${w[0]},${w[1]}`,
     );
     assert.ok(
-      Math.abs(Math.hypot(w[2], w[3]) - 1) < 0.01,
+      Math.abs(Math.hypot(w[2], w[3]) - 1) < 1 / 32,
       `shape ${i}: column 2 is ${w[2]},${w[3]}`,
     );
     assert.ok(
-      Math.abs(w[0] * w[2] + w[1] * w[3]) < 0.02,
+      Math.abs(w[0] * w[2] + w[1] * w[3]) < 1 / 16,
       `shape ${i}: columns not at right angles`,
     );
   });
@@ -2577,24 +2577,24 @@ test("a shape that pulses a little shares its lines between the frames of the pu
       ty: 0,
     });
     view.prepare(root);
-    // Its 2 pixel lines, under the stretch's inverse, reach the stage within a few hundredths of
-    // a pixel of their width: their path is the shape's exactly.
+    // Its 2 pixel lines, under the stretch's inverse, reach the stage stretched by under a step of
+    // the grid, 1/32, their edges within a twentieth of a pixel: their path is the shape's exactly.
     const lines = strokes();
     lines.updateLocalTransform();
     const l = lines.localTransform;
     const m = shape.matrix;
     const column = Math.hypot(m.a * l.a + m.c * l.b, m.b * l.a + m.d * l.b);
-    assert.ok(Math.abs(column - 1) < 0.02, `frame ${f}: column 1 is ${column} long`);
+    assert.ok(Math.abs(column - 1) < 1 / 32, `frame ${f}: column 1 is ${column} long`);
   }
 
-  // 48 frames of a pulse of 2% and a squash of 1%: a few stretches.
-  assert.ok(view.counts.strokeContexts <= 6, `${view.counts.strokeContexts} contexts`);
+  // 48 frames of a pulse of 2% and a squash of 1%: a stretch or two.
+  assert.ok(view.counts.strokeContexts <= 3, `${view.counts.strokeContexts} contexts`);
 });
 
 test("a wide line settles within its edges' slack, and one too wide on none", async () => {
   const { settledStretch } = await import("../../../../packages/player/dist/render/strokes.js");
   const pulse: [number, number, number, number] = [1.013, 0.002, 0.002, 1.007];
-  // A hairline, nearly even, moves to an even stretch on a grid of 64ths of its logarithm.
+  // A hairline, nearly even, moves to an even stretch on a coarse grid of its logarithm.
   const hair = settledStretch(pulse, 1, 1);
   assert.notDeepEqual(hair, pulse);
   assert.equal(hair[1], 0);
