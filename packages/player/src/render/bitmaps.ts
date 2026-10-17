@@ -83,6 +83,8 @@ class StoreTexture implements GpuCopy {
   constructor(
     private readonly renderer: Renderer,
     private readonly bitmaps: GpuBitmaps,
+    /** Held weakly: the store's collection is what frees its copies. */
+    private readonly store: WeakRef<BitmapStore>,
     width: number,
     height: number,
   ) {
@@ -101,6 +103,26 @@ class StoreTexture implements GpuCopy {
     this.texture = new Texture({ source: this.source });
   }
 
+  /**
+   * The texture after a lost context was given back, which lost it: the
+   * store's pixels uploaded again, as Pixi no longer keeps them, and the
+   * sampled copies made again from it. A draw only the texture held is gone.
+   */
+  restore(): void {
+    const store = this.store.deref();
+    if (!store || store.disposed) {
+      return;
+    }
+
+    this.upload(store.lostOnGpu(this));
+    // Drawn again now: a fill or a Bitmap that does not change asks for none.
+    for (const [key, variant] of this.variants) {
+      variant.version = -1;
+      const [linear, repeat] = key.split(" ");
+      this.sampled(linear === "true", repeat === "true");
+    }
+  }
+
   read(): Uint32Array {
     return argbOf(this.renderer.extract.pixels(this.texture).pixels);
   }
@@ -117,8 +139,13 @@ class StoreTexture implements GpuCopy {
     }
 
     if (!uniform) {
+      // Uploaded now, the texture made first if it has none, and the bytes let go
+      // of: Pixi would keep a copy of every bitmap's pixels beside the store's.
+      // A context lost and given back has each copy upload again (restore).
       this.source.resource = rgbaOf(pixels);
       this.source.update();
+      this.renderer.texture.initSource(this.source);
+      this.source.resource = null as unknown as Uint8Array;
       return;
     }
 
@@ -249,9 +276,23 @@ class GpuBitmaps {
   readonly smoothed = new Set<TextureSource>();
   private smooth = true;
 
+  /** The copies not yet destroyed, which a context given back has upload again. */
+  private readonly live = new Set<StoreTexture>();
+
   constructor(private readonly renderer: Renderer) {
     const gl = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
     this.limit = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 8192;
+    // Each copy restored once Pixi's systems have their new context, not
+    // within their change, as an upload of one colour renders. A renderer the
+    // tests stand in for has no runners, nor a context to lose.
+    renderer.runners?.contextChange?.add({
+      contextChange: () =>
+        queueMicrotask(() => {
+          for (const copy of this.live) {
+            copy.restore();
+          }
+        }),
+    });
   }
 
   /** Whether a Bitmap or a fill asking to be smoothed is: not at Flash's low quality. */
@@ -289,8 +330,9 @@ class GpuBitmaps {
 
     let copy = this.copies.get(store);
     if (!copy) {
-      copy = new StoreTexture(this.renderer, this, store.width, store.height);
+      copy = new StoreTexture(this.renderer, this, new WeakRef(store), store.width, store.height);
       this.copies.set(store, copy);
+      this.live.add(copy);
       store.copies.add(copy);
       // Unregistered by the copy itself, on dispose.
       this.collected.register(store, copy, copy);
@@ -324,6 +366,7 @@ class GpuBitmaps {
 
   forget(copy: StoreTexture): void {
     this.collected.unregister(copy);
+    this.live.delete(copy);
   }
 
   /**

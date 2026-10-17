@@ -20,11 +20,19 @@ import { PixiView } from "../../../../packages/player/dist/render/view.js";
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
 
-/** A renderer that draws nothing and reads back `pixels`, counting its reads. */
+/** A renderer that draws nothing and reads back `pixels`, counting its reads and keeping its uploads. */
 function standIn(pixels: number[]) {
   const reads: unknown[] = [];
+  const uploads: number[][] = [];
   const renderer = {
     render: () => {},
+    texture: {
+      initSource: (source: { resource: Uint8Array | null }) => {
+        if (source.resource) {
+          uploads.push([...source.resource]);
+        }
+      },
+    },
     filter: {
       _setupFilterTextures: () => {},
       _setupBindGroupsAndRender: () => {},
@@ -42,7 +50,11 @@ function standIn(pixels: number[]) {
       },
     },
   };
-  return { renderer: renderer as unknown as ConstructorParameters<typeof PixiView>[0], reads };
+  return {
+    renderer: renderer as unknown as ConstructorParameters<typeof PixiView>[0],
+    reads,
+    uploads,
+  };
 }
 
 test("a store shown by two renderers has a copy in each, and what one drew reaches the other", () => {
@@ -72,10 +84,12 @@ test("a store shown by two renderers has a copy in each, and what one drew reach
     [...store.pixels].map((p) => p.toString(16)),
     ["ff102030", "80402010"],
   );
+  // Uploaded as the first drew it, and the bytes let go of after.
+  assert.deepEqual(b.uploads, [drawn]);
   const theirs = [...store.copies].find((copy) => copy !== store.gpu) as unknown as {
-    source: { resource: Uint8Array };
+    source: { resource: Uint8Array | null };
   };
-  assert.deepEqual([...theirs.source.resource], drawn);
+  assert.equal(theirs.source.resource, null);
 
   // Read once: the first renderer is not asked again.
   second.render(new BitmapObject(store));
