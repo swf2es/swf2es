@@ -535,6 +535,8 @@ function restore(em: MethodEmitter): void {
     em.copyOf[r] = saved.pop();
   }
 
+  em.recount();
+
   for (let r = <i32>ir.frameSize - 1; r >= 0; r--) {
     em.promoted[r] = <u8>saved.pop();
     em.checked[r] = <u8>saved.pop();

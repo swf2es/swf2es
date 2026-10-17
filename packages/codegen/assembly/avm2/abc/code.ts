@@ -14,7 +14,7 @@
 // entry state changes is walked again, until none changes. That is avmplus'
 // first verifier phase, and the type checks are its.
 //
-// A BodyDecoder is made once per ABC and reused for every body: its scratch
+// One BodyDecoder serves every body of every ABC (bodyDecoder): its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
 import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
 import { Domain, LOG_None, LOG_Verify } from "../link/domain";
@@ -275,6 +275,16 @@ export class BodyDecoder {
     this.index = index;
   }
 
+  /** The decoder made to decode ABC `index` of `domain` instead, its scratch kept. */
+  retarget(abc: Abc, base: usize, domain: Domain, index: u32): void {
+    this.abc = abc;
+    this.base = base;
+    this.r = new Reader(base, base + abc.length);
+    this.domain = domain;
+    this.typed = true;
+    this.index = index;
+  }
+
   /**
    * Decode body `body`, created in scope chain `outer` (empty by default, as
    * for a script's initializer); the result is valid until the next call.
@@ -285,6 +295,9 @@ export class BodyDecoder {
     code.error = 0;
     code.count = 0;
     code.caseCount = 0;
+    // Not the last body's, which may be another ABC's: a body that fails before
+    // its second pass captures nothing.
+    this.captured.length = 0;
 
     this.start = this.base + abc.bodyCodeStart[body];
     this.length = abc.bodyCodeLength[body];
@@ -2342,6 +2355,36 @@ export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
   return results;
 }
 
+/**
+ * The one decoder that verifies and compiles a domain's bodies, made for
+ * ABC `index`: its scratch, sized to the longest body yet, kept from one
+ * use to the next. Garbage is collected only between calls from JS, so a
+ * decoder of its own for each use, verifying a module and then compiling
+ * it, grew codegen's memory, which never shrinks, by each's scratch for a
+ * long body: a 285 KB static initializer took it to 128 MB. One use at a
+ * time: nothing decodes while another's IR is read.
+ */
+let sharedDecoder: BodyDecoder | null = null;
+
+/** Let go of the decoder, and the domain and ABC it was last made for, as a domain is replaced. */
+export function releaseDecoder(): void {
+  sharedDecoder = null;
+}
+
+export function bodyDecoder(domain: Domain, index: u32): BodyDecoder {
+  const abc = domain.abcs[index];
+  const base = domain.abcBase[index];
+  let decoder = sharedDecoder;
+  if (decoder === null) {
+    decoder = new BodyDecoder(abc, base, domain, index);
+    sharedDecoder = decoder;
+  } else {
+    decoder.retarget(abc, base, domain, index);
+  }
+
+  return decoder;
+}
+
 function verifyAll(domain: Domain, index: u32): StaticArray<i32> {
   const abc = domain.abcs[index];
   const traits = domain.traits;
@@ -2357,7 +2400,7 @@ function verifyAll(domain: Domain, index: u32): StaticArray<i32> {
   }
 
   const methods = domain.methodStart[index];
-  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  const decoder = bodyDecoder(domain, index);
   for (let q = 0; q < queue.length; q++) {
     const m = queue[q];
     const body = abc.methodBody[m - methods];
