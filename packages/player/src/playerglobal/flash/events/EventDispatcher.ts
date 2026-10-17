@@ -1,6 +1,7 @@
 // flash.events.EventDispatcher: listeners by type on the object itself,
 // which the player's dispatch (scripting/events.ts) calls along a display
-// object's parent chain. The player broadcasts its frame events through it.
+// object's parent chain. The player broadcasts its frame and activation
+// events through it.
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent, displayOf, type Listener } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
@@ -10,6 +11,12 @@ type Value = avm2.Value;
 
 /** The events Flash broadcasts to every display object that listens, on the display list or not, target only. */
 const BROADCAST = new Set(["enterFrame", "frameConstructed", "exitFrame", "render"]);
+/**
+ * The events Flash broadcasts to every EventDispatcher that listens, display
+ * object or not, target only: the player's activation, which, unlike a
+ * frame's events, holds no listener alive (Scripting.activationTargets).
+ */
+const ACTIVATION = new Set(["activate", "deactivate"]);
 
 function listeners(o: AsObject): Map<string, Listener[]> {
   if (!o.$listeners) {
@@ -53,9 +60,12 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
 
       list.splice(at, 0, listener);
       listeners(this).set(key, list);
-      // A display object listening for a frame event is broadcast to, wherever it is.
+      // A display object listening for a frame event is broadcast to, wherever it is; any
+      // dispatcher listening for activation is, held weakly.
       if (BROADCAST.has(key) && this.$display) {
         s.broadcastTargets(key).add(this);
+      } else if (ACTIVATION.has(key)) {
+        s.activationTargets(key).add(this);
       }
     }
 
@@ -67,6 +77,8 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
         list.splice(at, 1);
         if (list.length === 0 && BROADCAST.has(key)) {
           s.broadcastTargets(key).delete(this);
+        } else if (list.length === 0 && ACTIVATION.has(key)) {
+          s.activationTargets(key).delete(this);
         }
       }
     }

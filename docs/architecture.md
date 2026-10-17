@@ -2314,6 +2314,29 @@ keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
 this is recorded against Flash; there is no IME, and no scrolling to
 keep the caret in view.
 
+A key's release goes elsewhere when the page or the window loses focus
+while it is held, and never reaches the player. The host tells the
+player its focus (`Player.setActive`, bound by `bindActivation`,
+`input/activation.ts`): the window's blur and focus, the document's
+visibility, and the element's focus moving to the page around it, as a
+plug-in lost focus to its page. A page without focus or hidden as the
+host binds starts the player inactive, before its scripts listen, so
+its first focus is an `ACTIVATE`. Losing focus, the player lets go of
+the keys AVM1's `Key` holds with no keyUp: Flash sends none then, which
+is why content clears its own keys on `Event.DEACTIVATE`, and a release
+the user never made could set off a game's action. The mouse's buttons
+stay the pointer's, which finds a release it missed at its next move.
+It then broadcasts `deactivate`, and gaining focus back `activate`, to
+every EventDispatcher that listens, display object or not, as Adobe
+documents them, at the target alone. Unlike a frame's broadcasts, these
+listeners are held weakly (`WeakTargets`, `scripting/events.ts`): a
+listener for them keeps no object alive and no orphan playing. A change
+applies once the JavaScript that told it has returned, or at the next
+frame: the page may move its focus inside an ExternalInterface call,
+and no listener runs inside another script. Only the last state told
+counts, so a blur and a focus together send nothing. A host that never
+calls it leaves the player active.
+
 ### The clipboard
 
 Flash Player 10 let a script write the clipboard only while it handled
