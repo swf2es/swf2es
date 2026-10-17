@@ -301,7 +301,8 @@ object), or that pop them themselves where their number is on the stack
 (`V.initObject(cx)`, `V.callMethod(cx)`...), and step 7 `DefineFunction`,
 `DefineFunction2`, `StoreRegister`, a `Push` of a register and `Return`
 (below). Every other action Flash knows is `V.notYet("<name>")`, which
-throws, so the steps after fill them in one at a time; an unknown opcode is
+throws, so the steps after fill them in one at a time (`GetUrl` and
+`GetUrl2`, step 15, were the last); an unknown opcode is
 skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
 
 ### Version-dependent semantics
@@ -1530,6 +1531,40 @@ BitmapData at a depth as a bitmap with no AVM1 object of its own, which
 the bitmap's later changes show on. Real content caches its art in them:
 a level's tiles drawn from its clips once, then attached.
 
+### getURL and fscommand
+
+`GetURL` and `GetURL2` (`urls.ts`), which `getURL`, `fscommand`,
+`loadMovie`, `loadMovieNum`, `unloadMovie`, `loadVariables` and
+`loadVariablesNum` compile to, route as Ruffle's `action_get_url` and
+`action_get_url_2` do, and the host acts (`Host`'s `fsCommand`,
+`navigate`, `loadMovie` and `loadVariables`):
+
+- A URL `FSCommand:` in any case is fscommand, the target its arguments.
+  Without a host's handler (`Avm1Options.fsCommand`), "quit" stops the
+  SWF once its frame has run, as a projector quits and Ruffle's test
+  harness ends a test, and the rest are dropped; the web element passes
+  every command to its page, "quit" too, as the plug-in did, and stops
+  nothing.
+- `GetURL` with a target `_levelN` loads into that level, nothing where
+  N is not an int; `GetURL2` reads N as a float and truncates it, and
+  `_level` alone is level 0. Its flags pick `loadVariables` into the
+  target's clip or level (a path's clip that is not the root opens a page
+  after all), `loadMovie` into a clip or a level (an empty URL unloads),
+  `loadMovieNum` into a level, or else a page. `GetURL2` converts its
+  target before its URL.
+- A page opens in the window named, "blank" in any case and with or
+  without its underscore as "_blank". A method of GET or POST sends the
+  innermost scope's variables, for..in's names as strings, but
+  `loadMovieNum` sends none. `MovieClip.getURL(url, window, method)` is
+  the same from the code that called it. The player opens pages through
+  hosts.ts's `browserNavigate` by default, which refuses a target that
+  would replace the page; the test page opens none, and for a corpus
+  test with `log_fetch` traces them as Ruffle's test navigator does.
+
+The player has no `loadMovie` or `loadVariables` yet, so those requests
+are dropped; `$version`, which Flash defines on `_level0` and a GET or
+POST from the root sends, is not defined yet either.
+
 ### AVM1 and AVM2
 
 Two VMs meet in three places, each its own step in the plan:
@@ -1550,7 +1585,7 @@ An AS3 SWF loaded by AS2 (`loadMovie`, the corpus's
 ### Out of scope at first
 
 The first steps leave out: `loadMovie` into levels other than 0, `print`,
-`fscommand` beyond ExternalInterface's, `NetStream` and video, the
+`NetStream` and video, the
 context menu, `TextSnapshot`, a duplicate of a script's drawing or text
 field's properties, and structured output and stack registers in the
 compiler.
@@ -1897,6 +1932,9 @@ determinism` green, and the corpus baseline may only go up.
 15. **Loading and I/O.** `loadMovie`, `loadVariables`, `MovieClipLoader`,
     `LoadVars`, `XML`, `XMLNode`, `SharedObject`, `XMLSocket`,
     `getURL`, `ExternalInterface`. Corpus tests of each.
+    Begun: `GetURL`, `GetURL2` and `MovieClip.getURL` (see "getURL and
+    fscommand"), routed to the host. The corpus's avm1/ goes from 331 to
+    362 of 715, most of the rise tests that end with `fscommand("quit")`.
 16. **AVM1 in AS3.** An `AVM1Movie` runs its actions, `LocalConnection`
     across the VMs, `AVM1Movie.call` and `addCallback`; the `avm1-movie`
     case's AVM1 then traces, recorded again with adl. Passes

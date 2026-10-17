@@ -964,6 +964,15 @@ export function movieClipClass(movie: Movie): {
     clip.playing = true;
     return undefined;
   });
+  // As GetURL, from the code that called it, whose variables a method sends.
+  method("getURL", 0, (_, args, version) => {
+    const cx = movie.realm.current;
+    if (cx !== null) {
+      avm1.getUrlMethod(cx, args, version);
+    }
+
+    return undefined;
+  });
   method("stop", 0, (clip) => {
     clip.playing = false;
     return undefined;

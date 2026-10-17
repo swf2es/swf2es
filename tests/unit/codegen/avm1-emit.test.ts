@@ -572,16 +572,26 @@ test("StartDrag and EndDrag are calls that take their operands off the stack the
   );
 });
 
-test("every other action throws that it is not yet supported", async () => {
-  const thrown = await run([
-    asm().push("a").trace().push("x", "y").raw([0x9a, 1, 0, 0]).trace().bytes(),
-  ]);
-  assert.deepEqual(thrown.calls, [["trace", "a"]]);
-  assert.equal(thrown.error, "not yet supported: GetUrl2");
+test("GetUrl passes its strings, GetUrl2 its target and URL off the stack and its flags", async () => {
+  // A method of 3 is none.
+  const block = asm()
+    .getUrl("FSCommand:quit", "")
+    .push("u", "t")
+    .raw([0x9a, 1, 0, 0x42])
+    .push("u", "t")
+    .raw([0x9a, 1, 0, 0x83])
+    .bytes();
+  const { calls, error } = await run([block]);
 
-  // An action with operands.
-  const url = await run([asm().getUrl("a", "b").bytes()]);
-  assert.equal(url.error, "not yet supported: GetUrl");
+  assert.equal(error, null);
+  assert.deepEqual(
+    calls.filter((c) => c[0] !== "constantPool"),
+    [
+      ["getUrl", { pool: [], st: [] }, "FSCommand:quit", ""],
+      ["getUrl2", { pool: [], st: [] }, "t", "u", 0x42],
+      ["getUrl2", { pool: [], st: [] }, "t", "u", 0x80],
+    ],
+  );
 });
 
 test("a block's registers are the movie's four, and StoreRegister leaves its value", async () => {

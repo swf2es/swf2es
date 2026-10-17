@@ -19,15 +19,16 @@
 // SetTarget, SetTarget2, GetProperty, SetProperty, the gotos, NextFrame,
 // PrevFrame, WaitForFrame and WaitForFrame2 (a branch on whether the frame
 // is loaded), TargetPath, Call, StopSounds, ToggleQuality, GetTime,
-// CloneSprite and RemoveSprite. A function's region takes its `this` and
+// CloneSprite, RemoveSprite, GetUrl and GetUrl2. A function's region takes its `this` and
 // its arguments, and a DefineFunction2's registers are its `let`s; every
 // other register is one of the movie's four, `cx.g`. A jump back counts
 // down V.budget, and the script timeout's check reads the clock only as
 // the count runs out. With, Try and Throw are calls too, and a region
 // that has a With or a Try keeps what they hold on the activation, by
 // ranges of its blocks, which come off as control leaves them (see
-// `heldRanges`). Every other action Flash knows is a call that throws,
-// V.notYet, and one it does not know is skipped, as Flash skips it. An
+// `heldRanges`). That is every action Flash knows; one left out would be
+// a call that throws, V.notYet. One it does not know is skipped, as Flash
+// skips it. An
 // action Flash cannot read, cut short or a Push of a value type it does
 // not know, stops the SWF,
 // V.halt, as adl does.
@@ -665,6 +666,18 @@ export class BlockEmitter {
         break;
       case ops.OP_ToggleQuality:
         out.text("V.toggleQuality(cx);\n");
+        break;
+      case ops.OP_GetUrl:
+        out.text("V.getUrl(cx, ");
+        this.string(actions, action.first);
+        out.text(", ");
+        this.string(actions, action.first + 1);
+        out.text(");\n");
+        break;
+      case ops.OP_GetUrl2:
+        out.text("V.getUrl2(cx, st.pop(), st.pop(), ");
+        out.uint(action.a);
+        out.text(");\n");
         break;
       default:
         if (ops.opcodeKnown[op]) {

@@ -61,6 +61,15 @@ export interface Timeline {
   call(frame: number): void;
 }
 
+/**
+ * The variables a getURL, loadMovie or loadVariables sends, the code's
+ * locals as strings in for..in's order, and how: in the query or the body.
+ */
+export interface UrlForm {
+  method: "GET" | "POST";
+  vars: [name: string, value: string][];
+}
+
 export interface Host {
   /**
    * A trace's text, as it is: Flash's log breaks its lines at a carriage
@@ -119,4 +128,20 @@ export interface Host {
   returned?(): void;
   /** ToggleQuality: the stage's quality from high or best to low, or back. */
   toggleQuality?(): void;
+  /** fscommand: a GetURL's or GetURL2's URL `FSCommand:command`, its target the arguments. */
+  fsCommand?(command: string, args: string): void;
+  /**
+   * getURL: the page `url`, as the SWF gave it, opened in the browser
+   * window or frame named `window` ("_blank" in any spelling as
+   * "_blank"), with `form`'s variables where a method was given.
+   */
+  navigate?(url: string, window: string, form: UrlForm | null): void;
+  /**
+   * loadMovie and loadMovieNum: the SWF or image at `url` into a clip, or
+   * into the level of a number, which the load makes where there is none;
+   * an empty URL unloads what is there.
+   */
+  loadMovie?(into: Target | number, url: string, form: UrlForm | null): void;
+  /** loadVariables and loadVariablesNum: the variables at `url` set on a clip. */
+  loadVariables?(into: Target, url: string, form: UrlForm | null): void;
 }

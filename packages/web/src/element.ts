@@ -382,8 +382,20 @@ export class Swf2esPlayerElement extends ElementBase {
           return;
         }
 
-        // Its URL keys its SharedObjects, as a page's AS3 SWFs' are.
-        avm1 = new Avm1(codegen, { url, onUncaught: (error) => this.#report(session, error) });
+        // Its URL keys its SharedObjects, as a page's AS3 SWFs' are. Its
+        // fscommand and getURL reach the page as an AS3 SWF's do: "quit"
+        // goes to the page, as a plug-in's did, and stops nothing.
+        const { internal, allows, objectID } = this.#access(pageUrl);
+        avm1 = new Avm1(codegen, {
+          url,
+          onUncaught: (error) => this.#report(session, error),
+          fsCommand: (command, args) => {
+            if (allows(url)) {
+              this.#fsCommand(objectID, command, args);
+            }
+          },
+          navigate: internal ? null : undefined,
+        });
       }
 
       session.player = new Player(bytes, session.scripting, avm1);
@@ -427,16 +439,8 @@ export class Swf2esPlayerElement extends ElementBase {
     url: string,
     pageUrl: string,
   ): Scripting {
-    const access = attribute(this, "allowscriptaccess");
-    // Flash's allowNetworking: "internal" takes the page's scripting and
-    // navigation away, "none" every network access besides.
-    const networking = (attribute(this, "allownetworking") ?? "all").toLowerCase();
-    const internal = networking === "internal" || networking === "none";
-    const offline = networking === "none";
-    // Asked of the calling SWF, as Flash asked: a child from another origin is not the main SWF.
-    const allows = (swfUrl: string) => !internal && scriptAccess(access, swfUrl, pageUrl);
+    const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const base = attribute(this, "base");
-    const objectID = idOf(this) || attribute(this, "name") || null;
     const bridge: PageBridge = {
       objectID,
       callback: (name, call) => this.#callback(session, name, call),
@@ -469,6 +473,27 @@ export class Swf2esPlayerElement extends ElementBase {
       ...moduleCacheOptions(),
     });
     return scripting;
+  }
+
+  /** What the element's attributes let a SWF reach of its page and the network. */
+  #access(pageUrl: string): {
+    internal: boolean;
+    offline: boolean;
+    allows: (swfUrl: string) => boolean;
+    objectID: string | null;
+  } {
+    const access = attribute(this, "allowscriptaccess");
+    // Flash's allowNetworking: "internal" takes the page's scripting and
+    // navigation away, "none" every network access besides.
+    const networking = (attribute(this, "allownetworking") ?? "all").toLowerCase();
+    const internal = networking === "internal" || networking === "none";
+    return {
+      internal,
+      offline: networking === "none",
+      // Asked of the calling SWF, as Flash asked: a child from another origin is not the main SWF.
+      allows: (swfUrl) => !internal && scriptAccess(access, swfUrl, pageUrl),
+      objectID: idOf(this) || attribute(this, "name") || null,
+    };
   }
 
   /** The SWF's callback `name` on the element, or taken off it, while its load is the one playing. */
