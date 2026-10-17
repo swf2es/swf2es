@@ -126,6 +126,17 @@ export async function decodeImages(library: Library, decode: ImageDecode | null)
   await Promise.all(pending);
 }
 
+/**
+ * Each image's pixels, decoding or decoded, by the decoder and its
+ * definition, which the SWFs that define it alike share (timeline.ts'
+ * sharedBitmaps): decoded once for them all, and held as long as the
+ * definition is. A host's own decoder decodes for itself.
+ */
+const decoded = new WeakMap<
+  ImageDecode,
+  WeakMap<BitmapCharacter["definition"], Promise<BitmapPixels>>
+>();
+
 async function decodeOne(character: BitmapCharacter, decode: ImageDecode | null): Promise<void> {
   const definition = character.definition;
   if (definition.type !== "image" || !decode) {
@@ -133,9 +144,28 @@ async function decodeOne(character: BitmapCharacter, decode: ImageDecode | null)
     return;
   }
 
-  const image = await decode(definition.data, definition.format);
-  character.pixels =
-    image && image.width > 0 && image.height > 0 ? pixelsOf(definition, image) : INVALID_PIXELS;
+  let byDefinition = decoded.get(decode);
+  if (!byDefinition) {
+    byDefinition = new WeakMap();
+    decoded.set(decode, byDefinition);
+  }
+
+  let pixels = byDefinition.get(definition);
+  if (!pixels) {
+    const cache = byDefinition;
+    pixels = decode(definition.data, definition.format).then(
+      (image) =>
+        image && image.width > 0 && image.height > 0 ? pixelsOf(definition, image) : INVALID_PIXELS,
+      // A decoder that failed is asked again by the next load, as before it was shared.
+      (error) => {
+        cache.delete(definition);
+        throw error;
+      },
+    );
+    byDefinition.set(definition, pixels);
+  }
+
+  character.pixels = await pixels;
 }
 
 /** The pixels Flash makes of a decoded image, as adl shows them. */
