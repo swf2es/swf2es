@@ -231,7 +231,7 @@ export function compose3D(
   r[15] = 1;
   // The translation put in its column, not multiplied on: an infinite scale's column is then
   // infinite where the rotation's is 1, and NaN only where it is 0, as Flash's is.
-  const m = multiply3D(Float32Array.from(r), scale3D(sx, sy, sz));
+  const m = multiply3D(new Float32Array(r), scale3D(sx, sy, sz));
   m[12] = f(tx);
   m[13] = f(ty);
   m[14] = f(tz);

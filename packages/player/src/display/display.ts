@@ -696,7 +696,7 @@ export class DisplayObject {
       kept.set(raw);
       held = kept;
     } else if (!adopt) {
-      held = Float32Array.from(raw);
+      held = new Float32Array(raw);
     }
 
     this.space = {
@@ -710,7 +710,7 @@ export class DisplayObject {
       rotationY,
       rotationZ,
       raw: held,
-      shown: Float32Array.from(held),
+      shown: new Float32Array(held),
       singular,
       composed: false,
       flat: before,
