@@ -8,7 +8,7 @@
 import { avm1 } from "@swf2es/runtime";
 import { CONTENT, type DisplayObject, TextObject } from "../../display/display.js";
 import { maxScrollV, shownLines } from "../../text/layout.js";
-import { applied, emptyFormat } from "../../text/text.js";
+import { applied, emptyFormat, type PartialFormat } from "../../text/text.js";
 import { DEPTH_BIAS } from "./MovieClip.js";
 import { stylesOf } from "./StyleSheet.js";
 import { formatOf, newTextFormat } from "./TextFormat.js";
@@ -28,7 +28,7 @@ export interface TextFieldHost {
   variableChanged(field: TextObject): void;
 }
 
-/** What a field has only for AVM1: whether its text is HTML, and the variable it shows. */
+/** What a field has only for AVM1, beside what the player keeps for both VMs. */
 export interface FieldState {
   html: boolean;
   variable: string | null;
@@ -165,7 +165,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       ? avm1.get(textFormat, "prototype", version)
       : undefined;
   };
-  const textFormat = (format: ReturnType<typeof emptyFormat>, version: number): Value => {
+  const textFormat = (format: PartialFormat, version: number): Value => {
     const p = formatProto(version);
     return p instanceof avm1.Avm1Object ? newTextFormat(p, format) : undefined;
   };
@@ -291,12 +291,14 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
   method("getDepth", avm1.READ_ONLY | avm1.VERSION_6, (field) =>
     field.depth === null ? undefined : field.depth - DEPTH_BIAS,
   );
+  // The indices as Rust casts them to usize, NaN and below 0 to 0; a range backwards is none.
   method("replaceText", avm1.VERSION_7, (field, args, version) => {
     const model = field.model;
-    const from = Math.trunc(avm1.toNumber(args[0], version));
-    const to = Math.trunc(avm1.toNumber(args[1], version));
+    const usize = (v: Value) => Math.max(0, Math.trunc(avm1.toNumber(v, version)) || 0);
+    const from = usize(args[0]);
+    const to = usize(args[1]);
     const text = avm1.stringOf(args[2], version);
-    if (!(from >= 0 && to >= from)) {
+    if (to < from) {
       return undefined;
     }
 
