@@ -70,6 +70,7 @@ const results = await runPlayer(
     url: `/corpus/${t.path}/test.swf`,
     input: t.input ? JSON.parse(readFileSync(t.input, "utf8")) : undefined,
     viewport: t.viewport ?? undefined,
+    logFetch: t.logFetch,
   })),
   {
     timeout: TIMEOUT,
