@@ -2314,6 +2314,20 @@ keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
 this is recorded against Flash; there is no IME, and no scrolling to
 keep the caret in view.
 
+A key's release goes elsewhere when the page or the window loses focus
+while it is held, and never reaches the player. The host tells the
+player its focus (`Player.setActive`, bound by `bindActivation`,
+`input/activation.ts`): the window's blur and focus, the document's
+visibility, and the element's focus moving to the page around it, as a
+plug-in lost focus to its page. Losing it, the player lets go of the
+keys AVM1's `Key` holds, the mouse's buttons among them, with no keyUp:
+Flash sends none then, which is why content clears its own keys on
+`Event.DEACTIVATE`, and a release the user never made could set off a
+game's action. It then broadcasts `deactivate`, and gaining it back
+`activate`, to every display object that listens, on the display list
+or not, at the target alone, as it does `enterFrame`; only a change
+sends either. A host that never calls it leaves the player active.
+
 ### The clipboard
 
 Flash Player 10 let a script write the clipboard only while it handled

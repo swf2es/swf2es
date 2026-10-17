@@ -1,6 +1,7 @@
 // flash.events.EventDispatcher: listeners by type on the object itself,
 // which the player's dispatch (scripting/events.ts) calls along a display
-// object's parent chain. The player broadcasts its frame events through it.
+// object's parent chain. The player broadcasts its frame and activation
+// events through it.
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent, displayOf, type Listener } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
@@ -9,7 +10,14 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 /** The events Flash broadcasts to every display object that listens, on the display list or not, target only. */
-const BROADCAST = new Set(["enterFrame", "frameConstructed", "exitFrame", "render"]);
+const BROADCAST = new Set([
+  "enterFrame",
+  "frameConstructed",
+  "exitFrame",
+  "render",
+  "activate",
+  "deactivate",
+]);
 
 function listeners(o: AsObject): Map<string, Listener[]> {
   if (!o.$listeners) {
@@ -53,7 +61,7 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
 
       list.splice(at, 0, listener);
       listeners(this).set(key, list);
-      // A display object listening for a frame event is broadcast to, wherever it is.
+      // A display object listening for a broadcast event is reached, wherever it is.
       if (BROADCAST.has(key) && this.$display) {
         s.broadcastTargets(key).add(this);
       }

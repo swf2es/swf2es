@@ -213,6 +213,41 @@ export class Player {
     unloads.count++;
   }
 
+  private active = true;
+  /** How many times the player has been activated or deactivated: each may run listeners. */
+  private activations = 0;
+
+  /** Whether the player has the system's focus, as its host last told it; true until told otherwise. */
+  get isActive(): boolean {
+    return this.active;
+  }
+
+  /**
+   * The host's window or page gained or lost focus, or was hidden or shown.
+   * Losing it, the keys held are let go, the AVM1 Key's too, and then
+   * DEACTIVATE is broadcast to every display object that listens, on the
+   * display list or not; gaining it back, ACTIVATE. Only a change does
+   * anything, so a host may call this on every focus, blur and visibility
+   * change it sees. Keys are let go with no keyUp: Flash sends none when it
+   * loses focus, which is why content clears its own keys on DEACTIVATE,
+   * and a keyUp the user never made could fire an action in a game. The
+   * pointer needs nothing: a release it never saw is found at its next
+   * move, by the buttons it reports.
+   */
+  setActive(active: boolean): void {
+    if (this.stopped || active === this.active) {
+      return;
+    }
+
+    this.active = active;
+    this.activations++;
+    if (!active) {
+      this.avm1?.releaseKeys();
+    }
+
+    this.scripting?.broadcast(active ? "activate" : "deactivate");
+  }
+
   /** Time a host has let pass, in ms, still to be played as frames. */
   private owed = 0;
   /** The host's time the frame due has waited for a load from bytes so far. */
@@ -231,14 +266,14 @@ export class Player {
   /**
    * A count that moves whenever what the player shows may have changed: a
    * frame played, a key, a pointer event that changes a button, focus or a
-   * selection, a script's updateAfterEvent, or a call from the page into
-   * one of the SWF's ExternalInterface callbacks. A plain pointer move
-   * does not: what its listeners change shows at the next frame, as Flash
-   * and Ruffle draw it, so a fast mouse does not draw faster than the SWF.
-   * Loads and socket data arrive in a frame. A host that draws only when
-   * this moved draws every frame Flash would, and none in between, once it
-   * has drawn after start; what the host itself changes, a resize, it
-   * draws for itself.
+   * selection, a script's updateAfterEvent, a call from the page into
+   * one of the SWF's ExternalInterface callbacks, or the player activated
+   * or deactivated. A plain pointer move does not: what its listeners
+   * change shows at the next frame, as Flash and Ruffle draw it, so a fast
+   * mouse does not draw faster than the SWF. Loads and socket data arrive
+   * in a frame. A host that draws only when this moved draws every frame
+   * Flash would, and none in between, once it has drawn after start; what
+   * the host itself changes, a resize, it draws for itself.
    */
   get changes(): number {
     return (
@@ -247,7 +282,8 @@ export class Player {
       (this.touch?.redraws ?? 0) +
       (this.scripting?.updates ?? 0) +
       (this.keyboard?.handled ?? 0) +
-      (this.scripting?.hostCalls ?? 0)
+      (this.scripting?.hostCalls ?? 0) +
+      this.activations
     );
   }
 

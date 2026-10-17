@@ -1672,6 +1672,15 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost 
     return this.toggled.has(code);
   }
 
+  /**
+   * Every key and mouse button let go, with no event, as the player loses
+   * focus (Player.setActive): their releases go elsewhere and never come.
+   * What is toggled stays, as a release toggles nothing.
+   */
+  releaseKeys(): void {
+    this.keysDown.clear();
+  }
+
   get mouseShown(): boolean {
     return this.shown;
   }
