@@ -417,17 +417,14 @@ export function settledStretch(s: Linear, widest: number, least: number, out?: L
   // Nearly even: stroked through the even stretch of the same area, k, which no turn changes,
   // and taken back through its inverse, a line is as wide as k makes it times what s q⁻¹ = s / k
   // stretches each way, between the smaller scale over k and the larger. Through s itself it is
-  // one width all along, as screenWidth reads s; its edges share the difference, which must stay
-  // within the slack. A hairline, a pixel wide however small its scale, cannot: s / k would
-  // stretch the pixel itself.
+  // one width all along, somewhere in that span as screenWidth reads s at its angle; its edges
+  // share the difference, which must stay within the slack at every angle, so that a part
+  // turning does not flip between the even stretch and its own. A hairline, a pixel wide however
+  // small its scale, stretches with s / k as any line: a part squashed far keeps its own.
   if (r > 0) {
-    const width = widest / 20;
     const k = Math.sqrt((mean + r) * (mean - r));
-    const stroked = Math.max(least, width * k);
-    const own = Math.max(least, (width * Math.hypot(s[0] + s[2], s[1] + s[3])) / Math.SQRT2);
-    const wide = (stroked * (mean + r)) / k - own;
-    const narrow = own - (stroked * (mean - r)) / k;
-    if (Math.max(wide, narrow) <= 2 * EVEN_SLACK * least) {
+    const stroked = Math.max(least, (widest / 20) * k);
+    if ((stroked * 2 * r) / k <= 2 * EVEN_SLACK * least) {
       const even = out ?? [0, 0, 0, 0];
       even[0] = k;
       even[1] = 0;

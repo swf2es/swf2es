@@ -2632,8 +2632,8 @@ test("a part turning inside a parent squashed a little strokes through one stret
   const settled = (angle: number, squash: number, widest: number) =>
     settledStretch(stretchOf(turned(angle, squash)) as [number, number, number, number], widest, 1);
   assert.notDeepEqual(stretchOf(turned(0.3, 0.9)), stretchOf(turned(1.1, 0.9)));
-  // Its hairlines, and lines of two pixels, settle on one even stretch whatever the angle.
-  for (const widest of [1, 40]) {
+  // Its hairlines, and lines of a pixel and a half, settle on one even stretch whatever the angle.
+  for (const widest of [1, 30]) {
     const first = settled(0.3, 0.9, widest);
     assert.equal(first[1], 0);
     for (const angle of [0.7, 1.1, 2.5, -0.4]) {
