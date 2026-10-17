@@ -473,8 +473,22 @@ function clipDestroy() {
   return true;
 }
 
+function touchDestroy() {
+  element("touch").destroy();
+  // Gone from the page too: the next check makes a player of its own by the same id.
+  element("touch").remove();
+  document.getElementById("seed")?.remove();
+  return true;
+}
+
 /** A player of the touch SWF, made once the test has given the page a touch screen; where its stage is. */
 async function touchPlayer() {
+  // A check that failed before its touchDestroy left its player, which
+  // element("touch") would find before this one.
+  if (document.getElementById("touch")) {
+    touchDestroy();
+  }
+
   const p = document.createElement("swf2es-player") as Player;
   p.id = "touch";
   p.setAttribute("src", "/web-test/touch.swf");
@@ -535,13 +549,7 @@ Object.assign(globalThis, {
   touchLog,
   touchCall: (name: string, ...args: unknown[]) => element("touch")[name](...args),
   touchSeed: () => (document.getElementById("seed") as HTMLTextAreaElement).value,
-  touchDestroy: () => {
-    element("touch").destroy();
-    // Gone from the page too: the next check makes a player of its own by the same id.
-    element("touch").remove();
-    document.getElementById("seed")?.remove();
-    return true;
-  },
+  touchDestroy,
   clipboardPlayer,
   seedFocus,
   clipFocus,

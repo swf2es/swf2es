@@ -1060,10 +1060,41 @@ Enumerate2, converting it to a string) reaches the object placed at that
 path since, or nothing, as Ruffle's `MovieClipReference` does; its
 `typeof` stays `movieclip`.
 
-A text field with a variable name (DefineEditText's `VariableName`)
-shows a variable on the clip its path names, and a change to either
-updates the other; the player keeps the binding on the field, and the
-runtime tells the player when a variable it binds is set.
+A text field with a variable name (DefineEditText's `VariableName`, or
+`variable` set) shows a variable on the clip its path names, and a change
+to either updates the other (`avm1/bindings.ts`, after Ruffle's
+`try_bind_text_field_variable`). The path is resolved from the field's
+parent, past any button. A field bound to a display object's property is
+kept in that object's list, and the runtime calls the object's
+`DisplayNative.changed` before it stores any property, a set through
+SetVariable, DefineLocal, SetMember or a setter alike; the field shows
+the value as HTML. A script's set of the field's text sets the variable,
+its path resolved again each time. As a field is made it takes the
+variable's value, or gives it its text where the variable has none; one
+whose path names no object yet waits and is tried again as each display
+object is made, and the fields bound to a clip that is unloaded wait
+again for one at its path.
+
+### Text fields
+
+A text field's AS2 object has `TextField.prototype` (`globals/TextField.ts`,
+after Ruffle's `text_field.rs`), whose accessors read and write the
+player's `TextObject` and its `TextModel`, the same text, formats and
+layout AS3's `TextField` has; they find the field each time, so another
+object given them reads undefined. Each field is a broadcaster that hears
+itself first. What only AVM1 has, the `html` flag, the variable, the
+`tabIndex`, the style sheet and whether the field has a selection, is
+kept beside the field. `TextFormat` (`globals/TextFormat.ts`) holds a
+`PartialFormat`, null for what it does not set, its numbers ints from
+SWF 8 rounded half to even and out of range -2^31, before it wrapped.
+`createTextField` makes a field in whole pixels, which only a SWF 8 gets
+back; `_width` and `_height` set a field's own size in whole twips,
+whatever its scale. Setting the text or HTML a field already has changes
+nothing, its formats included. `TextField.StyleSheet`
+(`globals/StyleSheet.ts`) keeps each style copied in `_css` and its
+transform's TextFormat in `_styles`; a field with a sheet reads its text
+as HTML styled by it and gives back the HTML as set, and a new sheet
+styles that HTML again.
 
 ### The frame
 
@@ -1431,9 +1462,12 @@ not set, one in button mode or with a `tabIndex`. Once any has a
 `tabIndex` (an int; -1 none; a value but a number or boolean the least),
 the order is by it, equal ones as walked, those without one left out;
 else by place, 6 × y + x of the top left corner on the stage in twips (a
-button's hit area's), the first walked at a place alone kept. Text
-fields take the focus with their AS2 face (step 13), and so the
-corpus's tests that begin by focusing one wait for it.
+button's hit area's), the first walked at a place alone kept. An input
+text field is in the order unless its `tabEnabled` is false; a script may
+focus any field. A field given the focus, again too, has all its text
+selected once the focus's events have run, which see no selection, and
+loses its selection with the focus (Ruffle's `update_edittext_selection`);
+Selection's indices are the focused field's, -1 without one.
 
 ### Time and the script timeout
 
@@ -1561,9 +1595,50 @@ a level's tiles drawn from its clips once, then attached.
   would replace the page; the test page opens none, and for a corpus
   test with `log_fetch` traces them as Ruffle's test navigator does.
 
-The player has no `loadMovie` or `loadVariables` yet, so those requests
-are dropped; `$version`, which Flash defines on `_level0` and a GET or
-POST from the root sends, is not defined yet either.
+`loadVariables`, `loadVariablesNum` and `MovieClip.loadVariables` load
+through the network below; the player has no `loadMovie` yet, so those
+requests are dropped; `$version`, which Flash defines on `_level0` and a
+GET or POST from the root sends, is not defined yet either.
+
+### The network: XML, LoadVars, loadVariables and XMLSocket
+
+`player/src/avm1/net.ts` is what these ask of the host: requests go
+through the `fetch` option, the same host fetch AS3's `URLLoader` uses,
+resolved against `base` (the SWF's URL by default) and marked "data" for
+a host that judges requests as Flash did; `XMLSocket` connects through the
+`socket` option, the `SocketHost` AS3's `Socket` and `XMLSocket` use, so
+the browser's relay or refusal and the desktop app's TCP serve both.
+Without either, a load fails as a missing file does (`onHTTPStatus(0)`,
+`onData(undefined)`) and a connect with `onConnect(false)`, never an
+error. What the host answers is held and delivered between frames
+(`Avm1.network`, which `tick` and `idle` call), in the root's activation,
+and what that queues runs then, as Flash's network callbacks come
+between frames. Each delivery runs inside the runtime's call, so a
+setter, watcher or timeout it sets off ends that one alone and never
+escapes the frame; a SWF stopped for good has its loads aborted and its
+connections closed. `XML.send`, which sends without a window, is refused
+under `sendToUrl: false`, as the web element sets it for allowNetworking
+"internal" as it does AS3's sendToURL. `XMLSocket` refuses a port outside
+0 to 65535 as AS3's Socket does, fails a connection not open by its
+`timeout` with `onConnect(false)`, and closes one whose message passes
+16 MB without its zero byte. The tree builds, prints and clones in loops,
+however deep, in time linear in its size; the test page delivers after each frame, as Ruffle's
+runner does, and plays a test's `socket.json` as Ruffle's test navigator
+does.
+
+`globals/XMLNode.ts` and `globals/XML.ts` follow Ruffle's `xml.rs`,
+`xml_node.rs` and `tree.rs`, and adl where they part (cases written to a
+SharedObject, adl tracing no AVM1): the parser's statuses are Flash 8's
+list (an unclosed element -9, an end tag of an element further up -9 and
+closes those within it, an unquoted value -6, an unterminated one -8, any
+`<?` but the declaration -6); `<!x>` is an element; attributes need no
+space between them and keep a name's first value; `&nbsp;` decodes, and
+`&#0;` is nothing; the declaration and DOCTYPE are found in any case and
+toString writes them first; `new XML(undefined)` parses nothing; an
+`XMLNode` without a type and a value is no node; and the prototypes'
+properties are in Flash's for..in order, XMLSocket's hidden. Up to SWF 5,
+where a string is bytes, text loaded or received is its UTF-8's bytes,
+and `loadVariables` reads Windows-1252.
 
 ### AVM1 and AVM2
 
@@ -1914,7 +1989,16 @@ determinism` green, and the corpus baseline may only go up.
     movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
-    Corpus tests of text fields.
+    Corpus tests of text fields. Done (see "Text fields"): the corpus goes
+    from 371 to 421 of 715 (`text_format`, `textfield_variable`,
+    `textfield_props_swf6`-`8`, `edittext_stylesheet`, `stylesheet`,
+    `stylesheet_transform`, `selection`, `edittext_programmatic_focus`...).
+    Left: typing into an input field (`edittext_input`, `edittext_restrict`,
+    the paste and IME tests), `onChanged` and `onScroller` from the user,
+    `asfunction:` links, `StyleSheet.load` with loading (step 15), the
+    HTML of SWF 6 and 7 fields as Flash reads it, and layout metrics
+    (`textWidth`, `maxscroll`) where they part from Flash's, which AS3's
+    fields share.
 14. **Drawing, display and sound classes.** The drawing API, `Color`,
     `Transform`, `ColorTransform`, `Matrix`, `Point`, `Rectangle`,
     `BitmapData`, filters, `Stage`, `Sound`, timeline sounds that
@@ -1935,6 +2019,12 @@ determinism` green, and the corpus baseline may only go up.
     Begun: `GetURL`, `GetURL2` and `MovieClip.getURL` (see "getURL and
     fscommand"), routed to the host. The corpus's avm1/ goes from 331 to
     362 of 715, most of the rise tests that end with `fscommand("quit")`.
+    Then `XML`, `XMLNode`, `LoadVars`, `XMLSocket` and `loadVariables`
+    (see "The network"): avm1/ from 421 to 462 of 715, every `xml*`,
+    `xml_socket*`, `load_vars`, `loadvars_tostring` and `loadvariables*`
+    test passing. Left: `loadMovie` and `MovieClipLoader`, which
+    `swf5_xml_event_handler_context` needs too, and `System.useCodepage`'s
+    guess of a file's encoding (`form_loader_encoding_3` and `_4`).
 16. **AVM1 in AS3.** An `AVM1Movie` runs its actions, `LocalConnection`
     across the VMs, `AVM1Movie.call` and `addCallback`; the `avm1-movie`
     case's AVM1 then traces, recorded again with adl. Passes

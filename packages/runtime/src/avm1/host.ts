@@ -33,6 +33,12 @@ export interface DisplayNative {
    * has no property of its own of the name: whether it was one.
    */
   set(name: string, value: Value, version: number): boolean;
+  /**
+   * Any property of the object set, before it is stored: a text field
+   * bound to the name as a variable shows the value (Ruffle's
+   * notify_property_change).
+   */
+  changed?(name: string, value: Value, version: number): void;
   /** Its children's names, the highest depth first, which for..in lists after its own properties. */
   keys(out: string[]): void;
   /** Its path, `_level0.a.b`, which TargetPath gives, and a clip converts to as a string. */

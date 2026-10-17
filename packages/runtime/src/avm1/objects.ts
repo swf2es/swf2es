@@ -765,6 +765,7 @@ export function set(o: Avm1Object, name: string, value: Value, version: number):
  * `length` changed with it unless `early`, before the watcher, did.
  */
 function store(o: Avm1Object, name: string, value: Value, version: number, early: boolean): void {
+  o.display?.changed?.(name, value, version);
   const own = o.own(name, version);
   // A display property takes the value where the object has no property of the name (Ruffle's set_local).
   if (own === undefined && o.display !== null && o.display.set(name, value, version)) {

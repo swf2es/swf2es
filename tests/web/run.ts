@@ -553,30 +553,31 @@ check(
   async (evaluate, send) => {
     const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
     const log = () => call<string[]>(evaluate, "touchLog()");
-    const click = async (x: number, y: number, clickCount: number) => {
+    // Both clicks as the browser sends a double click's, back to back: the
+    // player counts a second press within half a second of the first, and a
+    // read of the log between them, under a slow build, has taken longer.
+    const click = async (clickCount: number) => {
       for (const type of ["mousePressed", "mouseReleased"]) {
         await send("Input.dispatchMouseEvent", {
           type,
-          x: left + x,
-          y: top + y,
+          x: left + 110,
+          y: top + 30,
           button: "left",
           buttons: type === "mousePressed" ? 1 : 0,
           clickCount,
         });
       }
-
-      return log();
     };
 
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: left + 110, y: top + 30 });
     await log();
     await call(evaluate, `touchCall("setBox", "c", "doubleClickEnabled", true)`);
-    assert.deepEqual(await click(110, 30, 1), [
+    await click(1);
+    await click(2);
+    assert.deepEqual(await log(), [
       "mouseDown c 10,30 true null",
       "mouseUp c 10,30 false null",
       "click c 10,30 false null",
-    ]);
-    assert.deepEqual(await click(110, 30, 2), [
       "mouseDown c 10,30 true null",
       "mouseUp c 10,30 false null",
       "doubleClick c 10,30 false null",
@@ -603,10 +604,18 @@ check(
         deltaX: 0,
         deltaY,
       });
-      // The page scrolls a moment later, if at all.
-      await new Promise((done) => setTimeout(done, 300));
-      const log = await call<string[]>(evaluate, "touchLog()");
-      return [(await scrolled()) > 0, log.filter((line) => line.startsWith("mouseWheel"))];
+      // The page scrolls a moment later, unless the SWF took the wheel: its
+      // listener runs in the wheel event's, which then prevents the scroll.
+      const log: string[] = [];
+      let moved = false;
+      for (let i = 0; i < 60 && !moved && log.length === 0; i++) {
+        await new Promise((done) => setTimeout(done, 50));
+        const heard = await call<string[]>(evaluate, "touchLog()");
+        log.push(...heard.filter((line) => line.startsWith("mouseWheel")));
+        moved = (await scrolled()) > 0;
+      }
+
+      return [moved, log];
     };
 
     await scrolled();

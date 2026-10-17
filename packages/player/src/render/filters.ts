@@ -17,6 +17,7 @@ import {
   BufferImageSource,
   type Container,
   Filter,
+  type FilterData,
   type FilterSystem,
   type FilterWithShader,
   GlProgram,
@@ -1139,6 +1140,23 @@ function sameInput(a: Input, b: Input): boolean {
  * One changing frame after frame is filtered straight to the target,
  * with no copy kept; so is one that `keeps` not, drawn once.
  */
+/** A pass that draws its input as it is, made once: an empty chain's (FilterChain.run). */
+let plainCopyFilter: Filter | null = null;
+
+function plainCopy(): Filter {
+  plainCopyFilter ??= new Filter({
+    glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
+    resources: {
+      colorUniforms: {
+        uColored: { value: 0, type: "f32" },
+        uMul: { value: new Float32Array([1, 1, 1, 1]), type: "vec4<f32>" },
+        uAdd: { value: new Float32Array(4), type: "vec4<f32>" },
+      },
+    },
+  });
+  return plainCopyFilter;
+}
+
 /** Each renderer's largest texture side, asked once. */
 const textureLimits = new WeakMap<object, number>();
 
@@ -1392,6 +1410,35 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     this.area = null;
   }
 
+  /**
+   * Its kept output, while it would draw it again: before its object is drawn into an input,
+   * which is then not drawn at all, nor the filters run. The input `apply` would compare is the
+   * one the system sizes from the bounds it measured.
+   */
+  override reusedOutput(_system: FilterSystem, data: FilterData): Texture | null {
+    const kept = this.kept;
+    if (!this.keeps || this.stale || !kept || !this.ran) {
+      return null;
+    }
+
+    const bounds = data.bounds;
+    const resolution = data.resolution;
+    const m = this.owner.worldTransform;
+    const now = this.next;
+    now.width = bounds.width;
+    now.height = bounds.height;
+    now.resolution = resolution;
+    now.dx = (bounds.minX - m.tx) * resolution;
+    now.dy = (bounds.minY - m.ty) * resolution;
+    now.colorAlpha = this.owner.groupColorAlpha;
+    if (!sameInput(this.ran, now)) {
+      return null;
+    }
+
+    this.changing = 0;
+    return kept;
+  }
+
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     if (!this.keeps) {
       this.runOver(system, input, output, clear);
@@ -1459,6 +1506,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
   private run(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const filters = this.filters;
+    // A layer kept for a blend (render/view.ts, layerBlend): what was drawn, as it was drawn.
+    if (filters.length === 0) {
+      plainCopy().apply(system, input, output, clear);
+      return;
+    }
+
     if (filters.length === 1) {
       filters[0].apply(system, input, output, clear);
       return;

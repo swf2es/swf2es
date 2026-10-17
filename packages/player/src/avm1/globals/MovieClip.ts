@@ -24,6 +24,7 @@ import type { Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import { storeOf } from "./BitmapData.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
+import { formVars } from "./LoadVars.js";
 
 type Value = avm1.Value;
 
@@ -71,6 +72,13 @@ export interface Movie extends GeomHost {
   ): DisplayObject | null;
   /** createEmptyMovieClip: an empty clip as `instance` at AVM1 depth `depth`. */
   createEmptyMovieClip(parent: MovieClip, instance: string, depth: number): DisplayObject;
+  /** createTextField: an empty text field as `instance` at AVM1 depth `depth`, at (x, y), width by height. */
+  createTextField(
+    parent: MovieClip,
+    instance: string,
+    depth: number,
+    rect: [x: number, y: number, width: number, height: number],
+  ): DisplayObject;
   /** duplicateMovieClip: `d` again as `name` at timeline depth `depth`. */
   duplicate(
     d: DisplayObject,
@@ -80,6 +88,10 @@ export interface Movie extends GeomHost {
   ): DisplayObject | null;
   /** removeMovieClip: `d` removed, where a script may remove it. */
   remove(d: DisplayObject): void;
+  /** A property of `d`'s AVM1 object set, which a text field bound to it shows. */
+  propertyChanged(d: DisplayObject, name: string, value: Value, version: number): void;
+  /** loadVariables: the variables at `url` set on `d`, `form`'s sent with them. */
+  loadVariables(d: DisplayObject, url: string, form: avm1.UrlForm | null): void;
 }
 
 /** AVM1's depths are the timeline's less this, as Flash gives them to scripts. */
@@ -452,11 +464,13 @@ function setSize(f: ClipNative, value: number, horizontal: boolean): void {
 
   const d = f.target;
   d.touch();
+  // A field's own size is the value, in whole twips, whatever its scale (the corpus's
+  // `movieclip_create_text_field` and `edittext_width_height`).
   if (d instanceof TextObject) {
     if (horizontal) {
-      d.width = value / (Math.abs(d.scaleX) || 1);
+      d.width = twips(value) / 20;
     } else {
-      d.height = value / (Math.abs(d.scaleY) || 1);
+      d.height = twips(value) / 20;
     }
 
     d.fit();
@@ -711,6 +725,10 @@ export class ClipNative implements avm1.DisplayNative {
 
     property.set?.(this, value, version);
     return true;
+  }
+
+  changed(name: string, value: Value, version: number): void {
+    this.movie.propertyChanged(this.target, name, value, version);
   }
 
   keys(out: string[]): void {
@@ -973,6 +991,19 @@ export function movieClipClass(movie: Movie): {
 
     return undefined;
   });
+  // The clip's own variables sent where a method is "GET" or "POST", in any case.
+  method("loadVariables", 0, (clip, args, version) => {
+    const face = clip.avm1;
+    if (args.length === 0 || face === null) {
+      return undefined;
+    }
+
+    const method = args.length > 1 ? avm1.stringOf(args[1], version).toUpperCase() : "";
+    const form: avm1.UrlForm | null =
+      method === "GET" || method === "POST" ? { method, vars: formVars(face, version) } : null;
+    movie.loadVariables(clip, avm1.stringOf(args[0], version), form);
+    return undefined;
+  });
   method("stop", 0, (clip) => {
     clip.playing = false;
     return undefined;
@@ -1100,6 +1131,16 @@ export function movieClipClass(movie: Movie): {
     const instance = avm1.stringOf(args[0], version);
     const depth = avm1.toNumber(args[1], version) | 0;
     return movie.faceOf(movie.createEmptyMovieClip(clip, instance, depth)) ?? undefined;
+  });
+  // Its place in whole pixels; a SWF 8 gets the field back, an earlier one nothing. The
+  // depth is cast as Rust casts it, saturating (Ruffle).
+  method("createTextField", avm1.VERSION_6, (clip, args, version) => {
+    const instance = avm1.stringOf(args[0], version);
+    const d = avm1.toNumber(args[1], version);
+    const depth = Number.isNaN(d) ? 0 : Math.trunc(Math.max(-0x80000000, Math.min(0x7fffffff, d)));
+    const [x, y, width, height] = args.slice(2, 6).map((a) => avm1.toNumber(a, version) | 0);
+    const field = movie.createTextField(clip, instance, depth, [x, y, width, height]);
+    return version < 8 ? undefined : (movie.faceOf(field) ?? undefined);
   });
   return { constr, proto };
 }

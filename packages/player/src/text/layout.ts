@@ -99,7 +99,8 @@ function heightOf(field: LayoutField, format: CharFormat): { ascent: number; des
 
 function measure(field: LayoutField, code: number, format: CharFormat, previous: number): Measure {
   const size = sizeOf(format);
-  const spacing = Math.trunc(format.letterSpacing * TWIPS);
+  // A TextFormat keeps a spacing of NaN or Infinity as given; laid out, it is none.
+  const spacing = Math.trunc(format.letterSpacing * TWIPS) || 0;
   if (field.embedFonts) {
     const font = field.fonts?.find(format.font, format.bold, format.italic) ?? null;
     if (!font?.layout) {

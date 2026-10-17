@@ -25,10 +25,13 @@ import {
   Avm1,
   Container,
   type DisplayObject,
+  type FetchRequest,
+  type FetchResult,
   type ModuleCache,
   PixiView,
   Player,
   Scripting,
+  type SocketHost,
   setTransformTable,
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
@@ -106,27 +109,7 @@ async function scriptingFor(
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
     onUncaught: (error) => uncaught.push(error),
-    fetch: async (request, signal) => {
-      const response = await fetch(request.url, {
-        signal,
-        method: request.method,
-        headers: request.headers.map(([name, value]) => [name, value]),
-        body: request.body ? new Uint8Array(request.body).buffer : null,
-      });
-      const headers: [string, string][] = [];
-      response.headers.forEach((value, name) => {
-        headers.push([name, value]);
-      });
-
-      // The corpus's files are served over HTTP here, but Flash loaded them from disk.
-      const local = new URL(request.url).pathname.startsWith("/corpus/");
-      return {
-        bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
-        status: local ? 0 : response.status,
-        headers: local ? [] : headers,
-        local,
-      };
-    },
+    fetch: pageFetch,
   });
   const libraries = await Promise.all(
     LIBRARIES.map(async (n) => {
@@ -143,6 +126,125 @@ async function scriptingFor(
   return scripting;
 }
 
+/** The page's fetch, a test's files served from the corpus as Flash loaded them from disk. */
+async function pageFetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
+  const response = await fetch(request.url, {
+    signal,
+    method: request.method,
+    headers: request.headers.map(([name, value]) => [name, value]),
+    body: request.body ? new Uint8Array(request.body).buffer : null,
+  });
+  const headers: [string, string][] = [];
+  response.headers.forEach((value, name) => {
+    headers.push([name, value]);
+  });
+
+  // The corpus's files are served over HTTP here, but Flash loaded them from disk.
+  const local = new URL(request.url).pathname.startsWith("/corpus/");
+  return {
+    bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
+    status: local ? 0 : response.status,
+    headers: local ? [] : headers,
+    local,
+  };
+}
+
+/** What a socket.json step does: Ruffle's ruffle_socket_format::SocketEvent. */
+type SocketStep =
+  | { type: "Send"; payload: number[] }
+  | { type: "Receive"; expected: number[] }
+  | { type: "Disconnect" }
+  | { type: "WaitForDisconnect" };
+
+/**
+ * A socket host whose every connection opens and then plays `steps`, as
+ * Ruffle's test navigator does: a Send the server's bytes, a Receive what
+ * the SWF must send next, a Disconnect the server closing. Without steps,
+ * a connection never answers, as Ruffle's does without a socket.json.
+ */
+function scriptedSockets(
+  steps: SocketStep[] | null,
+  trace: string[],
+  logFetch: boolean,
+  uncaught: unknown[],
+): SocketHost {
+  return {
+    connect: (host, port, events) => {
+      if (logFetch) {
+        trace.push("Navigator::connect_socket", `    Host: ${host}; Port: ${port}`);
+      }
+
+      const sent: Uint8Array[] = [];
+      let wake: (() => void) | null = null;
+      let closed = false;
+      const next = () =>
+        new Promise<Uint8Array | null>((resolve) => {
+          const take = () => {
+            if (sent.length > 0) {
+              resolve(sent.shift() ?? null);
+            } else if (closed) {
+              resolve(null);
+            } else {
+              wake = take;
+            }
+          };
+          take();
+        });
+      const poke = () => {
+        const w = wake;
+        wake = null;
+        w?.();
+      };
+      if (steps !== null) {
+        void (async () => {
+          events.open();
+          for (const step of steps) {
+            if (closed) {
+              return;
+            }
+
+            switch (step.type) {
+              case "Send":
+                events.data(Uint8Array.from(step.payload));
+                break;
+              case "Disconnect":
+                closed = true;
+                events.close();
+                return;
+              case "Receive": {
+                const got = await next();
+                if (got === null) {
+                  return;
+                }
+
+                if (got.join() !== step.expected.join()) {
+                  uncaught.push(new Error(`socket: expected [${step.expected}], got [${got}]`));
+                }
+
+                break;
+              }
+              case "WaitForDisconnect":
+                await next();
+                return;
+            }
+          }
+        })();
+      }
+
+      return {
+        send: (bytes) => {
+          sent.push(bytes.slice());
+          poke();
+        },
+        close: () => {
+          closed = true;
+          poke();
+        },
+      };
+    },
+  };
+}
+
 let avm1Codegen: Promise<Awaited<ReturnType<typeof createCodegen>>> | null = null;
 
 /**
@@ -154,7 +256,9 @@ async function avm1For(
   bytes: Uint8Array,
   trace: string[],
   uncaught: unknown[],
+  url: string | null,
   logFetch: boolean,
+  socket: SocketStep[] | null,
 ): Promise<Avm1 | null> {
   const swf = readSwf(bytes);
   if (isAs3(swf) || readActions(swf).blocks.length === 0) {
@@ -165,10 +269,22 @@ async function avm1For(
   // domain, and an instance each would hold a wasm memory each until collected.
   avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
   // Timers and getTimer go by the frames, as the tests step them.
+  // Its files are served, but Flash played it from disk: its URL is a file's, its host localhost.
+  const swfUrl = url ? new URL(url, location.href).href : undefined;
   return new Avm1(await avm1Codegen, {
     print: (line) => trace.push(...line.split(/\r|\n/)),
     onUncaught: (error) => uncaught.push(error),
     realTime: null,
+    url: swfUrl ? `file://${new URL(swfUrl).pathname}` : undefined,
+    base: swfUrl,
+    fetch: (request, signal) => {
+      if (logFetch) {
+        logRequest(request, swfUrl, trace);
+      }
+
+      return pageFetch(request, signal);
+    },
+    socket: scriptedSockets(socket, trace, logFetch, uncaught),
     // A page is never opened: a test that logs fetches traces it as Ruffle's navigator logs it.
     navigate: logFetch
       ? (url, window, form) => {
@@ -182,6 +298,33 @@ async function avm1For(
         }
       : null,
   });
+}
+
+/**
+ * A load traced as Ruffle's test navigator logs a fetch: its URL as the
+ * SWF gave it, relative to the SWF's directory, its method and its body.
+ */
+function logRequest(request: FetchRequest, swfUrl: string | undefined, trace: string[]): void {
+  const directory = swfUrl ? swfUrl.slice(0, swfUrl.lastIndexOf("/") + 1) : "";
+  const url =
+    directory && request.url.startsWith(directory)
+      ? request.url.slice(directory.length)
+      : request.url;
+  trace.push("Navigator::fetch:", `  URL: ${url}`, `  Method: ${request.method}`);
+  const type = request.headers.find(([name]) => name.toLowerCase() === "content-type")?.[1];
+  const others = request.headers.filter(([name]) => name.toLowerCase() !== "content-type");
+  if (others.length > 0) {
+    trace.push(`  Headers:`, ...others.map(([name, value]) => `${name}: ${value}`));
+  }
+
+  if (request.body) {
+    trace.push(`  Mime-Type: ${type ?? ""}`);
+    trace.push(
+      type === "application/x-www-form-urlencoded"
+        ? `  Body: ${new TextDecoder().decode(request.body)}`
+        : `  Body: [${[...request.body].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(", ")}]`,
+    );
+  }
 }
 
 const GRID = [1, 2, 4, 4];
@@ -228,6 +371,7 @@ async function runSwf(
   input: RecordedEvent[] | null = null,
   viewport: { width: number; height: number } | null = null,
   logFetch = false,
+  socket: SocketStep[] | null = null,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -243,7 +387,11 @@ async function runSwf(
   };
   try {
     scripting = await scriptingFor(bytes, trace, url, uncaught);
-    const player = new Player(bytes, scripting, await avm1For(bytes, trace, uncaught, logFetch));
+    const player = new Player(
+      bytes,
+      scripting,
+      await avm1For(bytes, trace, uncaught, url, logFetch, socket),
+    );
     const n = GRID[quality] ?? 4;
     setTransformTable(table, tableMinRun);
     const renderer = await autoDetectRenderer({
@@ -299,6 +447,13 @@ async function runSwf(
         // What a frame asked to load is linked between frames, as in a browser's.
         await scripting?.settled();
         player.tick();
+        stopOnUncaught();
+      }
+
+      // What an AVM1 frame asked of the network answers after it, as Ruffle's test runner has it.
+      if (player.avm1) {
+        await player.avm1.settled();
+        player.avm1.network();
         stopOnUncaught();
       }
 

@@ -50,6 +50,8 @@ export interface RuffleTest {
   viewport: { width: number; height: number } | null;
   /** Whether Ruffle traces its navigator's requests into the output. */
   logFetch: boolean;
+  /** Its socket.json, what the server of each connection it makes does, if it has one. */
+  socket: string | null;
 }
 
 /**
@@ -162,6 +164,7 @@ function test(path: string): RuffleTest | null {
     (k) => values.get(`player_options.${k}`) === "true",
   );
   const input = join(dir, "input.json");
+  const socket = join(dir, "socket.json");
   const quality = /quality\s*=\s*"(\w+)"/.exec(values.get("player_options.with_renderer") ?? "");
   const viewport = values.get("player_options.viewport_dimensions") ?? "";
   const width = /width\s*=\s*([\d.]+)/.exec(viewport);
@@ -178,6 +181,7 @@ function test(path: string): RuffleTest | null {
     input: existsSync(input) ? input : null,
     viewport: width && height ? { width: Number(width[1]), height: Number(height[1]) } : null,
     logFetch: values.get("log_fetch") === "true",
+    socket: existsSync(socket) ? socket : null,
   };
 }
 

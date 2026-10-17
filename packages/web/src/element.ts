@@ -385,9 +385,17 @@ export class Swf2esPlayerElement extends ElementBase {
         // Its URL keys its SharedObjects, as a page's AS3 SWFs' are. Its
         // fscommand and getURL reach the page as an AS3 SWF's do: "quit"
         // goes to the page, as a plug-in's did, and stops nothing.
-        const { internal, allows, objectID } = this.#access(pageUrl);
+        const { internal, offline, allows, objectID } = this.#access(pageUrl);
+        const base = attribute(this, "base");
         avm1 = new Avm1(codegen, {
           url,
+          base: base ? new URL(base, pageUrl).href : undefined,
+          // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
+          fetch: offline
+            ? () => Promise.reject(new Error("allowNetworking is none"))
+            : (configuration().fetch ?? browserFetch),
+          socket: offline ? undefined : socketHost(),
+          sendToUrl: !internal,
           onUncaught: (error) => this.#report(session, error),
           fsCommand: (command, args) => {
             if (allows(url)) {
