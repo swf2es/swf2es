@@ -2497,7 +2497,7 @@ test("a shape's lines share a context through every turn and mirror of one stret
 
   // Each one's lines reach the stage through a turn or a mirror alone, but for the grid it was
   // settled on (settledStretch), whose step for these lines, 2 to 6 pixels wide, is 1/32 or less,
-  // their edges within a twentieth of a pixel: the stroke is barely stretched.
+  // their edges within a tenth of a pixel: the stroke is barely stretched.
   shapes.forEach((shape, i) => {
     const m = shape.matrix;
     // Pixi works its local transform out of its scale, turn and skew as it renders.
@@ -2577,8 +2577,8 @@ test("a shape that pulses a little shares its lines between the frames of the pu
       ty: 0,
     });
     view.prepare(root);
-    // Its 2 pixel lines, under the stretch's inverse, reach the stage stretched by under a step of
-    // the grid, 1/32, their edges within a twentieth of a pixel: their path is the shape's exactly.
+    // Its 2 pixel lines, under the stretch's inverse, reach the stage stretched by a few hundredths,
+    // the even stretch's and the grid's together: their path is the shape's exactly.
     const lines = strokes();
     lines.updateLocalTransform();
     const l = lines.localTransform;
