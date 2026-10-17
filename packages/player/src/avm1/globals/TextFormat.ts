@@ -26,6 +26,9 @@ export function roundToEven(n: number): number {
 
 const unset = (v: Value) => v === undefined || v === null;
 
+/** The most tab stops a TextFormat reads of an object. */
+const MAX_TAB_STOPS = 0x10000;
+
 /** A value of the integer kind as a SWF of `version` keeps it: to an int, wrapping, before 8; rounded from 8. */
 function integer(v: Value, version: number, min: number | null): number {
   const n = avm1.toNumber(v, version);
@@ -81,7 +84,8 @@ const PROPERTIES: [
     (v, version) =>
       unset(v) ? null : version < 8 ? integer(v, version, 0) : integer(v, version, null),
   ],
-  // Any object's elements, by its length; anything else none.
+  // Any object's elements, by its length, at most 2^16 of them: a length a
+  // script made up must not keep a native loop from the script timeout.
   [
     "tabStops",
     (v, version) => {
@@ -89,7 +93,10 @@ const PROPERTIES: [
         return null;
       }
 
-      const length = avm1.toNumber(avm1.get(v, "length", version), version) | 0;
+      const length = Math.min(
+        avm1.toNumber(avm1.get(v, "length", version), version) | 0,
+        MAX_TAB_STOPS,
+      );
       const stops: number[] = [];
       for (let i = 0; i < length; i++) {
         stops.push(roundToEven(avm1.toNumber(avm1.get(v, String(i), version), version)));

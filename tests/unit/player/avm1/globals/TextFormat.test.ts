@@ -32,3 +32,12 @@ t.replaceText(1, 2, "XY"); trace(t.text);`,
     ["false true null", "true false", "true true 12", "nXYw"],
   );
 });
+
+test("tabStops reads at most 2^16 of an object's elements, whatever length it claims", async () => {
+  assert.deepEqual(
+    await traces([
+      `var f = new TextFormat(); f.tabStops = {length: 0x7fffffff, 0: 4}; trace(f.tabStops.length + " " + f.tabStops[0]);`,
+    ]),
+    ["65536 4"],
+  );
+});
