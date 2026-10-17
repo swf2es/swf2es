@@ -66,6 +66,7 @@ import {
   prefixedNamespace,
   prefixOf,
   publicNs,
+  publicQname,
   qname,
   TypeName,
 } from "./names.js";
@@ -514,7 +515,7 @@ export class Runtime {
     // one defining Object makes XML while XML's needs Object.
     if (!this.toplevelReady) {
       this.toplevelReady = true;
-      const toplevel = this.findScript(qname(publicNs, "Object"));
+      const toplevel = this.findScript(publicQname("Object"));
       if (toplevel && toplevel !== script) {
         this.initScript(toplevel);
       }
@@ -1336,7 +1337,7 @@ export class Runtime {
       );
     }
 
-    return this.hasProperty(o, this.publicName(name));
+    return this.hasProperty(o, publicQname(this.nameString(name)));
   }
 
   /** Whether `o` itself has element `i`: its class's indexing, an Array's, or a dynamic property. */
@@ -1440,8 +1441,18 @@ export class Runtime {
     return this.traitsOf(o).proto.$p;
   }
 
+  /**
+   * A public name seen at every version, as the host and the natives reach
+   * members, slots and all; what AS3 itself looks up by a string goes by
+   * publicQname, at user code's version.
+   */
   publicName(name: Value): Multiname {
-    return qname(publicNs, typeof name === "string" ? name : this.toString(name));
+    return qname(publicNs, this.nameString(name));
+  }
+
+  /** A property name as a string, as ToString makes one. */
+  private nameString(name: Value): string {
+    return typeof name === "string" ? name : this.toString(name);
   }
 
   // Calls.
@@ -2333,7 +2344,7 @@ export class Runtime {
     // that is not a function is TypeError 1006; a Namespace is a primitive.
     const order = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
     for (const name of order) {
-      const v = this.callProperty(o, qname(publicNs, name));
+      const v = this.callProperty(o, publicQname(name));
       if (v === null || typeof v !== "object" || v instanceof Namespace) {
         return v;
       }

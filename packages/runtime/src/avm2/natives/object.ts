@@ -3,7 +3,7 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import { formatClassName, Namespace, prefixOf, publicNs, qname } from "../names.js";
+import { formatClassName, Namespace, prefixOf, publicQname } from "../names.js";
 import { NOT_FOUND, type Runtime } from "../runtime.js";
 import { AS3, elements, type Natives, plain } from "./define.js";
 import { constructNamespace, newNamespace } from "./xml/xml.js";
@@ -13,7 +13,7 @@ export const objectNatives: Natives = {
   "Object.Object::_hasOwnProperty": (rt) => (o: Value, v: Value) => {
     const name = rt.toString(v);
     const traits = rt.traitsOf(o);
-    if (traits.find(qname(publicNs, name)) !== 0) {
+    if (traits.find(publicQname(name)) !== 0) {
       return true;
     }
 

@@ -1946,7 +1946,17 @@ at 60 Hz, five at most; until it has seen three calls, one. A typical
 interval over 36 ms is no display's (none refreshes slower than about 30
 Hz) but the host lagging, often by the frames themselves, and gets one
 frame a call, so that the content slows down as Flash's does rather than
-feed its own lag with frames run back to back. What is owed beyond that
+feed its own lag with frames run back to back. A host that keeps time
+tells `advance` how long its last call took (`busy`, which
+`@swf2es/web`'s loop passes): where that came to more than a frame's
+duration for each frame played, the frames overran, and the call runs
+one, as Flash runs the frame after an overrun alone. Drawing is left
+out of it: it costs the same however many frames a call plays, so with
+it a call of one frame would look overrun where two would fit. The interval
+alone cannot tell: AS2 content that holds a 60 fps movie to 30 by spinning
+on `getTimer` until 33 ms after its last frame makes calls 33 to 36 ms
+apart, a display's interval by time, and two frames a call then waited
+66 ms every other call. What is owed beyond that
 is dropped but for the part of a frame, which keeps the grid's phase;
 not within half an interval of the next frame, though, where a call that
 came a little early would leave a frame owed under ordinary jitter and
@@ -5174,6 +5184,10 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   moves focus with Tab, and only the recorded text and editing keys edit
   a field, as Ruffle's input keeps them apart; a press is a first click
   unless its `index` counts it as a second, as Ruffle's runner has it.
+  A test that gives its window (`viewport_dimensions`) recorded its
+  positions in it, the stage shown whole and centred: they are scaled
+  back to the stage's, and an AVM1 movie told the window's pixels to a
+  stage pixel, which `_xmouse` is measured in.
   Flash's harness plays no input, so `check-references.ts` leaves these
   tests out.
   A test that does not finish in its time is a timeout, a standing of its

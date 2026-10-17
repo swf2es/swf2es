@@ -13,7 +13,7 @@
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "./descriptors.js";
-import { NS_PackageInternal, NS_Public, namespace, publicNs, qname } from "./names.js";
+import { API_USER, NS_PackageInternal, NS_Public, namespace, publicQname, qname } from "./names.js";
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
 import { xmlToXMLString } from "./natives/xml/xml.js";
 import type { Runtime } from "./runtime.js";
@@ -136,7 +136,7 @@ function classInfoOf(rt: Runtime, traits: Traits): ClassInfo {
     for (const [name, list] of t.bindings) {
       for (const b of list) {
         const kind = b.value & 7;
-        const isPublic = b.ns.kind === NS_Public && b.ns.uri === "";
+        const isPublic = b.ns.kind === NS_Public && b.ns.uri === "" && b.version <= API_USER;
         if (isPublic && (kind === 2 || kind === 7) && !traits.isTransient(b.value)) {
           sealed.push(name);
         }
@@ -318,7 +318,7 @@ export class Writer implements ExternalStream {
     this.u8(d.$weakKeys ? 1 : 0);
     for (const name of names) {
       this.value(name);
-      this.value(rt.getProperty(d, qname(publicNs, name)));
+      this.value(rt.getProperty(d, publicQname(name)));
     }
 
     for (const [key, value] of keys) {
@@ -357,7 +357,7 @@ export class Writer implements ExternalStream {
         continue;
       }
 
-      const value = rt.getProperty(a, qname(publicNs, name));
+      const value = rt.getProperty(a, publicQname(name));
       if (value?.$f) {
         continue;
       }
@@ -428,7 +428,7 @@ export class Writer implements ExternalStream {
 
     const info = known[1];
     if (info.externalizable) {
-      const write = this.rt.getProperty(o, qname(publicNs, "writeExternal"));
+      const write = this.rt.getProperty(o, publicQname("writeExternal"));
       if (write?.$f) {
         this.rt.callValue(write, o, [externalStream(this.rt, "ObjectOutput", this)], null);
       }
@@ -437,7 +437,7 @@ export class Writer implements ExternalStream {
     }
 
     for (const name of info.sealed) {
-      this.value(this.rt.getProperty(o, qname(publicNs, name)));
+      this.value(this.rt.getProperty(o, publicQname(name)));
     }
 
     if (info.dynamic) {
@@ -446,7 +446,7 @@ export class Writer implements ExternalStream {
         this.dynamicProperties(writer, o);
       } else {
         for (const name of this.rt.enumerableNames(o)) {
-          const value = this.rt.getProperty(o, qname(publicNs, name));
+          const value = this.rt.getProperty(o, publicQname(name));
           if (value?.$f || name.length === 0) {
             continue;
           }
@@ -467,7 +467,7 @@ export class Writer implements ExternalStream {
    */
   private dynamicProperties(writer: AsObject, o: AsObject): void {
     const rt = this.rt;
-    const f = rt.getProperty(writer, qname(publicNs, "writeDynamicProperties"));
+    const f = rt.getProperty(writer, publicQname("writeDynamicProperties"));
     if (f === null || typeof f !== "object") {
       return;
     }
@@ -592,7 +592,7 @@ export class Reader implements ExternalStream {
    */
   private set(o: AsObject, name: string, value: Value): void {
     try {
-      this.rt.setProperty(o, qname(publicNs, name), value);
+      this.rt.setProperty(o, publicQname(name), value);
     } catch (e) {
       if (e instanceof Error) {
         throw e;
@@ -619,7 +619,7 @@ export class Reader implements ExternalStream {
       const key = this.value();
       const value = this.value();
       if (typeof key === "string") {
-        rt.setProperty(d, qname(publicNs, key), value);
+        rt.setProperty(d, publicQname(key), value);
       } else if (typeof key === "object" && key !== null) {
         d.$keys.set(key, value);
       } else {
@@ -824,7 +824,7 @@ export class Reader implements ExternalStream {
     const o = rt.constructClass(cls, []);
     this.objects.push(o);
     if (info.externalizable) {
-      const read = rt.getProperty(o, qname(publicNs, "readExternal"));
+      const read = rt.getProperty(o, publicQname("readExternal"));
       if (read?.$f) {
         rt.callValue(read, o, [externalStream(rt, "ObjectInput", this)], null);
       }

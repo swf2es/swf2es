@@ -5,7 +5,7 @@
 
 /** What the element's player gives that is counted here: its advance, which the element calls each animation frame. */
 interface Advancing {
-  advance(dt: number): number;
+  advance(dt: number, busy?: number): number;
 }
 
 interface MemoryInfo {
@@ -49,8 +49,8 @@ export class Stats {
 
     // Counted on the instance: the element's loop calls advance as a method of it.
     const advance = player.advance.bind(player);
-    player.advance = (dt: number) => {
-      const n = advance(dt);
+    player.advance = (dt: number, busy?: number) => {
+      const n = advance(dt, busy);
       if (this.watching === player) {
         this.played += n;
       }

@@ -3,6 +3,7 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
+import { drawDisplayObject } from "../../../bitmap/draw.js";
 import {
   applyFilter,
   filterRect,
@@ -30,11 +31,7 @@ import {
   threshold,
 } from "../../../bitmap/ops.js";
 import { encodePng } from "../../../bitmap/png.js";
-import { bounds } from "../../../display/bounds.js";
-import { type DisplayObject, pickWork } from "../../../display/display.js";
 import type { Filter } from "../../../display/filters.js";
-import { transformRect } from "../../../display/geometry.js";
-import { drawnAsStage } from "../../../display/perspective.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
@@ -124,50 +121,6 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
   return storeOf(s, v as AsObject);
 }
 
-/** `d` drawn into `store` through `m`, as drawInto draws a display object. */
-function drawObject(
-  s: Scripting,
-  store: BitmapStore,
-  d: DisplayObject,
-  m: Affine,
-  c: ReturnType<typeof colorOf> | null,
-  blend: string,
-  r: PixelRect | null,
-  samples: number,
-): void {
-  const drawer = s.drawer as NonNullable<Scripting["drawer"]>;
-  // Only the part the object can reach: its bounds through the matrix, a
-  // pixel wider for anti-aliasing, within the clip and the bitmap; the
-  // snapshot's cost is then the object's size, not the bitmap's.
-  const local = bounds(d, true);
-  if (!local) {
-    return;
-  }
-
-  const reach = transformRect(local, m);
-  const x0 = Math.max(0, Math.floor(reach.xMin) - 1, r ? r.x : 0);
-  const y0 = Math.max(0, Math.floor(reach.yMin) - 1, r ? r.y : 0);
-  const x1 = Math.min(store.width, Math.ceil(reach.xMax) + 1, r ? r.x + r.width : store.width);
-  const y1 = Math.min(store.height, Math.ceil(reach.yMax) + 1, r ? r.y + r.height : store.height);
-  if (x1 <= x0 || y1 <= y0) {
-    return;
-  }
-
-  const placed = { ...m, tx: m.tx - x0, ty: m.ty - y0 };
-  // Plain source over goes on the GPU, the store left there until a script reads it.
-  if (
-    !c &&
-    blend === "normal" &&
-    drawer.drawInto(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples)
-  ) {
-    return;
-  }
-
-  const drawn = new BitmapStore(x1 - x0, y1 - y0, true, 0);
-  drawn.pixels = drawer.snapshot(d, placed, x1 - x0, y1 - y0, samples);
-  drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
-}
-
 /**
  * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
  * composited on the CPU (bitmap/ops.ts drawBitmap); any other display
@@ -210,28 +163,7 @@ function drawInto(
       throw s.rt.unsupported("BitmapData#draw of a display object without a renderer");
     }
 
-    // What is in 3D in an object on no stage projects as on a stage the bitmap's size.
-    let top: DisplayObject = o.$display;
-    while (top.parent) {
-      top = top.parent;
-    }
-
-    const restore = drawnAsStage(top, store.width, store.height);
-    if (!restore) {
-      drawObject(s, store, o.$display, m, c, blend, r, samples);
-      return;
-    }
-
-    // Planes in perspective made before are made again, for that stage and after it; only then,
-    // as each change picks the pointer's hover again and remakes every plane.
-    pickWork.changes++;
-    try {
-      drawObject(s, store, o.$display, m, c, blend, r, samples);
-    } finally {
-      restore();
-      pickWork.changes++;
-    }
-
+    drawDisplayObject(s.drawer, store, o.$display, m, c, blend, r, samples);
     return;
   }
 
@@ -241,22 +173,6 @@ function drawInto(
 
   // A BitmapData drawn into itself goes a row at a time; through a Bitmap, in scan order.
   drawBitmap(store, storeOf(s, data), m, c, blend, r, !!smoothing, o.$store !== undefined);
-}
-
-/** Samples a side of each pixel a display object is rendered at, by drawWithQuality's quality: Flash's 1, 2 and 4. */
-function samplesOf(s: Scripting, quality: Value): number {
-  if (quality === null || quality === undefined) {
-    return 4;
-  }
-
-  switch (s.rt.toString(quality).toLowerCase()) {
-    case "low":
-      return 1;
-    case "medium":
-      return 2;
-    default:
-      return 4;
-  }
 }
 
 /**
@@ -288,6 +204,22 @@ function matrixOf(s: Scripting, o: AsObject): Affine {
   m.tx = twips(m.tx);
   m.ty = twips(m.ty);
   return m;
+}
+
+/** Samples a side of each pixel a display object is rendered at, by drawWithQuality's quality: Flash's 1, 2 and 4. */
+function samplesOf(s: Scripting, quality: Value): number {
+  if (quality === null || quality === undefined) {
+    return 4;
+  }
+
+  switch (s.rt.toString(quality).toLowerCase()) {
+    case "low":
+      return 1;
+    case "medium":
+      return 2;
+    default:
+      return 4;
+  }
 }
 
 export function bitmapDataNatives(s: Scripting): avm2.Natives {

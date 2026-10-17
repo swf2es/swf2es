@@ -1,8 +1,11 @@
 // A WebGL context lost and given back while a SWF plays: what the view
 // and Pixi keep on the CPU of what they uploaded must draw the same again.
 // Large shapes, drawn alone through the transform table's atlas, small
-// ones batched, a colour transform, a gradient and a line.
+// ones batched, a colour transform, a gradient and a line; a bitmap that
+// never changes, placed and as a smoothed fill, which uploads again from
+// its store, as Pixi keeps no bytes of it.
 import assert from "node:assert/strict";
+import { deflateSync } from "node:zlib";
 import * as w from "../swf-writer.ts";
 import { playLosingContext, playLosingContextPlan } from "./chrome.ts";
 
@@ -78,7 +81,35 @@ const moving = w.sprite(5, 4, [
   w.showFrame(),
 ]);
 
-const tags: Uint8Array[] = [w.fileAttributes(false), large, small, shaded, turning, moving];
+// DefineBitsLossless2: 16 by 16 premultiplied ARGB, no two rows alike.
+const argb = new Uint8Array(16 * 16 * 4);
+for (let i = 0; i < 256; i++) {
+  argb.set([255, (i * 7) & 0xff, (i * 13) & 0xff, (i * 29) & 0xff], i * 4);
+}
+
+const image = w.tag(36, Uint8Array.from([6, 0, 5, 16, 0, 16, 0, ...deflateSync(argb)]), true);
+const filled = w.shape({
+  id: 7,
+  bounds: [0, 1200, 0, 1200],
+  fills: [{ type: 0x41, bitmap: 6, matrix: { a: 75, d: 75 } }],
+  paths: [
+    {
+      fill1: 1,
+      commands: [{ move: [0, 0] }, { line: [1200, 0] }, { line: [1200, 1200] }, { line: [0, 0] }],
+    },
+  ],
+});
+
+const tags: Uint8Array[] = [
+  w.fileAttributes(false),
+  large,
+  small,
+  shaded,
+  turning,
+  moving,
+  image,
+  filled,
+];
 let depth = 1;
 for (let i = 0; i < 24; i++) {
   const tx = 600 + (i % 6) * 1300;
@@ -100,6 +131,13 @@ for (let i = 0; i < 6; i++) {
 
 tags.push(
   w.place({ depth: depth++, character: 3, matrix: { a: 0.6, d: 0.6, tx: 7000, ty: 5000 } }),
+  w.place({
+    depth: depth++,
+    character: 6,
+    matrix: { a: 4, d: 4, tx: 200, ty: 3800 },
+    hasImage: true,
+  }),
+  w.place({ depth: depth++, character: 7, matrix: { tx: 1700, ty: 3800 } }),
   w.showFrame(),
   w.end(),
 );

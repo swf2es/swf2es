@@ -1272,7 +1272,20 @@ perhaps) has it, whose `useHandCursor` and `enabled` are true. `enabled`,
 activation, so a getter `addProperty` gave runs. `startDrag` and
 StartDrag drag one clip at a time, its centre on the pointer where they
 lock it, within their bounds in its parent's space, at whole twips, as
-an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it. Ruffle's
+an AS3 drag moves (`dragTo`); `stopDrag` and EndDrag end it.
+`_xmouse` and `_ymouse` are the pointer in a clip's space as Flash gives
+them (Ruffle's `local_mouse_position`): through the matrix from the
+clip's twips to the screen's pixels (`Avm1.pixelRatio` of them a stage
+pixel, as the host shows the stage), whose translation a matrix keeps in
+whole units, so a whole screen pixel, and back to whole twips, each
+rounded half to even; where that matrix cannot be inverted, as for a
+clip scaled to nothing, the pointer's screen pixels are taken as its
+twips (the corpus's `mouse_pos` and `mouse_pos_with_scale_factor`). As it
+moves, a dragged clip's `_droptarget` becomes the slash path of what is
+under the pointer, the clip left out (`""` for nothing), picked as the
+pointer picks but where a clip's own drawing counts too, the topmost of
+what is in it deciding, and a clip in button mode by its drawing, not
+its `hitArea` (the corpus's `drag_drop`). Ruffle's
 order throughout (player.rs's `update_mouse_state`, `mouse_pick_avm1`,
 and Avm1Button's and MovieClip's `event_dispatch`).
 
@@ -1455,6 +1468,67 @@ other's frames forever) `realm.budget`, and only as one runs out, every
 100000, is the clock read. A loop of ten million iterations runs in the
 same time with the check and without (648 and 645 ms in node, the median
 of seven).
+
+### flash.geom
+
+`_global.flash` (from SWF 8, DONT_ENUM) holds `geom`'s classes
+(`globals/geom.ts`), as Ruffle's point.rs, rectangle.rs, matrix.rs,
+color_transform.rs and transform.rs have them, checked against the
+corpus's Flash traces. `Point`, `Rectangle` and `Matrix` are plain
+objects, as Flash writes them in ActionScript: their methods read and
+write `x`, `y`, `width`, `a`... by name, so any object with them will do,
+and a constructor keeps its arguments as given, NaN, undefined and `{}`
+among them (`new Point()` is (0, 0), `new Matrix()` the identity). What a
+method makes is made by the class `flash.geom` has then, a script's own
+among them, -1 where it has none. In doubles where Ruffle works in floats:
+`rotate`, `scale` and `translate` apply after the matrix, `concat`
+applies its argument after; `invert` of a singular matrix is the
+identity; `createBox` without a rotation is NaN; `createGradientBox`
+scales by 1/1638.4. A rectangle's `topLeft` and `size` are points of its
+values as they are; `contains*` of a NaN is undefined; `union` treats a
+size not above 0 as empty, so NaNs go into it; `equals` asks for a
+Rectangle. `normalize` leaves a point of no length as it is.
+`ColorTransform` holds its eight values natively, kept as given (the
+constructor's eight, one ColorTransform to copy, else the identity), its
+accessors defined alpha first, as for..in lists them backwards; `rgb`
+gives and sets the offsets, zeroing the multipliers. `Transform` holds a
+clip's AVM1 object, read again as it is used, so it follows the clip:
+`matrix` a new Matrix in pixels, set where all six fields are its own,
+the translation to whole twips; `colorTransform` set from a
+ColorTransform as a clip keeps one, the multipliers in 8.8 fixed point
+and the offsets whole, 16 bits each and wrapped, which the
+concatenation up the parents keeps at each step too
+(`concatenatedColorTransform`: -523 × 127.5 is -1147); `concatenatedMatrix`
+to the stage; `pixelBounds` the box on the stage. A clip's `transform` is
+a new Transform of it each read, and one assigned gives it the matrix and
+colour transform of the Transform's clip.
+
+### BitmapData
+
+`flash.display.BitmapData` (`globals/BitmapData.ts`), as Ruffle's
+bitmap_data.rs has it: each object holds a BitmapStore, the player's
+bitmap, whose operations AS3's BitmapData shares (bitmap/bitmap.ts,
+bitmap/ops.ts). What AS3 throws, AS2 answers with a number: -1 for too
+few arguments or a disposed bitmap, -2 for a source that is none, -3 for a
+disposed one, -4 for a rectangle that is none. The constructor takes at
+least two arguments and sizes Flash makes (0 never; up to SWF 9 2880 a
+side; to 12 under 8192 a side and 2^24 pixels; then up to 0x6666666 a
+side and under 2^29), else `new` gives undefined; a transparent or fill
+given as undefined is false or 0, one not given true or 0xFFFFFFFF.
+`width`, `height`, `transparent` and `rectangle` are -1 once disposed.
+`getPixel` and `getPixel32` are signed; `setPixel`, `setPixel32`,
+`fillRect` (a rectangle's x, y, width and height, own or inherited, as
+ints) and `copyPixels` (its mergeAlpha false without an alpha bitmap)
+give 0; `draw` takes a BitmapData, composited on the CPU, or a clip or
+button, drawn by the host's renderer at the stage's quality (`Avm1.drawer`,
+which the element and the test page give, as Scripting's for AS3), its
+matrix's fields by name; `clone` keeps the prototype; `floodFill`,
+`scroll`, `colorTransform` (-1 even done, as Flash) and the static
+`loadBitmap`, the library's bitmap exported by a name, transparent. A
+clip's `attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
+BitmapData at a depth as a bitmap with no AVM1 object of its own, which
+the bitmap's later changes show on. Real content caches its art in them:
+a level's tiles drawn from its clips once, then attached.
 
 ### AVM1 and AVM2
 
@@ -1797,11 +1871,11 @@ determinism` green, and the corpus baseline may only go up.
     (`button_key_events`, `button_key_events_special`,
     `button_keypress_vs_press`, `button_keypress_vs_tab`,
     `movieclip_focusenabled`, `selection_asbroadcaster`, three of
-    `tab_ordering_*`...). Left: text fields' focus (step 13, which most of
-    the focus and tab tests begin with), the highlight drawn,
-    `_droptarget`, `_xmouse` in device pixels as Ruffle reads it
-    (`mouse_pos`), the viewport's scale factor a test gives
-    (`mouse_pos_with_scale_factor`), and touches, which reach only an AS3
+    `tab_ordering_*`...). Then `_droptarget`: 309 (`drag_drop`,
+    `text_blocks_clicks`). Then `_xmouse` and `_ymouse` as Flash gives
+    them: 311 (`mouse_pos`, `mouse_pos_with_scale_factor`). Left: text
+    fields' focus (step 13, which most of the focus and tab tests begin
+    with), the highlight drawn, and touches, which reach only an AS3
     movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
@@ -1810,6 +1884,16 @@ determinism` green, and the corpus baseline may only go up.
     `Transform`, `ColorTransform`, `Matrix`, `Point`, `Rectangle`,
     `BitmapData`, filters, `Stage`, `Sound`, timeline sounds that
     `stop()` now stops. Corpus tests and the visual tests' traces.
+    First `flash.geom` and a clip's `transform` (see "flash.geom"): 317
+    (`matrix`, `point`, `rectangle`, `color_transform`, `transform`),
+    then `BitmapData`, which real content caches its art in, so it comes
+    before text: 329 (`bitmap_data_thorough/` `constructor`, `getPixel`,
+    `getPixel32`, `setPixel`, `setPixel32`, `fillRect`, `colorTransform`,
+    `bitmap_data_copypixels`, `bitmapdata_copypixels_self`, the
+    `max_size` tests, `issue_2030`). Left of BitmapData: `noise`,
+    `perlinNoise`, `threshold`, `merge`, `paletteMap`, `copyChannel`,
+    `pixelDissolve`, `hitTest`, `getColorBoundsRect`, `compare`,
+    `applyFilter`, `generateFilterRect`.
 15. **Loading and I/O.** `loadMovie`, `loadVariables`, `MovieClipLoader`,
     `LoadVars`, `XML`, `XMLNode`, `SharedObject`, `XMLSocket`,
     `getURL`, `ExternalInterface`. Corpus tests of each.

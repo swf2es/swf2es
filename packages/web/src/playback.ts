@@ -18,6 +18,12 @@ export interface Look {
 export class Playback {
   private frame = 0;
   private last: number | null = null;
+  /**
+   * The ms the last call to advance took, by which the player tells frames
+   * that overran. Drawing is left out: it costs the same however many frames
+   * a call plays, and counted with one it would keep the player at one a call.
+   */
+  private busy = 0;
   private drawn = -1;
   /** Something the host changed, a size or a look, which the next frame draws though the player has not. */
   private dirty = true;
@@ -45,6 +51,11 @@ export class Playback {
     this.view = new PixiView(renderer);
     if (scripting) {
       scripting.drawer = this.view;
+    }
+
+    // An AVM1 movie's BitmapData draws display objects by it too.
+    if (player.avm1) {
+      player.avm1.drawer = this.view;
     }
 
     this.unbind.push(this.view.bindPointer(player));
@@ -104,11 +115,14 @@ export class Playback {
       this.layout();
     }
 
+    const start = performance.now();
     try {
-      this.player.advance(dt);
+      this.player.advance(dt, this.busy);
     } catch (error) {
       this.report(error);
     }
+
+    this.busy = performance.now() - start;
 
     if (this.player.quality !== this.quality) {
       this.requality();
@@ -177,6 +191,11 @@ export class Playback {
       this.renderer.resize(this.player.width, this.player.height, placed.resolution);
     }
 
+    // AVM1's _xmouse is measured in the screen's pixels, as Flash Player measures it.
+    if (this.player.avm1) {
+      this.player.avm1.pixelRatio = placed.resolution;
+    }
+
     this.placed = placed;
     this.dirty = true;
   }
@@ -196,6 +215,10 @@ export class Playback {
 
     if (this.scripting?.drawer === this.view) {
       this.scripting.drawer = null;
+    }
+
+    if (this.player.avm1?.drawer === this.view) {
+      this.player.avm1.drawer = null;
     }
 
     this.view.dropSpares();

@@ -10,6 +10,7 @@
 
 import type { Matrix } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
+import type { BitmapStore } from "../../bitmap/bitmap.js";
 import { bounds, hitsObject, hitsPoint, toStage } from "../../display/bounds.js";
 import {
   ButtonObject,
@@ -21,11 +22,13 @@ import {
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import type { Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import { storeOf } from "./BitmapData.js";
+import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 
 type Value = avm1.Value;
 
 /** What the clips' AVM1 faces ask of the player's AVM1 (avm1.ts). */
-export interface Movie {
+export interface Movie extends GeomHost {
   readonly root: MovieClip;
   readonly realm: avm1.Realm;
   /** The SWF's version, its URL and its length, which `getSWFVersion`, `_url` and `getBytesTotal` give. */
@@ -40,8 +43,14 @@ export interface Movie {
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
+  /** The screen's pixels to a stage pixel, which `_xmouse` is measured in. */
+  readonly pixelRatio: number;
+  /** What `d` was last dragged over, its `_droptarget`; null for nothing. */
+  dropTargetOf(d: DisplayObject): DisplayObject | null;
   /** `d` hidden by its `_visible`: the focus, if it has it, goes. */
   hidden(d: DisplayObject): void;
+  /** attachBitmap: `store` shown in `parent` at AVM1 depth `depth`. */
+  attachBitmap(parent: MovieClip, store: BitmapStore, depth: number, smoothing: boolean): void;
   /** startDrag: `d` follows the pointer, within `bounds` (left, top, right, bottom) where given. */
   startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;
   stopDrag(): void;
@@ -277,8 +286,12 @@ const PROPERTIES: [string, DisplayProperty][] = [
   [
     "_droptarget",
     {
-      // "" in every version (adl; Ruffle: undefined up to SWF 5).
-      get: () => "",
+      // The slash path of what it was last dragged over; "" for nothing, in every version (adl;
+      // Ruffle: undefined up to SWF 5).
+      get: (f) => {
+        const over = f.movie.dropTargetOf(f.target);
+        return over === null ? "" : slashPathOf(over, f.movie.root);
+      },
       set: null,
     },
   ],
@@ -360,16 +373,51 @@ const PROPERTIES: [string, DisplayProperty][] = [
 
 const QUALITIES = ["LOW", "MEDIUM", "HIGH", "BEST"];
 
-const IDENTITY_COLOR = { rMul: 1, gMul: 1, bMul: 1, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
+/** A clip's colour transform where it has none. */
+export const IDENTITY_COLOR = {
+  rMul: 1,
+  gMul: 1,
+  bMul: 1,
+  aMul: 1,
+  rAdd: 0,
+  gAdd: 0,
+  bAdd: 0,
+  aAdd: 0,
+};
 
 /** The display properties by name in lower case, which they are found by in any case. */
 const BY_NAME = new Map(PROPERTIES.map(([name, p]) => [name, p]));
 
-/** The pointer in `d`'s space, in whole twips. */
+/**
+ * The pointer in `d`'s space, as Flash gives it (Ruffle's
+ * local_mouse_position): through the matrix from `d`'s twips to the
+ * screen's pixels (`pixelRatio` of them a stage pixel), whose translation
+ * a matrix keeps whole, so a whole pixel, and back to whole twips, each
+ * rounded half to even; where that matrix cannot be inverted, as for a
+ * clip scaled to nothing, the pointer's pixels are taken as twips (the
+ * corpus's `mouse_pos`).
+ */
 function mouse(d: DisplayObject, movie: Movie): [number, number] {
-  const m = invert(toStage(d, movie.root.parent));
-  const [x, y] = m ? apply(m, movie.mouseX, movie.mouseY) : [0, 0];
-  return [Math.round(x * 20) / 20, Math.round(y * 20) / 20];
+  const m = toStage(d, movie.root.parent);
+  const ratio = movie.pixelRatio;
+  const px = movie.mouseX * ratio;
+  const py = movie.mouseY * ratio;
+  const device = {
+    a: (m.a * ratio) / 20,
+    b: (m.b * ratio) / 20,
+    c: (m.c * ratio) / 20,
+    d: (m.d * ratio) / 20,
+    tx: roundEven(m.tx * ratio),
+    ty: roundEven(m.ty * ratio),
+  };
+  const back = invert(device);
+  if (back === null) {
+    return [roundEven(px) / 20, roundEven(py) / 20];
+  }
+
+  const x = back.a * px + back.c * py + roundEven(back.tx);
+  const y = back.b * px + back.d * py + roundEven(back.ty);
+  return [roundEven(x) / 20, roundEven(y) / 20];
 }
 
 /**
@@ -930,6 +978,32 @@ export function movieClipClass(movie: Movie): {
   method("prevFrame", 0, (clip) => {
     if (clip.currentFrame > 1) {
       movie.timeline(clip).goto(clip.currentFrame - 1, false);
+    }
+
+    return undefined;
+  });
+  // A new Transform of it each read; one given takes the matrix and colour transform of its clip.
+  const transform = proto.add("transform", undefined, avm1.DONT_ENUM | avm1.VERSION_8);
+  transform.get = realm.method((self, _, version) => {
+    const clip = clipOf(self);
+    const face = clip === null ? null : movie.faceOf(clip);
+    return face === null ? undefined : transformOf(movie, face, version);
+  });
+  transform.set = realm.method((self, args) => {
+    const clip = clipOf(self);
+    if (clip !== null) {
+      assignTransform(clip, args[0]);
+    }
+
+    return undefined;
+  });
+  // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
+  // not read (Ruffle).
+  method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {
+    const store = storeOf(args[0]);
+    if (store !== null && args.length > 1) {
+      const depth = avm1.toNumber(args[1], version) | 0;
+      movie.attachBitmap(clip, store, depth, args.length > 3 && avm1.toBoolean(args[3], version));
     }
 
     return undefined;

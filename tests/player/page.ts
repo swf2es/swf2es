@@ -213,6 +213,7 @@ async function runSwf(
   tableMinRun?: number,
   shown = false,
   input: RecordedEvent[] | null = null,
+  viewport: { width: number; height: number } | null = null,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -272,9 +273,13 @@ async function runSwf(
       scripting.drawer = view;
     }
 
+    if (player.avm1) {
+      player.avm1.drawer = view;
+    }
+
     await player.start();
     stopOnUncaught();
-    const replay = input ? new Replay(player, input) : null;
+    const replay = input ? new Replay(player, input, viewport) : null;
     for (let frame = 1; frame <= frames; frame++) {
       if (frame > 1) {
         // What a frame asked to load is linked between frames, as in a browser's.
@@ -536,6 +541,10 @@ async function benchSwf(
     const view = new PixiView(renderer);
     if (scripting) {
       scripting.drawer = view;
+    }
+
+    if (player.avm1) {
+      player.avm1.drawer = view;
     }
 
     await player.start();

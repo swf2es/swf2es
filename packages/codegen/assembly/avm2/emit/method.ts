@@ -175,6 +175,7 @@ export class MethodEmitter {
 
     if (<u32>this.copyOf.length < ir.frameSize) {
       this.copyOf = new StaticArray<i32>(ir.frameSize);
+      this.copiedBy = new StaticArray<u32>(ir.frameSize);
       this.promoted = new StaticArray<u8>(ir.frameSize);
     }
 
@@ -182,6 +183,7 @@ export class MethodEmitter {
       this.copyOf[r] = NONE;
     }
 
+    this.recount();
     if (<u32>this.checked.length < ir.frameSize) {
       this.checked = new StaticArray<u8>(ir.frameSize);
     }
@@ -627,6 +629,8 @@ export class MethodEmitter {
       this.copyOf[base + s] = this.copyIn[row + s];
     }
 
+    this.recount();
+
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.promoted[r] = 0;
     }
@@ -770,13 +774,13 @@ export class MethodEmitter {
         }
 
         i += moves;
-        this.copyOf[sinking] = NONE;
+        this.setCopy(sinking, NONE);
         if (ir.op[i] === ops.OP_pushscope) {
           this.scopeWith[this.scopeDepth++] = 0;
         }
 
         if (copied) {
-          this.copyOf[dst] = sinking;
+          this.setCopy(dst, sinking);
           this.uncopy(dst + 1);
         } else {
           this.uncopy(dst);
@@ -789,13 +793,13 @@ export class MethodEmitter {
         // What the branch took is gone.
         this.uncopy(ir.src[i]);
       } else if (op === ops.OP_swap) {
-        this.copyOf[ir.src[i]] = NONE;
-        this.copyOf[ir.src[i] + 1] = NONE;
+        this.setCopy(ir.src[i], NONE);
+        this.setCopy(ir.src[i] + 1, NONE);
       } else if (op === ops.OP_popscope) {
-        this.copyOf[ir.src[i]] = NONE;
+        this.setCopy(ir.src[i], NONE);
       } else {
         if (dst >= 0 && !this.kept) {
-          this.copyOf[dst] = NONE;
+          this.setCopy(dst, NONE);
         }
 
         // What is above the stack now is gone.
@@ -835,7 +839,7 @@ export class MethodEmitter {
     }
 
     // Its own value again, as a nip of a dup: as it was.
-    this.copyOf[dst] = from === dst ? NONE : from;
+    this.setCopy(dst, from === dst ? NONE : from);
     this.kept = true;
     return true;
   }
@@ -877,7 +881,7 @@ export class MethodEmitter {
     const ir = this.ir;
     const base = <i32>ir.localCount;
     const stack = base + <i32>ir.maxScope;
-    const end = min(limit, <i32>ir.frameSize);
+    const end = min(min(limit, <i32>ir.frameSize), this.copyTop);
     const row = <i32>t * (<i32>ir.frameSize - base) - base;
     const scopes = base + <i32>ir.blockScope[t];
     const depth = stack + <i32>ir.blockStack[t];
@@ -904,8 +908,12 @@ export class MethodEmitter {
 
   /** Write the scope and stack registers below `limit` that copy register w, before w changes. */
   private copyAll(w: i32, limit: i32): void {
+    if (this.copiedBy[w] === 0) {
+      return;
+    }
+
     const ir = this.ir;
-    const end = min(limit, <i32>ir.frameSize);
+    const end = min(min(limit, <i32>ir.frameSize), this.copyTop);
     for (let r = <i32>ir.localCount; r < end; r++) {
       if (this.copyOf[r] === w) {
         this.writeCopy(r);
@@ -921,7 +929,7 @@ export class MethodEmitter {
   private writeCopy(r: i32): void {
     const out = this.out;
     const from = this.copyOf[r];
-    this.copyOf[r] = NONE;
+    this.setCopy(r, NONE);
     this.checked[r] = 0;
     this.reg(r);
     out.text(" = ");
@@ -1016,9 +1024,53 @@ export class MethodEmitter {
 
   /** Forget every copy from register `from` up: none is needed. */
   private uncopy(from: i32): void {
-    for (let r = from; r < <i32>this.ir.frameSize; r++) {
-      this.copyOf[r] = NONE;
+    const top = min(this.copyTop, <i32>this.ir.frameSize);
+    for (let r = from; r < top; r++) {
+      this.setCopy(r, NONE);
     }
+
+    if (from < this.copyTop) {
+      this.copyTop = max(from, 0);
+    }
+  }
+
+  /** Register r now a copy of `copy`, or of nothing for NONE: copyTop and copiedBy kept. */
+  setCopy(r: i32, copy: i32): void {
+    const old = this.copyOf[r];
+    if (old >= 0) {
+      this.copiedBy[old]--;
+    }
+
+    this.copyOf[r] = copy;
+    if (copy >= 0) {
+      this.copiedBy[copy]++;
+    }
+
+    if (copy !== NONE && r >= this.copyTop) {
+      this.copyTop = r + 1;
+    }
+  }
+
+  /** copyTop and copiedBy made again from copyOf, as a block's entry or a restore sets it whole. */
+  recount(): void {
+    const frame = <i32>this.ir.frameSize;
+    let top = 0;
+    for (let r = 0; r < frame; r++) {
+      this.copiedBy[r] = 0;
+    }
+
+    for (let r = 0; r < frame; r++) {
+      const copy = this.copyOf[r];
+      if (copy >= 0) {
+        this.copiedBy[copy]++;
+      }
+
+      if (copy !== NONE) {
+        top = r + 1;
+      }
+    }
+
+    this.copyTop = top;
   }
 
   /** The builtin type of register r's value now. */
@@ -1240,6 +1292,15 @@ export class MethodEmitter {
    * so reading it reads what it copies.
    */
   copyOf: StaticArray<i32> = new StaticArray<i32>(0);
+  /**
+   * A register from which up none is a copy, so that what forgets or writes
+   * the copies looks at those below it: a static initializer that pushes
+   * thousands of values looked at the whole frame for each, and spent most
+   * of its compile there.
+   */
+  copyTop: i32 = 0;
+  /** How many scope and stack registers copy each register: a write to one none copies has none to write first. */
+  copiedBy: StaticArray<u32> = new StaticArray<u32>(0);
   /** Each block's copies on entry, and flowCopies' scratch (see copies.ts). */
   copyIn: StaticArray<i32> = new StaticArray<i32>(0);
   flow: StaticArray<i32> = new StaticArray<i32>(0);
@@ -1272,7 +1333,7 @@ export class MethodEmitter {
     if (pushesConstant(op) && ir.dst[i] >= <i32>(ir.localCount + ir.maxScope)) {
       // Read as the literal until the register changes or a branch needs
       // it: V8 then gives the operation the constant in its own bytecode.
-      this.copyOf[ir.dst[i]] = CONSTANT - <i32>i;
+      this.setCopy(ir.dst[i], CONSTANT - <i32>i);
       this.kept = true;
       return;
     }

@@ -151,10 +151,39 @@ export class Replay {
 
   private readonly player: Player;
   private readonly events: readonly RecordedEvent[];
+  /** The window's pixels to a stage pixel, and where the stage's corner is in the window. */
+  private readonly scale: number = 1;
+  private readonly left: number = 0;
+  private readonly top: number = 0;
 
-  constructor(player: Player, events: readonly RecordedEvent[]) {
+  /**
+   * The input played into `player`; recorded in `viewport`, a window of
+   * its own pixels the stage is shown in whole, centred, as Ruffle's runner
+   * shows it, its positions are the window's, the stage's once scaled back.
+   */
+  constructor(
+    player: Player,
+    events: readonly RecordedEvent[],
+    viewport: { width: number; height: number } | null = null,
+  ) {
     this.player = player;
     this.events = events;
+    if (viewport && player.width > 0 && player.height > 0) {
+      this.scale = Math.min(viewport.width / player.width, viewport.height / player.height);
+      this.left = (viewport.width - player.width * this.scale) / 2;
+      this.top = (viewport.height - player.height * this.scale) / 2;
+      // AVM1 reads the pointer in the screen's pixels too (_xmouse).
+      if (player.avm1) {
+        player.avm1.pixelRatio = this.scale;
+      }
+    }
+  }
+
+  /** A recorded position, the window's, as the stage's. */
+  private at(pos: unknown): void {
+    const [x, y] = pos as [number, number];
+    this.x = (x - this.left) / this.scale;
+    this.y = (y - this.top) / this.scale;
   }
 
   /** A frame has run: the events up to the next Wait. */
@@ -176,12 +205,12 @@ export class Replay {
     const keyboard = this.player.keyboard;
     switch (e.type) {
       case "MouseMove":
-        [this.x, this.y] = e.pos as [number, number];
+        this.at(e.pos);
         pointer?.handle("move", this.point(0));
         break;
 
       case "MouseDown": {
-        [this.x, this.y] = e.pos as [number, number];
+        this.at(e.pos);
         const button = BUTTONS[e.btn as string] ?? 0;
         // Ruffle's runner counts a press as a first click unless its index says it continues
         // one: the player tells them by time, so a first is far from the press before it, and
@@ -194,7 +223,7 @@ export class Replay {
       }
 
       case "MouseUp": {
-        [this.x, this.y] = e.pos as [number, number];
+        this.at(e.pos);
         const button = BUTTONS[e.btn as string] ?? 0;
         this.buttons &= ~BUTTON_BITS[button];
         pointer?.handle("up", this.point(button));

@@ -8,7 +8,7 @@
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
-import { publicNs, qname } from "../names.js";
+import { publicQname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { lowerCase } from "./case.js";
 
@@ -154,7 +154,7 @@ function fieldCompare(rt: Runtime, fields: Field[], options: number): Compare {
     }
 
     for (const field of fields) {
-      const name = qname(publicNs, field.name);
+      const name = publicQname(field.name);
       opt = field.options;
       const x = rt.getProperty(objJ, name);
       const y = rt.getProperty(objK, name);
@@ -228,7 +228,7 @@ function sortWith(
   if (fields && fields.length === 1) {
     // One field: sort by its values, then write back the elements.
     fieldAtoms = new Array(len);
-    const name = qname(publicNs, fields[0].name);
+    const name = publicQname(fields[0].name);
     for (let i = len - 1; i >= 0; i--) {
       index[i] = i;
       const v = rt.getProperty(d, rt.publicName(i));
