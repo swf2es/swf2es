@@ -21,9 +21,15 @@ const as1 = (source: string, version: number) =>
 /**
  * What `frames` trace, each a frame's actions, in a SWF of `version` whose
  * root places field `t` showing "Hello" at depth 1, bound to `variable`
- * where given, and clip `mc` at depth 2.
+ * where given, before the actions of frame `fieldFrame` (the first by
+ * default), and clip `mc` at depth 2.
  */
-export async function traces(frames: string[], version = 8, variable?: string): Promise<string[]> {
+export async function traces(
+  frames: string[],
+  version = 8,
+  variable?: string,
+  fieldFrame = 0,
+): Promise<string[]> {
   const swf = w.swf({
     version,
     width: 200,
@@ -32,9 +38,12 @@ export async function traces(frames: string[], version = 8, variable?: string): 
     tags: [
       w.editText(1, "Hello", 2000, 400, 0, { variable }),
       w.sprite(2, 1, [w.showFrame(), w.end()]),
-      w.place({ depth: 1, character: 1, name: "t" }),
       w.place({ depth: 2, character: 2, name: "mc" }),
-      ...frames.flatMap((source) => [as1(source, version), w.showFrame()]),
+      ...frames.flatMap((source, i) => [
+        ...(i === fieldFrame ? [w.place({ depth: 1, character: 1, name: "t" })] : []),
+        as1(source, version),
+        w.showFrame(),
+      ]),
       w.end(),
     ],
   });

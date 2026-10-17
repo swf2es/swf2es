@@ -7,7 +7,8 @@
 // Where it names a display object's property, the field is bound: a set of
 // the property shows in the field. A field's text set by a script sets the
 // variable, wherever its path leads then. A field whose variable has no
-// object yet waits, and is tried again as each display object is made.
+// object yet waits, and is tried again as a display object is made whose
+// name is a step of its path, the only kind that can give it one.
 import { avm1 } from "@swf2es/runtime";
 import {
   ButtonObject,
@@ -30,8 +31,10 @@ export class VariableBindings {
   private readonly bound = new WeakMap<DisplayObject, { field: TextObject; name: string }[]>();
   /** What each bound field is bound to. */
   private readonly boundTo = new WeakMap<TextObject, DisplayObject>();
-  /** The fields whose variable's object is not there yet. */
-  private waiting: TextObject[] = [];
+  /** How many fields are bound, which a property set looks for none while there are none. */
+  private count = 0;
+  /** The fields whose variable's object is not there yet, each with its path's steps in lower case. */
+  private waiting: { field: TextObject; steps: Set<string> }[] = [];
   /** The fields whose text their variable is taking. */
   private readonly propagating = new Set<TextObject>();
 
@@ -40,15 +43,32 @@ export class VariableBindings {
   /** A field made: bound, taking its variable's value, or waiting. */
   made(field: TextObject): void {
     if (!this.bind(field, true)) {
-      this.waiting.push(field);
+      this.wait(field);
     }
   }
 
-  /** A display object made: the fields waiting for one tried again. */
-  retry(): void {
-    if (this.waiting.length > 0) {
-      this.waiting = this.waiting.filter((field) => !this.bind(field, false));
+  /** `d` made: the fields waiting with its name a step of their path tried again. */
+  retry(d: DisplayObject): void {
+    if (this.waiting.length === 0 || d.name === "") {
+      return;
     }
+
+    const name = d.name.toLowerCase();
+    this.waiting = this.waiting.filter(
+      (waiting) => !waiting.steps.has(name) || !this.bind(waiting.field, false),
+    );
+  }
+
+  /** `field` waiting for its variable's object; not one without a path, whose object is its parent. */
+  private wait(field: TextObject): void {
+    const variable = stateOf(field).variable;
+    const separator = variable === null ? -1 : lastSeparator(variable);
+    if (variable === null || separator < 0) {
+      return;
+    }
+
+    const steps = variable.slice(0, separator).toLowerCase().split(/[.:/]/);
+    this.waiting.push({ field, steps: new Set(steps) });
   }
 
   /**
@@ -75,7 +95,11 @@ export class VariableBindings {
     }
   }
 
-  /** A field's variable set: its binding cleared, its text its tag's again, and bound where it can be now. */
+  /**
+   * A field's variable set: its binding cleared, its text its tag's again,
+   * and bound where it can be now. One that cannot does not wait, as in
+   * Ruffle's set_variable, which leaves it off the unbound list.
+   */
   variableChanged(field: TextObject): void {
     this.unbindField(field);
     field.model.setText(field.definition?.definition?.text ?? "");
@@ -86,7 +110,7 @@ export class VariableBindings {
 
   /** A property of `d`'s AVM1 object set: the fields bound to it by the name show the value. */
   propertyChanged(d: DisplayObject, name: string, value: avm1.Value, version: number): void {
-    const list = this.bound.get(d);
+    const list = this.count === 0 ? undefined : this.bound.get(d);
     if (list === undefined) {
       return;
     }
@@ -111,9 +135,10 @@ export class VariableBindings {
     const list = this.bound.get(d);
     if (list !== undefined) {
       this.bound.delete(d);
+      this.count -= list.length;
       for (const { field } of list) {
         this.boundTo.delete(field);
-        this.waiting.push(field);
+        this.wait(field);
       }
     }
   }
@@ -161,6 +186,7 @@ export class VariableBindings {
         }
 
         list.push({ field, name });
+        this.count++;
         this.boundTo.set(field, target);
         bound = true;
       }
@@ -175,14 +201,13 @@ export class VariableBindings {
       this.boundTo.delete(field);
       const list = this.bound.get(target);
       if (list !== undefined) {
-        this.bound.set(
-          target,
-          list.filter((b) => b.field !== field),
-        );
+        const rest = list.filter((b) => b.field !== field);
+        this.count -= list.length - rest.length;
+        this.bound.set(target, rest);
       }
     }
 
-    const at = this.waiting.indexOf(field);
+    const at = this.waiting.findIndex((waiting) => waiting.field === field);
     if (at >= 0) {
       this.waiting.splice(at, 1);
     }
@@ -210,7 +235,7 @@ function variablePath(
   path: string,
   version: number,
 ): [avm1.Avm1Object, string] | null {
-  const separator = Math.max(path.lastIndexOf(":"), path.lastIndexOf("."));
+  const separator = lastSeparator(path);
   if (separator < 0) {
     return parent.avm1 === null ? null : [parent.avm1, path];
   }
@@ -224,4 +249,9 @@ function variablePath(
   }
 
   return null;
+}
+
+/** Where a variable's last `.` or `:` is, which ends its path; -1 for a name alone. */
+function lastSeparator(variable: string): number {
+  return Math.max(variable.lastIndexOf(":"), variable.lastIndexOf("."));
 }

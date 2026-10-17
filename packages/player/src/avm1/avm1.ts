@@ -1098,7 +1098,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       this.madeField(d, face);
     }
 
-    this.bindings.retry();
+    this.bindings.retry(d);
 
     if (!clip) {
       return;

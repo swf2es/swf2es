@@ -19,3 +19,33 @@ Selection.setSelection(1, 3); t.replaceSel("_"); trace(t.text + " " + Selection.
     ["Hello v", "set", "typed", "Hello", "inner typed", "_level0.t 0 5", "i_er 2"],
   );
 });
+
+test("a field whose variable's clip is not there yet is bound as a clip of that name is made", async () => {
+  assert.deepEqual(
+    await traces(
+      [
+        `createEmptyMovieClip("other", 5); trace(t.text);
+createEmptyMovieClip("later", 6); trace(later.x + " " + t.text); later.x = "y"; trace(t.text);
+later.removeMovieClip(); createEmptyMovieClip("later", 7); later.x = "z"; trace(t.text);`,
+      ],
+      8,
+      "later.x",
+    ),
+    ["Hello", "undefined Hello", "y", "z"],
+  );
+});
+
+test("a throw from the variable's toString as the field binds does not stop the field being made", async () => {
+  assert.deepEqual(
+    await traces(
+      [
+        `v = {toString: function () { throw "no"; }}; trace("set");`,
+        `trace(typeof t + " " + t._name);`,
+      ],
+      8,
+      "v",
+      1,
+    ),
+    ["set", "object t"],
+  );
+});
