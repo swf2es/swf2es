@@ -8,7 +8,9 @@
  * Tell `player` when the page gains or loses focus or is hidden or shown
  * (Player.setActive), and, with `element`, when the focus moves from the
  * element to the page around it, whose keys the element no longer hears.
- * The player stays active until one of them says otherwise.
+ * A page without focus or hidden as it binds, a background tab's, starts
+ * the player inactive, before its scripts listen, so that the first focus
+ * is an ACTIVATE.
  */
 export function bindActivation(
   player: { setActive(active: boolean): void },
@@ -16,7 +18,7 @@ export function bindActivation(
   element: HTMLElement | null = null,
 ): () => void {
   const doc = win.document;
-  let focused = true;
+  let focused = doc.hasFocus();
   let left = false;
   const update = () => {
     player.setActive(focused && !left && doc.visibilityState !== "hidden");
@@ -29,7 +31,9 @@ export function bindActivation(
     focused = false;
     update();
   };
+  // The element's focus is the page's too.
   const focusin = () => {
+    focused = true;
     left = false;
     update();
   };
@@ -46,6 +50,7 @@ export function bindActivation(
   doc.addEventListener("visibilitychange", update);
   element?.addEventListener("focusin", focusin);
   element?.addEventListener("focusout", focusout);
+  update();
 
   return () => {
     win.removeEventListener("focus", focus);
