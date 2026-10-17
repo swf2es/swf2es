@@ -340,7 +340,7 @@ class GpuBitmaps {
 
     // Behind the store: its pixels, read back first if another renderer's draw wrote them.
     if (copy.version !== store.version) {
-      copy.upload(store.pixels);
+      copy.upload(store.readable);
       copy.version = store.version;
     }
 

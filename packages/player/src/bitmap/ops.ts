@@ -236,8 +236,9 @@ function forEachCopied(
 
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
-  const pixels = source.pixels;
+  // The store written first: if it is the source, both are then its own array.
   const into = store.pixels;
+  const pixels = source.readable;
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
@@ -283,8 +284,8 @@ export function comparePixels(left: BitmapStore, right: BitmapStore): Uint32Arra
   const out = new Uint32Array(left.width * left.height);
   let different = false;
   for (let i = 0; i < out.length; i++) {
-    const p = unmultiply(left.pixels[i]);
-    const q = unmultiply(right.pixels[i]);
+    const p = unmultiply(left.readable[i]);
+    const q = unmultiply(right.readable[i]);
     if (p === q) {
       continue;
     }
@@ -447,8 +448,8 @@ export function threshold(
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
   // In place, each pixel read as the ones before it left it (forEachCopied).
-  const pixels = source.pixels;
   const into = store.pixels;
+  const pixels = source.readable;
   const fill = store.premultiplied(color >>> 0);
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
@@ -571,7 +572,7 @@ export function alphaAt(store: BitmapStore, x: number, y: number): number {
     return -1;
   }
 
-  return store.pixels[y * store.width + x] >>> 24;
+  return store.readable[y * store.width + x] >>> 24;
 }
 
 /**
@@ -894,7 +895,7 @@ function composite(
   mode: string,
 ): void {
   const into = store.pixels;
-  const from = source.pixels;
+  const from = source.readable;
   const opaque = store.transparent ? 0 : 0xff000000;
   const plain = !ct && mode === "normal";
   for (let y = area.y; y < area.y + area.height; y++) {
@@ -932,7 +933,7 @@ function put(store: BitmapStore, i: number, mode: string, p: number): void {
 function nearest(source: BitmapStore, x: number, y: number): number {
   const px = Math.min(source.width - 1, Math.max(0, Math.floor(x)));
   const py = Math.min(source.height - 1, Math.max(0, Math.floor(y)));
-  return source.pixels[py * source.width + px];
+  return source.readable[py * source.width + px];
 }
 
 /** Bilinear between the four premultiplied pixels round (x, y), clamped to the edges. */
@@ -942,7 +943,7 @@ function bilinear(source: BitmapStore, x: number, y: number): number {
   const fx = x - x0;
   const fy = y - y0;
   const at = (px: number, py: number) =>
-    source.pixels[
+    source.readable[
       Math.min(source.height - 1, Math.max(0, py)) * source.width +
         Math.min(source.width - 1, Math.max(0, px))
     ];
