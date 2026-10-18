@@ -686,7 +686,11 @@ the runtime translates it, so that its output is avmplus' byte for byte:
 number formatting (`numbers.ts`), Array's sort (`natives/sort.ts`),
 ByteArray with its capacity and UTF-8 (`natives/bytearray.ts`), AMF3
 (`amf.ts`), JSON (`natives/json.ts`), Date's formats (`natives/date.ts`),
-XML (`natives/xml/`: `chars.ts`, `parser.ts`, `node.ts` and `xml.ts`) and
+XML (`natives/xml/`: `chars.ts` and `parser.ts` tokenize text, `node.ts`
+is the tree, `build.ts` makes trees from text and values, `values.ts` the
+XML and XMLList objects, `names.ts` their names, Namespaces and QNames,
+`access.ts` E4X's internal methods, `strings.ts` toString and toXMLString,
+`operators.ts` == and +, and `xml.ts` the classes' hooks and natives) and
 describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by

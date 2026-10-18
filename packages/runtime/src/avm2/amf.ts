@@ -15,7 +15,7 @@
 import type { AsObject, Value } from "./descriptors.js";
 import { API_USER, NS_PackageInternal, NS_Public, namespace, publicQname, qname } from "./names.js";
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
-import { xmlToXMLString } from "./natives/xml/xml.js";
+import { xmlToXMLString } from "./natives/xml/strings.js";
 import type { Runtime } from "./runtime.js";
 import type { Traits } from "./traits.js";
 

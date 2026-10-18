@@ -1,7 +1,7 @@
 // E4X's tree, as avmplus' E4XNode: elements with their attributes, the
 // namespaces they declare and their children; text, CDATA, comments,
 // processing instructions and attributes with their values. Each node has
-// its parent, and one XML object stands for it (see xml.ts), so that XML
+// its parent, and one XML object stands for it (see values.ts), so that XML
 // values compare by the node they are.
 //
 // Translated from avmplus' core/E4XNode.cpp, this file is subject to the
