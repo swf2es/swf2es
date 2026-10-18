@@ -3281,7 +3281,8 @@ test("an unload takes the lines' budget back to its floor at the next prepare", 
   const { unloads } = await import("../../../../packages/player/dist/display/display.js");
   const { LINES_IDLE_VERTICES } = await import("../../../../packages/player/dist/render/pools.js");
   const view = new PixiView(standIn([]).renderer);
-  const budget = (view as unknown as { lines: { budget: { size: number } } }).lines.budget;
+  const budget = (view as unknown as { art: { lines: { budget: { size: number } } } }).art.lines
+    .budget;
   const root = new Container();
   view.prepare(root);
   budget.size = 2_000_000;
