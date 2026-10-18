@@ -15,6 +15,14 @@
 // its places, each sprite's once. setInterval's timers fire between
 // frames by the player's clock, and scripts that run past the script
 // timeout have the movie's actions disabled.
+//
+// Avm1 coordinates the frame; what changes for other reasons is in files
+// of its own, each a part the movie owns: the action queue (queue.ts),
+// the clock and timers (timers.ts), loadMovie's loads (loads.ts), what
+// scripts make and remove (clips.ts), registered classes (classes.ts),
+// the keys and pointer (input.ts), the focus (focus.ts), Sound
+// (sound.ts) and calls out to the page (external.ts); a SWF's own record
+// is swf.ts's.
 import type { Codegen } from "@swf2es/codegen";
 import { type ActionList, ClipEvent, isAs3, type Place, type Swf } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";

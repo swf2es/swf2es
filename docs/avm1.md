@@ -49,8 +49,10 @@ runtime's. `codegen` knows the AVM1 runtime's function names but never
 imports it.
 
 `player/src/avm1/` mirrors `playerglobal/`: the host and the frame's AVM1
-work at its top (`avm1.ts`, `paths.ts`, `net.ts`, `loads.ts`...), and the
-AS2 classes the player provides in `globals/`, a file per class
+work at its top (`avm1.ts` and the parts it owns, `queue.ts`,
+`timers.ts`, `loads.ts`, `input.ts`, `focus.ts`..., beside `paths.ts`
+and `net.ts`), and the AS2 classes the player provides in `globals/`, a
+file per class
 (`globals/MovieClip.ts`, `globals/TextField.ts`...). Its unit tests
 mirror it under `tests/unit/player/avm1/`, as the mirror test requires.
 
