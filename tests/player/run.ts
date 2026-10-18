@@ -5,9 +5,10 @@
 // A case marked `table`, or every case with --table-ab, is played again
 // without the transform table (render/table.ts), and must draw the same
 // pixels; a marked one, played with the table drawing even its shortest
-// runs, must have the table draw some of it. An unmarked one keeps the
-// table's threshold of 16 draws a run, so with --table-ab most of its runs
-// are Pixi's pipe on both sides: the marked cases are the real guard.
+// runs as multi-draws, must have the table draw some of it. An unmarked
+// one keeps the table's threshold of 16 draws a run, so with --table-ab
+// most of its runs are drawn from the table's atlas a call a draw on one
+// side and by Pixi's pipe on the other.
 //
 // A case marked `gap`, a known gap, is neither checked nor drawn unless
 // named, though the default run still builds its SWF: named, it is checked

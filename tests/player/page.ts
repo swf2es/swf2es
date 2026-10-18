@@ -621,6 +621,38 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("tableRuns");
     add("tableDraws", args[6] as number);
   });
+  // A short run's draws, drawn from the atlas a call a draw (render/table.ts): the table's
+  // own drawElements, not those of Pixi's pipe for what it leaves to it.
+  let inTable = 0;
+  let inGraphics = 0;
+  const around = (pipe: object | undefined, enter: (by: number) => void) => {
+    const object = pipe as Record<string, (...args: unknown[]) => unknown> | undefined;
+    const original = object?.execute;
+    if (!object || !original) {
+      return;
+    }
+
+    object.execute = function (this: unknown, ...args: unknown[]) {
+      enter(1);
+      try {
+        return original.apply(this, args);
+      } finally {
+        enter(-1);
+      }
+    };
+  };
+  around(r.renderPipes.flashTable, (by) => {
+    inTable += by;
+  });
+  around(r.renderPipes.graphics, (by) => {
+    inGraphics += by;
+  });
+  wrap(gl, "drawElements", () => {
+    if (inTable > 0 && inGraphics === 0) {
+      add("tableDraws");
+      add("tableLoopDraws");
+    }
+  });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
   wrap(r.renderPipes.batch, "execute", () => add("batches"));
   // A filter's region: the bounds Pixi measures for it each time it draws.
@@ -1075,9 +1107,10 @@ async function contextLossPlanSwf(
   base64: string,
   plan: string,
   table: boolean,
+  tableMinRun = 1,
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  setTransformTable(table, 1);
+  setTransformTable(table, tableMinRun);
   const make = async () => {
     const player = new Player(bytes, null);
     const renderer = await autoDetectRenderer({

@@ -53,12 +53,14 @@ const ROW_TEXELS = 5;
 const ROWS_A_LINE = 256;
 const TABLE_WIDTH = ROWS_A_LINE * ROW_TEXELS;
 /**
- * The fewest draws a run makes through the table; Pixi's pipe draws a
- * shorter one. A multi-draw call costs Chrome's GPU process some 5 to 15
- * µs more than its draws would alone, and saves the page well under 1 µs
- * a draw: in a crowd of filtered creatures, each filter ending a run, runs
- * of 2 to 10 draws took a frame 1 to 5 ms longer than Pixi's draws on a
- * GPU, and runs of 22 broke even (`bench.ts --rig 128 --filtered K --gpu`).
+ * The fewest draws a run makes as one multi-draw; a shorter one is drawn
+ * from the atlas a call a draw. A multi-draw call costs Chrome's GPU
+ * process some 5 to 15 µs more than its draws would alone, and saves the
+ * page well under 1 µs a draw: in a crowd of filtered creatures, each
+ * filter ending a run, runs of 2 to 10 draws took a frame 1 to 5 ms longer
+ * than Pixi's draws on a GPU, and runs of 22 broke even (`bench.ts --rig
+ * 128 --filtered K --gpu`). Drawn a call a draw from the atlas, the same
+ * short runs took less than either.
  */
 const MIN_RUN = 16;
 /**
@@ -94,7 +96,9 @@ let loopShort = true;
  * it is built again. `shortest` is the fewest draws a run makes as one
  * multi-draw, MIN_RUN by default: the tests have the table draw every run
  * so with 1, and the bench times others. A shorter run is drawn from the
- * atlas a call a draw, or with `loop` false by Pixi's pipe.
+ * atlas a call a draw, its rows passed in uniforms, or with `loop` false
+ * by Pixi's pipe; so is it with `shortest` past SHORT_RUN + 1, as the
+ * uniforms hold no more rows.
  */
 export function setTransformTable(on: boolean, shortest = MIN_RUN, loop = true): void {
   enabled = on;
@@ -629,7 +633,10 @@ export class TablePipe {
   private draws = 0;
   private runBase = 0;
   private runBlend = "";
-  /** The Graphics the run gathered, for Pixi's pipe to draw if it is too short for the table. */
+  /**
+   * The Graphics the run gathered, for Pixi's pipe to draw if it is too
+   * short for a multi-draw and the table leaves such runs to it (loops).
+   */
   private segment: Graphics[] = [];
 
   constructor(renderer: WebGLRenderer) {
@@ -766,7 +773,10 @@ export class TablePipe {
         this.runBlend = graphics.groupBlendMode;
       }
 
-      this.segment.push(graphics);
+      if (!this.loops) {
+        this.segment.push(graphics);
+      }
+
       for (let i = 0; i < place.counts.length; i++) {
         this.row(graphics);
         this.counts[this.draws] = place.counts[i];

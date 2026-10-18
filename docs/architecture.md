@@ -3004,9 +3004,9 @@ each rebuild and each change of the transform, and a busy monster SWF
 whose creatures, rebuilt on most frames, fade out under a tween packed
 some 55 MB a frame of them. A flat one takes its transform in its row,
 which grows to five texels with the multipliers, the offsets and a flag;
-a Graphics Pixi's pipe draws, of a gradient or a bitmap,
-or with the table switched off, takes Pixi's graphics shader with the colour
-batcher's colour, the transform in uniforms. Both apply it as the colour
+a Graphics Pixi's pipe draws, of a gradient or a bitmap, one that rounds
+to pixels, or any with the table switched off, takes Pixi's graphics
+shader with the colour batcher's colour, the transform in uniforms. Both apply it as the colour
 batcher does, to the straight colour, the fill's times the Graphics' own
 tint rounded to a byte, clamped and premultiplied after, and leave out
 Pixi's group colour; where a renderer is not WebGL, every one is a

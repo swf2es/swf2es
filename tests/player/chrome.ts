@@ -748,10 +748,11 @@ export function playLosingContextPlan(
   swf: Uint8Array,
   plan: string,
   table: boolean,
+  tableMinRun = 1,
 ): Promise<string | null> {
   return withPage("contextLossPlanSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table})`,
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table}, ${tableMinRun})`,
     );
     return exception ?? value ?? null;
   });
