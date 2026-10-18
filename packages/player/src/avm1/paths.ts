@@ -107,7 +107,7 @@ export function atPath(
   caseSensitive: boolean,
 ): DisplayObject | null {
   const parts = path.split(".");
-  const match = /^_level(\d+)$/.exec(parts[0]);
+  const match = /^_level(-?\d+)$/.exec(parts[0]);
   if (match === null) {
     return null;
   }

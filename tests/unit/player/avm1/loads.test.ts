@@ -120,3 +120,26 @@ createEmptyMovieClip("b", 2).loadMovie("as3.swf");`,
   played.player.tick();
   assert.deepEqual(take(played), ["_level0.a true _level0"]);
 });
+
+test("a load into one clip arrives without waiting for one into another whose answer has not come", async () => {
+  const child = movie(`trace("fast ran");`);
+  const played = await play(
+    `createEmptyMovieClip("a", 1).loadMovie("slow.swf");
+createEmptyMovieClip("b", 2).loadMovie("fast.swf");`,
+    {
+      // The slow file never answers.
+      fetch: (request) =>
+        request.url.endsWith("fast.swf")
+          ? Promise.resolve({ bytes: child, status: 0, headers: [] })
+          : new Promise(() => {}),
+    },
+  );
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  played.avm1.network();
+  played.player.tick();
+  assert.deepEqual(take(played), ["fast ran"]);
+});

@@ -115,7 +115,10 @@ export class Avm1Net {
     );
   }
 
-  /** `task`'s value delivered to `deliver` in a frame after it settles; nothing for one that fails. */
+  /**
+   * `task`'s value delivered to `deliver` in a frame after it settles;
+   * nothing for one that fails.
+   */
   after<T>(task: Promise<T>, deliver: (value: T) => void): void {
     this.track(
       task.then(

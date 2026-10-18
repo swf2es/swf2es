@@ -1666,9 +1666,12 @@ A load goes through the host's fetch, as AS3's Loader's does ("content",
 which allowNetworking "internal" allows and "none" refuses), its URL
 resolved against `base`, the clip's variables sent where a method is
 given, and what it brings is read, its images decoded and its code
-compiled before it arrives between frames (`Avm1.network`), each load in
-the order asked, as Ruffle's test runner has them arrive (Ruffle's
-`loader.rs`, `movie_loader*`). As it arrives, as Ruffle has it:
+compiled before it arrives between frames (`Avm1.network`). Loads into
+one clip, or by one MovieClipLoader, arrive in the order asked, as
+Ruffle's test runner has them arrive, one slow to answer holding the next
+two seconds at most; others do not wait for each other. A second load
+into a clip replaces one under way, which is neither read nor told of
+(Ruffle's `loader.rs`, `movie_loader*`). As it arrives, as Ruffle has it:
 
 - what the clip showed unloads, its children's and its own unload
   events queued, its own variables go (a level 0's too), and the
@@ -1696,7 +1699,14 @@ frame's actions, the latest load's first (Ruffle's `movie_clip_on_load`).
 A clip removed before its load arrives takes nothing, and nothing is
 told; one unloaded meanwhile (`unloadClip`, `unloadMovie`) tells
 onLoadStart as it arrives, and no more (adl's `load_cancel_*` outputs,
-which Ruffle fails).
+which Ruffle fails). One whose listener removes or unloads the clip is
+told no more after that listener.
+
+A clip's clip actions run by the version of the SWF that placed it, and
+its AS2 event methods by the SWF it shows, as Ruffle's movie version has
+it, but where a load left an image, the error state or nothing, which
+have no version, by the SWF that made it. Filling level 0 makes the SWF
+the main one, whose version and length the movie gives from then on.
 
 A level is a clip on the stage at its number as depth, above the levels
 below it; a load into a level that is not there makes it empty at once,
@@ -1720,8 +1730,8 @@ its timeline plays, and none of its code, ABC or actions, runs.
 What is left: Flash's loading state between the call and the arrival
 (`_currentframe` 0, the movie's frames not yet loaded, which the corpus's
 `movieclip_state_values` checks at the call); a load into level 0, which
-Flash and Ruffle treat as a new main movie, its stage and frame rate
-among it; the per-version prototypes and `_global`s a SWF of one version
+Flash and Ruffle treat as a new main movie: its version is taken, but
+the stage's size and the frame rate stay the first SWF's; the per-version prototypes and `_global`s a SWF of one version
 sees of another (`loadmovienum_cross_version_prototype`,
 `global_swf6_7_8`); ImportAssets; and `onLoadProgress` while a SWF
 streams in, which a whole fetch never reports.

@@ -14,14 +14,20 @@ type Value = avm1.Value;
 /** What MovieClipLoader asks of the movie. */
 export interface LoaderHost {
   readonly realm: avm1.Realm;
-  /** What a path from the code's target, or a display object's AVM1 object, names; null for nothing. */
+  /**
+   * What a path from the code's target, or a display object's AVM1 object,
+   * names; null for nothing.
+   */
   resolve(value: Value, version: number): DisplayObject | null;
   /** Level `n`'s clip, null where there is none. */
   level(n: number): DisplayObject | null;
   /** Level `n`'s clip, an empty one made where there is none, as a load into it makes one. */
   levelToLoad(n: number): DisplayObject;
-  /** The SWF or image at `url` loaded into `target`, `loader`'s listeners told of it. */
-  loadClip(loader: avm1.Avm1Object, target: DisplayObject, url: string): void;
+  /**
+   * The SWF or image at `url` loaded into `target`, `loader`'s listeners
+   * told of it; false for no clip.
+   */
+  loadClip(loader: avm1.Avm1Object, target: DisplayObject, url: string): boolean;
   /** unloadMovie: what `d` shows unloaded. */
   unloadMovie(d: DisplayObject): void;
   /** The size of the SWF `d` is of, as it came, which getProgress gives. */
@@ -67,7 +73,7 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
     return null;
   };
 
-  // The URL must be a string; true where the target names a display object.
+  // The URL must be a string; true where the target names a clip.
   proto.define(
     "loadClip",
     realm.method((self, args, v) => {
@@ -85,8 +91,7 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
         return false;
       }
 
-      host.loadClip(self, target, url);
-      return true;
+      return host.loadClip(self, target, url);
     }),
     FIXED,
   );

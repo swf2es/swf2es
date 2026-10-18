@@ -93,3 +93,66 @@ mcl.unloadClip(mc);`,
   played.player.tick();
   assert.deepEqual(take(played), ["start _level0.mc"]);
 });
+
+test("loadClip into what is no clip, a text field, loads nothing and returns false", async () => {
+  const asked: string[] = [];
+  const played = await play(
+    `var mcl = new MovieClipLoader();
+var tf = createTextField("tf", 1, 0, 0, 10, 10);
+trace(mcl.loadClip("child.swf", tf));`,
+    {
+      fetch: async (request) => {
+        asked.push(request.url);
+        return { bytes: null, status: 404, headers: [] };
+      },
+    },
+  );
+
+  assert.deepEqual(take(played), ["false"]);
+  assert.deepEqual(asked, []);
+});
+
+test("a second load into a clip replaces the first, which is never told of nor read", async () => {
+  const played = await play(
+    `var mcl = new MovieClipLoader();
+var mc = createEmptyMovieClip("mc", 1);
+mcl.onLoadStart = function (t) { trace("start " + t); };
+mcl.onLoadComplete = function (t) { trace("complete " + t); };
+mcl.onLoadInit = function (t) { trace("init " + t); };
+mcl.loadClip("first.swf", mc);
+mcl.loadClip("second.swf", mc);`,
+    {
+      fetch: files({
+        "first.swf": movie(`trace("first ran");`),
+        "second.swf": movie(`trace("second ran");`),
+      }),
+    },
+  );
+
+  await played.deliver();
+  played.player.tick();
+  assert.deepEqual(take(played), [
+    "start _level0.mc",
+    "complete _level0.mc",
+    "second ran",
+    "init _level0.mc",
+  ]);
+});
+
+test("a listener that removes the clip in onLoadProgress hears no onLoadComplete nor onLoadInit", async () => {
+  const played = await play(
+    `var mcl = new MovieClipLoader();
+var mc = createEmptyMovieClip("mc", 1);
+mcl.onLoadStart = function (t) { trace("start"); };
+mcl.onLoadProgress = function (t) { trace("progress"); t.removeMovieClip(); };
+mcl.onLoadComplete = function (t) { trace("complete"); };
+mcl.onLoadInit = function (t) { trace("init"); };
+mcl.loadClip("child.swf", mc);`,
+    { fetch: files({ "child.swf": movie(`trace("child ran");`) }) },
+  );
+
+  await played.deliver();
+  played.player.tick();
+  played.player.tick();
+  assert.deepEqual(take(played), ["start", "progress"]);
+});

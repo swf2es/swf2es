@@ -40,7 +40,10 @@ export interface Movie extends GeomHost {
    * which `getSWFVersion`, `_url` and `getBytesTotal` give, and its root.
    */
   swfOf(d: DisplayObject | null): Avm1Swf;
-  /** `_root` for code of `d`'s: its level, or the first clip up from it whose `_lockroot` is set. */
+  /**
+   * `_root` for code of `d`'s: its level, or the first clip up from it whose
+   * `_lockroot` is set.
+   */
   rootOf(d: DisplayObject): MovieClip;
   /** The level `d` is, null for none. */
   levelOf(d: DisplayObject): number | null;
