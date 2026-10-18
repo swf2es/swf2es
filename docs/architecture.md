@@ -3915,6 +3915,35 @@ format as one Pixi Text on the line's baseline. A device font
 other by its name. Bullets, underlines, input and selection are still
 to come.
 
+A field whose `antiAliasType` is advanced has its embedded glyphs drawn
+as Flash's Saffron draws them (`render/saffron.ts`), all of a field's in
+one mesh under a shader of its own, measured in adl with fonts of bars
+(`text-advanced`, `text-advanced-draw`). Each of Flash's pixels is
+covered by a ramp over its signed distance to the glyph's outline, from
+0 at an outside cutoff to 1 at an inside one: the shader finds the
+distance exactly, from the outline cut into fine chords in a texture
+every glyph shares, kept as a glyph is first drawn. The cutoffs come from
+a table by size in pixels on the screen (`text/csm.ts`, measured in adl),
+one for each of the font's CSM hints (its DefineFontAlignZones; none is
+thin) and for light and dark text, light being a luma of 30:59:11 over
+200 of the colour as drawn, under the object's colour transform: thin
+light text at 20 pixels gains 0.6 of a pixel of ink across a stem, dark
+0.1. `thickness` moves both cutoffs and `sharpness` each the other way, a
+fiftieth of a pixel per pixel of size at the end of their ranges;
+`TextRenderer.setAdvancedAntiAliasingTable` gives a font a table of its
+own, for light and dark text alike, as adl uses it. A glyph lies where
+adl puts it: the field's origin on the screen at a whole pixel, the pen
+(in fractions of a twip) at a quarter of a pixel across and down under
+`gridFitType` none, an eighth across and a whole pixel down under pixel,
+a quarter across and a whole pixel down under subpixel, ties to even, and
+sampled half a pixel left of the pixel's centre; turned or skewed, where
+it falls. The grid is the stage's, inside a filter's input too (the Pixi
+fork's `uWorldOffset`), and a BitmapData's in a draw. Fitting stems to
+pixels by a font's alignment zones is still to come. Static text whose
+CSMTextSettings ask for advanced anti-aliasing is drawn so too, though
+adl drew none of the test SWF's static text with the tag after its
+DefineText at all.
+
 A field's text is laid out by swf2es, as Flash lays it out, never by the
 browser: lines, and each character's place on them, are what
 `textWidth`, `textHeight`, the line and character queries and

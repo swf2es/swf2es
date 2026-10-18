@@ -1162,6 +1162,8 @@ export class PixiView {
     trimPools();
     trimBatchers(this.renderer, now);
     const pixel = this.flashPixel;
+    // Flash's pixels to a unit of the world, whose units are the renderer's resolution in pixels.
+    this.art.saffron.unit = this.fresh ? 1 / this.samples : (this.renderer.resolution ?? 1) / pixel;
     if (pixel !== this.meshPixel) {
       this.meshPixel = pixel;
       for (const mesh of this.art.meshes) {
@@ -1276,6 +1278,8 @@ export class PixiView {
   forDraw(root: DisplayObject, samples: number): PixiView {
     const view = new PixiView(this.renderer, true, this);
     view.samples = samples;
+    // Its world is the BitmapData's pixels, each drawn `samples` units a side (render/snapshot.ts).
+    view.art.saffron.unit = 1 / samples;
     view.drawRoot = root;
     return view;
   }

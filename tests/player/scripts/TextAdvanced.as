@@ -8,8 +8,8 @@ package {
   // sharpness: Flash's advanced anti-aliasing (Saffron) moves stems onto
   // the pixel grid and thickens or thins them, and lays advanced text out
   // with its pen in fractions of a twip, letter spacing, kerning and mixed
-  // sizes too. The player lays it out so (text-advanced-layout); drawing
-  // is the known gap, out of the default run (text-advanced).
+  // sizes too. The player lays it out so (text-advanced-layout) and draws
+  // it so (text-advanced).
   public class TextAdvanced extends Sprite {
     private static const SIZES:Array = [10, 12, 14, 20, 24];
     private static const MODES:Array = [

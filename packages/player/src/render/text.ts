@@ -12,8 +12,10 @@ import {
 } from "pixi.js";
 import type { StaticTextObject, TextObject } from "../display/display.js";
 import { shapeLayers } from "../display/shapes.js";
+import { csmTables } from "../text/csm.js";
 import { deviceMetrics, fontFamily } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
+import { SaffronBuilder, type SaffronView } from "./saffron.js";
 import { SharedGraphics } from "./shared.js";
 import { fillContext, paint } from "./tessellate.js";
 
@@ -29,13 +31,19 @@ export function overruns(
   width: number,
   height: number,
 ): boolean {
+  // Within a millionth of a pixel, the field's own size in pixels from its text's in twips
+  // rounds off: advanced text, thickened, would be clipped where it only meets the edge.
+  const e = 1e-6;
   return (
-    x < field.left ||
-    y < field.top ||
-    x + width > field.left + field.width ||
-    y + height > field.top + field.height
+    x < field.left - e ||
+    y < field.top - e ||
+    x + width > field.left + field.width + e ||
+    y + height > field.top + field.height + e
   );
 }
+
+/** gridFitType's values, in the order Saffron's shader and CSMTextSettings number them. */
+const GRIDS = ["none", "pixel", "subpixel"];
 
 /** Glyphs' fills, made once and shared by every character drawn in them; null for an empty glyph. */
 const glyphFills = new WeakMap<Glyph, GraphicsContext | null>();
@@ -66,9 +74,10 @@ function glyphFill(glyph: Glyph): GraphicsContext | null {
  * border, then each line from the first scrolled to, a character of an
  * embedded font as its glyph's shape, a run of a device font as one Pixi
  * Text on the line's baseline, each in its own colour, clipped to the
- * field where the text runs over it.
+ * field where the text runs over it. An advanced field's embedded glyphs
+ * are drawn as Saffron draws them (render/saffron.ts), all in one mesh.
  */
-export function drawText(o: TextObject, art: PixiContainer): void {
+export function drawText(o: TextObject, art: PixiContainer, saffron: SaffronView): void {
   if (o.background || o.border) {
     const box = new Graphics();
     if (o.background) {
@@ -97,6 +106,10 @@ export function drawText(o: TextObject, art: PixiContainer): void {
   const dx = o.left * 20 - o.scrollH * 20;
   const dy = o.top * 20 - (layout.lines[first].y - GUTTER);
   const text = new PixiContainer();
+  const advanced =
+    o.antiAliasType === "advanced"
+      ? new SaffronBuilder(saffron, GRIDS.indexOf(o.gridFitType), o.thickness, o.sharpness)
+      : null;
   let bottom = 0;
   let right = 0;
   let left = Number.POSITIVE_INFINITY;
@@ -117,13 +130,33 @@ export function drawText(o: TextObject, art: PixiContainer): void {
 
       if (c.font) {
         flush();
+        const x = (dx + c.x + c.kern) / 20;
+        const size = Math.max(0, c.format.size);
+        const color = c.format.color & 0xffffff;
+        // Saffron places a glyph where the pen stood, in fractions of a twip, as adl does.
+        if (
+          advanced &&
+          c.glyph &&
+          advanced.add(
+            c.glyph,
+            c.font.em,
+            (dx + c.at + c.kern) / 20,
+            baseline,
+            size,
+            color,
+            1,
+            csmTables(c.font),
+          )
+        ) {
+          continue;
+        }
+
         const fill = c.glyph && glyphFill(c.glyph);
         if (fill) {
           const g = new SharedGraphics(fill);
-          const scale = (Math.max(0, c.format.size) * 20) / c.font.em;
-          g.scale.set(scale);
-          g.position.set((dx + c.x + c.kern) / 20, baseline);
-          g.tint = c.format.color & 0xffffff;
+          g.scale.set((size * 20) / c.font.em);
+          g.position.set(x, baseline);
+          g.tint = color;
           text.addChild(g);
         }
       } else if (run.length > 0 && run[0].format !== c.format) {
@@ -138,6 +171,11 @@ export function drawText(o: TextObject, art: PixiContainer): void {
     bottom = Math.max(bottom, dy + line.y + line.ascent + line.descent);
     right = Math.max(right, dx + line.x + line.width);
     left = Math.min(left, dx + line.x);
+  }
+
+  const glyphs = advanced?.done();
+  if (glyphs) {
+    text.addChild(glyphs);
   }
 
   art.addChild(text);
@@ -161,12 +199,40 @@ export function drawText(o: TextObject, art: PixiContainer): void {
   drawCaret(o, art);
 }
 
-/** Static text: each glyph's shared fill, at its height and in its colour, under the text's matrix. */
-export function drawStaticText(o: StaticTextObject, art: PixiContainer): void {
+/**
+ * Static text: each glyph's shared fill, at its height and in its colour,
+ * under the text's matrix; or, where its CSMTextSettings ask for advanced
+ * anti-aliasing, as Saffron draws them.
+ */
+export function drawStaticText(
+  o: StaticTextObject,
+  art: PixiContainer,
+  saffron: SaffronView,
+): void {
   const m = o.definition.definition.matrix;
   const text = new PixiContainer();
   text.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx / 20, m.ty / 20));
+  const csm = o.definition.csm;
+  const advanced = csm?.useFlashType
+    ? new SaffronBuilder(saffron, csm.gridFit, csm.thickness, csm.sharpness)
+    : null;
   for (const placed of o.glyphs.glyphs) {
+    const color = placed.color & 0xffffff;
+    if (
+      advanced?.add(
+        placed.glyph,
+        placed.font.em,
+        placed.x / 20,
+        placed.y / 20,
+        placed.height / 20,
+        color,
+        (placed.color >>> 24) / 255,
+        csmTables(placed.font),
+      )
+    ) {
+      continue;
+    }
+
     const fill = glyphFill(placed.glyph);
     if (!fill) {
       continue;
@@ -176,9 +242,14 @@ export function drawStaticText(o: StaticTextObject, art: PixiContainer): void {
     const g = new SharedGraphics(fill);
     g.scale.set(placed.height / placed.font.em);
     g.position.set(placed.x / 20, placed.y / 20);
-    g.tint = placed.color & 0xffffff;
+    g.tint = color;
     g.alpha = (placed.color >>> 24) / 255;
     text.addChild(g);
+  }
+
+  const glyphs = advanced?.done();
+  if (glyphs) {
+    text.addChild(glyphs);
   }
 
   art.addChild(text);

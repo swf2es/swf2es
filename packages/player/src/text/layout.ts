@@ -16,6 +16,12 @@ const BULLET = 36 * TWIPS;
 export interface LaidChar {
   index: number;
   x: number;
+  /**
+   * Where advanced text's pen stood as it started the character, in
+   * fractions of a twip, which Saffron draws it at (render/saffron.ts);
+   * x is that truncated, where its boundaries start.
+   */
+  at: number;
   advance: number;
   /** Its pair's kerning, which shortens its advance and, drawn, moves it: its boundaries stay where they were. */
   kern: number;
@@ -240,12 +246,14 @@ export function layoutText(field: LayoutField): TextLayout {
         const m = measures[i];
         // A run of another size starts where the last one's text landed, as
         // adl lays advanced text out: 10, 13 and 17 pixels in one line.
-        pen = (m.run ? x : pen) + m.pen;
+        const at = m.run ? x : pen;
+        pen = at + m.pen;
         // A pen a negative spacing took left of 0 lands at 0, not -0.
         const next = Math.trunc(pen) || 0;
         chars.push({
           index: start + i,
           x,
+          at,
           advance: next - x,
           kern: m.kern,
           font: m.font,
@@ -268,6 +276,7 @@ export function layoutText(field: LayoutField): TextLayout {
         chars.push({
           index: end,
           x,
+          at: x,
           advance: 0,
           kern: 0,
           font: null,
@@ -296,6 +305,7 @@ export function layoutText(field: LayoutField): TextLayout {
       const lineX = left + Math.max(0, align);
       for (const c of chars) {
         c.x += lineX;
+        c.at += lineX;
       }
 
       const leading = Math.trunc(format.leading * TWIPS);
@@ -373,6 +383,7 @@ function justify(text: string, chars: LaidChar[], room: number): number {
   let x = 0;
   for (const c of chars) {
     c.x = x;
+    c.at = x;
     x += c.advance;
   }
 

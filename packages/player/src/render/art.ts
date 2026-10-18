@@ -25,6 +25,7 @@ import type { ShapeCharacter } from "../display/timeline.js";
 import { characterStore, gpuBitmaps } from "./bitmaps.js";
 import type { Node } from "./node.js";
 import { SPARE_GRAPHICS_MOST } from "./pools.js";
+import { SaffronView } from "./saffron.js";
 import { SharedGraphics } from "./shared.js";
 import {
   type Linear,
@@ -157,6 +158,8 @@ export class Art {
   private readonly borrowed = new WeakSet<GraphicsContext>();
   /** Its drawings' textured triangles drawn, which the view tells of a new pixel or smoothing. */
   readonly meshes = new Set<TriangleView>();
+  /** What its advanced texts share, which the view tells of the world's scale to Flash's pixels. */
+  readonly saffron = new SaffronView();
 
   constructor(
     private readonly renderer: Renderer,
@@ -350,12 +353,12 @@ export class Art {
     }
 
     if (o instanceof TextObject) {
-      drawText(o, node.art);
+      drawText(o, node.art, this.saffron);
       return;
     }
 
     if (o instanceof StaticTextObject) {
-      drawStaticText(o, node.art);
+      drawStaticText(o, node.art, this.saffron);
       return;
     }
 

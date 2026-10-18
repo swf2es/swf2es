@@ -315,6 +315,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       const type = avm1.stringOf(value, version);
       if (type === "pixel" || type === "subpixel" || type === "none") {
         field.gridFitType = type;
+        field.invalidate(CONTENT);
       }
     },
     avm1.VERSION_8,
@@ -336,6 +337,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     (field) => field.thickness,
     (field, value, version) => {
       field.thickness = Math.fround(avm1.toNumber(value, version));
+      field.invalidate(CONTENT);
     },
     avm1.VERSION_8,
   );
@@ -344,6 +346,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     (field) => field.sharpness,
     (field, value, version) => {
       field.sharpness = Math.fround(avm1.toNumber(value, version));
+      field.invalidate(CONTENT);
     },
     avm1.VERSION_8,
   );

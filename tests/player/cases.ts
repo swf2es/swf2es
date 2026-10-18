@@ -5987,10 +5987,10 @@ export const probeFont = (id: number): Uint8Array =>
  * pixel to two, and "l", "m", "a" and "W" with advances that are no whole
  * number of pixels at any of the cases' sizes; "a" then "l" kern.
  */
-export const stemFont = (id: number): Uint8Array =>
+export const stemFont = (id: number, name = "Stem"): Uint8Array =>
   w.font3({
     id,
-    name: "Stem",
+    name,
     ascent: 900,
     descent: 250,
     glyphs: [
@@ -6583,6 +6583,31 @@ function textAdvanced(abc: Uint8Array): Uint8Array {
       stemFont(1),
       w.doAbc(abc, "TextAdvanced"),
       w.symbolClass([[0, "TextAdvanced"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Advanced text drawn every other way (scripts/TextAdvancedDraw.as): Stem
+// as it is, with a medium and a thick CSM hint, and by a table of its own.
+function textAdvancedDraw(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 400,
+    height: 250,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      stemFont(1),
+      stemFont(2, "StemM"),
+      w.fontAlignZones(2, 1, 11),
+      stemFont(3, "StemT"),
+      w.fontAlignZones(3, 2, 11),
+      stemFont(4, "StemTable"),
+      w.doAbc(abc, "TextAdvancedDraw"),
+      w.symbolClass([[0, "TextAdvancedDraw"]]),
       w.showFrame(),
       w.end(),
     ],
@@ -8431,10 +8456,10 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 64,
     maxOutliers: 40,
-    // Saffron's CSM cutoffs: stems thickened, thickness and sharpness. Its
-    // layout is text-advanced-layout's, which passes; fitting to pixels
-    // needs a font's alignment zones, which Stem has none of.
-    gap: "advanced anti-aliasing's drawing",
+    // Saffron's CSM cutoffs: stems thickened, thickness and sharpness. Stem
+    // has no alignment zones, so no gridFitType fits its stems to pixels;
+    // the normal rows, whose edges are Flash's 4×4 samples, need the
+    // tolerance.
   },
   {
     // The same text's layout alone, advanced text's pen in fractions of a twip.
@@ -8444,6 +8469,17 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [],
     tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "text-advanced-draw",
+    swf: textAdvancedDraw,
+    script: "TextAdvancedDraw",
+    frames: 1,
+    capture: [1],
+    // Its table set with TextRenderer stays in adl for the jobs after it.
+    alone: true,
+    tolerance: 8,
     maxOutliers: 0,
   },
   {
