@@ -25,17 +25,7 @@ import type {
   TypeRef,
   Value,
 } from "./descriptors.js";
-import {
-  add,
-  compileUnit,
-  Domain,
-  definedInChain,
-  definitionNames,
-  findScript,
-  frameScripts,
-  type Script,
-  stackFrames,
-} from "./domain.js";
+import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
   type Enumeration,
   enumerated,
@@ -46,6 +36,7 @@ import {
   pairOf,
 } from "./enumeration.js";
 import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
+import { Modules } from "./modules.js";
 import {
   arrayIndex,
   CONSTANT_Multiname,
@@ -131,24 +122,9 @@ export class Runtime {
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
-  private domainCount = 1;
-  private loads = 0;
   private loading: Domain = this.root;
-  /**
-   * The domain of each loaded module's code, by the script a stack's frame
-   * names it with (see codeDomain); found from the stacks its loads took,
-   * which wait in `unlocated` until a domain other than the root exists.
-   * Weakly: a module's code keeps its domain, through its Abc, for as long
-   * as it can run, and a domain no code is left of is let go, an entry
-   * dropped with it.
-   */
-  private readonly moduleDomains = new Map<string, WeakRef<Domain>>();
-  private readonly moduleDomainGone = new FinalizationRegistry<string>((at) => {
-    if (!this.moduleDomains.get(at)?.deref()) {
-      this.moduleDomains.delete(at);
-    }
-  });
-  private readonly unlocated: [Error, Domain][] = [];
+  /** The modules loaded, and the domains of their code. */
+  private readonly modules = new Modules();
   private loadingBuiltin = false;
   /** Whether a domain other than the root exists. */
   children = false;
@@ -256,50 +232,21 @@ export class Runtime {
   /** A domain whose definitions are looked up after `parent`'s, as `new ApplicationDomain(parent)`. */
   childDomain(parent: Domain = this.root): Domain {
     this.children = true;
-    return new Domain(parent, this.domainCount++);
+    return this.modules.newDomain(parent);
   }
 
   /**
    * The domain of the innermost code on the stack that a module defines,
-   * as avmplus' AvmCore::codeContext; the root without one. A frame is a
-   * module's by its script, so a host gives each module a script of its
-   * own: its URL, or a sourceURL comment for code it evaluates.
+   * as avmplus' AvmCore::codeContext; the root without one (see
+   * Modules.domainOf). The stack is taken here, so that it has as many of
+   * the caller's frames as the engine keeps.
    */
   codeDomain(): Domain {
     if (!this.children) {
       return this.root;
     }
 
-    this.locate();
-    for (const at of frameScripts(new Error().stack)) {
-      const domain = this.moduleDomains.get(at)?.deref();
-      if (domain) {
-        return domain;
-      }
-    }
-
-    return this.root;
-  }
-
-  /**
-   * The scripts of the modules loaded since last asked, by the stacks their
-   * loads took. Their stacks reach the modules' code, so they are not kept
-   * past the load once there are domains to tell apart.
-   */
-  private locate(): void {
-    for (const [error, domain] of this.unlocated) {
-      // Its first frame is abc's own, its second the module's factory. An
-      // engine may name no script for the factory's frame (JavaScriptCore,
-      // for code a Function made), and the next frame that names one is
-      // the host's, which must not stand for the module.
-      const at = stackFrames(error.stack)[1];
-      if (at) {
-        this.moduleDomains.set(at, new WeakRef(domain));
-        this.moduleDomainGone.register(domain, at);
-      }
-    }
-
-    this.unlocated.length = 0;
+    return this.modules.domainOf(new Error().stack) ?? this.root;
   }
 
   /**
@@ -318,7 +265,7 @@ export class Runtime {
       this.loading = previous;
       this.loadingBuiltin = wasBuiltin;
       if (this.children) {
-        this.locate();
+        this.modules.locate();
       }
     }
   }
@@ -433,47 +380,8 @@ export class Runtime {
 
   /** Load a module: its scripts' names become visible; the entry script of a non-builtin module runs. */
   abc(desc: AbcDesc): Abc {
-    // Its layouts are those of its ABC after exactly these ABCs; the
-    // root's, which a player loads thousands into, are not copied.
-    const domain = this.loading;
-    const loaded = domain.parent ? domain.chain() : domain.own;
-    const linked = desc.linked;
-    if (linked.length !== loaded.length || linked.some((h, i) => h !== loaded[i])) {
-      throw new Error(
-        `swf2es: a module compiled after [${linked.join(", ")}] cannot load after [${loaded.join(", ")}]`,
-      );
-    }
-
-    const abc = desc as Abc;
-    abc.domain = domain;
-    abc.index = domain.own.length;
-    domain.own.push(desc.hash);
-    domain.ownOrder.push(this.loads++);
-    if (!this.loadingBuiltin) {
-      this.unlocated.push([new Error(), domain]);
-    }
-    for (const name of abc.names) {
-      if (name instanceof TypeName) {
-        name.names = abc.names;
-      }
-    }
-
-    for (const cls of abc.classes) {
-      cls.abc = abc;
-    }
-
-    abc.scriptStates = abc.scripts.map((s) => ({ desc: s, abc, global: null, state: 0 }));
-    // As DomainMgr::addNamedScript: a name the domain's chain defines
-    // already, cached or loaded, is unreachable, and not added.
-    for (const script of abc.scriptStates) {
-      for (const [ns, version, name] of script.desc.traits.bindings) {
-        if (!definedInChain(domain, name, ns)) {
-          add(domain.globals, { ns, version, script }, name);
-        }
-      }
-    }
-
-    return abc;
+    // The stack taken here has this frame first and the module's factory second.
+    return this.modules.load(desc, this.loading, this.loadingBuiltin ? null : new Error());
   }
 
   /** Run a module's entry point, its last script, as avmshell does. */

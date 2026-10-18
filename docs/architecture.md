@@ -653,7 +653,8 @@ what a host gives a runtime; `hooks.ts`, what a builtin or a player's class
 plugs in to allocate, index, resolve names or be called; `traits.ts`, the
 layout model (`Traits`, the binding kinds, the class and Vector references);
 `domain.ts`, application domains and the lookup of a name along a domain's
-chain; `classes.ts`, OP_newclass, which makes a class from its descriptor;
+chain; `modules.ts`, the modules loaded into them and which module's code
+a stack is in; `classes.ts`, OP_newclass, which makes a class from its descriptor;
 `enumeration.ts`, the names a for-in goes through; `property-cache.ts`, the
 inline caches; `names.ts`, namespaces and multinames; `number-strings.ts`,
 numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
