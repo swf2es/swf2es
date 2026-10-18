@@ -162,9 +162,9 @@ export class Playback {
 
   /**
    * The samples the stage and the filter layers take, by the quality and the
-   * canvas's pixels. Flash covers an edge with 4 at medium and 16 at high and
-   * best; the stage takes them, while filter and blend layers, which are many
-   * and drawn into often, take 4 at medium, 8 at high and 16 at best. Every
+   * canvas's pixels: 4 at medium, 8 at high and 16 at best. Flash covers an
+   * edge with 16 at high, but 8 look alike but on the longest, shallowest
+   * edges, and cost half the memory; best takes Flash's 16. Every
    * sample costs its pixels' 4 bytes of colour and 4 of depth and stencil, so
    * a large canvas takes fewer: at most what fits STAGE_BYTES, and 4 at least,
    * as before samples could be chosen.
@@ -182,8 +182,9 @@ export class Playback {
     const canvas = this.renderer.canvas as HTMLCanvasElement;
     const fits = fittingSamples(canvas.width * canvas.height);
     const quality = this.player.quality;
-    adaptor.backBufferSamples = Math.min(quality === "MEDIUM" ? 4 : 16, fits);
-    adaptor.msaaSamples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
+    const samples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
+    adaptor.backBufferSamples = samples;
+    adaptor.msaaSamples = samples;
   }
 
   private draw(): void {

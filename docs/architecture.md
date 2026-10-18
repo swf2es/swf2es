@@ -4603,13 +4603,13 @@ makes it anew), and `PixiView.quality` at low samples the smoothed copies
 of the stores' textures, and drawTriangles' fills, nearest. Medium and
 high are the GPU's multisampling, which costs the GPU memory and
 bandwidth but no shading: supersampling, 4 or 16 times the pixels, would
-cost more than the edges show. The back buffer takes Flash's samples, 4
-at medium and 16 at high and best, as many as the GPU allows (the fork's
-`backBufferSamples`), remade at the next frame. Filter and blend layers
-(`msaaSamples`) take 4 at medium, 8 at high and 16 at best: they are many
-and drawn into often, so more samples there cost more than on the one back
-buffer. Every sample costs its pixels 8 bytes, colour and depth-stencil, so
-a canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
+cost more than the edges show. The back buffer and the filter and blend
+layers take 4 samples at medium, 8 at high and 16 at best, as many as the
+GPU allows (the fork's `backBufferSamples` and `msaaSamples`), remade at
+the next frame. Flash covers an edge with 16 at high; 8 look alike but on
+the longest, shallowest edges, at half the memory, and best takes 16.
+Every sample costs its pixels 8 bytes, colour and depth-stencil, so a
+canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
 256 MB, 4 at least): 8 at 1440p, 4 at 4K. A BitmapData's draw at low
 quality smooths no bitmap either.
 
