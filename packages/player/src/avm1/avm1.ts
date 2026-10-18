@@ -124,8 +124,11 @@ export interface Avm1Options {
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
    * as Ruffle's test harness ends a test, and the rest are dropped.
+   * `callers` is the calling SWF's URL, or every URL of a SWF that has had
+   * code where the caller cannot be told, as Scripting's: a host that
+   * checks them lets the command through only if all pass.
    */
-  fsCommand?: (command: string, args: string) => void;
+  fsCommand?: (command: string, args: string, callers: string[]) => void;
   /**
    * Opens getURL's pages: the browser's navigation by default (hosts.ts's
    * browserNavigate), null for none.
@@ -665,7 +668,13 @@ export class Avm1
       loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
       loadMovie: (into, url, form) =>
         this.loadMovie(typeof into === "number" ? into : (into as DisplayObject), url, form),
-      fsCommand: options.fsCommand ?? ((command) => this.fsCommand(command)),
+      fsCommand: (command, args) => {
+        if (options.fsCommand === undefined) {
+          this.fsCommand(command);
+        } else {
+          options.fsCommand(command, args, this.callerUrls());
+        }
+      },
       navigate:
         (options.navigate === undefined
           ? getUrlNavigate(browserNavigate(), this.url)

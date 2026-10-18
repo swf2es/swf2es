@@ -1615,7 +1615,10 @@ a level's tiles drawn from its clips once, then attached.
   SWF once its frame has run, as a projector quits and Ruffle's test
   harness ends a test, and the rest are dropped; the web element passes
   every command to its page, "quit" too, as the plug-in did, and stops
-  nothing.
+  nothing. The handler is told its callers as Scripting's is: the URL of
+  the SWF whose code runs, or every SWF's that has had code where none
+  does (see ExternalInterface), and the element passes a command on only
+  where its allowScriptAccess allows them all.
 - `GetURL` with a target `_levelN` loads into that level, nothing where
   N is not an int; `GetURL2` reads N as a float and truncates it, and
   `_level` alone is level 0. Its flags pick `loadVariables` into the

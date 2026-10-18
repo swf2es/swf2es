@@ -405,8 +405,9 @@ export class Swf2esPlayerElement extends ElementBase {
           socket: offline ? undefined : socketHost(),
           sendToUrl: !internal,
           onUncaught: (error) => this.#report(session, error),
-          fsCommand: (command, args) => {
-            if (allows(url)) {
+          // Asked of the calling SWF, as for an AS3 SWF: a child from another origin is not the main one.
+          fsCommand: (command, args, callers) => {
+            if (callers.every(allows)) {
               this.#fsCommand(objectID, command, args);
             }
           },
