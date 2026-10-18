@@ -1638,7 +1638,8 @@ objects of a list up to its length (adl: an object without a length sets
 none; a list's length is read up to 2^20, as Function.apply's), a
 displacement map's pixels as they are then, as AS3's are; the
 renderer draws them as AS3's (the corpus's `bitmap_filters`, the
-`avm1-filters` case). A clip's `blendMode`, from SWF 8, reads its mode's
+`avm1-filters` case). A clip's and a button's `blendMode`, from SWF 8
+(a button's listed), reads its mode's
 name and takes BlendMode's name or PlaceObject3's number of one, a byte,
 undefined and null as normal; anything else leaves it as it was, where
 BitmapData's `draw` takes it as normal (the corpus's

@@ -878,6 +878,31 @@ function boundsObject(
   return o;
 }
 
+/**
+ * A display object's `blendMode` on its class's prototype, of `flags`: its
+ * mode's name; one set that is none leaves it as it was (the corpus's
+ * movieclip_blend_mode_property, adl for a button's).
+ */
+export function blendModeProperty(
+  realm: avm1.Realm,
+  proto: avm1.Avm1Object,
+  flags: number,
+  targetOf: (self: avm1.Avm1Object) => DisplayObject | null,
+): void {
+  const p = proto.add("blendMode", undefined, flags);
+  p.get = realm.method((self) => targetOf(self)?.blendMode);
+  p.set = realm.method((self, args) => {
+    const d = targetOf(self);
+    const mode = blendModeOf(args[0]);
+    if (d !== null && mode !== null) {
+      d.touch();
+      d.setBlendMode(mode);
+    }
+
+    return undefined;
+  });
+}
+
 /** The display object a method's argument names from `start`: a clip's AVM1 object, or a path. */
 export function targetOf(
   movie: Movie,
@@ -1144,23 +1169,7 @@ export function movieClipClass(movie: Movie): {
     clipOf,
     () => movie.filterFaces,
   );
-  // Its blend mode's name; one set that is none leaves it as it was.
-  const blendMode = proto.add(
-    "blendMode",
-    undefined,
-    avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8,
-  );
-  blendMode.get = realm.method((self) => clipOf(self)?.blendMode);
-  blendMode.set = realm.method((self, args) => {
-    const clip = clipOf(self);
-    const mode = blendModeOf(args[0]);
-    if (clip !== null && mode !== null) {
-      clip.touch();
-      clip.setBlendMode(mode);
-    }
-
-    return undefined;
-  });
+  blendModeProperty(realm, proto, avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8, clipOf);
   // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
   // not read (Ruffle).
   method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {
