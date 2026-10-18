@@ -625,8 +625,9 @@ function bitsFor(n: number): number {
  * pixel takes the fill colour where the source is the destination, and
  * there it is the source rect that dissolves, the point aside, though
  * clipped as a copy's; else the source's pixel. A rect a pixel high or
- * wide dissolves nothing, and a count of 0 only the origin: both give the
- * seed back as it came.
+ * wide dissolves nothing and gives the seed back as it came; a count of 0
+ * writes the origin alone and gives the seed back, the tap for 0. AS3's
+ * answers are AVM1's (the dissolve-noise case).
  */
 export function pixelDissolve(
   store: BitmapStore,
@@ -696,14 +697,15 @@ export function pixelDissolve(
   };
   const inside = (state: number) => (state & xMask) < w && Math.floor(state / 2 ** bw) < h;
 
-  // The origin is written on every call; 0, which the generator's states
-  // never step to, starts at the tap.
+  // The origin is written on every call; 0, which no state within the
+  // generator's steps to (a seed past them may), starts at the tap.
   write(0);
   if (seed === 0) {
     seed = tap;
   }
 
   if (count === 0) {
+    store.changed();
     return seed;
   }
 

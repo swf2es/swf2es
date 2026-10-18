@@ -1582,20 +1582,22 @@ BitmapData, composited on the CPU, or a clip or button, drawn by the
 host's renderer at the stage's quality (`Avm1.drawer`, which the element
 and the test page give, as Scripting's for AS3), its matrix's fields by
 name, and a blend mode by BlendMode's name or PlaceObject3's number,
-anything else, null included, normal (adl); `clone` keeps the prototype; `floodFill` (0
-for a point off the bitmap or its own colour), `scroll` (0),
-`colorTransform` (-1 even done, as Flash) and the static
-`loadBitmap`, the library's bitmap exported by a name, transparent.
+anything else, null included, normal (adl); `clone` keeps the
+prototype; `floodFill` (0 for a point off the bitmap or its own
+colour), `scroll` (0), `colorTransform` (-1 even done, as Flash) and
+the static `loadBitmap`, the library's bitmap exported by a name,
+transparent.
 The rest run AS3's operations with AVM1's conversions, ints where AS3
 takes uints, and AVM1's answers (the corpus's `bitmap_data_thorough`):
 `copyChannel`, `merge` (its multipliers clamped to 0 to 256, the alpha
 one optional), `paletteMap` (its tables' entries summed as they are; no
 red table, -1) and `threshold` (an unknown operation is "<") take a rect
-spanning back from a negative size, as AS3's do; `noise`, `perlinNoise` (a base's sign dropped, as Flash),
-`pixelDissolve` (five arguments at least, a negative count a uint's; a
-seed past the generator's states steps down as any state, and one not
-used, a count of 0 or a rect it cannot dissolve, comes back as it
-came), `getColorBoundsRect` and
+spanning back from a negative size, as AS3's do; `noise`,
+`perlinNoise` (a base's sign dropped, as Flash), `pixelDissolve` (five
+arguments at least, a negative count a uint's; a seed past the
+generator's states steps down as any state, and one a count of 0 or a
+rect it cannot dissolve leaves unused comes back, 0 as the tap),
+`getColorBoundsRect` and
 `hitTest` (its errors -2 to -4; a point needs an alpha above 0, a rect
 not at threshold 0). `threshold` and `getColorBoundsRect` compare the
 pixels as they are kept, premultiplied, unlike AS3's, and threshold
