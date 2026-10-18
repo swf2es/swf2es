@@ -4,11 +4,13 @@ import { BitmapStore } from "/player/bitmap/bitmap.js";
 import { drawDisplayObject } from "/player/bitmap/draw.js";
 import {
   BitmapObject,
+  ButtonObject,
   CONTENT,
   ShapeObject,
   TextObject,
   TRANSFORM,
 } from "/player/display/display.js";
+import { Drawing } from "/player/display/drawing.js";
 import { filterDefaults } from "/player/display/filters.js";
 import { FrameWriter, sharedFrames } from "/player/render/worker/frames.js";
 import { SceneLibraries, shareLibrary } from "/player/render/worker/libraries.js";
@@ -177,11 +179,15 @@ async function runWorkerTest(base64: string, content: string): Promise<string[]>
     matches(newest, reference());
     results.push("latest snapshot matches main-thread Pixi pixels");
 
-    const compare = async () => {
-      check(publish() !== null, "effects frame not published");
-      const expected = reference();
-      matches(await request("render").done, expected);
-      return expected;
+    const compare = async (label = "scene") => {
+      try {
+        check(publish() !== null, "scene frame not published");
+        const expected = reference();
+        matches(await request("render").done, expected);
+        return expected;
+      } catch (error) {
+        throw new Error(`${label}: ${String(error)}`);
+      }
     };
     const kinds = [
       "blur",
@@ -385,6 +391,155 @@ async function runWorkerTest(base64: string, content: string): Promise<string[]>
     extra.root.removeChild(bitmap);
     extra.root.removeChild(sharedBitmap);
     await compare();
+
+    extra.root.addChildAt(bitmap, extra.root.children.length);
+    const graphic = new ShapeObject(null);
+    const drawing = new Drawing();
+    graphic.drawing = drawing;
+    graphic.matrix = { ...graphic.matrix, tx: 80, ty: 0 };
+    extra.root.addChildAt(graphic, extra.root.children.length);
+    drawing.lineStyle({
+      width: 35,
+      color: 0xff113366,
+      startCap: 0,
+      endCap: 2,
+      join: 2,
+      miterLimit: 3,
+      noHScale: true,
+      noVScale: false,
+      pixelHinting: true,
+      noClose: false,
+      fill: null,
+    });
+    drawing.beginFill({
+      type: "gradient",
+      matrix: { a: 0.025, b: 0, c: 0, d: 0.025, tx: 15, ty: 10 },
+      radial: true,
+      focal: 0.3,
+      spread: 1,
+      linearRgb: true,
+      stops: [
+        { ratio: 0, color: 0xffddaa22 },
+        { ratio: 255, color: 0x884422cc },
+      ],
+    });
+    drawing.moveTo(0, 0);
+    drawing.cubicCurveTo(25, -5, 40, 20, 20, 25);
+    drawing.lineTo(0, 15);
+    drawing.endFill();
+    graphic.invalidate(CONTENT);
+    await compare("Graphics curves and gradient");
+    const drawingPixels = reference();
+    check(publish() !== null, "drawing snapshot not published");
+    const drawingHeld = request("render", { hold: true });
+    await drawingHeld.acquired;
+    drawing.clear();
+    bitmap.store.views.add(graphic.ref);
+    drawing.beginFill({
+      type: "image",
+      image: bitmap.store,
+      matrix: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+      repeat: false,
+      smooth: true,
+    });
+    drawing.drawRoundRect(0, 0, 35, 30, 8, 12);
+    drawing.drawTriangles(
+      [0, 0, 30, 0, 0, 25, 30, 25],
+      [0, 1, 2, 1, 2, 3],
+      [0, 0, 1, 0, 0, 1, 1, 1],
+      1,
+    );
+    graphic.invalidate(CONTENT);
+    check(publish() !== null, "changed drawing snapshot not published");
+    await request("release").done;
+    matches(await drawingHeld.done, drawingPixels);
+    matches(await request("render").done, reference());
+    graphic.matrix = { ...graphic.matrix, a: -1, tx: 115 };
+    graphic.invalidate(TRANSFORM);
+    await compare("Graphics mirrored triangle culling");
+    bitmap.store.setPixel32(3, 3, 0xffcc2288);
+    await compare("Graphics bitmap update");
+
+    // A failed frame must return its slot and leave the last valid scene usable.
+    check(
+      writer.write((target) => {
+        const length = snapshot.encode(player.stage, target);
+        new Float64Array(target.buffer, target.byteOffset, length / 8)[0] = -1;
+        return length;
+      }) !== null,
+      "malformed frame not published",
+    );
+    let rejected = false;
+    try {
+      await request("render").done;
+    } catch (error) {
+      rejected = String(error).includes("snapshot header");
+    }
+    check(rejected, "worker did not reject malformed frame");
+    await compare("valid frame after rejected payload");
+    for (let i = 0; i < 2; i++) {
+      check((await request("loseContext").done).type === "lost", "worker context not lost");
+      check(publish() !== null, "lost-context frame not published");
+      rejected = false;
+      try {
+        await request("render").done;
+      } catch (error) {
+        rejected = String(error).includes("context is lost");
+      }
+      check(rejected, "lost worker context accepted a presentation");
+      check(
+        (await request("restoreContext").done).type === "restored",
+        "worker context not restored",
+      );
+      await compare("restored worker context");
+    }
+    results.push(
+      "rejected frames release slots and worker WebGL contexts restore twice with matching pixels",
+    );
+
+    bitmap.store.dispose();
+    await compare("Graphics disposed bitmap fill");
+    drawing.clear();
+    graphic.invalidate(CONTENT);
+    await compare("Graphics clear");
+    results.push(
+      "Graphics curves, gradients, closing strokes, bitmap fills and culled triangles match pixels",
+    );
+
+    const button = new ButtonObject();
+    const up = new ShapeObject(shape?.type === "shape" ? shape : null);
+    const morphAsset = extra.library.characters.get(10);
+    check(morphAsset?.type === "morph", "morph asset not found");
+    if (morphAsset?.type !== "morph") {
+      throw new Error("missing morph");
+    }
+
+    const morph = ShapeObject.ofMorph(morphAsset);
+    morph.matrix = { ...morph.matrix, tx: 5, ty: 3 };
+    button.upState = up;
+    button.overState = morph;
+    button.downState = up;
+    button.hitTestState = new ShapeObject(null);
+    button.matrix = { ...button.matrix, tx: 110, ty: 10 };
+    button.setState("up", false);
+    extra.root.addChildAt(button, extra.root.children.length);
+    await compare();
+    button.setState("over", false);
+    for (let i = 0; i < 4; i++) {
+      morph.ratio = [0, 16384, 32768, 65535][i];
+      morph.invalidate(CONTENT);
+      const before = morph.shape;
+      check(publish() !== null, "morph snapshot not published");
+      check(morph.shape === before, "capture changed main-thread morph bounds");
+      matches(await request("render").done, reference());
+    }
+    button.setState("down", false);
+    await compare();
+    button.downState = null;
+    button.show();
+    await compare();
+    results.push("button states and morph ratios match without capturing off-list states");
+
     player.root.removeChild(extra.root);
     await compare();
     assets.drop(2);

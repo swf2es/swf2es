@@ -41,8 +41,8 @@ not a prerequisite for the shared-memory path.
 
 ## Scene coverage
 
-The codec supports 2D containers and immutable shapes, static text, TextFields,
-and Bitmap objects. It carries child order, transforms, visibility, colour
+The codec supports 2D containers, shapes and morphs, dynamic Graphics, button
+states, static text, TextFields and Bitmap objects. It carries child order, transforms, visibility, colour
 transforms, all Flash blend modes, timeline clip depths, script masks within
 the captured tree, and every filter except displacement maps. The worker
 retains mirror objects across frames and draws through the existing `PixiView`
@@ -73,8 +73,10 @@ version. Two Bitmaps showing one store share a mirror store. Unchanged versions
 retain the mirror's CPU/GPU copy, but their pixels are still present in the
 frame so skipping a presentation cannot lose an update. Mirror pixels own
 their memory, and retired stores are disposed. Dirty-rectangle staging remains
-future work. Immutable library bitmap fills use the shared asset pixels;
-mutable fills and bitmap strokes remain unsupported.
+future work. Immutable library bitmap fills use the shared asset pixels.
+Graphics bitmap fills and textured triangles share the same per-frame store
+records as Bitmap objects, including change notifications for retained geometry.
+Bitmap strokes on library shapes remain unsupported.
 
 A main-thread `BitmapData.draw` can leave pixels newer on its GPU. Encoding
 reads the store's `readable` pixels, which synchronously brings that copy back
@@ -83,27 +85,37 @@ never drawn the stage, followed by an immediate pixel read while the worker
 renders the stage. This preserves the bitmap operation's semantics; the readback
 cost and the extra main-thread renderer's GPU resources must be included in performance and memory measurements.
 
-Unsupported content is rejected during encoding: dynamic Graphics, morphs,
-buttons, displacement maps, masks outside the captured tree, explicit
-`cacheAsBitmap`, scroll rectangles, scale9 and 3D. Decoding validates the full snapshot before
-changing the mirror, including variable content, fonts and mask ownership.
+Graphics snapshots copy resolved layers: paths, gradients, winding, line styles,
+closing strokes and textured triangles, including the triangles drawn under a
+mirrored transform. The worker retains unchanged geometry. A button contributes
+only its currently visible display-list children; its other states, input and
+scripts remain on main. Morphs reference their registered asset and ratio. Capture
+does not call `drawn()` on the source: a future host must commit main-thread
+morph bounds at its presentation boundary, preserving Flash's last-drawn bounds
+and hit-test behaviour even when presentations are skipped.
+
+Unsupported content is rejected during encoding: displacement maps, masks outside
+the captured tree, explicit `cacheAsBitmap`, scroll rectangles, scale9 and 3D.
+Decoding validates the full snapshot before changing the mirror, including
+variable content, fonts and mask ownership.
 Mask links are restored after attachment; retained arrays never point into a
 reusable shared slot. Changed text and filters invalidate their existing
 mirror objects; unchanged values retain their records and layout.
 
-Version 3 uses two Float64 header values (version and node count), followed
-by 25 Float64 values per node: identity, parent row, character ID, kind/visibility
+Version 4 uses two Float64 header values (version and node count), followed
+by 26 Float64 values per node: identity, parent row, character ID, kind/visibility
 flags, six matrix values, eight colour values, blend index, timeline depth
 (NaN for none), clip depth, mask row (-1 for none), filter-tail offset,
-library ID, and content-tail offset. Zero offsets mean no payload. Each row's
-nonempty filter list and then text/bitmap content follow the rows in row order.
+library ID, content-tail offset, and drawing-tail offset. Zero offsets mean no
+payload. Each row's nonempty filter list, text/bitmap/morph content and Graphics
+layers follow the rows in row order.
 Filter lists contain a count, then kind and values; arrays have a length prefix,
 booleans are 0/1, and bevel types use inner/outer/full indices. Bitmap records
 can reference pixels already defined earlier in the same complete frame.
 The text property/format order and filter field order belong to the version.
 
 This prototype favours explicit complete records over compact packing. At
-50,000 nodes the fixed records alone use about 10 MB per slot, or 30 MB for
+50,000 nodes the fixed records alone use about 10.4 MB per slot, or 31.2 MB for
 three slots, before variable content and assets. That is transport storage,
 not total player memory: each thread also has library and scene objects, and
 the renderer owns GPU resources. Encoding/decoding still allocates; memory,
@@ -118,8 +130,16 @@ script-visible operations on the main thread. In particular, moving stage
 rendering must preserve `BitmapData.draw` and immediate pixel reads, with any
 extra main-thread renderer and GPU copies included in memory measurements.
 
-Before integrating a host: cover the remaining scene features, test context
-loss and error recovery, retain synchronous bitmap semantics, and measure
-encoding, rendering, presentation/input latency, backpressure and both heaps.
+The browser tests reject a malformed frame, draw a valid frame afterwards, and
+lose and restore the worker's WebGL context twice with filters, text and bitmap
+fills still visible. Failed presentations release their slots. Filter caches
+invalidate after restoration in both renderers. These checks cover recovery
+inside a live worker; worker termination and recreation, asset re-registration
+and host fallback remain to be implemented.
+
+Before integrating a host: cover the remaining scene features, implement host
+recovery and morph presentation bookkeeping, retain synchronous bitmap semantics,
+and measure encoding, rendering, presentation/input latency, backpressure and both
+heaps.
 The current pixel tests establish correctness for the limited scene; they
 do not establish a performance gain on real SWFs.

@@ -11,7 +11,7 @@ export interface BitmapRecord {
   snapping: string;
   pixels: BitmapPixels | null;
 }
-interface BitmapPixels {
+export interface BitmapPixels {
   id: number;
   version: number;
   width: number;
@@ -38,7 +38,11 @@ export class BitmapSnapshot {
 
     w.number(Number(o.smoothing));
     w.number(snapping);
-    const store = o.store;
+    return this.writeStore(o.store, data, w.at);
+  }
+
+  writeStore(store: BitmapStore | null, data: Float64Array, at: number): number {
+    const w = new ValuesWriter(data, at);
     if (!store || store.disposed) {
       w.number(0);
       return w.at;
@@ -83,9 +87,15 @@ export class BitmapRecords {
     const r = new ValuesReader(data, at);
     const smoothing = r.boolean();
     const snapping = SNAPPING[r.integer(0, SNAPPING.length - 1)];
+    const decoded = this.readStore(data, r.at);
+    return { record: { smoothing, snapping, pixels: decoded.pixels }, end: decoded.end };
+  }
+
+  readStore(data: Float64Array, at: number): { pixels: BitmapPixels | null; end: number } {
+    const r = new ValuesReader(data, at);
     const id = r.integer(0, Number.MAX_SAFE_INTEGER);
     if (id === 0) {
-      return { record: { smoothing, snapping, pixels: null }, end: r.at };
+      return { pixels: null, end: r.at };
     }
 
     const offset = r.integer(0, data.length);
@@ -95,7 +105,7 @@ export class BitmapRecords {
         throw new Error("invalid scene snapshot bitmap reference");
       }
 
-      return { record: { smoothing, snapping, pixels: previous.value }, end: r.at };
+      return { pixels: previous.value, end: r.at };
     }
 
     if (offset !== r.at) {
@@ -115,7 +125,7 @@ export class BitmapRecords {
     const pixels = new Uint32Array(data.buffer, data.byteOffset + r.at * 8, count);
     const value = { id, version, width, height, transparent, pixels };
     this.records.set(id, { offset, value });
-    return { record: { smoothing, snapping, pixels: value }, end: r.at + size };
+    return { pixels: value, end: r.at + size };
   }
 }
 
@@ -128,7 +138,18 @@ export class BitmapMirror {
   }
 
   apply(o: BitmapObject, record: BitmapRecord): void {
-    const p = record.pixels;
+    const store = this.store(record.pixels);
+    if (o.store !== store) {
+      o.store = store;
+    }
+    if (o.smoothing !== record.smoothing || o.pixelSnapping !== record.snapping) {
+      o.smoothing = record.smoothing;
+      o.pixelSnapping = record.snapping;
+      o.invalidate(CONTENT);
+    }
+  }
+
+  store(p: BitmapPixels | null): BitmapStore | null {
     let store: BitmapStore | null = null;
     if (p) {
       this.seen.add(p.id);
@@ -157,14 +178,7 @@ export class BitmapMirror {
       }
     }
 
-    if (o.store !== store) {
-      o.store = store;
-    }
-    if (o.smoothing !== record.smoothing || o.pixelSnapping !== record.snapping) {
-      o.smoothing = record.smoothing;
-      o.pixelSnapping = record.snapping;
-      o.invalidate(CONTENT);
-    }
+    return store;
   }
 
   finish(): void {

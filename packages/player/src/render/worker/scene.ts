@@ -3,8 +3,8 @@
 import { IDENTITY_COLOR, sameColor } from "../../display/color.js";
 import {
   BitmapObject,
-  BUTTON,
   CHILDREN,
+  CONTENT,
   Container,
   type DisplayObject,
   ShapeObject,
@@ -16,19 +16,22 @@ import { BLEND_MODES } from "../../display/displayobject.js";
 import type { Filter } from "../../display/filters.js";
 import type { Library } from "../../display/timeline.js";
 import { BitmapMirror, type BitmapRecord, BitmapRecords, BitmapSnapshot } from "./bitmaps.js";
+import { bindDrawing, type DrawingRecord, readDrawing, writeDrawing } from "./drawing.js";
 import { readFilters, writeFilters } from "./filters.js";
 import { type SceneLibraries, sceneLibraries } from "./libraries.js";
 import { readText, SnapshotText, type TextRecord, writeText } from "./text.js";
 
-const VERSION = 3;
+const VERSION = 4;
 const HEADER = 2;
-const ROW = 25;
+const ROW = 26;
 const CONTAINER = 1;
 const VISIBLE = 2;
 const STATIC_TEXT = 4;
 const TEXT = 8;
 const BITMAP = 16;
-const KINDS = CONTAINER | STATIC_TEXT | TEXT | BITMAP;
+const DYNAMIC = 32;
+const MORPH = 64;
+const KINDS = CONTAINER | STATIC_TEXT | TEXT | BITMAP | DYNAMIC | MORPH;
 
 /** Minimum space for the nodes, plus any filter and content tail values. */
 export const sceneFrameBytes = (nodes: number, contentValues = 0): number =>
@@ -70,8 +73,7 @@ export class SceneSnapshot {
             !(o instanceof TextObject) &&
             !(o instanceof StaticTextObject) &&
             !(o instanceof BitmapObject)) ||
-          o.kind === BUTTON ||
-          o.drawing ||
+          (o.drawing && !container && !(o instanceof ShapeObject)) ||
           o.space ||
           o.projection ||
           o.scrollRect ||
@@ -89,11 +91,9 @@ export class SceneSnapshot {
         let library = 0;
         if (o instanceof ShapeObject) {
           if (
-            o.morph ||
             o.stale ||
-            !o.shape ||
-            o.shape.id <= 0 ||
-            o.shape.layers.some(
+            (!o.drawing && !o.morph && o.shape && o.shape.id <= 0) ||
+            o.shape?.layers.some(
               (layer) =>
                 layer.meshes?.length ||
                 layer.strokes.some(({ line }) => line.fill?.type === "bitmap"),
@@ -104,11 +104,18 @@ export class SceneSnapshot {
             );
           }
 
-          const ref = this.assets.ref(o.shape);
-          character = ref.character;
-          library = ref.library;
-          for (const layer of o.shape.layers) {
-            for (const { fill } of layer.fills) {
+          const asset = o.morph ?? o.shape;
+          if (!o.drawing && asset) {
+            const ref = this.assets.ref(asset);
+            character = ref.character;
+            library = ref.library;
+          }
+
+          const layers = o.shape?.layers ?? [];
+          for (let k = 0; k < layers.length; k++) {
+            const fills = layers[k].fills;
+            for (let j = 0; j < fills.length; j++) {
+              const fill = fills[j].fill;
               if (fill.type === "image") {
                 if (
                   !("type" in fill.image) ||
@@ -145,7 +152,11 @@ export class SceneSnapshot {
                   ? TEXT
                   : o instanceof BitmapObject
                     ? BITMAP
-                    : 0) | (o.visible ? VISIBLE : 0),
+                    : o.drawing || (o instanceof ShapeObject && !o.shape)
+                      ? DYNAMIC
+                      : o instanceof ShapeObject && o.morph
+                        ? MORPH
+                        : 0) | (o.visible ? VISIBLE : 0),
             m.a,
             m.b,
             m.c,
@@ -167,13 +178,14 @@ export class SceneSnapshot {
             0,
             library,
             0,
+            0,
           ],
           at,
         );
 
         if (container) {
-          for (const child of o.children) {
-            nodes.push(child);
+          for (let k = 0; k < o.children.length; k++) {
+            nodes.push(o.children[k]);
             parents.push(i);
           }
         }
@@ -207,6 +219,21 @@ export class SceneSnapshot {
         } else if (o instanceof BitmapObject) {
           data[at + 24] = end;
           end = this.bitmaps.write(o, data, end);
+        } else if (o instanceof ShapeObject && o.morph && !o.drawing) {
+          data[at + 24] = end;
+          if (!Number.isInteger(o.ratio) || o.ratio < 0 || o.ratio > 65535) {
+            throw new Error("invalid worker morph ratio");
+          }
+          if (end >= data.length) {
+            throw new RangeError("scene snapshot exceeds its slot capacity");
+          }
+
+          data[end++] = o.ratio;
+        }
+
+        if (o.drawing) {
+          data[at + 25] = end;
+          end = writeDrawing(o.drawing, data, end, this.assets, this.bitmaps);
         }
       }
 
@@ -229,6 +256,8 @@ interface MirrorNode {
   library: number;
   kind: number;
   textValues: Float64Array;
+  drawingValues: Uint8Array;
+  drawingImages: object[];
   filterValues: Float64Array;
 }
 
@@ -276,6 +305,9 @@ export class SceneMirror {
     const contentEnds: number[] = [];
     const texts: (TextRecord | null)[] = [];
     const bitmaps: (BitmapRecord | null)[] = [];
+    const drawings: (DrawingRecord | null)[] = [];
+    const drawingEnds: number[] = [];
+    const ratios: number[] = [];
     const bitmapRecords = new BitmapRecords();
     let end = HEADER + count * ROW;
     // Validate before touching the mirror, so a rejected frame leaves it intact.
@@ -292,16 +324,16 @@ export class SceneMirror {
         !Number.isInteger(flags) ||
         flags < 0 ||
         flags > (KINDS | VISIBLE) ||
-        ![0, CONTAINER, STATIC_TEXT, TEXT, BITMAP].includes(kind) ||
+        ![0, CONTAINER, STATIC_TEXT, TEXT, BITMAP, DYNAMIC, MORPH].includes(kind) ||
         !Number.isSafeInteger(library) ||
         library < 0 ||
         !Number.isInteger(parent) ||
         (i === 0 ? parent !== -1 || !(flags & CONTAINER) : parent < 0 || parent >= i) ||
         (i > 0 && !(data[HEADER + parent * ROW + 3] & CONTAINER)) ||
-        (kind === 0 || kind === STATIC_TEXT
+        (kind === 0 || kind === STATIC_TEXT || kind === MORPH
           ? !Number.isInteger(character) ||
             character <= 0 ||
-            asset?.type !== (kind === 0 ? "shape" : "static")
+            asset?.type !== (kind === 0 ? "shape" : kind === MORPH ? "morph" : "static")
           : character !== 0 || library !== 0)
       ) {
         throw new Error("invalid scene snapshot node");
@@ -342,7 +374,7 @@ export class SceneMirror {
 
       filterEnds.push(end);
       const content = data[at + 24];
-      if (kind === TEXT || kind === BITMAP) {
+      if (kind === TEXT || kind === BITMAP || kind === MORPH) {
         if (content !== end) {
           throw new Error("invalid scene snapshot content offset");
         }
@@ -352,6 +384,19 @@ export class SceneMirror {
           texts.push(decoded.record);
           bitmaps.push(null);
           end = decoded.end;
+        } else if (kind === MORPH) {
+          if (
+            content >= data.length ||
+            !Number.isInteger(data[content]) ||
+            data[content] < 0 ||
+            data[content] > 65535
+          ) {
+            throw new Error("invalid scene snapshot morph ratio");
+          }
+
+          texts.push(null);
+          bitmaps.push(null);
+          end = content + 1;
         } else {
           const decoded = bitmapRecords.read(data, content);
           texts.push(null);
@@ -368,6 +413,21 @@ export class SceneMirror {
       }
 
       contentEnds.push(end);
+      ratios.push(kind === MORPH ? data[content] : 0);
+      const drawing = data[at + 25];
+      if (drawing !== 0) {
+        if (drawing !== end || ![CONTAINER, 0, DYNAMIC, MORPH].includes(kind)) {
+          throw new Error("invalid scene snapshot drawing offset");
+        }
+
+        const decoded = readDrawing(data, drawing, this.assets, bitmapRecords);
+        drawings.push(decoded.record);
+        end = decoded.end;
+      } else {
+        drawings.push(null);
+      }
+
+      drawingEnds.push(end);
       this.seen.add(id);
     }
 
@@ -406,11 +466,15 @@ export class SceneMirror {
                         asset,
                         (this.assets.library(library) as Library).characters,
                       )
-                    : new ShapeObject(asset?.type === "shape" ? asset : null),
+                    : asset?.type === "morph"
+                      ? ShapeObject.ofMorph(asset)
+                      : new ShapeObject(asset?.type === "shape" ? asset : null),
           character,
           library,
           kind,
           textValues: new Float64Array(),
+          drawingValues: new Uint8Array(),
+          drawingImages: [],
           filterValues: new Float64Array(),
         };
         this.nodes.set(id, node);
@@ -455,10 +519,7 @@ export class SceneMirror {
 
       const offset = data[at + 22];
       const values = offset ? data.subarray(offset, filterEnds[i]) : data.subarray(0, 0);
-      if (
-        node.filterValues.length !== values.length ||
-        !node.filterValues.every((v, k) => Object.is(v, values[k]))
-      ) {
+      if (!sameValues(node.filterValues, values)) {
         node.filterValues = values.slice();
         o.filters = filters[i];
         o.invalidate(TRANSFORM);
@@ -466,15 +527,46 @@ export class SceneMirror {
 
       if (o instanceof SnapshotText) {
         const values = data.subarray(data[at + 24], contentEnds[i]);
-        if (
-          node.textValues.length !== values.length ||
-          !node.textValues.every((v, k) => Object.is(v, values[k]))
-        ) {
+        if (!sameValues(node.textValues, values)) {
           node.textValues = values.slice();
           o.apply(texts[i] as TextRecord);
         }
       } else if (o instanceof BitmapObject) {
         this.bitmaps.apply(o, bitmaps[i] as BitmapRecord);
+      }
+
+      if (o instanceof ShapeObject && o.ratio !== ratios[i]) {
+        o.ratio = ratios[i];
+        o.invalidate(CONTENT);
+      }
+
+      const drawing = drawings[i];
+      const drawingStart = data[at + 25];
+      // Byte comparison preserves packed bitmap bits even where Float64 reads NaN.
+      const drawingValues = drawingStart
+        ? bytes.subarray(drawingStart * 8, drawingEnds[i] * 8)
+        : bytes.subarray(0, 0);
+      const resolved = drawing ? bindDrawing(drawing, this.bitmaps, o) : null;
+      let imagesChanged = node.drawingImages.length !== (drawing?.images.length ?? 0);
+      if (drawing) {
+        for (let k = 0; k < drawing.images.length; k++) {
+          if (node.drawingImages[k] !== drawing.images[k].target.image) {
+            imagesChanged = true;
+          }
+        }
+      }
+
+      if (imagesChanged || !sameValues(node.drawingValues, drawingValues)) {
+        node.drawingImages.length = 0;
+        if (drawing) {
+          for (let k = 0; k < drawing.images.length; k++) {
+            node.drawingImages.push(drawing.images[k].target.image);
+          }
+        }
+
+        node.drawingValues = drawingValues.slice();
+        o.drawing = resolved;
+        o.invalidate(CONTENT);
       }
 
       const blend = BLEND_MODES[data[at + 18]];
@@ -507,7 +599,8 @@ export class SceneMirror {
 
     // Reordering children clears their timeline depths; restore these only
     // after the full tree is attached, before Pixi groups timeline masks.
-    for (const o of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const o = rows[i];
       if (o instanceof Container) {
         o.depths.clear();
       }
@@ -543,4 +636,18 @@ export class SceneMirror {
     this.bitmaps.finish();
     return rows[0] as Container;
   }
+}
+
+function sameValues(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) {
+      return false;
+    }
+  }
+
+  return true;
 }

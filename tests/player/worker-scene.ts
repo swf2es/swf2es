@@ -55,6 +55,26 @@ export function workerContentScene(): Uint8Array {
     frameCount: 1,
     tags: [
       w.fileAttributes(false),
+      w.morphShape({
+        id: 10,
+        startBounds: [0, 500, 0, 500],
+        endBounds: [0, 700, 0, 700],
+        fills: [{ start: 0xffcc2244, end: 0xff33cc88 }],
+        start: [
+          {
+            fill1: 1,
+            commands: [
+              { move: [0, 0] },
+              { line: [500, 0] },
+              { line: [500, 500] },
+              { line: [0, 0] },
+            ],
+          },
+        ],
+        end: [
+          [{ move: [0, 0] }, { curve: [700, 0, 700, 700] }, { line: [0, 700] }, { line: [0, 0] }],
+        ],
+      }),
       w.shape({
         id: 1,
         bounds: [0, 400, 0, 400],

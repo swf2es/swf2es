@@ -59,7 +59,7 @@ await withPage(
       `runWorkerTest(${JSON.stringify(Buffer.from(workerScene()).toString("base64"))}, ${JSON.stringify(Buffer.from(workerContentScene()).toString("base64"))})`,
     );
     assert.equal(result.exception, null);
-    assert.equal(result.value?.length, 10);
+    assert.equal(result.value?.length, 13);
     for (const name of result.value ?? []) {
       console.log(`worker: ok ${name}`);
     }

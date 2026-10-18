@@ -12,7 +12,15 @@ import { SceneMirror } from "../../packages/player/dist/render/worker/scene.js";
 const scope = self as DedicatedWorkerGlobalScope;
 interface Command {
   id: number;
-  type: "init" | "render" | "destroy" | "release" | "library" | "dropLibrary";
+  type:
+    | "init"
+    | "render"
+    | "destroy"
+    | "release"
+    | "library"
+    | "dropLibrary"
+    | "loseContext"
+    | "restoreContext";
   frames: SharedFrames;
   asset: SharedLibrary;
   library: number;
@@ -27,6 +35,8 @@ let reader: FrameReader;
 let mirror: SceneMirror;
 let assets: SceneLibraries;
 let renderer: Renderer;
+let canvas: OffscreenCanvas;
+let contextLoss: WEBGL_lose_context | null = null;
 let view: PixiView;
 let resume: (() => void) | null = null;
 let stopping = false;
@@ -39,6 +49,7 @@ async function handle(command: Command): Promise<void> {
         throw new Error("worker test host is not isolated");
       }
 
+      canvas = command.canvas;
       reader = new FrameReader(command.frames);
       assets = new SceneLibraries();
       assets.add(1, readSharedLibrary(command.asset));
@@ -61,6 +72,36 @@ async function handle(command: Command): Promise<void> {
       assets.drop(command.library);
       scope.postMessage({ id, type: "retired" });
       return;
+    case "loseContext":
+    case "restoreContext": {
+      const gl = (renderer as WebGLRenderer).gl;
+      contextLoss ??= gl.getExtension("WEBGL_lose_context");
+      if (!contextLoss) {
+        throw new Error("worker context-loss extension is unavailable");
+      }
+
+      const lose = command.type === "loseContext";
+      const event = lose ? "webglcontextlost" : "webglcontextrestored";
+      await new Promise<void>((resolve, reject) => {
+        const done = () => {
+          clearTimeout(timeout);
+          canvas.removeEventListener(event, done);
+          resolve();
+        };
+        const timeout = setTimeout(() => {
+          canvas.removeEventListener(event, done);
+          reject(new Error(`worker ${event} timed out`));
+        }, 5000);
+        canvas.addEventListener(event, done);
+        if (lose) {
+          contextLoss?.loseContext();
+        } else {
+          contextLoss?.restoreContext();
+        }
+      });
+      scope.postMessage({ id, type: lose ? "lost" : "restored" });
+      return;
+    }
     case "render": {
       const frame = reader.take();
       if (!frame) {
@@ -84,8 +125,12 @@ async function handle(command: Command): Promise<void> {
           renderer.resize(...command.size);
         }
 
-        view.render(mirror.apply(frame.bytes));
         const gl = (renderer as WebGLRenderer).gl;
+        if (gl.isContextLost()) {
+          throw new Error("worker WebGL context is lost");
+        }
+
+        view.render(mirror.apply(frame.bytes));
         const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
         gl.readPixels(
           0,

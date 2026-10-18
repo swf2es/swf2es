@@ -4,6 +4,7 @@ import { readSwf } from "../../../../../packages/format/dist/index.js";
 import { BitmapStore } from "../../../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
+  ButtonObject,
   Container,
   ShapeObject,
   StaticTextObject,
@@ -71,7 +72,7 @@ test("a rejected vector snapshot leaves the existing mirror intact", () => {
   const root = mirror.apply(frame);
   const child = root.children[0];
   const data = new Float64Array(frame.buffer, 0, frame.length / 8);
-  data[2 + 25 + 1] = 99;
+  data[2 + 26 + 1] = 99;
   assert.throws(() => mirror.apply(frame), /snapshot node/);
   assert.equal(root.children[0], child);
   assert.throws(() => mirror.apply(frame.subarray(0, frame.length - 1)), /length/);
@@ -80,7 +81,7 @@ test("a rejected vector snapshot leaves the existing mirror intact", () => {
   const shape = p.library.characters.get(1);
   assert.ok(shape);
   p.library.characters.set(0, shape);
-  data[2 + 3 * 25 + 2] = 0;
+  data[2 + 3 * 26 + 2] = 0;
   assert.throws(() => mirror.apply(frame), /snapshot node/);
 });
 
@@ -190,7 +191,7 @@ test("bad filter tails and conflicting masks leave the mirror untouched", () => 
     values[index] = saved;
   }
   values[2 + 21] = 2;
-  values[2 + 25 + 21] = 2;
+  values[2 + 26 + 21] = 2;
   assert.throws(() => mirror.apply(frame), /snapshot effects/);
   assert.equal(root.children[0].mask, null);
   assert.equal(root.mask, null);
@@ -302,10 +303,10 @@ test("malformed text and bitmap payloads leave the prior mirror intact", () => {
   const layout = text.layout;
   const store = bitmap.store;
   const data = new Float64Array(frame.buffer, 0, frame.length / 8);
-  const textAt = data[2 + 25 + 24];
-  const bitmapAt = data[2 + 2 * 25 + 24];
+  const textAt = data[2 + 26 + 24];
+  const bitmapAt = data[2 + 2 * 26 + 24];
   for (const [index, value] of [
-    [2 + 25 + 24, -1],
+    [2 + 26 + 24, -1],
     [textAt + 4, 2],
     [bitmapAt + 2, -1],
     [bitmapAt + 3, 0],
@@ -325,4 +326,47 @@ test("malformed text and bitmap payloads leave the prior mirror intact", () => {
   assert.throws(() => mirror.apply(frame), /font/);
   assert.equal(text.layout, layout);
   assert.equal(bitmap.store, store);
+});
+
+test("buttons mirror only their visible state and morph capture leaves main-thread bounds unchanged", () => {
+  const { source, target } = library();
+  const root = new Container();
+  const button = new ButtonObject();
+  const shape = source.characters.get(1);
+  const asset = source.characters.get(10);
+  assert.ok(shape?.type === "shape" && asset?.type === "morph");
+  const up = new ShapeObject(shape);
+  const down = ShapeObject.ofMorph(asset);
+  const hidden = new TextObject(null);
+  // An unsupported off-list state must not enter the rendering snapshot.
+  hidden.cachedAsBitmap = true;
+  button.upState = up;
+  button.downState = down;
+  button.hitTestState = hidden;
+  button.setState("up", false);
+  root.addChildAt(button, 0);
+  const snapshot = new SceneSnapshot(source);
+  const mirror = new SceneMirror(target);
+  const bytes = new Uint8Array(sceneFrameBytes(8, 32));
+  const apply = () => mirror.apply(bytes.subarray(0, snapshot.encode(root, bytes)));
+  const mirrored = apply().children[0] as Container;
+  assert.equal(mirrored.children.length, 1);
+  assert.equal((mirrored.children[0] as ShapeObject).shape?.id, 1);
+  button.setState("down", false);
+  down.ratio = 32768;
+  const old = down.shape;
+  apply();
+  assert.equal(down.shape, old);
+  const morph = mirrored.children[0] as ShapeObject;
+  assert.equal(morph.ratio, 32768);
+  assert.equal(morph.morph?.id, 10);
+  assert.notDeepEqual(morph.drawn()?.shape, old?.shape);
+  down.ratio = 65535;
+  apply();
+  assert.equal(mirrored.children[0], morph);
+  assert.equal(morph.ratio, 65535);
+  button.downState = null;
+  button.show();
+  apply();
+  assert.equal(mirrored.children.length, 0);
 });
