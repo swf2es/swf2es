@@ -2768,9 +2768,10 @@ renderer, input bindings and loop, the host lets go itself, as
 ### Rendering
 
 An internal [shared-memory worker prototype](render-worker.md) exercises
-complete vector-scene snapshots and the existing renderer on an
-OffscreenCanvas. Hosts still select the main-thread renderer; worker
-integration and broader scene coverage remain separate work.
+complete 2D scene snapshots and the existing renderer on an
+OffscreenCanvas. It includes registered library assets, main-thread text layout
+and versioned bitmap pixel snapshots. Hosts still select the main-thread
+renderer; worker integration and broader scene coverage remain separate work.
 
 A branch with at least 64 immediate art objects across its subtree owns
 a Pixi render group. Children already grouped do not count again, so

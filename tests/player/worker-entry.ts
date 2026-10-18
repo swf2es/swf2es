@@ -1,17 +1,21 @@
 import { type Renderer, type WebGLRenderer, WebWorkerAdapter } from "pixi.js";
-import { readSwf } from "../../packages/format/dist/index.js";
-import { readLibrary } from "../../packages/player/dist/display/timeline.js";
 import { PixiView } from "../../packages/player/dist/render/view.js";
 import { FrameReader, type SharedFrames } from "../../packages/player/dist/render/worker/frames.js";
+import {
+  readSharedLibrary,
+  SceneLibraries,
+  type SharedLibrary,
+} from "../../packages/player/dist/render/worker/libraries.js";
 import { workerRenderer } from "../../packages/player/dist/render/worker/renderer.js";
-import { VectorMirror } from "../../packages/player/dist/render/worker/scene.js";
+import { SceneMirror } from "../../packages/player/dist/render/worker/scene.js";
 
 const scope = self as DedicatedWorkerGlobalScope;
 interface Command {
   id: number;
-  type: "init" | "render" | "destroy" | "release";
+  type: "init" | "render" | "destroy" | "release" | "library" | "dropLibrary";
   frames: SharedFrames;
-  swf: SharedArrayBuffer;
+  asset: SharedLibrary;
+  library: number;
   canvas: OffscreenCanvas;
   width: number;
   height: number;
@@ -20,7 +24,8 @@ interface Command {
 }
 
 let reader: FrameReader;
-let mirror: VectorMirror;
+let mirror: SceneMirror;
+let assets: SceneLibraries;
 let renderer: Renderer;
 let view: PixiView;
 let resume: (() => void) | null = null;
@@ -35,7 +40,9 @@ async function handle(command: Command): Promise<void> {
       }
 
       reader = new FrameReader(command.frames);
-      mirror = new VectorMirror(readLibrary(readSwf(new Uint8Array(command.swf))));
+      assets = new SceneLibraries();
+      assets.add(1, readSharedLibrary(command.asset));
+      mirror = new SceneMirror(assets);
       renderer = await workerRenderer(
         command.canvas,
         command.width,
@@ -46,6 +53,14 @@ async function handle(command: Command): Promise<void> {
       scope.postMessage({ id, type: "ready" });
       return;
     }
+    case "library":
+      assets.add(command.library, readSharedLibrary(command.asset));
+      scope.postMessage({ id, type: "registered" });
+      return;
+    case "dropLibrary":
+      assets.drop(command.library);
+      scope.postMessage({ id, type: "retired" });
+      return;
     case "render": {
       const frame = reader.take();
       if (!frame) {
@@ -97,6 +112,7 @@ async function handle(command: Command): Promise<void> {
     }
     case "destroy":
       view.dispose(view.stage);
+      mirror.dispose();
       renderer.destroy();
       scope.postMessage({ id, type: "destroyed" });
       return;

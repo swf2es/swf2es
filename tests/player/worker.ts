@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withPage } from "./chrome.ts";
 import { importMap } from "./serve.ts";
-import { workerScene } from "./worker-scene.ts";
+import { workerContentScene, workerScene } from "./worker-scene.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -56,10 +56,10 @@ await withPage(
   "runWorkerTest",
   async (evaluate) => {
     const result = await evaluate<string[]>(
-      `runWorkerTest(${JSON.stringify(Buffer.from(workerScene()).toString("base64"))})`,
+      `runWorkerTest(${JSON.stringify(Buffer.from(workerScene()).toString("base64"))}, ${JSON.stringify(Buffer.from(workerContentScene()).toString("base64"))})`,
     );
     assert.equal(result.exception, null);
-    assert.equal(result.value?.length, 7);
+    assert.equal(result.value?.length, 10);
     for (const name of result.value ?? []) {
       console.log(`worker: ok ${name}`);
     }

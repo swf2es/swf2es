@@ -429,9 +429,9 @@ function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number)
     letterSpacing: Number.isFinite(f.letterSpacing) ? f.letterSpacing : 0,
   };
   const t = new Text({ text: chars, style });
-  // Pixi's Text puts its top at its font's ascent above the baseline; without a DOM (node) there is no font to measure.
+  // Workers measure on OffscreenCanvas as the page does; node has no canvas font to measure.
   const ascent =
-    typeof document === "undefined"
+    typeof document === "undefined" && typeof OffscreenCanvas === "undefined"
       ? deviceMetrics(f.font, f.size, f.bold, f.italic).ascent
       : CanvasTextMetrics.measureFont(fontStringFromTextStyle(t.style)).ascent;
   t.position.set((dx + run[0].x) / 20, baseline - ascent);
