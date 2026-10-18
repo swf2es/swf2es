@@ -833,7 +833,6 @@ const SCROLL_SOURCE = `package {
 }
 `;
 
-/** The scrolling trail (--scroll): a bitmap of `size` a side that a script draws into and scrolls each frame. */
 /** N TextFields in Stem (cases.ts), advanced or normal; a tenth take new text a frame, a seventh move. */
 function textSwf(count: number, normal: boolean): Uint8Array {
   const source = `package {
@@ -893,6 +892,7 @@ function textSwf(count: number, normal: boolean): Uint8Array {
   });
 }
 
+/** The scrolling trail (--scroll): a bitmap of `size` a side that a script draws into and scrolls each frame. */
 function scrollSwf(size: number): Uint8Array {
   const abc = compiler()(`BenchScroll${size}`, SCROLL_SOURCE.replace("SIZE", String(size)));
   libraryAbcs();
