@@ -1982,13 +1982,38 @@ export class MovieClip extends Container {
   /** Whether an AVM1 clip ran the actions after its last ShowFrame, which it does once. */
   private tailed = false;
 
-  constructor(
-    readonly timeline: Timeline,
-    library: Library,
-  ) {
+  /** Its frames: its character's, or, once an AVM1 load has filled it, the SWF's root's. */
+  timeline: Timeline;
+
+  constructor(timeline: Timeline, library: Library) {
     super();
     this.kind = CLIP;
+    this.timeline = timeline;
     this.library = library;
+  }
+
+  /**
+   * What an AVM1 load puts in it, as Flash keeps the clip and replaces
+   * what it shows: `timeline` of `library` in place of its own, its
+   * children gone, before its first frame and playing. Telling of what it
+   * showed going, its unload, is the caller's.
+   */
+  replaceTimeline(timeline: Timeline, library: Library): void {
+    this.library.sounds?.stopStream(this);
+    for (const child of [...this.children]) {
+      this.removeChild(child);
+    }
+
+    this.depths.clear();
+    this.held = [];
+    this.timeline = timeline;
+    this.library = library;
+    this.drawing = null;
+    this.currentFrame = 0;
+    this.running = true;
+    this.tailed = false;
+    this.queuedGoto = null;
+    this.invalidate(CONTENT);
   }
 
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */

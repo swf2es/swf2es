@@ -92,11 +92,13 @@ export interface Host {
   halt(): void;
   /**
    * What paths need of the display list (docs/avm1.md, "Scopes, targets
-   * and names"), each a clip's AVM1 object: the root's, `_levelN`, a
-   * clip's parent, and a clip's child by its instance name, found in its
-   * case from SWF 7. A host without a display list leaves them out.
+   * and names"), each a clip's AVM1 object: the `_root` of the code whose
+   * clip is `base` (its level, or the clip below it that locks the root),
+   * `_levelN`, a clip's parent, and a clip's child by its instance name,
+   * found in its case from SWF 7. A host without a display list leaves
+   * them out.
    */
-  root?(): Value;
+  root?(base: Target): Value;
   level?(level: number): Value;
   parent?(clip: object): Value;
   child?(clip: object, name: string, caseSensitive: boolean): Value;

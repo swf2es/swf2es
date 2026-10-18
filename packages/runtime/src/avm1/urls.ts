@@ -212,7 +212,7 @@ function levelClip(cx: Activation, level: number): Target | null {
 }
 
 function rootClip(cx: Activation): Target | null {
-  const root = cx.host.root?.();
+  const root = cx.host.root?.(cx.base);
   return root instanceof Avm1Object ? (cx.host.clipOf?.(root) ?? null) : null;
 }
 

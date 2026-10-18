@@ -49,7 +49,7 @@ runtime's. `codegen` knows the AVM1 runtime's function names but never
 imports it.
 
 `player/src/avm1/` mirrors `playerglobal/`: the host and the frame's AVM1
-work at its top (`avm1.ts`, `paths.ts`, `queue.ts`, `events.ts`), and the
+work at its top (`avm1.ts`, `paths.ts`, `net.ts`, `loads.ts`...), and the
 AS2 classes the player provides in `globals/`, a file per class
 (`globals/MovieClip.ts`, `globals/TextField.ts`...). Its unit tests
 mirror it under `tests/unit/player/avm1/`, as the mirror test requires.
@@ -656,7 +656,8 @@ of a name exist (set by SWF 7 code), a SWF 6 finds the exact one, else
 the lower-case one, else the first added. Within
 one SWF, an object made by a SWF 6 and read by a SWF 7 behaves so by
 construction; adl's harness runs one SWF, so that is not checked against
-it yet (step 15 brings `loadMovie`).
+it yet, though the corpus's SWFs that load others of other versions now
+run (see "Loading movies").
 
 `__proto__` is a property like any other (it can be listed, flagged and
 set), which the object also keeps at hand for the walks up its chain. A
@@ -795,7 +796,10 @@ has it (GetVariable) or set on the first object it reaches (SetVariable).
 A path's steps are a clip's children by name or else properties, `..` a
 clip's parent, a leading `/` the root, and `this`, `_root` and `_levelN`
 at its start; what needs the display list the host gives (`root`,
-`level`, `parent`, `child` in `host.ts`). A name with a
+`level`, `parent`, `child` in `host.ts`). `_root` is the code's own: the
+host is given the clip whose code runs, a function's the one that
+defined it, and answers with its level, or the first clip up from it
+whose `_lockroot` is set (Ruffle's `avm1_root`). A name with a
 `/` and no variable, from SWF 5, is the object the path names. A name
 without a path walks the scope chain, top down, and is read from the
 first scope object that has it on its chain; a name none has is `_root`,
@@ -1046,7 +1050,9 @@ orders them; a set of a display property's name goes to the display
 object where the object has no property of its own of the name; for..in
 lists its children last, the highest depth first. `typeof` a clip is
 `movieclip`, a button's or a text field's `object`; any of them converts
-to its path, `_level0.a.b`. A clip, a button, a text field and a video
+to its path from its level, `_level0.a.b` or `_level1.a`, and `_target`
+is its slash path, `/a/b`, `_level1/a` below another level and `/` for any
+level itself (Ruffle's `slash_path`). A clip, a button, a text field and a video
 get one as they are made; a shape, a morph, a bitmap or static text has
 none, and its name finds its parent's. A clip or a button without a name
 is named `instance1`, `instance2`... as it is made, the root never.
@@ -1596,9 +1602,9 @@ a level's tiles drawn from its clips once, then attached.
   test with `log_fetch` traces them as Ruffle's test navigator does.
 
 `loadVariables`, `loadVariablesNum` and `MovieClip.loadVariables` load
-through the network below; the player has no `loadMovie` yet, so those
-requests are dropped; `$version`, which Flash defines on `_level0` and a
-GET or POST from the root sends, is not defined yet either.
+through the network below, `loadMovie`, `loadMovieNum` and `unloadMovie`
+as "Loading movies" has them; `$version`, which Flash defines on
+`_level0` and a GET or POST from the root sends, is not defined yet.
 
 ### The network: XML, LoadVars, loadVariables and XMLSocket
 
@@ -1640,6 +1646,96 @@ properties are in Flash's for..in order, XMLSocket's hidden. Up to SWF 5,
 where a string is bytes, text loaded or received is its UTF-8's bytes,
 and `loadVariables` reads Windows-1252.
 
+### Loading movies
+
+`loadMovie(url, target, method)`, `MovieClip.loadMovie(url, method)`,
+`loadMovieNum(url, level, method)` and `MovieClipLoader.loadClip` load a
+SWF or an image into a clip or a level; `unloadMovie`,
+`unloadMovieNum`, `MovieClip.unloadMovie` and `unloadClip` empty one.
+The player keeps each AVM1 SWF it runs apart (`Avm1Swf` in `avm1.ts`): its
+module's blocks, its library, its root's frames, its exports and its
+DoInitAction blocks run, which its own timelines and code use and not
+another's; a queued action carries the SWF whose block it runs, a clip's
+clip actions the SWF of its place. Every SWF shares the realm, `_global`
+and its classes among it, as Flash does. Object.registerClass binds a
+name for every SWF, as the corpus's `register_class` shows Flash's: the
+name in its case where the code that registers runs from SWF 7, folded up
+to SWF 6, and so looked up by the SWF of the clip it is for.
+
+A load goes through the host's fetch, as AS3's Loader's does ("content",
+which allowNetworking "internal" allows and "none" refuses), its URL
+resolved against `base`, the clip's variables sent where a method is
+given, and what it brings is read, its images decoded and its code
+compiled before it arrives between frames (`Avm1.network`). Loads into
+one clip, or by one MovieClipLoader, arrive in the order asked, as
+Ruffle's test runner has them arrive, one slow to answer holding the next
+two seconds at most; others do not wait for each other. A second load
+into a clip replaces one under way, which is neither read nor told of
+(Ruffle's `loader.rs`, `movie_loader*`). As it arrives, as Ruffle has it:
+
+- what the clip showed unloads, its children's and its own unload
+  events queued, its own variables go (a level 0's too), and the
+  listeners of a MovieClipLoader hear onLoadStart;
+- a SWF, sniffed by its bytes and not its name, takes the clip's place
+  as Flash keeps the clip: its name, depth, transform, clip actions and
+  `_lockroot` stay, its timeline becomes the SWF's root's, before its
+  first frame, which it enters as the next frame plays, its load event
+  first; the URL's query becomes its variables, and the listeners hear
+  onLoadProgress (bytes as they came, both the size) and
+  onLoadComplete(clip, status);
+- a JPEG, PNG or GIF shows as a bitmap at depth 1 of the emptied clip, a
+  movie of no version (`getSWFVersion()` -1) whose bytes are the file's;
+- other bytes leave the clip in Flash's error state: no frames, none
+  loaded (`_framesloaded` -1), -1 bytes in all and none loaded, no
+  version; onLoadProgress(0, 0) and onLoadComplete;
+- nothing at all, a missing file, leaves it so too, with onLoadError(clip,
+  "URLNotFound", status) and no more. Flash also has "LoadNeverCompleted",
+  for a load cut off midway, which a host fetch that gives all or nothing
+  never reports.
+
+Each load that arrived and loaded has its loader's onLoadInit queued
+after the next frame's clips have played, after the loaded movie's first
+frame's actions, the latest load's first (Ruffle's `movie_clip_on_load`).
+A clip removed before its load arrives takes nothing, and nothing is
+told; one unloaded meanwhile (`unloadClip`, `unloadMovie`) tells
+onLoadStart as it arrives, and no more (adl's `load_cancel_*` outputs,
+which Ruffle fails). One whose listener removes or unloads the clip is
+told no more after that listener.
+
+A clip's clip actions run by the version of the SWF that placed it, and
+its AS2 event methods by the SWF it shows, as Ruffle's movie version has
+it, but where a load left an image, the error state or nothing, which
+have no version, by the SWF that made it. Filling level 0 makes the SWF
+the main one, whose version and length the movie gives from then on.
+
+A level is a clip on the stage at its number as depth, above the levels
+below it; a load into a level that is not there makes it empty at once,
+of the SWF whose code asked, so `_level1` is a clip from the call on.
+`_levelN` finds it, its `_parent` is none, `_root` in its SWF's code is
+itself, its `getDepth()` its number less 16384, and its paths start at
+`_level1`. Unloading a level, or the root of a loaded SWF, waits for the
+next delivery between frames, a frame on, as Ruffle's `avm1_unload_movie`
+does; another clip unloads at once. An unloaded clip is an empty movie of
+its parent's SWF, version and URL, no frames and none loaded.
+
+`_url`, `getSWFVersion`, `getBytesLoaded` and `getBytesTotal` are those of
+the SWF whose timeline a clip is in, the loaded SWF's root's its size;
+MovieClipLoader's `getProgress` gives the size as it came, compressed.
+`_lockroot`, any value as a boolean, makes a clip `_root` for the code in
+it, a SWF loaded into it among it, and stays across a load.
+
+An ActionScript 3 SWF loaded by AS2 plays as AVM1, as Ruffle forces it:
+its timeline plays, and none of its code, ABC or actions, runs.
+
+What is left: Flash's loading state between the call and the arrival
+(`_currentframe` 0, the movie's frames not yet loaded, which the corpus's
+`movieclip_state_values` checks at the call); a load into level 0, which
+Flash and Ruffle treat as a new main movie: its version is taken, but
+the stage's size and the frame rate stay the first SWF's; the per-version prototypes and `_global`s a SWF of one version
+sees of another (`loadmovienum_cross_version_prototype`,
+`global_swf6_7_8`); ImportAssets; and `onLoadProgress` while a SWF
+streams in, which a whole fetch never reports.
+
 ### AVM1 and AVM2
 
 Two VMs meet in three places, each its own step in the plan:
@@ -1655,11 +1751,12 @@ Two VMs meet in three places, each its own step in the plan:
   Flash copies across.
 
 An AS3 SWF loaded by AS2 (`loadMovie`, the corpus's
-`mixed_avm/avm1_loads_avm2*`) comes after the steps here.
+`mixed_avm/avm1_loads_avm2*`) plays as AVM1 with none of its code, as
+Ruffle forces it ("Loading movies"); running its ABC is out of scope.
 
 ### Out of scope at first
 
-The first steps leave out: `loadMovie` into levels other than 0, `print`,
+The first steps leave out: `print`,
 `NetStream` and video, the
 context menu, `TextSnapshot`, a duplicate of a script's drawing or text
 field's properties, and structured output and stack registers in the
@@ -1731,8 +1828,9 @@ AVM1, so nothing is expected from it.
   `value.rs`'s conversions and `f64_to_string`, `activation.rs`'s actions,
   `resolve_target_path` and the scope rules, `function.rs`'s preloads,
   `property_map.rs`, `globals/`'s classes, the event and queue order in
-  `frame_lifecycle.rs`. Its code is Rust, so what swf2es takes is the
-  algorithm and its tables, translated, under its header.
+  `frame_lifecycle.rs`, and `core/src/loader.rs`'s movie loads. Its code
+  is Rust, so what swf2es takes is the algorithm and its tables,
+  translated, under its header.
   Some of its globals are AS1 source (`globals.as`, `AsBroadcaster.as`,
   `Error.as`, `flash/geom`'s `Point`, `Matrix` and `Rectangle`), compiled
   into its build; swf2es has no AS1 compiler, so it writes those in
@@ -2022,9 +2120,14 @@ determinism` green, and the corpus baseline may only go up.
     Then `XML`, `XMLNode`, `LoadVars`, `XMLSocket` and `loadVariables`
     (see "The network"): avm1/ from 421 to 462 of 715, every `xml*`,
     `xml_socket*`, `load_vars`, `loadvars_tostring` and `loadvariables*`
-    test passing. Left: `loadMovie` and `MovieClipLoader`, which
-    `swf5_xml_event_handler_context` needs too, and `System.useCodepage`'s
-    guess of a file's encoding (`form_loader_encoding_3` and `_4`).
+    test passing. Then `loadMovie`, `loadMovieNum`, `unloadMovie`,
+    `MovieClipLoader`, levels and `_lockroot` (see "Loading movies"):
+    avm1/ from 462 to 503 of 715, 65 tests raised, every `loadmovie*`,
+    `mcl_*` (but the two replacing a root of another version, which
+    Ruffle fails too), `unloadmovie*`, `register_class*` and `*lockroot`
+    test passing. Left: what "Loading movies" lists, and
+    `System.useCodepage`'s guess of a file's encoding
+    (`form_loader_encoding_3` and `_4`).
 16. **AVM1 in AS3.** An `AVM1Movie` runs its actions, `LocalConnection`
     across the VMs, `AVM1Movie.call` and `addCallback`; the `avm1-movie`
     case's AVM1 then traces, recorded again with adl. Passes

@@ -269,13 +269,16 @@ async function avm1For(
   // domain, and an instance each would hold a wasm memory each until collected.
   avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
   // Timers and getTimer go by the frames, as the tests step them.
-  // Its files are served, but Flash played it from disk: its URL is a file's, its host localhost.
+  // Its files are served, but Flash played it from disk: its URL is a file's, its host
+  // localhost, at the disk's root as the corpus's outputs show it (`file:///test.swf`), and
+  // what it loads beside it.
   const swfUrl = url ? new URL(url, location.href).href : undefined;
+  const fileName = swfUrl ? new URL(swfUrl).pathname.split("/").pop() : undefined;
   return new Avm1(await avm1Codegen, {
     print: (line) => trace.push(...line.split(/\r|\n/)),
     onUncaught: (error) => uncaught.push(error),
     realTime: null,
-    url: swfUrl ? `file://${new URL(swfUrl).pathname}` : undefined,
+    url: fileName === undefined ? undefined : `file:///${fileName}`,
     base: swfUrl,
     fetch: (request, signal) => {
       if (logFetch) {

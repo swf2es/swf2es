@@ -20,36 +20,53 @@ export function asciiLower(s: string): string {
   return s;
 }
 
-/** A display object's parent as AVM1 sees it: none above a level, the root of its movie. */
-export function parentOf(d: DisplayObject, root: DisplayObject): Container | null {
-  return d === root ? null : d.parent;
-}
+/** The level a display object is, null for one that is none. */
+export type LevelOf = (d: DisplayObject) => number | null;
 
-/** The dot path of `d`, `_level0.a.b`, as a clip converts to a string and TargetPath gives it. */
-export function pathOf(d: DisplayObject, root: DisplayObject): string {
+/**
+ * The dot path of `d`, `_level0.a.b`, as a clip converts to a string and
+ * TargetPath gives it: from its level, or from level 0 for one off the
+ * display list.
+ */
+export function pathOf(d: DisplayObject, levelOf: LevelOf): string {
   const names: string[] = [];
-  let o: DisplayObject | null = d;
-  while (o !== null && o !== root) {
+  let level = 0;
+  for (let o: DisplayObject | null = d; o !== null; o = o.parent) {
+    const n = levelOf(o);
+    if (n !== null) {
+      level = n;
+      break;
+    }
+
     names.push(o.name);
-    o = o.parent;
   }
 
-  names.push("_level0");
+  names.push(`_level${level}`);
   return names.reverse().join(".");
 }
 
-/** The slash path of `d`, `/a/b`, `_target`'s: "/" for the root. */
-export function slashPathOf(d: DisplayObject, root: DisplayObject): string {
-  if (d === root) {
+/**
+ * The slash path of `d`, `_target`'s: "/" for a level, `/a/b` below level
+ * 0 and `_level1/a/b` below another, as Ruffle's slash_path has it.
+ */
+export function slashPathOf(d: DisplayObject, levelOf: LevelOf): string {
+  if (levelOf(d) !== null) {
     return "/";
   }
 
   const names: string[] = [];
-  for (let o: DisplayObject | null = d; o !== null && o !== root; o = o.parent) {
+  let level = 0;
+  for (let o: DisplayObject | null = d; o !== null; o = o.parent) {
+    const n = levelOf(o);
+    if (n !== null) {
+      level = n;
+      break;
+    }
+
     names.push(o.name);
   }
 
-  return `/${names.reverse().join("/")}`;
+  return `${level === 0 ? "" : `_level${level}`}/${names.reverse().join("/")}`;
 }
 
 /**
@@ -82,19 +99,20 @@ export function childByName(
 
 /**
  * The display object at a dot path, `_level0.a.b`, as a clip's reference
- * finds it again: names from the root, each a child. Null where none is.
+ * finds it again: names from the level, each a child. Null where none is.
  */
 export function atPath(
   path: string,
-  root: DisplayObject,
+  level: (n: number) => DisplayObject | null,
   caseSensitive: boolean,
 ): DisplayObject | null {
   const parts = path.split(".");
-  if (parts[0] !== "_level0") {
+  const match = /^_level(-?\d+)$/.exec(parts[0]);
+  if (match === null) {
     return null;
   }
 
-  let d: DisplayObject | null = root;
+  let d: DisplayObject | null = level(Number(match[1]));
   for (let i = 1; i < parts.length && d !== null; i++) {
     d = childByName(d, parts[i], caseSensitive);
   }

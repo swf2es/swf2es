@@ -20,7 +20,7 @@ import {
   TRANSFORM,
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
-import type { Handler } from "../avm1.js";
+import type { Avm1Swf, Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import { storeOf } from "./BitmapData.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
@@ -30,12 +30,25 @@ type Value = avm1.Value;
 
 /** What the clips' AVM1 faces ask of the player's AVM1 (avm1.ts). */
 export interface Movie extends GeomHost {
+  /** Level 0's clip. */
   readonly root: MovieClip;
   readonly realm: avm1.Realm;
-  /** The SWF's version, its URL and its length, which `getSWFVersion`, `_url` and `getBytesTotal` give. */
+  /** The main SWF's version. */
   readonly version: number;
-  readonly url: string;
-  readonly length: number;
+  /**
+   * The SWF `d` is of, the nearest clip's: its version, URL and length,
+   * which `getSWFVersion`, `_url` and `getBytesTotal` give, and its root.
+   */
+  swfOf(d: DisplayObject | null): Avm1Swf;
+  /**
+   * `_root` for code of `d`'s: its level, or the first clip up from it whose
+   * `_lockroot` is set.
+   */
+  rootOf(d: DisplayObject): MovieClip;
+  /** The level `d` is, null for none. */
+  levelOf(d: DisplayObject): number | null;
+  /** Level `n`'s clip, null where there is none. */
+  level(n: number): MovieClip | null;
   /** The stage's quality, "LOW" to "BEST". */
   quality: string;
   /** The stage's focus rectangle's, `_focusrect` up to SWF 5 and on the root. */
@@ -92,6 +105,10 @@ export interface Movie extends GeomHost {
   propertyChanged(d: DisplayObject, name: string, value: Value, version: number): void;
   /** loadVariables: the variables at `url` set on `d`, `form`'s sent with them. */
   loadVariables(d: DisplayObject, url: string, form: avm1.UrlForm | null): void;
+  /** loadMovie: the SWF or image at `url` into `d`, `form`'s variables sent with the request. */
+  loadMovie(d: DisplayObject | number, url: string, form: avm1.UrlForm | null): void;
+  /** unloadMovie: what `d` shows unloaded, and it left empty. */
+  unloadMovie(d: DisplayObject): void;
 }
 
 /** AVM1's depths are the timeline's less this, as Flash gives them to scripts. */
@@ -278,10 +295,21 @@ const PROPERTIES: [string, DisplayProperty][] = [
       },
     },
   ],
-  ["_target", { get: (f) => slashPathOf(f.target, f.movie.root), set: null }],
+  ["_target", { get: (f) => slashPathOf(f.target, (d) => f.movie.levelOf(d)), set: null }],
   [
     "_framesloaded",
-    { get: (f) => (f.target instanceof MovieClip ? f.target.totalFrames : undefined), set: null },
+    {
+      // -1 for a load's root in error, which has -1 bytes.
+      get: (f) => {
+        if (!(f.target instanceof MovieClip)) {
+          return undefined;
+        }
+
+        const swf = f.movie.swfOf(f.target);
+        return swf.root === f.target && swf.length < 0 ? -1 : f.target.totalFrames;
+      },
+      set: null,
+    },
   ],
   [
     "_name",
@@ -302,12 +330,12 @@ const PROPERTIES: [string, DisplayProperty][] = [
       // Ruffle: undefined up to SWF 5).
       get: (f) => {
         const over = f.movie.dropTargetOf(f.target);
-        return over === null ? "" : slashPathOf(over, f.movie.root);
+        return over === null ? "" : slashPathOf(over, (d) => f.movie.levelOf(d));
       },
       set: null,
     },
   ],
-  ["_url", { get: (f) => f.movie.url, set: null }],
+  ["_url", { get: (f) => f.movie.swfOf(f.target).url, set: null }],
   [
     "_highquality",
     {
@@ -623,9 +651,9 @@ function pathProperty(face: ClipNative, name: string, version: number): Value | 
   const movie = face.movie;
   switch (key) {
     case "_root":
-      return movie.faceOf(movie.root) ?? undefined;
+      return movie.faceOf(movie.rootOf(face.target)) ?? undefined;
     case "_parent": {
-      const parent = face.target === movie.root ? null : face.target.parent;
+      const parent = movie.levelOf(face.target) !== null ? null : face.target.parent;
       return parent === null ? undefined : (movie.faceOf(parent) ?? undefined);
     }
     case "_global":
@@ -636,7 +664,8 @@ function pathProperty(face: ClipNative, name: string, version: number): Value | 
     return avm1.ABSENT;
   }
 
-  return levelOf(key.slice(6)) === 0 ? (movie.faceOf(movie.root) ?? undefined) : undefined;
+  const level = movie.level(levelOf(key.slice(6)));
+  return level === null ? undefined : (movie.faceOf(level) ?? undefined);
 }
 
 /** `_levelN`'s N as Flash reads it: a sign and the digits up to anything else, wrapping. */
@@ -679,6 +708,10 @@ export class ClipNative implements avm1.DisplayNative {
   unloaded = false;
   /** Whether it was removed with an unload handler, and stays until the next frame. */
   pending = false;
+  /** The SWF whose blocks its clip actions are, its place's. */
+  swf: Avm1Swf | null = null;
+  /** `_lockroot`: whether it is `_root` for the code in it, as a SWF loaded into it has it. */
+  lockroot = false;
 
   constructor(
     readonly movie: Movie,
@@ -744,7 +777,7 @@ export class ClipNative implements avm1.DisplayNative {
   }
 
   path(): string {
-    return pathOf(this.target, this.movie.root);
+    return pathOf(this.target, (d) => this.movie.levelOf(d));
   }
 
   live(): avm1.Avm1Object | null {
@@ -969,15 +1002,37 @@ export function movieClipClass(movie: Movie): {
     const target = args.length > 0 ? targetOf(movie, clip, args[0], version) : clip;
     return target === null ? undefined : boundsObject(movie, clip, target, true, version);
   });
-  // A sprite's are its tags', the root's the SWF's.
-  const bytes = (clip: MovieClip) =>
-    clip === movie.root ? movie.length : (clip.timeline.length ?? 0);
+  // A sprite's are its tags', a SWF's root's the SWF's.
+  const bytes = (clip: MovieClip) => {
+    const swf = movie.swfOf(clip);
+    return clip === swf.root ? swf.length : (clip.timeline.length ?? 0);
+  };
   method("getBytesTotal", 0, bytes);
-  method("getBytesLoaded", 0, bytes);
+  // A load in error has -1 bytes in all, none loaded (the corpus's movieclip_state_values).
+  method("getBytesLoaded", 0, (clip) => Math.max(0, bytes(clip)));
   // The root is level 0's, at depth 0 (the corpus's movieclip_get_instance_at_depth).
   method("getDepth", avm1.READ_ONLY | avm1.VERSION_6, (clip) =>
     clip.depth !== null ? clip.depth - DEPTH_BIAS : clip === movie.root ? -DEPTH_BIAS : undefined,
   );
+  // The SWF at the URL in place of what the clip shows, the clip's own variables sent where
+  // a method is "GET" or "POST", in any case (Ruffle's load_movie).
+  method("loadMovie", 0, (clip, args, version) => {
+    const face = clip.avm1;
+    if (face === null) {
+      return undefined;
+    }
+
+    const url = avm1.stringOf(args[0], version);
+    const method = args.length > 1 ? avm1.stringOf(args[1], version).toUpperCase() : "";
+    const form: avm1.UrlForm | null =
+      method === "GET" || method === "POST" ? { method, vars: formVars(face, version) } : null;
+    movie.loadMovie(clip, url, form);
+    return undefined;
+  });
+  method("unloadMovie", 0, (clip) => {
+    movie.unloadMovie(clip);
+    return undefined;
+  });
   method("play", 0, (clip) => {
     clip.playing = true;
     return undefined;
@@ -1018,6 +1073,23 @@ export function movieClipClass(movie: Movie): {
   method("prevFrame", 0, (clip) => {
     if (clip.currentFrame > 1) {
       movie.timeline(clip).goto(clip.currentFrame - 1, false);
+    }
+
+    return undefined;
+  });
+  // Whether the clip is `_root` for the code in it; any value set as a boolean (the corpus's
+  // movieclip_lockroot).
+  const lockroot = proto.add("_lockroot", undefined, avm1.DONT_ENUM | avm1.DONT_DELETE);
+  lockroot.get = realm.method((self) => {
+    const clip = clipOf(self);
+    const native = clip?.avm1?.display;
+    return native instanceof ClipNative ? native.lockroot : undefined;
+  });
+  lockroot.set = realm.method((self, args, version) => {
+    const clip = clipOf(self);
+    const native = clip?.avm1?.display;
+    if (native instanceof ClipNative) {
+      native.lockroot = avm1.toBoolean(args[0], version);
     }
 
     return undefined;
@@ -1118,7 +1190,10 @@ export function movieClipClass(movie: Movie): {
       ? undefined
       : (movie.faceOf(child) ?? movie.faceOf(clip) ?? undefined);
   });
-  method("getSWFVersion", 0, () => (movie.version > 0 ? movie.version : -1));
+  method("getSWFVersion", 0, (clip) => {
+    const version = movie.swfOf(clip).version;
+    return version > 0 ? version : -1;
+  });
   method("getRect", avm1.VERSION_8, (clip, args, version) => {
     const target = args.length > 0 ? targetOf(movie, clip, args[0], version) : clip;
     return target === null ? undefined : boundsObject(movie, clip, target, false, version);

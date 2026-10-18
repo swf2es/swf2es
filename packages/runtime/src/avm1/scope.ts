@@ -9,7 +9,7 @@
 // player has: it gives them through the host (`child`, `parent`, `root`,
 // `level`), as step 10 of docs/avm1.md fills in; until then a path walks
 // objects' properties only.
-import type { Host } from "./host.js";
+import type { Host, Target } from "./host.js";
 import { PRIMITIVE } from "./inheritance.js";
 import {
   type Avm1Object,
@@ -57,6 +57,8 @@ export interface Variables {
   /** The global object, `_global`. */
   readonly global: Avm1Object;
   readonly host: Host;
+  /** The clip whose code runs, whose `_root` a path's starts from. */
+  readonly base: Target;
 }
 
 /** Whether `c` ends a path's object part: `:`, and `.` from SWF 5. */
@@ -100,7 +102,7 @@ function pathProperty(cx: Variables, name: string, version: number): Value {
   }
 
   if (sameName(name, "_root", version)) {
-    return cx.host.root?.();
+    return cx.host.root?.(cx.base);
   }
 
   if (sameName(name, "_parent", version)) {
@@ -379,7 +381,7 @@ export function targetPath(
     prev = 0x2f;
     firstElement = false;
     slash = true;
-    object = cx.host.root?.();
+    object = cx.host.root?.(cx.base);
     if (!(object instanceof ObjectClass)) {
       return null;
     }
@@ -446,7 +448,7 @@ export function targetPath(
       } else if (swf5 && handleThis && sameName(name, "this", version)) {
         value = cx.self;
       } else if (swf5 && firstElement && sameName(name, "_root", version)) {
-        value = cx.host.root?.();
+        value = cx.host.root?.(cx.base);
       } else if (version >= 6 && firstElement && sameName(name, "_global", version)) {
         value = cx.global;
       } else if (firstElement && isLevel(name, version)) {

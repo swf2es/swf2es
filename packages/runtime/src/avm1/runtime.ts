@@ -606,7 +606,7 @@ function operations(version: number): Operations {
     },
     argumentsOf: (cx, args) => argumentsOf(cx, args, version),
     superOf: (cx, self) => superOf(cx, self, version),
-    root: (cx) => cx.host.root?.(),
+    root: (cx) => cx.host.root?.(cx.base),
     parentOf: (cx) => cx.host.parent?.(cx.clip),
     with: (cx, object, from, to) => enterWith(cx, object, from, to, version),
     try: enterTry,
