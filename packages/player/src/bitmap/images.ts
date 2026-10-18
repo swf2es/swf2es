@@ -168,6 +168,39 @@ async function decodeOne(character: BitmapCharacter, decode: ImageDecode | null)
   character.pixels = await pixels;
 }
 
+/** An image file's format by its signature, as Flash sniffs a load's: null for none it shows. */
+export function imageFormat(data: Uint8Array): "jpeg" | "png" | "gif" | null {
+  if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
+    return "jpeg";
+  }
+
+  if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) {
+    return "png";
+  }
+
+  return data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x38
+    ? "gif"
+    : null;
+}
+
+/**
+ * The pixels of an image file a load brought, a JPEG opaque and a PNG's or
+ * GIF's alpha its own; null where the decoder cannot read it, or there is
+ * none.
+ */
+export async function decodeImageFile(
+  data: Uint8Array,
+  format: "jpeg" | "png" | "gif",
+  decode: ImageDecode | null,
+): Promise<BitmapPixels | null> {
+  const image = decode === null ? null : await decode(data, format).catch(() => null);
+  if (image === null || image.width === 0 || image.height === 0) {
+    return null;
+  }
+
+  return pixelsOf({ id: 0, type: "image", format, data, alpha: null, opaque: false }, image);
+}
+
 /** The pixels Flash makes of a decoded image, as adl shows them. */
 function pixelsOf(
   definition: Extract<BitmapCharacter["definition"], { type: "image" }>,

@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1, type Avm1Options } from "../../../../packages/player/dist/avm1/avm1.js";
+import type { FetchRequest, FetchResult } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { flashAssembler, script } from "../../../avm1-script.ts";
 import * as w from "../../../swf-writer.ts";
@@ -72,4 +73,30 @@ export async function play(
 export function take(played: Played): string[] {
   assert.deepEqual(played.errors, []);
   return played.lines.splice(0);
+}
+
+/** A SWF of one frame whose actions are `source`, as a load brings it. */
+export function movie(source: string, version = 8, as3 = false): Uint8Array {
+  return w.swf({
+    version,
+    width: 10,
+    height: 10,
+    frameCount: 1,
+    tags: [
+      ...(as3 ? [w.fileAttributes(true)] : []),
+      w.doAction([...script(source, version)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** A host fetch that answers each file by its name, a missing one as a 404; the requests kept. */
+export function files(byName: Record<string, Uint8Array>, asked: FetchRequest[] = []) {
+  return async (request: FetchRequest): Promise<FetchResult> => {
+    asked.push(request);
+    const name = request.url.slice(request.url.lastIndexOf("/") + 1).split("?")[0];
+    const bytes = byName[name];
+    return bytes ? { bytes, status: 0, headers: [] } : { bytes: null, status: 404, headers: [] };
+  };
 }

@@ -1,9 +1,11 @@
 // What AVM1's network classes ask of the host: XML's, LoadVars' and
 // loadVariables' requests, through the host's fetch as AS3's URLLoader's
-// go, and XMLSocket's connections, through the host's sockets as AS3's
-// XMLSocket's go. What comes back is held for the next frame, where the
-// movie delivers it between frames, as Flash's network callbacks come.
+// go, loadMovie's as AS3's Loader's go, and XMLSocket's connections,
+// through the host's sockets as AS3's XMLSocket's go. What comes back is
+// held for the next frame, where the movie delivers it between frames, as
+// Flash's network callbacks come.
 import type {
+  FetchPurpose,
   FetchRequest,
   FetchResult,
   SocketEvents,
@@ -92,13 +94,35 @@ export class Avm1Net {
    * after, a failure as no bytes, status 0, where nothing answered.
    */
   fetch(request: NetRequest, deliver: (result: FetchResult) => void): void {
+    this.after(this.request(request, "data"), deliver);
+  }
+
+  /**
+   * `request` sent by the host's fetch, as `purpose`: its result, a
+   * failure as no bytes, status 0, where nothing answered. A movie's load
+   * is "content", as AS3's Loader's is.
+   */
+  request(request: NetRequest, purpose: FetchPurpose): Promise<FetchResult> {
     const fetch = this.fetchHost;
-    const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose: "data" };
-    const fetched = (fetch ? fetch(outgoing, this.stopped.signal) : Promise.reject()).then(
+    if (this.destroyed) {
+      return Promise.resolve(FAILED);
+    }
+
+    const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose };
+    return (fetch ? fetch(outgoing, this.stopped.signal) : Promise.reject()).then(
       (result) => result,
       () => FAILED,
     );
-    this.track(fetched.then((result) => this.defer(() => deliver(result))));
+  }
+
+  /** `task`'s value delivered to `deliver` in a frame after it settles; nothing for one that fails. */
+  after<T>(task: Promise<T>, deliver: (value: T) => void): void {
+    this.track(
+      task.then(
+        (value) => this.defer(() => deliver(value)),
+        () => {},
+      ),
+    );
   }
 
   /**

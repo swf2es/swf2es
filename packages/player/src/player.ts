@@ -125,7 +125,7 @@ export class Player {
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
     // An AVM1 SWF's clips play through its AVM1, from the first frame on.
-    avm1?.attach(this.swf, this.library, this.root);
+    avm1?.attach(this.swf, this.library, this.root, bytes.length);
     if (!scripting) {
       this.root.enterFirstFrame();
     }
