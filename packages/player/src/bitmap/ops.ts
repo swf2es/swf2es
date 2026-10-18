@@ -322,9 +322,10 @@ export function perlinNoise(
 ): void {
   const turbulence = new Turbulence(seed);
   const { width, height } = store;
+  // A base's sign is dropped (adl).
   const frequency: [number, number] = [
-    base[0] === 0 ? 0 : 1 / base[0],
-    base[1] === 0 ? 0 : 1 / base[1],
+    base[0] === 0 ? 0 : 1 / Math.abs(base[0]),
+    base[1] === 0 ? 0 : 1 / Math.abs(base[1]),
   ];
   const at = (channel: number, x: number, y: number) =>
     turbulence.turbulence(channel, x, y, frequency, offsets, fractal, stitch, width, height);
@@ -618,12 +619,15 @@ function bitsFor(n: number): number {
  * numPixels pixels, from the seed on, and returns the state after the
  * last, raw, so the next call goes on from there. Every call writes the
  * pixel at the origin too, which no state stands for, and so n calls of
- * 1 write n + 1 (Ruffle's bitmapdata_pixeldissolve); a seed past the
- * generator's states is taken modulo 2^bits - 1, and 0 starts at the tap. A
+ * 1 write n + 1 (Ruffle's bitmapdata_pixeldissolve); 0 starts at the tap,
+ * and a seed past the generator's states steps down to them as any state
+ * does, its bits shifted out, or to 0, which writes the origin for good. A
  * pixel takes the fill colour where the source is the destination, and
  * there it is the source rect that dissolves, the point aside, though
  * clipped as a copy's; else the source's pixel. A rect a pixel high or
- * wide dissolves nothing.
+ * wide dissolves nothing and gives the seed back as it came; a count of 0
+ * writes the origin alone and gives the seed back, the tap for 0. AS3's
+ * answers are AVM1's (the dissolve-noise case).
  */
 export function pixelDissolve(
   store: BitmapStore,
@@ -638,14 +642,14 @@ export function pixelDissolve(
   // Over the rect clipped to the source and then to the destination, as the copies are.
   const sc = source.clip(rect);
   if (!sc) {
-    return 0;
+    return seed;
   }
 
   const ox = dx + (sc.x - rect.x);
   const oy = dy + (sc.y - rect.y);
   const dc = store.clip({ x: ox, y: oy, width: sc.width, height: sc.height });
   if (!dc) {
-    return 0;
+    return seed;
   }
 
   const rx = sc.x + (dc.x - ox);
@@ -654,16 +658,17 @@ export function pixelDissolve(
   dy = dc.y;
   const { width: w, height: h } = dc;
   if (w <= 1 || h <= 1) {
-    return 0;
+    return seed;
   }
 
   const bw = bitsFor(w);
   const bits = bw + bitsFor(h);
   const tap = DISSOLVE_TAPS[bits] ?? 0;
-  const mask = 2 ** bits - 1;
   const xMask = (1 << bw) - 1;
   const color = store.premultiplied(fill >>> 0);
-  const next = (s: number) => (s & 1 ? Math.floor(s / 2) ^ tap : Math.floor(s / 2));
+  // An opaque store keeps every alpha at 255, as threshold's copies have it.
+  const opaque = store.transparent ? 0 : 0xff000000;
+  const next = (s: number) => (s & 1 ? (s >>> 1) ^ tap : s >>> 1);
 
   // A position of the rect, written where it lies in both bitmaps.
   const write = (state: number) => {
@@ -688,27 +693,34 @@ export function pixelDissolve(
     }
 
     store.pixels[ty * store.width + tx] =
-      source === store ? color : source.pixels[sy * source.width + sx];
+      source === store ? color : (source.pixels[sy * source.width + sx] | opaque) >>> 0;
   };
   const inside = (state: number) => (state & xMask) < w && Math.floor(state / 2 ** bw) < h;
 
-  // The origin is written on every call; the seed is reduced to the
-  // generator's period, and 0, which it never reaches, starts at the tap.
+  // The origin is written on every call; 0, which no state within the
+  // generator's steps to (a seed past them may), starts at the tap.
   write(0);
-  const start = Math.abs(Math.trunc(seed));
-  let s = start > mask ? start % mask : start;
-  if (s === 0) {
-    s = tap;
+  if (seed === 0) {
+    seed = tap;
   }
 
+  if (count === 0) {
+    store.changed();
+    return seed;
+  }
+
+  let s = seed >>> 0;
+
   // The states inside the rect come round every w * h - 1 writes (state 0
-  // is the origin's, reached from seed 0 alone), so a count past that is
-  // one full round, which writes every pixel, and the remainder: the same
-  // pixels and the seed Flash returns, without its seconds-long loop.
+  // is the origin's, which only a seed past the states steps down to, and
+  // stays at), so a count past that is one full round, which writes every
+  // pixel, and the remainder: the same pixels and the seed Flash returns,
+  // without its seconds-long loop.
   const round = w * h - 1;
   const steps = count > round ? round + (count % round) : count;
   for (let k = 0; k < steps; k++) {
-    // Every state but 0 comes round within 2^bits steps, so this ends.
+    // A seed's bits past the states shift out, and every state then comes
+    // round within 2^bits steps, so this ends.
     while (!inside(s)) {
       s = next(s);
     }

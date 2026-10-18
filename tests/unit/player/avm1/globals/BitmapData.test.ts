@@ -133,3 +133,85 @@ trace(b.hitTest({x: 0, y: 0}, 0, made(true)));`),
     ["false", "true", "-2", "-3", "-4", "true"],
   );
 });
+
+test("draw takes a blend mode by name or number, anything else as normal, and clips", async () => {
+  // adl: null, undefined, an unknown name, a name in capitals, a number in a string, true and an
+  // object draw normally; 9 and 265 subtract, a byte's number; erase does nothing to a bitmap.
+  assert.deepEqual(
+    await run(`var modes = [null, undefined, "foo", "SUBTRACT", "9", true, {}, 9, 265, "erase", 12];
+var src = new BitmapData(4, 4, false, 0xFFFF0000); var line = [];
+for (var i = 0; i < modes.length; i++) {
+  var d = new BitmapData(4, 4, false, 0xFF808080); d.draw(src, new flash.geom.Matrix(), null, modes[i]);
+  line.push(d.getPixel32(1, 1).toString(16));
+}
+trace(line.join(" "));
+var c = new BitmapData(50, 50, false, 0xFF0000FF);
+c.draw(new BitmapData(50, 50, false, 0xFFFF0000), new flash.geom.Matrix(), null, null, new flash.geom.Rectangle(10, 10, 20, 20));
+trace(row(c, 10) + " " + row(c, 29) + " " + row(c, 9) + " " + row(c, 30));`),
+    [
+      "-10000 -10000 -10000 -10000 -10000 -10000 -10000 -ff7f80 -ff7f80 -7f7f80 -7f7f80",
+      [
+        row("ff0000ff ff0000ff ff0000ff"),
+        row("ff0000ff ff0000ff ff0000ff"),
+        row("ff0000ff ff0000ff ff0000ff"),
+        row("ff0000ff ff0000ff ff0000ff"),
+      ].join(" "),
+    ],
+  );
+});
+
+test("copyPixels takes an alpha bitmap only with its point, and merges only when told", async () => {
+  const copy = (args: string) => `var b = made(true);
+b.copyPixels(new BitmapData(3, 3, false, 0x12345678), rect, point${args}); trace(row(b, 1));\n`;
+  const alpha = ", new BitmapData(3, 3, true, 0x12345678)";
+  assert.deepEqual(
+    await run(copy(alpha) + copy(`${alpha}, point`) + copy(`${alpha}, point, true`)),
+    [
+      row("aabbccdc ff345678 ff345678"),
+      row("aabbccdc 112d5a78 112d5a78"),
+      row("aabbccdc afadc0d3 afadc0d3"),
+    ],
+  );
+});
+
+test("pixelDissolve steps a seed past its states down, and gives one it does not use back", async () => {
+  // adl and the corpus: 3 by 3 bitmaps, a rect of 2 by 2 (or 2 by 1) at (1, 1).
+  const at = (w: number, h: number, seed: number, count: string) =>
+    `b = made(true); trace(b.pixelDissolve(made(true), new flash.geom.Rectangle(0, 0, ${w}, ${h}), point, ${seed}, ${count}));\n`;
+  assert.deepEqual(
+    await run(
+      `var b;\n${at(2, 2, 100, "40")}${at(2, 2, 100, "0")}${at(2, 2, 100, "-1")}${at(2, 2, 7, "1")}` +
+        `${at(2, 2, 0, "0")}${at(2, 1, -2, "5")}${at(2, 2, 100, "null")}`,
+    ),
+    ["1", "100", "2", "0", "3", "-2", "100"],
+  );
+});
+
+test("pixelDissolve keeps an opaque bitmap opaque, its getPixel Flash's", async () => {
+  // Flash's getPixel32 reads 12040608, the translucent pixel as kept, which an opaque store here does not keep.
+  assert.deepEqual(
+    await run(`var b = made(false); b.pixelDissolve(new BitmapData(3, 3, true, 0x12345678), rect, point, 100, 40);
+trace(row(b, 1)); trace(b.getPixel(1, 1).toString(16));`),
+    [row("ffbbccdd ff040608 ff040608"), "40608"],
+  );
+});
+
+test("perlinNoise drops a base's sign and stitches each frequency by its own size", async () => {
+  // adl: a 6 by 6 bitmap, two octaves moved by (1, 2) and (-3, 0.5), seed 100, all channels.
+  const noise = (x: number, y: number, stitch: boolean) =>
+    `b = new BitmapData(6, 6, true, 0); b.perlinNoise(${x}, ${y}, 2, 100, ${stitch}, false, 15, false,
+[new flash.geom.Point(1, 2), new flash.geom.Point(-3, 0.5)]); trace(b.getPixel32(0, 0).toString(16) + " " + b.getPixel32(1, 0).toString(16));\n`;
+  assert.deepEqual(
+    await run(`var b;\n${noise(-3, 5, false)}${noise(3, -5, false)}${noise(3, 5, true)}`),
+    ["3ba8ff6c 787d6e24", "3ba8ff6c 787d6e24", "27ffe5ff 38e44d40"],
+  );
+});
+
+test("the channels are plain properties of BitmapData", async () => {
+  assert.deepEqual(
+    await run(
+      `BitmapData.RED_CHANNEL = 5; trace(BitmapData.RED_CHANNEL); trace(delete BitmapData.ALPHA_CHANNEL);`,
+    ),
+    ["5", "true"],
+  );
+});

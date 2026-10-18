@@ -509,3 +509,19 @@ test("pixelDissolve takes its seed as the int it is declared, NaN as 0", () => {
     );
   }
 });
+
+test("pixelDissolve's answers past the states, at count 0 and for a rect a pixel high are AVM1's", () => {
+  // adl (the dissolve-noise case): a 5 by 5 source into a 5 by 5 destination at (1, 1).
+  const p = make("flash.geom::Point", 1, 1);
+  const answer = (w: number, h: number, seed: number, count: number) => {
+    const dest = make("flash.display::BitmapData", 5, 5, true, 0xaabbccdd);
+    const src = make("flash.display::BitmapData", 5, 5, true, 0x12345678);
+    const rect = make("flash.geom::Rectangle", 0, 0, w, h);
+    return call(dest, "pixelDissolve", src, rect, p, seed, count, 0);
+  };
+  assert.deepEqual(
+    [answer(2, 2, 100, 1), answer(2, 2, 7, 1), answer(2, 2, -1, 1), answer(2, 2, 100, 0)],
+    [1, 0, 2, 100],
+  );
+  assert.deepEqual([answer(3, 3, 100, 1), answer(2, 1, -2, 3), answer(2, 2, 0, 0)], [0, -2, 3]);
+});

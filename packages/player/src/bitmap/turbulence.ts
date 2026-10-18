@@ -165,9 +165,9 @@ export class Turbulence {
         fx = fx / lo < hi / fx ? lo : hi;
       }
 
-      // The reference's slip, which Ruffle keeps: the y frequency's floor from the x one.
+      // Not the reference's slip, which Ruffle keeps, the y frequency's floor from the x one (adl).
       if (fy !== 0) {
-        const lo = Math.floor(height * fx) / height;
+        const lo = Math.floor(height * fy) / height;
         const hi = Math.ceil(height * fy) / height;
         fy = fy / lo < hi / fy ? lo : hi;
       }

@@ -8826,6 +8826,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // pixelDissolve's seeds and answers and perlinNoise's bases from AS3, as AVM1's (bitmap/ops.ts).
+    name: "dissolve-noise",
+    swf: (abc) => bare(abc, 1, "DissolveNoise"),
+    script: "DissolveNoise",
+    traced: true,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "filters",
     swf: (abc) => bare(abc, 1, "FiltersDraw", 396, 132),
     script: "FiltersDraw",

@@ -29,6 +29,7 @@ import {
   threshold,
 } from "../../bitmap/ops.js";
 import type { DisplayObject } from "../../display/display.js";
+import { BLEND_MODES } from "../../display/displayobject.js";
 import type { Drawer } from "../../hosts.js";
 import { colorValues, type GeomHost, makeGeom } from "./geom.js";
 
@@ -126,6 +127,19 @@ function matrixOf(o: Value, v: number) {
 
   const n = (name: string) => avm1.toNumber(avm1.get(o, name, v), v);
   return { a: n("a"), b: n("b"), c: n("c"), d: n("d"), tx: n("tx"), ty: n("ty") };
+}
+
+/**
+ * draw's blend mode: a name as BlendMode has it, or PlaceObject3's number
+ * of one, a byte; anything else, a name in another case or a number in a
+ * string included, is normal (adl).
+ */
+function blendOf(value: Value): string {
+  if (typeof value === "number") {
+    return BLEND_MODES[Math.trunc(value) & 0xff] ?? "normal";
+  }
+
+  return typeof value === "string" && BLEND_MODES.includes(value) ? value : "normal";
 }
 
 /** A native ColorTransform's values as a colour transform; null for anything else. */
@@ -273,9 +287,11 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     }
 
     const [dx, dy] = pointOf(args[2], v);
-    const alpha = storeOf(args[3]);
-    // mergeAlpha is false without an alpha bitmap, whatever the documentation says (Ruffle).
-    const merge = args.length >= 6 ? avm1.toBoolean(args[5], v) : alpha !== null && !alpha.disposed;
+    // An alpha bitmap counts only with its point given, and mergeAlpha is
+    // false unless given, whatever the documentation says (the corpus's
+    // bitmap_data_thorough).
+    const alpha = args.length >= 5 ? storeOf(args[3]) : null;
+    const merge = args.length >= 6 && avm1.toBoolean(args[5], v);
     if (alpha !== null && !alpha.disposed) {
       const [ax, ay] = pointOf(args[4], v);
       store.copyPixels(source, r, dx, dy, merge, alpha, ax, ay);
@@ -288,7 +304,7 @@ export function bitmapDataClass(host: BitmapHost): Obj {
   method("draw", 0, (store, args, v) => {
     const m = matrixOf(args[1], v);
     const c = colorOf(args[2]);
-    const blend = args.length > 3 && args[3] !== undefined ? avm1.stringOf(args[3], v) : "normal";
+    const blend = blendOf(args[3]);
     const clip = args.length > 4 ? rectOf(args[4], v) : null;
     const smooth = args.length > 5 && avm1.toBoolean(args[5], v);
     const source = storeOf(args[0]);
@@ -479,7 +495,8 @@ export function bitmapDataClass(host: BitmapHost): Obj {
       a.dx,
       a.dy,
       avm1.toNumber(args[3], v) | 0,
-      avm1.toNumber(args[4], v) | 0,
+      // A negative count is a uint's, which comes round the rect as any other.
+      avm1.toNumber(args[4], v) >>> 0,
       given(args, 5) ? avm1.toNumber(args[5], v) >>> 0 : 0,
     );
   });
@@ -622,10 +639,11 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     return false;
   });
 
-  constr.define("RED_CHANNEL", 1, FIXED);
-  constr.define("GREEN_CHANNEL", 2, FIXED);
-  constr.define("BLUE_CHANNEL", 4, FIXED);
-  constr.define("ALPHA_CHANNEL", 8, FIXED);
+  // Plain properties, enumerable and writable, as Flash has them (the corpus's bitmapdata_channels).
+  constr.define("RED_CHANNEL", 1, 0);
+  constr.define("GREEN_CHANNEL", 2, 0);
+  constr.define("BLUE_CHANNEL", 4, 0);
+  constr.define("ALPHA_CHANNEL", 8, 0);
   // The library's bitmap exported as the name, transparent; undefined where there is none.
   constr.define(
     "loadBitmap",
