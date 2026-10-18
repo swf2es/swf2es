@@ -3612,8 +3612,10 @@ visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
 LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
 26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)
 and skipped outside the rect; each call writes numPixels and returns the
-next state; every call writes the origin too, a seed past the states is
-taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
+next state; every call writes the origin too, 0 starts at the tap, a
+seed past the states steps down to them as any state does, its bits
+shifted out, or to 0, which writes the origin from then on, a count of 0
+or a rect a pixel wide or high gives the seed back, and a count past the
 w · h − 1 states a round visits is one round and the remainder, which
 gives Flash's seed without its loop (Flash itself takes seconds over
 2^31 − 1). `paletteMap` makes each copied pixel the sum, wrapping at 32
@@ -3631,7 +3633,10 @@ makes it, and the pixel written as it comes, not premultiplied (the
 `perlin-noise` case). A double past an int converts as on x86, to -2^31,
 so that octaves enough to take the lattice that far give Flash's wild
 noise and bytes of 0; more than 1024 octaves give what 1024 do, as
-Flash's sum settles long before, a negative count among them.
+Flash's sum settles long before, a negative count among them. A
+negative base is taken as its size, and stitching fits each frequency to
+its own side, without the reference's slip of the y frequency's floor
+from the x one (adl).
 
 #### Drawing into a bitmap
 

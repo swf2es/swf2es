@@ -1576,11 +1576,13 @@ given as undefined is false or 0, one not given true or 0xFFFFFFFF.
 `width`, `height`, `transparent` and `rectangle` are -1 once disposed.
 `getPixel` and `getPixel32` are signed; `setPixel`, `setPixel32`,
 `fillRect` (a rectangle's x, y, width and height, own or inherited, as
-ints) and `copyPixels` (its mergeAlpha false without an alpha bitmap)
-give 0; `draw` takes a BitmapData, composited on the CPU, or a clip or
-button, drawn by the host's renderer at the stage's quality (`Avm1.drawer`,
-which the element and the test page give, as Scripting's for AS3), its
-matrix's fields by name; `clone` keeps the prototype; `floodFill` (0
+ints) and `copyPixels` (an alpha bitmap counts only with its point
+given, and mergeAlpha is false unless given) give 0; `draw` takes a
+BitmapData, composited on the CPU, or a clip or button, drawn by the
+host's renderer at the stage's quality (`Avm1.drawer`, which the element
+and the test page give, as Scripting's for AS3), its matrix's fields by
+name, and a blend mode by BlendMode's name or PlaceObject3's number,
+anything else, null included, normal (adl); `clone` keeps the prototype; `floodFill` (0
 for a point off the bitmap or its own colour), `scroll` (0),
 `colorTransform` (-1 even done, as Flash) and the static
 `loadBitmap`, the library's bitmap exported by a name, transparent.
@@ -1589,15 +1591,19 @@ takes uints, and AVM1's answers (the corpus's `bitmap_data_thorough`):
 `copyChannel`, `merge` (its multipliers clamped to 0 to 256, the alpha
 one optional), `paletteMap` (its tables' entries summed as they are; no
 red table, -1) and `threshold` (an unknown operation is "<") take a rect
-spanning back from a negative size, as AS3's do; `noise`, `perlinNoise`,
-`pixelDissolve` (five arguments at least), `getColorBoundsRect` and
+spanning back from a negative size, as AS3's do; `noise`, `perlinNoise` (a base's sign dropped, as Flash),
+`pixelDissolve` (five arguments at least, a negative count a uint's; a
+seed past the generator's states steps down as any state, and one not
+used, a count of 0 or a rect it cannot dissolve, comes back as it
+came), `getColorBoundsRect` and
 `hitTest` (its errors -2 to -4; a point needs an alpha above 0, a rect
 not at threshold 0). `threshold` and `getColorBoundsRect` compare the
 pixels as they are kept, premultiplied, unlike AS3's, and threshold
 writes its colour premultiplied by its own alpha. Flash leaves the alpha
 it writes into an opaque bitmap, which its getPixel32 reads back; an
 opaque store here keeps every alpha at 255, as its drawing, copies and
-filters take it to, so only getPixel32 differs there. `compare` has answers
+filters take it to, so only getPixel32 differs there (threshold's and
+pixelDissolve's copies). `compare` has answers
 of its own: -1 for no argument, -2 for no live bitmap, -3 and -4 for
 other sizes, 0 for the same pixels, else a bitmap of the differences.
 With no filter objects in AVM1 yet, `applyFilter` gives -1 after its
