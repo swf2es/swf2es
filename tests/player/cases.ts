@@ -14,6 +14,7 @@ import {
   type SimpleAction,
   TryFlag,
 } from "../avm1-assembler.ts";
+import { skippedExports } from "../avm1-exports.ts";
 import { flashAssembler, script } from "../avm1-script.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
@@ -9391,6 +9392,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[6, 7].map(
+    (version): PlayerCase => ({
+      name: `avm1-skipped-exports-swf${version}`,
+      swf: skippedExports(version),
+      traced: true,
+      frames: 4,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   ...[6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-timers-swf${version}`,

@@ -561,6 +561,14 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       placing: (display, place) => this.places.set(display, place),
       made: (display) => this.made(display),
       entered: (clip, frame) => this.entered(clip, frame),
+      skipped: (clip, first, last) => {
+        const swf = this.swfOf(clip);
+        if (clip === swf.root) {
+          for (let frame = first; frame <= last; frame++) {
+            this.frameDefinitions(clip, swf, frame);
+          }
+        }
+      },
       actions: (clip, tag) => this.queueTag(clip, tag),
       occupied: (depth) => this.host.trace(`Warning: Failed to place object at depth ${depth}.`),
       keeps: (display) => this.keeps(display),
@@ -1439,6 +1447,22 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       [this.rt.maxRecursion, this.rt.scriptTimeout] = actions.limits;
     }
 
+    this.frameDefinitions(clip, swf, frame);
+
+    if (actions.stop === "construct") {
+      this.queue.enqueue(CONSTRUCT, new Queued(HALT, clip));
+    }
+
+    this.stopNext ||= actions.stop === "enterFrame";
+  }
+
+  /** A skipped root frame still registers its exports and queues its #initclip (adl). */
+  private frameDefinitions(clip: MovieClip, swf: Avm1Swf, frame: number): void {
+    const actions = swf.frames.get(frame);
+    if (actions === undefined) {
+      return;
+    }
+
     for (const { id, name } of actions.exports) {
       swf.exports.set(asciiLower(name), id);
       swf.exportNames.set(id, name);
@@ -1450,12 +1474,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
         this.queue.enqueue(INIT, new Queued(BLOCK, clip, swf, block));
       }
     }
-
-    if (actions.stop === "construct") {
-      this.queue.enqueue(CONSTRUCT, new Queued(HALT, clip));
-    }
-
-    this.stopNext ||= actions.stop === "enterFrame";
   }
 
   /**
