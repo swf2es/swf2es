@@ -10,7 +10,9 @@
 // are Pixi's pipe on both sides: the marked cases are the real guard.
 //
 // A case marked `gap`, a known gap, is neither checked nor drawn unless
-// named: named, it is checked and expected to fail until the gap closes.
+// named, though the default run still builds its SWF: named, it is checked
+// and expected to fail, and one that passes is reported for its mark to
+// come off.
 //
 //   node tests/player/run.ts [--table-ab] [case...]   check
 //   node tests/player/run.ts --update [case...]       draw the references again in Flash
@@ -28,14 +30,18 @@ const args = process.argv.slice(2);
 const update = args.includes("--update");
 const tableAb = args.includes("--table-ab");
 const names = args.filter((a) => a !== "--update" && a !== "--table-ab");
-// A case marked as a known gap runs only when named.
+// A case marked as a known gap runs only when named; left out, its SWF is
+// still built, so that a gap case that no longer builds is noticed.
 const chosen = cases.filter((c) => (names.length ? names.includes(c.name) : !c.gap));
+const gaps = update || names.length ? [] : cases.filter((c) => c.gap);
 const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
 const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
 
 // The scripted cases' ABCs, compiled in the oracle's container, and each case's SWF;
 // the libraries the page serves them with, fetched if missing.
-const scripts = compileScripts([...new Set(chosen.flatMap((c) => (c.script ? [c.script] : [])))]);
+const scripts = compileScripts([
+  ...new Set([...chosen, ...gaps].flatMap((c) => (c.script ? [c.script] : []))),
+]);
 if (scripts.size || chosen.some((c) => c.build)) {
   libraryAbcs();
 }
@@ -59,6 +65,9 @@ const isAvm1 = (swf: Uint8Array): boolean => {
 };
 const traced = (c: PlayerCase) => Boolean(c.script || c.build || c.traced);
 const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), tableMinRun: c.table ? 1 : undefined }));
+for (const c of gaps) {
+  swfOf(c);
+}
 
 if (update) {
   // The oracle needs adl, which only this mode does.
@@ -182,6 +191,8 @@ if (update) {
     if (problems.length) {
       failed++;
       console.log(`FAIL ${c.name}\n  ${problems.join("\n  ")}`);
+    } else if (c.gap) {
+      console.log(`${c.name} draws as Flash does: its gap (${c.gap}) is closed, take the mark off`);
     }
   }
 
