@@ -53,12 +53,12 @@ import {
   PARKED_FIRST_GROUPS_MOST,
   PARKED_MOST,
   SPARE_GRAPHICS_MOST,
-  SPARE_NODES_MOST,
   trimPools,
 } from "./pools.js";
 import { SETTLE_MS, type Settling, settle, unsettle } from "./settle.js";
 import { SharedGraphics } from "./shared.js";
 import { drawInto, snapshot } from "./snapshot.js";
+import { SpareNodes } from "./spares.js";
 import {
   type Linear,
   linesContext,
@@ -181,19 +181,8 @@ export class PixiView {
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
   private readonly spareGraphics: SharedGraphics[] = [];
-  /**
-   * The released nodes, by their objects' character, for a new object of
-   * the character to take. A timeline that places its children anew on
-   * every frame, as an animated character's often does, made hundreds of
-   * nodes a frame, each with its containers, and dropped as many: taken, a
-   * node keeps its containers and Graphics, where they are in Pixi's tree
-   * when it comes back in its place, and its filters where the new
-   * object's are the same. And all of them, oldest first, with the time
-   * each was listed: SPARE_NODES_MOST at most, none past IDLE_MS, and none
-   * past an unload (`dropSpares`), which would keep its SWF's characters.
-   */
-  private readonly spareNodes = new Map<object, Set<Node>>();
-  private readonly spareSince = new Map<Node, number>();
+  /** The released nodes, for a new object of their character to take (render/spares.ts). */
+  private readonly spares: SpareNodes;
   /** The unloads (display's `unloads`) the spares were last dropped for. */
   private unloadsSeen = unloads.count;
   /** The nodes by their containers, for a child's sync to take the node that is in its place. */
@@ -325,6 +314,7 @@ export class PixiView {
     private readonly source: PixiView | null = null,
   ) {
     hookRenderer(renderer);
+    this.spares = new SpareNodes(fresh, this.nodes, this.containerNodes);
     this.planes = new Planes(renderer, this.nodes, this.containerNodes, (o, node) => {
       this.rescaled = true;
       this.sync(o, UNIT, false, o.flatPlaced, false, node.inherited, node.childIsolation);
@@ -368,7 +358,7 @@ export class PixiView {
     this.placeHint = null;
     let node = this.nodes.get(o);
     if (!node && !this.fresh) {
-      node = this.takeSpare(o, hint);
+      node = this.spares.take(o, hint);
     }
 
     if (!node) {
@@ -383,137 +373,6 @@ export class PixiView {
   }
 
   /**
-   * A released node of `o`'s character and class for `o` to take, the one
-   * whose container is `hint`, in `o`'s place, where it is one. Its object
-   * gets a node of its own if it comes back. The node is synced as one
-   * that comes back is, which `o`, new, has redrawn and placed whole;
-   * what only its old object's history set (a stale cache, a slice, a
-   * colour) is forgotten here.
-   */
-  private takeSpare(o: DisplayObject, hint: PixiContainer | null): Node | undefined {
-    const character = o.character;
-    const listed = character && this.spareNodes.get(character);
-    if (!listed) {
-      return undefined;
-    }
-
-    let node: Node | undefined;
-    const placed = hint ? this.containerNodes.get(hint) : undefined;
-    if (placed && listed.has(placed) && this.spareFor(placed, o)) {
-      node = placed;
-    } else {
-      // Oldest first; one no longer fit to take, as one made a mask, is let go of on the way.
-      for (const spare of listed) {
-        if (this.spareFor(spare, o)) {
-          node = spare;
-          break;
-        }
-
-        this.unlistSpare(spare);
-      }
-    }
-
-    if (!node) {
-      return undefined;
-    }
-
-    this.unlistSpare(node);
-    // Back on the list, the old object is drawn whole into a node of its own.
-    const was = node.owner.deref();
-    if (was) {
-      this.nodes.delete(was);
-      was.dirty |= TRANSFORM | CONTENT | (was instanceof Container ? CHILDREN : 0);
-    }
-
-    node.owner = o.ref;
-    node.stale = null;
-    node.color = null;
-    node.inherited = null;
-    // The chain it keeps, as filters set alike keep it, is coloured only as the colour changes:
-    // from none, as node.color now is, not in the old object's.
-    const chain = node.filters[0];
-    if (chain instanceof FilterChain) {
-      chain.recolor(null);
-    }
-
-    node.slice = null;
-    node.sliceKey = "";
-    node.sliceOwner = null;
-    node.sliceLinear = null;
-    node.lineSpace = null;
-    this.nodes.set(o, node);
-    return node;
-  }
-
-  /**
-   * Whether `node`, listed spare, may be taken by `o`: still off the list,
-   * of its class, and not made a mask since it was listed, as an object
-   * taken off the list in the frame a script makes it one is.
-   */
-  private spareFor(node: Node, o: DisplayObject): boolean {
-    const container = node.container;
-    return (
-      node.released &&
-      node.kind === o.constructor &&
-      node.character === o.character &&
-      container.includeInBuild !== false &&
-      container.measurable !== false
-    );
-  }
-
-  /**
-   * List a node just released for a new object of its character to take:
-   * not a mask's, whose container a masked one may still hold.
-   */
-  private listSpare(node: Node): void {
-    // As its object is now: a timeline may have swapped the character it was made of.
-    const owner = node.owner.deref();
-    if (owner) {
-      node.character = owner.character;
-      node.kind = owner.constructor;
-    }
-
-    const character = node.character;
-    const container = node.container;
-    if (
-      this.fresh ||
-      !character ||
-      node.masking ||
-      container.includeInBuild === false ||
-      container.measurable === false ||
-      this.spareSince.has(node)
-    ) {
-      return;
-    }
-
-    let listed = this.spareNodes.get(character);
-    if (!listed) {
-      listed = new Set();
-      this.spareNodes.set(character, listed);
-    }
-
-    listed.add(node);
-    this.spareSince.set(node, performance.now());
-    if (this.spareSince.size > SPARE_NODES_MOST) {
-      this.unlistSpare(this.spareSince.keys().next().value as Node);
-    }
-  }
-
-  /** A node off the spares: taken, come back, kept too long, or past the most. */
-  private unlistSpare(node: Node): void {
-    if (!this.spareSince.delete(node)) {
-      return;
-    }
-
-    const character = node.character as object;
-    const listed = this.spareNodes.get(character);
-    listed?.delete(node);
-    if (listed?.size === 0) {
-      this.spareNodes.delete(character);
-    }
-  }
-
-  /**
    * Let go of every spare node, as a SWF unloads: they hold its characters,
    * and its objects' containers, till taken or IDLE_MS on, which a player
    * paused or let go of never reaches. For a host to call too as it lets
@@ -521,8 +380,7 @@ export class PixiView {
    * its floor: what grew it may have gone with the SWF.
    */
   dropSpares(): void {
-    this.spareNodes.clear();
-    this.spareSince.clear();
+    this.spares.clear();
     this.lines.unloaded();
   }
 
@@ -923,7 +781,7 @@ export class PixiView {
     node.released = true;
     this.blends.forget(node);
     this.planes.drop(node);
-    this.listSpare(node);
+    this.spares.list(node);
     const group = node.container.isRenderGroup ? node.container.renderGroup : null;
     if (group) {
       const uid = group.instructionSet.uid;
@@ -1196,7 +1054,7 @@ export class PixiView {
       node.released = false;
       node.reused = true;
       this.parked.delete(node);
-      this.unlistSpare(node);
+      this.spares.unlist(node);
       const group = node.container.renderGroup;
       if (group) {
         this.parkedGroups.delete(group.instructionSet.uid);
@@ -1886,13 +1744,7 @@ export class PixiView {
       this.emptyGroup(uid, entry.group.deref());
     }
 
-    for (const [node, since] of this.spareSince) {
-      if (now - since < IDLE_MS) {
-        break;
-      }
-
-      this.unlistSpare(node);
-    }
+    this.spares.expire(now);
 
     trimPools();
     trimBatchers(this.renderer, now);

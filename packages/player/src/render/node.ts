@@ -126,7 +126,7 @@ export interface Node {
   lineSpace: Linear | null;
   /**
    * The object it draws, the one it was made for or the last to take it,
-   * and the character and class of those that may take it (`PixiView.spareNodes`).
+   * and the character and class of those that may take it (render/spares.ts).
    */
   owner: WeakRef<DisplayObject>;
   character: object | null;
