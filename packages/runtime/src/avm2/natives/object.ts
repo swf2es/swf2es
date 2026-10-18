@@ -6,7 +6,7 @@ import type { ClassHook } from "../hooks.js";
 import { formatClassName, Namespace, prefixOf, publicQname } from "../names.js";
 import { NOT_FOUND, type Runtime } from "../runtime.js";
 import { AS3, elements, type Natives, plain } from "./define.js";
-import { constructNamespace, newNamespace } from "./xml/xml.js";
+import { constructNamespace, newNamespace } from "./xml/names.js";
 
 export const objectNatives: Natives = {
   // Object

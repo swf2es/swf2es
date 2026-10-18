@@ -3,6 +3,7 @@
 
 import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
+import { numberToString } from "../number-strings.js";
 import {
   convertDoubleToString,
   convertDoubleToStringRadix,
@@ -10,7 +11,7 @@ import {
   DTOSTR_FIXED,
   DTOSTR_PRECISION,
 } from "../numbers.js";
-import { numberToString, type Runtime } from "../runtime.js";
+import type { Runtime } from "../runtime.js";
 import { conversion, type Natives, plain } from "./define.js";
 
 export const numberNatives: Natives = {

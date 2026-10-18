@@ -653,9 +653,12 @@ what a host gives a runtime; `hooks.ts`, what a builtin or a player's class
 plugs in to allocate, index, resolve names or be called; `traits.ts`, the
 layout model (`Traits`, the binding kinds, the class and Vector references);
 `domain.ts`, application domains and the lookup of a name along a domain's
-chain; `classes.ts`, OP_newclass, which makes a class from its descriptor;
+chain; `modules.ts`, the modules loaded into them and which module's code
+a stack is in; `method-factories.ts`, the natives and the methods with no
+generated body as a module binds them; `classes.ts`, OP_newclass, which makes a class from its descriptor;
 `enumeration.ts`, the names a for-in goes through; `property-cache.ts`, the
-inline caches; `names.ts`, namespaces and multinames; `numbers.ts`,
+inline caches; `names.ts`, namespaces and multinames; `number-strings.ts`,
+numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
 
@@ -686,7 +689,11 @@ the runtime translates it, so that its output is avmplus' byte for byte:
 number formatting (`numbers.ts`), Array's sort (`natives/sort.ts`),
 ByteArray with its capacity and UTF-8 (`natives/bytearray.ts`), AMF3
 (`amf.ts`), JSON (`natives/json.ts`), Date's formats (`natives/date.ts`),
-XML (`natives/xml/`: `chars.ts`, `parser.ts`, `node.ts` and `xml.ts`) and
+XML (`natives/xml/`: `chars.ts` and `parser.ts` tokenize text, `node.ts`
+is the tree, `build.ts` makes trees from text and values, `values.ts` the
+XML and XMLList objects, `names.ts` their names, Namespaces and QNames,
+`access.ts` E4X's internal methods, `strings.ts` toString and toXMLString,
+`operators.ts` == and +, and `xml.ts` the classes' hooks and natives) and
 describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
