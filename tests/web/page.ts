@@ -411,16 +411,31 @@ async function avm1Churn(n: number) {
   return stopped;
 }
 
-/** An AVM1 SWF's calls to the page, and the page's call into it, its element then taken away. */
+/**
+ * An AVM1 SWF's calls to the page and the page's call into it, after the
+ * same SWF under allowScriptAccess="never" (whether its callback came),
+ * each element then taken away.
+ */
 async function avm1External() {
-  const p = document.createElement("swf2es-player") as Player;
-  p.setAttribute("src", "/web-test/avm1-external.swf");
-  document.body.append(p);
-  await p.ready;
-  await frames(2);
+  const play = async (access: string | null) => {
+    const p = document.createElement("swf2es-player") as Player;
+    p.setAttribute("src", "/web-test/avm1-external.swf");
+    if (access !== null) {
+      p.setAttribute("allowscriptaccess", access);
+    }
+
+    document.body.append(p);
+    await p.ready;
+    await frames(2);
+    return p;
+  };
+  const locked = await play("never");
+  const never = "triple" in locked;
+  locked.remove();
+  const p = await play(null);
   const triple = (p as unknown as { triple(n: number): unknown }).triple(5);
   p.remove();
-  return { calls: calls.avm1, triple };
+  return { calls: calls.avm1, triple, never };
 }
 
 /** What a collection left: players made and destroyed still alive, and codegen instances. */

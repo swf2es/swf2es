@@ -20,8 +20,12 @@ export interface ExternalHost {
   readonly realm: avm1.Realm;
   /** The page's bridge where it lets the calling SWF use it; null for none. */
   externalBridge(): ExternalInterfaceHost | null;
-  /** `fn` called on `self` with `args` from the page, outside a frame, and what it gave. */
-  callIn(fn: Value, self: Value, args: Value[]): Value;
+  /**
+   * `body`, the page's call into a callback, run as AVM1 code between
+   * frames, what it queued run after it: what it gave, undefined where it
+   * did not run or threw.
+   */
+  callIn(body: () => Value): Value;
 }
 
 const ESCAPES: [string, string][] = [
@@ -54,6 +58,14 @@ export function unescapeXml(text: string): string {
 
 const FLAGS = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY;
 
+/**
+ * The most elements of an array-like the converters read, whatever length
+ * it claims: a length a script made up must not keep a native loop from
+ * the script timeout (as TextFormat's tabStops reads at most 2^16). Flash
+ * reads them all, running into its timeout.
+ */
+const MAX_ELEMENTS = 0x10000;
+
 /** `flash.external.ExternalInterface`. */
 export function externalInterfaceClass(host: ExternalHost): Obj {
   const realm = host.realm;
@@ -77,7 +89,25 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
   const asObject = (x: Value, v: number): Obj =>
     x instanceof avm1.Avm1Object ? x : realm.box(x, v);
   const lengthOf = (o: Obj, v: number) =>
-    Math.max(0, avm1.toNumber(avm1.get(o, "length", v), v) | 0);
+    Math.min(MAX_ELEMENTS, Math.max(0, avm1.toNumber(avm1.get(o, "length", v), v) | 0));
+  /**
+   * `f` of `o`, or `inside` where `o` is already being converted further
+   * out: an object that holds itself ends there, where Flash's recursion
+   * would run out of stack (as the page's toXml has it).
+   */
+  const open = new Set<Obj>();
+  const once = <T>(o: Obj, inside: T, f: () => T): T => {
+    if (open.has(o)) {
+      return inside;
+    }
+
+    open.add(o);
+    try {
+      return f();
+    } finally {
+      open.delete(o);
+    }
+  };
 
   const arrayToXml = (o: Obj, v: number): string => {
     const parts = ["<array>"];
@@ -134,10 +164,10 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
     }
 
     if (x.own("length", v) !== undefined) {
-      return arrayToXml(x, v);
+      return once(x, "<null/>", () => arrayToXml(x, v));
     }
 
-    return x instanceof avm1.Avm1Function ? "<null/>" : objectToXml(x, v);
+    return x instanceof avm1.Avm1Function ? "<null/>" : once(x, "<null/>", () => objectToXml(x, v));
   };
 
   const field = (o: Value, name: string, v: number): Value =>
@@ -183,9 +213,13 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
       case "number":
         return avm1.toNumber(avm1.stringOf(field(node, "firstChild", v), v), v);
       case "array":
-        return properties(node, realm.newArray([], v), v);
       case "object":
-        return properties(node, realm.newObject(v), v);
+        // A node that holds itself, as only a script's objects can, is undefined inside itself.
+        return node instanceof avm1.Avm1Object
+          ? once(node, undefined, () =>
+              properties(node, name === "array" ? realm.newArray([], v) : realm.newObject(v), v),
+            )
+          : properties(node, name === "array" ? realm.newArray([], v) : realm.newObject(v), v);
       case "class":
         return avm1.stringOf(field(node, "firstChild", v), v);
       default:
@@ -222,15 +256,19 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
       return false;
     }
 
+    // Reading the request, the call and writing its answer all run as AVM1 code: the XML class,
+    // a getter or a toString they meet are the content's.
     const self = args[1];
-    bridge.addCallback(avm1.stringOf(args[0], v), (request) => {
-      const invocation = parse(request, v);
-      const argsNode = children(invocation, v).find(
-        (child) => field(child, "nodeName", v) === "arguments",
-      );
-      const given = children(argsNode, v).map((child) => toAs(child, v));
-      return toXml(host.callIn(method, self, given), v);
-    });
+    bridge.addCallback(avm1.stringOf(args[0], v), (request) =>
+      host.callIn(() => {
+        const invocation = parse(request, v);
+        const argsNode = children(invocation, v).find(
+          (child) => field(child, "nodeName", v) === "arguments",
+        );
+        const given = children(argsNode, v).map((child) => toAs(child, v));
+        return toXml(avm1.invoke(method, self, given, v), v);
+      }),
+    );
     return true;
   });
   // The page's answer, null where there is no page or nothing answers.
@@ -244,14 +282,18 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
 
       const name = avm1.stringOf(args[0], v);
       const rest = args.slice(1);
-      const js = rest.map((x) => toJs(x, v)).join(",");
-      let answer = bridge.evalJS(
-        `try { __flash__toXML(${name}(${js})) ; } catch (e) { "<undefined/>"; }`,
-      );
+      // As JavaScript only for a host that evaluates it; the web element's declines every call.
+      let answer =
+        bridge.evalJS === undefined
+          ? null
+          : bridge.evalJS(
+              `try { __flash__toXML(${name}(${rest.map((x) => toJs(x, v)).join(",")})) ; } catch (e) { "<undefined/>"; }`,
+            );
       if (answer === null) {
+        // The name as it is, as AS3's playerglobal sends it: the page reads it so, an inline function among them.
         const xml = rest.map((x) => toXml(x, v)).join("");
         answer = bridge.callOut(
-          `<invoke name="${escapeXml(name)}" returntype="xml"><arguments>${xml}</arguments></invoke>`,
+          `<invoke name="${name}" returntype="xml"><arguments>${xml}</arguments></invoke>`,
         );
       }
 
@@ -277,7 +319,9 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
       return "null";
     }
 
-    return x.own("length", v) !== undefined ? arrayToJs(x, v) : objectToJs(x, v);
+    return once(x, "null", () =>
+      x.own("length", v) !== undefined ? arrayToJs(x, v) : objectToJs(x, v),
+    );
   };
   const arrayToJs = (o: Obj, v: number): string =>
     `[${Array.from({ length: lengthOf(o, v) }, (_, i) => toJs(avm1.get(o, String(i), v), v)).join(",")}]`;
@@ -314,7 +358,7 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
   define("_initJS", () => undefined);
   define(
     "_evalJS",
-    (_, args, v) => host.externalBridge()?.evalJS(avm1.stringOf(args[0], v)) ?? null,
+    (_, args, v) => host.externalBridge()?.evalJS?.(avm1.stringOf(args[0], v)) ?? null,
   );
   define(
     "_callOut",

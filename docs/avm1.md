@@ -1643,15 +1643,25 @@ as "Loading movies" has them; `$version`, which Flash defines on
 SWF 8 but `call`) talks to the page through the host's bridge that AS3's
 Scripting takes (`Avm1Options.externalInterface`, which the element
 gives as it gives Scripting's), in Flash's XML: `call` offers the call to
-`evalJS` as JavaScript, its object's keys quoted, then sends it to
-`callOut` as an `<invoke>`, and reads the answer back with the realm's
-`XML`, as content would; `addCallback(name, instance, method)` takes a
-function only, and the page's call comes as an `<invoke>` whose
-arguments are read the same way, the method run on `instance` between
-frames as a timer's callback is, what it queued after it, and its answer
-sent back as XML. Without a bridge, or one whose `allows` refuses the
-calling SWF's URL, `available` is false, `call` null and `addCallback`
-false. The underscored helpers Flash's own AS2 class is built of
+`evalJS` as JavaScript, its object's keys quoted, where the host has one
+(the element's has none), then sends it to `callOut` as an `<invoke>`,
+its name as it is, as AS3's playerglobal sends it, and reads the answer
+back with the realm's `XML`, as content would; `addCallback(name,
+instance, method)` takes a function only, and the page's call comes as
+an `<invoke>` whose arguments are read the same way, the reading, the
+method run on `instance` and the writing of its answer as XML all as
+AVM1 code between frames, as a timer's callback runs, what it queued
+after it. The converters read at most 2^16 elements of an array-like,
+whatever length it claims, and an object met inside itself is null.
+Without a bridge, or one whose `allows` refuses the calling SWF's URL,
+`available` is false, `call` null and `addCallback` false. The calling
+SWF is the one whose block or function is running, known by its code
+(each SWF's compiled blocks); a native called with none running, as a
+timer, a network callback or the page's call calls one straight, needs
+every SWF that has had code so far allowed, as AS3's natives ask when
+they cannot tell their caller, so that a child from another origin
+cannot call the page through `setInterval(ExternalInterface.call, ...)`
+or `xml.onData = ExternalInterface.call`. The underscored helpers Flash's own AS2 class is built of
 (`_escapeXML`, `_toXML`, `_toAS`, `_arrayToXML`, `_argumentsToAS`...) are
 there for content to call, answering as Flash's do: an empty string
 escapes to null and serialises as `<string>null</string>`, an object

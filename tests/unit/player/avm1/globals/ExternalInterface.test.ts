@@ -12,6 +12,7 @@ import type { ExternalInterfaceHost } from "../../../../../packages/player/dist/
 import { Player } from "../../../../../packages/player/dist/player.js";
 import { flashAssembler, script } from "../../../../avm1-script.ts";
 import * as w from "../../../../swf-writer.ts";
+import { files, movie, play as playNet, take } from "../network.ts";
 import { traces } from "../text-fields.ts";
 
 const codegen = await createCodegen(
@@ -148,5 +149,88 @@ trace(${EI}._toAS({nodeName: {toString: function() { return "true"; }}}));`,
       "NaN",
       "undefined",
     ],
+  );
+});
+
+/** The function names of the page's requests. */
+const names = (requests: string[]) => requests.map((r) => /name="([^"]*)"/.exec(r)?.[1]);
+
+test("a page that refuses the SWF leaves it no ExternalInterface", async () => {
+  const { host, requests } = page("<null/>");
+  host.allows = () => false;
+  assert.deepEqual(
+    await play(
+      `trace(${EI}.available); trace(${EI}.call("f")); trace(${EI}.addCallback("g", null, function() {}));
+trace(${EI}._callOut("<invoke/>"));`,
+      host,
+    ),
+    ["false", "null", "false", "null"],
+  );
+  assert.deepEqual(requests, []);
+});
+
+test("a child from an origin the page refuses cannot call it, by its code or by a timer or callback calling straight", async () => {
+  const { host, requests } = page("<null/>");
+  host.allows = (url) => url.startsWith("http://a.test/");
+  const played = await playNet(
+    `createEmptyMovieClip("evil", 1).loadMovie("http://b.test/evil.swf");
+createEmptyMovieClip("good", 2).loadMovie("http://a.test/good.swf");
+${EI}.call("main");
+var frames = 0;
+this.onEnterFrame = function() {
+  frames++;
+  if (_global.f) { _global.f(); _global.f = undefined; }
+  if (frames == 4) { ${EI}.call("mainLater"); }
+};`,
+    {
+      url: "http://a.test/main.swf",
+      externalInterface: host,
+      fetch: files({
+        "evil.swf": movie(`${EI}.call("evilDirect");
+trace("evil " + ${EI}.available + " " + ${EI}.addCallback("evilCallback", null, function() {}));
+setInterval(${EI}.call, 1, "evilTimer");
+var holder = {call: ${EI}.call}; setInterval(holder, "call", 1, "evilMethodTimer");
+var x = new XML(); x.onData = ${EI}.call; x.load("http://b.test/name.txt");
+_global.f = function() { ${EI}.call("evilFunction"); };`),
+        "good.swf": movie(`${EI}.call("good");`),
+        "name.txt": new TextEncoder().encode("evilData"),
+      }),
+    },
+  );
+  for (let i = 0; i < 5; i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played), ["evil false false"]);
+  assert.deepEqual(names(requests), ["main", "good", "mainLater"]);
+});
+
+test("call sends the function's name as it is, as AS3's does, and a callback's answer reads its getters as AVM1 code", async () => {
+  const { host, requests, callbacks } = page("<null/>");
+  const lines = await play(
+    `${EI}.call("function(a) { return a + '!' && a; }");
+var o = {}; o.addProperty("g", function() { return "got"; }, null);
+trace(${EI}.addCallback("h", null, function() { return o; }));`,
+    host,
+  );
+  assert.deepEqual(lines, ["true"]);
+  assert.deepEqual(names(requests), ["function(a) { return a + '!' && a; }"]);
+  assert.equal(
+    callbacks.get("h")?.(
+      '<invoke name="h" returntype="xml"><arguments></arguments></invoke>',
+      null,
+    ),
+    '<object><property id="g"><string>got</string></property></object>',
+  );
+});
+
+test("the converters read at most 2^16 elements and stop at an object inside itself", async () => {
+  assert.deepEqual(
+    await traces([
+      `var s = ${EI}._toXML({length: 2147483647}); trace(s.split("<property").length - 1);
+var o = {}; o.me = o; trace(${EI}._toXML(o)); trace(${EI}._toJS(o));`,
+    ]),
+    ["65536", '<object><property id="me"><null/></property></object>', '({"me":null})'],
   );
 });

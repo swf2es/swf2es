@@ -460,6 +460,10 @@ export class Avm1
   private readonly arrivals = new WeakMap<object, Promise<void>>();
   private readonly decodeImage: ImageDecode | null;
   private readonly externalInterface: ExternalInterfaceHost | null;
+  /** Each SWF's blocks, by which a function's or block's code is known as that SWF's. */
+  private readonly codeSwfs = new WeakMap<avm1.Region[], Avm1Swf>();
+  /** The URLs of every SWF that has had code to run, unloaded ones too. */
+  private readonly codeUrls = new Set<string>();
   /** The operand stack, which every activation of a frame's actions shares. */
   private readonly st: avm1.Value[] = [];
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
@@ -834,6 +838,7 @@ export class Avm1
       const module = this.codegen.compileActionsModule(swf.bytes, list);
       const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
       this.main.blocks = (factory as unknown as avm1.Factory)(this.rt);
+      this.ownCode(this.main);
     }
 
     this.loaded = true;
@@ -1529,18 +1534,51 @@ export class Avm1
   }
 
   /** The page's ExternalInterface, where it lets the SWF of the code running now use it. */
+  /**
+   * The page's ExternalInterface, where it lets the code calling use it:
+   * the SWF whose block or function is running, known by its code; where
+   * a native is called with no code of a SWF's running, as a timer, a
+   * network callback or the page's call calls one straight, every SWF that
+   * has run code so far must be allowed, as AS3's natives ask when they
+   * cannot tell their caller (hosts.ts's allows). The clip a function was
+   * made in is not enough: a load can put another SWF in it.
+   */
   externalBridge(): ExternalInterfaceHost | null {
     const host = this.externalInterface;
-    return host !== null && (host.allows?.(this.currentSwf().url) ?? true) ? host : null;
+    const allows = host?.allows;
+    if (host === null || allows === undefined) {
+      return host;
+    }
+
+    const caller = this.codeSwfs.get(this.realm.current?.code ?? []);
+    const urls = caller !== undefined ? [caller.url] : this.codeUrls;
+    for (const url of urls) {
+      if (!allows.call(host, url)) {
+        return null;
+      }
+    }
+
+    return host;
+  }
+
+  /** `swf`'s code compiled: its blocks known as its own, and its URL among those that ran code. */
+  private ownCode(swf: Avm1Swf): void {
+    for (const block of swf.blocks) {
+      this.codeSwfs.set(block, swf);
+    }
+
+    if (swf.blocks.length > 0) {
+      this.codeUrls.add(swf.url);
+    }
   }
 
   /**
-   * `fn` called on `self` with `args` by the page, between frames or
-   * inside a call out, in the root's activation as a timer's callback
-   * runs, and what it queued run after it: what it returned, undefined
-   * where it did not run or threw.
+   * `body`, the page's call into a callback, run between frames or inside
+   * a call out, in the root's activation as a timer's callback runs, and
+   * what it queued run after it: what it returned, undefined where it did
+   * not run or threw.
    */
-  callIn(fn: Value, self: Value, args: Value[]): Value {
+  callIn(body: () => Value): Value {
     const cx =
       this.movieRoot === null || this.halted || !this.loaded
         ? null
@@ -1553,7 +1591,7 @@ export class Avm1
     this.begin();
     try {
       this.rt.call(cx, () => {
-        result = avm1.invoke(fn, self, args, this.swfVersion);
+        result = body();
       });
       this.runQueue();
     } finally {
@@ -1849,6 +1887,7 @@ export class Avm1
           size,
         );
         swf.blocks = arrived.blocks;
+        this.ownCode(swf);
         this.adopt(swf);
         this.readRootFrames(file, swf);
         this.fill(target, swf);

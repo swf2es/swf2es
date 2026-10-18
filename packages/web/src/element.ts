@@ -2,7 +2,14 @@
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
 import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
-import { Avm1, type FetchRequest, type FetchResult, Player, Scripting } from "@swf2es/player";
+import {
+  Avm1,
+  type ExternalInterfaceHost,
+  type FetchRequest,
+  type FetchResult,
+  Player,
+  Scripting,
+} from "@swf2es/player";
 import {
   codegenForPlayer,
   configuration,
@@ -388,11 +395,6 @@ export class Swf2esPlayerElement extends ElementBase {
         // nothing.
         const { internal, offline, allows, objectID } = this.#access(pageUrl);
         const base = attribute(this, "base");
-        const bridge: PageBridge = {
-          objectID,
-          callback: (name, call) => this.#callback(session, name, call),
-          alive: () => this.#session === session,
-        };
         avm1 = new Avm1(codegen, {
           url,
           base: base ? new URL(base, pageUrl).href : undefined,
@@ -409,11 +411,7 @@ export class Swf2esPlayerElement extends ElementBase {
             }
           },
           navigate: internal ? null : undefined,
-          externalInterface: externalInterfaceHost(
-            bridge,
-            (error) => this.#report(session, error),
-            allows,
-          ),
+          externalInterface: this.#externalInterface(session, objectID, allows),
         });
       }
 
@@ -460,11 +458,6 @@ export class Swf2esPlayerElement extends ElementBase {
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const base = attribute(this, "base");
-    const bridge: PageBridge = {
-      objectID,
-      callback: (name, call) => this.#callback(session, name, call),
-      alive: () => this.#session === session,
-    };
     const scripting = new Scripting(codegen, {
       url,
       base: base ? new URL(base, pageUrl).href : undefined,
@@ -478,11 +471,7 @@ export class Swf2esPlayerElement extends ElementBase {
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
       sendToUrl: !internal,
-      externalInterface: externalInterfaceHost(
-        bridge,
-        (error) => this.#report(session, error),
-        allows,
-      ),
+      externalInterface: this.#externalInterface(session, objectID, allows),
       fsCommand: (command, args, callers) => {
         if (callers.every(allows)) {
           this.#fsCommand(objectID, command, args);
@@ -513,6 +502,20 @@ export class Swf2esPlayerElement extends ElementBase {
       allows: (swfUrl) => !internal && scriptAccess(access, swfUrl, pageUrl),
       objectID: idOf(this) || attribute(this, "name") || null,
     };
+  }
+
+  /** The page's ExternalInterface for a load, an AS3 or an AVM1 SWF's alike, for the SWFs `allows` lets script it. */
+  #externalInterface(
+    session: Session,
+    objectID: string | null,
+    allows: (url: string) => boolean,
+  ): ExternalInterfaceHost {
+    const bridge: PageBridge = {
+      objectID,
+      callback: (name, call) => this.#callback(session, name, call),
+      alive: () => this.#session === session,
+    };
+    return externalInterfaceHost(bridge, (error) => this.#report(session, error), allows);
   }
 
   /** The SWF's callback `name` on the element, or taken off it, while its load is the one playing. */

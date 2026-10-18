@@ -61,6 +61,8 @@ writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 const external = `var EI = flash.external.ExternalInterface;
 var got = EI.call("avm1Hello", "hi", [1, {k: "v"}]);
 EI.call("avm1Hello", got.got[0] + "!", got.got[1][1].k);
+// An inline function, its quotes and && sent as they are.
+EI.call("avm1Hello", EI.call("function(a) { return a && a + \\"'\\"; }", "q"));
 EI.addCallback("triple", null, function(n) { return {n: n * 3, s: "a<b"}; });
 stop();`;
 writeFileSync(
@@ -380,12 +382,14 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
 });
 
 check("an AVM1 SWF's ExternalInterface calls the page and takes its calls", async (evaluate) => {
-  const ei = await call<{ calls: unknown[][]; triple: unknown }>(evaluate, "avm1External()");
-  assert.deepEqual(ei.calls, [
-    ["hi", [1, { k: "v" }]],
-    ["hi!", "v"],
-  ]);
+  const ei = await call<{ calls: unknown[][]; triple: unknown; never: boolean }>(
+    evaluate,
+    "avm1External()",
+  );
+  // The SWF under allowScriptAccess="never" called nothing and added no callback.
+  assert.deepEqual(ei.calls, [["hi", [1, { k: "v" }]], ["hi!", "v"], ["q'"]]);
   assert.deepEqual(ei.triple, { n: 15, s: "a<b" });
+  assert.equal(ei.never, false);
 });
 
 check(
