@@ -60,6 +60,8 @@ export interface LayoutField {
   fonts: FontSet | null;
   /** Whether its type is "input": the empty line a final newline leaves then counts in its height. */
   input: boolean;
+  /** "advanced" lays an embedded font's text out with its pen in fractions of a twip; "normal" by default. */
+  antiAliasType?: string;
 }
 
 /** A character's measure in its format: its font and glyph, its advance and the line height it asks, in twips. */
@@ -67,6 +69,10 @@ interface Measure {
   font: Font | null;
   glyph: Glyph | null;
   advance: number;
+  /** How far it moves the pen, in twips: its advance, or for advanced text the same untruncated. */
+  pen: number;
+  /** Whether it starts a run of another font, size, style or spacing, where the pen is truncated. */
+  run: boolean;
   kern: number;
   ascent: number;
   descent: number;
@@ -104,28 +110,66 @@ function measure(field: LayoutField, code: number, format: CharFormat, previous:
   if (field.embedFonts) {
     const font = field.fonts?.find(format.font, format.bold, format.italic) ?? null;
     if (!font?.layout) {
-      return { font, glyph: null, advance: 0, kern: 0, ascent: 0, descent: 0, shown: false };
+      return {
+        font,
+        glyph: null,
+        advance: 0,
+        pen: 0,
+        run: false,
+        kern: 0,
+        ascent: 0,
+        descent: 0,
+        shown: false,
+      };
     }
 
     const ascent = twips(font.ascent, size, font.em);
     const descent = twips(font.descent, size, font.em);
     const glyph = glyphOf(font, code);
     if (!glyph) {
-      return { font, glyph: null, advance: 0, kern: 0, ascent, descent, shown: false };
+      return {
+        font,
+        glyph: null,
+        advance: 0,
+        pen: 0,
+        run: false,
+        kern: 0,
+        ascent,
+        descent,
+        shown: false,
+      };
     }
 
-    // A pair's kerning shortens the second character, as adl has it.
+    // A pair's kerning shortens the second character, as adl has it where
+    // the pair ends the text. Before another character, adl's boundaries
+    // give it to the first instead in normal text, and in advanced text
+    // only some of the time: the player keeps to the rule at the end.
     const pair = format.kerning && previous >= 0 ? font.kerning.get((previous << 16) | code) : 0;
     const kern = pair ? twips(pair, size, font.em) : 0;
-    const advance = twips(glyph.advance, size, font.em) + spacing + kern;
-    return { font, glyph, advance, kern, ascent, descent, shown: true };
+    // Kerned, the advance and the pair's adjustment are summed in the font's
+    // units and truncated once: 230 − 77 units at 11 pixels is 32 twips, not 49 − 16.
+    const advance = twips(glyph.advance + (pair || 0), size, font.em) + spacing;
+    // Advanced text keeps its pen in fractions of a twip, and only where a
+    // character lands is truncated, as adl lays it out: 230 units of a
+    // 1024 em at 10 pixels move it 44.92 twips, and eight of them land at
+    // 0, 44, 89, 134 and on to 359, not at multiples of 44. Fitting to the
+    // pixel grid ("pixel") moves advances only by the font's alignment
+    // zones, which the player does not read yet: it is laid out as "none".
+    const pen =
+      field.antiAliasType === "advanced"
+        ? ((glyph.advance + (pair || 0)) * size * TWIPS) / font.em + spacing
+        : advance;
+    return { font, glyph, advance, pen, run: false, kern, ascent, descent, shown: true };
   }
 
   const m = deviceMetrics(format.font, size, format.bold, format.italic);
+  const advance = twips(m.advance(String.fromCharCode(code)), size, size) + spacing;
   return {
     font: null,
     glyph: null,
-    advance: twips(m.advance(String.fromCharCode(code)), size, size) + spacing,
+    advance,
+    pen: advance,
+    run: false,
     kern: 0,
     ascent: twips(m.ascent, size, size),
     descent: twips(m.descent, size, size),
@@ -153,7 +197,9 @@ export function layoutText(field: LayoutField): TextLayout {
     for (let i = start; i < end; i++) {
       const glyphs = measures[i - start - 1];
       const previous = i > start && glyphs?.shown ? text.charCodeAt(i - 1) : -1;
-      measures.push(measure(field, text.charCodeAt(i), formats[i], previous));
+      const m = measure(field, text.charCodeAt(i), formats[i], previous);
+      m.run = i > start && newRun(formats[i - 1], formats[i]);
+      measures.push(m);
     }
 
     // The paragraph's lines: [from, to) of its characters each.
@@ -187,21 +233,27 @@ export function layoutText(field: LayoutField): TextLayout {
     for (const [k, [a, b]] of breaks.entries()) {
       const chars: LaidChar[] = [];
       let x = 0;
+      let pen = 0;
       let ascent = 0;
       let descent = 0;
       for (let i = a; i < b; i++) {
         const m = measures[i];
+        // A run of another size starts where the last one's text landed, as
+        // adl lays advanced text out: 10, 13 and 17 pixels in one line.
+        pen = (m.run ? x : pen) + m.pen;
+        // A pen a negative spacing took left of 0 lands at 0, not -0.
+        const next = Math.trunc(pen) || 0;
         chars.push({
           index: start + i,
           x,
-          advance: m.advance,
+          advance: next - x,
           kern: m.kern,
           font: m.font,
           glyph: m.glyph,
           shown: m.shown,
           format: formats[start + i],
         });
-        x += m.advance;
+        x = next;
         ascent = Math.max(ascent, m.ascent);
         descent = Math.max(descent, m.descent);
       }
@@ -343,8 +395,9 @@ function wrap(
     let wordEnd = i;
     let wordWidth = width;
     while (wordEnd < measures.length && text[start + wordEnd] !== " ") {
-      wordWidth += measures[wordEnd].advance;
-      if (wordWidth > room) {
+      const m = measures[wordEnd];
+      wordWidth = (m.run ? Math.trunc(wordWidth) : wordWidth) + m.pen;
+      if (Math.trunc(wordWidth) > room) {
         // On a line of its own, it breaks before the character that runs past, one at least.
         return i > from ? i : Math.max(wordEnd, from + 1);
       }
@@ -355,12 +408,25 @@ function wrap(
     width = wordWidth;
     i = wordEnd;
     while (i < measures.length && text[start + i] === " ") {
-      width += measures[i].advance;
+      const m = measures[i];
+      width = (m.run ? Math.trunc(width) : width) + m.pen;
       i++;
     }
   }
 
   return measures.length;
+}
+
+/** Whether `b` lays out in another run from `a`: another font, size, style or spacing. */
+function newRun(a: CharFormat, b: CharFormat): boolean {
+  return (
+    a !== b &&
+    (a.font !== b.font ||
+      a.size !== b.size ||
+      a.bold !== b.bold ||
+      a.italic !== b.italic ||
+      a.letterSpacing !== b.letterSpacing)
+  );
 }
 
 function textWidth(lines: Line[]): number {

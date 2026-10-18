@@ -324,8 +324,9 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     (field) => field.antiAliasType,
     (field, value, version) => {
       const type = avm1.stringOf(value, version);
-      if (type === "normal" || type === "advanced") {
+      if ((type === "normal" || type === "advanced") && type !== field.antiAliasType) {
         field.antiAliasType = type;
+        changed(field);
       }
     },
     avm1.VERSION_8,

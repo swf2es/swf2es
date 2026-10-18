@@ -5985,7 +5985,7 @@ export const probeFont = (id: number): Uint8Array =>
  * "Stem", a font of upright bars: "1" to "6" a bar each, 15 to 100 units
  * of the em wide, so that at 20 pixels they run from under a third of a
  * pixel to two, and "l", "m", "a" and "W" with advances that are no whole
- * number of pixels at any of the cases' sizes.
+ * number of pixels at any of the cases' sizes; "a" then "l" kern.
  */
 export const stemFont = (id: number): Uint8Array =>
   w.font3({
@@ -6019,6 +6019,7 @@ export const stemFont = (id: number): Uint8Array =>
       { char: "a", advance: 537, boxes: [[50, -500, 487, 0]] },
       { char: "W", advance: 1000, boxes: [[0, -700, 1000, 0]] },
     ],
+    kerning: [["a", "l", -77]],
   });
 
 // Static text in Probe, defined before the font it uses: a DefineText of
@@ -8430,9 +8431,20 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 64,
     maxOutliers: 40,
-    // Saffron's CSM cutoffs (stems thickened, thickness and sharpness),
-    // and advanced layout's pen kept in fractions of a twip.
-    gap: "advanced anti-aliasing",
+    // Saffron's CSM cutoffs: stems thickened, thickness and sharpness. Its
+    // layout is text-advanced-layout's, which passes; fitting to pixels
+    // needs a font's alignment zones, which Stem has none of.
+    gap: "advanced anti-aliasing's drawing",
+  },
+  {
+    // The same text's layout alone, advanced text's pen in fractions of a twip.
+    name: "text-advanced-layout",
+    swf: textAdvanced,
+    script: "TextAdvanced",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "text-indent",

@@ -391,8 +391,9 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     // An unknown one is left as it was, as adl leaves it.
     set antiAliasType(v: Value) {
       const value = s.rt.toString(v);
-      if (value === "normal" || value === "advanced") {
+      if ((value === "normal" || value === "advanced") && value !== this.$display.antiAliasType) {
         this.$display.antiAliasType = value;
+        changed(this);
       }
     }
     get gridFitType(): string {
