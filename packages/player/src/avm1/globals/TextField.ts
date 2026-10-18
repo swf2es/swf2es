@@ -315,6 +315,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       const type = avm1.stringOf(value, version);
       if (type === "pixel" || type === "subpixel" || type === "none") {
         field.gridFitType = type;
+        changed(field);
       }
     },
     avm1.VERSION_8,
@@ -326,6 +327,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       const type = avm1.stringOf(value, version);
       if (type === "normal" || type === "advanced") {
         field.antiAliasType = type;
+        changed(field);
       }
     },
     avm1.VERSION_8,

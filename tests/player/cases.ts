@@ -8435,6 +8435,16 @@ export const cases: PlayerCase[] = [
     gap: "advanced anti-aliasing",
   },
   {
+    // The same text's layout alone, advanced text's pen in fractions of a twip.
+    name: "text-advanced-layout",
+    swf: textAdvanced,
+    script: "TextAdvanced",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "text-indent",
     swf: textIndent,
     script: "TextIndent",

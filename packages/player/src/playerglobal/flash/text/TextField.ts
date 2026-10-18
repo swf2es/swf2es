@@ -393,6 +393,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       const value = s.rt.toString(v);
       if (value === "normal" || value === "advanced") {
         this.$display.antiAliasType = value;
+        changed(this);
       }
     }
     get gridFitType(): string {
@@ -402,6 +403,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     set gridFitType(v: Value) {
       const value = s.rt.toString(v);
       this.$display.gridFitType = value === "pixel" || value === "subpixel" ? value : "none";
+      changed(this);
     }
 
     get border(): boolean {
