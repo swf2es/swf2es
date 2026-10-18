@@ -142,16 +142,21 @@ function matrixOf(o: Value, v: number) {
 }
 
 /**
- * draw's blend mode: a name as BlendMode has it, or PlaceObject3's number
- * of one, a byte; anything else, a name in another case or a number in a
- * string included, is normal (adl).
+ * A blend mode as AVM1 takes one: a name as BlendMode has it, or
+ * PlaceObject3's number of one, a byte, undefined and null normal; null for
+ * anything else, a name in another case or a number in a string included
+ * (adl, the corpus's movieclip_blend_mode_property).
  */
-function blendOf(value: Value): string {
-  if (typeof value === "number") {
-    return BLEND_MODES[Math.trunc(value) & 0xff] ?? "normal";
+export function blendModeOf(value: Value): string | null {
+  if (value === undefined || value === null) {
+    return "normal";
   }
 
-  return typeof value === "string" && BLEND_MODES.includes(value) ? value : "normal";
+  if (typeof value === "number") {
+    return BLEND_MODES[(Number.isFinite(value) ? Math.trunc(value) : 0) & 0xff] ?? null;
+  }
+
+  return typeof value === "string" && BLEND_MODES.includes(value) ? value : null;
 }
 
 /** A native ColorTransform's values as a colour transform; null for anything else. */
@@ -316,7 +321,8 @@ export function bitmapDataClass(host: BitmapHost): Obj {
   method("draw", 0, (store, args, v) => {
     const m = matrixOf(args[1], v);
     const c = colorOf(args[2]);
-    const blend = blendOf(args[3]);
+    // draw takes anything that is no blend mode as normal (adl).
+    const blend = blendModeOf(args[3]) ?? "normal";
     const clip = args.length > 4 ? rectOf(args[4], v) : null;
     const smooth = args.length > 5 && avm1.toBoolean(args[5], v);
     const source = storeOf(args[0]);
