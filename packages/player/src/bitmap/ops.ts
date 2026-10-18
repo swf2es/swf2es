@@ -322,9 +322,10 @@ export function perlinNoise(
 ): void {
   const turbulence = new Turbulence(seed);
   const { width, height } = store;
+  // A base's sign is dropped (adl).
   const frequency: [number, number] = [
-    base[0] === 0 ? 0 : 1 / base[0],
-    base[1] === 0 ? 0 : 1 / base[1],
+    base[0] === 0 ? 0 : 1 / Math.abs(base[0]),
+    base[1] === 0 ? 0 : 1 / Math.abs(base[1]),
   ];
   const at = (channel: number, x: number, y: number) =>
     turbulence.turbulence(channel, x, y, frequency, offsets, fractal, stitch, width, height);

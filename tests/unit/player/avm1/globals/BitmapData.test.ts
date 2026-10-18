@@ -195,3 +195,14 @@ trace(row(b, 1)); trace(b.getPixel(1, 1).toString(16));`),
     [row("ffbbccdd ff040608 ff040608"), "40608"],
   );
 });
+
+test("perlinNoise drops a base's sign and stitches each frequency by its own size", async () => {
+  // adl: a 6 by 6 bitmap, two octaves moved by (1, 2) and (-3, 0.5), seed 100, all channels.
+  const noise = (x: number, y: number, stitch: boolean) =>
+    `b = new BitmapData(6, 6, true, 0); b.perlinNoise(${x}, ${y}, 2, 100, ${stitch}, false, 15, false,
+[new flash.geom.Point(1, 2), new flash.geom.Point(-3, 0.5)]); trace(b.getPixel32(0, 0).toString(16) + " " + b.getPixel32(1, 0).toString(16));\n`;
+  assert.deepEqual(
+    await run(`var b;\n${noise(-3, 5, false)}${noise(3, -5, false)}${noise(3, 5, true)}`),
+    ["3ba8ff6c 787d6e24", "3ba8ff6c 787d6e24", "27ffe5ff 38e44d40"],
+  );
+});
