@@ -54,6 +54,12 @@ export interface Movie extends GeomHost {
   /** The stage's focus rectangle's, `_focusrect` up to SWF 5 and on the root. */
   focusRect: boolean;
   soundBufferTime: number;
+  /**
+   * Whether getBounds has switched the invalid bounds it gives in another
+   * clip's space to 6710886.4, which it does for good once code of SWF 8 or
+   * later calls it, or any code under a root of SWF 8 or later.
+   */
+  newInvalidBounds: boolean;
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
@@ -855,7 +861,12 @@ function boundsObject(
     r = twipsBounds(d, down ? concatTwips(down, up) : up, lines);
   }
 
-  const none = 0x7ffffff;
+  if (!movie.newInvalidBounds && (version >= 8 || movie.version >= 8)) {
+    movie.newInvalidBounds = true;
+  }
+
+  // Twips of nothing: one more in another clip's space once switched, as Flash.
+  const none = target !== d && movie.newInvalidBounds ? 0x8000000 : 0x7ffffff;
   const o = movie.realm.newObject(version);
   avm1.set(o, "xMin", (r?.xMin ?? none) / 20, version);
   avm1.set(o, "xMax", (r?.xMax ?? none) / 20, version);

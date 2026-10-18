@@ -89,6 +89,12 @@ trace(a.hitTest(15, 10) + " " + a.hitTest(5, 10) + " " + a.hitTest(c) + " " + a.
   );
 });
 
+test("nothing's bounds in another clip's space switch to 6710886.4 for good under a root of SWF 8", async () => {
+  const empty = `var e = createEmptyMovieClip("e", 9); trace(e.getBounds(e).xMin + " " + e.getBounds(this).xMin);`;
+  assert.deepEqual(await traces(empty, 7), ["6710886.35 6710886.35"]);
+  assert.deepEqual(await traces(empty, 8), ["6710886.35 6710886.4"]);
+});
+
 test("the timeline's methods move a clip, play and stop it", async () => {
   assert.deepEqual(
     await traces(
