@@ -86,6 +86,7 @@ import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./glo
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { stateOf, textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
+import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
 import { xmlNodeClass } from "./globals/XMLNode.js";
 import { xmlSocketClass } from "./globals/XMLSocket.js";
@@ -751,6 +752,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       movieClipLoaderClass(this, this.swfVersion),
       avm1.DONT_ENUM,
     );
+    // Last, as Flash defines it: _global's names are enumerated from the last defined.
+    realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
     this.made(root);
   }

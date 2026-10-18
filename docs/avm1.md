@@ -1102,6 +1102,18 @@ transform's TextFormat in `_styles`; a field with a sheet reads its text
 as HTML styled by it and gives back the HTML as set, and a new sheet
 styles that HTML again.
 
+`TextSnapshot` (`globals/TextSnapshot.ts`, as Ruffle's) is a clip's
+static texts' text, its own children's in the order they are drawn, as
+it was when made: `new TextSnapshot(clip)` with the clip alone, or
+`clip.getTextSnapshot()`, which makes one by whatever `_global.TextSnapshot`
+is then. `getCount`, `getText(from, to, newlines)` (at least one
+character, the indices clamped to the text, a "\n" between texts with
+newlines) and `findText(from, text, caseSensitive)` (ASCII's case aside)
+answer undefined for other argument counts, as Flash's do (the corpus's
+`textsnapshot_*`); selection, `hitTestTextNearPos` and `getTextRunInfo`
+do nothing yet. Its methods are enumerable, from SWF 6, and `_global`
+defines it last, so it is the first name enumerated, as in Flash.
+
 ### The frame
 
 `Avm1` (`player/src/avm1/avm1.ts`) holds a player's AVM1: the modules of
@@ -1758,7 +1770,7 @@ Ruffle forces it ("Loading movies"); running its ABC is out of scope.
 
 The first steps leave out: `print`,
 `NetStream` and video, the
-context menu, `TextSnapshot`, a duplicate of a script's drawing or text
+context menu, TextSnapshot's selection, a duplicate of a script's drawing or text
 field's properties, and structured output and stack registers in the
 compiler.
 
