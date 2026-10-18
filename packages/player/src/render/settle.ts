@@ -35,13 +35,18 @@ export type Settling = {
 
 /**
  * A build of `group`'s instructions about to run, as Pixi's render group
- * system tells it (render/hooks.ts): when it was last rebuilt, unless
- * the build is its own batching's, which is no change of its own.
+ * system tells it (render/hooks.ts): when it was last rebuilt, unless the
+ * build is its own batching's, or `forced`, only for a context given back,
+ * which Pixi builds every group again for. Neither is a change of its own:
+ * counted, a group settled before the loss was drawn alone again after it,
+ * unlike the same scene in a renderer that kept its context. A group never
+ * timed, as one Pixi took from its pool, is timed from its first build,
+ * forced or not.
  */
-export function noteBuild(group: Settling): void {
+export function noteBuild(group: Settling, forced = false): void {
   if (group.$settling) {
     group.$settling = false;
-  } else {
+  } else if (!forced || group.$builtAt === undefined) {
     group.$builtAt = performance.now();
   }
 }

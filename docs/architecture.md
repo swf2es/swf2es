@@ -2971,10 +2971,21 @@ long: there a multi-draw cost Chrome's GPU process some 5 to 15 µs more
 than its draws one by one, and saved the main thread under a microsecond
 a draw. On `bench.ts --rig 128 --filtered K --gpu`, runs of 2 to 10
 draws took a frame 1 to 5 ms longer than Pixi's own draws, and runs of
-22 broke even, so a run of fewer than 16 draws is drawn by Pixi's pipe:
-before any row is written if its contexts' batches are fewer, and
-otherwise once a blend mode or a Graphics the table cannot draw has cut
-it short (`--min-run` times other thresholds). Under software GL the
+22 broke even, so a run of fewer than 16 draws, whether its contexts'
+batches are fewer or a blend mode or a Graphics the table cannot draw
+has cut it short, is not a multi-draw (`--min-run` times other
+thresholds). It is drawn from the atlas a call a draw instead: its rows
+passed in the uniform array at once, the atlas bound once, and each draw
+told its row by a uniform, as `gl_DrawID` is 0 in a draw of its own.
+Pixi's pipe, which drew such runs at first (`--no-loop`), binds each
+context's buffers and sets each Graphics' uniforms. In a recorded crowded
+scene, some 1,100 of 2,000 draws a frame came in such runs, between
+filters; drawn from the atlas, the render took 13% less main-thread time
+(15.3 to 13.3 ms a frame on average, with the two alternating in blocks
+of frames in one replay), and on `--rig 128 --filtered 2 --gpu` a frame
+went from some 21 to 17 ms, GL's own time from 7.7 to 5.8. A multi-draw
+of those short runs saved no more main-thread time and cost GL more,
+again. Under software GL the
 table won at every length, by 5 ms on runs of 6, but a player's GPU is
 what counts. A run of up to 40 draws takes its rows in a uniform array,
 not the table texture, as an upload between draws cost a few µs more a
@@ -2993,9 +3004,9 @@ each rebuild and each change of the transform, and a busy monster SWF
 whose creatures, rebuilt on most frames, fade out under a tween packed
 some 55 MB a frame of them. A flat one takes its transform in its row,
 which grows to five texels with the multipliers, the offsets and a flag;
-a Graphics Pixi's pipe draws, of a gradient or a bitmap, a run too short
-or a table switched off, takes Pixi's graphics shader with the colour
-batcher's colour, the transform in uniforms. Both apply it as the colour
+a Graphics Pixi's pipe draws, of a gradient or a bitmap, one that rounds
+to pixels, or any with the table switched off, takes Pixi's graphics
+shader with the colour batcher's colour, the transform in uniforms. Both apply it as the colour
 batcher does, to the straight colour, the fill's times the Graphics' own
 tint rounded to a byte, clamped and premultiplied after, and leave out
 Pixi's group colour; where a renderer is not WebGL, every one is a
@@ -3612,8 +3623,10 @@ visits the rect, clipped to both bitmaps, in Flash's own order, a Galois
 LFSR over ⌈log2 w⌉ + ⌈log2 h⌉ bits whose taps for every width from 2 to
 26 bits were read off adl, a state standing for (s & (2^bw − 1), s >> bw)
 and skipped outside the rect; each call writes numPixels and returns the
-next state; every call writes the origin too, a seed past the states is
-taken modulo 2^bits − 1 and 0 starts at the tap, and a count past the
+next state; every call writes the origin too, 0 starts at the tap, a
+seed past the states steps down to them as any state does, its bits
+shifted out, or to 0, which writes the origin from then on, a count of 0
+or a rect a pixel wide or high gives the seed back, and a count past the
 w · h − 1 states a round visits is one round and the remainder, which
 gives Flash's seed without its loop (Flash itself takes seconds over
 2^31 − 1). `paletteMap` makes each copied pixel the sum, wrapping at 32
@@ -3631,7 +3644,10 @@ makes it, and the pixel written as it comes, not premultiplied (the
 `perlin-noise` case). A double past an int converts as on x86, to -2^31,
 so that octaves enough to take the lattice that far give Flash's wild
 noise and bytes of 0; more than 1024 octaves give what 1024 do, as
-Flash's sum settles long before, a negative count among them.
+Flash's sum settles long before, a negative count among them. A
+negative base is taken as its size, and stitching fits each frequency to
+its own side, without the reference's slip of the y frequency's floor
+from the x one (adl).
 
 #### Drawing into a bitmap
 
@@ -3914,6 +3930,42 @@ format as one Pixi Text on the line's baseline. A device font
 (`_sans`, `_serif`, `_typewriter`) is the browser's of that kind, any
 other by its name. Bullets, underlines, input and selection are still
 to come.
+
+A field whose `antiAliasType` is advanced has its embedded glyphs drawn
+as Flash's Saffron draws them (`render/saffron.ts`), all of a field's in
+one mesh under a shader of its own, measured in adl with fonts of bars
+(`text-advanced`, `text-advanced-draw`). Each of Flash's pixels is
+covered by a ramp over its signed distance to the glyph's outline, from
+0 at an outside cutoff to 1 at an inside one: the shader finds the
+distance exactly, from the outline cut into fine chords in a texture
+every glyph shares, kept as a glyph is first drawn. The cutoffs come from
+a table by size in pixels on the screen (`text/csm.ts`, measured in adl),
+one for each of the font's CSM hints (its DefineFontAlignZones; none is
+thin) and for light and dark text, light being a luma of 30:59:11 over
+200 of the colour as drawn, under the object's colour transform: thin
+light text at 20 pixels gains 0.6 of a pixel of ink across a stem, dark
+0.1. `thickness` moves both cutoffs and `sharpness` each the other way, a
+fiftieth of a pixel per pixel of size at the end of their ranges;
+`TextRenderer.setAdvancedAntiAliasingTable` gives a font a table of its
+own, for light and dark text alike, as adl uses it. A glyph lies where
+adl puts it: the field's origin on the screen at a whole pixel, the pen
+(in fractions of a twip) at a quarter of a pixel across and down under
+`gridFitType` none, an eighth across and a whole pixel down under pixel,
+a quarter across and a whole pixel down under subpixel, ties to even, and
+sampled half a pixel left of the pixel's centre; turned or skewed, where
+it falls. The grid is the stage's, inside a filter's input too (the Pixi
+fork's `uWorldOffset`), and a BitmapData's in a draw. What the shader
+goes through is bounded: a glyph of more than 2048 segments, or a field
+whose glyphs' segments times their quads' pixels pass 2^25, is drawn as
+normal text, all of the field alike, as advanced text is under a
+renderer other than WebGL 2 and in a 3D object's bitmap. The store of
+segments, 16 MB at most, starts again when full, drawing again the texts
+drawn from it, uploads only the rows added since, and goes with the last
+view that draws on a stage. Fitting stems to
+pixels by a font's alignment zones is still to come. Static text whose
+CSMTextSettings ask for advanced anti-aliasing is drawn so too, though
+adl drew none of the test SWF's static text with the tag after its
+DefineText at all.
 
 A field's text is laid out by swf2es, as Flash lays it out, never by the
 browser: lines, and each character's place on them, are what

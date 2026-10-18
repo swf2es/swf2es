@@ -236,3 +236,27 @@ test("a stored file that cannot be read starts empty, and one read back runs no 
   );
   assert.deepEqual(lines, ["object0 | object | 2 undefined true"]);
 });
+
+test("a typed object is written by the name last registered for its constructor, in its case, no getter called", async () => {
+  // Up to SWF 6 the names fold for lookups, but the .sol keeps the case given (the corpus's
+  // amf_swf6_case_insensitive_typed_objects writes the same names over NetConnection); a
+  // __constructor__ that is a getter types nothing and is not called.
+  const { stored, storage } = memory();
+  const source = `function C() {} Object.registerClass("My.First", C); Object.registerClass("My.Class", C);
+var d = SharedObject.getLocal("typed").data; d.p = new C();
+var q = {}; q.addProperty("__constructor__", function () { trace("called"); return C; }, null); d.q = q;
+trace("flush " + SharedObject.getLocal("typed").flush());`;
+  const lines: string[] = [];
+  const tags = [w.doAction([...script(source, 6)(flashAssembler()).end().bytes()]), w.showFrame()];
+  const player = new Player(
+    w.swf({ version: 6, width: 10, height: 10, frameCount: 1, tags: [...tags, w.end()] }),
+    null,
+    new Avm1(codegen, { print: (l) => lines.push(l), url: "file:///C:/so-test.swf", storage }),
+  );
+  await player.start();
+
+  assert.deepEqual(lines, ["flush true"]);
+  const text = Buffer.from([...stored.values()][0]).toString("latin1");
+  assert.ok(text.includes("\x00\x01p\x10\x00\x08My.Class"), JSON.stringify(text));
+  assert.ok(text.includes("\x00\x01q\x03"), JSON.stringify(text));
+});

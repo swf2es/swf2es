@@ -57,6 +57,9 @@ interface Run {
   trace: string[];
   /** The draws the transform table made (render/table.ts), in its multi-draw calls. */
   tableDraws: number;
+  /** What drew: the renderer's GL, and whether it had WEBGL_multi_draw, which the table needs. */
+  gl: string;
+  multiDraw: boolean;
   error: string | null;
 }
 
@@ -285,6 +288,14 @@ async function avm1For(
         logRequest(request, swfUrl, trace);
       }
 
+      // A test's server at localhost:8000 answers from its localhost/ directory, as Ruffle's
+      // test navigator has it; a path it has no file for fails.
+      const served = new URL(request.url);
+      if (swfUrl && served.host === "localhost:8000") {
+        const local = new URL(`localhost${served.pathname}`, swfUrl).href;
+        return pageFetch({ ...request, url: local }, signal);
+      }
+
       return pageFetch(request, signal);
     },
     socket: scriptedSockets(socket, trace, logFetch, uncaught),
@@ -380,6 +391,8 @@ async function runSwf(
   const images: Record<number, string> = {};
   const trace: string[] = [];
   let tableDraws = 0;
+  let gl = "none";
+  let multiDraw = false;
   let scripting: Scripting | null = null;
   const uncaught: unknown[] = [];
   // A run ends at the first error nothing caught, after the frame it came in.
@@ -418,6 +431,15 @@ async function runSwf(
         draw(...args);
       };
     }
+
+    multiDraw = !!multi;
+    const context = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
+    const info = context?.getExtension("WEBGL_debug_renderer_info");
+    gl = context
+      ? `${context instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1"}, ${
+          info ? context.getParameter(info.UNMASKED_RENDERER_WEBGL) : "?"
+        }`
+      : `not WebGL (${renderer.name})`;
 
     const samples = document.createElement("canvas");
     samples.width = renderer.canvas.width;
@@ -482,9 +504,9 @@ async function runSwf(
     }
 
     renderer.destroy();
-    return { images, trace, tableDraws, error: null };
+    return { images, trace, tableDraws, gl, multiDraw, error: null };
   } catch (e) {
-    return { images, trace, tableDraws, error: describe(e, scripting) };
+    return { images, trace, tableDraws, gl, multiDraw, error: describe(e, scripting) };
   }
 }
 
@@ -621,6 +643,38 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("tableRuns");
     add("tableDraws", args[6] as number);
   });
+  // A short run's draws, drawn from the atlas a call a draw (render/table.ts): the table's
+  // own drawElements, not those of Pixi's pipe for what it leaves to it.
+  let inTable = 0;
+  let inGraphics = 0;
+  const around = (pipe: object | undefined, enter: (by: number) => void) => {
+    const object = pipe as Record<string, (...args: unknown[]) => unknown> | undefined;
+    const original = object?.execute;
+    if (!object || !original) {
+      return;
+    }
+
+    object.execute = function (this: unknown, ...args: unknown[]) {
+      enter(1);
+      try {
+        return original.apply(this, args);
+      } finally {
+        enter(-1);
+      }
+    };
+  };
+  around(r.renderPipes.flashTable, (by) => {
+    inTable += by;
+  });
+  around(r.renderPipes.graphics, (by) => {
+    inGraphics += by;
+  });
+  wrap(gl, "drawElements", () => {
+    if (inTable > 0 && inGraphics === 0) {
+      add("tableDraws");
+      add("tableLoopDraws");
+    }
+  });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
   wrap(r.renderPipes.batch, "execute", () => add("batches"));
   // A filter's region: the bounds Pixi measures for it each time it draws.
@@ -684,8 +738,9 @@ async function benchSwf(
   finishEvery = 1,
   hover = false,
   hold = false,
+  tableLoop = true,
 ): Promise<Bench> {
-  setTransformTable(table, tableMinRun);
+  setTransformTable(table, tableMinRun, tableLoop);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];
@@ -1065,18 +1120,21 @@ async function contextLossSwf(
  * Play a SWF with no scripts in two renderers at once, one of which loses
  * its WebGL context and gets it back as `plan` says: each `t` plays a
  * frame and draws it in both, `l` loses the context, `r` waits for Pixi to
- * give it back, which it does once the steps between have run, and `s`
- * resizes both. Frames drawn while it is lost are drawn into nothing;
- * every frame drawn with it must match the other renderer's. What first
- * differed, or threw.
+ * give it back, which it does once the steps between have run, `s`
+ * resizes both, and `w` waits past the time after which render groups
+ * settle (render/settle.ts), so that the next frame batches what both draw
+ * alone. Frames drawn while it is lost are drawn into nothing; every frame
+ * drawn with it must match the other renderer's. What first differed, or
+ * threw.
  */
 async function contextLossPlanSwf(
   base64: string,
   plan: string,
   table: boolean,
+  tableMinRun = 1,
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  setTransformTable(table, 1);
+  setTransformTable(table, tableMinRun);
   const make = async () => {
     const player = new Player(bytes, null);
     const renderer = await autoDetectRenderer({
@@ -1171,6 +1229,12 @@ async function contextLossPlanSwf(
           }
 
           lost = false;
+          break;
+        }
+
+        case "w": {
+          // Past render/settle.ts's SETTLE_MS, 2000, which the player does not export.
+          await new Promise((done) => setTimeout(done, 2500));
           break;
         }
 

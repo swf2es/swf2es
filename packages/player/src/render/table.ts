@@ -7,7 +7,9 @@
 // ranges, each draw reading its transform and tint from a row of a float
 // texture by gl_DrawID, or of a uniform array for a short run: a frame
 // writes the rows and uploads them, and no vertex moves. A run too short to
-// repay its multi-draw, as filters leave, is drawn by Pixi's pipe. What the
+// repay its multi-draw, as filters leave, is drawn from the atlas a call a
+// draw, each told its row: its buffers bound once for the run, where
+// Pixi's pipe binds each context's own and sets each Graphics' uniforms. What the
 // table cannot draw, a context with a texture or a Graphics that rounds to
 // pixels, is drawn by Pixi's own pipe in its place in the run. A large
 // Graphics under a Flash colour transform, in a group that has not settled,
@@ -51,12 +53,14 @@ const ROW_TEXELS = 5;
 const ROWS_A_LINE = 256;
 const TABLE_WIDTH = ROWS_A_LINE * ROW_TEXELS;
 /**
- * The fewest draws a run makes through the table; Pixi's pipe draws a
- * shorter one. A multi-draw call costs Chrome's GPU process some 5 to 15
- * µs more than its draws would alone, and saves the page well under 1 µs
- * a draw: in a crowd of filtered creatures, each filter ending a run, runs
- * of 2 to 10 draws took a frame 1 to 5 ms longer than Pixi's draws on a
- * GPU, and runs of 22 broke even (`bench.ts --rig 128 --filtered K --gpu`).
+ * The fewest draws a run makes as one multi-draw; a shorter one is drawn
+ * from the atlas a call a draw. A multi-draw call costs Chrome's GPU
+ * process some 5 to 15 µs more than its draws would alone, and saves the
+ * page well under 1 µs a draw: in a crowd of filtered creatures, each
+ * filter ending a run, runs of 2 to 10 draws took a frame 1 to 5 ms longer
+ * than Pixi's draws on a GPU, and runs of 22 broke even (`bench.ts --rig
+ * 128 --filtered K --gpu`). Drawn a call a draw from the atlas, the same
+ * short runs took less than either.
  */
 const MIN_RUN = 16;
 /**
@@ -83,18 +87,23 @@ const ATLAS_GROWTH = 1.5;
 
 let enabled = true;
 let minRun = MIN_RUN;
+let loopShort = true;
 
 /**
  * Draw Graphics alone through the table, or not, from the next frame: a
  * switch to time the two apart. Runs already built draw through Pixi's
  * pipe while it is off; a group built while it was off draws alone until
- * it is built again. `shortest` is the fewest draws a run makes through
- * the table, MIN_RUN by default: the tests have the table draw every run
- * with 1, and the bench times others.
+ * it is built again. `shortest` is the fewest draws a run makes as one
+ * multi-draw, MIN_RUN by default: the tests have the table draw every run
+ * so with 1, and the bench times others. A shorter run is drawn from the
+ * atlas a call a draw, its rows passed in uniforms, or with `loop` false
+ * by Pixi's pipe; so is it with `shortest` past SHORT_RUN + 1, as the
+ * uniforms hold no more rows.
  */
-export function setTransformTable(on: boolean, shortest = MIN_RUN): void {
+export function setTransformTable(on: boolean, shortest = MIN_RUN, loop = true): void {
   enabled = on;
   minRun = shortest;
+  loopShort = loop;
 }
 
 /**
@@ -115,7 +124,8 @@ uniform vec4 uWorldColorAlpha;
 uniform vec2 uResolution;
 ${
   short
-    ? `uniform vec4 uRows[${SHORT_RUN * ROW_TEXELS}];`
+    ? `uniform vec4 uRows[${SHORT_RUN * ROW_TEXELS}];
+uniform int uFirst;`
     : `uniform highp sampler2D uTable;
 uniform float uBase;`
 }
@@ -127,7 +137,7 @@ flat out vec4 vAdd;
 void main(void) {
 ${
   short
-    ? `  int at = gl_DrawID * ${ROW_TEXELS};
+    ? `  int at = (uFirst + gl_DrawID) * ${ROW_TEXELS};
   vec4 m = uRows[at];
   vec4 t = uRows[at + 1];
   vec4 tint = uRows[at + 2];
@@ -595,8 +605,13 @@ export class TablePipe {
   private maxRows = 0;
   private shader: Shader | null = null;
   private shortShader: Shader | null = null;
-  /** Where the short shader's program, as last linked, takes its rows. */
-  private rows: { program: WebGLProgram; location: WebGLUniformLocation | null } | null = null;
+  /** Where the short shader's program, as last linked, takes its rows and first row, and that row. */
+  private rows: {
+    program: WebGLProgram;
+    location: WebGLUniformLocation | null;
+    first: WebGLUniformLocation | null;
+    firstValue: number;
+  } | null = null;
   private readonly uniforms = new UniformGroup({ uBase: { value: 0, type: "f32" } });
   private readonly state = State.for2d();
   /** The next row free this frame. */
@@ -618,7 +633,10 @@ export class TablePipe {
   private draws = 0;
   private runBase = 0;
   private runBlend = "";
-  /** The Graphics the run gathered, for Pixi's pipe to draw if it is too short for the table. */
+  /**
+   * The Graphics the run gathered, for Pixi's pipe to draw if it is too
+   * short for a multi-draw and the table leaves such runs to it (loops).
+   */
   private segment: Graphics[] = [];
 
   constructor(renderer: WebGLRenderer) {
@@ -695,6 +713,11 @@ export class TablePipe {
     return enabled && this.multi !== null;
   }
 
+  /** Whether a run too short for a multi-draw is drawn from the atlas, a call a draw. */
+  private get loops(): boolean {
+    return loopShort && minRun <= SHORT_RUN + 1;
+  }
+
   add(graphics: Graphics, instructionSet: InstructionSet): void {
     addToRun(graphics, instructionSet);
   }
@@ -704,10 +727,10 @@ export class TablePipe {
     const graphicsPipe = renderer.renderPipes.graphics;
     const contexts = renderer.graphicsContext;
     const roundAll = renderer._roundPixels;
-    // Switched off, a context restored without the extension, or a run
-    // that cannot reach minRun draws, as most between filters, before a row
+    // Switched off, a context restored without the extension, or, short
+    // runs left to it, a run that cannot reach minRun draws, before a row
     // is written: Pixi's pipe draws it.
-    if (!this.active || this.mostDraws(instruction, contexts) < minRun) {
+    if (!this.active || (!this.loops && this.mostDraws(instruction, contexts) < minRun)) {
       for (const item of instruction.items) {
         graphicsPipe.execute(item);
       }
@@ -750,7 +773,10 @@ export class TablePipe {
         this.runBlend = graphics.groupBlendMode;
       }
 
-      this.segment.push(graphics);
+      if (!this.loops) {
+        this.segment.push(graphics);
+      }
+
       for (let i = 0; i < place.counts.length; i++) {
         this.row(graphics);
         this.counts[this.draws] = place.counts[i];
@@ -837,7 +863,11 @@ export class TablePipe {
 
   /**
    * Draw the run gathered as one call, its rows passed in uniforms if few,
-   * uploaded if not; or its Graphics through Pixi's pipe if it is too short.
+   * uploaded if not. A run too short to repay a multi-draw is drawn from
+   * the atlas a call a draw, its rows passed in uniforms at once and each
+   * draw told its row: the atlas' buffers bound once, where Pixi's pipe
+   * binds each context's own and sets each Graphics' uniforms. Or, with
+   * that switched off, its Graphics go through Pixi's pipe.
    */
   private flush(): void {
     const draws = this.draws;
@@ -849,7 +879,8 @@ export class TablePipe {
     }
 
     const renderer = this.renderer;
-    if (draws < minRun) {
+    const loop = draws < minRun;
+    if (loop && !this.loops) {
       const graphicsPipe = renderer.renderPipes.graphics;
       for (const graphics of this.segment) {
         graphicsPipe.execute(graphics);
@@ -875,21 +906,31 @@ export class TablePipe {
     this.state.blendMode = this.runBlend as State["blendMode"];
     renderer.state.set(this.state);
     renderer.shader.bind(shader);
-    if (short) {
-      this.passRows(shader);
-    }
+    const rows = short ? this.passRows(shader) : null;
 
     renderer.geometry.bind(this.geometry, shader.glProgram);
     const gl = renderer.gl;
-    this.multi.multiDrawElementsWEBGL(
-      gl.TRIANGLES,
-      this.counts,
-      0,
-      gl.UNSIGNED_INT,
-      this.offsets,
-      0,
-      draws,
-    );
+    if (loop && rows) {
+      // gl_DrawID is 0 in a draw of its own: uFirst names its row.
+      for (let i = 0; i < draws; i++) {
+        this.first(rows, i);
+        gl.drawElements(gl.TRIANGLES, this.counts[i], gl.UNSIGNED_INT, this.offsets[i]);
+      }
+    } else {
+      if (rows) {
+        this.first(rows, 0);
+      }
+
+      this.multi.multiDrawElementsWEBGL(
+        gl.TRIANGLES,
+        this.counts,
+        0,
+        gl.UNSIGNED_INT,
+        this.offsets,
+        0,
+        draws,
+      );
+    }
 
     this.draws = 0;
     // Rows passed in uniforms are free again for the next run's.
@@ -914,12 +955,17 @@ export class TablePipe {
     return this.shortShader;
   }
 
-  /** Pass the run's rows to the short shader, bound: Pixi knows nothing of its uRows. */
-  private passRows(shader: Shader): void {
+  /** Pass the run's rows to the short shader, bound: Pixi knows nothing of its uRows and uFirst. */
+  private passRows(shader: Shader): NonNullable<TablePipe["rows"]> {
     const gl = this.renderer.gl;
     const program = this.renderer.shader._getProgramData(shader.glProgram).program;
     if (this.rows?.program !== program) {
-      this.rows = { program, location: gl.getUniformLocation(program, "uRows") };
+      this.rows = {
+        program,
+        location: gl.getUniformLocation(program, "uRows"),
+        first: gl.getUniformLocation(program, "uFirst"),
+        firstValue: 0,
+      };
     }
 
     const floats = ROW_TEXELS * 4;
@@ -929,6 +975,15 @@ export class TablePipe {
       this.runBase * floats,
       this.draws * floats,
     );
+    return this.rows;
+  }
+
+  /** Set the short shader's first row, bound, if it is not that already. */
+  private first(rows: NonNullable<TablePipe["rows"]>, value: number): void {
+    if (rows.firstValue !== value) {
+      rows.firstValue = value;
+      this.renderer.gl.uniform1i(rows.first, value);
+    }
   }
 
   /**

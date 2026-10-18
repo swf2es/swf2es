@@ -22,7 +22,8 @@ import {
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
-import { storeOf } from "./BitmapData.js";
+import { blendModeOf, storeOf } from "./BitmapData.js";
+import { type FilterFaces, filtersProperty } from "./filters.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 import { formVars } from "./LoadVars.js";
 
@@ -54,6 +55,14 @@ export interface Movie extends GeomHost {
   /** The stage's focus rectangle's, `_focusrect` up to SWF 5 and on the root. */
   focusRect: boolean;
   soundBufferTime: number;
+  /**
+   * Whether getBounds has switched the invalid bounds it gives in another
+   * clip's space to 6710886.4, which it does for good once code of SWF 8 or
+   * later calls it, or any code under a root of SWF 8 or later.
+   */
+  newInvalidBounds: boolean;
+  /** The filter objects `filters` reads, once flash.filters is made. */
+  readonly filterFaces: FilterFaces | null;
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
@@ -855,13 +864,43 @@ function boundsObject(
     r = twipsBounds(d, down ? concatTwips(down, up) : up, lines);
   }
 
-  const none = 0x7ffffff;
+  if (!movie.newInvalidBounds && (version >= 8 || movie.version >= 8)) {
+    movie.newInvalidBounds = true;
+  }
+
+  // Twips of nothing: one more in another clip's space once switched, as Flash.
+  const none = target !== d && movie.newInvalidBounds ? 0x8000000 : 0x7ffffff;
   const o = movie.realm.newObject(version);
   avm1.set(o, "xMin", (r?.xMin ?? none) / 20, version);
   avm1.set(o, "xMax", (r?.xMax ?? none) / 20, version);
   avm1.set(o, "yMin", (r?.yMin ?? none) / 20, version);
   avm1.set(o, "yMax", (r?.yMax ?? none) / 20, version);
   return o;
+}
+
+/**
+ * A display object's `blendMode` on its class's prototype, of `flags`: its
+ * mode's name; one set that is none leaves it as it was (the corpus's
+ * movieclip_blend_mode_property, adl for a button's).
+ */
+export function blendModeProperty(
+  realm: avm1.Realm,
+  proto: avm1.Avm1Object,
+  flags: number,
+  targetOf: (self: avm1.Avm1Object) => DisplayObject | null,
+): void {
+  const p = proto.add("blendMode", undefined, flags);
+  p.get = realm.method((self) => targetOf(self)?.blendMode);
+  p.set = realm.method((self, args) => {
+    const d = targetOf(self);
+    const mode = blendModeOf(args[0]);
+    if (d !== null && mode !== null) {
+      d.touch();
+      d.setBlendMode(mode);
+    }
+
+    return undefined;
+  });
 }
 
 /** The display object a method's argument names from `start`: a clip's AVM1 object, or a path. */
@@ -1123,6 +1162,14 @@ export function movieClipClass(movie: Movie): {
 
     return undefined;
   });
+  filtersProperty(
+    realm,
+    proto,
+    avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8,
+    clipOf,
+    () => movie.filterFaces,
+  );
+  blendModeProperty(realm, proto, avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8, clipOf);
   // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
   // not read (Ruffle).
   method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {

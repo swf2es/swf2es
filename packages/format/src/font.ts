@@ -33,6 +33,11 @@ export interface Font {
   leading: number;
   /** Kerning adjustments by pair, `first << 16 | second`, in the font's units. */
   kerning: Map<number, number>;
+  /**
+   * DefineFontAlignZones' CSM hint, how much advanced anti-aliasing
+   * thickens its stems: 0 thin, 1 medium, 2 thick; none without the tag.
+   */
+  csmHint?: number;
 }
 
 /** DefineFont4's CFF data, when embedded; a tag without it still has a name and style. */
@@ -150,4 +155,11 @@ export function glyphOf(font: Font, code: number): Glyph | null {
   }
 
   return null;
+}
+
+/** DefineFontAlignZones (73): the font it is for and its CSM hint; the zones themselves are not read. */
+export function readFontAlignZones(bytes: Uint8Array, tag: Tag): { id: number; csmHint: number } {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  return { id, csmHint: r.u8() >> 6 };
 }

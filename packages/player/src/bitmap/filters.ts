@@ -18,6 +18,15 @@ import {
   unmultiply,
 } from "./bitmap.js";
 
+/** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
+export const GLOWS: ReadonlySet<string> = new Set([
+  "glow",
+  "dropShadow",
+  "bevel",
+  "gradientGlow",
+  "gradientBevel",
+]);
+
 /** The filters this filters: the others' rects and pixels are still to come. */
 export const filtersDrawn: ReadonlySet<string> = new Set([
   "blur",
@@ -160,6 +169,43 @@ export function filterRect(rect: PixelRect, f: Filter): PixelRect {
     width: rect.width + left + right,
     height: rect.height + top + bottom,
   };
+}
+
+/**
+ * generateFilterRect's rect of `given` on a bitmap of `width` by `height`:
+ * the rect within the bitmap first, an edge of it a rect of no width, and
+ * grown by the filter; one apart from it Flash makes 2^27 - 1 on each side,
+ * of no size, grown as any other but an inner filter's, which stays where
+ * it is. A displacement map's result is within the bitmap too, and an
+ * inner filter's, which draws within what it filters.
+ */
+export function generatedRect(
+  width: number,
+  height: number,
+  given: PixelRect,
+  f: Filter,
+): PixelRect {
+  const x0 = Math.max(0, given.x);
+  const y0 = Math.max(0, given.y);
+  const x1 = Math.min(width, given.x + given.width);
+  const y1 = Math.min(height, given.y + given.height);
+  if (x1 < x0 || y1 < y0) {
+    const apart = { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 };
+    return isInner(f) ? apart : filterRect(apart, f);
+  }
+
+  const r = filterRect({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, f);
+  if (f.kind !== "displacementMap" && !isInner(f)) {
+    return r;
+  }
+
+  const rx0 = Math.max(0, r.x);
+  const ry0 = Math.max(0, r.y);
+  const rx1 = Math.min(width, r.x + r.width);
+  const ry1 = Math.min(height, r.y + r.height);
+  return rx1 > rx0 && ry1 > ry0
+    ? { x: rx0, y: ry0, width: rx1 - rx0, height: ry1 - ry0 }
+    : { x: 0, y: 0, width: 0, height: 0 };
 }
 
 /** The filters adl refuses a rect for whose left or top edge lies as far as an edge can. */

@@ -63,10 +63,11 @@ import { RegisteredClasses } from "./classes.js";
 import { constructBlocks, ScriptClips } from "./clips.js";
 import { ExternalCalls } from "./external.js";
 import { FocusTracker } from "./focus.js";
-import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
+import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
+import { type FilterFaces, filtersPackage } from "./globals/filters.js";
 import { flashPackage } from "./globals/geom.js";
 import { keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
@@ -79,6 +80,8 @@ import {
   targetOf,
 } from "./globals/MovieClip.js";
 import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
+import { netConnectionClass, Remoting } from "./globals/NetConnection.js";
+import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
@@ -87,7 +90,7 @@ import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
 import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
-import { xmlNodeClass } from "./globals/XMLNode.js";
+import { type XmlNodes, xmlNodeClass, serialize as xmlString } from "./globals/XMLNode.js";
 import { xmlSocketClass } from "./globals/XMLSocket.js";
 import { Avm1Input } from "./input.js";
 import { MovieLoads } from "./loads.js";
@@ -298,6 +301,13 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   quality = "HIGH";
   focusRect = true;
   soundBufferTime = 5;
+  newInvalidBounds = false;
+  /** XMLNode's nodes, once the class is made: what a remoting call writes as XML. */
+  private xmlNodes: XmlNodes | null = null;
+  /** NetConnection's connections, whose calls go at each frame's end. */
+  readonly remoting = new Remoting(this);
+  /** The filter objects a display object's `filters` reads, once flash.filters is made. */
+  filterFaces: FilterFaces | null = null;
   /** Where the pointer last was, in the stage's coordinates (avm1/pointer.ts). */
   mouseX = 0;
   mouseY = 0;
@@ -498,19 +508,30 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("SharedObject", sharedObjects.constr, avm1.DONT_ENUM);
     realm.global.define("Sound", soundClass(this.media), avm1.DONT_ENUM);
     const xmlNodes = xmlNodeClass(this);
+    this.xmlNodes = xmlNodes;
     realm.global.define("XMLNode", xmlNodes.constr, avm1.DONT_ENUM);
     const xml = xmlClass(this, xmlNodes);
     realm.global.define("XML", xml, avm1.DONT_ENUM);
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
+    realm.global.define("NetConnection", netConnectionClass(this, this.remoting), avm1.DONT_ENUM);
     const flash = flashPackage(this);
     const external = new avm1.Avm1Object(realm.objectProto);
     external.define("ExternalInterface", externalInterfaceClass(this.external), 0);
     flash.define("external", external, 0);
     const display = avm1.get(flash, "display", this.swfVersion);
+    const bitmapData = bitmapDataClass(this);
     if (display instanceof avm1.Avm1Object) {
-      display.define("BitmapData", bitmapDataClass(this), 0);
+      display.define("BitmapData", bitmapData, 0);
     }
+
+    const bitmapProto = bitmapData.own("prototype", this.swfVersion)?.value;
+    const filters = new avm1.Avm1Object(realm.objectProto);
+    flash.define("filters", filters, 0);
+    this.filterFaces = filtersPackage(
+      { realm, bitmapObject: (store) => bitmapObject(bitmapProto, store), storeOf },
+      filters,
+    );
     realm.Object.define(
       "registerClass",
       realm.method((_, args, version) => this.classes.registerClass(args, version)),
@@ -521,6 +542,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       movieClipLoaderClass(this, this.swfVersion),
       avm1.DONT_ENUM,
     );
+    realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
     // Last, as Flash defines it: _global's names are enumerated from the last defined.
     realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
@@ -686,6 +708,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       }
 
       this.timers.afterFrame(this.rate);
+      // The frame's remoting calls go, a packet for each connection.
+      this.remoting.flush();
     } finally {
       this.timers.end();
     }
@@ -1004,6 +1028,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
         this.stopNext = true;
         break;
     }
+  }
+
+  /** An XML node's text, as its toString gives it, which a remoting call writes; null for anything else. */
+  xmlText(o: avm1.Avm1Object): string | null {
+    const node = this.xmlNodes?.nodeOf(o) ?? null;
+    return node === null ? null : xmlString(node, this.swfVersion);
   }
 
   /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */

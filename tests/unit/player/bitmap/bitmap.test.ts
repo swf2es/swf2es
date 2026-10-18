@@ -69,7 +69,7 @@ test("pixelDissolve visits pixels in Flash's order and returns its seeds", async
     ],
     [7, 1, "[]>0 []>0"],
   ];
-  // From seed 12345 on 10x10: reduced modulo 255 to 105, the pixel at (9, 6), the origin with it.
+  // From seed 12345 on 10x10: stepped down to state 105, the pixel at (9, 6), the origin with it.
   const seeded = new BitmapStore(10, 10, false, 0);
   assert.equal(
     pixelDissolve(
@@ -157,6 +157,89 @@ test("pixelDissolve takes a count past every pixel as Flash does, in a bounded n
     assert.ok(performance.now() - started < 1000, "bounded");
     assert.equal(got, next, `${w}x${h} seed ${seed} count ${count}`);
     assert.equal(store.pixels.filter((p) => p === 0xffff0000).length, filled);
+  }
+});
+
+test("pixelDissolve steps a seed past its states down, and gives back one it does not use", async () => {
+  const { pixelDissolve } = await import("../../../../packages/player/dist/bitmap/ops.js");
+  // adl, from AS3 and AVM1 alike (the dissolve-noise case): a 5 by 5 source into a 5 by 5
+  // destination at (1, 1), by rect, seed, and counts 0, 1, 2, 3 and 40.
+  const runs: [number, number, number, number[]][] = [
+    [2, 2, 0, [3, 2, 1, 3, 2]],
+    [2, 2, 4, [4, 1, 3, 2, 1]],
+    [2, 2, 7, [7, 0, 0, 0, 0]],
+    [2, 2, 100, [100, 1, 3, 2, 1]],
+    [2, 2, -1, [-1, 2, 1, 3, 2]],
+    [3, 3, 100, [100, 0, 0, 0, 0]],
+    [3, 3, -2, [-2, 4, 2, 1, 8]],
+    [2, 1, 10, [10, 10, 10, 10, 10]],
+  ];
+  for (const [w, h, seed, answers] of runs) {
+    const got = [0, 1, 2, 3, 40].map((count) =>
+      pixelDissolve(
+        new BitmapStore(5, 5, true, 0xaabbccdd),
+        new BitmapStore(5, 5, true, 0x12345678),
+        { x: 0, y: 0, width: w, height: h },
+        1,
+        1,
+        seed,
+        count,
+        0,
+      ),
+    );
+    assert.deepEqual(got, answers, `${w}x${h} seed ${seed}`);
+  }
+
+  // A count of 0 writes the origin, and tells what shows the store.
+  const store = new BitmapStore(3, 3, true, 0);
+  const version = store.version;
+  pixelDissolve(
+    store,
+    new BitmapStore(3, 3, true, 0xff00ff00),
+    { x: 0, y: 0, width: 2, height: 2 },
+    0,
+    0,
+    5,
+    0,
+    0,
+  );
+  assert.equal(store.pixels[0], 0xff00ff00);
+  assert.notEqual(store.version, version);
+});
+
+test("perlinNoise drops a base's sign and stitches each frequency by its own side", async () => {
+  const { perlinNoise } = await import("../../../../packages/player/dist/bitmap/ops.js");
+  // adl, from AS3 and AVM1 alike (the dissolve-noise case): 6 by 6, two octaves moved by
+  // (1, 2) and (-3, 0.5), seed 100, every channel, the pixels at (0, 0), (1, 0) and (4, 5).
+  const runs: [number, number, boolean, number[]][] = [
+    [3, 5, false, [0x3ba8ff6c, 0x787d6e24, 0x5ab8b84a]],
+    [-3, 5, false, [0x3ba8ff6c, 0x787d6e24, 0x5ab8b84a]],
+    [3, -5, true, [0x27ffe5ff, 0x38e44d40, 0x11ffffff]],
+    [-2.5, -4, true, [0x2cffffff, 0x76ee3f52, 0x1c76ffd1]],
+    [-1, 3, true, [0x60ffffaf, 0x6f49e36e, 0x1fffffff]],
+    [-2.5, -4, false, [0x64c2ad57, 0x8fa6a937, 0x2eff43ac]],
+    [-1, 3, false, [0x60ffffaf, 0x6f49e36e, 0x4078ffdb]],
+  ];
+  for (const [x, y, stitch, pixels] of runs) {
+    const store = new BitmapStore(6, 6, true, 0);
+    perlinNoise(
+      store,
+      [x, y],
+      [
+        [1, 2],
+        [-3, 0.5],
+      ],
+      100,
+      stitch,
+      false,
+      15,
+      false,
+    );
+    assert.deepEqual(
+      [store.getPixel32(0, 0), store.getPixel32(1, 0), store.getPixel32(4, 5)],
+      pixels,
+      `${x}, ${y} ${stitch}`,
+    );
   }
 });
 

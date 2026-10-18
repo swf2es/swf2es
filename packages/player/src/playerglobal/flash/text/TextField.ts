@@ -403,6 +403,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     set gridFitType(v: Value) {
       const value = s.rt.toString(v);
       this.$display.gridFitType = value === "pixel" || value === "subpixel" ? value : "none";
+      this.$display.invalidate(CONTENT);
     }
 
     get border(): boolean {
@@ -490,12 +491,14 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set sharpness(v: Value) {
       this.$display.sharpness = s.rt.toNumber(v);
+      this.$display.invalidate(CONTENT);
     }
     get thickness(): number {
       return this.$display.thickness;
     }
     set thickness(v: Value) {
       this.$display.thickness = s.rt.toNumber(v);
+      this.$display.invalidate(CONTENT);
     }
     get mouseWheelEnabled(): boolean {
       return this.$display.mouseWheelEnabled;

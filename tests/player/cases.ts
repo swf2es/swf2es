@@ -3686,6 +3686,44 @@ e._width = 70; e._height = 12; e._y = 70;`,
   );
 }
 
+// Filters a SWF 8 script sets on clips of a square (docs/avm1.md, "flash.filters"):
+// a blur, a glow, a drop shadow, a bevel, a colour matrix and a gradient glow,
+// one cleared again, and the shadow read back and set on another clip.
+function avm1Filters(): Uint8Array {
+  const clip = avm1Sprite(2, [[w.place({ depth: 1, character: 1 })]]);
+  const place = (depth: number, name: string, tx: number, ty: number) =>
+    w.place({ depth, character: 2, name, matrix: { tx, ty } });
+  return avm1Swf(
+    8,
+    [square(1, 0x3366cc, 400), clip],
+    [
+      [
+        place(1, "a", 200, 200),
+        place(2, "b", 900, 200),
+        place(3, "c", 1600, 200),
+        place(4, "d", 200, 1000),
+        place(5, "e", 900, 1000),
+        place(6, "f", 1600, 1000),
+        place(7, "g", 200, 1600),
+        as1(
+          `var F = flash.filters;
+a.filters = [new F.BlurFilter(6, 2, 2)];
+b.filters = [new F.GlowFilter(0xff3300, 0.8, 8, 8, 2, 1)];
+c.filters = [new F.DropShadowFilter(5, 60, 0x000000, 0.6, 4, 4, 1, 1)];
+d.filters = [new F.BevelFilter(3, 45, 0xffffff, 1, 0x000000, 1, 3, 3, 1, 1, "inner")];
+e.filters = [new F.ColorMatrixFilter([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0])];
+f.filters = [new F.GradientGlowFilter(0, 45, [0xffffff, 0xff0000], [0, 1], [0, 255], 6, 6, 1, 1, "outer")];
+g.filters = [new F.BlurFilter()]; g.filters = [];
+g.filters = c.filters;
+trace(a.filters[0].blurX + " " + g.filters.length + " " + g.filters[0].distance);`,
+          8,
+        ),
+      ],
+      [as1(`stop();`, 8)],
+    ],
+  );
+}
+
 /** Clip actions for a place in a SWF of `version`: each record's events and its AS1 source. */
 const clipEvents = (version: number, records: [number, string][]) =>
   w.clipActions(
@@ -5987,10 +6025,10 @@ export const probeFont = (id: number): Uint8Array =>
  * pixel to two, and "l", "m", "a" and "W" with advances that are no whole
  * number of pixels at any of the cases' sizes; "a" then "l" kern.
  */
-export const stemFont = (id: number): Uint8Array =>
+export const stemFont = (id: number, name = "Stem"): Uint8Array =>
   w.font3({
     id,
-    name: "Stem",
+    name,
     ascent: 900,
     descent: 250,
     glyphs: [
@@ -6583,6 +6621,31 @@ function textAdvanced(abc: Uint8Array): Uint8Array {
       stemFont(1),
       w.doAbc(abc, "TextAdvanced"),
       w.symbolClass([[0, "TextAdvanced"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Advanced text drawn every other way (scripts/TextAdvancedDraw.as): Stem
+// as it is, with a medium and a thick CSM hint, and by a table of its own.
+function textAdvancedDraw(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 400,
+    height: 250,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      stemFont(1),
+      stemFont(2, "StemM"),
+      w.fontAlignZones(2, 1, 11),
+      stemFont(3, "StemT"),
+      w.fontAlignZones(3, 2, 11),
+      stemFont(4, "StemTable"),
+      w.doAbc(abc, "TextAdvancedDraw"),
+      w.symbolClass([[0, "TextAdvancedDraw"]]),
       w.showFrame(),
       w.end(),
     ],
@@ -8431,10 +8494,10 @@ export const cases: PlayerCase[] = [
     capture: [1],
     tolerance: 64,
     maxOutliers: 40,
-    // Saffron's CSM cutoffs: stems thickened, thickness and sharpness. Its
-    // layout is text-advanced-layout's, which passes; fitting to pixels
-    // needs a font's alignment zones, which Stem has none of.
-    gap: "advanced anti-aliasing's drawing",
+    // Saffron's CSM cutoffs: stems thickened, thickness and sharpness. Stem
+    // has no alignment zones, so no gridFitType fits its stems to pixels;
+    // the normal rows, whose edges are Flash's 4×4 samples, need the
+    // tolerance.
   },
   {
     // The same text's layout alone, advanced text's pen in fractions of a twip.
@@ -8444,6 +8507,17 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [],
     tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "text-advanced-draw",
+    swf: textAdvancedDraw,
+    script: "TextAdvancedDraw",
+    frames: 1,
+    capture: [1],
+    // Its table set with TextRenderer stays in adl for the jobs after it.
+    alone: true,
+    tolerance: 8,
     maxOutliers: 0,
   },
   {
@@ -8786,6 +8860,17 @@ export const cases: PlayerCase[] = [
     script: "DisplacementLive",
     frames: 3,
     capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // pixelDissolve's seeds and answers and perlinNoise's bases from AS3, as AVM1's (bitmap/ops.ts).
+    name: "dissolve-noise",
+    swf: (abc) => bare(abc, 1, "DissolveNoise"),
+    script: "DissolveNoise",
+    traced: true,
+    frames: 1,
+    capture: [],
     tolerance: 0,
     maxOutliers: 0,
   },
@@ -9246,6 +9331,16 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
+  {
+    name: "avm1-filters",
+    swf: avm1Filters(),
+    traced: true,
+    frames: 2,
+    capture: [2],
+    // As the AS3 filters case: the page blurs at four samples a pixel, adl whole pixels.
+    tolerance: 8,
+    maxOutliers: 40,
+  },
   {
     name: "avm1-clip-properties",
     swf: avm1ClipDrawn(),

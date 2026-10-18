@@ -34,7 +34,9 @@ export const READ_ONLY = 4;
 /** The bits from 0x8 up, which hide a property from SWFs before a version (ASSetPropFlags). */
 export const VERSION_BITS = 0xfff8;
 export const VERSION_6 = 0x80;
-export const VERSION_7 = 0x500;
+// 0x400 alone hides a property from SWF 5 and 6, and leaves it to hasOwnProperty,
+// which 0x100 would hide it from (adl, the corpus's global_proto_decls).
+export const VERSION_7 = 0x400;
 export const VERSION_8 = 0x1000;
 export const VERSION_9 = 0x2000;
 export const VERSION_10 = 0x4000;

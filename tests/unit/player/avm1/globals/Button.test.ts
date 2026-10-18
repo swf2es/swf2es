@@ -48,3 +48,35 @@ test("a button is a Button, whose depth it gives, and a class registered for its
 
   assert.deepEqual(lines, ["object true -16381 true true"]);
 });
+
+test("a button's blendMode is a clip's from SWF 8, listed", async () => {
+  // adl: a DefineButton2 placed as btn.
+  const lines: string[] = [];
+  const source = `var line = [btn.blendMode], modes = ["layer", null, 259, true, "lAyEr", "add"];
+for (var i = 0; i < modes.length; i++) { btn.blendMode = "invert"; btn.blendMode = modes[i]; line.push(btn.blendMode); }
+var listed = false; for (var k in btn) { if (k == "blendMode") { listed = true; } }
+trace(line.join(" ") + " " + listed);`;
+  const swf = w.swf({
+    version: 8,
+    width: 10,
+    height: 10,
+    frameCount: 1,
+    tags: [
+      w.shape({
+        id: 1,
+        bounds: [0, 200, 0, 200],
+        fills: [0xff0000],
+        paths: [{ fill1: 1, commands: [{ move: [0, 0] }, { line: [200, 0] }, { line: [0, 200] }] }],
+      }),
+      w.button2(2, 1),
+      w.place({ depth: 1, character: 2, name: "btn" }),
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const player = new Player(swf, null, new Avm1(codegen, { print: (line) => lines.push(line) }));
+  await player.start();
+
+  assert.deepEqual(lines, ["normal layer normal multiply invert invert add true"]);
+});

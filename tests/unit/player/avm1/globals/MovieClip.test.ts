@@ -9,6 +9,7 @@ import { Avm1 } from "../../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../../packages/player/dist/player.js";
 import { flashAssembler, script } from "../../../../avm1-script.ts";
 import * as w from "../../../../swf-writer.ts";
+import { files, movie, play, take } from "../network.ts";
 
 const codegen = await createCodegen(
   await WebAssembly.compile(
@@ -86,6 +87,43 @@ b = Beta.getBounds(); trace(b.xMin);
 trace(a.hitTest(15, 10) + " " + a.hitTest(5, 10) + " " + a.hitTest(c) + " " + a.hitTest(15, 10, true));`,
     ),
     ["11.2 7", "1.2 2", "0 20 0 20", "10 30 5 25", "6710886.35", "true false true true"],
+  );
+});
+
+test("nothing's bounds in another clip's space switch to 6710886.4 for good under a root of SWF 8", async () => {
+  const empty = `var e = createEmptyMovieClip("e", 9); trace(e.getBounds(e).xMin + " " + e.getBounds(this).xMin);`;
+  assert.deepEqual(await traces(empty, 7), ["6710886.35 6710886.35"]);
+  assert.deepEqual(await traces(empty, 8), ["6710886.35 6710886.4"]);
+});
+
+test("SWF 8 code under a root of SWF 7 switches the invalid bounds for the root's code too", async () => {
+  const played = await play(
+    `var e = createEmptyMovieClip("e", 1); trace("7 " + e.getBounds(this).xMin);
+createEmptyMovieClip("holder", 2).loadMovie("child.swf");
+var frames = 0;
+this.onEnterFrame = function () { frames++; if (frames == 2) { trace("7 " + e.getBounds(_root).xMin); } };`,
+    { fetch: files({ "child.swf": movie(`trace("8 " + _level0.e.getBounds(_level0).xMin);`, 8) }) },
+    7,
+  );
+
+  assert.deepEqual(take(played), ["7 6710886.35"]);
+  await played.deliver();
+  played.player.tick();
+  played.player.tick();
+  assert.deepEqual(take(played), ["8 6710886.4", "7 6710886.4"]);
+});
+
+test("blendMode takes a name or a byte's number, null as normal, and ignores anything else", async () => {
+  // The corpus's movieclip_blend_mode_property.
+  assert.deepEqual(
+    await traces(
+      `var line = [];
+var modes = ["layer", null, 259, 3.5, true, -1, "lAyEr", {}];
+for (var i = 0; i < modes.length; i++) { a.blendMode = "invert"; a.blendMode = modes[i]; line.push(a.blendMode); }
+trace(line.join(" "));`,
+      8,
+    ),
+    ["layer normal multiply multiply invert invert invert invert"],
   );
 });
 

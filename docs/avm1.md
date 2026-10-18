@@ -1257,7 +1257,10 @@ probes they came of), and the corpus, where it is not what Ruffle does:
   `removed_clip_halts_script`).
 - `hitTest(x, y)` is in the root's space against the clip's bounds on the
   stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
-  Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.
+  Flash's matrices do; `getBounds` of nothing is 6710886.35 each way, and
+  in another clip's space 6710886.4 for good once code of SWF 8, or any
+  code under a root of SWF 8, has called `getBounds` or `getRect` (the
+  corpus's `movieclip_invalid_get_bounds_*`).
 - StopSounds is minimal: no sound is stopped yet. ToggleQuality toggles
   `_quality`, which the element draws by from the next frame (see
   architecture.md, "Showing a player").
@@ -1573,36 +1576,74 @@ given as undefined is false or 0, one not given true or 0xFFFFFFFF.
 `width`, `height`, `transparent` and `rectangle` are -1 once disposed.
 `getPixel` and `getPixel32` are signed; `setPixel`, `setPixel32`,
 `fillRect` (a rectangle's x, y, width and height, own or inherited, as
-ints) and `copyPixels` (its mergeAlpha false without an alpha bitmap)
-give 0; `draw` takes a BitmapData, composited on the CPU, or a clip or
-button, drawn by the host's renderer at the stage's quality (`Avm1.drawer`,
-which the element and the test page give, as Scripting's for AS3), its
-matrix's fields by name; `clone` keeps the prototype; `floodFill` (0
-for a point off the bitmap or its own colour), `scroll` (0),
-`colorTransform` (-1 even done, as Flash) and the static
-`loadBitmap`, the library's bitmap exported by a name, transparent.
+ints) and `copyPixels` (an alpha bitmap counts only with its point
+given, and mergeAlpha is false unless given) give 0; `draw` takes a
+BitmapData, composited on the CPU, or a clip or button, drawn by the
+host's renderer at the stage's quality (`Avm1.drawer`, which the element
+and the test page give, as Scripting's for AS3), its matrix's fields by
+name, and a blend mode by BlendMode's name or PlaceObject3's number,
+anything else, null included, normal (adl); `clone` keeps the
+prototype; `floodFill` (0 for a point off the bitmap or its own
+colour), `scroll` (0), `colorTransform` (-1 even done, as Flash) and
+the static `loadBitmap`, the library's bitmap exported by a name,
+transparent.
 The rest run AS3's operations with AVM1's conversions, ints where AS3
 takes uints, and AVM1's answers (the corpus's `bitmap_data_thorough`):
 `copyChannel`, `merge` (its multipliers clamped to 0 to 256, the alpha
 one optional), `paletteMap` (its tables' entries summed as they are; no
 red table, -1) and `threshold` (an unknown operation is "<") take a rect
-spanning back from a negative size, as AS3's do; `noise`, `perlinNoise`,
-`pixelDissolve` (five arguments at least), `getColorBoundsRect` and
+spanning back from a negative size, as AS3's do; `noise`,
+`perlinNoise` (a base's sign dropped, as Flash), `pixelDissolve` (five
+arguments at least, a negative count a uint's; a seed past the
+generator's states steps down as any state, and one a count of 0 or a
+rect it cannot dissolve leaves unused comes back, 0 as the tap),
+`getColorBoundsRect` and
 `hitTest` (its errors -2 to -4; a point needs an alpha above 0, a rect
 not at threshold 0). `threshold` and `getColorBoundsRect` compare the
 pixels as they are kept, premultiplied, unlike AS3's, and threshold
 writes its colour premultiplied by its own alpha. Flash leaves the alpha
 it writes into an opaque bitmap, which its getPixel32 reads back; an
 opaque store here keeps every alpha at 255, as its drawing, copies and
-filters take it to, so only getPixel32 differs there. `compare` has answers
+filters take it to, so only getPixel32 differs there (threshold's and
+pixelDissolve's copies). `compare` has answers
 of its own: -1 for no argument, -2 for no live bitmap, -3 and -4 for
 other sizes, 0 for the same pixels, else a bitmap of the differences.
-With no filter objects in AVM1 yet, `applyFilter` gives -1 after its
-source's checks, and `generateFilterRect` undefined, as Ruffle's does. A
-clip's `attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
+`applyFilter` and `generateFilterRect` run AS3's operations on a filter
+object's record (`bitmap/filters.ts`), with adl's answers: applyFilter -4
+for no rect, -5 for no filter object, -6 for a glow, shadow or bevel into
+an opaque bitmap or a rect or filter AS3 refuses (its rect's numbers taken
+as AS3's, not as ints), a point that is none (0, 0), and 0 done;
+generateFilterRect -1 for no rect, -2 for no filter object. A clip's
+`attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
 BitmapData at a depth as a bitmap with no AVM1 object of its own, which
 the bitmap's later changes show on. Real content caches its art in them:
 a level's tiles drawn from its clips once, then attached.
+
+### flash.filters
+
+`flash.filters`' nine classes and BitmapFilter (`globals/filters.ts`, as
+Ruffle's) hold the record a display object's filters keep
+(`display/filters.ts`), its values kept as Flash keeps them, which their
+getters read back: an alpha in a byte, a strength in 256ths up to 255, an
+angle within a turn by `%`, kept in radians, blurs clamped to 0 to 255, a
+quality to 0 to 15, colour and convolution matrices in floats (a colour
+matrix's twenty NaN past a list given, a convolution's grown to its size,
+never shrunk), a gradient's colours in sixteen slots whose alphas and
+ratios outlast a shorter list, a bevel's or gradient's type `inner`,
+`outer` or else `full`. Their properties are getters and setters on each
+prototype, listed, from SWF 8; the prototypes extend BitmapFilter's, whose
+`clone` copies a filter. A clip's, a button's and a text field's `filters`
+read back new objects of its records each time and take the filter
+objects of a list up to its length (adl: an object without a length sets
+none; a list's length is read up to 2^20, as Function.apply's), a
+displacement map's pixels as they are then, as AS3's are; the
+renderer draws them as AS3's (the corpus's `bitmap_filters`, the
+`avm1-filters` case). A clip's and a button's `blendMode`, from SWF 8
+(a button's listed), reads its mode's
+name and takes BlendMode's name or PlaceObject3's number of one, a byte,
+undefined and null as normal; anything else leaves it as it was, where
+BitmapData's `draw` takes it as normal (the corpus's
+`movieclip_blend_mode_property`, adl).
 
 ### getURL and fscommand
 
@@ -1722,6 +1763,34 @@ properties are in Flash's for..in order, XMLSocket's hidden. Up to SWF 5,
 where a string is bytes, text loaded or received is its UTF-8's bytes,
 and `loadVariables` reads Windows-1252.
 
+### NetConnection
+
+`NetConnection` (`globals/NetConnection.ts`, as Ruffle's) connects
+locally for `connect(null)`, at once, its `onStatus` told
+`NetConnection.Connect.Success`, and to Flash Remoting for an http or
+https URL; any other connects nothing, and a new connection closes the
+one before (`Connect.Closed`). A remoting `call` is queued, and at the
+frame's end each connection's calls go as one AMF0 packet POSTed to its
+URL with its headers (`addHeader`, one of a name, its case aside), the
+calls answered at `/1`, `/2`...: an answer's `/n/onResult` or
+`/n/onStatus` goes to that call's responder; one that is no packet is
+ignored, and a failed request tells the connection's `onStatus`
+nothing, as does `close` of a remoting connection after its
+`Connect.Closed`. The values are AMF0 as `avm1/amf.ts` writes a .sol
+file's, but for a remoting packet's ways: a call's arguments one table
+of references, the arguments' array its first and a header's value its
+own first (adl, through a server it POSTed to), an array of indices
+alone a strict array (one with any other key an ECMA array), an XML
+node its text, a date's zone 0, and a getter or an element that throws
+undefined (the corpus's `amf_*` and `netconnection_*`); a call writes a
+million values at most and objects 1,024 deep, past which it writes
+undefined, as a script's length of 2^31 - 1 or a long chain would hang
+the page, and reading an answer fails past that depth or its bytes. Typed objects
+are written by the name Object.registerClass last gave their
+constructor, in the case it was given. The corpus runner answers a
+test's `localhost:8000` from its `localhost/` directory, as Ruffle's
+does.
+
 ### Loading movies
 
 `loadMovie(url, target, method)`, `MovieClip.loadMovie(url, method)`,
@@ -1831,6 +1900,19 @@ Two VMs meet in three places, each its own step in the plan:
 An AS3 SWF loaded by AS2 (`loadMovie`, the corpus's
 `mixed_avm/avm1_loads_avm2*`) plays as AVM1 with none of its code, as
 Ruffle forces it ("Loading movies"); running its ABC is out of scope.
+
+### PrintJob
+
+`PrintJob` (`globals/PrintJob.ts`, as Ruffle's) prints nothing: `start`
+gives false, as Flash does where the user cancels its dialog, so
+`addPage` gives false and `send` does nothing. Its methods are SWF 7's,
+and up to SWF 6 its prototype's `__proto__` is hidden too, so that it
+inherits nothing, not even `toString` (adl: the object traces as
+`[type Object]`). The
+first job made adds the page's and paper's measures to the prototype,
+listed, over what a script set there, and no later job again: a job's
+are 0, unchanged by a set (the corpus's `printjob_props_*`), anything
+else's undefined (adl).
 
 ### Out of scope at first
 
