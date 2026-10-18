@@ -11,12 +11,15 @@ import {
   numberToPrecision,
 } from "../../../packages/runtime/dist/avm2/natives/number.js";
 import {
+  numberToString,
+  stringToNumber,
+} from "../../../packages/runtime/dist/avm2/number-strings.js";
+import {
   convertDoubleToString,
   DTOSTR_EXPONENTIAL,
   DTOSTR_FIXED,
   DTOSTR_PRECISION,
 } from "../../../packages/runtime/dist/avm2/numbers.js";
-import { numberToString, stringToNumber } from "../../../packages/runtime/dist/avm2/runtime.js";
 
 let seed = 1;
 const random = () => {

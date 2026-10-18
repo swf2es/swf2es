@@ -1,6 +1,6 @@
 // XML text into tags, as avmplus' XMLParser: a tokenizer, not a validating
 // parser, whose leniency and errors are avmplus', which E4X's are. The tree
-// is made from its tags in xml.ts.
+// is made from its tags in build.ts.
 //
 // Translated from avmplus' core/XMLParser16.cpp, this file is subject to the
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
@@ -16,7 +16,7 @@ export const TAG_DOCTYPE = 10;
 export const TAG_XML_DECLARATION = 13;
 
 // What getNext gives, as XMLParser's status codes: a tag, the end, or the
-// error E4X throws for each (see ERRORS in xml.ts).
+// error E4X throws for each (see PARSE_ERRORS in values.ts).
 export const OK = 0;
 export const END = -1;
 export const UNTERMINATED_CDATA = -2;

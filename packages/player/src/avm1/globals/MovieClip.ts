@@ -20,8 +20,8 @@ import {
   TRANSFORM,
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
-import type { Avm1Swf, Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import type { Avm1Swf, Handler } from "../swf.js";
 import { storeOf } from "./BitmapData.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 import { formVars } from "./LoadVars.js";
@@ -682,6 +682,12 @@ function levelOf(digits: string): number {
   }
 
   return negative ? -n | 0 : n;
+}
+
+/** `d`'s AVM1 side, null for one without. */
+export function nativeOf(d: DisplayObject): ClipNative | null {
+  const native = d.avm1?.display;
+  return native instanceof ClipNative ? native : null;
 }
 
 /** A display object's side of its AVM1 object (runtime's DisplayNative). */

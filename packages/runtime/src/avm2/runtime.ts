@@ -25,17 +25,7 @@ import type {
   TypeRef,
   Value,
 } from "./descriptors.js";
-import {
-  add,
-  compileUnit,
-  Domain,
-  definedInChain,
-  definitionNames,
-  findScript,
-  frameScripts,
-  type Script,
-  stackFrames,
-} from "./domain.js";
+import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
   type Enumeration,
   enumerated,
@@ -46,6 +36,14 @@ import {
   pairOf,
 } from "./enumeration.js";
 import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
+import {
+  type CountedMethod,
+  nativeFactory,
+  noBodyFactory,
+  unverifiedFactory,
+  verifyErrorFactory,
+} from "./method-factories.js";
+import { Modules } from "./modules.js";
 import {
   arrayIndex,
   CONSTANT_Multiname,
@@ -71,7 +69,7 @@ import {
   TypeName,
 } from "./names.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
-import { convertDoubleToString } from "./numbers.js";
+import { numberToString, stringToNumber } from "./number-strings.js";
 import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
 import { errorMessages } from "./player-messages.js";
 import {
@@ -106,9 +104,6 @@ import {
   VectorRef,
 } from "./traits.js";
 
-/** A native with argument counts to check, when it has any, and its declared parameter count (see Runtime.native). */
-type CountedMethod = Method & { $min?: number; $max?: number; $length?: number };
-
 /**
  * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject
  * keeps none for one: never any. Shared and frozen; what writes elements
@@ -131,24 +126,9 @@ export class Runtime {
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
-  private domainCount = 1;
-  private loads = 0;
   private loading: Domain = this.root;
-  /**
-   * The domain of each loaded module's code, by the script a stack's frame
-   * names it with (see codeDomain); found from the stacks its loads took,
-   * which wait in `unlocated` until a domain other than the root exists.
-   * Weakly: a module's code keeps its domain, through its Abc, for as long
-   * as it can run, and a domain no code is left of is let go, an entry
-   * dropped with it.
-   */
-  private readonly moduleDomains = new Map<string, WeakRef<Domain>>();
-  private readonly moduleDomainGone = new FinalizationRegistry<string>((at) => {
-    if (!this.moduleDomains.get(at)?.deref()) {
-      this.moduleDomains.delete(at);
-    }
-  });
-  private readonly unlocated: [Error, Domain][] = [];
+  /** The modules loaded, and the domains of their code. */
+  private readonly modules = new Modules();
   private loadingBuiltin = false;
   /** Whether a domain other than the root exists. */
   children = false;
@@ -256,50 +236,21 @@ export class Runtime {
   /** A domain whose definitions are looked up after `parent`'s, as `new ApplicationDomain(parent)`. */
   childDomain(parent: Domain = this.root): Domain {
     this.children = true;
-    return new Domain(parent, this.domainCount++);
+    return this.modules.newDomain(parent);
   }
 
   /**
    * The domain of the innermost code on the stack that a module defines,
-   * as avmplus' AvmCore::codeContext; the root without one. A frame is a
-   * module's by its script, so a host gives each module a script of its
-   * own: its URL, or a sourceURL comment for code it evaluates.
+   * as avmplus' AvmCore::codeContext; the root without one (see
+   * Modules.domainOf). The stack is taken here, so that it has as many of
+   * the caller's frames as the engine keeps.
    */
   codeDomain(): Domain {
     if (!this.children) {
       return this.root;
     }
 
-    this.locate();
-    for (const at of frameScripts(new Error().stack)) {
-      const domain = this.moduleDomains.get(at)?.deref();
-      if (domain) {
-        return domain;
-      }
-    }
-
-    return this.root;
-  }
-
-  /**
-   * The scripts of the modules loaded since last asked, by the stacks their
-   * loads took. Their stacks reach the modules' code, so they are not kept
-   * past the load once there are domains to tell apart.
-   */
-  private locate(): void {
-    for (const [error, domain] of this.unlocated) {
-      // Its first frame is abc's own, its second the module's factory. An
-      // engine may name no script for the factory's frame (JavaScriptCore,
-      // for code a Function made), and the next frame that names one is
-      // the host's, which must not stand for the module.
-      const at = stackFrames(error.stack)[1];
-      if (at) {
-        this.moduleDomains.set(at, new WeakRef(domain));
-        this.moduleDomainGone.register(domain, at);
-      }
-    }
-
-    this.unlocated.length = 0;
+    return this.modules.domainOf(new Error().stack) ?? this.root;
   }
 
   /**
@@ -318,7 +269,7 @@ export class Runtime {
       this.loading = previous;
       this.loadingBuiltin = wasBuiltin;
       if (this.children) {
-        this.locate();
+        this.modules.locate();
       }
     }
   }
@@ -433,47 +384,8 @@ export class Runtime {
 
   /** Load a module: its scripts' names become visible; the entry script of a non-builtin module runs. */
   abc(desc: AbcDesc): Abc {
-    // Its layouts are those of its ABC after exactly these ABCs; the
-    // root's, which a player loads thousands into, are not copied.
-    const domain = this.loading;
-    const loaded = domain.parent ? domain.chain() : domain.own;
-    const linked = desc.linked;
-    if (linked.length !== loaded.length || linked.some((h, i) => h !== loaded[i])) {
-      throw new Error(
-        `swf2es: a module compiled after [${linked.join(", ")}] cannot load after [${loaded.join(", ")}]`,
-      );
-    }
-
-    const abc = desc as Abc;
-    abc.domain = domain;
-    abc.index = domain.own.length;
-    domain.own.push(desc.hash);
-    domain.ownOrder.push(this.loads++);
-    if (!this.loadingBuiltin) {
-      this.unlocated.push([new Error(), domain]);
-    }
-    for (const name of abc.names) {
-      if (name instanceof TypeName) {
-        name.names = abc.names;
-      }
-    }
-
-    for (const cls of abc.classes) {
-      cls.abc = abc;
-    }
-
-    abc.scriptStates = abc.scripts.map((s) => ({ desc: s, abc, global: null, state: 0 }));
-    // As DomainMgr::addNamedScript: a name the domain's chain defines
-    // already, cached or loaded, is unreachable, and not added.
-    for (const script of abc.scriptStates) {
-      for (const [ns, version, name] of script.desc.traits.bindings) {
-        if (!definedInChain(domain, name, ns)) {
-          add(domain.globals, { ns, version, script }, name);
-        }
-      }
-    }
-
-    return abc;
+    // The stack taken here has this frame first and the module's factory second.
+    return this.modules.load(desc, this.loading, this.loadingBuiltin ? null : new Error());
   }
 
   /** Run a module's entry point, its last script, as avmshell does. */
@@ -2891,34 +2803,7 @@ export class Runtime {
 
   /** A native method, bound by its name; one the runtime lacks throws when called. */
   native(name: string, required = 0, max = -1): Factory {
-    const make = this.natives[name];
-    if (!make) {
-      return () => () => {
-        throw this.unsupported(`native ${name}`);
-      };
-    }
-
-    let f: Method | null = null;
-    return () => {
-      if (!f) {
-        f = make(this);
-        // Checked where a call was not bound (callBound, methodClosure): the
-        // verifier binds only a call its argument count fits.
-        if (required > 0 || max >= 0) {
-          (f as CountedMethod).$min = required;
-          (f as CountedMethod).$max = max;
-        }
-
-        // Its Function.length is the ABC's parameter count, as avmplus'
-        // (FunctionClass.cpp), not what the JavaScript declares: a native
-        // with optional parameters gives them defaults, which length skips.
-        if (max >= 0) {
-          (f as CountedMethod).$length = max;
-        }
-      }
-
-      return f;
-    };
+    return nativeFactory(this, name, required, max);
   }
 
   /**
@@ -2940,21 +2825,15 @@ export class Runtime {
   }
 
   get noBody(): Factory {
-    return () => () => {
-      throw this.error("VerifyError", 1001, "method");
-    };
+    return noBodyFactory(this);
   }
 
   get unverified(): Factory {
-    return () => () => {
-      throw this.unsupported("a method the compiler did not verify");
-    };
+    return unverifiedFactory(this);
   }
 
   verifyError(id: number): Factory {
-    return () => () => {
-      throw this.error("VerifyError", id);
-    };
+    return verifyErrorFactory(this, id);
   }
 
   isPrimitive(v: Value): boolean {
@@ -2984,103 +2863,3 @@ const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Obj
 
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
-
-/**
- * As avmplus' String to Number: JavaScript's, without its binary and octal
- * prefixes. JavaScript skips the whitespace trim() does, so a number it
- * reads is avmplus' unless it came from such a prefix; only that, or one it
- * cannot read, needs avmplus' own rules.
- */
-export function stringToNumber(s: string): number {
-  const n = Number(s);
-  if (!Number.isNaN(n)) {
-    return binaryOrOctal(s) ? Number.NaN : n;
-  }
-
-  return unreadNumber(s);
-}
-
-/** Whether `s`, which JavaScript read as a number, starts with a binary or octal prefix. */
-function binaryOrOctal(s: string): boolean {
-  let i = 0;
-  while (i < s.length) {
-    const c = s.charCodeAt(i);
-    if (c !== 0x20 && (c < 0x09 || c > 0x0d)) {
-      break;
-    }
-
-    i++;
-  }
-
-  // Whitespace past ASCII is rare: trimStart knows all of it.
-  if (s.charCodeAt(i) > 0x7f) {
-    return /^0[bBoO]/.test(s.trimStart());
-  }
-
-  const next = s.charCodeAt(i + 1) | 0x20;
-  return s.charCodeAt(i) === 0x30 && (next === 0x62 || next === 0x6f);
-}
-
-/**
- * A string JavaScript reads as NaN, as avmplus reads it: a sign before a hex
- * number, a NUL that ends the number, an exponent with no digits; anything
- * else, a binary or octal prefix among it, is NaN.
- */
-function unreadNumber(s: string): number {
-  const t = s.trim();
-  if (/^[-+]0[xX]/.test(t)) {
-    const n = Number(t.slice(1));
-    return t[0] === "-" ? -n : n;
-  }
-
-  // As avmplus, a NUL ends the number, and one before any is none.
-  const nul = s.indexOf("\0");
-  if (nul > 0 && s.slice(0, nul).trim() !== "") {
-    return stringToNumber(s.slice(0, nul));
-  }
-
-  // "4e" or "4e+": the exponent is left off.
-  const bare = /^([-+]?(?:\d+\.?\d*|\.\d+))[eE]\+?$/.exec(t);
-  return bare ? Number(bare[1]) : Number.NaN;
-}
-
-/**
- * A number as AS3 writes it: avmplus' own formatting, not JavaScript's,
- * though the two agree, and JavaScript's is some ten times faster, for an
- * int, and for a number from 1e-6 up to 1e15 that JavaScript writes with 15
- * significant digits or fewer. Both write the shortest digits that read
- * back as the number, and no two decimals of 15 digits read back as one
- * double; past 15 they can part on the last digit, which avmplus rounds up
- * (209.14077758789063 where JavaScript has ...062), and from 1e15 up every
- * number takes 16 or more (tests/unit/runtime/numbers.test.ts).
- */
-export function numberToString(n: number): string {
-  if ((n | 0) === n) {
-    return String(n);
-  }
-
-  const magnitude = n < 0 ? -n : n;
-  if (magnitude >= 1e-6 && magnitude < 1e15) {
-    const text = String(n);
-    if (significantDigits(text) <= 15) {
-      return text;
-    }
-  }
-
-  return convertDoubleToString(n);
-}
-
-/** The significant digits in a number JavaScript wrote in plain decimals: all but its leading zeros. */
-function significantDigits(text: string): number {
-  let digits = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (c > 0x30 && c <= 0x39) {
-      digits++;
-    } else if (c === 0x30 && digits > 0) {
-      digits++;
-    }
-  }
-
-  return digits;
-}

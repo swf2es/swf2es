@@ -653,9 +653,12 @@ what a host gives a runtime; `hooks.ts`, what a builtin or a player's class
 plugs in to allocate, index, resolve names or be called; `traits.ts`, the
 layout model (`Traits`, the binding kinds, the class and Vector references);
 `domain.ts`, application domains and the lookup of a name along a domain's
-chain; `classes.ts`, OP_newclass, which makes a class from its descriptor;
+chain; `modules.ts`, the modules loaded into them and which module's code
+a stack is in; `method-factories.ts`, the natives and the methods with no
+generated body as a module binds them; `classes.ts`, OP_newclass, which makes a class from its descriptor;
 `enumeration.ts`, the names a for-in goes through; `property-cache.ts`, the
-inline caches; `names.ts`, namespaces and multinames; `numbers.ts`,
+inline caches; `names.ts`, namespaces and multinames; `number-strings.ts`,
+numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
 
@@ -686,7 +689,11 @@ the runtime translates it, so that its output is avmplus' byte for byte:
 number formatting (`numbers.ts`), Array's sort (`natives/sort.ts`),
 ByteArray with its capacity and UTF-8 (`natives/bytearray.ts`), AMF3
 (`amf.ts`), JSON (`natives/json.ts`), Date's formats (`natives/date.ts`),
-XML (`natives/xml/`: `chars.ts`, `parser.ts`, `node.ts` and `xml.ts`) and
+XML (`natives/xml/`: `chars.ts` and `parser.ts` tokenize text, `node.ts`
+is the tree, `build.ts` makes trees from text and values, `values.ts` the
+XML and XMLList objects, `names.ts` their names, Namespaces and QNames,
+`access.ts` E4X's internal methods, `strings.ts` toString and toXMLString,
+`operators.ts` == and +, and `xml.ts` the classes' hooks and natives) and
 describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
@@ -1155,7 +1162,12 @@ draws with, plays a SWF so under that policy and draws it as without one).
 
 The player keeps Flash's display list and timeline
 (`packages/player/src`: `display/timeline.ts` reads a SWF's definitions and
-frames, `display/display.ts` is the display list), and PixiJS only mirrors it
+frames, `display/display.ts` gathers the display list, whose kinds of
+display object each have a module of their own: `displayobject.ts`,
+`container.ts`, `movieclip.ts`, `buttonobject.ts`, `shapeobject.ts`,
+`textobjects.ts`, `bitmapobject.ts`, `videoobject.ts`, with `walk.ts` for
+the frame's walks and `instantiate.ts` for what a character makes), and
+PixiJS only mirrors it
 (`render/view.ts`): a container per display object, kept from frame to frame
 and updated where the display object marks itself changed.
 
@@ -1193,7 +1205,12 @@ and the player's paths in this document are relative to it:
   and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
-- `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
+- `render/`: the PixiJS view (`view.ts`, the walk that keeps each
+  object's node, `node.ts`, in step) and what only it uses: what an
+  object itself draws (`art.ts`), how it is blended (`compositing.ts`),
+  3D objects' planes (`planes.ts`), released nodes kept for reuse
+  (`spares.ts`), BitmapData.draw's sampling (`snapshot.ts`), the pointer
+  on the canvas (`pointer.ts`), shapes'
   fills tessellated (`tessellate.ts`) and lines stroked (`strokes.ts`)
   into shared contexts, where the player plugs into the Pixi fork's
   extension points (`hooks.ts`), render groups settling (`settle.ts`),
@@ -4603,16 +4620,15 @@ makes it anew), and `PixiView.quality` at low samples the smoothed copies
 of the stores' textures, and drawTriangles' fills, nearest. Medium and
 high are the GPU's multisampling, which costs the GPU memory and
 bandwidth but no shading: supersampling, 4 or 16 times the pixels, would
-cost more than the edges show. The back buffer takes Flash's samples, 4
-at medium and 16 at high and best, as many as the GPU allows (the fork's
-`backBufferSamples`; 8 on many integrated GPUs), remade at the next
-frame. Filter and blend layers keep 4 at every quality (`msaaSamples`):
-they are many and drawn into often, and on an integrated GPU 8 samples
-for every target slowed a crowded scene's slowest frames where 8 for the
-back buffer alone cost nothing measurable. A filtered object's edges are
-so a little coarser at high than an unfiltered neighbour's, where Flash
-covers both with 16. A BitmapData's draw at low quality smooths no bitmap
-either.
+cost more than the edges show. The back buffer and the filter and blend
+layers take 4 samples at medium, 8 at high and 16 at best, as many as the
+GPU allows (the fork's `backBufferSamples` and `msaaSamples`), remade at
+the next frame. Flash covers an edge with 16 at high; 8 look alike but on
+the longest, shallowest edges, at half the memory, and best takes 16.
+Every sample costs its pixels 8 bytes, colour and depth-stencil, so a
+canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
+256 MB, 4 at least): 8 at 1440p, 4 at 4K. A BitmapData's draw at low
+quality smooths no bitmap either.
 
 ### The page's configuration
 

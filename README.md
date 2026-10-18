@@ -1,3 +1,5 @@
+<img src="apps/site/static/icon.svg" alt="" width="96" height="96" align="right">
+
 # swf2es
 
 swf2es plays SWF files in the browser and compiles their ActionScript 3

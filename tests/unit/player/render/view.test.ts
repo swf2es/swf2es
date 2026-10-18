@@ -3202,10 +3202,11 @@ test("spare nodes are listed once, kept to the most, and dropped as a SWF unload
   const { SPARE_NODES_MOST } = await import("../../../../packages/player/dist/render/pools.js");
   const character = await outlinedSquare();
   const view = new PixiView(standIn([]).renderer);
-  const spares = view as unknown as {
-    spareNodes: Map<unknown, Set<unknown>>;
-    spareSince: Map<unknown, number>;
-  };
+  const spares = (
+    view as unknown as {
+      spares: { byCharacter: Map<unknown, Set<unknown>>; since: Map<unknown, number> };
+    }
+  ).spares;
   const root = new Container();
 
   await withClock(() => {
@@ -3226,26 +3227,26 @@ test("spare nodes are listed once, kept to the most, and dropped as a SWF unload
 
     placeAll(3);
     removeAll();
-    assert.equal(spares.spareSince.size, 3);
-    assert.equal(spares.spareNodes.get(character)?.size, 3);
+    assert.equal(spares.since.size, 3);
+    assert.equal(spares.byCharacter.get(character)?.size, 3);
 
     // Taken by new objects, they leave the lists; released again, each is listed once.
     placeAll(3);
-    assert.equal(spares.spareSince.size, 0);
+    assert.equal(spares.since.size, 0);
     removeAll();
-    assert.equal(spares.spareSince.size, 3);
+    assert.equal(spares.since.size, 3);
 
     // Past the most, the oldest go.
     placeAll(SPARE_NODES_MOST + 10);
     removeAll();
-    assert.equal(spares.spareSince.size, SPARE_NODES_MOST);
-    assert.equal(spares.spareNodes.get(character)?.size, SPARE_NODES_MOST);
+    assert.equal(spares.since.size, SPARE_NODES_MOST);
+    assert.equal(spares.byCharacter.get(character)?.size, SPARE_NODES_MOST);
 
     // An unload lets go of them all at the next prepare.
     unloads.count++;
     view.prepare(root);
-    assert.equal(spares.spareSince.size, 0);
-    assert.equal(spares.spareNodes.size, 0);
+    assert.equal(spares.since.size, 0);
+    assert.equal(spares.byCharacter.size, 0);
   });
 });
 
@@ -3280,7 +3281,8 @@ test("an unload takes the lines' budget back to its floor at the next prepare", 
   const { unloads } = await import("../../../../packages/player/dist/display/display.js");
   const { LINES_IDLE_VERTICES } = await import("../../../../packages/player/dist/render/pools.js");
   const view = new PixiView(standIn([]).renderer);
-  const budget = (view as unknown as { lines: { budget: { size: number } } }).lines.budget;
+  const budget = (view as unknown as { art: { lines: { budget: { size: number } } } }).art.lines
+    .budget;
   const root = new Container();
   view.prepare(root);
   budget.size = 2_000_000;
