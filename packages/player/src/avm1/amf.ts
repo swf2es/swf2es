@@ -31,12 +31,12 @@ const decoder = new TextDecoder();
 /**
  * The most values a remoting value writes: a length a script sets, or an
  * object shared down a tree of them (a = [b, b], b = [c, c]...) met each
- * time, would otherwise hang the page or run it out of memory; past it,
- * what is left is undefined, an array's length cut to what is left.
+ * time, would otherwise hang the page or run it out of memory. Arrays
+ * and properties stop when it is spent; the reader refuses more values.
  */
 export const MAX_VALUES = 1 << 20;
 
-/** How deep objects nest as they are written or read; past it, undefined, or a read fails. */
+/** How deep values nest as they are written or read; past it, undefined, or a read fails. */
 export const MAX_DEPTH = 1024;
 
 /** A remoting packet's ways, where they part from a .sol file's (globals/NetConnection.ts). */
@@ -160,6 +160,17 @@ export class Writer {
     }
   }
 
+  /** A call's implicit argument array, already reserved as reference 0 by the caller. */
+  arguments(values: Value[]): void {
+    this.left--;
+    this.depth++;
+    try {
+      this.array(values.length, (i) => values[i]);
+    } finally {
+      this.depth--;
+    }
+  }
+
   /** A property of `o` as remoting reads it: undefined where its getter throws (Ruffle). */
   private read(o: Obj, key: string): Value {
     if (this.remoting === null) {
@@ -178,7 +189,8 @@ export class Writer {
   }
 
   private object(o: Obj): void {
-    if (this.depth >= MAX_DEPTH) {
+    // Leave room for the undefined leaf in the reader's depth budget.
+    if (this.depth >= MAX_DEPTH - 1) {
       this.bytes(UNDEFINED);
       return;
     }
@@ -270,15 +282,26 @@ export class Writer {
       length = Math.max(length, Number(key) + 1);
     }
 
+    this.array(length, (i) => this.read(o, String(i)));
+    return true;
+  }
+
+  /** An array's elements, shortened where nested values spend the remaining budget. */
+  private array(length: number, read: (index: number) => Value): void {
     // No more than the values left to write, which also keeps it a u32.
     length = Math.min(length, this.left);
     this.bytes(STRICT_ARRAY);
-    this.u32(length);
-    for (let i = 0; i < length; i++) {
-      this.value(this.read(o, String(i)));
+
+    // Nested values spend this budget too, so the final count is only known after writing them.
+    const count = new Uint8Array(4);
+    this.push(count);
+    let written = 0;
+    for (let i = 0; i < length && this.left > 0; i++) {
+      this.value(read(i));
+      written++;
     }
 
-    return true;
+    new DataView(count.buffer).setUint32(0, written);
   }
 
   /**
@@ -288,9 +311,13 @@ export class Writer {
    */
   properties(o: Obj): void {
     for (const key of avm1.keys(o, this.version).reverse()) {
+      if (this.remoting !== null && this.left === 0) {
+        break;
+      }
+
       if (avm1.find(o, key, this.version)?.get) {
         this.name(key);
-        this.bytes(UNDEFINED);
+        this.value(undefined);
         continue;
       }
 
@@ -323,6 +350,7 @@ export class Reader {
   private readonly view: DataView;
   private readonly references: Value[];
   private depth = 0;
+  private left = MAX_VALUES;
 
   constructor(
     private readonly bytes: Uint8Array,
@@ -361,8 +389,12 @@ export class Reader {
     return this.utf8(this.u16());
   }
 
-  /** A value; past MAX_DEPTH of objects inside objects, a RangeError, as for bytes past the end. */
+  /** A value; past the count or depth budget, a RangeError, as for bytes past the end. */
   value(): Value {
+    if (this.left-- <= 0) {
+      throw new RangeError("AMF0 too many values");
+    }
+
     if (this.depth >= MAX_DEPTH) {
       throw new RangeError("AMF0 nested too deep");
     }
@@ -384,6 +416,10 @@ export class Reader {
         return n;
       }
       case BOOLEAN:
+        if (this.at >= this.bytes.length) {
+          throw new RangeError("past the end");
+        }
+
         return this.bytes[this.at++] !== 0;
       case STRING:
         return this.name();
@@ -423,6 +459,10 @@ export class Reader {
         const a = this.realm.newArray([], this.version);
         this.references.push(a);
         const count = this.u32();
+        if (count > this.left) {
+          throw new RangeError("AMF0 too many values");
+        }
+
         for (let i = 0; i < count; i++) {
           put(a, String(i), this.value(), this.version);
         }
@@ -431,7 +471,8 @@ export class Reader {
       }
       case DATE: {
         const time = this.view.getFloat64(this.at);
-        this.at += 10;
+        this.at += 8;
+        this.u16();
         // Flash's own Date, whatever a script set _global.Date to.
         return this.realm.construct(this.realm.Date.constr, [time], this.version);
       }
