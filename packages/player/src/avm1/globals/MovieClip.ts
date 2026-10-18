@@ -998,6 +998,14 @@ export function movieClipClass(movie: Movie): {
 
     return false;
   });
+  // A snapshot of this clip by whatever TextSnapshot is on _global now.
+  method("getTextSnapshot", 0, (clip, _, version) =>
+    realm.construct(
+      avm1.get(realm.global, "TextSnapshot", version),
+      [movie.faceOf(clip) ?? undefined],
+      version,
+    ),
+  );
   method("getBounds", 0, (clip, args, version) => {
     const target = args.length > 0 ? targetOf(movie, clip, args[0], version) : clip;
     return target === null ? undefined : boundsObject(movie, clip, target, true, version);
