@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { filterDefaults } from "../../../../../packages/player/dist/display/filters.js";
 import { type Container, Player } from "../../../../../packages/player/dist/index.js";
 import {
   VectorMirror,
@@ -42,9 +43,9 @@ test("unsupported content and oversized snapshots fail without changing the sour
   const bytes = new Uint8Array(vectorFrameBytes(32));
   const dirty = p.root.dirty;
   assert.throws(() => encoder.encode(p.root, new Uint8Array(vectorFrameBytes(1))), /capacity/);
-  p.root.blendMode = "multiply";
-  assert.throws(() => encoder.encode(p.root, bytes), /plain vector/);
-  p.root.blendMode = "normal";
+  p.root.cachedAsBitmap = true;
+  assert.throws(() => encoder.encode(p.root, bytes), /2D vector/);
+  p.root.cachedAsBitmap = false;
   assert.ok(encoder.encode(p.root, bytes) > 0);
   assert.equal(p.root.dirty, dirty);
 });
@@ -58,7 +59,7 @@ test("a rejected vector snapshot leaves the existing mirror intact", () => {
   const root = mirror.apply(frame);
   const child = root.children[0];
   const data = new Float64Array(frame.buffer, 0, frame.length / 8);
-  data[2 + 18 + 1] = 99;
+  data[2 + 23 + 1] = 99;
   assert.throws(() => mirror.apply(frame), /snapshot node/);
   assert.equal(root.children[0], child);
   assert.throws(() => mirror.apply(frame.subarray(0, frame.length - 1)), /length/);
@@ -67,6 +68,126 @@ test("a rejected vector snapshot leaves the existing mirror intact", () => {
   const shape = p.library.characters.get(1);
   assert.ok(shape);
   p.library.characters.set(0, shape);
-  data[2 + 3 * 18 + 2] = 0;
+  data[2 + 3 * 23 + 2] = 0;
   assert.throws(() => mirror.apply(frame), /snapshot node/);
+});
+
+test("snapshots preserve every numeric filter kind and replace changed filter lists", () => {
+  const p = new Player(workerScene());
+  const mirror = new VectorMirror(p.library);
+  const encoder = new VectorSnapshot(p.library);
+  const bytes = new Uint8Array(vectorFrameBytes(32, 256));
+  const kinds = [
+    "blur",
+    "glow",
+    "dropShadow",
+    "bevel",
+    "gradientGlow",
+    "gradientBevel",
+    "colorMatrix",
+    "convolution",
+  ] as const;
+  p.root.filters = kinds.map(filterDefaults);
+  const gradient = p.root.filters[4];
+  gradient.type = "outer";
+  gradient.colors = [0xff0000, 0x00ff00];
+  gradient.alphas = [0.3, 0.9];
+  gradient.ratios = [0, 255];
+  const apply = () => mirror.apply(bytes.subarray(0, encoder.encode(p.root, bytes)));
+  const root = apply();
+  assert.deepEqual(root.filters, p.root.filters);
+  assert.notEqual(root.filters[4].colors, gradient.colors);
+  const previous = root.filters;
+  apply();
+  assert.equal(root.filters, previous);
+  gradient.colors[0] = 0x123456;
+  apply();
+  assert.equal(root.filters[4].colors[0], 0x123456);
+  assert.equal(previous[4].colors[0], 0xff0000);
+  p.root.filters = [];
+  apply();
+  assert.deepEqual(root.filters, []);
+  p.root.filters = [filterDefaults("displacementMap")];
+  assert.throws(apply, /displacement map/);
+  p.root.filters = [filterDefaults("glow")];
+  assert.throws(() => encoder.encode(p.root, new Uint8Array(vectorFrameBytes(7))), /capacity/);
+});
+
+test("snapshots preserve mask ownership, timeline depths and blend changes", () => {
+  const p = new Player(workerScene());
+  const mirror = new VectorMirror(p.library);
+  const encoder = new VectorSnapshot(p.library);
+  const bytes = new Uint8Array(vectorFrameBytes(32));
+  const sourceA = p.root.children[0] as Container;
+  const sourceB = p.root.children[1] as Container;
+  const mask = sourceA.children[0];
+  sourceB.setMask(mask);
+  sourceA.children[1].clipDepth = 5;
+  sourceA.children[1].blendMode = "multiply";
+  const apply = () => mirror.apply(bytes.subarray(0, encoder.encode(p.root, bytes)));
+  const root = apply();
+  const a = root.children[0] as Container;
+  const b = root.children[1] as Container;
+  const mirroredMask = a.children[0];
+  assert.equal(b.mask, mirroredMask);
+  assert.equal(mirroredMask.maskOf, b);
+  assert.equal(a.children[1].clipDepth, 5);
+  assert.equal(a.children[1].depth, 2);
+  assert.equal(a.children[1].blendMode, "multiply");
+  p.root.addChildAt(sourceB, 0);
+  sourceA.setMask(mask);
+  sourceA.children[1].clipDepth = 0;
+  sourceA.children[1].blendMode = "screen";
+  apply();
+  assert.equal(a.mask, mirroredMask);
+  assert.equal(b.mask, null);
+  assert.equal(mirroredMask.maskOf, a);
+  assert.equal(a.children[1].clipDepth, 0);
+  assert.equal(a.children[1].blendMode, "screen");
+  sourceA.setMask(null);
+  apply();
+  assert.equal(mirroredMask.maskOf, null);
+  assert.equal(a.mask, null);
+  p.root.removeChild(sourceA);
+  sourceB.setMask(mask);
+  assert.throws(apply, /masks inside/);
+});
+
+test("bad filter tails and conflicting masks leave the mirror untouched", () => {
+  const p = new Player(workerScene());
+  const mirror = new VectorMirror(p.library);
+  const encoder = new VectorSnapshot(p.library);
+  const bytes = new Uint8Array(vectorFrameBytes(32, 256));
+  p.root.filters = [filterDefaults("glow")];
+  const frame = bytes.subarray(0, encoder.encode(p.root, bytes));
+  const root = mirror.apply(frame);
+  const original = root.filters;
+  const values = new Float64Array(frame.buffer, 0, frame.length / 8);
+  const tail = values[2 + 22];
+  for (const [index, value] of [
+    [tail, 1e9],
+    [tail + 1, 99],
+    [tail + 7, 3],
+    [2 + 22, tail + 1],
+    [2 + 21, 999],
+  ]) {
+    const saved = values[index];
+    values[index] = value;
+    assert.throws(() => mirror.apply(frame), /snapshot/);
+    assert.equal(root.filters, original);
+    values[index] = saved;
+  }
+  values[2 + 21] = 2;
+  values[2 + 23 + 21] = 2;
+  assert.throws(() => mirror.apply(frame), /snapshot effects/);
+  assert.equal(root.children[0].mask, null);
+  assert.equal(root.mask, null);
+  p.root.filters = [filterDefaults("colorMatrix")];
+  const matrixFrame = bytes.subarray(0, encoder.encode(p.root, bytes));
+  values[values[2 + 22] + 2] = -1;
+  assert.throws(() => mirror.apply(matrixFrame), /filter array/);
+  assert.throws(
+    () => mirror.apply(matrixFrame.subarray(0, matrixFrame.length - 8)),
+    /filter array|truncated/,
+  );
 });

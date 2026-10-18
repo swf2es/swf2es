@@ -59,11 +59,11 @@ await withPage(
       `runWorkerTest(${JSON.stringify(Buffer.from(workerScene()).toString("base64"))})`,
     );
     assert.equal(result.exception, null);
-    assert.equal(result.value?.length, 4);
+    assert.equal(result.value?.length, 7);
     for (const name of result.value ?? []) {
       console.log(`worker: ok ${name}`);
     }
   },
   process.argv.includes("--gpu"),
-  { page: "page/out/worker/index.html", isolated: true, timeout: 30_000 },
+  { page: "page/out/worker/index.html", isolated: true, timeout: 60_000 },
 );

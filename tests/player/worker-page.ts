@@ -1,5 +1,6 @@
 import { type Container, PixiView, Player } from "@swf2es/player";
 import { autoDetectRenderer, type WebGLRenderer } from "pixi.js";
+import { filterDefaults } from "/player/display/filters.js";
 import { FrameWriter, sharedFrames } from "/player/render/worker/frames.js";
 import { VectorSnapshot, vectorFrameBytes } from "/player/render/worker/scene.js";
 
@@ -159,17 +160,121 @@ async function runWorkerTest(base64: string): Promise<string[]> {
     matches(newest, reference());
     results.push("latest snapshot matches main-thread Pixi pixels");
 
+    const compare = async () => {
+      check(publish() !== null, "effects frame not published");
+      const expected = reference();
+      matches(await request("render").done, expected);
+      return expected;
+    };
+    const kinds = [
+      "blur",
+      "glow",
+      "dropShadow",
+      "bevel",
+      "gradientGlow",
+      "gradientBevel",
+      "colorMatrix",
+      "convolution",
+    ] as const;
+    const plain = reference();
+    for (const kind of kinds) {
+      const filter = filterDefaults(kind);
+      if (kind === "gradientGlow" || kind === "gradientBevel") {
+        filter.colors = [0x00ff00, 0xff00ff];
+        filter.alphas = [0.8, 1];
+        filter.ratios = [0, 255];
+        filter.type = "full";
+      } else if (kind === "colorMatrix") {
+        filter.matrix[4] = 90;
+        filter.matrix[9] = 40;
+      } else if (kind === "convolution") {
+        filter.matrixX = filter.matrixY = 3;
+        filter.matrix = [0, 1, 0, 1, 1, 1, 0, 1, 0];
+        filter.divisor = 3;
+      }
+
+      group.filters = [filter, filterDefaults("colorMatrix")];
+      group.children[1].filters = [filterDefaults("glow")];
+      group.children[1].invalidate(1);
+      group.invalidate(1);
+      const filtered = await compare();
+      check(
+        filtered.some((v, i) => v !== plain[i]),
+        `filter ${kind} did not affect the image`,
+      );
+      // A second draw exercises retained filter output and unchanged records.
+      await compare();
+    }
+    group.filters = [filterDefaults("glow")];
+    group.invalidate(1);
+    const heldFilters = reference();
+    check(publish() !== null, "filtered frame not published");
+    const filtering = request("render", { hold: true });
+    check((await filtering.acquired).type === "held", "filtered frame not acquired");
+    group.filters = [{ ...group.filters[0], color: 0x00ff00 }];
+    group.invalidate(1);
+    check(publish() !== null, "updated filter frame not published");
+    await request("release").done;
+    matches(await filtering.done, heldFilters);
+    matches(await request("render").done, reference());
+    group.filters = [];
+    group.children[1].filters = [];
+    group.children[1].invalidate(1);
+    group.invalidate(1);
+    await compare();
+    results.push("all numeric filters, nested chains and removal match main-thread pixels");
+
+    for (const blend of [
+      "layer",
+      "multiply",
+      "screen",
+      "lighten",
+      "darken",
+      "difference",
+      "add",
+      "subtract",
+      "invert",
+      "alpha",
+      "erase",
+      "overlay",
+      "hardlight",
+      "normal",
+    ]) {
+      group.children[1].blendMode = blend;
+      group.children[1].invalidate(1);
+      await compare();
+    }
+    results.push("every Flash blend mode matches main-thread pixels");
+
+    const mask = group.children[0];
+    const target = group.children[1];
+    target.setMask(mask);
+    await compare();
+    group.setMask(mask);
+    await compare();
+    group.setMask(null);
+    await compare();
+    mask.clipDepth = 2;
+    mask.invalidate(1);
+    group.invalidate(2);
+    await compare();
+    mask.clipDepth = 0;
+    mask.invalidate(1);
+    group.invalidate(2);
+    await compare();
+    results.push("script and timeline masks update and clear with matching pixels");
+
     const moved = group.children[0];
     group.removeChild(moved);
     (player.root.children[0] as Container).addChildAt(moved, 0);
     moved.visible = false;
     moved.invalidate(1);
     renderer.resize(200, 140, 1.5);
-    check(publish() === 4, "frame after release not published");
+    check(publish() !== null, "frame after release not published");
     matches(await request("render", { size: [200, 140, 1.5] }).done, reference());
     results.push("resize, reparent and visibility match main-thread pixels");
     check((await request("render").done).type === "empty", "frame unexpectedly left queued");
-    check(publish() === 5, "shutdown frame not published");
+    check(publish() !== null, "shutdown frame not published");
     const finishing = request("render", { hold: true });
     check((await finishing.acquired).type === "held", "shutdown frame not acquired");
     await request("destroy").done;

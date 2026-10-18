@@ -41,18 +41,41 @@ not a prerequisite for the shared-memory path.
 
 ## Scene coverage
 
-The first codec supports plain 2D containers and immutable vector shapes
-from one SWF library, with child order, transforms, visibility and colour
-transforms. The library's SWF bytes are shared once; each thread parses its
-own library. Complete frames contain flat numeric records referencing those
-assets. The worker retains its mirror objects across frames and uses the
+The codec supports 2D containers and immutable vector shapes from one SWF
+library, with child order, transforms, visibility and colour transforms.
+It also carries all Flash blend modes, timeline clip depths, script masks
+whose objects and owners are inside the captured tree, and every filter
+except displacement maps. Filter chains and their retained output are drawn
+by the same Flash-compatible code as the main-thread renderer. The library's
+SWF bytes are shared once; each thread parses its own library. Complete frames
+contain flat numeric records referencing those assets. The worker retains its mirror objects across frames and uses the
 existing `PixiView` and the pinned Pixi fork to draw them.
 
 Unsupported content is rejected during encoding: text, bitmaps and image
-fills, dynamic Graphics, morphs, buttons, filters, masks, cached bitmaps,
-scroll rectangles, non-normal blends, scale9 and 3D. This keeps a successful
-snapshot from silently omitting a rendering feature. Decoding validates
-the full snapshot before changing the mirror.
+fills, dynamic Graphics, morphs, buttons, displacement maps, masks outside the
+captured tree, cached bitmaps, scroll rectangles, scale9 and 3D. This keeps a
+successful snapshot from silently omitting a rendering feature. Decoding
+validates the full snapshot, including filter tails and mask ownership, before
+changing the mirror. Mask links are restored after all objects are attached, and
+changed filter records replace the mirror's own copies; no retained filter
+array points into a reusable shared slot.
+
+Version 2 uses two Float64 header values (version and node count), followed
+by 23 Float64 values per node: identity, parent row, library character,
+flags, six matrix values, eight colour values, blend index, timeline depth
+(NaN for none), clip depth, mask row (-1 for none), and filter-tail offset
+(0 for none). Nonempty filter lists follow the rows in row order. They
+contain a count, then each filter's kind and values; arrays have a length
+prefix, booleans are 0/1, and bevel types use inner/outer/full indices.
+The filter field order is part of this internal protocol's version.
+
+This prototype favours explicit complete records over compact packing. At
+50,000 nodes the fixed records alone use about 9.2 MB per slot, or 27.6 MB
+for three slots, before filter tails and assets. That is transport storage,
+not total player memory: each thread also has its library and scene objects,
+and the renderer owns GPU resources. The current codec still allocates
+while encoding and decoding; allocation and memory measurements are needed
+before making a performance claim.
 
 The worker installs Pixi's worker adapter and removes its DOM event system
 inside that worker's isolate. The caller supplies that adapter; the test

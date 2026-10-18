@@ -1,26 +1,33 @@
-// Experimental complete snapshots of plain vector scenes. Assets stay in a
+// Experimental complete snapshots of 2D vector scenes. Assets stay in a
 // library loaded once per thread; scripting objects never enter shared memory.
 import { IDENTITY_COLOR, sameColor } from "../../display/color.js";
 import {
   BUTTON,
+  CHILDREN,
   Container,
   type DisplayObject,
   ShapeObject,
   TRANSFORM,
 } from "../../display/display.js";
+import { BLEND_MODES } from "../../display/displayobject.js";
+import type { Filter } from "../../display/filters.js";
 import type { Library } from "../../display/timeline.js";
+import { readFilters, writeFilters } from "./filters.js";
 
-const VERSION = 1;
+const VERSION = 2;
 const HEADER = 2;
-const ROW = 18;
+const ROW = 23;
 const CONTAINER = 1;
 const VISIBLE = 2;
 
-export const vectorFrameBytes = (nodes: number): number => (HEADER + nodes * ROW) * 8;
+/** Minimum space for the nodes, plus any filter tail values. */
+export const vectorFrameBytes = (nodes: number, filterValues = 0): number =>
+  (HEADER + nodes * ROW + filterValues) * 8;
 
 export class VectorSnapshot {
   private readonly nodes: DisplayObject[] = [];
   private readonly parents: number[] = [];
+  private readonly indices = new Map<DisplayObject, number>();
 
   constructor(private readonly library: Library) {}
 
@@ -29,6 +36,7 @@ export class VectorSnapshot {
     const nodes = this.nodes;
     const parents = this.parents;
     nodes.length = parents.length = 0;
+    this.indices.clear();
     nodes.push(root);
     parents.push(-1);
 
@@ -46,20 +54,17 @@ export class VectorSnapshot {
           o.drawing ||
           o.space ||
           o.projection ||
-          o.mask ||
-          o.maskOf ||
-          o.clipDepth ||
           o.scrollRect ||
           o.scale9Grid ||
           o.cachedAsBitmap ||
-          o.filters.length ||
-          o.blendMode !== "normal"
+          !BLEND_MODES.includes(o.blendMode)
         ) {
           throw new Error(
-            "experimental worker snapshot supports plain vector shapes and containers only",
+            "experimental worker snapshot supports 2D vector shapes and containers only",
           );
         }
 
+        this.indices.set(o, i);
         let character = 0;
         if (o instanceof ShapeObject) {
           if (
@@ -106,6 +111,11 @@ export class VectorSnapshot {
             c.gAdd,
             c.bAdd,
             c.aAdd,
+            BLEND_MODES.indexOf(o.blendMode),
+            o.depth ?? Number.NaN,
+            o.clipDepth,
+            -1,
+            0,
           ],
           at,
         );
@@ -118,13 +128,37 @@ export class VectorSnapshot {
         }
       }
 
+      let end = HEADER + nodes.length * ROW;
+      for (let i = 0; i < nodes.length; i++) {
+        const o = nodes[i];
+        const at = HEADER + i * ROW;
+        if (o.mask) {
+          const mask = this.indices.get(o.mask);
+          if (mask === undefined || o.mask.maskOf !== o) {
+            throw new Error("experimental worker snapshot needs masks inside its scene");
+          }
+
+          data[at + 21] = mask;
+        }
+
+        if (o.maskOf && (!this.indices.has(o.maskOf) || o.maskOf.mask !== o)) {
+          throw new Error("experimental worker snapshot needs mask owners inside its scene");
+        }
+
+        if (o.filters.length) {
+          data[at + 22] = end;
+          end = writeFilters(o.filters, data, end);
+        }
+      }
+
       data[0] = VERSION;
       data[1] = nodes.length;
 
-      return vectorFrameBytes(nodes.length);
+      return end * 8;
     } finally {
       // A failed or blocked publication must not retain removed display objects.
       nodes.length = parents.length = 0;
+      this.indices.clear();
     }
   }
 }
@@ -132,6 +166,7 @@ export class VectorSnapshot {
 interface MirrorNode {
   object: Container | ShapeObject;
   character: number;
+  filterValues: Float64Array;
 }
 
 export class VectorMirror {
@@ -139,6 +174,7 @@ export class VectorMirror {
   private readonly seen = new Set<number>();
   private readonly rows: (Container | ShapeObject)[] = [];
   private readonly childCounts: number[] = [];
+  private readonly masks = new Set<number>();
 
   constructor(private readonly library: Library) {}
 
@@ -153,12 +189,16 @@ export class VectorMirror {
       data[0] !== VERSION ||
       !Number.isInteger(count) ||
       count < 1 ||
-      vectorFrameBytes(count) !== bytes.length
+      vectorFrameBytes(count) > bytes.length
     ) {
       throw new Error("invalid vector snapshot header");
     }
 
     this.seen.clear();
+    this.masks.clear();
+    const filters: (readonly Filter[])[] = [];
+    const filterEnds: number[] = [];
+    let end = HEADER + count * ROW;
     // Validate before touching the mirror, so a rejected frame leaves it intact.
     for (let i = 0; i < count; i++) {
       const at = HEADER + i * ROW;
@@ -182,7 +222,45 @@ export class VectorMirror {
         throw new Error("invalid vector snapshot node");
       }
 
+      const blend = data[at + 18];
+      const depth = data[at + 19];
+      const clipDepth = data[at + 20];
+      const mask = data[at + 21];
+      const offset = data[at + 22];
+      if (
+        !Number.isInteger(blend) ||
+        blend < 0 ||
+        blend >= BLEND_MODES.length ||
+        (!Number.isNaN(depth) && !Number.isSafeInteger(depth)) ||
+        !Number.isSafeInteger(clipDepth) ||
+        clipDepth < 0 ||
+        !Number.isInteger(mask) ||
+        mask < -1 ||
+        mask >= count ||
+        (mask !== -1 && this.masks.has(mask)) ||
+        (offset !== 0 && offset !== end)
+      ) {
+        throw new Error("invalid vector snapshot effects");
+      }
+
+      if (mask !== -1) {
+        this.masks.add(mask);
+      }
+
+      if (offset !== 0) {
+        const decoded = readFilters(data, offset);
+        end = decoded.end;
+        filters.push(decoded.filters);
+      } else {
+        filters.push([]);
+      }
+
+      filterEnds.push(end);
       this.seen.add(id);
+    }
+
+    if (end !== data.length) {
+      throw new Error("invalid vector snapshot filter tail");
     }
 
     const rows = this.rows;
@@ -196,12 +274,15 @@ export class VectorMirror {
       const character = data[at + 2];
       let node = this.nodes.get(id);
       if (!node || node.character !== character) {
+        node?.object.setMask(null);
+        node?.object.maskOf?.setMask(null);
         node?.object.parent?.removeChild(node.object);
         const shape = this.library.characters.get(character);
         node = {
           object:
             character !== 0 && shape?.type === "shape" ? new ShapeObject(shape) : new Container(),
           character,
+          filterValues: new Float64Array(),
         };
         this.nodes.set(id, node);
       }
@@ -243,6 +324,23 @@ export class VectorMirror {
         o.invalidate(TRANSFORM);
       }
 
+      const offset = data[at + 22];
+      const values = offset ? data.subarray(offset, filterEnds[i]) : data.subarray(0, 0);
+      if (
+        node.filterValues.length !== values.length ||
+        !node.filterValues.every((v, k) => Object.is(v, values[k]))
+      ) {
+        node.filterValues = values.slice();
+        o.filters = filters[i];
+        o.invalidate(TRANSFORM);
+      }
+
+      const blend = BLEND_MODES[data[at + 18]];
+      if (o.blendMode !== blend) {
+        o.blendMode = blend;
+        o.invalidate(TRANSFORM);
+      }
+
       rows.push(o);
       if (i === 0) {
         o.parent?.removeChild(o);
@@ -258,9 +356,46 @@ export class VectorMirror {
 
     for (const [id, node] of this.nodes) {
       if (!this.seen.has(id)) {
+        node.object.setMask(null);
+        node.object.maskOf?.setMask(null);
         node.object.parent?.removeChild(node.object);
         this.nodes.delete(id);
       }
+    }
+
+    // Reordering children clears their timeline depths; restore these only
+    // after the full tree is attached, before Pixi groups timeline masks.
+    for (const o of rows) {
+      if (o instanceof Container) {
+        o.depths.clear();
+      }
+    }
+
+    for (let i = 0; i < count; i++) {
+      const at = HEADER + i * ROW;
+      const o = rows[i];
+      const depth = Number.isNaN(data[at + 19]) ? null : data[at + 19];
+      const clipDepth = data[at + 20];
+      if (o.depth !== depth || o.clipDepth !== clipDepth) {
+        o.depth = depth;
+        o.clipDepth = clipDepth;
+        o.invalidate(TRANSFORM);
+        o.parent?.invalidate(CHILDREN);
+      }
+
+      if (depth !== null) {
+        o.parent?.depths.set(depth, o);
+      }
+
+      const mask = data[at + 21];
+      if (o.mask !== (mask === -1 ? null : rows[mask])) {
+        o.setMask(null);
+      }
+    }
+
+    for (let i = 0; i < count; i++) {
+      const mask = data[HEADER + i * ROW + 21];
+      rows[i].setMask(mask === -1 ? null : rows[mask]);
     }
 
     return rows[0] as Container;
