@@ -133,3 +133,29 @@ trace(b.hitTest({x: 0, y: 0}, 0, made(true)));`),
     ["false", "true", "-2", "-3", "-4", "true"],
   );
 });
+
+test("draw takes a blend mode by name or number, anything else as normal, and clips", async () => {
+  // adl: null, undefined, an unknown name, a name in capitals, a number in a string, true and an
+  // object draw normally; 9 and 265 subtract, a byte's number; erase does nothing to a bitmap.
+  assert.deepEqual(
+    await run(`var modes = [null, undefined, "foo", "SUBTRACT", "9", true, {}, 9, 265, "erase", 12];
+var src = new BitmapData(4, 4, false, 0xFFFF0000); var line = [];
+for (var i = 0; i < modes.length; i++) {
+  var d = new BitmapData(4, 4, false, 0xFF808080); d.draw(src, new flash.geom.Matrix(), null, modes[i]);
+  line.push(d.getPixel32(1, 1).toString(16));
+}
+trace(line.join(" "));
+var c = new BitmapData(50, 50, false, 0xFF0000FF);
+c.draw(new BitmapData(50, 50, false, 0xFFFF0000), new flash.geom.Matrix(), null, null, new flash.geom.Rectangle(10, 10, 20, 20));
+trace(row(c, 10) + " " + row(c, 29) + " " + row(c, 9) + " " + row(c, 30));`),
+    [
+      "-10000 -10000 -10000 -10000 -10000 -10000 -10000 -ff7f80 -ff7f80 -7f7f80 -7f7f80",
+      [
+        row("ff0000ff ff0000ff ff0000ff"),
+        row("ff0000ff ff0000ff ff0000ff"),
+        row("ff0000ff ff0000ff ff0000ff"),
+        row("ff0000ff ff0000ff ff0000ff"),
+      ].join(" "),
+    ],
+  );
+});

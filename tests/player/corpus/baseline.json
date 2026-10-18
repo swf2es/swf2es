@@ -64,7 +64,7 @@
   "avm1/bitmap_data_colortransform": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm1/bitmap_data_compare": {"matched":41,"lines":41,"traced":41,"error":null},
   "avm1/bitmap_data_copypixels": {"matched":17,"lines":17,"traced":17,"error":null},
-  "avm1/bitmap_data_draw_cliprect": {"matched":0,"lines":13,"traced":13,"error":null},
+  "avm1/bitmap_data_draw_cliprect": {"matched":13,"lines":13,"traced":13,"error":null},
   "avm1/bitmap_data_fillrect": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm1/bitmap_data_hittest": {"matched":133,"lines":133,"traced":133,"error":null},
   "avm1/bitmap_data_max_size_swf10": {"matched":12,"lines":12,"traced":12,"error":null},
