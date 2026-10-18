@@ -288,6 +288,14 @@ async function avm1For(
         logRequest(request, swfUrl, trace);
       }
 
+      // A test's server at localhost:8000 answers from its localhost/ directory, as Ruffle's
+      // test navigator has it; a path it has no file for fails.
+      const served = new URL(request.url);
+      if (swfUrl && served.host === "localhost:8000") {
+        const local = new URL(`localhost${served.pathname}`, swfUrl).href;
+        return pageFetch({ ...request, url: local }, signal);
+      }
+
       return pageFetch(request, signal);
     },
     socket: scriptedSockets(socket, trace, logFetch, uncaught),

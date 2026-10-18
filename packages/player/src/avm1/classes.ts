@@ -21,6 +21,12 @@ export class RegisteredClasses {
    * corpus's register_class).
    */
   private readonly registered = new Map<string, avm1.Avm1Function>();
+  /**
+   * The name each key was last registered by, in the case it was given,
+   * which AMF0 writes, and when: a constructor of two names is the later's.
+   */
+  private readonly spelled = new Map<string, { name: string; at: number }>();
+  private registrations = 0;
 
   constructor(private readonly movie: Avm1) {}
 
@@ -42,13 +48,15 @@ export class RegisteredClasses {
       return null;
     }
 
-    for (const [name, registered] of this.registered) {
-      if (registered === constr) {
-        return name;
+    let found: { name: string; at: number } | null = null;
+    for (const [key, registered] of this.registered) {
+      const spelled = this.spelled.get(key) ?? { name: key, at: -1 };
+      if (registered === constr && (found === null || spelled.at > found.at)) {
+        found = spelled;
       }
     }
 
-    return null;
+    return found?.name ?? null;
   }
 
   /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
@@ -62,11 +70,14 @@ export class RegisteredClasses {
       return false;
     }
 
-    const key = classKey(avm1.stringOf(args[0], version), version);
+    const name = avm1.stringOf(args[0], version);
+    const key = classKey(name, version);
     if (constr instanceof avm1.Avm1Function) {
       this.registered.set(key, constr);
+      this.spelled.set(key, { name, at: this.registrations++ });
     } else {
       this.registered.delete(key);
+      this.spelled.delete(key);
     }
 
     return true;
