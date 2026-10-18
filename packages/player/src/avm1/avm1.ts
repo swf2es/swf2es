@@ -41,7 +41,7 @@ import {
   TextObject,
   VideoObject,
 } from "../display/display.js";
-import type { DisplayCharacter, Library, SoundCharacter, Timeline } from "../display/timeline.js";
+import type { DisplayCharacter, Library, Timeline } from "../display/timeline.js";
 import {
   browserNavigate,
   type Drawer,
@@ -53,13 +53,12 @@ import {
   type SharedObjectStorage,
   type SocketHost,
 } from "../hosts.js";
-import { type AudioHost, browserAudioHost, type DecodedSound } from "../media/audio.js";
+import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
   type SoundHost,
   stopTimelineSounds,
   timelineSoundsOf,
-  updateMixes,
 } from "../media/sounds.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { resolve } from "../scripting/loads.js";
@@ -84,7 +83,7 @@ import {
 import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
-import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./globals/Sound.js";
+import { soundClass } from "./globals/Sound.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { stateOf, textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
@@ -112,6 +111,7 @@ import {
   NOTIFY,
   Queued,
 } from "./queue.js";
+import { Avm1Sounds } from "./sound.js";
 import {
   Avm1Swf,
   handlersOf,
@@ -427,16 +427,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   readonly audio: AudioHost | null;
   /** What the timeline's sounds, and Sound's, play by. */
   readonly sounds: SoundHost;
-  /** Each sound decoded once for the device. */
-  private readonly decodes = new WeakMap<SoundCharacter, Promise<DecodedSound>>();
-  /** The transforms Sound gave clips, and the global one. */
-  private readonly soundTransforms = new WeakMap<DisplayObject, Avm1SoundTransform>();
-  private globalSoundTransform: Avm1SoundTransform = FULL;
+  /** Sound's side: its transforms, the sounds it decodes and those that ended. */
+  private readonly media: Avm1Sounds;
   /** What XML, LoadVars, loadVariables and XMLSocket ask of the network, and its answers for the next frame. */
   readonly net: Avm1Net;
-  /** The Sounds whose sound ended, for their onSoundComplete after the frame's actions. */
-  private completed: avm1.Avm1Object[] = [];
-  private frameCount = 0;
 
   constructor(
     readonly codegen: Codegen,
@@ -455,27 +449,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.external = new ExternalCalls(this, options.externalInterface ?? null);
-    const movie = this;
-    this.sounds = {
-      get audio() {
-        return movie.audio;
-      },
-      get now() {
-        return movie.timers.now();
-      },
-      get frames() {
-        return movie.frameCount;
-      },
-      soundClip: (character) => this.soundClip(character),
-      ownMix: (d) => {
-        const t = this.soundTransforms.get(d);
-        return t === undefined ? undefined : mixOfTransform(t);
-      },
-      get mixer() {
-        return mixOfTransform(movie.globalSoundTransform);
-      },
-      scriptSounds: () => 0,
-    };
+    this.media = new Avm1Sounds(this, this.audio);
+    this.sounds = this.media.sounds;
     this.timers = new Timers(
       this,
       options.realTime === undefined ? defaultClock() : options.realTime,
@@ -623,7 +598,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     const sharedObjects = sharedObjectClass(this);
     this.sharedObjects = sharedObjects;
     realm.global.define("SharedObject", sharedObjects.constr, avm1.DONT_ENUM);
-    realm.global.define("Sound", soundClass(this), avm1.DONT_ENUM);
+    realm.global.define("Sound", soundClass(this.media), avm1.DONT_ENUM);
     const xmlNodes = xmlNodeClass(this);
     realm.global.define("XMLNode", xmlNodes.constr, avm1.DONT_ENUM);
     const xml = xmlClass(this, xmlNodes);
@@ -697,7 +672,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   /** The SWF of the code running now, by its clip; the main one's outside any. */
-  private currentSwf(): Avm1Swf {
+  currentSwf(): Avm1Swf {
     const base = this.realm.current?.base as DisplayObject | undefined;
     return this.swfOf(base ?? null);
   }
@@ -773,7 +748,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       this.dropPending();
       // Sounds whose time has run are over before the clips play on, as AS3's are: a stream
       // starts again at its first block, a NoMultiple may start again.
-      this.frameCount++;
+      this.media.frames++;
       // What the network answered since the last frame, before the clips play on.
       if (this.netDelivered()) {
         this.queue.run();
@@ -808,7 +783,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       this.loadsInitialized();
       this.queue.run();
       // onSoundComplete runs with the frame's actions, and what it queues runs with them too.
-      if (this.soundsCompleted()) {
+      if (this.media.soundsCompleted()) {
         this.queue.run();
       }
 
@@ -1242,28 +1217,6 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     this.sharedObjects?.flush(this.swfVersion);
     stopTimelineSounds(this.sounds);
     this.audio?.close?.();
-  }
-
-  /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
-  exportedSound(name: string): SoundCharacter | null {
-    const swf = this.currentSwf();
-    const id = swf.exports.get(asciiLower(name));
-    const character = id === undefined ? undefined : swf.library?.characters.get(id);
-    return character?.type === "sound" ? character : null;
-  }
-
-  soundTransform(d: DisplayObject | null): Avm1SoundTransform {
-    return d === null ? this.globalSoundTransform : (this.soundTransforms.get(d) ?? FULL);
-  }
-
-  setSoundTransform(d: DisplayObject | null, transform: Avm1SoundTransform): void {
-    if (d === null) {
-      this.globalSoundTransform = transform;
-    } else {
-      this.soundTransforms.set(d, transform);
-    }
-
-    updateMixes(this.sounds);
   }
 
   /** Resolves once every request the SWF has made so far has come back, for the next frame. */
@@ -1722,44 +1675,6 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       native.unloaded = false;
       native.pending = false;
     }
-  }
-
-  /** A Sound's sound has ended: its onSoundComplete runs once the frame's actions have. */
-  complete(o: avm1.Avm1Object): void {
-    this.completed.push(o);
-  }
-
-  /** Each ended Sound's onSoundComplete, in the root's activation: whether any ran. */
-  private soundsCompleted(): boolean {
-    const completed = this.completed;
-    this.completed = [];
-    if (completed.length === 0 || this.movieRoot === null) {
-      return false;
-    }
-
-    const cx = this.activationOf(this.movieRoot);
-    for (const o of completed) {
-      if (cx !== null && !this.halted) {
-        this.rt.callMethod(cx, o, "onSoundComplete", NO_ARGS, this.swfVersion);
-      }
-    }
-
-    return true;
-  }
-
-  private soundClip(character: SoundCharacter): Promise<DecodedSound> | null {
-    const audio = this.audio;
-    if (audio === null) {
-      return null;
-    }
-
-    let clip = this.decodes.get(character);
-    if (clip === undefined) {
-      clip = Promise.resolve().then(() => audio.decode(character.definition));
-      this.decodes.set(character, clip);
-    }
-
-    return clip;
   }
 
   /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
