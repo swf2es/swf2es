@@ -62,8 +62,6 @@ export interface LayoutField {
   input: boolean;
   /** "advanced" lays an embedded font's text out with its pen in fractions of a twip; "normal" by default. */
   antiAliasType?: string;
-  /** "pixel", "subpixel" or "none": how advanced text fits the pixel grid. */
-  gridFitType?: string;
 }
 
 /** A character's measure in its format: its font and glyph, its advance and the line height it asks, in twips. */
@@ -220,17 +218,19 @@ export function layoutText(field: LayoutField): TextLayout {
       for (let i = a; i < b; i++) {
         const m = measures[i];
         pen += m.pen;
+        // A pen a negative spacing took left of 0 lands at 0, not -0.
+        const next = Math.trunc(pen) || 0;
         chars.push({
           index: start + i,
           x,
-          advance: Math.trunc(pen) - x,
+          advance: next - x,
           kern: m.kern,
           font: m.font,
           glyph: m.glyph,
           shown: m.shown,
           format: formats[start + i],
         });
-        x = Math.trunc(pen);
+        x = next;
         ascent = Math.max(ascent, m.ascent);
         descent = Math.max(descent, m.descent);
       }

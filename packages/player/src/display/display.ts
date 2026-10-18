@@ -1108,7 +1108,7 @@ export class TextObject extends DisplayObject {
 
   /** Its text laid out, as of now: made again only when the text, its formats or the field changed. */
   get layout(): TextLayout {
-    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}|${this.displayAsPassword}|${this.type}|${this.antiAliasType}|${this.gridFitType}`;
+    const key = `${this.model.revision}|${this.width}|${this.wordWrap}|${this.embedFonts}|${this.displayAsPassword}|${this.type}|${this.antiAliasType}`;
     if (this.laid?.key !== key) {
       const text = this.model.text;
       this.laid = {
@@ -1124,7 +1124,6 @@ export class TextObject extends DisplayObject {
           fonts: this.fonts,
           input: this.type === "input",
           antiAliasType: this.antiAliasType,
-          gridFitType: this.gridFitType,
         }),
       };
     }
