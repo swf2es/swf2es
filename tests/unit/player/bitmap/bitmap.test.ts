@@ -217,6 +217,8 @@ test("perlinNoise drops a base's sign and stitches each frequency by its own sid
     [3, -5, true, [0x27ffe5ff, 0x38e44d40, 0x11ffffff]],
     [-2.5, -4, true, [0x2cffffff, 0x76ee3f52, 0x1c76ffd1]],
     [-1, 3, true, [0x60ffffaf, 0x6f49e36e, 0x1fffffff]],
+    [-2.5, -4, false, [0x64c2ad57, 0x8fa6a937, 0x2eff43ac]],
+    [-1, 3, false, [0x60ffffaf, 0x6f49e36e, 0x4078ffdb]],
   ];
   for (const [x, y, stitch, pixels] of runs) {
     const store = new BitmapStore(6, 6, true, 0);

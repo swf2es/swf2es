@@ -10,6 +10,7 @@
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore, pixelRect, spanRect } from "../../bitmap/bitmap.js";
 import { drawDisplayObject } from "../../bitmap/draw.js";
+import { applyFilter, filterRefusal, GLOWS, generatedRect } from "../../bitmap/filters.js";
 import {
   alphaAt,
   type ColorTransformValues,
@@ -31,6 +32,7 @@ import {
 import type { DisplayObject } from "../../display/display.js";
 import { BLEND_MODES } from "../../display/displayobject.js";
 import type { Drawer } from "../../hosts.js";
+import { filterRecordOf } from "./filters.js";
 import { colorValues, type GeomHost, makeGeom } from "./geom.js";
 
 type Value = avm1.Value;
@@ -48,6 +50,13 @@ export interface BitmapHost extends GeomHost {
 
 /** Each BitmapData's store, by its AVM1 object. */
 const stores = new WeakMap<Obj, BitmapStore>();
+
+/** A new BitmapData object of `proto` showing `store`, as a displacement map's `mapBitmap` reads it. */
+export function bitmapObject(proto: Value, store: BitmapStore): Obj {
+  const o = new avm1.Avm1Object(proto);
+  stores.set(o, store);
+  return o;
+}
 
 /** `o`'s store where it is a BitmapData, disposed or not; null for anything else. */
 export function storeOf(o: Value): BitmapStore | null {
@@ -80,7 +89,7 @@ function sizeValid(w: number, h: number, version: number): boolean {
  * as Flash clips, a negative size spanning back with `span`; null if one
  * is missing.
  */
-function rectOf(o: Value, v: number, span = false) {
+function rectOf(o: Value, v: number, span = false, ints = true) {
   if (!(o instanceof avm1.Avm1Object)) {
     return null;
   }
@@ -90,7 +99,10 @@ function rectOf(o: Value, v: number, span = false) {
     return null;
   }
 
-  const [x, y, w, h] = names.map((n) => avm1.toNumber(avm1.get(o, n, v), v) | 0);
+  const [x, y, w, h] = names.map((n) => {
+    const d = avm1.toNumber(avm1.get(o, n, v), v);
+    return ints ? d | 0 : d;
+  });
   return (span ? spanRect : pixelRect)(x, y, w, h);
 }
 
@@ -360,15 +372,57 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     return 0;
   });
   // A filter's rect is not worked out yet (Ruffle's neither).
-  method("generateFilterRect", 0, () => undefined);
-  // AVM1 has no filter objects yet, so every filter is one applyFilter does not know: -1.
-  method("applyFilter", 0, (_store, args) => {
+  // -1 for no rect, -2 for no filter object (adl).
+  method("generateFilterRect", 2, (store, args, v) => {
+    const r = rectOf(args[0], v);
+    if (r === null) {
+      return -1;
+    }
+
+    const f = filterRecordOf(args[1]);
+    if (f === null) {
+      return -2;
+    }
+
+    const g = generatedRect(store.width, store.height, r, f);
+    return makeGeom(realm, "Rectangle", [g.x, g.y, g.width, g.height], v);
+  });
+  // AS3's operation, its errors numbers (adl): -4 for no rect, -5 for no filter object, -6 for a
+  // glow, shadow or bevel into an opaque bitmap; a point that is none is (0, 0).
+  method("applyFilter", 4, (store, args, v) => {
     const source = storeOf(args[0]);
     if (source === null) {
       return -2;
     }
 
-    return source.disposed ? -3 : -1;
+    if (source.disposed) {
+      return -3;
+    }
+
+    // Its rect's numbers as AS3's are, not as ints: an edge of NaN or of
+    // Infinity is refused as AS3 refuses it (adl).
+    const r = rectOf(args[1], v, false, false);
+    if (r === null) {
+      return -4;
+    }
+
+    const f = filterRecordOf(args[3]);
+    if (f === null) {
+      return -5;
+    }
+
+    // What AS3 refuses with an error, an edge or a size past what Flash makes its buffers for,
+    // AVM1 answers -6 for too (adl).
+    const refused =
+      filterRefusal(r, f, { x: 0, y: 0, width: source.width, height: source.height }) !== 0;
+    if (refused || (!store.transparent && GLOWS.has(f.kind))) {
+      return -6;
+    }
+
+    const [dx, dy] = pointOf(args[2], v);
+    const map = (f.mapBitmap as { $store?: BitmapStore } | null)?.$store ?? null;
+    applyFilter(store, source, r, dx, dy, f, map);
+    return 0;
   });
   method("colorTransform", 2, (store, args, v) => {
     const r = rectOf(args[0], v);

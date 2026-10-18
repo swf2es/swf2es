@@ -3686,6 +3686,44 @@ e._width = 70; e._height = 12; e._y = 70;`,
   );
 }
 
+// Filters a SWF 8 script sets on clips of a square (docs/avm1.md, "flash.filters"):
+// a blur, a glow, a drop shadow, a bevel, a colour matrix and a gradient glow,
+// one cleared again, and the shadow read back and set on another clip.
+function avm1Filters(): Uint8Array {
+  const clip = avm1Sprite(2, [[w.place({ depth: 1, character: 1 })]]);
+  const place = (depth: number, name: string, tx: number, ty: number) =>
+    w.place({ depth, character: 2, name, matrix: { tx, ty } });
+  return avm1Swf(
+    8,
+    [square(1, 0x3366cc, 400), clip],
+    [
+      [
+        place(1, "a", 200, 200),
+        place(2, "b", 900, 200),
+        place(3, "c", 1600, 200),
+        place(4, "d", 200, 1000),
+        place(5, "e", 900, 1000),
+        place(6, "f", 1600, 1000),
+        place(7, "g", 200, 1600),
+        as1(
+          `var F = flash.filters;
+a.filters = [new F.BlurFilter(6, 2, 2)];
+b.filters = [new F.GlowFilter(0xff3300, 0.8, 8, 8, 2, 1)];
+c.filters = [new F.DropShadowFilter(5, 60, 0x000000, 0.6, 4, 4, 1, 1)];
+d.filters = [new F.BevelFilter(3, 45, 0xffffff, 1, 0x000000, 1, 3, 3, 1, 1, "inner")];
+e.filters = [new F.ColorMatrixFilter([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0])];
+f.filters = [new F.GradientGlowFilter(0, 45, [0xffffff, 0xff0000], [0, 1], [0, 255], 6, 6, 1, 1, "outer")];
+g.filters = [new F.BlurFilter()]; g.filters = [];
+g.filters = c.filters;
+trace(a.filters[0].blurX + " " + g.filters.length + " " + g.filters[0].distance);`,
+          8,
+        ),
+      ],
+      [as1(`stop();`, 8)],
+    ],
+  );
+}
+
 /** Clip actions for a place in a SWF of `version`: each record's events and its AS1 source. */
 const clipEvents = (version: number, records: [number, string][]) =>
   w.clipActions(
@@ -9293,6 +9331,16 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
+  {
+    name: "avm1-filters",
+    swf: avm1Filters(),
+    traced: true,
+    frames: 2,
+    capture: [2],
+    // As the AS3 filters case: the page blurs at four samples a pixel, adl whole pixels.
+    tolerance: 8,
+    maxOutliers: 40,
+  },
   {
     name: "avm1-clip-properties",
     swf: avm1ClipDrawn(),

@@ -4,6 +4,8 @@
 // and Ruffle contributors. Its events and the rest of its properties come
 // with the pointer (docs/avm1.md, step 12).
 import { avm1 } from "@swf2es/runtime";
+import { ButtonObject } from "../../display/display.js";
+import { filtersProperty } from "./filters.js";
 import { DEPTH_BIAS, type Movie } from "./MovieClip.js";
 
 /** Button: its constructor and its prototype, as `_global.Button`. */
@@ -28,6 +30,17 @@ export function buttonClass(movie: Movie): {
       return depth === undefined || depth === null ? undefined : depth - DEPTH_BIAS;
     }),
     avm1.VERSION_6,
+  );
+  // Read-only as Ruffle declares it, which its setter still takes.
+  filtersProperty(
+    realm,
+    proto,
+    avm1.READ_ONLY | avm1.VERSION_8,
+    (self) => {
+      const d = self.display?.live()?.display?.target;
+      return d instanceof ButtonObject ? d : null;
+    },
+    () => movie.filterFaces,
   );
   return { constr, proto };
 }
