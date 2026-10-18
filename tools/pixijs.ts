@@ -239,6 +239,9 @@ function entryPlugin(): Plugin {
   const src = (path: string) => JSON.stringify(join(pixi, "src", path));
   const index = readFileSync(join(pixi, "src/index.ts"), "utf8");
   const library = [...index.matchAll(/^export \* from '\.\/([\w-]+)';$/gm)]
+    // Even unused re-exports traverse the worker adapter's CommonJS XML parser.
+    // Worker builds supply their adapter separately; the browser never needs it.
+    .filter(([, dir]) => dir !== "environment-webworker")
     .map(([, dir]) => `export * from ${src(`${dir}/index.ts`)};`)
     .join("\n");
   const entry = [
