@@ -88,7 +88,7 @@
   "avm1/bitmap_data_thorough/noise": {"matched":1521,"lines":1521,"traced":1521,"error":null},
   "avm1/bitmap_data_thorough/paletteMap": {"matched":954,"lines":954,"traced":954,"error":null},
   "avm1/bitmap_data_thorough/perlinNoise": {"matched":117,"lines":8484,"traced":8484,"error":null},
-  "avm1/bitmap_data_thorough/pixelDissolve": {"matched":178,"lines":1374,"traced":1374,"error":null},
+  "avm1/bitmap_data_thorough/pixelDissolve": {"matched":704,"lines":1374,"traced":1374,"error":null},
   "avm1/bitmap_data_thorough/scroll": {"matched":387,"lines":387,"traced":387,"error":null},
   "avm1/bitmap_data_thorough/setPixel": {"matched":534,"lines":534,"traced":534,"error":null},
   "avm1/bitmap_data_thorough/setPixel32": {"matched":534,"lines":534,"traced":534,"error":null},

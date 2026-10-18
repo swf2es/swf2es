@@ -495,7 +495,8 @@ export function bitmapDataClass(host: BitmapHost): Obj {
       a.dx,
       a.dy,
       avm1.toNumber(args[3], v) | 0,
-      avm1.toNumber(args[4], v) | 0,
+      // A negative count is a uint's, which comes round the rect as any other.
+      avm1.toNumber(args[4], v) >>> 0,
       given(args, 5) ? avm1.toNumber(args[5], v) >>> 0 : 0,
     );
   });

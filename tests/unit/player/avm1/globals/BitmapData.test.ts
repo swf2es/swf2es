@@ -173,3 +173,25 @@ b.copyPixels(new BitmapData(3, 3, false, 0x12345678), rect, point${args}); trace
     ],
   );
 });
+
+test("pixelDissolve steps a seed past its states down, and gives one it does not use back", async () => {
+  // adl and the corpus: 3 by 3 bitmaps, a rect of 2 by 2 (or 2 by 1) at (1, 1).
+  const at = (w: number, h: number, seed: number, count: string) =>
+    `b = made(true); trace(b.pixelDissolve(made(true), new flash.geom.Rectangle(0, 0, ${w}, ${h}), point, ${seed}, ${count}));\n`;
+  assert.deepEqual(
+    await run(
+      `var b;\n${at(2, 2, 100, "40")}${at(2, 2, 100, "0")}${at(2, 2, 100, "-1")}${at(2, 2, 7, "1")}` +
+        `${at(2, 2, 0, "0")}${at(2, 1, -2, "5")}${at(2, 2, 100, "null")}`,
+    ),
+    ["1", "100", "2", "0", "3", "-2", "100"],
+  );
+});
+
+test("pixelDissolve keeps an opaque bitmap opaque, its getPixel Flash's", async () => {
+  // Flash's getPixel32 reads 12040608, the translucent pixel as kept, which an opaque store here does not keep.
+  assert.deepEqual(
+    await run(`var b = made(false); b.pixelDissolve(new BitmapData(3, 3, true, 0x12345678), rect, point, 100, 40);
+trace(row(b, 1)); trace(b.getPixel(1, 1).toString(16));`),
+    [row("ffbbccdd ff040608 ff040608"), "40608"],
+  );
+});
