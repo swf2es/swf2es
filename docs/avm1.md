@@ -1588,8 +1588,11 @@ spanning back from a negative size, as AS3's do; `noise`, `perlinNoise`,
 `pixelDissolve` (five arguments at least), `getColorBoundsRect` and
 `hitTest` (its errors -2 to -4; a point needs an alpha above 0, a rect
 not at threshold 0). `threshold` and `getColorBoundsRect` compare the
-pixels as they are kept, premultiplied, unlike AS3's, and threshold's
-writes keep an opaque bitmap's alpha as it comes. `compare` has answers
+pixels as they are kept, premultiplied, unlike AS3's, and threshold
+writes its colour premultiplied by its own alpha. Flash leaves the alpha
+it writes into an opaque bitmap, which its getPixel32 reads back; an
+opaque store here keeps every alpha at 255, as its drawing, copies and
+filters take it to, so only getPixel32 differs there. `compare` has answers
 of its own: -1 for no argument, -2 for no live bitmap, -3 and -4 for
 other sizes, 0 for the same pixels, else a bitmap of the differences.
 With no filter objects in AVM1 yet, `applyFilter` gives -1 after its

@@ -419,7 +419,11 @@ export function isThresholdOperation(op: string): boolean {
  * `copySource`; how many held. With `premultiplied`, as AVM1's
  * BitmapData has it (Ruffle's operations.rs), the pixel is compared as it
  * is kept, premultiplied, and `color` and the source pixel are written as
- * a transparent bitmap keeps them, an opaque one's alpha left as it is.
+ * a transparent bitmap keeps them, the colour's channels premultiplied by
+ * its alpha. Flash leaves an opaque bitmap's alpha as written there too,
+ * which its getPixel32 then reads; here an opaque store keeps every alpha
+ * at 255, which its drawing, copies and filters take it to have, so its
+ * getPixel32 alone differs from Flash's (its getPixel does not).
  */
 export function threshold(
   store: BitmapStore,
@@ -454,7 +458,10 @@ export function threshold(
   // In place, each pixel read as the ones before it left it (forEachCopied).
   const into = store.pixels;
   const pixels = source.readable;
-  const fill = premultiplied ? premultiply(color >>> 0) : store.premultiplied(color >>> 0);
+  const opaque = store.transparent ? 0 : 0xff000000;
+  const fill = premultiplied
+    ? (premultiply(color >>> 0) | opaque) >>> 0
+    : store.premultiplied(color >>> 0);
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
@@ -463,7 +470,7 @@ export function threshold(
         into[to] = fill;
         count++;
       } else if (copySource) {
-        into[to] = store.transparent || premultiplied ? raw : (raw | 0xff000000) >>> 0;
+        into[to] = (raw | opaque) >>> 0;
       }
     }
   }
