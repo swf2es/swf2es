@@ -99,3 +99,50 @@ nc.call("svc.m", {});`,
   await played.deliver();
   assert.deepEqual(take(played), ["status 0"]);
 });
+
+/** What `source` POSTs at its first frame's end, as hex. */
+async function posted(source: string): Promise<string[]> {
+  const asked: FetchRequest[] = [];
+  const played = await play(source, {
+    fetch: async (request) => {
+      asked.push(request);
+      return { bytes: null, status: 404, headers: [] };
+    },
+  });
+  played.player.tick();
+  take(played);
+  return asked.map((r) => hex(r.body as Uint8Array));
+}
+
+test("a call's arguments share one table of references, the arguments the first; a header's its own", async () => {
+  // adl, the bodies Flash POSTed to a server: an array and an object holding themselves, an
+  // array met twice in another, a header's object holding itself, an array with a key that is no
+  // index, an object met twice among the arguments.
+  assert.deepEqual(
+    await posted(`var nc = new NetConnection(); nc.connect("http://example.test/a"); var r = {};
+var a = [1]; a.push(a); var o = {x: 1}; o.self = o; var b = [2]; var c = [b, b];
+nc.call("cyc", r, a); nc.call("obj", r, o); nc.call("shared", r, c);`),
+    [
+      "00 00 00 00 00 03 00 03 63 79 63 00 02 2f 31 00 00 00 16 0a 00 00 00 01 0a 00 00 00 02 00 3f f0 00 00 00 00 00 00 07 00 01 00 03 6f 62 6a 00 02 2f 32 00 00 00 1e 0a 00 00 00 01 03 00 01 78 00 3f f0 00 00 00 00 00 00 00 04 73 65 6c 66 07 00 01 00 00 09 00 06 73 68 61 72 65 64 00 02 2f 33 00 00 00 1b 0a 00 00 00 01 0a 00 00 00 02 0a 00 00 00 01 00 40 00 00 00 00 00 00 00 07 00 02",
+    ],
+  );
+  assert.deepEqual(
+    await posted(`var nc = new NetConnection(); nc.connect("http://example.test/b"); var r = {};
+var o = {x: 1}; o.self = o; nc.addHeader("h", false, o);
+var m = [3]; m.k = m; var n = {}; nc.call("mixed", r, m, n, n);
+var big = []; big[70000] = 1; nc.call("long", r, big.length);`),
+    [
+      "00 00 00 01 00 01 68 00 00 00 00 19 03 00 01 78 00 3f f0 00 00 00 00 00 00 00 04 73 65 6c 66 07 00 00 00 00 09 00 02 00 05 6d 69 78 65 64 00 02 2f 31 00 00 00 26 0a 00 00 00 03 08 00 00 00 01 00 01 30 00 40 08 00 00 00 00 00 00 00 01 6b 07 00 01 00 00 09 03 00 00 09 07 00 02 00 04 6c 6f 6e 67 00 02 2f 32 00 00 00 0e 0a 00 00 00 01 00 40 f1 17 10 00 00 00 00",
+    ],
+  );
+});
+
+test("a length or a nesting a script makes huge is written bounded", async () => {
+  // Flash would write 2^31 - 1 elements, or recurse as deep as the objects go.
+  const [body] = await posted(`var nc = new NetConnection(); nc.connect("http://example.test/c");
+var a = []; a.length = 2147483647; var d = []; d["99999999999"] = 1;
+var deep = {}; var at = deep; for (var i = 0; i < 5000; i++) { at.next = {}; at = at.next; }
+nc.call("m", {}, a, d, deep);`);
+  // A million values at most, a byte each where they are undefined.
+  assert.ok(body.length / 3 < 1.1 * 2 ** 20, `${body.length / 3} bytes`);
+});

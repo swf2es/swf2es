@@ -28,6 +28,25 @@ export const TYPED_OBJECT = 0x10;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+/**
+ * The most values a remoting value writes: a length a script sets, or an
+ * object shared down a tree of them (a = [b, b], b = [c, c]...) met each
+ * time, would otherwise hang the page or run it out of memory; past it,
+ * what is left is undefined, an array's length cut to what is left.
+ */
+export const MAX_VALUES = 1 << 20;
+
+/** How deep objects nest as they are written or read; past it, undefined, or a read fails. */
+export const MAX_DEPTH = 1024;
+
+/** A remoting packet's ways, where they part from a .sol file's (globals/NetConnection.ts). */
+export interface RemotingWays {
+  /** An XML node's text, which it is written as; null for anything else. */
+  xmlText(o: Obj): string | null;
+  /** The place the first object written takes among the references: 1 in a call, 0 in a header (adl). */
+  readonly first: number;
+}
+
 /** AMF0 written into chunks, joined once: a long save would overflow a spread. */
 export class Writer {
   readonly chunks: Uint8Array[] = [];
@@ -37,7 +56,10 @@ export class Writer {
    * is a reference. Flash counts the data object as the first (adl).
    */
   private readonly references = new Map<Obj, number>();
-  private nextReference = 1;
+  private nextReference: number;
+  /** The values a remoting value may still write (MAX_VALUES). */
+  private left = MAX_VALUES;
+  private depth = 0;
 
   constructor(
     /** The name Object.registerClass gave a constructor, which an object of is written typed. */
@@ -52,10 +74,13 @@ export class Writer {
     /**
      * A remoting packet's ways, where they part from a .sol file's: an XML
      * node as its text, a date's zone as 0, an array of indices alone as a
-     * strict array (the corpus's netconnection_serialize_arrays).
+     * strict array (the corpus's netconnection_serialize_arrays), a getter
+     * or an element that throws undefined, its values bounded.
      */
-    private readonly remoting: { xmlText(o: Obj): string | null } | null = null,
-  ) {}
+    private readonly remoting: RemotingWays | null = null,
+  ) {
+    this.nextReference = remoting?.first ?? 1;
+  }
 
   get size(): number {
     return this.length;
@@ -114,7 +139,10 @@ export class Writer {
   }
 
   value(v: Value): void {
-    if (v === undefined) {
+    if (this.remoting !== null && this.left-- <= 0) {
+      this.left = 0;
+      this.bytes(UNDEFINED);
+    } else if (v === undefined) {
       this.bytes(UNDEFINED);
     } else if (v === null) {
       this.bytes(NULL);
@@ -132,33 +160,38 @@ export class Writer {
     }
   }
 
-  /**
-   * An object at the top of a remoting value: written as any, but not
-   * counted among the references its properties make (Ruffle's amf.rs).
-   */
-  root(o: Obj): void {
-    if (
-      o.display !== null ||
-      o.primitive instanceof avm1.DateCell ||
-      (this.remoting?.xmlText(o) ?? null) !== null
-    ) {
-      this.object(o);
-      return;
+  /** A property of `o` as remoting reads it: undefined where its getter throws (Ruffle). */
+  private read(o: Obj, key: string): Value {
+    if (this.remoting === null) {
+      return avm1.get(o, key, this.version);
     }
 
-    const typed = this.typedName(constructorOf(o, this.version));
-    if (typed !== null) {
-      this.bytes(TYPED_OBJECT);
-      this.name(typed);
-    } else {
-      this.bytes(OBJECT);
-    }
+    try {
+      return avm1.get(o, key, this.version);
+    } catch (error) {
+      if (error instanceof avm1.Avm1Throw) {
+        return undefined;
+      }
 
-    this.properties(o);
-    this.bytes(0, 0, OBJECT_END);
+      throw error;
+    }
   }
 
   private object(o: Obj): void {
+    if (this.depth >= MAX_DEPTH) {
+      this.bytes(UNDEFINED);
+      return;
+    }
+
+    this.depth++;
+    try {
+      this.contents(o);
+    } finally {
+      this.depth--;
+    }
+  }
+
+  private contents(o: Obj): void {
     // A clip is no data: Flash writes undefined for it.
     if (o.display !== null) {
       this.bytes(UNDEFINED);
@@ -204,8 +237,9 @@ export class Writer {
     }
 
     if (o.array) {
+      // Its length, as the int it is kept as.
       this.bytes(ECMA_ARRAY);
-      this.u32(avm1.toNumber(avm1.get(o, "length", this.version), this.version) >>> 0);
+      this.u32(avm1.toNumber(this.read(o, "length"), this.version) >>> 0);
     } else {
       const typed = this.typedName(constructorOf(o, this.version));
       if (typed !== null) {
@@ -231,15 +265,17 @@ export class Writer {
       return false;
     }
 
-    let length = Math.max(0, avm1.toNumber(avm1.get(o, "length", this.version), this.version) | 0);
+    let length = Math.max(0, avm1.toNumber(this.read(o, "length"), this.version) | 0);
     for (const key of keys) {
       length = Math.max(length, Number(key) + 1);
     }
 
+    // No more than the values left to write, which also keeps it a u32.
+    length = Math.min(length, this.left);
     this.bytes(STRICT_ARRAY);
     this.u32(length);
     for (let i = 0; i < length; i++) {
-      this.value(avm1.get(o, String(i), this.version));
+      this.value(this.read(o, String(i)));
     }
 
     return true;
@@ -258,7 +294,7 @@ export class Writer {
         continue;
       }
 
-      const v = avm1.get(o, key, this.version);
+      const v = this.read(o, key);
       if (v instanceof avm1.Avm1Function) {
         continue;
       }
@@ -286,6 +322,7 @@ export class Reader {
   at = 0;
   private readonly view: DataView;
   private readonly references: Value[];
+  private depth = 0;
 
   constructor(
     private readonly bytes: Uint8Array,
@@ -324,7 +361,21 @@ export class Reader {
     return this.utf8(this.u16());
   }
 
+  /** A value; past MAX_DEPTH of objects inside objects, a RangeError, as for bytes past the end. */
   value(): Value {
+    if (this.depth >= MAX_DEPTH) {
+      throw new RangeError("AMF0 nested too deep");
+    }
+
+    this.depth++;
+    try {
+      return this.marked();
+    } finally {
+      this.depth--;
+    }
+  }
+
+  private marked(): Value {
     const marker = this.bytes[this.at++];
     switch (marker) {
       case NUMBER: {
@@ -381,8 +432,8 @@ export class Reader {
       case DATE: {
         const time = this.view.getFloat64(this.at);
         this.at += 10;
-        const date = avm1.get(this.realm.global, "Date", this.version);
-        return this.realm.construct(date, [time], this.version);
+        // Flash's own Date, whatever a script set _global.Date to.
+        return this.realm.construct(this.realm.Date.constr, [time], this.version);
       }
       case XML:
         // XML is not AS2's yet: its text, kept, reads as nothing.

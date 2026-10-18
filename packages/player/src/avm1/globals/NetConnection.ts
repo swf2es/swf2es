@@ -7,7 +7,7 @@
 // connection's headers with them, each call's answer, /n/onResult or
 // /n/onStatus, going to its responder. Any other URL connects nothing.
 import { avm1 } from "@swf2es/runtime";
-import { ECMA_ARRAY, OBJECT_END, Reader, STRICT_ARRAY, Writer } from "../amf.js";
+import { Reader, STRICT_ARRAY, Writer } from "../amf.js";
 import type { Avm1Net } from "../net.js";
 
 type Value = avm1.Value;
@@ -49,6 +49,7 @@ interface Connection {
 }
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 /** Bytes, joined once. */
 function join(chunks: Uint8Array[]): Uint8Array {
@@ -62,91 +63,32 @@ function join(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** How an XML node's text is had, which a remoting value writes as XML. */
-type Xml = { xmlText(o: Obj): string | null };
-
-/** A value's AMF0 as a remoting call writes an argument or a header (Ruffle's amf.rs serialize). */
-export function remotingValue(
-  v: Value,
-  typedName: (constr: Value) => string | null,
-  version: number,
-  xml: Xml,
-): Uint8Array {
-  const w = new Writer(typedName, version, null, xml);
-  writeTop(w, v, typedName, version, xml);
-  return join(w.chunks);
-}
-
 /**
- * A value at the top of an argument: an array as a strict array of its
- * elements, each again at the top, or, with a key that is no index, as an
- * ECMA array of every key; an object without the references its own
- * properties count, which start afresh for each.
+ * A call's arguments as AMF0, a strict array of them, written with one
+ * table of references, the array itself the first (adl: an argument met
+ * twice, or an array or object holding itself, is a reference, the first
+ * argument's object 1); or with `first` 0, a header's value, itself the
+ * first (adl).
  */
-function writeTop(
-  w: Writer,
-  v: Value,
+export function remotingValue(
+  v: Value | Value[],
   typedName: (constr: Value) => string | null,
   version: number,
-  xml: Xml,
-): void {
-  if (!(v instanceof avm1.Avm1Object) || v.display !== null || !v.array) {
-    if (v instanceof avm1.Avm1Object) {
-      w.root(v);
-    } else {
-      w.value(v);
+  xml: (o: Obj) => string | null,
+  first = 0,
+): Uint8Array {
+  const w = new Writer(typedName, version, null, { xmlText: xml, first });
+  if (first === 1 && Array.isArray(v)) {
+    w.bytes(STRICT_ARRAY);
+    w.u32(v.length);
+    for (const arg of v) {
+      w.value(arg);
     }
-
-    return;
+  } else {
+    w.value(v as Value);
   }
 
-  // A getter that throws, length's or an element's, gives 0 or undefined (Ruffle).
-  const read = (name: string): Value => {
-    try {
-      return avm1.get(v, name, version);
-    } catch (error) {
-      if (error instanceof avm1.Avm1Throw) {
-        return undefined;
-      }
-
-      throw error;
-    }
-  };
-  const keys = avm1.keys(v, version);
-  let length = Math.max(0, avm1.toNumber(read("length"), version) | 0);
-  let custom = false;
-  for (const key of keys) {
-    if (/^\d+$/.test(key)) {
-      length = Math.max(length, Number(key) + 1);
-    } else {
-      custom = true;
-    }
-  }
-
-  const element = (value: Value) => {
-    const inner = new Writer(typedName, version, null, xml);
-    writeTop(inner, value, typedName, version, xml);
-    for (const chunk of inner.chunks) {
-      w.push(chunk);
-    }
-  };
-  if (custom) {
-    w.bytes(ECMA_ARRAY);
-    w.u32(length);
-    for (const key of keys.reverse()) {
-      w.name(key);
-      element(read(key));
-    }
-
-    w.bytes(0, 0, OBJECT_END);
-    return;
-  }
-
-  w.bytes(STRICT_ARRAY);
-  w.u32(length);
-  for (let i = 0; i < length; i++) {
-    element(read(String(i)));
-  }
+  return join(w.chunks);
 }
 
 /** A u16-long UTF-8 string, no marker. */
@@ -189,7 +131,7 @@ function messagesOf(
         throw new RangeError("past the end");
       }
 
-      const s = new TextDecoder().decode(bytes.subarray(at, at + n));
+      const s = decoder.decode(bytes.subarray(at, at + n));
       at += n;
       return s;
     };
@@ -223,16 +165,28 @@ function messagesOf(
   }
 }
 
-/** The connections open and their calls, sent a packet each at the end of a frame. */
+/**
+ * The connections open, held by their objects weakly, and those with calls
+ * waiting, sent a packet each at the end of a frame and let go.
+ */
 export class Remoting {
-  private readonly connections = new Map<Obj, Connection>();
+  private readonly connections = new WeakMap<Obj, Connection>();
+  private waiting = new Set<Connection>();
 
   constructor(private readonly host: NetConnectionHost) {}
 
+  /** `c`'s call queued for the frame's end. */
+  queue(c: Connection, call: Call): void {
+    c.queue.push(call);
+    this.waiting.add(c);
+  }
+
   /** A frame's end: each connection's calls sent as one packet. */
   flush(): void {
-    for (const c of this.connections.values()) {
-      if (c.url === null || c.queue.length === 0) {
+    const waiting = this.waiting;
+    this.waiting = new Set();
+    for (const c of waiting) {
+      if (c.url === null || c.queue.length === 0 || this.connections.get(c.self) !== c) {
         continue;
       }
 
@@ -296,6 +250,7 @@ export class Remoting {
     }
 
     this.connections.delete(self);
+    this.waiting.delete(c);
     this.status(self, "NetConnection.Connect.Closed");
     if (explicit && c.url !== null) {
       this.host.callback(self, "onStatus", []);
@@ -326,6 +281,7 @@ export function netConnectionClass(host: NetConnectionHost, remoting: Remoting):
   );
   const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE;
   const typedName = (c: Value) => host.registeredName(c);
+  const xml = (o: Obj) => host.xmlText(o);
   // A subclass's `super.call(...)` is the connection's call: super's `this` is it.
   const connectionOf = (self: Obj): Obj | null => {
     const o = self instanceof avm1.Avm1Super ? self.self : self;
@@ -374,21 +330,19 @@ export function netConnectionClass(host: NetConnectionHost, remoting: Remoting):
       return;
     }
 
-    const parts: Uint8Array[] = [Uint8Array.of(STRICT_ARRAY), u32(values.length)];
-    for (const value of values) {
-      parts.push(remotingValue(value, typedName, v, host));
+    // The local connection sends nothing, so writes nothing.
+    if (c.url === null) {
+      return;
     }
 
     const responder =
       args.length > 1 ? (args[1] instanceof avm1.Avm1Object ? args[1] : realm.newObject(v)) : null;
-    if (c.url !== null) {
-      c.queue.push({ method, args: join(parts), responder });
-    }
+    remoting.queue(c, { method, args: remotingValue(values, typedName, v, xml, 1), responder });
   });
   method("addHeader", (self, args, v) => {
     const name = avm1.stringOf(args[0], v);
     const mustUnderstand = args.length > 1 ? avm1.toBoolean(args[1], v) : true;
-    const value = remotingValue(args.length > 2 ? args[2] : null, typedName, v, host);
+    const value = remotingValue(args.length > 2 ? args[2] : null, typedName, v, xml);
     const c = remoting.connection(self);
     if (c !== undefined) {
       // One header of a name, its case aside: the last set.

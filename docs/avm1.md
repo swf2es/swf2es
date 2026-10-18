@@ -1777,11 +1777,15 @@ calls answered at `/1`, `/2`...: an answer's `/n/onResult` or
 ignored, and a failed request tells the connection's `onStatus`
 nothing, as does `close` of a remoting connection after its
 `Connect.Closed`. The values are AMF0 as `avm1/amf.ts` writes a .sol
-file's, but for a remoting packet's ways: each argument its own
-references, an object at the top not among them, an array of indices
+file's, but for a remoting packet's ways: a call's arguments one table
+of references, the arguments' array its first and a header's value its
+own first (adl, through a server it POSTed to), an array of indices
 alone a strict array (one with any other key an ECMA array), an XML
 node its text, a date's zone 0, and a getter or an element that throws
-undefined (the corpus's `amf_*` and `netconnection_*`). Typed objects
+undefined (the corpus's `amf_*` and `netconnection_*`); a call writes a
+million values at most and objects 1,024 deep, past which it writes
+undefined, as a script's length of 2^31 - 1 or a long chain would hang
+the page, and reading an answer fails past that depth or its bytes. Typed objects
 are written by the name Object.registerClass last gave their
 constructor, in the case it was given. The corpus runner answers a
 test's `localhost:8000` from its `localhost/` directory, as Ruffle's

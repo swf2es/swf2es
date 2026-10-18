@@ -1030,12 +1030,13 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */
+  /** An XML node's text, as its toString gives it, which a remoting call writes; null for anything else. */
   xmlText(o: avm1.Avm1Object): string | null {
     const node = this.xmlNodes?.nodeOf(o) ?? null;
     return node === null ? null : xmlString(node, this.swfVersion);
   }
 
+  /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */
   registeredName(constr: Value): string | null {
     return this.classes.registeredName(constr);
   }
