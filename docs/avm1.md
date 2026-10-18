@@ -1257,7 +1257,10 @@ probes they came of), and the corpus, where it is not what Ruffle does:
   `removed_clip_halts_script`).
 - `hitTest(x, y)` is in the root's space against the clip's bounds on the
   stage, `localToGlobal` and `globalToLocal` work in twips, rounding as
-  Flash's matrices do; `getBounds` of nothing is 6710886.35 each way.
+  Flash's matrices do; `getBounds` of nothing is 6710886.35 each way, and
+  in another clip's space 6710886.4 for good once code of SWF 8, or any
+  code under a root of SWF 8, has called `getBounds` or `getRect` (the
+  corpus's `movieclip_invalid_get_bounds_*`).
 - StopSounds is minimal: no sound is stopped yet. ToggleQuality toggles
   `_quality`, which the element draws by from the next frame (see
   architecture.md, "Showing a player").

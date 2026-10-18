@@ -298,6 +298,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   quality = "HIGH";
   focusRect = true;
   soundBufferTime = 5;
+  newInvalidBounds = false;
   /** Where the pointer last was, in the stage's coordinates (avm1/pointer.ts). */
   mouseX = 0;
   mouseY = 0;
