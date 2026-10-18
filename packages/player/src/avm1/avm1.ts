@@ -79,6 +79,7 @@ import {
   targetOf,
 } from "./globals/MovieClip.js";
 import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
+import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
@@ -522,6 +523,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       movieClipLoaderClass(this, this.swfVersion),
       avm1.DONT_ENUM,
     );
+    realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
     // Last, as Flash defines it: _global's names are enumerated from the last defined.
     realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
