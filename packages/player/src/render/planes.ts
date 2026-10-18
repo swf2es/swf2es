@@ -144,7 +144,7 @@ export class Planes {
   /**
    * A 3D object's blend mode put on its quad, which Flash composites with what is behind it, not
    * on its content within its bitmap: the blend's filters, or the GPU's own blending, from the
-   * node's state, as blendDirectly may change them outside a sync. Its filters' chain draws
+   * node's state, as compositing.ts may change them outside a sync. Its filters' chain draws
    * their result into the bitmap as it is, the quad blending it (`three-d-filter-blend`).
    */
   blendQuad(node: Node, plane: Plane): void {

@@ -1361,7 +1361,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /**
    * Its result blended over what is below in `mode`, by the GPU's own
    * blending as its last pass draws it, where that is Flash's blend
-   * (render/view.ts): no copy of what is below, nor a blend filter after it.
+   * (render/compositing.ts): no copy of what is below, nor a blend filter after it.
    */
   blendOver(mode: BLEND_MODES): void {
     this.blendMode = mode;
@@ -1506,7 +1506,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
   private run(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const filters = this.filters;
-    // A layer kept for a blend (render/view.ts, layerBlend): what was drawn, as it was drawn.
+    // A layer kept for a blend (render/compositing.ts): what was drawn, as it was drawn.
     if (filters.length === 0) {
       plainCopy().apply(system, input, output, clear);
       return;
