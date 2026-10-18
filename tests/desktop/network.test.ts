@@ -1002,6 +1002,33 @@ function headerEnds(bytes: Uint8Array): [whole: number, bytewise: number] {
   return [whole, bytewise];
 }
 
+/**
+ * `f`'s result and the bytes it copied with Uint8Array's set or searched
+ * with its indexOf, the two ways GzipHeader touches its bytes in bulk: a
+ * count that does not change with how busy the machine is, as its time does.
+ */
+function bytesTouched<T>(f: () => T): [T, number] {
+  const proto = Uint8Array.prototype;
+  const { set, indexOf } = proto;
+  let touched = 0;
+  proto.set = function (this: Uint8Array, source: ArrayLike<number>, offset?: number) {
+    touched += source.length;
+    set.call(this, source, offset);
+  };
+  proto.indexOf = function (this: Uint8Array, value: number, from = 0) {
+    const at = indexOf.call(this, value, from);
+    touched += (at < 0 ? this.length : at + 1) - Math.max(from, 0);
+    return at;
+  };
+
+  try {
+    return [f(), touched];
+  } finally {
+    proto.set = set;
+    proto.indexOf = indexOf;
+  }
+}
+
 test("a gzip header is read the same whole or a byte at a time, in time linear in it", () => {
   for (const flags of [0, 2, 4, 8, 16, 2 | 4 | 8 | 16]) {
     const head = gzipHead(flags);
@@ -1027,7 +1054,15 @@ test("a gzip header is read the same whole or a byte at a time, in time linear i
     gzipHead(8, "").subarray(0, 10),
     Buffer.alloc(GZIP_HEADER_MAX * 2, 0x6e),
   ]);
-  const started = performance.now();
-  assert.deepEqual(headerEnds(endless), [-1, -1]);
-  assert.ok(performance.now() - started < 100, `${performance.now() - started} ms`);
+  const [ends, touched] = bytesTouched(() => headerEnds(endless));
+  assert.deepEqual(ends, [-1, -1]);
+  // Linear: each byte copied in, copied again as the array doubles, and
+  // searched, a few times over; were the bytes so far copied or searched
+  // again for each one, it would be some 2^31.
+  assert.ok(touched < 8 * endless.length, `${touched} bytes touched`);
+
+  // A header ending at the limit, its name a byte at a time, the same.
+  const [atEnds, atTouched] = bytesTouched(() => headerEnds(at));
+  assert.deepEqual(atEnds, [GZIP_HEADER_MAX, GZIP_HEADER_MAX]);
+  assert.ok(atTouched < 8 * at.length, `${atTouched} bytes touched`);
 });
