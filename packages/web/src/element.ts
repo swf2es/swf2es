@@ -383,10 +383,16 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         // Its URL keys its SharedObjects, as a page's AS3 SWFs' are. Its
-        // fscommand and getURL reach the page as an AS3 SWF's do: "quit"
-        // goes to the page, as a plug-in's did, and stops nothing.
+        // fscommand, getURL and ExternalInterface reach the page as an AS3
+        // SWF's do: "quit" goes to the page, as a plug-in's did, and stops
+        // nothing.
         const { internal, offline, allows, objectID } = this.#access(pageUrl);
         const base = attribute(this, "base");
+        const bridge: PageBridge = {
+          objectID,
+          callback: (name, call) => this.#callback(session, name, call),
+          alive: () => this.#session === session,
+        };
         avm1 = new Avm1(codegen, {
           url,
           base: base ? new URL(base, pageUrl).href : undefined,
@@ -403,6 +409,11 @@ export class Swf2esPlayerElement extends ElementBase {
             }
           },
           navigate: internal ? null : undefined,
+          externalInterface: externalInterfaceHost(
+            bridge,
+            (error) => this.#report(session, error),
+            allows,
+          ),
         });
       }
 

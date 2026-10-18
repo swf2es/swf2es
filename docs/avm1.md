@@ -1637,6 +1637,31 @@ through the network below, `loadMovie`, `loadMovieNum` and `unloadMovie`
 as "Loading movies" has them; `$version`, which Flash defines on
 `_level0` and a GET or POST from the root sends, is not defined yet.
 
+### ExternalInterface
+
+`flash.external.ExternalInterface` (`globals/ExternalInterface.ts`, from
+SWF 8 but `call`) talks to the page through the host's bridge that AS3's
+Scripting takes (`Avm1Options.externalInterface`, which the element
+gives as it gives Scripting's), in Flash's XML: `call` offers the call to
+`evalJS` as JavaScript, its object's keys quoted, then sends it to
+`callOut` as an `<invoke>`, and reads the answer back with the realm's
+`XML`, as content would; `addCallback(name, instance, method)` takes a
+function only, and the page's call comes as an `<invoke>` whose
+arguments are read the same way, the method run on `instance` between
+frames as a timer's callback is, what it queued after it, and its answer
+sent back as XML. Without a bridge, or one whose `allows` refuses the
+calling SWF's URL, `available` is false, `call` null and `addCallback`
+false. The underscored helpers Flash's own AS2 class is built of
+(`_escapeXML`, `_toXML`, `_toAS`, `_arrayToXML`, `_argumentsToAS`...) are
+there for content to call, answering as Flash's do: an empty string
+escapes to null and serialises as `<string>null</string>`, an object
+with an own `length` (a String object too) is an array, `_argumentsToXML`
+skips the first element, the function's name, and `_toAS` reads a
+node's `nodeName` only as a string or a String object and a number by
+AVM1's conversion (the corpus's `external_interface_*`). `_arrayToAS`
+and `_objectToAS`, which Ruffle leaves empty, read a node's `<property
+id>` children.
+
 ### The network: XML, LoadVars, loadVariables and XMLSocket
 
 `player/src/avm1/net.ts` is what these ask of the host: requests go

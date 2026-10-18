@@ -17,12 +17,14 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { flashAssembler, script } from "../avm1-script.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { decodePng, type Image } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { importMap } from "../player/serve.ts";
+import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -55,6 +57,26 @@ const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
+// An AS2 SWF that calls the page, tells it what came back, and takes its calls.
+const external = `var EI = flash.external.ExternalInterface;
+var got = EI.call("avm1Hello", "hi", [1, {k: "v"}]);
+EI.call("avm1Hello", got.got[0] + "!", got.got[1][1].k);
+EI.addCallback("triple", null, function(n) { return {n: n * 3, s: "a<b"}; });
+stop();`;
+writeFileSync(
+  `${site}avm1-external.swf`,
+  w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(external, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
@@ -355,6 +377,15 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
   // The scripted and locked players' instances alone.
   assert.equal(left.codegens, 2);
   assert.ok(after - warm < BOUND * CHURN, `the heap grew by ${after - warm} bytes`);
+});
+
+check("an AVM1 SWF's ExternalInterface calls the page and takes its calls", async (evaluate) => {
+  const ei = await call<{ calls: unknown[][]; triple: unknown }>(evaluate, "avm1External()");
+  assert.deepEqual(ei.calls, [
+    ["hi", [1, { k: "v" }]],
+    ["hi!", "v"],
+  ]);
+  assert.deepEqual(ei.triple, { n: 15, s: "a<b" });
 });
 
 check(

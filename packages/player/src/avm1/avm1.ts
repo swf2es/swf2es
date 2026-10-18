@@ -48,6 +48,7 @@ import {
   browserNavigate,
   type Drawer,
   defaultStorage,
+  type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
   type Navigate,
@@ -69,6 +70,7 @@ import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
+import { type ExternalHost, externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
@@ -150,6 +152,12 @@ export interface Avm1Options {
    * loads: the browser's by default.
    */
   decodeImage?: ImageDecode | null;
+  /**
+   * The page's ExternalInterface, as AS3's Scripting takes it; without
+   * one, ExternalInterface is unavailable. AVM1's callbacks answer the
+   * page's XML invocations whatever arguments come with them.
+   */
+  externalInterface?: ExternalInterfaceHost;
 }
 
 /**
@@ -418,7 +426,9 @@ const timeoutClock =
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost {
+export class Avm1
+  implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost, ExternalHost
+{
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -449,6 +459,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    */
   private readonly arrivals = new WeakMap<object, Promise<void>>();
   private readonly decodeImage: ImageDecode | null;
+  private readonly externalInterface: ExternalInterfaceHost | null;
   /** The operand stack, which every activation of a frame's actions shares. */
   private readonly st: avm1.Value[] = [];
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
@@ -570,6 +581,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     );
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
+    this.externalInterface = options.externalInterface ?? null;
     const movie = this;
     this.sounds = {
       get audio() {
@@ -738,6 +750,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     const flash = flashPackage(this);
+    const external = new avm1.Avm1Object(realm.objectProto);
+    external.define("ExternalInterface", externalInterfaceClass(this), 0);
+    flash.define("external", external, 0);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
       display.define("BitmapData", bitmapDataClass(this), 0);
@@ -1511,6 +1526,41 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
     }
+  }
+
+  /** The page's ExternalInterface, where it lets the SWF of the code running now use it. */
+  externalBridge(): ExternalInterfaceHost | null {
+    const host = this.externalInterface;
+    return host !== null && (host.allows?.(this.currentSwf().url) ?? true) ? host : null;
+  }
+
+  /**
+   * `fn` called on `self` with `args` by the page, between frames or
+   * inside a call out, in the root's activation as a timer's callback
+   * runs, and what it queued run after it: what it returned, undefined
+   * where it did not run or threw.
+   */
+  callIn(fn: Value, self: Value, args: Value[]): Value {
+    const cx =
+      this.movieRoot === null || this.halted || !this.loaded
+        ? null
+        : this.activationOf(this.movieRoot);
+    if (cx === null) {
+      return undefined;
+    }
+
+    let result: Value;
+    this.begin();
+    try {
+      this.rt.call(cx, () => {
+        result = avm1.invoke(fn, self, args, this.swfVersion);
+      });
+      this.runQueue();
+    } finally {
+      this.end();
+    }
+
+    return result;
   }
 
   /** LoadVars.send's page, as getURL's opens it. */
