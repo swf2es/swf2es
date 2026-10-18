@@ -474,6 +474,7 @@ export function benchPlayer(
   finishEvery = 1,
   hover = false,
   snapshotPath?: string,
+  tableLoop = true,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -496,7 +497,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true)`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };

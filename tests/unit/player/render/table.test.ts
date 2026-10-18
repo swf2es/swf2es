@@ -332,3 +332,86 @@ test("a run's rows go up in one call: the part of their line, or the whole lines
     [0, 1, 1280, 1, 256 * 20],
   ]);
 });
+
+test("a run too short for a multi-draw is drawn a call a draw from the atlas, each told its row", () => {
+  const calls: string[] = [];
+  const gl = {
+    TRIANGLES: 4,
+    UNSIGNED_INT: 5,
+    getUniformLocation(_program: unknown, name: string) {
+      return name;
+    },
+    uniform4fv(location: string, _data: Float32Array, offset: number, length: number) {
+      calls.push(`${location} ${offset} ${length}`);
+    },
+    uniform1i(location: string, value: number) {
+      calls.push(`${location} ${value}`);
+    },
+    drawElements(_mode: number, count: number, _type: number, offset: number) {
+      calls.push(`draw ${count} at ${offset}`);
+    },
+  };
+  const program = {};
+  const renderer = {
+    type: 1,
+    gl,
+    texture: { bindForUpload() {} },
+    globalUniforms: { bindGroup: {} },
+    state: { set() {} },
+    shader: { bind() {}, _getProgramData: () => ({ program }) },
+    geometry: {
+      bind() {
+        calls.push("bind atlas");
+      },
+    },
+    runners: { contextChange: { add() {} }, prerender: { add() {} } },
+  };
+  const pipe = new TablePipe(renderer as unknown as ConstructorParameters<typeof TablePipe>[0]);
+  const run = pipe as unknown as {
+    multi: { multiDrawElementsWEBGL(...args: unknown[]): void };
+    atlas: { send(): void };
+    shortShader: { groups: unknown[]; glProgram: object };
+    counts: Int32Array;
+    offsets: Int32Array;
+    draws: number;
+    cursor: number;
+    flush(): void;
+  };
+  run.multi = {
+    multiDrawElementsWEBGL(...args: unknown[]) {
+      calls.push(`multi ${args[6]}`);
+    },
+  };
+  run.atlas = { send() {} };
+  // Pixi's program would want a canvas to compile in.
+  run.shortShader = { groups: [], glProgram: {} };
+  const gather = (draws: number) => {
+    for (let i = 0; i < draws; i++) {
+      run.counts[i] = 3 * (i + 1);
+      run.offsets[i] = 4 * i;
+    }
+
+    run.draws = draws;
+    run.cursor = draws;
+  };
+
+  gather(3);
+  run.flush();
+  // Rows of 5 vectors, passed at once; the first row is 0 as the program starts.
+  assert.deepEqual(calls, [
+    "uRows 0 60",
+    "bind atlas",
+    "draw 3 at 0",
+    "uFirst 1",
+    "draw 6 at 4",
+    "uFirst 2",
+    "draw 9 at 8",
+  ]);
+  // Their rows are free again.
+  assert.equal(run.cursor, 0);
+
+  calls.length = 0;
+  gather(16);
+  run.flush();
+  assert.deepEqual(calls, ["uRows 0 320", "bind atlas", "uFirst 0", "multi 16"]);
+});

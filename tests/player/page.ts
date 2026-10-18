@@ -684,8 +684,9 @@ async function benchSwf(
   finishEvery = 1,
   hover = false,
   hold = false,
+  tableLoop = true,
 ): Promise<Bench> {
-  setTransformTable(table, tableMinRun);
+  setTransformTable(table, tableMinRun, tableLoop);
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];

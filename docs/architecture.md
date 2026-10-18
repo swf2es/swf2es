@@ -2971,10 +2971,21 @@ long: there a multi-draw cost Chrome's GPU process some 5 to 15 µs more
 than its draws one by one, and saved the main thread under a microsecond
 a draw. On `bench.ts --rig 128 --filtered K --gpu`, runs of 2 to 10
 draws took a frame 1 to 5 ms longer than Pixi's own draws, and runs of
-22 broke even, so a run of fewer than 16 draws is drawn by Pixi's pipe:
-before any row is written if its contexts' batches are fewer, and
-otherwise once a blend mode or a Graphics the table cannot draw has cut
-it short (`--min-run` times other thresholds). Under software GL the
+22 broke even, so a run of fewer than 16 draws, whether its contexts'
+batches are fewer or a blend mode or a Graphics the table cannot draw
+has cut it short, is not a multi-draw (`--min-run` times other
+thresholds). It is drawn from the atlas a call a draw instead: its rows
+passed in the uniform array at once, the atlas bound once, and each draw
+told its row by a uniform, as `gl_DrawID` is 0 in a draw of its own.
+Pixi's pipe, which drew such runs at first (`--no-loop`), binds each
+context's buffers and sets each Graphics' uniforms. In a recorded crowded
+scene, some 1,100 of 2,000 draws a frame came in such runs, between
+filters; drawn from the atlas, the render took 13% less main-thread time
+(15.3 to 13.3 ms a frame on average, with the two alternating in blocks
+of frames in one replay), and on `--rig 128 --filtered 2 --gpu` a frame
+went from some 21 to 17 ms, GL's own time from 7.7 to 5.8. A multi-draw
+of those short runs saved no more main-thread time and cost GL more,
+again. Under software GL the
 table won at every length, by 5 ms on runs of 6, but a player's GPU is
 what counts. A run of up to 40 draws takes its rows in a uniform array,
 not the table texture, as an upload between draws cost a few µs more a
@@ -2993,8 +3004,8 @@ each rebuild and each change of the transform, and a busy monster SWF
 whose creatures, rebuilt on most frames, fade out under a tween packed
 some 55 MB a frame of them. A flat one takes its transform in its row,
 which grows to five texels with the multipliers, the offsets and a flag;
-a Graphics Pixi's pipe draws, of a gradient or a bitmap, a run too short
-or a table switched off, takes Pixi's graphics shader with the colour
+a Graphics Pixi's pipe draws, of a gradient or a bitmap,
+or with the table switched off, takes Pixi's graphics shader with the colour
 batcher's colour, the transform in uniforms. Both apply it as the colour
 batcher does, to the straight colour, the fill's times the Graphics' own
 tint rounded to a byte, clamped and premultiplied after, and leave out
