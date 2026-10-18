@@ -639,10 +639,11 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     return false;
   });
 
-  constr.define("RED_CHANNEL", 1, FIXED);
-  constr.define("GREEN_CHANNEL", 2, FIXED);
-  constr.define("BLUE_CHANNEL", 4, FIXED);
-  constr.define("ALPHA_CHANNEL", 8, FIXED);
+  // Plain properties, enumerable and writable, as Flash has them (the corpus's bitmapdata_channels).
+  constr.define("RED_CHANNEL", 1, 0);
+  constr.define("GREEN_CHANNEL", 2, 0);
+  constr.define("BLUE_CHANNEL", 4, 0);
+  constr.define("ALPHA_CHANNEL", 8, 0);
   // The library's bitmap exported as the name, transparent; undefined where there is none.
   constr.define(
     "loadBitmap",

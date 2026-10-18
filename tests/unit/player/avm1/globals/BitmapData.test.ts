@@ -206,3 +206,12 @@ test("perlinNoise drops a base's sign and stitches each frequency by its own siz
     ["3ba8ff6c 787d6e24", "3ba8ff6c 787d6e24", "27ffe5ff 38e44d40"],
   );
 });
+
+test("the channels are plain properties of BitmapData", async () => {
+  assert.deepEqual(
+    await run(
+      `BitmapData.RED_CHANNEL = 5; trace(BitmapData.RED_CHANNEL); trace(delete BitmapData.ALPHA_CHANNEL);`,
+    ),
+    ["5", "true"],
+  );
+});
