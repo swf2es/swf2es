@@ -350,7 +350,6 @@ export class Reader {
   private readonly view: DataView;
   private readonly references: Value[];
   private depth = 0;
-  private left = MAX_VALUES;
 
   constructor(
     private readonly bytes: Uint8Array,
@@ -358,6 +357,8 @@ export class Reader {
     private readonly version: number,
     /** As a .sol file's writer counts its data object first, which Flash never refers to. */
     data = false,
+    /** Remoting's value limit; .sol reads use Infinity to match their uncapped writer. */
+    private left = MAX_VALUES,
   ) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     this.references = data ? [undefined] : [];

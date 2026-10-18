@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { MAX_VALUES } from "../../../../../packages/player/dist/avm1/amf.js";
 import { Avm1 } from "../../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../../packages/player/dist/player.js";
 import { flashAssembler, script } from "../../../../avm1-script.ts";
@@ -78,6 +79,27 @@ trace("flush " + so.flush());
 trace("size " + so.getSize());
 trace("same " + (SharedObject.getLocal("probe") == so));
 `;
+
+test("a local save larger than the remoting value limit remains readable", async () => {
+  const { storage } = memory();
+  // Repeated names keep the resulting object small while exceeding the network value limit.
+  const prefix = Buffer.from(
+    "00bf000000005443534f00040000000000056c617267650000000000016103",
+    "hex",
+  );
+  const file = new Uint8Array(prefix.length + MAX_VALUES * 5 + 4);
+  file.set(prefix);
+  for (let i = 0; i < MAX_VALUES; i++) {
+    file.set([0, 1, 120, 0x01, 1], prefix.length + i * 5);
+  }
+
+  file.set([0, 0, 0x09, 0], file.length - 4);
+  new DataView(file.buffer).setUint32(2, file.length - 6);
+  storage.set("/C:/so-test.swf/large", file);
+
+  const { lines } = await play('trace(SharedObject.getLocal("large").data.a.x);', storage);
+  assert.deepEqual(lines, ["true"]);
+});
 
 test("a SharedObject's .sol file is Flash's, byte for byte, and reads back as it was", async () => {
   const { stored, storage } = memory();
