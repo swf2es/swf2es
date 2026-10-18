@@ -1205,7 +1205,12 @@ and the player's paths in this document are relative to it:
   and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
-- `render/`: the PixiJS view (`view.ts`) and what only it uses: shapes'
+- `render/`: the PixiJS view (`view.ts`, the walk that keeps each
+  object's node, `node.ts`, in step) and what only it uses: what an
+  object itself draws (`art.ts`), how it is blended (`compositing.ts`),
+  3D objects' planes (`planes.ts`), released nodes kept for reuse
+  (`spares.ts`), BitmapData.draw's sampling (`snapshot.ts`), the pointer
+  on the canvas (`pointer.ts`), shapes'
   fills tessellated (`tessellate.ts`) and lines stroked (`strokes.ts`)
   into shared contexts, where the player plugs into the Pixi fork's
   extension points (`hooks.ts`), render groups settling (`settle.ts`),

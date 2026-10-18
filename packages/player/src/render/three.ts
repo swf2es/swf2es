@@ -325,14 +325,14 @@ export class Plane {
   /** The renderer's units a pixel of the object's space its content was last drawn at, and its texels a pixel. */
   units = SAMPLES;
   texels = 1;
-  /** What its content draws, filters' reach included, as last measured (view.ts); undefined before. */
+  /** What its content draws, filters' reach included, as last measured (planes.ts); undefined before. */
   drawnRect: { x: number; y: number; width: number; height: number } | null | undefined = undefined;
   /** The units its content was last synced for (view.ts). */
   syncedUnits = SAMPLES;
   private readonly at = new Matrix();
   /** Whether the quad was placed elsewhere, or its bitmap drawn again, since the last frame. */
   changed = true;
-  /** The blend's filters on the quad (view.ts), null for none. */
+  /** The blend's filters on the quad (planes.ts), null for none. */
   blending: Filter[] | null = null;
   /**
    * A 2D mask from outside the object: its container, kept from being drawn on the stage by
