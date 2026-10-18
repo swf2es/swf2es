@@ -655,7 +655,8 @@ layout model (`Traits`, the binding kinds, the class and Vector references);
 `domain.ts`, application domains and the lookup of a name along a domain's
 chain; `classes.ts`, OP_newclass, which makes a class from its descriptor;
 `enumeration.ts`, the names a for-in goes through; `property-cache.ts`, the
-inline caches; `names.ts`, namespaces and multinames; `numbers.ts`,
+inline caches; `names.ts`, namespaces and multinames; `number-strings.ts`,
+numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
 
