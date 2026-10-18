@@ -272,7 +272,16 @@ for (const page of ["index.html", "notices.html"]) {
 }
 
 cpSync(join(here, "static/style.css"), join(out, "style.css"));
-cpSync(join(here, "static/icon.svg"), join(out, "icon.svg"));
+// The icon as an SVG, and as the bitmaps browsers and home screens ask for by name.
+for (const icon of [
+  "icon.svg",
+  "favicon.ico",
+  "icon-192.png",
+  "icon-512.png",
+  "apple-touch-icon.png",
+]) {
+  cpSync(join(here, `static/${icon}`), join(out, icon));
+}
 // Pages serves an artifact as it is; this keeps Jekyll away were it ever built from a branch.
 writeFileSync(join(out, ".nojekyll"), "");
 
