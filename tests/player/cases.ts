@@ -55,6 +55,11 @@ export interface PlayerCase {
    * again without the table it must draw the same pixels.
    */
   table?: boolean;
+  /**
+   * A known gap: what Flash does that the player does not yet. The case is
+   * left out of the default run and runs, expected to fail, when named.
+   */
+  gap?: string;
 }
 
 const square = (id: number, color: number, size = 1000) =>
@@ -5976,6 +5981,46 @@ export const probeFont = (id: number): Uint8Array =>
     kerning: [["a", "b", -100]],
   });
 
+/**
+ * "Stem", a font of upright bars: "1" to "6" a bar each, 15 to 100 units
+ * of the em wide, so that at 20 pixels they run from under a third of a
+ * pixel to two, and "l", "m", "a" and "W" with advances that are no whole
+ * number of pixels at any of the cases' sizes.
+ */
+export const stemFont = (id: number): Uint8Array =>
+  w.font3({
+    id,
+    name: "Stem",
+    ascent: 900,
+    descent: 250,
+    glyphs: [
+      { char: " ", advance: 250, boxes: [] },
+      ...[15, 25, 35, 50, 70, 100].map((width, i) => ({
+        char: String(i + 1),
+        advance: 300,
+        boxes: [[150 - (width >> 1), -700, 150 - (width >> 1) + width, 0]] as [
+          number,
+          number,
+          number,
+          number,
+        ][],
+      })),
+      { char: "l", advance: 230, boxes: [[70, -760, 130, 0]] },
+      {
+        char: "m",
+        advance: 900,
+        boxes: [
+          [60, -470, 120, 0],
+          [400, -470, 460, 0],
+          [740, -470, 800, 0],
+          [60, -520, 800, -470],
+        ],
+      },
+      { char: "a", advance: 537, boxes: [[50, -500, 487, 0]] },
+      { char: "W", advance: 1000, boxes: [[0, -700, 1000, 0]] },
+    ],
+  });
+
 // Static text in Probe, defined before the font it uses: a DefineText of
 // two lines in two colours, and a DefineText2 turned and scaled by its
 // matrix, a run in half-transparent green, one of a font the SWF lacks,
@@ -6518,6 +6563,25 @@ function textLayout(abc: Uint8Array): Uint8Array {
       probeFont(1),
       w.doAbc(abc, "TextLayout"),
       w.symbolClass([[0, "TextLayout"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Text in Stem with advanced anti-aliasing (scripts/TextAdvanced.as).
+function textAdvanced(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 400,
+    height: 300,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      stemFont(1),
+      w.doAbc(abc, "TextAdvanced"),
+      w.symbolClass([[0, "TextAdvanced"]]),
       w.showFrame(),
       w.end(),
     ],
@@ -8357,6 +8421,18 @@ export const cases: PlayerCase[] = [
     // corner, part grey in Flash: 27 channels.
     tolerance: 64,
     maxOutliers: 40,
+  },
+  {
+    name: "text-advanced",
+    swf: textAdvanced,
+    script: "TextAdvanced",
+    frames: 1,
+    capture: [1],
+    tolerance: 64,
+    maxOutliers: 40,
+    // Saffron's CSM cutoffs (stems thickened, thickness and sharpness),
+    // and advanced layout's pen kept in fractions of a twip.
+    gap: "advanced anti-aliasing",
   },
   {
     name: "text-indent",
