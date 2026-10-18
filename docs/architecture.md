@@ -4600,11 +4600,19 @@ of 2×2 at medium and 4×4 at high and best (the `stage-quality-*` cases).
 The canvas is not multisampled; the back buffer the stage is drawn into
 is, but at low (the Pixi fork's `GlBackBufferSystem.antialias`, which
 makes it anew), and `PixiView.quality` at low samples the smoothed copies
-of the stores' textures, and drawTriangles' fills, nearest. Medium is the
-GPU's multisampling as high is: the four samples it takes are near
-enough to either grid that supersampling, 4 or 16 times the pixels, would
-cost more than the edges show. A BitmapData's draw at low quality
-smooths no bitmap either.
+of the stores' textures, and drawTriangles' fills, nearest. Medium and
+high are the GPU's multisampling, which costs the GPU memory and
+bandwidth but no shading: supersampling, 4 or 16 times the pixels, would
+cost more than the edges show. The back buffer takes Flash's samples, 4
+at medium and 16 at high and best, as many as the GPU allows (the fork's
+`backBufferSamples`; 8 on many integrated GPUs), remade at the next
+frame. Filter and blend layers keep 4 at every quality (`msaaSamples`):
+they are many and drawn into often, and on an integrated GPU 8 samples
+for every target slowed a crowded scene's slowest frames where 8 for the
+back buffer alone cost nothing measurable. A filtered object's edges are
+so a little coarser at high than an unfiltered neighbour's, where Flash
+covers both with 16. A BitmapData's draw at low quality smooths no bitmap
+either.
 
 ### The page's configuration
 

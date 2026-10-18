@@ -197,7 +197,13 @@ check(
     await call(evaluate, 'requality("high")');
     const most = await call<number>(
       evaluate,
-      'document.createElement("canvas").getContext("webgl2")?.getParameter(0x8d57) ?? 0',
+      `(() => {
+        const gl = document.createElement("canvas").getContext("webgl2");
+        const most = gl?.getParameter(gl.MAX_SAMPLES) ?? 0;
+        // A context let go of at once, not left to count against the page's.
+        gl?.getExtension("WEBGL_lose_context")?.loseContext();
+        return most;
+      })()`,
     );
     if (most > 4) {
       assert.ok(medium < high, `${medium} colours at medium, ${high} at high (${most} samples)`);
