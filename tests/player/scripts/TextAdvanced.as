@@ -7,8 +7,9 @@ package {
   // and laid out with each antiAliasType, gridFitType, thickness and
   // sharpness: Flash's advanced anti-aliasing (Saffron) moves stems onto
   // the pixel grid and thickens or thins them, and lays advanced text out
-  // with its pen in fractions of a twip. The player has neither yet: a
-  // known gap, out of the default run.
+  // with its pen in fractions of a twip, letter spacing, kerning and mixed
+  // sizes too. The player lays it out so (text-advanced-layout); drawing
+  // is the known gap, out of the default run (text-advanced).
   public class TextAdvanced extends Sprite {
     private static const SIZES:Array = [10, 12, 14, 20, 24];
     private static const MODES:Array = [
@@ -22,14 +23,14 @@ package {
       ["advanced", "pixel", 0, 400]
     ];
 
-    private function field(size:Number, mode:Array, color:uint, text:String):TextField {
+    private function field(size:Number, mode:Array, color:uint, text:String, format:TextFormat = null):TextField {
       var t:TextField = new TextField();
       t.embedFonts = true;
       t.antiAliasType = mode[0];
       t.gridFitType = mode[1];
       t.thickness = mode[2];
       t.sharpness = mode[3];
-      t.defaultTextFormat = new TextFormat("Stem", size, color);
+      t.defaultTextFormat = format || new TextFormat("Stem", size, color);
       t.autoSize = TextFieldAutoSize.LEFT;
       t.text = text;
       return t;
@@ -46,6 +47,22 @@ package {
     }
 
     public function TextAdvanced() {
+      // Kerning, in sizes no other field here uses: adl's advanced,
+      // pixel-fitted text keeps a word's layout from one field to another
+      // of the same size whether kerned or not. The pair ends the text:
+      // before another character adl's boundaries give it to the pair's
+      // first.
+      for (var km:int = 0; km < 3; km++) {
+        for each (var ks:Number in [11, 22]) {
+          var kerned:TextFormat = new TextFormat("Stem", ks);
+          kerned.kerning = true;
+          var kt:TextField = field(ks, MODES[km], 0, "lmal", kerned);
+          kt.y = 400;
+          addChild(kt);
+          trace(MODES[km][0], MODES[km][1], ks, "kerning", "tw", kt.textWidth, "w", widths(kt));
+        }
+      }
+
       var bar:Shape = new Shape();
       bar.graphics.beginFill(0xcc2222);
       bar.graphics.drawRect(0, 0, 200, 212);
@@ -87,6 +104,28 @@ package {
           addChild(t);
           trace(MODES[m][0], MODES[m][1], SIZES[s], "tw", t.textWidth, "w", widths(t));
         }
+      }
+
+      // Letter spacing in fractions of a pixel and sizes mixed in one
+      // line, normal and advanced.
+      for (m = 0; m < 3; m++) {
+        for each (var size:Number in [12, 20]) {
+          for each (var spacing:Number in [0.3, 1.7, -0.6]) {
+            var spaced:TextFormat = new TextFormat("Stem", size);
+            spaced.letterSpacing = spacing;
+            var st:TextField = field(size, MODES[m], 0, "lmalmaW 1ll2", spaced);
+            st.y = 400;
+            addChild(st);
+            trace(MODES[m][0], MODES[m][1], size, "spacing", spacing, "tw", st.textWidth, "w", widths(st));
+          }
+
+        }
+
+        var mixed:TextField = field(12, MODES[m], 0, "");
+        mixed.htmlText = "<font size='10'>lma</font><font size='13'>lma</font><font size='17'>lmW</font>";
+        mixed.y = 400;
+        addChild(mixed);
+        trace(MODES[m][0], MODES[m][1], "mixed", "tw", mixed.textWidth, "w", widths(mixed));
       }
     }
   }

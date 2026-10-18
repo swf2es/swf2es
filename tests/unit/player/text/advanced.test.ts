@@ -74,3 +74,49 @@ test("antiAliasType lays a field's text out again", () => {
   // 230 of 1024 at 10 pixels, 44.92 twips each: the eighth lands at 359.
   assert.equal(o.layout.width, 359);
 });
+
+/** A field of `text` in the given format changes, set before the text. */
+function formatted(aa: string, size: number, text: string, format: object): TextObject {
+  const o = field(aa, "none", size, "");
+  o.model.defaultFormat = { ...o.model.defaultFormat, ...format };
+  o.model.setText(text);
+  return o;
+}
+
+test("advanced text's letter spacing lands where adl puts it", () => {
+  const spaced = (aa: string, spacing: number) =>
+    widths(formatted(aa, 12, "lmalmaW 1ll2", { letterSpacing: spacing }));
+  assert.deepEqual(spaced("normal", 0.3), [59, 216, 131, 59, 216, 131, 240, 64, 76, 59, 59, 76]);
+  assert.deepEqual(spaced("advanced", 0.3), [59, 217, 132, 60, 217, 132, 240, 65, 76, 60, 60, 76]);
+  assert.deepEqual(spaced("advanced", -0.6), [41, 199, 114, 42, 199, 114, 222, 47, 58, 42, 42, 58]);
+});
+
+test("a kerned advance is summed with its pair's adjustment in the font's units, then truncated", () => {
+  // "a" then "l" kern by -77 units: 230 - 77 at 11 pixels is 32 twips, not 49 - 16.
+  const kerned = (aa: string, size: number) =>
+    widths(formatted(aa, size, "lmal", { kerning: true }));
+  assert.deepEqual(kerned("normal", 11), [49, 193, 115, 32]);
+  assert.deepEqual(kerned("advanced", 11), [49, 193, 116, 33]);
+  assert.deepEqual(kerned("advanced", 22), [98, 387, 231, 66]);
+});
+
+test("a run of another size starts where the last one's text landed", () => {
+  const html = "<font size='10'>lma</font><font size='13'>lma</font><font size='17'>lmW</font>";
+  for (const [aa, expected, width] of [
+    ["normal", [44, 175, 104, 58, 228, 136, 76, 298, 332], 1451],
+    ["advanced", [44, 176, 105, 58, 228, 137, 76, 299, 332], 1455],
+  ] as const) {
+    const o = field(aa, "none", 12, "");
+    o.model.setHtml(html, false);
+    assert.deepEqual(widths(o), expected, aa);
+    assert.equal(o.layout.width, width, aa);
+  }
+});
+
+test("a pen a negative spacing takes left of 0 lands at 0, not -0", () => {
+  // 44.92 twips less 45 a character: the first lands at -0.08.
+  const o = formatted("advanced", 10, "ll", { letterSpacing: -2.27 });
+  for (const c of o.layout.lines[0].chars) {
+    assert.ok(!Object.is(c.x, -0) && !Object.is(c.advance, -0));
+  }
+});
