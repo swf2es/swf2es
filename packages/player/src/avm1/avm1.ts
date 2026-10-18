@@ -1550,15 +1550,17 @@ export class Avm1
       return host;
     }
 
-    const caller = this.codeSwfs.get(this.realm.current?.code ?? []);
-    const urls = caller !== undefined ? [caller.url] : this.codeUrls;
-    for (const url of urls) {
-      if (!allows.call(host, url)) {
-        return null;
-      }
-    }
+    return this.callerUrls().every((url) => allows.call(host, url)) ? host : null;
+  }
 
-    return host;
+  /**
+   * The URL of the SWF whose code is running, known by its blocks; where
+   * no SWF's code is running, as a timer, a network callback or the page
+   * calls a native straight, every URL of a SWF that has had code.
+   */
+  private callerUrls(): string[] {
+    const caller = this.codeSwfs.get(this.realm.current?.code ?? []);
+    return caller !== undefined ? [caller.url] : [...this.codeUrls];
   }
 
   /** `swf`'s code compiled: its blocks known as its own, and its URL among those that ran code. */
@@ -1781,6 +1783,11 @@ export class Avm1
         // One replaced or cancelled meanwhile is not read, nor its code compiled.
         if (load.status !== "pending") {
           return SKIPPED;
+        }
+
+        // What came is the final URL's: a redirect to another origin must not pass as the one asked for.
+        if (result.url) {
+          load.url = result.url;
         }
 
         const a = await arrive(result, this.decodeImage);
@@ -3397,7 +3404,11 @@ interface MovieLoad {
   target: MovieClip;
   /** The MovieClipLoader whose listeners hear of it; null for loadMovie's. */
   loader: avm1.Avm1Object | null;
-  /** Its URL against the SWF's: what it loaded's `_url`. */
+  /**
+   * Its URL against the SWF's, then where a redirect took it once it
+   * arrives, as AS3's loads and Ruffle's take it: what it loaded's `_url`,
+   * its query variables and the URL every access check asks about.
+   */
   url: string;
   /**
    * Under way, or cancelled by an unload before it arrived; arrived and

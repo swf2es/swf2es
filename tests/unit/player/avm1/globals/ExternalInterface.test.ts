@@ -109,14 +109,14 @@ test("the page's calls in run the callback on its object and answer in XML", asy
   const lines = await play(
     `var self = {name: "it"};
 trace(${EI}.addCallback("g", self, function(a, b) { trace(this.name + " " + a + " " + b); return [a, b]; }));
-trace(${EI}.addCallback("h", self, 5));`,
+trace(${EI}.addCallback("h", self, 5)); trace(${EI}.addCallback("h", self, {}));`,
     host,
   );
   const answer = callbacks.get("g")?.(
     '<invoke name="g" returntype="xml"><arguments><string>x</string><number>2</number></arguments></invoke>',
     null,
   );
-  assert.deepEqual(lines, ["true", "false", "it x 2"]);
+  assert.deepEqual(lines, ["true", "false", "false", "it x 2"]);
   assert.equal(
     answer,
     '<array><property id="0"><string>x</string></property><property id="1"><number>2</number></property></array>',
@@ -225,12 +225,45 @@ trace(${EI}.addCallback("h", null, function() { return o; }));`,
   );
 });
 
-test("the converters read at most 2^16 elements and stop at an object inside itself", async () => {
+test("the converters read at most 2^16 values, the array itself among them, and stop at an object inside itself", async () => {
   assert.deepEqual(
     await traces([
       `var s = ${EI}._toXML({length: 2147483647}); trace(s.split("<property").length - 1);
 var o = {}; o.me = o; trace(${EI}._toXML(o)); trace(${EI}._toJS(o));`,
     ]),
-    ["65536", '<object><property id="me"><null/></property></object>', '({"me":null})'],
+    ["65535", '<object><property id="me"><null/></property></object>', '({"me":null})'],
   );
+});
+
+test("a load redirected to a refused origin is that origin's: its _url and its calls", async () => {
+  const { host, requests } = page("<null/>");
+  host.allows = (url) => url.startsWith("http://a.test/");
+  const evil = movie(`trace("child " + _url); ${EI}.call("evil");`);
+  const played = await playNet(
+    `createEmptyMovieClip("child", 1).loadMovie("http://a.test/go.swf?u=http://b.test/x.swf");`,
+    {
+      url: "http://a.test/main.swf",
+      externalInterface: host,
+      fetch: async (request) =>
+        request.url.startsWith("http://a.test/go.swf")
+          ? { bytes: evil, status: 200, headers: [], url: "http://b.test/x.swf" }
+          : { bytes: null, status: 404, headers: [] },
+    },
+  );
+  await played.deliver();
+  played.player.tick();
+  assert.deepEqual(take(played), ["child http://b.test/x.swf"]);
+  assert.deepEqual(requests, []);
+});
+
+test("one call's conversions stop past 2^16 values, however an object is shared down a tree", async () => {
+  const started = performance.now();
+  const lines = await traces([
+    `var o = [1, 2];
+for (var i = 0; i < 40; i++) { o = [o, o]; }
+var s = ${EI}._toXML(o); trace(s.split("<number>").length - 1 <= 65536);
+trace(${EI}._toJS(o).length > 0);`,
+  ]);
+  assert.deepEqual(lines, ["true", "true"]);
+  assert.ok(performance.now() - started < 20000);
 });

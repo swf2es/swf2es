@@ -1651,8 +1651,10 @@ instance, method)` takes a function only, and the page's call comes as
 an `<invoke>` whose arguments are read the same way, the reading, the
 method run on `instance` and the writing of its answer as XML all as
 AVM1 code between frames, as a timer's callback runs, what it queued
-after it. The converters read at most 2^16 elements of an array-like,
-whatever length it claims, and an object met inside itself is null.
+after it. A native call converts at most 2^16 values in all, an
+array-like's elements whatever length it claims among them, so that an
+object shared down a tree of them stops there and not after an
+exponential walk, and an object met inside itself is null.
 Without a bridge, or one whose `allows` refuses the calling SWF's URL,
 `available` is false, `call` null and `addCallback` false. The calling
 SWF is the one whose block or function is running, known by its code
@@ -1661,7 +1663,10 @@ timer, a network callback or the page's call calls one straight, needs
 every SWF that has had code so far allowed, as AS3's natives ask when
 they cannot tell their caller, so that a child from another origin
 cannot call the page through `setInterval(ExternalInterface.call, ...)`
-or `xml.onData = ExternalInterface.call`. The underscored helpers Flash's own AS2 class is built of
+or `xml.onData = ExternalInterface.call`. A native called by the code
+that sets it off implicitly, as a getter, a watcher or a listener, is
+that code's call, as in Flash. The underscored helpers Flash's own AS2
+class is built of
 (`_escapeXML`, `_toXML`, `_toAS`, `_arrayToXML`, `_argumentsToAS`...) are
 there for content to call, answering as Flash's do: an empty string
 escapes to null and serialises as `<string>null</string>`, an object
@@ -1731,7 +1736,9 @@ to SWF 6, and so looked up by the SWF of the clip it is for.
 A load goes through the host's fetch, as AS3's Loader's does ("content",
 which allowNetworking "internal" allows and "none" refuses), its URL
 resolved against `base`, the clip's variables sent where a method is
-given, and what it brings is read, its images decoded and its code
+given, and what it brings is read, its URL from then on the one a
+redirect took it to, as AS3's loads and Ruffle's have it: the loaded
+movie's `_url`, its query's variables and every check of its access, its images decoded and its code
 compiled before it arrives between frames (`Avm1.network`). Loads into
 one clip, or by one MovieClipLoader, arrive in the order asked, as
 Ruffle's test runner has them arrive, one slow to answer holding the next

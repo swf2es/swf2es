@@ -66,6 +66,15 @@ const FLAGS = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY;
  */
 const MAX_ELEMENTS = 0x10000;
 
+/**
+ * The most values one native call converts in all, elements, properties
+ * and objects: an object shared down a tree of them (a = [b, b], b = [c,
+ * c]...) is converted each time it is met, which grows exponentially in
+ * loops that never reach the script timeout. Past it, what is left is
+ * null (undefined for _toAS).
+ */
+const MAX_WORK = 0x10000;
+
 /** `flash.external.ExternalInterface`. */
 export function externalInterfaceClass(host: ExternalHost): Obj {
   const realm = host.realm;
@@ -74,8 +83,30 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
     () => undefined,
     () => undefined,
   );
+  /** What the native call converting now may still convert. */
+  let left = MAX_WORK;
+  /** Up to `n` of the work left, taken: what was. */
+  const spend = (n: number) => {
+    const k = Math.min(n, left);
+    left -= k;
+    return k;
+  };
+  /** `f`, a native call's conversions, with its own budget, the outer one's kept for after it. */
+  const budgeted = <T>(f: () => T): T => {
+    const outer = left;
+    left = MAX_WORK;
+    try {
+      return f();
+    } finally {
+      left = outer;
+    }
+  };
   const define = (name: string, f: avm1.Native, flags = avm1.VERSION_8) =>
-    constr.define(name, realm.method(f), FLAGS | flags);
+    constr.define(
+      name,
+      realm.method((self, args, v) => budgeted(() => f(self, args, v))),
+      FLAGS | flags,
+    );
 
   /** A string argument, null where it is left out or makes an empty string. */
   const text = (args: Value[], v: number, f: (s: string) => string): Value => {
@@ -88,8 +119,9 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
   };
   const asObject = (x: Value, v: number): Obj =>
     x instanceof avm1.Avm1Object ? x : realm.box(x, v);
+  /** How many elements of `o` to read: its length, capped, out of the work left. */
   const lengthOf = (o: Obj, v: number) =>
-    Math.min(MAX_ELEMENTS, Math.max(0, avm1.toNumber(avm1.get(o, "length", v), v) | 0));
+    spend(Math.min(MAX_ELEMENTS, Math.max(0, avm1.toNumber(avm1.get(o, "length", v), v) | 0)));
   /**
    * `f` of `o`, or `inside` where `o` is already being converted further
    * out: an object that holds itself ends there, where Flash's recursion
@@ -97,7 +129,7 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
    */
   const open = new Set<Obj>();
   const once = <T>(o: Obj, inside: T, f: () => T): T => {
-    if (open.has(o)) {
+    if (open.has(o) || spend(1) === 0) {
       return inside;
     }
 
@@ -126,6 +158,10 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
     for (let i = own.length - 1; i >= 0; i--) {
       const p = own[i];
       if ((p.flags & avm1.DONT_ENUM) === 0) {
+        if (spend(1) === 0) {
+          break;
+        }
+
         parts.push(`<property id="${p.name}">`, toXml(avm1.get(o, p.name, v), v), "</property>");
       }
     }
@@ -252,7 +288,7 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
   define("addCallback", (_, args, v) => {
     const bridge = host.externalBridge();
     const method = args[2];
-    if (bridge === null || args.length < 3 || !(method instanceof avm1.Avm1Object)) {
+    if (bridge === null || args.length < 3 || !(method instanceof avm1.Avm1Function)) {
       return false;
     }
 
@@ -260,14 +296,16 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
     // a getter or a toString they meet are the content's.
     const self = args[1];
     bridge.addCallback(avm1.stringOf(args[0], v), (request) =>
-      host.callIn(() => {
-        const invocation = parse(request, v);
-        const argsNode = children(invocation, v).find(
-          (child) => field(child, "nodeName", v) === "arguments",
-        );
-        const given = children(argsNode, v).map((child) => toAs(child, v));
-        return toXml(avm1.invoke(method, self, given, v), v);
-      }),
+      host.callIn(() =>
+        budgeted(() => {
+          const invocation = parse(request, v);
+          const argsNode = children(invocation, v).find(
+            (child) => field(child, "nodeName", v) === "arguments",
+          );
+          const given = children(argsNode, v).map((child) => toAs(child, v));
+          return toXml(avm1.invoke(method, self, given, v), v);
+        }),
+      ),
     );
     return true;
   });
@@ -332,6 +370,10 @@ export function externalInterfaceClass(host: ExternalHost): Obj {
     for (let i = own.length - 1; i >= 0; i--) {
       const p = own[i];
       if ((p.flags & avm1.DONT_ENUM) === 0) {
+        if (spend(1) === 0) {
+          break;
+        }
+
         parts.push(`${JSON.stringify(p.name)}:${toJs(avm1.get(o, p.name, v), v)}`);
       }
     }
