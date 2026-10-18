@@ -64,11 +64,12 @@ import {
 import { evaluate } from "../scripting/evaluate.js";
 import { resolve } from "../scripting/loads.js";
 import { type BindingHost, VariableBindings } from "./bindings.js";
+import { ExternalCalls } from "./external.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
-import { type ExternalHost, externalInterfaceClass } from "./globals/ExternalInterface.js";
+import { externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
@@ -313,9 +314,7 @@ const BUTTON_STATES = new Map<number, "up" | "over" | "down">([
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1
-  implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost, ExternalHost
-{
+export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost {
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -346,11 +345,8 @@ export class Avm1
    */
   private readonly arrivals = new WeakMap<object, Promise<void>>();
   private readonly decodeImage: ImageDecode | null;
-  private readonly externalInterface: ExternalInterfaceHost | null;
-  /** Each SWF's blocks, by which a function's or block's code is known as that SWF's. */
-  private readonly codeSwfs = new WeakMap<avm1.Region[], Avm1Swf>();
-  /** The URLs of every SWF that has had code to run, unloaded ones too. */
-  private readonly codeUrls = new Set<string>();
+  /** The page's ExternalInterface, and which SWFs call it and fscommand. */
+  private readonly external: ExternalCalls;
   /** The operand stack, which every activation of a frame's actions shares. */
   private readonly st: avm1.Value[] = [];
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
@@ -383,7 +379,7 @@ export class Avm1
   /** The display object a script is making, which it constructs itself; its children are the timeline's. */
   private scripted: DisplayObject | null = null;
   /** The player's clock, the scripts' timeout and setInterval's timers. */
-  private readonly timers: Timers;
+  readonly timers: Timers;
 
   quality = "HIGH";
   focusRect = true;
@@ -458,7 +454,7 @@ export class Avm1
     );
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
-    this.externalInterface = options.externalInterface ?? null;
+    this.external = new ExternalCalls(this, options.externalInterface ?? null);
     const movie = this;
     this.sounds = {
       get audio() {
@@ -544,7 +540,7 @@ export class Avm1
         if (options.fsCommand === undefined) {
           this.fsCommand(command);
         } else {
-          options.fsCommand(command, args, this.callerUrls());
+          options.fsCommand(command, args, this.external.callerUrls());
         }
       },
       navigate:
@@ -636,7 +632,7 @@ export class Avm1
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     const flash = flashPackage(this);
     const external = new avm1.Avm1Object(realm.objectProto);
-    external.define("ExternalInterface", externalInterfaceClass(this), 0);
+    external.define("ExternalInterface", externalInterfaceClass(this.external), 0);
     flash.define("external", external, 0);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
@@ -719,7 +715,7 @@ export class Avm1
       const module = this.codegen.compileActionsModule(swf.bytes, list);
       const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
       this.main.blocks = (factory as unknown as avm1.Factory)(this.rt);
-      this.ownCode(this.main);
+      this.external.ownCode(this.main);
     }
 
     this.loaded = true;
@@ -1283,76 +1279,6 @@ export class Avm1
     }
   }
 
-  /** The page's ExternalInterface, where it lets the SWF of the code running now use it. */
-  /**
-   * The page's ExternalInterface, where it lets the code calling use it:
-   * the SWF whose block or function is running, known by its code; where
-   * a native is called with no code of a SWF's running, as a timer, a
-   * network callback or the page's call calls one straight, every SWF that
-   * has run code so far must be allowed, as AS3's natives ask when they
-   * cannot tell their caller (hosts.ts's allows). The clip a function was
-   * made in is not enough: a load can put another SWF in it.
-   */
-  externalBridge(): ExternalInterfaceHost | null {
-    const host = this.externalInterface;
-    const allows = host?.allows;
-    if (host === null || allows === undefined) {
-      return host;
-    }
-
-    return this.callerUrls().every((url) => allows.call(host, url)) ? host : null;
-  }
-
-  /**
-   * The URL of the SWF whose code is running, known by its blocks; where
-   * no SWF's code is running, as a timer, a network callback or the page
-   * calls a native straight, every URL of a SWF that has had code.
-   */
-  private callerUrls(): string[] {
-    const caller = this.codeSwfs.get(this.realm.current?.code ?? []);
-    return caller !== undefined ? [caller.url] : [...this.codeUrls];
-  }
-
-  /** `swf`'s code compiled: its blocks known as its own, and its URL among those that ran code. */
-  private ownCode(swf: Avm1Swf): void {
-    for (const block of swf.blocks) {
-      this.codeSwfs.set(block, swf);
-    }
-
-    if (swf.blocks.length > 0) {
-      this.codeUrls.add(swf.url);
-    }
-  }
-
-  /**
-   * `body`, the page's call into a callback, run between frames or inside
-   * a call out, in the root's activation as a timer's callback runs, and
-   * what it queued run after it: what it returned, undefined where it did
-   * not run or threw.
-   */
-  callIn(body: () => Value): Value {
-    const cx =
-      this.movieRoot === null || this.halted || !this.loaded
-        ? null
-        : this.activationOf(this.movieRoot);
-    if (cx === null) {
-      return undefined;
-    }
-
-    let result: Value;
-    this.timers.begin();
-    try {
-      this.rt.call(cx, () => {
-        result = body();
-      });
-      this.queue.run();
-    } finally {
-      this.timers.end();
-    }
-
-    return result;
-  }
-
   /** LoadVars.send's page, as getURL's opens it. */
   navigate(url: string, window: string, form: avm1.UrlForm): void {
     this.host.navigate?.(url, window, form);
@@ -1644,7 +1570,7 @@ export class Avm1
           size,
         );
         swf.blocks = arrived.blocks;
-        this.ownCode(swf);
+        this.external.ownCode(swf);
         this.adopt(swf);
         readRootFrames(file, swf);
         this.fill(target, swf);
