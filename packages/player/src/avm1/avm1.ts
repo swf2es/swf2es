@@ -77,6 +77,7 @@ import {
   DEPTH_BIAS,
   type Movie,
   movieClipClass,
+  nativeOf,
   targetOf,
 } from "./globals/MovieClip.js";
 import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
@@ -93,6 +94,23 @@ import { xmlSocketClass } from "./globals/XMLSocket.js";
 import { type Arrival, arrive, queryVariables } from "./loads.js";
 import { Avm1Net, textFor } from "./net.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
+import {
+  ActionQueue,
+  BLOCK,
+  CALL,
+  CONSTRUCT,
+  CONSTRUCTION,
+  FRAME,
+  HALT,
+  INIT,
+  INITIALIZE,
+  METHOD,
+  NO_ARGS,
+  NO_BLOCKS,
+  NORMAL,
+  NOTIFY,
+  Queued,
+} from "./queue.js";
 import {
   Avm1Swf,
   handlersOf,
@@ -273,54 +291,6 @@ const LABELS = new Map<number, string>([
   [ClipEvent.dragOver, "_down"],
 ]);
 
-// The queue's priorities, which it runs in order: initialize clip events
-// first, then the root's DoInitAction blocks, then constructions, then the
-// rest, frame actions, events and methods, each in the order queued
-// (Ruffle's ActionPriority; adl has a frame's initialize events before its
-// DoInitAction blocks, which Ruffle runs as the SWF loads).
-const INITIALIZE = 0;
-const INIT = 1;
-const CONSTRUCT = 2;
-const NORMAL = 3;
-
-// What a queued action is.
-/** A DoAction tag's blocks, `index` the tag's body's offset. */
-const FRAME = 0;
-/** A block alone, a DoInitAction's or a clip event's, by its index. */
-const BLOCK = 1;
-/** A timeline's clip's construction: its registered class's prototype and constructor, and its construct events. */
-const CONSTRUCTION = 2;
-/** An AS2 event method, `name`, of the clip's object. */
-const METHOD = 3;
-/** The SWF stopped, at a place whose clip actions Flash cannot read. */
-const HALT = 4;
-/** A broadcaster's message, `name`, to its listeners: Key's and Mouse's, as the player sends them. */
-const NOTIFY = 5;
-/** A method, `name`, of `object`, called with `args`, as a script would call it. */
-const CALL = 6;
-
-/** An action waiting its turn in the frame. */
-class Queued {
-  constructor(
-    readonly kind: number,
-    readonly clip: DisplayObject,
-    /** The SWF whose blocks `index` and `blocks` are. */
-    readonly swf: Avm1Swf | null = null,
-    readonly index = 0,
-    /** Which of the clip's frame entries queued a FRAME: blocks of one share their constant pool. */
-    readonly entry = 0,
-    /** Whether it is an unload's, which runs for a clip removed since. */
-    readonly unload = false,
-    readonly name = "",
-    readonly blocks: number[] = NO_BLOCKS,
-    /** A NOTIFY's broadcaster or a CALL's object, and the arguments. */
-    readonly object: avm1.Avm1Object | null = null,
-    readonly args: avm1.Value[] = NO_ARGS,
-  ) {}
-}
-
-const NO_BLOCKS: number[] = [];
-
 /** What Mouse's listeners hear of the pointer's clip events. */
 const MOUSE_MESSAGES = new Map<number, string>([
   [ClipEvent.mouseMove, "onMouseMove"],
@@ -338,9 +308,6 @@ const BUTTON_STATES = new Map<number, "up" | "over" | "down">([
   [ClipEvent.dragOut, "over"],
   [ClipEvent.dragOver, "down"],
 ]);
-
-/** How many queued actions of a priority run before those run are dropped from its queue. */
-const COMPACT_AT = 4096;
 
 /** The ms in a frame of the SWF's rate. */
 const frameMs = (rate: number) => 1000 / (rate || 24);
@@ -398,17 +365,11 @@ export class Avm1
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
   private stopNext = false;
   /** The clips, in the order they were made, which play the newest first. */
-  private clips: MovieClip[] = [];
-  /** The queue, by priority, and how far each has run. */
-  private readonly queues: Queued[][] = [[], [], [], []];
-  private readonly heads = [0, 0, 0, 0];
+  clips: MovieClip[] = [];
+  /** What the frame, events and scripts queue, and what runs it. */
+  private readonly queue = new ActionQueue(this);
   /** Whether the module is loaded: until it is, the first frame's actions wait in the queue. */
-  private loaded = false;
-  /** Whether the queue is running, which a function's return runs the earlier passes of. */
-  private running = false;
-  /** The pass of the action the queue runs, and the pass `next` last took from. */
-  private priority = NORMAL;
-  private taken = NORMAL;
+  loaded = false;
   /** Each clip's latest frame entry, which its queued blocks are of. */
   private readonly entries = new WeakMap<MovieClip, number>();
   private entryCount = 0;
@@ -419,7 +380,7 @@ export class Avm1
   private swfLength = 0;
   private rate = 24;
   private readonly host: avm1.Host;
-  private readonly onUncaught: (error: unknown) => void;
+  readonly onUncaught: (error: unknown) => void;
   private readonly timelines = new WeakMap<MovieClip, avm1.Timeline>();
   private clipProto: avm1.Avm1Object | null = null;
   private buttonProto: avm1.Avm1Object | null = null;
@@ -589,7 +550,7 @@ export class Avm1
       startDrag: (target, lockCenter, bounds) =>
         this.startDrag(target as DisplayObject, lockCenter, bounds),
       stopDrag: () => this.stopDrag(),
-      returned: () => this.returned(),
+      returned: () => this.queue.returned(),
       stopSounds: () => stopTimelineSounds(this.sounds),
       loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
       loadMovie: (into, url, form) =>
@@ -790,7 +751,7 @@ export class Avm1
         this.method(this.movieRoot, ClipEvent.load, false);
       }
 
-      this.runQueue();
+      this.queue.run();
       this.afterFrame();
     } finally {
       this.end();
@@ -840,7 +801,7 @@ export class Avm1
       this.frameCount++;
       // What the network answered since the last frame, before the clips play on.
       if (this.netDelivered()) {
-        this.runQueue();
+        this.queue.run();
       }
 
       finishTimelineSounds(this.sounds);
@@ -870,10 +831,10 @@ export class Avm1
       this.clips = clips.filter((clip) => !this.removed(clip));
       // A load's onLoadInit after the frame's actions of what it loaded, as Ruffle queues it.
       this.loadsInitialized();
-      this.runQueue();
+      this.queue.run();
       // onSoundComplete runs with the frame's actions, and what it queues runs with them too.
       if (this.soundsCompleted()) {
-        this.runQueue();
+        this.queue.run();
       }
 
       this.afterFrame();
@@ -964,7 +925,7 @@ export class Avm1
           const key = asciiLower(label);
           return clip.timeline.gotoLabels.find((l) => asciiLower(l.name) === key)?.frame;
         },
-        call: (frame) => this.callFrame(clip, frame),
+        call: (frame) => this.queue.callFrame(clip, frame),
       };
       this.timelines.set(clip, timeline);
     }
@@ -1178,7 +1139,7 @@ export class Avm1
       this.now(),
       this.swfVersion,
       () => this.activationOf(root),
-      () => this.runQueue(),
+      () => this.queue.run(),
       (object) => {
         const target = object.display?.target;
         return target instanceof MovieClip && this.removed(target);
@@ -1258,7 +1219,7 @@ export class Avm1
     // Its initialize events wait for the queue's first pass, before its children's.
     for (const h of native.handlers ?? NO_HANDLERS) {
       if (h.events & ClipEvent.initialize) {
-        this.enqueue(INITIALIZE, new Queued(BLOCK, d, native.swf, h.block));
+        this.queue.enqueue(INITIALIZE, new Queued(BLOCK, d, native.swf, h.block));
       }
     }
 
@@ -1272,7 +1233,10 @@ export class Avm1
     // DoInitAction blocks run after its places are made, before the queue.
     const constructs = constructBlocks(native);
     if (constructs.length > 0 || this.exported(d)) {
-      this.enqueue(CONSTRUCT, new Queued(CONSTRUCTION, d, native.swf, 0, 0, false, "", constructs));
+      this.queue.enqueue(
+        CONSTRUCT,
+        new Queued(CONSTRUCTION, d, native.swf, 0, 0, false, "", constructs),
+      );
     }
   }
 
@@ -1322,7 +1286,7 @@ export class Avm1
         this.halted = true;
         break;
       case "construct":
-        this.enqueue(CONSTRUCT, new Queued(HALT, d));
+        this.queue.enqueue(CONSTRUCT, new Queued(HALT, d));
         break;
       case "enterFrame":
         this.stopNext = true;
@@ -1334,7 +1298,7 @@ export class Avm1
    * The class Object.registerClass bound to `d`'s character's export name
    * in its SWF, null for none.
    */
-  private classOf(d: DisplayObject): avm1.Avm1Function | null {
+  classOf(d: DisplayObject): avm1.Avm1Function | null {
     // A sprite's only: a button's symbol stays a Button (the corpus's register_class).
     const id = d instanceof MovieClip ? d.character?.id : undefined;
     const swf = this.swfOf(d);
@@ -1462,7 +1426,7 @@ export class Avm1
       this.rt.call(cx, () => {
         result = body();
       });
-      this.runQueue();
+      this.queue.run();
     } finally {
       this.end();
     }
@@ -1493,7 +1457,7 @@ export class Avm1
     this.begin();
     try {
       if (this.netDelivered()) {
-        this.runQueue();
+        this.queue.run();
       }
     } finally {
       this.end();
@@ -1549,7 +1513,7 @@ export class Avm1
       }
 
       if (into instanceof MovieClip) {
-        this.enqueue(NORMAL, new Queued(METHOD, into, null, 0, 0, false, "onData"));
+        this.queue.enqueue(NORMAL, new Queued(METHOD, into, null, 0, 0, false, "onData"));
         this.dispatch(into, ClipEvent.data, false);
       }
     });
@@ -1817,7 +1781,7 @@ export class Avm1
 
       this.movieLoads.splice(i, 1);
       if (load.status === "loaded" && load.loader !== null) {
-        this.enqueue(
+        this.queue.enqueue(
           NORMAL,
           new Queued(
             CALL,
@@ -2027,8 +1991,8 @@ export class Avm1
 
     // It is constructed as the queue's constructions are: a function returning in it
     // runs only initializations queued (the corpus's register_and_init_order).
-    const pass = this.priority;
-    this.priority = CONSTRUCT;
+    const pass = this.queue.priority;
+    this.queue.priority = CONSTRUCT;
     try {
       // A SWF 6 sets the init object's properties before the construct events, a later one
       // after (adl).
@@ -2037,7 +2001,7 @@ export class Avm1
       }
 
       for (const block of constructBlocks(native)) {
-        this.runOne(new Queued(BLOCK, child, native.swf, block), []);
+        this.queue.runOne(new Queued(BLOCK, child, native.swf, block), []);
       }
 
       if (version > 6) {
@@ -2055,7 +2019,7 @@ export class Avm1
         this.rt.callMethod(cx, face, "onConstruct", NO_ARGS, version);
       }
     } finally {
-      this.priority = pass;
+      this.queue.priority = pass;
     }
 
     return child;
@@ -2081,7 +2045,7 @@ export class Avm1
   }
 
   /** `constr` run on the clip's object as its constructor, as `new` runs one. */
-  private construct(clip: DisplayObject, face: avm1.Avm1Object, constr: avm1.Avm1Function): void {
+  construct(clip: DisplayObject, face: avm1.Avm1Object, constr: avm1.Avm1Function): void {
     const cx = this.activationOf(clip);
     if (cx === null) {
       return;
@@ -2099,7 +2063,7 @@ export class Avm1
   }
 
   /** An activation of `d`'s code, as a frame's block has. */
-  private activationOf(d: DisplayObject, pool: Value[] = []): avm1.Activation | null {
+  activationOf(d: DisplayObject, pool: Value[] = []): avm1.Activation | null {
     const face = d.avm1;
     return face === null ? null : this.rt.activation(this.st, pool, d, face, this.host);
   }
@@ -2496,12 +2460,12 @@ export class Avm1
     for (const { sprite, block } of actions.inits) {
       if (!swf.initialized.has(sprite)) {
         swf.initialized.add(sprite);
-        this.enqueue(INIT, new Queued(BLOCK, clip, swf, block));
+        this.queue.enqueue(INIT, new Queued(BLOCK, clip, swf, block));
       }
     }
 
     if (actions.stop === "construct") {
-      this.enqueue(CONSTRUCT, new Queued(HALT, clip));
+      this.queue.enqueue(CONSTRUCT, new Queued(HALT, clip));
     }
 
     this.stopNext ||= actions.stop === "enterFrame";
@@ -2528,7 +2492,7 @@ export class Avm1
     const unload = event === ClipEvent.unload;
     for (const h of native.handlers ?? NO_HANDLERS) {
       if (h.events & event) {
-        this.enqueue(
+        this.queue.enqueue(
           event === ClipEvent.initialize ? INITIALIZE : NORMAL,
           new Queued(BLOCK, clip, native.swf, h.block, 0, unload),
         );
@@ -2555,7 +2519,7 @@ export class Avm1
   private method(clip: DisplayObject, event: number, unload: boolean): void {
     const name = METHODS.get(event);
     if (name !== undefined && this.methodVersion(clip) >= 6) {
-      this.enqueue(NORMAL, new Queued(METHOD, clip, null, 0, 0, unload, name));
+      this.queue.enqueue(NORMAL, new Queued(METHOD, clip, null, 0, 0, unload, name));
     }
   }
 
@@ -2690,7 +2654,7 @@ export class Avm1
       // press what has it.
       let used = pressed;
       if (down && !pressed && keyCode === 9) {
-        this.runQueue();
+        this.queue.run();
         // A movie with nothing to tab to leaves Tab to the page.
         used = this.tab(shift);
       } else if (down && !pressed && (keyCode === 13 || typed === 32)) {
@@ -2698,7 +2662,7 @@ export class Avm1
         used = this.activate();
       }
 
-      this.runQueue();
+      this.queue.run();
       return used;
     } finally {
       this.end();
@@ -2714,7 +2678,7 @@ export class Avm1
     this.begin();
     try {
       const pressed = this.queueKeyPress(press) || (press === 32 && this.activate());
-      this.runQueue();
+      this.queue.run();
       return pressed;
     } finally {
       this.end();
@@ -2751,7 +2715,7 @@ export class Avm1
           const swf = this.swfOf(button);
           for (const h of handlersOfButton(swf, id)) {
             if (h.key === press) {
-              this.enqueue(NORMAL, new Queued(BLOCK, button.parent, swf, h.block));
+              this.queue.enqueue(NORMAL, new Queued(BLOCK, button.parent, swf, h.block));
               found = true;
             }
           }
@@ -2765,7 +2729,7 @@ export class Avm1
         let found = false;
         for (const h of native.handlers ?? NO_HANDLERS) {
           if (h.events & ClipEvent.keyPress && h.key === press) {
-            this.enqueue(NORMAL, new Queued(BLOCK, d, native.swf, h.block));
+            this.queue.enqueue(NORMAL, new Queued(BLOCK, d, native.swf, h.block));
             found = true;
           }
         }
@@ -2782,7 +2746,7 @@ export class Avm1
   /** `object`'s listeners told `name` with `args`, queued after what is queued now. */
   private notify(object: avm1.Avm1Object | null, name: string, args: avm1.Value[] = NO_ARGS): void {
     if (object !== null && this.root !== null) {
-      this.enqueue(
+      this.queue.enqueue(
         NORMAL,
         new Queued(NOTIFY, this.root, null, 0, 0, false, name, NO_BLOCKS, object, args),
       );
@@ -2808,7 +2772,7 @@ export class Avm1
     this.begin();
     try {
       this.notify(this.mouseFace, "onMouseWheel", [delta, target?.avm1 ?? undefined]);
-      this.runQueue();
+      this.queue.run();
     } finally {
       this.end();
     }
@@ -2905,7 +2869,7 @@ export class Avm1
         this.buttonDispatch(d, event);
       }
 
-      this.runQueue();
+      this.queue.run();
     } finally {
       this.end();
     }
@@ -2939,7 +2903,7 @@ export class Avm1
       const swf = this.swfOf(button);
       for (const h of handlersOfButton(swf, id)) {
         if (h.conditions & condition) {
-          this.enqueue(NORMAL, new Queued(BLOCK, parent, swf, h.block));
+          this.queue.enqueue(NORMAL, new Queued(BLOCK, parent, swf, h.block));
         }
       }
     }
@@ -2978,272 +2942,18 @@ export class Avm1
         this.notify(this.mouseFace, message);
       }
 
-      this.runQueue();
+      this.queue.run();
     } finally {
       this.end();
     }
   }
 
-  private enqueue(priority: number, q: Queued): void {
-    this.queues[priority].push(q);
-  }
-
   /** A DoAction tag a clip's frame reached: its blocks wait for the queue. */
   private queueTag(clip: MovieClip, tag: number): void {
-    this.enqueue(
+    this.queue.enqueue(
       NORMAL,
       new Queued(FRAME, clip, this.swfOf(clip), tag, this.entries.get(clip) ?? 0),
     );
-  }
-
-  /** The next action of priorities `from` to `to`, the most urgent first; null for none. */
-  private next(from = INITIALIZE, to = NORMAL): Queued | null {
-    for (let p = from; p <= to; p++) {
-      const queue = this.queues[p];
-      // Gotos that go back and forth queue each other's frames for as long
-      // as they run, which is forever in a SWF that never stops them: what
-      // has run goes, and so do the clips they removed, so that such a SWF
-      // runs into the script timeout without its memory growing.
-      if (this.heads[p] >= COMPACT_AT) {
-        queue.splice(0, this.heads[p]);
-        this.heads[p] = 0;
-        this.clips = this.clips.filter((clip) => !this.removed(clip));
-      }
-
-      if (this.heads[p] < queue.length) {
-        this.taken = p;
-        return queue[this.heads[p]++];
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Run what is queued, by priority, what it queues included: the actions
-   * of a clip still on the display list but an unload's; a frame entry's
-   * blocks sharing a constant pool, each starting with the one the block
-   * before left.
-   */
-  private runQueue(): void {
-    if (!this.loaded || this.running) {
-      return;
-    }
-
-    this.running = true;
-    let pool: avm1.Value[] = [];
-    let last: Queued | null = null;
-    try {
-      for (let q = this.next(); q !== null; q = this.next()) {
-        if (this.halted || this.rt.disabled) {
-          continue;
-        }
-
-        // A goto that queues its own frame again and again loops here, as a jump back does.
-        if (--this.realm.budget < 0) {
-          this.timeout();
-        }
-
-        this.priority = this.taken;
-        if (q.kind === FRAME) {
-          if (last === null || last.clip !== q.clip || last.entry !== q.entry) {
-            pool = [];
-          }
-
-          last = q;
-          if (!this.gone(q.clip)) {
-            pool = this.runOne(q, pool);
-          }
-        } else {
-          this.runOne(q, []);
-        }
-      }
-    } finally {
-      this.running = false;
-      for (let p = 0; p < this.queues.length; p++) {
-        this.queues[p].length = 0;
-        this.heads[p] = 0;
-      }
-    }
-  }
-
-  /** The queue's own check of the script timeout, which disables the movie's actions past it. */
-  private timeout(): void {
-    const cx = this.activationOf(this.root);
-    if (cx !== null) {
-      this.rt.call(cx, () => this.realm.timeout());
-    }
-  }
-
-  /**
-   * A function of the SWF's returned to code the queue runs: Flash runs
-   * what was queued by then of the passes before that code's, a frame
-   * action's initializations and constructions, a construction's
-   * initializations (adl, and the corpus's register_and_init_order).
-   */
-  private returned(): void {
-    if (!this.running) {
-      return;
-    }
-
-    const outer = this.priority;
-    try {
-      for (
-        let q = this.next(INITIALIZE, outer - 1);
-        q !== null;
-        q = this.next(INITIALIZE, outer - 1)
-      ) {
-        if (!this.halted && !this.rt.disabled) {
-          this.priority = this.taken;
-          this.runOne(q, []);
-        }
-      }
-    } finally {
-      this.priority = outer;
-    }
-  }
-
-  /**
-   * Whether the clip of a queued action is gone: its actions do not run
-   * but an unload's. One kept a frame for an unload handler is, where it
-   * has clip actions of its own; one without, kept for an onUnload or for
-   * a clip in it, runs what it queued before (adl; Ruffle skips them all).
-   */
-  private gone(d: DisplayObject): boolean {
-    if (this.removed(d)) {
-      return true;
-    }
-
-    const native = nativeOf(d);
-    return native?.pending === true && native.handlers !== null;
-  }
-
-  /** Run one queued action, from constant pool `pool` for a FRAME; the pool it leaves. */
-  private runOne(q: Queued, pool: avm1.Value[]): avm1.Value[] {
-    const clip = q.clip;
-    if (q.kind !== FRAME && !q.unload && this.gone(clip)) {
-      return pool;
-    }
-
-    switch (q.kind) {
-      case FRAME:
-        // A clip a load has filled since runs none of what it queued before.
-        if (q.swf !== this.swfOf(clip)) {
-          return pool;
-        }
-
-        for (const index of q.swf.list?.byTag.get(q.index) ?? NO_BLOCKS) {
-          pool = this.run(q.swf, index, pool, clip);
-        }
-
-        return pool;
-      case BLOCK:
-        this.run(q.swf, q.index, [], clip);
-        break;
-      case CONSTRUCTION:
-        this.construction(q);
-        break;
-      case METHOD: {
-        const face = clip.avm1;
-        const cx = this.activationOf(clip);
-        if (face !== null && cx !== null && !this.removed(clip)) {
-          this.rt.callMethod(cx, face, q.name, NO_ARGS, this.swfOf(clip).version);
-        }
-        break;
-      }
-      case HALT:
-        this.halted = true;
-        break;
-      case CALL: {
-        const cx = this.activationOf(clip);
-        if (cx !== null && q.object !== null) {
-          this.rt.callMethod(cx, q.object, q.name, q.args, this.swfVersion);
-        }
-        break;
-      }
-      case NOTIFY: {
-        const cx = this.activationOf(clip);
-        const object = q.object;
-        if (cx !== null && object !== null) {
-          this.rt.call(cx, () => {
-            avm1.broadcastMessage(object, q.name, q.args, this.swfVersion, (listener) => {
-              const display = listener.display;
-              return display instanceof ClipNative && this.removed(display.target);
-            });
-          });
-        }
-        break;
-      }
-    }
-
-    return pool;
-  }
-
-  /**
-   * A timeline's clip constructed: its registered class's prototype, its
-   * construct events, then the class's constructor on it.
-   */
-  private construction(q: Queued): void {
-    const face = q.clip.avm1;
-    if (face === null) {
-      return;
-    }
-
-    const constr = this.classOf(q.clip);
-    if (constr !== null) {
-      face.define(
-        "__proto__",
-        avm1.get(constr, "prototype", this.swfOf(q.clip).version),
-        avm1.DONT_ENUM | avm1.DONT_DELETE,
-      );
-    }
-
-    for (const block of q.blocks) {
-      this.run(q.swf, block, [], q.clip);
-    }
-
-    if (constr !== null) {
-      this.construct(q.clip, face, constr);
-    }
-  }
-
-  /** CallFrame: the actions of `clip`'s frame `frame`, run now in order, each with a pool of its own. */
-  private callFrame(clip: MovieClip, frame: number): void {
-    const swf = this.swfOf(clip);
-    for (const command of clip.timeline.frames[frame - 1] ?? []) {
-      if (command.type === "actions") {
-        for (const index of swf.list?.byTag.get(command.tag) ?? []) {
-          this.run(swf, index, [], clip);
-        }
-      }
-    }
-  }
-
-  /**
-   * Run `swf`'s block `index` with `clip` as its target, starting from
-   * constant pool `pool`; the pool it leaves.
-   */
-  private run(
-    swf: Avm1Swf | null,
-    index: number,
-    pool: avm1.Value[],
-    clip: DisplayObject,
-  ): avm1.Value[] {
-    const regions = swf?.blocks[index];
-    const cx = regions ? this.activationOf(clip, pool) : null;
-    if (!regions || cx === null) {
-      return pool;
-    }
-
-    try {
-      this.rt.run(regions, cx);
-    } catch (error) {
-      if (!(error instanceof avm1.Halt)) {
-        this.onUncaught(error);
-      }
-    }
-
-    return cx.pool;
   }
 }
 
@@ -3289,18 +2999,10 @@ function within(previous: Promise<unknown>, ms: number): Promise<unknown> {
 /** What a clip unloaded or in error shows: no frames, which it never enters. */
 const NO_FRAMES: Timeline = { ...EMPTY_TIMELINE, frames: [] };
 
-const NO_ARGS: Value[] = [];
-
 /** The highest timeline depth scripts place at, 2^31 - 16777220, as Ruffle has it. */
 const MAX_DEPTH = 2130706428;
 /** The depth from which removeMovieClip removes nothing. */
 const MAX_REMOVE_DEPTH = 2130706416;
-
-/** `d`'s AVM1 side, null for one without. */
-function nativeOf(d: DisplayObject): ClipNative | null {
-  const native = d.avm1?.display;
-  return native instanceof ClipNative ? native : null;
-}
 
 /** A symbol name as registerClass keys it, by a SWF of `version`: in its case from SWF 7. */
 function classKey(name: string, version: number): string {

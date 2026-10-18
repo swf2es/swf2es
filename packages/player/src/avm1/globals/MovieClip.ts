@@ -685,6 +685,12 @@ function levelOf(digits: string): number {
 }
 
 /** A display object's side of its AVM1 object (runtime's DisplayNative). */
+/** `d`'s AVM1 side, null for one without. */
+export function nativeOf(d: DisplayObject): ClipNative | null {
+  const native = d.avm1?.display;
+  return native instanceof ClipNative ? native : null;
+}
+
 export class ClipNative implements avm1.DisplayNative {
   [Symbol.for("nodejs.util.inspect.custom")](): string {
     return `ClipNative(${this.target.name})`;
