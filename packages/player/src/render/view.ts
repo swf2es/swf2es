@@ -49,6 +49,7 @@ import { makeNode, NO_RECORDS, type Node } from "./node.js";
 import { Planes } from "./planes.js";
 import { bindPointer } from "./pointer.js";
 import { IDLE_MS, PARKED_FIRST_GROUPS_MOST, PARKED_MOST, trimPools } from "./pools.js";
+import { uploadSegments } from "./saffron.js";
 import { SETTLE_MS, type Settling, settle, unsettle } from "./settle.js";
 import { SharedGraphics } from "./shared.js";
 import { drawInto, snapshot } from "./snapshot.js";
@@ -1104,6 +1105,11 @@ export class PixiView {
    * samples; on the stage, a pixel of the screen, where the host says what
    * that is.
    */
+  /** Whether it syncs a 3D object's content, drawn into the object's bitmap. */
+  get inPlane(): boolean {
+    return this.planeUnits !== 0;
+  }
+
   get flashPixel(): number {
     if (this.fresh) {
       return this.samples;
@@ -1190,6 +1196,7 @@ export class PixiView {
     }
 
     const node = this.sync(root, UNIT, false);
+    uploadSegments(this.renderer);
     this.rescaled = false;
     if (!this.fresh) {
       this.blends.checkStageClear();
@@ -1295,6 +1302,7 @@ export class PixiView {
     }
 
     const node = this.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
+    uploadSegments(this.renderer);
     const masks = new PixiContainer();
     into.addChild(node, masks);
     this.placeMasks(o, masks);

@@ -42,6 +42,52 @@ export function overruns(
   );
 }
 
+/**
+ * How a text's advanced glyphs are drawn (render/saffron.ts): by the view's
+ * shared uniforms, at `scale` of Flash's pixels to a pixel of the text as
+ * it is placed now, drawn `again` when the outlines' store starts again.
+ */
+export interface Advanced {
+  view: SaffronView;
+  scale: number;
+  again: () => void;
+}
+
+/**
+ * A builder for a text's advanced glyphs, each reserved by `each`, or
+ * null where one cannot be drawn so, a glyph or the whole asking too much
+ * of the shader: the text is then drawn as normal text, all of it alike.
+ * Reserving goes again where the store started again meanwhile.
+ */
+function advancedBuilder(
+  advanced: Advanced,
+  grid: number,
+  thickness: number,
+  sharpness: number,
+  each: (builder: SaffronBuilder) => boolean,
+): SaffronBuilder | null {
+  const builder = new SaffronBuilder(
+    advanced.view,
+    grid,
+    thickness,
+    sharpness,
+    advanced.scale,
+    advanced.again,
+  );
+  for (let tries = 0; tries < 2; tries++) {
+    builder.restart();
+    if (!each(builder)) {
+      return null;
+    }
+
+    if (builder.intact()) {
+      return builder;
+    }
+  }
+
+  return null;
+}
+
 /** gridFitType's values, in the order Saffron's shader and CSMTextSettings number them. */
 const GRIDS = ["none", "pixel", "subpixel"];
 
@@ -77,7 +123,7 @@ function glyphFill(glyph: Glyph): GraphicsContext | null {
  * field where the text runs over it. An advanced field's embedded glyphs
  * are drawn as Saffron draws them (render/saffron.ts), all in one mesh.
  */
-export function drawText(o: TextObject, art: PixiContainer, saffron: SaffronView): void {
+export function drawText(o: TextObject, art: PixiContainer, saffron: Advanced | null): void {
   if (o.background || o.border) {
     const box = new Graphics();
     if (o.background) {
@@ -107,8 +153,34 @@ export function drawText(o: TextObject, art: PixiContainer, saffron: SaffronView
   const dy = o.top * 20 - (layout.lines[first].y - GUTTER);
   const text = new PixiContainer();
   const advanced =
-    o.antiAliasType === "advanced"
-      ? new SaffronBuilder(saffron, GRIDS.indexOf(o.gridFitType), o.thickness, o.sharpness)
+    saffron && o.antiAliasType === "advanced"
+      ? advancedBuilder(
+          saffron,
+          GRIDS.indexOf(o.gridFitType),
+          o.thickness,
+          o.sharpness,
+          (builder) => {
+            for (let l = first; l <= last; l++) {
+              for (const c of layout.lines[l].chars) {
+                if (
+                  c.shown &&
+                  c.font &&
+                  c.glyph &&
+                  !builder.reserve(
+                    c.glyph,
+                    c.font.em,
+                    Math.max(0, c.format.size),
+                    csmTables(c.font),
+                  )
+                ) {
+                  return false;
+                }
+              }
+            }
+
+            return true;
+          },
+        )
       : null;
   let bottom = 0;
   let right = 0;
@@ -207,15 +279,30 @@ export function drawText(o: TextObject, art: PixiContainer, saffron: SaffronView
 export function drawStaticText(
   o: StaticTextObject,
   art: PixiContainer,
-  saffron: SaffronView,
+  saffron: Advanced | null,
 ): void {
   const m = o.definition.definition.matrix;
   const text = new PixiContainer();
   text.setFromMatrix(new Matrix(m.a, m.b, m.c, m.d, m.tx / 20, m.ty / 20));
   const csm = o.definition.csm;
-  const advanced = csm?.useFlashType
-    ? new SaffronBuilder(saffron, csm.gridFit, csm.thickness, csm.sharpness)
-    : null;
+  const advanced =
+    saffron && csm?.useFlashType
+      ? advancedBuilder(
+          { ...saffron, scale: saffron.scale * Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) },
+          csm.gridFit,
+          csm.thickness,
+          csm.sharpness,
+          (builder) =>
+            o.glyphs.glyphs.every((placed) =>
+              builder.reserve(
+                placed.glyph,
+                placed.font.em,
+                placed.height / 20,
+                csmTables(placed.font),
+              ),
+            ),
+        )
+      : null;
   for (const placed of o.glyphs.glyphs) {
     const color = placed.color & 0xffffff;
     if (

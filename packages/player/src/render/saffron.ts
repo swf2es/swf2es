@@ -27,14 +27,23 @@ import {
   Geometry,
   GlProgram,
   Mesh,
+  type Renderer,
+  RendererType,
   Shader,
   UniformGroup,
+  type WebGLRenderer,
 } from "pixi.js";
 import { CURVE, LINE, MOVE, shapeLayers } from "../display/shapes.js";
 import type { CsmTable } from "../text/csm.js";
 
 /** Most table entries a text's uniforms hold. */
 const ENTRIES = 48;
+
+/**
+ * Chords a curve is cut into stray from it by this fraction of the em at
+ * most: a 2048th, a hundredth of a pixel at 20 pixels, and few chords.
+ */
+const TOLERANCE = 2048;
 
 // uView.x: Flash's pixels to a unit of the world, on whose grid they lie, whatever the target.
 // uMode: gridFitType (0 none, 1 pixel, 2 subpixel), thickness, sharpness, and whether a Flash
@@ -109,7 +118,8 @@ void main(void) {
   mat2 linear = mat2(m[0].xy, m[1].xy);
   vec2 origin = m[2].xy;
   vec2 pen = (m * vec3(aOrigin.xy, 1.0)).xy + roundEven(origin) - origin;
-  if (linear[0][1] != 0.0 || linear[1][0] != 0.0) {
+  float across = max(abs(linear[0][1]), abs(linear[1][0]));
+  if (across > max(abs(linear[0][0]), abs(linear[1][1])) / 65536.0) {
     // Turned or skewed: no grid.
   } else if (uMode.x == 1.0) {
     pen = vec2(roundEven(pen.x * 8.0) / 8.0 + 0.5, roundEven(pen.y));
@@ -208,23 +218,37 @@ let program: GlProgram | null = null;
 
 /** Segments to a row of the texture. */
 const ROW = 1024;
-/** The most segments kept: 16 bytes each, 16 MB. Glyphs past it are drawn as normal text is. */
-const MOST = ROW * 1024;
+/** The most segments kept: 16 bytes each, 16 MB. Past it the store starts again. */
+export const MOST = ROW * 1024;
+/**
+ * The most segments a glyph may have: every pixel of its quad goes through
+ * them all, so a glyph past this is drawn as normal text is.
+ */
+export const GLYPH_MOST = 2048;
+/**
+ * The most a field may ask of the shader, its glyphs' segments times the
+ * pixels of their quads: past it, the field is drawn as normal text, so
+ * that no SWF has the GPU go through millions of segments a pixel.
+ */
+export const FIELD_BUDGET = 2 ** 25;
 
 /**
  * The glyphs' outlines as segments, x0 y0 x1 y1 a texel, in the font's
  * units over 20 (as shapeLayers reads them), each glyph's a run of its
- * own: added as a glyph is first drawn, and kept, up to MOST, as the
- * glyphs' fills are (render/text.ts).
+ * own: added as a glyph is first drawn, kept until the store is full, when
+ * it starts again and the texts drawn from it are drawn again, or until the
+ * last view that draws them goes.
  */
 let data = new Float32Array(ROW * 4 * 16);
 let used = 0;
 let source: BufferImageSource | null = null;
-/** Whether segments were added since the texture was last told. */
-let added = false;
+/** Bumped as the store starts again, grows or goes: each renderer then uploads it whole. */
+let epoch = 0;
+/** Each renderer's upload of the store: of which epoch, and how many segments of it. */
+const uploads = new WeakMap<Renderer, { epoch: number; segments: number }>();
 
 /** A glyph's run of segments and its outline's bounds, in the font's units over 20. */
-interface Outline {
+export interface Outline {
   start: number;
   count: number;
   xMin: number;
@@ -233,34 +257,80 @@ interface Outline {
   yMax: number;
 }
 
-/** Each glyph's outline; null for an empty one. */
-const outlines = new WeakMap<Glyph, Outline | null>();
+/** What a glyph of more segments than GLYPH_MOST is known by, so that it is not cut again. */
+const TOO_MANY: Outline = { start: 0, count: 0, xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
 
-/** The segments' texture, told of those added since. */
+/** Each glyph's outline in the store as it now is; null for an empty one. */
+let outlines = new WeakMap<Glyph, Outline | null>();
+
+/** The texts drawn from the store, each with what draws it again. */
+const live = new Map<SaffronText, () => void>();
+
+/** The segments' texture, made on first use; its contents go up as renderers draw (uploadSegments). */
 function segments(): BufferImageSource {
-  if (!source) {
-    source = new BufferImageSource({
-      resource: data,
-      width: ROW,
-      height: data.length / 4 / ROW,
-      format: "rgba32float",
-      scaleMode: "nearest",
-      alphaMode: "no-premultiply-alpha",
-      autoGenerateMipmaps: false,
-    });
-    added = false;
-  } else if (added) {
-    added = false;
-    const rows = data.length / 4 / ROW;
-    if (source.resource !== data || source.pixelHeight !== rows) {
-      source.resource = data;
-      source.resize(ROW, rows, 1);
-    }
+  source ??= new BufferImageSource({
+    resource: data,
+    width: ROW,
+    height: data.length / 4 / ROW,
+    format: "rgba32float",
+    scaleMode: "nearest",
+    alphaMode: "no-premultiply-alpha",
+    autoGenerateMipmaps: false,
+  });
+  return source;
+}
 
-    source.update();
+/**
+ * Upload what `renderer` has not of the store: the rows added since it last
+ * did, or the whole after the store started again or grew. A view calls it
+ * after it syncs, before it draws.
+ */
+export function uploadSegments(renderer: Renderer): void {
+  if (!source || renderer.type !== RendererType.WEBGL) {
+    return;
   }
 
-  return source;
+  let upload = uploads.get(renderer);
+  if (!upload) {
+    // Its first bind uploads the texture whole.
+    upload = { epoch, segments: used };
+    uploads.set(renderer, upload);
+    return;
+  }
+
+  const from = upload.epoch === epoch ? upload.segments : 0;
+  if (from >= used) {
+    return;
+  }
+
+  const gl = (renderer as WebGLRenderer).gl;
+  const first = Math.floor(from / ROW);
+  const rows = Math.ceil(used / ROW) - first;
+  (renderer as WebGLRenderer).texture.bindForUpload(source);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, first, ROW, rows, gl.RGBA, gl.FLOAT, data, first * ROW * 4);
+  upload.epoch = epoch;
+  upload.segments = used;
+}
+
+/**
+ * Start the store again: every outline is cut again on its next draw, and
+ * every text drawn from the store hidden till it is drawn again.
+ */
+export function resetSegments(): void {
+  used = 0;
+  epoch++;
+  outlines = new WeakMap();
+  for (const [text, again] of live) {
+    text.visible = false;
+    again();
+  }
+
+  live.clear();
+}
+
+/** How many segments the store holds, for tests. */
+export function segmentsUsed(): number {
+  return used;
 }
 
 /** Room for `count` more segments, the store grown to hold them: false past MOST. */
@@ -278,22 +348,22 @@ function room(count: number): boolean {
     const grown = new Float32Array(length);
     grown.set(data.subarray(0, used * 4));
     data = grown;
+    if (source) {
+      source.resource = data;
+      source.resize(ROW, length / 4 / ROW, 1);
+    }
+
+    epoch++;
   }
 
   return true;
 }
 
 /**
- * A glyph's outline as segments, its curves cut into chords that stray from
- * them by `tolerance` at most: added on its first draw. Null for an empty
- * glyph, undefined past the most kept.
+ * A glyph's outline cut into segments, its curves into chords that stray
+ * from them by `tolerance` at most, as x0 y0 x1 y1 each.
  */
-function outlineOf(glyph: Glyph, tolerance: number): Outline | null | undefined {
-  const known = outlines.get(glyph);
-  if (known !== undefined) {
-    return known;
-  }
-
+export function chordsOf(glyph: Glyph, tolerance: number): number[] {
   const shape = {
     id: 0,
     bounds: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
@@ -312,46 +382,50 @@ function outlineOf(glyph: Glyph, tolerance: number): Outline | null | undefined 
     let startX = 0;
     let startY = 0;
     for (let i = 0; i < path.length; ) {
-      const command = path[i];
-      if (command === MOVE) {
-        if (x !== startX || y !== startY) {
-          points.push(x, y, startX, startY);
-        }
+      switch (path[i]) {
+        case MOVE:
+          if (x !== startX || y !== startY) {
+            points.push(x, y, startX, startY);
+          }
 
-        x = startX = path[i + 1];
-        y = startY = path[i + 2];
-        i += 3;
-      } else if (command === LINE) {
-        points.push(x, y, path[i + 1], path[i + 2]);
-        x = path[i + 1];
-        y = path[i + 2];
-        i += 3;
-      } else if (command === CURVE) {
-        const cx = path[i + 1];
-        const cy = path[i + 2];
-        const ax = path[i + 3];
-        const ay = path[i + 4];
-        // A quadratic strays from its chords of a nth of it by |p0 - 2c + p1| / 4n² at most.
-        const bend = Math.hypot(x - 2 * cx + ax, y - 2 * cy + ay);
-        const n = Math.max(1, Math.min(64, Math.ceil(Math.sqrt(bend / (4 * tolerance)))));
-        let px = x;
-        let py = y;
-        for (let k = 1; k <= n; k++) {
-          const t = k / n;
-          const u = 1 - t;
-          const qx = u * u * x + 2 * u * t * cx + t * t * ax;
-          const qy = u * u * y + 2 * u * t * cy + t * t * ay;
-          points.push(px, py, qx, qy);
-          px = qx;
-          py = qy;
-        }
+          x = startX = path[i + 1];
+          y = startY = path[i + 2];
+          i += 3;
+          break;
+        case LINE:
+          points.push(x, y, path[i + 1], path[i + 2]);
+          x = path[i + 1];
+          y = path[i + 2];
+          i += 3;
+          break;
+        case CURVE: {
+          const cx = path[i + 1];
+          const cy = path[i + 2];
+          const ax = path[i + 3];
+          const ay = path[i + 4];
+          // A quadratic strays from its chords of a nth of it by |p0 - 2c + p1| / 4n² at most.
+          const bend = Math.hypot(x - 2 * cx + ax, y - 2 * cy + ay);
+          const n = Math.max(1, Math.min(64, Math.ceil(Math.sqrt(bend / (4 * tolerance)))));
+          let px = x;
+          let py = y;
+          for (let k = 1; k <= n; k++) {
+            const t = k / n;
+            const u = 1 - t;
+            const qx = u * u * x + 2 * u * t * cx + t * t * ax;
+            const qy = u * u * y + 2 * u * t * cy + t * t * ay;
+            points.push(px, py, qx, qy);
+            px = qx;
+            py = qy;
+          }
 
-        x = ax;
-        y = ay;
-        i += 5;
-      } else {
-        // A cubic, which no glyph has.
-        i += 7;
+          x = ax;
+          y = ay;
+          i += 5;
+          break;
+        }
+        default:
+          // A cubic, which no glyph has.
+          i += 7;
       }
     }
 
@@ -360,10 +434,30 @@ function outlineOf(glyph: Glyph, tolerance: number): Outline | null | undefined 
     }
   }
 
+  return points;
+}
+
+/**
+ * A glyph's outline in the store, cut on its first draw: null for an empty
+ * glyph, undefined for one of more segments than GLYPH_MOST or past the
+ * store's room.
+ */
+function outlineOf(glyph: Glyph, tolerance: number): Outline | null | undefined {
+  const known = outlines.get(glyph);
+  if (known !== undefined) {
+    return known === TOO_MANY ? undefined : known;
+  }
+
+  const points = chordsOf(glyph, tolerance);
   const count = points.length / 4;
   if (count === 0) {
     outlines.set(glyph, null);
     return null;
+  }
+
+  if (count > GLYPH_MOST) {
+    outlines.set(glyph, TOO_MANY);
+    return undefined;
   }
 
   if (!room(count)) {
@@ -387,16 +481,46 @@ function outlineOf(glyph: Glyph, tolerance: number): Outline | null | undefined 
 
   data.set(points, used * 4);
   used += count;
-  added = true;
   outlines.set(glyph, outline);
   return outline;
 }
 
-/** What every advanced text a view draws shares: Flash's pixels to a unit of its world. */
+/** The views that draw on the stage, by which the store is kept: it goes with the last. */
+let views = 0;
+const viewsGone = new FinalizationRegistry<null>(() => {
+  views--;
+  if (views === 0) {
+    resetSegments();
+    source?.destroy();
+    source = null;
+    data = new Float32Array(ROW * 4 * 16);
+  }
+});
+
+/**
+ * What every advanced text a view draws shares: Flash's pixels to a unit
+ * of its world, and whether its renderer draws them at all (WebGL 2, as
+ * the shader is GLSL ES 3.0; elsewhere text is drawn as normal text).
+ */
 export class SaffronView {
   readonly uniforms = new UniformGroup({
     uView: { value: new Float32Array([1, 0, 0, 0]), type: "vec4<f32>" },
   });
+  readonly enabled: boolean;
+
+  constructor(renderer: Renderer, keeps: boolean) {
+    this.enabled =
+      renderer.type === RendererType.WEBGL &&
+      (renderer as WebGLRenderer).context?.webGLVersion === 2;
+    if (keeps) {
+      views++;
+      viewsGone.register(this, null);
+    }
+  }
+
+  get unit(): number {
+    return (this.uniforms.uniforms.uView as Float32Array)[0];
+  }
 
   set unit(unit: number) {
     const view = this.uniforms.uniforms.uView as Float32Array;
@@ -437,31 +561,109 @@ function quadIndices(count: number): Uint32Array {
   return quads.subarray(0, count * 6);
 }
 
+/** The finite value of `v`, 0 for NaN or an infinity, as a field's settings reach the shader. */
+const finite = (v: number) => (Number.isFinite(v) ? v : 0);
+
+/** The table's furthest cutoff from the outline, in pixels. */
+function reachOf(table: CsmTable): number {
+  let reach = 0;
+  for (let i = 0; i < table.length; i += 3) {
+    reach = Math.max(reach, Math.abs(table[i + 1]), Math.abs(table[i + 2]));
+  }
+
+  return reach;
+}
+
 /**
- * The glyphs of a text drawn with advanced anti-aliasing, gathered as the
- * text is laid out (add), then made into one mesh (done). One builds at a
- * time: they share the vertices they write.
+ * The glyphs of a text drawn with advanced anti-aliasing: each glyph first
+ * reserved (reserve), which cuts its outline and counts what it asks of
+ * the shader, then, if all fit, added (add) and made into one mesh
+ * (done). One builds at a time: they share the vertices they write.
  */
 export class SaffronBuilder {
   private glyphs = 0;
   private readonly tables: CsmTable[] = [];
   private readonly starts: number[] = [];
   private entries = 0;
+  private cost = 0;
+  private readonly thickness: number;
+  private readonly sharpness: number;
+  /** The epoch the reserved glyphs' outlines are of. */
+  private reserved = epoch;
 
   constructor(
     private readonly view: SaffronView,
     /** 0 none, 1 pixel, 2 subpixel. */
     private readonly grid: number,
-    private readonly thickness: number,
-    private readonly sharpness: number,
-  ) {}
+    thickness: number,
+    sharpness: number,
+    /** Flash's pixels to a pixel of the text, as it is placed now, for the quads' reach and cost. */
+    private readonly scale: number,
+    /** Draws the text again, when the store it is drawn from starts again. */
+    private readonly again: () => void,
+  ) {
+    this.thickness = finite(thickness);
+    this.sharpness = finite(sharpness);
+  }
+
+  /** Flash's pixels the shader may reach past the outline, at `size` pixels to the em, by `tables`. */
+  private reach(size: number, tables: readonly [CsmTable, CsmTable]): number {
+    const ppem = size * this.scale;
+    const moved = 0.0001 * ppem * (Math.abs(this.thickness) + Math.abs(this.sharpness) / 2);
+    // And a pixel round, and two for the pen's snapping.
+    return Math.max(reachOf(tables[0]), reachOf(tables[1])) + moved + 3;
+  }
 
   /**
-   * Add a glyph of a font of `em` units, its pen at (x, y) in the text's
-   * pixels, `size` pixels to the em, in 0xRRGGBB and `alpha`, by the
-   * light or the dark of `tables` as its colour is drawn: false where it
-   * cannot, past the segments kept or the tables' room, for the glyph to
-   * be drawn as normal text is.
+   * Cut a glyph of a font of `em` units and count it at `size` pixels to the
+   * em: false where the text cannot be drawn so, a glyph past GLYPH_MOST
+   * or the field past FIELD_BUDGET, for the whole text to be drawn as
+   * normal text. The store may start again here: reserving every glyph
+   * then goes again (reserveAll).
+   */
+  reserve(glyph: Glyph, em: number, size: number, tables: readonly [CsmTable, CsmTable]): boolean {
+    const units = em / 20;
+    let outline = outlineOf(glyph, units / TOLERANCE);
+    if (outline === undefined && outlines.get(glyph) !== TOO_MANY) {
+      resetSegments();
+      outline = outlineOf(glyph, units / TOLERANCE);
+    }
+
+    if (outline === undefined) {
+      return false;
+    }
+
+    if (outline === null) {
+      return true;
+    }
+
+    const s = (size / units) * this.scale;
+    const margin = 2 * this.reach(size, tables);
+    const area =
+      ((outline.xMax - outline.xMin) * s + margin) * ((outline.yMax - outline.yMin) * s + margin);
+    this.cost += outline.count * area;
+    return this.cost <= FIELD_BUDGET;
+  }
+
+  /**
+   * Whether every glyph reserved since restart is still in the store as it
+   * was: false where the store started again while they were reserved.
+   */
+  intact(): boolean {
+    return this.reserved === epoch;
+  }
+
+  /** Reserve afresh, the store's epoch now. */
+  restart(): void {
+    this.cost = 0;
+    this.reserved = epoch;
+  }
+
+  /**
+   * Add a reserved glyph, its pen at (x, y) in the text's pixels, `size`
+   * pixels to the em, in 0xRRGGBB and `alpha`, by the light or the dark of
+   * `tables` as its colour is drawn: false where the tables' room is full,
+   * which leaves the text to be drawn as normal text.
    */
   add(
     glyph: Glyph,
@@ -473,9 +675,8 @@ export class SaffronBuilder {
     alpha: number,
     tables: readonly [CsmTable, CsmTable],
   ): boolean {
-    // The units shapeLayers reads glyphs in: the font's over 20, a 1024th of the em for DefineFont3.
     const units = em / 20;
-    const outline = outlineOf(glyph, units / 8192);
+    const outline = outlineOf(glyph, units / TOLERANCE);
     if (outline === null) {
       return true;
     }
@@ -497,6 +698,9 @@ export class SaffronBuilder {
     }
 
     const scale = size / units;
+    // Where the quad reaches in the text's pixels, for Pixi's bounds (filters, culling): the
+    // shader moves it out by the cutoffs from where the pen snaps.
+    const out = this.reach(size, tables) / Math.max(this.scale, 1 / 64);
     const r = ((color >> 16) & 0xff) / 255;
     const g = ((color >> 8) & 0xff) / 255;
     const b = (color & 0xff) / 255;
@@ -506,9 +710,8 @@ export class SaffronBuilder {
       const sy = CORNERS[k + 1];
       const gx = sx < 0 ? outline.xMin : outline.xMax;
       const gy = sy < 0 ? outline.yMin : outline.yMax;
-      // Where the quad reaches, for Pixi's bounds: the shader moves it to the pen's place.
-      scratch[at] = x + gx * scale + sx * 3;
-      scratch[at + 1] = y + gy * scale + sy * 3;
+      scratch[at] = x + gx * scale + sx * out;
+      scratch[at + 1] = y + gy * scale + sy * out;
       scratch[at + 2] = x;
       scratch[at + 3] = y;
       scratch[at + 4] = light;
@@ -533,7 +736,7 @@ export class SaffronBuilder {
   }
 
   /** A table's place in the uniforms, its first entry plus 64 times its entries, added where new; -1 past their room. */
-  private code(table: CsmTable): number {
+  code(table: CsmTable): number {
     let t = this.tables.indexOf(table);
     if (t < 0) {
       if (this.entries + table.length / 3 > ENTRIES) {
@@ -581,12 +784,14 @@ export class SaffronBuilder {
       }
     }
 
-    return new SaffronText(
+    const text = new SaffronText(
       geometry,
       this.view,
       new Float32Array([this.grid, this.thickness, this.sharpness, 0]),
       table,
     );
+    live.set(text, this.again);
+    return text;
   }
 }
 
@@ -636,6 +841,7 @@ export class SaffronText extends Mesh<Geometry, Shader> {
   override destroy(): void {
     const geometry = this.geometry;
     const shader = this.shader as Shader;
+    live.delete(this);
     super.destroy();
     // Its buffers too: the renderer holds a buffer, and its data, till the buffer goes.
     geometry.destroy(true);

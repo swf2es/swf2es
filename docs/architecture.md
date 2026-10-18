@@ -3938,7 +3938,14 @@ adl puts it: the field's origin on the screen at a whole pixel, the pen
 a quarter across and a whole pixel down under subpixel, ties to even, and
 sampled half a pixel left of the pixel's centre; turned or skewed, where
 it falls. The grid is the stage's, inside a filter's input too (the Pixi
-fork's `uWorldOffset`), and a BitmapData's in a draw. Fitting stems to
+fork's `uWorldOffset`), and a BitmapData's in a draw. What the shader
+goes through is bounded: a glyph of more than 2048 segments, or a field
+whose glyphs' segments times their quads' pixels pass 2^25, is drawn as
+normal text, all of the field alike, as advanced text is under a
+renderer other than WebGL 2 and in a 3D object's bitmap. The store of
+segments, 16 MB at most, starts again when full, drawing again the texts
+drawn from it, uploads only the rows added since, and goes with the last
+view that draws on a stage. Fitting stems to
 pixels by a font's alignment zones is still to come. Static text whose
 CSMTextSettings ask for advanced anti-aliasing is drawn so too, though
 adl drew none of the test SWF's static text with the tag after its

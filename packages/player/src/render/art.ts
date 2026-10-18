@@ -47,7 +47,7 @@ import {
   remakeable,
   SharedFills,
 } from "./tessellate.js";
-import { drawStaticText, drawText } from "./text.js";
+import { type Advanced, drawStaticText, drawText } from "./text.js";
 import { TriangleView } from "./triangles.js";
 
 /**
@@ -56,10 +56,14 @@ import { TriangleView } from "./triangles.js";
  */
 export type Slicing = { slice: Slice; m: DisplayObject["matrix"] | null };
 
-/** What the art asks of its view: the thinnest line, and the target's pixels a side of Flash's. */
+/**
+ * What the art asks of its view: the thinnest line, the target's pixels a
+ * side of Flash's, and whether it draws into a 3D object's bitmap.
+ */
 export interface ArtView {
   readonly leastWidth: number;
   readonly flashPixel: number;
+  readonly inPlane: boolean;
 }
 
 /** No transform, for a Graphics kept to be taken again (recycle). */
@@ -159,7 +163,7 @@ export class Art {
   /** Its drawings' textured triangles drawn, which the view tells of a new pixel or smoothing. */
   readonly meshes = new Set<TriangleView>();
   /** What its advanced texts share, which the view tells of the world's scale to Flash's pixels. */
-  readonly saffron = new SaffronView();
+  readonly saffron: SaffronView;
 
   constructor(
     private readonly renderer: Renderer,
@@ -174,6 +178,7 @@ export class Art {
     private readonly counts: { strokeContexts: number; strokeReuses: number },
   ) {
     this.lines = new StrokeContexts(counts);
+    this.saffron = new SaffronView(renderer, !fresh);
   }
 
   /**
@@ -339,6 +344,24 @@ export class Art {
     return node.stale.spent ? o.drawn() : cache.shape;
   }
 
+  /**
+   * How a text draws its advanced glyphs (render/saffron.ts): not at all, as
+   * normal text, where the renderer cannot, or in a 3D object's bitmap,
+   * whose pixels are not the stage's.
+   */
+  private advanced(o: DisplayObject, node: Node): Advanced | null {
+    if (!this.saffron.enabled || this.view.inPlane) {
+      return null;
+    }
+
+    const w = node.world;
+    return {
+      view: this.saffron,
+      scale: Math.sqrt(Math.abs(w[0] * w[3] - w[1] * w[2])),
+      again: () => o.invalidate(CONTENT),
+    };
+  }
+
   /** What `o` itself draws, into its node emptied of what it drew before. */
   private draw(o: DisplayObject, node: Node): void {
     const current = this.current(o);
@@ -353,12 +376,12 @@ export class Art {
     }
 
     if (o instanceof TextObject) {
-      drawText(o, node.art, this.saffron);
+      drawText(o, node.art, this.advanced(o, node));
       return;
     }
 
     if (o instanceof StaticTextObject) {
-      drawStaticText(o, node.art, this.saffron);
+      drawStaticText(o, node.art, this.advanced(o, node));
       return;
     }
 

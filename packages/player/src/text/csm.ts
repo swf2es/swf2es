@@ -84,7 +84,8 @@ const styleKey = (name: string, bold: boolean, italic: boolean) =>
 /**
  * Set a font's own table, entries of size, inside and outside cutoff, in
  * any order; none takes it away. Text drawn by it before is drawn by it
- * once drawn again.
+ * once drawn again. An entry with NaN or an infinity in it is left out,
+ * as the shader could make nothing of it.
  */
 export function setCsmTable(
   name: string,
@@ -92,18 +93,21 @@ export function setCsmTable(
   entries: [number, number, number][],
 ): void {
   const key = `${name}\u0000${style}`;
-  if (entries.length === 0) {
+  const usable = entries.filter((entry) => entry.every(Number.isFinite));
+  if (usable.length === 0) {
     custom.delete(key);
   } else {
-    const sorted = [...entries].sort((a, b) => a[0] - b[0]);
-    custom.set(key, sorted.flat());
+    usable.sort((a, b) => a[0] - b[0]);
+    custom.set(key, usable.flat());
   }
 }
 
 /**
  * Whether Flash takes a colour, 0xRRGGBB, for light text: its luma,
  * 30:59:11, over 200 of 255. It is the colour as drawn, under the
- * object's colour transform: render/saffron.ts' shader chooses so.
+ * object's colour transform. This and cutoffs mirror what
+ * render/saffron.ts' vertex shader does in GLSL, which draws by it: a
+ * change to one is a change to the other.
  */
 export function isLight(color: number): boolean {
   return 30 * ((color >> 16) & 0xff) + 59 * ((color >> 8) & 0xff) + 11 * (color & 0xff) > 20000;

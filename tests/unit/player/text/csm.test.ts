@@ -67,4 +67,14 @@ test("a table set for a font draws its light and dark text alike, by size betwee
 
   setCsmTable("Own", "regular", []);
   assert.notEqual(csmTables(font("Own"))[0], light);
+
+  // An entry of NaN or an infinity is left out; a table of none such is none.
+  setCsmTable("Own", "regular", [
+    [Number.NaN, 1, -1],
+    [10, 0.5, Number.POSITIVE_INFINITY],
+    [20, 0.25, -0.25],
+  ]);
+  assert.deepEqual([...csmTables(font("Own"))[0]], [20, 0.25, -0.25]);
+  setCsmTable("Own", "regular", [[10, Number.NaN, 0]]);
+  assert.equal(csmTables(font("Own"))[0], csmTables(font("Nobody"))[0]);
 });
