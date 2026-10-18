@@ -290,7 +290,7 @@ export class ActionQueue {
     }
 
     if (constr !== null) {
-      this.movie.construct(q.clip, face, constr);
+      this.movie.scriptClips.construct(q.clip, face, constr);
     }
   }
 

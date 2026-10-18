@@ -24,15 +24,13 @@ import {
   BitmapObject,
   ButtonObject,
   Container,
-  construct,
   type DisplayObject,
-  displayFor,
   EMPTY_TIMELINE,
   MovieClip,
   TextObject,
   VideoObject,
 } from "../display/display.js";
-import type { DisplayCharacter, Library } from "../display/timeline.js";
+import type { Library } from "../display/timeline.js";
 import {
   browserNavigate,
   type Drawer,
@@ -54,6 +52,7 @@ import {
 import { evaluate } from "../scripting/evaluate.js";
 import { type BindingHost, VariableBindings } from "./bindings.js";
 import { RegisteredClasses } from "./classes.js";
+import { constructBlocks, ScriptClips } from "./clips.js";
 import { ExternalCalls } from "./external.js";
 import { FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
@@ -96,7 +95,6 @@ import {
   INIT,
   INITIALIZE,
   METHOD,
-  NO_ARGS,
   NORMAL,
   Queued,
 } from "./queue.js";
@@ -249,6 +247,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private readonly levelNumbers = new WeakMap<DisplayObject, number>();
   /** Object.registerClass's classes, which clips of their symbols are constructed as. */
   readonly classes = new RegisteredClasses(this);
+  /** What scripts make, duplicate and remove on the display list. */
+  readonly scriptClips = new ScriptClips(this);
   /** What each clip a load filled shows, the SWF's root it plays, by the clip. */
   readonly contents = new WeakMap<MovieClip, Avm1Swf>();
   /** loadMovie's and MovieClipLoader's loads, until they are done with. */
@@ -284,8 +284,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private readonly places = new WeakMap<DisplayObject, Place>();
   /** The clips removed with an unload handler, kept until the next frame. */
   private pending: DisplayObject[] = [];
-  /** The display object a script is making, which it constructs itself; its children are the timeline's. */
-  private scripted: DisplayObject | null = null;
   /** The player's clock, the scripts' timeout and setInterval's timers. */
   readonly timers: Timers;
 
@@ -775,11 +773,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return timeline;
   }
 
-  /**
-   * attachMovie: the character exported as `name` placed in `parent` at
-   * AVM1 depth `depth` as `instance`, made as a script makes one; null
-   * where there is no such character or the depth is out of range.
-   */
+  /** attachMovie (clips.ts). */
   attachMovie(
     parent: MovieClip,
     name: string,
@@ -787,41 +781,37 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     depth: number,
     init: avm1.Avm1Object | null,
   ): DisplayObject | null {
-    const timelineDepth = (depth + DEPTH_BIAS) | 0;
-    if (timelineDepth < 0 || timelineDepth > MAX_DEPTH) {
-      return null;
-    }
-
-    const swf = this.swfOf(parent);
-    const id = swf.exports.get(asciiLower(name));
-    const character = id === undefined ? undefined : swf.library?.characters.get(id);
-    if (!isDisplayCharacter(character)) {
-      return null;
-    }
-
-    const child = displayFor(character, parent.library);
-    return this.scriptPlace(parent, child, character, instance, timelineDepth, init);
+    return this.scriptClips.attachMovie(parent, name, instance, depth, init);
   }
 
-  /** createEmptyMovieClip: an empty clip in `parent` at AVM1 depth `depth` as `instance`. */
+  /** createEmptyMovieClip (clips.ts). */
   createEmptyMovieClip(parent: MovieClip, instance: string, depth: number): DisplayObject {
-    const child = new MovieClip(EMPTY_TIMELINE, parent.library);
-    return this.scriptPlace(parent, child, null, instance, (depth + DEPTH_BIAS) | 0, null);
+    return this.scriptClips.createEmptyMovieClip(parent, instance, depth);
   }
 
-  /** createTextField: an empty field in `parent` at AVM1 depth `depth` as `instance`. */
+  /** createTextField (clips.ts). */
   createTextField(
     parent: MovieClip,
     instance: string,
     depth: number,
-    [x, y, width, height]: [number, number, number, number],
+    rect: [number, number, number, number],
   ): DisplayObject {
-    const field = new TextObject(null);
-    field.fonts = parent.library.fonts;
-    field.width = width;
-    field.height = height;
-    field.matrix = { ...field.matrix, tx: x, ty: y };
-    return this.scriptPlace(parent, field, null, instance, (depth + DEPTH_BIAS) | 0, null);
+    return this.scriptClips.createTextField(parent, instance, depth, rect);
+  }
+
+  /** duplicateMovieClip and CloneSprite (clips.ts). */
+  duplicate(
+    d: DisplayObject,
+    name: string,
+    depth: number,
+    init: avm1.Avm1Object | null,
+  ): DisplayObject | null {
+    return this.scriptClips.duplicate(d, name, depth, init);
+  }
+
+  /** removeMovieClip and RemoveSprite (clips.ts). */
+  remove(d: DisplayObject): void {
+    this.scriptClips.remove(d);
   }
 
   textChanged(field: TextObject): void {
@@ -854,74 +844,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /**
-   * duplicateMovieClip and CloneSprite: a new one of `d`'s character, or an
-   * empty clip for a script's, beside it at timeline depth `depth` as
-   * `name`, with its matrix, colour and clip actions; null where `d` has
-   * no clip for a parent or the depth is out of range.
-   */
-  duplicate(
-    d: DisplayObject,
-    name: string,
-    depth: number,
-    init: avm1.Avm1Object | null,
-  ): DisplayObject | null {
-    const parent = this.levelNumbers.has(d) ? null : d.parent;
-    if (!(parent instanceof MovieClip) || this.removed(d) || depth < 0 || depth > MAX_DEPTH) {
-      return null;
-    }
-
-    const character = d.character as DisplayCharacter | null;
-    let child: DisplayObject;
-    if (isDisplayCharacter(character)) {
-      child = displayFor(character, parent.library);
-    } else if (d instanceof MovieClip) {
-      child = new MovieClip(EMPTY_TIMELINE, parent.library);
-    } else {
-      return null;
-    }
-
-    child.matrix = { ...d.matrix };
-    child.colorTransform = d.colorTransform === null ? null : { ...d.colorTransform };
-    const native = nativeOf(d);
-    if (native !== null && native.handlers !== null) {
-      this.handed.set(child, native);
-    }
-
-    return this.scriptPlace(
-      parent,
-      child,
-      isDisplayCharacter(character) ? character : null,
-      name,
-      depth,
-      init,
-    );
-  }
-
-  /** The clips a duplicate takes the clip actions of, until it is made. */
-  private readonly handed = new WeakMap<DisplayObject, ClipNative>();
-
-  /**
-   * removeMovieClip and RemoveSprite: `d` removed, where it is at a depth
-   * scripts place at (a timeline's clip swapped there too), as Flash
-   * removes only those.
-   */
-  remove(d: DisplayObject): void {
-    const parent = this.levelNumbers.has(d) ? null : d.parent;
-    const depth = d.depth;
-    if (
-      !(parent instanceof Container) ||
-      depth === null ||
-      depth < DEPTH_BIAS ||
-      depth >= MAX_REMOVE_DEPTH ||
-      this.removed(d)
-    ) {
-      return;
-    }
-
-    parent.removeAtDepth(depth);
-  }
-
   /** The frame's stack empty and its registers undefined, as each frame starts in Flash. */
   private frameStart(): void {
     this.st.length = 0;
@@ -934,7 +856,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * play, with the clip actions of its place, its initialize events and its
    * construction queued where the timeline placed it.
    */
-  private made(d: DisplayObject): void {
+  made(d: DisplayObject): void {
     if (d.avm1 !== null) {
       return;
     }
@@ -985,14 +907,14 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     // parent's timeline, of the SWF the clip's character is.
     native.swf = this.swfOf(d);
     const place = this.places.get(d);
-    const source = this.handed.get(d);
+    const source = this.scriptClips.handed.get(d);
     if (place !== undefined) {
       this.places.delete(d);
       native.corrupt = place.corrupt;
       native.handlers = handlersOf(place, native.swf);
       this.corruptPlace(d, place.corrupt);
     } else if (source !== undefined) {
-      this.handed.delete(d);
+      this.scriptClips.handed.delete(d);
       native.swf = source.swf;
       native.corrupt = source.corrupt;
       native.handlers = source.handlers;
@@ -1007,7 +929,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     // Placed by a timeline, its class's constructor and its construct events wait too;
     // a script constructs what it makes itself.
-    if (d === this.scripted) {
+    if (d === this.scriptClips.scripted) {
       return;
     }
 
@@ -1271,130 +1193,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       native.unloaded = false;
       native.pending = false;
     }
-  }
-
-  /**
-   * A display object a script made, put in `parent` at timeline depth
-   * `depth` as `name` and made: its first frame entered, its children
-   * placed, its load queued; then its construct events, its init
-   * object's properties, before them up to SWF 6, its class's constructor
-   * and its onConstruct at once, its initialize events queued as it was
-   * made (adl:
-   * Ruffle runs neither event, and onConstruct only for
-   * createEmptyMovieClip's).
-   */
-  private scriptPlace(
-    parent: MovieClip,
-    child: DisplayObject,
-    character: DisplayCharacter | null,
-    name: string,
-    depth: number,
-    init: avm1.Avm1Object | null,
-  ): DisplayObject {
-    child.name = name;
-    parent.placeAtDepth(child, depth);
-    const outer = this.scripted;
-    this.scripted = child;
-    try {
-      if (character !== null) {
-        construct(child, character, parent.library);
-      } else {
-        this.made(child);
-        if (child instanceof MovieClip) {
-          child.enterFirstFrame();
-        }
-      }
-    } finally {
-      this.scripted = outer;
-    }
-
-    const face = child.avm1;
-    const native = face?.display;
-    if (face === null || !(native instanceof ClipNative)) {
-      return child;
-    }
-
-    const version = this.swfOf(child).version;
-    const constr = this.classes.classOf(child);
-    if (constr !== null) {
-      face.define(
-        "__proto__",
-        avm1.get(constr, "prototype", version),
-        avm1.DONT_ENUM | avm1.DONT_DELETE,
-      );
-    }
-
-    // It is constructed as the queue's constructions are: a function returning in it
-    // runs only initializations queued (the corpus's register_and_init_order).
-    const pass = this.queue.priority;
-    this.queue.priority = CONSTRUCT;
-    try {
-      // A SWF 6 sets the init object's properties before the construct events, a later one
-      // after (adl).
-      if (version <= 6) {
-        this.initProperties(face, init, version);
-      }
-
-      for (const block of constructBlocks(native)) {
-        this.queue.runOne(new Queued(BLOCK, child, native.swf, block), []);
-      }
-
-      if (version > 6) {
-        this.initProperties(face, init, version);
-      }
-
-      if (constr !== null) {
-        this.construct(child, face, constr);
-      }
-
-      // Then its onConstruct, from MovieClip's prototype or its class's, what it
-      // throws caught there (adl, and the corpus's movieclip_onconstruct).
-      const cx = this.activationOf(child);
-      if (cx !== null) {
-        this.rt.callMethod(cx, face, "onConstruct", NO_ARGS, version);
-      }
-    } finally {
-      this.queue.priority = pass;
-    }
-
-    return child;
-  }
-
-  /** An init object's properties set on `face`, in the reverse of for..in's order, as Flash sets them. */
-  private initProperties(
-    face: avm1.Avm1Object,
-    init: avm1.Avm1Object | null,
-    version: number,
-  ): void {
-    const cx = init === null ? null : this.activationOf(this.root);
-    if (init === null || cx === null) {
-      return;
-    }
-
-    this.rt.call(cx, () => {
-      const names = avm1.keys(init, version);
-      for (let i = names.length - 1; i >= 0; i--) {
-        avm1.set(face, names[i], avm1.get(init, names[i], version), version);
-      }
-    });
-  }
-
-  /** `constr` run on the clip's object as its constructor, as `new` runs one. */
-  construct(clip: DisplayObject, face: avm1.Avm1Object, constr: avm1.Avm1Function): void {
-    const cx = this.activationOf(clip);
-    if (cx === null) {
-      return;
-    }
-
-    const version = this.swfOf(clip).version;
-    face.define("__constructor__", constr, avm1.DONT_ENUM);
-    if (version < 7) {
-      face.define("constructor", constr, avm1.DONT_ENUM);
-    }
-
-    this.rt.call(cx, () => {
-      constr.callConstructor(face, NO_ARGS, version, 1);
-    });
   }
 
   /** An activation of `d`'s code, as a frame's block has. */
@@ -1699,35 +1497,4 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       new Queued(FRAME, clip, this.swfOf(clip), tag, this.entries.get(clip) ?? 0),
     );
   }
-}
-
-/** The highest timeline depth scripts place at, 2^31 - 16777220, as Ruffle has it. */
-const MAX_DEPTH = 2130706428;
-/** The depth from which removeMovieClip removes nothing. */
-const MAX_REMOVE_DEPTH = 2130706416;
-
-/** The blocks of a clip's construct events. */
-function constructBlocks(native: ClipNative): number[] {
-  const blocks: number[] = [];
-  for (const h of native.handlers ?? NO_HANDLERS) {
-    if (h.events & ClipEvent.construct) {
-      blocks.push(h.block);
-    }
-  }
-
-  return blocks;
-}
-
-/** Whether a character is one a timeline places. */
-function isDisplayCharacter(c: unknown): c is DisplayCharacter {
-  const type = (c as { type?: string } | null | undefined)?.type;
-  return (
-    type === "sprite" ||
-    type === "shape" ||
-    type === "morph" ||
-    type === "button" ||
-    type === "text" ||
-    type === "static" ||
-    type === "bitmap"
-  );
 }
