@@ -92,7 +92,16 @@ for (const gpu of [false, true]) {
   const [table, pixi] = await runPlayer([job, { ...job, table: false }], { gpu });
   assert.equal(table.error, null);
   assert.equal(pixi.error, null);
-  assert.ok(table.tableDraws > 0, "the long runs were no multi-draws");
+  // Without the extension, as some software GL has it, the table draws nothing: the frames must
+  // still match, but that is all the run shows.
+  const where = `${gpu ? "GPU" : "software GL"} (${table.gl})`;
+  console.log(`table-runs: ${where}, ${table.tableDraws} draws in multi-draws`);
+  if (table.multiDraw) {
+    assert.ok(table.tableDraws > 0, `${where}: the long runs were no multi-draws`);
+  } else {
+    console.log(`table-runs: ${where} has no WEBGL_multi_draw; the table drew nothing`);
+  }
+
   const a = decodePng(table.images.get(1) as Uint8Array);
   const b = decodePng(pixi.images.get(1) as Uint8Array);
   let differ = 0;
@@ -102,7 +111,7 @@ for (const gpu of [false, true]) {
     }
   }
 
-  assert.equal(differ, 0, `${gpu ? "GPU" : "software GL"}: ${differ} bytes differ`);
+  assert.equal(differ, 0, `${where}: ${differ} bytes differ`);
 }
 
 console.log("table-runs: ok");

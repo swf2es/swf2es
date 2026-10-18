@@ -59,6 +59,9 @@ export interface PlayerResult {
   trace: string[];
   /** The draws the transform table made. */
   tableDraws: number;
+  /** What drew, and whether it had WEBGL_multi_draw, which the table needs. */
+  gl: string;
+  multiDraw: boolean;
   /** What stopped the player, if anything. */
   error: string | null;
 }
@@ -333,6 +336,8 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               images: Record<string, string>;
               trace: string[];
               tableDraws: number;
+              gl: string;
+              multiDraw: boolean;
               error: string | null;
             }
           | undefined;
@@ -381,6 +386,8 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
           images,
           trace: value?.trace ?? [],
           tableDraws: value?.tableDraws ?? 0,
+          gl: value?.gl ?? "unknown",
+          multiDraw: value?.multiDraw ?? false,
           error,
         };
         results.push(result);

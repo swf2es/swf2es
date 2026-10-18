@@ -57,6 +57,9 @@ interface Run {
   trace: string[];
   /** The draws the transform table made (render/table.ts), in its multi-draw calls. */
   tableDraws: number;
+  /** What drew: the renderer's GL, and whether it had WEBGL_multi_draw, which the table needs. */
+  gl: string;
+  multiDraw: boolean;
   error: string | null;
 }
 
@@ -380,6 +383,8 @@ async function runSwf(
   const images: Record<number, string> = {};
   const trace: string[] = [];
   let tableDraws = 0;
+  let gl = "none";
+  let multiDraw = false;
   let scripting: Scripting | null = null;
   const uncaught: unknown[] = [];
   // A run ends at the first error nothing caught, after the frame it came in.
@@ -418,6 +423,15 @@ async function runSwf(
         draw(...args);
       };
     }
+
+    multiDraw = !!multi;
+    const context = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
+    const info = context?.getExtension("WEBGL_debug_renderer_info");
+    gl = context
+      ? `${context instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1"}, ${
+          info ? context.getParameter(info.UNMASKED_RENDERER_WEBGL) : "?"
+        }`
+      : `not WebGL (${renderer.name})`;
 
     const samples = document.createElement("canvas");
     samples.width = renderer.canvas.width;
@@ -482,9 +496,9 @@ async function runSwf(
     }
 
     renderer.destroy();
-    return { images, trace, tableDraws, error: null };
+    return { images, trace, tableDraws, gl, multiDraw, error: null };
   } catch (e) {
-    return { images, trace, tableDraws, error: describe(e, scripting) };
+    return { images, trace, tableDraws, gl, multiDraw, error: describe(e, scripting) };
   }
 }
 
