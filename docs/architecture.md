@@ -1155,7 +1155,12 @@ draws with, plays a SWF so under that policy and draws it as without one).
 
 The player keeps Flash's display list and timeline
 (`packages/player/src`: `display/timeline.ts` reads a SWF's definitions and
-frames, `display/display.ts` is the display list), and PixiJS only mirrors it
+frames, `display/display.ts` gathers the display list, whose kinds of
+display object each have a module of their own: `displayobject.ts`,
+`container.ts`, `movieclip.ts`, `buttonobject.ts`, `shapeobject.ts`,
+`textobjects.ts`, `bitmapobject.ts`, `videoobject.ts`, with `walk.ts` for
+the frame's walks and `instantiate.ts` for what a character makes), and
+PixiJS only mirrors it
 (`render/view.ts`): a container per display object, kept from frame to frame
 and updated where the display object marks itself changed.
 

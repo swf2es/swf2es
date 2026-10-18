@@ -3,6 +3,18 @@
 // multipliers, the child's transform before its parent's.
 import type { ColorTransform } from "@swf2es/format";
 
+/** The colour transform that changes nothing: an object without one draws as with this. */
+export const IDENTITY_COLOR: ColorTransform = {
+  rMul: 1,
+  gMul: 1,
+  bMul: 1,
+  aMul: 1,
+  rAdd: 0,
+  gAdd: 0,
+  bAdd: 0,
+  aAdd: 0,
+};
+
 /** What a child draws, seen through its parent: `child` first, then `parent`. */
 export function concatColor(parent: ColorTransform, child: ColorTransform): ColorTransform {
   return {
