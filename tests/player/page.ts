@@ -1065,10 +1065,12 @@ async function contextLossSwf(
  * Play a SWF with no scripts in two renderers at once, one of which loses
  * its WebGL context and gets it back as `plan` says: each `t` plays a
  * frame and draws it in both, `l` loses the context, `r` waits for Pixi to
- * give it back, which it does once the steps between have run, and `s`
- * resizes both. Frames drawn while it is lost are drawn into nothing;
- * every frame drawn with it must match the other renderer's. What first
- * differed, or threw.
+ * give it back, which it does once the steps between have run, `s`
+ * resizes both, and `w` waits past the time after which render groups
+ * settle (render/settle.ts), so that the next frame batches what both draw
+ * alone. Frames drawn while it is lost are drawn into nothing; every frame
+ * drawn with it must match the other renderer's. What first differed, or
+ * threw.
  */
 async function contextLossPlanSwf(
   base64: string,
@@ -1171,6 +1173,12 @@ async function contextLossPlanSwf(
           }
 
           lost = false;
+          break;
+        }
+
+        case "w": {
+          // render/settle.ts's SETTLE_MS is 2000.
+          await new Promise((done) => setTimeout(done, 2500));
           break;
         }
 

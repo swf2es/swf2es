@@ -52,7 +52,15 @@ export function hookRenderer(renderer: Renderer): void {
   }
 
   if (renderer.renderGroup instanceof RenderGroupSystem) {
-    renderer.renderGroup.onBuildInstructions = (group) => noteBuild(group as unknown as Settling);
+    // Counts the contexts given back since: each has Pixi build every group again.
+    let context = 0;
+    renderer.runners?.contextChange?.add({
+      contextChange: () => {
+        context++;
+      },
+    });
+    renderer.renderGroup.onBuildInstructions = (group) =>
+      noteBuild(group as unknown as Settling, context);
   }
 
   const filter = (renderer as { filter?: unknown }).filter;

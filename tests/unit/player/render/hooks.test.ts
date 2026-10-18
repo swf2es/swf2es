@@ -68,3 +68,35 @@ test("each extension point of a renderer is set, once, and a stand-in's are left
   hookRenderer(standIn as unknown as Parameters<typeof hookRenderer>[0]);
   assert.deepEqual(standIn, { renderPipes: { graphics: {}, batch: {} }, filter: {} });
 });
+
+test("a group's build for a context given back is no change of its own, so it stays settled", async () => {
+  const renderGroup = made(RenderGroupSystem);
+  const listeners: { contextChange(): void }[] = [];
+  const renderer = {
+    renderPipes: {},
+    renderGroup,
+    runners: {
+      contextChange: { add: (listener: { contextChange(): void }) => listeners.push(listener) },
+    },
+  };
+  hookRenderer(renderer as unknown as Parameters<typeof hookRenderer>[0]);
+  const build = renderGroup.onBuildInstructions as (group: object) => void;
+  const group: { $builtAt?: number } = {};
+
+  build(group);
+  const first = group.$builtAt;
+  assert.equal(typeof first, "number");
+  await new Promise((done) => setTimeout(done, 5));
+
+  // Pixi builds every group again for a new context.
+  for (const listener of listeners) {
+    listener.contextChange();
+  }
+
+  build(group);
+  assert.equal(group.$builtAt, first);
+
+  // A build after that is a change again.
+  build(group);
+  assert.ok((group.$builtAt ?? 0) > (first ?? 0));
+});

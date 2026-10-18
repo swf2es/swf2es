@@ -148,9 +148,11 @@ assert.equal(await playLosingContext(swf, 4, true), null, "with the transform ta
 assert.equal(await playLosingContext(swf, 4, false), null, "without the transform table");
 assert.equal(await playLosingContext(swf, 4, true, true), null, "with objects turned in 3D");
 // Lost for frames that draw into nothing, lost twice, and resized while lost and after: every
-// frame drawn with a context matches a renderer that kept its own.
+// frame drawn with a context matches a renderer that kept its own. Settled while lost, its groups
+// are batched by a shader first linked then, which found no uniforms: Pixi kept the sync
+// function chosen for it, which set none, after the context came back.
 for (const table of [true, false]) {
-  for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt"]) {
+  for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt", "tttwltrttt"]) {
     assert.equal(await playLosingContextPlan(swf, plan, table), null, `${plan}, table ${table}`);
   }
 }

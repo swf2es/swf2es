@@ -31,17 +31,25 @@ export type Settling = {
   $pass?: number;
   /** The Graphics settle batched in it, some since destroyed, unbatched or moved (unsettle). */
   $batched?: Set<Graphics>;
+  /** Which of its renderer's contexts it was last built for (noteBuild). */
+  $context?: number;
 };
 
 /**
  * A build of `group`'s instructions about to run, as Pixi's render group
- * system tells it (render/hooks.ts): when it was last rebuilt, unless
- * the build is its own batching's, which is no change of its own.
+ * system tells it (render/hooks.ts), for the renderer's `context`th
+ * context: when it was last rebuilt, unless the build is its own
+ * batching's, or the first for a context given back, which Pixi builds
+ * every group again for. Neither is a change of its own: counted, a group
+ * settled before the loss was drawn alone again after it, unlike the same
+ * scene in a renderer that kept its context.
  */
-export function noteBuild(group: Settling): void {
+export function noteBuild(group: Settling, context: number): void {
+  const restored = group.$context !== undefined && group.$context !== context;
+  group.$context = context;
   if (group.$settling) {
     group.$settling = false;
-  } else {
+  } else if (!restored) {
     group.$builtAt = performance.now();
   }
 }
