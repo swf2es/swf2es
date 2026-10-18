@@ -1178,9 +1178,29 @@ function textureLimit(renderer: FilterSystem["renderer"]): number {
   return limit;
 }
 
+// A restored context has no pixels in the render textures a chain kept.
+// One listener per renderer avoids retaining every chain on its runners.
+const filterContexts = new WeakMap<FilterSystem["renderer"], object>();
+
+function filterContext(renderer: FilterSystem["renderer"]): object {
+  let state = filterContexts.get(renderer);
+  if (!state) {
+    state = {};
+    filterContexts.set(renderer, state);
+    renderer.runners?.contextChange?.add({
+      contextChange: () => {
+        filterContexts.set(renderer, {});
+      },
+    });
+  }
+
+  return state;
+}
+
 export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
+  private context: object | null = null;
   /** The input to be compared with it, which then becomes it. */
   private next: Input = { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
   /**
@@ -1415,7 +1435,8 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
    * which is then not drawn at all, nor the filters run. The input `apply` would compare is the
    * one the system sizes from the bounds it measured.
    */
-  override reusedOutput(_system: FilterSystem, data: FilterData): Texture | null {
+  override reusedOutput(system: FilterSystem, data: FilterData): Texture | null {
+    this.checkContext(system);
     const kept = this.kept;
     if (!this.keeps || this.stale || !kept || !this.ran) {
       return null;
@@ -1439,7 +1460,16 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     return kept;
   }
 
+  private checkContext(system: FilterSystem): void {
+    const context = filterContext(system.renderer);
+    if (this.context !== context) {
+      this.context = context;
+      this.forget();
+    }
+  }
+
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
+    this.checkContext(system);
     if (!this.keeps) {
       this.runOver(system, input, output, clear);
       return;

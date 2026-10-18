@@ -130,6 +130,12 @@ for (let i = 0; i < 6; i++) {
 }
 
 tags.push(
+  w.place({
+    depth: depth++,
+    character: 2,
+    matrix: { tx: 7200, ty: 4100 },
+    glows: [{ color: 0xff33aa, blur: 12, strength: 1 }],
+  }),
   w.place({ depth: depth++, character: 3, matrix: { a: 0.6, d: 0.6, tx: 7000, ty: 5000 } }),
   w.place({
     depth: depth++,
