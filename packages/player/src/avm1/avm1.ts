@@ -63,10 +63,11 @@ import { RegisteredClasses } from "./classes.js";
 import { constructBlocks, ScriptClips } from "./clips.js";
 import { ExternalCalls } from "./external.js";
 import { FocusTracker } from "./focus.js";
-import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
+import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
+import { type FilterFaces, filtersPackage } from "./globals/filters.js";
 import { flashPackage } from "./globals/geom.js";
 import { keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
@@ -300,6 +301,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   focusRect = true;
   soundBufferTime = 5;
   newInvalidBounds = false;
+  /** The filter objects a display object's `filters` reads, once flash.filters is made. */
+  filterFaces: FilterFaces | null = null;
   /** Where the pointer last was, in the stage's coordinates (avm1/pointer.ts). */
   mouseX = 0;
   mouseY = 0;
@@ -510,9 +513,18 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     external.define("ExternalInterface", externalInterfaceClass(this.external), 0);
     flash.define("external", external, 0);
     const display = avm1.get(flash, "display", this.swfVersion);
+    const bitmapData = bitmapDataClass(this);
     if (display instanceof avm1.Avm1Object) {
-      display.define("BitmapData", bitmapDataClass(this), 0);
+      display.define("BitmapData", bitmapData, 0);
     }
+
+    const bitmapProto = bitmapData.own("prototype", this.swfVersion)?.value;
+    const filters = new avm1.Avm1Object(realm.objectProto);
+    flash.define("filters", filters, 0);
+    this.filterFaces = filtersPackage(
+      { realm, bitmapObject: (store) => bitmapObject(bitmapProto, store), storeOf },
+      filters,
+    );
     realm.Object.define(
       "registerClass",
       realm.method((_, args, version) => this.classes.registerClass(args, version)),

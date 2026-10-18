@@ -6,10 +6,10 @@ import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitma
 import { drawDisplayObject } from "../../../bitmap/draw.js";
 import {
   applyFilter,
-  filterRect,
   filterRefusal,
   filtersDrawn,
-  isInner,
+  GLOWS,
+  generatedRect,
 } from "../../../bitmap/filters.js";
 import {
   type Affine,
@@ -35,15 +35,6 @@ import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
-
-/** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
-const GLOWS: ReadonlySet<string> = new Set([
-  "glow",
-  "dropShadow",
-  "bevel",
-  "gradientGlow",
-  "gradientBevel",
-]);
 
 import { colorOf } from "../geom/Transform.js";
 
@@ -403,42 +394,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
       }
 
-      // The rect within the bitmap first, an edge of it a rect of no width;
-      // one apart from it Flash makes 2^27 - 1 on each side, of no size.
-      const given = rectOf(s, sourceRect);
-      const x0 = Math.max(0, given.x);
-      const y0 = Math.max(0, given.y);
-      const x1 = Math.min(store.width, given.x + given.width);
-      const y1 = Math.min(store.height, given.y + given.height);
-      if (x1 < x0 || y1 < y0) {
-        // Grown as any other, but an inner filter's, which stays where it is.
-        const apart = { x: 0x7ffffff, y: 0x7ffffff, width: 0, height: 0 };
-        const r = isInner(f) ? apart : filterRect(apart, f);
-        return s.rt.construct(
-          s.rt.classNamed("flash.geom::Rectangle"),
-          r.x,
-          r.y,
-          r.width,
-          r.height,
-        );
-      }
-
-      let r = filterRect({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, f);
-      // A displacement map's result within the bitmap too, and an inner
-      // filter's, which draws within what it filters.
-      const within = (r: PixelRect): PixelRect => {
-        const x0 = Math.max(0, r.x);
-        const y0 = Math.max(0, r.y);
-        const x1 = Math.min(store.width, r.x + r.width);
-        const y1 = Math.min(store.height, r.y + r.height);
-        return x1 > x0 && y1 > y0
-          ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
-          : { x: 0, y: 0, width: 0, height: 0 };
-      };
-      if (f.kind === "displacementMap" || isInner(f)) {
-        r = within(r);
-      }
-
+      const r = generatedRect(store.width, store.height, rectOf(s, sourceRect), f);
       return s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), r.x, r.y, r.width, r.height);
     }
 

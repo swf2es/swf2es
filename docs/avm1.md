@@ -1608,12 +1608,35 @@ filters take it to, so only getPixel32 differs there (threshold's and
 pixelDissolve's copies). `compare` has answers
 of its own: -1 for no argument, -2 for no live bitmap, -3 and -4 for
 other sizes, 0 for the same pixels, else a bitmap of the differences.
-With no filter objects in AVM1 yet, `applyFilter` gives -1 after its
-source's checks, and `generateFilterRect` undefined, as Ruffle's does. A
-clip's `attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
+`applyFilter` and `generateFilterRect` run AS3's operations on a filter
+object's record (`bitmap/filters.ts`), with adl's answers: applyFilter -4
+for no rect, -5 for no filter object, -6 for a glow, shadow or bevel into
+an opaque bitmap, a point that is none (0, 0), and 0 done;
+generateFilterRect -1 for no rect, -2 for no filter object. A clip's
+`attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
 BitmapData at a depth as a bitmap with no AVM1 object of its own, which
 the bitmap's later changes show on. Real content caches its art in them:
 a level's tiles drawn from its clips once, then attached.
+
+### flash.filters
+
+`flash.filters`' nine classes and BitmapFilter (`globals/filters.ts`, as
+Ruffle's) hold the record a display object's filters keep
+(`display/filters.ts`), its values kept as Flash keeps them, which their
+getters read back: an alpha in a byte, a strength in 256ths up to 255, an
+angle within a turn by `%`, kept in radians, blurs clamped to 0 to 255, a
+quality to 0 to 15, colour and convolution matrices in floats (a colour
+matrix's twenty NaN past a list given, a convolution's grown to its size,
+never shrunk), a gradient's colours in sixteen slots whose alphas and
+ratios outlast a shorter list, a bevel's or gradient's type `inner`,
+`outer` or else `full`. Their properties are getters and setters on each
+prototype, listed, from SWF 8; the prototypes extend BitmapFilter's, whose
+`clone` copies a filter. A clip's, a button's and a text field's `filters`
+read back new objects of its records each time and take the filter
+objects of a list up to its length (adl: an object without a length sets
+none), a displacement map's pixels as they are then, as AS3's are; the
+renderer draws them as AS3's (the corpus's `bitmap_filters`, the
+`avm1-filters` case).
 
 ### getURL and fscommand
 

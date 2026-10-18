@@ -9,6 +9,7 @@ import { avm1 } from "@swf2es/runtime";
 import { CONTENT, type DisplayObject, TextObject } from "../../display/display.js";
 import { maxScrollV, shownLines } from "../../text/layout.js";
 import { applied, emptyFormat, type PartialFormat } from "../../text/text.js";
+import { type FilterFaces, filtersProperty } from "./filters.js";
 import { DEPTH_BIAS } from "./MovieClip.js";
 import { stylesOf } from "./StyleSheet.js";
 import { formatOf, newTextFormat } from "./TextFormat.js";
@@ -26,6 +27,8 @@ export interface TextFieldHost {
   textChanged(field: TextObject): void;
   /** The field's variable set: bound to it from now on. */
   variableChanged(field: TextObject): void;
+  /** The filter objects `filters` reads, once flash.filters is made. */
+  readonly filterFaces: FilterFaces | null;
 }
 
 /** What a field has only for AVM1, beside what the player keeps for both VMs. */
@@ -587,6 +590,13 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     },
   );
 
+  filtersProperty(
+    realm,
+    proto,
+    avm1.DONT_DELETE | avm1.VERSION_8,
+    (self) => fieldOf(self),
+    () => host.filterFaces,
+  );
   return { constr, proto };
 }
 

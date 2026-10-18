@@ -23,6 +23,7 @@ import { apply, contains, invert, type Rect, transformRect } from "../../display
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
 import { storeOf } from "./BitmapData.js";
+import { type FilterFaces, filtersProperty } from "./filters.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 import { formVars } from "./LoadVars.js";
 
@@ -60,6 +61,8 @@ export interface Movie extends GeomHost {
    * later calls it, or any code under a root of SWF 8 or later.
    */
   newInvalidBounds: boolean;
+  /** The filter objects `filters` reads, once flash.filters is made. */
+  readonly filterFaces: FilterFaces | null;
   /** The pointer's position on the stage. */
   readonly mouseX: number;
   readonly mouseY: number;
@@ -1134,6 +1137,13 @@ export function movieClipClass(movie: Movie): {
 
     return undefined;
   });
+  filtersProperty(
+    realm,
+    proto,
+    avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8,
+    clipOf,
+    () => movie.filterFaces,
+  );
   // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
   // not read (Ruffle).
   method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {
