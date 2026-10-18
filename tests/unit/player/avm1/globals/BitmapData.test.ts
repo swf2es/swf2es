@@ -159,3 +159,17 @@ trace(row(c, 10) + " " + row(c, 29) + " " + row(c, 9) + " " + row(c, 30));`),
     ],
   );
 });
+
+test("copyPixels takes an alpha bitmap only with its point, and merges only when told", async () => {
+  const copy = (args: string) => `var b = made(true);
+b.copyPixels(new BitmapData(3, 3, false, 0x12345678), rect, point${args}); trace(row(b, 1));\n`;
+  const alpha = ", new BitmapData(3, 3, true, 0x12345678)";
+  assert.deepEqual(
+    await run(copy(alpha) + copy(`${alpha}, point`) + copy(`${alpha}, point, true`)),
+    [
+      row("aabbccdc ff345678 ff345678"),
+      row("aabbccdc 112d5a78 112d5a78"),
+      row("aabbccdc afadc0d3 afadc0d3"),
+    ],
+  );
+});

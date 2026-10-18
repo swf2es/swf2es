@@ -77,7 +77,7 @@
   "avm1/bitmap_data_thorough/compare": {"matched":72,"lines":72,"traced":72,"error":null},
   "avm1/bitmap_data_thorough/constructor": {"matched":314,"lines":314,"traced":314,"error":null},
   "avm1/bitmap_data_thorough/copyChannel": {"matched":2718,"lines":2718,"traced":2718,"error":null},
-  "avm1/bitmap_data_thorough/copyPixels": {"matched":189,"lines":1206,"traced":1206,"error":null},
+  "avm1/bitmap_data_thorough/copyPixels": {"matched":1206,"lines":1206,"traced":1206,"error":null},
   "avm1/bitmap_data_thorough/fillRect": {"matched":345,"lines":345,"traced":345,"error":null},
   "avm1/bitmap_data_thorough/floodFill": {"matched":870,"lines":870,"traced":870,"error":null},
   "avm1/bitmap_data_thorough/getColorBoundsRect": {"matched":288,"lines":288,"traced":288,"error":null},

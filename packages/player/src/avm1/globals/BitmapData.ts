@@ -287,9 +287,11 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     }
 
     const [dx, dy] = pointOf(args[2], v);
-    const alpha = storeOf(args[3]);
-    // mergeAlpha is false without an alpha bitmap, whatever the documentation says (Ruffle).
-    const merge = args.length >= 6 ? avm1.toBoolean(args[5], v) : alpha !== null && !alpha.disposed;
+    // An alpha bitmap counts only with its point given, and mergeAlpha is
+    // false unless given, whatever the documentation says (the corpus's
+    // bitmap_data_thorough).
+    const alpha = args.length >= 5 ? storeOf(args[3]) : null;
+    const merge = args.length >= 6 && avm1.toBoolean(args[5], v);
     if (alpha !== null && !alpha.disposed) {
       const [ax, ay] = pointOf(args[4], v);
       store.copyPixels(source, r, dx, dy, merge, alpha, ax, ay);
