@@ -11,7 +11,7 @@ export const SPARE_GRAPHICS_MOST = 4096;
 
 /**
  * The most released nodes a view keeps, of all characters, for a new
- * object of their character to take (render/view.ts), the oldest going
+ * object of their character to take (render/spares.ts), the oldest going
  * first. A crowd of 32 of one animated character releases some 340 a
  * frame and takes most of them back only as its loop comes round, a second
  * or two on: it keeps some 9,000. At 2,048 those went before they were
