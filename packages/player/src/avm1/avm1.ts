@@ -16,14 +16,7 @@
 // frames by the player's clock, and scripts that run past the script
 // timeout have the movie's actions disabled.
 import type { Codegen } from "@swf2es/codegen";
-import {
-  type ActionList,
-  ButtonCondition,
-  ClipEvent,
-  isAs3,
-  type Place,
-  type Swf,
-} from "@swf2es/format";
+import { type ActionList, ClipEvent, isAs3, type Place, type Swf } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import { decodeInBrowser, type ImageDecode } from "../bitmap/images.js";
@@ -69,7 +62,7 @@ import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { flashPackage } from "./globals/geom.js";
-import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
+import { keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
 import {
   ClipNative,
@@ -90,6 +83,7 @@ import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
 import { xmlNodeClass } from "./globals/XMLNode.js";
 import { xmlSocketClass } from "./globals/XMLSocket.js";
+import { Avm1Input } from "./input.js";
 import { MovieLoads } from "./loads.js";
 import { Avm1Net, textFor } from "./net.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
@@ -104,20 +98,11 @@ import {
   INITIALIZE,
   METHOD,
   NO_ARGS,
-  NO_BLOCKS,
   NORMAL,
-  NOTIFY,
   Queued,
 } from "./queue.js";
 import { Avm1Sounds } from "./sound.js";
-import {
-  Avm1Swf,
-  handlersOf,
-  handlersOfButton,
-  NO_HANDLERS,
-  readRootFrames,
-  stopOf,
-} from "./swf.js";
+import { Avm1Swf, handlersOf, NO_HANDLERS, readRootFrames, stopOf } from "./swf.js";
 import { defaultClock, Timers } from "./timers.js";
 
 type Value = avm1.Value;
@@ -247,72 +232,10 @@ const METHODS = new Map<number, string>([
   [ClipEvent.dragOut, "onDragOut"],
 ]);
 
-/** The pointer's events that make a clip a button where its clip actions have one (Ruffle's BUTTON_EVENT_FLAGS). */
-const BUTTON_EVENTS =
-  ClipEvent.press |
-  ClipEvent.release |
-  ClipEvent.releaseOutside |
-  ClipEvent.rollOver |
-  ClipEvent.rollOut |
-  ClipEvent.dragOver |
-  ClipEvent.dragOut |
-  ClipEvent.keyPress;
-
-/** The AS2 methods that make a clip a button where its object, or what it inherits, has one. */
-const BUTTON_METHODS = [
-  "onPress",
-  "onRelease",
-  "onReleaseOutside",
-  "onRollOver",
-  "onRollOut",
-  "onDragOver",
-  "onDragOut",
-];
-
-/** The button transition each of the pointer's events is, by the event's bit (Ruffle's Avm1Button). */
-const CONDITIONS = new Map<number, number>([
-  [ClipEvent.rollOver, ButtonCondition.idleToOverUp],
-  [ClipEvent.rollOut, ButtonCondition.overUpToIdle],
-  [ClipEvent.press, ButtonCondition.overUpToOverDown],
-  [ClipEvent.release, ButtonCondition.overDownToOverUp],
-  [ClipEvent.releaseOutside, ButtonCondition.outDownToIdle],
-  [ClipEvent.dragOut, ButtonCondition.overDownToOutDown],
-  [ClipEvent.dragOver, ButtonCondition.outDownToOverDown],
-]);
-
-/** The frame label a clip in button mode goes to and stops at on each of the pointer's events. */
-const LABELS = new Map<number, string>([
-  [ClipEvent.rollOut, "_up"],
-  [ClipEvent.releaseOutside, "_up"],
-  [ClipEvent.rollOver, "_over"],
-  [ClipEvent.release, "_over"],
-  [ClipEvent.dragOut, "_over"],
-  [ClipEvent.press, "_down"],
-  [ClipEvent.dragOver, "_down"],
-]);
-
-/** What Mouse's listeners hear of the pointer's clip events. */
-const MOUSE_MESSAGES = new Map<number, string>([
-  [ClipEvent.mouseMove, "onMouseMove"],
-  [ClipEvent.mouseDown, "onMouseDown"],
-  [ClipEvent.mouseUp, "onMouseUp"],
-]);
-
-/** The state a button goes to on each of the pointer's events (Ruffle's Avm1Button: a drag out shows over). */
-const BUTTON_STATES = new Map<number, "up" | "over" | "down">([
-  [ClipEvent.rollOver, "over"],
-  [ClipEvent.rollOut, "up"],
-  [ClipEvent.press, "down"],
-  [ClipEvent.release, "over"],
-  [ClipEvent.releaseOutside, "up"],
-  [ClipEvent.dragOut, "over"],
-  [ClipEvent.dragOver, "down"],
-]);
-
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost {
+export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost {
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -388,29 +311,17 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   } | null = null;
   /** A dragged clip's `_droptarget`: what is under the pointer as it was last dragged. */
   readonly dropTargets = new WeakMap<DisplayObject, DisplayObject | null>();
-  /** The keys down by Flash's codes, the mouse's buttons among them as 1, 2 and 4. */
-  private readonly keysDown = new Set<number>();
-  /**
-   * The keys toggled on, by their codes: each press of a key, a mouse
-   * button's too, turns it on or off, Caps Lock's as any other's (the
-   * corpus's `key_isToggled`).
-   */
-  private readonly toggled = new Set<number>();
-  keyCode = 0;
-  keyAscii = 0;
-  private shown = true;
-  /** `_global.Key` and `_global.Mouse`, whose listeners the player sends their messages. */
-  private keyFace: avm1.Avm1Object | null = null;
-  private mouseFace: avm1.Avm1Object | null = null;
+  /** The keys, the pointer's buttons and Key's and Mouse's listeners. */
+  readonly input = new Avm1Input(this);
   private selectionFace: avm1.Avm1Object | null = null;
   /** The button or clip with the focus. */
-  private focusedObject: DisplayObject | null = null;
+  focusedObject: DisplayObject | null = null;
   /**
    * Whether keyboard navigation shows the focus (Ruffle's highlight): a
    * focused object's onKeyDown and onKeyUp fire while it is not inactive,
    * and Enter and Space press it while it is visible.
    */
-  private highlight: "inactive" | "visible" | "hidden" = "inactive";
+  highlight: "inactive" | "visible" | "hidden" = "inactive";
   readonly url: string;
   readonly storage: SharedObjectStorage;
   /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
@@ -582,10 +493,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     realm.global.define("TextField", textField.constr, avm1.DONT_ENUM);
     textField.constr.define("StyleSheet", styleSheetClass(this), avm1.DONT_ENUM | avm1.VERSION_7);
     realm.global.define("TextFormat", textFormatClass(this).constr, avm1.DONT_ENUM);
-    this.keyFace = keyObject(realm, this, this.swfVersion);
-    realm.global.define("Key", this.keyFace, avm1.DONT_ENUM);
-    this.mouseFace = mouseObject(realm, this, this.swfVersion);
-    realm.global.define("Mouse", this.mouseFace, avm1.DONT_ENUM);
+    this.input.keyFace = keyObject(realm, this.input, this.swfVersion);
+    realm.global.define("Key", this.input.keyFace, avm1.DONT_ENUM);
+    this.input.mouseFace = mouseObject(realm, this.input, this.swfVersion);
+    realm.global.define("Mouse", this.input.mouseFace, avm1.DONT_ENUM);
     this.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
     realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
@@ -829,7 +740,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   /** The levels' clips, by number, the lowest first. */
-  private levelClips(): MovieClip[] {
+  levelClips(): MovieClip[] {
     return [...this.levels.entries()].sort(([a], [b]) => a - b).map(([, clip]) => clip);
   }
 
@@ -1685,7 +1596,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     return (
       d instanceof MovieClip &&
       d !== this.root &&
-      (this.buttonMode(d) || avm1.toBoolean(this.read(d, "focusEnabled"), this.swfVersion))
+      (this.input.buttonMode(d) ||
+        avm1.toBoolean(this.input.read(d, "focusEnabled"), this.swfVersion))
     );
   }
 
@@ -1730,18 +1642,22 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   tabEnabled(d: DisplayObject): boolean | undefined {
-    const value = this.read(d, "tabEnabled");
+    const value = this.input.read(d, "tabEnabled");
     return value === undefined ? undefined : avm1.toBoolean(value, this.swfVersion);
   }
 
   tabChildren(d: DisplayObject): boolean {
-    const value = this.read(d, "tabChildren");
+    const value = this.input.read(d, "tabChildren");
     return value === undefined || avm1.toBoolean(value, this.swfVersion);
+  }
+
+  buttonMode(clip: MovieClip): boolean {
+    return this.input.buttonMode(clip);
   }
 
   /** A tabIndex as an int: a number's or a boolean's, any other value's the least; -1 is none (Ruffle). */
   tabIndex(d: DisplayObject): number | undefined {
-    const value = this.read(d, "tabIndex");
+    const value = this.input.read(d, "tabIndex");
     if (value === undefined || value === null) {
       return undefined;
     }
@@ -1754,7 +1670,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   /** Tab, or Shift+Tab: the focus to the next object in the tab order, or the one before, round. */
-  private tab(reverse: boolean): boolean {
+  tab(reverse: boolean): boolean {
     const root = this.movieRoot;
     const stage = root?.parent;
     if (!(root instanceof MovieClip) || !stage) {
@@ -1777,14 +1693,19 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * Enter or Space on what has the focus, where the highlight shows: a press
    * and a release of it. Whether it was pressed, the key then the SWF's.
    */
-  private activate(): boolean {
+  activate(): boolean {
     const d = this.focusedObject;
-    if (this.highlight !== "visible" || d === null || this.removed(d) || !this.flag(d, "enabled")) {
+    if (
+      this.highlight !== "visible" ||
+      d === null ||
+      this.removed(d) ||
+      !this.input.flag(d, "enabled")
+    ) {
       return false;
     }
 
-    this.buttonDispatch(d, ClipEvent.press);
-    this.buttonDispatch(d, ClipEvent.release);
+    this.input.buttonDispatch(d, ClipEvent.press);
+    this.input.buttonDispatch(d, ClipEvent.release);
     return true;
   }
 
@@ -1957,7 +1878,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * method it calls after them. One whose place's clip actions Flash
    * cannot read stops the SWF instead.
    */
-  private dispatch(clip: MovieClip, event: number, methods = true): void {
+  dispatch(clip: MovieClip, event: number, methods = true): void {
     const native = nativeOf(clip);
     // Its clip actions are the SWF's that placed it, whatever a load put in it since.
     if (native === null || (native.swf ?? this.swfOf(clip)).version < 5) {
@@ -1996,7 +1917,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   /** From SWF 6, the AS2 method of `event` on `clip`'s object, queued. */
-  private method(clip: DisplayObject, event: number, unload: boolean): void {
+  method(clip: DisplayObject, event: number, unload: boolean): void {
     const name = METHODS.get(event);
     if (name !== undefined && this.methodVersion(clip) >= 6) {
       this.queue.enqueue(NORMAL, new Queued(METHOD, clip, null, 0, 0, unload, name));
@@ -2011,421 +1932,14 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     this.pointer?.stopDrag();
   }
 
-  keyIsDown(code: number): boolean {
-    return this.keysDown.has(code);
-  }
-
-  keyToggled(code: number): boolean {
-    return this.toggled.has(code);
-  }
-
-  /**
-   * Every key let go, with no event, as the player loses focus
-   * (Player.setActive): their releases go elsewhere and never come. The
-   * mouse's buttons, 1, 2 and 4, stay the pointer's, which tells their
-   * releases. What is toggled stays, as a release toggles nothing.
-   */
+  /** Every key let go, with no event, as the player loses focus (input.ts). */
   releaseKeys(): void {
-    for (const code of this.keysDown) {
-      if (code !== 1 && code !== 2 && code !== 4) {
-        this.keysDown.delete(code);
-      }
-    }
+    this.input.releaseKeys();
   }
 
-  get mouseShown(): boolean {
-    return this.shown;
-  }
-
-  set mouseShown(shown: boolean) {
-    this.shown = shown;
-    this.pointer?.updateCursor();
-  }
-
-  /** A mouse button, as the pointer gives it (0 left, 1 middle, 2 right), down or up: Key's 1, 4 or 2. */
-  mouseButton(button: number, down: boolean): void {
-    const code = button === 0 ? 1 : button === 1 ? 4 : button === 2 ? 2 : 0;
-    if (code === 0) {
-      return;
-    }
-
-    this.keyState(code, down);
-  }
-
-  /**
-   * A key down or up in Key's state: the last key, a press toggling it
-   * unless it was already down (a held key's repeats do not), as Ruffle's
-   * input state has it.
-   */
-  private keyState(code: number, down: boolean): void {
-    this.keyCode = code;
-    if (code === 0) {
-      return;
-    }
-
-    if (!down) {
-      this.keysDown.delete(code);
-      return;
-    }
-
-    if (!this.keysDown.has(code) && !this.toggled.delete(code)) {
-      this.toggled.add(code);
-    }
-
-    this.keysDown.add(code);
-  }
-
-  /**
-   * A key pressed or let go (avm1/keyboard.ts), as Ruffle orders it:
-   * every clip's keyDown or keyUp clip actions, as they are drawn, then Key's
-   * listeners' onKeyDown or onKeyUp; then, for a press of a key that
-   * `press` is a keyPress of, the first button or clip in the order they
-   * are drawn whose keyPress it is runs its actions for it. The queue runs
-   * once. Whether a keyPress ran.
-   */
-  key(
-    down: boolean,
-    keyCode: number,
-    charCode: number,
-    press: number,
-    typed = 0,
-    shift = false,
-  ): boolean {
-    if (this.halted || !this.loaded) {
-      return false;
-    }
-
-    this.keyState(keyCode, down);
-    this.keyAscii = charCode;
-    this.timers.begin();
-    try {
-      // To the clips as they are drawn, the lowest first, what is in one before it (Ruffle's order).
-      // What has the focus also hears onKeyDown or onKeyUp, from SWF 6, while the highlight is active.
-      const event = down ? ClipEvent.keyDown : ClipEvent.keyUp;
-      const focused = this.focusedObject;
-      const heard =
-        this.swfVersion >= 6 &&
-        this.highlight !== "inactive" &&
-        focused !== null &&
-        this.flag(focused, "enabled")
-          ? focused
-          : null;
-      const visit = (d: DisplayObject) => {
-        if (d instanceof Container) {
-          for (const child of d.children) {
-            visit(child);
-          }
-        }
-
-        if (d instanceof MovieClip) {
-          this.dispatch(d, event, d === heard);
-        } else if (d instanceof ButtonObject && d === heard) {
-          this.method(d, event, false);
-        }
-      };
-      for (const level of this.levelClips()) {
-        visit(level);
-      }
-
-      this.notify(this.keyFace, down ? "onKeyDown" : "onKeyUp");
-      const pressed = down && press !== 0 && this.queueKeyPress(press);
-
-      // A key no keyPress took: Tab moves the focus, after what is queued runs; Enter and Space
-      // press what has it.
-      let used = pressed;
-      if (down && !pressed && keyCode === 9) {
-        this.queue.run();
-        // A movie with nothing to tab to leaves Tab to the page.
-        used = this.tab(shift);
-      } else if (down && !pressed && (keyCode === 13 || typed === 32)) {
-        // A press it made keeps the page from acting on the key too: Space would scroll it.
-        used = this.activate();
-      }
-
-      this.queue.run();
-      return used;
-    } finally {
-      this.timers.end();
-    }
-  }
-
-  /** Text typed with no key events (avm1/keyboard.ts): a keyPress of its character, as `key` runs one. */
-  keyPress(press: number): boolean {
-    if (this.halted || !this.loaded || press === 0) {
-      return false;
-    }
-
-    this.timers.begin();
-    try {
-      const pressed = this.queueKeyPress(press) || (press === 32 && this.activate());
-      this.queue.run();
-      return pressed;
-    } finally {
-      this.timers.end();
-    }
-  }
-
-  /**
-   * The first button or clip, as they are drawn, the lowest first and what
-   * is in one before it, whose keyPress is `press`: a button's condition
-   * blocks with that key, enabled or not, with its parent as target; a
-   * clip's `on (keyPress)` clip actions. A hidden clip takes none, nor what
-   * is in it, a hidden button none while it is up, and a button in a button
-   * none. Whether one was queued.
-   */
-  private queueKeyPress(press: number): boolean {
-    const visit = (d: DisplayObject, inButton: boolean): boolean => {
-      const button = d instanceof ButtonObject ? d : null;
-      if (!d.visible && (button === null || button.state === "up")) {
-        return false;
-      }
-
-      if (d instanceof Container) {
-        for (const child of d.children) {
-          if (visit(child, inButton || button !== null)) {
-            return true;
-          }
-        }
-      }
-
-      if (button) {
-        const id = button.character?.id;
-        let found = false;
-        if (!inButton && button.parent !== null && id !== undefined) {
-          const swf = this.swfOf(button);
-          for (const h of handlersOfButton(swf, id)) {
-            if (h.key === press) {
-              this.queue.enqueue(NORMAL, new Queued(BLOCK, button.parent, swf, h.block));
-              found = true;
-            }
-          }
-        }
-
-        return found;
-      }
-
-      const native = d instanceof MovieClip ? nativeOf(d) : null;
-      if (native !== null && this.swfOf(d).version >= 5) {
-        let found = false;
-        for (const h of native.handlers ?? NO_HANDLERS) {
-          if (h.events & ClipEvent.keyPress && h.key === press) {
-            this.queue.enqueue(NORMAL, new Queued(BLOCK, d, native.swf, h.block));
-            found = true;
-          }
-        }
-
-        return found;
-      }
-
-      return false;
-    };
-
-    return this.levelClips().some((level) => visit(level, false));
-  }
-
-  /** `object`'s listeners told `name` with `args`, queued after what is queued now. */
-  private notify(object: avm1.Avm1Object | null, name: string, args: avm1.Value[] = NO_ARGS): void {
-    if (object !== null && this.root !== null) {
-      this.queue.enqueue(
-        NORMAL,
-        new Queued(NOTIFY, this.root, null, 0, 0, false, name, NO_BLOCKS, object, args),
-      );
-    }
-  }
-
-  /** Whether Mouse has listeners, which the wheel would tell: the page keeps it otherwise. */
-  get mouseHeard(): boolean {
-    const face = this.mouseFace;
-    const listeners = face === null ? undefined : avm1.get(face, "_listeners", this.swfVersion);
-    return (
-      listeners instanceof avm1.Avm1Object &&
-      avm1.toNumber(avm1.get(listeners, "length", this.swfVersion), this.swfVersion) > 0
-    );
-  }
-
-  /** The wheel turned by `delta` lines over `target`: Mouse's listeners' onMouseWheel, then the queue runs. */
-  mouseWheel(delta: number, target: DisplayObject | null): void {
-    if (this.halted || !this.loaded) {
-      return;
-    }
-
-    this.timers.begin();
-    try {
-      this.notify(this.mouseFace, "onMouseWheel", [delta, target?.avm1 ?? undefined]);
-      this.queue.run();
-    } finally {
-      this.timers.end();
-    }
-  }
-
-  /**
-   * Whether the pointer takes `clip` as a button (Ruffle's is_button_mode):
-   * its clip actions have one of the pointer's button events, or, below
-   * the root, its object has one of their AS2 methods, its own or
-   * inherited, a class's among them.
-   */
-  buttonMode(clip: MovieClip): boolean {
-    const native = nativeOf(clip);
-    for (const h of native?.handlers ?? NO_HANDLERS) {
-      if (h.events & BUTTON_EVENTS) {
-        return true;
-      }
-    }
-
-    const face = clip.avm1;
-    if (face === null || clip === this.root || this.swfVersion < 6) {
-      return false;
-    }
-
-    for (const name of BUTTON_METHODS) {
-      if (avm1.has(face, name, this.swfVersion)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /** A button's or clip's AS2 flag, `enabled` or `useHandCursor`: true where it is undefined, as Flash reads it. */
-  flag(d: DisplayObject, name: "enabled" | "useHandCursor"): boolean {
-    const value = this.read(d, name);
-    return value === undefined || avm1.toBoolean(value, this.swfVersion);
-  }
-
-  /** What a clip's `hitArea` names, a clip or button the pointer tests in its place; null for none. */
-  hitArea(clip: MovieClip): DisplayObject | null {
-    if (this.swfVersion < 6) {
-      return null;
-    }
-
-    const area = this.read(clip, "hitArea");
-    const display = area instanceof avm1.Avm1Object ? area.display : null;
-    return display instanceof ClipNative ? display.target : null;
-  }
-
-  /**
-   * `d`'s AVM1 object's property `name`, read as code reads it, in an
-   * activation of `d`'s, as a getter `addProperty` gave it may be AVM1
-   * code; undefined where it has no object, or the read throws. Within
-   * a script, the begin and end go for nothing: the script's own hold.
-   */
-  private read(d: DisplayObject, name: string): avm1.Value {
-    const face = d.avm1;
-    const cx = this.halted ? null : this.activationOf(d);
-    if (face === null || cx === null) {
-      return undefined;
-    }
-
-    let value: avm1.Value;
-    this.timers.begin();
-    try {
-      this.rt.call(cx, () => {
-        value = avm1.get(face, name, this.swfVersion);
-      });
-    } finally {
-      this.timers.end();
-    }
-
-    return value;
-  }
-
-  /**
-   * The pointer's button events, each to its object, in the order given,
-   * then the queue runs once. A button runs its condition blocks for the
-   * transition, with its parent as target, plays the transition's sound
-   * and changes state, then, from SWF 6, its AS2 method; a clip in button
-   * mode goes to the event's frame label, if it has one, and stops, then
-   * runs its clip actions and method for it. Ruffle's order (Avm1Button
-   * and MovieClip's event_dispatch).
-   */
-  buttonEvents(events: readonly (readonly [DisplayObject, number])[]): void {
-    if (this.halted || !this.loaded || events.length === 0) {
-      return;
-    }
-
-    this.timers.begin();
-    try {
-      for (const [d, event] of events) {
-        this.buttonDispatch(d, event);
-      }
-
-      this.queue.run();
-    } finally {
-      this.timers.end();
-    }
-  }
-
-  /** One of the pointer's button events to `d`, a button or a clip in button mode, queued. */
-  private buttonDispatch(d: DisplayObject, event: number): void {
-    if (this.removed(d)) {
-      return;
-    }
-
-    if (d instanceof ButtonObject) {
-      this.buttonEvent(d, event);
-    } else if (d instanceof MovieClip) {
-      const label = LABELS.get(event);
-      const timeline = this.timeline(d);
-      const frame = label === undefined ? undefined : timeline.labelFrame(label);
-      if (frame !== undefined) {
-        timeline.goto(frame, false);
-      }
-
-      this.dispatch(d, event);
-    }
-  }
-
-  private buttonEvent(button: ButtonObject, event: number): void {
-    const condition = CONDITIONS.get(event) ?? 0;
-    const parent = button.parent;
-    const id = button.character?.id;
-    if (parent !== null && id !== undefined) {
-      const swf = this.swfOf(button);
-      for (const h of handlersOfButton(swf, id)) {
-        if (h.conditions & condition) {
-          this.queue.enqueue(NORMAL, new Queued(BLOCK, parent, swf, h.block));
-        }
-      }
-    }
-
-    const state = BUTTON_STATES.get(event);
-    if (state !== undefined && state !== button.state) {
-      // A drag's transitions are silent.
-      button.setState(state, event !== ClipEvent.dragOut && event !== ClipEvent.dragOver);
-    }
-
-    this.method(button, event, false);
-  }
-
-  /**
-   * Broadcast a pointer's event (avm1/pointer.ts): every clip's clip
-   * actions for it, the newest first, then Mouse's listeners, then the
-   * queue runs. A key's go by `key`.
-   */
+  /** Broadcast a pointer's event (input.ts): every clip's clip actions for it, then Mouse's listeners. */
   clipEvent(event: number): void {
-    if (this.halted || !this.loaded) {
-      return;
-    }
-
-    this.timers.begin();
-    try {
-      for (let i = this.clips.length - 1; i >= 0; i--) {
-        const clip = this.clips[i];
-        if (!this.removed(clip)) {
-          this.dispatch(clip, event);
-        }
-      }
-
-      // Mouse's listeners after every clip's, as Ruffle queues them.
-      const message = MOUSE_MESSAGES.get(event);
-      if (message !== undefined) {
-        this.notify(this.mouseFace, message);
-      }
-
-      this.queue.run();
-    } finally {
-      this.timers.end();
-    }
+    this.input.clipEvent(event);
   }
 
   /** A DoAction tag a clip's frame reached: its blocks wait for the queue. */

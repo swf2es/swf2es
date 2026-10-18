@@ -40,18 +40,18 @@ export class Avm1Keyboard implements Keyboard {
   handle(type: "down" | "up", k: KeyState, edits = true): boolean {
     this.handled++;
     if (type === "up") {
-      this.avm1.key(false, k.keyCode, k.charCode, 0);
+      this.avm1.input.key(false, k.keyCode, k.charCode, 0);
       return false;
     }
 
     const typed = edits ? printable(k.charCode) : 0;
     const press = KEY_PRESSES.get(k.keyCode) ?? typed;
-    return this.avm1.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
+    return this.avm1.input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
   }
 
   text(k: KeyState): boolean {
     this.handled++;
-    return this.avm1.keyPress(printable(k.charCode));
+    return this.avm1.input.keyPress(printable(k.charCode));
   }
 
   /** Text fields come with step 13: nothing to copy or paste into yet. */
