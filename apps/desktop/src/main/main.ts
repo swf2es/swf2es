@@ -30,6 +30,8 @@ import { bridgeSockets } from "./sockets.ts";
 
 const preload = fileURLToPath(new URL("../preload/preload.cjs", import.meta.url));
 const promptPreload = fileURLToPath(new URL("../preload/prompt.cjs", import.meta.url));
+// The window's and the taskbar's icon, the project's, where the platform takes one from the window.
+const icon = fileURLToPath(new URL("../../static/icon.png", import.meta.url));
 const PROMPT_URL = `${APP_ORIGIN}/open-url.html`;
 const TITLE = "swf2es";
 
@@ -604,6 +606,7 @@ function createWindow(): void {
     width: 1024,
     height: 768,
     title: TITLE,
+    icon,
     webPreferences: {
       preload,
       contextIsolation: true,
