@@ -1451,7 +1451,7 @@ showed before, else 0, as adl gives them (Ruffle gives the opposite). A listener
 list hears nothing: a clip is found by its path (the corpus's
 `string_paths_keyevents`).
 
-The focus (`Avm1.focus`, the tab order in `avm1/focus.ts`, `Selection` in
+The focus (`FocusTracker` and the tab order in `avm1/focus.ts`, `Selection` in
 `globals/Selection.ts`), as Ruffle's FocusTracker has it. A button, or a
 clip below the root in button mode or whose `focusEnabled` is true, may
 be focused; `Selection.setFocus` of nothing gives false, of undefined or

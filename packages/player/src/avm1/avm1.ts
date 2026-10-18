@@ -20,11 +20,9 @@ import { type ActionList, ClipEvent, isAs3, type Place, type Swf } from "@swf2es
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import { decodeInBrowser, type ImageDecode } from "../bitmap/images.js";
-import { boundsIn } from "../display/bounds.js";
 import {
   BitmapObject,
   ButtonObject,
-  CONTENT,
   Container,
   construct,
   type DisplayObject,
@@ -56,7 +54,7 @@ import {
 import { evaluate } from "../scripting/evaluate.js";
 import { type BindingHost, VariableBindings } from "./bindings.js";
 import { ExternalCalls } from "./external.js";
-import { type TabHost, tabOrder } from "./focus.js";
+import { FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
@@ -77,7 +75,7 @@ import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
-import { stateOf, textFieldClass } from "./globals/TextField.js";
+import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
 import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
@@ -235,7 +233,7 @@ const METHODS = new Map<number, string>([
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost {
+export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -313,15 +311,8 @@ export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost
   readonly dropTargets = new WeakMap<DisplayObject, DisplayObject | null>();
   /** The keys, the pointer's buttons and Key's and Mouse's listeners. */
   readonly input = new Avm1Input(this);
-  private selectionFace: avm1.Avm1Object | null = null;
-  /** The button or clip with the focus. */
-  focusedObject: DisplayObject | null = null;
-  /**
-   * Whether keyboard navigation shows the focus (Ruffle's highlight): a
-   * focused object's onKeyDown and onKeyUp fire while it is not inactive,
-   * and Enter and Space press it while it is visible.
-   */
-  highlight: "inactive" | "visible" | "hidden" = "inactive";
+  /** The focus, what Tab moves it through and Selection's listeners. */
+  readonly focusTracker = new FocusTracker(this);
   readonly url: string;
   readonly storage: SharedObjectStorage;
   /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
@@ -497,8 +488,8 @@ export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost
     realm.global.define("Key", this.input.keyFace, avm1.DONT_ENUM);
     this.input.mouseFace = mouseObject(realm, this.input, this.swfVersion);
     realm.global.define("Mouse", this.input.mouseFace, avm1.DONT_ENUM);
-    this.selectionFace = selectionObject(realm, this, this.swfVersion);
-    realm.global.define("Selection", this.selectionFace, avm1.DONT_ENUM);
+    this.focusTracker.selectionFace = selectionObject(realm, this, this.swfVersion);
+    realm.global.define("Selection", this.focusTracker.selectionFace, avm1.DONT_ENUM);
     realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
     const sharedObjects = sharedObjectClass(this);
     this.sharedObjects = sharedObjects;
@@ -1461,7 +1452,7 @@ export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost
 
   /** A display object about to leave the display list: its unload, and where it and what is in it are. */
   private removing(d: DisplayObject): void {
-    const focused = this.focusedObject;
+    const focused = this.focusTracker.focusedObject;
     if (focused !== null && (focused === d || under(focused, d))) {
       this.focus(null);
     }
@@ -1502,103 +1493,23 @@ export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost
   }
 
   hidden(d: DisplayObject): void {
-    if (this.focusedObject === d) {
+    if (this.focusTracker.focusedObject === d) {
       this.focus(null);
     }
   }
 
   get focused(): DisplayObject | null {
-    return this.focusedObject;
+    return this.focusTracker.focusedObject;
   }
 
-  /**
-   * Focus `d`, or none: where it changes, the one that had it hears
-   * onKillFocus(new), `d` onSetFocus(old), then Selection's listeners
-   * onSetFocus(old, new), at once, not queued (Ruffle's FocusTracker). The
-   * highlight shows where `d` may show it.
-   */
+  /** Focus `d`, or none, telling those it concerns at once (focus.ts). */
   focus(d: DisplayObject | null): void {
-    const old = this.focusedObject;
-    this.focusedObject = d;
-    this.highlight =
-      d === null
-        ? "inactive"
-        : !(d instanceof TextObject) && this.highlightable(d)
-          ? "visible"
-          : "hidden";
-    if (d === old) {
-      this.selectFocused();
-      return;
-    }
-
-    // A field that loses the focus loses its selection.
-    if (old instanceof TextObject) {
-      old.focused = false;
-      stateOf(old).selected = false;
-      old.invalidate(CONTENT);
-    }
-
-    if (d instanceof TextObject) {
-      d.focused = true;
-      d.invalidate(CONTENT);
-    }
-
-    // Each object's method in an activation of its own, as its other event methods run.
-    const version = this.swfVersion;
-    const oldFace = old?.avm1 ?? null;
-    const newFace = d?.avm1 ?? null;
-    this.timers.begin();
-    try {
-      const oldCx = old === null ? null : this.activationOf(old);
-      if (oldFace !== null && oldCx !== null) {
-        this.rt.callMethod(oldCx, oldFace, "onKillFocus", [newFace], version);
-      }
-
-      const newCx = d === null ? null : this.activationOf(d);
-      if (newFace !== null && newCx !== null) {
-        this.rt.callMethod(newCx, newFace, "onSetFocus", [oldFace], version);
-      }
-
-      const selection = this.selectionFace;
-      const cx = this.root !== null ? this.activationOf(this.root) : null;
-      if (selection !== null && cx !== null) {
-        this.rt.call(cx, () => {
-          avm1.broadcastMessage(selection, "onSetFocus", [oldFace, newFace], version);
-        });
-      }
-    } finally {
-      this.timers.end();
-    }
-
-    this.selectFocused();
+    this.focusTracker.focus(d);
   }
 
-  /**
-   * A field given the focus, again too, has all its text selected, after
-   * the focus's events, which see none (Ruffle's update_edittext_selection;
-   * the corpus's `selection` and `edittext_programmatic_focus`).
-   */
-  private selectFocused(): void {
-    const d = this.focusedObject;
-    if (d instanceof TextObject) {
-      stateOf(d).selected = true;
-      d.select(0, d.model.text.length);
-    }
-  }
-
-  /** Whether a script may focus `d`: a button, or a clip below the root in button mode or with focusEnabled true. */
+  /** Whether a script may focus `d` (focus.ts). */
   focusable(d: DisplayObject): boolean {
-    // A field, selectable or not, as a script may focus any (Ruffle).
-    if (d instanceof ButtonObject || d instanceof TextObject) {
-      return true;
-    }
-
-    return (
-      d instanceof MovieClip &&
-      d !== this.root &&
-      (this.input.buttonMode(d) ||
-        avm1.toBoolean(this.input.read(d, "focusEnabled"), this.swfVersion))
-    );
+    return this.focusTracker.focusable(d);
   }
 
   pathOf(d: DisplayObject): string {
@@ -1608,120 +1519,6 @@ export class Avm1 implements Movie, FocusState, TabHost, BitmapHost, BindingHost
   resolve(value: avm1.Value, version: number): DisplayObject | null {
     const target = this.rt.realm.current?.target as DisplayObject | null | undefined;
     return targetOf(this, target ?? this.root, value, version);
-  }
-
-  /**
-   * Whether the focus shows on `d`: not the root, something drawn, and its
-   * `_focusrect`, from SWF 6 its own where it has one, else the stage's.
-   */
-  private highlightable(d: DisplayObject): boolean {
-    if (d === this.root || d.parent === null) {
-      return false;
-    }
-
-    const own = this.swfVersion >= 6 ? (nativeOf(d)?.focusRect ?? null) : null;
-    if (!(own ?? this.focusRect)) {
-      return false;
-    }
-
-    // A button's by its hit area, which it is tested by whatever it shows.
-    const area = d instanceof ButtonObject ? d.hitTestState : null;
-    const parent = area?.parent ?? null;
-    if (area) {
-      area.parent = d as ButtonObject;
-    }
-
-    try {
-      const r = boundsIn(area ?? d, d.parent, null, true);
-      return r.xMax > r.xMin || r.yMax > r.yMin;
-    } finally {
-      if (area) {
-        area.parent = parent;
-      }
-    }
-  }
-
-  tabEnabled(d: DisplayObject): boolean | undefined {
-    const value = this.input.read(d, "tabEnabled");
-    return value === undefined ? undefined : avm1.toBoolean(value, this.swfVersion);
-  }
-
-  tabChildren(d: DisplayObject): boolean {
-    const value = this.input.read(d, "tabChildren");
-    return value === undefined || avm1.toBoolean(value, this.swfVersion);
-  }
-
-  buttonMode(clip: MovieClip): boolean {
-    return this.input.buttonMode(clip);
-  }
-
-  /** A tabIndex as an int: a number's or a boolean's, any other value's the least; -1 is none (Ruffle). */
-  tabIndex(d: DisplayObject): number | undefined {
-    const value = this.input.read(d, "tabIndex");
-    if (value === undefined || value === null) {
-      return undefined;
-    }
-
-    const index =
-      typeof value === "number" || typeof value === "boolean"
-        ? avm1.toNumber(value, this.swfVersion) | 0
-        : -2147483648;
-    return index === -1 ? undefined : index;
-  }
-
-  /** Tab, or Shift+Tab: the focus to the next object in the tab order, or the one before, round. */
-  tab(reverse: boolean): boolean {
-    const root = this.movieRoot;
-    const stage = root?.parent;
-    if (!(root instanceof MovieClip) || !stage) {
-      return false;
-    }
-
-    const order = tabOrder(root, stage, this);
-    if (order.length === 0) {
-      return false;
-    }
-
-    const at = this.focusedObject === null ? -1 : order.indexOf(this.focusedObject);
-    const step = reverse ? order.length - 1 : 1;
-    const next = at < 0 ? (reverse ? order.length - 1 : 0) : (at + step) % order.length;
-    this.focus(order[next]);
-    return true;
-  }
-
-  /**
-   * Enter or Space on what has the focus, where the highlight shows: a press
-   * and a release of it. Whether it was pressed, the key then the SWF's.
-   */
-  activate(): boolean {
-    const d = this.focusedObject;
-    if (
-      this.highlight !== "visible" ||
-      d === null ||
-      this.removed(d) ||
-      !this.input.flag(d, "enabled")
-    ) {
-      return false;
-    }
-
-    this.input.buttonDispatch(d, ClipEvent.press);
-    this.input.buttonDispatch(d, ClipEvent.release);
-    return true;
-  }
-
-  /**
-   * The pointer's input, which hides the focus's highlight until Tab moves
-   * the focus again: a left press always, and, below SWF 9, any press,
-   * release or move.
-   */
-  pointerInput(type: "move" | "down" | "up", button: number): void {
-    const left = button === 0;
-    if (
-      (type === "down" && left) ||
-      (this.swfVersion < 9 && (left || button === 2 || type === "move"))
-    ) {
-      this.highlight = "inactive";
-    }
   }
 
   /** Where `d` and what is in it are, the paths their references keep. */

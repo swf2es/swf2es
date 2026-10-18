@@ -186,10 +186,10 @@ export class Avm1Input implements InputState {
       // To the clips as they are drawn, the lowest first, what is in one before it (Ruffle's order).
       // What has the focus also hears onKeyDown or onKeyUp, from SWF 6, while the highlight is active.
       const event = down ? ClipEvent.keyDown : ClipEvent.keyUp;
-      const focused = this.movie.focusedObject;
+      const focused = this.movie.focusTracker.focusedObject;
       const heard =
         this.movie.version >= 6 &&
-        this.movie.highlight !== "inactive" &&
+        this.movie.focusTracker.highlight !== "inactive" &&
         focused !== null &&
         this.flag(focused, "enabled")
           ? focused
@@ -220,10 +220,10 @@ export class Avm1Input implements InputState {
       if (down && !pressed && keyCode === 9) {
         this.movie.queue.run();
         // A movie with nothing to tab to leaves Tab to the page.
-        used = this.movie.tab(shift);
+        used = this.movie.focusTracker.tab(shift);
       } else if (down && !pressed && (keyCode === 13 || typed === 32)) {
         // A press it made keeps the page from acting on the key too: Space would scroll it.
-        used = this.movie.activate();
+        used = this.movie.focusTracker.activate();
       }
 
       this.movie.queue.run();
@@ -241,7 +241,8 @@ export class Avm1Input implements InputState {
 
     this.movie.timers.begin();
     try {
-      const pressed = this.queueKeyPress(press) || (press === 32 && this.movie.activate());
+      const pressed =
+        this.queueKeyPress(press) || (press === 32 && this.movie.focusTracker.activate());
       this.movie.queue.run();
       return pressed;
     } finally {
