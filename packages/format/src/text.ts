@@ -181,3 +181,33 @@ export function readStaticText(bytes: Uint8Array, tag: Tag): StaticText {
 
   return { id, bounds, matrix, records };
 }
+
+/** CSMTextSettings (74): how a text character is anti-aliased, as TextField's settings of the same names. */
+export interface CsmTextSettings {
+  id: number;
+  /** Advanced anti-aliasing (Saffron) rather than normal. */
+  useFlashType: boolean;
+  /** 0 none, 1 pixel, 2 subpixel. */
+  gridFit: number;
+  thickness: number;
+  sharpness: number;
+}
+
+export function readCsmTextSettings(bytes: Uint8Array, tag: Tag): CsmTextSettings {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  const flags = r.u8();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const float = () => {
+    const at = r.pos;
+    r.pos += 4;
+    return at + 4 <= r.end ? view.getFloat32(at, true) : 0;
+  };
+  return {
+    id,
+    useFlashType: flags >> 6 === 1,
+    gridFit: (flags >> 3) & 7,
+    thickness: float(),
+    sharpness: float(),
+  };
+}

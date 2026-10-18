@@ -966,6 +966,20 @@ export function staticText(spec: {
 }
 
 /**
+ * DefineFontAlignZones for a font of `glyphs` glyphs: its CSM hint (0 thin,
+ * 1 medium, 2 thick) and, for each glyph, two zones of nothing that align
+ * neither way.
+ */
+export function fontAlignZones(id: number, hint: number, glyphs: number): Uint8Array {
+  const w = new BitWriter().u16(id).u8(hint << 6);
+  for (let i = 0; i < glyphs; i++) {
+    w.u8(2).u16(0).u16(0).u16(0).u16(0).u8(0);
+  }
+
+  return tag(73, w.done(), true);
+}
+
+/**
  * A DefineFont3: glyphs of rectangles, with the layout (ascent, descent,
  * leading, advances, bounds and kerning). Its coordinates are twentieths
  * of DefineFont2's, 20480 to the em.
