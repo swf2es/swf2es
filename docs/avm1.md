@@ -1102,6 +1102,18 @@ transform's TextFormat in `_styles`; a field with a sheet reads its text
 as HTML styled by it and gives back the HTML as set, and a new sheet
 styles that HTML again.
 
+`TextSnapshot` (`globals/TextSnapshot.ts`, as Ruffle's) is a clip's
+static texts' text, its own children's in the order they are drawn, as
+it was when made: `new TextSnapshot(clip)` with the clip alone, or
+`clip.getTextSnapshot()`, which makes one by whatever `_global.TextSnapshot`
+is then. `getCount`, `getText(from, to, newlines)` (at least one
+character, the indices clamped to the text, a "\n" between texts with
+newlines) and `findText(from, text, caseSensitive)` (ASCII's case aside)
+answer undefined for other argument counts, as Flash's do (the corpus's
+`textsnapshot_*`); selection, `hitTestTextNearPos` and `getTextRunInfo`
+do nothing yet. Its methods are enumerable, from SWF 6, and `_global`
+defines it last, so it is the first name enumerated, as in Flash.
+
 ### The frame
 
 `Avm1` (`player/src/avm1/avm1.ts`) holds a player's AVM1: the modules of
@@ -1576,8 +1588,11 @@ spanning back from a negative size, as AS3's do; `noise`, `perlinNoise`,
 `pixelDissolve` (five arguments at least), `getColorBoundsRect` and
 `hitTest` (its errors -2 to -4; a point needs an alpha above 0, a rect
 not at threshold 0). `threshold` and `getColorBoundsRect` compare the
-pixels as they are kept, premultiplied, unlike AS3's, and threshold's
-writes keep an opaque bitmap's alpha as it comes. `compare` has answers
+pixels as they are kept, premultiplied, unlike AS3's, and threshold
+writes its colour premultiplied by its own alpha. Flash leaves the alpha
+it writes into an opaque bitmap, which its getPixel32 reads back; an
+opaque store here keeps every alpha at 255, as its drawing, copies and
+filters take it to, so only getPixel32 differs there. `compare` has answers
 of its own: -1 for no argument, -2 for no live bitmap, -3 and -4 for
 other sizes, 0 for the same pixels, else a bitmap of the differences.
 With no filter objects in AVM1 yet, `applyFilter` gives -1 after its
@@ -1774,7 +1789,7 @@ Ruffle forces it ("Loading movies"); running its ABC is out of scope.
 
 The first steps leave out: `print`,
 `NetStream` and video, the
-context menu, `TextSnapshot`, a duplicate of a script's drawing or text
+context menu, TextSnapshot's selection, a duplicate of a script's drawing or text
 field's properties, and structured output and stack registers in the
 compiler.
 

@@ -144,16 +144,24 @@ export class Playback {
   /**
    * Drawn by the stage's quality as a script or the page changes it:
    * Flash's low draws edges aliased and smooths no bitmap; medium, high and
-   * best anti-alias the edges, as the GPU's multisampling does.
+   * best anti-alias the edges, as the GPU's multisampling does. Flash covers
+   * an edge with 4 samples at medium and 16 at high and best: the stage takes
+   * as many, up to the GPU's most, while filter inputs keep 4, which are many
+   * and drawn into often, where more samples slowed the slowest frames.
    */
   private requality(): void {
     const quality = this.player.quality;
     this.quality = quality;
     this.view.quality = quality;
 
-    const gl = this.renderer as unknown as { backBuffer?: { antialias: boolean } };
+    const gl = this.renderer as unknown as {
+      backBuffer?: { antialias: boolean };
+      renderTarget: { adaptor: { msaaSamples?: number; backBufferSamples?: number } };
+    };
     if (gl.backBuffer) {
       gl.backBuffer.antialias = quality !== "LOW";
+      gl.renderTarget.adaptor.backBufferSamples = quality === "MEDIUM" ? 4 : 16;
+      gl.renderTarget.adaptor.msaaSamples = 4;
     }
 
     this.dirty = true;

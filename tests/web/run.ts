@@ -190,6 +190,24 @@ check(
     // Edges and smoothed bitmaps blend colours at high quality; at low, the fills' and texels' alone.
     assert.ok(low * 4 < high, `${low} colours at low, ${high} at high`);
     assert.equal(await shown(rect), high);
+    // Flash's medium covers an edge with 4 samples, high with 16: high, with as many as the
+    // GPU allows, shades the edges more finely where it allows more than 4.
+    await call(evaluate, 'requality("medium")');
+    const medium = await shown(rect);
+    await call(evaluate, 'requality("high")');
+    const most = await call<number>(
+      evaluate,
+      `(() => {
+        const gl = document.createElement("canvas").getContext("webgl2");
+        const most = gl?.getParameter(gl.MAX_SAMPLES) ?? 0;
+        // A context let go of at once, not left to count against the page's.
+        gl?.getExtension("WEBGL_lose_context")?.loseContext();
+        return most;
+      })()`,
+    );
+    if (most > 4) {
+      assert.ok(medium < high, `${medium} colours at medium, ${high} at high (${most} samples)`);
+    }
     await call(evaluate, 'requality("high", "/web-test/shapes.swf")');
   },
 );
@@ -795,7 +813,8 @@ const failures = await withPage(
 
     return failed;
   },
-  false,
+  // Software GL by default; SWF2ES_WEB_GPU=1 draws on the GPU, whose multisampling may go past 4.
+  process.env.SWF2ES_WEB_GPU === "1",
   {
     page: "web-test/index.html",
     mounts: [

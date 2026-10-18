@@ -51,6 +51,32 @@ trace(made(true).threshold(s, rect, point, "=="));`),
   );
 });
 
+test("threshold keeps an opaque bitmap opaque: its getPixel is Flash's, its copies stay opaque", async () => {
+  // Flash's getPixel32 reads 12040608 at (2, 1), the source's translucent pixel as kept, and
+  // aa717171 for the fill; an opaque store here keeps alpha 255, which drawing and copies rely on.
+  const source = `var s = new BitmapData(3, 3, true, 0x12345678);
+s.setPixel32(0, 0, 0xFFFFFFFF); s.setPixel32(1, 1, 0xFFFFFFFF);
+s.setPixel32(2, 1, 0); s.setPixel32(1, 2, 0);
+`;
+  assert.deepEqual(
+    await run(`${source}var b = made(false);
+trace(b.threshold(s, rect, point, "==", 0x33333333, 0xAAAAAAAA, 0x00FF0000, true));
+trace(row(b, 1)); trace(b.getPixel(2, 1));
+var f = made(false); trace(f.threshold(s, rect, point, null, 0x33333333, 0xAAAAAAAA, 0x00FF0000, false));
+trace(row(f, 1));
+var t = new BitmapData(3, 3, true, 0); t.copyPixels(b, b.rectangle, new flash.geom.Point(0, 0));
+trace(row(t, 1));`),
+    [
+      "0",
+      row("ffbbccdd ffffffff ff040608"),
+      String(0x040608),
+      "2",
+      row("ffbbccdd ffbbccdd ff717171"),
+      row("ffbbccdd ffffffff ff040608"),
+    ],
+  );
+});
+
 test("getColorBoundsRect matches the premultiplied colour against masked pixels", async () => {
   assert.deepEqual(
     await run(`var b = made(true);
