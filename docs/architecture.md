@@ -4605,14 +4605,13 @@ high are the GPU's multisampling, which costs the GPU memory and
 bandwidth but no shading: supersampling, 4 or 16 times the pixels, would
 cost more than the edges show. The back buffer takes Flash's samples, 4
 at medium and 16 at high and best, as many as the GPU allows (the fork's
-`backBufferSamples`; 8 on many integrated GPUs), remade at the next
-frame. Filter and blend layers keep 4 at every quality (`msaaSamples`):
-they are many and drawn into often, and on an integrated GPU 8 samples
-for every target slowed a crowded scene's slowest frames where 8 for the
-back buffer alone cost nothing measurable. A filtered object's edges are
-so a little coarser at high than an unfiltered neighbour's, where Flash
-covers both with 16. A BitmapData's draw at low quality smooths no bitmap
-either.
+`backBufferSamples`), remade at the next frame. Filter and blend layers
+(`msaaSamples`) take 4 at medium, 8 at high and 16 at best: they are many
+and drawn into often, so more samples there cost more than on the one back
+buffer. Every sample costs its pixels 8 bytes, colour and depth-stencil, so
+a canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
+256 MB, 4 at least): 8 at 1440p, 4 at 4K. A BitmapData's draw at low
+quality smooths no bitmap either.
 
 ### The page's configuration
 

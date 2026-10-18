@@ -144,27 +144,46 @@ export class Playback {
   /**
    * Drawn by the stage's quality as a script or the page changes it:
    * Flash's low draws edges aliased and smooths no bitmap; medium, high and
-   * best anti-alias the edges, as the GPU's multisampling does. Flash covers
-   * an edge with 4 samples at medium and 16 at high and best: the stage takes
-   * as many, up to the GPU's most, while filter inputs keep 4, which are many
-   * and drawn into often, where more samples slowed the slowest frames.
+   * best anti-alias the edges, as the GPU's multisampling does.
    */
   private requality(): void {
     const quality = this.player.quality;
     this.quality = quality;
     this.view.quality = quality;
 
-    const gl = this.renderer as unknown as {
-      backBuffer?: { antialias: boolean };
-      renderTarget: { adaptor: { msaaSamples?: number; backBufferSamples?: number } };
-    };
+    const gl = this.renderer as unknown as { backBuffer?: { antialias: boolean } };
     if (gl.backBuffer) {
       gl.backBuffer.antialias = quality !== "LOW";
-      gl.renderTarget.adaptor.backBufferSamples = quality === "MEDIUM" ? 4 : 16;
-      gl.renderTarget.adaptor.msaaSamples = 4;
     }
 
+    this.resample();
     this.dirty = true;
+  }
+
+  /**
+   * The samples the stage and the filter layers take, by the quality and the
+   * canvas's pixels. Flash covers an edge with 4 at medium and 16 at high and
+   * best; the stage takes them, while filter and blend layers, which are many
+   * and drawn into often, take 4 at medium, 8 at high and 16 at best. Every
+   * sample costs its pixels' 4 bytes of colour and 4 of depth and stencil, so
+   * a large canvas takes fewer: at most what fits STAGE_BYTES, and 4 at least,
+   * as before samples could be chosen.
+   */
+  private resample(): void {
+    const adaptor = (
+      this.renderer as unknown as {
+        renderTarget: { adaptor: { msaaSamples?: number; backBufferSamples?: number } };
+      }
+    ).renderTarget.adaptor;
+    if (adaptor.backBufferSamples === undefined) {
+      return;
+    }
+
+    const canvas = this.renderer.canvas as HTMLCanvasElement;
+    const fits = fittingSamples(canvas.width * canvas.height);
+    const quality = this.player.quality;
+    adaptor.backBufferSamples = Math.min(quality === "MEDIUM" ? 4 : 16, fits);
+    adaptor.msaaSamples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
   }
 
   private draw(): void {
@@ -205,6 +224,7 @@ export class Playback {
     canvas.style.height = `${placed.height}px`;
     if (placed.resolution !== this.placed?.resolution) {
       this.renderer.resize(this.player.width, this.player.height, placed.resolution);
+      this.resample();
     }
 
     // AVM1's _xmouse is measured in the screen's pixels, as Flash Player measures it.
@@ -242,4 +262,17 @@ export class Playback {
     // Pixi loses the GL context as it goes, which a browser allows only so many of.
     this.renderer.destroy({ removeView: true });
   }
+}
+
+/** The most a canvas's multisampled buffers may take, colour and depth-stencil together. */
+const STAGE_BYTES = 256 * 1024 * 1024;
+
+/** The most samples, a power of two and 4 at least, whose buffers for `pixels` fit STAGE_BYTES. */
+export function fittingSamples(pixels: number): number {
+  let samples = 16;
+  while (samples > 4 && pixels * samples * 8 > STAGE_BYTES) {
+    samples /= 2;
+  }
+
+  return samples;
 }
