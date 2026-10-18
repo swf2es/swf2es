@@ -22,7 +22,7 @@ import {
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
-import { storeOf } from "./BitmapData.js";
+import { blendModeOf, storeOf } from "./BitmapData.js";
 import { type FilterFaces, filtersProperty } from "./filters.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 import { formVars } from "./LoadVars.js";
@@ -1144,6 +1144,23 @@ export function movieClipClass(movie: Movie): {
     clipOf,
     () => movie.filterFaces,
   );
+  // Its blend mode's name; one set that is none leaves it as it was.
+  const blendMode = proto.add(
+    "blendMode",
+    undefined,
+    avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8,
+  );
+  blendMode.get = realm.method((self) => clipOf(self)?.blendMode);
+  blendMode.set = realm.method((self, args) => {
+    const clip = clipOf(self);
+    const mode = blendModeOf(args[0]);
+    if (clip !== null && mode !== null) {
+      clip.touch();
+      clip.setBlendMode(mode);
+    }
+
+    return undefined;
+  });
   // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
   // not read (Ruffle).
   method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {

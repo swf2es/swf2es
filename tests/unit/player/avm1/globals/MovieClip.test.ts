@@ -113,6 +113,20 @@ this.onEnterFrame = function () { frames++; if (frames == 2) { trace("7 " + e.ge
   assert.deepEqual(take(played), ["8 6710886.4", "7 6710886.4"]);
 });
 
+test("blendMode takes a name or a byte's number, null as normal, and ignores anything else", async () => {
+  // The corpus's movieclip_blend_mode_property.
+  assert.deepEqual(
+    await traces(
+      `var line = [];
+var modes = ["layer", null, 259, 3.5, true, -1, "lAyEr", {}];
+for (var i = 0; i < modes.length; i++) { a.blendMode = "invert"; a.blendMode = modes[i]; line.push(a.blendMode); }
+trace(line.join(" "));`,
+      8,
+    ),
+    ["layer normal multiply multiply invert invert invert invert"],
+  );
+});
+
 test("the timeline's methods move a clip, play and stop it", async () => {
   assert.deepEqual(
     await traces(
