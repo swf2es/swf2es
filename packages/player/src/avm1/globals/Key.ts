@@ -3,7 +3,7 @@
 // mouse.rs have them: MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC
 // and Ruffle contributors. Each is a broadcaster: the player sends Key's
 // listeners onKeyDown and onKeyUp, Mouse's onMouseDown, onMouseMove,
-// onMouseUp and onMouseWheel (avm1.ts).
+// onMouseUp and onMouseWheel (input.ts).
 import { avm1 } from "@swf2es/runtime";
 
 /** What Key and Mouse read of the player. */

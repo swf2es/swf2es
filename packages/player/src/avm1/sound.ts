@@ -2,6 +2,8 @@
 // transforms Sound gives clips and the movie, each sound decoded once for
 // the device, and the Sounds whose sound ended, whose onSoundComplete runs
 // after the frame's actions.
+// Sound's state follows Ruffle's (https://github.com/ruffle-rs/ruffle): MIT
+// OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
 import type { avm1 } from "@swf2es/runtime";
 import type { DisplayObject, MovieClip } from "../display/display.js";
 import type { SoundCharacter } from "../display/timeline.js";

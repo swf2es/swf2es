@@ -1,6 +1,6 @@
 // The keyboard of an AVM1 movie: each key goes to Key, its clips' keyDown
 // and keyUp clip actions, and a press to the first button or clip whose
-// keyPress it is (Avm1.key). A keyPress's key is Flash's own code, as
+// keyPress it is (input.ts's key). A keyPress's key is Flash's own code, as
 // Ruffle's ButtonKeyCode has it (https://github.com/ruffle-rs/ruffle,
 // core/src/events.rs: MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle
 // LLC and Ruffle contributors): a printable character's ASCII code, or one

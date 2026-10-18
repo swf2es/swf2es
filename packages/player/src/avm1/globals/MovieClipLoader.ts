@@ -2,7 +2,7 @@
 // (https://github.com/ruffle-rs/ruffle) core/src/avm1/globals/movie_clip_loader.rs
 // has it: MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle
 // contributors. A loader is a broadcaster, itself its first listener; the
-// player tells its listeners of each load (avm1.ts, "loadClip"):
+// player tells its listeners of each load (loads.ts, "loadClip"):
 // onLoadStart, onLoadProgress, onLoadComplete or onLoadError as the load
 // arrives, and onLoadInit once the loaded movie's first frame's actions
 // have run.

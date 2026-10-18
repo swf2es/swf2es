@@ -684,13 +684,13 @@ function levelOf(digits: string): number {
   return negative ? -n | 0 : n;
 }
 
-/** A display object's side of its AVM1 object (runtime's DisplayNative). */
 /** `d`'s AVM1 side, null for one without. */
 export function nativeOf(d: DisplayObject): ClipNative | null {
   const native = d.avm1?.display;
   return native instanceof ClipNative ? native : null;
 }
 
+/** A display object's side of its AVM1 object (runtime's DisplayNative). */
 export class ClipNative implements avm1.DisplayNative {
   [Symbol.for("nodejs.util.inspect.custom")](): string {
     return `ClipNative(${this.target.name})`;

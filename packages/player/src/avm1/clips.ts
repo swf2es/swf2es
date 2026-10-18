@@ -3,6 +3,9 @@
 // duplicateMovieClip's, each placed and made at once, constructed as its
 // registered class with its init object's properties, and removeMovieClip's
 // removal of what is at a depth scripts place at.
+// The depths and the order of construction follow Ruffle's
+// (https://github.com/ruffle-rs/ruffle) construct_as_avm1_object: MIT OR
+// Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
 import { ClipEvent } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import {

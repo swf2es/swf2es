@@ -1,6 +1,9 @@
 // An AVM1 movie's clock: the time getTimer and setInterval's timers go by,
 // the real clock's or the frames', and the script timeout's start and end
 // around the scripts that run.
+// GetTime's frame clock follows Ruffle's (https://github.com/ruffle-rs/
+// ruffle): MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle
+// contributors.
 import { MovieClip } from "../display/display.js";
 import type { Avm1 } from "./avm1.js";
 

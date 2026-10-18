@@ -2,6 +2,9 @@
 // what is read of its action list once: its root's frames' exports,
 // DoInitAction blocks, ScriptLimits and the places Flash cannot read, a
 // place's clip actions and a button's condition blocks.
+// The per-movie library and button conditions follow Ruffle's
+// (https://github.com/ruffle-rs/ruffle): MIT OR Apache-2.0, Copyright (c)
+// 2018-2022 Ruffle LLC and Ruffle contributors.
 import {
   type ActionList,
   ClipEvent,
