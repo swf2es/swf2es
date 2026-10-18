@@ -6,13 +6,11 @@
 import type { ColorTransform, Matrix as FlatMatrix } from "@swf2es/format";
 import {
   type BLEND_MODES,
-  type FederatedPointerEvent,
   type Filter,
   Graphics,
   type GraphicsContext,
   Matrix,
   Container as PixiContainer,
-  Rectangle,
   type Renderer,
   RendererType,
   type RenderTexture,
@@ -42,8 +40,6 @@ import { apply, concat, shifted } from "../display/geometry.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
-import type { PointerState } from "../input/pointer.js";
-import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
 import { retireBatchers, trimBatchers, viewGroups } from "./batchers.js";
 import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
@@ -52,6 +48,7 @@ import { setFlashColor } from "./color.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
 import { hookRenderer } from "./hooks.js";
 import { makeNode, NO_RECORDS, type Node } from "./node.js";
+import { bindPointer } from "./pointer.js";
 import {
   drawTarget,
   IDLE_MS,
@@ -397,314 +394,9 @@ export class PixiView {
     hookRenderer(renderer);
   }
 
-  /**
-   * Where a pointer event is on the SWF's stage. CSS `object-fit` shows the
-   * canvas's pixels in a box of their own within its content box, letterboxed
-   * by `contain`, cropped by `cover`: Pixi maps a point over the whole element
-   * as `fill` would, so the point is taken within that box instead, centred
-   * as the default `object-position` puts it, and then from the canvas's
-   * pixels to Pixi's screen and the stage. `style` is the canvas's live
-   * computed style, null where there is no DOM. A `size`, a touch's
-   * contact, comes back in stage units after the point.
-   */
-  private stagePoint(
-    player: Player,
-    e: { clientX: number; clientY: number; global: { x: number; y: number } },
-    style: CSSStyleDeclaration | null,
-    size: { width: number; height: number } = { width: 0, height: 0 },
-  ): [x: number, y: number, width: number, height: number] {
-    const screen = this.renderer.screen;
-    const toStage = (x: number, y: number, w: number, h: number) =>
-      [
-        (x * player.width) / screen.width,
-        (y * player.height) / screen.height,
-        (w * player.width) / screen.width,
-        (h * player.height) / screen.height,
-      ] as [number, number, number, number];
-    const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
-    if (!canvas?.getBoundingClientRect || !style) {
-      return toStage(e.global.x, e.global.y, size.width, size.height);
-    }
-
-    // The content box: the element's rectangle within its borders and padding.
-    const px = (v: string | undefined) => Number.parseFloat(v ?? "") || 0;
-    const rect = canvas.getBoundingClientRect();
-    let left = rect.left + px(style.borderLeftWidth) + px(style.paddingLeft);
-    let top = rect.top + px(style.borderTopWidth) + px(style.paddingTop);
-    const width =
-      rect.width -
-      px(style.borderLeftWidth) -
-      px(style.paddingLeft) -
-      px(style.borderRightWidth) -
-      px(style.paddingRight);
-    const height =
-      rect.height -
-      px(style.borderTopWidth) -
-      px(style.paddingTop) -
-      px(style.borderBottomWidth) -
-      px(style.paddingBottom);
-
-    let sx = width / canvas.width;
-    let sy = height / canvas.height;
-    const fit = style.objectFit;
-    if (fit === "contain" || fit === "scale-down" || fit === "cover" || fit === "none") {
-      let scale = fit === "cover" ? Math.max(sx, sy) : fit === "none" ? 1 : Math.min(sx, sy);
-      if (fit === "scale-down") {
-        scale = Math.min(scale, 1);
-      }
-
-      left += (width - canvas.width * scale) / 2;
-      top += (height - canvas.height * scale) / 2;
-      sx = scale;
-      sy = scale;
-    }
-
-    const resolution = this.renderer.resolution || 1;
-    return toStage(
-      (e.clientX - left) / sx / resolution,
-      (e.clientY - top) / sy / resolution,
-      size.width / sx / resolution,
-      size.height / sy / resolution,
-    );
-  }
-
-  /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
+  /** Let Pixi normalize browser coordinates; Flash's display list chooses the target (render/pointer.ts). */
   bindPointer(player: Player): () => void {
-    this.stage.eventMode = "static";
-    this.stage.hitArea = new Rectangle(
-      0,
-      0,
-      this.renderer.screen.width,
-      this.renderer.screen.height,
-    );
-    // The stage is Pixi's only target: its hit test would otherwise search
-    // every child on each move, which on a crowded display list made each
-    // frame a third longer while the mouse moved.
-    const interactiveChildren = this.stage.interactiveChildren;
-    this.stage.interactiveChildren = false;
-    // A move is posted, handled when the player next advances or before the
-    // next press, release, leave or key; a frame callback of its own handles
-    // it where the host does not advance (a paused player, say).
-    let frame = 0;
-    const canvas = this.renderer.canvas as HTMLCanvasElement | undefined;
-    // Live: read once, it follows the element's style as the page changes it.
-    const style =
-      canvas?.getBoundingClientRect && typeof getComputedStyle === "function"
-        ? getComputedStyle(canvas)
-        : null;
-    const flushSoon = () => {
-      frame ||= requestAnimationFrame(() => {
-        frame = 0;
-        player.pointer?.flush();
-        player.touch?.flush();
-      });
-    };
-    // Each touch's last point, which a cancel, whose own may be anywhere, ends at.
-    const touches = new Map<number, TouchState>();
-    // A touch goes to the player's touches, which move the mouse for the primary one.
-    const touched = (type: "move" | "down" | "up" | "leave", e: FederatedPointerEvent) => {
-      const touch = player.touch;
-      // A lifted finger leaves the canvas too: the mouse it moved stays, as Flash's does.
-      if (!touch || type === "leave") {
-        return;
-      }
-
-      const [x, y, width, height] = this.stagePoint(player, e, style, e);
-      const t: TouchState = {
-        x,
-        y,
-        id: e.pointerId,
-        primary: e.isPrimary,
-        width,
-        height,
-        pressure: e.pressure,
-        altKey: e.altKey,
-        ctrlKey: e.ctrlKey,
-        shiftKey: e.shiftKey,
-        time: e.timeStamp,
-      };
-      if (type === "up") {
-        touches.delete(t.id);
-      } else {
-        touches.set(t.id, t);
-      }
-
-      if (type === "move" && typeof requestAnimationFrame === "function") {
-        touch.post(t);
-        flushSoon();
-        return;
-      }
-
-      touch.handle(type === "down" ? "begin" : type === "up" ? "end" : "move", t);
-    };
-    const send = (type: "move" | "down" | "up" | "leave") => (e: FederatedPointerEvent) => {
-      if (e.pointerType === "touch") {
-        touched(type, e);
-        return;
-      }
-
-      const [x, y] = this.stagePoint(player, e, style);
-      const p: PointerState = {
-        x,
-        y,
-        button: e.button,
-        buttons: e.buttons,
-        altKey: e.altKey,
-        ctrlKey: e.ctrlKey,
-        shiftKey: e.shiftKey,
-        time: e.timeStamp,
-      };
-      if (type === "move" && player.pointer && typeof requestAnimationFrame === "function") {
-        player.pointer.post(p);
-        flushSoon();
-        return;
-      }
-
-      player.pointer?.handle(type, p);
-    };
-    const moved = send("move");
-    const down = send("down");
-    const up = send("up");
-    const leave = send("leave");
-    // Every move on the page: one over the canvas, and, while the mouse's
-    // button is down after a press on it, one anywhere, as Flash keeps the
-    // mouse until the release.
-    const screen = this.renderer.screen;
-    // A release outside after a press that held the mouse leaves it at the
-    // next move outside, as Flash's mouseLeave comes.
-    let leaveNext = false;
-    const move = (e: FederatedPointerEvent) => {
-      const { x, y } = e.global;
-      const inside = x >= 0 && y >= 0 && x < screen.width && y < screen.height;
-      if (inside || (e.pointerType !== "touch" && player.pointer?.captured)) {
-        leaveNext = false;
-        moved(e);
-      } else if (leaveNext && e.pointerType !== "touch") {
-        leaveNext = false;
-        leave(e);
-      }
-    };
-    const upOutside = (e: FederatedPointerEvent) => {
-      const held = e.pointerType !== "touch" && !!player.pointer?.captured;
-      up(e);
-      leaveNext ||= held && !player.pointer?.captured;
-    };
-    this.stage.on("globalpointermove", move);
-    this.stage.on("pointerdown", down);
-    this.stage.on("pointerup", up);
-    this.stage.on("pointerupoutside", upOutside);
-    this.stage.on("pointerleave", leave);
-    // Pixi listens for no cancel: the browser takes a touch back so, as for a
-    // system gesture, and the touch ends where it last was, without its tap or click.
-    const cancel = (e: Event) => {
-      const t = touches.get((e as PointerEvent).pointerId);
-      if (t && (e as PointerEvent).pointerType === "touch") {
-        touches.delete(t.id);
-        player.touch?.handle("cancel", { ...t, time: e.timeStamp });
-      }
-    };
-    canvas?.addEventListener?.("pointercancel", cancel);
-    // The wheel in Flash's lines, up positive: 3 a notch, Flash's delta on
-    // Windows. A browser gives a notch as 3 lines, or as about 100 pixels,
-    // fewer where the page is zoomed or the screen scaled, and several at
-    // once as their multiple; a touchpad's few pixels at a time add up, 100
-    // to 3 lines. The page scrolls unless the SWF takes the wheel where the
-    // pointer is. With Ctrl, as a touchpad's pinch comes too, the page zooms
-    // and the SWF hears nothing. Pixi listens passively.
-    let lines = 0;
-    const wheel = (e: WheelEvent) => {
-      const pointer = player.pointer;
-      if (!pointer || e.deltaY === 0 || e.ctrlKey) {
-        return;
-      }
-
-      const size = Math.abs(e.deltaY);
-      if (e.deltaMode !== 0) {
-        lines = -e.deltaY * (e.deltaMode === 2 ? 3 : 1);
-      } else if (size >= 50) {
-        lines = -Math.sign(e.deltaY) * 3 * Math.max(1, Math.round(size / 100));
-      } else {
-        lines -= (e.deltaY * 3) / 100;
-      }
-
-      const delta = Math.trunc(lines);
-      lines -= delta;
-      const at = { clientX: e.clientX, clientY: e.clientY, global: { x: e.offsetX, y: e.offsetY } };
-      const [x, y] = this.stagePoint(player, at, style);
-      const p: PointerState = {
-        x,
-        y,
-        buttons: e.buttons,
-        altKey: e.altKey,
-        shiftKey: e.shiftKey,
-        time: e.timeStamp,
-      };
-      if (pointer.wheel(p, delta)) {
-        e.preventDefault();
-      }
-    };
-    canvas?.addEventListener?.("wheel", wheel, { passive: false });
-    // Pixi sets the canvas's cursor on every move, from its target's, which
-    // is this stage: the player's cursor goes there, and through Pixi's own
-    // setter now, which keeps Pixi's record of it right.
-    const events = (
-      this.renderer as {
-        events?: { setCursor(mode: string | null): void; cursorStyles: Record<string, unknown> };
-      }
-    ).events;
-    // Pixi's "default" is "inherit", which shows the page's cursor where the
-    // page sets one; Flash's arrow, auto's or a forced one, is the arrow.
-    const pixiDefault = events?.cursorStyles.default;
-    if (events) {
-      events.cursorStyles.default = "default";
-    }
-
-    const show = (cursor: string) => {
-      this.stage.cursor = cursor;
-      if (events) {
-        events.setCursor(cursor);
-      } else if (canvas?.style) {
-        canvas.style.cursor = cursor;
-      }
-    };
-    const pointer = player.pointer;
-    if (pointer) {
-      pointer.onCursor = show;
-      show(pointer.cursor());
-    }
-
-    return () => {
-      // Pixi's own default back first, then the canvas left to it, as before the bind.
-      if (events) {
-        events.cursorStyles.default = pixiDefault;
-      }
-
-      if (pointer) {
-        pointer.onCursor = null;
-        this.stage.cursor = "default";
-        if (canvas?.style) {
-          canvas.style.cursor = "";
-        }
-      }
-
-      if (frame) {
-        cancelAnimationFrame(frame);
-        frame = 0;
-      }
-
-      player.pointer?.flush();
-      player.touch?.flush();
-      canvas?.removeEventListener?.("pointercancel", cancel);
-      canvas?.removeEventListener?.("wheel", wheel);
-      this.stage.off("globalpointermove", move);
-      this.stage.off("pointerdown", down);
-      this.stage.off("pointerup", up);
-      this.stage.off("pointerupoutside", upOutside);
-      this.stage.off("pointerleave", leave);
-      this.stage.eventMode = "passive";
-      this.stage.hitArea = null;
-      this.stage.interactiveChildren = interactiveChildren;
-    };
+    return bindPointer(this.renderer, this.stage, player);
   }
 
   /**
