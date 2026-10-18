@@ -1726,7 +1726,7 @@ and `loadVariables` reads Windows-1252.
 `loadMovieNum(url, level, method)` and `MovieClipLoader.loadClip` load a
 SWF or an image into a clip or a level; `unloadMovie`,
 `unloadMovieNum`, `MovieClip.unloadMovie` and `unloadClip` empty one.
-The player keeps each AVM1 SWF it runs apart (`Avm1Swf` in `avm1.ts`): its
+The player keeps each AVM1 SWF it runs apart (`Avm1Swf` in `swf.ts`): its
 module's blocks, its library, its root's frames, its exports and its
 DoInitAction blocks run, which its own timelines and code use and not
 another's; a queued action carries the SWF whose block it runs, a clip's

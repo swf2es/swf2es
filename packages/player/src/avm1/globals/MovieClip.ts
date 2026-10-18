@@ -20,8 +20,8 @@ import {
   TRANSFORM,
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
-import type { Avm1Swf, Handler } from "../avm1.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import type { Avm1Swf, Handler } from "../swf.js";
 import { storeOf } from "./BitmapData.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 import { formVars } from "./LoadVars.js";

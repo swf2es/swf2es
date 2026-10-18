@@ -22,9 +22,7 @@ import {
   ClipEvent,
   isAs3,
   type Place,
-  readExports,
   type Swf,
-  tags,
 } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
@@ -95,6 +93,14 @@ import { xmlSocketClass } from "./globals/XMLSocket.js";
 import { type Arrival, arrive, queryVariables } from "./loads.js";
 import { Avm1Net, textFor } from "./net.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
+import {
+  Avm1Swf,
+  handlersOf,
+  handlersOfButton,
+  NO_HANDLERS,
+  readRootFrames,
+  stopOf,
+} from "./swf.js";
 
 type Value = avm1.Value;
 
@@ -204,43 +210,6 @@ function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1Navigate
   };
 }
 
-/**
- * Where in a frame Flash stops the SWF at a place whose clip actions it
- * cannot read: it reads them as the first of the place's events comes, so
- * as it places the clip for load and initialize, before any of the
- * frame's actions; after the frame's DoInitActions for construct; at the
- * next frame for enterFrame, the frame's actions run. A place of other
- * events stops it as one comes to the clip (`dispatch`).
- */
-type Stop = "place" | "construct" | "enterFrame";
-
-/** The first of `events`, a place's field of all events, by which Flash stops. */
-function stopOf(events: number): Stop | null {
-  if (events & (ClipEvent.load | ClipEvent.initialize)) {
-    return "place";
-  }
-
-  if (events & ClipEvent.construct) {
-    return "construct";
-  }
-
-  return events & ClipEvent.enterFrame ? "enterFrame" : null;
-}
-
-const STOPS: Stop[] = ["place", "construct", "enterFrame"];
-
-/** What happens as the root enters a frame, before its places and DoAction blocks. */
-interface RootFrame {
-  /** Its ExportAssets' names, which attachMovie and registerClass find characters by. */
-  exports: { id: number; name: string }[];
-  /** Its DoInitAction blocks, by index, with the sprite each is of. */
-  inits: { sprite: number; block: number }[];
-  /** Where a place in the frame whose clip actions Flash cannot read stops the SWF. */
-  stop: Stop | null;
-  /** The frame's last ScriptLimits: its recursion depth and script timeout, in seconds. */
-  limits: [number, number] | null;
-}
-
 /** The AS2 methods a clip's events call from SWF 6, by the event's bit. */
 const METHODS = new Map<number, string>([
   [ClipEvent.load, "onLoad"],
@@ -304,13 +273,6 @@ const LABELS = new Map<number, string>([
   [ClipEvent.dragOver, "_down"],
 ]);
 
-/** A button's condition block: the transitions it runs on, and its key (0 for none). */
-interface ButtonHandler {
-  conditions: number;
-  key: number;
-  block: number;
-}
-
 // The queue's priorities, which it runs in order: initialize clip events
 // first, then the root's DoInitAction blocks, then constructions, then the
 // rest, frame actions, events and methods, each in the order queued
@@ -358,42 +320,6 @@ class Queued {
 }
 
 const NO_BLOCKS: number[] = [];
-
-const NO_BUTTON_HANDLERS: readonly ButtonHandler[] = [];
-
-/**
- * One AVM1 SWF the player runs, the main one or one loadMovie loaded: its
- * blocks, its library and what its root's frames export and initialize,
- * which its own code and timelines use, not another's (Ruffle's per-movie
- * library). Every SWF shares the player's realm, `_global` among it.
- */
-export class Avm1Swf {
-  /** Its module's blocks, by index. */
-  blocks: avm1.Blocks = [];
-  /** By its root's frame, 1 the first. */
-  readonly frames = new Map<number, RootFrame>();
-  /** The sprites whose DoInitAction has run. */
-  readonly initialized = new Set<number>();
-  /** Exported characters by name in lower case, as attachMovie finds them, and each one's name. */
-  readonly exports = new Map<string, number>();
-  readonly exportNames = new Map<number, string>();
-  /** Each button character's condition blocks, by its id, gathered from the action list once. */
-  buttonHandlers: Map<number, ButtonHandler[]> | null = null;
-  /** The clip that plays it as its root: level 0's, a level's or the clip it was loaded into. */
-  root: MovieClip | null = null;
-
-  constructor(
-    readonly library: Library | null,
-    readonly list: ActionList | null,
-    readonly version: number,
-    /** Its URL, which `_url` gives. */
-    readonly url: string,
-    /** Its length in bytes, which getBytesTotal and getBytesLoaded give for its root. */
-    readonly length: number,
-    /** Its size as it came, compressed, which MovieClipLoader.getProgress gives. */
-    readonly size = length,
-  ) {}
-}
 
 /** What Mouse's listeners hear of the pointer's clip events. */
 const MOUSE_MESSAGES = new Map<number, string>([
@@ -731,7 +657,7 @@ export class Avm1
     );
     this.main = main;
     main.root = root;
-    this.readRootFrames(swf, main);
+    readRootFrames(swf, main);
 
     const clip = movieClipClass(this);
     this.clipProto = clip.proto;
@@ -1260,56 +1186,6 @@ export class Avm1
     );
   }
 
-  /** Each root frame's exports, DoInitAction blocks, the tags Flash cannot read and its ScriptLimits. */
-  private readRootFrames(swf: Swf, into: Avm1Swf): void {
-    const list = into.list;
-    if (list === null) {
-      return;
-    }
-
-    // The root has a frame a ShowFrame tag ends; what follows the last is the last's.
-    const last = Math.max(1, swf.tags.filter((t) => t.code === tags.ShowFrame).length);
-    const frameOf = (frame: number) => {
-      const at = Math.min(frame, last);
-      let actions = into.frames.get(at);
-      if (!actions) {
-        actions = { exports: [], inits: [], stop: null, limits: null };
-        into.frames.set(at, actions);
-      }
-
-      return actions;
-    };
-    for (const block of list.blocks) {
-      const owner = block.owner;
-      if (block.length > 0 && owner.type === "init" && owner.timeline === null) {
-        frameOf(owner.frame + 1).inits.push({ sprite: owner.sprite, block: block.index });
-      }
-    }
-
-    // A ScriptLimits takes effect as its frame comes, before the frame's
-    // actions, the frame's last one if it has two (adl): two u16s, the
-    // recursion depth and the script timeout in seconds.
-    let frame = 1;
-    for (const tag of swf.tags) {
-      const events = list.corruptEvents.get(tag.offset);
-      if (tag.code === tags.ShowFrame) {
-        frame++;
-      } else if (tag.code === tags.ScriptLimits && tag.length >= 4) {
-        const at = tag.offset;
-        const b = swf.bytes;
-        frameOf(frame).limits = [b[at] | (b[at + 1] << 8), b[at + 2] | (b[at + 3] << 8)];
-      } else if (tag.code === tags.ExportAssets) {
-        frameOf(frame).exports.push(...readExports(swf.bytes, tag));
-      } else if (events !== undefined) {
-        const actions = frameOf(frame);
-        const stop = stopOf(events);
-        if (stop && (!actions.stop || STOPS.indexOf(stop) < STOPS.indexOf(actions.stop))) {
-          actions.stop = stop;
-        }
-      }
-    }
-  }
-
   /**
    * A display object made alive: its AS2 face, and a clip among those that
    * play, with the clip actions of its place, its initialize events and its
@@ -1370,7 +1246,7 @@ export class Avm1
     if (place !== undefined) {
       this.places.delete(d);
       native.corrupt = place.corrupt;
-      native.handlers = this.handlersOf(place, native.swf);
+      native.handlers = handlersOf(place, native.swf);
       this.corruptPlace(d, place.corrupt);
     } else if (source !== undefined) {
       this.handed.delete(d);
@@ -1428,24 +1304,6 @@ export class Avm1
   private exported(d: DisplayObject): boolean {
     const id = d.character?.id;
     return id !== undefined && this.swfOf(d).exportNames.has(id);
-  }
-
-  /** A place's clip actions, with the events each runs for, as `swf`'s action list has them. */
-  private handlersOf(place: Place, swf: Avm1Swf): Handler[] | null {
-    const list = swf.list;
-    if (place.actions === null || place.actions.length === 0 || list === null) {
-      return null;
-    }
-
-    const handlers: Handler[] = [];
-    for (const index of place.actions) {
-      const owner = list.blocks[index].owner;
-      if (owner.type === "clip") {
-        handlers.push({ events: owner.events, key: owner.key, block: index });
-      }
-    }
-
-    return handlers;
   }
 
   /**
@@ -1905,7 +1763,7 @@ export class Avm1
         swf.blocks = arrived.blocks;
         this.ownCode(swf);
         this.adopt(swf);
-        this.readRootFrames(file, swf);
+        readRootFrames(file, swf);
         this.fill(target, swf);
         // The URL's query as the root's variables, as a movie's parameters.
         if (face !== undefined) {
@@ -2891,7 +2749,7 @@ export class Avm1
         let found = false;
         if (!inButton && button.parent !== null && id !== undefined) {
           const swf = this.swfOf(button);
-          for (const h of this.handlersOfButton(swf, id)) {
+          for (const h of handlersOfButton(swf, id)) {
             if (h.key === press) {
               this.enqueue(NORMAL, new Queued(BLOCK, button.parent, swf, h.block));
               found = true;
@@ -3079,7 +2937,7 @@ export class Avm1
     const id = button.character?.id;
     if (parent !== null && id !== undefined) {
       const swf = this.swfOf(button);
-      for (const h of this.handlersOfButton(swf, id)) {
+      for (const h of handlersOfButton(swf, id)) {
         if (h.conditions & condition) {
           this.enqueue(NORMAL, new Queued(BLOCK, parent, swf, h.block));
         }
@@ -3093,24 +2951,6 @@ export class Avm1
     }
 
     this.method(button, event, false);
-  }
-
-  /** `id`'s condition blocks: a DefineButton's one, or a DefineButton2's, one a BUTTONCONDACTION. */
-  private handlersOfButton(swf: Avm1Swf, id: number): readonly ButtonHandler[] {
-    if (swf.buttonHandlers === null) {
-      const handlers = new Map<number, ButtonHandler[]>();
-      for (const [block, { owner }] of (swf.list?.blocks ?? []).entries()) {
-        if (owner.type === "button") {
-          const list = handlers.get(owner.button) ?? [];
-          list.push({ conditions: owner.conditions, key: owner.key, block });
-          handlers.set(owner.button, list);
-        }
-      }
-
-      swf.buttonHandlers = handlers;
-    }
-
-    return swf.buttonHandlers.get(id) ?? NO_BUTTON_HANDLERS;
   }
 
   /**
@@ -3449,14 +3289,6 @@ function within(previous: Promise<unknown>, ms: number): Promise<unknown> {
 /** What a clip unloaded or in error shows: no frames, which it never enters. */
 const NO_FRAMES: Timeline = { ...EMPTY_TIMELINE, frames: [] };
 
-/** A clip action: the block, the events it runs for, and keyPress's key code. */
-export interface Handler {
-  events: number;
-  key: number;
-  block: number;
-}
-
-const NO_HANDLERS: Handler[] = [];
 const NO_ARGS: Value[] = [];
 
 /** The highest timeline depth scripts place at, 2^31 - 16777220, as Ruffle has it. */
