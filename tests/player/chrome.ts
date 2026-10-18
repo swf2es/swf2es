@@ -49,6 +49,8 @@ export interface RunOptions {
   csp?: string;
   /** The served page to open, by its path: page.ts's by default. */
   page?: string;
+  /** Isolate the test host so pages and dedicated workers can share memory. */
+  isolated?: boolean;
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -152,7 +154,7 @@ export async function withPage<T>(
   options: RunOptions = {},
 ): Promise<T> {
   const { timeout, mounts, csp, page = "" } = options;
-  const { server, url } = await serve(mounts, csp);
+  const { server, url } = await serve(mounts, csp, options.isolated);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
   try {

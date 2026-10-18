@@ -72,6 +72,8 @@ node tests/player/resize.ts         # filters inside filters drawn while the ren
                               # in Chrome (part of pnpm test)
 node tests/player/context-loss.ts   # a WebGL context lost and given back mid-play draws the same
                               # in Chrome (part of pnpm test)
+node tests/player/worker.ts [--gpu] # the SAB/OffscreenCanvas vector prototype vs the main renderer
+                              # on an isolated Chrome host (part of pnpm test; SwiftShader by default)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it

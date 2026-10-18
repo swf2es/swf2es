@@ -81,9 +81,15 @@ function page(): string {
 export async function serve(
   extra: [string, string][] = [],
   csp?: string,
+  isolated = false,
 ): Promise<{ server: Server; url: string }> {
   const served = [...extra, ...mounts];
   const server = createServer((request, response) => {
+    if (isolated) {
+      response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+      response.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+    }
+
     let path: string;
     try {
       path = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);

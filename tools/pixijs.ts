@@ -59,6 +59,8 @@ export const BROWSER_EXPORTS = [
   "BufferUsage",
   "CanvasTextMetrics",
   "Container",
+  "DOMAdapter",
+  "EventSystem",
   "ExtensionType",
   "Filter",
   "FilterSystem",

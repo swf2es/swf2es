@@ -24,5 +24,11 @@
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts"
   ],
-  "exclude": ["tests/programs/as3pb", "tests/player/page.ts", "tests/web/page.ts"]
+  "exclude": [
+    "tests/programs/as3pb",
+    "tests/player/page.ts",
+    "tests/player/worker-page.ts",
+    "tests/player/worker-entry.ts",
+    "tests/web/page.ts"
+  ]
 }
