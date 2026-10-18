@@ -276,7 +276,7 @@ export class ActionQueue {
       return;
     }
 
-    const constr = this.movie.classOf(q.clip);
+    const constr = this.movie.classes.classOf(q.clip);
     if (constr !== null) {
       face.define(
         "__proto__",

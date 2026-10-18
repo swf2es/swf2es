@@ -53,6 +53,7 @@ import {
 } from "../media/sounds.js";
 import { evaluate } from "../scripting/evaluate.js";
 import { type BindingHost, VariableBindings } from "./bindings.js";
+import { RegisteredClasses } from "./classes.js";
 import { ExternalCalls } from "./external.js";
 import { FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
@@ -246,13 +247,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The levels, the main SWF's root level 0, by number, and each one's number. */
   private readonly levels = new Map<number, MovieClip>();
   private readonly levelNumbers = new WeakMap<DisplayObject, number>();
-  /**
-   * Object.registerClass's classes, by symbol name, one for every SWF:
-   * named in its case from SWF 7, folded up to SWF 6, by the code that
-   * registers and by the SWF of the clip it is looked up for (the
-   * corpus's register_class).
-   */
-  private readonly registered = new Map<string, avm1.Avm1Function>();
+  /** Object.registerClass's classes, which clips of their symbols are constructed as. */
+  readonly classes = new RegisteredClasses(this);
   /** What each clip a load filled shows, the SWF's root it plays, by the clip. */
   readonly contents = new WeakMap<MovieClip, Avm1Swf>();
   /** loadMovie's and MovieClipLoader's loads, until they are done with. */
@@ -511,7 +507,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
     realm.Object.define(
       "registerClass",
-      realm.method((_, args, version) => this.registerClass(args, version)),
+      realm.method((_, args, version) => this.classes.registerClass(args, version)),
       avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY,
     );
     realm.global.define(
@@ -1080,31 +1076,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /**
-   * The class Object.registerClass bound to `d`'s character's export name
-   * in its SWF, null for none.
-   */
-  classOf(d: DisplayObject): avm1.Avm1Function | null {
-    // A sprite's only: a button's symbol stays a Button (the corpus's register_class).
-    const id = d instanceof MovieClip ? d.character?.id : undefined;
-    const swf = this.swfOf(d);
-    const name = id === undefined ? undefined : swf.exportNames.get(id);
-    return name === undefined ? null : (this.registered.get(classKey(name, swf.version)) ?? null);
-  }
-
   /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */
   registeredName(constr: Value): string | null {
-    if (!(constr instanceof avm1.Avm1Function)) {
-      return null;
-    }
-
-    for (const [name, registered] of this.registered) {
-      if (registered === constr) {
-        return name;
-      }
-    }
-
-    return null;
+    return this.classes.registeredName(constr);
   }
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
@@ -1299,27 +1273,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /** Object.registerClass(name, constructor): true where it binds or unbinds (null) the name. */
-  private registerClass(args: Value[], version: number): Value {
-    if (args.length < 2) {
-      return false;
-    }
-
-    const constr = args[1];
-    if (constr !== undefined && constr !== null && !(constr instanceof avm1.Avm1Function)) {
-      return false;
-    }
-
-    const key = classKey(avm1.stringOf(args[0], version), version);
-    if (constr instanceof avm1.Avm1Function) {
-      this.registered.set(key, constr);
-    } else {
-      this.registered.delete(key);
-    }
-
-    return true;
-  }
-
   /**
    * A display object a script made, put in `parent` at timeline depth
    * `depth` as `name` and made: its first frame entered, its children
@@ -1362,7 +1315,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
 
     const version = this.swfOf(child).version;
-    const constr = this.classOf(child);
+    const constr = this.classes.classOf(child);
     if (constr !== null) {
       face.define(
         "__proto__",
@@ -1752,11 +1705,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 const MAX_DEPTH = 2130706428;
 /** The depth from which removeMovieClip removes nothing. */
 const MAX_REMOVE_DEPTH = 2130706416;
-
-/** A symbol name as registerClass keys it, by a SWF of `version`: in its case from SWF 7. */
-function classKey(name: string, version: number): string {
-  return version > 6 ? name : avm1.fold(name);
-}
 
 /** The blocks of a clip's construct events. */
 function constructBlocks(native: ClipNative): number[] {
