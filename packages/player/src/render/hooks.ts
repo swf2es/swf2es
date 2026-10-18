@@ -52,7 +52,8 @@ export function hookRenderer(renderer: Renderer): void {
   }
 
   if (renderer.renderGroup instanceof RenderGroupSystem) {
-    renderer.renderGroup.onBuildInstructions = (group) => noteBuild(group as unknown as Settling);
+    renderer.renderGroup.onBuildInstructions = (group, forced) =>
+      noteBuild(group as unknown as Settling, forced);
   }
 
   const filter = (renderer as { filter?: unknown }).filter;
