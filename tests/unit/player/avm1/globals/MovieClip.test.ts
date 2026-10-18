@@ -9,6 +9,7 @@ import { Avm1 } from "../../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../../packages/player/dist/player.js";
 import { flashAssembler, script } from "../../../../avm1-script.ts";
 import * as w from "../../../../swf-writer.ts";
+import { files, movie, play, take } from "../network.ts";
 
 const codegen = await createCodegen(
   await WebAssembly.compile(
@@ -93,6 +94,23 @@ test("nothing's bounds in another clip's space switch to 6710886.4 for good unde
   const empty = `var e = createEmptyMovieClip("e", 9); trace(e.getBounds(e).xMin + " " + e.getBounds(this).xMin);`;
   assert.deepEqual(await traces(empty, 7), ["6710886.35 6710886.35"]);
   assert.deepEqual(await traces(empty, 8), ["6710886.35 6710886.4"]);
+});
+
+test("SWF 8 code under a root of SWF 7 switches the invalid bounds for the root's code too", async () => {
+  const played = await play(
+    `var e = createEmptyMovieClip("e", 1); trace("7 " + e.getBounds(this).xMin);
+createEmptyMovieClip("holder", 2).loadMovie("child.swf");
+var frames = 0;
+this.onEnterFrame = function () { frames++; if (frames == 2) { trace("7 " + e.getBounds(_root).xMin); } };`,
+    { fetch: files({ "child.swf": movie(`trace("8 " + _level0.e.getBounds(_level0).xMin);`, 8) }) },
+    7,
+  );
+
+  assert.deepEqual(take(played), ["7 6710886.35"]);
+  await played.deliver();
+  played.player.tick();
+  played.player.tick();
+  assert.deepEqual(take(played), ["8 6710886.4", "7 6710886.4"]);
 });
 
 test("the timeline's methods move a clip, play and stop it", async () => {

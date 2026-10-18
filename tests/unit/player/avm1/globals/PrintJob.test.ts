@@ -50,6 +50,24 @@ test("a job's measures are 0 on the prototype the first job adds them to, its me
   ]);
 });
 
+test("the first job's measures replace what a script set on the prototype, in its place, and no later job adds them", async () => {
+  // adl, whose measures read -2^31 where Flash Player's corpus has 0.
+  assert.deepEqual(
+    await play(
+      `var p = PrintJob.prototype; p.pageWidth = 7; p.paperHeight = "mine";
+var o = new PrintJob(); trace(p.pageWidth + " " + o.pageWidth + " " + p.paperHeight + " " + o.paperHeight);
+var names = []; for (var k in p) { names.push(k); } trace(names.join(","));
+delete p.orientation; trace(typeof new PrintJob().orientation);`,
+      7,
+    ),
+    [
+      "undefined 0 undefined 0",
+      "orientation,pageHeight,paperWidth,paperHeight,pageWidth",
+      "undefined",
+    ],
+  );
+});
+
 test("up to SWF 6 the prototype has no methods and inherits nothing, not even toString", async () => {
   assert.deepEqual(await play(`trace(PrintJob.prototype); trace(new PrintJob().start);`, 6), [
     "[type Object]",

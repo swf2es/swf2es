@@ -1,8 +1,8 @@
 // PrintJob's AS2 face, as Ruffle's (https://github.com/ruffle-rs/ruffle)
 // core/src/avm1/globals/print_job.rs has it: MIT OR Apache-2.0, Copyright
 // (c) 2018-2022 Ruffle LLC and Ruffle contributors. Nothing prints: start
-// gives false, as Flash does where the user cancels the print dialog, and so
-// a job never has pages to add or send.
+// gives false, as Flash does where the user cancels the print dialog, so
+// addPage gives false and send does nothing.
 import { avm1 } from "@swf2es/runtime";
 
 const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE;
@@ -15,14 +15,20 @@ export function printJobClass(realm: avm1.Realm): avm1.Avm1Object {
   // Flash's prototype has its constructor before its __proto__, which SWF 7
   // on sees: up to 6 it inherits nothing, not even toString (adl).
   const proto = new avm1.Avm1Object();
+  const jobs = new WeakSet<avm1.Avm1Object>();
+  let measured = false;
   const constr = realm.classOf(
     proto,
     (self) => {
-      // Flash adds the measures to the prototype as the first job is made.
-      for (const name of MEASURES) {
-        if (proto.exact(name) === undefined) {
-          const p = proto.add(name, undefined, avm1.DONT_DELETE);
-          p.get = realm.method(() => 0);
+      jobs.add(self);
+      // The first job made adds the measures to the prototype, over what a
+      // script set there, in its place; later jobs add none again, not even
+      // one deleted. Read of anything but a job, they are undefined (adl).
+      if (!measured) {
+        measured = true;
+        for (const name of MEASURES) {
+          const p = proto.define(name, undefined, 0);
+          p.get = realm.method((job) => (jobs.has(job as avm1.Avm1Object) ? 0 : undefined));
           p.set = realm.method(() => undefined);
         }
       }
