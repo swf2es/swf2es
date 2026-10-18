@@ -9,10 +9,12 @@ import {
   DONT_ENUM,
   get,
   type Host,
+  invoke,
   keys,
   Runtime,
   set,
   type Value,
+  VERSION_7,
 } from "../../../packages/runtime/dist/avm1/index.js";
 
 const rt = new Runtime();
@@ -115,6 +117,17 @@ test("the version bits hide a property from earlier SWFs, until a set shows it",
       assert.equal(get(o, "v", version), still ? undefined : "set", `${version} ${bits}`);
     }
   }
+});
+
+test("a native of SWF 7 is hidden from 5 and 6, and hasOwnProperty sees it, as not one of bit 0x100", () => {
+  const o = rt.newObject();
+  o.define("seven", 1, VERSION_7);
+  o.define("hidden", 1, 0x100);
+  const has = (name: string) => invoke(get(o, "hasOwnProperty", 7), o, [name], 7);
+  assert.deepEqual(
+    [get(o, "seven", 5), get(o, "seven", 6), get(o, "seven", 7), has("seven"), has("hidden")],
+    [undefined, undefined, 1, true, false],
+  );
 });
 
 test("addProperty takes a function getter and a function or null setter", () => {
