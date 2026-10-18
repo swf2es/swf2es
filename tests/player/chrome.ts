@@ -59,6 +59,9 @@ export interface PlayerResult {
   trace: string[];
   /** The draws the transform table made. */
   tableDraws: number;
+  /** What drew, and whether it had WEBGL_multi_draw, which the table needs. */
+  gl: string;
+  multiDraw: boolean;
   /** What stopped the player, if anything. */
   error: string | null;
 }
@@ -333,6 +336,8 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               images: Record<string, string>;
               trace: string[];
               tableDraws: number;
+              gl: string;
+              multiDraw: boolean;
               error: string | null;
             }
           | undefined;
@@ -381,6 +386,8 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
           images,
           trace: value?.trace ?? [],
           tableDraws: value?.tableDraws ?? 0,
+          gl: value?.gl ?? "unknown",
+          multiDraw: value?.multiDraw ?? false,
           error,
         };
         results.push(result);
@@ -474,6 +481,7 @@ export function benchPlayer(
   finishEvery = 1,
   hover = false,
   snapshotPath?: string,
+  tableLoop = true,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -496,7 +504,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true)`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };
@@ -747,10 +755,11 @@ export function playLosingContextPlan(
   swf: Uint8Array,
   plan: string,
   table: boolean,
+  tableMinRun = 1,
 ): Promise<string | null> {
   return withPage("contextLossPlanSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table})`,
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table}, ${tableMinRun})`,
     );
     return exception ?? value ?? null;
   });

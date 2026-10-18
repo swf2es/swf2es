@@ -9,6 +9,7 @@ import {
   type AtlasStore,
   addToRun,
   type Packed,
+  setTransformTable,
   type TableInstruction,
   TablePipe,
 } from "../../../../packages/player/dist/render/table.js";
@@ -331,4 +332,145 @@ test("a run's rows go up in one call: the part of their line, or the whole lines
     [0, 0, 1280, 2, 0],
     [0, 1, 1280, 1, 256 * 20],
   ]);
+});
+
+/**
+ * A table pipe over a GL that logs its calls, gathered runs flushed by
+ * hand: its program the given one, which a test may swap as a restored
+ * context's would be, and Pixi's pipe logging the Graphics it draws.
+ */
+function flushing() {
+  const calls: string[] = [];
+  const gl = {
+    TRIANGLES: 4,
+    UNSIGNED_INT: 5,
+    getUniformLocation(_program: unknown, name: string) {
+      calls.push(`locate ${name}`);
+      return name;
+    },
+    uniform4fv(location: string, _data: Float32Array, offset: number, length: number) {
+      calls.push(`${location} ${offset} ${length}`);
+    },
+    uniform1i(location: string, value: number) {
+      calls.push(`${location} ${value}`);
+    },
+    drawElements(_mode: number, count: number, _type: number, offset: number) {
+      calls.push(`draw ${count} at ${offset}`);
+    },
+  };
+  const programs = { current: {} };
+  const renderer = {
+    type: 1,
+    gl,
+    texture: { bindForUpload() {} },
+    globalUniforms: { bindGroup: {} },
+    state: { set() {} },
+    shader: { bind() {}, _getProgramData: () => ({ program: programs.current }) },
+    geometry: {
+      bind() {
+        calls.push("bind atlas");
+      },
+    },
+    renderPipes: {
+      graphics: {
+        execute(graphics: { name: string }) {
+          calls.push(`pixi ${graphics.name}`);
+        },
+      },
+    },
+    runners: { contextChange: { add() {} }, prerender: { add() {} } },
+  };
+  const pipe = new TablePipe(renderer as unknown as ConstructorParameters<typeof TablePipe>[0]);
+  const run = pipe as unknown as {
+    multi: { multiDrawElementsWEBGL(...args: unknown[]): void };
+    atlas: { send(): void };
+    shortShader: { groups: unknown[]; glProgram: object };
+    segment: { name: string }[];
+    counts: Int32Array;
+    offsets: Int32Array;
+    draws: number;
+    cursor: number;
+    flush(): void;
+  };
+  run.multi = {
+    multiDrawElementsWEBGL(...args: unknown[]) {
+      calls.push(`multi ${args[6]}`);
+    },
+  };
+  run.atlas = { send() {} };
+  // Pixi's program would want a canvas to compile in.
+  run.shortShader = { groups: [], glProgram: {} };
+  const gather = (draws: number) => {
+    for (let i = 0; i < draws; i++) {
+      run.counts[i] = 3 * (i + 1);
+      run.offsets[i] = 4 * i;
+    }
+
+    run.draws = draws;
+    run.cursor = draws;
+  };
+
+  return { calls, programs, run, gather };
+}
+
+test("a run too short for a multi-draw is drawn a call a draw from the atlas, each told its row", () => {
+  const { calls, run, gather } = flushing();
+
+  gather(3);
+  run.flush();
+  // Rows of 5 vectors, passed at once; the first row is 0 as the program starts.
+  assert.deepEqual(calls, [
+    "locate uRows",
+    "locate uFirst",
+    "uRows 0 60",
+    "bind atlas",
+    "draw 3 at 0",
+    "uFirst 1",
+    "draw 6 at 4",
+    "uFirst 2",
+    "draw 9 at 8",
+  ]);
+  // Their rows are free again.
+  assert.equal(run.cursor, 0);
+
+  calls.length = 0;
+  gather(16);
+  run.flush();
+  assert.deepEqual(calls, ["uRows 0 320", "bind atlas", "uFirst 0", "multi 16"]);
+});
+
+test("a program linked again, as for a restored context, is told its rows and first row anew", () => {
+  const { calls, programs, run, gather } = flushing();
+  gather(3);
+  run.flush();
+
+  calls.length = 0;
+  programs.current = {};
+  gather(2);
+  run.flush();
+  // A new program's uFirst starts at 0: set only where a draw needs another.
+  assert.deepEqual(calls, [
+    "locate uRows",
+    "locate uFirst",
+    "uRows 0 40",
+    "bind atlas",
+    "draw 3 at 0",
+    "uFirst 1",
+    "draw 6 at 4",
+  ]);
+});
+
+test("with short runs left to Pixi, a short run's Graphics go through its pipe", () => {
+  const { calls, run, gather } = flushing();
+  setTransformTable(true, 16, false);
+  try {
+    run.segment = [{ name: "a" }, { name: "b" }];
+    gather(3);
+    run.flush();
+    assert.deepEqual(calls, ["pixi a", "pixi b"]);
+    assert.equal(run.cursor, 0);
+    assert.equal(run.segment.length, 0);
+  } finally {
+    setTransformTable(true);
+  }
 });

@@ -155,4 +155,11 @@ for (const table of [true, false]) {
   }
 }
 
+// At the table's own threshold, its short runs drawn from the atlas a call a draw.
+assert.equal(
+  await playLosingContextPlan(swf, "ttltrtltrtt", true, 16),
+  null,
+  "ttltrtltrtt, the table's own threshold",
+);
+
 console.log("context-loss: ok");

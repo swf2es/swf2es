@@ -72,7 +72,8 @@
 // --no-table draws the Graphics drawn alone each with a call of its own,
 // as Pixi does, not through the transform table (render/table.ts): the two
 // timed apart. --min-run N has the table draw only runs of N draws or
-// more, and Pixi the shorter, to time where the table starts to gain.
+// more as one multi-draw, to time where that starts to gain; it draws the
+// shorter from its atlas a call a draw, or with --no-loop leaves them to Pixi.
 //
 // --scripted N plays instead N rigs whose 12 parts are clips of a class
 // with a frame script, each frame taken off and new ones put in their
@@ -144,7 +145,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--pace MS] [--hover]
+//     [--min-run N] [--no-loop] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
@@ -1353,6 +1354,7 @@ const result = await benchPlayer(
   args.includes("--pipelined") ? 30 : 1,
   args.includes("--hover"),
   args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
+  !args.includes("--no-loop"),
 );
 if (result.error) {
   console.error(result.error);
