@@ -109,3 +109,33 @@ trace(d.getPixel32(0, 3).toString(16) + " " + d.getPixel32(3, 3).toString(16) + 
     ],
   );
 });
+
+test("applyFilter answers -6 where AS3 refuses the rect or the filter, its rect's numbers as AS3's", async () => {
+  // adl: an x of NaN, -Infinity or a height of Infinity, a width of 2e8, a shadow cast NaN far.
+  assert.deepEqual(
+    await run(`var B = flash.display.BitmapData, R = flash.geom.Rectangle, P = flash.geom.Point;
+var bd = new B(10, 10, true, 0xFF336699), src = new B(10, 10, true, 0xFF00FF00), blur = new F.BlurFilter(4, 4, 1);
+var at = new P(0, 0), line = [];
+line.push(bd.applyFilter(src, new R(NaN, 0, 10, 10), at, blur));
+line.push(bd.applyFilter(src, new R(NaN, 0, 10, 10), at, new F.ColorMatrixFilter()));
+line.push(bd.applyFilter(src, new R(-Infinity, 0, 10, 10), at, new F.BevelFilter()));
+line.push(bd.applyFilter(src, new R(0, 0, 200000000, 10), at, blur));
+line.push(bd.applyFilter(src, new R(0, 0, 10, Infinity), at, blur));
+line.push(bd.applyFilter(src, new R(0, 0, 10, 10), at, new F.DropShadowFilter(NaN, 45)));
+trace(line.join(" "));`),
+    ["-6 0 -6 -6 -6 -6"],
+  );
+});
+
+test("lists are read as long as Flash reads them, up to a bound past any real one", async () => {
+  // adl: a kernel of 300 and of 100,000 kept whole, a filters list of a million read through.
+  assert.deepEqual(
+    await run(`var k = new F.ConvolutionFilter(), big = [];
+for (var i = 0; i < 300; i++) { big.push(i); }
+k.matrix = big; trace(k.matrix.length + " " + k.matrix[299]);
+k.matrix = {length: 100000}; trace(k.matrix.length);
+k.matrix = {length: 2147483647}; trace(k.matrix.length);
+mc.filters = {length: 1000000, 0: new F.BlurFilter()}; trace(mc.filters.length);`),
+    ["300 299", "100000", "1048576", "1"],
+  );
+});

@@ -35,6 +35,13 @@ interface State {
 
 const MAX_COLORS = 16;
 
+/**
+ * A list's length is read up to this, as Function.apply's is: Flash keeps a
+ * kernel of 100,000 elements and walks a filters list as long (adl), but a
+ * script's length of 2^31 - 1 would hang the page or run it out of memory.
+ */
+const MAX_LIST = 1 << 20;
+
 /** The angle a new shadow, bevel or gradient filter has: 0.785398163 radians, nearly 45°. */
 const ANGLE = 0.785398163 * (180 / Math.PI);
 
@@ -92,13 +99,8 @@ export function filterRecordOf(o: Value): Filter | null {
     return null;
   }
 
+  // NaN and all, as AS3's records may hold them: the renderer and applyFilter take them so.
   const f = copyFilter(state.f);
-  // The values a script may leave as NaN, drawn as none.
-  for (const key of ["blurX", "blurY", "distance", "angle", "strength"] as const) {
-    if (key in f && Number.isNaN(f[key])) {
-      f[key] = 0;
-    }
-  }
 
   const slots = state.slots;
   if (slots) {
@@ -146,7 +148,7 @@ export function filtersOf(value: Value, version: number): Filter[] {
 /** An object's `length` as Flash reads it for a list: a string's its length, 0 for no int. */
 function lengthOf(value: Value, version: number): number {
   if (typeof value === "string") {
-    return value.length;
+    return Math.min(value.length, MAX_LIST);
   }
 
   if (!(value instanceof avm1.Avm1Object)) {
@@ -154,7 +156,7 @@ function lengthOf(value: Value, version: number): number {
   }
 
   const n = avm1.toNumber(avm1.get(value, "length", version), version) | 0;
-  return n < 0 ? 0 : n;
+  return n < 0 ? 0 : Math.min(n, MAX_LIST);
 }
 
 function element(value: Value, i: number, version: number): Value {

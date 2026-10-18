@@ -1611,7 +1611,8 @@ other sizes, 0 for the same pixels, else a bitmap of the differences.
 `applyFilter` and `generateFilterRect` run AS3's operations on a filter
 object's record (`bitmap/filters.ts`), with adl's answers: applyFilter -4
 for no rect, -5 for no filter object, -6 for a glow, shadow or bevel into
-an opaque bitmap, a point that is none (0, 0), and 0 done;
+an opaque bitmap or a rect or filter AS3 refuses (its rect's numbers taken
+as AS3's, not as ints), a point that is none (0, 0), and 0 done;
 generateFilterRect -1 for no rect, -2 for no filter object. A clip's
 `attachBitmap(bitmap, depth, pixelSnapping, smoothing)` shows a
 BitmapData at a depth as a bitmap with no AVM1 object of its own, which
@@ -1634,7 +1635,8 @@ prototype, listed, from SWF 8; the prototypes extend BitmapFilter's, whose
 `clone` copies a filter. A clip's, a button's and a text field's `filters`
 read back new objects of its records each time and take the filter
 objects of a list up to its length (adl: an object without a length sets
-none), a displacement map's pixels as they are then, as AS3's are; the
+none; a list's length is read up to 2^20, as Function.apply's), a
+displacement map's pixels as they are then, as AS3's are; the
 renderer draws them as AS3's (the corpus's `bitmap_filters`, the
 `avm1-filters` case).
 

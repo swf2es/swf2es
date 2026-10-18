@@ -10,7 +10,7 @@
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore, pixelRect, spanRect } from "../../bitmap/bitmap.js";
 import { drawDisplayObject } from "../../bitmap/draw.js";
-import { applyFilter, GLOWS, generatedRect } from "../../bitmap/filters.js";
+import { applyFilter, filterRefusal, GLOWS, generatedRect } from "../../bitmap/filters.js";
 import {
   alphaAt,
   type ColorTransformValues,
@@ -89,7 +89,7 @@ function sizeValid(w: number, h: number, version: number): boolean {
  * as Flash clips, a negative size spanning back with `span`; null if one
  * is missing.
  */
-function rectOf(o: Value, v: number, span = false) {
+function rectOf(o: Value, v: number, span = false, ints = true) {
   if (!(o instanceof avm1.Avm1Object)) {
     return null;
   }
@@ -99,7 +99,10 @@ function rectOf(o: Value, v: number, span = false) {
     return null;
   }
 
-  const [x, y, w, h] = names.map((n) => avm1.toNumber(avm1.get(o, n, v), v) | 0);
+  const [x, y, w, h] = names.map((n) => {
+    const d = avm1.toNumber(avm1.get(o, n, v), v);
+    return ints ? d | 0 : d;
+  });
   return (span ? spanRect : pixelRect)(x, y, w, h);
 }
 
@@ -396,7 +399,9 @@ export function bitmapDataClass(host: BitmapHost): Obj {
       return -3;
     }
 
-    const r = rectOf(args[1], v);
+    // Its rect's numbers as AS3's are, not as ints: an edge of NaN or of
+    // Infinity is refused as AS3 refuses it (adl).
+    const r = rectOf(args[1], v, false, false);
     if (r === null) {
       return -4;
     }
@@ -406,7 +411,11 @@ export function bitmapDataClass(host: BitmapHost): Obj {
       return -5;
     }
 
-    if (!store.transparent && GLOWS.has(f.kind)) {
+    // What AS3 refuses with an error, an edge or a size past what Flash makes its buffers for,
+    // AVM1 answers -6 for too (adl).
+    const refused =
+      filterRefusal(r, f, { x: 0, y: 0, width: source.width, height: source.height }) !== 0;
+    if (refused || (!store.transparent && GLOWS.has(f.kind))) {
       return -6;
     }
 
