@@ -1763,6 +1763,30 @@ properties are in Flash's for..in order, XMLSocket's hidden. Up to SWF 5,
 where a string is bytes, text loaded or received is its UTF-8's bytes,
 and `loadVariables` reads Windows-1252.
 
+### NetConnection
+
+`NetConnection` (`globals/NetConnection.ts`, as Ruffle's) connects
+locally for `connect(null)`, at once, its `onStatus` told
+`NetConnection.Connect.Success`, and to Flash Remoting for an http or
+https URL; any other connects nothing, and a new connection closes the
+one before (`Connect.Closed`). A remoting `call` is queued, and at the
+frame's end each connection's calls go as one AMF0 packet POSTed to its
+URL with its headers (`addHeader`, one of a name, its case aside), the
+calls answered at `/1`, `/2`...: an answer's `/n/onResult` or
+`/n/onStatus` goes to that call's responder; one that is no packet is
+ignored, and a failed request tells the connection's `onStatus`
+nothing, as does `close` of a remoting connection after its
+`Connect.Closed`. The values are AMF0 as `avm1/amf.ts` writes a .sol
+file's, but for a remoting packet's ways: each argument its own
+references, an object at the top not among them, an array of indices
+alone a strict array (one with any other key an ECMA array), an XML
+node its text, a date's zone 0, and a getter or an element that throws
+undefined (the corpus's `amf_*` and `netconnection_*`). Typed objects
+are written by the name Object.registerClass last gave their
+constructor, in the case it was given. The corpus runner answers a
+test's `localhost:8000` from its `localhost/` directory, as Ruffle's
+does.
+
 ### Loading movies
 
 `loadMovie(url, target, method)`, `MovieClip.loadMovie(url, method)`,
