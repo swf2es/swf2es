@@ -1838,12 +1838,14 @@ Ruffle forces it ("Loading movies"); running its ABC is out of scope.
 ### PrintJob
 
 `PrintJob` (`globals/PrintJob.ts`, as Ruffle's) prints nothing: `start`
-gives false, as Flash does where the user cancels its dialog, and so do
-`addPage` and `send` nothing. Its methods are SWF 7's, and up to SWF 6
+gives false, as Flash does where the user cancels its dialog, so
+`addPage` gives false and `send` does nothing. Its methods are SWF 7's, and up to SWF 6
 its prototype's `__proto__` is hidden too, so that it inherits nothing,
 not even `toString` (adl: the object traces as `[type Object]`). The
 first job made adds the page's and paper's measures to the prototype,
-listed, 0 and unchanged by a set (the corpus's `printjob_props_*`).
+listed, over what a script set there, and no later job again: a job's
+are 0, unchanged by a set (the corpus's `printjob_props_*`), anything
+else's undefined (adl).
 
 ### Out of scope at first
 
