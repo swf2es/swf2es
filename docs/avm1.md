@@ -1782,10 +1782,14 @@ of references, the arguments' array its first and a header's value its
 own first (adl, through a server it POSTed to), an array of indices
 alone a strict array (one with any other key an ECMA array), an XML
 node its text, a date's zone 0, and a getter or an element that throws
-undefined (the corpus's `amf_*` and `netconnection_*`); a call writes a
-million values at most and objects 1,024 deep, past which it writes
-undefined, as a script's length of 2^31 - 1 or a long chain would hang
-the page, and reading an answer fails past that depth or its bytes. Typed objects
+undefined (the corpus's `amf_*` and `netconnection_*`); a remoting value
+writes at most 2^20 values, counting nested values and getters written
+as undefined. Arrays and properties stop when that budget is spent,
+and nesting is cut with undefined so the output fits the reader's
+1,024-value depth limit. A script's length of 2^31 - 1 or a long chain
+would otherwise hang the page. Reading fails past the value or depth
+limit or the available bytes, including a boolean's byte and a date's
+timezone. Typed objects
 are written by the name Object.registerClass last gave their
 constructor, in the case it was given. The corpus runner answers a
 test's `localhost:8000` from its `localhost/` directory, as Ruffle's

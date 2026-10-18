@@ -7,7 +7,7 @@
 // connection's headers with them, each call's answer, /n/onResult or
 // /n/onStatus, going to its responder. Any other URL connects nothing.
 import { avm1 } from "@swf2es/runtime";
-import { Reader, STRICT_ARRAY, Writer } from "../amf.js";
+import { Reader, Writer } from "../amf.js";
 import type { Avm1Net } from "../net.js";
 
 type Value = avm1.Value;
@@ -79,11 +79,7 @@ export function remotingValue(
 ): Uint8Array {
   const w = new Writer(typedName, version, null, { xmlText: xml, first });
   if (first === 1 && Array.isArray(v)) {
-    w.bytes(STRICT_ARRAY);
-    w.u32(v.length);
-    for (const arg of v) {
-      w.value(arg);
-    }
+    w.arguments(v);
   } else {
     w.value(v as Value);
   }

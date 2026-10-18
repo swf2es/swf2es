@@ -100,6 +100,29 @@ nc.call("svc.m", {});`,
   assert.deepEqual(take(played), ["status 0"]);
 });
 
+test("a reply with a truncated boolean or date is ignored", async () => {
+  for (const value of [h("01"), h("0b 00 00 00 00 00 00 00 00")]) {
+    const answer = Uint8Array.from([
+      ...h("00 00 00 00 00 01"),
+      ...utf("/1/onResult"),
+      ...utf("null"),
+      0,
+      0,
+      0,
+      value.length,
+      ...value,
+    ]);
+    const played = await play(
+      `var nc = new NetConnection(); nc.connect("https://example.test/gateway");
+nc.call("svc.m", {onResult: function () { trace("unexpected result"); }});`,
+      { fetch: async () => ({ bytes: answer, status: 200, headers: [] }) },
+    );
+    played.player.tick();
+    await played.deliver();
+    assert.deepEqual(take(played), []);
+  }
+});
+
 /** What `source` POSTs at its first frame's end, as hex. */
 async function posted(source: string): Promise<string[]> {
   const asked: FetchRequest[] = [];
