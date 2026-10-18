@@ -13,7 +13,6 @@ import {
   Container as PixiContainer,
   type Renderer,
   RendererType,
-  type RenderTexture,
   Sprite,
 } from "pixi.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
@@ -42,7 +41,7 @@ import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js
 import type { ShapeCharacter } from "../display/timeline.js";
 import type { Player } from "../player.js";
 import { retireBatchers, trimBatchers, viewGroups } from "./batchers.js";
-import { argbOf, characterStore, gpuBitmaps } from "./bitmaps.js";
+import { characterStore, gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
@@ -50,17 +49,16 @@ import { hookRenderer } from "./hooks.js";
 import { makeNode, NO_RECORDS, type Node } from "./node.js";
 import { bindPointer } from "./pointer.js";
 import {
-  drawTarget,
   IDLE_MS,
   PARKED_FIRST_GROUPS_MOST,
   PARKED_MOST,
-  releaseDrawTarget,
   SPARE_GRAPHICS_MOST,
   SPARE_NODES_MOST,
   trimPools,
 } from "./pools.js";
 import { SETTLE_MS, type Settling, settle, unsettle } from "./settle.js";
 import { SharedGraphics } from "./shared.js";
+import { drawInto, snapshot } from "./snapshot.js";
 import {
   type Linear,
   linesContext,
@@ -2437,72 +2435,28 @@ export class PixiView {
   }
 
   /**
-   * `o` drawn alone, as BitmapData.draw takes a display object: through `m`
-   * into a w x h texture, rendered at `samples` a side and averaged on the
-   * GPU, as Flash covers edges (4 at its high quality). A fresh view does
-   * it, borrowing the stage's current geometry, so the stage's is untouched.
+   * A fresh view of this one's, for BitmapData.draw (render/snapshot.ts):
+   * it draws `root` under the draw's matrix at `samples` units a pixel,
+   * borrowing this view's current geometry, so this one's is untouched.
    */
-  private sampled(
-    o: DisplayObject,
-    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
-    width: number,
-    height: number,
-    samples: number,
-  ): RenderTexture {
-    const n = samples;
+  forDraw(root: DisplayObject, samples: number): PixiView {
     const view = new PixiView(this.renderer, true, this);
-    view.samples = n;
-    const bitmaps = gpuBitmaps(this.renderer);
-    const smoothing = bitmaps.smoothing;
-    view.drawRoot = o;
-    // Built at the draw's own scale, lines included, as the stage's are,
-    // then rendered n times larger: the curves are no finer than on the
-    // stage, and widths and hairlines scale with the samples.
-    // What the view built is destroyed, and the targets given back, though a render throws.
-    const scaled = new PixiContainer();
-    let target = drawTarget(width * n, height * n);
-    try {
-      // At low quality, a sample a pixel, as the stage's at low, no bitmap is smoothed.
-      bitmaps.smoothing = n > 1;
-      const node = view.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
-      const masks = new PixiContainer();
-      scaled.addChild(node, masks);
-      view.placeMasks(o, masks);
-      view.rebuildMasks();
-      view.renderPlanes();
-      scaled.scale.set(n);
-      this.renderer.render({ container: scaled, target, clear: true });
-    } catch (error) {
-      releaseDrawTarget(target);
-      throw error;
-    } finally {
-      view.dispose(scaled);
-      bitmaps.smoothing = smoothing;
-    }
-
-    // Halved until a sample a pixel: a linear sample at the corner four texels share is their mean.
-    for (let k = n; k > 1; k /= 2) {
-      const half = drawTarget((width * k) / 2, (height * k) / 2);
-      target.source.scaleMode = "linear";
-      const sprite = new Sprite(target);
-      sprite.scale.set(0.5);
-      try {
-        this.renderer.render({ container: sprite, target: half, clear: true });
-      } catch (error) {
-        releaseDrawTarget(half);
-        throw error;
-      } finally {
-        sprite.destroy();
-        releaseDrawTarget(target);
-      }
-
-      target = half;
-    }
-
-    return target;
+    view.samples = samples;
+    view.drawRoot = root;
+    return view;
   }
 
-  /** `o` drawn alone, as `sampled`, read back as premultiplied ARGB. */
+  /** A fresh view's `o` synced through `m` into `into`, with the masks and 3D objects' bitmaps it needs. */
+  drawAlone(o: DisplayObject, m: DisplayObject["matrix"], into: PixiContainer): void {
+    const node = this.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
+    const masks = new PixiContainer();
+    into.addChild(node, masks);
+    this.placeMasks(o, masks);
+    this.rebuildMasks();
+    this.renderPlanes();
+  }
+
+  /** `o` drawn alone, as BitmapData.draw takes a display object, read back as premultiplied ARGB. */
   snapshot(
     o: DisplayObject,
     m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
@@ -2510,17 +2464,10 @@ export class PixiView {
     height: number,
     samples = 4,
   ): Uint32Array {
-    const target = this.sampled(o, m, width, height, samples);
-    const pixels = argbOf(this.renderer.extract.pixels(target).pixels);
-    releaseDrawTarget(target);
-    return pixels;
+    return snapshot(this, o, m, width, height, samples);
   }
 
-  /**
-   * `o` drawn into `store` on the GPU, as `sampled`, source over at (x, y)
-   * with nothing read back: the store is then newer on the GPU. False,
-   * having done nothing, where the store can have no texture.
-   */
+  /** `o` drawn into `store` on the GPU at (x, y), as `snapshot`; false where the store has no texture. */
   drawInto(
     store: BitmapStore,
     o: DisplayObject,
@@ -2531,21 +2478,7 @@ export class PixiView {
     height: number,
     samples = 4,
   ): boolean {
-    const bitmaps = gpuBitmaps(this.renderer);
-    const texture = bitmaps.texture(store);
-    if (!texture) {
-      return false;
-    }
-
-    // Into a texture of its own first: the object may show the store itself.
-    const drawn = this.sampled(o, m, width, height, samples);
-    const sprite = new Sprite(drawn);
-    sprite.position.set(x, y);
-    this.renderer.render({ container: sprite, target: texture, clear: false });
-    sprite.destroy();
-    releaseDrawTarget(drawn);
-    bitmaps.drawn(store);
-    return true;
+    return drawInto(this, store, o, m, x, y, width, height, samples);
   }
 
   /** Draw `root`'s display list, synced first. */
