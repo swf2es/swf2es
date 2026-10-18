@@ -1280,8 +1280,16 @@ export class PixiView {
     return view;
   }
 
-  /** A fresh view's `o` synced through `m` into `into`, with the masks and 3D objects' bitmaps it needs. */
+  /**
+   * A fresh view's `o` synced through `m` into `into`, with the masks and 3D objects' bitmaps it
+   * needs. Only a fresh view (forDraw's) may: the stage's would take `o` into its own nodes,
+   * clear its dirty flags and move its container.
+   */
   drawAlone(o: DisplayObject, m: DisplayObject["matrix"], into: PixiContainer): void {
+    if (!this.fresh) {
+      throw new Error("swf2es: drawAlone on the stage's view, not a fresh one (forDraw)");
+    }
+
     const node = this.sync(o, [1, 0, 0, 1], true, o.scroll ? shifted(m, o.scroll) : m);
     const masks = new PixiContainer();
     into.addChild(node, masks);
