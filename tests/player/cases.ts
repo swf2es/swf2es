@@ -55,6 +55,11 @@ export interface PlayerCase {
    * again without the table it must draw the same pixels.
    */
   table?: boolean;
+  /**
+   * A known gap: what Flash does that the player does not yet. The case is
+   * left out of the default run and runs, expected to fail, when named.
+   */
+  gap?: string;
 }
 
 const square = (id: number, color: number, size = 1000) =>

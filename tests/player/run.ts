@@ -9,6 +9,9 @@
 // table's threshold of 16 draws a run, so with --table-ab most of its runs
 // are Pixi's pipe on both sides: the marked cases are the real guard.
 //
+// A case marked `gap`, a known gap, is neither checked nor drawn unless
+// named: named, it is checked and expected to fail until the gap closes.
+//
 //   node tests/player/run.ts [--table-ab] [case...]   check
 //   node tests/player/run.ts --update [case...]       draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +28,8 @@ const args = process.argv.slice(2);
 const update = args.includes("--update");
 const tableAb = args.includes("--table-ab");
 const names = args.filter((a) => a !== "--update" && a !== "--table-ab");
-const chosen = cases.filter((c) => !names.length || names.includes(c.name));
+// A case marked as a known gap runs only when named.
+const chosen = cases.filter((c) => (names.length ? names.includes(c.name) : !c.gap));
 const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
 const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
 
