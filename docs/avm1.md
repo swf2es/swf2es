@@ -1615,7 +1615,10 @@ a level's tiles drawn from its clips once, then attached.
   SWF once its frame has run, as a projector quits and Ruffle's test
   harness ends a test, and the rest are dropped; the web element passes
   every command to its page, "quit" too, as the plug-in did, and stops
-  nothing.
+  nothing. The handler is told its callers as Scripting's is: the URL of
+  the SWF whose code runs, or every SWF's that has had code where none
+  does (see ExternalInterface), and the element passes a command on only
+  where its allowScriptAccess allows them all.
 - `GetURL` with a target `_levelN` loads into that level, nothing where
   N is not an int; `GetURL2` reads N as a float and truncates it, and
   `_level` alone is level 0. Its flags pick `loadVariables` into the
@@ -1636,6 +1639,46 @@ a level's tiles drawn from its clips once, then attached.
 through the network below, `loadMovie`, `loadMovieNum` and `unloadMovie`
 as "Loading movies" has them; `$version`, which Flash defines on
 `_level0` and a GET or POST from the root sends, is not defined yet.
+
+### ExternalInterface
+
+`flash.external.ExternalInterface` (`globals/ExternalInterface.ts`, from
+SWF 8 but `call`) talks to the page through the host's bridge that AS3's
+Scripting takes (`Avm1Options.externalInterface`, which the element
+gives as it gives Scripting's), in Flash's XML: `call` offers the call to
+`evalJS` as JavaScript, its object's keys quoted, where the host has one
+(the element's has none), then sends it to `callOut` as an `<invoke>`,
+its name as it is, as AS3's playerglobal sends it, and reads the answer
+back with the realm's `XML`, as content would; `addCallback(name,
+instance, method)` takes a function only, and the page's call comes as
+an `<invoke>` whose arguments are read the same way, the reading, the
+method run on `instance` and the writing of its answer as XML all as
+AVM1 code between frames, as a timer's callback runs, what it queued
+after it. A native call converts at most 2^16 values in all, an
+array-like's elements whatever length it claims among them, so that an
+object shared down a tree of them stops there and not after an
+exponential walk, and an object met inside itself is null.
+Without a bridge, or one whose `allows` refuses the calling SWF's URL,
+`available` is false, `call` null and `addCallback` false. The calling
+SWF is the one whose block or function is running, known by its code
+(each SWF's compiled blocks); a native called with none running, as a
+timer, a network callback or the page's call calls one straight, needs
+every SWF that has had code so far allowed, as AS3's natives ask when
+they cannot tell their caller, so that a child from another origin
+cannot call the page through `setInterval(ExternalInterface.call, ...)`
+or `xml.onData = ExternalInterface.call`. A native called by the code
+that sets it off implicitly, as a getter, a watcher or a listener, is
+that code's call, as in Flash. The underscored helpers Flash's own AS2
+class is built of
+(`_escapeXML`, `_toXML`, `_toAS`, `_arrayToXML`, `_argumentsToAS`...) are
+there for content to call, answering as Flash's do: an empty string
+escapes to null and serialises as `<string>null</string>`, an object
+with an own `length` (a String object too) is an array, `_argumentsToXML`
+skips the first element, the function's name, and `_toAS` reads a
+node's `nodeName` only as a string or a String object and a number by
+AVM1's conversion (the corpus's `external_interface_*`). `_arrayToAS`
+and `_objectToAS`, which Ruffle leaves empty, read a node's `<property
+id>` children.
 
 ### The network: XML, LoadVars, loadVariables and XMLSocket
 
@@ -1696,7 +1739,9 @@ to SWF 6, and so looked up by the SWF of the clip it is for.
 A load goes through the host's fetch, as AS3's Loader's does ("content",
 which allowNetworking "internal" allows and "none" refuses), its URL
 resolved against `base`, the clip's variables sent where a method is
-given, and what it brings is read, its images decoded and its code
+given, and what it brings is read, its URL from then on the one a
+redirect took it to, as AS3's loads and Ruffle's have it: the loaded
+movie's `_url`, its query's variables and every check of its access, its images decoded and its code
 compiled before it arrives between frames (`Avm1.network`). Loads into
 one clip, or by one MovieClipLoader, arrive in the order asked, as
 Ruffle's test runner has them arrive, one slow to answer holding the next

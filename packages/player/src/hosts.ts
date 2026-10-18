@@ -204,8 +204,12 @@ export function hostTouchPoints(): number {
 
 /** The host side of playerglobal's synchronous ExternalInterface protocol. */
 export interface ExternalInterfaceHost {
-  /** JavaScript source from playerglobal; the host decides whether to evaluate it. */
-  evalJS(source: string): string | null;
+  /**
+   * JavaScript source from playerglobal; the host decides whether to
+   * evaluate it, null declining. A host without it evaluates none, and
+   * AVM1's calls then go as XML without being written as JavaScript.
+   */
+  evalJS?(source: string): string | null;
   /** An XML invocation when evalJS declined the call. */
   callOut(request: string): string | null;
   /**

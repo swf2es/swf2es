@@ -85,17 +85,12 @@ test("an invocation's name is read as playerglobal writes it, quotes and all", (
   );
 });
 
-test("every SWF call goes as XML: evalJS is always declined", () => {
+test("every SWF call goes as XML: the host evaluates no JavaScript", () => {
   const host = externalInterfaceHost(
     { objectID: null, callback() {}, alive: () => true },
     () => {},
   );
-  for (const source of [
-    'try { __flash__toXML(hello("x")) ; } catch (e) { "<undefined/>"; }',
-    'try { __flash__toXML(function(){ return 1; }()) ; } catch (e) { "<undefined/>"; }',
-  ]) {
-    assert.equal(host.evalJS(source), null);
-  }
+  assert.equal(host.evalJS, undefined);
 });
 
 test("a SWF's call runs in the page, whatever form its name takes, its data never run", () => {

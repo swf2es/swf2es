@@ -13,6 +13,7 @@ import { Player } from "../../../../packages/player/dist/player.js";
 import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
 import { flashAssembler, script } from "../../../avm1-script.ts";
 import * as w from "../../../swf-writer.ts";
+import { files, movie as movieNet, play as playNet } from "./network.ts";
 
 const codegen = await createCodegen(
   await WebAssembly.compile(
@@ -992,5 +993,39 @@ test("a host's fsCommand takes every command, quit too, and getURL's pages go to
     ["http://a.example/", "_blank", null],
     ["http://b.example/", "_self", { method: "POST", vars: [["v", "1"]] }],
     ["http://c.example/", "_blank", { method: "GET", vars: [["v", "1"]] }],
+  ]);
+});
+
+test("getURL's fscommand names its caller by the code running: a loaded child's own, every SWF's from a timer", async () => {
+  const commands: [string, string[]][] = [];
+  const played = await playNet(
+    `this.getURL("FSCommand:main", "");
+createEmptyMovieClip("child", 1).loadMovie("http://b.test/child.swf");
+this.onEnterFrame = function() {
+  if (_global.f) { _global.f(); _global.f = undefined; }
+};`,
+    {
+      url: "http://a.test/main.swf",
+      fsCommand: (command, _, callers) => commands.push([command, callers]),
+      fetch: files({
+        "child.swf": movieNet(`this.getURL("FSCommand:child", "");
+var self = this;
+_global.f = function() { self.getURL("FSCommand:childFunction", ""); };
+var once = setInterval(this, "getURL", 1, "FSCommand:timer");`),
+      }),
+    },
+  );
+  for (let i = 0; i < 3 && !commands.some(([c]) => c === "timer"); i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  const both = ["http://a.test/main.swf", "http://b.test/child.swf"];
+  const first = commands.filter(([c], i) => commands.findIndex(([d]) => d === c) === i);
+  assert.deepEqual(first, [
+    ["main", ["http://a.test/main.swf"]],
+    ["child", ["http://b.test/child.swf"]],
+    ["childFunction", ["http://b.test/child.swf"]],
+    ["timer", both],
   ]);
 });

@@ -2,7 +2,14 @@
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
 import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
-import { Avm1, type FetchRequest, type FetchResult, Player, Scripting } from "@swf2es/player";
+import {
+  Avm1,
+  type ExternalInterfaceHost,
+  type FetchRequest,
+  type FetchResult,
+  Player,
+  Scripting,
+} from "@swf2es/player";
 import {
   codegenForPlayer,
   configuration,
@@ -383,8 +390,9 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         // Its URL keys its SharedObjects, as a page's AS3 SWFs' are. Its
-        // fscommand and getURL reach the page as an AS3 SWF's do: "quit"
-        // goes to the page, as a plug-in's did, and stops nothing.
+        // fscommand, getURL and ExternalInterface reach the page as an AS3
+        // SWF's do: "quit" goes to the page, as a plug-in's did, and stops
+        // nothing.
         const { internal, offline, allows, objectID } = this.#access(pageUrl);
         const base = attribute(this, "base");
         avm1 = new Avm1(codegen, {
@@ -397,12 +405,14 @@ export class Swf2esPlayerElement extends ElementBase {
           socket: offline ? undefined : socketHost(),
           sendToUrl: !internal,
           onUncaught: (error) => this.#report(session, error),
-          fsCommand: (command, args) => {
-            if (allows(url)) {
+          // Asked of the calling SWF, as for an AS3 SWF: a child from another origin is not the main one.
+          fsCommand: (command, args, callers) => {
+            if (callers.every(allows)) {
               this.#fsCommand(objectID, command, args);
             }
           },
           navigate: internal ? null : undefined,
+          externalInterface: this.#externalInterface(session, objectID, allows),
         });
       }
 
@@ -449,11 +459,6 @@ export class Swf2esPlayerElement extends ElementBase {
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const base = attribute(this, "base");
-    const bridge: PageBridge = {
-      objectID,
-      callback: (name, call) => this.#callback(session, name, call),
-      alive: () => this.#session === session,
-    };
     const scripting = new Scripting(codegen, {
       url,
       base: base ? new URL(base, pageUrl).href : undefined,
@@ -467,11 +472,7 @@ export class Swf2esPlayerElement extends ElementBase {
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
       sendToUrl: !internal,
-      externalInterface: externalInterfaceHost(
-        bridge,
-        (error) => this.#report(session, error),
-        allows,
-      ),
+      externalInterface: this.#externalInterface(session, objectID, allows),
       fsCommand: (command, args, callers) => {
         if (callers.every(allows)) {
           this.#fsCommand(objectID, command, args);
@@ -502,6 +503,20 @@ export class Swf2esPlayerElement extends ElementBase {
       allows: (swfUrl) => !internal && scriptAccess(access, swfUrl, pageUrl),
       objectID: idOf(this) || attribute(this, "name") || null,
     };
+  }
+
+  /** The page's ExternalInterface for a load, an AS3 or an AVM1 SWF's alike, for the SWFs `allows` lets script it. */
+  #externalInterface(
+    session: Session,
+    objectID: string | null,
+    allows: (url: string) => boolean,
+  ): ExternalInterfaceHost {
+    const bridge: PageBridge = {
+      objectID,
+      callback: (name, call) => this.#callback(session, name, call),
+      alive: () => this.#session === session,
+    };
+    return externalInterfaceHost(bridge, (error) => this.#report(session, error), allows);
   }
 
   /** The SWF's callback `name` on the element, or taken off it, while its load is the one playing. */

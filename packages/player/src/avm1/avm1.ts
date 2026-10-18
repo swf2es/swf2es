@@ -48,6 +48,7 @@ import {
   browserNavigate,
   type Drawer,
   defaultStorage,
+  type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
   type Navigate,
@@ -69,6 +70,7 @@ import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
+import { type ExternalHost, externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
@@ -122,8 +124,11 @@ export interface Avm1Options {
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
    * as Ruffle's test harness ends a test, and the rest are dropped.
+   * `callers` is the calling SWF's URL, or every URL of a SWF that has had
+   * code where the caller cannot be told, as Scripting's: a host that
+   * checks them lets the command through only if all pass.
    */
-  fsCommand?: (command: string, args: string) => void;
+  fsCommand?: (command: string, args: string, callers: string[]) => void;
   /**
    * Opens getURL's pages: the browser's navigation by default (hosts.ts's
    * browserNavigate), null for none.
@@ -150,6 +155,12 @@ export interface Avm1Options {
    * loads: the browser's by default.
    */
   decodeImage?: ImageDecode | null;
+  /**
+   * The page's ExternalInterface, as AS3's Scripting takes it; without
+   * one, ExternalInterface is unavailable. AVM1's callbacks answer the
+   * page's XML invocations whatever arguments come with them.
+   */
+  externalInterface?: ExternalInterfaceHost;
 }
 
 /**
@@ -418,7 +429,9 @@ const timeoutClock =
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost {
+export class Avm1
+  implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost, ExternalHost
+{
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
@@ -449,6 +462,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    */
   private readonly arrivals = new WeakMap<object, Promise<void>>();
   private readonly decodeImage: ImageDecode | null;
+  private readonly externalInterface: ExternalInterfaceHost | null;
+  /** Each SWF's blocks, by which a function's or block's code is known as that SWF's. */
+  private readonly codeSwfs = new WeakMap<avm1.Region[], Avm1Swf>();
+  /** The URLs of every SWF that has had code to run, unloaded ones too. */
+  private readonly codeUrls = new Set<string>();
   /** The operand stack, which every activation of a frame's actions shares. */
   private readonly st: avm1.Value[] = [];
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
@@ -570,6 +588,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     );
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
+    this.externalInterface = options.externalInterface ?? null;
     const movie = this;
     this.sounds = {
       get audio() {
@@ -649,7 +668,13 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
       loadMovie: (into, url, form) =>
         this.loadMovie(typeof into === "number" ? into : (into as DisplayObject), url, form),
-      fsCommand: options.fsCommand ?? ((command) => this.fsCommand(command)),
+      fsCommand: (command, args) => {
+        if (options.fsCommand === undefined) {
+          this.fsCommand(command);
+        } else {
+          options.fsCommand(command, args, this.callerUrls());
+        }
+      },
       navigate:
         (options.navigate === undefined
           ? getUrlNavigate(browserNavigate(), this.url)
@@ -738,6 +763,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     const flash = flashPackage(this);
+    const external = new avm1.Avm1Object(realm.objectProto);
+    external.define("ExternalInterface", externalInterfaceClass(this), 0);
+    flash.define("external", external, 0);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
       display.define("BitmapData", bitmapDataClass(this), 0);
@@ -819,6 +847,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       const module = this.codegen.compileActionsModule(swf.bytes, list);
       const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
       this.main.blocks = (factory as unknown as avm1.Factory)(this.rt);
+      this.ownCode(this.main);
     }
 
     this.loaded = true;
@@ -1513,6 +1542,76 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
   }
 
+  /** The page's ExternalInterface, where it lets the SWF of the code running now use it. */
+  /**
+   * The page's ExternalInterface, where it lets the code calling use it:
+   * the SWF whose block or function is running, known by its code; where
+   * a native is called with no code of a SWF's running, as a timer, a
+   * network callback or the page's call calls one straight, every SWF that
+   * has run code so far must be allowed, as AS3's natives ask when they
+   * cannot tell their caller (hosts.ts's allows). The clip a function was
+   * made in is not enough: a load can put another SWF in it.
+   */
+  externalBridge(): ExternalInterfaceHost | null {
+    const host = this.externalInterface;
+    const allows = host?.allows;
+    if (host === null || allows === undefined) {
+      return host;
+    }
+
+    return this.callerUrls().every((url) => allows.call(host, url)) ? host : null;
+  }
+
+  /**
+   * The URL of the SWF whose code is running, known by its blocks; where
+   * no SWF's code is running, as a timer, a network callback or the page
+   * calls a native straight, every URL of a SWF that has had code.
+   */
+  private callerUrls(): string[] {
+    const caller = this.codeSwfs.get(this.realm.current?.code ?? []);
+    return caller !== undefined ? [caller.url] : [...this.codeUrls];
+  }
+
+  /** `swf`'s code compiled: its blocks known as its own, and its URL among those that ran code. */
+  private ownCode(swf: Avm1Swf): void {
+    for (const block of swf.blocks) {
+      this.codeSwfs.set(block, swf);
+    }
+
+    if (swf.blocks.length > 0) {
+      this.codeUrls.add(swf.url);
+    }
+  }
+
+  /**
+   * `body`, the page's call into a callback, run between frames or inside
+   * a call out, in the root's activation as a timer's callback runs, and
+   * what it queued run after it: what it returned, undefined where it did
+   * not run or threw.
+   */
+  callIn(body: () => Value): Value {
+    const cx =
+      this.movieRoot === null || this.halted || !this.loaded
+        ? null
+        : this.activationOf(this.movieRoot);
+    if (cx === null) {
+      return undefined;
+    }
+
+    let result: Value;
+    this.begin();
+    try {
+      this.rt.call(cx, () => {
+        result = body();
+      });
+      this.runQueue();
+    } finally {
+      this.end();
+    }
+
+    return result;
+  }
+
   /** LoadVars.send's page, as getURL's opens it. */
   navigate(url: string, window: string, form: avm1.UrlForm): void {
     this.host.navigate?.(url, window, form);
@@ -1695,6 +1794,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
           return SKIPPED;
         }
 
+        // What came is the final URL's: a redirect to another origin must not pass as the one asked for.
+        if (result.url) {
+          load.url = result.url;
+        }
+
         const a = await arrive(result, this.decodeImage);
         if (a.type !== "swf") {
           return a;
@@ -1799,6 +1903,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
           size,
         );
         swf.blocks = arrived.blocks;
+        this.ownCode(swf);
         this.adopt(swf);
         this.readRootFrames(file, swf);
         this.fill(target, swf);
@@ -3308,7 +3413,11 @@ interface MovieLoad {
   target: MovieClip;
   /** The MovieClipLoader whose listeners hear of it; null for loadMovie's. */
   loader: avm1.Avm1Object | null;
-  /** Its URL against the SWF's: what it loaded's `_url`. */
+  /**
+   * Its URL against the SWF's, then where a redirect took it once it
+   * arrives, as AS3's loads and Ruffle's take it: what it loaded's `_url`,
+   * its query variables and the URL every access check asks about.
+   */
   url: string;
   /**
    * Under way, or cancelled by an unload before it arrived; arrived and
