@@ -1,6 +1,6 @@
 // The keyboard of an AVM1 movie: each key goes to Key, its clips' keyDown
 // and keyUp clip actions, and a press to the first button or clip whose
-// keyPress it is (Avm1.key). A keyPress's key is Flash's own code, as
+// keyPress it is (input.ts's key). A keyPress's key is Flash's own code, as
 // Ruffle's ButtonKeyCode has it (https://github.com/ruffle-rs/ruffle,
 // core/src/events.rs: MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle
 // LLC and Ruffle contributors): a printable character's ASCII code, or one
@@ -40,18 +40,18 @@ export class Avm1Keyboard implements Keyboard {
   handle(type: "down" | "up", k: KeyState, edits = true): boolean {
     this.handled++;
     if (type === "up") {
-      this.avm1.key(false, k.keyCode, k.charCode, 0);
+      this.avm1.input.key(false, k.keyCode, k.charCode, 0);
       return false;
     }
 
     const typed = edits ? printable(k.charCode) : 0;
     const press = KEY_PRESSES.get(k.keyCode) ?? typed;
-    return this.avm1.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
+    return this.avm1.input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
   }
 
   text(k: KeyState): boolean {
     this.handled++;
-    return this.avm1.keyPress(printable(k.charCode));
+    return this.avm1.input.keyPress(printable(k.charCode));
   }
 
   /** Text fields come with step 13: nothing to copy or paste into yet. */

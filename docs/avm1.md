@@ -49,8 +49,10 @@ runtime's. `codegen` knows the AVM1 runtime's function names but never
 imports it.
 
 `player/src/avm1/` mirrors `playerglobal/`: the host and the frame's AVM1
-work at its top (`avm1.ts`, `paths.ts`, `net.ts`, `loads.ts`...), and the
-AS2 classes the player provides in `globals/`, a file per class
+work at its top (`avm1.ts` and the parts it owns, `queue.ts`,
+`timers.ts`, `loads.ts`, `input.ts`, `focus.ts`..., beside `paths.ts`
+and `net.ts`), and the AS2 classes the player provides in `globals/`, a
+file per class
 (`globals/MovieClip.ts`, `globals/TextField.ts`...). Its unit tests
 mirror it under `tests/unit/player/avm1/`, as the mirror test requires.
 
@@ -1451,7 +1453,7 @@ showed before, else 0, as adl gives them (Ruffle gives the opposite). A listener
 list hears nothing: a clip is found by its path (the corpus's
 `string_paths_keyevents`).
 
-The focus (`Avm1.focus`, the tab order in `avm1/focus.ts`, `Selection` in
+The focus (`FocusTracker` and the tab order in `avm1/focus.ts`, `Selection` in
 `globals/Selection.ts`), as Ruffle's FocusTracker has it. A button, or a
 clip below the root in button mode or whose `focusEnabled` is true, may
 be focused; `Selection.setFocus` of nothing gives false, of undefined or
@@ -1726,7 +1728,7 @@ and `loadVariables` reads Windows-1252.
 `loadMovieNum(url, level, method)` and `MovieClipLoader.loadClip` load a
 SWF or an image into a clip or a level; `unloadMovie`,
 `unloadMovieNum`, `MovieClip.unloadMovie` and `unloadClip` empty one.
-The player keeps each AVM1 SWF it runs apart (`Avm1Swf` in `avm1.ts`): its
+The player keeps each AVM1 SWF it runs apart (`Avm1Swf` in `swf.ts`): its
 module's blocks, its library, its root's frames, its exports and its
 DoInitAction blocks run, which its own timelines and code use and not
 another's; a queued action carries the SWF whose block it runs, a clip's

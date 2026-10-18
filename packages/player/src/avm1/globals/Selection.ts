@@ -2,7 +2,7 @@
 // ruffle) core/src/avm1/globals/selection.rs has it: MIT OR Apache-2.0,
 // Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors. A
 // broadcaster, whose listeners hear onSetFocus(old, new) as the focus moves
-// (avm1.ts). The text selection is the focused text field's.
+// (focus.ts). The text selection is the focused text field's.
 import { avm1 } from "@swf2es/runtime";
 import { type DisplayObject, TextObject } from "../../display/display.js";
 import { stateOf } from "./TextField.js";

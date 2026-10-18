@@ -133,11 +133,11 @@ export class Avm1Pointer implements Pointer {
    */
   wheel(p: PointerState, delta: number): boolean {
     this.handle("move", p);
-    if (delta === 0 || !this.avm1.mouseHeard) {
+    if (delta === 0 || !this.avm1.input.mouseHeard) {
       return false;
     }
 
-    this.avm1.mouseWheel(delta, this.hover);
+    this.avm1.input.mouseWheel(delta, this.hover);
     return true;
   }
 
@@ -171,7 +171,7 @@ export class Avm1Pointer implements Pointer {
     this.avm1.mouseY = p.y;
     const left = (p.button ?? 0) === 0;
     if (type !== "move") {
-      this.avm1.mouseButton(p.button ?? 0, type === "down");
+      this.avm1.input.mouseButton(p.button ?? 0, type === "down");
     }
 
     // Every clip's clip event first, and what they queue runs, before the pick.
@@ -218,7 +218,7 @@ export class Avm1Pointer implements Pointer {
     this.send(events);
 
     // After the input and what it ran, as Ruffle resets the focus's highlight.
-    this.avm1.pointerInput(type, p.button ?? 0);
+    this.avm1.focusTracker.pointerInput(type, p.button ?? 0);
   }
 
   /**
@@ -327,7 +327,7 @@ export class Avm1Pointer implements Pointer {
         continue;
       }
 
-      if (!this.avm1.flag(d, "enabled")) {
+      if (!this.avm1.input.flag(d, "enabled")) {
         if (button) {
           this.letGo(button, e);
         }
@@ -340,7 +340,7 @@ export class Avm1Pointer implements Pointer {
 
     if (kept.length > 0) {
       this.redraws++;
-      this.avm1.buttonEvents(kept);
+      this.avm1.input.buttonEvents(kept);
     }
 
     this.updateCursor();
@@ -422,8 +422,8 @@ export class Avm1Pointer implements Pointer {
     // A clip in button mode takes the pointer itself, its children's
     // buttons with it, where its hitArea, or else it, is drawn; where it
     // misses, its children may still be hit.
-    if (this.avm1.buttonMode(d)) {
-      const area = any ? null : this.avm1.hitArea(d);
+    if (this.avm1.input.buttonMode(d)) {
+      const area = any ? null : this.avm1.input.hitArea(d);
       if (hitsPoint(area ?? d, x, y, true, this.stage)) {
         return d;
       }
@@ -471,13 +471,13 @@ export class Avm1Pointer implements Pointer {
    * them so; the arrow elsewhere, and nothing while Mouse.hide holds.
    */
   updateCursor(): void {
-    let cursor: Cursor = this.avm1.mouseShown ? "default" : "none";
-    const hover = this.avm1.mouseShown ? this.hover : null;
+    let cursor: Cursor = this.avm1.input.mouseShown ? "default" : "none";
+    const hover = this.avm1.input.mouseShown ? this.hover : null;
     if (hover instanceof ButtonObject) {
       cursor = this.hand(hover) ? "pointer" : "default";
     } else {
       for (let o = hover; o && o !== this.stage; o = o.parent) {
-        if (o instanceof MovieClip && this.avm1.buttonMode(o)) {
+        if (o instanceof MovieClip && this.avm1.input.buttonMode(o)) {
           cursor = this.hand(o) ? "pointer" : "default";
           break;
         }
@@ -491,7 +491,7 @@ export class Avm1Pointer implements Pointer {
   }
 
   private hand(d: DisplayObject): boolean {
-    return this.avm1.flag(d, "useHandCursor") && this.avm1.flag(d, "enabled");
+    return this.avm1.input.flag(d, "useHandCursor") && this.avm1.input.flag(d, "enabled");
   }
 }
 
