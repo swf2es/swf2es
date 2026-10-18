@@ -28,6 +28,7 @@ import {
 } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
+import { decodeInBrowser, type ImageDecode } from "../bitmap/images.js";
 import { boundsIn } from "../display/bounds.js";
 import {
   BitmapObject,
@@ -42,11 +43,12 @@ import {
   TextObject,
   VideoObject,
 } from "../display/display.js";
-import type { DisplayCharacter, Library, SoundCharacter } from "../display/timeline.js";
+import type { DisplayCharacter, Library, SoundCharacter, Timeline } from "../display/timeline.js";
 import {
   browserNavigate,
   type Drawer,
   defaultStorage,
+  type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
   type Navigate,
@@ -62,11 +64,13 @@ import {
   updateMixes,
 } from "../media/sounds.js";
 import { evaluate } from "../scripting/evaluate.js";
+import { resolve } from "../scripting/loads.js";
 import { type BindingHost, VariableBindings } from "./bindings.js";
 import { type TabHost, tabOrder } from "./focus.js";
 import { type BitmapHost, bitmapDataClass } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
+import { type ExternalHost, externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { flashPackage } from "./globals/geom.js";
 import { type InputState, keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
@@ -77,15 +81,18 @@ import {
   movieClipClass,
   targetOf,
 } from "./globals/MovieClip.js";
+import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { type Avm1SoundTransform, FULL, mixOfTransform, soundClass } from "./globals/Sound.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { stateOf, textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
+import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
 import { xmlNodeClass } from "./globals/XMLNode.js";
 import { xmlSocketClass } from "./globals/XMLSocket.js";
+import { type Arrival, arrive, queryVariables } from "./loads.js";
 import { Avm1Net, textFor } from "./net.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 
@@ -117,8 +124,11 @@ export interface Avm1Options {
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
    * as Ruffle's test harness ends a test, and the rest are dropped.
+   * `callers` is the calling SWF's URL, or every URL of a SWF that has had
+   * code where the caller cannot be told, as Scripting's: a host that
+   * checks them lets the command through only if all pass.
    */
-  fsCommand?: (command: string, args: string) => void;
+  fsCommand?: (command: string, args: string, callers: string[]) => void;
   /**
    * Opens getURL's pages: the browser's navigation by default (hosts.ts's
    * browserNavigate), null for none.
@@ -140,6 +150,17 @@ export interface Avm1Options {
    * sendToURL.
    */
   sendToUrl?: boolean;
+  /**
+   * What decodes the images loadMovie brings, and those in the SWFs it
+   * loads: the browser's by default.
+   */
+  decodeImage?: ImageDecode | null;
+  /**
+   * The page's ExternalInterface, as AS3's Scripting takes it; without
+   * one, ExternalInterface is unavailable. AVM1's callbacks answer the
+   * page's XML invocations whatever arguments come with them.
+   */
+  externalInterface?: ExternalInterfaceHost;
 }
 
 /**
@@ -313,12 +334,16 @@ const METHOD = 3;
 const HALT = 4;
 /** A broadcaster's message, `name`, to its listeners: Key's and Mouse's, as the player sends them. */
 const NOTIFY = 5;
+/** A method, `name`, of `object`, called with `args`, as a script would call it. */
+const CALL = 6;
 
 /** An action waiting its turn in the frame. */
 class Queued {
   constructor(
     readonly kind: number,
     readonly clip: DisplayObject,
+    /** The SWF whose blocks `index` and `blocks` are. */
+    readonly swf: Avm1Swf | null = null,
     readonly index = 0,
     /** Which of the clip's frame entries queued a FRAME: blocks of one share their constant pool. */
     readonly entry = 0,
@@ -326,7 +351,7 @@ class Queued {
     readonly unload = false,
     readonly name = "",
     readonly blocks: number[] = NO_BLOCKS,
-    /** A NOTIFY's broadcaster and the message's arguments. */
+    /** A NOTIFY's broadcaster or a CALL's object, and the arguments. */
     readonly object: avm1.Avm1Object | null = null,
     readonly args: avm1.Value[] = NO_ARGS,
   ) {}
@@ -335,6 +360,40 @@ class Queued {
 const NO_BLOCKS: number[] = [];
 
 const NO_BUTTON_HANDLERS: readonly ButtonHandler[] = [];
+
+/**
+ * One AVM1 SWF the player runs, the main one or one loadMovie loaded: its
+ * blocks, its library and what its root's frames export and initialize,
+ * which its own code and timelines use, not another's (Ruffle's per-movie
+ * library). Every SWF shares the player's realm, `_global` among it.
+ */
+export class Avm1Swf {
+  /** Its module's blocks, by index. */
+  blocks: avm1.Blocks = [];
+  /** By its root's frame, 1 the first. */
+  readonly frames = new Map<number, RootFrame>();
+  /** The sprites whose DoInitAction has run. */
+  readonly initialized = new Set<number>();
+  /** Exported characters by name in lower case, as attachMovie finds them, and each one's name. */
+  readonly exports = new Map<string, number>();
+  readonly exportNames = new Map<number, string>();
+  /** Each button character's condition blocks, by its id, gathered from the action list once. */
+  buttonHandlers: Map<number, ButtonHandler[]> | null = null;
+  /** The clip that plays it as its root: level 0's, a level's or the clip it was loaded into. */
+  root: MovieClip | null = null;
+
+  constructor(
+    readonly library: Library | null,
+    readonly list: ActionList | null,
+    readonly version: number,
+    /** Its URL, which `_url` gives. */
+    readonly url: string,
+    /** Its length in bytes, which getBytesTotal and getBytesLoaded give for its root. */
+    readonly length: number,
+    /** Its size as it came, compressed, which MovieClipLoader.getProgress gives. */
+    readonly size = length,
+  ) {}
+}
 
 /** What Mouse's listeners hear of the pointer's clip events. */
 const MOUSE_MESSAGES = new Map<number, string>([
@@ -370,17 +429,44 @@ const timeoutClock =
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
-export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost {
+export class Avm1
+  implements Movie, InputState, FocusState, TabHost, BitmapHost, BindingHost, ExternalHost
+{
   readonly rt = new avm1.Runtime();
   /** Whether the SWF has stopped for good at what Flash cannot read: nothing plays or runs after. */
   halted = false;
-  private blocks: avm1.Blocks = [];
-  private list: ActionList | null = null;
-  private library: Library | null = null;
-  /** By the root's frame, 1 the first. */
-  private readonly frames = new Map<number, RootFrame>();
-  /** The sprites whose DoInitAction has run. */
-  private readonly initialized = new Set<number>();
+  /**
+   * The main SWF, the one the player plays, and each SWF by its library,
+   * loaded ones among them.
+   */
+  private main = new Avm1Swf(null, null, 0, "", 0);
+  private readonly swfs = new WeakMap<Library, Avm1Swf>();
+  /** The levels, the main SWF's root level 0, by number, and each one's number. */
+  private readonly levels = new Map<number, MovieClip>();
+  private readonly levelNumbers = new WeakMap<DisplayObject, number>();
+  /**
+   * Object.registerClass's classes, by symbol name, one for every SWF:
+   * named in its case from SWF 7, folded up to SWF 6, by the code that
+   * registers and by the SWF of the clip it is looked up for (the
+   * corpus's register_class).
+   */
+  private readonly registered = new Map<string, avm1.Avm1Function>();
+  /** What each clip a load filled shows, the SWF's root it plays, by the clip. */
+  private readonly contents = new WeakMap<MovieClip, Avm1Swf>();
+  /** The loads asked, in order, until they are done with. */
+  private movieLoads: MovieLoad[] = [];
+  /**
+   * The last load's arrival, nothing, into each clip and by each
+   * MovieClipLoader, which the next one's waits for: they arrive in the
+   * order asked.
+   */
+  private readonly arrivals = new WeakMap<object, Promise<void>>();
+  private readonly decodeImage: ImageDecode | null;
+  private readonly externalInterface: ExternalInterfaceHost | null;
+  /** Each SWF's blocks, by which a function's or block's code is known as that SWF's. */
+  private readonly codeSwfs = new WeakMap<avm1.Region[], Avm1Swf>();
+  /** The URLs of every SWF that has had code to run, unloaded ones too. */
+  private readonly codeUrls = new Set<string>();
   /** The operand stack, which every activation of a frame's actions shares. */
   private readonly st: avm1.Value[] = [];
   /** Whether the SWF stops as the next frame comes, at a clip's enterFrame. */
@@ -416,11 +502,6 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   private readonly places = new WeakMap<DisplayObject, Place>();
   /** The clips removed with an unload handler, kept until the next frame. */
   private pending: DisplayObject[] = [];
-  /** Exported characters by name in lower case, as attachMovie finds them, and each one's name. */
-  private readonly exports = new Map<string, number>();
-  private readonly exportNames = new Map<number, string>();
-  /** Object.registerClass's classes, by symbol name in the SWF's case. */
-  private readonly registered = new Map<string, avm1.Avm1Function>();
   /** The display object a script is making, which it constructs itself; its children are the timeline's. */
   private scripted: DisplayObject | null = null;
   private readonly realTime: (() => number) | null;
@@ -473,8 +554,6 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   private highlight: "inactive" | "visible" | "hidden" = "inactive";
   /** How deep begin() is: only the outermost begin and end start and stop the scripts' clock. */
   private beginDepth = 0;
-  /** Each button character's condition blocks, by its id, gathered from the action list once. */
-  private buttonHandlers: Map<number, ButtonHandler[]> | null = null;
   readonly url: string;
   readonly storage: SharedObjectStorage;
   /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
@@ -508,6 +587,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       options.sendToUrl ?? true,
     );
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
+    this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
+    this.externalInterface = options.externalInterface ?? null;
     const movie = this;
     this.sounds = {
       get audio() {
@@ -555,11 +636,11 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       halt: () => {
         this.halted = true;
       },
-      root: () => face(this.movieRoot),
-      level: (level) => (level === 0 ? face(this.movieRoot) : undefined),
+      root: (base) => face(this.rootOf(base as DisplayObject)),
+      level: (level) => face(this.levels.get(level)),
       parent: (object) => {
         const d = display(object);
-        return d === undefined || d === this.movieRoot ? undefined : face(d.parent);
+        return d === undefined || this.levelNumbers.has(d) ? undefined : face(d.parent);
       },
       child: (object, name, caseSensitive) => {
         const d = display(object);
@@ -585,7 +666,15 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       returned: () => this.returned(),
       stopSounds: () => stopTimelineSounds(this.sounds),
       loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
-      fsCommand: options.fsCommand ?? ((command) => this.fsCommand(command)),
+      loadMovie: (into, url, form) =>
+        this.loadMovie(typeof into === "number" ? into : (into as DisplayObject), url, form),
+      fsCommand: (command, args) => {
+        if (options.fsCommand === undefined) {
+          this.fsCommand(command);
+        } else {
+          options.fsCommand(command, args, this.callerUrls());
+        }
+      },
       navigate:
         (options.navigate === undefined
           ? getUrlNavigate(browserNavigate(), this.url)
@@ -620,19 +709,29 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * Take the SWF's timelines, before the root enters its first frame: their
    * clips are made and play through this from now on.
    */
-  attach(swf: Swf, library: Library, root: MovieClip): void {
+  attach(swf: Swf, library: Library, root: MovieClip, size = swf.header.fileLength): void {
     this.movieRoot = root;
     this.swfVersion = swf.header.version;
     this.swfLength = swf.header.fileLength;
     this.rate = swf.frameRate;
+    this.levels.set(0, root);
+    this.levelNumbers.set(root, 0);
     if (isAs3(swf) || !library.actions) {
       return;
     }
 
     root.avm1Root = true;
-    this.library = library;
-    this.list = library.actions;
-    this.readRootFrames(swf, this.list);
+    const main = new Avm1Swf(
+      library,
+      library.actions,
+      swf.header.version,
+      this.url,
+      swf.header.fileLength,
+      size,
+    );
+    this.main = main;
+    main.root = root;
+    this.readRootFrames(swf, main);
 
     const clip = movieClipClass(this);
     this.clipProto = clip.proto;
@@ -664,6 +763,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     const flash = flashPackage(this);
+    const external = new avm1.Avm1Object(realm.objectProto);
+    external.define("ExternalInterface", externalInterfaceClass(this), 0);
+    flash.define("external", external, 0);
     const display = avm1.get(flash, "display", this.swfVersion);
     if (display instanceof avm1.Avm1Object) {
       display.define("BitmapData", bitmapDataClass(this), 0);
@@ -673,6 +775,25 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       realm.method((_, args, version) => this.registerClass(args, version)),
       avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY,
     );
+    realm.global.define(
+      "MovieClipLoader",
+      movieClipLoaderClass(this, this.swfVersion),
+      avm1.DONT_ENUM,
+    );
+    // Last, as Flash defines it: _global's names are enumerated from the last defined.
+    realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
+    this.adopt(main);
+    this.made(root);
+  }
+
+  /** A SWF's timelines told to this: their clips are made and play through it from now on. */
+  private adopt(swf: Avm1Swf): void {
+    const library = swf.library;
+    if (library === null) {
+      return;
+    }
+
+    this.swfs.set(library, swf);
     library.avm1 = {
       placing: (display, place) => this.places.set(display, place),
       made: (display) => this.made(display),
@@ -683,7 +804,34 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     };
     library.removing = (display) => this.removing(display);
     library.sounds = timelineSoundsOf(this.sounds);
-    this.made(root);
+  }
+
+  /**
+   * The SWF whose timeline `d` is in: its clip's, or the nearest clip's
+   * above it; the main one's for none.
+   */
+  swfOf(d: DisplayObject | null): Avm1Swf {
+    for (let o = d; o !== null; o = o.parent) {
+      const filled = o instanceof MovieClip ? this.contents.get(o) : undefined;
+      if (filled !== undefined) {
+        return filled;
+      }
+
+      if (o instanceof Container && o.library !== null) {
+        const swf = this.swfs.get(o.library);
+        if (swf !== undefined) {
+          return swf;
+        }
+      }
+    }
+
+    return this.main;
+  }
+
+  /** The SWF of the code running now, by its clip; the main one's outside any. */
+  private currentSwf(): Avm1Swf {
+    const base = this.realm.current?.base as DisplayObject | undefined;
+    return this.swfOf(base ?? null);
   }
 
   /**
@@ -692,11 +840,14 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * runs none of them.
    */
   async load(swf: Swf): Promise<void> {
-    const list = this.list;
+    // Compiled here, not by compile(), which would put a tick more between the
+    // first frame and its actions than the timeline's sounds have.
+    const list = this.main.list;
     if (list !== null && list.blocks.length > 0) {
       const module = this.codegen.compileActionsModule(swf.bytes, list);
       const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
-      this.blocks = (factory as unknown as avm1.Factory)(this.rt);
+      this.main.blocks = (factory as unknown as avm1.Factory)(this.rt);
+      this.ownCode(this.main);
     }
 
     this.loaded = true;
@@ -718,6 +869,17 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     } finally {
       this.end();
     }
+  }
+
+  /** The blocks of `list`, a loaded SWF's, compiled to a module and loaded. */
+  private async compile(swf: Swf, list: ActionList | null): Promise<avm1.Blocks> {
+    if (list === null || list.blocks.length === 0) {
+      return [];
+    }
+
+    const module = this.codegen.compileActionsModule(swf.bytes, list);
+    const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
+    return (factory as unknown as avm1.Factory)(this.rt);
   }
 
   /** A frame's actions have run: until the next frame, its time passes and the timers due fire. */
@@ -757,21 +919,31 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
       finishTimelineSounds(this.sounds);
       const clips = this.clips;
-      const root = this.root;
       for (let i = clips.length - 1; i >= 0; i--) {
         const clip = clips[i];
-        if (clip !== root && !under(clip, root)) {
+        if (this.removed(clip)) {
           continue;
         }
 
-        this.dispatch(clip, ClipEvent.enterFrame);
-        clip.advance();
+        // A clip a load has just filled enters its first frame, its load event its first;
+        // one of no frames, unloaded or in error, stays before it.
+        if (clip.currentFrame === 0) {
+          if (clip.totalFrames > 0) {
+            clip.enterFirstFrame();
+          }
+        } else {
+          this.dispatch(clip, ClipEvent.enterFrame);
+          clip.advance();
+        }
+
         if (this.halted) {
           return;
         }
       }
 
-      this.clips = clips.filter((clip) => clip === root || under(clip, root));
+      this.clips = clips.filter((clip) => !this.removed(clip));
+      // A load's onLoadInit after the frame's actions of what it loaded, as Ruffle queues it.
+      this.loadsInitialized();
       this.runQueue();
       // onSoundComplete runs with the frame's actions, and what it queues runs with them too.
       if (this.soundsCompleted()) {
@@ -799,9 +971,17 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
   }
 
-  /** Whether `d` is off the display list, no longer a clip scripts reach but by its path. */
+  /**
+   * Whether `d` is off the display list, on no level, no longer a clip
+   * scripts reach but by its path.
+   */
   removed(d: DisplayObject): boolean {
-    return d !== this.movieRoot && !under(d, this.root);
+    let top = d;
+    while (top.parent !== null && !this.levelNumbers.has(top)) {
+      top = top.parent;
+    }
+
+    return !this.levelNumbers.has(top) || this.levels.get(this.levelNumbers.get(top) ?? -1) !== top;
   }
 
   faceOf(d: DisplayObject): avm1.Avm1Object | null {
@@ -809,7 +989,32 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   atPath(path: string): DisplayObject | null {
-    return atPath(path, this.root, this.swfVersion > 6);
+    return atPath(path, (n) => this.levels.get(n) ?? null, this.swfVersion > 6);
+  }
+
+  /** The level `d` is, null for a display object that is none. */
+  levelOf(d: DisplayObject): number | null {
+    return this.levelNumbers.get(d) ?? null;
+  }
+
+  /** The levels' clips, by number, the lowest first. */
+  private levelClips(): MovieClip[] {
+    return [...this.levels.entries()].sort(([a], [b]) => a - b).map(([, clip]) => clip);
+  }
+
+  /**
+   * `_root` for code of `d`'s: the first clip from it up whose `_lockroot`
+   * is set, else its level (Ruffle's avm1_root); level 0 for one off the
+   * display list.
+   */
+  rootOf(d: DisplayObject): MovieClip {
+    for (let o: DisplayObject | null = d; o !== null; o = o.parent) {
+      if (o instanceof MovieClip && (this.levelNumbers.has(o) || nativeOf(o)?.lockroot)) {
+        return this.removed(o) ? this.root : o;
+      }
+    }
+
+    return this.root;
   }
 
   /** What timeline actions do to `clip`. */
@@ -858,8 +1063,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       return null;
     }
 
-    const id = this.exports.get(asciiLower(name));
-    const character = id === undefined ? undefined : this.library?.characters.get(id);
+    const swf = this.swfOf(parent);
+    const id = swf.exports.get(asciiLower(name));
+    const character = id === undefined ? undefined : swf.library?.characters.get(id);
     if (!isDisplayCharacter(character)) {
       return null;
     }
@@ -931,7 +1137,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     depth: number,
     init: avm1.Avm1Object | null,
   ): DisplayObject | null {
-    const parent = d === this.movieRoot ? null : d.parent;
+    const parent = this.levelNumbers.has(d) ? null : d.parent;
     if (!(parent instanceof MovieClip) || this.removed(d) || depth < 0 || depth > MAX_DEPTH) {
       return null;
     }
@@ -972,7 +1178,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * removes only those.
    */
   remove(d: DisplayObject): void {
-    const parent = d === this.movieRoot ? null : d.parent;
+    const parent = this.levelNumbers.has(d) ? null : d.parent;
     const depth = d.depth;
     if (
       !(parent instanceof Container) ||
@@ -1055,15 +1261,20 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   /** Each root frame's exports, DoInitAction blocks, the tags Flash cannot read and its ScriptLimits. */
-  private readRootFrames(swf: Swf, list: ActionList): void {
+  private readRootFrames(swf: Swf, into: Avm1Swf): void {
+    const list = into.list;
+    if (list === null) {
+      return;
+    }
+
     // The root has a frame a ShowFrame tag ends; what follows the last is the last's.
     const last = Math.max(1, swf.tags.filter((t) => t.code === tags.ShowFrame).length);
     const frameOf = (frame: number) => {
       const at = Math.min(frame, last);
-      let actions = this.frames.get(at);
+      let actions = into.frames.get(at);
       if (!actions) {
         actions = { exports: [], inits: [], stop: null, limits: null };
-        this.frames.set(at, actions);
+        into.frames.set(at, actions);
       }
 
       return actions;
@@ -1122,7 +1333,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
     // Flash names each clip, button, text field and video without a name of its own as it
     // is made (the corpus's default_names).
-    if (d.name === "" && d !== this.movieRoot) {
+    if (d.name === "" && !this.levelNumbers.has(d)) {
       d.name = `instance${++this.instances}`;
     }
 
@@ -1151,15 +1362,19 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
 
     this.clips.push(d);
+    // The SWF that places or makes it, whose clip actions it runs: its place is in its
+    // parent's timeline, of the SWF the clip's character is.
+    native.swf = this.swfOf(d);
     const place = this.places.get(d);
     const source = this.handed.get(d);
     if (place !== undefined) {
       this.places.delete(d);
       native.corrupt = place.corrupt;
-      native.handlers = this.handlersOf(place);
+      native.handlers = this.handlersOf(place, native.swf);
       this.corruptPlace(d, place.corrupt);
     } else if (source !== undefined) {
       this.handed.delete(d);
+      native.swf = source.swf;
       native.corrupt = source.corrupt;
       native.handlers = source.handlers;
     }
@@ -1167,7 +1382,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     // Its initialize events wait for the queue's first pass, before its children's.
     for (const h of native.handlers ?? NO_HANDLERS) {
       if (h.events & ClipEvent.initialize) {
-        this.enqueue(INITIALIZE, new Queued(BLOCK, d, h.block));
+        this.enqueue(INITIALIZE, new Queued(BLOCK, d, native.swf, h.block));
       }
     }
 
@@ -1181,7 +1396,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     // DoInitAction blocks run after its places are made, before the queue.
     const constructs = constructBlocks(native);
     if (constructs.length > 0 || this.exported(d)) {
-      this.enqueue(CONSTRUCT, new Queued(CONSTRUCTION, d, 0, 0, false, "", constructs));
+      this.enqueue(CONSTRUCT, new Queued(CONSTRUCTION, d, native.swf, 0, 0, false, "", constructs));
     }
   }
 
@@ -1212,12 +1427,12 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   /** Whether `d`'s character has an export name, which a class may be registered by. */
   private exported(d: DisplayObject): boolean {
     const id = d.character?.id;
-    return id !== undefined && this.exportNames.has(id);
+    return id !== undefined && this.swfOf(d).exportNames.has(id);
   }
 
-  /** A place's clip actions, with the events each runs for, as the action list has them. */
-  private handlersOf(place: Place): Handler[] | null {
-    const list = this.list;
+  /** A place's clip actions, with the events each runs for, as `swf`'s action list has them. */
+  private handlersOf(place: Place, swf: Avm1Swf): Handler[] | null {
+    const list = swf.list;
     if (place.actions === null || place.actions.length === 0 || list === null) {
       return null;
     }
@@ -1257,16 +1472,16 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
   }
 
-  /** The class Object.registerClass bound to `d`'s character's export name, null for none. */
+  /**
+   * The class Object.registerClass bound to `d`'s character's export name
+   * in its SWF, null for none.
+   */
   private classOf(d: DisplayObject): avm1.Avm1Function | null {
     // A sprite's only: a button's symbol stays a Button (the corpus's register_class).
     const id = d instanceof MovieClip ? d.character?.id : undefined;
-    const name = id === undefined ? undefined : this.exportNames.get(id);
-    return name === undefined ? null : (this.registered.get(this.classKey(name)) ?? null);
-  }
-
-  private classKey(name: string): string {
-    return this.swfVersion > 6 ? name : avm1.fold(name);
+    const swf = this.swfOf(d);
+    const name = id === undefined ? undefined : swf.exportNames.get(id);
+    return name === undefined ? null : (this.registered.get(classKey(name, swf.version)) ?? null);
   }
 
   /** The name Object.registerClass gave `constr`, as SharedObject's AMF0 types an object; null for none. */
@@ -1294,8 +1509,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
   /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
   exportedSound(name: string): SoundCharacter | null {
-    const id = this.exports.get(asciiLower(name));
-    const character = id === undefined ? undefined : this.library?.characters.get(id);
+    const swf = this.currentSwf();
+    const id = swf.exports.get(asciiLower(name));
+    const character = id === undefined ? undefined : swf.library?.characters.get(id);
     return character?.type === "sound" ? character : null;
   }
 
@@ -1324,6 +1540,76 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
     }
+  }
+
+  /** The page's ExternalInterface, where it lets the SWF of the code running now use it. */
+  /**
+   * The page's ExternalInterface, where it lets the code calling use it:
+   * the SWF whose block or function is running, known by its code; where
+   * a native is called with no code of a SWF's running, as a timer, a
+   * network callback or the page's call calls one straight, every SWF that
+   * has run code so far must be allowed, as AS3's natives ask when they
+   * cannot tell their caller (hosts.ts's allows). The clip a function was
+   * made in is not enough: a load can put another SWF in it.
+   */
+  externalBridge(): ExternalInterfaceHost | null {
+    const host = this.externalInterface;
+    const allows = host?.allows;
+    if (host === null || allows === undefined) {
+      return host;
+    }
+
+    return this.callerUrls().every((url) => allows.call(host, url)) ? host : null;
+  }
+
+  /**
+   * The URL of the SWF whose code is running, known by its blocks; where
+   * no SWF's code is running, as a timer, a network callback or the page
+   * calls a native straight, every URL of a SWF that has had code.
+   */
+  private callerUrls(): string[] {
+    const caller = this.codeSwfs.get(this.realm.current?.code ?? []);
+    return caller !== undefined ? [caller.url] : [...this.codeUrls];
+  }
+
+  /** `swf`'s code compiled: its blocks known as its own, and its URL among those that ran code. */
+  private ownCode(swf: Avm1Swf): void {
+    for (const block of swf.blocks) {
+      this.codeSwfs.set(block, swf);
+    }
+
+    if (swf.blocks.length > 0) {
+      this.codeUrls.add(swf.url);
+    }
+  }
+
+  /**
+   * `body`, the page's call into a callback, run between frames or inside
+   * a call out, in the root's activation as a timer's callback runs, and
+   * what it queued run after it: what it returned, undefined where it did
+   * not run or threw.
+   */
+  callIn(body: () => Value): Value {
+    const cx =
+      this.movieRoot === null || this.halted || !this.loaded
+        ? null
+        : this.activationOf(this.movieRoot);
+    if (cx === null) {
+      return undefined;
+    }
+
+    let result: Value;
+    this.begin();
+    try {
+      this.rt.call(cx, () => {
+        result = body();
+      });
+      this.runQueue();
+    } finally {
+      this.end();
+    }
+
+    return result;
   }
 
   /** LoadVars.send's page, as getURL's opens it. */
@@ -1405,10 +1691,370 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       }
 
       if (into instanceof MovieClip) {
-        this.enqueue(NORMAL, new Queued(METHOD, into, 0, 0, false, "onData"));
+        this.enqueue(NORMAL, new Queued(METHOD, into, null, 0, 0, false, "onData"));
         this.dispatch(into, ClipEvent.data, false);
       }
     });
+  }
+
+  /**
+   * loadMovie and loadMovieNum: the SWF or image at `url` into a clip, or
+   * into a level, which the load makes where there is none; an empty URL
+   * unloads what is there.
+   */
+  loadMovie(into: DisplayObject | number, url: string, form: avm1.UrlForm | null): void {
+    if (typeof into === "number") {
+      const level = this.levels.get(into);
+      if (url !== "") {
+        this.startLoad(level ?? this.makeLevel(into), url, form, null);
+      } else if (level !== undefined) {
+        this.unloadMovie(level);
+      }
+    } else if (into instanceof MovieClip) {
+      if (url !== "") {
+        this.startLoad(into, url, form, null);
+      } else {
+        this.unloadMovie(into);
+      }
+    }
+  }
+
+  /**
+   * MovieClipLoader.loadClip: the SWF or image at `url` into `target`,
+   * `loader`'s listeners told of it; false for a target that is no clip.
+   */
+  loadClip(loader: avm1.Avm1Object, target: DisplayObject, url: string): boolean {
+    if (!(target instanceof MovieClip)) {
+      return false;
+    }
+
+    this.startLoad(target, url, null, loader);
+    return true;
+  }
+
+  /** Level `n`'s clip, null where there is none. */
+  level(n: number): MovieClip | null {
+    return this.levels.get(n) ?? null;
+  }
+
+  /** Level `n`'s clip, an empty one made where there is none. */
+  levelToLoad(n: number): MovieClip {
+    return this.levels.get(n) ?? this.makeLevel(n);
+  }
+
+  /** The size of the SWF `d` is of, as it came. */
+  sizeOf(d: DisplayObject): number {
+    return this.swfOf(d).size;
+  }
+
+  /**
+   * A level of an empty clip, the main SWF's, on the stage at depth `n`,
+   * above those below it, as a load into a level makes one before what it
+   * loads arrives (Ruffle's get_or_create_level).
+   */
+  private makeLevel(n: number): MovieClip {
+    const clip = new MovieClip(EMPTY_TIMELINE, this.root.library);
+    this.levels.set(n, clip);
+    this.levelNumbers.set(clip, n);
+    this.root.parent?.placeAtDepth(clip, n);
+    this.made(clip);
+    return clip;
+  }
+
+  /**
+   * A load into `target` asked: the request goes now, and what it brings,
+   * read and its code compiled, arrives between frames, each load in the
+   * order asked, as Ruffle's test runner has them arrive; one whose answer
+   * is slow to come holds those after it a while at most.
+   */
+  private startLoad(
+    target: MovieClip,
+    url: string,
+    form: avm1.UrlForm | null,
+    loader: avm1.Avm1Object | null,
+  ): void {
+    // A load into a clip that another is under way into replaces it, which tells nothing.
+    for (const earlier of this.movieLoads) {
+      if (earlier.target === target && earlier.status === "pending") {
+        earlier.status = "done";
+      }
+    }
+
+    const request =
+      form === null
+        ? { url, method: "GET" as const, headers: [], body: null }
+        : formRequest(url, form.method, form.vars);
+    const load: MovieLoad = { target, loader, url: resolve(this.url, url), status: "pending" };
+    this.movieLoads.push(load);
+    const arrival = this.net
+      .request(request, "content")
+      .then(async (result): Promise<Arrived> => {
+        // One replaced or cancelled meanwhile is not read, nor its code compiled.
+        if (load.status !== "pending") {
+          return SKIPPED;
+        }
+
+        // What came is the final URL's: a redirect to another origin must not pass as the one asked for.
+        if (result.url) {
+          load.url = result.url;
+        }
+
+        const a = await arrive(result, this.decodeImage);
+        if (a.type !== "swf") {
+          return a;
+        }
+
+        if (load.status !== "pending") {
+          return SKIPPED;
+        }
+
+        return { ...a, blocks: await this.compile(a.swf, a.library.actions ?? null) };
+      })
+      .catch((): Arrived => ({ type: "unknown", status: 0 }));
+    // After the loads asked before it into the same clip or by the same loader, which
+    // are kept by what they settle to, nothing, not by what they brought.
+    const keys: object[] = loader === null ? [target] : [target, loader];
+    const previous = Promise.all(keys.map((key) => this.arrivals.get(key)));
+    const ordered = within(previous, ORDER_WAIT).then(() => arrival);
+    const settled = ordered.then(() => {});
+    for (const key of keys) {
+      this.arrivals.set(key, settled);
+    }
+
+    this.net.after(ordered, (arrived) => this.arrived(load, arrived));
+  }
+
+  /**
+   * A load's bytes arrived, between frames: as Ruffle's movie_loader has
+   * it, what the clip showed unloads, its variables go, and onLoadStart;
+   * then the SWF or image takes its place, or an empty one where the bytes
+   * are neither, with onLoadProgress and onLoadComplete, or onLoadError
+   * where nothing came. A clip removed meanwhile takes nothing, and
+   * nothing is told; one a listener removes or unloads is told no more.
+   */
+  private arrived(load: MovieLoad, arrived: Arrived): void {
+    const target = load.target;
+    const face = target.avm1 ?? undefined;
+    const over = () => load.status !== "pending" || this.removed(target);
+    // Told, and whether the load goes on.
+    const told = (name: string, args: Value[]) => {
+      this.tell(load, name, args);
+      return !over();
+    };
+    if (over()) {
+      // One an unload cancelled still starts, and no more (the corpus's load_cancel_*).
+      if (load.status === "cancelled" && !this.removed(target)) {
+        this.tell(load, "onLoadStart", [face]);
+      }
+
+      load.status = "done";
+      return;
+    }
+
+    const version = this.swfOf(target).version;
+    this.unload(target);
+    if (face !== undefined) {
+      for (const p of [...face.ownProperties()]) {
+        if ((p.flags & avm1.DONT_DELETE) === 0) {
+          face.remove(p);
+        }
+      }
+    }
+
+    this.fill(target, new Avm1Swf(null, null, version, load.url, 0));
+    if (!told("onLoadStart", [face])) {
+      load.status = "done";
+      return;
+    }
+
+    // Flash's error state: no frames, none loaded, no version, and -1 bytes (the corpus's
+    // movieclip_state_values).
+    const error = () => this.fill(target, new Avm1Swf(null, null, 0, load.url, -1), NO_FRAMES);
+    let going = true;
+    switch (arrived.type) {
+      case "failed":
+        error();
+        load.status = "done";
+        this.tell(load, "onLoadError", [face, "URLNotFound", arrived.status]);
+        return;
+      case "unknown":
+        error();
+        going = told("onLoadProgress", [face, 0, 0]);
+        break;
+      case "image": {
+        // An image is a movie of no version, its one frame the image at depth 1.
+        const swf = new Avm1Swf(null, null, 0, load.url, arrived.size);
+        this.fill(target, swf);
+        if (arrived.pixels !== null) {
+          target.placeAtDepth(new BitmapObject(BitmapStore.of(arrived.pixels)), 1);
+        }
+
+        going = told("onLoadProgress", [face, arrived.size, arrived.size]);
+        break;
+      }
+      case "swf": {
+        const { swf: file, library, size } = arrived;
+        const swf = new Avm1Swf(
+          library,
+          library.actions ?? null,
+          file.header.version,
+          load.url,
+          file.header.fileLength,
+          size,
+        );
+        swf.blocks = arrived.blocks;
+        this.ownCode(swf);
+        this.adopt(swf);
+        this.readRootFrames(file, swf);
+        this.fill(target, swf);
+        // The URL's query as the root's variables, as a movie's parameters.
+        if (face !== undefined) {
+          for (const [name, value] of queryVariables(load.url)) {
+            face.define(name, textFor(value, swf.version), 0);
+          }
+        }
+
+        // Ruffle tells a load into level 0 twice.
+        going =
+          (target !== this.root || told("onLoadProgress", [face, size, size])) &&
+          told("onLoadProgress", [face, size, size]);
+        break;
+      }
+    }
+
+    if (!going) {
+      load.status = "done";
+      return;
+    }
+
+    load.status = "loaded";
+    this.tell(load, "onLoadComplete", [face, arrived.status]);
+    // No onLoadInit for one a listener removed or unloaded.
+    if (this.removed(target)) {
+      load.status = "done";
+    }
+  }
+
+  /**
+   * `load`'s loader's listeners told `name`, through its broadcastMessage,
+   * as a script would call it.
+   */
+  private tell(load: MovieLoad, name: string, args: Value[]): void {
+    if (load.loader !== null && !this.halted) {
+      this.callback(load.loader, "broadcastMessage", [name, ...args]);
+    }
+  }
+
+  /**
+   * Each load that has arrived done with: one that loaded has its
+   * loader's onLoadInit queued, after the frame's actions of what it
+   * loaded, the latest load's first (Ruffle's movie_clip_on_load).
+   */
+  private loadsInitialized(): void {
+    for (let i = this.movieLoads.length - 1; i >= 0; i--) {
+      const load = this.movieLoads[i];
+      if (load.status === "pending") {
+        continue;
+      }
+
+      this.movieLoads.splice(i, 1);
+      if (load.status === "loaded" && load.loader !== null) {
+        this.enqueue(
+          NORMAL,
+          new Queued(
+            CALL,
+            this.root,
+            null,
+            0,
+            0,
+            false,
+            "broadcastMessage",
+            NO_BLOCKS,
+            load.loader,
+            ["onLoadInit", load.target.avm1 ?? undefined],
+          ),
+        );
+      }
+    }
+  }
+
+  /**
+   * unloadMovie: what `d` shows unloaded, its unload events, and it left
+   * empty, as an empty movie of its parent's SWF; a level's or a loaded
+   * movie's root's between frames, a frame later, as Ruffle's
+   * avm1_unload_movie has them. A load into it under way is cancelled: it
+   * tells of its start as it arrives, and no more.
+   */
+  unloadMovie(d: DisplayObject): void {
+    if (!(d instanceof MovieClip)) {
+      return;
+    }
+
+    // One under way tells of its start as it arrives; one arrived has no onLoadInit.
+    for (const load of this.movieLoads) {
+      if (load.target === d && load.status === "pending") {
+        load.status = "cancelled";
+      } else if (load.target === d && load.status === "loaded") {
+        load.status = "done";
+      }
+    }
+
+    if (this.levelNumbers.has(d) || this.contents.has(d)) {
+      this.net.after(Promise.resolve(), () => this.unloaded(d));
+    } else {
+      this.unloaded(d);
+    }
+  }
+
+  /** `d` unloaded and left empty. */
+  private unloaded(d: MovieClip): void {
+    if (this.removed(d)) {
+      return;
+    }
+
+    const parent = this.levelNumbers.has(d) ? null : d.parent;
+    const swf = parent === null ? this.swfOf(d) : this.swfOf(parent);
+    this.unload(d);
+    this.fill(
+      d,
+      new Avm1Swf(null, null, swf.version, parent === null ? "" : swf.url, 0),
+      NO_FRAMES,
+    );
+  }
+
+  /**
+   * `target` made to show `swf`, as Flash keeps a clip a load fills: what
+   * it showed taken off, references to it kept by their paths, and its
+   * timeline the SWF's root's, before its first frame, which it enters as
+   * the next frame plays; one without a library shows nothing.
+   */
+  private fill(target: MovieClip, swf: Avm1Swf, frames = EMPTY_TIMELINE): void {
+    for (const child of target.children) {
+      this.markPaths(child);
+      target.library.sounds?.removed(child);
+    }
+
+    this.realm.removals++;
+    target.replaceTimeline(swf.library?.root ?? frames, swf.library ?? target.library);
+    // Level 0's SWF is the main one, whose version and size the movie gives; the frame rate
+    // stays the first's.
+    if (target === this.root) {
+      this.main = swf;
+      if (swf.library !== null) {
+        this.swfVersion = swf.version;
+        this.swfLength = swf.length;
+      }
+    }
+
+    this.contents.set(target, swf);
+    swf.root = target;
+    this.entries.set(target, ++this.entryCount);
+    const native = nativeOf(target);
+    if (native !== null) {
+      native.loaded = false;
+      native.unloaded = false;
+      native.pending = false;
+    }
   }
 
   /** A Sound's sound has ended: its onSoundComplete runs once the frame's actions have. */
@@ -1460,7 +2106,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       return false;
     }
 
-    const key = this.classKey(avm1.stringOf(args[0], version));
+    const key = classKey(avm1.stringOf(args[0], version), version);
     if (constr instanceof avm1.Avm1Function) {
       this.registered.set(key, constr);
     } else {
@@ -1511,7 +2157,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       return child;
     }
 
-    const version = this.swfVersion;
+    const version = this.swfOf(child).version;
     const constr = this.classOf(child);
     if (constr !== null) {
       face.define(
@@ -1533,7 +2179,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       }
 
       for (const block of constructBlocks(native)) {
-        this.runOne(new Queued(BLOCK, child, block), []);
+        this.runOne(new Queued(BLOCK, child, native.swf, block), []);
       }
 
       if (version > 6) {
@@ -1583,7 +2229,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       return;
     }
 
-    const version = this.swfVersion;
+    const version = this.swfOf(clip).version;
     face.define("__constructor__", constr, avm1.DONT_ENUM);
     if (version < 7) {
       face.define("constructor", constr, avm1.DONT_ENUM);
@@ -1616,8 +2262,9 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
   /** The library's bitmap exported as `name`, as a new transparent store, as loadBitmap makes one. */
   libraryBitmap(name: string): BitmapStore | null {
-    const id = this.exports.get(asciiLower(name));
-    const character = id === undefined ? undefined : this.library?.characters.get(id);
+    const swf = this.currentSwf();
+    const id = swf.exports.get(asciiLower(name));
+    const character = id === undefined ? undefined : swf.library?.characters.get(id);
     if (character?.type !== "bitmap" || character.pixels === null) {
       return null;
     }
@@ -1741,7 +2388,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   pathOf(d: DisplayObject): string {
-    return pathOf(d, this.root);
+    return pathOf(d, (o) => this.levelOf(o));
   }
 
   resolve(value: avm1.Value, version: number): DisplayObject | null {
@@ -1859,7 +2506,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     const mark = (o: DisplayObject) => {
       const native = o.avm1?.display;
       if (native instanceof ClipNative && native.removedAt === null) {
-        native.removedAt = pathOf(o, this.root);
+        native.removedAt = pathOf(o, (p) => this.levelOf(p));
       }
 
       if (o instanceof MovieClip || o instanceof ButtonObject) {
@@ -1896,7 +2543,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    * theirs come now.
    */
   private keeps(d: DisplayObject): boolean {
-    if (this.swfVersion < 5 || nativeOf(d)?.pending || !this.delays(d)) {
+    if (this.swfOf(d).version < 5 || nativeOf(d)?.pending || !this.delays(d)) {
       return false;
     }
 
@@ -1927,7 +2574,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       }
 
       const face = d.avm1;
-      if (face !== null && avm1.find(face, "onUnload", this.swfVersion) !== undefined) {
+      if (face !== null && avm1.find(face, "onUnload", this.swfOf(d).version) !== undefined) {
         return true;
       }
     }
@@ -1947,7 +2594,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
         this.markPaths(d);
         this.realm.removals++;
         parent.removeChild(d);
-        this.library?.sounds?.removed(d);
+        parent.library?.sounds?.removed(d);
       }
     }
   }
@@ -1964,11 +2611,12 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       }
     }
 
-    if (clip !== this.movieRoot) {
+    const swf = this.swfOf(clip);
+    if (clip !== swf.root) {
       return;
     }
 
-    const actions = this.frames.get(frame);
+    const actions = swf.frames.get(frame);
     if (actions === undefined) {
       return;
     }
@@ -1983,14 +2631,14 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
 
     for (const { id, name } of actions.exports) {
-      this.exports.set(asciiLower(name), id);
-      this.exportNames.set(id, name);
+      swf.exports.set(asciiLower(name), id);
+      swf.exportNames.set(id, name);
     }
 
     for (const { sprite, block } of actions.inits) {
-      if (!this.initialized.has(sprite)) {
-        this.initialized.add(sprite);
-        this.enqueue(INIT, new Queued(BLOCK, clip, block));
+      if (!swf.initialized.has(sprite)) {
+        swf.initialized.add(sprite);
+        this.enqueue(INIT, new Queued(BLOCK, clip, swf, block));
       }
     }
 
@@ -2009,7 +2657,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
    */
   private dispatch(clip: MovieClip, event: number, methods = true): void {
     const native = nativeOf(clip);
-    if (this.swfVersion < 5 || native === null) {
+    // Its clip actions are the SWF's that placed it, whatever a load put in it since.
+    if (native === null || (native.swf ?? this.swfOf(clip)).version < 5) {
       return;
     }
 
@@ -2023,7 +2672,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       if (h.events & event) {
         this.enqueue(
           event === ClipEvent.initialize ? INITIALIZE : NORMAL,
-          new Queued(BLOCK, clip, h.block, 0, unload),
+          new Queued(BLOCK, clip, native.swf, h.block, 0, unload),
         );
       }
     }
@@ -2033,11 +2682,22 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     }
   }
 
+  /**
+   * The version that decides whether a clip's AS2 event methods run: the
+   * SWF it shows (Ruffle's movie version), but where a load left an image,
+   * the error state or nothing, which have none, the SWF that made it.
+   */
+  private methodVersion(clip: DisplayObject): number {
+    const shown = this.swfOf(clip);
+    const made = nativeOf(clip)?.swf ?? null;
+    return shown.library === null && made !== null ? made.version : shown.version;
+  }
+
   /** From SWF 6, the AS2 method of `event` on `clip`'s object, queued. */
   private method(clip: DisplayObject, event: number, unload: boolean): void {
     const name = METHODS.get(event);
-    if (this.swfVersion >= 6 && name !== undefined) {
-      this.enqueue(NORMAL, new Queued(METHOD, clip, 0, 0, unload, name));
+    if (name !== undefined && this.methodVersion(clip) >= 6) {
+      this.enqueue(NORMAL, new Queued(METHOD, clip, null, 0, 0, unload, name));
     }
   }
 
@@ -2161,8 +2821,8 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
           this.method(d, event, false);
         }
       };
-      if (this.movieRoot !== null) {
-        visit(this.movieRoot);
+      for (const level of this.levelClips()) {
+        visit(level);
       }
 
       this.notify(this.keyFace, down ? "onKeyDown" : "onKeyUp");
@@ -2230,9 +2890,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
         const id = button.character?.id;
         let found = false;
         if (!inButton && button.parent !== null && id !== undefined) {
-          for (const h of this.handlersOfButton(id)) {
+          const swf = this.swfOf(button);
+          for (const h of this.handlersOfButton(swf, id)) {
             if (h.key === press) {
-              this.enqueue(NORMAL, new Queued(BLOCK, button.parent, h.block));
+              this.enqueue(NORMAL, new Queued(BLOCK, button.parent, swf, h.block));
               found = true;
             }
           }
@@ -2241,11 +2902,12 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
         return found;
       }
 
-      if (d instanceof MovieClip && this.swfVersion >= 5) {
+      const native = d instanceof MovieClip ? nativeOf(d) : null;
+      if (native !== null && this.swfOf(d).version >= 5) {
         let found = false;
-        for (const h of nativeOf(d)?.handlers ?? NO_HANDLERS) {
+        for (const h of native.handlers ?? NO_HANDLERS) {
           if (h.events & ClipEvent.keyPress && h.key === press) {
-            this.enqueue(NORMAL, new Queued(BLOCK, d, h.block));
+            this.enqueue(NORMAL, new Queued(BLOCK, d, native.swf, h.block));
             found = true;
           }
         }
@@ -2256,7 +2918,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
       return false;
     };
 
-    return this.movieRoot !== null && visit(this.movieRoot, false);
+    return this.levelClips().some((level) => visit(level, false));
   }
 
   /** `object`'s listeners told `name` with `args`, queued after what is queued now. */
@@ -2264,7 +2926,7 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     if (object !== null && this.root !== null) {
       this.enqueue(
         NORMAL,
-        new Queued(NOTIFY, this.root, 0, 0, false, name, NO_BLOCKS, object, args),
+        new Queued(NOTIFY, this.root, null, 0, 0, false, name, NO_BLOCKS, object, args),
       );
     }
   }
@@ -2416,9 +3078,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     const parent = button.parent;
     const id = button.character?.id;
     if (parent !== null && id !== undefined) {
-      for (const h of this.handlersOfButton(id)) {
+      const swf = this.swfOf(button);
+      for (const h of this.handlersOfButton(swf, id)) {
         if (h.conditions & condition) {
-          this.enqueue(NORMAL, new Queued(BLOCK, parent, h.block));
+          this.enqueue(NORMAL, new Queued(BLOCK, parent, swf, h.block));
         }
       }
     }
@@ -2433,19 +3096,21 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
   }
 
   /** `id`'s condition blocks: a DefineButton's one, or a DefineButton2's, one a BUTTONCONDACTION. */
-  private handlersOfButton(id: number): readonly ButtonHandler[] {
-    if (this.buttonHandlers === null) {
-      this.buttonHandlers = new Map();
-      for (const [block, { owner }] of (this.list?.blocks ?? []).entries()) {
+  private handlersOfButton(swf: Avm1Swf, id: number): readonly ButtonHandler[] {
+    if (swf.buttonHandlers === null) {
+      const handlers = new Map<number, ButtonHandler[]>();
+      for (const [block, { owner }] of (swf.list?.blocks ?? []).entries()) {
         if (owner.type === "button") {
-          const list = this.buttonHandlers.get(owner.button) ?? [];
+          const list = handlers.get(owner.button) ?? [];
           list.push({ conditions: owner.conditions, key: owner.key, block });
-          this.buttonHandlers.set(owner.button, list);
+          handlers.set(owner.button, list);
         }
       }
+
+      swf.buttonHandlers = handlers;
     }
 
-    return this.buttonHandlers.get(id) ?? NO_BUTTON_HANDLERS;
+    return swf.buttonHandlers.get(id) ?? NO_BUTTON_HANDLERS;
   }
 
   /**
@@ -2485,7 +3150,10 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
   /** A DoAction tag a clip's frame reached: its blocks wait for the queue. */
   private queueTag(clip: MovieClip, tag: number): void {
-    this.enqueue(NORMAL, new Queued(FRAME, clip, tag, this.entries.get(clip) ?? 0));
+    this.enqueue(
+      NORMAL,
+      new Queued(FRAME, clip, this.swfOf(clip), tag, this.entries.get(clip) ?? 0),
+    );
   }
 
   /** The next action of priorities `from` to `to`, the most urgent first; null for none. */
@@ -2619,13 +3287,18 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
     switch (q.kind) {
       case FRAME:
-        for (const index of this.list?.byTag.get(q.index) ?? NO_BLOCKS) {
-          pool = this.run(index, pool, clip);
+        // A clip a load has filled since runs none of what it queued before.
+        if (q.swf !== this.swfOf(clip)) {
+          return pool;
+        }
+
+        for (const index of q.swf.list?.byTag.get(q.index) ?? NO_BLOCKS) {
+          pool = this.run(q.swf, index, pool, clip);
         }
 
         return pool;
       case BLOCK:
-        this.run(q.index, [], clip);
+        this.run(q.swf, q.index, [], clip);
         break;
       case CONSTRUCTION:
         this.construction(q);
@@ -2634,13 +3307,20 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
         const face = clip.avm1;
         const cx = this.activationOf(clip);
         if (face !== null && cx !== null && !this.removed(clip)) {
-          this.rt.callMethod(cx, face, q.name, NO_ARGS, this.swfVersion);
+          this.rt.callMethod(cx, face, q.name, NO_ARGS, this.swfOf(clip).version);
         }
         break;
       }
       case HALT:
         this.halted = true;
         break;
+      case CALL: {
+        const cx = this.activationOf(clip);
+        if (cx !== null && q.object !== null) {
+          this.rt.callMethod(cx, q.object, q.name, q.args, this.swfVersion);
+        }
+        break;
+      }
       case NOTIFY: {
         const cx = this.activationOf(clip);
         const object = q.object;
@@ -2673,13 +3353,13 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     if (constr !== null) {
       face.define(
         "__proto__",
-        avm1.get(constr, "prototype", this.swfVersion),
+        avm1.get(constr, "prototype", this.swfOf(q.clip).version),
         avm1.DONT_ENUM | avm1.DONT_DELETE,
       );
     }
 
     for (const block of q.blocks) {
-      this.run(block, [], q.clip);
+      this.run(q.swf, block, [], q.clip);
     }
 
     if (constr !== null) {
@@ -2689,18 +3369,27 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
 
   /** CallFrame: the actions of `clip`'s frame `frame`, run now in order, each with a pool of its own. */
   private callFrame(clip: MovieClip, frame: number): void {
+    const swf = this.swfOf(clip);
     for (const command of clip.timeline.frames[frame - 1] ?? []) {
       if (command.type === "actions") {
-        for (const index of this.list?.byTag.get(command.tag) ?? []) {
-          this.run(index, [], clip);
+        for (const index of swf.list?.byTag.get(command.tag) ?? []) {
+          this.run(swf, index, [], clip);
         }
       }
     }
   }
 
-  /** Run block `index` with `clip` as its target, starting from constant pool `pool`; the pool it leaves. */
-  private run(index: number, pool: avm1.Value[], clip: DisplayObject): avm1.Value[] {
-    const regions = this.blocks[index];
+  /**
+   * Run `swf`'s block `index` with `clip` as its target, starting from
+   * constant pool `pool`; the pool it leaves.
+   */
+  private run(
+    swf: Avm1Swf | null,
+    index: number,
+    pool: avm1.Value[],
+    clip: DisplayObject,
+  ): avm1.Value[] {
+    const regions = swf?.blocks[index];
     const cx = regions ? this.activationOf(clip, pool) : null;
     if (!regions || cx === null) {
       return pool;
@@ -2717,6 +3406,48 @@ export class Avm1 implements Movie, InputState, FocusState, TabHost, BitmapHost,
     return cx.pool;
   }
 }
+
+/** A load of loadMovie's or MovieClipLoader's, from when it is asked until it is done with. */
+interface MovieLoad {
+  /** The clip it fills: the target's, or a level's. */
+  target: MovieClip;
+  /** The MovieClipLoader whose listeners hear of it; null for loadMovie's. */
+  loader: avm1.Avm1Object | null;
+  /**
+   * Its URL against the SWF's, then where a redirect took it once it
+   * arrives, as AS3's loads and Ruffle's take it: what it loaded's `_url`,
+   * its query variables and the URL every access check asks about.
+   */
+  url: string;
+  /**
+   * Under way, or cancelled by an unload before it arrived; arrived and
+   * loaded, its onLoadInit to come; or done, with nothing more to tell.
+   */
+  status: "pending" | "cancelled" | "loaded" | "done";
+}
+
+/** What a load brought, its blocks compiled where it is a SWF. */
+type Arrived =
+  | Exclude<Arrival, { type: "swf" }>
+  | (Extract<Arrival, { type: "swf" }> & { blocks: avm1.Blocks });
+
+/** What a load replaced or cancelled before it was read brings: nothing it reads. */
+const SKIPPED: Arrived = { type: "failed", status: 0 };
+
+/** The longest a load waits for the one asked before it, in ms, to arrive in their order. */
+const ORDER_WAIT = 2000;
+
+/** `previous` settled, or `ms` passed, whichever comes first. */
+function within(previous: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const passed = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  return Promise.race([previous, passed]).finally(() => clearTimeout(timer));
+}
+
+/** What a clip unloaded or in error shows: no frames, which it never enters. */
+const NO_FRAMES: Timeline = { ...EMPTY_TIMELINE, frames: [] };
 
 /** A clip action: the block, the events it runs for, and keyPress's key code. */
 export interface Handler {
@@ -2737,6 +3468,11 @@ const MAX_REMOVE_DEPTH = 2130706416;
 function nativeOf(d: DisplayObject): ClipNative | null {
   const native = d.avm1?.display;
   return native instanceof ClipNative ? native : null;
+}
+
+/** A symbol name as registerClass keys it, by a SWF of `version`: in its case from SWF 7. */
+function classKey(name: string, version: number): string {
+  return version > 6 ? name : avm1.fold(name);
 }
 
 /** The blocks of a clip's construct events. */

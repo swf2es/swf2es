@@ -78,7 +78,7 @@ export function externalInterfaceNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("Error", 2067);
       }
 
-      return host.evalJS(s.rt.toString(source));
+      return host.evalJS?.(s.rt.toString(source)) ?? null;
     }
 
     static "flash.external:ExternalInterface::_callOut"(request: Value): Value {

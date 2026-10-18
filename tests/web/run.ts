@@ -17,12 +17,14 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { flashAssembler, script } from "../avm1-script.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { decodePng, type Image } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { importMap } from "../player/serve.ts";
+import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -55,6 +57,28 @@ const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
+// An AS2 SWF that calls the page, tells it what came back, and takes its calls.
+const external = `var EI = flash.external.ExternalInterface;
+var got = EI.call("avm1Hello", "hi", [1, {k: "v"}]);
+EI.call("avm1Hello", got.got[0] + "!", got.got[1][1].k);
+// An inline function, its quotes and && sent as they are.
+EI.call("avm1Hello", EI.call("function(a) { return a && a + \\"'\\"; }", "q"));
+EI.addCallback("triple", null, function(n) { return {n: n * 3, s: "a<b"}; });
+stop();`;
+writeFileSync(
+  `${site}avm1-external.swf`,
+  w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(external, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
@@ -190,6 +214,24 @@ check(
     // Edges and smoothed bitmaps blend colours at high quality; at low, the fills' and texels' alone.
     assert.ok(low * 4 < high, `${low} colours at low, ${high} at high`);
     assert.equal(await shown(rect), high);
+    // Flash's medium covers an edge with 4 samples, high with 16: high, with as many as the
+    // GPU allows, shades the edges more finely where it allows more than 4.
+    await call(evaluate, 'requality("medium")');
+    const medium = await shown(rect);
+    await call(evaluate, 'requality("high")');
+    const most = await call<number>(
+      evaluate,
+      `(() => {
+        const gl = document.createElement("canvas").getContext("webgl2");
+        const most = gl?.getParameter(gl.MAX_SAMPLES) ?? 0;
+        // A context let go of at once, not left to count against the page's.
+        gl?.getExtension("WEBGL_lose_context")?.loseContext();
+        return most;
+      })()`,
+    );
+    if (most > 4) {
+      assert.ok(medium < high, `${medium} colours at medium, ${high} at high (${most} samples)`);
+    }
     await call(evaluate, 'requality("high", "/web-test/shapes.swf")');
   },
 );
@@ -337,6 +379,17 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
   // The scripted and locked players' instances alone.
   assert.equal(left.codegens, 2);
   assert.ok(after - warm < BOUND * CHURN, `the heap grew by ${after - warm} bytes`);
+});
+
+check("an AVM1 SWF's ExternalInterface calls the page and takes its calls", async (evaluate) => {
+  const ei = await call<{ calls: unknown[][]; triple: unknown; never: boolean }>(
+    evaluate,
+    "avm1External()",
+  );
+  // The SWF under allowScriptAccess="never" called nothing and added no callback.
+  assert.deepEqual(ei.calls, [["hi", [1, { k: "v" }]], ["hi!", "v"], ["q'"]]);
+  assert.deepEqual(ei.triple, { n: 15, s: "a<b" });
+  assert.equal(ei.never, false);
 });
 
 check(
@@ -795,7 +848,8 @@ const failures = await withPage(
 
     return failed;
   },
-  false,
+  // Software GL by default; SWF2ES_WEB_GPU=1 draws on the GPU, whose multisampling may go past 4.
+  process.env.SWF2ES_WEB_GPU === "1",
   {
     page: "web-test/index.html",
     mounts: [

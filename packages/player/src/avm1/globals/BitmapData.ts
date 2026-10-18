@@ -8,14 +8,25 @@
 // disposed bitmap, -2 for a source that is none, -3 for a disposed one,
 // -4 for a rectangle that is none.
 import { avm1 } from "@swf2es/runtime";
-import { BitmapStore, pixelRect } from "../../bitmap/bitmap.js";
+import { BitmapStore, pixelRect, spanRect } from "../../bitmap/bitmap.js";
 import { drawDisplayObject } from "../../bitmap/draw.js";
 import {
+  alphaAt,
   type ColorTransformValues,
+  colorBounds,
   colorTransform,
+  comparePixels,
+  copyChannel,
   drawBitmap,
   floodFill,
+  isThresholdOperation,
+  merge,
+  noise,
+  paletteMap,
+  perlinNoise,
+  pixelDissolve,
   scroll,
+  threshold,
 } from "../../bitmap/ops.js";
 import type { DisplayObject } from "../../display/display.js";
 import type { Drawer } from "../../hosts.js";
@@ -63,8 +74,12 @@ function sizeValid(w: number, h: number, version: number): boolean {
   return w <= 0x6666666 && h <= 0x6666666 && w * h < 0x20000000;
 }
 
-/** A rectangle's own or inherited x, y, width and height as ints, clipped as Flash clips; null if one is missing. */
-function rectOf(o: Value, v: number) {
+/**
+ * A rectangle's own or inherited x, y, width and height as ints, clipped
+ * as Flash clips, a negative size spanning back with `span`; null if one
+ * is missing.
+ */
+function rectOf(o: Value, v: number, span = false) {
   if (!(o instanceof avm1.Avm1Object)) {
     return null;
   }
@@ -75,7 +90,25 @@ function rectOf(o: Value, v: number) {
   }
 
   const [x, y, w, h] = names.map((n) => avm1.toNumber(avm1.get(o, n, v), v) | 0);
-  return pixelRect(x, y, w, h);
+  return (span ? spanRect : pixelRect)(x, y, w, h);
+}
+
+/** A point's own x and y as ints, as hitTest takes them; null if either is not its own. */
+function ownPoint(o: Value, v: number): [number, number] | null {
+  if (
+    !(o instanceof avm1.Avm1Object) ||
+    o.own("x", v) === undefined ||
+    o.own("y", v) === undefined
+  ) {
+    return null;
+  }
+
+  return [avm1.toNumber(avm1.get(o, "x", v), v) | 0, avm1.toNumber(avm1.get(o, "y", v), v) | 0];
+}
+
+/** An alpha threshold: an int clamped to a byte. */
+function threshold8(x: Value, v: number): number {
+  return Math.max(0, Math.min(255, avm1.toNumber(x, v) | 0));
 }
 
 /** A point's x and y, truncated to ints. */
@@ -290,18 +323,36 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     store.dispose();
     return undefined;
   });
+  // 1 where it filled, 0 for a point off the bitmap or a fill of the colour already there.
   method("floodFill", 3, (store, args, v) => {
-    floodFill(
-      store,
-      avm1.toNumber(args[0], v) | 0,
-      avm1.toNumber(args[1], v) | 0,
-      avm1.toNumber(args[2], v) >>> 0,
-    );
+    const x = avm1.toNumber(args[0], v) >>> 0;
+    const y = avm1.toNumber(args[1], v) >>> 0;
+    const color = avm1.toNumber(args[2], v) >>> 0;
+    if (
+      x >= store.width ||
+      y >= store.height ||
+      store.pixels[y * store.width + x] === store.premultiplied(color)
+    ) {
+      return 0;
+    }
+
+    floodFill(store, x, y, color);
     return 1;
   });
   method("scroll", 2, (store, args, v) => {
     scroll(store, avm1.toNumber(args[0], v) | 0, avm1.toNumber(args[1], v) | 0);
-    return undefined;
+    return 0;
+  });
+  // A filter's rect is not worked out yet (Ruffle's neither).
+  method("generateFilterRect", 0, () => undefined);
+  // AVM1 has no filter objects yet, so every filter is one applyFilter does not know: -1.
+  method("applyFilter", 0, (_store, args) => {
+    const source = storeOf(args[0]);
+    if (source === null) {
+      return -2;
+    }
+
+    return source.disposed ? -3 : -1;
   });
   method("colorTransform", 2, (store, args, v) => {
     const r = rectOf(args[0], v);
@@ -316,6 +367,259 @@ export function bitmapDataClass(host: BitmapHost): Obj {
 
     colorTransform(store, r, c);
     return -1;
+  });
+
+  /**
+   * The source, rect and destination point the copying methods take: -2
+   * for a source that is no BitmapData, -3 for a disposed one, -4 for a
+   * rect that is none. Their rect spans back from a negative size, as AS3's
+   * does.
+   */
+  const copyArgs = (args: Value[], v: number) => {
+    const source = storeOf(args[0]);
+    if (source === null) {
+      return -2;
+    }
+
+    if (source.disposed) {
+      return -3;
+    }
+
+    const r = rectOf(args[1], v, true);
+    if (r === null) {
+      return -4;
+    }
+
+    const [dx, dy] = pointOf(args[2], v);
+    return { source, r, dx, dy };
+  };
+  // An argument left out takes its default; one given as undefined is converted, as Flash does.
+  const given = (args: Value[], i: number) => args.length > i;
+
+  method("copyChannel", 5, (store, args, v) => {
+    const a = copyArgs(args, v);
+    if (typeof a === "number") {
+      return a;
+    }
+
+    const from = avm1.toNumber(args[3], v) | 0;
+    const to = avm1.toNumber(args[4], v) | 0;
+    copyChannel(store, a.source, a.r, a.dx, a.dy, from >>> 0, to >>> 0);
+    return -1;
+  });
+  method("merge", 6, (store, args, v) => {
+    const a = copyArgs(args, v);
+    if (typeof a === "number") {
+      return a;
+    }
+
+    // The alpha multiplier may be left out, whatever the documentation says; each is an int
+    // clamped to 0 to 256, where AS3's is a uint taken as it is (Ruffle).
+    const muls = [3, 4, 5, 6].map((i) =>
+      i === 6 && !given(args, i) ? 0xff : Math.max(0, Math.min(256, avm1.toNumber(args[i], v) | 0)),
+    );
+    merge(store, a.source, a.r, a.dx, a.dy, muls as [number, number, number, number]);
+    return -1;
+  });
+  // Three arguments are enough by the documentation, but without the red table it does nothing.
+  method("paletteMap", 4, (store, args, v) => {
+    const a = copyArgs(args, v);
+    if (typeof a === "number") {
+      return a;
+    }
+
+    // A channel without a table, an object, maps to itself.
+    const table = (t: Value, shift: number) =>
+      Uint32Array.from({ length: 256 }, (_, i) =>
+        t instanceof avm1.Avm1Object
+          ? avm1.toNumber(avm1.get(t, String(i), v), v) >>> 0
+          : (i << shift) >>> 0,
+      );
+    paletteMap(store, a.source, a.r, a.dx, a.dy, [
+      table(args[3], 16),
+      table(args[4], 8),
+      table(args[5], 0),
+      table(args[6], 24),
+    ]);
+    return -1;
+  });
+  method("threshold", 5, (store, args, v) => {
+    const a = copyArgs(args, v);
+    if (typeof a === "number") {
+      return a;
+    }
+
+    // An operation threshold does not know is "<".
+    const op = avm1.stringOf(args[3], v);
+    return threshold(
+      store,
+      a.source,
+      a.r,
+      a.dx,
+      a.dy,
+      isThresholdOperation(op) ? op : "<",
+      avm1.toNumber(args[4], v) >>> 0,
+      avm1.toNumber(args[5], v) >>> 0,
+      given(args, 6) ? avm1.toNumber(args[6], v) >>> 0 : 0xffffffff,
+      avm1.toBoolean(args[7], v),
+      true,
+    );
+  });
+  // Four arguments are enough by the documentation, but without numPixels it does nothing.
+  method("pixelDissolve", 5, (store, args, v) => {
+    const a = copyArgs(args, v);
+    if (typeof a === "number") {
+      return a;
+    }
+
+    return pixelDissolve(
+      store,
+      a.source,
+      a.r,
+      a.dx,
+      a.dy,
+      avm1.toNumber(args[3], v) | 0,
+      avm1.toNumber(args[4], v) | 0,
+      given(args, 5) ? avm1.toNumber(args[5], v) >>> 0 : 0,
+    );
+  });
+  method("noise", 1, (store, args, v) => {
+    // The bounds are ints clamped to a byte, not bytes, so a negative low is 0.
+    const byte = (x: Value) => Math.max(0, Math.min(255, avm1.toNumber(x, v) | 0));
+    noise(
+      store,
+      avm1.toNumber(args[0], v) | 0,
+      byte(args[1]),
+      given(args, 2) ? byte(args[2]) : 255,
+      given(args, 3) ? (avm1.toNumber(args[3], v) | 0) & 0xf : 7,
+      avm1.toBoolean(args[4], v),
+    );
+    return 0;
+  });
+  method("perlinNoise", 6, (store, args, v) => {
+    // Past 1024 octaves the sum no longer changes (the AS3 face's perlinNoise).
+    const count = Math.min(Math.max(0, avm1.toNumber(args[2], v) | 0), 1024);
+    const offsets = args[8];
+    const shifts = Array.from({ length: count }, (_, i): [number, number] => {
+      const p = offsets instanceof avm1.Avm1Object ? avm1.get(offsets, String(i), v) : undefined;
+      return p instanceof avm1.Avm1Object
+        ? [avm1.toNumber(avm1.get(p, "x", v), v), avm1.toNumber(avm1.get(p, "y", v), v)]
+        : [0, 0];
+    });
+    perlinNoise(
+      store,
+      [avm1.toNumber(args[0], v), avm1.toNumber(args[1], v)],
+      shifts,
+      avm1.toNumber(args[3], v) | 0,
+      avm1.toBoolean(args[4], v),
+      avm1.toBoolean(args[5], v),
+      given(args, 6) ? (avm1.toNumber(args[6], v) | 0) & 0xf : 7,
+      avm1.toBoolean(args[7], v),
+    );
+    return 0;
+  });
+  method("getColorBoundsRect", 2, (store, args, v) => {
+    const r = colorBounds(
+      store,
+      avm1.toNumber(args[0], v) >>> 0,
+      avm1.toNumber(args[1], v) >>> 0,
+      !given(args, 2) || avm1.toBoolean(args[2], v),
+      true,
+    );
+    return makeGeom(realm, "Rectangle", [r.x, r.y, r.width, r.height], v);
+  });
+  // compare's answers are its own: -1 for no argument, -2 for one that is no live BitmapData,
+  // -3 and -4 for another width and height, 0 for the same pixels.
+  method("compare", 1, (store, args, v, self) => {
+    const other = storeOf(args[0]);
+    if (other === null || other.disposed) {
+      return -2;
+    }
+
+    if (other.width !== store.width) {
+      return -3;
+    }
+
+    if (other.height !== store.height) {
+      return -4;
+    }
+
+    const pixels = comparePixels(store, other);
+    if (pixels === null) {
+      return 0;
+    }
+
+    const diff = new BitmapStore(store.width, store.height, true, 0);
+    diff.pixels.set(pixels);
+    diff.changed();
+    const o = new avm1.Avm1Object(avm1.get(self, "__proto__", v));
+    stores.set(o, diff);
+    return o;
+  });
+  method("hitTest", 3, (store, args, v) => {
+    // Despite the documentation's Boolean, the errors are negative numbers.
+    const first = ownPoint(args[0], v);
+    if (first === null) {
+      return -2;
+    }
+
+    const [fx, fy] = first;
+    const a1 = threshold8(args[1], v);
+    const second = args[2];
+    const other = storeOf(second);
+    if (other !== null) {
+      if (other.disposed) {
+        return -3;
+      }
+
+      // The second point may be left out, but not be given as something else.
+      const at = ownPoint(args[3], v);
+      if (at === null && given(args, 3)) {
+        return -4;
+      }
+
+      const [sx, sy] = at ?? [0, 0];
+      const a2 = threshold8(args[4], v);
+      const ox = sx - fx;
+      const oy = sy - fy;
+      for (let y = Math.max(0, oy); y < Math.min(store.height, oy + other.height); y++) {
+        for (let x = Math.max(0, ox); x < Math.min(store.width, ox + other.width); x++) {
+          if (alphaAt(store, x, y) >= a1 && alphaAt(other, x - ox, y - oy) >= a2) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }
+
+    // A point or a rectangle, duck-typed by its own fields.
+    if (!(second instanceof avm1.Avm1Object)) {
+      return -3;
+    }
+
+    const field = (n: string) =>
+      second.own(n, v) === undefined ? null : avm1.toNumber(avm1.get(second, n, v), v) | 0;
+    const [x, y, w, h] = ["x", "y", "width", "height"].map(field);
+    if (x === null || y === null || (w === null) !== (h === null)) {
+      return -3;
+    }
+
+    const x0 = x - fx;
+    const y0 = y - fy;
+    // A point hits no pixel of alpha 0, at threshold 0 too; a rect does (Ruffle).
+    const least = w === null ? Math.max(1, a1) : a1;
+    const x1 = x0 + (w ?? 1);
+    const y1 = y0 + (h ?? 1);
+    for (let py = Math.max(0, y0); py < Math.min(store.height, y1); py++) {
+      for (let px = Math.max(0, x0); px < Math.min(store.width, x1); px++) {
+        if (alphaAt(store, px, py) >= least) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   });
 
   constr.define("RED_CHANNEL", 1, FIXED);

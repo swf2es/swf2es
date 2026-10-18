@@ -288,9 +288,9 @@ export interface PageBridge {
 /**
  * The ExternalInterface host for a page that lets SWFs script it: those
  * `allows` allows, by the calling SWF's URL (the player asks before it
- * calls here). Every call from a SWF is declined to evalJS, so that
- * playerglobal sends it as XML: its JavaScript form writes an object's
- * keys unquoted, as Flash's did, so a key could carry code into an eval.
+ * calls here). It evaluates no JavaScript, so that a SWF's every call
+ * comes as XML: playerglobal's JavaScript form writes an object's keys
+ * unquoted, as Flash's did, so a key could carry code into an eval.
  * The XML is read as data, and the name alone made a function
  * (pageFunction). The page's calls into the SWF go as XML both ways.
  */
@@ -302,7 +302,6 @@ export function externalInterfaceHost(
   return {
     objectID: bridge.objectID,
     allows,
-    evalJS: () => null,
     callOut(request) {
       try {
         const call = readInvocation(request);

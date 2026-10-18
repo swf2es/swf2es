@@ -23,7 +23,7 @@ export function targetOrRoot(cx: Activation): Target {
     return cx.target;
   }
 
-  const root = cx.host.root?.();
+  const root = cx.host.root?.(cx.base);
   return (root instanceof Avm1Object ? cx.host.clipOf?.(root) : undefined) ?? cx.base;
 }
 

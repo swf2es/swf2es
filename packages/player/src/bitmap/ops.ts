@@ -2,7 +2,7 @@
 // (bitmap.ts): each on unmultiplied ARGB as Flash's results show it works,
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
-import { type BitmapStore, type PixelRect, unmultiply } from "./bitmap.js";
+import { type BitmapStore, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
 import { Turbulence } from "./turbulence.js";
 
 const M = 2147483647;
@@ -416,7 +416,14 @@ export function isThresholdOperation(op: string): boolean {
  * threshold: each source pixel, unmultiplied and masked, compared with the
  * masked threshold as unsigned numbers; where the test holds the
  * destination pixel becomes `color`, elsewhere the source pixel if
- * `copySource`; how many held.
+ * `copySource`; how many held. With `premultiplied`, as AVM1's
+ * BitmapData has it (Ruffle's operations.rs), the pixel is compared as it
+ * is kept, premultiplied, and `color` and the source pixel are written as
+ * a transparent bitmap keeps them, the colour's channels premultiplied by
+ * its alpha. Flash leaves an opaque bitmap's alpha as written there too,
+ * which its getPixel32 then reads; here an opaque store keeps every alpha
+ * at 255, which its drawing, copies and filters take it to have, so its
+ * getPixel32 alone differs from Flash's (its getPixel does not).
  */
 export function threshold(
   store: BitmapStore,
@@ -429,6 +436,7 @@ export function threshold(
   color: number,
   mask: number,
   copySource: boolean,
+  premultiplied = false,
 ): number {
   const test = OPERATIONS[op];
   const target = (value & mask) >>> 0;
@@ -450,16 +458,19 @@ export function threshold(
   // In place, each pixel read as the ones before it left it (forEachCopied).
   const into = store.pixels;
   const pixels = source.readable;
-  const fill = store.premultiplied(color >>> 0);
+  const opaque = store.transparent ? 0 : 0xff000000;
+  const fill = premultiplied
+    ? (premultiply(color >>> 0) | opaque) >>> 0
+    : store.premultiplied(color >>> 0);
   for (let row = 0; row < d.height; row++) {
     for (let i = 0; i < d.width; i++) {
       const to = (d.y + row) * store.width + d.x + i;
       const raw = pixels[(sy + row) * source.width + sx + i];
-      if (test((unmultiply(raw) & mask) >>> 0, target)) {
+      if (test(((premultiplied ? raw : unmultiply(raw)) & mask) >>> 0, target)) {
         into[to] = fill;
         count++;
       } else if (copySource) {
-        into[to] = store.transparent ? raw : (raw | 0xff000000) >>> 0;
+        into[to] = (raw | opaque) >>> 0;
       }
     }
   }
@@ -472,22 +483,32 @@ export function threshold(
  * getColorBoundsRect: the smallest rect holding every pixel whose
  * unmultiplied value, masked, is `color` (or is not, without findColor);
  * empty where none is, and where the one found is the pixel at the
- * origin alone, as Flash has it (Ruffle's bitmap_data).
+ * origin alone, as Flash has it (Ruffle's bitmap_data). With
+ * `premultiplied`, as AVM1's BitmapData has it (Ruffle's operations.rs),
+ * the pixel is compared as it is kept, premultiplied, masked, with the
+ * colour premultiplied and not masked, and an opaque bitmap's alpha is
+ * in the mask.
  */
 export function colorBounds(
   store: BitmapStore,
   mask: number,
   color: number,
   find: boolean,
+  premultiplied = false,
 ): PixelRect {
   let x0 = store.width;
   let y0 = store.height;
   let x1 = -1;
   let y1 = -1;
-  const target = (color & mask) >>> 0;
+  if (premultiplied && !store.transparent) {
+    mask = (mask | 0xff000000) >>> 0;
+  }
+
+  const target = premultiplied ? store.premultiplied(color >>> 0) : (color & mask) >>> 0;
   for (let y = 0; y < store.height; y++) {
     for (let x = 0; x < store.width; x++) {
-      const hit = (unmultiply(store.pixels[y * store.width + x]) & mask) >>> 0 === target;
+      const pixel = store.pixels[y * store.width + x];
+      const hit = ((premultiplied ? pixel : unmultiply(pixel)) & mask) >>> 0 === target;
       if (hit === find) {
         x0 = Math.min(x0, x);
         y0 = Math.min(y0, y);
