@@ -32,7 +32,14 @@ m.lock();
 probe("bad timeout", function():* { return c.wait(-2); });
 c.notify();
 c.notifyAll();
-trace("wait", c.wait(1), c.wait(0), c.wait(0.5));
+// avmshell's timed wait adds the timeout, ceiled to milliseconds, to the
+// time of day's nanoseconds without carrying into the seconds: a wait that
+// starts less than its timeout's milliseconds (mod 1000) before a second
+// ends is refused by pthread_cond_timedwait and gives false, one 1 ms wait
+// in a thousand. Whole seconds never overflow, so these give true whatever
+// the clock: 999.5 ceiled to a second checks the rounding too, as 999
+// would almost always give false.
+trace("wait", c.wait(0), c.wait(999.5));
 trace("still held", m.tryLock());
 m.unlock();
 m.unlock();
