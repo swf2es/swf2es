@@ -119,6 +119,7 @@ import {
   readRootFrames,
   stopOf,
 } from "./swf.js";
+import { defaultClock, Timers } from "./timers.js";
 
 type Value = avm1.Value;
 
@@ -309,16 +310,6 @@ const BUTTON_STATES = new Map<number, "up" | "over" | "down">([
   [ClipEvent.dragOver, "down"],
 ]);
 
-/** The ms in a frame of the SWF's rate. */
-const frameMs = (rate: number) => 1000 / (rate || 24);
-
-const defaultClock = (): (() => number) | null =>
-  typeof performance !== "undefined" ? () => performance.now() : null;
-
-/** The real clock the script timeout reads, whatever clock the timers go by. */
-const timeoutClock =
-  typeof performance !== "undefined" ? () => performance.now() : () => Date.now();
-
 /** Names the scripts of AVM1 modules, as their stack frames show them. */
 let modules = 0;
 
@@ -367,7 +358,7 @@ export class Avm1
   /** The clips, in the order they were made, which play the newest first. */
   clips: MovieClip[] = [];
   /** What the frame, events and scripts queue, and what runs it. */
-  private readonly queue = new ActionQueue(this);
+  readonly queue = new ActionQueue(this);
   /** Whether the module is loaded: until it is, the first frame's actions wait in the queue. */
   loaded = false;
   /** Each clip's latest frame entry, which its queued blocks are of. */
@@ -391,14 +382,8 @@ export class Avm1
   private pending: DisplayObject[] = [];
   /** The display object a script is making, which it constructs itself; its children are the timeline's. */
   private scripted: DisplayObject | null = null;
-  private readonly realTime: (() => number) | null;
-  /** The frame clock, ms since the start, a frame's duration on each frame. */
-  private frameClock = 0;
-  /** GetTime's calls in the frame, and what they have added to a frame clock that stands still. */
-  private timeCalls = 0;
-  private timeOffset = 0;
-  /** The real clock's reading at the start. */
-  private readonly start: number;
+  /** The player's clock, the scripts' timeout and setInterval's timers. */
+  private readonly timers: Timers;
 
   quality = "HIGH";
   focusRect = true;
@@ -439,8 +424,6 @@ export class Avm1
    * and Enter and Space press it while it is visible.
    */
   private highlight: "inactive" | "visible" | "hidden" = "inactive";
-  /** How deep begin() is: only the outermost begin and end start and stop the scripts' clock. */
-  private beginDepth = 0;
   readonly url: string;
   readonly storage: SharedObjectStorage;
   /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
@@ -482,7 +465,7 @@ export class Avm1
         return movie.audio;
       },
       get now() {
-        return movie.now();
+        return movie.timers.now();
       },
       get frames() {
         return movie.frameCount;
@@ -497,8 +480,10 @@ export class Avm1
       },
       scriptSounds: () => 0,
     };
-    this.realTime = options.realTime === undefined ? defaultClock() : options.realTime;
-    this.start = this.realTime?.() ?? 0;
+    this.timers = new Timers(
+      this,
+      options.realTime === undefined ? defaultClock() : options.realTime,
+    );
     if (options.scriptTimeout !== undefined) {
       this.rt.scriptTimeout = options.scriptTimeout;
     }
@@ -542,7 +527,7 @@ export class Avm1
       toggleQuality: () => {
         this.quality = this.quality === "HIGH" || this.quality === "BEST" ? "LOW" : "HIGH";
       },
-      time: () => this.getTime(),
+      time: () => this.timers.getTime(),
       duplicate: (target, name, depth) => {
         this.duplicate(target as DisplayObject, name, depth, null);
       },
@@ -743,7 +728,7 @@ export class Avm1
     }
 
     this.frameStart();
-    this.begin();
+    this.timers.begin();
     try {
       // The main movie's root gets its load once its first frame's actions
       // have run: an onLoad they set is called (the corpus's root_onload).
@@ -752,9 +737,9 @@ export class Avm1
       }
 
       this.queue.run();
-      this.afterFrame();
+      this.timers.afterFrame(this.rate);
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -767,12 +752,6 @@ export class Avm1
     const module = this.codegen.compileActionsModule(swf.bytes, list);
     const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
     return (factory as unknown as avm1.Factory)(this.rt);
-  }
-
-  /** A frame's actions have run: until the next frame, its time passes and the timers due fire. */
-  private afterFrame(): void {
-    this.frameClock += frameMs(this.rate);
-    this.fireTimers();
   }
 
   /**
@@ -792,7 +771,7 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       this.frameStart();
       this.dropPending();
@@ -837,9 +816,9 @@ export class Avm1
         this.queue.run();
       }
 
-      this.afterFrame();
+      this.timers.afterFrame(this.rate);
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -850,11 +829,11 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
-      this.fireTimers();
+      this.timers.fire();
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -1004,11 +983,11 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       this.rt.call(cx, () => body(cx));
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -1084,67 +1063,7 @@ export class Avm1
   private frameStart(): void {
     this.st.length = 0;
     this.rt.realm.registers.fill(undefined);
-    this.timeCalls = 0;
-  }
-
-  /** The time on the player's clock: the real clock's since the start, or the frame clock. */
-  private now(): number {
-    return this.realTime === null ? this.frameClock : this.realTime() - this.start;
-  }
-
-  /**
-   * GetTime: whole ms since the start. A frame clock stands still through
-   * a frame, so, as Ruffle has it, a script that asks it again and again,
-   * waiting for it to move, sees a ms pass every fifth call from the 20th.
-   */
-  private getTime(): number {
-    if (this.realTime !== null) {
-      return Math.floor(this.realTime() - this.start);
-    }
-
-    this.timeCalls++;
-    if (this.timeCalls >= 20 && this.timeCalls % 5 === 0) {
-      this.timeOffset++;
-    }
-
-    return Math.floor(this.realm.timers.now) + this.timeOffset;
-  }
-
-  /** Scripts start running: the script timeout counts from now. */
-  private begin(): void {
-    if (this.beginDepth++ > 0) {
-      return;
-    }
-
-    this.realm.timers.now = this.now();
-    this.rt.begin(timeoutClock(), timeoutClock);
-  }
-
-  private end(): void {
-    if (--this.beginDepth > 0) {
-      return;
-    }
-
-    this.rt.end();
-  }
-
-  /** The timers due by now, each running what it queues after it. */
-  private fireTimers(): void {
-    if (this.realm.timers.size === 0 || this.movieRoot === null) {
-      return;
-    }
-
-    const root = this.movieRoot;
-    this.rt.fireTimers(
-      this.now(),
-      this.swfVersion,
-      () => this.activationOf(root),
-      () => this.queue.run(),
-      (object) => {
-        const target = object.display?.target;
-        return target instanceof MovieClip && this.removed(target);
-      },
-    );
+    this.timers.frameStarted();
   }
 
   /**
@@ -1421,14 +1340,14 @@ export class Avm1
     }
 
     let result: Value;
-    this.begin();
+    this.timers.begin();
     try {
       this.rt.call(cx, () => {
         result = body();
       });
       this.queue.run();
     } finally {
-      this.end();
+      this.timers.end();
     }
 
     return result;
@@ -1454,13 +1373,13 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       if (this.netDelivered()) {
         this.queue.run();
       }
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -2156,7 +2075,7 @@ export class Avm1
     const version = this.swfVersion;
     const oldFace = old?.avm1 ?? null;
     const newFace = d?.avm1 ?? null;
-    this.begin();
+    this.timers.begin();
     try {
       const oldCx = old === null ? null : this.activationOf(old);
       if (oldFace !== null && oldCx !== null) {
@@ -2176,7 +2095,7 @@ export class Avm1
         });
       }
     } finally {
-      this.end();
+      this.timers.end();
     }
 
     this.selectFocused();
@@ -2617,7 +2536,7 @@ export class Avm1
 
     this.keyState(keyCode, down);
     this.keyAscii = charCode;
-    this.begin();
+    this.timers.begin();
     try {
       // To the clips as they are drawn, the lowest first, what is in one before it (Ruffle's order).
       // What has the focus also hears onKeyDown or onKeyUp, from SWF 6, while the highlight is active.
@@ -2665,7 +2584,7 @@ export class Avm1
       this.queue.run();
       return used;
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -2675,13 +2594,13 @@ export class Avm1
       return false;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       const pressed = this.queueKeyPress(press) || (press === 32 && this.activate());
       this.queue.run();
       return pressed;
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -2769,12 +2688,12 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       this.notify(this.mouseFace, "onMouseWheel", [delta, target?.avm1 ?? undefined]);
       this.queue.run();
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -2837,13 +2756,13 @@ export class Avm1
     }
 
     let value: avm1.Value;
-    this.begin();
+    this.timers.begin();
     try {
       this.rt.call(cx, () => {
         value = avm1.get(face, name, this.swfVersion);
       });
     } finally {
-      this.end();
+      this.timers.end();
     }
 
     return value;
@@ -2863,7 +2782,7 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       for (const [d, event] of events) {
         this.buttonDispatch(d, event);
@@ -2871,7 +2790,7 @@ export class Avm1
 
       this.queue.run();
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
@@ -2927,7 +2846,7 @@ export class Avm1
       return;
     }
 
-    this.begin();
+    this.timers.begin();
     try {
       for (let i = this.clips.length - 1; i >= 0; i--) {
         const clip = this.clips[i];
@@ -2944,7 +2863,7 @@ export class Avm1
 
       this.queue.run();
     } finally {
-      this.end();
+      this.timers.end();
     }
   }
 
