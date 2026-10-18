@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   glyphOf,
+  readCsmTextSettings,
   readEditText,
   readFont,
   readFont4,
+  readFontAlignZones,
   tags,
 } from "../../../packages/format/dist/index.js";
-import { BitWriter, font3, rect } from "../../swf-writer.ts";
+import { BitWriter, font3, fontAlignZones, rect } from "../../swf-writer.ts";
 
 test("DefineEditText reads conditional fields before the variable and initial text", () => {
   const w = new BitWriter().u16(17);
@@ -141,4 +143,37 @@ test("DefineFont4 reads its style and optional CFF bytes", () => {
       data: null,
     },
   );
+});
+
+test("DefineFontAlignZones gives its font and CSM hint", () => {
+  // A long header: two bytes of code and length, four of length.
+  const bytes = fontAlignZones(7, 2, 3);
+  const zones = readFontAlignZones(bytes, {
+    code: tags.DefineFontAlignZones,
+    offset: 6,
+    length: bytes.length - 6,
+    long: true,
+  });
+  assert.deepEqual(zones, { id: 7, csmHint: 2 });
+});
+
+test("CSMTextSettings reads its flags and its little-endian floats", () => {
+  const bytes = new Uint8Array(12);
+  const view = new DataView(bytes.buffer);
+  view.setUint16(0, 9, true);
+  // Advanced (01), gridFit subpixel (010), reserved.
+  bytes[2] = 0b01_010_000;
+  view.setFloat32(3, -150, true);
+  view.setFloat32(7, 250.5, true);
+  const tag = { code: tags.CSMTextSettings, offset: 0, length: 12, long: false };
+  assert.deepEqual(readCsmTextSettings(bytes, tag), {
+    id: 9,
+    useFlashType: true,
+    gridFit: 2,
+    thickness: -150,
+    sharpness: 250.5,
+  });
+  bytes[2] = 0b00_001_000;
+  assert.equal(readCsmTextSettings(bytes, tag).useFlashType, false);
+  assert.equal(readCsmTextSettings(bytes, tag).gridFit, 1);
 });

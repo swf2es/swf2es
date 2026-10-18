@@ -6,6 +6,7 @@ import {
   type ActionList,
   type Bitmap,
   type ButtonRecord,
+  type CsmTextSettings,
   type EditText,
   type Font,
   type Font4,
@@ -19,9 +20,11 @@ import {
   readBitmap,
   readButton,
   readButtonSound,
+  readCsmTextSettings,
   readEditText,
   readFont,
   readFont4,
+  readFontAlignZones,
   readFrameLabel,
   readMorphShape,
   readPlace,
@@ -181,6 +184,8 @@ export interface TextCharacter {
   definition: EditText;
   /** The font it names by id, if the SWF defines it: its name and style, which the field shows its text in. */
   font: FontName | null;
+  /** CSMTextSettings for it: advanced anti-aliasing and its settings. */
+  csm?: CsmTextSettings;
 }
 
 /** DefineText or DefineText2: glyphs of its SWF's fonts, which it finds as it is shown (text/static.ts). */
@@ -188,6 +193,8 @@ export interface StaticTextCharacter {
   type: "static";
   id: number;
   definition: StaticText;
+  /** CSMTextSettings for it: drawn with advanced anti-aliasing when it says so. */
+  csm?: CsmTextSettings;
 }
 
 /** DefineButton or DefineButton2: the characters it shows in each state. */
@@ -634,6 +641,22 @@ function timelineOf(
           italic: font.italic,
           font,
         });
+        break;
+      }
+      case tags.DefineFontAlignZones: {
+        const { id, csmHint } = readFontAlignZones(bytes, t);
+        const font = library.get(id);
+        if (font?.type === "font") {
+          font.font.csmHint = csmHint;
+        }
+        break;
+      }
+      case tags.CSMTextSettings: {
+        const csm = readCsmTextSettings(bytes, t);
+        const text = library.get(csm.id);
+        if (text?.type === "static" || text?.type === "text") {
+          text.csm = csm;
+        }
         break;
       }
       case tags.DefineFont4: {

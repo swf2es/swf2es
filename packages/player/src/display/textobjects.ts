@@ -115,6 +115,14 @@ export class TextObject extends DisplayObject {
     this.background = edit.border;
     this.maxChars = edit.maxLength ?? 0;
     this.embedFonts = edit.useOutlines;
+    const csm = definition.csm;
+    if (csm) {
+      this.antiAliasType = csm.useFlashType ? "advanced" : "normal";
+      this.gridFitType = ["none", "pixel", "subpixel"][csm.gridFit] ?? "none";
+      this.thickness = csm.thickness;
+      this.sharpness = csm.sharpness;
+    }
+
     const font = definition?.font;
     const color = edit.color;
     this.model.defaultFormat = {

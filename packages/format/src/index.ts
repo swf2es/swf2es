@@ -52,7 +52,15 @@ export {
   type SceneData,
 } from "./display.js";
 export { type FilterColor, readFilters, type SwfFilter } from "./filters.js";
-export { type Font, type Font4, type Glyph, glyphOf, readFont, readFont4 } from "./font.js";
+export {
+  type Font,
+  type Font4,
+  type Glyph,
+  glyphOf,
+  readFont,
+  readFont4,
+  readFontAlignZones,
+} from "./font.js";
 export {
   type ColorTransform,
   type Fill,
@@ -100,8 +108,10 @@ export {
 } from "./swf.js";
 export * as tags from "./tags.js";
 export {
+  type CsmTextSettings,
   type EditText,
   type FontName,
+  readCsmTextSettings,
   readEditText,
   readFontName,
   readStaticText,

@@ -1,8 +1,9 @@
 // flash.text.TextRenderer: settings for advanced anti-aliasing, kept for the
-// SWF to read back, with the values adl takes and ignores; the player draws
-// its text the same either way.
+// SWF to read back, with the values adl takes and ignores, and the tables
+// of cutoffs a font's advanced text is drawn by (text/csm.ts).
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import { setCsmTable } from "../../../text/csm.js";
 
 type Value = avm2.Value;
 
@@ -55,7 +56,7 @@ export function textRendererNatives(s: Scripting): avm2.Natives {
       antiAliasType = type === "on" || type === "default" ? type : "off";
     }
 
-    /** Checked as adl checks it, then dropped: the player's text has no tables to tune. */
+    /** Checked as adl checks it; then the font's table, for its light and dark text alike, as adl takes it. */
     static setAdvancedAntiAliasingTable(
       fontName: Value,
       fontStyle: Value,
@@ -83,6 +84,18 @@ export function textRendererNatives(s: Scripting): avm2.Natives {
           throw s.rt.error("TypeError", 2005, 4, "CSMSettings");
         }
       }
+
+      const read = (entry: Value, k: string) =>
+        s.rt.toNumber(s.rt.getProperty(entry as avm2.AsObject, s.rt.publicName(k)));
+      setCsmTable(
+        s.rt.toString(fontName),
+        s.rt.toString(fontStyle),
+        entries.map((entry) => [
+          read(entry, "fontSize"),
+          read(entry, "insideCutoff"),
+          read(entry, "outsideCutoff"),
+        ]),
+      );
     }
   }
 

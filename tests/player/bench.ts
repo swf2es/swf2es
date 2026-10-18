@@ -117,6 +117,11 @@
 // its meshes: what drawing them anew each frame costs, and whether it
 // leaks. --culled has it cull half of them.
 //
+// --text N plays instead N TextFields of an embedded font, with advanced
+// anti-aliasing (--normal: normal), white and black at four sizes; each
+// frame a tenth of them take new text and a seventh move half a pixel:
+// what drawing text, and drawing it again, costs.
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -137,7 +142,7 @@
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
-//     | --triangles N [--culled]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
+//     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
 //     [--min-run N] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
@@ -146,6 +151,7 @@
 // browser or player to play.
 import { readFileSync, writeFileSync } from "node:fs";
 import * as w from "../swf-writer.ts";
+import { stemFont } from "./cases.ts";
 import { benchPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 import { compiler } from "./scripts.ts";
@@ -173,6 +179,7 @@ const pulse = option("pulse", 0);
 const town = option("town", 0);
 const scrolled = option("scroll", 0);
 const triangles = option("triangles", 0);
+const texts = option("text", 0);
 const cpuProfile = args.includes("--cpu-profile")
   ? args[args.indexOf("--cpu-profile") + 1]
   : undefined;
@@ -826,6 +833,65 @@ const SCROLL_SOURCE = `package {
 }
 `;
 
+/** N TextFields in Stem (cases.ts), advanced or normal; a tenth take new text a frame, a seventh move. */
+function textSwf(count: number, normal: boolean): Uint8Array {
+  const source = `package {
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.text.*;
+
+  public class Main extends Sprite {
+    private var fields:Array = [];
+    private var n:int = 0;
+
+    public function Main() {
+      for (var i:int = 0; i < ${count}; i++) {
+        var t:TextField = new TextField();
+        t.embedFonts = true;
+        t.antiAliasType = "${normal ? "normal" : "advanced"}";
+        t.defaultTextFormat = new TextFormat("Stem", 10 + (i % 4) * 4, i % 2 ? 0x000000 : 0x2040c0);
+        t.autoSize = TextFieldAutoSize.LEFT;
+        t.text = "123456 lmaW 123 lm";
+        t.x = (i % 8) * 100;
+        t.y = (int(i / 8) * 23) % 580;
+        addChild(t);
+        fields.push(t);
+      }
+
+      addEventListener(Event.ENTER_FRAME, frame);
+    }
+
+    private function frame(e:Event):void {
+      n++;
+      for (var i:int = n % 10; i < fields.length; i += 10) {
+        fields[i].text = "lm " + (n % 6 + 1) + (int(n / 6) % 6 + 1) + " aW 1234";
+      }
+
+      for (i = n % 7; i < fields.length; i += 7) {
+        fields[i].x += n & 1 ? 0.5 : -0.5;
+      }
+    }
+  }
+}`;
+  const abc = compiler()("BenchText", source);
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      stemFont(1),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** The scrolling trail (--scroll): a bitmap of `size` a side that a script draws into and scrolls each frame. */
 function scrollSwf(size: number): Uint8Array {
   const abc = compiler()(`BenchScroll${size}`, SCROLL_SOURCE.replace("SIZE", String(size)));
@@ -1232,35 +1298,37 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  triangles > 0
-    ? trianglesSwf(triangles, args.includes("--culled"))
-    : scrolled > 0
-      ? scrollSwf(scrolled)
-      : town > 0
-        ? townSwf(town)
-        : toggleBranches > 0
-          ? branchSwf(toggleBranches)
-          : toggle > 0
-            ? toggleSwf(toggle)
-            : toggleStatic > 0
-              ? toggleStaticSwf(toggleStatic)
-              : scripted > 0
-                ? scriptedSwf(scripted, args.includes("--still"))
-                : pulse > 0
-                  ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
-                  : masks > 0
-                    ? masksSwf(masks, args.includes("--unmasked"))
-                    : branches > 0
-                      ? branchSwf(branches)
-                      : rig > 0
-                        ? rigSwf(
-                            rig,
-                            args.includes("--swap"),
-                            args.includes("--fresh"),
-                            args.includes("--blurred") || filtered > 0,
-                            args.includes("--glide"),
-                          )
-                        : synthetic();
+  texts > 0
+    ? textSwf(texts, args.includes("--normal"))
+    : triangles > 0
+      ? trianglesSwf(triangles, args.includes("--culled"))
+      : scrolled > 0
+        ? scrollSwf(scrolled)
+        : town > 0
+          ? townSwf(town)
+          : toggleBranches > 0
+            ? branchSwf(toggleBranches)
+            : toggle > 0
+              ? toggleSwf(toggle)
+              : toggleStatic > 0
+                ? toggleStaticSwf(toggleStatic)
+                : scripted > 0
+                  ? scriptedSwf(scripted, args.includes("--still"))
+                  : pulse > 0
+                    ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
+                    : masks > 0
+                      ? masksSwf(masks, args.includes("--unmasked"))
+                      : branches > 0
+                        ? branchSwf(branches)
+                        : rig > 0
+                          ? rigSwf(
+                              rig,
+                              args.includes("--swap"),
+                              args.includes("--fresh"),
+                              args.includes("--blurred") || filtered > 0,
+                              args.includes("--glide"),
+                            )
+                          : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1313,29 +1381,31 @@ const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    triangles > 0
-      ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
-      : scrolled > 0
-        ? `scrolled bitmap of ${scrolled}`
-        : town > 0
-          ? `town of ${town}`
-          : toggleBranches > 0
-            ? `toggle of ${toggleBranches} branches`
-            : toggle > 0
-              ? `toggle of ${toggle}`
-              : toggleStatic > 0
-                ? `static toggle of ${toggleStatic}`
-                : scripted > 0
-                  ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                  : pulse > 0
-                    ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                    : masks > 0
-                      ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                      : branches > 0
-                        ? `${branches} branches`
-                        : rig > 0
-                          ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                          : shapes,
+    texts > 0
+      ? `${texts} text fields, ${args.includes("--normal") ? "normal" : "advanced"}`
+      : triangles > 0
+        ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+        : scrolled > 0
+          ? `scrolled bitmap of ${scrolled}`
+          : town > 0
+            ? `town of ${town}`
+            : toggleBranches > 0
+              ? `toggle of ${toggleBranches} branches`
+              : toggle > 0
+                ? `toggle of ${toggle}`
+                : toggleStatic > 0
+                  ? `static toggle of ${toggleStatic}`
+                  : scripted > 0
+                    ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                    : pulse > 0
+                      ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                      : masks > 0
+                        ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                        : branches > 0
+                          ? `${branches} branches`
+                          : rig > 0
+                            ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                            : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {
