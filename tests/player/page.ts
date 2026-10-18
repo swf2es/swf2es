@@ -1177,7 +1177,7 @@ async function contextLossPlanSwf(
         }
 
         case "w": {
-          // render/settle.ts's SETTLE_MS is 2000.
+          // Past render/settle.ts's SETTLE_MS, 2000, which the player does not export.
           await new Promise((done) => setTimeout(done, 2500));
           break;
         }

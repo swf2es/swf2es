@@ -69,34 +69,38 @@ test("each extension point of a renderer is set, once, and a stand-in's are left
   assert.deepEqual(standIn, { renderPipes: { graphics: {}, batch: {} }, filter: {} });
 });
 
-test("a group's build for a context given back is no change of its own, so it stays settled", async () => {
+/** The build hook hookRenderer sets on a render group system, as Pixi calls it. */
+function buildHook(): (group: object, forced: boolean) => void {
   const renderGroup = made(RenderGroupSystem);
-  const listeners: { contextChange(): void }[] = [];
-  const renderer = {
-    renderPipes: {},
-    renderGroup,
-    runners: {
-      contextChange: { add: (listener: { contextChange(): void }) => listeners.push(listener) },
-    },
-  };
+  const renderer = { renderPipes: {}, renderGroup };
   hookRenderer(renderer as unknown as Parameters<typeof hookRenderer>[0]);
-  const build = renderGroup.onBuildInstructions as (group: object) => void;
+  return renderGroup.onBuildInstructions as (group: object, forced: boolean) => void;
+}
+
+const tick = () => new Promise((done) => setTimeout(done, 5));
+
+test("a group's build only for a context given back is no change of its own, so it stays settled", async () => {
+  const build = buildHook();
   const group: { $builtAt?: number } = {};
 
-  build(group);
+  build(group, false);
   const first = group.$builtAt;
   assert.equal(typeof first, "number");
-  await new Promise((done) => setTimeout(done, 5));
+  await tick();
 
-  // Pixi builds every group again for a new context.
-  for (const listener of listeners) {
-    listener.contextChange();
-  }
-
-  build(group);
+  build(group, true);
   assert.equal(group.$builtAt, first);
 
-  // A build after that is a change again.
-  build(group);
+  // A build after that, or one with a change of its own, is a change again.
+  build(group, false);
   assert.ok((group.$builtAt ?? 0) > (first ?? 0));
+});
+
+test("a group taken from Pixi's pool and first built for a context given back is timed from then", () => {
+  const build = buildHook();
+  // As disableRenderGroup leaves a group it retires, for Pixi to pool and lend again.
+  const group: { $builtAt?: number } = { $builtAt: undefined };
+
+  build(group, true);
+  assert.equal(typeof group.$builtAt, "number");
 });
