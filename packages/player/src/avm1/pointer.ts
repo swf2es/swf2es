@@ -1,15 +1,22 @@
 // The pointer of an AVM1 movie, by AVM1's rules rather than AS3's (Ruffle's
 // player.rs update_mouse_state, and Avm1Button's and MovieClip's mouse picks
 // and event dispatches, at the corpus's commit; MIT OR Apache-2.0,
-// Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors). Only
+// Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors). Selectable fields,
 // buttons and clips in button mode take it. An input first goes to every
 // clip as its clip event (mouseMove, mouseDown, mouseUp); then the object
 // under it is picked again and gets its button events: rolls as the hover
 // moves, drags while the button is down, a press, and a release or a
 // release outside.
 import { ClipEvent } from "@swf2es/format";
-import { hitsPoint } from "../display/bounds.js";
-import { ButtonObject, type Container, type DisplayObject, MovieClip } from "../display/display.js";
+import { hitsPoint, toStage } from "../display/bounds.js";
+import {
+  ButtonObject,
+  type Container,
+  type DisplayObject,
+  MovieClip,
+  TextObject,
+} from "../display/display.js";
+import { apply, invert } from "../display/geometry.js";
 import {
   type Cursor,
   type Drag,
@@ -17,7 +24,9 @@ import {
   type Pointer,
   type PointerState,
 } from "../input/pointer.js";
+import { caretAt } from "../input/text-editor.js";
 import type { Avm1 } from "./avm1.js";
+import { stateOf } from "./globals/TextField.js";
 
 type ButtonEvent = readonly [DisplayObject, number];
 
@@ -42,6 +51,7 @@ export class Avm1Pointer implements Pointer {
   private moved: PointerState | null = null;
   private shown: Cursor = "default";
   private drag: Drag | null = null;
+  private selection: { field: TextObject; anchor: number } | null = null;
 
   constructor(
     private readonly stage: Container,
@@ -191,12 +201,26 @@ export class Avm1Pointer implements Pointer {
 
     const events = this.hoverTo(this.pick(p.x, p.y), []);
     if (left && type === "down") {
+      this.selection = null;
+      const field = this.hover instanceof TextObject ? this.hover : null;
+      if (field || this.avm1.focused instanceof TextObject) {
+        this.avm1.focus(field);
+      }
+
+      if (field) {
+        const position = this.textPosition(field, p.x, p.y);
+        stateOf(field).selected = true;
+        field.select(position, position);
+        this.selection = { field, anchor: position };
+      }
+
       this.pressed = this.hover;
       this.pressedAt = this.hoverAt;
       if (this.hover) {
         events.push([this.hover, ClipEvent.press]);
       }
     } else if (left && type === "up" && held) {
+      this.selection = null;
       const pressed = this.pressed;
       const hover = this.hover;
       this.pressed = null;
@@ -215,10 +239,22 @@ export class Avm1Pointer implements Pointer {
       }
     }
 
+    const selection = this.selection;
+    if (type === "move" && this.held && selection && this.onStage(selection.field)) {
+      selection.field.select(selection.anchor, this.textPosition(selection.field, p.x, p.y));
+      this.redraws++;
+    }
+
     this.send(events);
 
     // After the input and what it ran, as Ruffle resets the focus's highlight.
     this.avm1.focusTracker.pointerInput(type, p.button ?? 0);
+  }
+
+  private textPosition(field: TextObject, x: number, y: number): number {
+    const inverse = invert(toStage(field, this.stage));
+    const [localX, localY] = inverse ? apply(inverse, x, y) : [0, 0];
+    return caretAt(field, localX * 20, localY * 20);
   }
 
   /**
@@ -392,6 +428,10 @@ export class Avm1Pointer implements Pointer {
       return null;
     }
 
+    if (!any && d instanceof TextObject) {
+      return d.selectable && hitsPoint(d, x, y, false, this.stage) ? d : null;
+    }
+
     // A button: what is in the state it shows first, a clip in button mode
     // there taking the pointer from it, then its hit test state, tested as
     // its child, whatever state it shows.
@@ -437,7 +477,9 @@ export class Avm1Pointer implements Pointer {
     for (let i = children.length - 1; i >= 0; i--) {
       const child = children[i];
       const found =
-        child instanceof MovieClip || child instanceof ButtonObject
+        child instanceof MovieClip ||
+        child instanceof ButtonObject ||
+        (!any && child instanceof TextObject)
           ? this.pickIn(child, x, y, any)
           : any && d instanceof MovieClip && this.drawnAt(child, x, y)
             ? d
@@ -473,7 +515,9 @@ export class Avm1Pointer implements Pointer {
   updateCursor(): void {
     let cursor: Cursor = this.avm1.input.mouseShown ? "default" : "none";
     const hover = this.avm1.input.mouseShown ? this.hover : null;
-    if (hover instanceof ButtonObject) {
+    if (hover instanceof TextObject) {
+      cursor = "text";
+    } else if (hover instanceof ButtonObject) {
       cursor = this.hand(hover) ? "pointer" : "default";
     } else {
       for (let o = hover; o && o !== this.stage; o = o.parent) {
