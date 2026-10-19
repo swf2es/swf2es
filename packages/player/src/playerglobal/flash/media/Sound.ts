@@ -7,6 +7,7 @@ import type { Sound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { SoundCharacter } from "../../../display/timeline.js";
 import type { ExtractedSamples, SoundMix } from "../../../media/audio.js";
+import { startDynamicSound } from "../../../media/dynamic-sound.js";
 import {
   EXTRACT_RATE,
   type ExtractSource,
@@ -590,7 +591,12 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
     play(startTime: Value, loops: Value, transform: Value): Value {
       const sound = stateOf(this as AsObject);
-      if (!sound.character && !sound.bytes && !sound.abort) {
+      const dynamic =
+        !sound.character &&
+        !sound.bytes &&
+        !sound.abort &&
+        ((this as AsObject).$listeners?.get("sampleData")?.length ?? 0) > 0;
+      if (!dynamic && !sound.character && !sound.bytes && !sound.abort) {
         return null;
       }
 
@@ -623,7 +629,11 @@ export function soundNatives(s: Scripting): avm2.Natives {
       }
 
       active.add(channel);
-      startAudio(state);
+      if (dynamic) {
+        startDynamicSound(s, this as AsObject, state);
+      } else {
+        startAudio(state);
+      }
 
       return channel;
     }

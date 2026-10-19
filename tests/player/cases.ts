@@ -8416,6 +8416,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "dynamic-sound",
+    swf: (abc) => bare(abc, 1, "DynamicSound"),
+    script: "DynamicSound",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "sound-extract",
     build: extractSounds("SoundExtract"),
     frames: 3,
