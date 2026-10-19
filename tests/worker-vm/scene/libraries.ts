@@ -96,10 +96,15 @@ export function readSharedLibrary(asset: SharedLibrary): Library {
 }
 
 export class SceneLibraries {
+  private version = 0;
   private readonly libraries = new Map<number, Library>();
   private readonly used = new Set<number>();
   private readonly references = new WeakMap<object, AssetRef[]>();
   private readonly glyphs = new WeakMap<Glyph, number>();
+
+  get revision(): number {
+    return this.version;
+  }
 
   add(id: number, library: Library): void {
     if (!Number.isSafeInteger(id) || id <= 0 || this.used.has(id)) {
@@ -108,6 +113,7 @@ export class SceneLibraries {
 
     this.used.add(id);
     this.libraries.set(id, library);
+    this.version++;
     for (const [character, c] of library.characters) {
       const ref = { library: id, character };
       this.index(c, ref);
@@ -145,7 +151,9 @@ export class SceneLibraries {
       }
     }
 
-    this.libraries.delete(id);
+    if (this.libraries.delete(id)) {
+      this.version++;
+    }
   }
 
   ref(asset: object): AssetRef {

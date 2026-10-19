@@ -53,6 +53,12 @@ are copied into receiver-owned storage, so a frame can be released before an
 asynchronous draw. Returning a lease does not acknowledge that it was rendered.
 The slot protocol uses no main-thread waits or spin loops.
 
+Unchanged text and filter records are compared with their previously validated,
+owned numeric copies before parsing. Matching records reuse the retained state;
+changed records are parsed and validated before any graph updates. Text font
+references are revalidated after the library registry changes. Reuse adds no
+history of old frames or additional copies of these records.
+
 ```ts
 const writer = new FrameWriter(frames);
 const snapshot = new SceneSnapshot(assets);
@@ -94,6 +100,8 @@ payloads before rendering and compares every output pixel, including two
 libraries with the same character ID. The Node checks cover retained state,
 bitmap aliases, glyph references, malformed-frame recovery, subtree roots,
 failed publication, backpressure, payload reuse and delayed morph receipts.
+They also check changed and truncated retained records, and font retirement
+after an identical text frame.
 CI runs these Node and software-renderer checks explicitly. The hardware-GPU
 comparison remains a local check; no experiment is added to the production host.
 
@@ -101,8 +109,9 @@ comparison remains a local check; no experiment is added to the production host.
 encoding CPU time. Use the same node/frame counts and repeat on both revisions
 under comparable machine load. These timings do not measure FPS, GPU
 presentation, input latency or cold-load responsiveness. Complete snapshots
-still walk every node and rebuild text/filter records; this is not a diff
-protocol and does not establish a general worker performance benefit.
+still walk every node and compare retained text/filter values; changed records
+are rebuilt. This is not a diff protocol or an allocation-free pipeline, and
+does not establish a general worker performance benefit.
 
 The fixed 27-value node header uses indexed writes, avoiding one temporary
 numeric array per node. In a local CPU comparison, two encoders processed the
@@ -114,3 +123,14 @@ CPU saving of 16.1%. Background load varied, so absolute times and full-game
 frame pacing are not inferred from this comparison. Six subsequent live VM
 replays did not establish a material encoding or pacing gain. The synthetic command
 above provides a redistributable workload for comparisons across revisions.
+
+A separate decoder comparison applied the same sixteen captured snapshots
+(about 7,500 nodes) to two retained mirrors, alternating batch order. Skipping
+unchanged text/filter parsing was faster in 30 of 32 paired batches, with a
+median paired CPU saving of 24.5%. This is a component measurement without VM
+execution or rendering, not an FPS or garbage-collection pause measurement.
+Six subsequent hardware-GPU replay runs used a benchmark-only 60 Hz VM target
+and preparation before display. Median per-run decoding fell from 5.74 to
+5.45 ms, but draw submissions fell from 56.3 to 54.2/s and draw-gap p95 rose
+from 23.4 to 27.7 ms. System load varied. The component saving does not justify
+promoting the candidate as a smoother playback mode.

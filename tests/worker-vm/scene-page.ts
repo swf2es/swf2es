@@ -99,7 +99,10 @@ export async function runSceneTransport() {
       }
       fixture.step(frame);
       pictures.direct.push(capture(fixture.root));
-      const local = localMirror.apply(buffer.subarray(0, encoder.encode(fixture.root, buffer)));
+      const localBytes = buffer.subarray(0, encoder.encode(fixture.root, buffer));
+      localMirror.apply(localBytes);
+      // Draw after an identical record too, so the retained parsing path is covered.
+      const local = localMirror.apply(localBytes);
       buffer.fill(0xee);
       pictures.local.push(capture(local));
       const packet = reader.take();
@@ -111,6 +114,7 @@ export async function runSceneTransport() {
         if (packet.sequence !== sequence) {
           throw new Error("scene comparison read the wrong frame");
         }
+        mirror.apply(packet.bytes);
         root = mirror.apply(packet.bytes);
       } finally {
         packet.release();

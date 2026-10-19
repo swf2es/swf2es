@@ -177,3 +177,58 @@ test("a snapshot subtree may be a leaf rather than a container", () => {
     mirror.dispose();
   }
 });
+
+test("retained text and filters still reject changed or truncated records without mutating", () => {
+  const fixture = sceneFixture(),
+    encoder = new SceneSnapshot(fixture.assets),
+    mirror = new SceneMirror(fixture.assets);
+  fixture.text.filters = [filterDefaults("glow")];
+  const buffer = new Uint8Array(new SharedArrayBuffer(131072));
+  const packet = () => buffer.subarray(0, encoder.encode(fixture.text, buffer));
+  const root = mirror.apply(packet());
+  assert.ok(root instanceof TextObject);
+  const layout = root.layout,
+    filters = root.filters;
+  assert.equal(mirror.apply(packet()), root);
+  assert.equal(root.layout, layout);
+  assert.equal(root.filters, filters);
+
+  let bytes = packet();
+  const data = new Float64Array(buffer.buffer);
+  data[data[2 + 22]] = 0;
+  assert.throws(() => mirror.apply(bytes), /invalid vector snapshot filter count/);
+  assert.equal(root.layout, layout);
+  assert.equal(root.filters, filters);
+
+  bytes = packet();
+  data[data[2 + 24] + 9] = 1.5;
+  assert.throws(() => mirror.apply(bytes), /invalid scene snapshot text scroll/);
+  assert.equal(root.layout, layout);
+  assert.equal(root.filters, filters);
+  bytes = packet();
+  assert.throws(() => mirror.apply(bytes.subarray(0, bytes.length - 8)), /scene snapshot/);
+
+  fixture.text.model.setText("BA");
+  fixture.text.filters = [filterDefaults("colorMatrix")];
+  assert.equal(mirror.apply(packet()), root);
+  assert.equal(root.model.text, "BA");
+  assert.deepEqual(root.filters, fixture.text.filters);
+  buffer.fill(0xee);
+  assert.equal(root.model.text, "BA");
+  assert.deepEqual(root.filters, fixture.text.filters);
+});
+
+test("identical text revalidates embedded fonts after a library is retired", () => {
+  const fixture = sceneFixture(),
+    encoder = new SceneSnapshot(fixture.assets),
+    mirror = new SceneMirror(fixture.assets);
+  const buffer = new Uint8Array(new SharedArrayBuffer(131072));
+  const bytes = buffer.subarray(0, encoder.encode(fixture.text, buffer));
+  const root = mirror.apply(bytes);
+  assert.ok(root instanceof TextObject);
+  const layout = root.layout;
+  assert.equal(mirror.apply(bytes), root);
+  fixture.assets.drop(1);
+  assert.throws(() => mirror.apply(bytes), /invalid worker scene font/);
+  assert.equal(root.layout, layout);
+});

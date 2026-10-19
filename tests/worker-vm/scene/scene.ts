@@ -297,6 +297,7 @@ interface MirrorNode {
 }
 
 export class SceneMirror {
+  private assetRevision = -1;
   private readonly nodes = new Map<number, MirrorNode>();
   private readonly seen = new Set<number>();
   private readonly rows: DisplayObject[] = [];
@@ -405,10 +406,20 @@ export class SceneMirror {
         this.masks.add(mask);
       }
 
+      const previous = this.nodes.get(id);
+      const retained =
+        previous?.kind === kind && previous.character === character && previous.library === library
+          ? previous
+          : undefined;
       if (offset !== 0) {
-        const decoded = readFilters(data, offset);
-        end = decoded.end;
-        filters.push(decoded.filters);
+        if (retained && matchesRecord(retained.filterValues, data, offset)) {
+          end = offset + retained.filterValues.length;
+          filters.push(EMPTY_FILTERS);
+        } else {
+          const decoded = readFilters(data, offset);
+          end = decoded.end;
+          filters.push(decoded.filters);
+        }
       } else {
         filters.push(EMPTY_FILTERS);
       }
@@ -421,10 +432,21 @@ export class SceneMirror {
         }
 
         if (kind === TEXT) {
-          const decoded = readText(data, content, this.assets);
-          texts.push(decoded.record);
+          // Identical owned values were validated already. Font references must
+          // still be checked again after a library is registered or retired.
+          if (
+            retained &&
+            this.assetRevision === this.assets.revision &&
+            matchesRecord(retained.textValues, data, content)
+          ) {
+            end = content + retained.textValues.length;
+            texts.push(null);
+          } else {
+            const decoded = readText(data, content, this.assets);
+            texts.push(decoded.record);
+            end = decoded.end;
+          }
           bitmaps.push(null);
-          end = decoded.end;
         } else if (kind === MORPH) {
           if (
             content >= data.length ||
@@ -740,8 +762,17 @@ export class SceneMirror {
     }
 
     this.bitmaps.finish();
+    this.assetRevision = this.assets.revision;
     return rows[0];
   }
+}
+
+function matchesRecord(values: Float64Array, data: Float64Array, start: number): boolean {
+  return (
+    values.length > 0 &&
+    start + values.length <= data.length &&
+    sameValuesAt(values, data, start, start + values.length)
+  );
 }
 
 function sameValuesAt(
