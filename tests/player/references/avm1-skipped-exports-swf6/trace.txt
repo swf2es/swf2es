@@ -1,0 +1,8 @@
+first:1
+future:undefined
+after:movieclip
+init one
+init two
+land:2:movieclip
+back:1:movieclip
+past:2

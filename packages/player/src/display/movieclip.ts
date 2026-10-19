@@ -367,6 +367,12 @@ export class MovieClip extends Container {
     const target = Math.max(1, Math.min(frame, this.totalFrames));
     const from = this.currentFrame;
     const rewind = target < from;
+
+    // A goto past the last frame reads its definitions without queueing its frame actions (adl).
+    if (target !== from) {
+      this.library.avm1?.skipped(this, rewind ? 1 : from + 1, target - (target === frame ? 1 : 0));
+    }
+
     // A goto stops the stream, and the frame it lands on starts it again
     // if the clip plays, as Ruffle's run_goto has it; one to the frame it is
     // on is nothing to it, as Ruffle's goto_frame_now has it.

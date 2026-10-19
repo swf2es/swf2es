@@ -11,6 +11,7 @@ import { createCodegen } from "@swf2es/codegen";
 import { Avm1, type Avm1Options } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
+import { skippedExports, skippedExportsTrace } from "../../../avm1-exports.ts";
 import { flashAssembler, script } from "../../../avm1-script.ts";
 import * as w from "../../../swf-writer.ts";
 import { files, movie as movieNet, play as playNet } from "./network.ts";
@@ -158,6 +159,15 @@ test("a DoInitAction runs before its frame's DoActions, once a sprite, its pool 
   ]);
 
   assert.deepEqual((await play(swf, 3)).lines, ["init", "undefined", "undefined"]);
+});
+
+test("a goto processes skipped exports and initializations, replaying exports on a rewind", async () => {
+  for (const version of [6, 7]) {
+    const { lines, errors } = await play(skippedExports(version), 4);
+
+    assert.deepEqual(errors, []);
+    assert.deepEqual(lines, skippedExportsTrace);
+  }
 });
 
 test("values trace as AVM1 writes them, by version", async () => {

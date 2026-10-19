@@ -117,6 +117,8 @@ export interface TimelineActions {
   placing(display: DisplayObject, place: Place): void;
   made(display: DisplayObject): void;
   entered(clip: MovieClip, frame: number): void;
+  /** A goto's skipped frames: their exports and initializations, without their frame actions. */
+  skipped(clip: MovieClip, first: number, last: number): void;
   actions(clip: MovieClip, tag: number): void;
   occupied(depth: number): void;
   /**

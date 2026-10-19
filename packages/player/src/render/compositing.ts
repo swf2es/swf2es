@@ -127,7 +127,8 @@ export class Compositing {
 
   /** Blend `node` in `direct` by the GPU's own blending, or by its blend filter for null. */
   private blendDirectly(node: Node, direct: BLEND_MODES | null, refilled: boolean): void {
-    if (direct === node.directBlend && !(direct && refilled)) {
+    // A retired layer must be detached even if the direct blend stays null.
+    if (direct === node.directBlend && !refilled) {
       return;
     }
 

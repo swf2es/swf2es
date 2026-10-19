@@ -14,6 +14,7 @@ import {
   type SimpleAction,
   TryFlag,
 } from "../avm1-assembler.ts";
+import { skippedExports } from "../avm1-exports.ts";
 import { flashAssembler, script } from "../avm1-script.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
@@ -6652,6 +6653,24 @@ function textAdvancedDraw(abc: Uint8Array): Uint8Array {
   });
 }
 
+function textAdvancedMirrored(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 360,
+    height: 160,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      stemFont(1),
+      w.doAbc(abc, "TextAdvancedMirrored"),
+      w.symbolClass([[0, "TextAdvancedMirrored"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text drawn in Probe (scripts/TextDraw.as).
 function textDraw(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -6957,6 +6976,44 @@ function morphs(): Uint8Array {
       w.end(),
     ],
   });
+}
+
+// A cached blend layer retired after an erase makes the stage nonopaque.
+function blendLayerRetirement(): Uint8Array {
+  const tags = [
+    w.fileAttributes(true),
+    w.backgroundColor(0xffffff),
+    square(1, 0x336699, 5000),
+    square(2, 0xff3300, 600),
+    square(3, 0x33ff66, 600),
+    w.sprite(4, 1, [
+      w.place({ depth: 1, character: 2 }),
+      w.place({ depth: 2, character: 3, matrix: { tx: 300, ty: 300 } }),
+      w.showFrame(),
+      w.end(),
+    ]),
+    w.place({ depth: 1, character: 1 }),
+    w.place({ depth: 2, character: 4, blendMode: 3, matrix: { tx: 400, ty: 400 } }),
+    w.place({ depth: 3, character: 4, blendMode: 9, matrix: { tx: 2200, ty: 400 } }),
+    w.showFrame(),
+  ];
+  for (let frame = 1; frame <= 3; frame++) {
+    if (frame === 1) {
+      // Offscreen so it changes the stage's blend policy without covering art.
+      tags.push(w.place({ depth: 4, character: 2, blendMode: 12, matrix: { tx: -2000 } }));
+    } else if (frame === 3) {
+      tags.push(w.remove(4));
+    }
+
+    tags.push(
+      w.place({ depth: 2, move: true, matrix: { tx: 400 + frame * 20, ty: 400 } }),
+      w.place({ depth: 3, move: true, matrix: { tx: 2200 + frame * 20, ty: 400 } }),
+      w.showFrame(),
+    );
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 200, height: 100, frameRate: 24, frameCount: 4, tags });
 }
 
 // A pale band in overlay drifting a quarter pixel each way a frame over a
@@ -8521,6 +8578,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "text-advanced-mirrored",
+    swf: textAdvancedMirrored,
+    script: "TextAdvancedMirrored",
+    frames: 1,
+    capture: [1],
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     name: "text-indent",
     swf: textIndent,
     script: "TextIndent",
@@ -8575,6 +8641,14 @@ export const cases: PlayerCase[] = [
     // 180 channels in all.
     tolerance: 3,
     maxOutliers: 200,
+  },
+  {
+    name: "blend-layer-retirement",
+    swf: blendLayerRetirement(),
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    tolerance: 3,
+    maxOutliers: 0,
   },
   {
     name: "blend-drift",
@@ -9391,6 +9465,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[6, 7].map(
+    (version): PlayerCase => ({
+      name: `avm1-skipped-exports-swf${version}`,
+      swf: skippedExports(version),
+      traced: true,
+      frames: 4,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   ...[6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-timers-swf${version}`,

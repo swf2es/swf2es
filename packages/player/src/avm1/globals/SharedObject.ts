@@ -83,7 +83,7 @@ function deserialize(bytes: Uint8Array, realm: avm1.Realm, version: number): Obj
     return null;
   }
 
-  const reader = new Reader(bytes, realm, version, true);
+  const reader = new Reader(bytes, realm, version, true, Infinity);
   const data = realm.newObject(version);
   try {
     reader.at = 16;
