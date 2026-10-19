@@ -1365,7 +1365,10 @@ does:
   registers after its frame's places is theirs. An attachMovie of a
   sprite whose `#initclip` has not run attaches it all the same. An
   ExportAssets name is found as the root reaches its frame (the corpus's
-  `attach_movie_export_not_yet_run`).
+  `attach_movie_export_not_yet_run`). A goto registers the exports and
+  queues the initializations of the frames it skips, even one beyond the
+  last frame; their DoAction blocks do not run. A rewind replays exports
+  from frame 1, while a sprite's initialization still runs only once (adl).
 - A clip a script makes, by `attachMovie`, `duplicateMovieClip` (with the
   source's matrix, colour and clip actions) or `createEmptyMovieClip`, is
   placed, its first frame entered and its `load` and first frame's actions
