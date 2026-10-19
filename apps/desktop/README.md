@@ -62,6 +62,9 @@ own installer. A relative path is taken from the directory pnpm was run in.
 - **Sockets** (`flash.net.Socket`) connect over TCP through the main
   process. The first connection to each server asks: Allow Once, Always
   Allow for This SWF (remembered in `settings.json`) or Deny.
+- **File dialogs** requested by AS2 or AS3 FileReference use native open
+  and save dialogs after a click or key. Uploads and downloads use the
+  same network permissions as other data requests.
 - **Pages** a SWF with the network opens with navigateToURL go to
   the system's browser, http and https only, one for each click or key in
   the window.

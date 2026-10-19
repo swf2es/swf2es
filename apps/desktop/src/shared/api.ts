@@ -79,7 +79,27 @@ export interface DesktopNetwork {
   loadPolicyFile(url: string): void;
 }
 
+export interface DesktopFile {
+  id: number;
+  name: string;
+  size: number;
+  modificationDate: number;
+  creationDate: number;
+}
+
+export interface DesktopFiles {
+  browse(
+    filters: { description: string; extension: string }[],
+    multiple: boolean,
+  ): Promise<DesktopFile[]>;
+  save(name: string): Promise<{ id: number; name: string } | null>;
+  read(id: number): Promise<Uint8Array>;
+  write(id: number, bytes: Uint8Array): Promise<void>;
+  release(id: number): void;
+}
+
 export interface DesktopApi {
+  files: DesktopFiles;
   /** The page has loaded and listens: what it is to show. */
   start(): Promise<StartState>;
   /** The shell opened a SWF: play it in place of what plays. */
