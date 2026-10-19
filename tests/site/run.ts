@@ -172,6 +172,82 @@ async function check(): Promise<void> {
           },
         ],
         [
+          "gameplay keys reach the focused player without scrolling the page",
+          async () => {
+            await value(`(() => {
+              document.body.style.minHeight = "3000px";
+              document.body.style.minWidth = "2000px";
+              document.getElementById("player").focus({ preventScroll: true });
+              scrollTo({ left: 300, top: 300, behavior: "instant" });
+              return true;
+            })()`);
+            const position = () => value<number[]>("[scrollX, scrollY]");
+            assert.deepEqual(await position(), [300, 300]);
+            const handled = () =>
+              value<number>("document.getElementById('player').player.keyboard.handled");
+            const press = async (key: string, code: string, keyCode: number) => {
+              const before = await handled();
+              for (const type of ["keyDown", "keyUp"]) {
+                await send("Input.dispatchKeyEvent", {
+                  type,
+                  key,
+                  code,
+                  windowsVirtualKeyCode: keyCode,
+                  ...(type === "keyDown" && key === " " ? { text: " " } : {}),
+                });
+              }
+
+              await new Promise((done) => setTimeout(done, 200));
+              return (await handled()) - before;
+            };
+            try {
+              const keys: [string, string, number][] = [
+                ["ArrowDown", "ArrowDown", 40],
+                ["ArrowUp", "ArrowUp", 38],
+                ["ArrowRight", "ArrowRight", 39],
+                ["ArrowLeft", "ArrowLeft", 37],
+                [" ", "Space", 32],
+                ["PageDown", "PageDown", 34],
+                ["PageUp", "PageUp", 33],
+                ["End", "End", 35],
+                ["Home", "Home", 36],
+              ];
+              for (const [key, code, keyCode] of keys) {
+                assert.equal(await press(key, code, keyCode), 2, `${code} reaches the SWF`);
+                assert.deepEqual(await position(), [300, 300], `${code} must not scroll`);
+              }
+
+              // Browser shortcuts keep their defaults, and Shift+Space stays a gameplay key.
+              assert.deepEqual(
+                await value(`(() => {
+                  const player = document.getElementById("player");
+                  return ["ctrlKey", "metaKey", "altKey", "shiftKey"].map(modifier => {
+                    const e = new KeyboardEvent("keydown", {
+                      key: " ", keyCode: 32, bubbles: true, cancelable: true, [modifier]: true
+                    });
+                    player.dispatchEvent(e);
+                    return e.defaultPrevented;
+                  });
+                })()`),
+                [false, false, false, true],
+              );
+
+              await value(`document.getElementById("url").focus({ preventScroll: true })`);
+              assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
+              await value(`document.getElementById("report").focus({ preventScroll: true })`);
+              assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
+              await until("scrollY > 300", 5000);
+            } finally {
+              await value(`(() => {
+                document.body.style.minHeight = "";
+                document.body.style.minWidth = "";
+                scrollTo({ left: 0, top: 0, behavior: "instant" });
+                return true;
+              })()`);
+            }
+          },
+        ],
+        [
           "the report link carries the SWF's facts and the last error",
           async () => {
             const href = await value<string>(
