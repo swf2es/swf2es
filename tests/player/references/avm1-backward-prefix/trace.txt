@@ -1,0 +1,5 @@
+outside é
+callback
+42
+conditional prefix
+done

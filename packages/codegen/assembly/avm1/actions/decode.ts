@@ -8,6 +8,8 @@
 // says, whatever the operands took; a nested body's size adds to that
 // length; a Try shorter than its header is empty; and a ConstantPool keeps
 // the strings it could read.
+
+import { Offsets } from "./offsets";
 import * as ops from "./opcodes";
 
 /** The action decoded as Flash reads it. */
@@ -70,19 +72,37 @@ export class Action {
   region: i32 = -1;
 
   constructor(public offset: i32) {}
+
+  reset(offset: i32): void {
+    this.offset = offset;
+    this.opcode = 0;
+    this.error = ERROR_None;
+    this.next = 0;
+    this.a = 0;
+    this.b = 0;
+    this.target = 0;
+    this.first = 0;
+    this.count = 0;
+    this.s0 = 0;
+    this.s1 = 0;
+    this.s2 = 0;
+    this.s3 = 0;
+    this.skips = false;
+    this.region = -1;
+  }
 }
 
 /**
  * A block's actions, decoded on demand, each offset once: control may reach
  * an offset inside another action, and from several regions. Strings are
- * ranges of the block's bytes, without their zero; what they read as
+ * ranges of the SWF's bytes, without their zero; what they read as
  * depends on the SWF's version, which the emitter knows.
  */
 @final
 export class Actions {
   actions: Action[] = [];
   /** By offset, the index of the action there plus one; 0 before it is decoded. */
-  at: StaticArray<i32>;
+  at: Offsets;
   stringStart: i32[] = [];
   stringLength: i32[] = [];
   /** A DefineFunction2 parameter's register, 0 for none; 0 for other strings. */
@@ -104,24 +124,65 @@ export class Actions {
   private pos: i32 = 0;
   private failed: bool = false;
 
-  constructor(public bytes: Uint8Array) {
-    this.at = new StaticArray<i32>(bytes.length);
+  private size: i32;
+  private reusable: Action[] = [];
+
+  constructor(
+    public bytes: Uint8Array,
+    public start: i32 = 0,
+    length: i32 = -1,
+  ) {
+    const size = length < 0 ? bytes.length - start : length;
+    this.size = size;
+    this.at = new Offsets(size);
+  }
+
+  reset(bytes: Uint8Array, start: i32, length: i32): void {
+    this.bytes = bytes;
+    this.start = start;
+    this.size = length;
+    this.at.reset(length);
+
+    this.actions.length = 0;
+    this.stringStart.length = 0;
+    this.stringLength.length = 0;
+    this.stringRegister.length = 0;
+    this.valueType.length = 0;
+    this.valueNumber.length = 0;
+    this.valueIndex.length = 0;
+
+    this.read = 0;
+    this.pos = 0;
+    this.failed = false;
   }
 
   get length(): i32 {
-    return this.bytes.length;
+    return this.size;
   }
 
-  /** The action at `offset`, from 0 to the block's length, excluded. */
+  get minimum(): i32 {
+    return -this.start;
+  }
+
+  /** The action at `offset`, from `minimum` to the block's length, excluded. */
   decode(offset: i32): Action {
-    const known = this.at[offset];
+    const known = this.at.get(offset);
     if (known !== 0) {
       return this.actions[known - 1];
     }
 
-    const action = new Action(offset);
+    const index = this.actions.length;
+    let action: Action;
+    if (index < this.reusable.length) {
+      action = this.reusable[index];
+      action.reset(offset);
+    } else {
+      action = new Action(offset);
+      this.reusable.push(action);
+    }
+
     this.operands(action);
-    this.at[offset] = this.actions.length + 1;
+    this.at.set(offset, this.actions.length + 1);
     this.actions.push(action);
     return action;
   }
@@ -147,7 +208,7 @@ export class Actions {
 
   private operands(action: Action): void {
     const end = this.length;
-    const opcode = this.bytes[action.offset];
+    const opcode = this.bytes[this.start + action.offset];
     action.opcode = opcode;
     if (opcode < 0x80) {
       action.next = action.offset + 1;
@@ -397,7 +458,7 @@ export class Actions {
     }
 
     this.pos = p + 1;
-    return <u32>this.bytes[p];
+    return <u32>this.bytes[this.start + p];
   }
 
   private u16(): u32 {
@@ -408,7 +469,8 @@ export class Actions {
     }
 
     this.pos = p + 2;
-    return <u32>this.bytes[p] | ((<u32>this.bytes[p + 1]) << 8);
+    const at = this.start + p;
+    return <u32>this.bytes[at] | ((<u32>this.bytes[at + 1]) << 8);
   }
 
   private i16(): i32 {
@@ -424,11 +486,12 @@ export class Actions {
 
     this.pos = p + 4;
     const bytes = this.bytes;
+    const at = this.start + p;
     return (
-      <u32>bytes[p] |
-      ((<u32>bytes[p + 1]) << 8) |
-      ((<u32>bytes[p + 2]) << 16) |
-      ((<u32>bytes[p + 3]) << 24)
+      <u32>bytes[at] |
+      ((<u32>bytes[at + 1]) << 8) |
+      ((<u32>bytes[at + 2]) << 16) |
+      ((<u32>bytes[at + 3]) << 24)
     );
   }
 
@@ -440,7 +503,7 @@ export class Actions {
     const from = this.pos;
     const bytes = this.bytes;
     let p = from;
-    while (p < this.length && bytes[p] !== 0) {
+    while (p < this.length && bytes[this.start + p] !== 0) {
       p++;
     }
 
@@ -451,7 +514,7 @@ export class Actions {
     }
 
     const index = this.stringStart.length;
-    this.stringStart.push(from);
+    this.stringStart.push(this.start + from);
     this.stringLength.push(p - from);
     this.stringRegister.push(0);
     this.pos = p + 1;

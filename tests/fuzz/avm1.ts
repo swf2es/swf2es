@@ -252,9 +252,12 @@ const MAX_IMPORTS = 4000;
 let imported = 0;
 
 /** What is wrong with the block's module at `version`, or null. */
-async function emitted(block: Uint8Array, version: number): Promise<string | null> {
-  range[1][0] = block.length;
-  const bytes: Uint8Array = testing.actionsModuleBytes(block, range[0], range[1], version, true);
+async function emitted(block: Uint8Array, version: number, start = 0): Promise<string | null> {
+  range[0][0] = start;
+  range[1][0] = block.length - start;
+  const offsets = start ? Int32Array.of(0, start) : range[0];
+  const lengths = start ? Int32Array.of(block.length, block.length - start) : range[1];
+  const bytes: Uint8Array = testing.actionsModuleBytes(block, offsets, lengths, version, true);
   let module: string;
   try {
     module = utf8.decode(bytes);
@@ -279,8 +282,18 @@ async function emitted(block: Uint8Array, version: number): Promise<string | nul
   }
 
   const entry: string = testing.actionsModuleEntries();
-  if (testing.actionsEmitEach(block, range[0], range[1], version, "0", false) !== entry) {
-    return "the block compiled alone differs from its entry";
+  const parts = entry.split("\u0002");
+  const order = start ? [1, 0, 1] : [0];
+  const expected = order
+    .map((i) => parts[i])
+    .join("\u0002")
+    .concat("\u0002");
+  for (const reuse of [false, true]) {
+    if (
+      testing.actionsEmitEach(block, offsets, lengths, version, order.join(","), reuse) !== expected
+    ) {
+      return `the block compiled alone differs from its entry (reuse ${reuse})`;
+    }
   }
 
   return null;
@@ -309,6 +322,14 @@ for (let k = 0; k < caseCount; k++) {
     const why = await emitted(block, k % 2 ? 5 : 10);
     if (why) {
       fail(block, why);
+    }
+
+    if (k % 4 === 0 && block.length < 2048) {
+      const start = below(block.length + 1);
+      const prefix = await emitted(block, k % 2 ? 5 : 10, start);
+      if (prefix) {
+        fail(block, `with prefix ${start}: ${prefix}`);
+      }
     }
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.

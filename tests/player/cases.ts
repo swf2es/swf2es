@@ -14,6 +14,7 @@ import {
   type SimpleAction,
   TryFlag,
 } from "../avm1-assembler.ts";
+import { backwardSwf } from "../avm1-backward.ts";
 import { skippedExports } from "../avm1-exports.ts";
 import { flashAssembler, script } from "../avm1-script.ts";
 import * as w from "../swf-writer.ts";
@@ -9310,6 +9311,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[false, true].map(
+    (distant): PlayerCase => ({
+      name: distant ? "avm1-backward-distant" : "avm1-backward-prefix",
+      swf: backwardSwf(distant),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   ...[4, 5, 6, 7, 8, 10].map(
     (version): PlayerCase => ({
       name: `avm1-operators-swf${version}`,
