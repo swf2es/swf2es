@@ -11,7 +11,12 @@ export interface DynamicChannel {
   complete(): boolean;
 }
 
-export function startDynamicSound(s: Scripting, owner: avm2.AsObject, state: ChannelState): void {
+export function startDynamicSound(
+  s: Scripting,
+  owner: avm2.AsObject,
+  state: ChannelState,
+  onFailure: (error: unknown) => void,
+): void {
   const data = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray"));
   const bytes = avm2.bytesOf(s.rt, data);
   let generated = 0;
@@ -19,6 +24,7 @@ export function startDynamicSound(s: Scripting, owner: avm2.AsObject, state: Cha
   let finished = false;
   let requesting = false;
   let ready = false;
+  let starting = true;
   let stream: StreamingSound | undefined;
   const position = () =>
     stream?.positionMs ?? Math.min((generated * 1000) / 44100, s.timers.now - state.started);
@@ -39,10 +45,12 @@ export function startDynamicSound(s: Scripting, owner: avm2.AsObject, state: Cha
     }
 
     const frames = Math.floor(bytes.position / 8);
-    if (frames > 8192) {
+    if (frames > 8192 || bytes.position > bytes.length) {
       finished = true;
       stream?.finish();
-      s.reportUncaught(s.rt.error("RangeError", 2004));
+      s.reportUncaught(
+        frames > 8192 ? s.rt.error("RangeError", 2004) : s.rt.error("flash.errors::EOFError", 2030),
+      );
       return;
     }
 
@@ -74,6 +82,13 @@ export function startDynamicSound(s: Scripting, owner: avm2.AsObject, state: Cha
       if (generated - (position() * 44100) / 1000 < 8192) {
         request();
       }
+    } catch (error) {
+      if (starting) {
+        throw error;
+      }
+
+      finished = true;
+      onFailure(error);
     } finally {
       requesting = false;
     }
@@ -99,4 +114,5 @@ export function startDynamicSound(s: Scripting, owner: avm2.AsObject, state: Cha
 
   // AIR applies startTime to later request positions, after its synchronous initial fill.
   requestOffset = Math.floor(state.start * 44.1);
+  starting = false;
 }

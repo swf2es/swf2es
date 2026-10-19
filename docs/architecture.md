@@ -4541,7 +4541,8 @@ play, then refills against the audio device's consumed samples. Each channel
 keeps its own ByteArray, resetting its position before each callback while
 preserving its contents and endian, as AIR does. The write position counts
 the supplied frames: fewer than 2048 ends the stream after those samples,
-and more than 8192 reports RangeError 2004. Sample buffers are copied before
+and more than 8192 reports RangeError 2004. A write cursor beyond the
+logical data length reports EOFError 2030 and ends the stream. Sample buffers are copied before
 scripts can reuse them. The sound's `length` stays zero; its channel's position
 tracks consumed samples and freezes on stop.
 
@@ -4550,7 +4551,9 @@ or a conversion to 16-bit samples. The browser schedules consecutive Web Audio
 buffers on one device clock and mixer, with bounded buffering and a refill
 timer independent of the SWF's frame rate. Completion waits for queued audio
 to drain and is dispatched on a player frame. Stop, stopAll and destruction
-cancel refills and queued sources. A host without streaming keeps script-visible
+cancel refills and queued sources. Failed startup or refill releases the channel
+and its device resources, even if stopping a failed device also throws.
+A host without streaming keeps script-visible
 state and sample requests on the player clock, without emitting this audio.
 
 `SoundMixer.soundTransform` is one transform per player, stored in

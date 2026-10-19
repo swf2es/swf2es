@@ -630,7 +630,30 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
       active.add(channel);
       if (dynamic) {
-        startDynamicSound(s, this as AsObject, state);
+        const failed = () => {
+          active.delete(channel);
+          try {
+            state.stoppedAt = positionOf(s, state);
+          } catch {
+            state.stoppedAt = state.start;
+          }
+          state.stopped = true;
+
+          try {
+            state.playing?.stop();
+          } catch {
+            // A failing device's stop must not mask the original failure or retain the channel.
+          }
+        };
+        try {
+          startDynamicSound(s, this as AsObject, state, (error) => {
+            failed();
+            s.reportUncaught(error);
+          });
+        } catch (error) {
+          failed();
+          throw error;
+        }
       } else {
         startAudio(state);
       }

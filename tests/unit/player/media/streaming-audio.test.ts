@@ -146,3 +146,97 @@ test("stopping cancels pending buffers and refill timers; underruns do not count
     stream.stop();
   }
 });
+
+test("a failed device start disconnects its source without leaving a scheduled buffer", () => {
+  const h = context();
+  const create = h.ctx.createBufferSource;
+  const failure = new Error("device start failed");
+  h.ctx.createBufferSource = () => {
+    const source = create();
+    source.start = () => {
+      throw failure;
+    };
+    return source;
+  };
+  let released = 0;
+  const stream = browserStream(
+    h.ctx as unknown as Parameters<typeof browserStream>[0],
+    mixOf(null),
+    () => {},
+    () => released++,
+  );
+  try {
+    assert.throws(
+      () => stream.append([new Float32Array(2048), new Float32Array(2048)]),
+      (error) => error === failure,
+    );
+    assert.equal(h.sources[0].onended, null);
+    stream.stop();
+    assert.equal(h.sources[0].stops, 0);
+    assert.equal(h.disconnected(), 7);
+    assert.equal(released, 1);
+  } finally {
+    stream.stop();
+  }
+});
+
+test("stream startup errors cancel the refill timer and disconnect its graph", async () => {
+  const h = context();
+  const failure = new Error("device resume failed");
+  h.ctx.resume = () => {
+    throw failure;
+  };
+  let requests = 0;
+  let released = 0;
+  assert.throws(
+    () =>
+      browserStream(
+        h.ctx as unknown as Parameters<typeof browserStream>[0],
+        mixOf(null),
+        () => requests++,
+        () => released++,
+      ),
+    (error) => error === failure,
+  );
+  await new Promise((done) => setTimeout(done, 40));
+  assert.equal(requests, 0);
+  assert.equal(released, 0);
+  assert.equal(h.disconnected(), 6);
+});
+
+test("one source failing to stop cannot retain other sources or the refill timer", async () => {
+  const h = context();
+  const create = h.ctx.createBufferSource;
+  h.ctx.createBufferSource = () => {
+    const source = create();
+    source.stop = () => {
+      source.stops++;
+      throw new Error("device stop failed");
+    };
+    return source;
+  };
+  let requests = 0;
+  let released = 0;
+  const stream = browserStream(
+    h.ctx as unknown as Parameters<typeof browserStream>[0],
+    mixOf(null),
+    () => requests++,
+    () => released++,
+  );
+  try {
+    stream.append([new Float32Array(2048), new Float32Array(2048)]);
+    stream.append([new Float32Array(2048), new Float32Array(2048)]);
+    stream.stop();
+    await new Promise((done) => setTimeout(done, 40));
+    assert.deepEqual(
+      h.sources.map((source) => source.stops),
+      [1, 1],
+    );
+    assert.equal(requests, 0);
+    assert.equal(released, 1);
+    assert.equal(h.disconnected(), 8);
+    assert.equal(stream.ended, true);
+  } finally {
+    stream.stop();
+  }
+});

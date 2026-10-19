@@ -319,3 +319,141 @@ test("a host's synchronous setup refill cannot discard the initial samples", asy
     h.player.destroy();
   }
 });
+
+for (const allocated of [false, true]) {
+  test(`a sample cursor beyond logical data ends safely (${allocated ? "retained capacity" : "empty buffer"})`, async () => {
+    const d = device();
+    const h = await setup(d.audio);
+    try {
+      let requests = 0;
+      h.listen(h.sound, "sampleData", (event) => {
+        requests++;
+        const bytes = avm2.bytesOf(h.rt, h.get(event, "data"));
+        if (allocated) {
+          bytes.setLength(32768);
+          bytes.setLength(0);
+        }
+        bytes.position = 16384;
+      });
+      const channel = h.call(h.sound, "play");
+      assert.ok(channel);
+      assert.equal(d.blocks.length, 0);
+      assert.equal(d.finished(), true);
+      assert.equal(h.errors.length, 1);
+      assert.equal(h.rt.traitsOf(h.errors[0]).name, "flash.errors::EOFError");
+      assert.equal(h.get(h.errors[0], "errorID"), 2030);
+      d.refill();
+      h.player.tick();
+      d.refill();
+      assert.equal(requests, 1);
+      assert.equal(h.errors.length, 1);
+      assert.equal(liveSounds(h.s), 0);
+    } finally {
+      h.player.destroy();
+    }
+  });
+}
+
+test("failed stream creation cannot consume channel slots, and a recovered host can play", async () => {
+  const d = device();
+  const create = d.audio.stream;
+  const failure = new Error("audio device unavailable");
+  d.audio.stream = () => {
+    throw failure;
+  };
+  const h = await setup(d.audio);
+  try {
+    h.listen(h.sound, "sampleData", (event) => samples(h.rt, event, 4096));
+    for (let i = 0; i < 40; i++) {
+      assert.throws(
+        () => h.call(h.sound, "play"),
+        (error) => error === failure,
+      );
+      assert.equal(liveSounds(h.s), 0);
+    }
+    d.audio.stream = create;
+    assert.ok(h.call(h.sound, "play"));
+    assert.equal(d.blocks.length, 1);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+  }
+});
+
+for (const when of ["initial", "prefill", "refill", "finish", "position"] as const) {
+  test(`a host failure during ${when} stops the stream and cannot repeat`, async () => {
+    const d = device();
+    const create = d.audio.stream;
+    assert.ok(create);
+    const failure = new Error(`host ${when} failure`);
+    let later = false;
+    let appended = 0;
+    d.audio.stream = (mix, refill) => {
+      const stream = create(mix, refill);
+      return {
+        ...stream,
+        append(data) {
+          appended++;
+          if (
+            when === "initial" ||
+            (when === "prefill" && appended === 2) ||
+            (when === "refill" && later)
+          ) {
+            throw failure;
+          }
+          stream.append(data);
+        },
+        finish() {
+          if (when === "finish") {
+            throw failure;
+          }
+          stream.finish();
+        },
+        get positionMs() {
+          if (when === "position" && later) {
+            throw failure;
+          }
+          return stream.positionMs;
+        },
+        get ended() {
+          return stream.ended;
+        },
+      };
+    };
+    const h = await setup(d.audio);
+    try {
+      let requests = 0;
+      h.listen(h.sound, "sampleData", (event) => {
+        requests++;
+        samples(h.rt, event, when === "prefill" ? 8192 : when === "finish" && later ? 0 : 4096);
+      });
+      if (when === "initial" || when === "prefill") {
+        assert.throws(
+          () => h.call(h.sound, "play"),
+          (error) => error === failure,
+        );
+        assert.deepEqual(h.errors, []);
+      } else {
+        const channel = h.call(h.sound, "play");
+        let completed = false;
+        h.listen(channel, "soundComplete", () => {
+          completed = true;
+        });
+        d.advance(25);
+        later = true;
+        d.refill();
+        assert.equal(completed, false);
+        assert.deepEqual(h.errors, [failure]);
+      }
+      const before = requests;
+      assert.equal(d.stopped(), true);
+      assert.equal(liveSounds(h.s), 0);
+      d.refill();
+      h.player.tick();
+      assert.equal(requests, before);
+      assert.equal(h.errors.length, when === "initial" || when === "prefill" ? 0 : 1);
+    } finally {
+      h.player.destroy();
+    }
+  });
+}

@@ -46,7 +46,7 @@ export function browserStream(
     gains[2].gain.value = next.volume * next.rightToLeft;
     gains[3].gain.value = next.volume * next.rightToRight;
   };
-  const cleanup = () => {
+  const cleanup = (notify = true) => {
     ended = true;
     clearInterval(timer);
     splitter.disconnect();
@@ -55,7 +55,9 @@ export function browserStream(
       gain.disconnect();
     }
 
-    release();
+    if (notify) {
+      release();
+    }
   };
   // Request on the device's cadence even if the SWF has a very low frame rate.
   const timer = setInterval(() => {
@@ -63,8 +65,13 @@ export function browserStream(
       refill();
     }
   }, 20);
-  setMix(mix);
-  void context.resume().catch(() => {});
+  try {
+    setMix(mix);
+    void context.resume().catch(() => {});
+  } catch (error) {
+    cleanup(false);
+    throw error;
+  }
 
   return {
     append(channels) {
@@ -79,13 +86,9 @@ export function browserStream(
       }
 
       const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(splitter);
-      next = Math.max(next, context.currentTime);
-      const block = { at: next, from: submitted, frames };
+      const at = Math.max(next, context.currentTime);
+      const block = { at, from: submitted, frames };
       nodes.set(source, block);
-      submitted += frames;
-      next += frames / 44100;
       source.onended = () => {
         source.disconnect();
         nodes.delete(source);
@@ -95,7 +98,19 @@ export function browserStream(
           cleanup();
         }
       };
-      source.start(block.at);
+      try {
+        source.buffer = buffer;
+        source.connect(splitter);
+        source.start(at);
+      } catch (error) {
+        source.onended = null;
+        nodes.delete(source);
+        source.disconnect();
+        throw error;
+      }
+
+      submitted += frames;
+      next = at + frames / 44100;
     },
     finish() {
       finished = true;
@@ -113,7 +128,11 @@ export function browserStream(
       stoppedAt = position();
       for (const source of nodes.keys()) {
         source.onended = null;
-        source.stop();
+        try {
+          source.stop();
+        } catch {
+          // A device failure must not leave other sources or the refill timer alive.
+        }
         source.disconnect();
       }
 
