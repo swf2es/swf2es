@@ -79,6 +79,31 @@ export async function checkPlayback(out: string, gpu = false) {
           await fresh();
         }
       }
+      const ui = await evaluate<{ sizes: number[][]; errors: string[] }>(`(async()=>{
+        const sizes=[],errors=[];
+        for(const mode of ['direct','main-renderer','worker-renderer']) {
+          document.querySelector('#mode').value=mode;
+          document.querySelector('#launch').click();
+          const until=performance.now()+30000;
+          while(document.querySelector('#launch').disabled||globalThis.playbackPreview?.mode!==mode||playbackPreview.stats.vmFrames<30) {
+            if(performance.now()>until)throw new Error(document.querySelector('#status').textContent);
+            await new Promise(resolve=>setTimeout(resolve,25));
+          }
+          await playbackPreview.stop();
+          sizes.push([playbackPreview.renderer.canvas.width,playbackPreview.renderer.canvas.height]);
+          if(playbackPreview.stats.error)errors.push(playbackPreview.stats.error);
+        }
+        return {sizes,errors};
+      })()`);
+      assert.equal(ui.exception, null, JSON.stringify(ui));
+      assert.ok(ui.value);
+      assert.deepEqual(ui.value.errors, []);
+      assert.deepEqual(
+        ui.value.sizes,
+        [ui.value.sizes[0], ui.value.sizes[0], ui.value.sizes[0]],
+        "arrangement switches must preserve canvas resolution",
+      );
+      console.log("playback controls preserve canvas resolution across all three arrangements");
     },
     gpu,
     {
