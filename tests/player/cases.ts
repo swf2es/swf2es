@@ -6977,6 +6977,44 @@ function morphs(): Uint8Array {
   });
 }
 
+// A cached blend layer retired after an erase makes the stage nonopaque.
+function blendLayerRetirement(): Uint8Array {
+  const tags = [
+    w.fileAttributes(true),
+    w.backgroundColor(0xffffff),
+    square(1, 0x336699, 5000),
+    square(2, 0xff3300, 600),
+    square(3, 0x33ff66, 600),
+    w.sprite(4, 1, [
+      w.place({ depth: 1, character: 2 }),
+      w.place({ depth: 2, character: 3, matrix: { tx: 300, ty: 300 } }),
+      w.showFrame(),
+      w.end(),
+    ]),
+    w.place({ depth: 1, character: 1 }),
+    w.place({ depth: 2, character: 4, blendMode: 3, matrix: { tx: 400, ty: 400 } }),
+    w.place({ depth: 3, character: 4, blendMode: 9, matrix: { tx: 2200, ty: 400 } }),
+    w.showFrame(),
+  ];
+  for (let frame = 1; frame <= 3; frame++) {
+    if (frame === 1) {
+      // Offscreen so it changes the stage's blend policy without covering art.
+      tags.push(w.place({ depth: 4, character: 2, blendMode: 12, matrix: { tx: -2000 } }));
+    } else if (frame === 3) {
+      tags.push(w.remove(4));
+    }
+
+    tags.push(
+      w.place({ depth: 2, move: true, matrix: { tx: 400 + frame * 20, ty: 400 } }),
+      w.place({ depth: 3, move: true, matrix: { tx: 2200 + frame * 20, ty: 400 } }),
+      w.showFrame(),
+    );
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 200, height: 100, frameRate: 24, frameCount: 4, tags });
+}
+
 // A pale band in overlay drifting a quarter pixel each way a frame over a
 // checkerboard, once on the root and once inside a clip drawn as a layer,
 // whose blend reads the layer's pixels: what shows through the band must
@@ -8602,6 +8640,14 @@ export const cases: PlayerCase[] = [
     // 180 channels in all.
     tolerance: 3,
     maxOutliers: 200,
+  },
+  {
+    name: "blend-layer-retirement",
+    swf: blendLayerRetirement(),
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    tolerance: 3,
+    maxOutliers: 0,
   },
   {
     name: "blend-drift",
