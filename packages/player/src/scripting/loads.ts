@@ -448,7 +448,10 @@ export class Loads {
     }
 
     const post = String(request.$method ?? "GET").toUpperCase() === "POST";
-    this.s.navigate?.(this.fetchRequest(request, this.s.url, post ? "POST" : "GET"), window);
+    this.s.navigate?.(
+      this.fetchRequest(request, this.s.url, { method: post ? "POST" : "GET" }),
+      window,
+    );
   }
 
   /** sendToURL's request, sent by the host's fetch and its response dropped, as Flash ignores it. */
@@ -470,13 +473,17 @@ export class Loads {
   }
 
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
-  private fetchRequest(request: AsObject | string, base: string, as?: string): FetchRequest {
+  fetchRequest(
+    request: AsObject | string,
+    base: string,
+    options: { method?: string; requestHeaders?: boolean | "all" } = {},
+  ): FetchRequest {
     if (typeof request === "string") {
       return { url: resolve(this.s.base ?? base, request), method: "GET", headers: [], body: null };
     }
 
     let url = String(request?.$url ?? "");
-    const method = as ?? String(request?.$method ?? "GET");
+    const method = options.method ?? String(request?.$method ?? "GET");
     const get = method.toUpperCase() === "GET";
     const post = method.toUpperCase() === "POST";
     const data = request?.$data as Value;
@@ -498,7 +505,7 @@ export class Loads {
     }
 
     const headers: [string, string][] = [];
-    if (post) {
+    if ((post || options.requestHeaders === "all") && options.requestHeaders !== false) {
       for (const header of request?.$headers?.$a ?? []) {
         headers.push([
           this.s.rt.toString(this.s.rt.getProperty(header, this.s.rt.publicName("name"))),

@@ -102,14 +102,21 @@ export class Avm1Net {
    * failure as no bytes, status 0, where nothing answered. A movie's load
    * is "content", as AS3's Loader's is.
    */
-  request(request: NetRequest, purpose: FetchPurpose): Promise<FetchResult> {
+  request(request: NetRequest, purpose: FetchPurpose, signal?: AbortSignal): Promise<FetchResult> {
     const fetch = this.fetchHost;
     if (this.destroyed) {
       return Promise.resolve(FAILED);
     }
 
     const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose };
-    return (fetch ? fetch(outgoing, this.stopped.signal) : Promise.reject()).then(
+    return (
+      fetch
+        ? fetch(
+            outgoing,
+            signal ? AbortSignal.any([signal, this.stopped.signal]) : this.stopped.signal,
+          )
+        : Promise.reject()
+    ).then(
       (result) => result,
       () => FAILED,
     );

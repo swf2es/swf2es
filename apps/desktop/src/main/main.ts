@@ -22,6 +22,7 @@ import {
   type WebContents,
 } from "electron";
 import type { LibraryName, NetworkResponse, OpenedMovie, StartState } from "../shared/api.js";
+import { bridgeFiles } from "./files.ts";
 import { type Movie, Network, Refused } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -626,6 +627,19 @@ function createWindow(): void {
 }
 
 function listen(): void {
+  bridgeFiles(
+    trusted,
+    () => window,
+    () => {
+      if (performance.now() - gestureAt > GESTURE_MS) {
+        return false;
+      }
+
+      gestureAt = Number.NEGATIVE_INFINITY;
+      return true;
+    },
+    { ipcMain, dialog },
+  );
   ipcMain.handle("desktop:start", (event): StartState => {
     if (!trusted(event)) {
       throw new Error("not the app's page");

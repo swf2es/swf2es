@@ -212,6 +212,13 @@ A player you set up yourself takes `socket:` from
 so does the desktop app, through its main process; an embedder with a
 transport of its own gives it as `configure({ sockets })`.
 
+FileReference and FileReferenceList use the browser's file chooser. Saving
+uses the File System Access picker where available, or a Blob download;
+uploads and downloads use the player's host fetch. A custom embedder can
+supply `configure({ fileHost })` (`FileHost` from `@swf2es/player`), or set
+`fileHost: null` to make dialogs cancel. The desktop app supplies native
+dialogs. Browser dialogs require a recent user click or keypress.
+
 ## Packages
 
 ```

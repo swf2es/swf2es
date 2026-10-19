@@ -39,6 +39,7 @@ import {
   VideoObject,
 } from "../display/display.js";
 import type { Library } from "../display/timeline.js";
+import { browserFileHost, type FileHost } from "../files.js";
 import {
   browserNavigate,
   type Drawer,
@@ -67,6 +68,7 @@ import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globa
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
+import { fileReferenceClasses } from "./globals/FileReference.js";
 import { type FilterFaces, filtersPackage } from "./globals/filters.js";
 import { flashPackage } from "./globals/geom.js";
 import { keyObject, mouseObject } from "./globals/Key.js";
@@ -151,6 +153,7 @@ export interface Avm1Options {
    * browserNavigate), null for none.
    */
   navigate?: Avm1Navigate | null;
+  fileHost?: FileHost | null;
   /**
    * What XML, LoadVars and loadVariables load by, the same fetch AS3's
    * URLLoader goes through; without one, every load fails as a missing
@@ -336,6 +339,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private readonly media: Avm1Sounds;
   /** What XML, LoadVars, loadVariables and XMLSocket ask of the network, and its answers for the next frame. */
   readonly net: Avm1Net;
+  readonly fileHost: FileHost | null;
+  readonly fileLifetime = new AbortController();
 
   constructor(
     readonly codegen: Codegen,
@@ -343,6 +348,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   ) {
     const print = options.print ?? ((line: string) => console.log(line));
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
+    this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.url = options.url ?? "";
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
@@ -516,6 +522,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     realm.global.define("NetConnection", netConnectionClass(this, this.remoting), avm1.DONT_ENUM);
     const flash = flashPackage(this);
+    flash.define("net", fileReferenceClasses(this), 0);
     const external = new avm1.Avm1Object(realm.objectProto);
     external.define("ExternalInterface", externalInterfaceClass(this.external), 0);
     flash.define("external", external, 0);
@@ -666,6 +673,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
 
     if (this.halted) {
+      this.fileLifetime.abort();
       this.net.destroy();
       return;
     }
@@ -1051,6 +1059,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(): void {
+    this.fileLifetime.abort();
     this.net.destroy();
     this.sharedObjects?.flush(this.swfVersion);
     stopTimelineSounds(this.sounds);
@@ -1082,6 +1091,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   network(): void {
     // A SWF stopped for good takes nothing more: its loads and connections end.
     if (this.halted) {
+      this.fileLifetime.abort();
       this.net.destroy();
       return;
     }

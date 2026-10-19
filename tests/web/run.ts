@@ -170,6 +170,49 @@ const check = (name: string, run: (evaluate: Evaluate, send: Send) => Promise<vo
 let booted: Booted[] = [];
 const byId = (id: string) => booted.find((b) => b.id === id) as Booted;
 
+check("file dialogs select and read real browser Files", async (evaluate, send) => {
+  const filePath = `${out}chosen.txt`;
+  writeFileSync(filePath, Uint8Array.of(65, 0, 255));
+  await call(
+    evaluate,
+    `(async () => {
+    window.fileDialogHost = (await import("@swf2es/player")).browserFileHost();
+    window.fileDialogAbort = new AbortController();
+    return true;
+  })()`,
+  );
+  const denied = await call<unknown[]>(
+    evaluate,
+    "fileDialogHost.browse([], false, fileDialogAbort.signal)",
+  );
+  assert.deepEqual(denied, []);
+  await send("Page.setInterceptFileChooserDialog", { enabled: true });
+  try {
+    const started = await send<{ exceptionDetails?: object }>("Runtime.evaluate", {
+      expression: `window.fileDialogResult = fileDialogHost.browse([{description:"Text", extension:"*.txt"}], true, fileDialogAbort.signal).then(async files => ({ name: files[0].name, size: files[0].size, bytes: Array.from(await files[0].read(fileDialogAbort.signal)) }))`,
+      userGesture: true,
+    });
+    assert.equal(started.exceptionDetails, undefined);
+    const { root } = await send<{ root: { nodeId: number } }>("DOM.getDocument");
+    const { nodeId } = await send<{ nodeId: number }>("DOM.querySelector", {
+      nodeId: root.nodeId,
+      selector: "input[type=file]",
+    });
+    assert.ok(nodeId);
+    assert.equal(await call(evaluate, 'document.querySelector("input[type=file]").accept'), ".txt");
+    await send("DOM.setFileInputFiles", { nodeId, files: [filePath] });
+    assert.deepEqual(await call(evaluate, "fileDialogResult"), {
+      name: "chosen.txt",
+      size: 3,
+      bytes: [65, 0, 255],
+    });
+    assert.equal(await call(evaluate, 'document.querySelectorAll("input[type=file]").length'), 0);
+  } finally {
+    await send("Page.setInterceptFileChooserDialog", { enabled: false });
+    await call(evaluate, "fileDialogAbort.abort(); true");
+  }
+});
+
 check("each element boots and draws", async (evaluate, send) => {
   booted = await call<Booted[]>(evaluate, "booted()");
   assert.deepEqual(

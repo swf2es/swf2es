@@ -8,6 +8,7 @@
 // makes one for a `new`. The rest is in parts it holds, in scripting/:
 // the SWFs' code, what SymbolClass binds, display objects' comings and
 // goings, loads and timers.
+
 import { API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
@@ -28,6 +29,7 @@ import {
   walkList,
 } from "./display/display.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
+import { browserFileHost, type FileHost } from "./files.js";
 import {
   browserClipboard,
   browserNavigate,
@@ -159,6 +161,8 @@ export class Scripting {
   readonly audio: AudioHost | null;
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
+  readonly fileHost: FileHost | null;
+  readonly fileLifetime = new AbortController();
   /** Where the host keeps the compiler's modules across page loads, or nothing does. */
   readonly moduleCache: ModuleCache | null;
   /** The connections open, Sockets' and WebSockets', each closing its transport: what destroy closes. */
@@ -290,6 +294,7 @@ export class Scripting {
       webSocket?: WebSocketHost | null;
       audio?: AudioHost | null;
       navigate?: Navigate | null;
+      fileHost?: FileHost | null;
       /** Where scripts' writes to the clipboard go outside a copy event: the browser's by default, null for none. */
       clipboard?: ClipboardHost | null;
       /**
@@ -360,6 +365,7 @@ export class Scripting {
       : null;
     this.onUncaught = options.onUncaught ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
+    this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
     this.clipboard = new Clipboard(
       options.clipboard === undefined ? browserClipboard() : options.clipboard,
@@ -419,6 +425,7 @@ export class Scripting {
    * frame plays again (Player.destroy).
    */
   destroy(): void {
+    this.fileLifetime.abort();
     if (this.destroyed) {
       return;
     }
