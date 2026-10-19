@@ -140,11 +140,15 @@ void main(void) {
   vec2 cut = cutoffs(table & 63, table >> 6, ppem);
   mat2 toPixel = linear * aRun.z;
   float margin = max(abs(cut.x), abs(cut.y)) + 1.0;
-  vec2 p = pen + toPixel * aGlyph.xy + aGlyph.zw * margin;
   float det = determinant(toPixel);
   mat2 inverse = det != 0.0
     ? mat2(toPixel[1][1], -toPixel[0][1], -toPixel[1][0], toPixel[0][0]) / det
     : mat2(0.0);
+  // Expand in glyph space so the margin stays outside under reflections and rotations.
+  // Each inverse row gives the glyph units needed for a pixel perpendicular to that edge.
+  vec2 reach = vec2(length(vec2(inverse[0][0], inverse[1][0])),
+                    length(vec2(inverse[0][1], inverse[1][1]))) * margin;
+  vec2 p = pen + toPixel * (aGlyph.xy + aGlyph.zw * reach);
   vPixel = p;
   vPen = pen;
   vToGlyph = vec4(inverse[0], inverse[1]);
