@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { withPage } from "../player/chrome.ts";
 import { serve } from "../player/serve.ts";
 import { buildExperiment } from "./build.ts";
+import { checkPlayback } from "./playback-check.ts";
 
 const { out } = await buildExperiment();
 
@@ -197,11 +198,17 @@ if (process.argv.includes("--serve")) {
     "Cross-Origin-Embedder-Policy": "require-corp",
   });
   console.log(`Bitmap preview: ${url}experiment/bitmap.html`);
+  console.log(`Playback preview: ${url}experiment/playback.html`);
   process.once("SIGINT", () => server.close());
   process.once("SIGTERM", () => server.close());
+} else if (process.argv.includes("--playback")) {
+  await checkPlayback(out, process.argv.includes("--gpu"));
 } else {
   if (!process.argv.includes("--bitmap")) {
     await checkExternal();
   }
   await checkBitmaps();
+  if (!process.argv.includes("--bitmap")) {
+    await checkPlayback(out, process.argv.includes("--gpu"));
+  }
 }

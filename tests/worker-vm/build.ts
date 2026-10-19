@@ -16,6 +16,7 @@ export async function buildExperiment() {
     [
       { name: "WorkerExternal", source: readFileSync(`${here}scripts/WorkerExternal.as`, "utf8") },
       { name: "WorkerBitmap", source: readFileSync(`${here}scripts/WorkerBitmap.as`, "utf8") },
+      { name: "WorkerPlayback", source: readFileSync(`${here}scripts/WorkerPlayback.as`, "utf8") },
     ],
     out,
   );
@@ -95,6 +96,84 @@ stop();`;
       w.sprite(i + 11, 1, [w.place({ depth: 1, character: i + 1 }), w.showFrame(), w.end()]),
     );
   }
+  const playbackAbc = abcs.get("WorkerPlayback");
+  if (!playbackAbc) {
+    throw new Error("missing WorkerPlayback ABC");
+  }
+  writeFileSync(
+    `${out}playback.swf`,
+    w.swf({
+      version: 10,
+      width: 128,
+      height: 96,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        ...symbols,
+        w.sprite(20, 1, [
+          w.place({ depth: 1, character: 1 }),
+          w.place({ depth: 2, character: 2, matrix: { tx: 80, ty: 120 } }),
+          w.showFrame(),
+          w.end(),
+        ]),
+        w.doAbc(playbackAbc),
+        w.symbolClass([[0, "WorkerPlayback"]]),
+        w.place({ depth: 1, character: 20 }),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+  writeFileSync(
+    `${out}playback-avm1.swf`,
+    w.swf({
+      version: 8,
+      width: 128,
+      height: 96,
+      frameCount: 1,
+      tags: [
+        ...symbols,
+        w.sprite(20, 1, [
+          w.place({ depth: 1, character: 1 }),
+          w.place({ depth: 2, character: 2, matrix: { tx: 80, ty: 120 } }),
+          w.showFrame(),
+          w.end(),
+        ]),
+        w.place({ depth: 1, character: 20, name: "art" }),
+        w.doAction([
+          ...script(
+            `
+var art = _root.art;
+var bitmap = new flash.display.BitmapData(64, 64, true, 0);
+bitmap.draw(art);
+trace("constructor-pixel:" + bitmap.getPixel32(2, 2).toString(16));
+var frame = 0;
+_root.onEnterFrame = function() {
+  frame++;
+  art._x = 30 + frame % 24 * 2;
+  art._y = 24;
+  art._xscale = 100;
+  if (frame % 12 >= 6) { art._xscale = -100; }
+  art.filters = [];
+  if (frame % 6 < 3) {
+    art.filters = [new flash.filters.BlurFilter(2, 2, 1), new flash.filters.GlowFilter(0x33cc66, 0.7, 4, 4)];
+  }
+  if (frame % 8 == 0) {
+    bitmap.draw(art);
+    trace("frame-pixel:" + bitmap.getPixel32(2, 2).toString(16));
+  }
+};
+stop();`,
+            8,
+          )(flashAssembler())
+            .end()
+            .bytes(),
+        ]),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
   writeFileSync(
     `${out}avm1-bitmap.swf`,
     w.swf({
@@ -147,13 +226,19 @@ stop();`;
     }),
   );
   writeFileSync(`${out}bitmap.html`, readFileSync(`${here}bitmap.html`));
+  writeFileSync(`${out}playback.html`, readFileSync(`${here}playback.html`));
 
   // Reuse the fork's existing build tool; no dependency or production bundle changes.
   const esbuild = await import(
     new URL("../../vendor/pixijs/node_modules/esbuild/lib/main.js", import.meta.url).href
   );
   await esbuild.build({
-    entryPoints: [`${here}page.ts`, `${here}thread.ts`, `${here}bitmap-page.ts`],
+    entryPoints: [
+      `${here}page.ts`,
+      `${here}thread.ts`,
+      `${here}bitmap-page.ts`,
+      `${here}playback-page.ts`,
+    ],
     outdir: out,
     bundle: true,
     format: "esm",
@@ -174,8 +259,8 @@ stop();`;
   // The renderer comparison needs DOMAdapter, outside the production bundle's
   // intentionally small export list. Bundle the fork locally for this worker.
   await esbuild.build({
-    entryPoints: [`${here}bitmap-thread.ts`],
-    outfile: `${out}bitmap-thread.js`,
+    entryPoints: [`${here}bitmap-thread.ts`, `${here}playback-thread.ts`],
+    outdir: out,
     bundle: true,
     format: "esm",
     platform: "browser",

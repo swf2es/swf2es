@@ -1,18 +1,21 @@
 # Flash VM worker feasibility probe
 
 These opt-in experiments run real AVM1 and AVM2 SWFs on main and in a browser
-worker. One probes the ExternalInterface contract without a renderer; the other
-tests synchronous bitmap drawing through the existing Drawer interface.
+worker. They probe ExternalInterface, synchronous bitmap drawing through Drawer,
+and a minimal renderer-neutral scene path for visible playback.
 
 After `pnpm build`, run:
 
 ```sh
 node tests/worker-vm/run.ts
 node tests/worker-vm/run.ts --bitmap
+node tests/worker-vm/run.ts --playback
+node tests/worker-vm/run.ts --playback --gpu
+node --test tests/worker-vm/playback-scene.test.ts
 node tests/worker-vm/run.ts --serve
 ```
 
-The default command checks both boundaries in Chrome; `--bitmap` checks only the
+The default command checks all three experiments in Chrome; `--bitmap` checks only the
 bitmap boundary. `--serve` builds the fixtures and serves the interactive preview
 at the loopback URL it prints. Choose a VM, colour and repetition count, then run
 the comparison. The preview uses asynchronous commands to start worker work;
@@ -96,8 +99,54 @@ renderer instance count. Those times include draw/readback work, transport and
 fixture allocation, with different bundle shapes and shader warmup. They are
 diagnostics, not a throughput or frame-pacing benchmark.
 
+## Standalone playback comparison
+
+`--serve` also prints a playback preview URL. It accepts a local SWF or a URL
+served with suitable CORS headers. Choose an arrangement, animation label and
+one to 32 visual copies, then load/restart to switch arrangements. Test one mode
+at a time. The bundled redistributable fixture exercises constructor bitmap
+drawing, immediate pixel reads, moving and mirrored shapes, changing filters,
+child reordering and removal/reinsertion.
+
+In both VM-worker arrangements, main owns the visible Pixi renderer. The optional
+second Pixi renderer lives beside the VM and handles bitmap operations. A scene
+without bitmap calls leaves that renderer idle; its presence alone does not
+offload visible rendering. The preview exposes bitmap call counts, VM frames,
+render submissions and timing counters on `globalThis.playbackPreview.stats`.
+Submission counts are not GPU presentation measurements.
+
+The VM advances on its own worker timer. It publishes complete 2D frames through
+an owned SharedArrayBuffer slot, and continues advancing while main draws the
+previous frame. When the slot is occupied, subsequent states coalesce instead
+of queueing frames or overwriting data being read. Main copies the fields into
+retained display objects before releasing the slot. Static vector assets and
+filter records are registered once with structured messages. This is a complete
+snapshot experiment, not a compact diff protocol or an optimized transport.
+
+The scene path currently accepts containers, static vector fills/strokes and
+ordinary filters, colours and blend modes. Unsupported content fails visibly:
+text, bitmap objects/image fills, Graphics, morphs, masks, scrolling, scale9,
+displacement and 3D. It supports one standalone SWF, not loaded libraries, input,
+audio or full-game host services. ExternalInterface is stubbed as an isolated
+preview host; it does not solve the synchronous embedding contract above.
+
+There is one bounded visible-frame slot and one separate snapshot slot (about
+5.5 MiB each), plus a 4 MiB bitmap-result buffer, in worker modes. Frames permit
+32,768 nodes. Each session permits 8,192 shape assets and 8,192 filter lists,
+with a 64 MiB JSON-size estimate across registrations. Remote snapshots are
+limited to 1,024 x 1,024 pixels. These bounds do not describe total heap/GPU use.
+Main-thread mode allocates no worker transport. Closing or failing a session
+cancels pending commands, wakes the bridge and terminates the worker.
+
+Nine displayed frames and immediate bitmap results match across all three modes
+on software GL and the hardware GPU. A busy worker leaves main tasks running;
+backpressure coalesces frames while main is blocked. The separate Node check
+covers slot ownership, reparenting, rejected captures and malformed-frame
+recovery. Private user content and its captures are kept outside tracked files.
+
 ## Next step
 
-Design a minimal renderer-neutral scene-update path for visible playback, then
-measure it on a repeatable workload. Full-player worker hosting, callback policy,
-storage, audio, fonts, asset transport and frame pacing remain separate work.
+Measure sustained playback with warmed, alternating runs on the same content and
+canvas size. Extend supported display features only as real workloads require.
+Full-player worker hosting, callback policy, storage, audio, fonts, asset
+retirement and frame pacing remain separate work.
