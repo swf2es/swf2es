@@ -78,10 +78,16 @@ export class BlockEmitter {
 
   constructor(public out: Output) {}
 
-  /** The entry of the block `bytes` hold, written to `out`. */
-  block(bytes: Uint8Array): void {
+  /** The block's entry, retaining the surrounding SWF for backward jumps. */
+  block(bytes: Uint8Array, offset: i32, length: i32): void {
     const out = this.out;
-    const actions = new Actions(bytes);
+    if (offset < 0 || length < 0 || <i64>offset + <i64>length > <i64>bytes.length) {
+      bytes = new Uint8Array(0);
+      offset = 0;
+      length = 0;
+    }
+
+    const actions = new Actions(bytes, offset, length);
     const flow = new Flow(actions);
     out.byte(0x5b);
     if (flow.tooLarge) {

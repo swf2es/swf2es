@@ -5,7 +5,7 @@
 // docs/architecture.md). Nothing is kept from one SWF to the next but
 // the emitter's buffers.
 import { Output } from "../output";
-import { blockOf, ModuleEmitter } from "./emit/module";
+import { ModuleEmitter } from "./emit/module";
 
 /** The emitter of the module actionsModuleBytes wrote last, if it was kept, for its entries. */
 let written: ModuleEmitter | null = null;
@@ -102,7 +102,7 @@ export function actionsEmitEach(
     const out = emitter.out;
     out.reset();
     emitter.blocks.version = version;
-    emitter.blocks.block(blockOf(swf, offsets[k], lengths[k]));
+    emitter.blocks.block(swf, offsets[k], lengths[k]);
     entries.uint(k);
     entries.byte(1);
     entries.reserve(out.length);

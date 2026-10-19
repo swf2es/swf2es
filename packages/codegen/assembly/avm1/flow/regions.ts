@@ -13,9 +13,8 @@
 // preloads) shapes its code: a body that jumps back before its
 // DefineFunction defines itself again, with the same region, so regions
 // form a graph, cycles included, which the emitter writes a region at a
-// time. A target before the block's start (a negative offset) is not
-// in the block's bytes at all; it is taken as an exit, where Flash runs
-// the SWF's bytes before the block.
+// time. A target before the block's start (a negative offset) runs the
+// preceding SWF bytes, down to the start of the file.
 //
 // With and Try bodies are not regions: in adl, their code runs in the
 // activation that reached them, the With's scope and the Try's handlers
@@ -28,6 +27,7 @@
 // the emitter drops what is no longer held.
 
 import { Action, Actions, ERROR_None } from "../actions/decode";
+import { Offsets } from "../actions/offsets";
 import * as ops from "../actions/opcodes";
 
 export const REGION_Block: u8 = 0;
@@ -69,12 +69,13 @@ export class Region {
     public parent: i32,
     /** The index of the action that first opened it, -1 for the block. */
     public opener: i32,
+    public minimum: i32 = 0,
   ) {}
 
   /** Whether control at `offset` is still in the region. */
   @inline
   runs(offset: i32): bool {
-    return offset >= 0 && offset < this.end;
+    return offset >= this.minimum && offset < this.end;
   }
 
   /** The index of the block that starts at `offset`, which must start one. */
@@ -151,21 +152,21 @@ export class Flow {
   private visits: i32 = 0;
   // Per offset, the region (plus one) that last visited it, made it a block
   // start, or counted its fall-through predecessors, which `preds` holds.
-  private visited: StaticArray<i32>;
-  private started: StaticArray<i32>;
-  private counted: StaticArray<i32>;
-  private preds: StaticArray<i32>;
+  private visited: Offsets;
+  private started: Offsets;
+  private counted: Offsets;
+  private preds: Offsets;
   private work: i32[] = [];
   private maxRead: i64;
 
   constructor(public actions: Actions) {
     const n = actions.length;
     this.maxRead = <i64>n * MAX_READ_PER_BYTE + MAX_READ_BESIDES;
-    this.visited = new StaticArray<i32>(n);
-    this.started = new StaticArray<i32>(n);
-    this.counted = new StaticArray<i32>(n);
-    this.preds = new StaticArray<i32>(n);
-    this.regions.push(new Region(REGION_Block, 0, n, -1, -1));
+    this.visited = new Offsets(n);
+    this.started = new Offsets(n);
+    this.counted = new Offsets(n);
+    this.preds = new Offsets(n);
+    this.regions.push(new Region(REGION_Block, 0, n, -1, -1, actions.minimum));
     // Regions found while walking are walked in turn.
     for (let r = 0; r < this.regions.length && !this.tooLarge; r++) {
       this.walk(r);
@@ -183,7 +184,7 @@ export class Flow {
 
     while (work.length > 0) {
       const p = work.pop();
-      if (this.visited[p] === tag) {
+      if (this.visited.get(p) === tag) {
         continue;
       }
 
@@ -192,7 +193,7 @@ export class Flow {
         return;
       }
 
-      this.visited[p] = tag;
+      this.visited.set(p, tag);
       offsets.push(p);
       const action = actions.decode(p);
       if (actions.read > this.maxRead) {
@@ -212,7 +213,7 @@ export class Flow {
         case ops.OP_DefineFunction:
         case ops.OP_DefineFunction2:
           if (action.region < 0) {
-            action.region = this.function(action, r, actions.at[p] - 1);
+            action.region = this.function(action, r, actions.at.get(p) - 1);
           }
           break;
         case ops.OP_With:
@@ -243,14 +244,14 @@ export class Flow {
 
     offsets.sort();
     for (let i = 0; i < offsets.length; i++) {
-      region.actions.push(actions.at[offsets[i]] - 1);
+      region.actions.push(actions.at.get(offsets[i]) - 1);
     }
 
     this.blocks(region, tag, offsets);
   }
 
   private follow(region: Region, tag: i32, offset: i32): void {
-    if (region.runs(offset) && this.visited[offset] !== tag) {
+    if (region.runs(offset) && this.visited.get(offset) !== tag) {
       this.work.push(offset);
     }
   }
@@ -258,14 +259,16 @@ export class Flow {
   /** The region of a DefineFunction's body, which the action, decoded once, makes once. */
   private function(action: Action, parent: i32, opener: i32): i32 {
     const r = this.regions.length;
-    this.regions.push(new Region(REGION_Function, action.s0, action.s1, parent, opener));
+    this.regions.push(
+      new Region(REGION_Function, action.s0, action.s1, parent, opener, this.actions.minimum),
+    );
     return r;
   }
 
   /** Makes `offset` a block start, if the region holds it. */
   private start(region: Region, tag: i32, offset: i32): void {
-    if (region.runs(offset) && this.visited[offset] === tag) {
-      this.started[offset] = tag;
+    if (region.runs(offset) && this.visited.get(offset) === tag) {
+      this.started.set(offset, tag);
     }
   }
 
@@ -306,18 +309,22 @@ export class Flow {
 
       const next = action.next;
       if (branches(action)) {
-        this.started[next] = tag;
-      } else if (this.counted[next] !== tag) {
-        this.counted[next] = tag;
-        this.preds[next] = 1;
-      } else if (++this.preds[next] > 1) {
-        this.started[next] = tag;
+        this.started.set(next, tag);
+      } else if (this.counted.get(next) !== tag) {
+        this.counted.set(next, tag);
+        this.preds.set(next, 1);
+      } else {
+        const count = this.preds.get(next) + 1;
+        this.preds.set(next, count);
+        if (count > 1) {
+          this.started.set(next, tag);
+        }
       }
     }
 
     for (let i = 0; i < offsets.length; i++) {
       const first = offsets[i];
-      if (this.started[first] !== tag) {
+      if (this.started.get(first) !== tag) {
         continue;
       }
 
@@ -325,14 +332,14 @@ export class Flow {
       region.blockFirst.push(region.order.length);
       let p = first;
       for (;;) {
-        region.order.push(actions.at[p] - 1);
+        region.order.push(actions.at.get(p) - 1);
         const action = actions.decode(p);
         if (!fallsThrough(action)) {
           break;
         }
 
         p = fallsTo(action);
-        if (!region.runs(p) || this.started[p] === tag) {
+        if (!region.runs(p) || this.started.get(p) === tag) {
           break;
         }
       }

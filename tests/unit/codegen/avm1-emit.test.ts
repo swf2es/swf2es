@@ -14,6 +14,7 @@ import {
   register,
   TryFlag,
 } from "../../avm1-assembler.ts";
+import { backwardActions } from "../../avm1-backward.ts";
 import { testing } from "./testing-module.ts";
 
 // AVM1 blocks assembled in the tests, compiled by codegen's emitter
@@ -1151,6 +1152,53 @@ test("a block's range outside the SWF's bytes is an empty block", () => {
   );
   assert.equal(module.match(/V\.stop/g)?.length, 1);
   assert.equal(module.match(/function \(cx\)/g)?.length, 3);
+});
+
+test("backward branches read SWF prefixes, including functions and chained distant jumps", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  for (const distant of [false, true]) {
+    const { bytes, offset } = backwardActions(distant);
+    const offsets = Int32Array.of(offset);
+    const lengths = Int32Array.of(bytes.length - offset);
+    const actions = { version: 8, blocks: [{ offset, length: lengths[0] }] };
+    const compiled = codegen.compileActions(bytes, actions);
+    assert.equal(
+      utf8.decode(testing.actionsModuleBytes(bytes, offsets, lengths, 8, true)),
+      compiled.module,
+    );
+    const entries = testing.actionsModuleEntries();
+    for (const reuse of [false, true]) {
+      assert.equal(
+        testing.actionsEmitEach(bytes, offsets, lengths, 8, "0,0", reuse),
+        entries.repeat(2),
+      );
+    }
+
+    assert.equal(codegen.compileActionBlocks(bytes, actions, [0]).get(0), compiled.entries[0]);
+    const lines: string[] = [];
+    const rt = new Runtime();
+    const blocks = (await load(compiled.module, rt)) as unknown as Avm1Region[][];
+    const host = { trace: (text: string) => lines.push(text), play() {}, stop() {}, halt() {} };
+    rt.run(blocks[0], rt.activation([], [], {}, rt.newObject(), host));
+    assert.deepEqual(
+      lines,
+      distant
+        ? ["distant prefix", "returned"]
+        : ["outside é", "callback", "42", "conditional prefix", "done"],
+    );
+  }
+});
+
+test("SWF context does not extend an action block's upper decoding bound", () => {
+  const bytes = Uint8Array.of(0x07, 0x96, 5, 0, 7, 1, 0, 0, 0);
+  const module = utf8.decode(
+    testing.actionsModuleBytes(bytes, Int32Array.of(1), Int32Array.of(4), 8),
+  );
+  assert.match(module, /V\.halt\(cx\)/);
 });
 
 test("each block compiled alone is its entry in the module, in the test and release builds", async () => {

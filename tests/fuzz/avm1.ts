@@ -252,8 +252,9 @@ const MAX_IMPORTS = 4000;
 let imported = 0;
 
 /** What is wrong with the block's module at `version`, or null. */
-async function emitted(block: Uint8Array, version: number): Promise<string | null> {
-  range[1][0] = block.length;
+async function emitted(block: Uint8Array, version: number, start = 0): Promise<string | null> {
+  range[0][0] = start;
+  range[1][0] = block.length - start;
   const bytes: Uint8Array = testing.actionsModuleBytes(block, range[0], range[1], version, true);
   let module: string;
   try {
@@ -309,6 +310,14 @@ for (let k = 0; k < caseCount; k++) {
     const why = await emitted(block, k % 2 ? 5 : 10);
     if (why) {
       fail(block, why);
+    }
+
+    if (k % 4 === 0 && block.length < 2048) {
+      const start = below(block.length + 1);
+      const prefix = await emitted(block, k % 2 ? 5 : 10, start);
+      if (prefix) {
+        fail(block, `with prefix ${start}: ${prefix}`);
+      }
     }
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.
