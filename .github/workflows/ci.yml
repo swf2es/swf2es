@@ -19,6 +19,8 @@ jobs:
       - run: pnpm check
       - run: pnpm build
       - run: pnpm typecheck
+      - run: node --test tests/worker-vm/scene*.test.ts
+      - run: node tests/worker-vm/scene-run.ts
       - run: pnpm oracle:pull
       - run: pnpm test
       - run: pnpm test:checked

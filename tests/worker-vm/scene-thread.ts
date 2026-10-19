@@ -10,19 +10,26 @@ let snapshot: SceneSnapshot;
 const post = (message: SceneResponse) => self.postMessage(message);
 self.onmessage = ({ data: request }: MessageEvent<SceneRequest>) => {
   try {
-    if (request.type === "init") {
-      fixture = sceneFixture();
-      writer = new FrameWriter(request.frames);
-      snapshot = new SceneSnapshot(fixture.assets);
-      post({
-        type: "libraries",
-        libraries: fixture.libraries.map((entry) => ({
-          id: entry.id,
-          asset: shareLibrary(entry.bytes, entry.library),
-        })),
-      });
-    } else if (request.type === "step") {
-      fixture.step(request.frame);
+    switch (request.type) {
+      case "init":
+        fixture = sceneFixture();
+        writer = new FrameWriter(request.frames);
+        snapshot = new SceneSnapshot(fixture.assets);
+        post({
+          type: "libraries",
+          libraries: fixture.libraries.map((entry) => ({
+            id: entry.id,
+            asset: shareLibrary(entry.bytes, entry.library),
+          })),
+        });
+        break;
+      case "step":
+        fixture.step(request.frame);
+        break;
+      case "overwrite":
+        break;
+      default:
+        throw new Error("unknown scene fixture command");
     }
 
     const sequence = writer.write((bytes) => {

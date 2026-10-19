@@ -38,7 +38,8 @@ asset retirement, a total asset memory limit or a host lifecycle.
 
 `sharedFrames(capacity, slots)` allocates fixed-size slots for one producer and
 one consumer. Snapshot records use Float64 storage: payloads must be aligned
-to eight bytes, so use a capacity divisible by eight. `FrameWriter.write()` owns a free payload while encoding, then
+to eight bytes, so use a capacity divisible by eight. `FrameWriter.write()` owns
+a free payload while encoding, then
 publishes it with Atomics. It returns `null` without invoking the encoder when
 all slots are occupied. A failed encode returns its slot to the free pool and
 does not publish or advance the sequence. Sequences do not wrap; exhaustion
@@ -93,6 +94,8 @@ payloads before rendering and compares every output pixel, including two
 libraries with the same character ID. The Node checks cover retained state,
 bitmap aliases, glyph references, malformed-frame recovery, subtree roots,
 failed publication, backpressure, payload reuse and delayed morph receipts.
+CI runs these Node and software-renderer checks explicitly. The hardware-GPU
+comparison remains a local check; no experiment is added to the production host.
 
 `scene-bench.ts` builds its own redistributable synthetic scene and measures
 encoding CPU time. Use the same node/frame counts and repeat on both revisions
@@ -103,9 +106,11 @@ protocol and does not establish a general worker performance benefit.
 
 The fixed 27-value node header uses indexed writes, avoiding one temporary
 numeric array per node. In a local CPU comparison, two encoders processed the
-same sixteen captured scene states in alternating order, outside VM execution
-and rendering. All 70.8 MB of compared output matched byte-for-byte. Across
+same sixteen captured scene states decoded into a retained source graph, in
+alternating order outside VM execution and rendering. All 70.8 MB of compared
+output matched byte-for-byte. Across
 32 paired batches the indexed encoder was faster in 30, with a median paired
 CPU saving of 16.1%. Background load varied, so absolute times and full-game
-frame pacing are not inferred from this comparison. The synthetic command
+frame pacing are not inferred from this comparison. Six subsequent live VM
+replays did not establish a material encoding or pacing gain. The synthetic command
 above provides a redistributable workload for comparisons across revisions.
