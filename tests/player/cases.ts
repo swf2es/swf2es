@@ -6652,6 +6652,24 @@ function textAdvancedDraw(abc: Uint8Array): Uint8Array {
   });
 }
 
+function textAdvancedMirrored(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 360,
+    height: 160,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      stemFont(1),
+      w.doAbc(abc, "TextAdvancedMirrored"),
+      w.symbolClass([[0, "TextAdvancedMirrored"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text drawn in Probe (scripts/TextDraw.as).
 function textDraw(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -8517,6 +8535,15 @@ export const cases: PlayerCase[] = [
     capture: [1],
     // Its table set with TextRenderer stays in adl for the jobs after it.
     alone: true,
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
+    name: "text-advanced-mirrored",
+    swf: textAdvancedMirrored,
+    script: "TextAdvancedMirrored",
+    frames: 1,
+    capture: [1],
     tolerance: 8,
     maxOutliers: 0,
   },
