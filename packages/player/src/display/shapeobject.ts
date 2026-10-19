@@ -55,16 +55,13 @@ export class ShapeObject extends DisplayObject {
   }
 
   /** The shape to draw now: a MorphShape's blend at its ratio, which it keeps from here. */
-  drawn(): ShapeCharacter | null {
+  drawn(ratio = this.ratio): ShapeCharacter | null {
     // The blend it has is kept while its morph and ratio are: asking the
     // morph again would turn over its few latest blends for nothing.
     const b = this.blended;
-    if (
-      this.morph &&
-      (b?.morph !== this.morph || b.ratio !== this.ratio || b.shape !== this.shape)
-    ) {
-      this.shape = morphAt(this.morph, this.ratio);
-      this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
+    if (this.morph && (b?.morph !== this.morph || b.ratio !== ratio || b.shape !== this.shape)) {
+      this.shape = morphAt(this.morph, ratio);
+      this.blended = { morph: this.morph, ratio, shape: this.shape };
       // New bounds, which no invalidate tells of: the change of ratio did,
       // but those it marked may have been measured since, with the old blend.
       pickWork.changes++;

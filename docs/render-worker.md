@@ -2,14 +2,16 @@
 
 The experimental modules in `packages/player/src/render/worker/` exercise a
 SAB transport and an OffscreenCanvas renderer. They are internal, are not
-exported by the player entry point, and are not selected by any player host.
-The normal renderer remains the production path.
+exported by the player entry point. `WorkerView` is an opt-in experimental host
+adapter; the normal renderer remains the production path.
 
 Run `node tests/player/worker.ts` after `pnpm build`; `--gpu` uses the machine's
 GPU rather than SwiftShader. The runner serves an isolated localhost page,
 bundles the test worker using the Pixi fork's existing esbuild dependency,
 and compares its pixels with the main-thread renderer. No new dependency is
-needed. The default run is part of `pnpm test`.
+needed. The default run is part of `pnpm test`. `node tests/player/worker-host.ts`
+checks the host adapter, including resize/input, delayed library registration,
+acknowledged morph bounds, fallback, restart and disposal. Both accept `--gpu`.
 
 ## Ownership and transport
 
@@ -90,32 +92,34 @@ closing strokes and textured triangles, including the triangles drawn under a
 mirrored transform. The worker retains unchanged geometry. A button contributes
 only its currently visible display-list children; its other states, input and
 scripts remain on main. Morphs reference their registered asset and ratio. Capture
-does not call `drawn()` on the source: a future host must commit main-thread
-morph bounds at its presentation boundary, preserving Flash's last-drawn bounds
-and hit-test behaviour even when presentations are skipped.
+does not call `drawn()` on the source. The host records morphs for each bounded
+pending slot and commits only the acknowledged ratio, without changing the ratio
+scripts currently see. Dropped frames do not commit main-thread morph bounds.
 
-Unsupported content is rejected during encoding: displacement maps, masks outside
-the captured tree, explicit `cacheAsBitmap`, scroll rectangles, scale9 and 3D.
+Rendered scroll rectangles, scale9 grids and explicit cache flags are copied to
+the mirror. A pending scrollRect that main has not committed yet does not take
+effect early. Unsupported content is rejected during encoding: displacement
+maps, masks outside the captured tree, stale shape caches and 3D.
 Decoding validates the full snapshot before changing the mirror, including
 variable content, fonts and mask ownership.
 Mask links are restored after attachment; retained arrays never point into a
 reusable shared slot. Changed text and filters invalidate their existing
 mirror objects; unchanged values retain their records and layout.
 
-Version 4 uses two Float64 header values (version and node count), followed
-by 26 Float64 values per node: identity, parent row, character ID, kind/visibility
+Version 5 uses two Float64 header values (version and node count), followed
+by 27 Float64 values per node: identity, parent row, character ID, kind/visibility
 flags, six matrix values, eight colour values, blend index, timeline depth
 (NaN for none), clip depth, mask row (-1 for none), filter-tail offset,
-library ID, content-tail offset, and drawing-tail offset. Zero offsets mean no
+library ID, content-tail offset, drawing-tail offset and display-state offset. Zero offsets mean no
 payload. Each row's nonempty filter list, text/bitmap/morph content and Graphics
-layers follow the rows in row order.
+layers and display state follow the rows in row order.
 Filter lists contain a count, then kind and values; arrays have a length prefix,
 booleans are 0/1, and bevel types use inner/outer/full indices. Bitmap records
 can reference pixels already defined earlier in the same complete frame.
 The text property/format order and filter field order belong to the version.
 
 This prototype favours explicit complete records over compact packing. At
-50,000 nodes the fixed records alone use about 10.4 MB per slot, or 31.2 MB for
+50,000 nodes the fixed records alone use about 10.8 MB per slot, or 32.4 MB for
 three slots, before variable content and assets. That is transport storage,
 not total player memory: each thread also has library and scene objects, and
 the renderer owns GPU resources. Encoding/decoding still allocates; memory,
@@ -133,13 +137,42 @@ extra main-thread renderer and GPU copies included in memory measurements.
 The browser tests reject a malformed frame, draw a valid frame afterwards, and
 lose and restore the worker's WebGL context twice with filters, text and bitmap
 fills still visible. Failed presentations release their slots. Filter caches
-invalidate after restoration in both renderers. These checks cover recovery
-inside a live worker; worker termination and recreation, asset re-registration
-and host fallback remain to be implemented.
+invalidate after restoration in both renderers.
 
-Before integrating a host: cover the remaining scene features, implement host
-recovery and morph presentation bookkeeping, retain synchronous bitmap semantics,
-and measure encoding, rendering, presentation/input latency, backpressure and both
-heaps.
-The current pixel tests establish correctness for the limited scene; they
-do not establish a performance gain on real SWFs.
+## Experimental host adapter
+
+`WorkerView` keeps the main canvas for input and synchronous bitmap drawing,
+and places a noninteractive worker canvas above it. Its caller keeps the main
+`PixiView` as the scripting drawer and renders with that view whenever
+`WorkerView.render(state)` returns false. Size, resolution, background, quality
+and sample counts travel in each shared slot, together with the required library
+generation. A newer snapshot cannot take an older control message's settings.
+If the worker has not processed the required registrations, it skips that
+presentation and asks for the current complete frame again.
+
+Register each SWF after image decoding, before publishing its objects. The
+adapter keeps registrations until destruction and bounds them at 256 MiB of
+shared assets and 512 libraries; these limits exclude library objects and GPU
+resources. Initial transport is three 8 MiB slots, growing by recreation up to
+32 MiB per slot. Asset retirement during a session remains future work.
+
+The fork's optional `EventSystem.rootTarget` keeps stage input independent of a
+synchronous offscreen draw on the main renderer. The adapter commits acknowledged
+morph ratios, retries transient unsupported scenes at most once per second,
+hides late frames after fallback, and recreates the worker, canvas, buffers and
+registrations once after an error or timeout. Another failure leaves main
+rendering active. Destruction terminates the worker and releases registrations.
+Hosts must retain the latest redraw when publication encounters backpressure.
+
+Build a worker with this checkout's pinned adapter using
+`node tools/render-worker.ts output.js /asset-prefix/`. The prefix serves
+`pixi/pixi.mjs`; the worker does not depend on a page's import map. Hosts must
+serve COOP/COEP headers, expose active/fallback status, preserve quality/input and
+call `destroy` before destroying the main renderer.
+
+The adapter exposes cumulative encoding, decoding, rendering and acknowledgement
+latency counters, publication/presentation/drop counts, asset and transport sizes,
+and restart/fallback state. These are diagnostics, not a benchmark of total
+memory, GPU completion or input-to-display latency. Full bitmap staging, readback,
+two heaps and GPU resources still require measurements. The tests establish
+correctness for the covered scenes; they do not establish a performance gain.

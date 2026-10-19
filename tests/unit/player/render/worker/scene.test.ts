@@ -56,9 +56,9 @@ test("unsupported content and oversized snapshots fail without changing the sour
   const bytes = new Uint8Array(sceneFrameBytes(32));
   const dirty = p.root.dirty;
   assert.throws(() => encoder.encode(p.root, new Uint8Array(sceneFrameBytes(1))), /capacity/);
-  p.root.cachedAsBitmap = true;
+  p.root.space = {} as typeof p.root.space;
   assert.throws(() => encoder.encode(p.root, bytes), /2D shapes/);
-  p.root.cachedAsBitmap = false;
+  p.root.space = null;
   assert.ok(encoder.encode(p.root, bytes) > 0);
   assert.equal(p.root.dirty, dirty);
 });
@@ -72,7 +72,7 @@ test("a rejected vector snapshot leaves the existing mirror intact", () => {
   const root = mirror.apply(frame);
   const child = root.children[0];
   const data = new Float64Array(frame.buffer, 0, frame.length / 8);
-  data[2 + 26 + 1] = 99;
+  data[2 + 27 + 1] = 99;
   assert.throws(() => mirror.apply(frame), /snapshot node/);
   assert.equal(root.children[0], child);
   assert.throws(() => mirror.apply(frame.subarray(0, frame.length - 1)), /length/);
@@ -81,7 +81,7 @@ test("a rejected vector snapshot leaves the existing mirror intact", () => {
   const shape = p.library.characters.get(1);
   assert.ok(shape);
   p.library.characters.set(0, shape);
-  data[2 + 3 * 26 + 2] = 0;
+  data[2 + 3 * 27 + 2] = 0;
   assert.throws(() => mirror.apply(frame), /snapshot node/);
 });
 
@@ -191,7 +191,7 @@ test("bad filter tails and conflicting masks leave the mirror untouched", () => 
     values[index] = saved;
   }
   values[2 + 21] = 2;
-  values[2 + 26 + 21] = 2;
+  values[2 + 27 + 21] = 2;
   assert.throws(() => mirror.apply(frame), /snapshot effects/);
   assert.equal(root.children[0].mask, null);
   assert.equal(root.mask, null);
@@ -303,10 +303,10 @@ test("malformed text and bitmap payloads leave the prior mirror intact", () => {
   const layout = text.layout;
   const store = bitmap.store;
   const data = new Float64Array(frame.buffer, 0, frame.length / 8);
-  const textAt = data[2 + 26 + 24];
-  const bitmapAt = data[2 + 2 * 26 + 24];
+  const textAt = data[2 + 27 + 24];
+  const bitmapAt = data[2 + 2 * 27 + 24];
   for (const [index, value] of [
-    [2 + 26 + 24, -1],
+    [2 + 27 + 24, -1],
     [textAt + 4, 2],
     [bitmapAt + 2, -1],
     [bitmapAt + 3, 0],
@@ -339,7 +339,7 @@ test("buttons mirror only their visible state and morph capture leaves main-thre
   const down = ShapeObject.ofMorph(asset);
   const hidden = new TextObject(null);
   // An unsupported off-list state must not enter the rendering snapshot.
-  hidden.cachedAsBitmap = true;
+  hidden.space = {} as typeof hidden.space;
   button.upState = up;
   button.downState = down;
   button.hitTestState = hidden;
@@ -369,4 +369,36 @@ test("buttons mirror only their visible state and morph capture leaves main-thre
   button.show();
   apply();
   assert.equal(mirrored.children.length, 0);
+});
+
+test("display state snapshots retain scale9, rendered scroll and bitmap-cache flags", () => {
+  const player = new Player(workerScene());
+  const snapshot = new SceneSnapshot(player.library);
+  const mirror = new SceneMirror(player.library);
+  const bytes = new Uint8Array(sceneFrameBytes(32, 128));
+  player.root.cachedAsBitmap = true;
+  player.root.scale9Grid = { xMin: 2, yMin: 3, xMax: 20, yMax: 25 };
+  player.root.scroll = { xMin: 0, yMin: 0, xMax: 100, yMax: 80 };
+  player.root.scrollRect = { xMin: 20, yMin: 10, xMax: 80, yMax: 60 };
+  const frame = bytes.subarray(0, snapshot.encode(player.stage, bytes));
+  const root = mirror.apply(frame).children[0];
+  assert.deepEqual(root.scale9Grid, player.root.scale9Grid);
+  assert.deepEqual(root.scroll, player.root.scroll);
+  assert.notDeepEqual(root.scroll, player.root.scrollRect);
+  assert.equal(root.cachedAsBitmap, true);
+  const data = new Float64Array(frame.buffer, frame.byteOffset, frame.length / 8);
+  const state = data[2 + 27 + 26];
+  data[2 + 27 + 26] = NaN;
+  assert.throws(() => mirror.apply(frame), /snapshot/);
+  data[2 + 27 + 26] = state;
+  data[state] = 8;
+  assert.throws(() => mirror.apply(frame), /snapshot/);
+  assert.equal(root.cachedAsBitmap, true);
+  player.root.cachedAsBitmap = false;
+  player.root.scroll = null;
+  player.root.scale9Grid = null;
+  mirror.apply(bytes.subarray(0, snapshot.encode(player.stage, bytes)));
+  assert.equal(root.scroll, null);
+  assert.equal(root.scale9Grid, null);
+  assert.equal(root.cachedAsBitmap, false);
 });

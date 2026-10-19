@@ -14,16 +14,18 @@ import {
 } from "../../display/display.js";
 import { BLEND_MODES } from "../../display/displayobject.js";
 import type { Filter } from "../../display/filters.js";
-import type { Library } from "../../display/timeline.js";
+import type { Rect } from "../../display/geometry.js";
+import type { Library, MorphCharacter } from "../../display/timeline.js";
 import { BitmapMirror, type BitmapRecord, BitmapRecords, BitmapSnapshot } from "./bitmaps.js";
 import { bindDrawing, type DrawingRecord, readDrawing, writeDrawing } from "./drawing.js";
 import { readFilters, writeFilters } from "./filters.js";
 import { type SceneLibraries, sceneLibraries } from "./libraries.js";
 import { readText, SnapshotText, type TextRecord, writeText } from "./text.js";
+import { ValuesReader, ValuesWriter } from "./values.js";
 
-const VERSION = 4;
+const VERSION = 5;
 const HEADER = 2;
-const ROW = 26;
+const ROW = 27;
 const CONTAINER = 1;
 const VISIBLE = 2;
 const STATIC_TEXT = 4;
@@ -37,6 +39,12 @@ const KINDS = CONTAINER | STATIC_TEXT | TEXT | BITMAP | DYNAMIC | MORPH;
 export const sceneFrameBytes = (nodes: number, contentValues = 0): number =>
   (HEADER + nodes * ROW + contentValues) * 8;
 
+export interface MorphPresentation {
+  object: ShapeObject;
+  morph: MorphCharacter;
+  ratio: number;
+}
+
 export class SceneSnapshot {
   private readonly nodes: DisplayObject[] = [];
   private readonly parents: number[] = [];
@@ -49,7 +57,10 @@ export class SceneSnapshot {
     this.assets = sceneLibraries(source);
   }
 
-  encode(root: Container, bytes: Uint8Array): number {
+  encode(root: Container, bytes: Uint8Array, morphs?: MorphPresentation[]): number {
+    if (morphs) {
+      morphs.length = 0;
+    }
     const data = new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 8));
     const nodes = this.nodes;
     const parents = this.parents;
@@ -76,9 +87,6 @@ export class SceneSnapshot {
           (o.drawing && !container && !(o instanceof ShapeObject)) ||
           o.space ||
           o.projection ||
-          o.scrollRect ||
-          o.scale9Grid ||
-          o.cachedAsBitmap ||
           !BLEND_MODES.includes(o.blendMode)
         ) {
           throw new Error(
@@ -179,6 +187,7 @@ export class SceneSnapshot {
             library,
             0,
             0,
+            0,
           ],
           at,
         );
@@ -229,11 +238,30 @@ export class SceneSnapshot {
           }
 
           data[end++] = o.ratio;
+          morphs?.push({ object: o, morph: o.morph, ratio: o.ratio });
         }
 
         if (o.drawing) {
           data[at + 25] = end;
           end = writeDrawing(o.drawing, data, end, this.assets, this.bitmaps);
+        }
+
+        const flags = Number(o.cachedAsBitmap) | (o.scroll ? 2 : 0) | (o.scale9Grid ? 4 : 0);
+        if (flags) {
+          data[at + 26] = end;
+          const w = new ValuesWriter(data, end);
+          w.number(flags);
+          const rects = [o.scroll, o.scale9Grid];
+          for (let k = 0; k < rects.length; k++) {
+            const rect = rects[k];
+            if (rect) {
+              w.number(rect.xMin);
+              w.number(rect.yMin);
+              w.number(rect.xMax);
+              w.number(rect.yMax);
+            }
+          }
+          end = w.at;
         }
       }
 
@@ -308,6 +336,7 @@ export class SceneMirror {
     const drawings: (DrawingRecord | null)[] = [];
     const drawingEnds: number[] = [];
     const ratios: number[] = [];
+    const displayStates: { cached: boolean; scroll: Rect | null; grid: Rect | null }[] = [];
     const bitmapRecords = new BitmapRecords();
     let end = HEADER + count * ROW;
     // Validate before touching the mirror, so a rejected frame leaves it intact.
@@ -336,7 +365,9 @@ export class SceneMirror {
             asset?.type !== (kind === 0 ? "shape" : kind === MORPH ? "morph" : "static")
           : character !== 0 || library !== 0)
       ) {
-        throw new Error("invalid scene snapshot node");
+        throw new Error(
+          `invalid scene snapshot node: row ${i}, id ${id}, parent ${parent}, kind ${kind}, asset ${library}:${character} (${asset?.type ?? "missing"})`,
+        );
       }
 
       const blend = data[at + 18];
@@ -428,6 +459,29 @@ export class SceneMirror {
       }
 
       drawingEnds.push(end);
+      const state = data[at + 26];
+      let cached = false;
+      let scroll: Rect | null = null;
+      let grid: Rect | null = null;
+      if (state !== 0) {
+        if (state !== end) {
+          throw new Error("invalid scene snapshot display state offset");
+        }
+
+        const r = new ValuesReader(data, end);
+        const flags = r.integer(1, 7);
+        cached = !!(flags & 1);
+        const rect = (): Rect => ({
+          xMin: r.number(),
+          yMin: r.number(),
+          xMax: r.number(),
+          yMax: r.number(),
+        });
+        scroll = flags & 2 ? rect() : null;
+        grid = flags & 4 ? rect() : null;
+        end = r.at;
+      }
+      displayStates.push({ cached, scroll, grid });
       this.seen.add(id);
     }
 
@@ -569,6 +623,19 @@ export class SceneMirror {
         o.invalidate(CONTENT);
       }
 
+      const state = displayStates[i];
+      if (
+        o.cachedAsBitmap !== state.cached ||
+        !sameRect(o.scroll, state.scroll) ||
+        !sameRect(o.scale9Grid, state.grid)
+      ) {
+        o.cachedAsBitmap = state.cached;
+        o.scroll = state.scroll;
+        o.scrollRect = state.scroll;
+        o.scale9Grid = state.grid;
+        o.invalidate(CONTENT | TRANSFORM);
+      }
+
       const blend = BLEND_MODES[data[at + 18]];
       if (o.blendMode !== blend) {
         o.blendMode = blend;
@@ -650,4 +717,16 @@ function sameValues(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
   }
 
   return true;
+}
+
+function sameRect(a: Rect | null, b: Rect | null): boolean {
+  return (
+    a === b ||
+    (a !== null &&
+      b !== null &&
+      Object.is(a.xMin, b.xMin) &&
+      Object.is(a.yMin, b.yMin) &&
+      Object.is(a.xMax, b.xMax) &&
+      Object.is(a.yMax, b.yMax))
+  );
 }

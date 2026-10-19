@@ -7,6 +7,6 @@
     "types": [],
     "paths": { "/player/*": ["../../packages/player/dist/*"] }
   },
-  "include": ["page.ts", "worker-page.ts"],
+  "include": ["page.ts", "worker-page.ts", "worker-host-page.ts"],
   "exclude": []
 }

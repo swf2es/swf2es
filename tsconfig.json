@@ -28,6 +28,7 @@
     "tests/programs/as3pb",
     "tests/player/page.ts",
     "tests/player/worker-page.ts",
+    "tests/player/worker-host-page.ts",
     "tests/player/worker-entry.ts",
     "tests/web/page.ts"
   ]

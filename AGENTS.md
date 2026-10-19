@@ -74,6 +74,8 @@ node tests/player/context-loss.ts   # a WebGL context lost and given back mid-pl
                               # in Chrome (part of pnpm test)
 node tests/player/worker.ts [--gpu] # the SAB/OffscreenCanvas scene prototype vs the main renderer
                               # on an isolated Chrome host (part of pnpm test; SwiftShader by default)
+node tests/player/worker-host.ts [--gpu] # experimental worker host: input/resize, asset ordering,
+                              # morph presentation, fallback/restart and disposal (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
