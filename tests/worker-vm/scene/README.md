@@ -37,7 +37,8 @@ and retained objects no longer need that library. The codec does not implement
 asset retirement, a total asset memory limit or a host lifecycle.
 
 `sharedFrames(capacity, slots)` allocates fixed-size slots for one producer and
-one consumer. `FrameWriter.write()` owns a free payload while encoding, then
+one consumer. Snapshot records use Float64 storage: payloads must be aligned
+to eight bytes, so use a capacity divisible by eight. `FrameWriter.write()` owns a free payload while encoding, then
 publishes it with Atomics. It returns `null` without invoking the encoder when
 all slots are occupied. A failed encode returns its slot to the free pool and
 does not publish or advance the sequence. Sequences do not wrap; exhaustion
@@ -99,3 +100,12 @@ under comparable machine load. These timings do not measure FPS, GPU
 presentation, input latency or cold-load responsiveness. Complete snapshots
 still walk every node and rebuild text/filter records; this is not a diff
 protocol and does not establish a general worker performance benefit.
+
+The fixed 27-value node header uses indexed writes, avoiding one temporary
+numeric array per node. In a local CPU comparison, two encoders processed the
+same sixteen captured scene states in alternating order, outside VM execution
+and rendering. All 70.8 MB of compared output matched byte-for-byte. Across
+32 paired batches the indexed encoder was faster in 30, with a median paired
+CPU saving of 16.1%. Background load varied, so absolute times and full-game
+frame pacing are not inferred from this comparison. The synthetic command
+above provides a redistributable workload for comparisons across revisions.

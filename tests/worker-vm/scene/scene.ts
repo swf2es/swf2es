@@ -158,50 +158,46 @@ export class SceneSnapshot {
         const at = HEADER + i * ROW;
         const m = o.matrix;
         const c = o.colorTransform ?? IDENTITY_COLOR;
-        data.set(
-          [
-            o.serial,
-            parents[i],
-            character,
-            (container
-              ? CONTAINER
-              : o instanceof StaticTextObject
-                ? STATIC_TEXT
-                : o instanceof TextObject
-                  ? TEXT
-                  : o instanceof BitmapObject
-                    ? BITMAP
-                    : o.drawing || (o instanceof ShapeObject && !o.shape)
-                      ? DYNAMIC
-                      : o instanceof ShapeObject && o.morph
-                        ? MORPH
-                        : 0) | (o.visible ? VISIBLE : 0),
-            m.a,
-            m.b,
-            m.c,
-            m.d,
-            m.tx,
-            m.ty,
-            c.rMul,
-            c.gMul,
-            c.bMul,
-            c.aMul,
-            c.rAdd,
-            c.gAdd,
-            c.bAdd,
-            c.aAdd,
-            BLEND_MODES.indexOf(o.blendMode),
-            o.depth ?? Number.NaN,
-            o.clipDepth,
-            -1,
-            0,
-            library,
-            0,
-            0,
-            0,
-          ],
-          at,
-        );
+        data[at] = o.serial;
+        data[at + 1] = parents[i];
+        data[at + 2] = character;
+        data[at + 3] =
+          (container
+            ? CONTAINER
+            : o instanceof StaticTextObject
+              ? STATIC_TEXT
+              : o instanceof TextObject
+                ? TEXT
+                : o instanceof BitmapObject
+                  ? BITMAP
+                  : o.drawing || (o instanceof ShapeObject && !o.shape)
+                    ? DYNAMIC
+                    : o instanceof ShapeObject && o.morph
+                      ? MORPH
+                      : 0) | (o.visible ? VISIBLE : 0);
+        data[at + 4] = m.a;
+        data[at + 5] = m.b;
+        data[at + 6] = m.c;
+        data[at + 7] = m.d;
+        data[at + 8] = m.tx;
+        data[at + 9] = m.ty;
+        data[at + 10] = c.rMul;
+        data[at + 11] = c.gMul;
+        data[at + 12] = c.bMul;
+        data[at + 13] = c.aMul;
+        data[at + 14] = c.rAdd;
+        data[at + 15] = c.gAdd;
+        data[at + 16] = c.bAdd;
+        data[at + 17] = c.aAdd;
+        data[at + 18] = BLEND_MODES.indexOf(o.blendMode);
+        data[at + 19] = o.depth ?? Number.NaN;
+        data[at + 20] = o.clipDepth;
+        data[at + 21] = -1;
+        data[at + 22] = 0;
+        data[at + 23] = library;
+        data[at + 24] = 0;
+        data[at + 25] = 0;
+        data[at + 26] = 0;
 
         if (container) {
           for (let k = 0; k < o.children.length; k++) {
