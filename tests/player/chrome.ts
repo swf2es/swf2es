@@ -40,6 +40,8 @@ export interface PlayerJob {
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
 export interface RunOptions {
+  /** Extra response headers, such as cross-origin isolation for worker experiments. */
+  headers?: Record<string, string>;
   timeout?: number;
   onResult?: (index: number, result: PlayerResult) => void;
   mounts?: [string, string][];
@@ -151,8 +153,8 @@ export async function withPage<T>(
   gpu = false,
   options: RunOptions = {},
 ): Promise<T> {
-  const { timeout, mounts, csp, page = "" } = options;
-  const { server, url } = await serve(mounts, csp);
+  const { timeout, mounts, csp, headers, page = "" } = options;
+  const { server, url } = await serve(mounts, csp, headers);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
   try {

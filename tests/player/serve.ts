@@ -81,9 +81,14 @@ function page(): string {
 export async function serve(
   extra: [string, string][] = [],
   csp?: string,
+  headers: Record<string, string> = {},
 ): Promise<{ server: Server; url: string }> {
   const served = [...extra, ...mounts];
   const server = createServer((request, response) => {
+    for (const [name, value] of Object.entries(headers)) {
+      response.setHeader(name, value);
+    }
+
     let path: string;
     try {
       path = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
