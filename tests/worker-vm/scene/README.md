@@ -59,6 +59,12 @@ changed records are parsed and validated before any graph updates. Text font
 references are revalidated after the library registry changes. Reuse adds no
 history of old frames or additional copies of these records.
 
+Decoder scratch arrays grow with the largest snapshot and are reused. References
+to parsed records and borrowed bitmap pixels are cleared after every apply,
+including rejected frames; `dispose()` also releases the array storage. This
+reduces temporary allocations but does not make decoding allocation-free:
+changed records and retained graph updates can still allocate.
+
 ```ts
 const writer = new FrameWriter(frames);
 const snapshot = new SceneSnapshot(assets);

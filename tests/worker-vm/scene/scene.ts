@@ -303,6 +303,17 @@ export class SceneMirror {
   private readonly rows: DisplayObject[] = [];
   private readonly childCounts: number[] = [];
   private readonly masks = new Set<number>();
+  private readonly filters: (readonly Filter[] | null)[] = [];
+  private readonly filterEnds: number[] = [];
+  private readonly contentEnds: number[] = [];
+  private readonly texts: (TextRecord | null)[] = [];
+  private readonly bitmapRows: (BitmapRecord | null)[] = [];
+  private readonly drawings: (DrawingRecord | null)[] = [];
+  private readonly drawingEnds: number[] = [];
+  private readonly ratios: number[] = [];
+  private readonly displayStates: (DisplayState | null)[] = [];
+  private readonly bitmapRecords = new BitmapRecords();
+  private scratchCount = 0;
 
   private readonly assets: SceneLibraries;
   private readonly bitmaps = new BitmapMirror();
@@ -315,10 +326,35 @@ export class SceneMirror {
     this.bitmaps.begin();
     this.bitmaps.finish();
     this.nodes.clear();
-    this.rows.length = 0;
+    this.rows.length = this.childCounts.length = 0;
+    this.seen.clear();
+    this.masks.clear();
+    this.clearScratch();
+    this.filters.length = this.filterEnds.length = this.contentEnds.length = 0;
+    this.texts.length = this.bitmapRows.length = this.drawings.length = 0;
+    this.drawingEnds.length = this.ratios.length = this.displayStates.length = 0;
   }
 
   apply(bytes: Uint8Array): DisplayObject {
+    try {
+      return this.decode(bytes);
+    } finally {
+      this.clearScratch();
+    }
+  }
+
+  private clearScratch(): void {
+    // Keep array storage, but never retain a consumed or rejected frame's records.
+    this.filters.fill(null, 0, this.scratchCount);
+    this.texts.fill(null, 0, this.scratchCount);
+    this.bitmapRows.fill(null, 0, this.scratchCount);
+    this.drawings.fill(null, 0, this.scratchCount);
+    this.displayStates.fill(null, 0, this.scratchCount);
+    this.bitmapRecords.clear();
+    this.scratchCount = 0;
+  }
+
+  private decode(bytes: Uint8Array): DisplayObject {
     if (bytes.byteLength < sceneFrameBytes(1) || bytes.byteLength % 8 !== 0) {
       throw new Error("invalid scene snapshot length");
     }
@@ -336,16 +372,17 @@ export class SceneMirror {
 
     this.seen.clear();
     this.masks.clear();
-    const filters: (readonly Filter[])[] = [];
-    const filterEnds: number[] = [];
-    const contentEnds: number[] = [];
-    const texts: (TextRecord | null)[] = [];
-    const bitmaps: (BitmapRecord | null)[] = [];
-    const drawings: (DrawingRecord | null)[] = [];
-    const drawingEnds: number[] = [];
-    const ratios: number[] = [];
-    const displayStates: (DisplayState | null)[] = [];
-    const bitmapRecords = new BitmapRecords();
+    this.scratchCount = count;
+    const filters = this.filters;
+    const filterEnds = this.filterEnds;
+    const contentEnds = this.contentEnds;
+    const texts = this.texts;
+    const bitmaps = this.bitmapRows;
+    const drawings = this.drawings;
+    const drawingEnds = this.drawingEnds;
+    const ratios = this.ratios;
+    const displayStates = this.displayStates;
+    const bitmapRecords = this.bitmapRecords;
     let end = HEADER + count * ROW;
     // Validate before touching the mirror, so a rejected frame leaves it intact.
     for (let i = 0; i < count; i++) {
@@ -414,17 +451,17 @@ export class SceneMirror {
       if (offset !== 0) {
         if (retained && matchesRecord(retained.filterValues, data, offset)) {
           end = offset + retained.filterValues.length;
-          filters.push(EMPTY_FILTERS);
+          filters[i] = EMPTY_FILTERS;
         } else {
           const decoded = readFilters(data, offset);
           end = decoded.end;
-          filters.push(decoded.filters);
+          filters[i] = decoded.filters;
         }
       } else {
-        filters.push(EMPTY_FILTERS);
+        filters[i] = EMPTY_FILTERS;
       }
 
-      filterEnds.push(end);
+      filterEnds[i] = end;
       const content = data[at + 24];
       if (kind === TEXT || kind === BITMAP || kind === MORPH) {
         if (content !== end) {
@@ -440,13 +477,13 @@ export class SceneMirror {
             matchesRecord(retained.textValues, data, content)
           ) {
             end = content + retained.textValues.length;
-            texts.push(null);
+            texts[i] = null;
           } else {
             const decoded = readText(data, content, this.assets);
-            texts.push(decoded.record);
+            texts[i] = decoded.record;
             end = decoded.end;
           }
-          bitmaps.push(null);
+          bitmaps[i] = null;
         } else if (kind === MORPH) {
           if (
             content >= data.length ||
@@ -457,13 +494,13 @@ export class SceneMirror {
             throw new Error("invalid scene snapshot morph ratio");
           }
 
-          texts.push(null);
-          bitmaps.push(null);
+          texts[i] = null;
+          bitmaps[i] = null;
           end = content + 1;
         } else {
           const decoded = bitmapRecords.read(data, content);
-          texts.push(null);
-          bitmaps.push(decoded.record);
+          texts[i] = null;
+          bitmaps[i] = decoded.record;
           end = decoded.end;
         }
       } else {
@@ -471,12 +508,12 @@ export class SceneMirror {
           throw new Error("unexpected scene snapshot content");
         }
 
-        texts.push(null);
-        bitmaps.push(null);
+        texts[i] = null;
+        bitmaps[i] = null;
       }
 
-      contentEnds.push(end);
-      ratios.push(kind === MORPH ? data[content] : 0);
+      contentEnds[i] = end;
+      ratios[i] = kind === MORPH ? data[content] : 0;
       const drawing = data[at + 25];
       if (drawing !== 0) {
         if (drawing !== end || !DRAWING_KINDS.includes(kind)) {
@@ -484,13 +521,13 @@ export class SceneMirror {
         }
 
         const decoded = readDrawing(data, drawing, this.assets, bitmapRecords);
-        drawings.push(decoded.record);
+        drawings[i] = decoded.record;
         end = decoded.end;
       } else {
-        drawings.push(null);
+        drawings[i] = null;
       }
 
-      drawingEnds.push(end);
+      drawingEnds[i] = end;
       const state = data[at + 26];
       let cached = false;
       let scroll: Rect | null = null;
@@ -513,7 +550,7 @@ export class SceneMirror {
         grid = flags & 4 ? rect() : null;
         end = r.at;
       }
-      displayStates.push(state === 0 ? null : { cached, scroll, grid });
+      displayStates[i] = state === 0 ? null : { cached, scroll, grid };
       this.seen.add(id);
     }
 
@@ -631,7 +668,7 @@ export class SceneMirror {
       const filterEnd = offset ? filterEnds[i] : 0;
       if (!sameValuesAt(node.filterValues, data, filterStart, filterEnd)) {
         node.filterValues = offset ? data.slice(filterStart, filterEnd) : EMPTY_VALUES;
-        o.filters = filters[i];
+        o.filters = filters[i] ?? EMPTY_FILTERS;
         o.invalidate(TRANSFORM);
       }
 

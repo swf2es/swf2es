@@ -232,3 +232,63 @@ test("identical text revalidates embedded fonts after a library is retired", () 
   assert.throws(() => mirror.apply(bytes), /invalid worker scene font/);
   assert.equal(root.layout, layout);
 });
+
+test("decoder scratch releases frame records after success, rejection and shrinking scenes", () => {
+  const fixture = sceneFixture();
+  const encoder = new SceneSnapshot(fixture.assets);
+  const mirror = new SceneMirror(fixture.assets);
+  const buffer = new Uint8Array(new SharedArrayBuffer(131072));
+  const scratch = mirror as unknown as {
+    filters: unknown[];
+    texts: unknown[];
+    bitmapRows: unknown[];
+    drawings: unknown[];
+    displayStates: unknown[];
+    bitmapRecords: { records: Map<number, unknown> };
+  };
+  const references = [
+    scratch.filters,
+    scratch.texts,
+    scratch.bitmapRows,
+    scratch.drawings,
+    scratch.displayStates,
+  ];
+  const released = () => {
+    for (const rows of references) {
+      assert.ok(
+        rows.every((record) => record === null),
+        "no frame record remains reachable",
+      );
+    }
+
+    assert.equal(scratch.bitmapRecords.records.size, 0);
+  };
+
+  for (let frame = 0; frame < 6; frame++) {
+    fixture.step(frame);
+    let length = encoder.encode(fixture.root, buffer);
+    const root = mirror.apply(buffer.subarray(0, length));
+    assert.ok(root instanceof Container);
+    const children = root.children.slice();
+    released();
+
+    // Fail after every record was read, including the borrowed bitmap pixels.
+    assert.throws(() => mirror.apply(buffer.subarray(0, length + 8)), /filter tail/);
+    released();
+    assert.deepEqual(root.children, children);
+
+    length = encoder.encode(fixture.bitmap, buffer);
+    const bitmap = mirror.apply(buffer.subarray(0, length));
+    assert.ok(bitmap instanceof BitmapObject);
+    assert.ok(bitmap.store && fixture.bitmap.store);
+    assert.deepEqual(bitmap.store.readable, fixture.bitmap.store.readable);
+    released();
+    buffer.fill(0xee);
+    assert.deepEqual(bitmap.store.readable, fixture.bitmap.store.readable);
+  }
+
+  mirror.dispose();
+  mirror.dispose();
+  released();
+  assert.ok(references.every((rows) => rows.length === 0));
+});

@@ -83,6 +83,10 @@ export class BitmapSnapshot {
 export class BitmapRecords {
   private readonly records = new Map<number, { offset: number; value: BitmapPixels }>();
 
+  clear(): void {
+    this.records.clear();
+  }
+
   read(data: Float64Array, at: number): { record: BitmapRecord; end: number } {
     const r = new ValuesReader(data, at);
     const smoothing = r.boolean();
