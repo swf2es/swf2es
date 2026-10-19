@@ -638,6 +638,7 @@ function listen(): void {
       gestureAt = Number.NEGATIVE_INFINITY;
       return true;
     },
+    { ipcMain, dialog },
   );
   ipcMain.handle("desktop:start", (event): StartState => {
     if (!trusted(event)) {

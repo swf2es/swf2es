@@ -1,25 +1,35 @@
 // A dialog grants an opaque capability, never a renderer-supplied path.
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
-import {
-  type BrowserWindow,
-  dialog,
-  type IpcMainEvent,
-  type IpcMainInvokeEvent,
-  ipcMain,
-  type WebContents,
+import type {
+  BrowserWindow,
+  Dialog,
+  IpcMain,
+  IpcMainEvent,
+  IpcMainInvokeEvent,
+  WebContents,
 } from "electron";
 
 type Event = IpcMainEvent | IpcMainInvokeEvent;
+type FileBridgeHost = {
+  ipcMain: Pick<IpcMain, "handle" | "on">;
+  dialog: Pick<Dialog, "showOpenDialog" | "showSaveDialog">;
+};
 
 export function bridgeFiles(
   trusted: (event: Event) => boolean,
   window: () => BrowserWindow | null,
   gesture: () => boolean,
+  { ipcMain, dialog }: FileBridgeHost,
 ): void {
   const grants = new Map<number, { path: string; write: boolean }>();
   let next = 1;
   let dialogOpen = false;
+  let generation = 0;
+  const revoke = () => {
+    generation++;
+    grants.clear();
+  };
   const watched = new WeakSet<WebContents>();
   const watch = (owner: BrowserWindow) => {
     const contents = owner.webContents;
@@ -30,10 +40,10 @@ export function bridgeFiles(
     watched.add(contents);
     contents.on("did-start-navigation", (details) => {
       if (details.isMainFrame && !details.isSameDocument) {
-        grants.clear();
+        revoke();
       }
     });
-    contents.once("destroyed", () => grants.clear());
+    contents.once("destroyed", revoke);
   };
   ipcMain.on("files:release", (event, id: unknown) => {
     if (trusted(event) && typeof id === "number") {
@@ -61,6 +71,10 @@ export function bridgeFiles(
     if (!trusted(event) || !owner || dialogOpen || !gesture()) {
       return [];
     }
+
+    watch(owner);
+    const opened = generation;
+    const current = () => trusted(event) && owner === window() && generation === opened;
     dialogOpen = true;
     try {
       const result = await dialog.showOpenDialog(owner, {
@@ -81,24 +95,28 @@ export function bridgeFiles(
             })
           : [],
       });
-      if (result.canceled || !trusted(event)) {
+      if (result.canceled || !current()) {
         return [];
       }
-      watch(owner);
-      return await Promise.all(
-        result.filePaths.map(async (path) => {
-          const info = await stat(path);
-          const id = next++;
-          grants.set(id, { path, write: false });
-          return {
-            id,
-            name: basename(path),
-            size: info.size,
-            modificationDate: info.mtimeMs,
-            creationDate: info.birthtimeMs,
-          };
-        }),
+
+      const selected = await Promise.all(
+        result.filePaths.map(async (path) => ({ path, info: await stat(path) })),
       );
+      if (!current()) {
+        return [];
+      }
+
+      return selected.map(({ path, info }) => {
+        const id = next++;
+        grants.set(id, { path, write: false });
+        return {
+          id,
+          name: basename(path),
+          size: info.size,
+          modificationDate: info.mtimeMs,
+          creationDate: info.birthtimeMs,
+        };
+      });
     } finally {
       dialogOpen = false;
     }
@@ -108,15 +126,19 @@ export function bridgeFiles(
     if (!trusted(event) || !owner || typeof name !== "string" || dialogOpen || !gesture()) {
       return null;
     }
+
+    watch(owner);
+    const opened = generation;
+    const current = () => trusted(event) && owner === window() && generation === opened;
     dialogOpen = true;
     try {
       const result = await dialog.showSaveDialog(owner, { defaultPath: basename(name) });
-      if (result.canceled || !result.filePath || !trusted(event)) {
+      if (result.canceled || !result.filePath || !current()) {
         return null;
       }
+
       const id = next++;
       grants.set(id, { path: result.filePath, write: true });
-      watch(owner);
       return { id, name: basename(result.filePath) };
     } finally {
       dialogOpen = false;
