@@ -1,6 +1,10 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "lib": ["ES2022", "WebWorker"], "types": [] },
-  "include": ["thread.ts"],
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "types": [],
+    "paths": { "pixi.js": ["../../vendor/pixijs/lib/index.d.ts"] }
+  },
+  "include": ["thread.ts", "bitmap-thread.ts"],
   "exclude": []
 }

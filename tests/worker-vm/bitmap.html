@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flash VM worker bitmap experiment</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; background: #f4f6fa; color: #182235; max-width: 1100px; margin: 40px auto; padding: 0 24px; }
+    h1 { font-size: 30px; } h2 { font-size: 18px; }
+    .controls { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; margin: 28px 0; }
+    label { display: grid; gap: 6px; } select, button { font: inherit; padding: 10px 14px; border: 1px solid #aeb8c9; border-radius: 6px; }
+    button { background: #1a56bd; color: white; cursor: pointer; } button:disabled { opacity: .6; cursor: progress; }
+    #cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    article { background: white; padding: 20px; border: 1px solid #d7deea; border-radius: 10px; }
+    article img { width: 240px; height: 192px; image-rendering: pixelated; background: #eee; border: 1px solid #ccc; }
+    .note { color: #4b5a70; } #status { min-height: 2em; }
+  </style>
+</head>
+<body>
+  <h1>Flash VM worker bitmap experiment</h1>
+  <p>Real Flash code draws, changes and reorders shapes, then reads pixels immediately.
+    Compare one main-thread renderer with a second renderer in the worker.</p>
+  <p class="note">This tests the bitmap boundary. Full game playback and frame pacing are separate work.
+    Callback timings include drawing and readback; they are not FPS measurements.</p>
+  <div class="controls">
+    <label>Flash VM <select id="kind"><option value="avm2">AVM2 / AS3</option><option value="avm1">AVM1 / AS2</option></select></label>
+    <label>Draw sequences <select id="repeats"><option>1</option><option>8</option><option>32</option></select></label>
+    <label>Front shape <select id="color"><option value="0">Green</option><option value="1">Purple</option></select></label>
+    <button type="button" id="compare">Run comparison</button>
+  </div>
+  <p id="status" role="status">Ready. Run a comparison to draw all three results.</p>
+  <div id="cards"></div>
+  <p class="note">Page activity ticks: <span id="ticks">0</span></p>
+  <script type="module" src="/experiment/bitmap-page.js"></script>
+</body>
+</html>
