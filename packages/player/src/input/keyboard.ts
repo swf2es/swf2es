@@ -847,6 +847,17 @@ function selectionAt(field: TextObject, position: number, clicks: number): [numb
 
 /** Flash's key codes where a browser's legacy ones differ: Firefox's for ";", "=" and "-". */
 const KEY_CODES: Record<number, number> = { 59: 186, 61: 187, 173: 189 };
+const SCROLL_KEYS = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  " ",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+]);
 
 /** The character a browser's key types, as Flash's charCode: its UTF-16 unit, or Enter's, Backspace's, Tab's, Escape's and Delete's. */
 function charCodeOf(e: KeyboardEvent): number {
@@ -869,8 +880,8 @@ function pagesOwn(e: Event): boolean {
  * Send the browser's keys on `target` (the window, say) to the player. A
  * key goes to the SWF unless it is typed into the page's own input or
  * button, or comes from an IME, which the player cannot compose; the
- * browser is kept from acting on one only where the SWF used it: a field's
- * edit or caret, or Tab moving the SWF's focus. Its own shortcuts stay.
+ * browser is kept from acting on a field's edit or caret, Tab moving the
+ * SWF's focus, or a scrolling key meant for the SWF. Its shortcuts stay.
  * The copy, cut and paste events the browser sends for Ctrl+C, X and V,
  * or its menu's, go to the player too, which reads and writes the
  * clipboard through them, synchronously and without asking for leave.
@@ -906,7 +917,7 @@ export function bindKeyboard(
       altKey: e.altKey,
       shiftKey: e.shiftKey,
     });
-    if (used) {
+    if (used || (!e.ctrlKey && !e.metaKey && !e.altKey && SCROLL_KEYS.has(e.key))) {
       e.preventDefault();
     }
   };
