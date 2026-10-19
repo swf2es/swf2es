@@ -34,6 +34,8 @@
     "tests/worker-vm/bitmap-thread.ts",
     "tests/worker-vm/bitmap-renderer.ts",
     "tests/worker-vm/playback-page.ts",
-    "tests/worker-vm/playback-thread.ts"
+    "tests/worker-vm/playback-thread.ts",
+    "tests/worker-vm/scene-page.ts",
+    "tests/worker-vm/scene-thread.ts"
   ]
 }
