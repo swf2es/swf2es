@@ -270,3 +270,47 @@ test("regular uploads and downloads ignore requestHeaders and retain POST data",
     player.destroy();
   }
 });
+
+for (const method of ["POST", "PUT"]) {
+  test(`unencoded ${method} uploads preserve the request method, headers and file bytes`, async () => {
+    const asked: FetchRequest[] = [];
+    const { player, rt, call, frame } = await setup({
+      fetch: async (request) => {
+        asked.push(request);
+        return { bytes: new Uint8Array(), status: 200, headers: [] };
+      },
+    });
+    try {
+      call("browse");
+      await frame();
+      const request = rt.construct(
+        rt.classNamed("flash.net::URLRequest"),
+        "https://example.test/file",
+      );
+      rt.setProperty(request, rt.publicName("method"), method);
+      rt.setProperty(
+        request,
+        rt.publicName("requestHeaders"),
+        rt.array([
+          rt.construct(
+            rt.classNamed("flash.net::URLRequestHeader"),
+            "Content-Type",
+            "application/octet-stream",
+          ),
+          rt.construct(rt.classNamed("flash.net::URLRequestHeader"), "If-Match", "version-1"),
+        ]),
+      );
+      call("uploadUnencoded", request);
+      await frame();
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].method, method);
+      assert.deepEqual(asked[0].headers, [
+        ["Content-Type", "application/octet-stream"],
+        ["If-Match", "version-1"],
+      ]);
+      assert.deepEqual(asked[0].body, Uint8Array.of(65, 0, 255));
+    } finally {
+      player.destroy();
+    }
+  });
+}

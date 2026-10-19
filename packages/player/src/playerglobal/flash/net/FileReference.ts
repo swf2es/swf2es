@@ -177,7 +177,10 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
     }
 
     uploadUnencoded(request: Value): void {
-      state(this).upload(s.loads.fetchRequest(requestOf(request), s.url), null);
+      state(this).upload(
+        s.loads.fetchRequest(requestOf(request), s.url, { requestHeaders: "all" }),
+        null,
+      );
     }
 
     "flash.net:FileReference::_load"(into: Value): void {

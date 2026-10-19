@@ -322,7 +322,7 @@ export class FileReference {
       operation.signal.throwIfAborted();
       const outgoing =
         field === null
-          ? { ...request, method: "POST", body: bytes }
+          ? { ...request, body: bytes }
           : await multipart(request, file.name, field, bytes);
       if (test && bytes.length > 10 * 1024) {
         const probe = await this.services.fetch(

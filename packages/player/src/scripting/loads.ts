@@ -476,7 +476,7 @@ export class Loads {
   fetchRequest(
     request: AsObject | string,
     base: string,
-    options: { method?: string; requestHeaders?: boolean } = {},
+    options: { method?: string; requestHeaders?: boolean | "all" } = {},
   ): FetchRequest {
     if (typeof request === "string") {
       return { url: resolve(this.s.base ?? base, request), method: "GET", headers: [], body: null };
@@ -505,7 +505,7 @@ export class Loads {
     }
 
     const headers: [string, string][] = [];
-    if (post && options.requestHeaders !== false) {
+    if ((post || options.requestHeaders === "all") && options.requestHeaders !== false) {
       for (const header of request?.$headers?.$a ?? []) {
         headers.push([
           this.s.rt.toString(this.s.rt.getProperty(header, this.s.rt.publicName("name"))),

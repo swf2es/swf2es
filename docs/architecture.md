@@ -2713,6 +2713,9 @@ later frame, preserving the headless player's fallback.
 
 Uploads encode multipart form data, or send the selected bytes directly
 for `uploadUnencoded`; downloads fetch only after choosing a destination.
+Unencoded uploads retain their URLRequest method and headers. Hosts still
+decide which methods are allowed: the desktop SWF network permits GET and
+POST and rejects PUT, while browser fetch can send PUT subject to CORS.
 Both pass through the existing host fetch as `data` requests, retaining
 CORS or the host's sandbox and policy checks. Completion and errors cross
 into player frames. Cancellation and player destruction suppress stale
