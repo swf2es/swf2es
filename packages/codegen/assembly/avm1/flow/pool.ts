@@ -37,9 +37,18 @@ export function poolAfter(actions: Actions, index: i32, pool: i32): i32 {
 }
 
 /** The pool at the start of each of the region's blocks. */
-export function poolsOf(actions: Actions, region: Region): StaticArray<i32> {
+export function poolsOf(
+  actions: Actions,
+  region: Region,
+  pools: StaticArray<i32>,
+  work: i32[],
+): StaticArray<i32> {
   const n = region.blocks.length;
-  const pools = new StaticArray<i32>(n);
+  if (n > pools.length) {
+    pools = new StaticArray<i32>(max(n, pools.length * 2));
+  }
+
+  work.length = 0;
   if (n === 0) {
     return pools;
   }
@@ -50,7 +59,6 @@ export function poolsOf(actions: Actions, region: Region): StaticArray<i32> {
 
   // Each block's pool changes at most twice, from unreached to one pool to
   // unknown, so the work list ends.
-  const work: i32[] = [];
   const entry = region.blockAt(region.start);
   pools[entry] = POOL_Unknown;
   work.push(entry);

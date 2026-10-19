@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { readActions, readSwf } from "../../../packages/format/dist/index.js";
 import { type Region as Avm1Region, Runtime } from "../../../packages/runtime/dist/avm1/index.js";
 import {
   Avm1Assembler,
@@ -14,7 +15,8 @@ import {
   register,
   TryFlag,
 } from "../../avm1-assembler.ts";
-import { testing } from "./testing-module.ts";
+import { backwardActions, sharedBackwardSwf } from "../../avm1-backward.ts";
+import { loadTesting, testing } from "./testing-module.ts";
 
 // AVM1 blocks assembled in the tests, compiled by codegen's emitter
 // (assembly/avm1/emit/) and run with a stub runtime that records what the
@@ -1151,6 +1153,75 @@ test("a block's range outside the SWF's bytes is an empty block", () => {
   );
   assert.equal(module.match(/V\.stop/g)?.length, 1);
   assert.equal(module.match(/function \(cx\)/g)?.length, 3);
+});
+
+test("backward branches read SWF prefixes, including functions and chained distant jumps", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  for (const distant of [false, true]) {
+    const { bytes, offset } = backwardActions(distant);
+    const offsets = Int32Array.of(offset);
+    const lengths = Int32Array.of(bytes.length - offset);
+    const actions = { version: 8, blocks: [{ offset, length: lengths[0] }] };
+    const compiled = codegen.compileActions(bytes, actions);
+    assert.equal(
+      utf8.decode(testing.actionsModuleBytes(bytes, offsets, lengths, 8, true)),
+      compiled.module,
+    );
+    const entries = testing.actionsModuleEntries();
+    for (const reuse of [false, true]) {
+      assert.equal(
+        testing.actionsEmitEach(bytes, offsets, lengths, 8, "0,0", reuse),
+        entries.repeat(2),
+      );
+    }
+
+    assert.equal(codegen.compileActionBlocks(bytes, actions, [0]).get(0), compiled.entries[0]);
+    const lines: string[] = [];
+    const rt = new Runtime();
+    const blocks = (await load(compiled.module, rt)) as unknown as Avm1Region[][];
+    const host = { trace: (text: string) => lines.push(text), play() {}, stop() {}, halt() {} };
+    rt.run(blocks[0], rt.activation([], [], {}, rt.newObject(), host));
+    assert.deepEqual(
+      lines,
+      distant
+        ? ["distant prefix", "returned"]
+        : ["outside é", "callback", "42", "conditional prefix", "done"],
+    );
+  }
+});
+
+test("SWF context does not extend an action block's upper decoding bound", () => {
+  const bytes = Uint8Array.of(0x07, 0x96, 5, 0, 7, 1, 0, 0, 0);
+  const module = utf8.decode(
+    testing.actionsModuleBytes(bytes, Int32Array.of(1), Int32Array.of(4), 8),
+  );
+  assert.match(module, /V\.halt\(cx\)/);
+});
+
+test("shared SWF prefixes reuse analysis storage across blocks without changing entries", async () => {
+  const fresh = await loadTesting(process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test");
+  const swf = readSwf(sharedBackwardSwf(500));
+  const blocks = readActions(swf).blocks;
+  const offsets = Int32Array.from(blocks, (b) => b.offset);
+  const lengths = Int32Array.from(blocks, (b) => b.length);
+  fresh.actionsModuleBytes(swf.bytes, offsets, lengths, 8, true);
+  const memory = fresh.memory.buffer.byteLength;
+  assert.ok(memory < 32 * 1024 * 1024, `500 shared-prefix blocks grew memory to ${memory} bytes`);
+  const entries = (fresh.actionsModuleEntries() as string).split("\u0002").filter(Boolean);
+  assert.equal(entries.length, 500);
+  for (const reuse of [false, true]) {
+    assert.equal(
+      fresh.actionsEmitEach(swf.bytes, offsets, lengths, 8, "499,0,250,0", reuse),
+      [499, 0, 250, 0]
+        .map((i) => entries[i])
+        .join("\u0002")
+        .concat("\u0002"),
+    );
+  }
 });
 
 test("each block compiled alone is its entry in the module, in the test and release builds", async () => {

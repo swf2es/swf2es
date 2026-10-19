@@ -47,20 +47,11 @@ export class ModuleEmitter {
     const count = min(offsets.length, lengths.length);
     for (let k = 0; k < count; k++) {
       this.entryStart.push(out.length);
-      this.blocks.block(blockOf(swf, offsets[k], lengths[k]));
+      this.blocks.block(swf, offsets[k], lengths[k]);
       this.entryEnd.push(out.length);
       out.text(",\n");
     }
 
     out.text("];\n}\n");
   }
-}
-
-/** The bytes of a block, empty where they are not all in the SWF's. */
-export function blockOf(swf: Uint8Array, offset: i32, length: i32): Uint8Array {
-  if (offset < 0 || length < 0 || <i64>offset + <i64>length > <i64>swf.length) {
-    return new Uint8Array(0);
-  }
-
-  return swf.subarray(offset, offset + length);
 }

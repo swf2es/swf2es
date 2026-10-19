@@ -5,10 +5,19 @@
 // docs/architecture.md). Nothing is kept from one SWF to the next but
 // the emitter's buffers.
 import { Output } from "../output";
-import { blockOf, ModuleEmitter } from "./emit/module";
+import { ModuleEmitter } from "./emit/module";
 
-/** The emitter of the module actionsModuleBytes wrote last, if it was kept, for its entries. */
-let written: ModuleEmitter | null = null;
+/** Keep entry text without retaining the compiler's reusable analysis storage. */
+@final
+class WrittenActions {
+  constructor(
+    public out: Output,
+    public entryStart: u32[],
+    public entryEnd: u32[],
+  ) {}
+}
+
+let written: WrittenActions | null = null;
 
 /**
  * The ES module of a SWF of version `version` whose blocks are
@@ -26,7 +35,7 @@ export function actionsModuleBytes(
   const emitter = new ModuleEmitter();
   emitter.module(swf, offsets, lengths, version);
   if (keep) {
-    written = emitter;
+    written = new WrittenActions(emitter.out, emitter.entryStart, emitter.entryEnd);
   }
 
   const out = emitter.out;
@@ -102,7 +111,7 @@ export function actionsEmitEach(
     const out = emitter.out;
     out.reset();
     emitter.blocks.version = version;
-    emitter.blocks.block(blockOf(swf, offsets[k], lengths[k]));
+    emitter.blocks.block(swf, offsets[k], lengths[k]);
     entries.uint(k);
     entries.byte(1);
     entries.reserve(out.length);

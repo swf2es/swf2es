@@ -126,9 +126,15 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   its tag, even with the SWF's next tag behind it: the emitter writes
   `V.halt(cx)`, which the player is to take as it takes `corrupt`. Flash
   Player 9 and Ruffle skip the unknown value type instead; adl decides.
-  The one place swf2es knowingly parts from adl is a jump before the
-  block's first byte (below). Never a trap: errors are sticky flags, as
-  in the ABC parser.
+  A block retains the decompressed SWF as its backing bytes, so backward
+  jumps can reach code before the tag that holds it. Lookup tables stay
+  dense inside the block; preceding offsets are stored sparsely only as
+  control reaches them. Never a trap: errors are sticky flags, as in the
+  ABC parser.
+  The emitter reuses decoded actions, region storage and lookup buffers
+  between blocks. Repeated jumps into shared preceding bytes therefore
+  reuse their analysis storage within the same compiler call; the minimal
+  runtime still collects garbage only between calls from JavaScript.
 - `flow/`: blocks and regions. A block starts at a jump's target, an
   `If`'s, a `WaitForFrame`'s skip, and after each. A **region** is code
   Flash runs as an activation of its own: a block's whole code, or a
@@ -144,10 +150,11 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   code, and an action is decoded once, so a body that jumps back before its
   own `DefineFunction` defines itself again with the same region: regions
   form a graph, cycles included, and the emitter writes each once, not
-  inlined into its parent. A target before the
-  block's first byte is taken as the block's exit; adl, as Ruffle, runs
-  the SWF's bytes before the block there, which a block compiled alone
-  does not have. The constant pool is tracked along
+  inlined into its parent. Backward jumps may reach any preceding SWF
+  byte, including another tag's contents; only a target before the file's
+  start exits. The block's upper bound still limits operands and nested
+  bodies, and forward jumps past it still exit. Blocks compiled alone
+  retain the same SWF context as their entries in a module. The constant pool is tracked along
   the flow: where one `ConstantPool` reaches a `Push` on every path, its
   strings are literals, and a constant past the pool's end `undefined`, as
   Ruffle pushes it; where none or several may, the push reads the
