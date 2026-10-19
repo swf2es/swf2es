@@ -15,6 +15,13 @@ export {
 } from "./display/display.js";
 export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
+export {
+  browserFileHost,
+  type FileFilter,
+  type FileHost,
+  type SaveFile,
+  type SelectedFile,
+} from "./files.js";
 export type {
   CachedModule,
   ClipboardHost,

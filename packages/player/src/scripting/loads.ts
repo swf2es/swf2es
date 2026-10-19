@@ -470,7 +470,7 @@ export class Loads {
   }
 
   /** Snapshot a URLRequest at load time, before scripts can change its data or headers. */
-  private fetchRequest(request: AsObject | string, base: string, as?: string): FetchRequest {
+  fetchRequest(request: AsObject | string, base: string, as?: string): FetchRequest {
     if (typeof request === "string") {
       return { url: resolve(this.s.base ?? base, request), method: "GET", headers: [], body: null };
     }

@@ -20,6 +20,13 @@ ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) =
 );
 
 const api: DesktopApi = {
+  files: {
+    browse: (filters, multiple) => ipcRenderer.invoke("files:browse", filters, multiple),
+    save: (name) => ipcRenderer.invoke("files:save", name),
+    read: (id) => ipcRenderer.invoke("files:read", id),
+    write: (id, bytes) => ipcRenderer.invoke("files:write", id, bytes),
+    release: (id) => ipcRenderer.send("files:release", id),
+  },
   start: () => ipcRenderer.invoke("desktop:start"),
   onOpen: (listener) => {
     ipcRenderer.on("desktop:open", (_event, movie: OpenedMovie) => listener(movie));

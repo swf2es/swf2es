@@ -5,6 +5,7 @@ import { type Codegen, createCodegen } from "@swf2es/codegen";
 import {
   type FetchRequest,
   type FetchResult,
+  type FileHost,
   type ModuleCache,
   playerglobalLibrary,
   type SocketHost,
@@ -40,6 +41,7 @@ export interface Configuration {
    * socketProxy's relays: a desktop app's, which reaches TCP itself.
    */
   sockets?: SocketHost;
+  fileHost?: FileHost | null;
   /**
    * A fetch of the embedder's own for what the SWFs load, the SWF the
    * element plays among it (its purpose "movie"), in place of the

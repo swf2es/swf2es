@@ -3,6 +3,7 @@
 // It reaches the shell only through window.swf2esDesktop (shared/api.ts).
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
 import type { DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
+import { shellFiles } from "./files.js";
 import { shellFetch } from "./network.js";
 import { shellSocketHost } from "./sockets.js";
 
@@ -16,6 +17,7 @@ const desktop = window.swf2esDesktop;
 
 configure({
   cache: true,
+  fileHost: shellFiles(desktop.files),
   sockets: shellSocketHost(desktop.sockets),
   fetch: shellFetch(desktop.network),
   loadPolicyFile: (url) => desktop.network.loadPolicyFile(url),

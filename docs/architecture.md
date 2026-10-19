@@ -2699,14 +2699,38 @@ replacement characters, a crash for a thousand fractional digits.
 `getAvailableLocaleIDNames` lists each region's likely locale that Intl
 supports, as Intl lists none.
 
+### File dialogs
+
+AS3's `FileReference` and `FileReferenceList`, and AS2's `flash.net`
+versions, share `files.ts`: a host supplies selected files' metadata and
+reads, and save destinations' writes, through `fileHost`. The browser's
+host opens a hidden file input while transient user activation is still
+present. `load()` reads the chosen File into a ByteArray. Saving asks
+`showSaveFilePicker` where available; otherwise it starts a Blob download.
+The latter cannot report whether the browser ultimately saved the file.
+Without a host or user activation, a dialog reports cancellation in a
+later frame, preserving the headless player's fallback.
+
+Uploads encode multipart form data, or send the selected bytes directly
+for `uploadUnencoded`; downloads fetch only after choosing a destination.
+Both pass through the existing host fetch as `data` requests, retaining
+CORS or the host's sandbox and policy checks. Completion and errors cross
+into player frames. Cancellation and player destruction suppress stale
+callbacks and abort transfers; progress reports the complete byte count,
+not streaming increments. The browser has no creation timestamp and uses
+the file's modification timestamp for creationDate as well.
+
+The desktop host uses Electron's native dialogs. The main process checks
+that a recent click or key requested the dialog, keeps paths behind
+opaque IDs, and accepts reads and writes only for IDs granted by a dialog.
+The renderer releases them on player destruction; navigation revokes them.
+The unit tests exercise both VMs' bindings and transfers with controlled
+hosts; the web tests exercise Chrome's actual file input and File reads.
+
 ### What a browser player lacks
 
 Some of playerglobal stands for what the player does not have, and acts
-as Flash does without it (the `system-natives` case). A FileReference
-never has a file: its dialogs are not shown, `browse`, `download` and
-`save` act as if the user cancelled, Event.CANCEL in the next frame, and
-what reads a file throws #2037; a FileReferenceList's `fileList` is empty
-after a browse. `Stage.stage3Ds` are Flash's four Stage3Ds, whose
+as Flash does without it (the `system-natives` case). `Stage.stage3Ds` are Flash's four Stage3Ds, whose
 positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
 each request for a Context3D gets ErrorEvent #3702 in the next frame, as
 Flash without a GPU gives, so content can fall back to the display list.
