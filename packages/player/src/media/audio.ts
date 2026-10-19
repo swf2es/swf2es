@@ -4,6 +4,7 @@
 // decodes as it decodes any other: PCM, or MP3 frames back to back.
 import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
 import { mp3Bytes, mp3Frames } from "./mp3.js";
+import { browserStream } from "./streaming-audio.js";
 
 export interface SoundMix {
   volume: number;
@@ -56,10 +57,18 @@ export interface ExtractedSamples {
 
 export interface AudioHost {
   decode(source: Sound | Uint8Array): Promise<DecodedSound>;
+  /** Stereo float PCM at 44.1 kHz, supplied as SampleDataEvent requests are answered. */
+  stream?(mix: SoundMix, refill: () => void): StreamingSound;
   /** MP3 bytes' samples as Flash's decoder gives them, for Sound.extract; a host that cannot leaves it out. */
   extractSamples?(bytes: Uint8Array): Promise<ExtractedSamples>;
   /** Let the device go, as the player is destroyed: nothing plays on it after. */
   close?(): void;
+}
+
+export interface StreamingSound extends PlayingSound {
+  readonly positionMs: number;
+  append(channels: Float32Array[]): void;
+  finish(): void;
 }
 
 /** The browser's decoder handles MP3; SWF's two uncompressed forms need no codec. */
@@ -71,6 +80,7 @@ export function browserAudioHost(): AudioHost | null {
 
   let context: AudioContext | null = null;
   let closed = false;
+  const streams = new Set<StreamingSound>();
   // Closed, it decodes nothing more: a new context would outlive the player.
   const getContext = () => {
     if (closed) {
@@ -82,9 +92,17 @@ export function browserAudioHost(): AudioHost | null {
   };
   return {
     extractSamples: decodeForExtract,
+    stream(mix, refill) {
+      const stream = browserStream(getContext(), mix, refill, () => streams.delete(stream));
+      streams.add(stream);
+      return stream;
+    },
     close() {
       // A browser keeps a context, and its thread, until it is closed.
       closed = true;
+      for (const stream of streams) {
+        stream.stop();
+      }
       void context?.close().catch(() => {});
       context = null;
     },
