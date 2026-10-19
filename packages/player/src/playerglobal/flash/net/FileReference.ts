@@ -42,6 +42,7 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
             );
             break;
           case "ioError":
+            target.$fileInto = null;
             event = s.rt.construct(
               s.rt.classNamed("flash.events::IOErrorEvent"),
               type,
@@ -65,11 +66,13 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
             if (into && data) {
               const bytes = avm2.bytesOf(s.rt, into);
               bytes.length = 0;
+              bytes.position = 0;
               bytes.write(data);
               bytes.position = 0;
               target.$fileData = into;
             }
 
+            target.$fileInto = null;
             event = s.event(type);
             break;
           }
@@ -143,6 +146,7 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
 
     cancel(): void {
       state(this).cancel();
+      (this as AsObject).$fileInto = null;
     }
 
     download(request: Value, name: Value = null): void {
