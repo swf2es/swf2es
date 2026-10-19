@@ -201,6 +201,16 @@ export class FileReference {
     return !operation.signal.aborted && operation.generation === this.generation;
   }
 
+  private fail(operation: Operation): void {
+    this.operation = null;
+    try {
+      this.emit(operation, "ioError", 0, 0, "Error #2038: File I/O Error.");
+    } finally {
+      // Hosts may hold a save destination even when the transfer never reached write().
+      operation.abort();
+    }
+  }
+
   private after<T>(operation: Operation, task: Promise<T>, deliver: (value: T) => void): void {
     this.services.track(
       task.then(
@@ -213,8 +223,7 @@ export class FileReference {
         () =>
           this.services.defer(() => {
             if (!operation.signal.aborted && operation.generation === this.generation) {
-              this.operation = null;
-              this.emit(operation, "ioError", 0, 0, "Error #2038: File I/O Error.");
+              this.fail(operation);
             }
           }),
       ),
@@ -339,8 +348,7 @@ export class FileReference {
           return;
         }
 
-        this.operation = null;
-        this.emit(operation, "ioError", 0, 0, "Error #2038: File I/O Error.");
+        this.fail(operation);
         return;
       }
 
