@@ -150,7 +150,7 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
     }
 
     download(request: Value, name: Value = null): void {
-      const outgoing = s.loads.fetchRequest(requestOf(request), s.url);
+      const outgoing = s.loads.fetchRequest(requestOf(request), s.url, { requestHeaders: false });
       const suggested =
         name == null
           ? outgoing.url.split(/[?#]/, 1)[0].split("/").pop() || "download"
@@ -159,7 +159,7 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
     }
 
     upload(request: Value, field: Value = "Filedata", test: Value = false): void {
-      const outgoing = s.loads.fetchRequest(requestOf(request), s.url);
+      const outgoing = s.loads.fetchRequest(requestOf(request), s.url, { requestHeaders: false });
       if (field === null || field === undefined) {
         throw s.rt.error("TypeError", 2007, "uploadDataFieldName");
       }

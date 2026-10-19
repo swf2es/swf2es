@@ -387,10 +387,7 @@ async function multipart(
   return {
     ...request,
     method: "POST",
-    headers: [
-      ...request.headers.filter(([key]) => key.toLowerCase() !== "content-type"),
-      ["Content-Type", encoded.headers.get("content-type") as string],
-    ],
+    headers: [["Content-Type", encoded.headers.get("content-type") as string]],
     body: new Uint8Array(await encoded.arrayBuffer()),
   };
 }

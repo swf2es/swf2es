@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { avm2 } from "@swf2es/runtime";
+import type { FetchRequest } from "../../../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 import { bare } from "../../../../../player/cases.ts";
@@ -208,3 +209,64 @@ for (const ending of ["cancel", "ioError"] as const) {
     }
   });
 }
+
+test("regular uploads and downloads ignore requestHeaders and retain POST data", async () => {
+  const asked: FetchRequest[] = [];
+  const { player, rt, call, frame } = await setup({
+    fileHost: {
+      browse: async () => [
+        {
+          name: "a.txt",
+          size: 3,
+          modificationDate: 123,
+          read: async () => Uint8Array.of(65, 0, 255),
+        },
+      ],
+      save: async (name) => ({ name, write: async () => {} }),
+    },
+    fetch: async (request) => {
+      asked.push(request);
+      return { bytes: new TextEncoder().encode("ok"), status: 200, headers: [] };
+    },
+  });
+  try {
+    call("browse");
+    await frame();
+    const request = rt.construct(
+      rt.classNamed("flash.net::URLRequest"),
+      "https://example.test/transfer",
+    );
+    rt.setProperty(request, rt.publicName("method"), "POST");
+    rt.setProperty(request, rt.publicName("data"), "x=a%26b");
+    const headers = [
+      rt.construct(rt.classNamed("flash.net::URLRequestHeader"), "X-Swf-Header", "ignored"),
+      rt.construct(rt.classNamed("flash.net::URLRequestHeader"), "Content-Type", "text/plain"),
+    ];
+    rt.setProperty(request, rt.publicName("requestHeaders"), rt.array(headers));
+    call("upload", request);
+    await frame();
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].headers.length, 1);
+    assert.equal(asked[0].headers[0][0], "Content-Type");
+    assert.match(asked[0].headers[0][1], /^multipart\/form-data; boundary=/);
+    const form = await new Response(asked[0].body?.slice().buffer, {
+      headers: asked[0].headers.map(([name, value]) => [name, value]),
+    }).formData();
+    assert.equal(form.get("x"), "a&b");
+    call("download", request, "download.txt");
+    await frame();
+    await frame();
+    assert.equal(asked.length, 2);
+    assert.equal(asked[1].method, "POST");
+    assert.deepEqual(asked[1].headers, [["Content-Type", "application/x-www-form-urlencoded"]]);
+    assert.equal(new TextDecoder().decode(asked[1].body as Uint8Array), "x=a%26b");
+    call("uploadUnencoded", request);
+    await frame();
+    assert.deepEqual(asked[2].headers, [
+      ["X-Swf-Header", "ignored"],
+      ["Content-Type", "text/plain"],
+    ]);
+  } finally {
+    player.destroy();
+  }
+});
