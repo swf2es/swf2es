@@ -18,6 +18,7 @@ import {
   type SoundMix,
   streamSound,
 } from "./audio.js";
+import type { DynamicChannel } from "./dynamic-sound.js";
 import type { Mp3Frames } from "./mp3.js";
 
 type AsObject = avm2.AsObject;
@@ -61,6 +62,7 @@ export interface SoundState {
 }
 
 export interface ChannelState {
+  dynamic?: DynamicChannel;
   sound: SoundState;
   started: number;
   start: number;
@@ -127,7 +129,8 @@ export function soundHostOf(s: Scripting): SoundHost {
       scriptSounds() {
         let n = 0;
         for (const channel of channels.get(s) ?? []) {
-          if ((channel.$channel as ChannelState).sound.length > 0) {
+          const state = channel.$channel as ChannelState;
+          if (!state.stopped && (state.dynamic || state.sound.length > 0)) {
             n++;
           }
         }
@@ -144,7 +147,8 @@ export function soundHostOf(s: Scripting): SoundHost {
 export const positionOf = (s: Scripting, state: ChannelState): number =>
   state.stopped
     ? state.stoppedAt
-    : Math.min(state.sound.length, state.start + Math.max(0, s.timers.now - state.started));
+    : (state.dynamic?.position() ??
+      Math.min(state.sound.length, state.start + Math.max(0, s.timers.now - state.started)));
 
 export function stopChannel(s: Scripting, state: ChannelState): void {
   state.stoppedAt = positionOf(s, state);
@@ -642,15 +646,22 @@ export function finishSounds(s: Scripting): void {
     return;
   }
 
-  for (const channel of active) {
+  for (const channel of [...active]) {
     const state = channel.$channel as ChannelState;
-    if (state.stopped || state.sound.length <= 0) {
+    if (state.stopped) {
       continue;
     }
 
-    const duration = (state.sound.length - state.start) * Math.max(1, state.loops);
-    if (s.timers.now - state.started < duration) {
-      continue;
+    if (state.dynamic) {
+      state.dynamic.pump();
+      if (state.stopped || !active.has(channel) || !state.dynamic.complete()) {
+        continue;
+      }
+    } else {
+      const duration = (state.sound.length - state.start) * Math.max(1, state.loops);
+      if (state.sound.length <= 0 || s.timers.now - state.started < duration) {
+        continue;
+      }
     }
 
     stopChannel(s, state);

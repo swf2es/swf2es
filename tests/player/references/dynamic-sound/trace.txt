@@ -1,0 +1,11 @@
+0 samples 0 0 0 bigEndian
+0 channel true length 0
+1 samples 0 0 0 bigEndian
+1 channel true length 0
+2047 samples 0 0 0 bigEndian
+2047 channel true length 0
+2048 samples 0 0 0 bigEndian
+2048 channel true length 0
+8192 samples 0 0 0 bigEndian
+8192 samples 8192 65536 0 bigEndian
+8192 channel true length 0
