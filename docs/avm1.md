@@ -131,6 +131,10 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   dense inside the block; preceding offsets are stored sparsely only as
   control reaches them. Never a trap: errors are sticky flags, as in the
   ABC parser.
+  The emitter reuses decoded actions, region storage and lookup buffers
+  between blocks. Repeated jumps into shared preceding bytes therefore
+  reuse their analysis storage within the same compiler call; the minimal
+  runtime still collects garbage only between calls from JavaScript.
 - `flow/`: blocks and regions. A block starts at a jump's target, an
   `If`'s, a `WaitForFrame`'s skip, and after each. A **region** is code
   Flash runs as an activation of its own: a block's whole code, or a

@@ -76,6 +76,12 @@ export class BlockEmitter {
   /** The registers the region's catches take values into. */
   private catchRegisters: i32[] = [];
 
+  // The minimal runtime cannot reclaim each block's analysis during a module call.
+  private actions: Actions = new Actions(new Uint8Array(0));
+  private flow: Flow = new Flow(this.actions);
+  private pools: StaticArray<i32> = new StaticArray<i32>(0);
+  private poolWork: i32[] = [];
+
   constructor(public out: Output) {}
 
   /** The block's entry, retaining the surrounding SWF for backward jumps. */
@@ -87,8 +93,10 @@ export class BlockEmitter {
       length = 0;
     }
 
-    const actions = new Actions(bytes, offset, length);
-    const flow = new Flow(actions);
+    const actions = this.actions;
+    actions.reset(bytes, offset, length);
+    const flow = this.flow;
+    flow.reset();
     out.byte(0x5b);
     if (flow.tooLarge) {
       out.text("function (cx) {\nV.tooLarge();\n}]");
@@ -131,7 +139,8 @@ export class BlockEmitter {
       return;
     }
 
-    const pools = poolsOf(actions, region);
+    const pools = poolsOf(actions, region, this.pools, this.poolWork);
+    this.pools = pools;
     this.heldRanges(actions, region);
     const dispatch = n > 1 || jumpsWithin(actions, region);
     if (dispatch) {

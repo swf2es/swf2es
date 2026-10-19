@@ -7,8 +7,17 @@
 import { Output } from "../output";
 import { ModuleEmitter } from "./emit/module";
 
-/** The emitter of the module actionsModuleBytes wrote last, if it was kept, for its entries. */
-let written: ModuleEmitter | null = null;
+/** Keep entry text without retaining the compiler's reusable analysis storage. */
+@final
+class WrittenActions {
+  constructor(
+    public out: Output,
+    public entryStart: u32[],
+    public entryEnd: u32[],
+  ) {}
+}
+
+let written: WrittenActions | null = null;
 
 /**
  * The ES module of a SWF of version `version` whose blocks are
@@ -26,7 +35,7 @@ export function actionsModuleBytes(
   const emitter = new ModuleEmitter();
   emitter.module(swf, offsets, lengths, version);
   if (keep) {
-    written = emitter;
+    written = new WrittenActions(emitter.out, emitter.entryStart, emitter.entryEnd);
   }
 
   const out = emitter.out;

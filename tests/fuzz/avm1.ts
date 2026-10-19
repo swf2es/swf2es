@@ -255,7 +255,9 @@ let imported = 0;
 async function emitted(block: Uint8Array, version: number, start = 0): Promise<string | null> {
   range[0][0] = start;
   range[1][0] = block.length - start;
-  const bytes: Uint8Array = testing.actionsModuleBytes(block, range[0], range[1], version, true);
+  const offsets = start ? Int32Array.of(0, start) : range[0];
+  const lengths = start ? Int32Array.of(block.length, block.length - start) : range[1];
+  const bytes: Uint8Array = testing.actionsModuleBytes(block, offsets, lengths, version, true);
   let module: string;
   try {
     module = utf8.decode(bytes);
@@ -280,8 +282,18 @@ async function emitted(block: Uint8Array, version: number, start = 0): Promise<s
   }
 
   const entry: string = testing.actionsModuleEntries();
-  if (testing.actionsEmitEach(block, range[0], range[1], version, "0", false) !== entry) {
-    return "the block compiled alone differs from its entry";
+  const parts = entry.split("\u0002");
+  const order = start ? [1, 0, 1] : [0];
+  const expected = order
+    .map((i) => parts[i])
+    .join("\u0002")
+    .concat("\u0002");
+  for (const reuse of [false, true]) {
+    if (
+      testing.actionsEmitEach(block, offsets, lengths, version, order.join(","), reuse) !== expected
+    ) {
+      return `the block compiled alone differs from its entry (reuse ${reuse})`;
+    }
   }
 
   return null;

@@ -1,4 +1,6 @@
 // Code hidden in an ignored tag, reached from the following DoAction.
+
+import { readActions, readSwf } from "../packages/format/dist/index.js";
 import { Avm1Assembler, constant } from "./avm1-assembler.ts";
 import * as w from "./swf-writer.ts";
 
@@ -84,4 +86,30 @@ export function backwardSwf(distant = false): Uint8Array {
       w.end(),
     ],
   });
+}
+
+/** Many tiny blocks share preceding code, which must not accumulate analysis garbage. */
+export function sharedBackwardSwf(count: number): Uint8Array {
+  const prefix = new Uint8Array(4097);
+  prefix.fill(1, 0, 4096);
+  const swf = readSwf(
+    w.swf({
+      version: 8,
+      width: 20,
+      height: 20,
+      frameCount: 1,
+      tags: [
+        w.tag(253, prefix),
+        ...Array.from({ length: count }, () => w.doAction([0x99, 2, 0, 0, 0, 0])),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+  const start = swf.tags[0].offset;
+  for (const block of readActions(swf).blocks) {
+    branch(swf.bytes, block.offset, start);
+  }
+
+  return swf.bytes;
 }

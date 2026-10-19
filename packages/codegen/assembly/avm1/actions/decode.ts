@@ -72,6 +72,24 @@ export class Action {
   region: i32 = -1;
 
   constructor(public offset: i32) {}
+
+  reset(offset: i32): void {
+    this.offset = offset;
+    this.opcode = 0;
+    this.error = ERROR_None;
+    this.next = 0;
+    this.a = 0;
+    this.b = 0;
+    this.target = 0;
+    this.first = 0;
+    this.count = 0;
+    this.s0 = 0;
+    this.s1 = 0;
+    this.s2 = 0;
+    this.s3 = 0;
+    this.skips = false;
+    this.region = -1;
+  }
 }
 
 /**
@@ -107,6 +125,7 @@ export class Actions {
   private failed: bool = false;
 
   private size: i32;
+  private reusable: Action[] = [];
 
   constructor(
     public bytes: Uint8Array,
@@ -116,6 +135,25 @@ export class Actions {
     const size = length < 0 ? bytes.length - start : length;
     this.size = size;
     this.at = new Offsets(size);
+  }
+
+  reset(bytes: Uint8Array, start: i32, length: i32): void {
+    this.bytes = bytes;
+    this.start = start;
+    this.size = length;
+    this.at.reset(length);
+
+    this.actions.length = 0;
+    this.stringStart.length = 0;
+    this.stringLength.length = 0;
+    this.stringRegister.length = 0;
+    this.valueType.length = 0;
+    this.valueNumber.length = 0;
+    this.valueIndex.length = 0;
+
+    this.read = 0;
+    this.pos = 0;
+    this.failed = false;
   }
 
   get length(): i32 {
@@ -133,7 +171,16 @@ export class Actions {
       return this.actions[known - 1];
     }
 
-    const action = new Action(offset);
+    const index = this.actions.length;
+    let action: Action;
+    if (index < this.reusable.length) {
+      action = this.reusable[index];
+      action.reset(offset);
+    } else {
+      action = new Action(offset);
+      this.reusable.push(action);
+    }
+
     this.operands(action);
     this.at.set(offset, this.actions.length + 1);
     this.actions.push(action);

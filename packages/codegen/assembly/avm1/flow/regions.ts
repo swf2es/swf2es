@@ -72,6 +72,20 @@ export class Region {
     public minimum: i32 = 0,
   ) {}
 
+  reset(kind: u8, start: i32, end: i32, parent: i32, opener: i32, minimum: i32): void {
+    this.kind = kind;
+    this.start = start;
+    this.end = end;
+    this.parent = parent;
+    this.opener = opener;
+    this.minimum = minimum;
+
+    this.actions.length = 0;
+    this.blocks.length = 0;
+    this.blockFirst.length = 0;
+    this.order.length = 0;
+  }
+
   /** Whether control at `offset` is still in the region. */
   @inline
   runs(offset: i32): bool {
@@ -152,21 +166,31 @@ export class Flow {
   private visits: i32 = 0;
   // Per offset, the region (plus one) that last visited it, made it a block
   // start, or counted its fall-through predecessors, which `preds` holds.
-  private visited: Offsets;
-  private started: Offsets;
-  private counted: Offsets;
-  private preds: Offsets;
+  private visited: Offsets = new Offsets(0);
+  private started: Offsets = new Offsets(0);
+  private counted: Offsets = new Offsets(0);
+  private preds: Offsets = new Offsets(0);
   private work: i32[] = [];
-  private maxRead: i64;
+  private maxRead: i64 = 0;
+  private offsets: i32[] = [];
+  private reusable: Region[] = [];
 
   constructor(public actions: Actions) {
+    this.reset();
+  }
+
+  reset(): void {
+    const actions = this.actions;
     const n = actions.length;
+    this.tooLarge = false;
+    this.visits = 0;
+    this.regions.length = 0;
     this.maxRead = <i64>n * MAX_READ_PER_BYTE + MAX_READ_BESIDES;
-    this.visited = new Offsets(n);
-    this.started = new Offsets(n);
-    this.counted = new Offsets(n);
-    this.preds = new Offsets(n);
-    this.regions.push(new Region(REGION_Block, 0, n, -1, -1, actions.minimum));
+    this.visited.reset(n);
+    this.started.reset(n);
+    this.counted.reset(n);
+    this.preds.reset(n);
+    this.region(REGION_Block, 0, n, -1, -1);
     // Regions found while walking are walked in turn.
     for (let r = 0; r < this.regions.length && !this.tooLarge; r++) {
       this.walk(r);
@@ -178,7 +202,8 @@ export class Flow {
     const actions = this.actions;
     const tag = r + 1;
     const work = this.work;
-    const offsets: i32[] = [];
+    const offsets = this.offsets;
+    offsets.length = 0;
     work.length = 0;
     this.follow(region, tag, region.start);
 
@@ -258,11 +283,22 @@ export class Flow {
 
   /** The region of a DefineFunction's body, which the action, decoded once, makes once. */
   private function(action: Action, parent: i32, opener: i32): i32 {
-    const r = this.regions.length;
-    this.regions.push(
-      new Region(REGION_Function, action.s0, action.s1, parent, opener, this.actions.minimum),
-    );
-    return r;
+    return this.region(REGION_Function, action.s0, action.s1, parent, opener);
+  }
+
+  private region(kind: u8, start: i32, end: i32, parent: i32, opener: i32): i32 {
+    const index = this.regions.length;
+    let region: Region;
+    if (index < this.reusable.length) {
+      region = this.reusable[index];
+      region.reset(kind, start, end, parent, opener, this.actions.minimum);
+    } else {
+      region = new Region(kind, start, end, parent, opener, this.actions.minimum);
+      this.reusable.push(region);
+    }
+
+    this.regions.push(region);
+    return index;
   }
 
   /** Makes `offset` a block start, if the region holds it. */
