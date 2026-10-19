@@ -60,6 +60,31 @@ test("separate text events, restrict, maxChars, selection and clipboard share th
   assert.deepEqual(take(p), ["name:A:A", "name:ABCD:ABCD", "name::", "name:XY:XY"]);
 });
 
+test("Ctrl+A leaves a non-selectable input's caret alone, so Cut cannot delete its text", async () => {
+  for (const separateText of [false, true]) {
+    const p = await play(
+      `${source}name.text = "abc"; name.selectable = false; Selection.setFocus(name); Selection.setSelection(3, 3);`,
+    );
+    const field = p.avm1.focused;
+    const k = p.player.keyboard;
+    assert.ok(k && field instanceof TextObject);
+    const shortcut = { keyCode: 65, charCode: 97, ctrlKey: true };
+    if (separateText) {
+      k.text(shortcut);
+    } else {
+      k.handle("down", shortcut);
+    }
+
+    assert.deepEqual(field.selection, [3, 3]);
+    assert.equal(k.copy(true), null);
+    assert.equal(field.model.text, "abc");
+    assert.deepEqual(take(p), []);
+    assert.equal(k.text({ keyCode: 0, charCode: 100 }), true);
+    assert.equal(field.model.text, "abcd");
+    assert.deepEqual(take(p), ["name:abcd:abcd"]);
+  }
+});
+
 test("read-only and password fields protect their text; removed fields take no edits", async () => {
   const p = await play(
     `${source}name.text = "secret"; name.password = true; Selection.setFocus(name);`,

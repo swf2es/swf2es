@@ -86,7 +86,10 @@ export class Avm1Keyboard implements Keyboard {
     }
 
     if (k.ctrlKey && !k.altKey && k.keyCode === 65) {
-      field.select(0, field.model.text.length);
+      if (field.selectable) {
+        field.select(0, field.model.text.length);
+      }
+
       return true;
     }
 
