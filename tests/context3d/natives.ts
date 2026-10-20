@@ -6,24 +6,45 @@ import { storeOf } from "../../packages/player/dist/playerglobal/flash/display/B
 import { dispatchEvent } from "../../packages/player/dist/scripting/events.js";
 import type { Scripting } from "../../packages/player/dist/scripting.js";
 import { avm2 } from "../../packages/runtime/dist/index.js";
-import type { Buffer3D, Context3D, Program3D } from "./backend.ts";
+import type { Buffer3D, Context3D, Program3D, Stage3DHost } from "./backend.ts";
 
 type AsObject = avm2.AsObject;
 const FLOAT_FORMATS = ["float1", "float2", "float3", "float4"];
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
-export function install(s: Scripting, create: () => Context3D): () => void {
+export function install(s: Scripting, host: Stage3DHost): () => void {
   const natives: avm2.Natives = {};
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
   const contexts = new Map<AsObject, { backend: Context3D; slot: AsObject }>();
   const buffers = new WeakMap<AsObject, Buffer3D>();
   const programs = new WeakMap<AsObject, Program3D>();
+  const indices = new WeakMap<AsObject, number>();
   let closed = false;
 
   function unsupported(): never {
     throw new Error("Unsupported operation in Context3D triangle experiment");
   }
+
+  const indexOf = (slot: AsObject): number => {
+    let index = indices.get(slot);
+    if (index === undefined) {
+      const vector = s.rt.getProperty(s.stage?.object, s.rt.publicName("stage3Ds")) as AsObject;
+      index = (vector.$a as AsObject[]).indexOf(slot);
+      if (index < 0) {
+        unsupported();
+      }
+
+      indices.set(slot, index);
+    }
+
+    return index;
+  };
+  const place = (slot: AsObject): void => {
+    if (!closed && slots.has(slot)) {
+      host.place(indexOf(slot), slot.$x ?? 0, slot.$y ?? 0, slot.$visible ?? true);
+    }
+  };
 
   const context = (o: AsObject): Context3D => {
     const entry = contexts.get(o);
@@ -80,17 +101,20 @@ export function install(s: Scripting, create: () => Context3D): () => void {
           return;
         }
 
-        const backend = create();
+        const index = indexOf(slot);
+        const backend = host.create(index);
         let object: AsObject;
         try {
           object = construct("Context3D");
         } catch (error) {
           backend.dispose();
+          host.remove(index);
           throw error;
         }
 
         contexts.set(object, { backend, slot });
         slots.set(slot, object);
+        place(slot);
         dispatchEvent(
           s,
           slot,
@@ -251,6 +275,7 @@ export function install(s: Scripting, create: () => Context3D): () => void {
       const entry = contexts.get(object);
       if (entry) {
         entry.backend.dispose();
+        host.remove(indexOf(entry.slot));
         contexts.delete(object);
         slots.delete(entry.slot);
       }
@@ -282,12 +307,26 @@ export function install(s: Scripting, create: () => Context3D): () => void {
   avm2.registerNativeClass(natives, "flash.display3D::VertexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::IndexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::Program3D", ProgramNatives);
+  // Keep the existing Flash-tested position validation and property storage.
+  for (const property of ["x", "y", "visible"]) {
+    const key = `flash.display::Stage3D#set:${property}`;
+    const original = s.rt.natives[key];
+    natives[key] = (rt) => {
+      const setter = original(rt);
+      return function (this: AsObject, value: avm2.Value) {
+        setter.call(this, value);
+        place(this);
+      };
+    };
+  }
+
   Object.assign(s.rt.natives, natives);
 
   return () => {
     closed = true;
     for (const entry of contexts.values()) {
       entry.backend.dispose();
+      host.remove(indexOf(entry.slot));
       slots.delete(entry.slot);
     }
 

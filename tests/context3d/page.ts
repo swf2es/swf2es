@@ -1,5 +1,7 @@
+import { autoDetectRenderer } from "pixi.js";
 import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { Player } from "../../packages/player/dist/player.js";
+import { PixiView } from "../../packages/player/dist/render/view.js";
 import { Scripting } from "../../packages/player/dist/scripting.js";
 import { install } from "./natives.ts";
 import { WebGLContext3D } from "./webgl.ts";
@@ -89,10 +91,14 @@ export async function triangle(mode: "enabled" | "fallback" | "cancel") {
   close =
     mode === "fallback"
       ? () => {}
-      : install(scripting, () => {
-          const entry = create();
-          owned.push(entry);
-          return entry.backend;
+      : install(scripting, {
+          create: () => {
+            const entry = create();
+            owned.push(entry);
+            return entry.backend;
+          },
+          place: () => {},
+          remove: () => {},
         });
   let player: Player | null = null;
   try {
@@ -158,6 +164,121 @@ function shader(fragment: boolean): Uint8Array {
   view.setUint32(15, 0xe4000000, true);
   view.setUint32(19, fragment ? 1 : 0, true);
   return bytes;
+}
+
+let compositionRun: { step: (step: number) => void; close: () => void } | null = null;
+
+/** Browser layers are a composition probe, not the production presentation path. */
+export async function composition(): Promise<void> {
+  check(!compositionRun, "composition already running");
+  const codegen = await createCodegen(
+    await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
+  );
+  const renderer = await autoDetectRenderer({
+    preference: "webgl",
+    width: 96,
+    height: 96,
+    resolution: 1,
+    antialias: false,
+    backgroundAlpha: 0,
+  });
+  const view = new PixiView(renderer);
+  const frame = document.createElement("div");
+  frame.style.cssText =
+    "position:fixed;left:0;top:0;width:96px;height:96px;overflow:hidden;background:black";
+  const overlay = renderer.canvas as HTMLCanvasElement;
+  overlay.style.cssText = "position:absolute;left:0;top:0;z-index:5";
+  frame.append(overlay);
+  document.body.append(frame);
+  const scripting = new Scripting(codegen, { audio: null });
+  const owned = new Map<number, ReturnType<typeof create>>();
+  const close = install(scripting, {
+    create: (slot) => {
+      const entry = create();
+      entry.canvas.style.cssText = `position:absolute;z-index:${slot + 1}`;
+      owned.set(slot, entry);
+      frame.append(entry.canvas);
+      return entry.backend;
+    },
+    place: (slot, x, y, visible) => {
+      const entry = owned.get(slot);
+      check(entry, "missing layer");
+      entry.canvas.style.left = `${x}px`;
+      entry.canvas.style.top = `${y}px`;
+      entry.canvas.style.visibility = visible ? "visible" : "hidden";
+    },
+    remove: (slot) => {
+      const entry = owned.get(slot);
+      check(entry, "missing retired layer");
+      check(entry.live.size === 0, "retired layer retained GPU handles");
+      entry.canvas.remove();
+      entry.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      owned.delete(slot);
+    },
+  });
+  let player: Player | null = null;
+  const cleanup = () => {
+    close();
+    player?.destroy();
+    scripting.destroy();
+    view.dispose(view.stage);
+    renderer.destroy();
+    frame.remove();
+    compositionRun = null;
+    check(owned.size === 0, "host retained layers");
+  };
+  try {
+    await scripting.loadLibraries(
+      await Promise.all(
+        ["builtin", "playerglobal-swf2es"].map(
+          async (name) =>
+            new Uint8Array(await (await fetch(`/libraries/${name}.abc`)).arrayBuffer()),
+        ),
+      ),
+    );
+    player = new Player(
+      new Uint8Array(await (await fetch("/context3d/Composition.swf")).arrayBuffer()),
+      scripting,
+    );
+    await player.start();
+    for (let i = 0; i < 4; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+
+    const root = scripting.root?.object;
+    check(root && scripting.rt.getProperty(root, scripting.rt.publicName("ready")), "not ready");
+    check(owned.size === 2, "expected two Stage3D slots");
+    const current = player;
+    compositionRun = {
+      step: (step) => {
+        scripting.rt.callValue(
+          scripting.rt.getProperty(root, scripting.rt.publicName("advance")),
+          root,
+          [step],
+          null,
+        );
+        frame.style.backgroundColor = `#${(scripting.stageColor ?? 0xffffff).toString(16).padStart(6, "0")}`;
+        view.render(current.stage);
+      },
+      close: cleanup,
+    };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+export async function compositionStep(step: number): Promise<void> {
+  check(compositionRun, "composition not running");
+  compositionRun.step(step);
+  await new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  );
+}
+
+export function closeComposition(): void {
+  compositionRun?.close();
 }
 
 export async function lifetime() {

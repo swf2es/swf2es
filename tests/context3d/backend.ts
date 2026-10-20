@@ -13,6 +13,13 @@ export interface Program3D {
   dispose(): void;
 }
 
+/** The host owns placement and lifetime of the surfaces beneath the display list. */
+export interface Stage3DHost {
+  create(slot: number): Context3D;
+  place(slot: number, x: number, y: number, visible: boolean): void;
+  remove(slot: number): void;
+}
+
 export interface Context3D {
   readonly width: number;
   readonly height: number;
