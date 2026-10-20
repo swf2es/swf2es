@@ -1122,6 +1122,14 @@ transform's TextFormat in `_styles`; a field with a sheet reads its text
 as HTML styled by it and gives back the HTML as set, and a new sheet
 styles that HTML again.
 
+`StyleSheet.load` uses the host's fetch, like `LoadVars.load`, and delivers
+between frames, with the same hidden byte counts and `loaded` state but no
+`onHTTPStatus` callback (adl). Its default `onData` calls the overridable
+`parse`, sets `loaded` to its return value, and calls `onLoad` with that
+value. Missing or empty responses call it with undefined, which reports
+false. Invalid CSS also reports false; existing styles remain. A custom
+`onData` replaces parsing and the `onLoad` notification.
+
 Input fields use the same editor as AS3 (`input/text-editor.ts`). A click
 focuses a selectable field and places its caret; dragging extends the
 selection. Keys and separate text events edit the focused input field,
@@ -2294,8 +2302,8 @@ determinism` green, and the corpus baseline may only go up.
     `stylesheet_transform`, `selection`, `edittext_programmatic_focus`...).
     Input fields now support typing, selection, clipboard edits and
     `onChanged`. Left: IME composition, `onScroller` from the user,
-    `asfunction:` links, `StyleSheet.load` with loading (step 15), the
-    HTML of SWF 6 and 7 fields as Flash reads it, and layout metrics
+    `asfunction:` links, the HTML of SWF 6 and 7 fields as Flash reads it,
+    and layout metrics
     (`textWidth`, `maxscroll`) where they part from Flash's, which AS3's
     fields share.
 14. **Drawing, display and sound classes.** The drawing API, `Color`,
