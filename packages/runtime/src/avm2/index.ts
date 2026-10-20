@@ -3,6 +3,7 @@ import { builtinHooks, builtinNatives } from "./natives/index.js";
 import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
+export { Reader as Amf3Reader, Writer as Amf3Writer } from "./amf.js";
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";

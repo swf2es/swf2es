@@ -51,6 +51,7 @@ import {
   type WebSocketHost,
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
+import { LocalConnections } from "./localconnection.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, soundHostOf, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import {
@@ -173,6 +174,7 @@ export class Scripting {
   private readonly stopped = new AbortController();
   /** Whether destroy has been called: the player plays, loads and connects no more. */
   destroyed = false;
+  readonly localConnections: LocalConnections;
   /** Whether sendToURL sends, as an embedding's allowNetworking "internal" or "none" has it not. */
   readonly sendToUrl: boolean;
   /** Takes what fscommand sends, or nothing does. */
@@ -266,6 +268,7 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      localConnections?: LocalConnections;
       /**
        * Security.sandboxType: "remote", "localWithFile", "localWithNetwork"
        * or "localTrusted", as the host placed the SWF; "remote" by default.
@@ -339,6 +342,7 @@ export class Scripting {
       onUncaught?: (error: unknown) => void;
     } = {},
   ) {
+    this.localConnections = options.localConnections ?? new LocalConnections();
     this.screenCapabilities = {
       screenResolutionX:
         options.screenCapabilities?.screenResolutionX ??
@@ -436,6 +440,8 @@ export class Scripting {
     }
 
     this.destroyed = true;
+    this.loads.destroyAvm1();
+    this.localConnections.destroy(this);
     this.flushSharedObjects?.();
     stopAllSounds(this);
     this.audio?.close?.();
@@ -1037,6 +1043,7 @@ export class Scripting {
       this.frames++;
       this.broadcast("enterFrame");
       this.timers.frameTimers();
+      this.loads.tickAvm1();
     }
 
     this.constructPending();

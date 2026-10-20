@@ -78,6 +78,7 @@ export class Writer {
      * or an element that throws undefined, its values bounded.
      */
     private readonly remoting: RemotingWays | null = null,
+    private readonly maxBytes = Infinity,
   ) {
     this.nextReference = remoting?.first ?? 1;
   }
@@ -91,6 +92,10 @@ export class Writer {
   }
 
   push(chunk: Uint8Array): void {
+    if (chunk.length > this.maxBytes - this.length) {
+      throw new RangeError("AMF0 message too large");
+    }
+
     this.chunks.push(chunk);
     this.length += chunk.length;
   }
@@ -120,12 +125,20 @@ export class Writer {
 
   /** A name, a u16-long UTF-8 string without a marker, cut to fit one. */
   name(text: string): void {
+    if (Math.min(text.length, 0xffff) > this.maxBytes - this.length) {
+      throw new RangeError("AMF0 message too large");
+    }
+
     const b = encoder.encode(text).subarray(0, 0xffff);
     this.u16(b.length);
     this.push(b);
   }
 
   string(text: string): void {
+    if (text.length > this.maxBytes - this.length) {
+      throw new RangeError("AMF0 message too large");
+    }
+
     const b = encoder.encode(text);
     if (b.length > 0xffff) {
       this.bytes(LONG_STRING);
@@ -224,6 +237,10 @@ export class Writer {
 
     const xml = this.remoting?.xmlText(o) ?? null;
     if (xml !== null) {
+      if (xml.length > this.maxBytes - this.length) {
+        throw new RangeError("AMF0 message too large");
+      }
+
       const b = encoder.encode(xml);
       this.bytes(XML);
       this.u32(b.length);
@@ -359,6 +376,7 @@ export class Reader {
     data = false,
     /** Remoting's value limit; .sol reads use Infinity to match their uncapped writer. */
     private left = MAX_VALUES,
+    private readonly xml: ((text: string) => Value) | null = null,
   ) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     this.references = data ? [undefined] : [];
@@ -468,6 +486,11 @@ export class Reader {
           put(a, String(i), this.value(), this.version);
         }
 
+        const length = a.own("length", this.version);
+        if (length) {
+          length.value = count;
+        }
+
         return a;
       }
       case DATE: {
@@ -477,10 +500,10 @@ export class Reader {
         // Flash's own Date, whatever a script set _global.Date to.
         return this.realm.construct(this.realm.Date.constr, [time], this.version);
       }
-      case XML:
-        // XML is not AS2's yet: its text, kept, reads as nothing.
-        this.utf8(this.u32());
-        return undefined;
+      case XML: {
+        const text = this.utf8(this.u32());
+        return this.xml?.(text);
+      }
       default:
         throw new RangeError(`AMF0 marker ${marker}`);
     }

@@ -53,6 +53,11 @@ export function walkList(root: Container): WalkList {
  * `keep`, and long enough. Returns the index after the last written.
  */
 function listInto(c: Container, list: WalkList, at: number, keep = true): number {
+  // AS3 sees a loaded AVM1 movie as one opaque object; its VM owns the frame walk.
+  if (c.avm1Root) {
+    return at;
+  }
+
   const { items, ends } = list;
   const start = at;
   let n = at;
