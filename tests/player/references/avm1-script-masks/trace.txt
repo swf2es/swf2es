@@ -1,0 +1,12 @@
+function
+undefined
+true
+false
+undefined
+true
+true
+true
+false
+true
+true
+true

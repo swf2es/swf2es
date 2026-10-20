@@ -78,6 +78,8 @@ export interface Movie extends GeomHost {
   startDrag(d: DisplayObject, lockCenter: boolean, bounds: number[] | null): void;
   stopDrag(): void;
   faceOf(d: DisplayObject): avm1.Avm1Object | null;
+  /** An object or path from the current action's target; null for no display object. */
+  resolve(value: Value, version: number): DisplayObject | null;
   /** Whether `d` was removed from the display list, its AVM1 object a reference by path from then on. */
   removed(d: DisplayObject): boolean;
   /** The display object at a path now, as a removed clip's reference finds one again. */
@@ -1190,6 +1192,20 @@ export function movieClipClass(movie: Movie): {
   method("stopDrag", 0, () => {
     movie.stopDrag();
     return undefined;
+  });
+  method("setMask", avm1.VERSION_6, (clip, args, version) => {
+    if (args.length === 0) {
+      return undefined;
+    }
+
+    const value = args[0];
+    const mask = value == null ? null : movie.resolve(value, version);
+    if (value != null && mask === null) {
+      return false;
+    }
+
+    clip.setMask(mask);
+    return true;
   });
   method("gotoAndPlay", 0, (clip, args, version) => {
     const cx = realm.current;

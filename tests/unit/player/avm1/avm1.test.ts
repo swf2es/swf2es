@@ -819,6 +819,42 @@ test("a key goes to the clips' keyDown as drawn, then Key's listeners, then the 
   ]);
 });
 
+test("a keyPress consumes its character before an input field can edit it", async () => {
+  const { player, lines, errors } = await play(
+    movie(8, [
+      [
+        w.editText(1, "", 1000, 400),
+        w.sprite(2, 1, [w.showFrame(), w.end()]),
+        w.place({ depth: 1, character: 1, name: "text" }),
+        w.place({
+          depth: 2,
+          character: 2,
+          name: "button",
+          clipActions: w.clipActions(8, [
+            {
+              events: 0x00020000,
+              key: 97,
+              actions: [...script('trace("keyPress");', 8)(flashAssembler()).end().bytes()],
+            },
+          ]),
+        }),
+        as1(
+          "text.onChanged = function() { trace(text.text); }; Selection.setFocus(text); stop();",
+          8,
+        ),
+      ],
+    ]),
+    1,
+  );
+  const k = player.keyboard;
+  assert.ok(k);
+  k.handle("down", { keyCode: 65, charCode: 97 });
+  k.text({ keyCode: 0, charCode: 97 });
+  k.text({ keyCode: 0, charCode: 98 });
+  assert.deepEqual(lines, ["keyPress", "keyPress", "b"]);
+  assert.deepEqual(errors, []);
+});
+
 test("a focus loss lets go of the keys held, with no onKeyUp, and keeps what is toggled and the mouse's buttons", async () => {
   const swf = movie(6, [
     [
