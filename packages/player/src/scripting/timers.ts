@@ -24,7 +24,7 @@ export class Timers {
    * one timer set from another keeps the first's pace, not the frame's.
    */
   now = 0;
-  private readonly realTime: (() => number) | null;
+  readonly realTime: (() => number) | null;
   /** The timers started, by their Timer objects, and a heap of them by when they fall due. */
   private readonly running = new Map<AsObject, TimerRecord>();
   private readonly timers = new TimerHeap();

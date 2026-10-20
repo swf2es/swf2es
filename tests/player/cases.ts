@@ -4801,7 +4801,7 @@ function avm1Control(version: number): Uint8Array {
 // version 8 whose FileAttributes leaves out ActionScript 3, three frames
 // that move a square and add another, and one of version 6 without
 // FileAttributes, a green square. The first's frame 1 has a DoAction,
-// `x = "1"`, which shows nothing: the player runs no AVM1 actions.
+// `x = "1"`, which changes no pixels.
 function avm1Movie(compile: Compile): Uint8Array {
   const inner = w.swf({
     version: 8,
