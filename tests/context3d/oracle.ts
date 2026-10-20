@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
   [
+    "RenderTargets",
     "CubeTextures",
     "TemporaryMatrices",
     "Multisampling",
@@ -65,7 +66,7 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Depth" || fixture === "Multisampling"}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Depth" || fixture === "Multisampling" || fixture === "RenderTargets"}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>

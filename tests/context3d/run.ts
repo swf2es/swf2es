@@ -26,6 +26,7 @@ const scripts = compileScripts(
     "Scissor",
     "Mipmaps",
     "Multisampling",
+    "RenderTargets",
     "CubeTextures",
     "TemporaryMatrices",
   ].map((name) => ({
@@ -47,6 +48,7 @@ for (const name of [
   "Scissor",
   "Mipmaps",
   "Multisampling",
+  "RenderTargets",
   "CubeTextures",
   "TemporaryMatrices",
 ]) {
@@ -90,6 +92,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(result.exception, null, JSON.stringify(result));
       assert.equal(result.value?.passed, true);
       console.log("context3d: ownership, failed uploads, resize, disposal and context loss ok");
+      const targets = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.renderTargets())',
+      );
+      assert.equal(targets.exception, null, JSON.stringify(targets));
+      assert.equal(targets.value?.passed, true);
+      console.log("context3d: render target reuse, feedback, allocation failures and cleanup ok");
       const msaa = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.multisampling())',
       );
@@ -134,6 +142,7 @@ if (!process.argv.includes("--build-only")) {
         "Scissor",
         "Mipmaps",
         "Multisampling",
+        "RenderTargets",
         "CubeTextures",
         "TemporaryMatrices",
       ]) {

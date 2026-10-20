@@ -256,7 +256,8 @@ export async function shaderFixture(
     | "Mipmaps"
     | "Multisampling"
     | "TemporaryMatrices"
-    | "CubeTextures",
+    | "CubeTextures"
+    | "RenderTargets",
 ) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
@@ -588,6 +589,153 @@ export async function compositionStep(step: number): Promise<void> {
 
 export function closeComposition(): void {
   compositionRun?.close();
+}
+
+export async function renderTargets() {
+  const owned = create();
+  const other = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(64, 64, true, 4);
+    c.clear(0, 0, 1, 1);
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    c.setVertex(0, vertices, 0, 4);
+    const solid = c.createProgram();
+    solid.upload(shader(false), shader(true));
+    const sampled = c.createProgram();
+    const fragment = shader(true);
+    const code = new DataView(fragment.buffer);
+    code.setUint32(7, 0x28, true);
+    code.setUint32(27, 5, true);
+    sampled.upload(shader(false), fragment);
+    const texture = c.createTexture(32, 16);
+    const fresh = c.createTexture(16, 32);
+    const tiny = c.createTexture(1, 1);
+    const cube = c.createTexture(8, 8, true);
+    rejects(() => c.setRenderTarget(tiny));
+    rejects(() => c.setRenderTarget(cube));
+    rejects(() => other.backend.setRenderTarget(texture));
+    tiny.dispose();
+    cube.dispose();
+    const show = () => {
+      c.setRenderTarget(null);
+      c.setTexture(0, texture);
+      c.setProgram(sampled);
+      c.setDepth(false, "always");
+      c.setConstants("fragment", 0, [0.5, 0.5, 0, 1], 1);
+      c.draw(indices, 0, 1);
+      check(color(c.read(), 32, 32, 64) === "ffff0000", "rendered texture was not sampled");
+      c.setTexture(0, null);
+    };
+    c.setRenderTarget(texture, true);
+    c.clear(1, 0, 0, 1);
+    check(color(c.read(), 32, 32, 64) === "ff0000ff", "target read changed the MSAA back buffer");
+    show();
+    const warmed = new Set(live);
+    for (let i = 0; i < 24; i++) {
+      c.setRenderTarget(texture, i % 2 === 0);
+      c.setRenderTarget(texture, i % 2 === 0);
+      c.clear(0, 1, 0, 1);
+      c.setProgram(solid);
+      c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
+      c.draw(indices, 0, 1);
+      show();
+      check(live.size === warmed.size, "warm render target pass allocated GPU resources");
+      for (const handle of live) {
+        check(warmed.has(handle), "warm render target pass replaced GPU resources");
+      }
+    }
+
+    c.setRenderTarget(texture, true);
+    c.setTexture(0, texture);
+    c.setProgram(sampled);
+    rejects(() => c.draw(indices, 0, 1));
+    c.setTexture(0, null);
+    const allocation = gl as unknown as {
+      createFramebuffer(): WebGLFramebuffer | null;
+      createRenderbuffer(): WebGLRenderbuffer | null;
+    };
+    const framebuffer = allocation.createFramebuffer;
+    const renderbuffer = allocation.createRenderbuffer;
+    const status = gl.checkFramebufferStatus;
+    for (const failure of ["framebuffer", "depth", "incomplete"] as const) {
+      const before = new Set(live);
+      try {
+        if (failure === "framebuffer") {
+          allocation.createFramebuffer = () => null;
+        }
+        if (failure === "depth") {
+          allocation.createRenderbuffer = () => null;
+        }
+        if (failure === "incomplete") {
+          gl.checkFramebufferStatus = () => gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+        }
+        rejects(() => c.setRenderTarget(fresh, true));
+      } finally {
+        allocation.createFramebuffer = framebuffer;
+        allocation.createRenderbuffer = renderbuffer;
+        gl.checkFramebufferStatus = status;
+      }
+      check(live.size === before.size, "failed render target leaked GPU resources");
+      for (const handle of live) {
+        check(before.has(handle), "failed target replaced a resource");
+      }
+      c.clear(1, 0, 0, 1);
+      show();
+      c.setRenderTarget(texture, true);
+    }
+    c.setRenderTarget(fresh, false);
+    gl.checkFramebufferStatus = () => gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+    try {
+      rejects(() => c.setRenderTarget(fresh, true));
+    } finally {
+      gl.checkFramebufferStatus = status;
+    }
+    c.setDepth(true, "never");
+    c.setProgram(solid);
+    c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
+    c.clear(0, 0, 1, 1);
+    c.draw(indices, 0, 1);
+    c.setRenderTarget(null);
+    c.setTexture(0, fresh);
+    c.setProgram(sampled);
+    c.setDepth(false, "always");
+    c.setConstants("fragment", 0, [0.5, 0.5, 0, 1], 1);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 32, 32, 64) === "ffff0000", "failed target attached depth state");
+    c.setTexture(0, null);
+    c.setRenderTarget(texture, true);
+    texture.dispose();
+    rejects(() => c.setRenderTarget(texture));
+    c.clear(0, 1, 0, 1);
+    check(
+      color(c.read(), 32, 32, 64) === "ff00ff00",
+      "disposing active target left invalid framebuffer",
+    );
+    c.setRenderTarget(fresh, true);
+    c.clear(1, 0, 0, 1);
+    c.present();
+    c.clear(0, 0, 1, 1);
+    check(color(c.read(), 32, 32, 64) === "ff0000ff", "present did not restore back buffer");
+    check(gl.getError() === gl.NO_ERROR, "render targets polluted GL state");
+
+    other.backend.configure(32, 32);
+    const lost = other.backend.createTexture(16, 16);
+    other.backend.setRenderTarget(lost, true);
+    other.backend.clear(1, 0, 0, 1);
+    other.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    rejects(() => other.backend.setRenderTarget(lost));
+    return { passed: true };
+  } finally {
+    c.dispose();
+    other.backend.dispose();
+    check(live.size === 0 && other.live.size === 0, "render target teardown leaked GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
 }
 
 export async function multisampling() {

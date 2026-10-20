@@ -319,11 +319,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       width: number,
       height: number,
       format: string,
-      target: boolean,
+      _target: boolean,
       levels = 0,
     ): AsObject {
       const backend = context(this as unknown as AsObject);
-      if (format !== "bgra" || target || levels !== 0) {
+      if (format !== "bgra" || levels !== 0) {
         unsupported();
       }
 
@@ -353,6 +353,24 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     setTextureAt(index: number, object: AsObject | null): void {
       context(this as unknown as AsObject).setTexture(index, object && texture(object));
+    }
+
+    setRenderToTexture(
+      object: AsObject | null,
+      depth = false,
+      aa = 0,
+      surface = 0,
+      output = 0,
+    ): void {
+      if (aa !== 0 || surface !== 0 || output !== 0) {
+        unsupported();
+      }
+
+      context(this as unknown as AsObject).setRenderTarget(object && texture(object), depth);
+    }
+
+    setRenderToBackBuffer(): void {
+      context(this as unknown as AsObject).setRenderTarget(null);
     }
 
     setProgram(object: AsObject): void {
@@ -465,6 +483,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         }
         if (error instanceof TextureBindingError) {
           switch (error.reason) {
+            case "feedback":
+              throw s.rt.error("Error", 3604);
             case "unused":
               throw s.rt.error("Error", 3697);
             case "conflicting":

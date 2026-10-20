@@ -28,6 +28,7 @@ node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --cubetextures
+node tests/context3d/oracle.ts --rendertargets
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -152,14 +153,41 @@ The prototype retains only weak ownership records for retired textures.
 
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 and cube `bgra` textures up to 1024×1024 per face,
-with no LOD bias, sampler overrides, rectangle/compressed textures
-or render-to-texture. Upload dimensions must match the selected mip level. Each context
+with no LOD bias, sampler overrides or rectangle/compressed textures.
+Upload dimensions must match the selected mip level. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
 between backends; the fixture uses representable byte values.
+
+`RenderTargets.as` checks level-zero 2D render targets against AIR: switching
+between differently sized targets and the back buffer, retained color and
+depth, depth disabled per target, top-down sampling and scissor coordinates,
+culling, transparent color, texture upload followed by rendering, and generated
+mipmaps when minifying the result. Textures created with either optimization
+flag can be used as targets. `drawToBitmapData()` continues to read the back
+buffer while a texture is selected; `present()` and a null target resume the
+back buffer. Sampling the active target fails with AIR's error 3604.
+
+Targets reuse a framebuffer and an optional depth/stencil attachment per
+texture. Target changes do not copy through the CPU. Vertex output flips Y for
+texture targets, with matching winding and scissor state, so sampled results
+share the uploaded texture orientation. Color writes mark mipmaps dirty;
+leaving a changed target generates its mip chain on the GPU. Warm switches
+allocate no GPU handles and do not query framebuffer completeness. Browser
+checks cover repeated passes, an antialiased back buffer, foreign/disposed
+textures, framebuffer/depth allocation failures, incomplete attachments,
+feedback rejection, disposal and context loss. Failed switches preserve the
+previous target; all tracked GPU handles are released on teardown.
+
+This slice limits render targets to power-of-two 2D textures from 8×8 through
+2048×2048, with no target antialiasing, cube faces or multiple color outputs.
+A 1×1 AIR rasterization probe differed; smaller targets remain unverified.
+Resizing the back buffer while a texture is selected is explicitly rejected.
+Target depth storage has a separate 64 MiB budget. Full validation/error parity
+and fractional clear-color rounding across GPU drivers remain future work.
 
 `Mipmaps.as` checks nearest and linear mip selection with both texture filters,
 including trilinear interpolation, non-square chains down to 1×1, LOD clamping,
@@ -297,12 +325,12 @@ This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
 tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
 float vertex attributes, vector/matrix uploads, depth testing, culling, blending,
-color rendering and non-antialiased back buffers are exercised, with sizes limited to
+color rendering and back buffers with optional multisampling are exercised, with sizes limited to
 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are the unresolved shader cases above and render-to-texture,
+Next gates are the unresolved shader cases above and broader render-target support,
 alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own

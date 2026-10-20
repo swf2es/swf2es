@@ -308,13 +308,13 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const declarations = [...names.values()].join("\n");
   const finish =
     stage === "vertex"
-      ? "gl_Position = vec4(result.xy, result.z * 2.0 - result.w, result.w);"
+      ? "gl_Position = vec4(result.x, result.y * targetY, result.z * 2.0 - result.w, result.w);"
       : "color = result;";
   return {
     source: `#version 300 es
 precision highp float;
 ${declarations}
-${stage === "fragment" ? "out vec4 color;" : ""}
+${stage === "fragment" ? "out vec4 color;" : "uniform float targetY;"}
 void main() {
   vec4 result = vec4(0.0);
   ${lines.join("\n  ")}
