@@ -23,6 +23,8 @@ export { builtinHooks, builtinNatives } from "./natives/index.js";
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
 export type { RuntimeOptions, ShellFiles } from "./options.js";
 export { errorMessages } from "./player-messages.js";
+// A destroyed host must not remain reachable through shared inline-cache entries.
+export { invalidate as clearPropertyCaches } from "./property-cache.js";
 export { Runtime } from "./runtime.js";
 // methodKey: where a method sits on its traits, for a player that makes a closure of its own.
 export { instanceVarField, methodKey, setStaticVar } from "./traits.js";

@@ -439,6 +439,7 @@ export class Scripting {
     }
 
     this.stopped.abort();
+    avm2.clearPropertyCaches();
   }
 
   /**
