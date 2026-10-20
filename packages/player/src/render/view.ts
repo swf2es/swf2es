@@ -939,7 +939,9 @@ export class PixiView {
     // the render group's structure changed though its order had not.
     const inPlace =
       node.groups.length === 0 && content.children[0] === node.art && !anyClips(o.children);
-    if (!inPlace) {
+    const keepGroups =
+      !inPlace && content.children[0] === node.art && this.sameClips(o.children, node.groups);
+    if (!inPlace && !keepGroups) {
       for (const group of node.groups) {
         group.mask = null;
         group.destroy();
@@ -992,6 +994,11 @@ export class PixiView {
       return;
     }
 
+    if (keepGroups) {
+      this.arrangeClips(o, node, content, moved, masking, isolated);
+      return;
+    }
+
     const clips = new Clips();
     const open: PixiContainer[] = [];
     for (const child of o.children) {
@@ -1013,6 +1020,83 @@ export class PixiView {
         into.addChild(group);
         open.push(group);
         node.groups.push(group);
+      }
+    }
+  }
+
+  /** Mask groups survive child edits while the masks themselves keep their order. */
+  private sameClips(children: readonly DisplayObject[], groups: readonly PixiContainer[]): boolean {
+    if (groups.length === 0) {
+      return false;
+    }
+
+    let at = 0;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.clipDepth > 0) {
+        if (at >= groups.length || groups[at].mask !== this.nodes.get(child)?.container) {
+          return false;
+        }
+
+        at++;
+      }
+    }
+
+    return at === groups.length;
+  }
+
+  /** Reconcile children and nesting without retiring unchanged stencil-mask effects. */
+  private arrangeClips(
+    o: Container,
+    node: Node,
+    content: PixiContainer,
+    moved: boolean,
+    masking: boolean,
+    isolated: boolean,
+  ): void {
+    const groups = node.groups;
+    const positions: number[] = new Array(groups.length + 1).fill(0);
+    // Slot zero is the content, whose art precedes the children; others name mask groups.
+    positions[0] = 1;
+    const clips = new Clips();
+    const open: number[] = [];
+    let next = 0;
+
+    for (let i = 0; i < o.children.length; i++) {
+      const child = o.children[i];
+      open.length = clips.enter(child);
+      const slot = open.length > 0 ? open[open.length - 1] : 0;
+      const into = slot === 0 ? content : groups[slot - 1];
+      const at = positions[slot]++;
+      this.placeHint = into.children[at] ?? null;
+      const container = this.sync(
+        child,
+        node.world,
+        moved,
+        child.flatPlaced,
+        masking,
+        node.rooted ? null : node.color,
+        isolated,
+      );
+      if (into.children[at] !== container) {
+        into.addChildAt(container, at);
+      }
+
+      if (child.clipDepth > 0) {
+        const group = groups[next++];
+        const at = positions[slot]++;
+        if (into.children[at] !== group) {
+          into.addChildAt(group, at);
+        }
+
+        open.push(next);
+      }
+    }
+
+    for (let i = 0; i <= groups.length; i++) {
+      const into = i === 0 ? content : groups[i - 1];
+      if (into.children.length > positions[i]) {
+        into.removeChildren(positions[i]);
       }
     }
   }
