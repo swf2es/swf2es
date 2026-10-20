@@ -254,7 +254,8 @@ export async function shaderFixture(
     | "ShaderMath"
     | "Scissor"
     | "Mipmaps"
-    | "Multisampling",
+    | "Multisampling"
+    | "TemporaryMatrices",
 ) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),

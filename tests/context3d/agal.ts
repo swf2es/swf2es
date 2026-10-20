@@ -225,9 +225,10 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 0x19: {
         const rows = opcode === 0x18 ? 4 : 3;
         const dimensions = opcode === 0x17 ? ".xyz" : "";
+        const matrixType = data.getUint32(offset + 20, true);
         if (
-          (rows === 3 && mask & 8) ||
-          data.getUint32(offset + 20, true) !== 1 ||
+          (rows === 3 && (mask & 8 || (matrixType === 2 && mask !== 7))) ||
+          (matrixType !== 1 && matrixType !== 2) ||
           data.getUint32(offset + 16, true) >>> 24 !== 0xe4
         ) {
           throw new Error("Unsupported AGAL matrix operand or write mask");

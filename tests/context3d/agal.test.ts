@@ -108,7 +108,7 @@ test("arithmetic validates both sources and rejects unsupported matrix encodings
     assert.throws(() => translate(bytes, "fragment"));
   }
   for (const [offset, value] of [
-    [27, 2],
+    [27, 4],
     [26, 0],
     [25, 1],
     [30, 128],
@@ -119,6 +119,33 @@ test("arithmetic validates both sources and rejects unsupported matrix encodings
   }
   for (const opcode of [0x17, 0x19]) {
     assert.throws(() => translate(binary(opcode, 4), "vertex"), "three-row matrix writes w");
+  }
+});
+
+test("temporary matrix spans are bounded independently of constant registers", () => {
+  for (const fragment of [false, true]) {
+    for (const opcode of [0x17, 0x18, 0x19]) {
+      const rows = opcode === 0x18 ? 4 : 3;
+      const bytes = binary(opcode, 8 - rows, fragment);
+      bytes[13] = 7;
+      bytes[27] = 2;
+      const stage = fragment ? "fragment" : "vertex";
+      const translated = translate(bytes, stage);
+      assert.deepEqual(translated.constants, fragment ? [0] : []);
+      for (let row = 8 - rows; row < 8; row++) {
+        assert.match(translated.source, new RegExp(`vec4 t${row};`));
+      }
+      if (rows === 3) {
+        bytes[13] = 5;
+        assert.throws(() => translate(bytes, stage), /Unsupported AGAL matrix/);
+        bytes[13] = 7;
+      }
+      bytes[23]++;
+      assert.throws(() => translate(bytes, stage), /Invalid AGAL temporary/);
+      bytes[23]--;
+      bytes[26] = 0xc6;
+      assert.throws(() => translate(bytes, stage), /Unsupported AGAL matrix/);
+    }
   }
 });
 

@@ -26,6 +26,7 @@ const scripts = compileScripts(
     "Scissor",
     "Mipmaps",
     "Multisampling",
+    "TemporaryMatrices",
   ].map((name) => ({
     name,
     source: readFileSync(`${here}${name}.as`, "utf8"),
@@ -45,6 +46,7 @@ for (const name of [
   "Scissor",
   "Mipmaps",
   "Multisampling",
+  "TemporaryMatrices",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -130,6 +132,7 @@ if (!process.argv.includes("--build-only")) {
         "Scissor",
         "Mipmaps",
         "Multisampling",
+        "TemporaryMatrices",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,

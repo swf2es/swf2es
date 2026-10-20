@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
   [
+    "TemporaryMatrices",
     "Multisampling",
     "Mipmaps",
     "Scissor",

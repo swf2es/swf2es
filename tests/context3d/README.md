@@ -26,6 +26,7 @@ node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --multisampling
+node tests/context3d/oracle.ts --temporarymatrices
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -97,9 +98,17 @@ negative register indices (RangeError 2006) and invalid program types
 (ArgumentError 2008). The prototype still limits constants to 128 vertex
 and 28 fragment registers; AIR can accept uploads beyond those limits.
 The parser rejects matrix spans beyond those limits before GPU allocation.
-Matrix operands currently require consecutive, unswizzled constant registers;
-three-row instructions require a destination mask within xyz. Indirect reads,
+Matrix operands require consecutive, unswizzled constant or temporary registers;
+three-row instructions require a destination mask within xyz (exact xyz for temporaries). Indirect reads,
 other instructions and broader numeric edge-case parity remain future work.
+
+`TemporaryMatrices.as` adds 144 AIR pixel samples for `m33`, `m44` and `m43`
+reading matrices from temporary registers, as Away3D's normal mapping does.
+Both shader stages cover independent destinations, destinations overlapping
+input vectors or matrix rows, input swizzles and partial `m44` writes. Matrix
+row spans are checked against the eight-register temporary bank. Three-row
+temporary matrices require an exact `.xyz` write mask: AIR rejected `.xz`.
+These remain GPU operations, translated only at program upload.
 
 `ShaderMath.as` adds 213 AIR pixel samples for `frc`, `sqt`, `rsq`, `pow`,
 `nrm`, `crs`, vertex `sge`/`slt`, and fragment `kil`. Both shader stages exercise
