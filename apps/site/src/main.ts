@@ -37,6 +37,7 @@ const close = byId<HTMLButtonElement>("close");
 const fullscreen = byId<HTMLButtonElement>("fullscreen");
 const facts = byId<HTMLElement>("facts");
 const log = byId<HTMLElement>("log");
+const traceLogging = byId<HTMLInputElement>("trace-logging");
 const clearLog = byId<HTMLButtonElement>("clear-log");
 const copyLog = byId<HTMLButtonElement>("copy-log");
 const report = byId<HTMLAnchorElement>("report");
@@ -107,7 +108,9 @@ for (const [method, kind] of [
   const original = console[method].bind(console);
   console[method] = (...args: unknown[]) => {
     original(...args);
-    write(kind, text(args));
+    if (kind !== "trace" || traceLogging.checked) {
+      write(kind, text(args));
+    }
   };
 }
 
