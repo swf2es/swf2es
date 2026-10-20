@@ -15,6 +15,7 @@ import {
   CULL_FACES,
   type CullFace,
   type Program3D,
+  ScissorBoundsError,
   type Stage3DHost,
   type Texture3D,
   TextureBindingError,
@@ -421,15 +422,45 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       contexts.get(this as unknown as AsObject)?.backend.setDepth(write, compare as CompareMode);
     }
 
+    setScissorRectangle(rect: AsObject | null): void {
+      const backend = contexts.get(this as unknown as AsObject)?.backend;
+      if (!backend) {
+        return;
+      }
+      if (rect === null) {
+        backend.setScissor(null);
+        return;
+      }
+
+      const rt = s.rt;
+      backend.setScissor(
+        rt.toNumber(rt.getProperty(rect, rt.publicName("x"))),
+        rt.toNumber(rt.getProperty(rect, rt.publicName("y"))),
+        rt.toNumber(rt.getProperty(rect, rt.publicName("width"))),
+        rt.toNumber(rt.getProperty(rect, rt.publicName("height"))),
+      );
+    }
+
     drawTriangles(object: AsObject, first = 0, count = -1): void {
       try {
         context(this as unknown as AsObject).draw(buffer(object), first, count);
       } catch (error) {
+        if (error instanceof ScissorBoundsError) {
+          throw s.rt.error("Error", 3706);
+        }
         if (error instanceof TextureBindingError) {
-          throw s.rt.error(
-            "Error",
-            error.reason === "unused" ? 3697 : error.reason === "conflicting" ? 3695 : 3663,
-          );
+          switch (error.reason) {
+            case "unused":
+              throw s.rt.error("Error", 3697);
+            case "conflicting":
+              throw s.rt.error("Error", 3695);
+            case "unuploaded":
+              throw s.rt.error("Error", 3605);
+            case "mipmaps":
+              throw s.rt.error("Error", 3700);
+            case "missing":
+              throw s.rt.error("Error", 3663);
+          }
         }
 
         throw error;
@@ -508,19 +539,22 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         return;
       }
 
-      if (level !== 0) {
-        unsupported();
+      if (level >= value.levels) {
+        throw s.rt.error("ArgumentError", 3674);
       }
       if (!source) {
         throw s.rt.error("TypeError", 2007, "source");
       }
 
       const bitmap = storeOf(s, source);
-      if (bitmap.width !== value.width || bitmap.height !== value.height) {
+      if (
+        bitmap.width !== Math.max(1, value.width >> level) ||
+        bitmap.height !== Math.max(1, value.height >> level)
+      ) {
         unsupported();
       }
 
-      value.upload(bitmap.readable);
+      value.upload(bitmap.readable, level);
     }
   }
 

@@ -27,10 +27,12 @@ export const BLEND_FACTORS = [
 ] as const;
 export type BlendFactor = (typeof BLEND_FACTORS)[number];
 
-export class TextureBindingError extends Error {
-  readonly reason: "unused" | "conflicting" | "missing";
+export class ScissorBoundsError extends Error {}
 
-  constructor(reason: "unused" | "conflicting" | "missing") {
+export class TextureBindingError extends Error {
+  readonly reason: "unused" | "conflicting" | "missing" | "unuploaded" | "mipmaps";
+
+  constructor(reason: TextureBindingError["reason"]) {
     super(`Invalid texture binding: ${reason}`);
     this.reason = reason;
   }
@@ -52,8 +54,9 @@ export interface Program3D {
 export interface Texture3D {
   readonly width: number;
   readonly height: number;
+  readonly levels: number;
   /** Top-down premultiplied ARGB pixels, copied before returning. */
-  upload(pixels: Uint32Array): void;
+  upload(pixels: Uint32Array, level?: number): void;
   dispose(): void;
 }
 
@@ -86,6 +89,8 @@ export interface Context3D {
   setDepth(write: boolean, compare: CompareMode): void;
   setCulling(face: CullFace): void;
   setBlend(source: BlendFactor, destination: BlendFactor): void;
+  /** Null disables clipping; coordinates are in top-down target pixels. */
+  setScissor(x: number | null, y?: number, width?: number, height?: number): void;
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
   createTexture(width: number, height: number): Texture3D;

@@ -23,6 +23,8 @@ node tests/context3d/oracle.ts --texturing
 node tests/context3d/oracle.ts --depth
 node tests/context3d/oracle.ts --blending
 node tests/context3d/oracle.ts --shader-math
+node tests/context3d/oracle.ts --scissor
+node tests/context3d/oracle.ts --mipmaps
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -125,7 +127,7 @@ against AIR. The fixture covers top-down UV orientation, nearest and linear
 filtering, clamp and repeat wrapping, separate sampler states, reupload,
 transparent pixels and premultiplied color, plus partially transparent clear
 readback. The upload copies into one reusable RGBA staging array per texture;
-draws reuse four lazily created sampler objects. Browser checks verify staging
+draws reuse lazily created sampler objects. Browser checks verify staging
 array identity and stable GPU handles across repeated uploads and draws,
 texture bindings across a resize, and cleanup after disposal and context loss.
 
@@ -136,14 +138,37 @@ reviving it; an upload after its owner context is disposed fails with 3694.
 The prototype retains only weak ownership records for retired textures.
 
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
-with no mipmaps, LOD bias, sampler overrides, cube/rectangle/compressed textures
-or render-to-texture. Upload dimensions must match the texture. Each context
-is limited to 128 textures and 64 MiB of texels, with another 64 MiB maximum
+with no LOD bias, sampler overrides, cube/rectangle/compressed textures
+or render-to-texture. Upload dimensions must match the selected mip level. Each context
+is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
 between backends; the fixture uses representable byte values.
+
+`Mipmaps.as` checks nearest and linear mip selection with both texture filters,
+including trilinear interpolation, non-square chains down to 1×1, LOD clamping,
+level reupload and presentation. Its 45-line AIR reference includes unuploaded
+base data (3605), incomplete chains (3700) and an out-of-range level (3674).
+Every level is uploaded explicitly; the backend does not generate mipmaps.
+All levels share the texture's existing base-sized CPU staging array. The twelve
+filter/wrap/mip combinations use lazily cached sampler objects. Browser checks
+verify stable staging storage and GPU handles across mip reuploads, with cleanup
+after disposal and context loss. Mip sampling adds no per-draw arrays.
+
+`Scissor.as` checks top-left clipping against AIR, including fractional edge
+rounding, empty and negative-sized rectangles, clipping to the viewport, and
+error 3706 for a nonempty rectangle outside the target. Rectangles are copied
+at the setter; clears ignore them, and clear/present/resize preserve their state.
+Browser checks separately verify that presentation copies pixels outside the
+scissor and that a replacement context starts with clipping disabled. Non-finite
+rectangle coordinates remain explicitly unsupported in this experiment.
+
+A local diagnostic of Away3D OpenFL's `Basic_View.swf` now draws its textured
+plane: 59 draws/presentations over 60 ticks, no uncaught errors and no WebGL error.
+This is a real-sample smoke check, not an AIR image comparison or general Away3D
+compatibility claim. The sample binary is not included in this repository.
 
 `Depth.as` compares 53 pixel samples with AIR. It covers all eight depth
 comparisons and four culling modes, the default strict `less` test with writes

@@ -23,6 +23,8 @@ const scripts = compileScripts(
     "Depth",
     "Blending",
     "ShaderMath",
+    "Scissor",
+    "Mipmaps",
   ].map((name) => ({
     name,
     source: readFileSync(`${here}${name}.as`, "utf8"),
@@ -39,6 +41,8 @@ for (const name of [
   "Depth",
   "Blending",
   "ShaderMath",
+  "Scissor",
+  "Mipmaps",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -109,7 +113,15 @@ if (!process.argv.includes("--build-only")) {
         assert.equal(result.value?.passed, true);
         console.log(`context3d: real WebGL loss/restoration (${cancel}) ok`);
       }
-      for (const fixture of ["Arithmetic", "Texturing", "Depth", "Blending", "ShaderMath"]) {
+      for (const fixture of [
+        "Arithmetic",
+        "Texturing",
+        "Depth",
+        "Blending",
+        "ShaderMath",
+        "Scissor",
+        "Mipmaps",
+      ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,
         );

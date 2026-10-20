@@ -7,6 +7,7 @@ import {
   type Context3DLifecycle,
   type CullFace,
   type Program3D,
+  ScissorBoundsError,
   type Texture3D,
   TextureBindingError,
 } from "./backend.ts";
@@ -65,7 +66,7 @@ interface ProgramState {
 interface TextureState {
   handle: WebGLTexture;
   bytes: Uint8Array;
-  uploaded: boolean;
+  uploaded: number;
 }
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
@@ -82,7 +83,7 @@ export class WebGLContext3D implements Context3D {
   private textureBytes = 0;
   private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
   private textureMask = 0;
-  private readonly samplers: (WebGLSampler | null)[] = new Array(4).fill(null);
+  private readonly samplers: (WebGLSampler | null)[] = new Array(12).fill(null);
   private readonly vertices: ({ buffer: Buffer3D; offset: number; size: number } | null)[] =
     new Array(8).fill(null);
   private selected: Program3D | null = null;
@@ -90,6 +91,12 @@ export class WebGLContext3D implements Context3D {
   private texture: WebGLTexture | null = null;
   private depthBuffer: WebGLRenderbuffer | null = null;
   private depthWrite = true;
+  private scissor = false;
+  private scissorLeft = 0;
+  private scissorTop = 0;
+  private scissorRight = 0;
+  private scissorBottom = 0;
+  private scissorOutside = false;
   private readonly vertexConstants = new Float32Array(128 * 4);
   private readonly fragmentConstants = new Float32Array(28 * 4);
   private pixels = new Uint8Array(0);
@@ -111,6 +118,7 @@ export class WebGLContext3D implements Context3D {
     gl.disable(gl.STENCIL_TEST);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
+    gl.disable(gl.SCISSOR_TEST);
     // Stage3D front faces are clockwise in clip-space XY.
     gl.frontFace(gl.CW);
     gl.disable(gl.DITHER);
@@ -185,6 +193,7 @@ export class WebGLContext3D implements Context3D {
     gl.canvas.height = height;
     this.pixels = new Uint8Array(width * height * 4);
     this.topDown = new Uint8Array(this.pixels.length);
+    this.applyScissor();
     this.clear(0, 0, 0, 1);
   }
 
@@ -218,7 +227,13 @@ export class WebGLContext3D implements Context3D {
       gl.depthMask(true);
     }
 
+    if (this.scissor) {
+      gl.disable(gl.SCISSOR_TEST);
+    }
     gl.clear(bits);
+    if (this.scissor) {
+      gl.enable(gl.SCISSOR_TEST);
+    }
     if (overrideDepth) {
       gl.depthMask(false);
     }
@@ -229,6 +244,48 @@ export class WebGLContext3D implements Context3D {
     this.depthWrite = write;
     this.gl.depthMask(write);
     this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+  }
+
+  setScissor(x: number | null, y = 0, width = 0, height = 0): void {
+    this.alive();
+    if (
+      x !== null &&
+      (!Number.isFinite(x) ||
+        !Number.isFinite(y) ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height))
+    ) {
+      throw new Error("Context3D experiment: non-finite scissor rectangle");
+    }
+
+    this.scissor = x !== null;
+    if (x !== null) {
+      // AIR rounds the edges, not the width/height, and copies the rectangle.
+      this.scissorLeft = Math.floor(x + 0.5);
+      this.scissorTop = Math.floor(y + 0.5);
+      this.scissorRight = Math.floor(x + width + 0.5);
+      this.scissorBottom = Math.floor(y + height + 0.5);
+      this.scissor = this.scissorRight > this.scissorLeft && this.scissorBottom > this.scissorTop;
+    }
+
+    this.applyScissor();
+  }
+
+  private applyScissor(): void {
+    const gl = this.gl;
+    if (!this.scissor) {
+      this.scissorOutside = false;
+      gl.disable(gl.SCISSOR_TEST);
+      return;
+    }
+
+    const left = Math.max(0, Math.min(this.width, this.scissorLeft));
+    const top = Math.max(0, Math.min(this.height, this.scissorTop));
+    const right = Math.max(0, Math.min(this.width, this.scissorRight));
+    const bottom = Math.max(0, Math.min(this.height, this.scissorBottom));
+    this.scissorOutside = right <= left || bottom <= top;
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(left, this.height - bottom, Math.max(0, right - left), Math.max(0, bottom - top));
   }
 
   setBlend(source: BlendFactor, destination: BlendFactor): void {
@@ -435,7 +492,11 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     range(1, width - 1, 2048);
     range(1, height - 1, 2048);
-    const size = width * height * 4;
+    const levels = 1 + Math.floor(Math.log2(Math.max(width, height)));
+    let size = 0;
+    for (let level = 0; level < levels; level++) {
+      size += Math.max(1, width >> level) * Math.max(1, height >> level) * 4;
+    }
     if (
       width & (width - 1) ||
       height & (height - 1) ||
@@ -445,7 +506,7 @@ export class WebGLContext3D implements Context3D {
       throw new Error("Context3D experiment: texture size or memory limit");
     }
 
-    const bytes = new Uint8Array(size);
+    const bytes = new Uint8Array(width * height * 4);
     const gl = this.gl;
     const handle = gl.createTexture();
     if (!handle) {
@@ -454,15 +515,19 @@ export class WebGLContext3D implements Context3D {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, handle);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height);
-    const state: TextureState = { handle, bytes, uploaded: false };
+    gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, width, height);
+    const state: TextureState = { handle, bytes, uploaded: 0 };
     const texture: Texture3D = {
       width,
       height,
-      upload: (pixels) => {
+      levels,
+      upload: (pixels, level = 0) => {
         this.alive();
         this.textureState(texture);
-        if (pixels.length !== width * height) {
+        range(level, 1, levels);
+        const w = Math.max(1, width >> level);
+        const h = Math.max(1, height >> level);
+        if (pixels.length !== w * h) {
           throw new Error("Context3D experiment: texture upload size mismatch");
         }
 
@@ -477,18 +542,8 @@ export class WebGLContext3D implements Context3D {
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, handle);
-        gl.texSubImage2D(
-          gl.TEXTURE_2D,
-          0,
-          0,
-          0,
-          width,
-          height,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          state.bytes,
-        );
-        state.uploaded = true;
+        gl.texSubImage2D(gl.TEXTURE_2D, level, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, state.bytes);
+        state.uploaded |= 1 << level;
       },
       dispose: () => {
         if (!this.textures.delete(texture)) {
@@ -544,7 +599,7 @@ export class WebGLContext3D implements Context3D {
   }
 
   private sampler(source: SamplerSource): WebGLSampler {
-    const index = Number(source.linear) * 2 + Number(source.repeat);
+    const index = source.mip * 4 + Number(source.linear) * 2 + Number(source.repeat);
     let sampler = this.samplers[index];
     if (!sampler) {
       const gl = this.gl;
@@ -554,8 +609,17 @@ export class WebGLContext3D implements Context3D {
       }
 
       const filter = source.linear ? gl.LINEAR : gl.NEAREST;
+      let minFilter: number = filter;
+      switch (source.mip) {
+        case 1:
+          minFilter = source.linear ? gl.LINEAR_MIPMAP_NEAREST : gl.NEAREST_MIPMAP_NEAREST;
+          break;
+        case 2:
+          minFilter = source.linear ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST_MIPMAP_LINEAR;
+          break;
+      }
       const wrap = source.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
-      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, filter);
+      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, minFilter);
       gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
       gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, wrap);
       gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, wrap);
@@ -648,6 +712,10 @@ export class WebGLContext3D implements Context3D {
 
   draw(indices: Buffer3D, first: number, triangles: number): void {
     this.target();
+    if (this.scissorOutside) {
+      throw new ScissorBoundsError("Scissor rectangle does not intersect the target");
+    }
+
     const index = this.buffer(indices);
     if (!index.indices || !this.selected) {
       throw new Error("Context3D experiment: draw needs indices and a program");
@@ -665,7 +733,9 @@ export class WebGLContext3D implements Context3D {
         const other = state.samplers[j].source;
         if (
           this.textureSlots[other.index] === texture &&
-          (source.linear !== other.linear || source.repeat !== other.repeat)
+          (source.linear !== other.linear ||
+            source.repeat !== other.repeat ||
+            source.mip !== other.mip)
         ) {
           throw new TextureBindingError("conflicting");
         }
@@ -722,8 +792,14 @@ export class WebGLContext3D implements Context3D {
       const slot = binding.source.index;
       const texture = this.textureSlots[slot];
       const resource = texture && this.textures.get(texture);
-      if (!resource?.uploaded) {
+      if (!resource || !texture) {
         throw new TextureBindingError("missing");
+      }
+      if (!(resource.uploaded & 1)) {
+        throw new TextureBindingError("unuploaded");
+      }
+      if (binding.source.mip !== 0 && resource.uploaded !== (1 << texture.levels) - 1) {
+        throw new TextureBindingError("mipmaps");
       }
 
       gl.activeTexture(gl.TEXTURE0 + slot);
@@ -766,6 +842,9 @@ export class WebGLContext3D implements Context3D {
     this.target();
     const gl = this.gl;
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    if (this.scissor) {
+      gl.disable(gl.SCISSOR_TEST);
+    }
     gl.blitFramebuffer(
       0,
       0,
@@ -778,6 +857,9 @@ export class WebGLContext3D implements Context3D {
       gl.COLOR_BUFFER_BIT,
       gl.NEAREST,
     );
+    if (this.scissor) {
+      gl.enable(gl.SCISSOR_TEST);
+    }
     gl.flush();
   }
 

@@ -6,7 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
-  ["ShaderMath", "Blending", "Depth", "Texturing", "Arithmetic", "Lifecycle"].find((name) =>
+  [
+    "Mipmaps",
+    "Scissor",
+    "ShaderMath",
+    "Blending",
+    "Depth",
+    "Texturing",
+    "Arithmetic",
+    "Lifecycle",
+  ].find((name) =>
     process.argv.includes(`--${name === "ShaderMath" ? "shader-math" : name.toLowerCase()}`),
   ) ?? "Triangle";
 const triangle = fixture === "Triangle";

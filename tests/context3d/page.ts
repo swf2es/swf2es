@@ -246,7 +246,7 @@ export async function lifecycle(cancel: boolean) {
 }
 
 export async function shaderFixture(
-  fixture: "Arithmetic" | "Texturing" | "Depth" | "Blending" | "ShaderMath",
+  fixture: "Arithmetic" | "Texturing" | "Depth" | "Blending" | "ShaderMath" | "Scissor" | "Mipmaps",
 ) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
@@ -401,6 +401,7 @@ export async function recovery(cancel: "none" | "lost" | "queued") {
       const retired = surfaces[cycle];
       const extension = retired.gl.getExtension("WEBGL_lose_context");
       check(extension, "loss extension unavailable");
+      retired.backend.setScissor(0, 0, 1, 1);
       const lost = waitEvent(retired.canvas, "webglcontextlost");
       extension.loseContext();
       await lost;
@@ -597,6 +598,16 @@ export async function lifetime() {
     c.clear(0, 0, 1, 1);
     c.draw(indices, 0, -1);
     check(color(c.read(), 32, 32, 64) === "ffff0000", "initial triangle");
+    c.setScissor(30, 30, 4, 4);
+    c.clear(0, 0, 1, 1);
+    c.draw(indices, 0, 1);
+    c.present();
+    first.gl.bindFramebuffer(first.gl.FRAMEBUFFER, null);
+    const presented = new Uint8Array(64 * 64 * 4);
+    first.gl.readPixels(0, 0, 64, 64, first.gl.RGBA, first.gl.UNSIGNED_BYTE, presented);
+    check(color(presented, 0, 0, 64) === "ff0000ff", "scissor clipped presentation");
+    check(color(presented, 32, 32, 64) === "ffff0000", "scissor lost the drawn region");
+    c.setScissor(null);
     const swizzled = shader(true);
     new DataView(swizzled.buffer).setUint32(15, 0xe1000000, true);
     p.upload(shader(false), swizzled);
@@ -690,6 +701,10 @@ export async function lifetime() {
     rejects(() => c.draw(indices, 0, 1));
     const pixels = Uint32Array.of(0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff);
     rejects(() => texture.upload(pixels.subarray(1)));
+    rejects(() => texture.upload(pixels, 2));
+    rejects(() => texture.upload(pixels, -1));
+    rejects(() => texture.upload(pixels, 0.5));
+    rejects(() => texture.upload(pixels, 1));
     const gl = first.gl as unknown as { texSubImage2D: (...args: unknown[]) => void };
     const upload = gl.texSubImage2D;
     let staging: unknown;
@@ -716,7 +731,20 @@ export async function lifetime() {
           check(warmed.has(handle), "warm texture draws replaced a GPU handle");
         }
       }
-      check(uploads === 9, "texture upload was skipped");
+      textureCode.setUint32(27, 0x12000005, true);
+      p.upload(shader(false), textured);
+      rejects(() => c.draw(indices, 0, 1));
+      const mip = Uint32Array.of(0xff0000ff);
+      texture.upload(mip, 1);
+      c.draw(indices, 0, 1);
+      const mipHandles = new Set(first.live);
+      texture.upload(mip, 1);
+      c.draw(indices, 0, 1);
+      check(first.live.size === mipHandles.size, "mip reupload allocated GPU handles");
+      for (const handle of first.live) {
+        check(mipHandles.has(handle), "mip reupload replaced a GPU handle");
+      }
+      check(uploads === 11, "texture upload was skipped");
     } finally {
       gl.texSubImage2D = upload;
     }
