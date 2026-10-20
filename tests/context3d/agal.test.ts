@@ -97,8 +97,9 @@ test("matrix register spans respect stage limits and retain every referenced row
 });
 
 test("arithmetic validates both sources and rejects unsupported matrix encodings", () => {
-  for (const opcode of [1, 2, 3, 4, 6, 7, 0x12, 0x13]) {
+  for (const opcode of [1, 2, 3, 4, 6, 7, 0x0b, 0x11, 0x12, 0x13]) {
     const bytes = binary(opcode, 27, true);
+    bytes[13] = 7;
     assert.deepEqual(translate(bytes, "fragment").constants, [0, 27]);
     bytes[23] = 28;
     assert.throws(() => translate(bytes, "fragment"));
@@ -124,7 +125,7 @@ test("arithmetic validates both sources and rejects unsupported matrix encodings
 test("unsupported instruction layouts are not reported as malformed arithmetic", () => {
   const bytes = mov(true);
   const view = new DataView(bytes.buffer);
-  view.setUint32(7, 0x27, true); // kil has no destination
+  view.setUint32(7, 0xffff, true); // Unknown instructions may have no destination
   view.setUint32(11, 0, true);
   assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL opcode/);
 });
@@ -161,4 +162,83 @@ test("2D texture samplers preserve filtering/wrapping and reject unsupported enc
   doubled.set(bytes.subarray(7), 31);
   new DataView(doubled.buffer).setUint32(51, 0x10000005, true);
   assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
+});
+
+test("unary math validates unused operands and three-lane vector destinations", () => {
+  for (const fragment of [false, true]) {
+    const stage = fragment ? "fragment" : "vertex";
+    for (const opcode of [8, 9, 0x0a, 0x0e]) {
+      const bytes = mov(fragment);
+      const view = new DataView(bytes.buffer);
+      view.setUint32(7, opcode, true);
+      bytes[13] = 7;
+      translate(bytes, stage);
+      bytes[23] = 1;
+      assert.throws(() => translate(bytes, stage), /Nonempty unused AGAL source/);
+      bytes[23] = 0;
+      bytes[22] = 128;
+      assert.throws(() => translate(bytes, stage), /Unsupported AGAL source encoding/);
+    }
+    for (const opcode of [0x0e, 0x11]) {
+      const bytes = opcode === 0x11 ? binary(opcode, 1, fragment) : mov(fragment);
+      new DataView(bytes.buffer).setUint32(7, opcode, true);
+      assert.throws(() => translate(bytes, stage), /vector write mask/);
+      bytes[13] = 2;
+      assert.throws(() => translate(bytes, stage), /vector write mask/);
+      bytes[13] = 7;
+      translate(bytes, stage);
+    }
+  }
+});
+
+test("discard validates its destination, stage, source and unused operand", () => {
+  const bytes = new Uint8Array(55);
+  bytes.set(mov(true));
+  const view = new DataView(bytes.buffer);
+  view.setUint32(31, 0x27, true);
+  view.setUint32(39, 0xaa000001, true); // v1.zzzz
+  view.setUint32(43, 4, true);
+  const result = translate(bytes, "fragment");
+  assert.deepEqual(result.constants, [0]);
+  assert.match(result.source, /if \(v1\.zzzz\.x < 0\.0\) \{ discard; \}/);
+  for (const [offset, value] of [
+    [35, 1],
+    [47, 1],
+    [51, 1],
+    [39, 8],
+    [46, 128],
+    [43, 1], // constant instead of temporary/varying
+    [42, 0xe4], // non-scalar swizzle
+  ]) {
+    const changed = bytes.slice();
+    changed[offset] = value;
+    assert.throws(() => translate(changed, "fragment"));
+  }
+  bytes[6] = 0;
+  assert.throws(() => translate(bytes, "vertex"), /Invalid AGAL discard/);
+});
+
+test("unverified fragment comparisons and root/power overlaps fail explicitly", () => {
+  for (const opcode of [0x29, 0x2a]) {
+    const bytes = binary(opcode, 127);
+    assert.deepEqual(translate(bytes, "vertex").constants, [127]);
+    bytes[23] = 128;
+    assert.throws(() => translate(bytes, "vertex"), /constant/);
+    assert.throws(() => translate(binary(opcode, 1, true), "fragment"), /fragment comparison/);
+  }
+  for (const opcode of [9, 0x0b]) {
+    const bytes = opcode === 9 ? mov(true) : binary(opcode, 1, true);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(7, opcode, true);
+    view.setUint32(11, 0x02070000, true);
+    view.setUint32(15, 0xc6000000, true);
+    view.setUint32(19, 2, true);
+    assert.throws(() => translate(bytes, "fragment"), /root\/power overlap/);
+    if (opcode === 0x0b) {
+      view.setUint32(19, 1, true);
+      view.setUint32(23, 0, true);
+      view.setUint32(27, 2, true);
+      assert.throws(() => translate(bytes, "fragment"), /root\/power overlap/);
+    }
+  }
 });

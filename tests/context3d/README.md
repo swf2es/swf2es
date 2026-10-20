@@ -22,6 +22,7 @@ node tests/context3d/oracle.ts --arithmetic
 node tests/context3d/oracle.ts --texturing
 node tests/context3d/oracle.ts --depth
 node tests/context3d/oracle.ts --blending
+node tests/context3d/oracle.ts --shader-math
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -96,6 +97,28 @@ The parser rejects matrix spans beyond those limits before GPU allocation.
 Matrix operands currently require consecutive, unswizzled constant registers;
 three-row instructions require a destination mask within xyz. Indirect reads,
 other instructions and broader numeric edge-case parity remain future work.
+
+`ShaderMath.as` adds 213 AIR pixel samples for `frc`, `sqt`, `rsq`, `pow`,
+`nrm`, `crs`, vertex `sge`/`slt`, and fragment `kil`. Both shader stages exercise
+math with swizzled inputs, masked writes, independent destinations and supported
+overlapping temporary registers. Discard tests select each scalar lane, cover
+negative/zero/positive values before and after the color write, and discard
+part of a triangle using an interpolated varying.
+
+This slice deliberately rejects unresolved cases. AIR's fragment comparisons
+did not agree with ordinary GLSL comparisons in the probes, even with separate
+input registers, so fragment `sge`/`slt` remain unsupported. Swizzled source
+registers overlapping a root/power destination also differed; `sqt`/`pow` reject
+that overlap, while identity-swizzled overlap is covered. `nrm`/`crs` currently
+require an exact `.xyz` destination mask: AIR rejected the partial `.y` probe.
+`kil` requires a replicated scalar swizzle from a temporary or varying, a zero
+destination, and an empty second operand. Other encodings fail before GPU
+allocation. The numeric reference uses finite inputs in each operation's domain;
+zero-length normalization, non-finite values and out-of-domain roots/powers do
+not have parity coverage.
+
+The new instructions are translated once at program upload. Execution stays in
+the GPU shader and adds no per-draw JavaScript arrays or resource allocations.
 
 `Texturing.as` checks AGAL `tex` and level-zero `Texture.uploadFromBitmapData`
 against AIR. The fixture covers top-down UV orientation, nearest and linear
@@ -194,7 +217,7 @@ color rendering and non-antialiased back buffers are exercised, with sizes limit
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are remaining shader operations and render-to-texture,
+Next gates are the unresolved shader cases above and render-to-texture,
 alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own

@@ -16,8 +16,10 @@ export interface ShaderSource {
 }
 
 const SUPPORTED = new Set([
-  0, 1, 2, 3, 4, 6, 7, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x28,
+  0, 1, 2, 3, 4, 6, 7, 8, 9, 0x0a, 0x0b, 0x0e, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+  0x27, 0x28, 0x29, 0x2a,
 ]);
+const UNARY = new Set([0, 8, 9, 0x0a, 0x0e, 0x14, 0x15, 0x16, 0x27]);
 
 export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -114,6 +116,28 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     }
 
     const dest = data.getUint32(offset + 4, true);
+    const unary = UNARY.has(opcode);
+    if (unary && (data.getUint32(offset + 16, true) || data.getUint32(offset + 20, true))) {
+      throw new Error("Nonempty unused AGAL source");
+    }
+
+    if (opcode === 0x27) {
+      const operand = data.getUint32(offset + 8, true);
+      const type = data.getUint32(offset + 12, true);
+      const swizzle = operand >>> 24;
+      if (
+        stage !== "fragment" ||
+        dest !== 0 ||
+        (type !== 2 && type !== 4) ||
+        swizzle !== (swizzle & 3) * 0x55
+      ) {
+        throw new Error("Invalid AGAL discard");
+      }
+
+      lines.push(`if (${source(offset + 8)}.x < 0.0) { discard; }`);
+      continue;
+    }
+
     const mask = (dest >>> 16) & 255;
     if (mask === 0 || mask > 15) {
       throw new Error("Invalid AGAL write mask");
@@ -121,12 +145,22 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
     const target = register(dest >>> 24, dest & 65535, true);
     const a = source(offset + 8);
-    const unary = opcode === 0 || opcode === 0x14 || opcode === 0x15 || opcode === 0x16;
-    if (unary && (data.getUint32(offset + 16, true) || data.getUint32(offset + 20, true))) {
-      throw new Error("Nonempty unused AGAL source");
+    const b = unary || opcode === 0x28 ? "" : source(offset + 16);
+
+    // AIR probes differ from a vector assignment for these swizzled overlaps.
+    if (opcode === 9 || opcode === 0x0b) {
+      for (let operand = offset + 8; operand <= offset + (unary ? 8 : 16); operand += 8) {
+        const low = data.getUint32(operand, true);
+        if (
+          data.getUint32(operand + 4, true) === dest >>> 24 &&
+          (low & 65535) === (dest & 65535) &&
+          low >>> 24 !== 0xe4
+        ) {
+          throw new Error("Unsupported AGAL swizzled root/power overlap");
+        }
+      }
     }
 
-    const b = unary || opcode === 0x28 ? "" : source(offset + 16);
     let expression: string;
     switch (opcode) {
       case 0:
@@ -149,6 +183,26 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         break;
       case 7:
         expression = `max(${a}, ${b})`;
+        break;
+      case 8:
+        expression = `fract(${a})`;
+        break;
+      case 9:
+        expression = `sqrt(${a})`;
+        break;
+      case 0x0a:
+        expression = `inversesqrt(${a})`;
+        break;
+      case 0x0b:
+        expression = `pow(${a}, ${b})`;
+        break;
+      case 0x0e:
+      case 0x11:
+        if (mask !== 7) {
+          throw new Error("Unsupported AGAL vector write mask");
+        }
+
+        expression = opcode === 0x0e ? `normalize(${a}.xyz)` : `cross(${a}.xyz, ${b}.xyz)`;
         break;
       case 0x12:
         expression = `vec4(dot(${a}.xyz, ${b}.xyz))`;
@@ -205,6 +259,20 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         expression = `texture(fs${low}, ${a}.xy)`;
         break;
       }
+      case 0x29:
+        if (stage !== "vertex") {
+          throw new Error("Unverified AGAL fragment comparison");
+        }
+
+        expression = `vec4(greaterThanEqual(${a}, ${b}))`;
+        break;
+      case 0x2a:
+        if (stage !== "vertex") {
+          throw new Error("Unverified AGAL fragment comparison");
+        }
+
+        expression = `vec4(lessThan(${a}, ${b}))`;
+        break;
       default:
         throw new Error("Unsupported AGAL opcode");
     }

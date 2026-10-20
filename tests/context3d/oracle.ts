@@ -5,22 +5,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const lifecycle = process.argv.includes("--lifecycle");
-const arithmetic = process.argv.includes("--arithmetic");
-const texturing = process.argv.includes("--texturing");
-const blending = process.argv.includes("--blending");
-const depth = process.argv.includes("--depth");
-const fixture = blending
-  ? "Blending"
-  : depth
-    ? "Depth"
-    : texturing
-      ? "Texturing"
-      : arithmetic
-        ? "Arithmetic"
-        : lifecycle
-          ? "Lifecycle"
-          : "Triangle";
+const fixture =
+  ["ShaderMath", "Blending", "Depth", "Texturing", "Arithmetic", "Lifecycle"].find((name) =>
+    process.argv.includes(`--${name === "ShaderMath" ? "shader-math" : name.toLowerCase()}`),
+  ) ?? "Triangle";
+const triangle = fixture === "Triangle";
+const prefix = fixture === "Lifecycle" ? "life" : fixture.toLowerCase();
 const out = `${here}out/oracle-${fixture}/`;
 mkdirSync(out, { recursive: true });
 writeFileSync(
@@ -34,7 +24,7 @@ writeFileSync(
       stage.nativeWindow.activate();
       setTimeout(function():void {
         try {
-          ${lifecycle || arithmetic || texturing || depth || blending ? 'if (!complete) { throw new Error("Fixture did not complete"); }' : "closeContext();"}
+          ${!triangle ? 'if (!complete) { throw new Error("Fixture did not complete"); }' : "closeContext();"}
           NativeApplication.nativeApplication.exit(0);
         } catch (error:Error) {
           trace("reference-error", error);
@@ -63,7 +53,7 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${depth}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Depth"}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>
@@ -80,35 +70,23 @@ const lines = (run.stdout + run.stderr)
   .replaceAll("\r", "")
   .split("\n")
   .filter((line) =>
-    blending
-      ? line.startsWith("blending ")
-      : depth
-        ? line.startsWith("depth ")
-        : texturing
-          ? line.startsWith("texturing ")
-          : arithmetic
-            ? line.startsWith("arithmetic ")
-            : lifecycle
-              ? line.startsWith("life ")
-              : /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
-                  line,
-                ),
+    triangle
+      ? /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
+          line,
+        )
+      : line.startsWith(`${prefix} `),
   );
-if (blending) {
-  assert.equal(lines.at(-1), "blending complete", JSON.stringify(lines));
-} else if (depth) {
-  assert.equal(lines.at(-1), "depth complete", JSON.stringify(lines));
-} else if (texturing) {
-  assert.equal(lines.at(-1), "texturing complete", JSON.stringify(lines));
-} else if (arithmetic) {
-  assert.equal(lines.at(-1), "arithmetic complete", JSON.stringify(lines));
-} else if (lifecycle) {
-  assert.equal(lines.at(-1), "life complete 3", JSON.stringify(lines));
-} else {
+if (triangle) {
   assert.equal(lines.length, 12, JSON.stringify(lines));
   assert.equal(lines.at(-1), "disposed");
+} else {
+  assert.equal(
+    lines.at(-1),
+    fixture === "Lifecycle" ? "life complete 3" : `${prefix} complete`,
+    JSON.stringify(lines),
+  );
 }
-const path = `${here}${blending ? "blending-" : depth ? "depth-" : texturing ? "texturing-" : arithmetic ? "arithmetic-" : lifecycle ? "lifecycle-" : ""}reference.json`;
+const path = `${here}${triangle ? "" : `${fixture.toLowerCase()}-`}reference.json`;
 if (process.argv.includes("--update")) {
   writeFileSync(path, `${JSON.stringify(lines, null, 2)}\n`);
 } else {

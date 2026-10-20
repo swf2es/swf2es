@@ -245,7 +245,9 @@ export async function lifecycle(cancel: boolean) {
   }
 }
 
-export async function shaderFixture(fixture: "Arithmetic" | "Texturing" | "Depth" | "Blending") {
+export async function shaderFixture(
+  fixture: "Arithmetic" | "Texturing" | "Depth" | "Blending" | "ShaderMath",
+) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
   );
