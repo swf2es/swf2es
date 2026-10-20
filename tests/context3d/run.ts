@@ -13,10 +13,12 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Triangle", "Composition", "Lifecycle", "Recovery", "Arithmetic", "Texturing"].map((name) => ({
-    name,
-    source: readFileSync(`${here}${name}.as`, "utf8"),
-  })),
+  ["Triangle", "Composition", "Lifecycle", "Recovery", "Arithmetic", "Texturing", "Depth"].map(
+    (name) => ({
+      name,
+      source: readFileSync(`${here}${name}.as`, "utf8"),
+    }),
+  ),
   out,
 );
 for (const name of [
@@ -26,6 +28,7 @@ for (const name of [
   "Recovery",
   "Arithmetic",
   "Texturing",
+  "Depth",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -96,7 +99,7 @@ if (!process.argv.includes("--build-only")) {
         assert.equal(result.value?.passed, true);
         console.log(`context3d: real WebGL loss/restoration (${cancel}) ok`);
       }
-      for (const fixture of ["Arithmetic", "Texturing"]) {
+      for (const fixture of ["Arithmetic", "Texturing", "Depth"]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,
         );

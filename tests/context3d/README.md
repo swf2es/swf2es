@@ -20,6 +20,7 @@ node tests/context3d/oracle.ts --update
 node tests/context3d/oracle.ts --lifecycle
 node tests/context3d/oracle.ts --arithmetic
 node tests/context3d/oracle.ts --texturing
+node tests/context3d/oracle.ts --depth
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -57,6 +58,8 @@ Restoration releases that surface and queues a new context on a fresh
 surface. The AS3 creation listener uploads new buffers and shaders and
 draws a triangle again; the browser checks red, green and blue presentations
 over two recovery cycles.
+The recovered contexts have depth/stencil attachments; state set to reject all
+draws before loss must not survive into the replacement.
 
 These checks also cover retained vertex/index buffers, programs and textures rejecting
 use after loss, fresh context defaults, preserved slot placement, duplicate
@@ -118,6 +121,29 @@ non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
 between backends; the fixture uses representable byte values.
 
+`Depth.as` compares 53 pixel samples with AIR. It covers all eight depth
+comparisons and four culling modes, the default strict `less` test with writes
+enabled, clockwise front faces, reversed indices and mirrored geometry.
+It also checks perspective depth, clipping outside the 0..w depth range,
+far-plane inclusion, depth write masks, partial clear masks, and state
+preservation across back-buffer resize. Clearing depth ignores the draw-time
+write mask, then restores it for subsequent draws. Invalid enum values produce
+ArgumentError 2008 even after disposal; valid depth/culling setters on a disposed
+AS3 context are accepted without touching the backend.
+
+Depth-enabled back buffers own a DEPTH24_STENCIL8 renderbuffer. Browser checks
+count its lifetime through resize, depth disabling, failed allocation,
+incomplete framebuffer creation, disposal and actual context loss. A failed
+resize keeps the previous back buffer usable. Color-only targets still bypass
+depth comparisons. Depth and culling state changes allocate no per-draw arrays
+or GPU resources; an attachment is created only when configuring a depth-enabled
+back buffer. The AIR oracle uses a depth-enabled window descriptor for this
+fixture, as AIR requires its window and Context3D flags to agree.
+
+Stencil testing and nonzero stencil clear values remain unsupported. Clear
+masks support color/depth/stencil bits (1/2/4), zero and the default all-bits
+mask; broader numeric validation and precision parity remain future work.
+
 `Composition.as` exercises two Stage3D slots beneath ordinary Flash
 graphics, including an opaque and a translucent overlay. The browser test
 uses the existing Pixi view for the display list and separate canvas layers
@@ -146,13 +172,14 @@ node tests/context3d/composition-oracle.ts --update
 This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
 tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
-float vertex attributes, vector/matrix uploads, unblended color rendering and
-non-antialiased color back buffers are exercised, with back-buffer sizes limited to
+float vertex attributes, vector/matrix uploads, depth testing, culling, unblended
+color rendering and non-antialiased back buffers are exercised, with sizes limited to
 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are depth/culling, broader Flash error semantics and AGAL/state/texture coverage.
+Next gates are blending, remaining shader operations and render-to-texture,
+alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim

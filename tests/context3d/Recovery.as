@@ -74,7 +74,7 @@ package {
         texture.dispose();
         trace("recovery", "survived", slot.context3D === current);
       }
-      current.configureBackBuffer(32, 32, 0, false);
+      current.configureBackBuffer(32, 32, 0, true);
       current.enableErrorChecking = true;
       current.clear(0, 0, 0, 1);
       previous = current;
@@ -95,6 +95,9 @@ package {
       ]), 1);
       current.drawTriangles(indices);
       current.present();
+      // The next context must start with fresh depth and culling defaults.
+      current.setDepthTest(false, "never");
+      current.setCulling("frontAndBack");
       texture = current.createTexture(2, 2, "bgra", false);
       texture.uploadFromBitmapData(bitmap);
     }

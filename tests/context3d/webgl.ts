@@ -1,12 +1,25 @@
 import { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.ts";
 import {
   type Buffer3D,
+  type CompareMode,
   type Context3D,
   type Context3DLifecycle,
+  type CullFace,
   type Program3D,
   type Texture3D,
   TextureBindingError,
 } from "./backend.ts";
+
+const DEPTH_FUNCTIONS = {
+  always: "ALWAYS",
+  never: "NEVER",
+  less: "LESS",
+  lessEqual: "LEQUAL",
+  equal: "EQUAL",
+  notEqual: "NOTEQUAL",
+  greaterEqual: "GEQUAL",
+  greater: "GREATER",
+} as const;
 
 function range(start: number, count: number, length: number): void {
   if (
@@ -61,6 +74,8 @@ export class WebGLContext3D implements Context3D {
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
+  private depthBuffer: WebGLRenderbuffer | null = null;
+  private depthWrite = true;
   private readonly vertexConstants = new Float32Array(128 * 4);
   private readonly fragmentConstants = new Float32Array(28 * 4);
   private pixels = new Uint8Array(0);
@@ -76,10 +91,14 @@ export class WebGLContext3D implements Context3D {
 
     this.vao = vao;
     gl.bindVertexArray(vao);
-    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.depthMask(true);
     gl.disable(gl.STENCIL_TEST);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
+    // Stage3D front faces are clockwise in clip-space XY.
+    gl.frontFace(gl.CW);
     gl.disable(gl.DITHER);
   }
 
@@ -99,16 +118,18 @@ export class WebGLContext3D implements Context3D {
     this.gl.viewport(0, 0, this.width, this.height);
   }
 
-  configure(width: number, height: number): void {
+  configure(width: number, height: number, depth = false): void {
     this.alive();
     range(32, width - 32, 2048);
     range(32, height - 32, 2048);
     const gl = this.gl;
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();
-    if (!texture || !framebuffer) {
+    const depthBuffer = depth ? gl.createRenderbuffer() : null;
+    if (!texture || !framebuffer || (depth && !depthBuffer)) {
       gl.deleteTexture(texture);
       gl.deleteFramebuffer(framebuffer);
+      gl.deleteRenderbuffer(depthBuffer);
       throw new Error("Context3D experiment: cannot allocate back buffer");
     }
 
@@ -118,17 +139,32 @@ export class WebGLContext3D implements Context3D {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (depthBuffer) {
+      gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+      gl.framebufferRenderbuffer(
+        gl.FRAMEBUFFER,
+        gl.DEPTH_STENCIL_ATTACHMENT,
+        gl.RENDERBUFFER,
+        depthBuffer,
+      );
+      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    }
+
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       gl.deleteTexture(texture);
       gl.deleteFramebuffer(framebuffer);
+      gl.deleteRenderbuffer(depthBuffer);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
       throw new Error("Context3D experiment: incomplete back buffer");
     }
 
     gl.deleteTexture(this.texture);
     gl.deleteFramebuffer(this.framebuffer);
+    gl.deleteRenderbuffer(this.depthBuffer);
     this.texture = texture;
     this.framebuffer = framebuffer;
+    this.depthBuffer = depthBuffer;
     this.width = width;
     this.height = height;
     gl.canvas.width = width;
@@ -138,10 +174,69 @@ export class WebGLContext3D implements Context3D {
     this.clear(0, 0, 0, 1);
   }
 
-  clear(red: number, green: number, blue: number, alpha: number): void {
+  clear(
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number,
+    depth = 1,
+    mask = 0xffffffff,
+  ): void {
     this.target();
-    this.gl.clearColor(red, green, blue, alpha);
-    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+    const gl = this.gl;
+    let bits = 0;
+    if (mask & 1) {
+      gl.clearColor(red, green, blue, alpha);
+      bits |= gl.COLOR_BUFFER_BIT;
+    }
+    if (mask & 2) {
+      gl.clearDepth(depth);
+      bits |= gl.DEPTH_BUFFER_BIT;
+    }
+    if (mask & 4) {
+      gl.clearStencil(0);
+      bits |= gl.STENCIL_BUFFER_BIT;
+    }
+
+    // Flash clear writes depth even while draw-time depth writes are masked.
+    const overrideDepth = this.depthBuffer !== null && (mask & 2) !== 0 && !this.depthWrite;
+    if (overrideDepth) {
+      gl.depthMask(true);
+    }
+
+    gl.clear(bits);
+    if (overrideDepth) {
+      gl.depthMask(false);
+    }
+  }
+
+  setDepth(write: boolean, compare: CompareMode): void {
+    this.alive();
+    this.depthWrite = write;
+    this.gl.depthMask(write);
+    this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+  }
+
+  setCulling(face: CullFace): void {
+    this.alive();
+    const gl = this.gl;
+    if (face === "none") {
+      gl.disable(gl.CULL_FACE);
+      return;
+    }
+
+    gl.enable(gl.CULL_FACE);
+    switch (face) {
+      case "back":
+        gl.cullFace(gl.BACK);
+        break;
+      case "front":
+        gl.cullFace(gl.FRONT);
+        break;
+      case "frontAndBack":
+        gl.cullFace(gl.FRONT_AND_BACK);
+        break;
+    }
   }
 
   createBuffer(count: number, stride: number): Buffer3D {
@@ -691,8 +786,10 @@ export class WebGLContext3D implements Context3D {
     this.gl.deleteVertexArray(this.vao);
     this.gl.deleteFramebuffer(this.framebuffer);
     this.gl.deleteTexture(this.texture);
+    this.gl.deleteRenderbuffer(this.depthBuffer);
     this.framebuffer = null;
     this.texture = null;
+    this.depthBuffer = null;
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
   }

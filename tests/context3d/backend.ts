@@ -1,5 +1,19 @@
 import type { ProgramType } from "./agal.ts";
 
+export const COMPARE_MODES = [
+  "always",
+  "never",
+  "less",
+  "lessEqual",
+  "equal",
+  "notEqual",
+  "greaterEqual",
+  "greater",
+] as const;
+export type CompareMode = (typeof COMPARE_MODES)[number];
+export const CULL_FACES = ["none", "back", "front", "frontAndBack"] as const;
+export type CullFace = (typeof CULL_FACES)[number];
+
 export class TextureBindingError extends Error {
   readonly reason: "unused" | "conflicting" | "missing";
 
@@ -47,8 +61,17 @@ export interface Context3D {
   readonly width: number;
   readonly height: number;
   readonly disposed: boolean;
-  configure(width: number, height: number): void;
-  clear(red: number, green: number, blue: number, alpha: number): void;
+  configure(width: number, height: number, depth?: boolean): void;
+  clear(
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number,
+    depth?: number,
+    mask?: number,
+  ): void;
+  setDepth(write: boolean, compare: CompareMode): void;
+  setCulling(face: CullFace): void;
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
   createTexture(width: number, height: number): Texture3D;

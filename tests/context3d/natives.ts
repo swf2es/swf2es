@@ -7,7 +7,11 @@ import type { Scripting } from "../../packages/player/dist/scripting.js";
 import { avm2 } from "../../packages/runtime/dist/index.js";
 import {
   type Buffer3D,
+  COMPARE_MODES,
+  type CompareMode,
   type Context3D,
+  CULL_FACES,
+  type CullFace,
   type Program3D,
   type Stage3DHost,
   type Texture3D,
@@ -252,11 +256,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         throw s.rt.error("Error", 3781, 32, 2048);
       }
 
-      if (aa !== 0 || depth || best || zoom) {
+      if (aa !== 0 || best || zoom) {
         unsupported();
       }
 
-      backend.configure(width, height);
+      backend.configure(width, height, depth);
     }
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {
@@ -265,11 +269,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         throw s.rt.error("Error", 3698);
       }
 
-      if (depth !== 1 || stencil !== 0 || (mask !== 0xffffffff && mask !== 1)) {
+      if (stencil !== 0 || (mask !== 0xffffffff && mask > 7)) {
         unsupported();
       }
 
-      backend.clear(r, g, b, a);
+      backend.clear(r, g, b, a, depth, mask);
     }
 
     createVertexBuffer(count: number, stride: number, usage = "staticDraw"): AsObject {
@@ -386,9 +390,20 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     setCulling(face: string): void {
-      if (face !== "none") {
-        unsupported();
+      if (!CULL_FACES.includes(face as CullFace)) {
+        throw s.rt.error("ArgumentError", 2008, "triangleFaceToCull");
       }
+
+      // AIR validates enum values but otherwise ignores these setters after disposal.
+      contexts.get(this as unknown as AsObject)?.backend.setCulling(face as CullFace);
+    }
+
+    setDepthTest(write: boolean, compare: string): void {
+      if (!COMPARE_MODES.includes(compare as CompareMode)) {
+        throw s.rt.error("ArgumentError", 2008, "passCompareMode");
+      }
+
+      contexts.get(this as unknown as AsObject)?.backend.setDepth(write, compare as CompareMode);
     }
 
     drawTriangles(object: AsObject, first = 0, count = -1): void {

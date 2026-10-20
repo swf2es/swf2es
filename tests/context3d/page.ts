@@ -42,6 +42,7 @@ function create() {
     "Shader",
     "Texture",
     "Framebuffer",
+    "Renderbuffer",
     "VertexArray",
     "Sampler",
   ] as const) {
@@ -243,7 +244,7 @@ export async function lifecycle(cancel: boolean) {
   }
 }
 
-export async function shaderFixture(fixture: "Arithmetic" | "Texturing") {
+export async function shaderFixture(fixture: "Arithmetic" | "Texturing" | "Depth") {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
   );
@@ -625,6 +626,50 @@ export async function lifetime() {
     c.configure(32, 32);
     c.draw(indices, 0, 1);
     check(color(c.read(), 16, 16, 32) === "ffff0000", "resize invalidated live resources");
+    const colorHandles = first.live.size;
+    const allocation = first.gl as unknown as { createRenderbuffer(): WebGLRenderbuffer | null };
+    const makeDepth = allocation.createRenderbuffer;
+    allocation.createRenderbuffer = () => null;
+    try {
+      rejects(() => c.configure(64, 64, true));
+    } finally {
+      allocation.createRenderbuffer = makeDepth;
+    }
+    check(first.live.size === colorHandles, "failed depth allocation leaked GPU handles");
+    const status = first.gl.checkFramebufferStatus;
+    first.gl.checkFramebufferStatus = () => first.gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+    try {
+      rejects(() => c.configure(64, 64, true));
+    } finally {
+      first.gl.checkFramebufferStatus = status;
+    }
+    check(first.live.size === colorHandles, "incomplete depth target leaked GPU handles");
+    check(c.width === 32 && c.height === 32, "failed resize changed back-buffer dimensions");
+    check(color(c.read(), 16, 16, 32) === "ffff0000", "failed resize lost the old back buffer");
+
+    c.setDepth(false, "always");
+    for (let i = 0; i < 8; i++) {
+      const size = i % 2 === 0 ? 64 : 32;
+      c.configure(size, size, true);
+      c.draw(indices, 0, 1);
+      check(color(c.read(), size / 2, size / 2, size) === "ffff0000", "depth resize lost geometry");
+      check(first.live.size === colorHandles + 1, "depth resize retained retired handles");
+      check(
+        !first.gl.getParameter(first.gl.DEPTH_WRITEMASK),
+        "resize changed the depth write mask",
+      );
+    }
+    c.setDepth(true, "never");
+    c.clear(0, 0, 1, 1);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ff0000ff", "depth test was disabled after resize");
+    c.configure(32, 32, false);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ffff0000", "color-only target performed a depth test");
+    check(first.live.size === colorHandles, "disabling depth retained its attachment");
+    c.setDepth(true, "less");
+    check(first.gl.getError() === first.gl.NO_ERROR, "depth resize polluted GL state");
+
     rejects(() => c.createTexture(0, 2));
     rejects(() => c.createTexture(3, 2));
     rejects(() => c.createTexture(4096, 2));
