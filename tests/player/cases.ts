@@ -669,6 +669,29 @@ function frameLabels(abc: Uint8Array): Uint8Array {
   });
 }
 
+function frameLabelAliases(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 100,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(abc, "FrameLabelAliases"),
+      w.symbolClass([[0, "Main"]]),
+      w.frameLabel("initial"),
+      w.showFrame(),
+      w.frameLabel("first"),
+      w.frameLabel("second"),
+      w.frameLabel("repeat"),
+      w.showFrame(),
+      w.frameLabel("repeat"),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Bodies of ten frames, each holding a looping kid of four and another in a
 // one-frame mid sprite, bound to the classes in scripts/GotoChildren.as that
 // jump or stop in different ways, one unbound that never jumps, and a loop
@@ -3641,6 +3664,44 @@ function avm1Gotos(version: number): Uint8Array {
       [
         as1(
           `trace("root 3 " + a._currentframe); a.gotoAndStop(4); a.prevFrame(); trace(a._currentframe); stop();`,
+          version,
+        ),
+      ],
+    ],
+  );
+}
+
+function avm1FrameLabelAliases(version: number): Uint8Array {
+  const clip = avm1Sprite(1, [
+    [w.frameLabel("initial"), as1("stop();", version)],
+    [w.frameLabel("first"), w.frameLabel("second"), w.frameLabel("repeat")],
+    [w.frameLabel("repeat")],
+  ]);
+  return avm1Swf(
+    version,
+    [clip],
+    [
+      [
+        w.place({ depth: 1, character: 1, name: "a" }),
+        as1(
+          `stop();
+tellTarget ("a") {
+  gotoAndStop("first");
+  trace("literal " + _currentframe);
+  gotoAndStop(1);
+  var label = "second";
+  gotoAndStop(label);
+  trace("dynamic " + _currentframe);
+}
+a.gotoAndStop(1);
+a.gotoAndStop("FIRST");
+trace("method first " + a._currentframe);
+a.gotoAndStop(1);
+a.gotoAndStop("second");
+trace("method second " + a._currentframe);
+a.gotoAndStop(1);
+a.gotoAndStop("repeat");
+trace("repeated " + a._currentframe);`,
           version,
         ),
       ],
@@ -8067,6 +8128,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "frame-label-aliases",
+    swf: frameLabelAliases,
+    script: "FrameLabelAliases",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "goto-children",
     swf: gotoChildren,
     script: "GotoChildren",
@@ -9537,6 +9607,17 @@ export const cases: PlayerCase[] = [
       swf: avm1Gotos(version),
       traced: true,
       frames: 5,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-frame-label-aliases-swf${version}`,
+      swf: avm1FrameLabelAliases(version),
+      traced: true,
+      frames: 2,
       capture: [],
       tolerance: 0,
       maxOutliers: 0,
