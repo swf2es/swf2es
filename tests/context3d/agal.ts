@@ -148,16 +148,17 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     const a = source(offset + 8);
     const b = unary || opcode === 0x28 ? "" : source(offset + 16);
 
-    // AIR probes differ from a vector assignment for these swizzled overlaps.
+    // AIR differs for overlaps that shuffle written lanes. Replicating the
+    // destination lane for a scalar write is safe; unused lanes do not matter.
     if (opcode === 9 || opcode === 0x0b) {
       for (let operand = offset + 8; operand <= offset + (unary ? 8 : 16); operand += 8) {
         const low = data.getUint32(operand, true);
-        if (
-          data.getUint32(operand + 4, true) === dest >>> 24 &&
-          (low & 65535) === (dest & 65535) &&
-          low >>> 24 !== 0xe4
-        ) {
-          throw new Error("Unsupported AGAL swizzled root/power overlap");
+        if (data.getUint32(operand + 4, true) === dest >>> 24 && (low & 65535) === (dest & 65535)) {
+          for (let lane = 0; lane < 4; lane++) {
+            if (mask & (1 << lane) && ((low >>> (24 + lane * 2)) & 3) !== lane) {
+              throw new Error("Unsupported AGAL swizzled root/power overlap");
+            }
+          }
         }
       }
     }

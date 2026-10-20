@@ -149,6 +149,38 @@ test("temporary matrix spans are bounded independently of constant registers", (
   }
 });
 
+test("scalar root/power overlaps retain the lane being written", () => {
+  for (const fragment of [false, true]) {
+    for (const opcode of [9, 0x0b]) {
+      for (let lane = 0; lane < 4; lane++) {
+        const bytes = new Uint8Array(55);
+        bytes.set(binary(opcode, 1, fragment));
+        bytes.set(mov(fragment).subarray(7), 31);
+        const view = new DataView(bytes.buffer);
+        view.setUint32(11, 0x02000000 | ((1 << lane) << 16), true);
+        view.setUint32(15, (lane * 0x55) << 24, true);
+        view.setUint32(19, 2, true);
+        if (opcode === 9) {
+          view.setUint32(23, 0, true);
+          view.setUint32(27, 0, true);
+        }
+        const stage = fragment ? "fragment" : "vertex";
+        translate(bytes, stage);
+        if (opcode === 0x0b) {
+          view.setUint32(23, (lane * 0x55) << 24, true);
+          view.setUint32(27, 2, true);
+          translate(bytes, stage);
+          view.setUint32(23, (((lane + 1) % 4) * 0x55) << 24, true);
+          assert.throws(() => translate(bytes, stage), /swizzled root\/power overlap/);
+          view.setUint32(27, 1, true);
+        }
+        view.setUint32(15, (((lane + 1) % 4) * 0x55) << 24, true);
+        assert.throws(() => translate(bytes, stage), /swizzled root\/power overlap/);
+      }
+    }
+  }
+});
+
 test("unsupported instruction layouts are not reported as malformed arithmetic", () => {
   const bytes = mov(true);
   const view = new DataView(bytes.buffer);

@@ -110,7 +110,7 @@ row spans are checked against the eight-register temporary bank. Three-row
 temporary matrices require an exact `.xyz` write mask: AIR rejected `.xz`.
 These remain GPU operations, translated only at program upload.
 
-`ShaderMath.as` adds 213 AIR pixel samples for `frc`, `sqt`, `rsq`, `pow`,
+`ShaderMath.as` adds 309 AIR pixel samples for `frc`, `sqt`, `rsq`, `pow`,
 `nrm`, `crs`, vertex `sge`/`slt`, and fragment `kil`. Both shader stages exercise
 math with swizzled inputs, masked writes, independent destinations and supported
 overlapping temporary registers. Discard tests select each scalar lane, cover
@@ -120,8 +120,10 @@ part of a triangle using an interpolated varying.
 This slice deliberately rejects unresolved cases. AIR's fragment comparisons
 did not agree with ordinary GLSL comparisons in the probes, even with separate
 input registers, so fragment `sge`/`slt` remain unsupported. Swizzled source
-registers overlapping a root/power destination also differed; `sqt`/`pow` reject
-that overlap, while identity-swizzled overlap is covered. `nrm`/`crs` currently
+registers overlapping a root/power destination also differed when they changed
+a written lane. `sqt`/`pow` reject that overlap; identity and same-lane scalar
+overlap are covered. The scalar probes check every lane in both stages and
+`pow` with either or both operands sharing its destination. `nrm`/`crs` currently
 require an exact `.xyz` destination mask: AIR rejected the partial `.y` probe.
 `kil` requires a replicated scalar swizzle from a temporary or varying, a zero
 destination, and an empty second operand. Other encodings fail before GPU
@@ -197,6 +199,12 @@ A local diagnostic of Away3D OpenFL's `Basic_View.swf` now draws its textured
 plane: 59 draws/presentations over 60 ticks, no uncaught errors and no WebGL error.
 This is a real-sample smoke check, not an AIR image comparison or general Away3D
 compatibility claim. The sample binary is not included in this repository.
+
+The local `Basic_Shading.swf` smoke check also draws its floor, sphere, cube and
+torus with normal/specular mapping: 236 draws and 59 presentations over 60 ticks,
+no uncaught or WebGL error. It exercises 4× back buffers, temporary matrix rows
+and scalar in-place powers. As with Basic_View, this is not an AIR pixel-parity
+claim, and its binary stays outside the repository.
 
 `Depth.as` compares 53 pixel samples with AIR. It covers all eight depth
 comparisons and four culling modes, the default strict `less` test with writes

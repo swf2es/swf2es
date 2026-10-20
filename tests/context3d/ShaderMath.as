@@ -118,6 +118,31 @@ package {
           }
         }
       }
+      for (stageIndex = 0; stageIndex < 2; stageIndex++) {
+        stageName = stageIndex == 0 ? "vertex" : "fragment";
+        context.setProgramConstantsFromVector(stageName, 0, Vector.<Number>([0.125, 0.25, 0.5, 0.75]));
+        context.setProgramConstantsFromVector(stageName, 1, Vector.<Number>([0.5, 0.5, 0.5, 0.5]));
+        for (var scalarOp:int = 0; scalarOp < 2; scalarOp++) {
+          op = scalarOp == 0 ? 9 : 0x0b;
+          for (var scalarLane:int = 0; scalarLane < 4; scalarLane++) {
+            for (var alias:int = 0; alias < (scalarOp == 0 ? 1 : 3); alias++) {
+              vertex = header(false);
+              emit(vertex, 0, 0x030f0000, 0xe4000000, 0);
+              fragment = header(true);
+              math = stageIndex == 0 ? vertex : fragment;
+              emit(math, 0, 0x020f0000, 0xe4000000, 1);
+              var scalar:uint = (scalarLane * 0x55) << 24;
+              emit(math, op, 0x02000000 | ((1 << scalarLane) << 16),
+                scalar | (alias == 1 ? 1 : 0), alias == 1 ? 1 : 2,
+                scalarOp == 0 ? 0 : scalar | (alias == 0 ? 1 : 0),
+                scalarOp == 0 ? 0 : alias == 0 ? 1 : 2);
+              emit(math, 0, stageIndex == 0 ? 0x040f0000 : 0x030f0000, 0xe4000000, 2);
+              if (stageIndex == 0) { emit(fragment, 0, 0x030f0000, 0xe4000000, 4); }
+              draw("scalar-" + stageName + "-" + op + "-" + scalarLane + "-" + alias, vertex, fragment);
+            }
+          }
+        }
+      }
       vertex = header(false);
       emit(vertex, 0, 0x030f0000, 0xe4000000, 0);
 
