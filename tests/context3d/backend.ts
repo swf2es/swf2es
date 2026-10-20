@@ -30,7 +30,7 @@ export type BlendFactor = (typeof BLEND_FACTORS)[number];
 export class ScissorBoundsError extends Error {}
 
 export class TextureBindingError extends Error {
-  readonly reason: "unused" | "conflicting" | "missing" | "unuploaded" | "mipmaps";
+  readonly reason: "unused" | "conflicting" | "missing" | "unuploaded" | "mipmaps" | "dimension";
 
   constructor(reason: TextureBindingError["reason"]) {
     super(`Invalid texture binding: ${reason}`);
@@ -55,8 +55,9 @@ export interface Texture3D {
   readonly width: number;
   readonly height: number;
   readonly levels: number;
+  readonly cube: boolean;
   /** Top-down premultiplied ARGB pixels, copied before returning. */
-  upload(pixels: Uint32Array, level?: number): void;
+  upload(pixels: Uint32Array, level?: number, face?: number): void;
   dispose(): void;
 }
 
@@ -93,7 +94,7 @@ export interface Context3D {
   setScissor(x: number | null, y?: number, width?: number, height?: number): void;
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
-  createTexture(width: number, height: number): Texture3D;
+  createTexture(width: number, height: number, cube?: boolean): Texture3D;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;
   setVertex(index: number, buffer: Buffer3D | null, offset: number, size: number): void;

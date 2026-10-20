@@ -26,6 +26,7 @@ const scripts = compileScripts(
     "Scissor",
     "Mipmaps",
     "Multisampling",
+    "CubeTextures",
     "TemporaryMatrices",
   ].map((name) => ({
     name,
@@ -46,6 +47,7 @@ for (const name of [
   "Scissor",
   "Mipmaps",
   "Multisampling",
+  "CubeTextures",
   "TemporaryMatrices",
 ]) {
   const abc = scripts.get(name);
@@ -132,6 +134,7 @@ if (!process.argv.includes("--build-only")) {
         "Scissor",
         "Mipmaps",
         "Multisampling",
+        "CubeTextures",
         "TemporaryMatrices",
       ]) {
         const result = await evaluate<{ trace: string[] }>(

@@ -336,6 +336,21 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       return object;
     }
 
+    createCubeTexture(size: number, format: string, target: boolean, levels = 0): AsObject {
+      const backend = context(this as unknown as AsObject);
+      if (format !== "bgra" || target || levels !== 0) {
+        unsupported();
+      }
+
+      const object = s.rt.construct(
+        s.rt.classNamed("flash.display3D.textures::CubeTexture"),
+      ) as AsObject;
+      const value = backend.createTexture(size, size, true);
+      textures.set(object, { value, owner: this as unknown as AsObject, disposed: false });
+
+      return object;
+    }
+
     setTextureAt(index: number, object: AsObject | null): void {
       context(this as unknown as AsObject).setTexture(index, object && texture(object));
     }
@@ -458,6 +473,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
               throw s.rt.error("Error", 3605);
             case "mipmaps":
               throw s.rt.error("Error", 3700);
+            case "dimension":
+              throw s.rt.error("Error", 3754);
             case "missing":
               throw s.rt.error("Error", 3663);
           }
@@ -529,32 +546,44 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
   }
 
+  function uploadTexture(object: AsObject, source: AsObject, level: number, face: number): void {
+    const value = texture(object);
+    // AIR accepts this call after explicit texture disposal without reviving
+    // the resource. A disposed owner context is still rejected above.
+    if (textures.get(object)?.disposed) {
+      return;
+    }
+
+    if (face >= (value.cube ? 6 : 1)) {
+      throw s.rt.error("ArgumentError", 3673);
+    }
+    if (level >= value.levels) {
+      throw s.rt.error("ArgumentError", 3674);
+    }
+    if (!source) {
+      throw s.rt.error("TypeError", 2007, "source");
+    }
+
+    const bitmap = storeOf(s, source);
+    if (
+      bitmap.width !== Math.max(1, value.width >> level) ||
+      bitmap.height !== Math.max(1, value.height >> level)
+    ) {
+      unsupported();
+    }
+
+    value.upload(bitmap.readable, level, face);
+  }
+
   class TextureNatives {
     uploadFromBitmapData(source: AsObject, level = 0): void {
-      const object = this as unknown as AsObject;
-      const value = texture(object);
-      // AIR accepts this call after explicit texture disposal without reviving
-      // the resource. A disposed owner context is still rejected above.
-      if (textures.get(object)?.disposed) {
-        return;
-      }
+      uploadTexture(this as unknown as AsObject, source, level, 0);
+    }
+  }
 
-      if (level >= value.levels) {
-        throw s.rt.error("ArgumentError", 3674);
-      }
-      if (!source) {
-        throw s.rt.error("TypeError", 2007, "source");
-      }
-
-      const bitmap = storeOf(s, source);
-      if (
-        bitmap.width !== Math.max(1, value.width >> level) ||
-        bitmap.height !== Math.max(1, value.height >> level)
-      ) {
-        unsupported();
-      }
-
-      value.upload(bitmap.readable, level);
+  class CubeTextureNatives {
+    uploadFromBitmapData(source: AsObject, face: number, level = 0): void {
+      uploadTexture(this as unknown as AsObject, source, level, face);
     }
   }
 
@@ -574,6 +603,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   avm2.registerNativeClass(natives, "flash.display3D::IndexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::Program3D", ProgramNatives);
   avm2.registerNativeClass(natives, "flash.display3D.textures::Texture", TextureNatives);
+  avm2.registerNativeClass(natives, "flash.display3D.textures::CubeTexture", CubeTextureNatives);
   avm2.registerNativeClass(natives, "flash.display3D.textures::TextureBase", TextureBaseNatives);
   // Keep the existing Flash-tested position validation and property storage.
   for (const property of ["x", "y", "visible"]) {

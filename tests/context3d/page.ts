@@ -255,7 +255,8 @@ export async function shaderFixture(
     | "Scissor"
     | "Mipmaps"
     | "Multisampling"
-    | "TemporaryMatrices",
+    | "TemporaryMatrices"
+    | "CubeTextures",
 ) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
@@ -904,6 +905,75 @@ export async function lifetime() {
     rejects(() => c.draw(indices, 0, 1));
     rejects(() => texture.upload(pixels));
     c.setTexture(0, null);
+    rejects(() => c.createTexture(2, 4, true));
+    rejects(() => c.createTexture(2048, 2048, true));
+    const cube = c.createTexture(2, 2, true);
+    rejects(() => second.backend.setTexture(0, cube));
+    rejects(() => cube.upload(pixels, 0, -1));
+    rejects(() => cube.upload(pixels, 0, 6));
+    rejects(() => cube.upload(pixels, 0, 0.5));
+    textureCode.setUint32(27, 0x12001005, true);
+    p.upload(shader(false), textured);
+    c.setTexture(0, cube);
+    c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
+    uploads = 0;
+    staging = undefined;
+    gl.texSubImage2D = function (...args) {
+      if (uploads === 0) {
+        staging = args[8];
+      }
+      check(staging === args[8], "cube faces/mips replaced the shared staging buffer");
+      uploads++;
+      upload.apply(this, args);
+    };
+    try {
+      const mip = Uint32Array.of(0xffff0000);
+      pixels.fill(0xffff0000);
+      for (let face = 0; face < 6; face++) {
+        cube.upload(pixels, 0, face);
+        rejects(() => c.draw(indices, 0, 1));
+        cube.upload(mip, 1, face);
+      }
+      c.draw(indices, 0, 1);
+      const handles = new Set(first.live);
+      for (let frame = 0; frame < 8; frame++) {
+        const argb = frame % 2 ? 0xffff0000 : 0xff00ff00;
+        pixels.fill(argb);
+        cube.upload(pixels, 0, 0);
+        c.clear(0, 0, 0, 1);
+        c.draw(indices, 0, 1);
+        check(color(c.read(), 32, 32, 64) === argb.toString(16), "cube reupload did not reach GPU");
+        check(first.live.size === handles.size, "cube reupload allocated GPU handles");
+        for (const handle of first.live) {
+          check(handles.has(handle), "cube reupload replaced GPU handles");
+        }
+      }
+      check(uploads === 20, "cube uploads were skipped");
+    } finally {
+      gl.texSubImage2D = upload;
+    }
+    c.configure(32, 32);
+    c.clear(0, 0, 0, 1);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ffff0000", "resize lost cube binding");
+    c.setTexture(0, null);
+    check(
+      first.gl.getParameter(first.gl.TEXTURE_BINDING_CUBE_MAP) === null,
+      "cube was not unbound",
+    );
+    c.setTexture(0, cube);
+    c.draw(indices, 0, 1);
+    cube.dispose();
+    cube.dispose();
+    check(
+      first.gl.getParameter(first.gl.TEXTURE_BINDING_CUBE_MAP) === null,
+      "disposed cube remains bound",
+    );
+    rejects(() => cube.upload(pixels));
+    c.setTexture(0, cube);
+    rejects(() => c.draw(indices, 0, 1));
+    c.setTexture(0, null);
+    check(first.gl.getError() === first.gl.NO_ERROR, "cube lifetime polluted GL state");
     p.upload(shader(false), shader(true));
     c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
     vertices.dispose();
@@ -918,6 +988,8 @@ export async function lifetime() {
     rejects(() => c.createProgram());
     rejects(() => c.configure(1, 1));
     second.backend.configure(32, 32);
+    const lossCube = second.backend.createTexture(2, 2, true);
+    lossCube.upload(pixels, 0, 0);
     const loss = second.gl.getExtension("WEBGL_lose_context");
     check(loss, "context loss extension unavailable");
     const lost = new Promise<void>((resolve) =>
@@ -928,6 +1000,7 @@ export async function lifetime() {
     rejects(() => second.backend.clear(1, 0, 0, 1));
     second.backend.dispose();
     check(second.live.size === 0, "lost context retains resource handles");
+    rejects(() => lossCube.upload(pixels));
     return { passed: true };
   } finally {
     c.dispose();

@@ -27,6 +27,7 @@ node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
+node tests/context3d/oracle.ts --cubetextures
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -150,7 +151,8 @@ reviving it; an upload after its owner context is disposed fails with 3694.
 The prototype retains only weak ownership records for retired textures.
 
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
-with no LOD bias, sampler overrides, cube/rectangle/compressed textures
+and cube `bgra` textures up to 1024×1024 per face,
+with no LOD bias, sampler overrides, rectangle/compressed textures
 or render-to-texture. Upload dimensions must match the selected mip level. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
@@ -168,6 +170,23 @@ All levels share the texture's existing base-sized CPU staging array. The twelve
 filter/wrap/mip combinations use lazily cached sampler objects. Browser checks
 verify stable staging storage and GPU handles across mip reuploads, with cleanup
 after disposal and context loss. Mip sampling adds no per-draw arrays.
+
+`CubeTextures.as` compares all six cube faces with AIR, including asymmetric
+quadrants to detect flips, nearest/linear filtering, all three mip modes,
+minification, face reupload and presentation.
+The AIR reference also checks missing faces/mips (3700), an entirely unuploaded
+cube (3605), invalid faces/levels (3673/3674), mismatched sampler dimensions (3754),
+and rebinding an explicitly disposed texture (3663). AIR requires the full cube
+mip chain even when mip filtering is disabled.
+
+All six faces and mip levels reuse one face-sized CPU staging array. The GPU
+budget counts every face and mip; shader sampling stays on the GPU. Browser
+checks verify staging identity, stable GPU handles during repeated uploads,
+unbinding, resize, disposal, cross-context rejection and loss cleanup. This
+adds no per-draw JavaScript arrays. Edge seams, hardware-dependent filtering
+rounding and broader cube validation remain unverified. AIR can keep drawing
+an already-bound texture after its disposal until it is rebound; this experiment
+still releases and unbinds immediately, as it already did for 2D textures.
 
 `Multisampling.as` checks antialiasing quality requests, interior readback,
 scissor interaction, presentation followed by clear, and resize against AIR.
@@ -205,6 +224,11 @@ torus with normal/specular mapping: 236 draws and 59 presentations over 60 ticks
 no uncaught or WebGL error. It exercises 4× back buffers, temporary matrix rows
 and scalar in-place powers. As with Basic_View, this is not an AIR pixel-parity
 claim, and its binary stays outside the repository.
+
+The local `Basic_SkyBox.swf` check draws its mountain environment and reflective
+torus: 118 draws and 59 presentations over 60 ticks, with no uncaught or WebGL
+error. It exercises cube uploads and sampling without native overrides. This is
+another smoke check, not AIR image parity; the sample binary is not included.
 
 `Depth.as` compares 53 pixel samples with AIR. It covers all eight depth
 comparisons and four culling modes, the default strict `less` test with writes

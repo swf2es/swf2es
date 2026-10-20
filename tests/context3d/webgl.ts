@@ -66,7 +66,7 @@ interface ProgramState {
 interface TextureState {
   handle: WebGLTexture;
   bytes: Uint8Array;
-  uploaded: number;
+  uploaded: Uint16Array;
 }
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
@@ -561,14 +561,19 @@ export class WebGLContext3D implements Context3D {
     return state;
   }
 
-  createTexture(width: number, height: number): Texture3D {
+  createTexture(width: number, height: number, cube = false): Texture3D {
     this.alive();
     range(1, width - 1, 2048);
     range(1, height - 1, 2048);
+    if (cube && (width !== height || width > 1024)) {
+      throw new Error("Context3D experiment: cube faces must be square and at most 1024");
+    }
+
+    const faces = cube ? 6 : 1;
     const levels = 1 + Math.floor(Math.log2(Math.max(width, height)));
     let size = 0;
     for (let level = 0; level < levels; level++) {
-      size += Math.max(1, width >> level) * Math.max(1, height >> level) * 4;
+      size += Math.max(1, width >> level) * Math.max(1, height >> level) * 4 * faces;
     }
     if (
       width & (width - 1) ||
@@ -587,17 +592,20 @@ export class WebGLContext3D implements Context3D {
     }
 
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, handle);
-    gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, width, height);
-    const state: TextureState = { handle, bytes, uploaded: 0 };
+    const target = cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
+    gl.bindTexture(target, handle);
+    gl.texStorage2D(target, levels, gl.RGBA8, width, height);
+    const state: TextureState = { handle, bytes, uploaded: new Uint16Array(faces) };
     const texture: Texture3D = {
       width,
       height,
       levels,
-      upload: (pixels, level = 0) => {
+      cube,
+      upload: (pixels, level = 0, face = 0) => {
         this.alive();
         this.textureState(texture);
         range(level, 1, levels);
+        range(face, 1, faces);
         const w = Math.max(1, width >> level);
         const h = Math.max(1, height >> level);
         if (pixels.length !== w * h) {
@@ -614,9 +622,19 @@ export class WebGLContext3D implements Context3D {
         }
 
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, handle);
-        gl.texSubImage2D(gl.TEXTURE_2D, level, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, state.bytes);
-        state.uploaded |= 1 << level;
+        gl.bindTexture(target, handle);
+        gl.texSubImage2D(
+          cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + face : target,
+          level,
+          0,
+          0,
+          w,
+          h,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          state.bytes,
+        );
+        state.uploaded[face] |= 1 << level;
       },
       dispose: () => {
         if (!this.textures.delete(texture)) {
@@ -628,7 +646,7 @@ export class WebGLContext3D implements Context3D {
             this.textureSlots[i] = null;
             this.textureMask &= ~(1 << i);
             gl.activeTexture(gl.TEXTURE0 + i);
-            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindTexture(target, null);
             gl.bindSampler(i, null);
           }
         }
@@ -667,6 +685,7 @@ export class WebGLContext3D implements Context3D {
     if (!texture) {
       this.gl.activeTexture(this.gl.TEXTURE0 + index);
       this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+      this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
       this.gl.bindSampler(index, null);
     }
   }
@@ -696,6 +715,7 @@ export class WebGLContext3D implements Context3D {
       gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
       gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, wrap);
       gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, wrap);
+      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_R, wrap);
       this.samplers[index] = sampler;
     }
 
@@ -868,15 +888,33 @@ export class WebGLContext3D implements Context3D {
       if (!resource || !texture) {
         throw new TextureBindingError("missing");
       }
-      if (!(resource.uploaded & 1)) {
-        throw new TextureBindingError("unuploaded");
+      if (texture.cube !== binding.source.cube) {
+        throw new TextureBindingError("dimension");
       }
-      if (binding.source.mip !== 0 && resource.uploaded !== (1 << texture.levels) - 1) {
-        throw new TextureBindingError("mipmaps");
+      if (texture.cube) {
+        let uploaded = 0;
+        for (let face = 0; face < 6; face++) {
+          uploaded |= resource.uploaded[face];
+        }
+        if (!uploaded) {
+          throw new TextureBindingError("unuploaded");
+        }
+      }
+      for (let face = 0; face < resource.uploaded.length; face++) {
+        if (!texture.cube && !(resource.uploaded[face] & 1)) {
+          throw new TextureBindingError("unuploaded");
+        }
+        // AIR requires every cube face and mip even with mip filtering disabled.
+        if (
+          (texture.cube || binding.source.mip !== 0) &&
+          resource.uploaded[face] !== (1 << texture.levels) - 1
+        ) {
+          throw new TextureBindingError("mipmaps");
+        }
       }
 
       gl.activeTexture(gl.TEXTURE0 + slot);
-      gl.bindTexture(gl.TEXTURE_2D, resource.handle);
+      gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, resource.handle);
       gl.bindSampler(slot, this.sampler(binding.source));
       gl.uniform1i(binding.location, slot);
     }
