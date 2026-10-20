@@ -119,12 +119,7 @@ export function localConnectionClass(
         LOCAL_MESSAGE_LIMIT,
       );
       writer.arguments(args.slice(2));
-      bytes = new Uint8Array(writer.size);
-      let at = 0;
-      for (const chunk of writer.chunks) {
-        bytes.set(chunk, at);
-        at += chunk.length;
-      }
+      bytes = writer.finish();
     } catch (error) {
       if (error instanceof RangeError) {
         return false;

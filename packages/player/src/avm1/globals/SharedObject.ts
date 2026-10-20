@@ -62,16 +62,9 @@ function serialize(host: SharedObjectHost, name: string, data: Value, version: n
   body.u16(title.length);
   body.push(title);
   body.u32(0);
-  for (const chunk of entry.chunks) {
-    body.push(chunk);
-  }
+  body.push(entry.finish());
 
-  const file = new Uint8Array(body.size);
-  let at = 0;
-  for (const chunk of body.chunks) {
-    file.set(chunk, at);
-    at += chunk.length;
-  }
+  const file = body.finish();
 
   new DataView(file.buffer).setUint32(2, file.length - 6);
   return file;

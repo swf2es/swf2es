@@ -133,13 +133,7 @@ export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
     write(value, 0);
   }
 
-  const bytes = new Uint8Array(out.size);
-  let at = 0;
-  for (const chunk of out.chunks) {
-    bytes.set(chunk, at);
-    at += chunk.length;
-  }
-  return bytes;
+  return out.finish();
 }
 
 export function readLocalValues(rt: avm2.Runtime, bytes: Uint8Array): Value[] {
