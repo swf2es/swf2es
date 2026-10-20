@@ -308,6 +308,71 @@ test("timeline masks stay nested across scroll changes and rebuild when their or
   assert.deepEqual(newInner.children, [childContainer]);
 });
 
+test("mask churn leaves neither retired groups nor removed display trees alive", async () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  view.prepare(root);
+  const top = view.stage.children[0];
+
+  // Keep the view and root alive while checking objects from several generations.
+  const churn = () => {
+    const refs: WeakRef<object>[] = [];
+    for (let generation = 0; generation < 32; generation++) {
+      const outer = new Container();
+      const inner = new Container();
+      outer.clipDepth = 4;
+      inner.clipDepth = 3;
+      root.placeAtDepth(outer, 1);
+      root.placeAtDepth(inner, 2);
+      view.prepare(root);
+      const outerGroup = top.children[2];
+      const innerGroup = outerGroup.children[1];
+      refs.push(new WeakRef(outer), new WeakRef(inner));
+      refs.push(new WeakRef(outerGroup), new WeakRef(innerGroup));
+      refs.push(new WeakRef(top.children[1]), new WeakRef(outerGroup.children[0]));
+
+      for (let edit = 0; edit < 8; edit++) {
+        const branch = new Container();
+        const child = new Container();
+        branch.addChildAt(child, 0);
+        root.placeAtDepth(branch, 3);
+        view.prepare(root);
+        assert.equal(top.children[2], outerGroup);
+        assert.equal(outerGroup.children[1], innerGroup);
+        assert.equal(innerGroup.children.length, 1);
+        refs.push(new WeakRef(branch), new WeakRef(child));
+        refs.push(new WeakRef(innerGroup.children[0]));
+      }
+
+      root.removeAtDepth(1);
+      root.removeAtDepth(2);
+      root.removeAtDepth(3);
+      view.prepare(root);
+      assert.equal(outerGroup.destroyed, true);
+      assert.equal(innerGroup.destroyed, true);
+      assert.equal(top.children.length, 1);
+    }
+
+    return refs;
+  };
+
+  for (let batch = 0; batch < 3; batch++) {
+    const refs = churn();
+    let retained = refs.length;
+    for (let attempt = 0; attempt < 10 && retained > 0; attempt++) {
+      // WeakRef keeps a dereferenced target alive until the current job ends.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      gc();
+      retained = refs.filter((ref) => ref.deref() !== undefined).length;
+    }
+
+    assert.equal(retained, 0, `batch ${batch} retained ${retained} retired objects`);
+    view.prepare(root);
+    assert.equal(view.stage.children[0], top);
+    assert.equal(top.children.length, 1);
+  }
+});
+
 test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
   const { batcherNameFor } = await import("../../../../packages/player/dist/render/color.js");
   const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
