@@ -23,7 +23,12 @@ export function abcVersion(abc: Uint8Array): i32 {
 }
 
 // The AVM1 compiler: see avm1/compile.ts.
-export { actionsEmitEach, actionsModuleBytes, actionsModuleEntries } from "./avm1/compile";
+export {
+  actionsEmitEach,
+  actionsEmitEachBytes,
+  actionsModuleBytes,
+  actionsModuleEntries,
+} from "./avm1/compile";
 // The compiler: see compile.ts.
 export {
   domainAdd,

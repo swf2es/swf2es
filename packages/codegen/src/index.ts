@@ -363,9 +363,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
-  const collected = <T>(result: T): T => {
+  const collected = <T>(result: T, reclaim = false): T => {
     const grown = wasm.memory.buffer.byteLength;
-    if (grown > size || ++calls >= COLLECT_EVERY) {
+    if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
       wasm.__collect();
       size = grown;
       calls = 0;
@@ -542,8 +542,20 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
       const [offsets, lengths] = ranges(actions);
       return parseEntries(
-        collected(
-          wasm.actionsEmitEach(bytes, offsets, lengths, actions.version, indices.join(","), true),
+        utf8.decode(
+          collected(
+            wasm.actionsEmitEachBytes(
+              bytes,
+              offsets,
+              lengths,
+              actions.version,
+              indices.join(","),
+              true,
+            ),
+            // Each lazy block copies the whole backing SWF into wasm. Its
+            // analysis and that copy can go before the next block runs.
+            true,
+          ),
         ),
       );
     },
