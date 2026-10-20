@@ -19,7 +19,7 @@
     "bench": "node tests/bench/bench.ts",
     "bench:avm1": "node tests/bench/avm1.ts",
     "bench:avm2": "node tests/bench/avm2.ts",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tests/player/tsconfig.json && tsc -p tests/web/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tests/player/tsconfig.json && tsc -p tests/web/tsconfig.json && tsc -p tests/context3d/tsconfig.json",
     "check": "biome check .",
     "format": "biome check --write .",
     "oracle": "node oracle/oracle.ts",

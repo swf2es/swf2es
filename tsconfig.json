@@ -28,6 +28,8 @@
     "tests/programs/as3pb",
     "tests/player/page.ts",
     "tests/player/hidden-groups-page.ts",
-    "tests/web/page.ts"
+    "tests/web/page.ts",
+    "tests/context3d/page.ts",
+    "tests/context3d/webgl.ts"
   ]
 }
