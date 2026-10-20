@@ -55,11 +55,13 @@ export { type FilterColor, readFilters, type SwfFilter } from "./filters.js";
 export {
   type Font,
   type Font4,
+  type FontInfo,
   type Glyph,
   glyphOf,
   readFont,
   readFont4,
   readFontAlignZones,
+  readFontInfo,
 } from "./font.js";
 export {
   type ColorTransform,

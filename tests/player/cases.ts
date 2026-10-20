@@ -6063,8 +6063,68 @@ export const stemFont = (id: number, name = "Stem"): Uint8Array =>
     kerning: [["a", "l", -77]],
   });
 
-// Static text in Probe, defined before the font it uses: a DefineText of
-// two lines in two colours, and a DefineText2 turned and scaled by its
+// Legacy glyphs with narrow codes, wide codes, and no character table.
+function legacyStaticTexts(abc?: Uint8Array): Uint8Array {
+  const glyphs: w.GlyphSpec[] = [
+    {
+      char: "A",
+      advance: 0,
+      boxes: [
+        [0, -800, 200, 0],
+        [200, -800, 700, -600],
+      ],
+    },
+    { char: "Ω", advance: 0, boxes: [[100, -600, 600, 0]] },
+  ];
+  const tags: Uint8Array[] = [w.backgroundColor(0x000000)];
+  for (let i = 0; i < 3; i++) {
+    const font = i + 1;
+    const text = i + 4;
+    tags.push(
+      w.font1(font, glyphs),
+      w.staticText({
+        id: text,
+        bounds: [0, 4000, -1200, 0],
+        records: [
+          {
+            font,
+            height: 1200,
+            color: [0x00ff00, 0x00ffff, 0xffff00][i],
+            glyphs: [
+              [0, 1600],
+              [1, 1600],
+              [0, 1600],
+            ],
+          },
+        ],
+      }),
+      w.place({ depth: i + 1, character: text, matrix: { tx: 400, ty: 1400 + i * 1600 } }),
+    );
+    if (i < 2) {
+      tags.push(
+        w.fontInfo(font, "Legacy", i === 0 ? [65, 90] : [65, 0x3a9], {
+          version: i === 0 ? 1 : 2,
+        }),
+      );
+    }
+  }
+
+  if (abc) {
+    tags.unshift(w.fileAttributes(true));
+    tags.push(w.doAbc(abc, "LegacyStaticTextProbe"), w.symbolClass([[0, "LegacyStaticTextProbe"]]));
+  }
+
+  return w.swf({
+    version: abc ? 10 : 6,
+    width: 280,
+    height: 260,
+    frameCount: 1,
+    tags: [...tags, w.showFrame(), w.end()],
+  });
+}
+
+// Static text in Probe, defined before its font: two lines in two colours,
+// and a DefineText2 turned and scaled by its
 // matrix, a run in half-transparent green, one of a font the SWF lacks,
 // which shows nothing, and a smaller line below.
 function staticTexts(): Uint8Array {
@@ -7712,6 +7772,23 @@ export const cases: PlayerCase[] = [
     // The aslant seams' ends anti-alias within a pixel of Flash's: some 30 pixels.
     tolerance: 32,
     maxOutliers: 60,
+  },
+  {
+    name: "legacy-static-text",
+    swf: legacyStaticTexts(),
+    frames: 1,
+    capture: [1],
+    tolerance: 32,
+    maxOutliers: 100,
+  },
+  {
+    name: "legacy-static-text-probe",
+    swf: legacyStaticTexts,
+    script: "LegacyStaticTextProbe",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "static-text",
