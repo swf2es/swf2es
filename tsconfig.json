@@ -24,5 +24,16 @@
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts"
   ],
-  "exclude": ["tests/programs/as3pb", "tests/player/page.ts", "tests/web/page.ts"]
+  "exclude": [
+    "tests/programs/as3pb",
+    "tests/player/page.ts",
+    "tests/web/page.ts",
+    "tests/worker-vm/page.ts",
+    "tests/worker-vm/thread.ts",
+    "tests/worker-vm/bitmap-page.ts",
+    "tests/worker-vm/bitmap-thread.ts",
+    "tests/worker-vm/bitmap-renderer.ts",
+    "tests/worker-vm/playback-page.ts",
+    "tests/worker-vm/playback-thread.ts"
+  ]
 }
