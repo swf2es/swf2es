@@ -529,6 +529,10 @@ function conversionOp(bd: BodyDecoder, type: i32): u16 {
     return ops.OP_convert_u;
   }
 
+  if (type >= 0 && type === domain.floatType) {
+    return ops.OP_convert_f;
+  }
+
   if (type === domain.numberType) {
     return ops.OP_convert_d;
   }

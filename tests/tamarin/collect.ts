@@ -17,8 +17,8 @@ const HELPERS = ["Assert.as", "Utils.as", "DateUtils.as"];
 /** Whole directories that do not apply to swf2es. */
 const SKIPPED_DIRS: Record<string, string> = {
   abcasm: "abcasm tests are assembled, not compiled",
-  // float and float4 (ABC 47.16) exist only in HARMAN's AIR runtime: not in Flash
-  // Player, not in Ruffle, and not in the oracle's avmshell (built without them).
+  // The oracle's avmshell was built without the experimental float types.
+  // Scalar float is covered separately against AIR (tests/conformance/air.ts).
   "as3/Types/Float": "float (ABC 47.16) is AIR-only",
   "as3/Types/Float4": "float (ABC 47.16) is AIR-only",
   // Exhausts memory, so whether it finishes in time depends on the machine.

@@ -7,6 +7,7 @@ import { IR_Coerce } from "../ir/ir";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
+  BUILTIN_Float,
   BUILTIN_Int,
   BUILTIN_Number,
   BUILTIN_Object,
@@ -244,6 +245,8 @@ export function conversionType(em: MethodEmitter, op: u8, i: u32): i32 {
     case ops.OP_convert_u:
     case ops.OP_coerce_u:
       return domain.uintType;
+    case ops.OP_convert_f:
+      return domain.floatType;
     case ops.OP_convert_d:
     case ops.OP_coerce_d:
       return domain.numberType;
@@ -306,6 +309,9 @@ export function conversion(em: MethodEmitter, i: u32, op: u8): void {
     case ops.OP_coerce_u:
       convert(em, "", src, domain.uintType, from);
       break;
+    case ops.OP_convert_f:
+      convert(em, "", src, domain.floatType, from);
+      break;
     case ops.OP_convert_d:
     case ops.OP_coerce_d:
       convert(em, "", src, domain.numberType, from);
@@ -357,6 +363,11 @@ export function convert(em: MethodEmitter, prefix: string, r: i32, type: i32, fr
 
   const numeric = fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number;
   switch (bt) {
+    case BUILTIN_Float:
+      out.text("rt.float(");
+      operand(em, prefix, r);
+      out.text(")");
+      return;
     case BUILTIN_Int:
       if (numeric || fromBt === BUILTIN_Boolean) {
         operand(em, prefix, r);
@@ -387,8 +398,14 @@ export function convert(em: MethodEmitter, prefix: string, r: i32, type: i32, fr
       }
       return;
     case BUILTIN_Boolean:
-      out.text("!!");
-      operand(em, prefix, r);
+      if (fromBt === BUILTIN_Float || fromBt === BUILTIN_Any || fromBt === BUILTIN_Object) {
+        out.text("rt.toBoolean(");
+        operand(em, prefix, r);
+        out.text(")");
+      } else {
+        out.text("!!");
+        operand(em, prefix, r);
+      }
       return;
     case BUILTIN_String:
       out.text("rt.coerceString(");

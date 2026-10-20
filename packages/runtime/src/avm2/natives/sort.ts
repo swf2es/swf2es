@@ -8,6 +8,7 @@
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
+import { FloatValue } from "../float.js";
 import { publicQname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { lowerCase } from "./case.js";
@@ -25,7 +26,7 @@ interface Field {
   options: number;
 }
 
-const isObject = (v: Value) => v !== null && typeof v === "object";
+const isObject = (v: Value) => v !== null && typeof v === "object" && !(v instanceof FloatValue);
 
 function stringCompare(rt: Runtime, lower: boolean): Compare {
   return (x, y) => {
@@ -82,13 +83,13 @@ export function sort(rt: Runtime, d: AsObject, args: Value[]): Value {
         return result > 0 ? 1 : result < 0 ? -1 : 0;
       };
       if (args.length >= 2) {
-        if (typeof args[1] !== "number") {
+        if (typeof args[1] !== "number" && !(args[1] instanceof FloatValue)) {
           throw rt.error("TypeError", 1034, rt.describe(args[1]), "Number");
         }
 
         options = rt.toInt(args[1]);
       }
-    } else if (typeof arg0 === "number") {
+    } else if (typeof arg0 === "number" || arg0 instanceof FloatValue) {
       options = rt.toInt(arg0);
     } else {
       throw rt.error("TypeError", 1034, rt.describe(arg0), "Function");

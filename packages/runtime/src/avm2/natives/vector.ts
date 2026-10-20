@@ -2,8 +2,9 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import { arrayIndex } from "../names.js";
+import { arrayIndex, NS_Public, namespace, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
+import { methodKey } from "../traits.js";
 import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
 import { sort } from "./sort.js";
 
@@ -247,7 +248,7 @@ for (const [kind, convert, fill] of VECTORS) {
       prepareVector(rt, cls, convert, fill);
       const o = cls.$it.instance();
       const length = args.length ? rt.toUint(args[0]) : 0;
-      o.$a = new Array(length).fill(fill);
+      o.$a = new Array(length).fill(cls.$fill);
       o.$fixed = !!args[1];
       return o;
     },
@@ -314,8 +315,11 @@ function prepareVector(
 ): void {
   if (!cls.$convert) {
     cls.$convert = convert;
-    cls.$fill = fill;
+    cls.$fill = cls.$param === "float" ? rt.float(0) : fill;
     cls.$rt = rt;
+    if (cls.$param === "float") {
+      floatSearchMethods(rt, cls);
+    }
   }
 }
 
@@ -358,4 +362,45 @@ function makeVector(rt: Runtime, param: AsObject | null): AsObject {
   }
 
   return cls;
+}
+
+/** Float vectors coerce search values to float; the generic object's AS3 methods do not. */
+function floatSearchMethods(rt: Runtime, cls: AsObject): void {
+  const proto = rt.objectTraits.instance();
+  proto.$p = cls.$prototype;
+  proto.$d.set("constructor", cls);
+  proto.$dontEnum = new Set(["constructor", "indexOf", "lastIndexOf"]);
+  cls.$prototype = proto;
+  cls.$it.proto.$p = proto;
+  for (const name of ["indexOf", "lastIndexOf"] as const) {
+    const search = function (
+      this: AsObject,
+      value: Value,
+      from: Value = name === "indexOf" ? 0 : 0x7fffffff,
+    ): number {
+      const needle = rt.float(value).value;
+      const raw = rt.toInt(from);
+      const elements: Value[] = this.$a;
+      const start = raw < 0 ? Math.max(elements.length + raw, 0) : Math.min(raw, elements.length);
+      if (name === "indexOf") {
+        for (let i = start; i < elements.length; i++) {
+          if (elements[i].value === needle) {
+            return i;
+          }
+        }
+      } else {
+        for (let i = Math.min(start, elements.length - 1); i >= 0; i--) {
+          if (elements[i].value === needle) {
+            return i;
+          }
+        }
+      }
+
+      return -1;
+    };
+    Object.assign(search, { $min: 1, $max: 2, $length: 2 });
+    const binding = cls.$it.find(qname(namespace(NS_Public, AS3), name));
+    cls.$it.proto[methodKey(binding >> 3)] = search;
+    proto.$d.set(name, rt.newFunctionObject(search, null));
+  }
 }

@@ -28,6 +28,7 @@ import { Domain } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
+  BUILTIN_Float,
   BUILTIN_Int,
   BUILTIN_Namespace,
   BUILTIN_Number,
@@ -958,6 +959,11 @@ export class MethodEmitter {
     }
   }
 
+  floatArithmetic(i: u32): bool {
+    const type = this.ir.type[i];
+    return this.abc.hasFloatSupport && (type === TYPE_Any || type === this.domain.floatType);
+  }
+
   /** What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed. */
   private copied(copy: i32): void {
     if (copy >= 0) {
@@ -1352,6 +1358,12 @@ export class MethodEmitter {
         this.assign(i);
         out.uint(this.abc.pool.uints[a]);
         break;
+      case ops.OP_pushfloat:
+        this.assign(i);
+        out.text("rt.float(");
+        out.double(this.abc.pool.floats[a]);
+        out.text(")");
+        break;
       case ops.OP_pushdouble:
         this.assign(i);
         out.double(this.abc.pool.doubles[a]);
@@ -1493,11 +1505,17 @@ export class MethodEmitter {
         break;
       case ops.OP_subtract:
         this.assign(i);
-        binary(this, i, " - ");
+        if (this.floatArithmetic(i)) {
+          call2(this, "rt.subtract(", i);
+        } else {
+          binary(this, i, " - ");
+        }
         break;
       case ops.OP_multiply:
         this.assign(i);
-        if (wraps(this, i)) {
+        if (this.floatArithmetic(i)) {
+          call2(this, "rt.multiply(", i);
+        } else if (wraps(this, i)) {
           call2(this, "Math.imul(", i);
         } else {
           binary(this, i, " * ");
@@ -1506,11 +1524,19 @@ export class MethodEmitter {
         break;
       case ops.OP_divide:
         this.assign(i);
-        binary(this, i, " / ");
+        if (this.floatArithmetic(i)) {
+          call2(this, "rt.divide(", i);
+        } else {
+          binary(this, i, " / ");
+        }
         break;
       case ops.OP_modulo:
         this.assign(i);
-        binary(this, i, " % ");
+        if (this.floatArithmetic(i)) {
+          call2(this, "rt.modulo(", i);
+        } else {
+          binary(this, i, " % ");
+        }
         break;
       case ops.OP_add_i:
         this.assign(i);
@@ -1554,8 +1580,20 @@ export class MethodEmitter {
         out.text("~");
         this.reg(ir.src[i]);
         break;
+      case ops.OP_unplus:
+        this.assign(i);
+        out.text("rt.toNumeric(");
+        this.reg(ir.src[i]);
+        out.text(")");
+        break;
       case ops.OP_negate:
         this.assign(i);
+        if (this.floatArithmetic(i)) {
+          out.text("rt.negate(");
+          this.reg(ir.src[i]);
+          out.text(")");
+          break;
+        }
         out.text("-");
         this.reg(ir.src[i]);
         break;
@@ -1568,6 +1606,12 @@ export class MethodEmitter {
       case ops.OP_increment:
       case ops.OP_decrement:
         this.assign(i);
+        if (this.floatArithmetic(i)) {
+          out.text(op === ops.OP_increment ? "rt.increment(" : "rt.decrement(");
+          this.reg(ir.src[i]);
+          out.text(")");
+          break;
+        }
         this.reg(ir.src[i]);
         out.text(op === ops.OP_increment ? " + 1" : " - 1");
         break;
@@ -1580,6 +1624,12 @@ export class MethodEmitter {
       case ops.OP_inclocal:
       case ops.OP_declocal:
         this.assign(i);
+        if (this.floatArithmetic(i)) {
+          out.text(op === ops.OP_inclocal ? "rt.increment(" : "rt.decrement(");
+          this.reg(ir.src[i]);
+          out.text(")");
+          break;
+        }
         this.reg(ir.src[i]);
         out.text(op === ops.OP_inclocal ? " + 1" : " - 1");
         break;
@@ -1613,6 +1663,7 @@ export class MethodEmitter {
       case ops.OP_coerce_i:
       case ops.OP_convert_u:
       case ops.OP_coerce_u:
+      case ops.OP_convert_f:
       case ops.OP_convert_d:
       case ops.OP_coerce_d:
       case ops.OP_convert_b:
@@ -2416,6 +2467,7 @@ export class MethodEmitter {
       bt === BUILTIN_Int ||
       bt === BUILTIN_Uint ||
       bt === BUILTIN_Number ||
+      bt === BUILTIN_Float ||
       bt === BUILTIN_Boolean ||
       bt === BUILTIN_String ||
       bt === BUILTIN_Namespace;

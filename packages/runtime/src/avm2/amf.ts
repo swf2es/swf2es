@@ -13,6 +13,7 @@
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "./descriptors.js";
+import { FloatValue } from "./float.js";
 import { API_USER, NS_PackageInternal, NS_Public, namespace, publicQname, qname } from "./names.js";
 import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
 import { xmlToXMLString } from "./natives/xml/strings.js";
@@ -37,6 +38,8 @@ const kVectorUint = 14;
 const kVectorDouble = 15;
 const kVectorObject = 16;
 const kDictionary = 17;
+const kFloat = 21;
+const kVectorFloat = 18;
 
 const VECTOR_KINDS: Record<string, number> = {
   "__AS3__.vec::Vector$int": kVectorInt,
@@ -101,6 +104,10 @@ function isA(traits: Traits, name: string): boolean {
 
 /** The kind of Vector a value is, or 0. */
 function vectorKind(traits: Traits): number {
+  if (traits.cls?.$param === "float") {
+    return kVectorFloat;
+  }
+
   for (let t: Traits | null = traits; t; t = t.base) {
     const kind = VECTOR_KINDS[t.name];
     if (kind) {
@@ -229,6 +236,13 @@ export class Writer implements ExternalStream {
   /** As WriteAtom. */
   value(v: Value): void {
     const rt = this.rt;
+    if (v instanceof FloatValue) {
+      this.u8(kFloat);
+      const at = this.out.shortWrite(4);
+      this.out.view.setFloat32(at, v.value);
+      return;
+    }
+
     switch (typeof v) {
       case "undefined":
         this.u8(kUndefined);
@@ -384,7 +398,13 @@ export class Writer implements ExternalStream {
     this.u8(v.$fixed ? 1 : 0);
     // A numeric Vector's elements in bytes reserved at once, which may move
     // the buffer: its view is read after.
-    if (kind === kVectorDouble) {
+    if (kind === kVectorFloat) {
+      const at = this.out.shortWrite(elements.length * 4);
+      const view = this.out.view;
+      for (let i = 0; i < elements.length; i++) {
+        view.setFloat32(at + i * 4, elements[i].value);
+      }
+    } else if (kind === kVectorDouble) {
       const at = this.out.shortWrite(elements.length * 8);
       const view = this.out.view;
       for (let i = 0; i < elements.length; i++) {
@@ -644,6 +664,10 @@ export class Reader implements ExternalStream {
         return true;
       case kInteger:
         return (this.uint29() << 3) >> 3;
+      case kFloat: {
+        const at = this.input.shortRead(4);
+        return rt.float(this.input.view.getFloat32(at));
+      }
       case kDouble:
         return this.double();
       case kString:
@@ -684,6 +708,7 @@ export class Reader implements ExternalStream {
       case kVectorUint:
       case kVectorDouble:
       case kVectorObject:
+      case kVectorFloat:
         return this.vector(type);
       case kXmlDocument:
       case kXml: {
@@ -748,7 +773,15 @@ export class Reader implements ExternalStream {
       cls = rt.vectorClass(param);
     } else {
       cls = rt.vectorClass(
-        rt.builtinClass(type === kVectorInt ? "int" : type === kVectorUint ? "uint" : "Number"),
+        rt.builtinClass(
+          type === kVectorInt
+            ? "int"
+            : type === kVectorUint
+              ? "uint"
+              : type === kVectorFloat
+                ? "float"
+                : "Number",
+        ),
       );
     }
 
@@ -762,14 +795,16 @@ export class Reader implements ExternalStream {
     if (type !== kVectorObject && length > 0 && this.input.available >= length * size) {
       const at = this.input.shortRead(length * size);
       const view = this.input.view;
-      const elements: number[] = v.$a;
+      const elements: Value[] = v.$a;
       for (let i = 0; i < length; i++) {
         elements[i] =
-          type === kVectorDouble
-            ? view.getFloat64(at + i * 8)
-            : type === kVectorInt
-              ? view.getInt32(at + i * 4)
-              : view.getUint32(at + i * 4);
+          type === kVectorFloat
+            ? rt.float(view.getFloat32(at + i * 4))
+            : type === kVectorDouble
+              ? view.getFloat64(at + i * 8)
+              : type === kVectorInt
+                ? view.getInt32(at + i * 4)
+                : view.getUint32(at + i * 4);
       }
 
       v.$fixed = fixed;
@@ -781,7 +816,13 @@ export class Reader implements ExternalStream {
     const setIndex = v.$traits.setIndex as NonNullable<Traits["setIndex"]>;
     for (let i = 0; i < length; i++) {
       const value =
-        type === kVectorDouble ? this.double() : type === kVectorObject ? this.value() : this.u32();
+        type === kVectorDouble
+          ? this.double()
+          : type === kVectorFloat
+            ? rt.float(this.input.view.getFloat32(this.input.shortRead(4)))
+            : type === kVectorObject
+              ? this.value()
+              : this.u32();
       setIndex(v, i, value, rt);
     }
 

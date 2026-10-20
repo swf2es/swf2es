@@ -478,7 +478,29 @@ which `newclass` builds from the module's layout:
   need (`String.fromCharCode = function ...`).
 
 Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
-`int` and `uint`, booleans, strings. A namespace value is the runtime's
+`int` and `uint`, booleans, strings. AIR's scalar `float` uses `FloatValue`
+with a binary32 payload, rounded by `Math.fround` when produced. The tag
+preserves its identity through `*`, calls, properties and arrays: AIR treats
+`float(1) === Number(1)` as false. Two float operands produce a rounded float;
+a mixed float/Number operation produces Number. Known Number arithmetic
+keeps its direct JavaScript operators. Float results currently allocate a
+small tagged value; zero, negative zero and NaN are shared. Float locals
+and vectors are not yet stored unboxed.
+
+AIR ABC 47.16 and above insert one scalar float pool after the doubles;
+current AIR omits the experimental Tamarin float4 pool. The scalar
+`pushfloat`, `convert_f` and `unplus` instructions are version-gated, and
+`float4` instructions remain rejected. The separate builtin `floatLibrary`,
+generated from `as3/builtin/src/float.as`, declares the primitive beside the
+Flash builtins without replacing them. The player and CLI load it once on demand
+when AIR float bytecode is encountered, before adding any ABC of that SWF;
+direct compiler/runtime users can supply
+`avm2.floatLibrary` as a builtin after `builtin.abc`. AIR's AMF3 float and
+float-vector markers are preserved, including signed zero and NaN. The
+`air-float` player case holds AIR's reference traces; its source is under
+`tests/conformance/cases/air`, outside the avmshell-only runner.
+
+A namespace value is the runtime's
 interned namespace, whose class is Namespace. Arrays and Vectors keep their
 elements in a JavaScript array, `$a`. A script's global object is an instance of its traits like any
 other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'

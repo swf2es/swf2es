@@ -30,6 +30,7 @@ export class Code {
    * epoch it was taken in.
    */
   private libraryCount: number | null = null;
+  private floatReady: Promise<void> | null = null;
   private libraryLog: { epoch: number; digest: string } | null = null;
   /**
    * The compiler's application domain for each of the runtime's, by its
@@ -162,6 +163,10 @@ export class Code {
         await linked;
       }
     }
+
+    if (avm2.hasFloatLibrary(abcs)) {
+      this.floatReady = Promise.resolve();
+    }
   }
 
   /** Load the SWF's DoABCs in tag order, each run unless its lazy flag defers it to first use, then its SymbolClass. */
@@ -187,15 +192,25 @@ export class Code {
     // Every DoABC added before any compiles: avmplus has a frame's ABCs all
     // loaded before it verifies a method, so a class in the first tag may
     // extend or name one in the last (the corpus's property_priority).
+    const abcs = swf.tags
+      .filter((tag) => tag.code === tags.DoABC || tag.code === tags.DoABC2)
+      .map((tag) => readDoAbc(swf.bytes, tag));
+    if (
+      abcs.some(({ abc }) => {
+        const version = this.s.codegen.abcVersion(abc);
+        return version?.major === 47 && version.minor >= 16;
+      })
+    ) {
+      this.floatReady ??= this.loadLibraries([avm2.floatLibrary]);
+      await this.floatReady;
+    }
+
     const added: { index: number; lazy: boolean }[] = [];
     const runs: (() => void)[] = [];
     this.pin(domain, 1);
     try {
-      for (const t of swf.tags) {
-        if (t.code === tags.DoABC || t.code === tags.DoABC2) {
-          const { lazy, abc } = readDoAbc(swf.bytes, t);
-          added.push({ index: await this.add(abc, false, domain), lazy });
-        }
+      for (const { lazy, abc } of abcs) {
+        added.push({ index: await this.add(abc, false, domain), lazy });
       }
 
       // With a module cache, each module is read or compiled first, so

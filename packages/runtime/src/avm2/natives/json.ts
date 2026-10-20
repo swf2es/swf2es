@@ -1,3 +1,4 @@
+import { FloatValue } from "../float.js";
 // JSON's natives, as avmplus' JSONParser and JSONSerializer: the parser's
 // tokens and SyntaxError 1132, and stringify's toJSON (public only: see
 // toJSONOf), replacers, gaps, numbers as the host writes them, and a
@@ -418,6 +419,10 @@ class Serializer {
 
     if (this.replacer) {
       value = rt.callValue(this.replacer, holder, [key, value], null);
+    }
+
+    if (value instanceof FloatValue) {
+      return value.value;
     }
 
     switch (typeof value) {

@@ -7835,6 +7835,19 @@ const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
 export const cases: PlayerCase[] = [
+  {
+    name: "air-float",
+    swf: bare(
+      new Uint8Array(readFileSync(new URL("fixtures/AirFloat.abc", import.meta.url))),
+      2,
+      "AirFloat",
+    ),
+    frames: 2,
+    capture: [],
+    traced: true,
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   { name: "moves", swf: moves(true), ...moved },
   { name: "moves-avm1", swf: moves(false), ...moved },
   {

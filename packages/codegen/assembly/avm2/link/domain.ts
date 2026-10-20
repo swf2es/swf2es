@@ -38,6 +38,7 @@ import {
   BKIND_Var,
   BUILTIN_Any,
   BUILTIN_Boolean,
+  BUILTIN_Float,
   BUILTIN_Int,
   BUILTIN_Namespace,
   BUILTIN_Number,
@@ -294,6 +295,7 @@ export class Domain {
   voidType: i32 = -1;
   nullType: i32 = -1;
   numberType: i32 = -1;
+  floatType: i32 = -1;
   intType: i32 = -1;
   uintType: i32 = -1;
   booleanType: i32 = -1;
@@ -918,6 +920,13 @@ export class Domain {
       this.nameInstance(index, i);
     }
 
+    if (abc.builtin) {
+      const floatType = this.builtinType("float");
+      if (floatType >= 0) {
+        this.floatType = floatType;
+      }
+    }
+
     // As AvmCore's first builtin pool: its classes include the special ones.
     if (abc.builtin && !this.hasBuiltins) {
       this.hasBuiltins = true;
@@ -1079,7 +1088,11 @@ export class Domain {
   typeNotNull(type: i32): bool {
     const bt = this.builtin(type);
     return (
-      bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number || bt === BUILTIN_Boolean
+      bt === BUILTIN_Int ||
+      bt === BUILTIN_Uint ||
+      bt === BUILTIN_Number ||
+      bt === BUILTIN_Boolean ||
+      bt === BUILTIN_Float
     );
   }
 
@@ -1319,6 +1332,10 @@ export class Domain {
       return -2;
     }
 
+    if (this.floatType >= 0 && slotType === this.staticOf(this.floatType)) {
+      return this.floatType;
+    }
+
     for (let k = 0; k < 5; k++) {
       const type =
         k === 0
@@ -1355,6 +1372,7 @@ export class Domain {
       (converted === this.intType ||
         converted === this.uintType ||
         converted === this.numberType ||
+        converted === this.floatType ||
         converted === this.booleanType ||
         converted === this.stringType)
     );
@@ -1457,6 +1475,10 @@ export class Domain {
       return BUILTIN_Uint;
     }
 
+    if (type >= 0 && type === this.floatType) {
+      return BUILTIN_Float;
+    }
+
     if (type === this.numberType) {
       return BUILTIN_Number;
     }
@@ -1471,7 +1493,7 @@ export class Domain {
   /** As Traits::isMachineType: Object, void, Boolean, int, uint and Number. */
   isMachineType(type: i32): bool {
     const bt = this.builtin(type);
-    return bt >= BUILTIN_Object && bt <= BUILTIN_Number;
+    return (bt >= BUILTIN_Object && bt <= BUILTIN_Number) || bt === BUILTIN_Float;
   }
 
   /** As Traits::isMachineCompatible: whether a and b have the same representation. */
@@ -1614,9 +1636,14 @@ export class Domain {
    * or the VerifyError.
    */
   checkDefault(index: u32, value: u32, kind: u8, type: i32): i32 {
-    // Without a value, the type's own default is always legal.
-    if (value === 0) {
+    // Legacy ABCs ignore the kind at index zero; AIR's float entry zero is NaN.
+    const hasFloats = this.abcs[index].hasFloatSupport;
+    if (value === 0 && (kind !== C.CONSTANT_Float || !hasFloats)) {
       return 0;
+    }
+
+    if (kind === C.CONSTANT_Float && !hasFloats) {
+      return type === TYPE_Any ? C.kCorruptABCError : C.kIllegalDefaultValue;
     }
 
     if (!isDefaultKind(kind)) {
@@ -1634,6 +1661,10 @@ export class Domain {
       case C.CONSTANT_UInt:
         count = pool.uints.length;
         number = value < count ? pool.uints[value] : 0;
+        break;
+      case C.CONSTANT_Float:
+        count = pool.floats.length;
+        number = value < count ? pool.floats[value] : 0;
         break;
       case C.CONSTANT_Double:
         count = pool.doubles.length;

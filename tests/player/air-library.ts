@@ -43,7 +43,7 @@ export function compileAirLibrary(out = `${here}out/air-library/`): Uint8Array {
  * such string added to the string pool, which the namespace names instead,
  * so that the string's other uses keep it unmarked.
  */
-function markPublic(abc: Uint8Array): Uint8Array {
+export function markPublic(abc: Uint8Array): Uint8Array {
   let at = 4;
   const u30 = () => {
     let value = 0;
