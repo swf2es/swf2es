@@ -8574,6 +8574,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 300,
   },
   {
+    name: "hidden-render-groups",
+    swf: (abc) => bare(abc, 8, "HiddenRenderGroups", 340, 190),
+    script: "HiddenRenderGroups",
+    frames: 8,
+    capture: [1, 3, 4, 5, 6, 8],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     name: "hidden-strokes",
     swf: (abc) => bare(abc, 7, "HiddenStrokes", 300, 150),
     script: "HiddenStrokes",

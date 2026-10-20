@@ -400,6 +400,53 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   assert.equal(batcherNameFor(mesh as unknown as Element), "default");
 });
 
+test("only the view's mask-contained groups opt into hidden instruction deferral", async () => {
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const renderer = standIn([]).renderer;
+  const pixi = (await import(entry)) as {
+    RenderGroupSystem: new (target: typeof renderer) => typeof renderer.renderGroup;
+    Container: new (options: { isRenderGroup: boolean }) => Node["container"];
+  };
+  renderer.renderGroup = new pixi.RenderGroupSystem(renderer);
+  const view = new PixiView(renderer);
+  const root = new Container();
+  const branch = new Container();
+  const mask = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(branch, 1);
+  root.placeAtDepth(mask, 2);
+  for (let i = 0; i < 64; i++) {
+    branch.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const drawn = view.stage.children[0].children[1];
+  const group = drawn.renderGroup;
+  const allow = renderer.renderGroup.canDeferInvisibleGroup;
+  assert.ok(allow);
+  assert.ok(group);
+  assert.equal(allow(group), true);
+  const foreign = new pixi.Container({ isRenderGroup: true });
+  assert.equal(allow(foreign.renderGroup), false);
+
+  branch.setMask(mask);
+  view.prepare(root);
+  assert.equal(drawn.isRenderGroup, false);
+  assert.equal(allow(group), false);
+  // The pooled group's instruction set must not retain permission for a later host-owned group.
+  foreign.disableRenderGroup();
+  foreign.enableRenderGroup();
+  assert.equal(allow(foreign.renderGroup), false);
+  branch.setMask(null);
+  view.prepare(root);
+  assert.equal(allow(drawn.renderGroup), true);
+
+  foreign.destroy();
+  view.dispose(view.stage);
+  store.dispose();
+});
+
 test("nested render groups keep their hierarchy while parked and release idle batches", async () => {
   await withClock((clock) => {
     const view = new PixiView(standIn([]).renderer);
