@@ -3,7 +3,62 @@ import { test } from "node:test";
 import { readShape, readSwf } from "@swf2es/format";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
+import { placeGlyphs } from "../../../../packages/player/dist/text/static.js";
 import * as w from "../../../swf-writer.ts";
+
+test("legacy fonts receive names, styles and character mappings after text has referenced them", () => {
+  const library = readLibrary(
+    readSwf(
+      w.swf({
+        version: 6,
+        width: 100,
+        height: 100,
+        frameCount: 1,
+        tags: [
+          w.font1(1, [
+            { char: "A", advance: 0, boxes: [[0, -700, 500, 0]] },
+            { char: "Ω", advance: 0, boxes: [[0, -700, 700, 0]] },
+          ]),
+          w.staticText({
+            id: 2,
+            bounds: [0, 1000, -700, 0],
+            records: [
+              {
+                font: 1,
+                height: 400,
+                color: 0xff0000,
+                glyphs: [
+                  [0, 200],
+                  [1, 300],
+                ],
+              },
+            ],
+          }),
+          w.fontInfo(1, "Legacy", [65, 0x3a9], { bold: true, italic: true }),
+          w.fontInfo(99, "Missing", [65]),
+          w.showFrame(),
+          w.end(),
+        ],
+      }),
+    ),
+  );
+  const font = library.characters.get(1);
+  const text = library.characters.get(2);
+  assert.ok(font?.type === "font");
+  assert.ok(text?.type === "static");
+  assert.equal(font.name, "Legacy");
+  assert.equal(font.font.name, font.name);
+  assert.equal(font.bold, true);
+  assert.equal(font.font.bold, true);
+  assert.equal(font.italic, true);
+  assert.equal(font.font.italic, true);
+  assert.equal(library.fonts.find("Legacy", true, true), font.font);
+  const placed = placeGlyphs(text, library.characters);
+  assert.equal(placed.text, "AΩ");
+  assert.equal(placed.glyphs.length, 2);
+  assert.equal(placed.glyphs[1].x, 200);
+  assert.equal(placed.glyphs[1].font.em, 1024);
+});
 
 function movie(fill: number | w.BitmapFill): Uint8Array {
   return w.swf({

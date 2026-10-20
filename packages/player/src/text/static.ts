@@ -23,8 +23,8 @@ export interface PlacedGlyph {
  * past its font's glyphs, is not drawn and does not move the pen. `text` is
  * the glyphs' characters, a line feed before a record's first where its
  * line is not the last glyph's, as adl reads it; null where a glyph has no
- * font, or there are none. (adl reads a glyph past its font as some other
- * character; the player reads the text as null.)
+ * font or character mapping, or there are none. (adl reads a glyph past
+ * its font as some other character; the player reads the text as null.)
  */
 export function placeGlyphs(
   character: StaticTextCharacter,
@@ -62,7 +62,12 @@ export function placeGlyphs(
 
       lineY = y;
       glyphs.push({ font, glyph, x, y, height, color });
-      chars.push(String.fromCharCode(glyph.code));
+      if (glyph.code < 0) {
+        unknown = true;
+      } else {
+        chars.push(String.fromCharCode(glyph.code));
+      }
+
       x += advance;
     }
   }

@@ -3,7 +3,7 @@
 // font, measured on a canvas where there is one.
 import type { Font } from "@swf2es/format";
 
-/** A SWF's embedded fonts: DefineFont2 and 3, by name. */
+/** A SWF's embedded fonts: DefineFont through 3, by name. */
 export class FontSet {
   private readonly byName = new Map<string, Font[]>();
 

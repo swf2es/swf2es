@@ -86,6 +86,32 @@ test("its text is null where a glyph has no font or one the SWF lacks, or where 
   );
 });
 
+test("a legacy font without a character table draws and advances its glyphs but has null text", () => {
+  const [text, characters] = read([
+    {
+      font: 5,
+      height: 400,
+      color: 0x00ff00,
+      glyphs: [
+        [2, 300],
+        [3, 200],
+      ],
+    },
+  ]);
+  const font = characters.get(5);
+  assert.ok(font?.type === "font");
+  font.font.glyphs[2].code = -1;
+  font.font.glyphs[3].code = -1;
+  const placed = placeGlyphs(text, characters);
+  assert.equal(placed.text, null);
+  assert.equal(placed.glyphs.length, 2);
+  assert.deepEqual(
+    placed.glyphs.map((g) => g.x),
+    [0, 300],
+  );
+  assert.ok(placed.glyphs.every((g) => g.glyph.records.length > 0));
+});
+
 test("a record on the same line adds no line feed; one on another line does, by the rule adl showed going down", () => {
   const text = (records: w.TextRecordSpec[]) => placeGlyphs(...read(records)).text;
   assert.equal(
