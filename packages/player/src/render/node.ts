@@ -57,7 +57,7 @@ export interface Node {
   reused: boolean;
   /** Whether its art was emptied while off the list: drawn again if it comes back. */
   emptied: boolean;
-  /** The thinnest line its lines were last drawn with, to draw them again for another. */
+  /** The thinnest line last drawn with; NaN while hidden strokes await their next visible sync. */
   strokedAt: number;
   /**
    * The stretch its lines were last stroked through, where all were
@@ -80,6 +80,8 @@ export interface Node {
   spared: boolean;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
+  /** Whether this branch's ordinary art is hidden by its own or an ancestor's visibility. */
+  hidden: boolean;
   /** The containers of the children a timeline's mask clips, each masked by it. */
   groups: PixiContainer[];
   /** Its scroll's clip: a rectangle in its space, and the container it masks, of the art and children. */
@@ -160,6 +162,7 @@ export function makeNode(o: DisplayObject): Node {
     spare: null,
     spared: false,
     masking: false,
+    hidden: false,
     groups: [],
     scroll: null,
     clipped: false,

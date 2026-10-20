@@ -11,7 +11,7 @@ import {
   type Renderer,
   RenderGroupSystem,
 } from "pixi.js";
-import { spareBatchersFor } from "./batchers.js";
+import { spareBatchersFor, viewGroups } from "./batchers.js";
 import { measureFilterArea, noteMask } from "./blend.js";
 import { batcherNameFor, colorShaderFor } from "./color.js";
 import { noteBuild, type Settling } from "./settle.js";
@@ -52,6 +52,8 @@ export function hookRenderer(renderer: Renderer): void {
   }
 
   if (renderer.renderGroup instanceof RenderGroupSystem) {
+    // The view forms groups only where every mask dependency stays inside them.
+    renderer.renderGroup.canDeferInvisibleGroup = (group) => viewGroups.has(group.instructionSet);
     renderer.renderGroup.onBuildInstructions = (group, forced) =>
       noteBuild(group as unknown as Settling, forced);
   }

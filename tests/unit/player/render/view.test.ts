@@ -10,11 +10,13 @@ import { runInNewContext } from "node:vm";
 import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
+  CHILDREN,
   CONTENT,
   Container,
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import type { Player } from "../../../../packages/player/dist/player.js";
+import type { Node } from "../../../../packages/player/dist/render/node.js";
 import { PixiView } from "../../../../packages/player/dist/render/view.js";
 
 setFlagsFromString("--expose-gc");
@@ -166,6 +168,212 @@ test("a timeline mask's range goes in a container it masks, a scroll clips the r
   assert.ok(!cNode.mask);
 });
 
+test("timeline mask groups survive child edits and changing ranges, but retire when a mask is replaced", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const children = Array.from({ length: 8 }, (_, i) => {
+    const child = new Container();
+    root.placeAtDepth(child, i + 1);
+    return child;
+  });
+  const [outerMask, first, innerMask, , , last, , outside] = children;
+  outerMask.clipDepth = 7;
+  innerMask.clipDepth = 5;
+  view.prepare(root);
+
+  const top = view.stage.children[0];
+  const [art, outer, outerGroup, beyond] = top.children;
+  const [firstContainer, inner, innerGroup, lastContainer, seventh] = outerGroup.children;
+  assert.equal(outerGroup.mask, outer);
+  assert.equal(innerGroup.mask, inner);
+
+  const replacement = new Container();
+  root.placeAtDepth(replacement, 4);
+  view.prepare(root);
+  assert.equal(top.children[2], outerGroup);
+  assert.equal(outerGroup.children[2], innerGroup);
+  const replacementContainer = innerGroup.children[0];
+  assert.equal(innerGroup.children.length, 2);
+
+  root.removeChild(first);
+  view.prepare(root);
+  assert.deepEqual(outerGroup.children, [inner, innerGroup, lastContainer, seventh]);
+  assert.equal(firstContainer.parent, null);
+
+  // Extending the inner range moves a child into its existing group.
+  innerMask.clipDepth = 6;
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.equal(innerGroup.children[0], replacementContainer);
+  assert.equal(innerGroup.children.at(-1), lastContainer);
+  assert.deepEqual(outerGroup.children, [inner, innerGroup, seventh]);
+
+  // The same masks now clip siblings instead of nesting.
+  outerMask.clipDepth = 2;
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.deepEqual(top.children, [art, outer, outerGroup, inner, innerGroup, seventh, beyond]);
+  assert.equal(outerGroup.children.length, 0);
+  assert.equal(outerGroup.destroyed, false);
+  assert.equal(innerGroup.destroyed, false);
+
+  outerMask.clipDepth = 7;
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.deepEqual(top.children, [art, outer, outerGroup, beyond]);
+  assert.deepEqual(outerGroup.children, [inner, innerGroup, seventh]);
+
+  root.removeChild(outside);
+  root.placeAtDepth(outside, 5);
+  root.removeChild(last);
+  view.prepare(root);
+  assert.deepEqual(innerGroup.children, [replacementContainer, beyond]);
+
+  const newMask = new Container();
+  newMask.clipDepth = 6;
+  root.placeAtDepth(newMask, 3);
+  view.prepare(root);
+  assert.equal(outerGroup.destroyed, true);
+  assert.equal(innerGroup.destroyed, true);
+  const rebuilt = top.children[2];
+  assert.notEqual(rebuilt, outerGroup);
+  assert.equal(rebuilt.mask, outer);
+  assert.equal(outer.includeInBuild, false);
+
+  root.removeChild(newMask);
+  root.removeChild(outerMask);
+  view.prepare(root);
+  assert.equal(rebuilt.destroyed, true);
+  assert.equal(top.children[0], art);
+  assert.ok(top.children.slice(1).every((child) => !child.mask));
+});
+
+test("timeline masks stay nested across scroll changes and rebuild when their order changes", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const outer = new Container();
+  const inner = new Container();
+  const child = new Container();
+  root.placeAtDepth(outer, 1);
+  root.placeAtDepth(inner, 2);
+  root.placeAtDepth(child, 3);
+  outer.clipDepth = 4;
+  inner.clipDepth = 3;
+  view.prepare(root);
+
+  const top = view.stage.children[0];
+  const [art, outerContainer] = top.children;
+  let outerGroup = top.children[2];
+  const innerContainer = outerGroup.children[0];
+  let innerGroup = outerGroup.children[1];
+  const childContainer = innerGroup.children[0];
+
+  root.scroll = { xMin: 0, yMin: 0, xMax: 20, yMax: 20 };
+  root.invalidate(TRANSFORM);
+  view.prepare(root);
+  const content = top.children[1];
+  outerGroup = content.children[2];
+  innerGroup = outerGroup.children[1];
+  assert.deepEqual(content.children, [art, outerContainer, outerGroup]);
+  assert.deepEqual(outerGroup.children, [innerContainer, innerGroup]);
+  assert.deepEqual(innerGroup.children, [childContainer]);
+  assert.equal(outerGroup.mask, outerContainer);
+  assert.equal(innerGroup.mask, innerContainer);
+
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.equal(content.children[2], outerGroup);
+  assert.equal(outerGroup.children[1], innerGroup);
+
+  root.scroll = null;
+  root.invalidate(TRANSFORM);
+  view.prepare(root);
+  outerGroup = top.children[2];
+  innerGroup = outerGroup.children[1];
+  assert.deepEqual(top.children, [art, outerContainer, outerGroup]);
+  assert.deepEqual(outerGroup.children, [innerContainer, innerGroup]);
+  assert.equal(outerGroup.mask, outerContainer);
+  assert.equal(innerGroup.mask, innerContainer);
+
+  // A later mask becomes the outer one: retained wrappers would otherwise form a cycle.
+  root.swapChildren(outer, inner);
+  view.prepare(root);
+  assert.equal(outerGroup.destroyed, true);
+  assert.equal(innerGroup.destroyed, true);
+  const newOuter = top.children[2];
+  assert.deepEqual(top.children, [art, innerContainer, newOuter]);
+  assert.equal(newOuter.mask, innerContainer);
+  const newInner = newOuter.children[1];
+  assert.deepEqual(newOuter.children, [outerContainer, newInner]);
+  assert.equal(newInner.mask, outerContainer);
+  assert.deepEqual(newInner.children, [childContainer]);
+});
+
+test("mask churn leaves neither retired groups nor removed display trees alive", async () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  view.prepare(root);
+  const top = view.stage.children[0];
+
+  // Keep the view and root alive while checking objects from several generations.
+  const churn = () => {
+    const refs: WeakRef<object>[] = [];
+    for (let generation = 0; generation < 32; generation++) {
+      const outer = new Container();
+      const inner = new Container();
+      outer.clipDepth = 4;
+      inner.clipDepth = 3;
+      root.placeAtDepth(outer, 1);
+      root.placeAtDepth(inner, 2);
+      view.prepare(root);
+      const outerGroup = top.children[2];
+      const innerGroup = outerGroup.children[1];
+      refs.push(new WeakRef(outer), new WeakRef(inner));
+      refs.push(new WeakRef(outerGroup), new WeakRef(innerGroup));
+      refs.push(new WeakRef(top.children[1]), new WeakRef(outerGroup.children[0]));
+
+      for (let edit = 0; edit < 8; edit++) {
+        const branch = new Container();
+        const child = new Container();
+        branch.addChildAt(child, 0);
+        root.placeAtDepth(branch, 3);
+        view.prepare(root);
+        assert.equal(top.children[2], outerGroup);
+        assert.equal(outerGroup.children[1], innerGroup);
+        assert.equal(innerGroup.children.length, 1);
+        refs.push(new WeakRef(branch), new WeakRef(child));
+        refs.push(new WeakRef(innerGroup.children[0]));
+      }
+
+      root.removeAtDepth(1);
+      root.removeAtDepth(2);
+      root.removeAtDepth(3);
+      view.prepare(root);
+      assert.equal(outerGroup.destroyed, true);
+      assert.equal(innerGroup.destroyed, true);
+      assert.equal(top.children.length, 1);
+    }
+
+    return refs;
+  };
+
+  for (let batch = 0; batch < 3; batch++) {
+    const refs = churn();
+    let retained = refs.length;
+    for (let attempt = 0; attempt < 10 && retained > 0; attempt++) {
+      // WeakRef keeps a dereferenced target alive until the current job ends.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      gc();
+      retained = refs.filter((ref) => ref.deref() !== undefined).length;
+    }
+
+    assert.equal(retained, 0, `batch ${batch} retained ${retained} retired objects`);
+    view.prepare(root);
+    assert.equal(view.stage.children[0], top);
+    assert.equal(top.children.length, 1);
+  }
+});
+
 test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
   const { batcherNameFor } = await import("../../../../packages/player/dist/render/color.js");
   const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
@@ -190,6 +398,53 @@ test("a batchable keeps the batcher name it is given, and one under a colour tra
   const mesh = new BatchableMesh();
   mesh.renderable = { flashColor: ct };
   assert.equal(batcherNameFor(mesh as unknown as Element), "default");
+});
+
+test("only the view's mask-contained groups opt into hidden instruction deferral", async () => {
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const renderer = standIn([]).renderer;
+  const pixi = (await import(entry)) as {
+    RenderGroupSystem: new (target: typeof renderer) => typeof renderer.renderGroup;
+    Container: new (options: { isRenderGroup: boolean }) => Node["container"];
+  };
+  renderer.renderGroup = new pixi.RenderGroupSystem(renderer);
+  const view = new PixiView(renderer);
+  const root = new Container();
+  const branch = new Container();
+  const mask = new Container();
+  const store = new BitmapStore(1, 1, false, 0xffffff);
+  root.placeAtDepth(branch, 1);
+  root.placeAtDepth(mask, 2);
+  for (let i = 0; i < 64; i++) {
+    branch.placeAtDepth(new BitmapObject(store), i + 1);
+  }
+
+  view.prepare(root);
+  const drawn = view.stage.children[0].children[1];
+  const group = drawn.renderGroup;
+  const allow = renderer.renderGroup.canDeferInvisibleGroup;
+  assert.ok(allow);
+  assert.ok(group);
+  assert.equal(allow(group), true);
+  const foreign = new pixi.Container({ isRenderGroup: true });
+  assert.equal(allow(foreign.renderGroup), false);
+
+  branch.setMask(mask);
+  view.prepare(root);
+  assert.equal(drawn.isRenderGroup, false);
+  assert.equal(allow(group), false);
+  // The pooled group's instruction set must not retain permission for a later host-owned group.
+  foreign.disableRenderGroup();
+  foreign.enableRenderGroup();
+  assert.equal(allow(foreign.renderGroup), false);
+  branch.setMask(null);
+  view.prepare(root);
+  assert.equal(allow(drawn.renderGroup), true);
+
+  foreign.destroy();
+  view.dispose(view.stage);
+  store.dispose();
 });
 
 test("nested render groups keep their hierarchy while parked and release idle batches", async () => {
@@ -1873,6 +2128,152 @@ async function outlinedSquare() {
     ],
   } as unknown as ConstructorParameters<typeof ShapeObject>[0];
 }
+
+/** Compare paths and stroke styles independently of Pixi's allocated path IDs. */
+function lineInstructions(node: Node): unknown {
+  return node.lines[0].shared.instructions.map((instruction) => {
+    assert.equal(instruction.action, "stroke");
+    if (instruction.action !== "stroke") {
+      throw new Error("expected a stroke");
+    }
+
+    const { path, style } = instruction.data;
+    return {
+      path: path.instructions,
+      width: style.width,
+      color: style.color,
+      alpha: style.alpha,
+      cap: style.cap,
+      join: style.join,
+      alignment: style.alignment,
+      miterLimit: style.miterLimit,
+    };
+  });
+}
+
+test("hidden branches defer strokes and catch up through clean descendants when shown", async () => {
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const hidden = new Container();
+  const nested = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  root.placeAtDepth(hidden, 1);
+  hidden.placeAtDepth(nested, 1);
+  nested.placeAtDepth(shape, 1);
+  hidden.visible = false;
+
+  for (let scale = 1; scale <= 6; scale++) {
+    hidden.setMatrix({ ...hidden.matrix, a: scale, d: scale });
+    shape.invalidate(CONTENT);
+    view.prepare(root);
+  }
+
+  assert.equal(view.counts.strokeContexts, 0);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(shape);
+  assert.ok(node);
+  assert.equal(node.lines[0].shared.instructions.length, 0);
+  assert.equal(shape.dirty, 0);
+  assert.equal(nested.descendantsDirty, false);
+
+  hidden.visible = true;
+  hidden.invalidate(TRANSFORM);
+  view.prepare(root);
+  assert.equal(view.counts.strokeContexts, 1);
+  assert.ok(node.lines[0].shared.instructions.length > 0);
+  const expected = new PixiView(standIn([]).renderer);
+  // A fresh mirror of the same tree must build the same final geometry.
+  const fresh = expected.forDraw(root, 1);
+  fresh.prepare(root);
+  const freshNodes = (fresh as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const drawn = freshNodes.get(shape);
+  assert.ok(drawn);
+  assert.deepEqual(lineInstructions(node), lineInstructions(drawn));
+  fresh.dispose(fresh.stage);
+  expected.dispose(expected.stage);
+  view.dispose(view.stage);
+});
+
+test("a bitmap draw cannot borrow strokes deferred at an obsolete transform", async () => {
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const hidden = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  root.placeAtDepth(hidden, 1);
+  hidden.placeAtDepth(shape, 1);
+  view.prepare(root);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(shape);
+  assert.ok(node);
+  const previous = node.lines[0].shared;
+
+  hidden.visible = false;
+  hidden.invalidate(TRANSFORM);
+  shape.setMatrix({ ...shape.matrix, a: 3, d: 3 });
+  view.prepare(root);
+  assert.equal(view.counts.strokeContexts, 1);
+  assert.equal(node.lines[0].shared, previous);
+  assert.ok(Number.isNaN(node.strokedAt));
+
+  const fresh = view.forDraw(shape, 1);
+  // The draw sees the same linear transform as the hidden stage node: only
+  // its deferred stroke state distinguishes it from safe borrowed geometry.
+  fresh.drawAlone(shape, shape.matrix, fresh.stage);
+  const freshNodes = (fresh as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const drawn = freshNodes.get(shape);
+  assert.ok(drawn);
+  assert.notEqual(drawn.lines[0].shared, previous);
+  assert.ok(drawn.lines[0].shared.instructions.length > 0);
+  assert.equal(view.counts.strokeContexts, 1);
+  assert.equal(node.lines[0].shared, previous);
+  const instructions = lineInstructions(drawn);
+
+  hidden.visible = true;
+  hidden.invalidate(TRANSFORM);
+  view.prepare(root);
+  assert.deepEqual(lineInstructions(node), instructions);
+  fresh.dispose(fresh.stage);
+  view.dispose(view.stage);
+});
+
+test("masks beneath hidden parents still prepare their geometry and their descendants", async () => {
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const hidden = new Container();
+  const mask = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  const target = new Container();
+  root.placeAtDepth(hidden, 1);
+  root.placeAtDepth(target, 2);
+  hidden.placeAtDepth(mask, 1);
+  mask.placeAtDepth(shape, 1);
+  hidden.visible = false;
+  shape.visible = false;
+  target.setMask(mask);
+  view.prepare(root);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(shape);
+  assert.ok(node);
+  assert.equal(node.hidden, false);
+  assert.equal(node.container.visible, true);
+  assert.ok(node.fills[0].instructions.length > 0);
+  assert.ok(node.lines[0].shared.instructions.length > 0);
+  assert.equal(node.lines[0].visible, false);
+
+  target.setMask(null);
+  shape.setMatrix({ ...shape.matrix, a: 2, d: 2 });
+  view.prepare(root);
+  assert.equal(node.hidden, true);
+  const count = view.counts.strokeContexts;
+  target.setMask(mask);
+  view.prepare(root);
+  assert.equal(node.hidden, false);
+  assert.equal(view.counts.strokeContexts, count + 1);
+  view.dispose(view.stage);
+});
 
 test("instances of a shape share its fills, which go once none has drawn them for a while", async () => {
   const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");

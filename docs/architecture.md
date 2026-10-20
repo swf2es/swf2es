@@ -2809,8 +2809,8 @@ ends; an element updated in place is packed apart and written, runs of
 neighbours together, before the batches draw. A batcher kept its buffers
 for as long as it lived, grown to the most it ever packed, so a renderer
 of many groups held all their vertices on the CPU too: `bench.ts
---branches 64` held 45 MB of them. A lost context has every group built
-again from the display list (the fork's `RenderGroupSystem`). Elsewhere a
+--branches 64` held 45 MB of them. After a lost context, groups are built
+again from the display list when needed (the fork's `RenderGroupSystem`). Elsewhere a
 batcher keeps its own buffers, cut back once they stay mostly empty.
 The colour batcher's shader ignores Pixi's group colour, since
 its vertex colour transform already includes every ancestor. The
@@ -2818,6 +2818,17 @@ its vertex colour transform already includes every ancestor. The
 filters, and a branch shrinking and growing against Flash. The
 `bench.ts --branches N --gpu` workload changes a quarter of N independent
 coloured branches while the rest stay still.
+
+An invisible group keeps clean instructions, but a structural or view
+change retires its obsolete instructions and GPU batches. Transforms and
+render callbacks still update; the group stays dirty until it is revealed.
+Only the view's mask-contained groups opt into this through
+`RenderGroupSystem.canDeferInvisibleGroup`. Host-owned groups, cached
+textures and explicit render roots keep Pixi's existing update path.
+Rendering a child as a root ignores the visibility of its scene parent,
+as a bitmap draw requires. `hidden-render-groups` compares reveal,
+reparenting and bitmap draws with Flash; `hidden-groups.ts` checks nested
+masks and filters, context restoration and collection of retired objects.
 
 A shape's fills are immutable `GraphicsContext`s shared by its instances
 (`render/tessellate.ts`),

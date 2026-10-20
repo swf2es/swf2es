@@ -1239,7 +1239,9 @@ probes they came of), and the corpus, where it is not what Ruffle does:
 - `_x` and `_y` are whole twips, cut toward zero (`1.234` is `1.2`), and
   what does not fit an int, an infinity included, -2^31 twips; `_alpha`
   is an 8.8 multiplier, the percentage's 256ths cut toward zero (`33` is
-  `32.8125`); `_xscale` and `_yscale` give back what was set; `_rotation`
+  `32.8125`); `_xscale` and `_yscale` give back the assigned percentage
+  exactly, without a divide/multiply round trip through a scale factor, so
+  integer increments reach exact endpoints (`avm1-scale-ramp`); `_rotation`
   is set modulo 360 into -180 to 180; `_xscale` and `_yscale` past
   32768 times, infinities included, draw at that; `_width` and `_height`
   are the bounds through the clip's matrix with each corner rounded to

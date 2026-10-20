@@ -388,15 +388,20 @@ export class Atlas {
 
   /**
    * Forget every context, to be copied in again as each is next drawn: in
-   * a store cut down to what was live, with room to grow, if the one it has
-   * is larger.
+   * a store cut down to what was live, with room to grow, when that needs
+   * less than half its capacity. Smaller reductions would undo the next
+   * growth as animated contexts leave holes and come back again.
    */
   clear(): void {
     const vertices = Math.ceil(Math.max(this.live * ATLAS_GROWTH, ATLAS_LEAST));
     const indices = Math.ceil(Math.max(this.liveIndices * ATLAS_GROWTH, ATLAS_LEAST * 3));
-    if (vertices < this.capacity || indices < this.indexCapacity) {
-      this.capacity = Math.min(vertices, this.capacity);
-      this.indexCapacity = Math.min(indices, this.indexCapacity);
+    if (vertices * 2 < this.capacity) {
+      this.capacity = vertices;
+      this.allocated = false;
+    }
+
+    if (indices * 2 < this.indexCapacity) {
+      this.indexCapacity = indices;
       this.allocated = false;
     }
 
@@ -618,7 +623,7 @@ export class TablePipe {
   private cursor = 0;
   // Made for WebGL alone, the only renderer that draws the table. The
   // table never shrinks from its peak, a crowded scene's rows; the atlas
-  // shrinks to what is live as it starts again.
+  // shrinks when its live geometry needs substantially less room.
   private table!: BufferImageSource;
   private atlas!: Atlas;
   private attributes!: Buffer;

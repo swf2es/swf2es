@@ -230,6 +230,51 @@ test("the atlas starts again in a store cut down to what was live, and grows by 
   atlas.destroy();
 });
 
+test("repeated compaction reuses capacity until the live geometry becomes substantially smaller", () => {
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
+  const keys = [{}, {}, {}];
+  const shape = packed(40000, [0, 1, 2], [{ start: 0, size: 3 }]);
+
+  for (let i = 0; i < keys.length; i++) {
+    atlas.place(keys[i], shape);
+  }
+
+  atlas.send();
+  const capacity = atlas.capacity;
+  assert.equal(capacity, 120000);
+
+  for (let cycle = 0; cycle < 3; cycle++) {
+    atlas.release(keys[1]);
+    atlas.release(keys[2]);
+    gpu.calls.length = 0;
+    atlas.compact();
+    assert.equal(atlas.vertexCount, 0);
+    assert.equal(atlas.capacity, capacity);
+
+    for (let i = 0; i < keys.length; i++) {
+      atlas.place(keys[i], shape);
+    }
+
+    atlas.send();
+    assert.ok(gpu.calls.every((call) => !call.startsWith("resize")));
+    assert.deepEqual(
+      [...gpu.indices.subarray(0, 9)],
+      [0, 1, 2, 40000, 40001, 40002, 80000, 80001, 80002],
+    );
+  }
+
+  for (let i = 0; i < keys.length; i++) {
+    atlas.release(keys[i]);
+  }
+
+  atlas.compact();
+  atlas.send();
+  assert.equal(atlas.capacity, 4096);
+  assert.equal(gpu.vertices.length, 4096 * 6);
+  atlas.destroy();
+});
+
 test("a lost context's atlas makes room again before writing, whatever its size", () => {
   const gpu = store();
   const atlas = new Atlas(WHITE, gpu);
