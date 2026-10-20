@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { serve } from "./serve.ts";
 
 export interface PlayerJob {
+  lazyCompilation?: boolean;
   swf: Uint8Array;
   frames: number;
   capture: number[];
@@ -345,7 +346,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           const answer = evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
           ({ value, exception } = await (options.timeout

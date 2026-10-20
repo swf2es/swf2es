@@ -24,6 +24,8 @@ export let domain = new Domain();
 // The last ABC's methods verified, kept for the JIT, which compiles them
 // one at a time; another ABC added, or a new domain, starts over.
 let verified: StaticArray<i32> | null = null;
+// Lazy modules freeze verification before later loads can change their scopes.
+const lazyVerified = new Map<u32, StaticArray<i32>>();
 
 /**
  * The emitter of the module domainModule wrote last, if it was kept: its
@@ -36,6 +38,7 @@ let written: ModuleEmitter | null = null;
 /** Start a new domain whose user ABCs have API version `apiVersion`. */
 export function domainReset(apiVersion: i32): void {
   domain = new Domain();
+  lazyVerified.clear();
   domain.apiVersion = <u8>apiVersion;
   verified = null;
   written = null;
@@ -80,6 +83,7 @@ function isLive(appDomain: i32): bool {
 export function domainDrop(appDomain: i32): void {
   if (appDomain >= 0) {
     domain.drop(<u32>appDomain);
+    pruneLazyVerification();
   }
 }
 
@@ -93,6 +97,7 @@ export function domainDrop(appDomain: i32): void {
 export function domainEvict(appDomain: i32): void {
   if (appDomain >= 0) {
     domain.evict(<u32>appDomain);
+    pruneLazyVerification();
   }
 }
 
@@ -171,6 +176,7 @@ export function domainRebuild(): bool {
   // A closure's scope is found by verifying its ABC, which the JIT does
   // once for its first method: the new domain has none found yet.
   domain = fresh;
+  lazyVerified.clear();
   verified = null;
   written = null;
   // The decoder may still be made for the old domain, which it would keep.
@@ -199,6 +205,10 @@ export function domainFound(
 
 /** Each body of ABC `index`'s VerifyError, 0 if it verified, -1 if nothing runs it; verified once per ABC asked for. */
 function verifiedBodies(index: u32): StaticArray<i32> {
+  if (lazyVerified.has(index)) {
+    return lazyVerified.get(index);
+  }
+
   let results = verified;
   if (results === null || verifiedIndex !== index) {
     results = verifyMethods(domain, index);
@@ -210,6 +220,15 @@ function verifiedBodies(index: u32): StaticArray<i32> {
 }
 
 let verifiedIndex: u32 = 0;
+
+function pruneLazyVerification(): void {
+  const indices = lazyVerified.keys();
+  for (let i = 0; i < indices.length; i++) {
+    if (!domain.isLive(indices[i])) {
+      lazyVerified.delete(indices[i]);
+    }
+  }
+}
 
 /**
  * ABC `index` of the domain, or the last added for -1; -1 again where
@@ -263,7 +282,25 @@ export function domainModuleBytes(
   return bytes;
 }
 
-function writeModule(hashes: string, index: i32, keep: bool, linkedOnly: bool): Output | null {
+/** A module's tables and lazy method factories; method entries are emitted separately. */
+export function domainLazyModuleBytes(hashes: string = "", index: i32 = -1): Uint8Array {
+  const out = writeModule(hashes, index, false, true, true);
+  if (out === null) {
+    return new Uint8Array(0);
+  }
+
+  const bytes = new Uint8Array(out.length);
+  memory.copy(bytes.dataStart, changetype<usize>(out.bytes), out.length);
+  return bytes;
+}
+
+function writeModule(
+  hashes: string,
+  index: i32,
+  keep: bool,
+  linkedOnly: bool,
+  lazy: bool = false,
+): Output | null {
   written = null;
   // No ABC, no module: the caller asked before adding one.
   const at = abcIndex(index);
@@ -273,7 +310,13 @@ function writeModule(hashes: string, index: i32, keep: bool, linkedOnly: bool): 
 
   const rows = domain.rows();
   const emitter = new ModuleEmitter(domain, <u32>at);
-  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly);
+  let results: StaticArray<i32> | null = null;
+  if (lazy) {
+    results = verifiedBodies(<u32>at);
+    lazyVerified.set(<u32>at, results);
+  }
+
+  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly, lazy, results);
   domain.weigh(<u32>at, rows);
   if (keep) {
     written = emitter;
@@ -326,9 +369,22 @@ export function domainSourceMap(): string {
  * domainModuleEntries writes them, leaving out a native or an unverified.
  */
 export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): string {
+  const entries = emitEach(bodies, reuse, which);
+  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+}
+
+/** Entries transferred as UTF-8, avoiding AssemblyScript string lifting. */
+export function domainEmitEachBytes(bodies: string, reuse: bool, which: i32 = -1): Uint8Array {
+  const entries = emitEach(bodies, reuse, which);
+  const bytes = new Uint8Array(entries.length);
+  memory.copy(bytes.dataStart, changetype<usize>(entries.bytes), entries.length);
+  return bytes;
+}
+
+function emitEach(bodies: string, reuse: bool, which: i32): Output {
   const at = abcIndex(which);
   if (at < 0) {
-    return "";
+    return new Output();
   }
 
   const index = <u32>at;
@@ -378,7 +434,7 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
   }
 
   domain.weigh(index, rows);
-  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+  return entries;
 }
 
 /**

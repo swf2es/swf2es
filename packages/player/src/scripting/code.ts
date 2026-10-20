@@ -10,6 +10,7 @@ import type { Library } from "../display/timeline.js";
 import type { CachedModule, ModuleCache } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
 import { type Evaluated, evaluate, evaluateFunction, type Factory } from "./evaluate.js";
+import { methodCompiler, supportsLazyCompilation } from "./lazy.js";
 import { sha256 } from "./sha256.js";
 
 type AsObject = avm2.AsObject;
@@ -319,6 +320,11 @@ export class Code {
    * it or under it, so a domain loaded into again stays.
    */
   private evict(domain: avm2.Domain): void {
+    // Deferred bodies still need their ABCs. Domain GC drops them as usual.
+    if (this.s.lazyCompilation) {
+      return;
+    }
+
     const target = this.codegenDomains.get(domain.id);
     if (
       target !== undefined &&
@@ -367,14 +373,32 @@ export class Code {
    * script the frames name, as codeDomain skips their code.
    */
   private evaluateAt(index: number, builtin: boolean, ready?: Ready): Module | Promise<Module> {
-    const compiled = (module = this.s.codegen.compileModule(this.hashes, index)) => {
+    const compiled = (
+      module?: string,
+      lazy = !builtin && this.s.lazyCompilation && supportsLazyCompilation(),
+    ) => {
       const script = `swf2es-${++this.modules}.js`;
-      return builtin
-        ? { factory: evaluateFunction(module, script), script }
-        : evaluate(module, script);
+      const epoch = this.s.codegen.epoch;
+      const source =
+        module ??
+        (lazy
+          ? this.s.codegen.compileLazyModule(this.hashes, index)
+          : this.s.codegen.compileModule(this.hashes, index));
+      const evaluated = builtin
+        ? { factory: evaluateFunction(source, script), script }
+        : evaluate(source, script);
+      const mark = (value: Evaluated): Module => ({
+        ...value,
+        lazy,
+        epoch,
+      });
+      return evaluated instanceof Promise ? evaluated.then(mark) : mark(evaluated);
     };
     if (!ready?.cached) {
-      return compiled(ready?.module);
+      return compiled(
+        ready?.module,
+        ready?.lazy ?? (!builtin && this.s.lazyCompilation && supportsLazyCompilation()),
+      );
     }
 
     if (ready.imported) {
@@ -386,7 +410,7 @@ export class Code {
       return compiled();
     };
     try {
-      const evaluated = compiled(ready.module);
+      const evaluated = compiled(ready.module, false);
       return evaluated instanceof Promise
         ? evaluated.then((e) => ({ ...e, cached: true }), recompiled)
         : { ...evaluated, cached: true };
@@ -412,8 +436,12 @@ export class Code {
     ready?: Ready,
     origin?: { url: string; library: Library },
   ): Value {
-    const run = (factory: Factory) => this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
     let script = evaluated.script;
+    const jit = evaluated.lazy
+      ? methodCompiler(this.s, index, domain, script, evaluated.epoch)
+      : undefined;
+    const run = (factory: Factory) =>
+      this.s.rt.loadInto(domain, () => factory(this.s.rt, jit), builtin);
     let linked: Value;
     if (!evaluated.cached || !ready) {
       linked = run(evaluated.factory);
@@ -467,9 +495,14 @@ export class Code {
     await this.digestLibraries(indices[0]);
     const smallest = cache?.minBytes ?? MIN_CACHED_ABC;
     for (const index of indices) {
+      const lazy = !this.builtins[index] && this.s.lazyCompilation && supportsLazyCompilation();
+      const compile = () =>
+        lazy
+          ? this.s.codegen.compileLazyModule(this.hashes, index)
+          : this.s.codegen.compileModule(this.hashes, index);
       if (this.sizes[index] < smallest) {
-        const module = this.s.codegen.compileModule(this.hashes, index);
-        ready.push({ module, key: null, cached: false });
+        const module = compile();
+        ready.push({ module, key: null, cached: false, lazy });
         continue;
       }
 
@@ -510,6 +543,11 @@ export class Code {
         // module compiled now is not that key's, and the entry goes.
         failed = true;
         this.discard(key, cached);
+      }
+
+      if (lazy) {
+        ready.push({ module: compile(), key, cached: false, lazy: true });
+        continue;
       }
 
       const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
@@ -805,6 +843,8 @@ async function read(
 /** A module evaluated or imported, and whether it came from the cache. */
 interface Module extends Evaluated {
   cached?: boolean;
+  lazy?: boolean;
+  epoch?: number;
 }
 
 type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
@@ -816,6 +856,7 @@ type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
  */
 interface Ready {
   module: string;
+  lazy?: boolean;
   key: string | null;
   cached: boolean;
   entry?: CachedModule;

@@ -386,6 +386,37 @@ async function churn(n: number) {
   return { ...counts };
 }
 
+/** Exercise the opt-in path without the eager modules already stored by earlier checks. */
+async function lazyChurn(n: number) {
+  const { web } = await loading;
+  web.configure({ lazyCompilation: true, cache: false });
+  let enabled = 0;
+  try {
+    for (let i = 0; i < n; i++) {
+      const element = document.createElement("swf2es-player") as Player;
+      document.body.append(element);
+      try {
+        await element.load("/web-test/scripted.swf");
+        await frames(2);
+        if (element.player?.scripting?.lazyCompilation) {
+          enabled++;
+          gone.push(new WeakRef(element.player));
+        }
+      } finally {
+        element.destroy();
+        element.remove();
+      }
+
+      // Let the last animation callback and its promise leave the current task.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  } finally {
+    web.configure({ lazyCompilation: false, cache: true });
+  }
+
+  return enabled;
+}
+
 /**
  * Make an element for the AVM1 SWF, play it until its actions stop its
  * root on frame 2, and take it away, `n` times; how many stopped there.
@@ -603,6 +634,7 @@ Object.assign(globalThis, {
   embedderFetch,
   watched,
   churn,
+  lazyChurn,
   avm1Churn,
   avm1External,
   survivors,

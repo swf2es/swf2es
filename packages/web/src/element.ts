@@ -481,6 +481,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       },
       onUncaught: (error) => this.#report(session, error),
+      lazyCompilation: configuration().lazyCompilation,
       ...moduleCacheOptions(),
     });
     return scripting;

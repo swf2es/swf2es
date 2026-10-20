@@ -165,6 +165,8 @@ export class Scripting {
   readonly fileLifetime = new AbortController();
   /** Where the host keeps the compiler's modules across page loads, or nothing does. */
   readonly moduleCache: ModuleCache | null;
+  /** Compile uncached AVM2 method bodies on first factory use; experimental and off by default. */
+  readonly lazyCompilation: boolean;
   /** The connections open, Sockets' and WebSockets', each closing its transport: what destroy closes. */
   private readonly connections = new Set<{ close(): void }>();
   /** Aborts the fetches of the `fetch` option still under way, once destroyed. */
@@ -309,6 +311,8 @@ export class Scripting {
       sendToUrl?: boolean;
       /** Where to keep compiled modules across page loads: none by default (see ModuleCache). */
       moduleCache?: ModuleCache | null;
+      /** Experimental AVM2 method compilation on first factory use. Cached/AOT modules remain whole. */
+      lazyCompilation?: boolean;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /** Drop the final newline produced by an HTML paragraph or BR. */
@@ -373,6 +377,7 @@ export class Scripting {
     this.fsCommand = options.fsCommand ?? null;
     this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
+    this.lazyCompilation = options.lazyCompilation ?? false;
     const fetch = options.fetch;
     this.fetch = fetch
       ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
@@ -439,6 +444,7 @@ export class Scripting {
     }
 
     this.stopped.abort();
+    avm2.clearPropertyCaches();
   }
 
   /**
