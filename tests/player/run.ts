@@ -30,7 +30,8 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
 const update = args.includes("--update");
 const tableAb = args.includes("--table-ab");
-const names = args.filter((a) => a !== "--update" && a !== "--table-ab");
+const lazyCompilation = args.includes("--lazy");
+const names = args.filter((a) => a !== "--update" && a !== "--table-ab" && a !== "--lazy");
 // A case marked as a known gap runs only when named; left out, its SWF is
 // still built, so that a gap case that no longer builds is noticed.
 const chosen = cases.filter((c) => (names.length ? names.includes(c.name) : !c.gap));
@@ -65,7 +66,12 @@ const isAvm1 = (swf: Uint8Array): boolean => {
   }
 };
 const traced = (c: PlayerCase) => Boolean(c.script || c.build || c.traced);
-const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), tableMinRun: c.table ? 1 : undefined }));
+const jobs = chosen.map((c) => ({
+  ...c,
+  swf: swfOf(c),
+  tableMinRun: c.table ? 1 : undefined,
+  lazyCompilation,
+}));
 for (const c of gaps) {
   swfOf(c);
 }

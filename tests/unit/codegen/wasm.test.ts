@@ -294,3 +294,49 @@ test("a malformed log is refused, not a trap", async () => {
 
   assert.equal(codegen.replay(""), true);
 });
+
+test("lazy modules defer entries without changing their code, including UTF-8 strings", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  const bytes = abc(
+    { strings: ["snowman ☃ and astral 🚀"] },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0, traits: [] }],
+      bodies: [
+        {
+          method: 0,
+          code: [0x2c, 1, 0x48],
+          maxStack: 1,
+          localCount: 1,
+          initScopeDepth: 0,
+          maxScopeDepth: 0,
+        },
+      ],
+    }),
+  );
+  assert.equal(codegen.add(bytes), 0);
+  const eager = codegen.compile();
+  const lazy = codegen.compileLazyModule();
+  testing.domainReset(50);
+  assert.equal(testing.domainAdd(bytes, false), 0);
+  const decoder = new TextDecoder();
+  assert.equal(decoder.decode(testing.domainLazyModuleBytes("", -1)), lazy);
+  assert.equal(
+    decoder.decode(testing.domainEmitEachBytes("0", true)),
+    testing.domainEmitEach("0", true),
+  );
+  assert.match(lazy, /function \(rt, jit\)/);
+  assert.doesNotMatch(lazy, /snowman/);
+  assert.deepEqual(codegen.compileMethods([...eager.entries.keys()]), eager.entries);
+  assert.equal(codegen.compileModule(), eager.module);
+  assert.throws(() => codegen.compileLazyModule([], 1), /only 1 have been added/);
+
+  const child = codegen.childDomain(0);
+  assert.equal(codegen.add(bytes, false, child), 0);
+  codegen.compileLazyModule();
+  codegen.dropDomain(child);
+  assert.deepEqual(codegen.compileMethods([0], 1), new Map());
+  assert.throws(() => codegen.compileLazyModule([], 1), /domain was dropped/);
+  assert.deepEqual(codegen.compileMethods([0], 0), eager.entries);
+});

@@ -43,6 +43,25 @@ movie through its first victory and level-up screen:
 The SWF itself is not supplied. This replay tests script/timeline costs;
 the browser's first-use rendering costs require a separate measurement.
 
+## AVM2 eager and lazy compilation
+
+`pnpm bench:avm2 [--runs 5] [--frames 600] [--json /tmp/avm2.json]`
+compares the default eager loader with the optional lazy compiler. Each run
+uses a fresh Node process, alternating eager/lazy and lazy/eager order. The
+generated movie exercises captured functions, arrays, properties and frame
+events across three scenes, with unused nested bodies. The libraries,
+startup, first-use scenes and warmed ticks are measured separately.
+Results check each scene's computed value and require warmed ticks to
+compile no further methods. Source bytes count emitted module and method
+text; the reported heap follows GC, outside the timing.
+
+`pnpm bench:avm2 --swf /path/to/movie.swf` measures a local movie's startup
+and subsequent ticks; it does not replay user interaction. The input movie is
+not copied into the repository. These are Node script/timeline CPU timings,
+not rendering or FPS measurements. Browser measurements are still needed
+for complete first-use frames. `node tests/player/run.ts --lazy` and
+`pnpm corpus --lazy avm2/` exercise existing browser cases in lazy mode.
+
 ## Inputs
 
 - **as3pb** ([33TU/as3pb](https://github.com/33TU/as3pb), MIT): a protobuf

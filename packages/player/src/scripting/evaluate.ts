@@ -2,11 +2,12 @@
 // own that its code's stack frames give, by which Runtime.codeDomain and
 // Code.codeOrigin tell whose code runs.
 import { avm2 } from "@swf2es/runtime";
+import type { LazyCompiler } from "./lazy.js";
 
 type Value = avm2.Value;
 
 /** A module's factory, as it exports it: given the runtime, it loads the module into it. */
-export type Factory = (rt: avm2.Runtime) => Value;
+export type Factory = (rt: avm2.Runtime, jit?: LazyCompiler) => Value;
 
 /** A module's factory and the script its code's frames name. */
 export interface Evaluated {

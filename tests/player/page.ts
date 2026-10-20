@@ -75,6 +75,7 @@ async function scriptingFor(
   uncaught: unknown[],
   moduleCache: ModuleCache | null = null,
   onCompile?: () => void,
+  lazyCompilation = false,
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
@@ -98,6 +99,7 @@ async function scriptingFor(
 
   const scripting = new Scripting(codegen, {
     moduleCache,
+    lazyCompilation,
     // A trace of several lines is several lines of Flash's log, which breaks at "\r" as at "\n".
     print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
@@ -386,6 +388,7 @@ async function runSwf(
   viewport: { width: number; height: number } | null = null,
   logFetch = false,
   socket: SocketStep[] | null = null,
+  lazyCompilation = false,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -402,7 +405,7 @@ async function runSwf(
     }
   };
   try {
-    scripting = await scriptingFor(bytes, trace, url, uncaught);
+    scripting = await scriptingFor(bytes, trace, url, uncaught, null, undefined, lazyCompilation);
     const player = new Player(
       bytes,
       scripting,

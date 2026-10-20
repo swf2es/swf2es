@@ -75,11 +75,16 @@ export class ModuleEmitter {
    * this one's and then only those of the ABCs it names as linked, in
    * order (see domainLinked), so a host need not pass every ABC's.
    */
-  module(hashes: string[], linkedOnly: bool = false): void {
+  module(
+    hashes: string[],
+    linkedOnly: bool = false,
+    lazy: bool = false,
+    results: StaticArray<i32> | null = null,
+  ): void {
     const out = this.out;
     out.reset();
     this.methods.map.reset();
-    out.text("export default function (rt) {\n");
+    out.text(lazy ? "export default function (rt, jit) {\n" : "export default function (rt) {\n");
     // A null check's throw, an expression where a check reads its register
     // (MethodEmitter.checkedRead), and an argument count's (checkEntry); not
     // named with a $, so that a stack starts at the method that called them
@@ -92,7 +97,13 @@ export class ModuleEmitter {
     out.text("  const cls = (n, name) => rt.cls(n, name);\n");
     out.text("  const mn = (kind, set, name) => rt.name(N, V, kind, set, name);\n");
     this.names();
-    this.functions();
+    if (lazy) {
+      out.text("  const lf = (m, b) => { let f; return (...args) => {\n");
+      out.text("    if (!f) { f = jit(b, [rt, nn, ac, ns, cls, N, S, M, V, F, A]); F[m] = f; }\n");
+      out.text("    return f(...args);\n  }; };\n");
+    }
+
+    this.functions(lazy, results);
     out.text("  const A = rt.abc({\n    hash: ");
     const self: u32 = linkedOnly ? 0 : this.index;
     this.text(self < <u32>hashes.length ? hashes[self] : "");
@@ -242,11 +253,11 @@ export class ModuleEmitter {
    * a native binds by name, and a method that failed verification throws
    * its VerifyError when called, as avmplus verifies on the first call.
    */
-  functions(): void {
+  functions(lazy: bool = false, verified: StaticArray<i32> | null = null): void {
     const out = this.out;
     const domain = this.domain;
     const abc = domain.abcs[this.index];
-    const results = verifyMethods(domain, this.index);
+    const results = verified === null ? verifyMethods(domain, this.index) : verified;
     const decoder = bodyDecoder(domain, this.index);
     const start = domain.methodStart[this.index];
     out.text("  const F = [");
@@ -276,6 +287,15 @@ export class ModuleEmitter {
       if (result > 0) {
         out.text("rt.verifyError(");
         out.uint(result);
+        out.text(")");
+        continue;
+      }
+
+      if (lazy) {
+        out.text("lf(");
+        out.uint(m);
+        out.text(", ");
+        out.uint(<u32>body);
         out.text(")");
         continue;
       }

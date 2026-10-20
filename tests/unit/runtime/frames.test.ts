@@ -111,3 +111,9 @@ test("the runtime calls a SWF's functions, and its own that do, in no tail posit
   assert.match("return this.callValue(f, receiver, args, null);", tail);
   assert.doesNotMatch("r = f.apply(o, args);\n    return r;", tail);
 });
+
+test("deferred method frames retain their module's code context", () => {
+  assert.equal(avm2.siteScript("swf2es-42.js/$f17.js:3:8"), "swf2es-42.js");
+  assert.equal(avm2.siteScript("https://example.test/$f17.js:3:8"), "https://example.test/$f17.js");
+  assert.deepEqual(avm2.stackFrames("f@swf2es-42.js/$f17.js:3:8"), ["swf2es-42.js"]);
+});
