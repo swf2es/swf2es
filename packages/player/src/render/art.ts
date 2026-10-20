@@ -424,6 +424,7 @@ export class Art {
       current &&
       !slicing &&
       sameLinear(current.world, node.world) &&
+      current.strokedAt === this.view.leastWidth &&
       this.source?.view.leastWidth === this.view.leastWidth
         ? current.strokes
         : null;
@@ -595,6 +596,13 @@ export class Art {
    * under the stretch's inverse (stretchOf).
    */
   restroke(node: Node, moved = false): void {
+    // Keep syncing hidden branches, but build their lines only when they can be drawn.
+    // NaN also prevents a BitmapData draw from borrowing lines at an obsolete transform.
+    if (node.hidden && !this.fresh) {
+      node.strokedAt = Number.NaN;
+      return;
+    }
+
     const m = node.world;
     const least = this.view.leastWidth;
     // Turned or mirrored, or stretched within one settled stretch: the lines and the inverse they

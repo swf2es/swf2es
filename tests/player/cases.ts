@@ -8574,6 +8574,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 300,
   },
   {
+    name: "hidden-strokes",
+    swf: (abc) => bare(abc, 7, "HiddenStrokes", 300, 150),
+    script: "HiddenStrokes",
+    frames: 7,
+    capture: [2, 4, 5, 7],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     name: "masks",
     swf: (abc) => bare(abc, 3, "Masks", 400, 300),
     script: "Masks",

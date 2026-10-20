@@ -16,6 +16,7 @@ import {
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import type { Player } from "../../../../packages/player/dist/player.js";
+import type { Node } from "../../../../packages/player/dist/render/node.js";
 import { PixiView } from "../../../../packages/player/dist/render/view.js";
 
 setFlagsFromString("--expose-gc");
@@ -2080,6 +2081,152 @@ async function outlinedSquare() {
     ],
   } as unknown as ConstructorParameters<typeof ShapeObject>[0];
 }
+
+/** Compare paths and stroke styles independently of Pixi's allocated path IDs. */
+function lineInstructions(node: Node): unknown {
+  return node.lines[0].shared.instructions.map((instruction) => {
+    assert.equal(instruction.action, "stroke");
+    if (instruction.action !== "stroke") {
+      throw new Error("expected a stroke");
+    }
+
+    const { path, style } = instruction.data;
+    return {
+      path: path.instructions,
+      width: style.width,
+      color: style.color,
+      alpha: style.alpha,
+      cap: style.cap,
+      join: style.join,
+      alignment: style.alignment,
+      miterLimit: style.miterLimit,
+    };
+  });
+}
+
+test("hidden branches defer strokes and catch up through clean descendants when shown", async () => {
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const hidden = new Container();
+  const nested = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  root.placeAtDepth(hidden, 1);
+  hidden.placeAtDepth(nested, 1);
+  nested.placeAtDepth(shape, 1);
+  hidden.visible = false;
+
+  for (let scale = 1; scale <= 6; scale++) {
+    hidden.setMatrix({ ...hidden.matrix, a: scale, d: scale });
+    shape.invalidate(CONTENT);
+    view.prepare(root);
+  }
+
+  assert.equal(view.counts.strokeContexts, 0);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(shape);
+  assert.ok(node);
+  assert.equal(node.lines[0].shared.instructions.length, 0);
+  assert.equal(shape.dirty, 0);
+  assert.equal(nested.descendantsDirty, false);
+
+  hidden.visible = true;
+  hidden.invalidate(TRANSFORM);
+  view.prepare(root);
+  assert.equal(view.counts.strokeContexts, 1);
+  assert.ok(node.lines[0].shared.instructions.length > 0);
+  const expected = new PixiView(standIn([]).renderer);
+  // A fresh mirror of the same tree must build the same final geometry.
+  const fresh = expected.forDraw(root, 1);
+  fresh.prepare(root);
+  const freshNodes = (fresh as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const drawn = freshNodes.get(shape);
+  assert.ok(drawn);
+  assert.deepEqual(lineInstructions(node), lineInstructions(drawn));
+  fresh.dispose(fresh.stage);
+  expected.dispose(expected.stage);
+  view.dispose(view.stage);
+});
+
+test("a bitmap draw cannot borrow strokes deferred at an obsolete transform", async () => {
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const hidden = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  root.placeAtDepth(hidden, 1);
+  hidden.placeAtDepth(shape, 1);
+  view.prepare(root);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(shape);
+  assert.ok(node);
+  const previous = node.lines[0].shared;
+
+  hidden.visible = false;
+  hidden.invalidate(TRANSFORM);
+  shape.setMatrix({ ...shape.matrix, a: 3, d: 3 });
+  view.prepare(root);
+  assert.equal(view.counts.strokeContexts, 1);
+  assert.equal(node.lines[0].shared, previous);
+  assert.ok(Number.isNaN(node.strokedAt));
+
+  const fresh = view.forDraw(shape, 1);
+  // The draw sees the same linear transform as the hidden stage node: only
+  // its deferred stroke state distinguishes it from safe borrowed geometry.
+  fresh.drawAlone(shape, shape.matrix, fresh.stage);
+  const freshNodes = (fresh as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const drawn = freshNodes.get(shape);
+  assert.ok(drawn);
+  assert.notEqual(drawn.lines[0].shared, previous);
+  assert.ok(drawn.lines[0].shared.instructions.length > 0);
+  assert.equal(view.counts.strokeContexts, 1);
+  assert.equal(node.lines[0].shared, previous);
+  const instructions = lineInstructions(drawn);
+
+  hidden.visible = true;
+  hidden.invalidate(TRANSFORM);
+  view.prepare(root);
+  assert.deepEqual(lineInstructions(node), instructions);
+  fresh.dispose(fresh.stage);
+  view.dispose(view.stage);
+});
+
+test("masks beneath hidden parents still prepare their geometry and their descendants", async () => {
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const hidden = new Container();
+  const mask = new Container();
+  const shape = new ShapeObject(await outlinedSquare());
+  const target = new Container();
+  root.placeAtDepth(hidden, 1);
+  root.placeAtDepth(target, 2);
+  hidden.placeAtDepth(mask, 1);
+  mask.placeAtDepth(shape, 1);
+  hidden.visible = false;
+  shape.visible = false;
+  target.setMask(mask);
+  view.prepare(root);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(shape);
+  assert.ok(node);
+  assert.equal(node.hidden, false);
+  assert.equal(node.container.visible, true);
+  assert.ok(node.fills[0].instructions.length > 0);
+  assert.ok(node.lines[0].shared.instructions.length > 0);
+  assert.equal(node.lines[0].visible, false);
+
+  target.setMask(null);
+  shape.setMatrix({ ...shape.matrix, a: 2, d: 2 });
+  view.prepare(root);
+  assert.equal(node.hidden, true);
+  const count = view.counts.strokeContexts;
+  target.setMask(mask);
+  view.prepare(root);
+  assert.equal(node.hidden, false);
+  assert.equal(view.counts.strokeContexts, count + 1);
+  view.dispose(view.stage);
+});
 
 test("instances of a shape share its fills, which go once none has drawn them for a while", async () => {
   const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
