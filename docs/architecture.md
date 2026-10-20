@@ -1681,7 +1681,7 @@ codegen's memory does not grow where one player loads them all, and that
 a text field kept from a SWF let go still takes a font registered after
 a collection.
 
-### Loading SWFs
+### Loading SWFs and images
 
 A `Loader` is a container whose one child is the root of the SWF it
 loaded, and a `LoaderInfo` is made for each `Loader` and one for the main
@@ -1695,6 +1695,17 @@ and height, `loader`, `applicationDomain`, `bytes`. The main SWF's
 dispatches `init` and then `complete` at the end of its first frame,
 after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
 `delayed_symbolclass` traces), as a loaded SWF's does.
+
+PNG, JPEG and GIF files use the same Loader queue, sniffed from their bytes
+and decoded through the host's image decoder. The content is a `Bitmap` with
+its own `loaderInfo` and `root`; image dimensions and MIME type become available
+after progress and before `INIT`. SWF-only metadata throws Error #2098 for an
+image, and dimensions throw #2099 before any content is ready. Alpha capability
+comes from the file's format and transparency metadata, including unused
+transparent colors. Partial-alpha PNG channels use Flash's eight-bit shift
+when premultiplied. The `loader-images`, `loader-image-alpha` and
+`loader-image-formats` cases compare these behaviors with AIR; unit tests cover
+URL loading, decoder failures, cancellation and replacement during decoding.
 
 `parameters` is a new object at each ask, so a script's changes to one
 stay in it. The main SWF's, which the stage's and every root's under it
@@ -1773,8 +1784,11 @@ constructor or `INIT` among them, ends there: an unload from `INIT` has
 no `COMPLETE`, as Flash has none. An `unload` asked for from `REMOVED`
 finds the content already let go of, and a load asked for there is the
 one that counts. What a `LoaderInfo` knows of its SWF's header
-(`swfVersion`, `frameRate`, `width`, `applicationDomain`...) is refused
-before the SWF is loaded, Error #2099, as Flash refuses it. The SWF a `Loader` belongs to, which its content's
+(`swfVersion`, `frameRate`, `width`...) is refused
+before the SWF is loaded, Error #2099, as Flash refuses it. `applicationDomain`
+is null before loading and after unloading; a byte load publishes its domain
+after the synchronous progress events, before its content is placed.
+The SWF a `Loader` belongs to, which its content's
 `loaderURL` reports and its relative URLs resolve against, is in Flash
 the one whose code made it, even before the first load; the runtime does not
 track callers, so it is the SWF the `Loader` is on the display list of when
