@@ -6,6 +6,7 @@
 // LoaderInfo of each, the main SWF's too.
 import { isAs3, readSwf, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { Avm1, getUrlNavigate } from "../avm1/avm1.js";
 import { decodeImages, hasUndecoded } from "../bitmap/images.js";
 import { type Container, MovieClip, rootOf, unloads } from "../display/display.js";
 import { type Library, readLibrary } from "../display/timeline.js";
@@ -56,6 +57,9 @@ interface Avm1Load {
 }
 
 export class Loads {
+  /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
+  private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
+
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
@@ -79,6 +83,31 @@ export class Loads {
     options: { parameters?: Readonly<Record<string, string>> },
   ) {
     this.flashvars = options.parameters ?? {};
+  }
+
+  tickAvm1(): void {
+    if (this.avm1Movies.size === 0) {
+      return;
+    }
+
+    for (const [root, movie] of this.avm1Movies) {
+      if (movie.first) {
+        const swf = movie.first;
+        movie.first = null;
+        root.fresh = false;
+        movie.vm.startScripts(swf);
+      } else {
+        movie.vm.tick(this.s.frameRate);
+      }
+    }
+  }
+
+  destroyAvm1(): void {
+    for (const movie of this.avm1Movies.values()) {
+      movie.vm.destroy(false);
+    }
+
+    this.avm1Movies.clear();
   }
 
   /** Keep an asynchronous host task visible to settled(). */
@@ -704,6 +733,12 @@ export class Loads {
     }
 
     if (content) {
+      const movie = this.avm1Movies.get(content.$display);
+      if (movie) {
+        movie.vm.destroy(false);
+        this.avm1Movies.delete(content.$display);
+      }
+
       unloads.count++;
     }
 
@@ -850,6 +885,7 @@ export class Loads {
 
     let object: AsObject;
     let root: MovieClip;
+    let avm1: Avm1 | null = null;
     if (run) {
       run();
       this.s.symbols.addFontLibrary(library);
@@ -867,10 +903,32 @@ export class Loads {
         return () => {};
       }
     } else {
-      // An AVM1 SWF: no code of its own runs, and its root is an AVM1Movie.
+      // Its scripts run in AVM1, sharing only the message broker and host services with AS3.
       object = made ?? this.avm1Movie(library);
       root = object.$display;
       root.loaderInfo = info;
+      const s = this.s;
+      const vm = new Avm1(s.codegen, {
+        print: s.rt.print,
+        onUncaught: (error) => s.reportUncaught(error),
+        url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
+        base: s.base ?? undefined,
+        fetch: s.fetch ?? undefined,
+        socket: s.socket ?? undefined,
+        audio: s.audio,
+        storage: s.storage,
+        fileHost: s.fileHost,
+        decodeImage: s.decodeImage,
+        externalInterface: s.externalInterface ?? undefined,
+        navigate: getUrlNavigate(s.navigate, load.url ?? s.url),
+        fsCommand: s.fsCommand ?? undefined,
+        sendToUrl: s.sendToUrl,
+        localConnections: s.localConnections,
+        realTime: s.timers.realTime,
+      });
+      vm.attach(swf, library, root, load.bytes.length, s.frameRate);
+      this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
+      avm1 = vm;
       root.enterFirstFrame();
     }
 
@@ -880,6 +938,10 @@ export class Loads {
     const display: Container = load.loader.$display;
     display.addChildAt(root, display.children.length);
     this.s.lifecycle.added(root);
+    if (avm1 && load.url !== null) {
+      avm1.startScripts(swf);
+    }
+
     return () => {
       if (!live()) {
         return;

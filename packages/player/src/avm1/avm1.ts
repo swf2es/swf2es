@@ -51,6 +51,7 @@ import {
   type SharedObjectStorage,
   type SocketHost,
 } from "../hosts.js";
+import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
@@ -73,6 +74,7 @@ import { type FilterFaces, filtersPackage } from "./globals/filters.js";
 import { flashPackage } from "./globals/geom.js";
 import { keyObject, mouseObject } from "./globals/Key.js";
 import { formRequest, loadVarsClass, parseForm } from "./globals/LoadVars.js";
+import { localConnectionClass } from "./globals/LocalConnection.js";
 import {
   ClipNative,
   DEPTH_BIAS,
@@ -118,6 +120,8 @@ import { defaultClock, Timers } from "./timers.js";
 type Value = avm1.Value;
 
 export interface Avm1Options {
+  /** The LocalConnection registry shared with other VMs of this player. */
+  localConnections?: LocalConnections;
   /**
    * Where trace's text goes, as it is, the console's log by default: a
    * "\r" in it breaks Flash's log's line as a "\n" does.
@@ -195,7 +199,7 @@ export type Avm1Navigate = (url: string, window: string, form: avm1.UrlForm | nu
  * object_into_request has them; an empty URL opens nothing, as Ruffle's
  * navigators ignore it.
  */
-function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1Navigate | null {
+export function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1Navigate | null {
   if (navigate === null) {
     return null;
   }
@@ -336,6 +340,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private readonly media: Avm1Sounds;
   /** What XML, LoadVars, loadVariables and XMLSocket ask of the network, and its answers for the next frame. */
   readonly net: Avm1Net;
+  readonly localConnections: LocalConnections;
   readonly fileHost: FileHost | null;
   readonly fileLifetime = new AbortController();
 
@@ -347,6 +352,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.url = options.url ?? "";
+    this.localConnections = options.localConnections ?? new LocalConnections();
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
       options.fetch ?? null,
@@ -463,11 +469,17 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * Take the SWF's timelines, before the root enters its first frame: their
    * clips are made and play through this from now on.
    */
-  attach(swf: Swf, library: Library, root: MovieClip, size = swf.header.fileLength): void {
+  attach(
+    swf: Swf,
+    library: Library,
+    root: MovieClip,
+    size = swf.header.fileLength,
+    frameRate = swf.frameRate,
+  ): void {
     this.movieRoot = root;
     this.swfVersion = swf.header.version;
     this.swfLength = swf.header.fileLength;
-    this.rate = swf.frameRate;
+    this.rate = frameRate;
     this.levels.set(0, root);
     this.levelNumbers.set(root, 0);
     if (isAs3(swf) || !library.actions) {
@@ -515,6 +527,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("XMLNode", xmlNodes.constr, avm1.DONT_ENUM);
     const xml = xmlClass(this, xmlNodes);
     realm.global.define("XML", xml, avm1.DONT_ENUM);
+    realm.global.define(
+      "LocalConnection",
+      localConnectionClass(this, xml, xmlNodes),
+      avm1.DONT_ENUM | avm1.VERSION_6,
+    );
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     realm.global.define("NetConnection", netConnectionClass(this, this.remoting), avm1.DONT_ENUM);
@@ -615,6 +632,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * runs none of them.
    */
   async load(swf: Swf): Promise<void> {
+    this.startScripts(swf);
+  }
+
+  /** Start synchronously when an AS3 Loader delivers an AVM1 movie on the player thread. */
+  startScripts(swf: Swf): void {
     // Prepared here, not by compile(), which would put a tick more between the
     // first frame and its actions than the timeline's sounds have.
     const list = this.main.list;
@@ -659,7 +681,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * enterFrame and queueing the actions of the frame it enters; then the
    * queue runs, and the timers due by the next frame fire.
    */
-  tick(): void {
+  tick(frameRate = this.rate): void {
+    this.rate = frameRate;
     // A clip's enterFrame comes whether the root moved or not.
     if (this.stopNext) {
       this.halted = true;
@@ -668,6 +691,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (this.halted) {
       this.fileLifetime.abort();
       this.net.destroy();
+      this.localConnections.destroy(this);
       return;
     }
 
@@ -1051,12 +1075,15 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
-  destroy(): void {
+  destroy(closeAudio = true): void {
+    this.localConnections.destroy(this);
     this.fileLifetime.abort();
     this.net.destroy();
     this.sharedObjects?.flush(this.swfVersion);
     stopTimelineSounds(this.sounds);
-    this.audio?.close?.();
+    if (closeAudio) {
+      this.audio?.close?.();
+    }
   }
 
   /** Resolves once every request the SWF has made so far has come back, for the next frame. */
@@ -1070,6 +1097,30 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
     }
+  }
+
+  /** LocalConnection may enter this VM from AS3, outside its own frame's script budget. */
+  localInvoke(o: avm1.Avm1Object, name: string, args: Value[], fallback: Value = undefined): Value {
+    const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
+    if (cx === null) {
+      return undefined;
+    }
+
+    let result: Value;
+    this.timers.begin();
+    try {
+      this.rt.call(cx, () => {
+        const method = avm1.get(o, name, this.version, o, false);
+        result =
+          method instanceof avm1.Avm1Function
+            ? avm1.invoke(method, o, args, this.version)
+            : fallback;
+      });
+    } finally {
+      this.timers.end();
+    }
+
+    return result;
   }
 
   /** LoadVars.send's page, as getURL's opens it. */
@@ -1086,6 +1137,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (this.halted) {
       this.fileLifetime.abort();
       this.net.destroy();
+      this.localConnections.destroy(this);
       return;
     }
 

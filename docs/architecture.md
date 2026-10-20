@@ -1802,17 +1802,32 @@ movie go to its `Loader`, as Flash has them (the corpus's
 `mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
 frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
 many frames as its ShowFrame tags end, whatever its header says, and stays
-on its last without an End tag. The
-player runs AVM1 actions only in a main AVM1 SWF so far, so what needs
-them is missing here: no AVM1 action runs, its
-DoAction, DoInitAction, clip and button actions read past; its buttons
-show their up state and are inert, with no other state, sound or hand
-cursor; and `AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
-while interop is unavailable (AVM1's plan, compiled by codegen with no
-interpreter, is [avm1.md](avm1.md)). Its timeline sounds do not play either:
-with no action to `stop()` it, its timeline loops where the content would
-have stopped, and its StartSounds would start again on every loop; they
-wait for AVM1 actions (see Timeline sounds).
+on its last without an End tag. The loaded movie now runs its AVM1
+actions in its own realm, using the parent player's codegen and host
+services. A movie from bytes runs its first-frame script after the
+following frame's AS3 ENTER_FRAME; a URL-loaded movie runs it in the load
+frame. Subsequent frames tick that VM once, and the AS3 timeline walker
+skips its subtree. Timeline sounds
+and script-driven playback run with the child. Unloading destroys the
+child VM and its connections without closing the parent's audio device.
+Pointer and keyboard routing into these loaded movies, and `AVM1Movie`'s
+`call` and `addCallback`, remain incomplete; those methods still throw #2014.
+
+`LocalConnection` uses one native broker (`player/src/localconnection.ts`)
+shared by a player's AS3 and loaded AVM1 movies. A standalone AVM1 player
+has its own broker; an embedding may explicitly share a `LocalConnections`
+instance across players. Connections live in a map keyed by ASCII-folded
+names, prefixed with the SWF's domain unless the name starts with `_`.
+Messages snapshot arguments as bounded bytes (40 KiB) and use the
+sender's existing host-event queue. AVM1 sends AMF0; AS3 sends AMF3 to
+preserve ByteArray, XML, Vector and class aliases, converting the snapshot
+to AMF0 only when an AVM1 receiver needs it. AMF3 scratch buffers are
+reused except for externalizable streams that may escape the call. A broker
+with no messages does no frame work. Receiver methods, domain permissions
+and sender status events enter the appropriate VM, never sharing live script objects. Closing or
+destroying a receiver frees its name. This is in-process messaging, not
+Flash's machine-wide transport: browser tabs and desktop processes do not
+share connections.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
