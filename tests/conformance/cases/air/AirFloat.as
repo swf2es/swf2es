@@ -35,6 +35,12 @@ package {
             trace("mixed-types", (a + Number(1)) is float, (a - Number(1)) is float);
             var boxed:* = {valueOf: function():* { return float(2); }};
             trace("primitive", boxed + float(1), boxed - float(1), (+boxed) is float);
+            var typedBox:FloatPrimitive = new FloatPrimitive();
+            trace("typed-primitive", typedBox - 1f, typedBox * 1f, typedBox / 1f,
+                typedBox % 3f, -typedBox, +typedBox);
+            trace("typed-primitive-types", (typedBox - 1f) is float, (typedBox * 1f) is float,
+                (typedBox / 1f) is float, (typedBox % 3f) is float, (-typedBox) is float,
+                (+typedBox - 1f) is float, (1f - typedBox) is float, (typedBox - 1) is float);
             trace("call", typed(0.1f), defaults() is float, dynamic(f) is float,
                 typed.apply(null, [0.1f]) is float);
             var choice:* = choose(true), other:* = choose(false);
@@ -44,6 +50,23 @@ package {
             trace("loop", count, count is float);
             var vec:Vector.<float> = new Vector.<float>(2);
             trace("vector-default", vec[0], vec[0] is float, vec.pop(), new Vector.<float>().pop());
+            var vectorTypes:Array = [Vector.<float>, Vector.<Number>, Vector.<int>, Vector.<uint>,
+                Vector.<String>, Vector.<Object>];
+
+            for each (var vectorType:Class in vectorTypes) {
+                var flags:Array = [];
+
+                for each (var fixed:* in [float(0), float(-0), float(NaN), float(1), float(-1)]) {
+                    flags.push(new vectorType(1, fixed).fixed);
+                }
+
+                trace("vector-fixed", getQualifiedClassName(vectorType), flags.join(","));
+            }
+
+            vec.fixed = float(1);
+            trace("vector-fixed-set", vec.fixed);
+            vec.fixed = float(0);
+            trace("vector-fixed-clear", vec.fixed);
             vec[0] = float(0.1); vec.push(float(2)); vec.length = 4;
             trace("vector", vec.length, vec[0], vec[0] is float, vec[2], vec[2] is float, vec.join(","));
             var list:Array = [1f, 2f, 1f, float(NaN)];
@@ -78,4 +101,8 @@ package {
         private function dynamic(value:*):* { return value; }
         private function choose(which:Boolean):* { return which ? 1f : Number(2); }
     }
+}
+
+class FloatPrimitive {
+    public function valueOf():* { return float(16777216); }
 }

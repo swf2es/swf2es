@@ -11,10 +11,20 @@ dynamic-types true true true true true true true true true
 mixed 16777217 16777215 16777216 16777216 16777216x
 mixed-types false false
 primitive 3 1 true
+typed-primitive 16777215 16777216 16777216 1 -16777216 16777216
+typed-primitive-types true true true true true true true false
 call 0.10000000149011612 true true true
 merge true false 3
 loop 1.0000001192092896 true
 vector-default 0 true 0 0
+vector-fixed __AS3__.vec::Vector.<float> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<Number> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<int> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<uint> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<String> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<Object> false,false,false,true,true
+vector-fixed-set true
+vector-fixed-clear false
 vector 4 0.10000000149011612 true 0 true 0.10000000149011612,2,0,0
 search 0 2 -1 -1 0 0 3
 dictionary float float float true true undefined

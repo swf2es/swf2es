@@ -18,6 +18,7 @@ const compiled = spawnSync(
   "amxmlc",
   [
     "-compiler.float=true",
+    "-strict=false",
     "-debug=false",
     "-omit-trace-statements=false",
     "-output",

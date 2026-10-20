@@ -2094,15 +2094,24 @@ export class BodyDecoder {
     return true;
   }
 
-  /** The result of AIR's ToNumeric: preserve float; resolve dynamic values at run time. */
+  /** ToNumeric may preserve a float returned by an object's valueOf. */
   numericType(type: i32): i32 {
-    if (type >= 0 && type === this.domain.floatType) {
+    const domain = this.domain;
+    if (type >= 0 && type === domain.floatType) {
       return type;
     }
 
-    return type === TYPE_Any || type === this.domain.objectType()
-      ? TYPE_Any
-      : this.domain.numberType;
+    if (
+      isNumeric(domain, type) ||
+      type === domain.booleanType ||
+      type === domain.stringType ||
+      type === domain.nullType ||
+      type === domain.voidType
+    ) {
+      return domain.numberType;
+    }
+
+    return TYPE_Any;
   }
 
   // Typed helpers, working on the stack before the instruction's depth change.

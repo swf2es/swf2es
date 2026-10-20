@@ -249,7 +249,7 @@ for (const [kind, convert, fill] of VECTORS) {
       const o = cls.$it.instance();
       const length = args.length ? rt.toUint(args[0]) : 0;
       o.$a = new Array(length).fill(cls.$fill);
-      o.$fixed = !!args[1];
+      o.$fixed = rt.toBoolean(args[1]);
       return o;
     },
     // As VectorClass::call: a Vector of this class is itself; any other

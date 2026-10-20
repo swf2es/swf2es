@@ -86,6 +86,36 @@ test("AIR unary operations still apply AS3 Number conversion to strings", () => 
   assert.ok(Number.isNaN(run([0x2c, 2, 0x90, 0x48])));
 });
 
+test("AIR Number-only arithmetic keeps the same direct JavaScript as Flash bytecode", () => {
+  const codes = [
+    ...[0xa1, 0xa2, 0xa3, 0xa4].map((op) => [0x2f, 1, 0x2f, 2, op, 0x48]),
+    ...[0x90, 0x91, 0x93].map((op) => [0x2f, 1, op, 0x48]),
+    ...[0x92, 0x94].map((op) => [0x2f, 1, 0xd4, op, 0, 0xd0, 0x48]),
+  ];
+  for (const code of codes) {
+    const bodies = [false, true].map((modern) => {
+      const bytes = abc(
+        { doubles: [2.5, 1.5], ...(modern ? { floats: [] } : {}) },
+        tables({
+          methods: [{}],
+          scripts: [{ init: 0 }],
+          bodies: [{ method: 0, code, maxStack: 2, localCount: 1 }],
+        }),
+      );
+      testing.domainReset(50);
+      assert.equal(testing.domainAdd(builtin, true), 0);
+      assert.equal(testing.domainAdd(avm2.floatLibrary, true), 0);
+      assert.equal(testing.domainAdd(bytes, false), 0);
+      const body = testing.domainEmit(0) as string;
+      assert.match(body, /^function/);
+
+      return body;
+    });
+
+    assert.equal(bodies[1], bodies[0], `bytecode: ${code.join(" ")}`);
+  }
+});
+
 test("float defaults preserve dynamic identity and coerce numeric parameter defaults", () => {
   for (const [param, value, modern] of [
     [0, 0, true],
