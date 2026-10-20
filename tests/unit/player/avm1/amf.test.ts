@@ -18,6 +18,85 @@ const h = (s: string) => Uint8Array.from(s.split(" ").map((x) => Number.parseInt
 const read = (bytes: Uint8Array) => new Reader(bytes, realm, 8).value();
 const none = () => null;
 
+test("primitive writes keep their byte order and canonical doubles across buffer growth", () => {
+  const w = new Writer(none, 8, null);
+  const prefix = new Uint8Array(61).fill(0xaa);
+  w.push(prefix);
+  w.u16(0x1234);
+  w.u32(0x89abcdef);
+  w.double(Number.NaN);
+  w.double(-0);
+  w.double(Number.NEGATIVE_INFINITY);
+  w.string("\u2603");
+
+  assert.deepEqual(
+    Buffer.from(w.finish()),
+    Buffer.concat([
+      prefix,
+      h(
+        "12 34 89 ab cd ef 7f ff ff ff ff ff ff ff " +
+          "00 00 00 00 00 00 00 00 ff f0 00 00 00 00 00 00 02 00 03 e2 98 83",
+      ),
+    ]),
+  );
+});
+
+test("nested array counts and references survive growth while their values are written", () => {
+  const text = "a".repeat(300);
+  const inner = realm.newArray([text, 7], 8);
+  const outer = realm.newArray([inner, inner], 8);
+  const w = new Writer(none, 8, null, { xmlText: none, first: 0 });
+  w.value(outer);
+
+  assert.deepEqual(
+    Buffer.from(w.finish()),
+    Buffer.concat([
+      h("0a 00 00 00 02 0a 00 00 00 02 02 01 2c"),
+      Buffer.from(text),
+      h("00 40 1c 00 00 00 00 00 00 07 00 01"),
+    ]),
+  );
+});
+
+test("the byte limit includes primitive writes and snapshots own exactly their written bytes", () => {
+  const w = new Writer(none, 8, null, null, 70);
+  w.push(new Uint8Array(65).fill(0x5a));
+  w.u32(0x12345678);
+  assert.throws(() => w.u16(1), /AMF0 message too large/);
+  assert.equal(w.size, 69);
+  w.bytes(0xab);
+  assert.throws(() => w.bytes(1), /AMF0 message too large/);
+  assert.equal(w.size, 70);
+
+  const first = w.finish();
+  assert.equal(first.buffer.byteLength, 70);
+  first[0] = 0;
+  assert.equal(w.finish()[0], 0x5a);
+  assert.deepEqual(first.subarray(65), h("12 34 56 78 ab"));
+
+  const empty = new Writer(none, 8, null, null, 0);
+  assert.throws(() => empty.bytes(1), /AMF0 message too large/);
+  assert.equal(empty.finish().length, 0);
+});
+
+test("UTF-8 name truncation and long string lengths count encoded bytes", () => {
+  const text = "\u00e9".repeat(40000);
+  const string = new Writer(none, 8, null);
+  string.string(text);
+  assert.deepEqual(
+    Buffer.from(string.finish()),
+    Buffer.concat([h("0c 00 01 38 80"), Buffer.from(text)]),
+  );
+  assert.equal(read(string.finish()), text);
+
+  const name = new Writer(none, 8, null);
+  name.name(text);
+  assert.deepEqual(
+    Buffer.from(name.finish()),
+    Buffer.concat([h("ff ff"), Buffer.from(text).subarray(0, 0xffff)]),
+  );
+});
+
 test("bytes cut short, a marker it does not know and nesting past the bound are refused", () => {
   for (const bytes of [h("00 3f f0"), h("02 00 05 61 62"), h("03 00 01"), h("11"), h("07")]) {
     try {
@@ -82,7 +161,7 @@ test("nested arrays share the writer's budget and keep their emitted counts", ()
   avm1.set(outer, "length", MAX_VALUES, 8);
   const w = new Writer(none, 8, null, { xmlText: none, first: 0 });
   w.value(outer);
-  const bytes = Buffer.concat(w.chunks);
+  const bytes = Buffer.from(w.finish());
   assert.ok(bytes.length <= MAX_VALUES + 10, String(bytes.length));
   assert.equal(bytes.readUInt32BE(1), 1);
   assert.equal(bytes.readUInt32BE(6), MAX_VALUES - 2);
@@ -98,9 +177,9 @@ test("properties spend the remaining writer budget, including getters written as
 
   const w = new Writer(none, 8, null, { xmlText: none, first: 0 });
   w.value(array);
-  const before = w.chunks.length;
+  const before = w.size;
   w.properties(o);
-  const bytes = Buffer.concat(w.chunks.slice(before));
+  const bytes = Buffer.from(w.finish().subarray(before));
   assert.equal(bytes.length, 8);
   assert.equal(bytes[3], 0x06);
   assert.equal(bytes[7], 0x06);
@@ -116,7 +195,7 @@ test("the writer's depth limit alone produces a value the reader accepts", () =>
 
   const w = new Writer(none, 8, null, { xmlText: none, first: 0 });
   w.value(deep);
-  assert.doesNotThrow(() => read(Buffer.concat(w.chunks)));
+  assert.doesNotThrow(() => read(Buffer.from(w.finish())));
   assert.doesNotThrow(() => read(remotingValue([deep], none, 8, none, 1)));
 });
 
@@ -148,6 +227,6 @@ test("a remoting value's huge length and deep nesting are written bounded, a cyc
   avm1.set(cyc, "1", cyc, 8);
   const c = new Writer(none, 8, null, { xmlText: none, first: 1 });
   c.value(cyc);
-  const out = Buffer.concat(c.chunks).toString("hex");
+  const out = Buffer.from(c.finish()).toString("hex");
   assert.equal(out, "0a00000002003ff0000000000000070001");
 });
