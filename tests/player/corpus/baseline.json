@@ -567,7 +567,7 @@
   "avm1/string_paths_variable_scopes": {"matched":5,"lines":5,"traced":5,"error":null},
   "avm1/string_relational_compare": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm1/stylesheet": {"matched":284,"lines":284,"traced":284,"error":null},
-  "avm1/stylesheet_load": {"matched":1,"lines":49,"traced":2,"error":null},
+  "avm1/stylesheet_load": {"matched":49,"lines":49,"traced":49,"error":null},
   "avm1/stylesheet_transform": {"matched":750,"lines":750,"traced":750,"error":null},
   "avm1/super_edge_cases": {"matched":3,"lines":39,"traced":41,"error":null},
   "avm1/swf4_actions_bool": {"matched":98,"lines":98,"traced":98,"error":null},
