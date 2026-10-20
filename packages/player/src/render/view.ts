@@ -434,6 +434,7 @@ export class PixiView {
     inMask = false,
     tint: ColorTransform | null = null,
     isolated = false,
+    parentHidden = false,
   ): PixiContainer {
     const node = this.node(o);
     const { container } = node;
@@ -491,6 +492,10 @@ export class PixiView {
     const masking = inMask || o.maskOf !== null || o.clipDepth > 0;
     const remask = masking !== node.masking;
     node.masking = masking;
+    const hidden = !masking && (parentHidden || (!o.visible && o !== this.drawRoot));
+    const visibilityChanged = hidden !== node.hidden;
+    node.hidden = hidden;
+    redrawn ||= visibilityChanged;
     if (remask) {
       dirty |= TRANSFORM | (o instanceof ShapeObject && o.stale ? CONTENT : 0);
     }
@@ -747,6 +752,7 @@ export class PixiView {
       (dirty & ~TRANSFORM ||
         moved ||
         remask ||
+        visibilityChanged ||
         (recolor && !rooted) ||
         rerooted ||
         this.rescaled ||
@@ -768,6 +774,7 @@ export class PixiView {
       } else if (
         moved ||
         remask ||
+        visibilityChanged ||
         recolor ||
         this.rescaled ||
         isolationChanged ||
@@ -779,6 +786,7 @@ export class PixiView {
             moved ||
             (resliced && child instanceof ShapeObject) ||
             remask ||
+            visibilityChanged ||
             this.rescaled ||
             recolor ||
             isolationChanged ||
@@ -793,6 +801,7 @@ export class PixiView {
               masking,
               node.rooted ? null : node.color,
               childIsolation,
+              hidden,
             );
           }
         }
@@ -978,6 +987,7 @@ export class PixiView {
           masking,
           node.rooted ? null : node.color,
           isolated,
+          node.hidden,
         );
         if (content.children[at] !== container) {
           content.addChildAt(container, at);
@@ -1012,6 +1022,7 @@ export class PixiView {
         masking,
         node.rooted ? null : node.color,
         isolated,
+        node.hidden,
       );
       into.addChild(container);
       if (child.clipDepth > 0) {
@@ -1077,6 +1088,7 @@ export class PixiView {
         masking,
         node.rooted ? null : node.color,
         isolated,
+        node.hidden,
       );
       if (into.children[at] !== container) {
         into.addChildAt(container, at);
