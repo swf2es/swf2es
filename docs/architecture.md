@@ -5,8 +5,8 @@ JavaScript. It has one compiler, which runs at two different times:
 
 - **JIT**: the player runs `@swf2es/codegen` as a SWF loads, and compiles
   each of the SWF's ABCs whole to an ES module (see [A SWF's
-  code](#a-swfs-code); compiling each method on its first call is
-  planned, see [Lazy compilation](#lazy-compilation-planned)).
+  code](#a-swfs-code)). An opt-in mode compiles method bodies on first
+  factory use (see [Optional lazy compilation](#optional-lazy-compilation)).
 - **AOT**: node (or a server) runs the same compiler ahead of time, with the
   `swf2es` command (`packages/cli`), and the player takes its modules in
   place of compiling them (see [Compiling ahead of time and caching
@@ -31,8 +31,8 @@ compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
   verifying](#parsing-linking-and-verifying));
 - the last ABC added compiles with `compile`, whole, to its module, source
   map and the entry of each method; with `compileModule`, to its module
-  alone; or with `compileMethods`, a method at a time, as lazy compilation
-  will;
+  alone; or with `compileLazyModule`, to its tables and lazy factories,
+  whose bodies compile with `compileMethods` on first factory use;
 - `context`, `revision`, `compileModuleLogged` and `replay` serve a cache
   of modules (see [Caching modules](#caching-modules)).
 
@@ -83,8 +83,8 @@ over the builtins, then each conformance case (also compiled with asc's
   others, in the reverse order twice in a row, and in the build that checks
   every array access, so that nothing the compiler keeps between calls,
   such as its reused buffers, leaks into its output.
-- **The JIT/AOT invariant:** each method compiled alone, as lazy JIT will
-  compile it, is byte for byte its entry in its module: in order with a
+- **The JIT/AOT invariant:** each method compiled alone, as lazy JIT
+  compiles it, is byte for byte its entry in its module: in order with a
   new emitter each, and in the reverse order with one emitter for all.
   Everything a method's code refers to is indexed by its ABC (multinames,
   namespaces, functions, descriptors), but for the classes and Vectors it
@@ -574,71 +574,60 @@ with the dispatcher where it does not hold: one `try`/`catch` around the
 loop, whose `catch` tries the handlers covering `t`'s region in the
 table's order and goes on at the first match's block.
 
-### Lazy compilation (planned)
+### Optional lazy compilation
 
-The player compiles each ABC whole when it loads (see [A SWF's
-code](#a-swfs-code)). For a large application that loads many SWFs, that is the
-most memory the compiler takes and most of the code it writes for nothing:
+The default player compiles each ABC whole when it loads (see [A SWF's
+code](#a-swfs-code)). `new Scripting(codegen, { lazyCompilation: true })`
+opts into compiling uncached AVM2 bodies on first factory use. The web
+embedder exposes the same option through `configure({ lazyCompilation:
+true })`. It remains experimental and off by default.
 
-- **codegen's memory.** Compiling a 963 KB ABC to one module of 10.4
-  million characters, 5,314 methods, grows codegen.wasm's memory from 32
-  MiB to 128 MiB in one call, the module alone (`compileModule`): the
-  minimal runtime collects nothing during a call, and wasm memory never
-  shrinks. The same methods compiled with `compileMethods` in batches of
-  500 peak at 128 MiB too.
-- **Code that never runs.** Of 23,873 methods such an application had
-  loaded after some minutes of use, 9,333 (39%) had run.
+The module's names, layouts, scripts and verification are prepared before
+execution, so their scopes resolve against the same domain as eager code.
+A lazy factory compiles its entry once, replaces its slot in F and returns
+the entry's original function. Later calls run that function directly;
+creating another closure may revisit the cached factory. Native methods,
+missing bodies and verification errors retain their eager factories. AOT
+still emits whole modules. Existing whole modules in the module cache are
+consumed normally; partial lazy modules are never written to that cache.
+The compiler must belong to this player for its lifetime: resetting it
+rejects a later deferred compile rather than using another movie's ABC.
 
-So the player is to compile a method on its factory's first call, as the
-JIT/AOT invariant already allows (a method compiled alone is its entry in
-the module, byte for byte). AOT is unchanged: it writes whole modules.
+Entries transfer from Wasm as UTF-8. The wrapper collects after a lazy
+skeleton, after memory growth, every 64 calls, or 256 KiB of method source
+since the last collection.
+It does not collect after every method, which costs substantially more.
+Verification results are kept per lazy ABC, cleared when its domain is
+dropped or evicted, and regenerated after a compiler-domain rebuild.
+Lazy mode retains compiler domains until runtime-domain collection instead
+of evicting them immediately after linking: deferred bodies still need their
+ABCs. Normal domain dropping and idle compaction still apply. Destroying
+a player clears shared property caches so their last getter or method
+cannot keep the destroyed player alive.
 
-**The module.** codegen writes a module without its method bodies: names,
-traits and scripts as now, and in F, for each method, a factory that
-compiles its entry on first use. A factory is called as a class is made,
-a script initialised or a `newfunction` run, never per call, so a lazy
-one costs one check there; the function it returns is the entry's own.
+The first method request is not the first verification: verification runs
+when the module's skeleton is built. It still verifies the ABC as a whole,
+so lazy mode does not eliminate this startup cost. Dynamic Function entries
+need identifiable stack frames; unsupported engines and policies fall back
+to whole-module compilation. Per-method sourceURLs have the form
+`swf2es-26.js/$f63.js`; frame parsing maps them to their module for both domain
+lookup and caller security checks. Class-reference tables are built under
+the original module's domain, even when another SWF is loading.
 
-**Building an entry.** The entry's source, from `compileMethods`, is
-evaluated by a strict `Function` given the module's tables and helpers as
-parameters: `new Function("rt", "nn", "ac", "ns", "cls", "N", "S", "M", "V",
-"F", "A", '"use strict"; return ' + entry)`. Both halves of that matter:
+Each entry is built with a strict `Function` whose parameters are the
+module's tables and helpers (`rt`, `nn`, `ac`, `ns`, `cls`, `N`, `S`, `M`,
+`V`, `F`, `A`). This keeps their lookups lexical, as in the eager module;
+direct `eval` would instead introduce dynamic scope lookups. Strictness
+matches the original ES module. The entry itself is byte for byte its
+factory in the whole module, the same JIT/AOT invariant the compiler's
+method-at-a-time tests enforce.
 
-- A direct `eval` in the module's scope makes the functions it builds
-  reach N, M, A and the rest by dynamic scope lookups: as3pb's and LZ4's
-  timed loops ran 1–9% slower. Given as parameters, the tables are a
-  closure's variables, as in an eager module, and the loops ran as fast.
-- A `Function`'s body is sloppy unless it says otherwise; a module is
-  strict. Sloppy, as3pb's checksum came out 0.
-
-**Two requirements from application domains.** A lazily built entry runs
-outside its module's load, which two things in the runtime assume it does
-not:
-
-- `Runtime.codeDomain` finds the domain of the code running by the script
-  names in the stack. Each built entry gets a sourceURL of its own under
-  its module's, `swf2es-26/$f63.js` for `swf2es-26.js`, which codeDomain
-  maps back to the module; debuggers then show one file per method, by
-  name, beside its module.
-- `rt.cls` binds a class reference to the domain loading now. An entry's
-  table of classes and Vectors (`((...T) => ...)(cls(...))`, the module's
-  `cls` calling `rt.cls`) is made as
-  the entry is built, so it must be made against its module's domain, not
-  whichever SWF is loading at that moment: otherwise a class of the
-  module's own is not found (ReferenceError #1065).
-
-**Where it compiles.** First on the main thread, on the factory's first
-call: about 0.04 ms a method in codegen (measured in batches of 500; one
-at a time is yet to be) and 0.026 ms to build it, so some 650 ms over the
-application's minutes of use above, and some 7 ms for a hundred methods
-first run in one frame. Workers compiling ahead, the player taking an
-entry built already or compiling it at once, can follow without changing
-the module.
-
-**Measured.** A prototype (each entry of the whole module made lazy, so
-codegen's memory is unchanged) against eager modules, nine runs each,
-interleaved: as3pb's loops within −0.8% and +1.9%, LZ4's within noise, the
-output the same; in the application above, no errors.
+See [the AVM2 benchmark](benchmarks.md#avm2-eager-and-lazy-compilation) for
+startup, first-use and warmed measurements. The potential saving depends
+on which factories the application binds: methods bind when a class or
+script is initialized, and a nested function when `newfunction` runs, not
+on each ActionScript call. A class whose every method is bound immediately
+may gain little while paying additional per-entry compilation costs.
 
 ## The runtime and the standard library
 
@@ -1679,8 +1668,10 @@ only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even
 those if every name it defines was defined in the chain before; code of
 such a module may then still run after its Abc went, and codeUrl and
-codeLibrary fall back to the main SWF's. Lazy compilation, whose
-entries are built apart from their module, will need this again. The
+codeLibrary fall back to the main SWF's. Lazy compilation keeps each
+returned method's originating Abc in a WeakMap keyed by that method, so
+entries built apart from their module retain their code origin even when
+the body itself never reads A. The
 symbols bound to names nothing defined (`Symbols.unbound`) are still
 kept for good, their libraries with them.
 

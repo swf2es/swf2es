@@ -238,11 +238,17 @@ export interface Codegen {
    */
   compileModule(hashes?: string[], index?: number): string;
   /**
+   * An opt-in JIT module's tables and lazy factories. Its default export
+   * takes (rt, jit); jit(body, bindings) returns that body's factory.
+   * Verification still runs now to fix scopes against the current domain.
+   * This module is not an AOT module and must not enter the module cache.
+   */
+  compileLazyModule(hashes?: string[], index?: number): string;
+  /**
    * Method bodies of ABC `index` (the last added by default) compiled
-   * alone, as the planned lazy JIT is to compile each on its first call; a
-   * native, unverified or unknown one is left out. No host calls it yet,
-   * but its tests hold each to its entry in the module, the JIT/AOT
-   * invariant that lazy compilation will rest on.
+   * alone, as the optional lazy JIT compiles each on first factory use;
+   * a native, unverified or unknown one is left out. Each is byte for byte
+   * its entry in the whole module.
    */
   compileMethods(bodies: number[], index?: number): Map<number, string>;
   /**
@@ -311,6 +317,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // cycle's garbage grow it a little further.
   let size = wasm.memory.buffer.byteLength;
   let calls = 0;
+  let methodBytes = 0;
   // Whether the domain has an ABC to compile: asking before is a mistake worth a message, not a trap.
   let added = 0;
   const last = (what: string) => {
@@ -328,7 +335,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
   // ABC `index`'s module, its source map and entries kept for `keep`. A
   // module is never empty: the ABC was of a dropped application domain.
-  const moduleOf = (hashes: string[], index: number, keep: boolean) => {
+  const moduleOf = (hashes: string[], index: number, keep: boolean, lazy = false) => {
     // Only the hashes the module names: joining every ABC's for each
     // compile took megabytes of codegen's memory a few thousand loads on.
     const at = indexOf(index);
@@ -342,7 +349,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     // Its bytes decoded here: lifted as a string, a module of megabytes took
     // longer than compiling it. The emitter writes only well-formed UTF-8,
     // which decodes alike either way.
-    const module = utf8.decode(collected(wasm.domainModuleBytes(named.join("\n"), at, keep, true)));
+    const bytes = lazy
+      ? wasm.domainLazyModuleBytes(named.join("\n"), at)
+      : wasm.domainModuleBytes(named.join("\n"), at, keep, true);
+    const module = utf8.decode(collected(bytes, lazy));
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
@@ -369,6 +379,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       wasm.__collect();
       size = grown;
       calls = 0;
+      methodBytes = 0;
     }
 
     return result;
@@ -484,6 +495,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       last("compileModule");
       return moduleOf(hashes, index, false);
     },
+    compileLazyModule(hashes = [], index = -1) {
+      last("compileLazyModule");
+      return moduleOf(hashes, index, false, true);
+    },
     context(index = -1, after = 0, upTo = -1) {
       if (added === 0) {
         return null;
@@ -524,7 +539,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return new Map();
       }
 
-      return parseEntries(collected(wasm.domainEmitEach(indices.join(","), true, indexOf(index))));
+      const bytes = wasm.domainEmitEachBytes(indices.join(","), true, indexOf(index));
+      methodBytes += bytes.length;
+      return parseEntries(utf8.decode(collected(bytes, methodBytes >= COLLECT_METHOD_BYTES)));
     },
     compileActions(bytes, actions) {
       const module = actionsModule(bytes, actions, true);
@@ -576,6 +593,8 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+// Large method entries should not accumulate sixty-four calls of garbage.
+const COLLECT_METHOD_BYTES = 256 * 1024;
 
 // TextDecoder is the web's and node's alike, though not ECMAScript's,
 // whose library alone the compiler's wrapper is typed against.

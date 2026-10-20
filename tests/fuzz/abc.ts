@@ -209,8 +209,15 @@ for (let k = 0; k < caseCount; k++) {
 
     const want = parseEntries(testing.domainModuleEntries());
     const got = parseEntries(testing.domainEmitEach([...want.keys()].join(","), false));
+    const lazy = utf8.decode(
+      testing.domainLazyModuleBytes([sha(abc), ...builtinHashes].join("\n")),
+    );
+    await import(`data:text/javascript;base64,${Buffer.from(lazy).toString("base64")}`);
+    const deferred = parseEntries(
+      utf8.decode(testing.domainEmitEachBytes([...want.keys()].join(","), true)),
+    );
     for (const [body, entry] of want) {
-      if (got.get(body) !== entry) {
+      if (got.get(body) !== entry || deferred.get(body) !== entry) {
         fail(abc, `method body ${body} compiled alone differs from its entry`);
         break;
       }

@@ -59,6 +59,8 @@ export interface Configuration {
    * default, as a first visit is some 9% slower for the writes.
    */
   cache?: boolean;
+  /** Experimental AVM2 compilation on first method-factory use; off by default. */
+  lazyCompilation?: boolean;
 }
 
 let config: Configuration = {};

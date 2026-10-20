@@ -72,6 +72,7 @@ const results = await runPlayer(
     viewport: t.viewport ?? undefined,
     logFetch: t.logFetch,
     socket: t.socket ? JSON.parse(readFileSync(t.socket, "utf8")) : undefined,
+    lazyCompilation: args.includes("--lazy"),
   })),
   {
     timeout: TIMEOUT,

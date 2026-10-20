@@ -112,7 +112,9 @@ export function frameSites(stack: string | undefined): (string | null)[] {
 
 /** A frame site's script: "script:1:2" without its line and column. */
 export function siteScript(site: string): string | null {
-  return /^(.+):\d+:\d+$/.exec(site)?.[1] ?? null;
+  const script = /^(.+):\d+:\d+$/.exec(site)?.[1];
+  // Deferred entries have separate debugger files but their module's code context.
+  return script?.replace(/^(swf2es-\d+\.js)\/\$f\d+\.js$/, "$1") ?? null;
 }
 
 /**
