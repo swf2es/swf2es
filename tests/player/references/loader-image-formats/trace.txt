@@ -1,0 +1,6 @@
+rgb image/png false ffff0000
+rgba-opaque image/png true ffff0000
+rgb-keyed image/png true ffff0000
+gif-opaque image/gif false ff000000
+gif-gce-opaque image/gif false ff000000
+gif-transparent-unused image/gif true ff000000
