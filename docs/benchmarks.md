@@ -1,5 +1,48 @@
 # Benchmarks
 
+## AVM1 startup and scene changes
+
+`pnpm bench:avm1 [--runs 5] [--frames 600]` runs a generated, three-scene
+AVM1 movie in fresh Node processes. Each stopped scene installs an
+`onEnterFrame` function doing arithmetic, property and array access. It
+reports startup, first-use scene entry and warmed ticks separately,
+including compiler time, compiled block counts, the JS heap after GC and
+Wasm memory. Warmed execution must compile no further blocks, and the
+script's result is checked.
+
+`pnpm bench:avm1 --compare /path/to/built-checkout --json /tmp/avm1.json`
+compares that checkout (A) with the current build (B), alternating A/B and
+B/A order in fresh processes. Build both checkouts first. Each displayed
+timing is the median of that statistic across runs; JSON retains every
+run. Collection happens outside the measured work at each checkpoint.
+These are script/timeline CPU timings, excluding rendering, browser
+scheduling and GPU work; they do not measure FPS.
+
+To replay a local movie, pass `--swf /path/to/movie.swf --replay steps.json`.
+A replay is an array of steps, for example:
+
+```json
+[
+  { "label": "title", "ticks": 120, "expectFrame": 64 },
+  { "label": "open", "click": [320, 294], "ticks": 60 },
+  { "label": "attack", "click": ["arena", "controls", "attack"], "ticks": 150, "repeat": 3 },
+  { "label": "warm", "ticks": 600 }
+]
+```
+
+Clicks use stage coordinates or the origin of a named clip reached through
+its parents. A step may also supply `text` for keyboard input, `next: true`
+to resume a stopped root, or `expectFrame` to check the replay's position.
+Without a replay, a supplied SWF simply plays for `--frames` ticks. Local
+movie assets are not copied into the repository. Browser profiling remains
+necessary to assess complete scene-entry frames in an actual game.
+
+`tests/bench/avm1-sas2.json` replays the locally supplied Swords and Sandals II
+movie through its first victory and level-up screen:
+`pnpm bench:avm1 --swf /path/to/sas2.swf --replay tests/bench/avm1-sas2.json`.
+The SWF itself is not supplied. This replay tests script/timeline costs;
+the browser's first-use rendering costs require a separate measurement.
+
 ## Inputs
 
 - **as3pb** ([33TU/as3pb](https://github.com/33TU/as3pb), MIT): a protobuf

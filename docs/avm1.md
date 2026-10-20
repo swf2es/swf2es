@@ -101,17 +101,28 @@ flag says it runs none of them.
 
 `Codegen.compileActions(bytes, actions)` compiles a SWF's whole list of
 blocks, as `format`'s `readActions` gives it (the SWF's version and each
-block's range of its decompressed bytes), to one ES module, as `compile` compiles an ABC to one: one
-module a SWF, not one a block, since a SWF has a block for every frame
-script, event and button and a `Function` each would cost more than the
-code. The SWF's version is an input, since the compiler picks the
+block's range of its decompressed bytes), to one ES module for AOT.
+The SWF's version is an input, since the compiler picks the
 version's operations (below), and part of the module's key with the
 compiler's identity and the SHA-256 of the SWF's decompressed bytes
 (`actionsKey`), so the module cache and AOT modules serve AVM1 as they
 serve ABCs. `compileActionBlocks` compiles blocks alone, by index, each
-byte for byte its entry in the module, as a JIT that compiles a block
-when it first runs would. AVM1 needs no domain: a block
+byte for byte its entry in the module. The player uses that API on first
+execution (`player/src/avm1/compile.ts`), retaining the compiled functions
+for subsequent calls. A block's region array keeps its identity as its
+placeholder is replaced, so defined functions and ExternalInterface still
+identify the code's SWF by that array. AVM1 needs no domain: a block
 links to nothing at compile time, every name resolves at run time.
+
+Each per-block compilation copies the backing SWF into Wasm; the wrapper
+collects after that call rather than letting those copies accumulate
+across its usual collection interval. This bounds the compiler's working
+memory by the block being compiled, rather than all the SWF's output.
+Obfuscated movies whose backward jumps expand into large entries benefit
+especially: code for scenes never entered is never generated or parsed.
+Entries cross the Wasm boundary as UTF-8 bytes decoded by the wrapper,
+as whole modules do, avoiding the bindings' per-character string lifting
+when an obfuscated block expands to megabytes.
 
 In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
 

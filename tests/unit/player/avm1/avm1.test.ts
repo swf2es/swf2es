@@ -73,6 +73,40 @@ test("each frame's blocks run in order as the root enters it, and the root loops
   assert.deepEqual(errors, []);
 });
 
+test("starting a stopped movie leaves later frames uncompiled until they play", async () => {
+  const calls: number[][] = [];
+  const lines: string[] = [];
+  const errors: unknown[] = [];
+  const lazy = {
+    ...codegen,
+    compileActionsModule: () => {
+      throw new Error("eager compilation");
+    },
+    compileActionBlocks: (...args: Parameters<typeof codegen.compileActionBlocks>) => {
+      calls.push(args[2]);
+      return codegen.compileActionBlocks(...args);
+    },
+  };
+  const avm1 = new Avm1(lazy, {
+    print: (line) => lines.push(line),
+    onUncaught: (error) => errors.push(error),
+  });
+  const swf = movie(8, [
+    [doAction((a) => a.push("first").trace().stop())],
+    [doAction((a) => a.push("second").trace().stop())],
+  ]);
+  const player = new Player(swf, null, avm1);
+  await player.start();
+  player.tick();
+  assert.deepEqual(calls, [[0]]);
+  assert.deepEqual(lines, ["first"]);
+  player.root.playing = true;
+  player.tick();
+  assert.deepEqual(calls, [[0], [1]]);
+  assert.deepEqual(lines, ["first", "second"]);
+  assert.deepEqual(errors, []);
+});
+
 test("actions after the last ShowFrame run with the last frame where it loops, and once after it where it stops", async () => {
   const swf = (header: number, end: boolean) =>
     w.swf({

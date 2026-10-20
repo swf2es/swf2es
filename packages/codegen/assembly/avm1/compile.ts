@@ -90,6 +90,33 @@ export function actionsEmitEach(
   blocks: string,
   reuse: bool,
 ): string {
+  const entries = emitEach(swf, offsets, lengths, version, blocks, reuse);
+  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+}
+
+/** The same entries as UTF-8, avoiding the bindings' per-character string lifting. */
+export function actionsEmitEachBytes(
+  swf: Uint8Array,
+  offsets: Int32Array,
+  lengths: Int32Array,
+  version: i32,
+  blocks: string,
+  reuse: bool,
+): Uint8Array {
+  const entries = emitEach(swf, offsets, lengths, version, blocks, reuse);
+  const bytes = new Uint8Array(entries.length);
+  memory.copy(bytes.dataStart, changetype<usize>(entries.bytes), entries.length);
+  return bytes;
+}
+
+function emitEach(
+  swf: Uint8Array,
+  offsets: Int32Array,
+  lengths: Int32Array,
+  version: i32,
+  blocks: string,
+  reuse: bool,
+): Output {
   const count = min(offsets.length, lengths.length);
   const entries = new Output();
   let emitter = new ModuleEmitter();
@@ -124,5 +151,5 @@ export function actionsEmitEach(
     entries.byte(2);
   }
 
-  return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
+  return entries;
 }
