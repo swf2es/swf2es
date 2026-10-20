@@ -1236,6 +1236,12 @@ test("each block compiled alone is its entry in the module, in the test and rele
   const order = "2,0,1,9,-1,";
   assert.equal(testing.actionsEmitEach(bytes, offsets, lengths, 7, order, false), alone(entries));
   assert.equal(testing.actionsEmitEach(bytes, offsets, lengths, 7, order, true), alone(entries));
+  for (const reuse of [false, true]) {
+    assert.equal(
+      utf8.decode(testing.actionsEmitEachBytes(bytes, offsets, lengths, 7, order, reuse)),
+      alone(entries),
+    );
+  }
 
   const wasm = new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url);
   const codegen = await createCodegen(

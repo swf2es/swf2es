@@ -120,6 +120,9 @@ across its usual collection interval. This bounds the compiler's working
 memory by the block being compiled, rather than all the SWF's output.
 Obfuscated movies whose backward jumps expand into large entries benefit
 especially: code for scenes never entered is never generated or parsed.
+Entries cross the Wasm boundary as UTF-8 bytes decoded by the wrapper,
+as whole modules do, avoiding the bindings' per-character string lifting
+when an obfuscated block expands to megabytes.
 
 In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
 

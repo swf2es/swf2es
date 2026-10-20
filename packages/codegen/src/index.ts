@@ -542,11 +542,20 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
       const [offsets, lengths] = ranges(actions);
       return parseEntries(
-        collected(
-          wasm.actionsEmitEach(bytes, offsets, lengths, actions.version, indices.join(","), true),
-          // Each lazy block copies the whole backing SWF into wasm. Its
-          // analysis and that copy can go before the next block runs.
-          true,
+        utf8.decode(
+          collected(
+            wasm.actionsEmitEachBytes(
+              bytes,
+              offsets,
+              lengths,
+              actions.version,
+              indices.join(","),
+              true,
+            ),
+            // Each lazy block copies the whole backing SWF into wasm. Its
+            // analysis and that copy can go before the next block runs.
+            true,
+          ),
         ),
       );
     },
