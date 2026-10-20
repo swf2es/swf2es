@@ -153,8 +153,9 @@ that `rt.version(v)` gives, made once and shared, and the `Host` through
 which they reach the player's display list. An object's `valueOf` and
 `toString`, which the conversions call, are hooks (`objects` in
 `values.ts`) that the steps bringing objects fill. The player's `Avm1`
-(`player/src/avm1/avm1.ts`) compiles a main AVM1 SWF's blocks with the
-same codegen, as `start` loads it, gives each clip, button and text field
+(`player/src/avm1/avm1.ts`) prepares lazy blocks as `start` loads a main
+AVM1 SWF, compiles each on first execution with the same codegen
+(`player/src/avm1/compile.ts`), gives each clip, button and text field
 its AS2 face (`player/src/avm1/globals/MovieClip.ts`, a `DisplayNative`
 of the runtime's), plays the clips the newest first and runs the blocks
 their frames queue, in Flash's order: a `Player` given one, as the web

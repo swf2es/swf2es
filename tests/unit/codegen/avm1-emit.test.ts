@@ -1256,6 +1256,22 @@ test("each block compiled alone is its entry in the module, in the test and rele
   });
 });
 
+test("lazy blocks reclaim their full SWF copy before the next compilation", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  const bytes = new Uint8Array(5 * 1024 * 1024);
+  const actions = { version: 8, blocks: [{ offset: bytes.length - 1, length: 1 }] };
+  for (let i = 0; i < 96; i++) {
+    codegen.compileActionBlocks(bytes, actions, [0]);
+  }
+
+  const memory = codegen.usage().memory;
+  assert.ok(memory < 32 * 1024 * 1024, `per-block compilation grew memory to ${memory} bytes`);
+});
+
 /** Entries 2, 0, 1 of `entries`, in that order, as actionsEmitEach writes them. */
 function alone(entries: string): string {
   const parts = entries.split("\u0002").filter(Boolean);

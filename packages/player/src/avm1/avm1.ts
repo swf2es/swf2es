@@ -58,10 +58,10 @@ import {
   stopTimelineSounds,
   timelineSoundsOf,
 } from "../media/sounds.js";
-import { evaluate } from "../scripting/evaluate.js";
 import { type BindingHost, VariableBindings } from "./bindings.js";
 import { RegisteredClasses } from "./classes.js";
 import { constructBlocks, ScriptClips } from "./clips.js";
+import { lazyBlocks } from "./compile.js";
 import { ExternalCalls } from "./external.js";
 import { FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
@@ -242,9 +242,6 @@ const METHODS = new Map<number, string>([
   [ClipEvent.dragOver, "onDragOver"],
   [ClipEvent.dragOut, "onDragOut"],
 ]);
-
-/** Names the scripts of AVM1 modules, as their stack frames show them. */
-let modules = 0;
 
 export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly rt = new avm1.Runtime();
@@ -613,18 +610,16 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   /**
-   * Compile the SWF's blocks and load their module, then run what the
+   * Prepare the SWF's lazy blocks, then run what the
    * first frame queued. An ActionScript 3 SWF's blocks are left, as Flash
    * runs none of them.
    */
   async load(swf: Swf): Promise<void> {
-    // Compiled here, not by compile(), which would put a tick more between the
+    // Prepared here, not by compile(), which would put a tick more between the
     // first frame and its actions than the timeline's sounds have.
     const list = this.main.list;
     if (list !== null && list.blocks.length > 0) {
-      const module = this.codegen.compileActionsModule(swf.bytes, list);
-      const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
-      this.main.blocks = (factory as unknown as avm1.Factory)(this.rt);
+      this.main.blocks = lazyBlocks(this.codegen, swf.bytes, list, this.rt);
       this.external.ownCode(this.main);
     }
 
@@ -649,15 +644,13 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /** The blocks of `list`, a loaded SWF's, compiled to a module and loaded. */
+  /** A loaded SWF's blocks, ready to compile as they first run. */
   async compile(swf: Swf, list: ActionList | null): Promise<avm1.Blocks> {
     if (list === null || list.blocks.length === 0) {
       return [];
     }
 
-    const module = this.codegen.compileActionsModule(swf.bytes, list);
-    const { factory } = await evaluate(module, `swf2es-avm1-${++modules}.js`);
-    return (factory as unknown as avm1.Factory)(this.rt);
+    return lazyBlocks(this.codegen, swf.bytes, list, this.rt);
   }
 
   /**
