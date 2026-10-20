@@ -5,6 +5,7 @@ import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
   Container,
+  type DisplayObject,
   ShapeObject,
   TextObject,
 } from "../../packages/player/dist/display/display.js";
@@ -176,6 +177,88 @@ test("a snapshot subtree may be a leaf rather than a container", () => {
     }
     mirror.dispose();
   }
+});
+
+test("retained depth lookups follow swaps, reparenting, removal and duplicate depths", () => {
+  const library = readLibrary(readSwf(swf({ width: 100, height: 100, frameCount: 1, tags: [] })));
+  const source = new Container(),
+    first = new Container(),
+    second = new Container(),
+    a = new ShapeObject(null),
+    b = new ShapeObject(null),
+    c = new ShapeObject(null);
+  source.addChildAt(first, 0);
+  source.addChildAt(second, 1);
+  first.addChildAt(a, 0);
+  first.addChildAt(b, 1);
+  first.addChildAt(c, 2);
+  a.depth = 1;
+  b.depth = 2;
+  const encoder = new SceneSnapshot(library),
+    mirror = new SceneMirror(library);
+  const buffer = new Uint8Array(new SharedArrayBuffer(65536));
+  const packet = () => buffer.subarray(0, encoder.encode(source, buffer));
+  const root = mirror.apply(packet()) as Container;
+  const left = root.children[0] as Container,
+    right = root.children[1] as Container;
+  const [ma, mb, mc] = left.children;
+  const check = (
+    leftEntries: [number, DisplayObject][],
+    rightEntries: [number, DisplayObject][] = [],
+  ) => {
+    assert.equal(mirror.apply(packet()), root);
+    assert.deepEqual(left.depths, new Map(leftEntries));
+    assert.deepEqual(right.depths, new Map(rightEntries));
+  };
+
+  for (let i = 0; i < 4; i++) {
+    a.matrix.tx++;
+    check([
+      [1, ma],
+      [2, mb],
+    ]);
+  }
+
+  a.depth = 2;
+  b.depth = 1;
+  check([
+    [2, ma],
+    [1, mb],
+  ]);
+  a.depth = null;
+  b.depth = 7;
+  c.depth = 1;
+  check([
+    [7, mb],
+    [1, mc],
+  ]);
+  first.addChildAt(c, 0);
+  c.depth = 3;
+  check([
+    [3, mc],
+    [7, mb],
+  ]);
+  second.addChildAt(b, 0);
+  b.depth = 7;
+  check([[3, mc]], [[7, mb]]);
+  second.addChildAt(a, 1);
+  a.depth = 7;
+  check([[3, mc]], [[7, ma]]);
+  second.removeChild(a);
+  check([[3, mc]], [[7, mb]]);
+
+  c.depth = 9;
+  const bad = packet();
+  assert.throws(() => mirror.apply(buffer.subarray(0, bad.length + 8)), /filter tail/);
+  assert.equal(left.depths.get(3), mc);
+  assert.equal(left.depths.has(9), false);
+  check([[9, mc]], [[7, mb]]);
+  first.removeChild(c);
+  check([], [[7, mb]]);
+  source.removeChild(second);
+  check([]);
+  assert.equal(root.children.length, 1);
+  mirror.dispose();
 });
 
 test("retained text and filters still reject changed or truncated records without mutating", () => {

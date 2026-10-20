@@ -762,12 +762,13 @@ export class SceneMirror {
       }
     }
 
-    // Reordering children clears their timeline depths; restore these only
-    // after the full tree is attached, before Pixi groups timeline masks.
-    for (let i = 0; i < rows.length; i++) {
+    // Remove old depths before assigning new ones, so depth swaps cannot
+    // erase each other's entries. Keep unchanged lookups across snapshots.
+    for (let i = 0; i < count; i++) {
       const o = rows[i];
-      if (o instanceof Container) {
-        o.depths.clear();
+      const depth = data[HEADER + i * ROW + 19];
+      if (o.depth !== null && o.depth !== depth) {
+        o.parent?.depths.delete(o.depth);
       }
     }
 

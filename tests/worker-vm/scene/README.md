@@ -65,6 +65,12 @@ including rejected frames; `dispose()` also releases the array storage. This
 reduces temporary allocations but does not make decoding allocation-free:
 changed records and retained graph updates can still allocate.
 
+Retained containers keep their timeline-depth lookups between snapshots. Old
+depths are removed before any new depths are assigned, so swaps cannot erase
+another child's new entry. Reordering and reparenting still use the ordinary
+display-list operations; duplicate depths resolve to the last child in scene
+order. Rejected frames leave the lookups intact.
+
 ```ts
 const writer = new FrameWriter(frames);
 const snapshot = new SceneSnapshot(assets);
