@@ -1,0 +1,5 @@
+literal 2
+dynamic 2
+method first 2
+method second 2
+repeated 2
