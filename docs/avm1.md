@@ -1111,6 +1111,20 @@ transform's TextFormat in `_styles`; a field with a sheet reads its text
 as HTML styled by it and gives back the HTML as set, and a new sheet
 styles that HTML again.
 
+Input fields use the same editor as AS3 (`input/text-editor.ts`). A click
+focuses a selectable field and places its caret; dragging extends the
+selection. Keys and separate text events edit the focused input field,
+with `restrict`, `maxChars`, deletion and selection, unless a button or
+clip consumed the character's keyPress. Copy, cut and paste use the same
+selection; password fields expose no text. User edits update the bound
+variable before broadcasting `onChanged(field)` to the field and its
+listeners. Scripted text changes do not broadcast it.
+
+`MovieClip.setMask`, from SWF 6, connects clips to the player's existing
+display masks: the mask's fills clip its target and its own artwork is
+hidden. An object or path selects a mask, null or undefined clears it,
+and an unresolved path returns false without replacing the existing mask.
+
 `TextSnapshot` (`globals/TextSnapshot.ts`, as Ruffle's) is a clip's
 static texts' text, its own children's in the order they are drawn, as
 it was when made: `new TextSnapshot(clip)` with the clip alone, or
@@ -2255,9 +2269,9 @@ determinism` green, and the corpus baseline may only go up.
     `movieclip_focusenabled`, `selection_asbroadcaster`, three of
     `tab_ordering_*`...). Then `_droptarget`: 309 (`drag_drop`,
     `text_blocks_clicks`). Then `_xmouse` and `_ymouse` as Flash gives
-    them: 311 (`mouse_pos`, `mouse_pos_with_scale_factor`). Left: text
-    fields' focus (step 13, which most of the focus and tab tests begin
-    with), the highlight drawn, and touches, which reach only an AS3
+    them: 311 (`mouse_pos`, `mouse_pos_with_scale_factor`). Text fields
+    now also take mouse focus (step 13). Left: the highlight drawn,
+    and touches, which reach only an AS3
     movie's pointer.
 13. **Text.** `TextField` and `TextFormat`'s AS2 faces,
     `createTextField`, variable bindings, `htmlText`, `TextField.StyleSheet`.
@@ -2265,8 +2279,8 @@ determinism` green, and the corpus baseline may only go up.
     from 371 to 421 of 715 (`text_format`, `textfield_variable`,
     `textfield_props_swf6`-`8`, `edittext_stylesheet`, `stylesheet`,
     `stylesheet_transform`, `selection`, `edittext_programmatic_focus`...).
-    Left: typing into an input field (`edittext_input`, `edittext_restrict`,
-    the paste and IME tests), `onChanged` and `onScroller` from the user,
+    Input fields now support typing, selection, clipboard edits and
+    `onChanged`. Left: IME composition, `onScroller` from the user,
     `asfunction:` links, `StyleSheet.load` with loading (step 15), the
     HTML of SWF 6 and 7 fields as Flash reads it, and layout metrics
     (`textWidth`, `maxscroll`) where they part from Flash's, which AS3's

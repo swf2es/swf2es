@@ -16,6 +16,7 @@ import {
 } from "../avm1-assembler.ts";
 import { backwardSwf } from "../avm1-backward.ts";
 import { skippedExports } from "../avm1-exports.ts";
+import { maskSwf } from "../avm1-masks.ts";
 import { flashAssembler, script } from "../avm1-script.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
@@ -9308,6 +9309,15 @@ export const cases: PlayerCase[] = [
     traced: true,
     frames: 4,
     capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-script-masks",
+    swf: maskSwf(),
+    traced: true,
+    frames: 5,
+    capture: [2, 3, 4, 5],
     tolerance: 0,
     maxOutliers: 0,
   },

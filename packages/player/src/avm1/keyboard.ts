@@ -6,8 +6,11 @@
 // LLC and Ruffle contributors): a printable character's ASCII code, or one
 // of the editing keys' below 20. A host whose text comes apart from its
 // keys (the corpus's replay) gives the character by `text`.
+
+import { TextObject } from "../display/display.js";
 import type { ClipboardText } from "../hosts.js";
 import type { Keyboard, KeyState } from "../input/keyboard.js";
+import { pasteable, TextEditor } from "../input/text-editor.js";
 import type { Avm1 } from "./avm1.js";
 
 /** The editing keys' keyPress codes, by Flash's key codes. */
@@ -33,6 +36,21 @@ const printable = (charCode: number) => (charCode >= 32 && charCode <= 126 ? cha
 
 export class Avm1Keyboard implements Keyboard {
   handled = 0;
+  private readonly editor = new TextEditor((field) => {
+    const movie = this.avm1;
+    movie.timers.begin();
+    try {
+      field.fit();
+      movie.textChanged(field);
+      if (field.avm1) {
+        movie.callback(field.avm1, "broadcastMessage", ["onChanged", field.avm1]);
+      }
+
+      movie.queue.run();
+    } finally {
+      movie.timers.end();
+    }
+  });
 
   constructor(private readonly avm1: Avm1) {}
 
@@ -46,20 +64,70 @@ export class Avm1Keyboard implements Keyboard {
 
     const typed = edits ? printable(k.charCode) : 0;
     const press = KEY_PRESSES.get(k.keyCode) ?? typed;
-    return this.avm1.input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
+    const used = this.avm1.input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
+    return used || (edits && k.keyCode !== 9 && this.edit(k));
   }
 
   text(k: KeyState): boolean {
     this.handled++;
-    return this.avm1.input.keyPress(printable(k.charCode));
+    const used = this.avm1.input.keyPress(printable(k.charCode));
+    return used || this.edit(k);
   }
 
-  /** Text fields come with step 13: nothing to copy or paste into yet. */
-  copy(_cut?: boolean): ClipboardText | null {
-    return null;
+  private field(): TextObject | null {
+    const d = this.avm1.focused;
+    return !this.avm1.halted && d instanceof TextObject && !this.avm1.removed(d) ? d : null;
   }
 
-  paste(_data?: ClipboardText | null): boolean {
-    return false;
+  private edit(k: KeyState): boolean {
+    const field = this.field();
+    if (!field || (field.type !== "input" && !field.selectable)) {
+      return false;
+    }
+
+    if (k.ctrlKey && !k.altKey && k.keyCode === 65) {
+      if (field.selectable) {
+        field.select(0, field.model.text.length);
+      }
+
+      return true;
+    }
+
+    return this.editor.edit(field, k);
+  }
+
+  copy(cut = false): ClipboardText | null {
+    this.handled++;
+    const field = this.field();
+    if (!field || field.displayAsPassword || (cut && field.type !== "input")) {
+      return null;
+    }
+
+    const [from, to] = field.selection;
+    if (from === to) {
+      return null;
+    }
+
+    const data = { text: field.model.text.slice(from, to).replace(/\r\n?/g, "\n") };
+    if (cut) {
+      this.editor.replace(field, from, to, "");
+    }
+
+    return data;
+  }
+
+  paste(data: ClipboardText | null = null): boolean {
+    this.handled++;
+    const field = this.field();
+    if (field?.type !== "input" || !data) {
+      return false;
+    }
+
+    const text = pasteable(field.multiline, data.text);
+    if (text !== "") {
+      this.editor.type(field, text);
+    }
+
+    return true;
   }
 }
