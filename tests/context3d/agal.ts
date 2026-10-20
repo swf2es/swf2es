@@ -8,6 +8,8 @@ export interface ShaderSource {
   constants: number[];
 }
 
+const SUPPORTED = new Set([0, 1, 2, 3, 4, 6, 7, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19]);
+
 export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (
@@ -95,6 +97,12 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
   for (let offset = 7; offset < bytes.length; offset += 24) {
     const opcode = data.getUint32(offset, true);
+    // Unsupported instructions may have no destination or a sampler operand;
+    // do not misreport those layouts as malformed arithmetic registers.
+    if (!SUPPORTED.has(opcode)) {
+      throw new Error("Unsupported AGAL opcode");
+    }
+
     const dest = data.getUint32(offset + 4, true);
     const mask = (dest >>> 16) & 255;
     if (mask === 0 || mask > 15) {

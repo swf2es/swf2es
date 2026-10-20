@@ -120,3 +120,15 @@ test("arithmetic validates both sources and rejects unsupported matrix encodings
     assert.throws(() => translate(binary(opcode, 4), "vertex"), "three-row matrix writes w");
   }
 });
+
+test("unsupported instruction layouts are not reported as malformed arithmetic", () => {
+  const bytes = mov(true);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(7, 0x27, true); // kil has no destination
+  view.setUint32(11, 0, true);
+  assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL opcode/);
+  view.setUint32(7, 0x28, true); // tex uses a sampler operand
+  view.setUint32(11, 0x030f0000, true);
+  view.setUint32(27, 5, true);
+  assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL opcode/);
+});
