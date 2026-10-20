@@ -166,6 +166,81 @@ function shader(fragment: boolean): Uint8Array {
   return bytes;
 }
 
+export async function lifecycle(cancel: boolean) {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
+  );
+  const trace: string[] = [];
+  let close = () => {};
+  const scripting = new Scripting(codegen, {
+    print: (line) => {
+      trace.push(line);
+      if (cancel && line === "life dispose-returned 1") {
+        close();
+      }
+    },
+    audio: null,
+  });
+  const active = new Map<number, ReturnType<typeof create>>();
+  const presented: string[] = [];
+  let created = 0;
+  let placed = 0;
+  close = install(scripting, {
+    create: (slot) => {
+      check(slot === 0 && active.size === 0, "recreation retained the old surface");
+      const entry = create();
+      active.set(slot, entry);
+      created++;
+      return entry.backend;
+    },
+    place: (slot, x, y, visible) => {
+      check(slot === 0 && x === 7 && y === 11 && !visible, "slot state lost during recreation");
+      placed++;
+    },
+    remove: (slot) => {
+      const entry = active.get(slot);
+      check(entry, "removed the same surface twice");
+      check(entry.live.size === 0, "retired context still owns GPU resources");
+      const { gl } = entry;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const pixel = new Uint8Array(4);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+      presented.push(color(pixel, 0, 0, 1));
+      check(gl.getError() === gl.NO_ERROR, "GL error during recreation");
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      active.delete(slot);
+    },
+  });
+  let player: Player | null = null;
+  try {
+    await scripting.loadLibraries(
+      await Promise.all(
+        ["builtin", "playerglobal-swf2es"].map(
+          async (name) =>
+            new Uint8Array(await (await fetch(`/libraries/${name}.abc`)).arrayBuffer()),
+        ),
+      ),
+    );
+    player = new Player(
+      new Uint8Array(await (await fetch("/context3d/Lifecycle.swf")).arrayBuffer()),
+      scripting,
+    );
+    await player.start();
+    for (let i = 0; i < 6; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+
+    check(active.size === 0, "completed lifecycle retained a surface");
+    check(placed === created, "recreated context was not placed");
+    return { trace, created, presented };
+  } finally {
+    close();
+    player?.destroy();
+    scripting.destroy();
+  }
+}
+
 let compositionRun: { step: (step: number) => void; close: () => void } | null = null;
 
 /** Browser layers are a composition probe, not the production presentation path. */

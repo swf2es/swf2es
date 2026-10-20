@@ -5,19 +5,22 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const out = `${here}out/oracle/`;
+const lifecycle = process.argv.includes("--lifecycle");
+const fixture = lifecycle ? "Lifecycle" : "Triangle";
+const out = `${here}out/oracle-${fixture}/`;
 mkdirSync(out, { recursive: true });
 writeFileSync(
   `${out}Reference.as`,
   `package {
   import flash.desktop.NativeApplication;
   import flash.utils.setTimeout;
-  public class Reference extends Triangle {
+  public class Reference extends ${fixture} {
     public function Reference() {
       super();
+      stage.nativeWindow.activate();
       setTimeout(function():void {
         try {
-          closeContext();
+          ${lifecycle ? 'if (!complete) { throw new Error("Lifecycle did not complete"); }' : "closeContext();"}
           NativeApplication.nativeApplication.exit(0);
         } catch (error:Error) {
           trace("reference-error", error);
@@ -63,13 +66,19 @@ const lines = (run.stdout + run.stderr)
   .replaceAll("\r", "")
   .split("\n")
   .filter((line) =>
-    /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
-      line,
-    ),
+    lifecycle
+      ? line.startsWith("life ")
+      : /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
+          line,
+        ),
   );
-assert.equal(lines.length, 12, JSON.stringify(lines));
-assert.equal(lines.at(-1), "disposed");
-const path = `${here}reference.json`;
+if (lifecycle) {
+  assert.equal(lines.at(-1), "life complete 3", JSON.stringify(lines));
+} else {
+  assert.equal(lines.length, 12, JSON.stringify(lines));
+  assert.equal(lines.at(-1), "disposed");
+}
+const path = `${here}${lifecycle ? "lifecycle-" : ""}reference.json`;
 if (process.argv.includes("--update")) {
   writeFileSync(path, `${JSON.stringify(lines, null, 2)}\n`);
 } else {

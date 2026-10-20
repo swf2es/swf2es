@@ -9,6 +9,13 @@ import { avm2 } from "../../packages/runtime/dist/index.js";
 import type { Buffer3D, Context3D, Program3D, Stage3DHost } from "./backend.ts";
 
 type AsObject = avm2.AsObject;
+
+interface Resource<T> {
+  value: T;
+  owner: AsObject;
+  disposed: boolean;
+}
+
 const FLOAT_FORMATS = ["float1", "float2", "float3", "float4"];
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
@@ -17,8 +24,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
   const contexts = new Map<AsObject, { backend: Context3D; slot: AsObject }>();
-  const buffers = new WeakMap<AsObject, Buffer3D>();
-  const programs = new WeakMap<AsObject, Program3D>();
+  const buffers = new WeakMap<AsObject, Resource<Buffer3D>>();
+  const programs = new WeakMap<AsObject, Resource<Program3D>>();
   const indices = new WeakMap<AsObject, number>();
   let closed = false;
 
@@ -49,7 +56,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   const context = (o: AsObject): Context3D => {
     const entry = contexts.get(o);
     if (!entry || entry.backend.disposed) {
-      throw new Error("Context3D experiment: context disposed");
+      throw s.rt.error("Error", 3694);
     }
 
     return entry.backend;
@@ -60,7 +67,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       throw new Error("Context3D experiment: invalid buffer");
     }
 
-    return value;
+    if (value.disposed || !contexts.has(value.owner)) {
+      throw s.rt.error("Error", 3694);
+    }
+
+    return value.value;
   };
   const program = (o: AsObject): Program3D => {
     const value = programs.get(o);
@@ -68,13 +79,60 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       throw new Error("Context3D experiment: invalid program");
     }
 
-    return value;
+    if (value.disposed || !contexts.has(value.owner)) {
+      throw s.rt.error("Error", 3694);
+    }
+
+    return value.value;
   };
   const construct = (name: string): AsObject =>
     s.rt.construct(s.rt.classNamed(`flash.display3D::${name}`)) as AsObject;
   const bytes = (o: AsObject): Uint8Array => {
     const storage = avm2.bytesOf(s.rt, o);
     return storage.buffer.subarray(0, storage.length);
+  };
+
+  const request = (slot: AsObject): void => {
+    pending.add(slot);
+    s.loads.deferHostEvent(() => {
+      pending.delete(slot);
+      if (closed || s.destroyed) {
+        return;
+      }
+
+      const index = indexOf(slot);
+      const backend = host.create(index);
+      let object: AsObject;
+      try {
+        object = construct("Context3D");
+      } catch (error) {
+        backend.dispose();
+        host.remove(index);
+        throw error;
+      }
+
+      contexts.set(object, { backend, slot });
+      slots.set(slot, object);
+      place(slot);
+      dispatchEvent(
+        s,
+        slot,
+        s.rt.construct(s.rt.classNamed("flash.events::Event"), "context3DCreate") as AsObject,
+      );
+    });
+  };
+
+  const dispose = (object: AsObject): AsObject | null => {
+    const entry = contexts.get(object);
+    if (!entry) {
+      return null;
+    }
+
+    contexts.delete(object);
+    slots.delete(entry.slot);
+    entry.backend.dispose();
+    host.remove(indexOf(entry.slot));
+    return entry.slot;
   };
 
   class StageNatives {
@@ -94,43 +152,17 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         unsupported();
       }
 
-      pending.add(slot);
-      s.loads.deferHostEvent(() => {
-        pending.delete(slot);
-        if (closed || s.destroyed) {
-          return;
-        }
-
-        const index = indexOf(slot);
-        const backend = host.create(index);
-        let object: AsObject;
-        try {
-          object = construct("Context3D");
-        } catch (error) {
-          backend.dispose();
-          host.remove(index);
-          throw error;
-        }
-
-        contexts.set(object, { backend, slot });
-        slots.set(slot, object);
-        place(slot);
-        dispatchEvent(
-          s,
-          slot,
-          s.rt.construct(s.rt.classNamed("flash.events::Event"), "context3DCreate") as AsObject,
-        );
-      });
+      request(slot);
     }
   }
 
   class ContextNatives {
     get driverInfo(): string {
-      return "swf2es experimental WebGL2";
+      return contexts.has(this as unknown as AsObject) ? "swf2es experimental WebGL2" : "Disposed";
     }
 
-    get profile(): string {
-      return "baseline";
+    get profile(): string | null {
+      return contexts.has(this as unknown as AsObject) ? "baseline" : null;
     }
 
     declare $checking: boolean;
@@ -144,11 +176,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     get backBufferWidth(): number {
-      return context(this as unknown as AsObject).width;
+      return contexts.get(this as unknown as AsObject)?.backend.width ?? 0;
     }
 
     get backBufferHeight(): number {
-      return context(this as unknown as AsObject).height;
+      return contexts.get(this as unknown as AsObject)?.backend.height ?? 0;
     }
 
     configureBackBuffer(
@@ -159,19 +191,32 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       best = false,
       zoom = false,
     ): void {
+      const backend = context(this as unknown as AsObject);
+      if (width < 32) {
+        throw s.rt.error("Error", 3780, 32, 2048);
+      }
+      if (height < 32) {
+        throw s.rt.error("Error", 3781, 32, 2048);
+      }
+
       if (aa !== 0 || depth || best || zoom) {
         unsupported();
       }
 
-      context(this as unknown as AsObject).configure(width, height);
+      backend.configure(width, height);
     }
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {
+      const backend = context(this as unknown as AsObject);
+      if (backend.width === 0) {
+        throw s.rt.error("Error", 3698);
+      }
+
       if (depth !== 1 || stencil !== 0 || (mask !== 0xffffffff && mask !== 1)) {
         unsupported();
       }
 
-      context(this as unknown as AsObject).clear(r, g, b, a);
+      backend.clear(r, g, b, a);
     }
 
     createVertexBuffer(count: number, stride: number, usage = "staticDraw"): AsObject {
@@ -181,7 +226,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
       const resource = context(this as unknown as AsObject).createBuffer(count, stride);
       const object = construct("VertexBuffer3D");
-      buffers.set(object, resource);
+      buffers.set(object, { value: resource, owner: this as unknown as AsObject, disposed: false });
 
       return object;
     }
@@ -193,7 +238,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
       const resource = context(this as unknown as AsObject).createBuffer(count, 0);
       const object = construct("IndexBuffer3D");
-      buffers.set(object, resource);
+      buffers.set(object, { value: resource, owner: this as unknown as AsObject, disposed: false });
 
       return object;
     }
@@ -201,7 +246,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     createProgram(): AsObject {
       const resource = context(this as unknown as AsObject).createProgram();
       const object = construct("Program3D");
-      programs.set(object, resource);
+      programs.set(object, {
+        value: resource,
+        owner: this as unknown as AsObject,
+        disposed: false,
+      });
 
       return object;
     }
@@ -267,17 +316,9 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     dispose(recreate = true): void {
-      if (recreate) {
-        unsupported();
-      }
-
-      const object = this as unknown as AsObject;
-      const entry = contexts.get(object);
-      if (entry) {
-        entry.backend.dispose();
-        host.remove(indexOf(entry.slot));
-        contexts.delete(object);
-        slots.delete(entry.slot);
+      const slot = dispose(this as unknown as AsObject);
+      if (slot && recreate && !closed && !s.destroyed) {
+        request(slot);
       }
     }
   }
@@ -288,7 +329,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     dispose(): void {
-      buffer(this as unknown as AsObject).dispose();
+      const entry = buffers.get(this as unknown as AsObject);
+      if (entry && !entry.disposed) {
+        entry.value.dispose();
+        entry.disposed = true;
+      }
     }
   }
 
@@ -298,7 +343,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     dispose(): void {
-      program(this as unknown as AsObject).dispose();
+      const entry = programs.get(this as unknown as AsObject);
+      if (entry && !entry.disposed) {
+        entry.value.dispose();
+        entry.disposed = true;
+      }
     }
   }
 
@@ -324,12 +373,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
   return () => {
     closed = true;
-    for (const entry of contexts.values()) {
-      entry.backend.dispose();
-      host.remove(indexOf(entry.slot));
-      slots.delete(entry.slot);
+    for (const object of contexts.keys()) {
+      dispose(object);
     }
-
-    contexts.clear();
   };
 }

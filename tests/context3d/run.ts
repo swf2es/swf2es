@@ -13,13 +13,13 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Triangle", "Composition"].map((name) => ({
+  ["Triangle", "Composition", "Lifecycle"].map((name) => ({
     name,
     source: readFileSync(`${here}${name}.as`, "utf8"),
   })),
   out,
 );
-for (const name of ["Triangle", "Composition"]) {
+for (const name of ["Triangle", "Composition", "Lifecycle"]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   const size = name === "Triangle" ? 64 : 96;
@@ -60,6 +60,27 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(result.exception, null, JSON.stringify(result));
       assert.equal(result.value?.passed, true);
       console.log("context3d: ownership, failed uploads, resize, disposal and context loss ok");
+      const lifecycle: string[] = JSON.parse(
+        readFileSync(`${here}lifecycle-reference.json`, "utf8"),
+      );
+      for (const cancel of [false, true]) {
+        const result = await evaluate<{ trace: string[]; created: number; presented: string[] }>(
+          `import("/repo/tests/context3d/page.ts").then(m => m.lifecycle(${cancel}))`,
+        );
+        assert.equal(result.exception, null, JSON.stringify(result));
+        assert.ok(result.value);
+        assert.deepEqual(
+          result.value.trace,
+          cancel ? lifecycle.slice(0, lifecycle.indexOf("life dispose-returned 1") + 1) : lifecycle,
+        );
+        assert.equal(result.value.created, cancel ? 1 : 3);
+        assert.deepEqual(
+          result.value.presented,
+          cancel ? ["ffff0000"] : ["ffff0000", "ff00ff00", "ff0000ff"],
+        );
+      }
+
+      console.log("context3d: AIR lifecycle, disposed errors and cancellation of recreation ok");
       const composition: { points: number[][]; samples: string[][] } = JSON.parse(
         readFileSync(`${here}composition-reference.json`, "utf8"),
       );
