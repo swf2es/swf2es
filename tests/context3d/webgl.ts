@@ -1,5 +1,6 @@
 import { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.ts";
 import {
+  type BlendFactor,
   type Buffer3D,
   type CompareMode,
   type Context3D,
@@ -19,6 +20,19 @@ const DEPTH_FUNCTIONS = {
   notEqual: "NOTEQUAL",
   greaterEqual: "GEQUAL",
   greater: "GREATER",
+} as const;
+
+const BLEND_FUNCTIONS = {
+  zero: "ZERO",
+  one: "ONE",
+  sourceColor: "SRC_COLOR",
+  oneMinusSourceColor: "ONE_MINUS_SRC_COLOR",
+  sourceAlpha: "SRC_ALPHA",
+  oneMinusSourceAlpha: "ONE_MINUS_SRC_ALPHA",
+  destinationColor: "DST_COLOR",
+  oneMinusDestinationColor: "ONE_MINUS_DST_COLOR",
+  destinationAlpha: "DST_ALPHA",
+  oneMinusDestinationAlpha: "ONE_MINUS_DST_ALPHA",
 } as const;
 
 function range(start: number, count: number, length: number): void {
@@ -215,6 +229,17 @@ export class WebGLContext3D implements Context3D {
     this.depthWrite = write;
     this.gl.depthMask(write);
     this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+  }
+
+  setBlend(source: BlendFactor, destination: BlendFactor): void {
+    this.alive();
+    const gl = this.gl;
+    if (source === "one" && destination === "zero") {
+      gl.disable(gl.BLEND);
+    } else {
+      gl.blendFunc(gl[BLEND_FUNCTIONS[source]], gl[BLEND_FUNCTIONS[destination]]);
+      gl.enable(gl.BLEND);
+    }
   }
 
   setCulling(face: CullFace): void {

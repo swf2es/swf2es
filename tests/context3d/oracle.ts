@@ -8,16 +8,19 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const lifecycle = process.argv.includes("--lifecycle");
 const arithmetic = process.argv.includes("--arithmetic");
 const texturing = process.argv.includes("--texturing");
+const blending = process.argv.includes("--blending");
 const depth = process.argv.includes("--depth");
-const fixture = depth
-  ? "Depth"
-  : texturing
-    ? "Texturing"
-    : arithmetic
-      ? "Arithmetic"
-      : lifecycle
-        ? "Lifecycle"
-        : "Triangle";
+const fixture = blending
+  ? "Blending"
+  : depth
+    ? "Depth"
+    : texturing
+      ? "Texturing"
+      : arithmetic
+        ? "Arithmetic"
+        : lifecycle
+          ? "Lifecycle"
+          : "Triangle";
 const out = `${here}out/oracle-${fixture}/`;
 mkdirSync(out, { recursive: true });
 writeFileSync(
@@ -31,7 +34,7 @@ writeFileSync(
       stage.nativeWindow.activate();
       setTimeout(function():void {
         try {
-          ${lifecycle || arithmetic || texturing || depth ? 'if (!complete) { throw new Error("Fixture did not complete"); }' : "closeContext();"}
+          ${lifecycle || arithmetic || texturing || depth || blending ? 'if (!complete) { throw new Error("Fixture did not complete"); }' : "closeContext();"}
           NativeApplication.nativeApplication.exit(0);
         } catch (error:Error) {
           trace("reference-error", error);
@@ -77,19 +80,23 @@ const lines = (run.stdout + run.stderr)
   .replaceAll("\r", "")
   .split("\n")
   .filter((line) =>
-    depth
-      ? line.startsWith("depth ")
-      : texturing
-        ? line.startsWith("texturing ")
-        : arithmetic
-          ? line.startsWith("arithmetic ")
-          : lifecycle
-            ? line.startsWith("life ")
-            : /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
-                line,
-              ),
+    blending
+      ? line.startsWith("blending ")
+      : depth
+        ? line.startsWith("depth ")
+        : texturing
+          ? line.startsWith("texturing ")
+          : arithmetic
+            ? line.startsWith("arithmetic ")
+            : lifecycle
+              ? line.startsWith("life ")
+              : /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
+                  line,
+                ),
   );
-if (depth) {
+if (blending) {
+  assert.equal(lines.at(-1), "blending complete", JSON.stringify(lines));
+} else if (depth) {
   assert.equal(lines.at(-1), "depth complete", JSON.stringify(lines));
 } else if (texturing) {
   assert.equal(lines.at(-1), "texturing complete", JSON.stringify(lines));
@@ -101,7 +108,7 @@ if (depth) {
   assert.equal(lines.length, 12, JSON.stringify(lines));
   assert.equal(lines.at(-1), "disposed");
 }
-const path = `${here}${depth ? "depth-" : texturing ? "texturing-" : arithmetic ? "arithmetic-" : lifecycle ? "lifecycle-" : ""}reference.json`;
+const path = `${here}${blending ? "blending-" : depth ? "depth-" : texturing ? "texturing-" : arithmetic ? "arithmetic-" : lifecycle ? "lifecycle-" : ""}reference.json`;
 if (process.argv.includes("--update")) {
   writeFileSync(path, `${JSON.stringify(lines, null, 2)}\n`);
 } else {

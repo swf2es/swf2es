@@ -13,6 +13,19 @@ export const COMPARE_MODES = [
 export type CompareMode = (typeof COMPARE_MODES)[number];
 export const CULL_FACES = ["none", "back", "front", "frontAndBack"] as const;
 export type CullFace = (typeof CULL_FACES)[number];
+export const BLEND_FACTORS = [
+  "zero",
+  "one",
+  "sourceColor",
+  "oneMinusSourceColor",
+  "sourceAlpha",
+  "oneMinusSourceAlpha",
+  "destinationColor",
+  "oneMinusDestinationColor",
+  "destinationAlpha",
+  "oneMinusDestinationAlpha",
+] as const;
+export type BlendFactor = (typeof BLEND_FACTORS)[number];
 
 export class TextureBindingError extends Error {
   readonly reason: "unused" | "conflicting" | "missing";
@@ -72,6 +85,7 @@ export interface Context3D {
   ): void;
   setDepth(write: boolean, compare: CompareMode): void;
   setCulling(face: CullFace): void;
+  setBlend(source: BlendFactor, destination: BlendFactor): void;
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
   createTexture(width: number, height: number): Texture3D;

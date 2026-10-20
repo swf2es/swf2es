@@ -143,6 +143,7 @@ export async function triangle(mode: "enabled" | "fallback" | "cancel") {
       check(backend.disposed, "AS3 dispose did not dispose the backend");
       check(owned[0].live.size === 0, "AS3 dispose retained GPU handles");
       rejects(() => backend.clear(0, 0, 0, 1));
+      rejects(() => backend.setBlend("one", "zero"));
     }
     return { trace, presented, contexts: owned.length };
   } finally {
@@ -244,7 +245,7 @@ export async function lifecycle(cancel: boolean) {
   }
 }
 
-export async function shaderFixture(fixture: "Arithmetic" | "Texturing" | "Depth") {
+export async function shaderFixture(fixture: "Arithmetic" | "Texturing" | "Depth" | "Blending") {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
   );

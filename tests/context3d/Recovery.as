@@ -95,9 +95,10 @@ package {
       ]), 1);
       current.drawTriangles(indices);
       current.present();
-      // The next context must start with fresh depth and culling defaults.
+      // The next context must start with fresh drawing defaults.
       current.setDepthTest(false, "never");
       current.setCulling("frontAndBack");
+      current.setBlendFactors("zero", "zero");
       texture = current.createTexture(2, 2, "bgra", false);
       texture.uploadFromBitmapData(bitmap);
     }

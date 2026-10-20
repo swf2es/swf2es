@@ -21,6 +21,7 @@ node tests/context3d/oracle.ts --lifecycle
 node tests/context3d/oracle.ts --arithmetic
 node tests/context3d/oracle.ts --texturing
 node tests/context3d/oracle.ts --depth
+node tests/context3d/oracle.ts --blending
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -58,8 +59,8 @@ Restoration releases that surface and queues a new context on a fresh
 surface. The AS3 creation listener uploads new buffers and shaders and
 draws a triangle again; the browser checks red, green and blue presentations
 over two recovery cycles.
-The recovered contexts have depth/stencil attachments; state set to reject all
-draws before loss must not survive into the replacement.
+The recovered contexts have depth/stencil attachments; depth/culling state set to
+reject all draws and zero blend factors before loss must not survive into the replacement.
 
 These checks also cover retained vertex/index buffers, programs and textures rejecting
 use after loss, fresh context defaults, preserved slot placement, duplicate
@@ -144,6 +145,21 @@ Stencil testing and nonzero stencil clear values remain unsupported. Clear
 masks support color/depth/stencil bits (1/2/4), zero and the default all-bits
 mask; broader numeric validation and precision parity remain future work.
 
+`Blending.as` compares all 100 pairs of the ten source/destination blend factors
+against AIR, including fractional color and alpha channels. Additional samples
+cover default replacement, additive saturation, zero/full source alpha,
+premultiplied source-over, clear independence and state preservation across resize
+and presentation. Invalid factors leave the previous state intact and produce
+ArgumentError 2008, including after disposal; valid setters on disposed AS3
+contexts are ignored.
+
+Blend factors apply to both color and alpha channels with additive blending.
+The backend disables blending for `one`/`zero` replacement and uses WebGL blend
+state for other combinations. State changes create no arrays or GPU resources.
+The browser recovery test verifies fresh blend defaults after loss. These samples
+match exactly on the tested backends; they do not establish rounding parity across
+all GPU drivers.
+
 `Composition.as` exercises two Stage3D slots beneath ordinary Flash
 graphics, including an opaque and a translucent overlay. The browser test
 uses the existing Pixi view for the display list and separate canvas layers
@@ -172,13 +188,13 @@ node tests/context3d/composition-oracle.ts --update
 This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
 tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
-float vertex attributes, vector/matrix uploads, depth testing, culling, unblended
+float vertex attributes, vector/matrix uploads, depth testing, culling, blending,
 color rendering and non-antialiased back buffers are exercised, with sizes limited to
 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are blending, remaining shader operations and render-to-texture,
+Next gates are remaining shader operations and render-to-texture,
 alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own

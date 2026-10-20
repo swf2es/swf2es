@@ -6,6 +6,8 @@ import { dispatchEvent } from "../../packages/player/dist/scripting/events.js";
 import type { Scripting } from "../../packages/player/dist/scripting.js";
 import { avm2 } from "../../packages/runtime/dist/index.js";
 import {
+  BLEND_FACTORS,
+  type BlendFactor,
   type Buffer3D,
   COMPARE_MODES,
   type CompareMode,
@@ -396,6 +398,19 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
       // AIR validates enum values but otherwise ignores these setters after disposal.
       contexts.get(this as unknown as AsObject)?.backend.setCulling(face as CullFace);
+    }
+
+    setBlendFactors(source: string, destination: string): void {
+      if (!BLEND_FACTORS.includes(source as BlendFactor)) {
+        throw s.rt.error("ArgumentError", 2008, "sourceFactor");
+      }
+      if (!BLEND_FACTORS.includes(destination as BlendFactor)) {
+        throw s.rt.error("ArgumentError", 2008, "destinationFactor");
+      }
+
+      contexts
+        .get(this as unknown as AsObject)
+        ?.backend.setBlend(source as BlendFactor, destination as BlendFactor);
     }
 
     setDepthTest(write: boolean, compare: string): void {
