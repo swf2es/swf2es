@@ -979,16 +979,8 @@ export function fontAlignZones(id: number, hint: number, glyphs: number): Uint8A
   return tag(73, w.done(), true);
 }
 
-/**
- * A DefineFont3: glyphs of rectangles, with the layout (ascent, descent,
- * leading, advances, bounds and kerning). Its coordinates are twentieths
- * of DefineFont2's, 20480 to the em.
- */
-export function font3(spec: FontSpec): Uint8Array {
-  const scale = 20;
-  // Flash finds a character by a binary search of the codes: they go in order.
-  const sorted = [...spec.glyphs].sort((a, b) => a.char.charCodeAt(0) - b.char.charCodeAt(0));
-  const glyphs = sorted.map((g) => {
+function glyphShapes(glyphs: GlyphSpec[], scale: number, fill0 = false): Uint8Array[] {
+  return glyphs.map((g) => {
     const w = new BitWriter();
     w.ub(4, 1).ub(4, 0);
     let x = 0;
@@ -1015,7 +1007,7 @@ export function font3(spec: FontSpec): Uint8Array {
     for (const [k, points] of contours.entries()) {
       const [l, t] = points[0].map((v) => v * scale);
       // Move, with the fill at the path's start.
-      w.ub(1, 0).ub(5, k === 0 ? 1 | 4 : 1);
+      w.ub(1, 0).ub(5, k === 0 ? 1 | (fill0 ? 2 : 4) : 1);
       const n = sbits(l, t);
       w.ub(5, n).sb(n, l).sb(n, t);
       if (k === 0) {
@@ -1037,6 +1029,63 @@ export function font3(spec: FontSpec): Uint8Array {
     w.ub(1, 0).ub(5, 0);
     return w.done();
   });
+}
+
+/** DefineFont's offsets and outlines, in code order; its name and codes are a separate tag. */
+export function font1(id: number, glyphs: GlyphSpec[]): Uint8Array {
+  const sorted = [...glyphs].sort((a, b) => a.char.charCodeAt(0) - b.char.charCodeAt(0));
+  const shapes = glyphShapes(sorted, 1, true);
+  const w = new BitWriter().u16(id);
+  let offset = shapes.length * 2;
+  for (const shape of shapes) {
+    w.u16(offset);
+    offset += shape.length;
+  }
+
+  for (const shape of shapes) {
+    w.raw(shape);
+  }
+
+  return tag(10, w.done(), true);
+}
+
+/** DefineFontInfo or DefineFontInfo2, whose language byte must precede its wide codes. */
+export function fontInfo(
+  id: number,
+  name: string,
+  codes: number[],
+  options: { version?: 1 | 2; wide?: boolean; bold?: boolean; italic?: boolean } = {},
+): Uint8Array {
+  const version = options.version ?? 2;
+  const wide = version === 2 || options.wide;
+  const encoded = new TextEncoder().encode(name);
+  const w = new BitWriter().u16(id).u8(encoded.length).raw(encoded);
+  w.u8((wide ? 1 : 0) | (options.bold ? 2 : 0) | (options.italic ? 4 : 0));
+  if (version === 2) {
+    w.u8(1);
+  }
+
+  for (const code of codes) {
+    if (wide) {
+      w.u16(code);
+    } else {
+      w.u8(code);
+    }
+  }
+
+  return tag(version === 2 ? 62 : 13, w.done());
+}
+
+/**
+ * A DefineFont3: glyphs of rectangles, with the layout (ascent, descent,
+ * leading, advances, bounds and kerning). Its coordinates are twentieths
+ * of DefineFont2's, 20480 to the em.
+ */
+export function font3(spec: FontSpec): Uint8Array {
+  const scale = 20;
+  // Flash finds a character by a binary search of the codes: they go in order.
+  const sorted = [...spec.glyphs].sort((a, b) => a.char.charCodeAt(0) - b.char.charCodeAt(0));
+  const glyphs = glyphShapes(sorted, scale);
 
   const w = new BitWriter().u16(spec.id);
   // HasLayout, WideOffsets, WideCodes, italic, bold.

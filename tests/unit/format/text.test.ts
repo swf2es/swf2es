@@ -7,9 +7,80 @@ import {
   readFont,
   readFont4,
   readFontAlignZones,
+  readFontInfo,
+  readTags,
   tags,
 } from "../../../packages/format/dist/index.js";
-import { BitWriter, font3, fontAlignZones, rect } from "../../swf-writer.ts";
+import { BitWriter, font1, font3, fontAlignZones, fontInfo, rect } from "../../swf-writer.ts";
+
+test("DefineFont infers its glyph count from the first offset and reads 1024-unit outlines", () => {
+  const bytes = font1(7, [
+    { char: "b", advance: 0, boxes: [[50, -700, 600, 0]] },
+    { char: "a", advance: 0, boxes: [] },
+  ]);
+  const font = readFont(bytes, readTags(bytes, 0, bytes.length).tags[0]);
+  assert.equal(font.id, 7);
+  assert.equal(font.em, 1024);
+  assert.equal(font.layout, false);
+  assert.equal(font.glyphs.length, 2);
+  assert.equal(font.glyphs[0].records.length, 0);
+  assert.deepEqual(font.glyphs[1].records, [
+    { type: "style", moveTo: { x: 50, y: -700 }, fill0: 1, fill1: null, line: null, styles: null },
+    { type: "line", dx: 550, dy: 0 },
+    { type: "line", dx: 0, dy: 700 },
+    { type: "line", dx: -550, dy: 0 },
+    { type: "line", dx: 0, dy: -700 },
+  ]);
+  assert.equal(font.name, "");
+  assert.deepEqual(
+    font.glyphs.map((g) => [g.code, g.advance, g.bounds]),
+    [
+      [-1, 0, null],
+      [-1, 0, null],
+    ],
+  );
+});
+
+test("DefineFont keeps malformed offset tables and glyphs within their tag", () => {
+  const read = (body: number[], length = body.length) =>
+    readFont(new Uint8Array([...body, 0xff, 0xff]), {
+      code: tags.DefineFont,
+      offset: 0,
+      length,
+      long: false,
+    });
+  for (const body of [
+    [7, 0],
+    [7, 0, 0xff, 0xff],
+    [7, 0, 3, 0, 0],
+  ]) {
+    assert.equal(read(body).glyphs.length, 0);
+  }
+
+  assert.equal(read([7, 0, 4, 0, 4, 0], 5).glyphs.length, 0);
+  assert.equal(read([7, 0, 4, 0, 3, 0]).glyphs.length, 0);
+  assert.equal(read([7, 0, 4, 0, 99, 0]).glyphs.length, 0);
+  assert.deepEqual(read([7, 0, 2, 0, 0x10]).glyphs[0].records, []);
+});
+
+test("legacy font info reads narrow and wide codes, style flags, UTF-8 names and the language byte", () => {
+  for (const version of [1, 2] as const) {
+    for (const wide of [false, true]) {
+      const codes = wide || version === 2 ? [65, 0x3a9] : [65, 90];
+      const bytes = fontInfo(7, "Épreuve", codes, { version, wide, bold: true, italic: true });
+      const tag = readTags(bytes, 0, bytes.length).tags[0];
+      assert.deepEqual(readFontInfo(bytes, tag), {
+        id: 7,
+        name: "Épreuve",
+        bold: true,
+        italic: true,
+        codes,
+      });
+      const cut = { ...tag, length: tag.length - 1 };
+      assert.deepEqual(readFontInfo(bytes, cut).codes, [65]);
+    }
+  }
+});
 
 test("DefineEditText reads conditional fields before the variable and initial text", () => {
   const w = new BitWriter().u16(17);

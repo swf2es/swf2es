@@ -1,14 +1,14 @@
-// DefineFont2 and DefineFont3: a font's glyphs, the outlines a field that
+// DefineFont through DefineFont3: a font's glyphs, the outlines a field that
 // embeds it draws, and its layout, the advances, kerning, ascent and
 // descent a field's text is laid out by.
-import { readString } from "./display.js";
+import { readString, utf8 } from "./display.js";
 import { readRecords, type ShapeRecord } from "./shape.js";
 import { type Rect, SwfReader, type Tag } from "./swf.js";
-import { DefineFont3 } from "./tags.js";
-import { readFontName } from "./text.js";
+import { DefineFont, DefineFont3, DefineFontInfo2 } from "./tags.js";
+import { type FontName, readFontName } from "./text.js";
 
 export interface Glyph {
-  /** The character, a UTF-16 code unit. */
+  /** The character, a UTF-16 code unit, or -1 before a legacy font has a character table. */
   code: number;
   /** Its outline: shape records of one fill, in the font's units, y down from the baseline. */
   records: ShapeRecord[];
@@ -22,7 +22,7 @@ export interface Font {
   name: string;
   bold: boolean;
   italic: boolean;
-  /** Units to the em: 1024 for DefineFont2, which is in twips, 20480 for DefineFont3. */
+  /** Units to the em: 1024 for DefineFont and DefineFont2, 20480 for DefineFont3. */
   em: number;
   /** In the order of the code table, which is by code. */
   glyphs: Glyph[];
@@ -65,8 +65,81 @@ export function readFont4(bytes: Uint8Array, tag: Tag): Font4 {
   };
 }
 
-/** DefineFont2 (48) or DefineFont3 (75), as far as the tag goes: a short one gives the glyphs it has. */
+/** DefineFont (10), whose first offset gives the glyph count; its name and codes come separately. */
+function readFont1(bytes: Uint8Array, tag: Tag): Font {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const font: Font = {
+    id: r.u16(),
+    name: "",
+    bold: false,
+    italic: false,
+    em: 1024,
+    glyphs: [],
+    layout: false,
+    ascent: 0,
+    descent: 0,
+    leading: 0,
+    kerning: new Map(),
+  };
+  const table = r.pos;
+  const first = r.u16();
+  if (r.overrun || first < 2 || first % 2 !== 0 || table + first > r.end) {
+    return font;
+  }
+
+  const offsets = [first];
+  for (let i = 1; i < first / 2; i++) {
+    const offset = r.u16();
+    if (offset < offsets[i - 1] || table + offset > r.end) {
+      return font;
+    }
+
+    offsets.push(offset);
+  }
+
+  offsets.push(r.end - table);
+  for (let i = 0; i < offsets.length - 1; i++) {
+    const start = offsets[i];
+    const end = offsets[i + 1];
+    const records = readRecords(new SwfReader(bytes, table + start, table + end), 1).records;
+    font.glyphs.push({ code: -1, records, advance: 0, bounds: null });
+  }
+
+  return font;
+}
+
+/** A legacy font's name, style and glyph-to-character mapping, supplied after its outlines. */
+export interface FontInfo extends FontName {
+  codes: number[];
+}
+
+/** DefineFontInfo (13) or DefineFontInfo2 (62); the latter has a language byte before its codes. */
+export function readFontInfo(bytes: Uint8Array, tag: Tag): FontInfo {
+  const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
+  const id = r.u16();
+  const length = r.u8();
+  const name = utf8(bytes.subarray(r.pos, Math.min(r.pos + length, r.end))).replace(/\0+$/, "");
+  r.pos += length;
+  const flags = r.u8();
+  if (tag.code === DefineFontInfo2) {
+    r.u8();
+  }
+
+  const codes: number[] = [];
+  const size = flags & 1 ? 2 : 1;
+  while (r.pos + size <= r.end) {
+    codes.push(size === 2 ? r.u16() : r.u8());
+  }
+
+  return { id, name, bold: (flags & 2) !== 0, italic: (flags & 4) !== 0, codes };
+}
+
+/** DefineFont (10), DefineFont2 (48) or DefineFont3 (75), as far as the tag goes. */
 export function readFont(bytes: Uint8Array, tag: Tag): Font {
+  if (tag.code === DefineFont) {
+    return readFont1(bytes, tag);
+  }
+
   const named = readFontName(bytes, tag);
   const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
   r.u16();

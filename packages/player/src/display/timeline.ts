@@ -25,6 +25,7 @@ import {
   readFont,
   readFont4,
   readFontAlignZones,
+  readFontInfo,
   readFrameLabel,
   readMorphShape,
   readPlace,
@@ -211,7 +212,7 @@ export interface ButtonCharacter {
   grid: Rect | null;
 }
 
-/** DefineFont2 or 3: its name and style, for the fields that name it, and its glyphs and layout. */
+/** DefineFont through 3: its name and style, glyphs, and optional layout. */
 export interface FontCharacter extends FontName {
   type: "font";
   font: Font;
@@ -632,6 +633,7 @@ function timelineOf(
         }
         break;
       }
+      case tags.DefineFont:
       case tags.DefineFont2:
       case tags.DefineFont3: {
         const font = readFont(bytes, t);
@@ -643,6 +645,20 @@ function timelineOf(
           italic: font.italic,
           font,
         });
+        break;
+      }
+      case tags.DefineFontInfo:
+      case tags.DefineFontInfo2: {
+        const info = readFontInfo(bytes, t);
+        const font = library.get(info.id);
+        if (font?.type === "font") {
+          font.name = font.font.name = info.name;
+          font.bold = font.font.bold = info.bold;
+          font.italic = font.font.italic = info.italic;
+          for (let i = 0; i < Math.min(info.codes.length, font.font.glyphs.length); i++) {
+            font.font.glyphs[i].code = info.codes[i];
+          }
+        }
         break;
       }
       case tags.DefineFontAlignZones: {
