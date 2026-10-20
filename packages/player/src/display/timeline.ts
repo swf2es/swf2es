@@ -84,7 +84,7 @@ export interface Timeline {
   labels: FrameName[];
   /** The labels a goto finds: those, or the FrameLabel tags where the scene data has none. */
   gotoLabels: FrameName[];
-  /** The FrameLabel tags by frame, which currentFrameLabel reads, scene data or not. */
+  /** The first FrameLabel tag by frame, which currentFrameLabel reads, scene data or not. */
   frameLabels: Map<number, string>;
   /** Scenes by their first frame, in order; one unnamed scene of every frame without scene data. */
   scenes: FrameName[];
@@ -508,6 +508,7 @@ function timelineOf(
 ): Timeline {
   const avm1 = actions !== null;
   const frames: FrameCommand[][] = [[]];
+  const tagged: FrameName[] = [];
   const frameLabels = new Map<number, string>();
   const sounds = new Map<number, StartSound[]>();
   let head: SoundStreamHead | null = null;
@@ -534,9 +535,15 @@ function timelineOf(
           frame.push({ type: "actions", tag: t.offset });
         }
         break;
-      case tags.FrameLabel:
-        frameLabels.set(frames.length, readFrameLabel(bytes, t));
+      case tags.FrameLabel: {
+        const name = readFrameLabel(bytes, t);
+        tagged.push({ name, frame: frames.length });
+        // A frame may have aliases: gotos find every name, currentFrameLabel the first.
+        if (!frameLabels.has(frames.length)) {
+          frameLabels.set(frames.length, name);
+        }
         break;
+      }
       case tags.StartSound:
       case tags.StartSound2: {
         const list = sounds.get(frames.length) ?? [];
@@ -766,7 +773,6 @@ function timelineOf(
   // Scene data that names no scene is none, as Flash reads it; its first
   // scene starts the timeline whatever frame it gives.
   const data = (scenes as SceneData | null)?.scenes.length ? (scenes as SceneData) : null;
-  const tagged = [...frameLabels].map(([frame, name]) => ({ name, frame }));
   const labels = data ? named(data.labels).sort((a, b) => a.frame - b.frame) : tagged;
   const sceneList = data ? named(data.scenes) : [{ name: "", frame: 1 }];
   sceneList[0].frame = 1;

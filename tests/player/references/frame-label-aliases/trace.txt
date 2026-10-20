@@ -1,0 +1,10 @@
+labels 5
+initial 1
+first 2
+second 2
+repeat 2
+repeat 3
+initial initial initial
+first 2 repeat first
+second 2 repeat first
+repeat 2 repeat first
