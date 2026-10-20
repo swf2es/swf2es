@@ -18,6 +18,7 @@ node tests/context3d/oracle.ts
 # Deliberately replace it after changing the reference fixture:
 node tests/context3d/oracle.ts --update
 node tests/context3d/oracle.ts --lifecycle
+node tests/context3d/oracle.ts --arithmetic
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -72,6 +73,23 @@ buffers and programs (3694). Disposed context getters and repeated resource
 disposal are checked too. Other validation remains experimental; this is
 not complete Flash error parity.
 
+`Arithmetic.as` compares finite arithmetic and matrix results with AIR:
+`add`, `sub`, `mul`, `div`, `min`, `max`, `dp3`, `dp4`, `abs`, `neg`, `sat`,
+`m33`, `m44` and `m43`. The fixture checks swizzles, masked writes, temporary
+registers that are both inputs and outputs, and both matrix-upload transpose
+settings. It samples transformed geometry as well as fragment colors and
+verifies that uploading a Matrix3D does not mutate it. Matrix uploads reuse
+one scratch array and copy into the backend's constant storage.
+
+The arithmetic reference also covers null matrices (TypeError 2007),
+negative register indices (RangeError 2006) and invalid program types
+(ArgumentError 2008). The prototype still limits constants to 128 vertex
+and 28 fragment registers; AIR can accept uploads beyond those limits.
+The parser rejects matrix spans beyond those limits before GPU allocation.
+Matrix operands currently require consecutive, unswizzled constant registers;
+three-row instructions require a destination mask within xyz. Indirect reads,
+other instructions and broader numeric edge-case parity remain future work.
+
 `Composition.as` exercises two Stage3D slots beneath ordinary Flash
 graphics, including an opaque and a translucent overlay. The browser test
 uses the existing Pixi view for the display list and separate canvas layers
@@ -99,9 +117,10 @@ node tests/context3d/composition-oracle.ts --update
 
 This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
-tears down its host. Only baseline AGAL v1 `mov`, float vertex attributes,
-vector uploads, opaque color rendering and non-antialiased color back
-buffers are exercised, with sizes limited to 32×32 through 2048×2048.
+tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
+float vertex attributes, vector/matrix uploads, opaque color rendering and
+non-antialiased color back buffers are exercised, with sizes limited to
+32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 

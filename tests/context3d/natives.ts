@@ -29,6 +29,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   const buffers = new WeakMap<AsObject, Resource<Buffer3D>>();
   const programs = new WeakMap<AsObject, Resource<Program3D>>();
   const indices = new WeakMap<AsObject, number>();
+  const matrixConstants = new Float32Array(16);
   let closed = false;
 
   function unsupported(): never {
@@ -314,6 +315,31 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         data,
         count === -1 ? Math.floor(data.length / 4) : count,
       );
+    }
+
+    setProgramConstantsFromMatrix(
+      type: string,
+      first: number,
+      matrix: AsObject,
+      transpose = false,
+    ): void {
+      const backend = context(this as unknown as AsObject);
+      if (type !== "vertex" && type !== "fragment") {
+        throw s.rt.error("ArgumentError", 2008, "programType");
+      }
+      if (!matrix) {
+        throw s.rt.error("TypeError", 2007, "matrix");
+      }
+      if (first < 0) {
+        throw s.rt.error("RangeError", 2006);
+      }
+
+      const values: Float32Array = matrix.$matrix3D;
+      for (let i = 0; i < 16; i++) {
+        matrixConstants[i] = values[transpose ? (i % 4) * 4 + Math.floor(i / 4) : i];
+      }
+
+      backend.setConstants(type, first, matrixConstants, 4);
     }
 
     setCulling(face: string): void {

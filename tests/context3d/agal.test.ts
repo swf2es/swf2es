@@ -24,7 +24,7 @@ test("AGAL stage, masks, swizzles, constants and clip-depth mapping", () => {
   const result = translate(vertex, "vertex");
   assert.deepEqual(result.attributes, [3]);
   assert.deepEqual(result.constants, []);
-  assert.match(result.source, /result\.xy = va3\.zy/);
+  assert.match(result.source, /result\.xy = va3\.zyxw\.xy/);
   assert.match(result.source, /result\.z \* 2\.0 - result\.w/);
   const fragment = translate(mov(true), "fragment");
   assert.deepEqual(fragment.constants, [0]);
@@ -41,7 +41,7 @@ test("unsupported and malformed AGAL never silently compile", () => {
     [1, 2],
     [5, 0],
     [6, 1], // header and stage
-    [7, 1], // unsupported opcode
+    [7, 5], // unsupported opcode
     [13, 0],
     [13, 16], // empty/invalid destination mask
     [14, 1], // constant destination
@@ -66,4 +66,57 @@ test("unsupported and malformed AGAL never silently compile", () => {
   const fragment = mov(true);
   fragment[15] = 28;
   assert.throws(() => translate(fragment, "fragment"));
+});
+
+function binary(opcode: number, first: number, fragment = false): Uint8Array {
+  const bytes = mov(fragment);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(7, opcode, true);
+  view.setUint32(23, 0xe4000000 | first, true);
+  view.setUint32(27, 1, true);
+  return bytes;
+}
+
+test("matrix register spans respect stage limits and retain every referenced row", () => {
+  for (const fragment of [false, true]) {
+    const stage = fragment ? "fragment" : "vertex";
+    const end = fragment ? 28 : 128;
+    for (const opcode of [0x17, 0x18, 0x19]) {
+      const rows = opcode === 0x18 ? 4 : 3;
+      const bytes = binary(opcode, end - rows, fragment);
+      bytes[13] = rows === 4 ? 15 : 7;
+      const translated = translate(bytes, stage);
+      const expected = Array.from({ length: rows }, (_, i) => end - rows + i);
+      assert.deepEqual(translated.constants, fragment ? [0, ...expected] : expected);
+      // Even a masked matrix read must not hide an out-of-range register span.
+      bytes[13] = 1;
+      bytes[23]++;
+      assert.throws(() => translate(bytes, stage));
+    }
+  }
+});
+
+test("arithmetic validates both sources and rejects unsupported matrix encodings", () => {
+  for (const opcode of [1, 2, 3, 4, 6, 7, 0x12, 0x13]) {
+    const bytes = binary(opcode, 27, true);
+    assert.deepEqual(translate(bytes, "fragment").constants, [0, 27]);
+    bytes[23] = 28;
+    assert.throws(() => translate(bytes, "fragment"));
+    bytes[23] = 0;
+    bytes[30] = 128;
+    assert.throws(() => translate(bytes, "fragment"));
+  }
+  for (const [offset, value] of [
+    [27, 2],
+    [26, 0],
+    [25, 1],
+    [30, 128],
+  ]) {
+    const bytes = binary(0x18, 4);
+    bytes[offset] = value;
+    assert.throws(() => translate(bytes, "vertex"));
+  }
+  for (const opcode of [0x17, 0x19]) {
+    assert.throws(() => translate(binary(opcode, 4), "vertex"), "three-row matrix writes w");
+  }
 });

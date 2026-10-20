@@ -76,43 +76,111 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     return name;
   };
 
-  for (let offset = 7; offset < bytes.length; offset += 24) {
-    if (data.getUint32(offset, true) !== 0) {
-      throw new Error("Context3D experiment supports only AGAL mov");
-    }
-
-    const dest = data.getUint32(offset + 4, true);
-    const low = data.getUint32(offset + 8, true);
-    const high = data.getUint32(offset + 12, true);
-    // Indirect constants, indexing and the unused second source are not
-    // supported by this slice; never silently turn them into a direct read.
-    if (
-      high >>> 8 ||
-      ((low >>> 16) & 255) !== 0 ||
-      data.getUint32(offset + 16, true) !== 0 ||
-      data.getUint32(offset + 20, true) !== 0
-    ) {
+  const source = (offset: number, row = 0): string => {
+    const low = data.getUint32(offset, true);
+    const high = data.getUint32(offset + 4, true);
+    if (high >>> 8 || ((low >>> 16) & 255) !== 0) {
       throw new Error("Unsupported AGAL source encoding");
     }
 
+    const name = register(high & 255, (low & 65535) + row, false);
+    const swizzle = low >>> 24;
+    let lanes = "";
+    for (let c = 0; c < 4; c++) {
+      lanes += components[(swizzle >>> (c * 2)) & 3];
+    }
+
+    return `${name}.${lanes}`;
+  };
+
+  for (let offset = 7; offset < bytes.length; offset += 24) {
+    const opcode = data.getUint32(offset, true);
+    const dest = data.getUint32(offset + 4, true);
     const mask = (dest >>> 16) & 255;
     if (mask === 0 || mask > 15) {
       throw new Error("Invalid AGAL write mask");
     }
 
     const target = register(dest >>> 24, dest & 65535, true);
-    const source = register(high & 255, low & 65535, false);
-    const swizzle = low >>> 24;
-    let left = "";
-    let right = "";
+    const a = source(offset + 8);
+    const unary = opcode === 0 || opcode === 0x14 || opcode === 0x15 || opcode === 0x16;
+    if (unary && (data.getUint32(offset + 16, true) || data.getUint32(offset + 20, true))) {
+      throw new Error("Nonempty unused AGAL source");
+    }
+
+    const b = unary ? "" : source(offset + 16);
+    let expression: string;
+    switch (opcode) {
+      case 0:
+        expression = a;
+        break;
+      case 1:
+        expression = `(${a} + ${b})`;
+        break;
+      case 2:
+        expression = `(${a} - ${b})`;
+        break;
+      case 3:
+        expression = `(${a} * ${b})`;
+        break;
+      case 4:
+        expression = `(${a} / ${b})`;
+        break;
+      case 6:
+        expression = `min(${a}, ${b})`;
+        break;
+      case 7:
+        expression = `max(${a}, ${b})`;
+        break;
+      case 0x12:
+        expression = `vec4(dot(${a}.xyz, ${b}.xyz))`;
+        break;
+      case 0x13:
+        expression = `vec4(dot(${a}, ${b}))`;
+        break;
+      case 0x14:
+        expression = `abs(${a})`;
+        break;
+      case 0x15:
+        expression = `(-${a})`;
+        break;
+      case 0x16:
+        expression = `clamp(${a}, 0.0, 1.0)`;
+        break;
+      case 0x17:
+      case 0x18:
+      case 0x19: {
+        const rows = opcode === 0x18 ? 4 : 3;
+        const dimensions = opcode === 0x17 ? ".xyz" : "";
+        if (
+          (rows === 3 && mask & 8) ||
+          data.getUint32(offset + 20, true) !== 1 ||
+          data.getUint32(offset + 16, true) >>> 24 !== 0xe4
+        ) {
+          throw new Error("Unsupported AGAL matrix operand or write mask");
+        }
+
+        const dots: string[] = [];
+        for (let row = 0; row < rows; row++) {
+          dots.push(`dot(${a}${dimensions}, ${source(offset + 16, row)}${dimensions})`);
+        }
+        expression = `vec${rows}(${dots.join(", ")})`;
+        break;
+      }
+      default:
+        throw new Error("Unsupported AGAL opcode");
+    }
+
+    let lanes = "";
     for (let c = 0; c < 4; c++) {
       if (mask & (1 << c)) {
-        left += components[c];
-        right += components[(swizzle >>> (c * 2)) & 3];
+        lanes += components[c];
       }
     }
 
-    lines.push(`${target}.${left} = ${source}.${right};`);
+    // One vector assignment evaluates every source before changing any lane,
+    // including overlapping temporary registers in matrix operations.
+    lines.push(`${target}.${lanes} = ${expression}.${lanes};`);
   }
 
   if (!output) {

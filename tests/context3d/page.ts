@@ -242,6 +242,56 @@ export async function lifecycle(cancel: boolean) {
   }
 }
 
+export async function arithmetic() {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
+  );
+  const trace: string[] = [];
+  const scripting = new Scripting(codegen, { print: (line) => trace.push(line), audio: null });
+  const owned: ReturnType<typeof create>[] = [];
+  const close = install(scripting, {
+    create: () => {
+      const entry = create();
+      owned.push(entry);
+      return entry.backend;
+    },
+    place: () => {},
+    remove: () => {},
+  });
+  let player: Player | null = null;
+  try {
+    await scripting.loadLibraries(
+      await Promise.all(
+        ["builtin", "playerglobal-swf2es"].map(
+          async (name) =>
+            new Uint8Array(await (await fetch(`/libraries/${name}.abc`)).arrayBuffer()),
+        ),
+      ),
+    );
+    player = new Player(
+      new Uint8Array(await (await fetch("/context3d/Arithmetic.swf")).arrayBuffer()),
+      scripting,
+    );
+    await player.start();
+    for (let i = 0; i < 3; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+    check(trace.at(-1) === "arithmetic complete", `incomplete arithmetic trace: ${trace}`);
+    check(owned.length === 1, "unexpected arithmetic context count");
+    check(owned[0].gl.getError() === owned[0].gl.NO_ERROR, "GL error after arithmetic");
+    return { trace };
+  } finally {
+    close();
+    player?.destroy();
+    scripting.destroy();
+    for (const entry of owned) {
+      check(entry.live.size === 0, "arithmetic retained GPU handles");
+      entry.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+  }
+}
+
 /** Forced browser loss is separate from the AIR explicit-disposal oracle. */
 export async function recovery(cancel: "none" | "lost" | "queued") {
   const codegen = await createCodegen(
