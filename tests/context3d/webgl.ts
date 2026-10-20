@@ -1,5 +1,5 @@
 import { type ProgramType, type ShaderSource, translate } from "./agal.ts";
-import type { Buffer3D, Context3D, Program3D } from "./backend.ts";
+import type { Buffer3D, Context3D, Context3DLifecycle, Program3D } from "./backend.ts";
 
 function range(start: number, count: number, length: number): void {
   if (
@@ -249,6 +249,9 @@ export class WebGLContext3D implements Context3D {
 
         this.gl.deleteProgram(state.handle);
         state.handle = null;
+        state.attributes.length = 0;
+        state.vertex.length = 0;
+        state.fragment.length = 0;
         if (this.selected === program) {
           this.selected = null;
         }
@@ -476,4 +479,20 @@ export class WebGLContext3D implements Context3D {
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
   }
+}
+
+/** The surface outlives its lost resources so the browser can signal recovery. */
+export function observeLoss(canvas: HTMLCanvasElement, lifecycle: Context3DLifecycle): () => void {
+  const lost = (event: Event): void => {
+    event.preventDefault();
+    lifecycle.lost();
+  };
+  const restored = (): void => lifecycle.restored();
+  canvas.addEventListener("webglcontextlost", lost);
+  canvas.addEventListener("webglcontextrestored", restored);
+
+  return () => {
+    canvas.removeEventListener("webglcontextlost", lost);
+    canvas.removeEventListener("webglcontextrestored", restored);
+  };
 }

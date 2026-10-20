@@ -3,8 +3,9 @@ import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { Player } from "../../packages/player/dist/player.js";
 import { PixiView } from "../../packages/player/dist/render/view.js";
 import { Scripting } from "../../packages/player/dist/scripting.js";
+import type { Context3DLifecycle } from "./backend.ts";
 import { install } from "./natives.ts";
-import { WebGLContext3D } from "./webgl.ts";
+import { observeLoss, WebGLContext3D } from "./webgl.ts";
 
 function check(value: unknown, message: string): asserts value {
   if (!value) {
@@ -238,6 +239,169 @@ export async function lifecycle(cancel: boolean) {
     close();
     player?.destroy();
     scripting.destroy();
+  }
+}
+
+/** Forced browser loss is separate from the AIR explicit-disposal oracle. */
+export async function recovery(cancel: "none" | "lost" | "queued") {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
+  );
+  const trace: string[] = [];
+  const scripting = new Scripting(codegen, { print: (line) => trace.push(line), audio: null });
+  type Surface = ReturnType<typeof create> & { detach: () => void; events: Context3DLifecycle };
+  const surfaces: Surface[] = [];
+  let active: Surface | null = null;
+  let placed = 0;
+  const close = install(scripting, {
+    create: (slot, events) => {
+      check(slot === 0 && active === null, "recovery retained the old surface");
+      const entry = create();
+      active = { ...entry, events, detach: observeLoss(entry.canvas, events) };
+      surfaces.push(active);
+      return entry.backend;
+    },
+    place: (slot, x, y, visible) => {
+      check(slot === 0 && x === 7 && y === 11 && !visible, "recovery lost slot properties");
+      placed++;
+    },
+    remove: () => {
+      check(active, "recovery removed the surface twice");
+      active.detach();
+      check(active.live.size === 0, "recovery retained GPU handles");
+      active.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      active = null;
+    },
+  });
+  const waitEvent = (canvas: HTMLCanvasElement, name: string): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        canvas.removeEventListener(name, done);
+        reject(new Error(`Timed out waiting for ${name}`));
+      }, 5000);
+      canvas.addEventListener(name, done, { once: true });
+    });
+  const expected: string[] = [];
+  const errors = [
+    "recovery context Error 3694",
+    "recovery buffer Error 3694",
+    "recovery indices Error 3694",
+    "recovery program Error 3694",
+  ];
+  let player: Player | null = null;
+  const drain = async (): Promise<void> => {
+    for (let i = 0; i < 3; i++) {
+      await scripting.settled();
+      player?.tick();
+    }
+  };
+  const verify = (generation: number): void => {
+    expected.push(`recovery created ${generation} true`, "recovery initial 0 0 false");
+    if (generation > 1) {
+      expected.push(...errors, "recovery survived true");
+    }
+    check(
+      JSON.stringify(trace) === JSON.stringify(expected),
+      `unexpected recovery trace: ${trace}`,
+    );
+    check(active && placed === generation, "recovery did not place the new context");
+    const { gl } = active;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const pixel = new Uint8Array(4);
+    gl.readPixels(16, 16, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    check(
+      color(pixel, 0, 0, 1) === ["ffff0000", "ff00ff00", "ff0000ff"][generation - 1],
+      "recreated AS3 context did not present new pixels",
+    );
+    check(gl.getError() === gl.NO_ERROR, "GL error after recovery");
+  };
+  try {
+    await scripting.loadLibraries(
+      await Promise.all(
+        ["builtin", "playerglobal-swf2es"].map(
+          async (name) =>
+            new Uint8Array(await (await fetch(`/libraries/${name}.abc`)).arrayBuffer()),
+        ),
+      ),
+    );
+    player = new Player(
+      new Uint8Array(await (await fetch("/context3d/Recovery.swf")).arrayBuffer()),
+      scripting,
+    );
+    await player.start();
+    await drain();
+    verify(1);
+    surfaces[0].events.restored();
+    await drain();
+    check(surfaces.length === 1, "restoration without loss recreated a context");
+    for (let cycle = 0; cycle < (cancel === "none" ? 2 : 1); cycle++) {
+      const retired = surfaces[cycle];
+      const extension = retired.gl.getExtension("WEBGL_lose_context");
+      check(extension, "loss extension unavailable");
+      const lost = waitEvent(retired.canvas, "webglcontextlost");
+      extension.loseContext();
+      await lost;
+      retired.events.lost();
+      check(retired.backend.disposed && retired.live.size === 0, "loss retained old resources");
+      const root = scripting.root?.object;
+      check(root, "missing recovery document");
+      scripting.rt.callValue(
+        scripting.rt.getProperty(root, scripting.rt.publicName("inspectLost")),
+        root,
+        [],
+        null,
+      );
+      expected.push("recovery empty true", "recovery disposed Disposed 0 null", ...errors);
+      check(JSON.stringify(trace) === JSON.stringify(expected), `unexpected lost trace: ${trace}`);
+      await drain();
+      check(surfaces.length === cycle + 1, "created a context before browser restoration");
+      if (cancel === "lost") {
+        close();
+      }
+      const restored = waitEvent(retired.canvas, "webglcontextrestored");
+      // Let the loss event finish before asking the extension to restore.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      extension.restoreContext();
+      await restored;
+      check(surfaces.length === cycle + 1, "restoration dispatched AS3 synchronously");
+      if (cancel === "queued") {
+        close();
+      }
+      await drain();
+      if (cancel === "none") {
+        verify(cycle + 2);
+      }
+      // Even an already queued callback from a retired host must be harmless.
+      retired.events.lost();
+      retired.events.restored();
+      retired.events.restored();
+      await drain();
+      check(
+        surfaces.length === (cancel === "none" ? cycle + 2 : 1),
+        "stale callback recreated a context",
+      );
+      check(JSON.stringify(trace) === JSON.stringify(expected), "stale callback changed AS3 state");
+      check(
+        cancel === "none" ? active !== null : active === null,
+        "stale callback changed the current surface",
+      );
+    }
+    return { passed: true };
+  } finally {
+    close();
+    player?.destroy();
+    scripting.destroy();
+    for (const surface of surfaces) {
+      check(surface.live.size === 0, "recovery teardown retained GPU resources");
+      const event = new Event("webglcontextlost", { cancelable: true });
+      surface.canvas.dispatchEvent(event);
+      check(!event.defaultPrevented, "teardown retained a loss listener");
+      surface.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
   }
 }
 

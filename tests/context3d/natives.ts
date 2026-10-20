@@ -23,6 +23,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   const natives: avm2.Natives = {};
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
+  const generations = new WeakMap<AsObject, object>();
+  const lost = new Map<AsObject, object>();
   const contexts = new Map<AsObject, { backend: Context3D; slot: AsObject }>();
   const buffers = new WeakMap<AsObject, Resource<Buffer3D>>();
   const programs = new WeakMap<AsObject, Resource<Program3D>>();
@@ -93,6 +95,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   };
 
   const request = (slot: AsObject): void => {
+    const generation = {};
+    generations.set(slot, generation);
     pending.add(slot);
     s.loads.deferHostEvent(() => {
       pending.delete(slot);
@@ -101,11 +105,39 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       }
 
       const index = indexOf(slot);
-      const backend = host.create(index);
+      const backend = host.create(index, {
+        lost: () => {
+          if (closed || s.destroyed || generations.get(slot) !== generation || lost.has(slot)) {
+            return;
+          }
+
+          const object = slots.get(slot);
+          if (!object) {
+            return;
+          }
+
+          const entry = contexts.get(object);
+          contexts.delete(object);
+          slots.delete(slot);
+          lost.set(slot, generation);
+          entry?.backend.dispose();
+        },
+        restored: () => {
+          if (closed || s.destroyed || lost.get(slot) !== generation) {
+            return;
+          }
+
+          lost.delete(slot);
+          generations.delete(slot);
+          host.remove(index);
+          request(slot);
+        },
+      });
       let object: AsObject;
       try {
         object = construct("Context3D");
       } catch (error) {
+        generations.delete(slot);
         backend.dispose();
         host.remove(index);
         throw error;
@@ -130,6 +162,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     contexts.delete(object);
     slots.delete(entry.slot);
+    generations.delete(entry.slot);
     entry.backend.dispose();
     host.remove(indexOf(entry.slot));
     return entry.slot;
@@ -147,7 +180,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         mode !== "auto" ||
         profile !== "baseline" ||
         slots.has(slot) ||
-        pending.has(slot)
+        pending.has(slot) ||
+        lost.has(slot)
       ) {
         unsupported();
       }
@@ -376,5 +410,10 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     for (const object of contexts.keys()) {
       dispose(object);
     }
+    for (const slot of lost.keys()) {
+      generations.delete(slot);
+      host.remove(indexOf(slot));
+    }
+    lost.clear();
   };
 }

@@ -13,13 +13,13 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Triangle", "Composition", "Lifecycle"].map((name) => ({
+  ["Triangle", "Composition", "Lifecycle", "Recovery"].map((name) => ({
     name,
     source: readFileSync(`${here}${name}.as`, "utf8"),
   })),
   out,
 );
-for (const name of ["Triangle", "Composition", "Lifecycle"]) {
+for (const name of ["Triangle", "Composition", "Lifecycle", "Recovery"]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   const size = name === "Triangle" ? 64 : 96;
@@ -81,6 +81,14 @@ if (!process.argv.includes("--build-only")) {
       }
 
       console.log("context3d: AIR lifecycle, disposed errors and cancellation of recreation ok");
+      for (const cancel of ["none", "lost", "queued"]) {
+        const result = await evaluate<{ passed: boolean }>(
+          `import("/repo/tests/context3d/page.ts").then(m => m.recovery(${JSON.stringify(cancel)}))`,
+        );
+        assert.equal(result.exception, null, JSON.stringify(result));
+        assert.equal(result.value?.passed, true);
+        console.log(`context3d: real WebGL loss/restoration (${cancel}) ok`);
+      }
       const composition: { points: number[][]; samples: string[][] } = JSON.parse(
         readFileSync(`${here}composition-reference.json`, "utf8"),
       );

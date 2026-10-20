@@ -46,6 +46,26 @@ does not affect its replacement. The browser also verifies that closing the
 host cancels queued recreation and that each retired context releases its
 GPU resources.
 
+`Recovery.as` exercises browser GPU loss with `WEBGL_lose_context`. The
+host keeps the lost canvas until the browser signals restoration, while
+the native adapter immediately retires the AS3 context and its resources.
+Restoration releases that surface and queues a new context on a fresh
+surface. The AS3 creation listener uploads new buffers and shaders and
+draws a triangle again; the browser checks red, green and blue presentations
+over two recovery cycles.
+
+These checks also cover retained vertex/index buffers and programs rejecting
+use after loss, fresh context defaults, preserved slot placement, duplicate
+notifications and callbacks from retired surfaces. Closing the host during
+loss or after recreation has been queued prevents resurrection and detaches
+the browser listeners. The native boundary carries loss/restoration
+notifications without browser or WebGL types.
+
+Forced WebGL recovery is a browser integration check, not an AIR hardware-loss
+oracle. The disposed-object behavior is separately covered by the AIR lifecycle
+reference. This probe replaces the surface after restoration; it does not
+restore GPU resources automatically or establish the production recovery design.
+
 The lifecycle reference covers error IDs for an unconfigured clear (3698),
 undersized back buffers (3780/3781), and operations on disposed contexts,
 buffers and programs (3694). Disposed context getters and repeated resource
@@ -85,8 +105,8 @@ buffers are exercised, with sizes limited to 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are recovery from actual GPU context loss, broader Flash error
-semantics, and AGAL/state/texture coverage. The separate WebGL contexts and canvas
+Next gates are broader Flash error semantics and AGAL/state/texture coverage.
+The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim
 complete pixel parity for arbitrary Stage3D content.
