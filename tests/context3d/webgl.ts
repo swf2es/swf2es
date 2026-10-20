@@ -80,8 +80,8 @@ export class WebGLContext3D implements Context3D {
 
   configure(width: number, height: number): void {
     this.alive();
-    range(1, width - 1, 2048);
-    range(1, height - 1, 2048);
+    range(32, width - 32, 2048);
+    range(32, height - 32, 2048);
     const gl = this.gl;
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();
@@ -218,6 +218,10 @@ export class WebGLContext3D implements Context3D {
         const fs = translate(fragment, "fragment");
         const handle = this.link(vs, fs);
         const gl = this.gl;
+        if (state.handle && gl.getParameter(gl.CURRENT_PROGRAM) === state.handle) {
+          gl.useProgram(null);
+        }
+
         gl.deleteProgram(state.handle);
         state.handle = handle;
         state.attributes = vs.attributes;
@@ -236,6 +240,11 @@ export class WebGLContext3D implements Context3D {
       dispose: () => {
         if (!this.programs.delete(program)) {
           return;
+        }
+
+        // WebGL keeps a deleted program alive while it is still current.
+        if (this.gl.getParameter(this.gl.CURRENT_PROGRAM) === state.handle) {
+          this.gl.useProgram(null);
         }
 
         this.gl.deleteProgram(state.handle);

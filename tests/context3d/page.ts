@@ -181,6 +181,7 @@ export async function lifetime() {
     const swizzled = shader(true);
     new DataView(swizzled.buffer).setUint32(15, 0xe1000000, true);
     p.upload(shader(false), swizzled);
+    check(first.gl.getParameter(first.gl.CURRENT_PROGRAM) === null, "replaced program still bound");
     c.draw(indices, 0, 1);
     check(color(c.read(), 32, 32, 64) === "ff00ff00", "AGAL swizzle did not reach the GPU");
     p.upload(shader(false), shader(true));
@@ -205,18 +206,22 @@ export async function lifetime() {
     c.draw(indices, 0, 1);
     check(color(c.read(), 32, 32, 64) === "ffff0000", "failed upload replaced a working program");
     check(first.gl.getError() === first.gl.NO_ERROR, "failed upload polluted GL state");
-    c.configure(32, 16);
+    rejects(() => c.configure(31, 32));
+    c.configure(32, 32);
     c.draw(indices, 0, 1);
-    check(color(c.read(), 16, 8, 32) === "ffff0000", "resize invalidated live resources");
+    check(color(c.read(), 16, 16, 32) === "ffff0000", "resize invalidated live resources");
     vertices.dispose();
     rejects(() => c.draw(indices, 0, 1));
     rejects(() => vertices.upload([], 0, 0));
+    p.dispose();
+    check(first.gl.getParameter(first.gl.CURRENT_PROGRAM) === null, "disposed program still bound");
+    rejects(() => c.setProgram(p));
     c.dispose();
     c.dispose();
     check(first.live.size === 0, "context disposal leaked resources");
     rejects(() => c.createProgram());
     rejects(() => c.configure(1, 1));
-    second.backend.configure(8, 8);
+    second.backend.configure(32, 32);
     const loss = second.gl.getExtension("WEBGL_lose_context");
     check(loss, "context loss extension unavailable");
     const lost = new Promise<void>((resolve) =>
