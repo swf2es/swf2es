@@ -1,5 +1,12 @@
-import { type ProgramType, type ShaderSource, translate } from "./agal.ts";
-import type { Buffer3D, Context3D, Context3DLifecycle, Program3D } from "./backend.ts";
+import { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.ts";
+import {
+  type Buffer3D,
+  type Context3D,
+  type Context3DLifecycle,
+  type Program3D,
+  type Texture3D,
+  TextureBindingError,
+} from "./backend.ts";
 
 function range(start: number, count: number, length: number): void {
   if (
@@ -24,6 +31,14 @@ interface ProgramState {
   attributes: number[];
   vertex: (WebGLUniformLocation | null)[];
   fragment: (WebGLUniformLocation | null)[];
+  samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
+  samplerMask: number;
+}
+
+interface TextureState {
+  handle: WebGLTexture;
+  bytes: Uint8Array;
+  uploaded: boolean;
 }
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
@@ -35,6 +50,12 @@ export class WebGLContext3D implements Context3D {
   private readonly buffers = new Map<Buffer3D, BufferState>();
   private bufferBytes = 0;
   private readonly programs = new Map<Program3D, ProgramState>();
+  private readonly textures = new Map<Texture3D, TextureState>();
+  private readonly textureOwners = new WeakSet<Texture3D>();
+  private textureBytes = 0;
+  private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
+  private textureMask = 0;
+  private readonly samplers: (WebGLSampler | null)[] = new Array(4).fill(null);
   private readonly vertices: ({ buffer: Buffer3D; offset: number; size: number } | null)[] =
     new Array(8).fill(null);
   private selected: Program3D | null = null;
@@ -208,7 +229,14 @@ export class WebGLContext3D implements Context3D {
       throw new Error("Context3D experiment: program limit");
     }
 
-    const state: ProgramState = { handle: null, attributes: [], vertex: [], fragment: [] };
+    const state: ProgramState = {
+      handle: null,
+      attributes: [],
+      vertex: [],
+      fragment: [],
+      samplers: [],
+      samplerMask: 0,
+    };
     const program: Program3D = {
       upload: (vertex, fragment) => {
         this.alive();
@@ -227,6 +255,8 @@ export class WebGLContext3D implements Context3D {
         state.attributes = vs.attributes;
         state.vertex = [];
         state.fragment = [];
+        state.samplers = [];
+        state.samplerMask = 0;
         for (let i = 0; i < vs.constants.length; i++) {
           const index = vs.constants[i];
           state.vertex[index] = gl.getUniformLocation(handle, `vc${index}`);
@@ -235,6 +265,15 @@ export class WebGLContext3D implements Context3D {
         for (let i = 0; i < fs.constants.length; i++) {
           const index = fs.constants[i];
           state.fragment[index] = gl.getUniformLocation(handle, `fc${index}`);
+        }
+
+        for (let i = 0; i < fs.samplers.length; i++) {
+          const source = fs.samplers[i];
+          state.samplerMask |= 1 << source.index;
+          state.samplers.push({
+            source,
+            location: gl.getUniformLocation(handle, `fs${source.index}`),
+          });
         }
       },
       dispose: () => {
@@ -252,6 +291,8 @@ export class WebGLContext3D implements Context3D {
         state.attributes.length = 0;
         state.vertex.length = 0;
         state.fragment.length = 0;
+        state.samplers.length = 0;
+        state.samplerMask = 0;
         if (this.selected === program) {
           this.selected = null;
         }
@@ -268,6 +309,140 @@ export class WebGLContext3D implements Context3D {
     }
 
     return state;
+  }
+
+  createTexture(width: number, height: number): Texture3D {
+    this.alive();
+    range(1, width - 1, 2048);
+    range(1, height - 1, 2048);
+    const size = width * height * 4;
+    if (
+      width & (width - 1) ||
+      height & (height - 1) ||
+      this.textures.size >= 128 ||
+      this.textureBytes + size > 64 * 1024 * 1024
+    ) {
+      throw new Error("Context3D experiment: texture size or memory limit");
+    }
+
+    const bytes = new Uint8Array(size);
+    const gl = this.gl;
+    const handle = gl.createTexture();
+    if (!handle) {
+      throw new Error("Context3D experiment: cannot create texture");
+    }
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, handle);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height);
+    const state: TextureState = { handle, bytes, uploaded: false };
+    const texture: Texture3D = {
+      width,
+      height,
+      upload: (pixels) => {
+        this.alive();
+        this.textureState(texture);
+        if (pixels.length !== width * height) {
+          throw new Error("Context3D experiment: texture upload size mismatch");
+        }
+
+        for (let i = 0; i < pixels.length; i++) {
+          const pixel = pixels[i];
+          const at = i * 4;
+          state.bytes[at] = pixel >>> 16;
+          state.bytes[at + 1] = pixel >>> 8;
+          state.bytes[at + 2] = pixel;
+          state.bytes[at + 3] = pixel >>> 24;
+        }
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, handle);
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          width,
+          height,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          state.bytes,
+        );
+        state.uploaded = true;
+      },
+      dispose: () => {
+        if (!this.textures.delete(texture)) {
+          return;
+        }
+
+        for (let i = 0; i < this.textureSlots.length; i++) {
+          if (this.textureSlots[i] === texture) {
+            this.textureSlots[i] = null;
+            this.textureMask &= ~(1 << i);
+            gl.activeTexture(gl.TEXTURE0 + i);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindSampler(i, null);
+          }
+        }
+
+        gl.deleteTexture(handle);
+        state.bytes = new Uint8Array(0);
+        this.textureBytes -= size;
+      },
+    };
+    this.textures.set(texture, state);
+    this.textureOwners.add(texture);
+    this.textureBytes += size;
+
+    return texture;
+  }
+
+  private textureState(texture: Texture3D): TextureState {
+    const state = this.textures.get(texture);
+    if (!state) {
+      throw new Error("Context3D experiment: texture disposed or from another context");
+    }
+
+    return state;
+  }
+
+  setTexture(index: number, texture: Texture3D | null): void {
+    this.alive();
+    range(index, 1, 8);
+    if (texture && !this.textureOwners.has(texture)) {
+      throw new Error("Context3D experiment: texture from another context");
+    }
+
+    // AIR accepts a disposed texture binding and reports 3663 when drawing.
+    this.textureSlots[index] = texture;
+    this.textureMask = (this.textureMask & ~(1 << index)) | (texture ? 1 << index : 0);
+    if (!texture) {
+      this.gl.activeTexture(this.gl.TEXTURE0 + index);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+      this.gl.bindSampler(index, null);
+    }
+  }
+
+  private sampler(source: SamplerSource): WebGLSampler {
+    const index = Number(source.linear) * 2 + Number(source.repeat);
+    let sampler = this.samplers[index];
+    if (!sampler) {
+      const gl = this.gl;
+      sampler = gl.createSampler();
+      if (!sampler) {
+        throw new Error("Context3D experiment: cannot create sampler");
+      }
+
+      const filter = source.linear ? gl.LINEAR : gl.NEAREST;
+      const wrap = source.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, filter);
+      gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
+      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, wrap);
+      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, wrap);
+      this.samplers[index] = sampler;
+    }
+
+    return sampler;
   }
 
   private link(vertex: ShaderSource, fragment: ShaderSource): WebGLProgram {
@@ -359,6 +534,24 @@ export class WebGLContext3D implements Context3D {
     }
 
     const state = this.program(this.selected);
+    if (this.textureMask & ~state.samplerMask) {
+      throw new TextureBindingError("unused");
+    }
+
+    for (let i = 0; i < state.samplers.length; i++) {
+      const source = state.samplers[i].source;
+      const texture = this.textureSlots[source.index];
+      for (let j = i + 1; texture && j < state.samplers.length; j++) {
+        const other = state.samplers[j].source;
+        if (
+          this.textureSlots[other.index] === texture &&
+          (source.linear !== other.linear || source.repeat !== other.repeat)
+        ) {
+          throw new TextureBindingError("conflicting");
+        }
+      }
+    }
+
     const count = triangles === -1 ? indices.count - first : triangles * 3;
     range(first, count, indices.count);
     if (count % 3 !== 0) {
@@ -404,6 +597,21 @@ export class WebGLContext3D implements Context3D {
     }
 
     gl.useProgram(state.handle);
+    for (let i = 0; i < state.samplers.length; i++) {
+      const binding = state.samplers[i];
+      const slot = binding.source.index;
+      const texture = this.textureSlots[slot];
+      const resource = texture && this.textures.get(texture);
+      if (!resource?.uploaded) {
+        throw new TextureBindingError("missing");
+      }
+
+      gl.activeTexture(gl.TEXTURE0 + slot);
+      gl.bindTexture(gl.TEXTURE_2D, resource.handle);
+      gl.bindSampler(slot, this.sampler(binding.source));
+      gl.uniform1i(binding.location, slot);
+    }
+
     this.uniforms(state.vertex, this.vertexConstants);
     this.uniforms(state.fragment, this.fragmentConstants);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
@@ -464,6 +672,15 @@ export class WebGLContext3D implements Context3D {
     }
     for (const program of this.programs.keys()) {
       program.dispose();
+    }
+    for (const texture of this.textures.keys()) {
+      texture.dispose();
+    }
+    this.textureSlots.fill(null);
+    this.textureMask = 0;
+    for (let i = 0; i < this.samplers.length; i++) {
+      this.gl.deleteSampler(this.samplers[i]);
+      this.samplers[i] = null;
     }
     this.gl.bindVertexArray(null);
     this.gl.useProgram(null);

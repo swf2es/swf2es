@@ -2,13 +2,22 @@
 // Format: https://github.com/adobe/glsl2agal/blob/master/agalassembler/agal.h
 export type ProgramType = "vertex" | "fragment";
 
+export interface SamplerSource {
+  index: number;
+  linear: boolean;
+  repeat: boolean;
+}
+
 export interface ShaderSource {
   source: string;
   attributes: number[];
   constants: number[];
+  samplers: SamplerSource[];
 }
 
-const SUPPORTED = new Set([0, 1, 2, 3, 4, 6, 7, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19]);
+const SUPPORTED = new Set([
+  0, 1, 2, 3, 4, 6, 7, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x28,
+]);
 
 export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -27,6 +36,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const names = new Map<string, string>();
   const attributes = new Set<number>();
   const constants = new Set<number>();
+  const samplers = new Map<number, SamplerSource>();
   const lines: string[] = [];
   const components = "xyzw";
   let output = false;
@@ -116,7 +126,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       throw new Error("Nonempty unused AGAL source");
     }
 
-    const b = unary ? "" : source(offset + 16);
+    const b = unary || opcode === 0x28 ? "" : source(offset + 16);
     let expression: string;
     switch (opcode) {
       case 0:
@@ -175,6 +185,26 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         expression = `vec${rows}(${dots.join(", ")})`;
         break;
       }
+      case 0x28: {
+        const low = data.getUint32(offset + 16, true);
+        const high = data.getUint32(offset + 20, true);
+        // This slice has no LOD bias, mipmaps, cube textures or sampler overrides.
+        if (stage !== "fragment" || low >= 8 || (high & ~0x10100000) !== 5) {
+          throw new Error("Unsupported AGAL sampler encoding");
+        }
+
+        const linear = (high & 0x10000000) !== 0;
+        const repeat = (high & 0x00100000) !== 0;
+        const previous = samplers.get(low);
+        if (previous && (previous.linear !== linear || previous.repeat !== repeat)) {
+          throw new Error("Conflicting AGAL sampler states");
+        }
+
+        samplers.set(low, { index: low, linear, repeat });
+        names.set(`fs${low}`, `uniform sampler2D fs${low};`);
+        expression = `texture(fs${low}, ${a}.xy)`;
+        break;
+      }
       default:
         throw new Error("Unsupported AGAL opcode");
     }
@@ -212,5 +242,6 @@ void main() {
 }`,
     attributes: [...attributes],
     constants: [...constants],
+    samplers: [...samplers.values()],
   };
 }

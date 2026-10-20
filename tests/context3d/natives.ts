@@ -1,12 +1,18 @@
 // Test-only native installation, before playerglobal binds. This is not a
 // public Context3D implementation: unsupported states and Flash error numbers
 // still need their own oracle coverage before promotion into the player.
-import { premultiply } from "../../packages/player/dist/bitmap/bitmap.js";
 import { storeOf } from "../../packages/player/dist/playerglobal/flash/display/BitmapData.js";
 import { dispatchEvent } from "../../packages/player/dist/scripting/events.js";
 import type { Scripting } from "../../packages/player/dist/scripting.js";
 import { avm2 } from "../../packages/runtime/dist/index.js";
-import type { Buffer3D, Context3D, Program3D, Stage3DHost } from "./backend.ts";
+import {
+  type Buffer3D,
+  type Context3D,
+  type Program3D,
+  type Stage3DHost,
+  type Texture3D,
+  TextureBindingError,
+} from "./backend.ts";
 
 type AsObject = avm2.AsObject;
 
@@ -28,6 +34,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   const contexts = new Map<AsObject, { backend: Context3D; slot: AsObject }>();
   const buffers = new WeakMap<AsObject, Resource<Buffer3D>>();
   const programs = new WeakMap<AsObject, Resource<Program3D>>();
+  const textures = new WeakMap<AsObject, Resource<Texture3D>>();
   const indices = new WeakMap<AsObject, number>();
   const matrixConstants = new Float32Array(16);
   let closed = false;
@@ -90,6 +97,17 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   };
   const construct = (name: string): AsObject =>
     s.rt.construct(s.rt.classNamed(`flash.display3D::${name}`)) as AsObject;
+  const texture = (o: AsObject): Texture3D => {
+    const entry = textures.get(o);
+    if (!entry) {
+      throw new Error("Context3D experiment: invalid texture");
+    }
+    if (!contexts.has(entry.owner)) {
+      throw s.rt.error("Error", 3694);
+    }
+
+    return entry.value;
+  };
   const bytes = (o: AsObject): Uint8Array => {
     const storage = avm2.bytesOf(s.rt, o);
     return storage.buffer.subarray(0, storage.length);
@@ -290,6 +308,31 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       return object;
     }
 
+    createTexture(
+      width: number,
+      height: number,
+      format: string,
+      target: boolean,
+      levels = 0,
+    ): AsObject {
+      const backend = context(this as unknown as AsObject);
+      if (format !== "bgra" || target || levels !== 0) {
+        unsupported();
+      }
+
+      const object = s.rt.construct(
+        s.rt.classNamed("flash.display3D.textures::Texture"),
+      ) as AsObject;
+      const value = backend.createTexture(width, height);
+      textures.set(object, { value, owner: this as unknown as AsObject, disposed: false });
+
+      return object;
+    }
+
+    setTextureAt(index: number, object: AsObject | null): void {
+      context(this as unknown as AsObject).setTexture(index, object && texture(object));
+    }
+
     setProgram(object: AsObject): void {
       context(this as unknown as AsObject).setProgram(program(object));
     }
@@ -349,14 +392,26 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     drawTriangles(object: AsObject, first = 0, count = -1): void {
-      context(this as unknown as AsObject).draw(buffer(object), first, count);
+      try {
+        context(this as unknown as AsObject).draw(buffer(object), first, count);
+      } catch (error) {
+        if (error instanceof TextureBindingError) {
+          throw s.rt.error(
+            "Error",
+            error.reason === "unused" ? 3697 : error.reason === "conflicting" ? 3695 : 3663,
+          );
+        }
+
+        throw error;
+      }
     }
 
     drawToBitmapData(destination: AsObject): void {
       const backend = context(this as unknown as AsObject);
       const store = storeOf(s, destination);
-      // Different-sized targets and clipping require a separate Flash probe.
-      if (store.width !== backend.width || store.height !== backend.height) {
+      // AIR can preserve alpha in opaque targets, outside BitmapStore's current
+      // opaque-pixel invariant. Different sizes and clipping need separate probes.
+      if (!store.transparent || store.width !== backend.width || store.height !== backend.height) {
         unsupported();
       }
 
@@ -364,8 +419,10 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       const pixels = store.pixels;
       for (let i = 0; i < pixels.length; i++) {
         const at = i * 4;
-        const color = (rgba[at + 3] << 24) | (rgba[at] << 16) | (rgba[at + 1] << 8) | rgba[at + 2];
-        pixels[i] = store.transparent ? premultiply(color) : color | 0xff000000;
+        // AIR preserves RGB and raises alpha to cover every channel.
+        // Multiplying RGB here would darken textures twice.
+        const alpha = Math.max(rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]);
+        pixels[i] = (alpha << 24) | (rgba[at] << 16) | (rgba[at + 1] << 8) | rgba[at + 2];
       }
 
       store.changed();
@@ -411,11 +468,49 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
   }
 
+  class TextureNatives {
+    uploadFromBitmapData(source: AsObject, level = 0): void {
+      const object = this as unknown as AsObject;
+      const value = texture(object);
+      // AIR accepts this call after explicit texture disposal without reviving
+      // the resource. A disposed owner context is still rejected above.
+      if (textures.get(object)?.disposed) {
+        return;
+      }
+
+      if (level !== 0) {
+        unsupported();
+      }
+      if (!source) {
+        throw s.rt.error("TypeError", 2007, "source");
+      }
+
+      const bitmap = storeOf(s, source);
+      if (bitmap.width !== value.width || bitmap.height !== value.height) {
+        unsupported();
+      }
+
+      value.upload(bitmap.readable);
+    }
+  }
+
+  class TextureBaseNatives {
+    dispose(): void {
+      const entry = textures.get(this as unknown as AsObject);
+      if (entry && !entry.disposed) {
+        entry.value.dispose();
+        entry.disposed = true;
+      }
+    }
+  }
+
   avm2.registerNativeClass(natives, "flash.display::Stage3D", StageNatives);
   avm2.registerNativeClass(natives, "flash.display3D::Context3D", ContextNatives);
   avm2.registerNativeClass(natives, "flash.display3D::VertexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::IndexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::Program3D", ProgramNatives);
+  avm2.registerNativeClass(natives, "flash.display3D.textures::Texture", TextureNatives);
+  avm2.registerNativeClass(natives, "flash.display3D.textures::TextureBase", TextureBaseNatives);
   // Keep the existing Flash-tested position validation and property storage.
   for (const property of ["x", "y", "visible"]) {
     const key = `flash.display::Stage3D#set:${property}`;

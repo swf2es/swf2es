@@ -1,5 +1,14 @@
 import type { ProgramType } from "./agal.ts";
 
+export class TextureBindingError extends Error {
+  readonly reason: "unused" | "conflicting" | "missing";
+
+  constructor(reason: "unused" | "conflicting" | "missing") {
+    super(`Invalid texture binding: ${reason}`);
+    this.reason = reason;
+  }
+}
+
 // No AS objects, Pixi objects or browser globals cross this boundary.
 export interface Buffer3D {
   readonly count: number;
@@ -10,6 +19,14 @@ export interface Buffer3D {
 
 export interface Program3D {
   upload(vertex: Uint8Array, fragment: Uint8Array): void;
+  dispose(): void;
+}
+
+export interface Texture3D {
+  readonly width: number;
+  readonly height: number;
+  /** Top-down premultiplied ARGB pixels, copied before returning. */
+  upload(pixels: Uint32Array): void;
   dispose(): void;
 }
 
@@ -34,11 +51,13 @@ export interface Context3D {
   clear(red: number, green: number, blue: number, alpha: number): void;
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
+  createTexture(width: number, height: number): Texture3D;
+  setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;
   setVertex(index: number, buffer: Buffer3D | null, offset: number, size: number): void;
   setConstants(stage: ProgramType, first: number, values: ArrayLike<number>, count: number): void;
   draw(indices: Buffer3D, first: number, triangles: number): void;
-  /** Top-down, straight RGBA bytes; read only until the next read. */
+  /** Top-down raw RGBA channels, without alpha conversion; valid until the next read. */
   read(): Uint8Array;
   present(): void;
   dispose(): void;

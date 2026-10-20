@@ -7,7 +7,14 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const lifecycle = process.argv.includes("--lifecycle");
 const arithmetic = process.argv.includes("--arithmetic");
-const fixture = arithmetic ? "Arithmetic" : lifecycle ? "Lifecycle" : "Triangle";
+const texturing = process.argv.includes("--texturing");
+const fixture = texturing
+  ? "Texturing"
+  : arithmetic
+    ? "Arithmetic"
+    : lifecycle
+      ? "Lifecycle"
+      : "Triangle";
 const out = `${here}out/oracle-${fixture}/`;
 mkdirSync(out, { recursive: true });
 writeFileSync(
@@ -21,7 +28,7 @@ writeFileSync(
       stage.nativeWindow.activate();
       setTimeout(function():void {
         try {
-          ${lifecycle || arithmetic ? 'if (!complete) { throw new Error("Fixture did not complete"); }' : "closeContext();"}
+          ${lifecycle || arithmetic || texturing ? 'if (!complete) { throw new Error("Fixture did not complete"); }' : "closeContext();"}
           NativeApplication.nativeApplication.exit(0);
         } catch (error:Error) {
           trace("reference-error", error);
@@ -67,15 +74,19 @@ const lines = (run.stdout + run.stderr)
   .replaceAll("\r", "")
   .split("\n")
   .filter((line) =>
-    arithmetic
-      ? line.startsWith("arithmetic ")
-      : lifecycle
-        ? line.startsWith("life ")
-        : /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
-            line,
-          ),
+    texturing
+      ? line.startsWith("texturing ")
+      : arithmetic
+        ? line.startsWith("arithmetic ")
+        : lifecycle
+          ? line.startsWith("life ")
+          : /^(request|request-returned|created|clear|triangle|outside|upper-left|lower-left|presented|next-clear|complete|disposed|context-error|reference-error)( |$)/.test(
+              line,
+            ),
   );
-if (arithmetic) {
+if (texturing) {
+  assert.equal(lines.at(-1), "texturing complete", JSON.stringify(lines));
+} else if (arithmetic) {
   assert.equal(lines.at(-1), "arithmetic complete", JSON.stringify(lines));
 } else if (lifecycle) {
   assert.equal(lines.at(-1), "life complete 3", JSON.stringify(lines));
@@ -83,7 +94,7 @@ if (arithmetic) {
   assert.equal(lines.length, 12, JSON.stringify(lines));
   assert.equal(lines.at(-1), "disposed");
 }
-const path = `${here}${arithmetic ? "arithmetic-" : lifecycle ? "lifecycle-" : ""}reference.json`;
+const path = `${here}${texturing ? "texturing-" : arithmetic ? "arithmetic-" : lifecycle ? "lifecycle-" : ""}reference.json`;
 if (process.argv.includes("--update")) {
   writeFileSync(path, `${JSON.stringify(lines, null, 2)}\n`);
 } else {

@@ -13,13 +13,20 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Triangle", "Composition", "Lifecycle", "Recovery", "Arithmetic"].map((name) => ({
+  ["Triangle", "Composition", "Lifecycle", "Recovery", "Arithmetic", "Texturing"].map((name) => ({
     name,
     source: readFileSync(`${here}${name}.as`, "utf8"),
   })),
   out,
 );
-for (const name of ["Triangle", "Composition", "Lifecycle", "Recovery", "Arithmetic"]) {
+for (const name of [
+  "Triangle",
+  "Composition",
+  "Lifecycle",
+  "Recovery",
+  "Arithmetic",
+  "Texturing",
+]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   const size = name === "Triangle" ? 64 : 96;
@@ -89,15 +96,17 @@ if (!process.argv.includes("--build-only")) {
         assert.equal(result.value?.passed, true);
         console.log(`context3d: real WebGL loss/restoration (${cancel}) ok`);
       }
-      const arithmetic = await evaluate<{ trace: string[] }>(
-        'import("/repo/tests/context3d/page.ts").then(m => m.arithmetic())',
-      );
-      assert.equal(arithmetic.exception, null, JSON.stringify(arithmetic));
-      assert.deepEqual(
-        arithmetic.value?.trace,
-        JSON.parse(readFileSync(`${here}arithmetic-reference.json`, "utf8")),
-      );
-      console.log("context3d: arithmetic and matrix uploads match AIR");
+      for (const fixture of ["Arithmetic", "Texturing"]) {
+        const result = await evaluate<{ trace: string[] }>(
+          `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,
+        );
+        assert.equal(result.exception, null, JSON.stringify(result));
+        assert.deepEqual(
+          result.value?.trace,
+          JSON.parse(readFileSync(`${here}${fixture.toLowerCase()}-reference.json`, "utf8")),
+        );
+        console.log(`context3d: ${fixture} matches AIR`);
+      }
       const composition: { points: number[][]; samples: string[][] } = JSON.parse(
         readFileSync(`${here}composition-reference.json`, "utf8"),
       );

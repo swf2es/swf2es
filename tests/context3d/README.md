@@ -19,18 +19,21 @@ node tests/context3d/oracle.ts
 node tests/context3d/oracle.ts --update
 node tests/context3d/oracle.ts --lifecycle
 node tests/context3d/oracle.ts --arithmetic
+node tests/context3d/oracle.ts --texturing
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
 from `oracle/flash.ts`: that harness uses CPU display-list capture, which
 does not capture Stage3D.
 
-The native adapter exchanges buffers, programs and pixels through
+The native adapter exchanges buffers, programs, textures and pixels through
 `backend.ts`; it imports no Pixi or WebGL code. The WebGL2 backend owns its
 context and resources. Presentation copies the offscreen back buffer to
 the canvas, so a subsequent clear does not alter the presented image.
 Readback reuses its storage and converts GL's bottom-up rows to top-down
-RGBA before the native adapter writes BitmapData.
+RGBA before the native adapter writes transparent BitmapData. AIR preserves
+the render buffer's RGB channels and raises alpha to at least the largest
+color channel. Multiplying RGB by alpha again would darken uploaded textures.
 
 Browser checks cover the AIR trace, presentation preservation, unchanged
 unavailable-context fallback, cancellation before creation, resource
@@ -55,7 +58,7 @@ surface. The AS3 creation listener uploads new buffers and shaders and
 draws a triangle again; the browser checks red, green and blue presentations
 over two recovery cycles.
 
-These checks also cover retained vertex/index buffers and programs rejecting
+These checks also cover retained vertex/index buffers, programs and textures rejecting
 use after loss, fresh context defaults, preserved slot placement, duplicate
 notifications and callbacks from retired surfaces. Closing the host during
 loss or after recreation has been queued prevents resurrection and detaches
@@ -90,6 +93,31 @@ Matrix operands currently require consecutive, unswizzled constant registers;
 three-row instructions require a destination mask within xyz. Indirect reads,
 other instructions and broader numeric edge-case parity remain future work.
 
+`Texturing.as` checks AGAL `tex` and level-zero `Texture.uploadFromBitmapData`
+against AIR. The fixture covers top-down UV orientation, nearest and linear
+filtering, clamp and repeat wrapping, separate sampler states, reupload,
+transparent pixels and premultiplied color, plus partially transparent clear
+readback. The upload copies into one reusable RGBA staging array per texture;
+draws reuse four lazily created sampler objects. Browser checks verify staging
+array identity and stable GPU handles across repeated uploads and draws,
+texture bindings across a resize, and cleanup after disposal and context loss.
+
+The texture reference covers unused bindings (3697), incompatible sampler
+states for the same texture (3695), and drawing with a disposed texture (3663).
+AIR accepts upload and binding calls on an explicitly disposed texture without
+reviving it; an upload after its owner context is disposed fails with 3694.
+The prototype retains only weak ownership records for retired textures.
+
+This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
+with no mipmaps, LOD bias, sampler overrides, cube/rectangle/compressed textures
+or render-to-texture. Upload dimensions must match the texture. Each context
+is limited to 128 textures and 64 MiB of texels, with another 64 MiB maximum
+for CPU staging arrays; these are experimental resource limits.
+Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
+non-opaque alpha there, which requires broader work on BitmapData's current
+opaque-pixel invariant. Fractional clear-color quantization also differs
+between backends; the fixture uses representable byte values.
+
 `Composition.as` exercises two Stage3D slots beneath ordinary Flash
 graphics, including an opaque and a translucent overlay. The browser test
 uses the existing Pixi view for the display list and separate canvas layers
@@ -118,13 +146,13 @@ node tests/context3d/composition-oracle.ts --update
 This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
 tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
-float vertex attributes, vector/matrix uploads, opaque color rendering and
-non-antialiased color back buffers are exercised, with sizes limited to
+float vertex attributes, vector/matrix uploads, unblended color rendering and
+non-antialiased color back buffers are exercised, with back-buffer sizes limited to
 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are broader Flash error semantics and AGAL/state/texture coverage.
+Next gates are depth/culling, broader Flash error semantics and AGAL/state/texture coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim

@@ -1,10 +1,12 @@
 package {
+  import flash.display.BitmapData;
   import flash.display.Sprite;
   import flash.display.Stage3D;
   import flash.display3D.Context3D;
   import flash.display3D.IndexBuffer3D;
   import flash.display3D.Program3D;
   import flash.display3D.VertexBuffer3D;
+  import flash.display3D.textures.Texture;
   import flash.events.Event;
   import flash.utils.ByteArray;
 
@@ -14,6 +16,8 @@ package {
     private var vertices:VertexBuffer3D;
     private var indices:IndexBuffer3D;
     private var program:Program3D;
+    private var texture:Texture;
+    private var bitmap:BitmapData = new BitmapData(2, 2, true, 0xffffffff);
     private var generation:int = 0;
 
     public function Recovery() {
@@ -53,6 +57,7 @@ package {
       probe("buffer", function():void { vertices.uploadFromVector(new Vector.<Number>(12), 0, 3); });
       probe("indices", function():void { indices.uploadFromVector(Vector.<uint>([0, 1, 2]), 0, 3); });
       probe("program", function():void { program.upload(new ByteArray(), new ByteArray()); });
+      probe("texture", function():void { texture.uploadFromBitmapData(bitmap); });
     }
 
     private function created(event:Event):void {
@@ -66,6 +71,7 @@ package {
         vertices.dispose();
         indices.dispose();
         program.dispose();
+        texture.dispose();
         trace("recovery", "survived", slot.context3D === current);
       }
       current.configureBackBuffer(32, 32, 0, false);
@@ -89,6 +95,8 @@ package {
       ]), 1);
       current.drawTriangles(indices);
       current.present();
+      texture = current.createTexture(2, 2, "bgra", false);
+      texture.uploadFromBitmapData(bitmap);
     }
 
     private function shader(fragment:Boolean):ByteArray {

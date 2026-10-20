@@ -127,8 +127,38 @@ test("unsupported instruction layouts are not reported as malformed arithmetic",
   view.setUint32(7, 0x27, true); // kil has no destination
   view.setUint32(11, 0, true);
   assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL opcode/);
-  view.setUint32(7, 0x28, true); // tex uses a sampler operand
-  view.setUint32(11, 0x030f0000, true);
+});
+
+test("2D texture samplers preserve filtering/wrapping and reject unsupported encodings", () => {
+  const bytes = mov(true);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(7, 0x28, true);
+  view.setUint32(23, 7, true);
+  for (const linear of [false, true]) {
+    for (const repeat of [false, true]) {
+      view.setUint32(27, 5 | (Number(linear) << 28) | (Number(repeat) << 20), true);
+      const result = translate(bytes, "fragment");
+      assert.deepEqual(result.samplers, [{ index: 7, linear, repeat }]);
+      assert.match(result.source, /uniform sampler2D fs7/);
+      assert.match(result.source, /texture\(fs7, fc0\.xyzw\.xy\)/);
+    }
+  }
+  for (const flags of [6, 0x105, 0x1005, 0x10005, 0x200005, 0x1000005, 0x20000005]) {
+    view.setUint32(27, flags, true);
+    assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
+  }
   view.setUint32(27, 5, true);
-  assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL opcode/);
+  for (const index of [8, 0x10000, 0x1000000]) {
+    view.setUint32(23, index, true);
+    assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
+  }
+  view.setUint32(23, 0, true);
+  bytes[6] = 0;
+  assert.throws(() => translate(bytes, "vertex"), /Unsupported AGAL sampler/);
+  bytes[6] = 1;
+  const doubled = new Uint8Array(55);
+  doubled.set(bytes);
+  doubled.set(bytes.subarray(7), 31);
+  new DataView(doubled.buffer).setUint32(51, 0x10000005, true);
+  assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
 });

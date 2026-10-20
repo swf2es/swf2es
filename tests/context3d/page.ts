@@ -43,6 +43,7 @@ function create() {
     "Texture",
     "Framebuffer",
     "VertexArray",
+    "Sampler",
   ] as const) {
     const object = gl as unknown as Record<string, (...args: never[]) => object | null>;
     const createName = `create${kind}`;
@@ -242,7 +243,7 @@ export async function lifecycle(cancel: boolean) {
   }
 }
 
-export async function arithmetic() {
+export async function shaderFixture(fixture: "Arithmetic" | "Texturing") {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
   );
@@ -269,7 +270,7 @@ export async function arithmetic() {
       ),
     );
     player = new Player(
-      new Uint8Array(await (await fetch("/context3d/Arithmetic.swf")).arrayBuffer()),
+      new Uint8Array(await (await fetch(`/context3d/${fixture}.swf`)).arrayBuffer()),
       scripting,
     );
     await player.start();
@@ -277,16 +278,19 @@ export async function arithmetic() {
       await scripting.settled();
       player.tick();
     }
-    check(trace.at(-1) === "arithmetic complete", `incomplete arithmetic trace: ${trace}`);
-    check(owned.length === 1, "unexpected arithmetic context count");
-    check(owned[0].gl.getError() === owned[0].gl.NO_ERROR, "GL error after arithmetic");
+    check(
+      trace.at(-1) === `${fixture.toLowerCase()} complete`,
+      `incomplete shader trace: ${trace}`,
+    );
+    check(owned.length === 1, "unexpected shader context count");
+    check(owned[0].gl.getError() === owned[0].gl.NO_ERROR, "GL error after shader fixture");
     return { trace };
   } finally {
     close();
     player?.destroy();
     scripting.destroy();
     for (const entry of owned) {
-      check(entry.live.size === 0, "arithmetic retained GPU handles");
+      check(entry.live.size === 0, "shader fixture retained GPU handles");
       entry.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
@@ -341,6 +345,7 @@ export async function recovery(cancel: "none" | "lost" | "queued") {
     "recovery buffer Error 3694",
     "recovery indices Error 3694",
     "recovery program Error 3694",
+    "recovery texture Error 3694",
   ];
   let player: Player | null = null;
   const drain = async (): Promise<void> => {
@@ -620,6 +625,68 @@ export async function lifetime() {
     c.configure(32, 32);
     c.draw(indices, 0, 1);
     check(color(c.read(), 16, 16, 32) === "ffff0000", "resize invalidated live resources");
+    rejects(() => c.createTexture(0, 2));
+    rejects(() => c.createTexture(3, 2));
+    rejects(() => c.createTexture(4096, 2));
+    const texture = c.createTexture(2, 2);
+    rejects(() => second.backend.setTexture(0, texture));
+    rejects(() => c.setTexture(8, texture));
+    const textured = shader(true);
+    const textureCode = new DataView(textured.buffer);
+    textureCode.setUint32(7, 0x28, true);
+    textureCode.setUint32(27, 5, true);
+    p.upload(shader(false), textured);
+    c.setConstants("fragment", 0, [0.25, 0.25, 0, 1], 1);
+    rejects(() => c.draw(indices, 0, 1));
+    c.setTexture(0, texture);
+    rejects(() => c.draw(indices, 0, 1));
+    const pixels = Uint32Array.of(0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff);
+    rejects(() => texture.upload(pixels.subarray(1)));
+    const gl = first.gl as unknown as { texSubImage2D: (...args: unknown[]) => void };
+    const upload = gl.texSubImage2D;
+    let staging: unknown;
+    let uploads = 0;
+    gl.texSubImage2D = function (...args) {
+      if (uploads === 0) {
+        staging = args[8];
+      }
+      check(staging === args[8], "texture upload replaced its staging buffer");
+      uploads++;
+      upload.apply(this, args);
+    };
+    try {
+      texture.upload(pixels);
+      c.draw(indices, 0, 1);
+      const warmed = new Set(first.live);
+      for (let i = 0; i < 8; i++) {
+        pixels[0] = i % 2 === 0 ? 0xff00ff00 : 0xffff0000;
+        texture.upload(pixels);
+        c.draw(indices, 0, 1);
+        check(color(c.read(), 16, 16, 32) === pixels[0].toString(16), "reupload did not reach GPU");
+        check(first.live.size === warmed.size, "warm texture draws allocated GPU handles");
+        for (const handle of first.live) {
+          check(warmed.has(handle), "warm texture draws replaced a GPU handle");
+        }
+      }
+      check(uploads === 9, "texture upload was skipped");
+    } finally {
+      gl.texSubImage2D = upload;
+    }
+    c.configure(64, 64);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 32, 32, 64) === "ffff0000", "resize lost texture bindings");
+    c.setTexture(0, null);
+    rejects(() => c.draw(indices, 0, 1));
+    c.setTexture(0, texture);
+    texture.dispose();
+    texture.dispose();
+    rejects(() => c.draw(indices, 0, 1));
+    c.setTexture(0, texture);
+    rejects(() => c.draw(indices, 0, 1));
+    rejects(() => texture.upload(pixels));
+    c.setTexture(0, null);
+    p.upload(shader(false), shader(true));
+    c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
     vertices.dispose();
     rejects(() => c.draw(indices, 0, 1));
     rejects(() => vertices.upload([], 0, 0));
