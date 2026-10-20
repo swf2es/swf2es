@@ -162,6 +162,37 @@ trace(renamed.hasOwnProperty("_x"));`,
   );
 });
 
+test("scale properties preserve assigned percentages exactly", async () => {
+  for (const version of [5, 6, 7, 8, 10]) {
+    assert.deepEqual(
+      await traces(
+        `var values = [7, 29, 57, 58, -29, 0.1, 1 / 3, 33.3333, 1000000, Infinity];
+for (var i = 0; i < values.length; i++) {
+  a._xscale = values[i]; a._yscale = values[i];
+  trace(a._xscale == values[i] && a._yscale == values[i]);
+}
+setProperty(a, 2, 29); setProperty(a, 3, 57);
+trace(getProperty(a, 2) == 29 && getProperty(a, 3) == 57);`,
+        version,
+      ),
+      new Array(11).fill("true"),
+      `SWF ${version}`,
+    );
+  }
+});
+
+test("incrementing scale percentages reaches exact integer endpoints", async () => {
+  assert.deepEqual(
+    await traces(
+      `a._xscale = 0; a._yscale = 0;
+for (var i = 0; i < 100; i++) { a._xscale++; a._yscale++; }
+trace(a._xscale == 100 && a._yscale == 100);
+trace(a._xscale - 100); trace(a._yscale - 100);`,
+    ),
+    ["true", "0", "0"],
+  );
+});
+
 test("_width and _height scale a turned clip by its turned, unscaled bounds, and a scale past 32768 draws at that (adl)", async () => {
   assert.deepEqual(
     await traces(

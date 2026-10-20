@@ -3519,6 +3519,39 @@ const as1 = (source: string, version: number) =>
 const avm1Sprite = (id: number, frames: Uint8Array[][]) =>
   w.sprite(id, frames.length, [...frames.flatMap((f) => [...f, w.showFrame()]), w.end()]);
 
+function avm1ScaleRamp(): Uint8Array {
+  return w.swf({
+    version: 10,
+    width: 100,
+    height: 100,
+    frameRate: 30,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0x00aa00, 1600),
+      avm1Sprite(2, [[w.place({ depth: 1, character: 1 })]]),
+      w.place({ depth: 1, character: 2, name: "bar", matrix: { tx: 200, ty: 200 } }),
+      as1(
+        `
+bar._xscale = 0; bar._yscale = 0;
+onEnterFrame = function() {
+  if (bar._xscale < 100) { bar._xscale++; }
+  if (bar._yscale < 100) { bar._yscale++; }
+  if (bar._xscale == 100 && bar._yscale == 100) {
+    trace("ready " + bar._xscale + " " + bar._yscale);
+    delete onEnterFrame;
+  }
+};
+stop();`,
+        10,
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** An AVM1 SWF of `version`, its root's frames' tags after the definitions. */
 function avm1Swf(version: number, defs: Uint8Array[], frames: Uint8Array[][]): Uint8Array {
   return w.swf({
@@ -9546,6 +9579,16 @@ export const cases: PlayerCase[] = [
     swf: avm1ClipDrawn(),
     frames: 2,
     capture: [2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-scale-ramp",
+    swf: avm1ScaleRamp(),
+    traced: true,
+    frames: 102,
+    // Flash may capture frame 1 before the AVM1 root's actions have run.
+    capture: [2, 51, 101],
     tolerance: 0,
     maxOutliers: 0,
   },

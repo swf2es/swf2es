@@ -207,7 +207,7 @@ const PROPERTIES: [string, DisplayProperty][] = [
         const n = numberOf(value, version);
         if (n !== null) {
           f.target.touch();
-          setScaleX(f, n / 100);
+          setScaleX(f, n / 100, n);
         }
       },
     },
@@ -223,7 +223,7 @@ const PROPERTIES: [string, DisplayProperty][] = [
         const n = numberOf(value, version);
         if (n !== null) {
           f.target.touch();
-          setScaleY(f, n / 100);
+          setScaleY(f, n / 100, n);
         }
       },
     },
@@ -479,15 +479,15 @@ const MAX_SCALE = 32768;
 
 const clampScale = (s: number): number => Math.max(-MAX_SCALE, Math.min(MAX_SCALE, s));
 
-/** `_xscale` set, as a fraction: kept as set, the matrix's clamped. */
-function setScaleX(f: ClipNative, s: number): void {
+/** Preserve explicit percentages without a divide/multiply round trip; size setters supply factors. */
+function setScaleX(f: ClipNative, s: number, percent = s * 100): void {
   f.target.setScaleX(clampScale(s));
-  f.xscale = s * 100;
+  f.xscale = percent;
 }
 
-function setScaleY(f: ClipNative, s: number): void {
+function setScaleY(f: ClipNative, s: number, percent = s * 100): void {
   f.target.setScaleY(clampScale(s));
-  f.yscale = s * 100;
+  f.yscale = percent;
 }
 
 /**
