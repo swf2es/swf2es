@@ -10,6 +10,7 @@ import { runInNewContext } from "node:vm";
 import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import {
   BitmapObject,
+  CHILDREN,
   CONTENT,
   Container,
   TRANSFORM,
@@ -164,6 +165,147 @@ test("a timeline mask's range goes in a container it masks, a scroll clips the r
   view.prepare(root);
   assert.equal(holder.children.length, 0);
   assert.ok(!cNode.mask);
+});
+
+test("timeline mask groups survive child edits and changing ranges, but retire when a mask is replaced", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const children = Array.from({ length: 8 }, (_, i) => {
+    const child = new Container();
+    root.placeAtDepth(child, i + 1);
+    return child;
+  });
+  const [outerMask, first, innerMask, , , last, , outside] = children;
+  outerMask.clipDepth = 7;
+  innerMask.clipDepth = 5;
+  view.prepare(root);
+
+  const top = view.stage.children[0];
+  const [art, outer, outerGroup, beyond] = top.children;
+  const [firstContainer, inner, innerGroup, lastContainer, seventh] = outerGroup.children;
+  assert.equal(outerGroup.mask, outer);
+  assert.equal(innerGroup.mask, inner);
+
+  const replacement = new Container();
+  root.placeAtDepth(replacement, 4);
+  view.prepare(root);
+  assert.equal(top.children[2], outerGroup);
+  assert.equal(outerGroup.children[2], innerGroup);
+  const replacementContainer = innerGroup.children[0];
+  assert.equal(innerGroup.children.length, 2);
+
+  root.removeChild(first);
+  view.prepare(root);
+  assert.deepEqual(outerGroup.children, [inner, innerGroup, lastContainer, seventh]);
+  assert.equal(firstContainer.parent, null);
+
+  // Extending the inner range moves a child into its existing group.
+  innerMask.clipDepth = 6;
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.equal(innerGroup.children[0], replacementContainer);
+  assert.equal(innerGroup.children.at(-1), lastContainer);
+  assert.deepEqual(outerGroup.children, [inner, innerGroup, seventh]);
+
+  // The same masks now clip siblings instead of nesting.
+  outerMask.clipDepth = 2;
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.deepEqual(top.children, [art, outer, outerGroup, inner, innerGroup, seventh, beyond]);
+  assert.equal(outerGroup.children.length, 0);
+  assert.equal(outerGroup.destroyed, false);
+  assert.equal(innerGroup.destroyed, false);
+
+  outerMask.clipDepth = 7;
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.deepEqual(top.children, [art, outer, outerGroup, beyond]);
+  assert.deepEqual(outerGroup.children, [inner, innerGroup, seventh]);
+
+  root.removeChild(outside);
+  root.placeAtDepth(outside, 5);
+  root.removeChild(last);
+  view.prepare(root);
+  assert.deepEqual(innerGroup.children, [replacementContainer, beyond]);
+
+  const newMask = new Container();
+  newMask.clipDepth = 6;
+  root.placeAtDepth(newMask, 3);
+  view.prepare(root);
+  assert.equal(outerGroup.destroyed, true);
+  assert.equal(innerGroup.destroyed, true);
+  const rebuilt = top.children[2];
+  assert.notEqual(rebuilt, outerGroup);
+  assert.equal(rebuilt.mask, outer);
+  assert.equal(outer.includeInBuild, false);
+
+  root.removeChild(newMask);
+  root.removeChild(outerMask);
+  view.prepare(root);
+  assert.equal(rebuilt.destroyed, true);
+  assert.equal(top.children[0], art);
+  assert.ok(top.children.slice(1).every((child) => !child.mask));
+});
+
+test("timeline masks stay nested across scroll changes and rebuild when their order changes", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const outer = new Container();
+  const inner = new Container();
+  const child = new Container();
+  root.placeAtDepth(outer, 1);
+  root.placeAtDepth(inner, 2);
+  root.placeAtDepth(child, 3);
+  outer.clipDepth = 4;
+  inner.clipDepth = 3;
+  view.prepare(root);
+
+  const top = view.stage.children[0];
+  const [art, outerContainer] = top.children;
+  let outerGroup = top.children[2];
+  const innerContainer = outerGroup.children[0];
+  let innerGroup = outerGroup.children[1];
+  const childContainer = innerGroup.children[0];
+
+  root.scroll = { xMin: 0, yMin: 0, xMax: 20, yMax: 20 };
+  root.invalidate(TRANSFORM);
+  view.prepare(root);
+  const content = top.children[1];
+  outerGroup = content.children[2];
+  innerGroup = outerGroup.children[1];
+  assert.deepEqual(content.children, [art, outerContainer, outerGroup]);
+  assert.deepEqual(outerGroup.children, [innerContainer, innerGroup]);
+  assert.deepEqual(innerGroup.children, [childContainer]);
+  assert.equal(outerGroup.mask, outerContainer);
+  assert.equal(innerGroup.mask, innerContainer);
+
+  root.invalidate(CHILDREN);
+  view.prepare(root);
+  assert.equal(content.children[2], outerGroup);
+  assert.equal(outerGroup.children[1], innerGroup);
+
+  root.scroll = null;
+  root.invalidate(TRANSFORM);
+  view.prepare(root);
+  outerGroup = top.children[2];
+  innerGroup = outerGroup.children[1];
+  assert.deepEqual(top.children, [art, outerContainer, outerGroup]);
+  assert.deepEqual(outerGroup.children, [innerContainer, innerGroup]);
+  assert.equal(outerGroup.mask, outerContainer);
+  assert.equal(innerGroup.mask, innerContainer);
+
+  // A later mask becomes the outer one: retained wrappers would otherwise form a cycle.
+  root.swapChildren(outer, inner);
+  view.prepare(root);
+  assert.equal(outerGroup.destroyed, true);
+  assert.equal(innerGroup.destroyed, true);
+  const newOuter = top.children[2];
+  assert.deepEqual(top.children, [art, innerContainer, newOuter]);
+  assert.equal(newOuter.mask, innerContainer);
+  const newInner = newOuter.children[1];
+  assert.deepEqual(newOuter.children, [outerContainer, newInner]);
+  assert.equal(newInner.mask, outerContainer);
+  assert.deepEqual(newInner.children, [childContainer]);
 });
 
 test("a batchable keeps the batcher name it is given, and one under a colour transform goes to swf2es's", async () => {
