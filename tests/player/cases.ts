@@ -9419,6 +9419,33 @@ export const cases: PlayerCase[] = [
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
   {
+    name: "loader-images",
+    swf: bare,
+    script: "LoaderImages",
+    frames: 5,
+    capture: [3, 5],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "loader-image-alpha",
+    swf: bare,
+    script: "LoaderImageAlpha",
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "loader-image-formats",
+    swf: bare,
+    script: "LoaderImageFormats",
+    frames: 9,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "loader-bytes-frames",
     build: loaderBytesFrames,
     frames: 5,
