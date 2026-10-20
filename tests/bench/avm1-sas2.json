@@ -1,0 +1,23 @@
+[
+  { "label": "title", "ticks": 1000, "expectFrame": 64 },
+  { "label": "menu", "click": [320, 294], "ticks": 60, "expectFrame": 83 },
+  { "label": "creator", "click": [320, 326], "ticks": 60, "expectFrame": 102 },
+  { "label": "name", "click": [108, 50], "text": "Maximus", "ticks": 1 },
+  { "label": "strength", "click": [120, 250], "ticks": 1, "repeat": 9 },
+  { "label": "intro", "click": [550, 365], "ticks": 1000, "expectFrame": 175 },
+  { "label": "versus", "click": [320, 210], "ticks": 300, "expectFrame": 246 },
+  { "label": "battle", "click": [320, 240], "ticks": 120, "expectFrame": 252 },
+  {
+    "label": "fight",
+    "click": ["arena", "gladiators", "overlay", "optionE"],
+    "ticks": 150,
+    "repeat": 6
+  },
+  {
+    "label": "win",
+    "click": ["arena", "fight_win_stuff", "button_yes"],
+    "ticks": 240,
+    "expectFrame": 260
+  },
+  { "label": "warm", "ticks": 600, "expectFrame": 260 }
+]
