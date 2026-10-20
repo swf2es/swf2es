@@ -1,5 +1,9 @@
 # Flash VM worker feasibility probe
 
+The separate [expanded scene snapshot codec](scene/README.md) covers text,
+bitmaps, Graphics, morphs and library namespaces with its own ownership and
+pixel checks. It does not replace the minimal playback codec or add a full host.
+
 These opt-in experiments run real AVM1 and AVM2 SWFs on main and in a browser
 worker. They probe ExternalInterface, synchronous bitmap drawing through Drawer,
 and a minimal renderer-neutral scene path for visible playback.

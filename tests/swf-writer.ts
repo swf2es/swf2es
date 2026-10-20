@@ -57,7 +57,7 @@ export class BitWriter {
   }
 
   string(s: string): this {
-    return this.raw([...Buffer.from(s, "utf8"), 0]);
+    return this.raw([...new TextEncoder().encode(s), 0]);
   }
 
   done(): Uint8Array {
