@@ -25,6 +25,7 @@ const scripts = compileScripts(
     "ShaderMath",
     "Scissor",
     "Mipmaps",
+    "Multisampling",
   ].map((name) => ({
     name,
     source: readFileSync(`${here}${name}.as`, "utf8"),
@@ -43,6 +44,7 @@ for (const name of [
   "ShaderMath",
   "Scissor",
   "Mipmaps",
+  "Multisampling",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -84,6 +86,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(result.exception, null, JSON.stringify(result));
       assert.equal(result.value?.passed, true);
       console.log("context3d: ownership, failed uploads, resize, disposal and context loss ok");
+      const msaa = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.multisampling())',
+      );
+      assert.equal(msaa.exception, null, JSON.stringify(msaa));
+      assert.equal(msaa.value?.passed, true);
+      console.log("context3d: multisample edges, resolve reuse, resize and allocation failures ok");
       const lifecycle: string[] = JSON.parse(
         readFileSync(`${here}lifecycle-reference.json`, "utf8"),
       );
@@ -121,6 +129,7 @@ if (!process.argv.includes("--build-only")) {
         "ShaderMath",
         "Scissor",
         "Mipmaps",
+        "Multisampling",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,

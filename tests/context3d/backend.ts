@@ -77,7 +77,7 @@ export interface Context3D {
   readonly width: number;
   readonly height: number;
   readonly disposed: boolean;
-  configure(width: number, height: number, depth?: boolean): void;
+  configure(width: number, height: number, depth?: boolean, antiAlias?: number): void;
   clear(
     red: number,
     green: number,

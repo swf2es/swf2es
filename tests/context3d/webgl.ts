@@ -89,6 +89,9 @@ export class WebGLContext3D implements Context3D {
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
+  private resolveFramebuffer: WebGLFramebuffer | null = null;
+  private colorBuffer: WebGLRenderbuffer | null = null;
+  private resolveDirty = false;
   private depthBuffer: WebGLRenderbuffer | null = null;
   private depthWrite = true;
   private scissor = false;
@@ -140,52 +143,121 @@ export class WebGLContext3D implements Context3D {
     this.gl.viewport(0, 0, this.width, this.height);
   }
 
-  configure(width: number, height: number, depth = false): void {
+  private samples(quality: number, depth: boolean): number {
+    if (!Number.isInteger(quality)) {
+      throw new Error("Context3D experiment: invalid antialiasing quality");
+    }
+    if (quality < 2) {
+      return 0;
+    }
+
+    const gl = this.gl;
+    const color: Int32Array = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA8, gl.SAMPLES);
+    const stencil: Int32Array | null = depth
+      ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, gl.SAMPLES)
+      : null;
+    let samples = 0;
+    // Quality is a hardware-dependent request; bound this experiment to 4x.
+    for (let i = 0; i < color.length; i++) {
+      const count = color[i];
+      if (
+        count > samples &&
+        count <= Math.min(quality, 4) &&
+        (!stencil || stencil.includes(count))
+      ) {
+        samples = count;
+      }
+    }
+
+    return samples;
+  }
+
+  configure(width: number, height: number, depth = false, antiAlias = 0): void {
     this.alive();
     range(32, width - 32, 2048);
     range(32, height - 32, 2048);
+    const samples = this.samples(antiAlias, depth);
     const gl = this.gl;
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();
     const depthBuffer = depth ? gl.createRenderbuffer() : null;
-    if (!texture || !framebuffer || (depth && !depthBuffer)) {
-      gl.deleteTexture(texture);
-      gl.deleteFramebuffer(framebuffer);
-      gl.deleteRenderbuffer(depthBuffer);
-      throw new Error("Context3D experiment: cannot allocate back buffer");
-    }
+    const resolveFramebuffer = samples ? gl.createFramebuffer() : null;
+    const colorBuffer = samples ? gl.createRenderbuffer() : null;
+    try {
+      if (
+        !texture ||
+        !framebuffer ||
+        (depth && !depthBuffer) ||
+        (samples && (!resolveFramebuffer || !colorBuffer))
+      ) {
+        throw new Error("Context3D experiment: cannot allocate back buffer");
+      }
 
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    if (depthBuffer) {
-      gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
-      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
-      gl.framebufferRenderbuffer(
-        gl.FRAMEBUFFER,
-        gl.DEPTH_STENCIL_ATTACHMENT,
-        gl.RENDERBUFFER,
-        depthBuffer,
-      );
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, resolveFramebuffer ?? framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      if (resolveFramebuffer) {
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+          throw new Error("Context3D experiment: incomplete resolve buffer");
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, colorBuffer);
+        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, width, height);
+        gl.framebufferRenderbuffer(
+          gl.FRAMEBUFFER,
+          gl.COLOR_ATTACHMENT0,
+          gl.RENDERBUFFER,
+          colorBuffer,
+        );
+      }
+      if (depthBuffer) {
+        gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
+        if (samples) {
+          gl.renderbufferStorageMultisample(
+            gl.RENDERBUFFER,
+            samples,
+            gl.DEPTH24_STENCIL8,
+            width,
+            height,
+          );
+        } else {
+          gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+        }
+        gl.framebufferRenderbuffer(
+          gl.FRAMEBUFFER,
+          gl.DEPTH_STENCIL_ATTACHMENT,
+          gl.RENDERBUFFER,
+          depthBuffer,
+        );
+      }
       gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    }
-
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error("Context3D experiment: incomplete back buffer");
+      }
+    } catch (error) {
       gl.deleteTexture(texture);
       gl.deleteFramebuffer(framebuffer);
+      gl.deleteFramebuffer(resolveFramebuffer);
       gl.deleteRenderbuffer(depthBuffer);
+      gl.deleteRenderbuffer(colorBuffer);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-      throw new Error("Context3D experiment: incomplete back buffer");
+      throw error;
     }
 
     gl.deleteTexture(this.texture);
     gl.deleteFramebuffer(this.framebuffer);
+    gl.deleteFramebuffer(this.resolveFramebuffer);
     gl.deleteRenderbuffer(this.depthBuffer);
+    gl.deleteRenderbuffer(this.colorBuffer);
     this.texture = texture;
     this.framebuffer = framebuffer;
+    this.resolveFramebuffer = resolveFramebuffer;
+    this.colorBuffer = colorBuffer;
     this.depthBuffer = depthBuffer;
     this.width = width;
     this.height = height;
@@ -211,6 +283,7 @@ export class WebGLContext3D implements Context3D {
     if (mask & 1) {
       gl.clearColor(red, green, blue, alpha);
       bits |= gl.COLOR_BUFFER_BIT;
+      this.resolveDirty = true;
     }
     if (mask & 2) {
       gl.clearDepth(depth);
@@ -812,6 +885,7 @@ export class WebGLContext3D implements Context3D {
     this.uniforms(state.fragment, this.fragmentConstants);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);
+    this.resolveDirty = true;
   }
 
   private uniforms(locations: (WebGLUniformLocation | null)[], data: Float32Array): void {
@@ -822,8 +896,41 @@ export class WebGLContext3D implements Context3D {
     }
   }
 
+  private resolve(): void {
+    if (!this.resolveFramebuffer) {
+      return;
+    }
+
+    const gl = this.gl;
+    if (this.resolveDirty) {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resolveFramebuffer);
+      if (this.scissor) {
+        gl.disable(gl.SCISSOR_TEST);
+      }
+      gl.blitFramebuffer(
+        0,
+        0,
+        this.width,
+        this.height,
+        0,
+        0,
+        this.width,
+        this.height,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+      if (this.scissor) {
+        gl.enable(gl.SCISSOR_TEST);
+      }
+      this.resolveDirty = false;
+    }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.resolveFramebuffer);
+  }
+
   read(): Uint8Array {
     this.target();
+    this.resolve();
     const gl = this.gl;
     gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
     const row = this.width * 4;
@@ -840,6 +947,7 @@ export class WebGLContext3D implements Context3D {
 
   present(): void {
     this.target();
+    this.resolve();
     const gl = this.gl;
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     if (this.scissor) {
@@ -892,9 +1000,13 @@ export class WebGLContext3D implements Context3D {
     this.gl.bindTexture(this.gl.TEXTURE_2D, null);
     this.gl.deleteVertexArray(this.vao);
     this.gl.deleteFramebuffer(this.framebuffer);
+    this.gl.deleteFramebuffer(this.resolveFramebuffer);
+    this.gl.deleteRenderbuffer(this.colorBuffer);
     this.gl.deleteTexture(this.texture);
     this.gl.deleteRenderbuffer(this.depthBuffer);
     this.framebuffer = null;
+    this.resolveFramebuffer = null;
+    this.colorBuffer = null;
     this.texture = null;
     this.depthBuffer = null;
     this.pixels = new Uint8Array(0);

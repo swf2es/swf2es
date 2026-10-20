@@ -25,6 +25,7 @@ node tests/context3d/oracle.ts --blending
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
+node tests/context3d/oracle.ts --multisampling
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -156,6 +157,24 @@ All levels share the texture's existing base-sized CPU staging array. The twelve
 filter/wrap/mip combinations use lazily cached sampler objects. Browser checks
 verify stable staging storage and GPU handles across mip reuploads, with cleanup
 after disposal and context loss. Mip sampling adds no per-draw arrays.
+
+`Multisampling.as` checks antialiasing quality requests, interior readback,
+scissor interaction, presentation followed by clear, and resize against AIR.
+Quality is a device-dependent request: this experiment picks a supported color
+and depth sample count no greater than the request, capped at 4×; it falls back
+to no antialiasing when no common count is available. Negative and unusually
+large integer requests are accepted by AIR. Exact edge coverage is GPU-dependent
+and is not compared pixel-for-pixel against AIR.
+
+The backend draws into multisampled renderbuffers and resolves into its existing
+single-sample texture only after color changes. Readback followed by presentation
+reuses the resolve; depth-only clears do not invalidate it. Scissor state cannot
+clip the resolve or presentation. Browser checks verify partially covered edges,
+resolve counts, warm resource reuse, fallback, repeated resizing, disabling MSAA,
+failed allocation/framebuffer rollback and full cleanup. Recovery also uses 4×
+back buffers. Allocations occur at configuration, with no new per-draw arrays.
+AIR's requirement to clear after present before AS3 readback (3692) remains part
+of the broader frame-validation work; this slice does not add that validation.
 
 `Scissor.as` checks top-left clipping against AIR, including fractional edge
 rounding, empty and negative-sized rectangles, clipping to the viewport, and

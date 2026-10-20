@@ -259,11 +259,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         throw s.rt.error("Error", 3781, 32, 2048);
       }
 
-      if (aa !== 0 || best || zoom) {
+      if (best || zoom) {
         unsupported();
       }
 
-      backend.configure(width, height, depth);
+      backend.configure(width, height, depth, aa);
     }
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {

@@ -246,7 +246,15 @@ export async function lifecycle(cancel: boolean) {
 }
 
 export async function shaderFixture(
-  fixture: "Arithmetic" | "Texturing" | "Depth" | "Blending" | "ShaderMath" | "Scissor" | "Mipmaps",
+  fixture:
+    | "Arithmetic"
+    | "Texturing"
+    | "Depth"
+    | "Blending"
+    | "ShaderMath"
+    | "Scissor"
+    | "Mipmaps"
+    | "Multisampling",
 ) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
@@ -578,6 +586,140 @@ export async function compositionStep(step: number): Promise<void> {
 
 export function closeComposition(): void {
   compositionRun?.close();
+}
+
+export async function multisampling() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(64, 64);
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    const program = c.createProgram();
+    program.upload(shader(false), shader(true));
+    c.setProgram(program);
+    c.setVertex(0, vertices, 0, 4);
+    c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
+    c.setDepth(false, "always");
+    const baseline = live.size;
+    const partial = (pixels: Uint8Array): number => {
+      let count = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] > 0 && pixels[i] < 255) {
+          count++;
+        }
+      }
+      return count;
+    };
+    c.clear(0, 0, 1, 1);
+    c.draw(indices, 0, 1);
+    check(partial(c.read()) === 0, "nonmultisampled triangle has partial coverage");
+
+    for (let i = 0; i < 6; i++) {
+      const size = i % 2 === 0 ? 64 : 32;
+      const depth = i % 3 !== 0;
+      c.configure(size, size, depth, 4);
+      check(gl.getParameter(gl.SAMPLES) === 4, "4x sample buffers unavailable in test browser");
+      check(live.size === baseline + 2 + Number(depth), "MSAA resize retained GPU handles");
+      c.clear(0, 0, 1, 1);
+      c.draw(indices, 0, 1);
+      check(partial(c.read()) > 0, "multisample readback lost edge coverage");
+    }
+
+    c.configure(64, 64, true, 4);
+    c.clear(0, 0, 1, 1);
+    c.draw(indices, 0, 1);
+    c.setScissor(30, 30, 4, 4);
+    let resolves = 0;
+    const blit = gl.blitFramebuffer;
+    gl.blitFramebuffer = function (...args) {
+      if (gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING) !== null) {
+        resolves++;
+      }
+      blit.apply(this, args);
+    };
+    try {
+      const pixels = c.read();
+      check(partial(pixels) > 0, "scissor clipped the resolve outside its rectangle");
+      check(color(pixels, 0, 0, 64) === "ff0000ff", "resolve lost background");
+      c.read();
+      c.present();
+      check(resolves === 1, "unchanged buffer resolved more than once");
+      const presented = new Uint8Array(64 * 64 * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, presented);
+      check(partial(presented) > 0, "presentation lost antialiased edges");
+      check(color(presented, 0, 0, 64) === "ff0000ff", "scissor clipped presentation");
+      c.clear(0, 1, 0, 1);
+      check(color(c.read(), 0, 0, 64) === "ff00ff00", "scissor clipped multisample clear");
+      check(Number(resolves) === 2, "clear did not invalidate the resolve");
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, presented);
+      check(color(presented, 0, 0, 64) === "ff0000ff", "clear overwrote presentation");
+      c.draw(indices, 0, 1);
+      const clipped = c.read();
+      check(color(clipped, 32, 32, 64) === "ffff0000", "resolve lost the new draw");
+      check(color(clipped, 20, 32, 64) === "ff00ff00", "resolve disabled draw-time scissor");
+      check(Number(resolves) === 3, "draw did not invalidate the resolve");
+      c.clear(0, 0, 0, 1, 1, 2);
+      c.read();
+      check(Number(resolves) === 3, "depth-only clear needlessly resolved color");
+    } finally {
+      gl.blitFramebuffer = blit;
+    }
+
+    c.setScissor(null);
+    const handles = live.size;
+    const allocation = gl as unknown as { createRenderbuffer(): WebGLRenderbuffer | null };
+    const allocate = allocation.createRenderbuffer;
+    allocation.createRenderbuffer = () => null;
+    try {
+      rejects(() => c.configure(32, 32, false, 4));
+    } finally {
+      allocation.createRenderbuffer = allocate;
+    }
+    check(live.size === handles, "failed MSAA allocation leaked GPU handles");
+    const status = gl.checkFramebufferStatus;
+    for (let failed = 1; failed <= 2; failed++) {
+      let checks = 0;
+      gl.checkFramebufferStatus = function (target) {
+        return ++checks === failed
+          ? gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT
+          : status.call(this, target);
+      };
+      try {
+        rejects(() => c.configure(32, 32, true, 4));
+      } finally {
+        gl.checkFramebufferStatus = status;
+      }
+      check(live.size === handles, "incomplete MSAA framebuffer leaked GPU handles");
+      check(c.width === 64 && c.height === 64, "failed MSAA resize changed dimensions");
+      check(color(c.read(), 32, 32, 64) === "ffff0000", "failed MSAA resize lost old pixels");
+    }
+    c.configure(64, 64);
+    check(live.size === baseline, "disabling MSAA retained its resources");
+    c.draw(indices, 0, 1);
+    check(partial(c.read()) === 0, "disabling MSAA retained partial coverage");
+
+    const formats = gl.getInternalformatParameter;
+    gl.getInternalformatParameter = (_target, format) =>
+      format === gl.RGBA8 ? Int32Array.of(4) : Int32Array.of(2);
+    try {
+      c.configure(32, 32, true, 4);
+      check(gl.getParameter(gl.SAMPLES) === 0, "incompatible sample counts were selected");
+      check(live.size === baseline + 1, "MSAA fallback allocated unused resources");
+    } finally {
+      gl.getInternalformatParameter = formats;
+    }
+    check(gl.getError() === gl.NO_ERROR, "multisampling polluted GL state");
+    return { passed: true };
+  } finally {
+    c.dispose();
+    check(live.size === 0, "multisampling retained GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
 }
 
 export async function lifetime() {

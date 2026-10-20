@@ -74,7 +74,7 @@ package {
         texture.dispose();
         trace("recovery", "survived", slot.context3D === current);
       }
-      current.configureBackBuffer(32, 32, 0, true);
+      current.configureBackBuffer(32, 32, 4, true);
       current.enableErrorChecking = true;
       current.clear(0, 0, 0, 1);
       previous = current;
