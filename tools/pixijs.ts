@@ -154,13 +154,14 @@ interface PluginContext {
 
 interface Plugin {
   name: string;
+  options?(this: PluginContext, options: { plugins: unknown[] }): unknown;
   resolveId?(
     this: PluginContext,
     id: string,
     importer: string | undefined,
     options: object,
   ): Promise<string | Resolved | null>;
-  load?(id: string): string | null;
+  load?(this: PluginContext, id: string): unknown;
 }
 
 interface Options {
@@ -361,6 +362,59 @@ async function browserBuild(rollup: Rollup, compiled: string): Promise<Options> 
  * state, which builds running at once or one after another must not share.
  */
 async function forkBuild(path: string, copy: string): Promise<{ build: Options; o: Output }> {
+  const result = await forkConfig(path, copy);
+  let worker = 0;
+  const fresh = async () =>
+    (await forkConfig(path, `${copy}-worker-${++worker}`)).build.plugins ?? [];
+  result.build = {
+    ...result.build,
+    plugins: isolatedWorkerPlugins(result.build.plugins ?? [], fresh),
+  };
+
+  return result;
+}
+
+const WORKER_PLUGIN = "@pixi/webworker-plugins/rollup-plugin";
+
+/**
+ * The worker plugin reuses its parent's plugins for nested Rollup builds.
+ * Their buildStart hooks reset state still in use by the parent: CommonJS
+ * can then emit proxies for exports it never generated. Each worker takes
+ * a fresh configuration, with the same isolation for its own workers.
+ */
+export function isolatedWorkerPlugins(
+  plugins: unknown[],
+  fresh: () => Promise<unknown[]>,
+): unknown[] {
+  return plugins.map((item) => {
+    const plugin = item as Plugin | undefined;
+    if (plugin?.name !== WORKER_PLUGIN) {
+      return item;
+    }
+
+    return {
+      ...plugin,
+      async load(this: PluginContext, id: string) {
+        if (!id.startsWith(`\0${WORKER_PLUGIN}:`)) {
+          return null;
+        }
+
+        const children = await fresh();
+        const worker = children.find((p) => (p as Plugin | undefined)?.name === WORKER_PLUGIN) as
+          | Plugin
+          | undefined;
+        if (!worker?.options || !worker.load) {
+          throw new Error("the fork's worker plugin has no options or load hook");
+        }
+
+        await worker.options.call(this, { plugins: isolatedWorkerPlugins(children, fresh) });
+        return worker.load.call(this, id);
+      },
+    };
+  });
+}
+
+async function forkConfig(path: string, copy: string): Promise<{ build: Options; o: Output }> {
   // The configuration resolves its paths against the working directory.
   process.chdir(pixi);
   const config = pathToFileURL(join(pixi, ".configs/rollup.config.mjs"));
