@@ -3642,7 +3642,7 @@ empties the store, after which every read, the size included, throws
 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
 `mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels`
-and `setPixels` (ByteArrays of big-endian ARGB), `getVector` and
+and `setPixels` (ByteArrays of ARGB words), `getVector` and
 `setVector`, `clone` and `rect` work on that store, clipped to it, a
 Rectangle's edges rounded to the nearest pixel and a half to the even one,
 as Flash rounds them (`bitmapdata_rectangle_rounding`), each edge, x and
@@ -3955,8 +3955,12 @@ JPEG XR, which Flash also writes, are not supported yet. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
 compression's file is Flash's byte for byte, as pako and zlib deflate
 alike. `getPixels` and
-`copyPixelsToByteArray` write their bytes in one pass, about 13 ms for
-1080p as in Flash.
+`copyPixelsToByteArray` write their bytes in one pass. `setPixels` and
+`copyPixelsToByteArray` honor the supplied ByteArray's `endian`;
+`getPixels` creates a big-endian one with its position after the pixels.
+Reads use the ByteArray's DataView without allocating per pixel, keeping
+complete pixels and the read position when a later word fails with
+EOFError 2030 (`bitmap-pixel-endian`).
 
 ### Text
 

@@ -8454,6 +8454,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "bitmap-pixel-endian",
+    swf: (abc) => bare(abc, 1, "Main", 40, 40),
+    script: "BitmapPixelEndian",
+    alone: true,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "bitmap-symbols",
     build: bitmapSymbols,
     frames: 1,
