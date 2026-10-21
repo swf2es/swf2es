@@ -31,11 +31,12 @@ const out = join(here, "dist/site/");
 const SOURCE = "https://github.com/swf2es/swf2es/blob/";
 
 /** The packages the page loads, by the name the import map gives each directory. */
-const PACKAGES = ["format", "codegen", "runtime", "player", "player-hosts", "web"];
+const PACKAGES = ["format", "mp3", "codegen", "runtime", "player", "player-hosts", "web"];
 
 const importMap = {
   imports: {
     "@swf2es/format": "./modules/format/index.js",
+    "@swf2es/mp3": "./modules/mp3/index.js",
     "@swf2es/codegen": "./modules/codegen/index.js",
     "@swf2es/runtime": "./modules/runtime/index.js",
     "@swf2es/player": "./modules/player/index.js",
@@ -190,6 +191,7 @@ mkdirSync(licenses, { recursive: true });
 copyFileSync(join(root, "LICENSE"), join(licenses, "swf2es-Apache-2.0.txt"));
 copyFileSync(join(root, "oracle/avmplus/LICENSE"), join(licenses, "MPL-2.0.txt"));
 copyFileSync(join(root, "vendor/pixijs/LICENSE"), join(licenses, "pixijs-MIT.txt"));
+copyFileSync(join(root, "vendor/minimp3/LICENSE"), join(licenses, "minimp3-CC0.txt"));
 copyFileSync(join(root, "packages/format/node_modules/pako/LICENSE"), join(licenses, "pako.txt"));
 copyFileSync(
   join(root, "packages/format/node_modules/lzma1/LICENSE"),

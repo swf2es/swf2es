@@ -5,7 +5,9 @@
 // those it writes. Ruffle's extract writes zeros (sound.rs's extract is a
 // stub).
 import type { Sound } from "@swf2es/format";
+import { Mp3Decoder } from "@swf2es/mp3";
 import { decodeAdpcm } from "./audio.js";
+import { mp3Frames } from "./mp3.js";
 
 export const EXTRACT_RATE = 44100;
 
@@ -26,6 +28,34 @@ export interface ExtractSource {
   starts?: number;
   /** Where a start lands, for a sound whose seeking adl gets wrong. */
   seek?: (start: number) => number;
+}
+
+/** Whole MP3 frames, including a header frame's silence, without gapless trimming. */
+export function mp3Source(bytes: Uint8Array): ExtractSource | null {
+  const mp3 = mp3Frames(bytes);
+  if (!mp3?.whole.length) {
+    return null;
+  }
+
+  const frames = (mp3.whole.length / 2) * mp3.samplesPerFrame;
+  const channels = Array.from({ length: mp3.channels }, () => new Float32Array(frames));
+  const decoder = new Mp3Decoder();
+  let at = 0;
+  for (let k = 0; k < mp3.whole.length; k += 2) {
+    const count = decoder.read(bytes.subarray(mp3.whole[k], mp3.whole[k + 1]));
+    if (decoder.channels === mp3.channels && decoder.rate === mp3.rate) {
+      const take = Math.min(count, mp3.samplesPerFrame);
+      for (let i = 0; i < take; i++) {
+        for (let c = 0; c < mp3.channels; c++) {
+          channels[c][at + i] = decoder.pcm[i * mp3.channels + c];
+        }
+      }
+    }
+
+    at += mp3.samplesPerFrame;
+  }
+
+  return { rate: mp3.rate, channels, skip: 0, whole: false };
 }
 
 /** An uncompressed or ADPCM DefineSound's samples to extract, or null for another format. */

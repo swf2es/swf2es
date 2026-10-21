@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 // declared; this test guards the declarations themselves.
 const allowed: Record<string, string[]> = {
   format: [],
+  mp3: [],
   codegen: ["format"],
   runtime: ["format"],
-  player: ["codegen", "format", "runtime"],
+  player: ["codegen", "format", "mp3", "runtime"],
   "player-hosts": ["player"],
   web: ["codegen", "format", "player", "player-hosts"],
   cli: ["codegen", "format", "runtime"],
@@ -23,6 +24,9 @@ const allowed: Record<string, string[]> = {
 const vendored: Record<string, { dir: string; users: string[] }> = {
   "pixi.js": { dir: "pixijs", users: ["player", "web"] },
 };
+
+// C-only libraries are compiled by their wrapper packages, rather than linked by pnpm.
+const nativeVendor = ["minimp3"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
@@ -61,12 +65,7 @@ test("every vendored package is in the table", () => {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
-  assert.deepEqual(
-    dirs,
-    Object.values(vendored)
-      .map((v) => v.dir)
-      .sort(),
-  );
+  assert.deepEqual(dirs, [...Object.values(vendored).map((v) => v.dir), ...nativeVendor].sort());
   for (const [name, { dir }] of Object.entries(vendored)) {
     assert.equal(readJson(`${dir}/package.json`, vendorRoot).name, name);
   }

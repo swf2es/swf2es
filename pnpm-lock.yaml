@@ -89,6 +89,8 @@ importers:
         specifier: 2.0.3
         version: 2.0.3
 
+  packages/mp3: {}
+
   packages/player:
     dependencies:
       '@swf2es/codegen':
@@ -97,6 +99,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
+      '@swf2es/mp3':
+        specifier: workspace:*
+        version: link:../mp3
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../runtime

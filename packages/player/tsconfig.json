@@ -7,5 +7,18 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": ["src"],
-  "references": [{ "path": "../format" }, { "path": "../codegen" }, { "path": "../runtime" }]
+  "references": [
+    {
+      "path": "../format"
+    },
+    {
+      "path": "../codegen"
+    },
+    {
+      "path": "../runtime"
+    },
+    {
+      "path": "../mp3"
+    }
+  ]
 }
