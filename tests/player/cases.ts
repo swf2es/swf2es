@@ -5982,6 +5982,34 @@ function fillHoles(): Uint8Array {
   });
 }
 
+/** Static shape masks keep their authored winding, unlike Graphics drawings used as masks. */
+function staticMaskWinding(): Uint8Array {
+  return w.swf({
+    width: 220,
+    height: 100,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.shape({
+        id: 1,
+        bounds: [0, 2000, 0, 2000],
+        fills: [0xcc3300],
+        paths: [rectPath(5, 5, 90, 90), rectPath(25, 25, 50, 50)].map((commands) => ({
+          fill1: 1,
+          commands,
+        })),
+      }),
+      square(2, 0x0033cc, 2000),
+      w.place({ depth: 1, character: 1 }),
+      w.place({ depth: 2, character: 1, clipDepth: 3, matrix: { tx: 2200, ty: 0 } }),
+      w.place({ depth: 3, character: 2, matrix: { tx: 2200, ty: 0 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** A rectangle's path, in pixels. */
 function rectPath(x: number, y: number, width: number, height: number): w.PathCommand[] {
   const [l, t, r, b] = [x * 20, y * 20, (x + width) * 20, (y + height) * 20];
@@ -7977,6 +8005,32 @@ export const cases: PlayerCase[] = [
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
   {
+    name: "static-mask-winding",
+    swf: staticMaskWinding(),
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "crossing-cones",
+    swf: (abc) => bare(abc, 2, "Main", 256, 192),
+    script: "CrossingCones",
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 32,
+    maxOutliers: 80,
+  },
+  {
+    name: "crossing-fills",
+    swf: (abc) => bare(abc, 3, "Main", 480, 360),
+    script: "CrossingFills",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 32,
+    maxOutliers: 500,
+  },
+  {
     name: "shared-fill-edges",
     swf: sharedFillEdges(),
     frames: 1,
@@ -8450,6 +8504,16 @@ export const cases: PlayerCase[] = [
     script: "BitmapRects",
     frames: 1,
     capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bitmap-pixel-endian",
+    swf: (abc) => bare(abc, 1, "Main", 40, 40),
+    script: "BitmapPixelEndian",
+    alone: true,
+    frames: 1,
+    capture: [],
     tolerance: 0,
     maxOutliers: 0,
   },

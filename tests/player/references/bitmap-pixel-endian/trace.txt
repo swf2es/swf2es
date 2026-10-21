@@ -1,0 +1,14 @@
+bigEndian ffff0000 ff00ff00 ff0000ff ffffff00 17 17
+copy bigEndian 17 17
+ffff0000 ff00ff00
+get bigEndian 16
+get word ffff0000
+partial 2030 5 ffff0000 ff123456 ff123456 ff123456
+empty 5
+littleEndian ffff0000 ff00ff00 ff0000ff ffffff00 17 17
+copy littleEndian 17 17
+ffff0000 ff00ff00
+get bigEndian 16
+get word ffff0000
+partial 2030 5 ffff0000 ff123456 ff123456 ff123456
+empty 5
