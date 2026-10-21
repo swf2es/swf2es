@@ -108,6 +108,8 @@ export class Multiname {
   domain: Domain | null = null;
   /** What its lookups found, for a module's name (property-cache.ts); a name made at run time keeps none. */
   cache: PropertyCache = NO_CACHE;
+  /** Fixed at construction so indexed access needs no getter in its hot path. */
+  readonly elementName: boolean;
 
   constructor(
     readonly kind: number,
@@ -118,6 +120,8 @@ export class Multiname {
     readonly attribute: boolean,
   ) {
     this.local = name;
+    this.elementName =
+      !attribute && namespaces.some((ns) => ns !== null && ns.kind === NS_Public && ns.uri === "");
   }
 
   /**
@@ -193,19 +197,6 @@ export class Multiname {
     }
 
     return null;
-  }
-
-  private publicCache: boolean | undefined;
-
-  /** Whether it has the public namespace and is not an attribute: whether an element is its to name. */
-  get elementName(): boolean {
-    if (this.publicCache === undefined) {
-      this.publicCache =
-        !this.attribute &&
-        this.namespaces.some((ns) => ns !== null && ns.kind === NS_Public && ns.uri === "");
-    }
-
-    return this.publicCache;
   }
 
   toString(): string {

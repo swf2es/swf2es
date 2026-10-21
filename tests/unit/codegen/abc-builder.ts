@@ -28,6 +28,8 @@ export interface Pool {
   ints?: number[];
   uints?: number[];
   doubles?: number[];
+  /** Present for AIR ABC 47.16, including an empty pool. */
+  floats?: number[];
   strings?: string[];
   /** Encoded namespace_info entries, e.g. [0x16, ...u30(1)]. */
   namespaces?: number[][];
@@ -47,11 +49,20 @@ export function abc(pool: Pool, rest: number[] = [0]): Uint8Array {
   return new Uint8Array([
     16,
     0,
-    46,
+    pool.floats === undefined ? 46 : 47,
     0,
     ...section((pool.ints ?? []).map(u30)),
     ...section((pool.uints ?? []).map(u30)),
     ...section((pool.doubles ?? []).map(double)),
+    ...(pool.floats === undefined
+      ? []
+      : section(
+          pool.floats.map((value) => {
+            const bytes = new Uint8Array(4);
+            new DataView(bytes.buffer).setFloat32(0, value, true);
+            return Array.from(bytes);
+          }),
+        )),
     ...section((pool.strings ?? []).map(string)),
     ...section(pool.namespaces ?? []),
     ...section((pool.nsSets ?? []).map((set) => [...u30(set.length), ...set.flatMap(u30)])),

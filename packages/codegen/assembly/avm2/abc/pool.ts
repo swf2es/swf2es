@@ -16,6 +16,7 @@ export class ConstantPool {
   ints: StaticArray<i32> = new StaticArray<i32>(1);
   uints: StaticArray<u32> = new StaticArray<u32>(1);
   doubles: StaticArray<f64> = new StaticArray<f64>(1);
+  floats: StaticArray<f32> = new StaticArray<f32>(1);
 
   /** Offset from the start of the ABC, and byte length, of each string. */
   stringStart: StaticArray<u32> = new StaticArray<u32>(1);
@@ -57,7 +58,7 @@ export class ConstantPool {
 }
 
 /** Read the constant pool at `r`; `base` is the start of the ABC. */
-export function readConstantPool(r: Reader, base: usize): ConstantPool {
+export function readConstantPool(r: Reader, base: usize, hasFloats: bool = false): ConstantPool {
   const pool = new ConstantPool();
 
   const intCount = readCount(r);
@@ -81,6 +82,23 @@ export function readConstantPool(r: Reader, base: usize): ConstantPool {
 
   if (r.failed) {
     return fail(pool, C.kCorruptABCError);
+  }
+
+  if (hasFloats) {
+    const count = readCount(r);
+    if (<u64>count * 4 > <u64>(r.end - r.pos) + 4) {
+      return fail(pool, C.kCorruptABCError);
+    }
+
+    pool.floats = new StaticArray<f32>(max(count, 1));
+    pool.floats[0] = <f32>NaN;
+    for (let i: u32 = 1; i < count; i++) {
+      pool.floats[i] = r.f32();
+    }
+
+    if (r.failed) {
+      return fail(pool, C.kCorruptABCError);
+    }
   }
 
   const stringCount = max(readCount(r), 1);

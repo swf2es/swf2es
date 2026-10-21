@@ -1,8 +1,11 @@
 # AS3 libraries
 
-The player's own ActionScript, compiled by `pnpm as3` with ASC 1 in the
+The player's own ActionScript, compiled by `pnpm as3` with ASC in the
 oracle's image and formatted by `pnpm as3:format`.
 
+- `builtin/`: AIR's scalar `float` primitive, loaded on demand beside the
+  Flash builtins (`packages/runtime/src/avm2/float-library.ts`). Its source
+  uses ordinary class syntax so the pinned ASC can compile the declarations.
 - `air/`: AIR's WebSocket client, which the oracle's playerglobal predates,
   loaded after playerglobal (`packages/player/src/playerglobal/air-library.ts`).
 - `playerglobal/`: the player's playerglobal, which it ships as

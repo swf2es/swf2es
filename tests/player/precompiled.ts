@@ -6,7 +6,7 @@
 // tested in node (tests/unit/player-hosts/precompiled.test.ts).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bare } from "./cases.ts";
 import { playPrecompiled } from "./chrome.ts";
@@ -75,6 +75,35 @@ assert.equal(imported.evalRefused, true);
 assert.equal(imported.compiled, 0);
 assert.deepEqual(imported.trace, expected);
 assert.equal(imported.image, evaluated.image);
+
+// AIR's supplemental builtin must be loaded in the same order by JIT and AOT.
+const floatAbc = new Uint8Array(readFileSync(new URL("fixtures/AirFloat.abc", import.meta.url)));
+const floatSwf = bare(floatAbc, 2, "AirFloat");
+writeFileSync(`${out}AirFloat.swf`, floatSwf);
+const floatDir = `${out}AirFloat/`;
+const floatCompiled = spawnSync(
+  process.execPath,
+  [
+    cli,
+    `${out}AirFloat.swf`,
+    "-o",
+    floatDir,
+    "--emit-libraries",
+    "-q",
+    ...libraryFiles(libraries).flatMap((file) => ["--lib", file]),
+  ],
+  { encoding: "utf8" },
+);
+assert.equal(floatCompiled.status, 0, floatCompiled.stderr);
+const floatResult = await playPrecompiled(floatSwf, floatDir, true, 2, csp);
+assert.equal(floatResult.error, null);
+assert.equal(floatResult.compiled, 0);
+assert.deepEqual(
+  floatResult.trace,
+  readFileSync(new URL("references/air-float/trace.txt", import.meta.url), "utf8")
+    .trimEnd()
+    .split("\n"),
+);
 
 // Evaluated under that policy, a module is refused, and so is its compile.
 const refused = await playPrecompiled(swf, dir, false, 3, csp);

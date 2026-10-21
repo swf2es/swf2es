@@ -190,5 +190,5 @@ export const numberHooks: Record<string, ClassHook> = {
   int: conversion((rt, args) => (args.length ? rt.toInt(args[0]) : 0)),
   uint: conversion((rt, args) => (args.length ? rt.toUint(args[0]) : 0)),
   Number: conversion((rt, args) => (args.length ? rt.toNumber(args[0]) : 0)),
-  Boolean: conversion((_rt, args) => !!args[0]),
+  Boolean: conversion((rt, args) => rt.toBoolean(args[0])),
 };

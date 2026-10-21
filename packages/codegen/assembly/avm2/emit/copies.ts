@@ -37,6 +37,7 @@ export function pushesConstant(op: u16): bool {
     case ops.OP_pushint:
     case ops.OP_pushuint:
     case ops.OP_pushdouble:
+    case ops.OP_pushfloat:
     case ops.OP_pushnan:
     case ops.OP_pushstring:
     case ops.OP_pushtrue:

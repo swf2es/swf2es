@@ -15,6 +15,7 @@ import { dateHook, dateNatives } from "./date.js";
 import type { Natives } from "./define.js";
 import { describeNatives } from "./describe.js";
 import { dictionaryNatives } from "./dictionary.js";
+import { floatHooks, floatNatives } from "./float.js";
 import { jsonNatives } from "./json.js";
 import { numberHooks, numberNatives } from "./number.js";
 import { objectHooks, objectNatives } from "./object.js";
@@ -34,6 +35,7 @@ export function builtinNatives(rt: Runtime): Natives {
     ...stringNatives,
     ...regexpNatives(rt),
     ...numberNatives,
+    ...floatNatives,
     ...toplevelNatives,
     ...describeNatives,
     ...proxyNatives,
@@ -53,6 +55,7 @@ export function builtinHooks(): Record<string, ClassHook> {
   return {
     ...objectHooks,
     ...numberHooks,
+    ...floatHooks,
     ...stringHooks,
     ...arrayHooks,
     ...regexpHooks,

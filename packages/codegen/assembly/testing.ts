@@ -89,9 +89,9 @@ export function readAll(bytes: Uint8Array, kinds: Uint8Array): Float64Array {
 export function poolDump(bytes: Uint8Array): string {
   const base = padded(bytes);
   const r = new Reader(base, base + bytes.length);
-  r.u16();
-  r.u16();
-  const pool = readConstantPool(r, base);
+  const minor = r.u16();
+  const major = r.u16();
+  const pool = readConstantPool(r, base, major === 47 && minor >= 16);
 
   // Lines joined once: the minimal runtime frees nothing during a call.
   const out: string[] = [];
@@ -103,6 +103,9 @@ export function poolDump(bytes: Uint8Array): string {
   }
   for (let i = 1; i < pool.doubles.length; i++) {
     out.push(`double ${i} ${pool.doubles[i]}`);
+  }
+  for (let i = 1; i < pool.floats.length; i++) {
+    out.push(`float ${i} ${<f64>pool.floats[i]}`);
   }
   for (let i = 1; i < pool.stringStart.length; i++) {
     const text = String.UTF8.decodeUnsafe(base + pool.stringStart[i], pool.stringLength[i]);
