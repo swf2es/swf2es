@@ -3,7 +3,7 @@ import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { Player } from "../../packages/player/dist/player.js";
 import { PixiView } from "../../packages/player/dist/render/view.js";
 import { Scripting } from "../../packages/player/dist/scripting.js";
-import type { Context3DLifecycle } from "./backend.ts";
+import type { Context3DLifecycle, VertexFormat } from "./backend.ts";
 import { install } from "./natives.ts";
 import { observeLoss, WebGLContext3D } from "./webgl.ts";
 
@@ -265,6 +265,7 @@ export async function shaderFixture(
     | "Stencil"
     | "BufferBytes"
     | "TextureBytes"
+    | "VertexFormats"
     | "ShaderMath"
     | "Comparisons"
     | "FrameValidation"
@@ -623,7 +624,7 @@ export async function renderTargets() {
     vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
     const indices = c.createBuffer(3, 0);
     indices.upload([0, 1, 2], 0, 3);
-    c.setVertex(0, vertices, 0, 4);
+    c.setVertex(0, vertices, 0, "float4");
     const solid = c.createProgram();
     solid.upload(shader(false), shader(true));
     const sampled = c.createProgram();
@@ -759,6 +760,99 @@ export async function renderTargets() {
   }
 }
 
+export async function vertexFormats() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(32, 32);
+    const vertices = c.createBuffer(3, 5);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    const bytes = new Uint8Array(60);
+    const view = new DataView(bytes.buffer);
+    const xy = [-0.75, -0.75, 0.75, -0.75, 0, 0.75];
+    for (let i = 0; i < 3; i++) {
+      view.setFloat32(i * 20, xy[i * 2], true);
+      view.setFloat32(i * 20 + 4, xy[i * 2 + 1], true);
+      view.setFloat32(i * 20 + 8, 0.5, true);
+      view.setFloat32(i * 20 + 12, 1, true);
+    }
+    const vertex = new Uint8Array(55);
+    vertex.set(shader(false));
+    vertex.set(vertex.subarray(7, 31), 31);
+    const code = new DataView(vertex.buffer);
+    code.setUint32(35, 0x040f0000, true);
+    code.setUint32(39, 0xe4000001, true);
+    const fragment = shader(true);
+    new DataView(fragment.buffer).setUint32(19, 4, true);
+    const program = c.createProgram();
+    program.upload(vertex, fragment);
+    c.setProgram(program);
+    c.setVertex(0, vertices, 0, "float4");
+    c.setVertex(1, vertices, 4, "bytes4");
+    const readback = c.read();
+    const allocated = owned.created;
+    for (let iteration = 0; iteration < 24; iteration++) {
+      for (let i = 0; i < 3; i++) {
+        const at = i * 20 + 16;
+        bytes[at] = iteration;
+        bytes[at + 1] = 255 - iteration;
+        bytes[at + 2] = 128 + iteration;
+        bytes[at + 3] = 255;
+      }
+      vertices.uploadBytes(bytes, 0, 0, 3);
+      c.setVertex(1, vertices, 3, "float1");
+      c.clear(0, 0, 0, 1);
+      c.draw(indices, 0, 1);
+      check(color(c.read(), 16, 16, 32) === "ffff0000", "float default components changed");
+      c.setVertex(1, vertices, 4, "bytes4");
+      c.draw(indices, 0, 1);
+      check(c.read() === readback, "vertex formats replaced readback storage");
+      const expected =
+        (0xff000000 | (iteration << 16) | ((255 - iteration) << 8) | (128 + iteration)) >>> 0;
+      check(
+        color(readback, 16, 16, 32) === expected.toString(16),
+        "packed channels not normalized",
+      );
+      rejects(() => c.setVertex(1, vertices, 4, "invalid" as VertexFormat));
+      c.draw(indices, 0, 1);
+      check(
+        color(c.read(), 16, 16, 32) === expected.toString(16),
+        "invalid format replaced binding",
+      );
+      for (const offset of [-1, 5, 6]) {
+        c.setVertex(1, vertices, offset, "bytes4");
+        rejects(() => c.draw(indices, 0, 1));
+      }
+      c.setVertex(1, vertices, 2, "float4");
+      rejects(() => c.draw(indices, 0, 1));
+      check(color(c.read(), 16, 16, 32) === expected.toString(16), "invalid offset changed pixels");
+      check(owned.created === allocated, "vertex formats allocated GPU handles");
+    }
+    c.setVertex(1, vertices, 4, "bytes4");
+    c.configure(64, 64);
+    c.clear(0, 0, 0, 1);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 32, 32, 64) === "ff17e897", "resize lost packed format");
+    const other = create();
+    try {
+      rejects(() => other.backend.setVertex(1, vertices, 4, "bytes4"));
+    } finally {
+      other.backend.dispose();
+      check(other.live.size === 0, "foreign packed-buffer check retained resources");
+      other.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+    vertices.dispose();
+    rejects(() => c.draw(indices, 0, 1));
+    check(gl.getError() === gl.NO_ERROR, "vertex format validation polluted GL state");
+    return { passed: true };
+  } finally {
+    c.dispose();
+    check(live.size === 0, "packed vertices retained GPU handles");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
 export async function textureBytes() {
   const owned = create();
   const { backend: c, gl, live } = owned;
@@ -883,7 +977,7 @@ export async function bufferBytes() {
     const program = c.createProgram();
     program.upload(shader(false), shader(true));
     c.setProgram(program);
-    c.setVertex(0, vertices, 0, 4);
+    c.setVertex(0, vertices, 0, "float4");
     c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
 
     // Raw uploads preserve float bit patterns without converting through JS Numbers.
@@ -949,7 +1043,7 @@ export async function bufferBytes() {
     rejects(() => c.draw(fresh, 0, 1));
     const other = create();
     try {
-      rejects(() => other.backend.setVertex(0, vertices, 0, 4));
+      rejects(() => other.backend.setVertex(0, vertices, 0, "float4"));
     } finally {
       other.backend.dispose();
       check(other.live.size === 0, "foreign byte-buffer check retained resources");
@@ -980,7 +1074,7 @@ export async function stencil() {
     const program = c.createProgram();
     program.upload(shader(false), shader(true));
     c.setProgram(program);
-    c.setVertex(0, vertices, 0, 4);
+    c.setVertex(0, vertices, 0, "float4");
     c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
     c.setDepth(false, "always");
     c.setStencilActions("frontAndBack", "equal", "keep", "keep", "keep");
@@ -1068,7 +1162,7 @@ export async function colorMasks() {
     const program = c.createProgram();
     program.upload(shader(false), shader(true));
     c.setProgram(program);
-    c.setVertex(0, vertices, 0, 4);
+    c.setVertex(0, vertices, 0, "float4");
     c.setConstants("fragment", 0, [1, 1, 0, 1], 1);
     c.setDepth(false, "always");
     const pixels = c.read();
@@ -1210,7 +1304,7 @@ export async function multisampling() {
     const program = c.createProgram();
     program.upload(shader(false), shader(true));
     c.setProgram(program);
-    c.setVertex(0, vertices, 0, 4);
+    c.setVertex(0, vertices, 0, "float4");
     c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
     c.setDepth(false, "always");
     const baseline = live.size;
@@ -1345,7 +1439,7 @@ export async function lifetime() {
     const p = c.createProgram();
     p.upload(shader(false), shader(true));
     c.setProgram(p);
-    c.setVertex(0, vertices, 0, 4);
+    c.setVertex(0, vertices, 0, "float4");
     c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
     c.clear(0, 0, 1, 1);
     c.draw(indices, 0, -1);
@@ -1373,10 +1467,10 @@ export async function lifetime() {
     check(color(c.read(), 32, 32, 64) === "ff0000ff", "negative AGAL clip depth was not clipped");
     vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
     rejects(() => second.backend.setProgram(p));
-    rejects(() => second.backend.setVertex(0, vertices, 0, 4));
+    rejects(() => second.backend.setVertex(0, vertices, 0, "float4"));
     rejects(() => c.draw(vertices, 0, 1));
     rejects(() => indices.upload([0], 3, 1));
-    rejects(() => c.setVertex(8, vertices, 0, 4));
+    rejects(() => c.setVertex(8, vertices, 0, "float4"));
     rejects(() => c.setConstants("fragment", 28, [1, 0, 0, 1], 1));
     const handles = first.live.size;
     // Valid stages with incompatible varyings fail linking after GPU allocation.

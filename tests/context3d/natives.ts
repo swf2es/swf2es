@@ -21,6 +21,9 @@ import {
   type StencilAction,
   type Texture3D,
   TextureBindingError,
+  VERTEX_FORMATS,
+  type VertexFormat,
+  VertexOffsetError,
 } from "./backend.ts";
 
 type AsObject = avm2.AsObject;
@@ -43,8 +46,6 @@ interface ContextState {
   aa: number;
   target: TextureResource | null;
 }
-
-const FLOAT_FORMATS = ["float1", "float2", "float3", "float4"];
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
 export function install(s: Scripting, host: Stage3DHost): () => void {
@@ -441,12 +442,32 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     setVertexBufferAt(index: number, object: AsObject | null, offset = 0, format = "float4"): void {
-      const size = FLOAT_FORMATS.indexOf(format) + 1;
-      if (!size) {
+      const backend = contexts.get(this as unknown as AsObject)?.backend;
+      const entry = object && buffers.get(object);
+      const live = entry && !entry.disposed && contexts.has(entry.owner);
+      if (backend && live) {
+        if (format === null) {
+          throw s.rt.error("TypeError", 2007, "format");
+        }
+
+        if (!VERTEX_FORMATS.includes(format as VertexFormat)) {
+          throw s.rt.error("ArgumentError", 2008, "format");
+        }
+      }
+
+      if (index < 0) {
+        throw s.rt.error("RangeError", 2006);
+      }
+
+      if (index >= 8) {
         unsupported();
       }
 
-      context(this as unknown as AsObject).setVertex(index, object && buffer(object), offset, size);
+      if (!backend) {
+        return;
+      }
+
+      backend.setVertex(index, live ? entry.value : null, offset, format as VertexFormat);
     }
 
     setProgramConstantsFromVector(type: string, first: number, values: AsObject, count = -1): void {
@@ -590,6 +611,9 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
         entry.backend.draw(buffer(object), first, count);
       } catch (error) {
+        if (error instanceof VertexOffsetError) {
+          throw s.rt.error("RangeError", 3610);
+        }
         if (error instanceof ScissorBoundsError) {
           throw s.rt.error("Error", 3706);
         }

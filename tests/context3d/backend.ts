@@ -38,6 +38,11 @@ export const BLEND_FACTORS = [
 ] as const;
 export type BlendFactor = (typeof BLEND_FACTORS)[number];
 
+export const VERTEX_FORMATS = ["float1", "float2", "float3", "float4", "bytes4"] as const;
+export type VertexFormat = (typeof VERTEX_FORMATS)[number];
+
+export class VertexOffsetError extends Error {}
+
 export class ScissorBoundsError extends Error {}
 
 export class TextureBindingError extends Error {
@@ -131,7 +136,8 @@ export interface Context3D {
   setRenderTarget(texture: Texture3D | null, depth?: boolean): void;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;
-  setVertex(index: number, buffer: Buffer3D | null, offset: number, size: number): void;
+  /** Offset counts 32-bit words; bytes4 consumes one word, normalized on the GPU. */
+  setVertex(index: number, buffer: Buffer3D | null, offset: number, format: VertexFormat): void;
   setConstants(stage: ProgramType, first: number, values: ArrayLike<number>, count: number): void;
   draw(indices: Buffer3D, first: number, triangles: number): void;
   /** Top-down raw RGBA channels, without alpha conversion; valid until the next read. */

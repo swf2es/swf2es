@@ -110,6 +110,7 @@ package {
       current.drawTriangles(indices);
       current.present();
       // The next context must start with fresh drawing defaults.
+      current.setVertexBufferAt(0, vertices, 0, "bytes4");
       current.setDepthTest(false, "never");
       current.setCulling("frontAndBack");
       current.setBlendFactors("zero", "zero");

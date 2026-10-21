@@ -26,6 +26,7 @@ node tests/context3d/oracle.ts --colormask
 node tests/context3d/oracle.ts --stencil
 node tests/context3d/oracle.ts --bufferbytes
 node tests/context3d/oracle.ts --texturebytes
+node tests/context3d/oracle.ts --vertexformats
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
@@ -96,6 +97,36 @@ uploads create no temporary arrays or views. Browser checks inspect raw GPU
 bytes at each mip/face, including nonzero source-view offsets, assert unchanged
 staging/GPU handles, and check invalid uploads, disposal and context recovery.
 
+`VertexFormats.as` compares 681 AIR trace lines, including 1,128 pixel samples,
+for `bytes4` and the four float formats. Packed attributes consume one 32-bit
+word and expose its four bytes in memory order as unsigned values divided by
+255. Checks cover every byte value, alpha and swizzles, separate/interleaved
+streams, float defaults, format changes, offset/stride bounds, null buffers,
+invalid formats and disposed resources/contexts. With a live context and buffer,
+null/invalid formats fail first (2007/2008); negative slots fail with 2006 even
+after disposal. Null/disposed buffers ignore the format. Offset/stride errors
+are deferred until a draw consumes the attribute (3610). This experiment still
+limits bindings to the eight attributes accessible to its AGAL v1 shaders;
+AIR accepted bindings at slot 8 in a separate probe.
+
+The backend uses normalized `UNSIGNED_BYTE` vertex attributes; it does not
+expand packed vertices or generate conversion shaders. Binding records are
+reused, and stride validity is cached at binding time. Browser checks cover
+repeated float/packed transitions, unchanged GPU handles/readback storage,
+failed draws preserving pixels and GL validity, resize, ownership and teardown.
+Recovery poisons a vertex binding with `bytes4` before losing each context.
+
+One vector-upload discrepancy remains open. On the tested Wine AIR backend,
+uploading `Vector.<Number>([1,1,1,1])` to a one-word stream and drawing it first
+as `bytes4` produces zero RGB. Drawing it as `float1` first, then as `bytes4`,
+exposes the expected float bit pattern (RGB 0,0,128). Changing or clearing the
+binding alone did not resolve it. The experiment consistently reads raw buffer
+bytes; it does not emulate that state-dependent result. The fixture covers
+reinterpretation after a float draw. To reproduce the unresolved case, insert
+a `bytes4` binding and capture immediately after its vector upload, before the
+`float1` capture. Native AIR confirmation is needed before treating this as
+general Flash behavior or a driver issue.
+
 `Reconfigure.as` checks 48 AIR pixel samples for an unchanged back-buffer
 configuration: retained color and depth, program/vertex/constant bindings,
 scissor, blending, culling, returning from a texture pass, and clearing after
@@ -113,7 +144,7 @@ Readback always enforces it (3692), while drawing and presenting enforce it only
 with error checking enabled. A failed presentation still returns to the back buffer.
 
 Texture targets have separate initialization state (3777): any successful clear,
-including mask zero, or a level-zero bitmap upload initializes them. Uploading
+including mask zero, or a level-zero bitmap/byte upload initializes them. Uploading
 only a smaller mip does not. Initialization survives presentation and depth toggles.
 The fixture checks both target depth settings, all clear masks, repeated presentation,
 resize, disposal, and that rejected operations leave the destination bitmap unchanged.
@@ -447,7 +478,7 @@ node tests/context3d/composition-oracle.ts --update
 This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
 tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
-float vertex attributes, vector/matrix uploads, depth/stencil testing, culling, blending,
+float and packed-byte vertex attributes, vector/matrix uploads, depth/stencil testing, culling, blending,
 color rendering and back buffers with optional multisampling are exercised, with sizes limited to
 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of

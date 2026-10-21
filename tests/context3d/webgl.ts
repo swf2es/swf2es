@@ -11,6 +11,9 @@ import {
   type StencilAction,
   type Texture3D,
   TextureBindingError,
+  VERTEX_FORMATS,
+  type VertexFormat,
+  VertexOffsetError,
 } from "./backend.ts";
 
 const DEPTH_FUNCTIONS = {
@@ -82,6 +85,14 @@ interface BufferState {
   uploaded: Uint8Array;
 }
 
+interface VertexBinding {
+  buffer: Buffer3D;
+  offset: number;
+  size: number;
+  packed: boolean;
+  valid: boolean;
+}
+
 interface ProgramState {
   handle: WebGLProgram | null;
   targetY: WebGLUniformLocation | null;
@@ -119,8 +130,7 @@ export class WebGLContext3D implements Context3D {
   private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
   private textureMask = 0;
   private readonly samplers: (WebGLSampler | null)[] = new Array(12).fill(null);
-  private readonly vertices: ({ buffer: Buffer3D; offset: number; size: number } | null)[] =
-    new Array(8).fill(null);
+  private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
@@ -1176,7 +1186,7 @@ export class WebGLContext3D implements Context3D {
     this.selected = program;
   }
 
-  setVertex(index: number, buffer: Buffer3D | null, offset: number, size: number): void {
+  setVertex(index: number, buffer: Buffer3D | null, offset: number, format: VertexFormat): void {
     this.alive();
     range(index, 1, 8);
     if (buffer === null) {
@@ -1185,9 +1195,25 @@ export class WebGLContext3D implements Context3D {
     }
 
     this.buffer(buffer);
+    const packed = format === "bytes4";
+    const size = packed ? 4 : VERTEX_FORMATS.indexOf(format) + 1;
     range(1, size - 1, 4);
-    range(offset, size, buffer.stride);
-    this.vertices[index] = { buffer, offset, size };
+    if (!Number.isInteger(offset)) {
+      throw new Error("Context3D experiment: vertex offset must be an integer");
+    }
+
+    // AIR reports stride overruns at draw time, including on an existing binding.
+    const valid = offset >= 0 && offset <= buffer.stride - (packed ? 1 : size);
+    const previous = this.vertices[index];
+    if (previous) {
+      previous.buffer = buffer;
+      previous.offset = offset;
+      previous.size = size;
+      previous.packed = packed;
+      previous.valid = valid;
+    } else {
+      this.vertices[index] = { buffer, offset, size, packed, valid };
+    }
   }
 
   setConstants(stage: ProgramType, first: number, values: ArrayLike<number>, count: number): void {
@@ -1258,6 +1284,10 @@ export class WebGLContext3D implements Context3D {
       }
 
       const buffer = this.buffer(binding.buffer);
+      if (!binding.valid) {
+        throw new VertexOffsetError("Vertex attribute exceeds its stride");
+      }
+
       for (let j = first; j < first + count; j++) {
         if (!buffer.uploaded[index.indices[j]]) {
           throw new Error("Context3D experiment: vertex not uploaded or out of range");
@@ -1269,8 +1299,8 @@ export class WebGLContext3D implements Context3D {
       gl.vertexAttribPointer(
         slot,
         binding.size,
-        gl.FLOAT,
-        false,
+        binding.packed ? gl.UNSIGNED_BYTE : gl.FLOAT,
+        binding.packed,
         binding.buffer.stride * 4,
         binding.offset * 4,
       );

@@ -24,6 +24,7 @@ const fixture =
     "Stencil",
     "BufferBytes",
     "TextureBytes",
+    "VertexFormats",
     "Depth",
     "Texturing",
     "Arithmetic",

@@ -27,6 +27,7 @@ const scripts = compileScripts(
     "Stencil",
     "BufferBytes",
     "TextureBytes",
+    "VertexFormats",
     "ShaderMath",
     "Comparisons",
     "FrameValidation",
@@ -57,6 +58,7 @@ for (const name of [
   "Stencil",
   "BufferBytes",
   "TextureBytes",
+  "VertexFormats",
   "ShaderMath",
   "Comparisons",
   "FrameValidation",
@@ -155,6 +157,14 @@ if (!process.argv.includes("--build-only")) {
       console.log(
         "context3d: texture byte uploads preserve channels, reuse staging and release resources",
       );
+      const vertexFormats = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.vertexFormats())',
+      );
+      assert.equal(vertexFormats.exception, null, JSON.stringify(vertexFormats));
+      assert.equal(vertexFormats.value?.passed, true);
+      console.log(
+        "context3d: packed vertex formats normalize on GPU and preserve resource lifetime",
+      );
       const lifecycle: string[] = JSON.parse(
         readFileSync(`${here}lifecycle-reference.json`, "utf8"),
       );
@@ -193,6 +203,7 @@ if (!process.argv.includes("--build-only")) {
         "Stencil",
         "BufferBytes",
         "TextureBytes",
+        "VertexFormats",
         "ShaderMath",
         "FrameValidation",
         "FrameValidationFlat",
