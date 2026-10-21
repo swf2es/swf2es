@@ -90,11 +90,11 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
 
     get showDefaultContextMenu(): boolean {
-      return true;
+      return s.showDefaultContextMenu;
     }
 
-    set showDefaultContextMenu(_v: Value) {
-      // No context menu.
+    set showDefaultContextMenu(v: Value) {
+      s.showDefaultContextMenu = s.rt.toBoolean(v);
     }
 
     // Kept, though no focus rectangle is drawn.

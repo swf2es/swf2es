@@ -21,8 +21,9 @@ import {
 } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
 import { type Library, readLibrary } from "./display/timeline.js";
+import { customContextMenu, type MenuItem } from "./input/context-menu.js";
 import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
-import { type Pointer, PointerInput } from "./input/pointer.js";
+import { type Pointer, PointerInput, type PointerState } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
 import type { Scripting } from "./scripting.js";
 
@@ -81,6 +82,19 @@ export class Player {
 
     if (this.avm1) {
       this.avm1.quality = quality;
+    }
+  }
+
+  private defaultContextMenu = true;
+
+  get showDefaultContextMenu(): boolean {
+    return this.scripting?.showDefaultContextMenu ?? this.defaultContextMenu;
+  }
+
+  set showDefaultContextMenu(value: boolean) {
+    this.defaultContextMenu = value;
+    if (this.scripting) {
+      this.scripting.showDefaultContextMenu = value;
     }
   }
 
@@ -199,6 +213,45 @@ export class Player {
   }
 
   private stopped = false;
+
+  /** Snapshot the SWF's menu on demand; hosts keep the callbacks only while it is open. */
+  contextMenu(p: PointerState): MenuItem[] {
+    if (this.stopped) {
+      return [];
+    }
+
+    this.pointer?.flush();
+    const s = this.scripting;
+    let menu = { items: [] as MenuItem[], quality: this.showDefaultContextMenu };
+    try {
+      if (s) {
+        menu = s.clipboard.gesture(() => customContextMenu(s, this.stage, p));
+        s.updates++;
+      }
+    } catch (error) {
+      s?.reportUncaught(error);
+    }
+
+    if (menu.quality) {
+      const qualities = ["LOW", "MEDIUM", "HIGH", "BEST"];
+      for (let i = 0; i < qualities.length; i++) {
+        const quality = qualities[i];
+        menu.items.push({
+          caption: `Quality: ${quality[0]}${quality.slice(1).toLowerCase()}`,
+          enabled: true,
+          checked: this.quality === quality,
+          separatorBefore: i === 0 && menu.items.length > 0,
+          select: () => {
+            if (!this.stopped) {
+              this.quality = quality;
+            }
+          },
+        });
+      }
+    }
+
+    return menu.items;
+  }
 
   /**
    * Stop for good: no frame plays after, and with scripts their sounds,
