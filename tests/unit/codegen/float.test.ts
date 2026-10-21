@@ -72,6 +72,10 @@ test("float arithmetic rounds each result, and conversion to Number drops float 
   const sum = run([0x22, 1, 0x22, 2, 0xa0, 0x48]);
   assert.ok(sum instanceof avm2.FloatValue);
   assert.equal(sum.value, 16777216);
+  const dynamic = run([0x22, 1, 0x22, 2, 0xa0, 0x82, 0x48]);
+  assert.ok(dynamic instanceof avm2.FloatValue);
+  assert.equal(dynamic.value, 16777216);
+  assert.equal(run([0x22, 1, 0x22, 2, 0xa0, 0x75, 0x48]), 16777216);
   assert.equal(run([0x22, 1, 0x75, 0x22, 2, 0x75, 0xa0, 0x48]), 16777217);
   const converted = run([0x24, 1, 0x79, 0x48]);
   assert.ok(converted instanceof avm2.FloatValue);
@@ -119,7 +123,7 @@ test("AIR Number-only arithmetic keeps the same direct JavaScript as Flash bytec
 test("typed float locals round each operation and allocate only when the result escapes", () => {
   const code = [0xd1, 0xd6];
   for (let i = 0; i < 64; i++) {
-    code.push(0xd2, 0x22, 1, 0xa0, 0xf0, i + 1, 0x2a, 0x79, 0xd6, 0x29);
+    code.push(0xd2, 0x22, 1, 0xa0, 0x22, 1, 0xa0, 0xf0, i + 1, 0x2a, 0x79, 0xd6, 0x29);
   }
 
   code.push(0xd2, 0x48);
@@ -152,6 +156,7 @@ test("typed float locals round each operation and allocate only when the result 
   const result = new Function("rt", "$dx", `return ${body}`)(rt, rt.defaultXmlNamespace)(input);
   let expected = input.value;
   for (let i = 0; i < 64; i++) {
+    expected = Math.fround(expected + Math.fround(0.1));
     expected = Math.fround(expected + Math.fround(0.1));
   }
 

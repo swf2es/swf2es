@@ -69,6 +69,7 @@ import {
   qname,
   TypeName,
 } from "./names.js";
+import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
@@ -886,7 +887,7 @@ export class Runtime {
         throw this.error("RangeError", 1125, i, a.length);
       }
 
-      return a[i];
+      return a instanceof FloatVector ? this.float(a.data[i]) : a[i];
     }
 
     return this.getIndexed(o, mn, i);
@@ -894,7 +895,36 @@ export class Runtime {
 
   vectorSetObject(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      this.setElement(o, i, o.$traits.cls.$convert(this, o.$traits.cls, v));
+      const value = o.$traits.cls.$convert(this, o.$traits.cls, v);
+      if (o.$a instanceof FloatVector) {
+        setFloatElement(this, o, i, value);
+      } else {
+        this.setElement(o, i, value);
+      }
+
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  /** Unboxed access for code compiled against Vector.<float>; dynamic access uses its hooks. */
+  vectorGetFloat(o: Value, mn: Multiname, i: number): number {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: FloatVector = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a.data[i];
+    }
+
+    return this.toNumber(this.getIndexed(o, mn, i));
+  }
+
+  vectorSetFloat(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      setFloatElement(this, o, i, this.toNumber(v));
       return;
     }
 

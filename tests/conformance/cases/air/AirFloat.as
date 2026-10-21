@@ -107,6 +107,7 @@ package {
             trace("amf-vector-marker", bytes[0]);
             var restored:* = bytes.readObject();
             trace("amf-vector", getQualifiedClassName(restored), restored[0], restored[0] is float);
+            vectorCases();
         }
 
         private function defaults(value:* = 0.1):float { return value; }
@@ -171,6 +172,98 @@ package {
             var result:float = typed(value);
             result += field;
             return result;
+        }
+
+        private function vectorCases():void {
+            var v:Vector.<float> = new Vector.<float>(3);
+            v[0] = 0.1f; v[1] = -0f; v[2] = float.NaN;
+            trace("float-storage", v.join(","), v[0] is float, 1 / Number(v[1]), v[2] is float);
+            v.length = 1; v.length = 3;
+            trace("float-resize", v.join(","), v[1] is float);
+            v[3] = 0.2f;
+            trace("float-append", v.length, v[3], v[3] is float);
+            v.unshift(3f, 4f);
+            trace("float-unshift", v.join(","), v.shift(), v.pop(), v.join(","));
+            v.insertAt(-1, 5f);
+            var removed:* = v.removeAt(-2);
+            trace("float-insert", v.join(","), removed, removed is float);
+            var cut:Vector.<float> = v.splice(1, 1, 6f, 7f);
+            trace("float-splice", v.join(","), cut.join(","), cut[0] is float);
+            trace("float-slice", v.slice(1, 3).join(","), v.concat(cut).join(","));
+            v.reverse();
+            trace("float-reverse", v.join(","));
+            var callbacks:Boolean = true;
+            v.forEach(function(value:*, index:int, vector:*):void {
+                callbacks = callbacks && value is float && vector === v;
+            });
+            var mapped:Vector.<float> = v.map(function(value:*, index:int, vector:*):* {
+                return value + 0.25f;
+            });
+            var filtered:Vector.<float> = v.filter(function(value:*, index:int, vector:*):Boolean {
+                return index < 2;
+            });
+            trace("float-callbacks", callbacks, mapped.join(","), mapped[0] is float,
+                filtered.join(","), filtered[0] is float,
+                v.every(function(value:*, index:int, vector:*):Boolean { return value is float; }),
+                v.some(function(value:*, index:int, vector:*):Boolean { return value is float; }));
+            var typedCompare:Boolean = true;
+            v.sort(function(a:*, b:*):Number {
+                typedCompare = typedCompare && a is float && b is float;
+                return Number(a) - Number(b);
+            });
+            trace("float-sort", typedCompare, v.join(","), v[0] is float);
+            var numeric:Vector.<float> = Vector.<float>([NaN, 3, 1]);
+            numeric.sort(16);
+            trace("float-numeric-sort", numeric.join(","));
+            var names:Array = [], values:Array = [];
+            for (var key:* in v) { names.push(key); }
+            for each (var element:* in v) { values.push(element is float); }
+            trace("float-enumeration", names.join(","), values.join(","));
+            var replaced:Boolean = true;
+            var json:String = JSON.stringify(v, function(key:String, value:*):* {
+                if (key !== "") { replaced = replaced && value is float; }
+                return value;
+            });
+            trace("float-json", json, replaced);
+            var copied:Vector.<float> = Vector.<float>([0.1, -0, Infinity, NaN]);
+            trace("float-copy", copied.join(","), copied[0] is float, 1 / Number(copied[1]));
+            trace("float-copy-types", Vector.<Object>(copied)[0] is float,
+                Vector.<Number>(copied)[0] is float);
+            var bytes:ByteArray = new ByteArray();
+            copied.fixed = true;
+            bytes.writeObject(copied); bytes.position = 0;
+            var decoded:Vector.<float> = bytes.readObject();
+            trace("float-amf", decoded.fixed, decoded.join(","), decoded[0] is float,
+                1 / Number(decoded[1]));
+            v.fixed = true;
+            try { v[v.length] = 1f; } catch (error:Error) { trace("float-fixed-set", error.errorID); }
+            try { v.length = v.length; } catch (error:Error) { trace("float-fixed-length", error.errorID); }
+            try { v.push(1f); } catch (error:Error) { trace("float-fixed-push", error.errorID); }
+            var changing:Vector.<float> = new Vector.<float>(2);
+            var shrink:Object = {valueOf: function():Number { changing.length = 0; return 0.1; }};
+            try { changing[1] = shrink; } catch (error:Error) { trace("float-shrink", error.errorID, changing.length); }
+            changing[0] = shrink;
+            trace("float-shrink-append", changing.length, changing[0], changing[0] is float);
+            var append:Object = {valueOf: function():Number { changing.length = 3; return 0.2; }};
+            trace("float-push-reentry", changing.push(append), changing.join(","));
+            var read:float = changing[0];
+            read += changing[1];
+            trace("float-typed-read", read, read is float, read === Number(read));
+            trace("float-stack-join", vectorStack(v, true), vectorStack(v, false),
+                vectorStack(v, true) is float, vectorStack(v, false) is float);
+            trace("float-stack-args", vectorArgs(v, true), vectorArgs(v, false));
+        }
+
+        private function vectorStack(v:Vector.<float>, which:Boolean):* {
+            return dynamic(v[0] + (which ? 0.1f : Number(0.1)));
+        }
+
+        private function vectorArgs(v:Vector.<float>, which:Boolean):String {
+            return pair(v[0], which ? v[1] : v[2]);
+        }
+
+        private function pair(a:*, b:*):String {
+            return [a is float, b is float, a, b].join(",");
         }
     }
 }

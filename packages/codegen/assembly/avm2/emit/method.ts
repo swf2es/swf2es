@@ -80,6 +80,10 @@ export class MethodEmitter {
   regType: StaticArray<i32> = new StaticArray<i32>(0);
   /** Locals whose float identity is known at every use; their storage is a JS number. */
   unboxed: StaticArray<u8> = new StaticArray<u8>(0);
+  /** Float stack values stay unboxed within a block, boxed only for a successor that needs them. */
+  rawFloat: StaticArray<u8> = new StaticArray<u8>(0);
+  rawTop: i32 = 0;
+  rawResult: bool = false;
   unboxResult: bool = false;
   /** Which local scope registers hold with scopes, and how many are pushed. */
   scopeWith: StaticArray<u8> = new StaticArray<u8>(0);
@@ -182,6 +186,7 @@ export class MethodEmitter {
       this.copyOf = new StaticArray<i32>(ir.frameSize);
       this.copiedBy = new StaticArray<u32>(ir.frameSize);
       this.promoted = new StaticArray<u8>(ir.frameSize);
+      this.rawFloat = new StaticArray<u8>(ir.frameSize);
     }
 
     for (let r: u32 = 0; r < ir.frameSize; r++) {
@@ -618,6 +623,7 @@ export class MethodEmitter {
     const out = this.out;
     const ir = this.ir;
     const entry = k * ir.frameSize;
+    this.clearRaw(0);
     this.resetEnd = -1;
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.regType[r] = ir.entryType[entry + r];
@@ -685,13 +691,16 @@ export class MethodEmitter {
       } else if (op === ops.OP_popscope || op === ops.OP_swap) {
         this.copyAll(ir.src[i], frame);
       } else if (conditional(op)) {
+        this.boxRaw(ir.src[i]);
         this.copyFor(ir.a[i], ir.src[i]);
       } else if (op === ops.OP_lookupswitch) {
+        this.boxRaw(ir.src[i]);
         this.copyFor(ir.a[i], ir.src[i]);
         for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
           this.copyFor(ir.cases[ir.b[i] + c], ir.src[i]);
         }
       } else if (op === ops.OP_jump) {
+        this.boxRaw(frame);
         this.copyFor(ir.a[i], frame);
       }
 
@@ -780,6 +789,18 @@ export class MethodEmitter {
 
       this.unchecks(i);
       this.target = -1;
+      if (conditional(op) || op === ops.OP_jump || op === ops.OP_lookupswitch) {
+        this.clearRaw(0);
+      } else if (op === ops.OP_swap) {
+        this.rawFloat[ir.src[i]] = 0;
+        this.rawFloat[ir.src[i] + 1] = 0;
+      } else if (dst >= stack && !this.kept) {
+        this.rawFloat[dst] = this.rawResult ? 1 : 0;
+        if (this.rawResult) {
+          this.rawTop = max(this.rawTop, dst + 1);
+        }
+      }
+
       if (op === ops.OP_swap) {
         // Its one destination is the new top, whose type the IR gives; the
         // register below it now holds what the top did, and its type.
@@ -861,6 +882,7 @@ export class MethodEmitter {
     }
 
     if (!terminates(this, k) && k + 1 < ir.blockCount) {
+      this.boxRaw(<i32>ir.frameSize);
       this.copyFor(k + 1, <i32>ir.frameSize);
     }
   }
@@ -982,10 +1004,11 @@ export class MethodEmitter {
     const from = this.copyOf[r];
     this.setCopy(r, NONE);
     this.checked[r] = 0;
-    this.reg(r);
+    this.regName(r);
     out.text(" = ");
     this.copied(from);
     out.text(";\n");
+    this.rawFloat[r] = 0;
   }
 
   /** Forget the null checks of what instruction i wrote. */
@@ -1017,7 +1040,7 @@ export class MethodEmitter {
   /** What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed. */
   private copied(copy: i32, boxed: bool = true): void {
     if (copy >= 0) {
-      const wrap = boxed && this.unboxedLocal(copy);
+      const wrap = boxed && (this.unboxedLocal(copy) || this.rawFloat[copy] !== 0);
       if (wrap) {
         this.out.text("rt.float(");
       }
@@ -1094,6 +1117,7 @@ export class MethodEmitter {
 
   /** Forget every copy from register `from` up: none is needed. */
   private uncopy(from: i32): void {
+    this.clearRaw(from);
     const top = min(this.copyTop, <i32>this.ir.frameSize);
     for (let r = from; r < top; r++) {
       this.setCopy(r, NONE);
@@ -1278,7 +1302,36 @@ export class MethodEmitter {
   }
 
   unboxedTarget(i: u32): bool {
-    return this.unboxedLocal(this.target >= 0 ? this.target : this.ir.dst[i]);
+    const r = this.target >= 0 ? this.target : this.ir.dst[i];
+    return (
+      this.unboxedLocal(r) ||
+      (r >= <i32>(this.ir.localCount + this.ir.maxScope) &&
+        this.domain.floatType >= 0 &&
+        this.ir.type[i] === this.domain.floatType)
+    );
+  }
+
+  private clearRaw(from: i32): void {
+    for (let r = max(from, 0); r < this.rawTop; r++) {
+      this.rawFloat[r] = 0;
+    }
+
+    this.rawTop = min(this.rawTop, max(from, 0));
+  }
+
+  private boxRaw(limit: i32): void {
+    for (let r = <i32>(this.ir.localCount + this.ir.maxScope); r < min(limit, this.rawTop); r++) {
+      if (this.rawFloat[r]) {
+        if (this.copyOf[r] === NONE) {
+          this.regName(r);
+          this.out.text(" = rt.float(");
+          this.regName(r);
+          this.out.text(");\n");
+        }
+
+        this.rawFloat[r] = 0;
+      }
+    }
   }
 
   /** A known float's payload, avoiding a wrapper when it is a local or its copy. */
@@ -1286,7 +1339,10 @@ export class MethodEmitter {
     const copy = this.copyOf[r];
     if (copy <= CONSTANT && this.ir.op[CONSTANT - copy] === ops.OP_pushfloat) {
       this.literal(this.abc.pool.floats[this.ir.a[CONSTANT - copy]], true);
-    } else if (this.unboxedLocal(copy === NONE ? r : copy)) {
+    } else if (
+      this.unboxedLocal(copy === NONE ? r : copy) ||
+      (copy >= NONE && this.rawFloat[copy === NONE ? r : copy] !== 0)
+    ) {
       this.copied(copy === NONE ? r : copy, false);
     } else if (this.builtinOf(r) === BUILTIN_Float) {
       this.out.text("rt.toNumber(");
@@ -1334,6 +1390,11 @@ export class MethodEmitter {
 
     this.out.text(" = ");
     this.unboxResult = !number && this.unboxedTarget(i);
+    this.rawResult =
+      this.target < 0 &&
+      this.ir.dst[i] >= <i32>(this.ir.localCount + this.ir.maxScope) &&
+      this.domain.floatType >= 0 &&
+      this.ir.type[i] === this.domain.floatType;
     if (this.unboxResult) {
       this.out.text("rt.toNumber(");
     }
@@ -1438,6 +1499,7 @@ export class MethodEmitter {
     const op = ir.op[i];
     const a = ir.a[i];
     this.unboxResult = false;
+    this.rawResult = false;
     if (pushesConstant(op) && ir.dst[i] >= <i32>(ir.localCount + ir.maxScope)) {
       // Read as the literal until the register changes or a branch needs
       // it: V8 then gives the operation the constant in its own bytecode.
@@ -2061,11 +2123,17 @@ export class MethodEmitter {
         this.reg(src + <i32>ir.srcCount[i] - 1);
         return true;
       case ops.OP_getproperty:
-        this.assign(i);
         if (this.indexed(a, src + 1)) {
           // As avmplus' getUintProperty: an element by its number, of a
           // Vector by the kind of its elements where the IR knows it.
           const kind = this.vectorKind(this.regType[src]);
+          const float = kind === "Float";
+          this.assign(i, float);
+          const box = float && !this.unboxedTarget(i);
+          if (box) {
+            out.text("rt.float(");
+          }
+
           out.text(kind.length ? "rt.vectorGet" : "rt.getIndexed(");
           if (kind.length) {
             out.text(kind);
@@ -2078,9 +2146,14 @@ export class MethodEmitter {
           out.text("], ");
           this.reg(src + 1);
           out.text(")");
+          if (box) {
+            out.text(")");
+          }
+
           return true;
         }
 
+        this.assign(i);
         out.text("rt.getProperty(");
         this.reg(src);
         out.text(", ");
@@ -2102,7 +2175,12 @@ export class MethodEmitter {
           out.text("], ");
           this.reg(src + 1);
           out.text(", ");
-          this.reg(src + 2);
+          if (kind === "Float") {
+            this.numberReg(src + 2);
+          } else {
+            this.reg(src + 2);
+          }
+
           out.text(")");
           return true;
         }
@@ -2526,6 +2604,10 @@ export class MethodEmitter {
 
     if (t === domain.vectorDoubleType) {
       return "Double";
+    }
+
+    if (domain.floatType >= 0 && domain.traits.param[t] === domain.floatType) {
+      return "Float";
     }
 
     return domain.vectorObjectType >= 0 &&

@@ -46,3 +46,28 @@ json [0.10000000149011612,0,null]
 amf 15 3d cc cc cd  0.10000000149011612 true
 amf-vector-marker 18
 amf-vector __AS3__.vec::Vector.<float> 0.10000000149011612 true
+float-storage 0.10000000149011612,0,NaN true -Infinity true
+float-resize 0.10000000149011612,0,0 true
+float-append 4 0.20000000298023224 true
+float-unshift 3,4,0.10000000149011612,0,0,0.20000000298023224 3 0.20000000298023224 4,0.10000000149011612,0,0
+float-insert 4,0.10000000149011612,0,0 5 true
+float-splice 4,6,7,0,0 0.10000000149011612 true
+float-slice 6,7 4,6,7,0,0,0.10000000149011612
+float-reverse 0,0,7,6,4
+float-callbacks true 0.25,0.25,7.25,6.25,4.25 true 0,0 true true true
+float-sort true 0,0,4,6,7 true
+float-numeric-sort 1,3,NaN
+float-enumeration 0,1,2,3,4 true,true,true,true,true
+float-json [0,0,4,6,7] true
+float-copy 0.10000000149011612,0,Infinity,NaN true -Infinity
+float-copy-types true false
+float-amf true 0.10000000149011612,0,Infinity,NaN true -Infinity
+float-fixed-set 1125
+float-fixed-length 1126
+float-fixed-push 1126
+float-shrink 1125 0
+float-shrink-append 1 0.10000000149011612 true
+float-push-reentry 3 0.10000000149011612,0.20000000298023224,0
+float-typed-read 0.30000001192092896 true false
+float-stack-join 0.10000000149011612 0.1 true false
+float-stack-args true,true,0,0 true,true,0,4

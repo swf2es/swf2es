@@ -402,7 +402,7 @@ export class Writer implements ExternalStream {
       const at = this.out.shortWrite(elements.length * 4);
       const view = this.out.view;
       for (let i = 0; i < elements.length; i++) {
-        view.setFloat32(at + i * 4, elements[i].value);
+        view.setFloat32(at + i * 4, v.$a.data[i]);
       }
     } else if (kind === kVectorDouble) {
       const at = this.out.shortWrite(elements.length * 8);
@@ -797,14 +797,17 @@ export class Reader implements ExternalStream {
       const view = this.input.view;
       const elements: Value[] = v.$a;
       for (let i = 0; i < length; i++) {
+        if (type === kVectorFloat) {
+          v.$a.data[i] = view.getFloat32(at + i * 4);
+          continue;
+        }
+
         elements[i] =
-          type === kVectorFloat
-            ? rt.float(view.getFloat32(at + i * 4))
-            : type === kVectorDouble
-              ? view.getFloat64(at + i * 8)
-              : type === kVectorInt
-                ? view.getInt32(at + i * 4)
-                : view.getUint32(at + i * 4);
+          type === kVectorDouble
+            ? view.getFloat64(at + i * 8)
+            : type === kVectorInt
+              ? view.getInt32(at + i * 4)
+              : view.getUint32(at + i * 4);
       }
 
       v.$fixed = fixed;
