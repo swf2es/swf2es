@@ -8,6 +8,7 @@ export interface SamplerSource {
   repeat: boolean;
   mip: number;
   cube: boolean;
+  ignore: boolean;
 }
 
 export interface ShaderSource {
@@ -304,27 +305,29 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 0x28: {
         const low = data.getUint32(offset + 16, true);
         const high = data.getUint32(offset + 20, true);
-        // This slice has no LOD bias or sampler overrides.
+        // LOD bias remains outside this slice.
         const mip = (high >>> 24) & 15;
-        if (stage !== "fragment" || low >= 8 || (high & ~0x13101000) !== 5 || mip > 2) {
+        if (stage !== "fragment" || low >= 8 || (high & ~0x13141000) !== 5 || mip > 2) {
           throw new Error("Unsupported AGAL sampler encoding");
         }
 
         const cube = (high & 0x1000) !== 0;
         const linear = (high & 0x10000000) !== 0;
         const repeat = (high & 0x00100000) !== 0;
+        const ignore = (high & 0x00040000) !== 0;
         const previous = samplers.get(low);
         if (
           previous &&
           (previous.linear !== linear ||
             previous.repeat !== repeat ||
             previous.mip !== mip ||
-            previous.cube !== cube)
+            previous.cube !== cube ||
+            previous.ignore !== ignore)
         ) {
           throw new Error("Conflicting AGAL sampler states");
         }
 
-        samplers.set(low, { index: low, linear, repeat, mip, cube });
+        samplers.set(low, { index: low, linear, repeat, mip, cube, ignore });
         names.set(`fs${low}`, `uniform ${cube ? "samplerCube" : "sampler2D"} fs${low};`);
         expression = `texture(fs${low}, ${a}.${cube ? "xyz" : "xy"})`;
         break;

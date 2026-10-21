@@ -3,7 +3,14 @@ import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { Player } from "../../packages/player/dist/player.js";
 import { PixiView } from "../../packages/player/dist/render/view.js";
 import { Scripting } from "../../packages/player/dist/scripting.js";
-import type { Context3DLifecycle, VertexFormat } from "./backend.ts";
+import {
+  type Context3DLifecycle,
+  SAMPLER_FILTERS,
+  SAMPLER_MIPS,
+  SAMPLER_WRAPS,
+  type SamplerWrap,
+  type VertexFormat,
+} from "./backend.ts";
 import { install } from "./natives.ts";
 import { observeLoss, WebGLContext3D } from "./webgl.ts";
 
@@ -274,6 +281,7 @@ export async function shaderFixture(
     | "Reconfigure"
     | "Scissor"
     | "Mipmaps"
+    | "SamplerStates"
     | "Multisampling"
     | "TemporaryMatrices"
     | "IndirectConstants"
@@ -958,6 +966,128 @@ export async function cubeTargets() {
     c.dispose();
     other.backend.dispose();
     check(live.size === 0 && other.live.size === 0, "cube target teardown leaked GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
+export async function samplerStates() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(32, 32);
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    c.setVertex(0, vertices, 0, "float4");
+    c.setConstants("fragment", 0, [1, 0.25, 0.25, 1], 1);
+    const texture = c.createTexture(4, 4);
+    const cube = c.createTexture(4, 4, true);
+    const pixels = new Uint32Array(16).fill(0xffff0000);
+    for (let level = 0; level < 3; level++) {
+      const data = pixels.subarray(0, (4 >> level) ** 2);
+      texture.upload(data, level);
+      for (let face = 0; face < 6; face++) {
+        cube.upload(data, level, face);
+      }
+    }
+
+    const fragment = shader(true);
+    const code = new DataView(fragment.buffer);
+    code.setUint32(7, 0x28, true);
+    code.setUint32(27, 0x40005, true);
+    const flat = c.createProgram();
+    flat.upload(shader(false), fragment);
+    code.setUint32(27, 0x41005, true);
+    const spherical = c.createProgram();
+    spherical.upload(shader(false), fragment);
+    c.setProgram(flat);
+    c.setTexture(0, texture);
+    const readback = c.read();
+    const make = gl.createSampler.bind(gl);
+    gl.createSampler = () => null as unknown as WebGLSampler;
+    c.clear(0, 0, 0, 1);
+    rejects(() => c.draw(indices, 0, 1));
+    gl.createSampler = make;
+    const minFilters = [
+      gl.NEAREST,
+      gl.LINEAR,
+      gl.NEAREST_MIPMAP_NEAREST,
+      gl.LINEAR_MIPMAP_NEAREST,
+      gl.NEAREST_MIPMAP_LINEAR,
+      gl.LINEAR_MIPMAP_LINEAR,
+    ];
+    let allocated = 0;
+    for (let pass = 0; pass < 3; pass++) {
+      for (let dimension = 0; dimension < 2; dimension++) {
+        c.setProgram(dimension ? spherical : flat);
+        c.setTexture(0, dimension ? cube : texture);
+        for (let w = 0; w < SAMPLER_WRAPS.length; w++) {
+          for (let f = 0; f < SAMPLER_FILTERS.length; f++) {
+            for (let m = 0; m < SAMPLER_MIPS.length; m++) {
+              c.setSampler(0, SAMPLER_WRAPS[w], SAMPLER_FILTERS[f], SAMPLER_MIPS[m]);
+              c.clear(0, 0, 0, 1);
+              if (dimension && w !== 0) {
+                rejects(() => c.draw(indices, 0, 1));
+                continue;
+              }
+              c.draw(indices, 0, 1);
+              const sampler = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler;
+              check(
+                gl.getSamplerParameter(sampler, gl.TEXTURE_MIN_FILTER) === minFilters[m * 2 + f],
+                "wrong mip/filter combination",
+              );
+              check(
+                gl.getSamplerParameter(sampler, gl.TEXTURE_MAG_FILTER) ===
+                  (f ? gl.LINEAR : gl.NEAREST),
+                "wrong magnification filter",
+              );
+              check(
+                gl.getSamplerParameter(sampler, gl.TEXTURE_WRAP_S) ===
+                  (w & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE),
+                "wrong U wrap",
+              );
+              check(
+                gl.getSamplerParameter(sampler, gl.TEXTURE_WRAP_T) ===
+                  (w & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE),
+                "wrong V wrap",
+              );
+              check(c.read() === readback, "samplers replaced readback storage");
+              check(color(readback, 16, 16, 32) === "ffff0000", "sampler lost texture contents");
+              if (pass) {
+                check(owned.created === allocated, "warm sampler draw allocated GPU handles");
+              }
+            }
+          }
+        }
+      }
+      if (!pass) {
+        allocated = owned.created;
+      }
+    }
+
+    c.setSampler(0, "clamp", "linear", "miplinear");
+    rejects(() => c.setSampler(0, "bad" as SamplerWrap, "nearest", "mipnone"));
+    rejects(() => c.setSampler(-1, "repeat", "nearest", "mipnone"));
+    rejects(() => c.setSampler(16, "repeat", "nearest", "mipnone"));
+    c.setSampler(15, "repeat", "nearest", "mipnone");
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ffff0000", "invalid sampler state damaged drawing");
+    const bad = fragment.slice();
+    bad[7] = 0xff;
+    rejects(() => spherical.upload(shader(false), bad));
+    c.draw(indices, 0, 1);
+    check(owned.created === allocated, "invalid sampler program allocated handles");
+    c.configure(64, 64);
+    c.clear(0, 0, 0, 1);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 32, 32, 64) === "ffff0000", "resize lost runtime sampler state");
+    check(gl.getError() === gl.NO_ERROR, "sampler tests polluted GL state");
+
+    return { passed: true };
+  } finally {
+    c.dispose();
+    check(live.size === 0, "samplers retained GPU handles");
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

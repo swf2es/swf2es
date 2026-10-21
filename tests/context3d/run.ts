@@ -36,6 +36,7 @@ const scripts = compileScripts(
     "Reconfigure",
     "Scissor",
     "Mipmaps",
+    "SamplerStates",
     "Multisampling",
     "RenderTargets",
     "CubeTargets",
@@ -70,6 +71,7 @@ for (const name of [
   "Reconfigure",
   "Scissor",
   "Mipmaps",
+  "SamplerStates",
   "Multisampling",
   "RenderTargets",
   "CubeTargets",
@@ -171,6 +173,14 @@ if (!process.argv.includes("--build-only")) {
       console.log(
         "context3d: texture byte uploads preserve channels, reuse staging and release resources",
       );
+      const samplers = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.samplerStates())',
+      );
+      assert.equal(samplers.exception, null, JSON.stringify(samplers));
+      assert.equal(samplers.value?.passed, true);
+      console.log(
+        "context3d: runtime samplers share cached handles and preserve resource lifetime",
+      );
       const indirect = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.indirectConstants())',
       );
@@ -231,6 +241,7 @@ if (!process.argv.includes("--build-only")) {
         "Reconfigure",
         "Scissor",
         "Mipmaps",
+        "SamplerStates",
         "Multisampling",
         "RenderTargets",
         "CubeTargets",

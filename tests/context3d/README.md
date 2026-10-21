@@ -31,6 +31,7 @@ node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scalarmath
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
+node tests/context3d/oracle.ts --samplerstates
 node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --indirectconstants
@@ -265,7 +266,7 @@ Each draw uploads the existing 2 KiB Float32Array once; direct-only shaders reta
 their sparse uploads. There are no new per-draw arrays, GPU handles or uniform
 location queries. Browser checks verify storage identity across 32 draws, constant
 updates, optimized-away indexed reads, failed uploads, direct/indirect replacement,
-resize and disposal. Sixteen AGAL unit tests cover accepted and rejected encodings.
+resize and disposal. Seventeen AGAL unit tests cover accepted and rejected encodings.
 
 `ShaderMath.as` adds 309 AIR pixel samples for `frc`, `sqt`, `rsq`, `pow`,
 `nrm`, `crs`, vertex `sge`/`slt`, and fragment `kil`. Both shader stages exercise
@@ -337,7 +338,7 @@ The prototype retains only weak ownership records for retired textures.
 
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 and cube `bgra` textures up to 1024×1024 per face,
-with no LOD bias, sampler overrides or rectangle/compressed textures.
+with no LOD bias, anisotropic filtering or rectangle/compressed textures.
 Upload dimensions must match the selected mip level. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
@@ -379,10 +380,43 @@ including trilinear interpolation, non-square chains down to 1×1, LOD clamping,
 level reupload and presentation. Its 45-line AIR reference includes unuploaded
 base data (3605), incomplete chains (3700) and an out-of-range level (3674).
 Every level is uploaded explicitly; the backend does not generate mipmaps.
-All levels share the texture's existing base-sized CPU staging array. The twelve
+All levels share the texture's existing base-sized CPU staging array. The shader's twelve
 filter/wrap/mip combinations use lazily cached sampler objects. Browser checks
 verify stable staging storage and GPU handles across mip reuploads, with cleanup
 after disposal and context loss. Mip sampling adds no per-draw arrays.
+
+`SamplerStates.as` adds 203 AIR trace lines, including 750 pixel samples, for
+`setSamplerStateAt` and the AGAL `ignoresampler` flag. Runtime overrides cover
+nearest/linear filtering, all three mip modes, and clamp/repeat independently
+on U and V. A fresh context starts with clamp/nearest/no mip filtering on the
+tested AIR backend. State setters accept slots 0–15; the current shaders still
+address only slots 0–7.
+
+Selecting a program applies its ordinary sampler settings even when selecting
+the same program again. `ignoresampler` preserves the slot's current state.
+Uploading a selected program also applies its settings; uploading an unselected
+program does not. Runtime state survives texture rebinding, presentation and
+resize. Draw-time mip completeness and same-texture state conflicts use these
+effective settings. Cube samplers require clamp on both axes (Error 3753).
+The fixture covers those transitions, independent slots, cube sampling, failed
+setters preserving state, null/invalid arguments and disposed contexts. Enums
+are validated before slot ranges; valid calls on disposed contexts are ignored.
+
+A fixed 16-byte table stores the slot settings. The 24 supported combinations
+share cached WebGL sampler handles across textures and programs. Browser checks
+cover a 90-draw loop (60 after warming the cache), repeated cube-wrap
+rejections, sampler-allocation failure, reuse, failed shader replacement, resize
+and teardown. Recovery draws through `ignoresampler` with a base-only texture
+after deliberately setting mip filtering in the previous context, verifying
+fresh defaults. Setters and warmed draws add no arrays or GPU queries.
+
+Fractional trilinear precision is not an exact-parity claim: with this fixture's
+quarter-colored base level, scale 6 produced a color-channel difference of up to 5/255
+between AIR and the browser. Scale `4 * sqrt(2)` also exposed nearest-mip
+selection differences at the half-LOD boundary. The exact reference uses
+integer LODs for trilinear sampling and stays away from that nearest-mip boundary;
+browser checks additionally inspect the selected GL filter. Anisotropic filtering,
+LOD bias, broader sampler encodings and full validation precedence remain open.
 
 `CubeTextures.as` compares all six cube faces with AIR, including asymmetric
 quadrants to detect flips, nearest/linear filtering, all three mip modes,

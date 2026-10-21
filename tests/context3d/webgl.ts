@@ -7,6 +7,12 @@ import {
   type Context3DLifecycle,
   type CullFace,
   type Program3D,
+  SAMPLER_FILTERS,
+  SAMPLER_MIPS,
+  SAMPLER_WRAPS,
+  type SamplerFilter,
+  type SamplerMip,
+  type SamplerWrap,
   ScissorBoundsError,
   type StencilAction,
   type Texture3D,
@@ -134,7 +140,8 @@ export class WebGLContext3D implements Context3D {
   private renderFace = 0;
   private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
   private textureMask = 0;
-  private readonly samplers: (WebGLSampler | null)[] = new Array(12).fill(null);
+  private readonly samplers: (WebGLSampler | null)[] = new Array(24).fill(null);
+  private readonly samplerStates = new Uint8Array(16);
   private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
@@ -765,6 +772,10 @@ export class WebGLContext3D implements Context3D {
             location: gl.getUniformLocation(handle, `fs${source.index}`),
           });
         }
+
+        if (this.selected === program) {
+          this.setProgram(program);
+        }
       },
       dispose: () => {
         if (!this.programs.delete(program)) {
@@ -1198,8 +1209,20 @@ export class WebGLContext3D implements Context3D {
     }
   }
 
-  private sampler(source: SamplerSource): WebGLSampler {
-    const index = source.mip * 4 + Number(source.linear) * 2 + Number(source.repeat);
+  setSampler(index: number, wrap: SamplerWrap, filter: SamplerFilter, mip: SamplerMip): void {
+    this.alive();
+    range(index, 1, this.samplerStates.length);
+    const w = SAMPLER_WRAPS.indexOf(wrap);
+    const f = SAMPLER_FILTERS.indexOf(filter);
+    const m = SAMPLER_MIPS.indexOf(mip);
+    if (w < 0 || f < 0 || m < 0) {
+      throw new Error("Context3D experiment: invalid sampler state");
+    }
+
+    this.samplerStates[index] = w | (f << 2) | (m << 3);
+  }
+
+  private sampler(index: number): WebGLSampler {
     let sampler = this.samplers[index];
     if (!sampler) {
       const gl = this.gl;
@@ -1208,22 +1231,26 @@ export class WebGLContext3D implements Context3D {
         throw new Error("Context3D experiment: cannot create sampler");
       }
 
-      const filter = source.linear ? gl.LINEAR : gl.NEAREST;
+      const linear = (index & 4) !== 0;
+      const filter = linear ? gl.LINEAR : gl.NEAREST;
       let minFilter: number = filter;
-      switch (source.mip) {
+      switch (index >>> 3) {
         case 1:
-          minFilter = source.linear ? gl.LINEAR_MIPMAP_NEAREST : gl.NEAREST_MIPMAP_NEAREST;
+          minFilter = linear ? gl.LINEAR_MIPMAP_NEAREST : gl.NEAREST_MIPMAP_NEAREST;
           break;
         case 2:
-          minFilter = source.linear ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST_MIPMAP_LINEAR;
+          minFilter = linear ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST_MIPMAP_LINEAR;
           break;
       }
-      const wrap = source.repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
       gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, minFilter);
       gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
-      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, wrap);
-      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, wrap);
-      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_R, wrap);
+      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, index & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+      gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, index & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+      gl.samplerParameteri(
+        sampler,
+        gl.TEXTURE_WRAP_R,
+        (index & 3) === 3 ? gl.REPEAT : gl.CLAMP_TO_EDGE,
+      );
       this.samplers[index] = sampler;
     }
 
@@ -1280,11 +1307,19 @@ export class WebGLContext3D implements Context3D {
 
   setProgram(program: Program3D): void {
     this.alive();
-    if (!this.program(program).handle) {
+    const state = this.program(program);
+    if (!state.handle) {
       throw new Error("Context3D experiment: program not uploaded");
     }
 
     this.selected = program;
+    for (let i = 0; i < state.samplers.length; i++) {
+      const source = state.samplers[i].source;
+      if (!source.ignore) {
+        this.samplerStates[source.index] =
+          (source.repeat ? 3 : 0) | (Number(source.linear) << 2) | (source.mip << 3);
+      }
+    }
   }
 
   setVertex(index: number, buffer: Buffer3D | null, offset: number, format: VertexFormat): void {
@@ -1350,9 +1385,7 @@ export class WebGLContext3D implements Context3D {
         const other = state.samplers[j].source;
         if (
           this.textureSlots[other.index] === texture &&
-          (source.linear !== other.linear ||
-            source.repeat !== other.repeat ||
-            source.mip !== other.mip)
+          this.samplerStates[source.index] !== this.samplerStates[other.index]
         ) {
           throw new TextureBindingError("conflicting");
         }
@@ -1423,6 +1456,9 @@ export class WebGLContext3D implements Context3D {
       if (texture.cube !== binding.source.cube) {
         throw new TextureBindingError("dimension");
       }
+      if (texture.cube && (this.samplerStates[slot] & 3) !== 0) {
+        throw new TextureBindingError("cubeWrap");
+      }
       if (texture.cube) {
         let uploaded = 0;
         for (let face = 0; face < 6; face++) {
@@ -1438,7 +1474,7 @@ export class WebGLContext3D implements Context3D {
         }
         // AIR requires every cube face and mip even with mip filtering disabled.
         if (
-          (texture.cube || binding.source.mip !== 0) &&
+          (texture.cube || this.samplerStates[slot] >>> 3 !== 0) &&
           resource.uploaded[face] !== (1 << texture.levels) - 1
         ) {
           throw new TextureBindingError("mipmaps");
@@ -1447,7 +1483,7 @@ export class WebGLContext3D implements Context3D {
 
       gl.activeTexture(gl.TEXTURE0 + slot);
       gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, resource.handle);
-      gl.bindSampler(slot, this.sampler(binding.source));
+      gl.bindSampler(slot, this.sampler(this.samplerStates[slot]));
       gl.uniform1i(binding.location, slot);
     }
 

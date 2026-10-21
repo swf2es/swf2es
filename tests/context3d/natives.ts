@@ -15,6 +15,12 @@ import {
   CULL_FACES,
   type CullFace,
   type Program3D,
+  SAMPLER_FILTERS,
+  SAMPLER_MIPS,
+  SAMPLER_WRAPS,
+  type SamplerFilter,
+  type SamplerMip,
+  type SamplerWrap,
   ScissorBoundsError,
   STENCIL_ACTIONS,
   type Stage3DHost,
@@ -411,6 +417,49 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       return object;
     }
 
+    setSamplerStateAt(
+      index: number,
+      wrap: string | null,
+      filter: string | null,
+      mip: string | null,
+    ): void {
+      if (wrap === null) {
+        throw s.rt.error("TypeError", 2007, "wrap");
+      }
+      if (!SAMPLER_WRAPS.includes(wrap as SamplerWrap)) {
+        throw s.rt.error("ArgumentError", 2008, "wrap");
+      }
+      if (filter === null) {
+        throw s.rt.error("TypeError", 2007, "filter");
+      }
+      const anisotropic =
+        filter === "anisotropic2x" ||
+        filter === "anisotropic4x" ||
+        filter === "anisotropic8x" ||
+        filter === "anisotropic16x";
+      if (!anisotropic && !SAMPLER_FILTERS.includes(filter as SamplerFilter)) {
+        throw s.rt.error("ArgumentError", 2008, "filter");
+      }
+      if (mip === null) {
+        throw s.rt.error("TypeError", 2007, "mipfilter");
+      }
+      if (!SAMPLER_MIPS.includes(mip as SamplerMip)) {
+        throw s.rt.error("ArgumentError", 2008, "mipfilter");
+      }
+      if (index < 0 || index >= 16) {
+        throw s.rt.error("RangeError", 2006);
+      }
+
+      const backend = contexts.get(this as unknown as AsObject)?.backend;
+      if (backend) {
+        if (anisotropic) {
+          unsupported();
+        }
+
+        backend.setSampler(index, wrap as SamplerWrap, filter as SamplerFilter, mip as SamplerMip);
+      }
+    }
+
     setTextureAt(index: number, object: AsObject | null): void {
       context(this as unknown as AsObject).setTexture(index, object && texture(object));
     }
@@ -637,6 +686,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
               throw s.rt.error("Error", 3605);
             case "mipmaps":
               throw s.rt.error("Error", 3700);
+            case "cubeWrap":
+              throw s.rt.error("Error", 3753);
             case "dimension":
               throw s.rt.error("Error", 3754);
             case "missing":

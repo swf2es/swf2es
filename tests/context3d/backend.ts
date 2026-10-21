@@ -38,6 +38,13 @@ export const BLEND_FACTORS = [
 ] as const;
 export type BlendFactor = (typeof BLEND_FACTORS)[number];
 
+export const SAMPLER_WRAPS = ["clamp", "repeat_u_clamp_v", "clamp_u_repeat_v", "repeat"] as const;
+export type SamplerWrap = (typeof SAMPLER_WRAPS)[number];
+export const SAMPLER_FILTERS = ["nearest", "linear"] as const;
+export type SamplerFilter = (typeof SAMPLER_FILTERS)[number];
+export const SAMPLER_MIPS = ["mipnone", "mipnearest", "miplinear"] as const;
+export type SamplerMip = (typeof SAMPLER_MIPS)[number];
+
 export const VERTEX_FORMATS = ["float1", "float2", "float3", "float4", "bytes4"] as const;
 export type VertexFormat = (typeof VERTEX_FORMATS)[number];
 
@@ -53,6 +60,7 @@ export class TextureBindingError extends Error {
     | "unuploaded"
     | "mipmaps"
     | "dimension"
+    | "cubeWrap"
     | "feedback";
 
   constructor(reason: TextureBindingError["reason"]) {
@@ -134,6 +142,7 @@ export interface Context3D {
   createTexture(width: number, height: number, cube?: boolean): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(texture: Texture3D | null, depth?: boolean, face?: number): void;
+  setSampler(index: number, wrap: SamplerWrap, filter: SamplerFilter, mip: SamplerMip): void;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;
   /** Offset counts 32-bit words; bytes4 consumes one word, normalized on the GPU. */

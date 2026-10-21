@@ -19,6 +19,7 @@ const fixture =
     "IndirectConstants",
     "Multisampling",
     "Mipmaps",
+    "SamplerStates",
     "Scissor",
     "ShaderMath",
     "ScalarMath",

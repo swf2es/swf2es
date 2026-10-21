@@ -111,6 +111,15 @@ package {
       current.setProgramConstantsFromVector("fragment", 0, Vector.<Number>([
         generation == 1 ? 1 : 0, generation == 2 ? 1 : 0, generation > 2 ? 1 : 0, 1
       ]), 1);
+      texture = current.createTexture(2, 2, "bgra", false);
+      if (generation == 2) {
+        bytes.clear();
+        for (i = 0; i < 4; i++) { bytes.writeUnsignedInt(0xffffffff); }
+        texture.uploadFromByteArray(bytes, 0);
+      } else {
+        texture.uploadFromBitmapData(bitmap);
+      }
+      current.setTextureAt(0, texture);
       cube = current.createCubeTexture(16, "bgra", true);
       for (var face:int = 0; face < 6; face++) {
         current.setRenderToTexture(cube, true, 0, face);
@@ -129,14 +138,7 @@ package {
       current.setColorMask(false, false, false, false);
       current.setStencilActions("frontAndBack", "never", "invert", "zero", "set");
       current.setStencilReferenceValue(42, 15, 0);
-      texture = current.createTexture(2, 2, "bgra", false);
-      if (generation == 2) {
-        bytes.clear();
-        for (i = 0; i < 4; i++) { bytes.writeUnsignedInt(0xffffffff); }
-        texture.uploadFromByteArray(bytes, 0);
-      } else {
-        texture.uploadFromBitmapData(bitmap);
-      }
+      current.setSamplerStateAt(0, "clamp", "linear", "miplinear");
     }
 
     private function shader(fragment:Boolean):ByteArray {
@@ -146,12 +148,27 @@ package {
       bytes.writeUnsignedInt(1);
       bytes.writeByte(0xa1);
       bytes.writeByte(fragment ? 1 : 0);
-      bytes.writeUnsignedInt(0);
-      bytes.writeUnsignedInt(0x030f0000);
-      bytes.writeUnsignedInt(0xe4000000);
-      bytes.writeUnsignedInt(fragment ? 1 : 0);
-      bytes.writeUnsignedInt(0);
-      bytes.writeUnsignedInt(0);
+      if (fragment) {
+        bytes.writeUnsignedInt(0x28);
+        bytes.writeUnsignedInt(0x020f0000);
+        bytes.writeUnsignedInt(0xe4000001);
+        bytes.writeUnsignedInt(1);
+        bytes.writeUnsignedInt(0);
+        bytes.writeUnsignedInt(0x00040005);
+        bytes.writeUnsignedInt(3);
+        bytes.writeUnsignedInt(0x030f0000);
+        bytes.writeUnsignedInt(0xe4000000);
+        bytes.writeUnsignedInt(2);
+        bytes.writeUnsignedInt(0xe4000000);
+        bytes.writeUnsignedInt(1);
+      } else {
+        bytes.writeUnsignedInt(0);
+        bytes.writeUnsignedInt(0x030f0000);
+        bytes.writeUnsignedInt(0xe4000000);
+        bytes.writeUnsignedInt(0);
+        bytes.writeUnsignedInt(0);
+        bytes.writeUnsignedInt(0);
+      }
       bytes.position = 0;
       return bytes;
     }
