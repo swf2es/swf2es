@@ -20,6 +20,7 @@ const fixture =
     "Scissor",
     "ShaderMath",
     "Blending",
+    "ColorMask",
     "Depth",
     "Texturing",
     "Arithmetic",
@@ -72,7 +73,7 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Depth" || fixture === "Multisampling" || fixture === "RenderTargets" || fixture === "Reconfigure" || fixture === "FrameValidation"}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "RenderTargets" || fixture === "Reconfigure" || fixture === "FrameValidation"}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>

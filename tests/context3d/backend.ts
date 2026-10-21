@@ -97,6 +97,7 @@ export interface Context3D {
   setDepth(write: boolean, compare: CompareMode): void;
   setCulling(face: CullFace): void;
   setBlend(source: BlendFactor, destination: BlendFactor): void;
+  setColorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void;
   /** Null disables clipping; coordinates are in top-down target pixels. */
   setScissor(x: number | null, y?: number, width?: number, height?: number): void;
   createBuffer(count: number, stride: number): Buffer3D;

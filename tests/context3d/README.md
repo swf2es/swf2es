@@ -22,6 +22,7 @@ node tests/context3d/oracle.ts --arithmetic
 node tests/context3d/oracle.ts --texturing
 node tests/context3d/oracle.ts --depth
 node tests/context3d/oracle.ts --blending
+node tests/context3d/oracle.ts --colormask
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
@@ -97,7 +98,8 @@ surface. The AS3 creation listener uploads new buffers and shaders and
 draws a triangle again; the browser checks red, green and blue presentations
 over two recovery cycles.
 The recovered contexts have depth/stencil attachments; depth/culling state set to
-reject all draws and zero blend factors before loss must not survive into the replacement.
+reject all draws, zero blend factors and disabled color writes before loss must
+not survive into the replacement.
 
 These checks also cover retained vertex/index buffers, programs and textures rejecting
 use after loss, fresh context defaults, preserved slot placement, duplicate
@@ -348,6 +350,19 @@ state for other combinations. State changes create no arrays or GPU resources.
 The browser recovery test verifies fresh blend defaults after loss. These samples
 match exactly on the tested backends; they do not establish rounding parity across
 all GPU drivers.
+
+`ColorMask.as` compares 77 pixel samples with AIR, including all 16 channel
+masks with ordinary and 4× back buffers. Clears ignore the channel mask and
+restore it for subsequent draws. The fixture covers alpha-only writes, a
+color-disabled depth pass, depth-only clears, additive blending, unchanged
+configuration, resize, presentation and texture-target transitions. A valid
+setter on a disposed AS3 context is accepted without touching the backend.
+
+The backend stores the mask in one integer and skips unchanged GL mask settings.
+There are no new per-draw allocations or GPU queries. Browser checks verify that
+resolve and presentation copy all channels even with color writes disabled,
+repeated use preserves readback storage and GPU handles, teardown releases all
+handles, and context recovery restores the default all-channel mask.
 
 `Composition.as` exercises two Stage3D slots beneath ordinary Flash
 graphics, including an opaque and a translucent overlay. The browser test

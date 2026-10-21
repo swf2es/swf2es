@@ -23,6 +23,7 @@ const scripts = compileScripts(
     "Texturing",
     "Depth",
     "Blending",
+    "ColorMask",
     "ShaderMath",
     "Comparisons",
     "FrameValidation",
@@ -49,6 +50,7 @@ for (const name of [
   "Texturing",
   "Depth",
   "Blending",
+  "ColorMask",
   "ShaderMath",
   "Comparisons",
   "FrameValidation",
@@ -119,6 +121,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(reconfiguration.exception, null, JSON.stringify(reconfiguration));
       assert.equal(reconfiguration.value?.passed, true);
       console.log("context3d: unchanged back buffers reuse resources and preserve pixels");
+      const masks = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.colorMasks())',
+      );
+      assert.equal(masks.exception, null, JSON.stringify(masks));
+      assert.equal(masks.value?.passed, true);
+      console.log("context3d: color masks preserve resolve/presentation and reuse GPU state");
       const lifecycle: string[] = JSON.parse(
         readFileSync(`${here}lifecycle-reference.json`, "utf8"),
       );
@@ -153,6 +161,7 @@ if (!process.argv.includes("--build-only")) {
         "Texturing",
         "Depth",
         "Blending",
+        "ColorMask",
         "ShaderMath",
         "FrameValidation",
         "FrameValidationFlat",

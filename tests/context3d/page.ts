@@ -261,6 +261,7 @@ export async function shaderFixture(
     | "Texturing"
     | "Depth"
     | "Blending"
+    | "ColorMask"
     | "ShaderMath"
     | "Comparisons"
     | "FrameValidation"
@@ -748,6 +749,72 @@ export async function renderTargets() {
     c.dispose();
     other.backend.dispose();
     check(live.size === 0 && other.live.size === 0, "render target teardown leaked GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
+export async function colorMasks() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(32, 32, true, 4);
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    const program = c.createProgram();
+    program.upload(shader(false), shader(true));
+    c.setProgram(program);
+    c.setVertex(0, vertices, 0, 4);
+    c.setConstants("fragment", 0, [1, 1, 0, 1], 1);
+    c.setDepth(false, "always");
+    const pixels = c.read();
+    const allocated = owned.created;
+    const setMask = gl.colorMask;
+    const getParameter = gl.getParameter;
+    let changes = 0;
+    let queries = 0;
+    gl.colorMask = (...args) => {
+      changes++;
+      setMask.apply(gl, args);
+    };
+    gl.getParameter = (...args) => {
+      queries++;
+      return getParameter.apply(gl, args);
+    };
+    try {
+      c.setColorMask(true, false, false, false);
+      const initial = changes;
+      for (let i = 0; i < 32; i++) {
+        c.setColorMask(true, false, false, false);
+      }
+      check(changes === initial, "unchanged color mask repeated a GL state change");
+      for (let i = 0; i < 24; i++) {
+        c.clear(0, 0, 1, 1);
+        c.draw(indices, 0, 1);
+        c.setColorMask(false, false, false, false);
+        check(c.read() === pixels, "color mask replaced readback storage");
+        check(color(pixels, 16, 16, 32) === "ffff00ff", "resolve obeyed draw-time color mask");
+        c.present();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.readPixels(0, 0, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        check(color(pixels, 16, 16, 32) === "ffff00ff", "presentation obeyed color mask");
+        check(color(pixels, 0, 0, 32) === "ff0000ff", "masked clear lost channels");
+        c.setColorMask(true, false, false, false);
+      }
+      check(queries === 0, "color masks queried GPU state");
+      check(owned.created === allocated, "color masks allocated GPU handles");
+    } finally {
+      gl.colorMask = setMask;
+      gl.getParameter = getParameter;
+    }
+    check(gl.getError() === gl.NO_ERROR, "color masks polluted GL state");
+    c.dispose();
+    rejects(() => c.setColorMask(true, true, true, true));
+    return { passed: true };
+  } finally {
+    c.dispose();
+    check(live.size === 0, "color mask test retained GPU resources");
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

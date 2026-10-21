@@ -508,6 +508,10 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         ?.backend.setBlend(source as BlendFactor, destination as BlendFactor);
     }
 
+    setColorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void {
+      contexts.get(this as unknown as AsObject)?.backend.setColorMask(red, green, blue, alpha);
+    }
+
     setDepthTest(write: boolean, compare: string): void {
       if (!COMPARE_MODES.includes(compare as CompareMode)) {
         throw s.rt.error("ArgumentError", 2008, "passCompareMode");

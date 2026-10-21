@@ -102,6 +102,7 @@ export class WebGLContext3D implements Context3D {
   private depthBuffer: WebGLRenderbuffer | null = null;
   private antiAlias = 0;
   private depthWrite = true;
+  private colorWrite = 15;
   private scissor = false;
   private scissorLeft = 0;
   private scissorTop = 0;
@@ -126,6 +127,7 @@ export class WebGLContext3D implements Context3D {
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
+    gl.colorMask(true, true, true, true);
     gl.disable(gl.STENCIL_TEST);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
@@ -330,6 +332,12 @@ export class WebGLContext3D implements Context3D {
       gl.depthMask(true);
     }
 
+    // AIR clears every color channel regardless of the draw-time mask.
+    const overrideColor = (mask & 1) !== 0 && this.colorWrite !== 15;
+    if (overrideColor) {
+      gl.colorMask(true, true, true, true);
+    }
+
     if (this.scissor) {
       gl.disable(gl.SCISSOR_TEST);
     }
@@ -340,6 +348,25 @@ export class WebGLContext3D implements Context3D {
     if (overrideDepth) {
       gl.depthMask(false);
     }
+    if (overrideColor) {
+      this.applyColorMask();
+    }
+  }
+
+  setColorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void {
+    this.alive();
+    const mask = (red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0);
+    if (mask === this.colorWrite) {
+      return;
+    }
+
+    this.colorWrite = mask;
+    this.applyColorMask();
+  }
+
+  private applyColorMask(): void {
+    const mask = this.colorWrite;
+    this.gl.colorMask((mask & 1) !== 0, (mask & 2) !== 0, (mask & 4) !== 0, (mask & 8) !== 0);
   }
 
   setDepth(write: boolean, compare: CompareMode): void {

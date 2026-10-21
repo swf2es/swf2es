@@ -99,6 +99,7 @@ package {
       current.setDepthTest(false, "never");
       current.setCulling("frontAndBack");
       current.setBlendFactors("zero", "zero");
+      current.setColorMask(false, false, false, false);
       texture = current.createTexture(2, 2, "bgra", false);
       texture.uploadFromBitmapData(bitmap);
     }
