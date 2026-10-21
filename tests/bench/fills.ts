@@ -1,6 +1,7 @@
 // Compare fill construction with two render modules from a git ref, using
 // the current player's other dependencies. Build first, then:
 // node --expose-gc tests/bench/fills.ts [ref, HEAD] [iterations, 5000] [samples, 10] [--allocs]
+// Add --staggered for a large fill with unrelated band levels; use fewer iterations.
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { Session } from "node:inspector";
@@ -9,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ShapeLayer } from "../../packages/player/dist/display/shapes.js";
 import * as current from "../../packages/player/dist/render/tessellate.js";
 
-const args = process.argv.slice(2).filter((arg) => arg !== "--allocs");
+const args = process.argv.slice(2).filter((arg) => arg !== "--allocs" && arg !== "--staggered");
 const ref = args[0] ?? "HEAD";
 const iterations = Number(args[1] ?? 5000);
 const samples = Number(args[2] ?? 10);
@@ -43,19 +44,26 @@ const rect = (x: number, y: number, w: number, h: number) => [
   x,
   y,
 ];
-const cases = {
-  square: [rect(0, 0, 100, 100)],
-  curves: [
-    [1, 0, 0, 3, 100, -100, 100, 0, 3, 200, 100, 100, 100, 3, 0, 200, 0, 100, 3, -100, 0, 0, 0],
-  ],
-  holes: [rect(0, 0, 100, 100), rect(10, 10, 20, 20), rect(50, 50, 40, 40)],
-  disjoint: Array.from({ length: 10 }, (_, i) => rect(i * 20, 0, 10, 10)),
-  crossing: [
-    rect(0, 0, 256, 192),
-    [1, 60, -40, 2, 20, 175, 2, 90, 175, 2, 60, -40],
-    [1, 190, -40, 2, 165, 175, 2, 235, 175, 2, 190, -40],
-  ],
-};
+const cases: Record<string, number[][]> = process.argv.includes("--staggered")
+  ? {
+      staggered: [
+        [1, 0, 0, 2, 10, 10, 2, 0, 10, 2, 10, 0, 2, 0, 0],
+        ...Array.from({ length: 300 }, (_, i) => rect(20 + i * 4, i + 0.25, 2, 699.75 - i * 2)),
+      ],
+    }
+  : {
+      square: [rect(0, 0, 100, 100)],
+      curves: [
+        [1, 0, 0, 3, 100, -100, 100, 0, 3, 200, 100, 100, 100, 3, 0, 200, 0, 100, 3, -100, 0, 0, 0],
+      ],
+      holes: [rect(0, 0, 100, 100), rect(10, 10, 20, 20), rect(50, 50, 40, 40)],
+      disjoint: Array.from({ length: 10 }, (_, i) => rect(i * 20, 0, 10, 10)),
+      crossing: [
+        rect(0, 0, 256, 192),
+        [1, 60, -40, 2, 20, 175, 2, 90, 175, 2, 60, -40],
+        [1, 190, -40, 2, 165, 175, 2, 235, 175, 2, 190, -40],
+      ],
+    };
 const painter = () => ({ color: 0, alpha: 1 });
 type Module = typeof current;
 const median = (values: number[]) => {
@@ -129,8 +137,8 @@ try {
       fills: [{ fill: { type: "solid", color: 0xff000000 }, contours, winding: "evenOdd" }],
       strokes: [],
     };
-    run(reference, layer, 2000);
-    run(current, layer, 2000);
+    run(reference, layer, Math.min(2000, iterations));
+    run(current, layer, Math.min(2000, iterations));
     const before: number[] = [];
     const after: number[] = [];
     for (let i = 0; i < samples; i++) {
