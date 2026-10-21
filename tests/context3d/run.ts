@@ -38,6 +38,7 @@ const scripts = compileScripts(
     "Mipmaps",
     "Multisampling",
     "RenderTargets",
+    "CubeTargets",
     "CubeTextures",
     "TemporaryMatrices",
   ].map((name) => ({
@@ -70,6 +71,7 @@ for (const name of [
   "Mipmaps",
   "Multisampling",
   "RenderTargets",
+  "CubeTargets",
   "CubeTextures",
   "TemporaryMatrices",
 ]) {
@@ -119,6 +121,14 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(targets.exception, null, JSON.stringify(targets));
       assert.equal(targets.value?.passed, true);
       console.log("context3d: render target reuse, feedback, allocation failures and cleanup ok");
+      const cubes = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.cubeTargets())',
+      );
+      assert.equal(cubes.exception, null, JSON.stringify(cubes));
+      assert.equal(cubes.value?.passed, true);
+      console.log(
+        "context3d: cube target faces, mipmaps, reuse, allocation rollback and cleanup ok",
+      );
       const msaa = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.multisampling())',
       );
@@ -215,6 +225,7 @@ if (!process.argv.includes("--build-only")) {
         "Mipmaps",
         "Multisampling",
         "RenderTargets",
+        "CubeTargets",
         "CubeTextures",
         "TemporaryMatrices",
       ]) {

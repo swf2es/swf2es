@@ -110,6 +110,9 @@ interface TextureState {
   framebuffer: WebGLFramebuffer | null;
   depthBuffer: WebGLRenderbuffer | null;
   dirty: boolean;
+  face: number;
+  mipFramebuffer: WebGLFramebuffer | null;
+  depthAttached: boolean;
 }
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
@@ -127,6 +130,7 @@ export class WebGLContext3D implements Context3D {
   private targetDepthBytes = 0;
   private renderTexture: Texture3D | null = null;
   private renderDepth = false;
+  private renderFace = 0;
   private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
   private textureMask = 0;
   private readonly samplers: (WebGLSampler | null)[] = new Array(12).fill(null);
@@ -836,6 +840,9 @@ export class WebGLContext3D implements Context3D {
       framebuffer: null,
       depthBuffer: null,
       dirty: false,
+      face: 0,
+      mipFramebuffer: null,
+      depthAttached: false,
     };
     const upload = (level: number, face: number, w: number, h: number): void => {
       gl.activeTexture(gl.TEXTURE0);
@@ -912,11 +919,13 @@ export class WebGLContext3D implements Context3D {
           this.applyScissor();
         }
         gl.deleteFramebuffer(state.framebuffer);
+        gl.deleteFramebuffer(state.mipFramebuffer);
         gl.deleteRenderbuffer(state.depthBuffer);
         if (state.depthBuffer) {
           this.targetDepthBytes -= width * height * 4;
         }
         state.framebuffer = null;
+        state.mipFramebuffer = null;
         state.depthBuffer = null;
 
         for (let i = 0; i < this.textureSlots.length; i++) {
@@ -950,34 +959,44 @@ export class WebGLContext3D implements Context3D {
     return state;
   }
 
-  setRenderTarget(texture: Texture3D | null, depth = false): void {
+  setRenderTarget(texture: Texture3D | null, depth = false, face = 0): void {
     this.alive();
-    if (texture === this.renderTexture && (!texture || depth === this.renderDepth)) {
+    if (texture) {
+      range(face, 1, texture.cube ? 6 : 1);
+    }
+    if (
+      texture === this.renderTexture &&
+      (!texture || (depth === this.renderDepth && face === this.renderFace))
+    ) {
       return;
     }
 
     const gl = this.gl;
     if (texture) {
       const state = this.textureState(texture);
-      if (texture.cube) {
-        throw new Error("Context3D experiment: cube render targets are not supported");
-      }
       if (texture.width < 8 || texture.height < 8) {
         throw new Error("Context3D experiment: render targets must be at least 8 by 8");
       }
 
       let framebuffer = state.framebuffer;
+      let mipFramebuffer = state.mipFramebuffer;
       let depthBuffer = state.depthBuffer;
       try {
         framebuffer ??= gl.createFramebuffer();
         if (!framebuffer) {
           throw new Error("Context3D experiment: cannot create texture framebuffer");
         }
+        if (texture.cube && !mipFramebuffer) {
+          mipFramebuffer = gl.createFramebuffer();
+          if (!mipFramebuffer) {
+            throw new Error("Context3D experiment: cannot create cube mip framebuffer");
+          }
+        }
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
         gl.framebufferTexture2D(
           gl.FRAMEBUFFER,
           gl.COLOR_ATTACHMENT0,
-          gl.TEXTURE_2D,
+          texture.cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + face : gl.TEXTURE_2D,
           state.handle,
           0,
         );
@@ -1013,13 +1032,23 @@ export class WebGLContext3D implements Context3D {
         if (framebuffer !== state.framebuffer) {
           gl.deleteFramebuffer(framebuffer);
         } else if (framebuffer) {
+          gl.framebufferTexture2D(
+            gl.FRAMEBUFFER,
+            gl.COLOR_ATTACHMENT0,
+            texture.cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + state.face : gl.TEXTURE_2D,
+            state.handle,
+            0,
+          );
           // Restore the attachment if this was the currently selected target.
           gl.framebufferRenderbuffer(
             gl.FRAMEBUFFER,
             gl.DEPTH_STENCIL_ATTACHMENT,
             gl.RENDERBUFFER,
-            this.renderTexture === texture && this.renderDepth ? state.depthBuffer : null,
+            state.depthAttached ? state.depthBuffer : null,
           );
+        }
+        if (mipFramebuffer !== state.mipFramebuffer) {
+          gl.deleteFramebuffer(mipFramebuffer);
         }
         if (depthBuffer !== state.depthBuffer) {
           gl.deleteRenderbuffer(depthBuffer);
@@ -1044,12 +1073,16 @@ export class WebGLContext3D implements Context3D {
         gl.stencilMask(this.stencilWrite);
       }
       state.framebuffer = framebuffer;
+      state.mipFramebuffer = mipFramebuffer;
+      state.face = face;
+      state.depthAttached = depth;
       state.depthBuffer = depthBuffer;
       gl.bindRenderbuffer(gl.RENDERBUFFER, null);
     }
 
     this.finishTarget();
     this.renderTexture = texture;
+    this.renderFace = texture ? face : 0;
     this.renderDepth = texture !== null && depth;
     gl.frontFace(texture ? gl.CCW : gl.CW);
     this.applyScissor();
@@ -1072,9 +1105,73 @@ export class WebGLContext3D implements Context3D {
     if (state.dirty) {
       const gl = this.gl;
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, state.handle);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      state.uploaded[0] = (1 << texture.levels) - 1;
+      if (texture.cube) {
+        // generateMipmap(CUBE_MAP) would overwrite manually uploaded mips on
+        // untouched faces. AIR regenerates only the face just rendered.
+        gl.disable(gl.SCISSOR_TEST);
+        const face = gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.renderFace;
+        // The base-size depth attachment cannot accompany smaller mip images.
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
+        if (state.depthAttached) {
+          gl.framebufferRenderbuffer(
+            gl.FRAMEBUFFER,
+            gl.DEPTH_STENCIL_ATTACHMENT,
+            gl.RENDERBUFFER,
+            null,
+          );
+        }
+        for (let level = 1; level < texture.levels; level++) {
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, state.framebuffer);
+          gl.framebufferTexture2D(
+            gl.READ_FRAMEBUFFER,
+            gl.COLOR_ATTACHMENT0,
+            face,
+            state.handle,
+            level - 1,
+          );
+          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, state.mipFramebuffer);
+          gl.framebufferTexture2D(
+            gl.DRAW_FRAMEBUFFER,
+            gl.COLOR_ATTACHMENT0,
+            face,
+            state.handle,
+            level,
+          );
+          const size = texture.width >> level;
+          gl.blitFramebuffer(
+            0,
+            0,
+            size * 2,
+            size * 2,
+            0,
+            0,
+            size,
+            size,
+            gl.COLOR_BUFFER_BIT,
+            gl.LINEAR,
+          );
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
+        gl.framebufferTexture2D(
+          gl.FRAMEBUFFER,
+          gl.COLOR_ATTACHMENT0,
+          gl.TEXTURE_CUBE_MAP_POSITIVE_X + state.face,
+          state.handle,
+          0,
+        );
+        if (state.depthAttached) {
+          gl.framebufferRenderbuffer(
+            gl.FRAMEBUFFER,
+            gl.DEPTH_STENCIL_ATTACHMENT,
+            gl.RENDERBUFFER,
+            state.depthBuffer,
+          );
+        }
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, state.handle);
+        gl.generateMipmap(gl.TEXTURE_2D);
+      }
+      state.uploaded[this.renderFace] = (1 << texture.levels) - 1;
       state.dirty = false;
     }
   }

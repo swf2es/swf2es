@@ -35,6 +35,7 @@ node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
+node tests/context3d/oracle.ts --cubetargets
 node tests/context3d/oracle.ts --reconfigure
 node tests/context3d/oracle.ts --framevalidation
 node tests/context3d/oracle.ts --framevalidationflat
@@ -127,6 +128,32 @@ reinterpretation after a float draw. To reproduce the unresolved case, insert
 a `bytes4` binding and capture immediately after its vector upload, before the
 `float1` capture. Native AIR confirmation is needed before treating this as
 general Flash behavior or a driver issue.
+
+`CubeTargets.as` compares 64 AIR trace lines, including 170 pixel samples,
+for rendering into all six cube faces. It checks top-down orientation, face
+retention, optimized/unoptimized cubes, switching through 2D/back-buffer targets,
+presentation, feedback rejection and mip generation. AIR retains one shared
+depth/stencil buffer across a cube's faces; the tests check that drawing or
+clearing depth/stencil on one face affects tests on another, and that disabling
+then re-enabling depth/stencil preserves its contents.
+
+A clear (including mask zero) initializes the whole cube for render-target
+validation; bitmap and ByteArray uploads alone do not. All six faces still need their mip
+chains before sampling. Invalid face selectors fail with ArgumentError 3772
+for cubes and 3771 for 2D textures. A null target ignores its face selector;
+a disposed target validates the selector, then returns to the back buffer.
+These are the covered cases, not complete argument/error-precedence parity.
+
+The backend reuses one framebuffer and depth/stencil buffer per cube, plus one
+framebuffer for mip generation. GPU blits regenerate only the rendered face;
+calling `generateMipmap` on the whole cube would overwrite uploaded mips on
+untouched faces, which AIR preserves. No CPU pixel copies or per-pass arrays are
+needed. Browser checks inspect every mip/face, exercise 48 warm passes without
+new GPU handles or readback arrays, reject feedback and foreign/disposed targets,
+and inject framebuffer/mip-framebuffer/depth allocation failures. A failed face
+switch preserves the previous face and attachments. Cleanup releases every GPU
+handle. Recovery creates fresh cube targets on each restored context and rejects
+retired targets; loss while a cube is active must not retain its resources.
 
 `Reconfigure.as` checks 48 AIR pixel samples for an unchanged back-buffer
 configuration: retained color and depth, program/vertex/constant bindings,
@@ -316,7 +343,8 @@ feedback rejection, disposal and context loss. Failed switches preserve the
 previous target; all tracked GPU handles are released on teardown.
 
 This slice limits render targets to power-of-two 2D textures from 8×8 through
-2048×2048, with no target antialiasing, cube faces or multiple color outputs.
+2048×2048 and cube faces from 8×8 through 1024×1024, without target antialiasing
+or multiple color outputs.
 A 1×1 AIR rasterization probe differed; smaller targets remain unverified.
 Resizing the back buffer while a texture is selected is explicitly rejected.
 Target depth storage has a separate 64 MiB budget. Full validation/error parity
@@ -501,7 +529,7 @@ color rendering and back buffers with optional multisampling are exercised, with
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are the unresolved shader cases above and broader render-target support,
+Next gates are the unresolved shader cases above, target MSAA and broader texture formats,
 alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own

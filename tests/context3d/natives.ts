@@ -391,9 +391,9 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       return object;
     }
 
-    createCubeTexture(size: number, format: string, target: boolean, levels = 0): AsObject {
+    createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
       const backend = context(this as unknown as AsObject);
-      if (format !== "bgra" || target || levels !== 0) {
+      if (format !== "bgra" || levels !== 0) {
         unsupported();
       }
 
@@ -422,13 +422,21 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       surface = 0,
       output = 0,
     ): void {
-      if (aa !== 0 || surface !== 0 || output !== 0) {
+      if (aa !== 0 || output !== 0) {
         unsupported();
       }
 
       const entry = state(this as unknown as AsObject);
-      entry.backend.setRenderTarget(object && texture(object), depth);
-      entry.target = object ? (textures.get(object) ?? null) : null;
+      let value = object && texture(object);
+      if (value && (surface < 0 || surface >= (value.cube ? 6 : 1))) {
+        throw s.rt.error("ArgumentError", value.cube ? 3772 : 3771);
+      }
+      if (object && textures.get(object)?.disposed) {
+        value = null;
+      }
+
+      entry.backend.setRenderTarget(value, depth, surface);
+      entry.target = value && object ? (textures.get(object) ?? null) : null;
     }
 
     setRenderToBackBuffer(): void {
@@ -782,7 +790,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     value.upload(bitmap.readable, level, face);
     const entry = textures.get(object);
-    if (entry && level === 0) {
+    if (entry && level === 0 && !value.cube) {
       entry.initialized = true;
     }
   }
@@ -819,7 +827,7 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     value.uploadBytes(storage.buffer, offset, level, face);
     const entry = textures.get(object);
-    if (entry && level === 0) {
+    if (entry && level === 0 && !value.cube) {
       entry.initialized = true;
     }
   }

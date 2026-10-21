@@ -7,6 +7,7 @@ package {
   import flash.display3D.Program3D;
   import flash.display3D.VertexBuffer3D;
   import flash.display3D.textures.Texture;
+  import flash.display3D.textures.CubeTexture;
   import flash.events.Event;
   import flash.utils.ByteArray;
 
@@ -17,6 +18,7 @@ package {
     private var indices:IndexBuffer3D;
     private var program:Program3D;
     private var texture:Texture;
+    private var cube:CubeTexture;
     private var bitmap:BitmapData = new BitmapData(2, 2, true, 0xffffffff);
     private var generation:int = 0;
 
@@ -61,6 +63,7 @@ package {
       probe("program", function():void { program.upload(new ByteArray(), new ByteArray()); });
       probe("texture-bytes", function():void { texture.uploadFromByteArray(new ByteArray(), 0); });
       probe("texture", function():void { texture.uploadFromBitmapData(bitmap); });
+      probe("cube-target", function():void { previous.setRenderToTexture(cube, true, 0, 2); });
     }
 
     private function created(event:Event):void {
@@ -75,6 +78,7 @@ package {
         indices.dispose();
         program.dispose();
         texture.dispose();
+        cube.dispose();
         trace("recovery", "survived", slot.context3D === current);
       }
       current.configureBackBuffer(32, 32, 4, true);
@@ -107,8 +111,16 @@ package {
       current.setProgramConstantsFromVector("fragment", 0, Vector.<Number>([
         generation == 1 ? 1 : 0, generation == 2 ? 1 : 0, generation > 2 ? 1 : 0, 1
       ]), 1);
+      cube = current.createCubeTexture(16, "bgra", true);
+      for (var face:int = 0; face < 6; face++) {
+        current.setRenderToTexture(cube, true, 0, face);
+        current.clear(0, 0, 0, 1);
+        current.drawTriangles(indices);
+      }
+      current.setRenderToBackBuffer();
       current.drawTriangles(indices);
       current.present();
+      current.setRenderToTexture(cube, true, 0, generation % 6);
       // The next context must start with fresh drawing defaults.
       current.setVertexBufferAt(0, vertices, 0, "bytes4");
       current.setDepthTest(false, "never");

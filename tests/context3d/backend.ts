@@ -132,8 +132,8 @@ export interface Context3D {
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
   createTexture(width: number, height: number, cube?: boolean): Texture3D;
-  /** Level-zero 2D target; null resumes the back buffer. */
-  setRenderTarget(texture: Texture3D | null, depth?: boolean): void;
+  /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
+  setRenderTarget(texture: Texture3D | null, depth?: boolean, face?: number): void;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;
   /** Offset counts 32-bit words; bytes4 consumes one word, normalized on the GPU. */
