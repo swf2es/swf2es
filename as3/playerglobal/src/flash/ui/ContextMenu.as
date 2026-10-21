@@ -83,8 +83,7 @@ package flash.ui
 		[API("667")]
 		public static function get isSupported():Boolean
 		{
-			// TODO: return true when implementation actually affects the context menu
-			return false;
+			return true;
 		}
 
 		// Flash Player's API that Ruffle's source lacks: native, and not implemented.

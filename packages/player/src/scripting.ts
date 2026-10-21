@@ -250,6 +250,7 @@ export class Scripting {
   /** Frames played since the start. */
   frames = 0;
   quality = "HIGH";
+  showDefaultContextMenu = true;
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;

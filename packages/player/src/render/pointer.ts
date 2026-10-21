@@ -10,6 +10,7 @@ import {
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
+import { bindContextMenu } from "./context-menu.js";
 
 /**
  * Where a pointer event is on the SWF's stage. CSS `object-fit` shows the
@@ -102,6 +103,17 @@ export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Pl
     canvas?.getBoundingClientRect && typeof getComputedStyle === "function"
       ? getComputedStyle(canvas)
       : null;
+  const unbindMenu = canvas?.ownerDocument
+    ? bindContextMenu(canvas, player, (e) => {
+        const at = {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          global: { x: e.offsetX, y: e.offsetY },
+        };
+        const [x, y] = stagePoint(renderer, player, at, style);
+        return [x, y];
+      })
+    : null;
   const flushSoon = () => {
     frame ||= requestAnimationFrame(() => {
       frame = 0;
@@ -284,6 +296,7 @@ export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Pl
   }
 
   return () => {
+    unbindMenu?.();
     // Pixi's own default back first, then the canvas left to it, as before the bind.
     if (events) {
       events.cursorStyles.default = pixiDefault;
