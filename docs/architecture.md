@@ -4165,6 +4165,13 @@ one that leaves every pixel clear draws nothing and runs none, as Pixi
 skipped an object at an alpha of 0 before its colour went to the chain
 (a rig's faded glowing parts took 12 ms a frame for nothing, 2 skipped).
 
+Stencil masks ignore their own and their ancestors' visibility and colour,
+while retaining ancestor transforms. The view uses the fork's
+`Container.visibilityRoot` and `colorRoot` on mask nodes; removing a mask role
+restores ordinary inheritance. `mask-ancestors` checks hidden, transparent and
+tinted ancestors, moving them, and removing and restoring the masks against
+Flash.
+
 ### Blend modes
 
 adl composites an object with a blend mode as a layer, its children
