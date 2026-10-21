@@ -8708,6 +8708,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "mask-ancestors",
+    swf: (abc) => bare(abc, 6, "MaskAncestors", 360, 60),
+    script: "MaskAncestors",
+    frames: 6,
+    capture: [2, 3, 4, 5, 6],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     name: "masks",
     swf: (abc) => bare(abc, 3, "Masks", 400, 300),
     script: "Masks",
