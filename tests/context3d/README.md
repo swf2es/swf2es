@@ -276,7 +276,7 @@ another smoke check, not AIR image parity; the sample binary is not included.
 The local `Basic_Load3DS.swf` smoke check draws its textured ant and moving shadow:
 711 draws, 239 presentations and 239 shadow-target passes over 240 ticks, without
 uncaught or WebGL errors. Live GPU handles stayed at 17 at ticks 60, 120 and 240,
-and teardown released them all. The sample still creates/deletes programs during
+and teardown released them all. The sample still creates/deletes GPU resources during
 playback, so this is not an allocation-free or performance claim. This exercises
 render-to-texture and fragment comparisons together; it does not establish AIR
 image parity. The downloaded sample stays outside the repository.
