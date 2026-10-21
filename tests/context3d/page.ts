@@ -283,6 +283,7 @@ export async function shaderFixture(
     | "Mipmaps"
     | "SamplerStates"
     | "LodBias"
+    | "RectangleTextures"
     | "Multisampling"
     | "TemporaryMatrices"
     | "IndirectConstants"
@@ -967,6 +968,151 @@ export async function cubeTargets() {
     c.dispose();
     other.backend.dispose();
     check(live.size === 0 && other.live.size === 0, "cube target teardown leaked GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
+export async function rectangleTextures() {
+  const owned = create();
+  const other = create();
+  const { backend: c, gl, live } = owned;
+  const uploads = gl as unknown as { texSubImage2D(...args: unknown[]): void };
+  const upload = uploads.texSubImage2D.bind(gl);
+  let staging: unknown;
+  let uploadCount = 0;
+  uploads.texSubImage2D = (...args) => {
+    const bytes = args[8];
+    check(!staging || staging === bytes, "rectangle upload replaced staging storage");
+    staging = bytes;
+    uploadCount++;
+    upload(...args);
+  };
+  const mipmap = gl.generateMipmap;
+  gl.generateMipmap = () => {
+    throw new Error("rectangle target generated mipmaps");
+  };
+  try {
+    c.configure(32, 32);
+    const texture = c.createRectangleTexture(17, 9);
+    check(texture.rectangle && !texture.cube && texture.levels === 1, "rectangle allocated mips");
+    const bitmap = new Uint32Array(17 * 9).fill(0xff00ff00);
+    const small = new Uint32Array([0xffff0000]);
+    const big = new Uint32Array(20 * 12).fill(0xff0000ff);
+    big[8 * 20 + 16] = 0xff00ffff;
+    big[11 * 20 + 19] = 0xffffff00;
+    const bytes = new Uint8Array(17 * 9 * 4 + 1);
+    for (let i = 1; i < bytes.length; i += 4) {
+      bytes[i + 1] = 255;
+      bytes[i + 3] = 255;
+    }
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-1, -1, 0.5, 1, 3, -1, 0.5, 1, -1, 3, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    c.setVertex(0, vertices, 0, "float4");
+    const fragment = shader(true);
+    const code = new DataView(fragment.buffer);
+    code.setUint32(7, 0x28, true);
+    code.setUint32(27, 5, true);
+    const program = c.createProgram();
+    program.upload(shader(false), fragment);
+    c.setProgram(program);
+    const readback = c.read();
+    const show = (x: number, y: number, expected: string): void => {
+      c.setTexture(0, texture);
+      c.setConstants("fragment", 0, [x, y, 0, 1], 1);
+      c.clear(0, 0, 0, 1);
+      c.draw(indices, 0, 1);
+      check(c.read() === readback, "rectangle replaced readback storage");
+      check(color(readback, 16, 16, 32) === expected, "rectangle contents differ");
+    };
+    texture.upload(bitmap);
+    show(0.5, 0.5, "ff00ff00");
+    c.setTexture(0, null);
+    c.setRenderTarget(texture, true);
+    c.clear(0, 1, 0, 1);
+    c.setRenderTarget(null);
+    const allocated = owned.created;
+    for (let pass = 0; pass < 10; pass++) {
+      texture.upload(small, 0, 0, 1, 1);
+      show(0, 0, "ffff0000");
+      show(1, 1, "0");
+      texture.upload(big, 0, 0, 20, 12);
+      show(1, 1, "ff00ffff");
+      texture.uploadBytes(bytes, 1);
+      show(0.5, 0.5, "ff00ff00");
+      c.setTexture(0, null);
+      c.setRenderTarget(texture, !!(pass & 1));
+      c.clear(1, 0, 0, 1);
+      c.setRenderTarget(null);
+      show(0.5, 0.5, "ffff0000");
+      check(owned.created === allocated, "warm rectangle operations allocated GPU handles");
+    }
+    check(uploadCount === 31, "unexpected rectangle upload count");
+    check(staging instanceof Uint8Array && staging.length === 17 * 9 * 4, "oversized staging");
+    rejects(() => texture.upload(bitmap, 1));
+    rejects(() => texture.upload(bitmap, 0, 1));
+    rejects(() => texture.upload(small, 0, 0, NaN, 1));
+    rejects(() => texture.upload(small, 0, 0, 2, 1));
+    rejects(() => texture.uploadBytes(bytes, 2));
+    rejects(() => other.backend.setTexture(0, texture));
+    rejects(() => other.backend.setRenderTarget(texture));
+    rejects(() => c.setRenderTarget(texture, false, 1));
+    show(0.5, 0.5, "ffff0000");
+    const fresh = c.createRectangleTexture(19, 11);
+    const allocation = gl as unknown as {
+      createFramebuffer(): WebGLFramebuffer | null;
+      createRenderbuffer(): WebGLRenderbuffer | null;
+    };
+    const framebuffer = allocation.createFramebuffer;
+    const renderbuffer = allocation.createRenderbuffer;
+    const status = gl.checkFramebufferStatus;
+    for (const failure of ["framebuffer", "depth", "incomplete"]) {
+      const before = new Set(live);
+      try {
+        if (failure === "framebuffer") {
+          allocation.createFramebuffer = () => null;
+        }
+        if (failure === "depth") {
+          allocation.createRenderbuffer = () => null;
+        }
+        if (failure === "incomplete") {
+          gl.checkFramebufferStatus = () => gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+        }
+        rejects(() => c.setRenderTarget(fresh, true));
+      } finally {
+        allocation.createFramebuffer = framebuffer;
+        allocation.createRenderbuffer = renderbuffer;
+        gl.checkFramebufferStatus = status;
+      }
+      check(live.size === before.size, "failed rectangle target leaked handles");
+      for (const handle of live) {
+        check(before.has(handle), "failed rectangle target replaced handles");
+      }
+      show(0.5, 0.5, "ffff0000");
+    }
+    c.setTexture(0, null);
+    c.setRenderTarget(texture, true);
+    texture.dispose();
+    c.clear(0, 1, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ff00ff00", "rectangle disposal lost back buffer");
+    rejects(() => texture.upload(bitmap));
+    rejects(() => c.setRenderTarget(texture));
+    check(gl.getError() === gl.NO_ERROR, "rectangle operations polluted GL state");
+    other.backend.configure(32, 32);
+    const lost = other.backend.createRectangleTexture(17, 9);
+    other.backend.setRenderTarget(lost, true);
+    other.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    rejects(() => lost.upload(bitmap));
+    rejects(() => other.backend.setRenderTarget(lost));
+    return { passed: true };
+  } finally {
+    uploads.texSubImage2D = upload;
+    gl.generateMipmap = mipmap;
+    c.dispose();
+    other.backend.dispose();
+    check(live.size === 0 && other.live.size === 0, "rectangle teardown leaked GPU resources");
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

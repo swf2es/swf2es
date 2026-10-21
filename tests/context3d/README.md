@@ -33,6 +33,7 @@ node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --samplerstates
 node tests/context3d/oracle.ts --lodbias
+node tests/context3d/oracle.ts --rectangletextures
 node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --indirectconstants
@@ -338,10 +339,10 @@ reviving it; an upload after its owner context is disposed fails with 3694.
 The prototype retains only weak ownership records for retired textures.
 
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
-and cube `bgra` textures up to 1024×1024 per face,
-with signed LOD bias; anisotropic filtering and rectangle/compressed textures
-remain unsupported.
-Upload dimensions must match the selected mip level. Each context
+cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
+`bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
+bias. Anisotropic filtering and compressed textures remain unsupported.
+Ordinary 2D/cube upload dimensions must match the selected mip level. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
@@ -437,6 +438,33 @@ use positive/negative biased programs and verify a failed conflicting-bias
 replacement preserves the previous program and creates no GPU handles.
 Hardware LOD-bias limits and implicit-derivative/filter precision remain
 driver-dependent; the checked AIR/browser backends match this reference exactly.
+
+`RectangleTextures.as` compares 60 trace lines and 100 pixel samples with AIR
+for non-power-of-two BGRA textures. They
+use normalized coordinates with an ordinary AGAL 2D sampler. Repeat wrapping
+fails with 3753 and mip filtering with 3755, including runtime overrides;
+`ignoresampler` uses the retained effective state. Bitmap uploads clip at the
+top-left and pad uncovered pixels with transparent black. ByteArray uploads
+preserve raw BGRA bytes, position and endian settings. The fixture covers
+source mutation, failed uploads, ordinary/rectangle rebinding, presentation,
+creation validation, explicit disposal and retired owners. Null upload sources
+fail first; explicitly disposed rectangle textures ignore other uploads even
+after owner disposal. Ordinary bitmap texture uploads retain their separate
+AIR-tested precedence.
+
+Rectangle targets reuse the existing framebuffer/depth path and never generate
+mipmaps. The reference checks clear/draw orientation, depth attachment toggles,
+feedback rejection and retained contents across presentation and target switches.
+Browser checks exercise ten warm upload/render cycles without new GPU handles
+or staging/readback arrays, clipping with a different source row stride, transparent
+padding, byte uploads, invalid levels/ranges, foreign owners, failed framebuffer/
+depth allocation, disposal and actual context loss. Rectangle storage contains
+only one GPU mip level and one reusable RGBA staging array; oversized bitmap
+uploads do not allocate an intermediate clipped image.
+
+This remains a BGRA-only slice. Other formats, broader profile/dimension and
+validation coverage, and hardware-dependent filtering precision remain open.
+The experimental render-target minimum of 8×8 still applies.
 
 `CubeTextures.as` compares all six cube faces with AIR, including asymmetric
 quadrants to detect flips, nearest/linear filtering, all three mip modes,

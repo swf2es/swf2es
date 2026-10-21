@@ -62,7 +62,8 @@ export class TextureBindingError extends Error {
     | "unuploaded"
     | "mipmaps"
     | "dimension"
-    | "cubeWrap"
+    | "wrap"
+    | "rectangleMip"
     | "feedback";
 
   constructor(reason: TextureBindingError["reason"]) {
@@ -91,8 +92,16 @@ export interface Texture3D {
   readonly height: number;
   readonly levels: number;
   readonly cube: boolean;
-  /** Top-down premultiplied ARGB pixels, copied before returning. */
-  upload(pixels: Uint32Array, level?: number, face?: number): void;
+  readonly rectangle: boolean;
+  /** Top-down premultiplied ARGB pixels, copied before returning. Rectangle
+   * textures clip/pad source dimensions; other textures require exact mip sizes. */
+  upload(
+    pixels: Uint32Array,
+    level?: number,
+    face?: number,
+    sourceWidth?: number,
+    sourceHeight?: number,
+  ): void;
   /** Top-down BGRA bytes, copied verbatim without alpha conversion. */
   uploadBytes(data: Uint8Array, offset: number, level?: number, face?: number): void;
   dispose(): void;
@@ -142,6 +151,7 @@ export interface Context3D {
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
   createTexture(width: number, height: number, cube?: boolean): Texture3D;
+  createRectangleTexture(width: number, height: number): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(texture: Texture3D | null, depth?: boolean, face?: number): void;
   setSampler(index: number, wrap: SamplerWrap, filter: SamplerFilter, mip: SamplerMip): void;

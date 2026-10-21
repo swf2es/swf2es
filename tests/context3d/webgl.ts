@@ -815,6 +815,19 @@ export class WebGLContext3D implements Context3D {
   }
 
   createTexture(width: number, height: number, cube = false): Texture3D {
+    return this.allocateTexture(width, height, cube, false);
+  }
+
+  createRectangleTexture(width: number, height: number): Texture3D {
+    return this.allocateTexture(width, height, false, true);
+  }
+
+  private allocateTexture(
+    width: number,
+    height: number,
+    cube: boolean,
+    rectangle: boolean,
+  ): Texture3D {
     this.alive();
     range(1, width - 1, 2048);
     range(1, height - 1, 2048);
@@ -823,14 +836,13 @@ export class WebGLContext3D implements Context3D {
     }
 
     const faces = cube ? 6 : 1;
-    const levels = 1 + Math.floor(Math.log2(Math.max(width, height)));
+    const levels = rectangle ? 1 : 1 + Math.floor(Math.log2(Math.max(width, height)));
     let size = 0;
     for (let level = 0; level < levels; level++) {
       size += Math.max(1, width >> level) * Math.max(1, height >> level) * 4 * faces;
     }
     if (
-      width & (width - 1) ||
-      height & (height - 1) ||
+      (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) ||
       this.textures.size >= 128 ||
       this.textureBytes + size > 64 * 1024 * 1024
     ) {
@@ -880,24 +892,53 @@ export class WebGLContext3D implements Context3D {
       height,
       levels,
       cube,
-      upload: (pixels, level = 0, face = 0) => {
+      rectangle,
+      upload: (pixels, level = 0, face = 0, sourceWidth, sourceHeight) => {
         this.alive();
         this.textureState(texture);
         range(level, 1, levels);
         range(face, 1, faces);
         const w = Math.max(1, width >> level);
         const h = Math.max(1, height >> level);
-        if (pixels.length !== w * h) {
+        const sw = sourceWidth ?? w;
+        const sh = sourceHeight ?? h;
+        if (
+          !Number.isSafeInteger(sw) ||
+          sw <= 0 ||
+          !Number.isSafeInteger(sh) ||
+          sh <= 0 ||
+          pixels.length !== sw * sh ||
+          (!rectangle && (sw !== w || sh !== h))
+        ) {
           throw new Error("Context3D experiment: texture upload size mismatch");
         }
 
-        for (let i = 0; i < pixels.length; i++) {
-          const pixel = pixels[i];
-          const at = i * 4;
-          state.bytes[at] = pixel >>> 16;
-          state.bytes[at + 1] = pixel >>> 8;
-          state.bytes[at + 2] = pixel;
-          state.bytes[at + 3] = pixel >>> 24;
+        if (sw === w && sh === h) {
+          for (let i = 0; i < pixels.length; i++) {
+            const pixel = pixels[i];
+            const at = i * 4;
+            state.bytes[at] = pixel >>> 16;
+            state.bytes[at + 1] = pixel >>> 8;
+            state.bytes[at + 2] = pixel;
+            state.bytes[at + 3] = pixel >>> 24;
+          }
+        } else {
+          // AIR clips at the top-left and clears uncovered pixels, without scaling.
+          if (sw < w || sh < h) {
+            state.bytes.fill(0);
+          }
+          const columns = Math.min(w, sw);
+          const rows = Math.min(h, sh);
+          for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < columns; x++) {
+              const pixel = pixels[y * sw + x];
+              const at = (y * w + x) * 4;
+              state.bytes[at] = pixel >>> 16;
+              state.bytes[at + 1] = pixel >>> 8;
+              state.bytes[at + 2] = pixel;
+              state.bytes[at + 3] = pixel >>> 24;
+            }
+          }
         }
 
         upload(level, face, w, h);
@@ -1182,7 +1223,7 @@ export class WebGLContext3D implements Context3D {
             state.depthBuffer,
           );
         }
-      } else {
+      } else if (!texture.rectangle) {
         gl.bindTexture(gl.TEXTURE_2D, state.handle);
         gl.generateMipmap(gl.TEXTURE_2D);
       }
@@ -1456,8 +1497,11 @@ export class WebGLContext3D implements Context3D {
       if (texture.cube !== binding.source.cube) {
         throw new TextureBindingError("dimension");
       }
-      if (texture.cube && (this.samplerStates[slot] & 3) !== 0) {
-        throw new TextureBindingError("cubeWrap");
+      if ((texture.cube || texture.rectangle) && (this.samplerStates[slot] & 3) !== 0) {
+        throw new TextureBindingError("wrap");
+      }
+      if (texture.rectangle && this.samplerStates[slot] >> 3 !== 0) {
+        throw new TextureBindingError("rectangleMip");
       }
       if (texture.cube) {
         let uploaded = 0;

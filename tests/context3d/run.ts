@@ -38,6 +38,7 @@ const scripts = compileScripts(
     "Mipmaps",
     "SamplerStates",
     "LodBias",
+    "RectangleTextures",
     "Multisampling",
     "RenderTargets",
     "CubeTargets",
@@ -74,6 +75,7 @@ for (const name of [
   "Mipmaps",
   "SamplerStates",
   "LodBias",
+  "RectangleTextures",
   "Multisampling",
   "RenderTargets",
   "CubeTargets",
@@ -175,6 +177,12 @@ if (!process.argv.includes("--build-only")) {
       console.log(
         "context3d: texture byte uploads preserve channels, reuse staging and release resources",
       );
+      const rectangles = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.rectangleTextures())',
+      );
+      assert.equal(rectangles.exception, null, JSON.stringify(rectangles));
+      assert.equal(rectangles.value?.passed, true);
+      console.log("context3d: rectangle textures reuse staging and targets without mip generation");
       const samplers = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.samplerStates())',
       );
@@ -245,6 +253,7 @@ if (!process.argv.includes("--build-only")) {
         "Mipmaps",
         "SamplerStates",
         "LodBias",
+        "RectangleTextures",
         "Multisampling",
         "RenderTargets",
         "CubeTargets",

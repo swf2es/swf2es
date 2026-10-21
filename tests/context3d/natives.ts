@@ -398,6 +398,51 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       return object;
     }
 
+    createRectangleTexture(
+      width: number,
+      height: number,
+      format: string | null,
+      _target: boolean,
+    ): AsObject {
+      const backend = context(this as unknown as AsObject);
+      if (format === null) {
+        throw s.rt.error("TypeError", 2007, "format");
+      }
+      switch (format) {
+        case "bgra":
+        case "bgraPacked4444":
+        case "bgrPacked565":
+        case "compressed":
+        case "compressedAlpha":
+        case "rgbaHalfFloat":
+          break;
+        default:
+          throw s.rt.error("ArgumentError", 2008, "format");
+      }
+      if (width <= 0 || height <= 0) {
+        throw s.rt.error("ArgumentError", 3681);
+      }
+      if (width > 2048 || height > 2048) {
+        throw s.rt.error("ArgumentError", 3766);
+      }
+      if (format !== "bgra") {
+        unsupported();
+      }
+
+      const value = backend.createRectangleTexture(width, height);
+      const object = s.rt.construct(
+        s.rt.classNamed("flash.display3D.textures::RectangleTexture"),
+      ) as AsObject;
+      textures.set(object, {
+        value,
+        owner: this as unknown as AsObject,
+        disposed: false,
+        initialized: false,
+      });
+
+      return object;
+    }
+
     createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
       const backend = context(this as unknown as AsObject);
       if (format !== "bgra" || levels !== 0) {
@@ -687,7 +732,9 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
               throw s.rt.error("Error", 3605);
             case "mipmaps":
               throw s.rt.error("Error", 3700);
-            case "cubeWrap":
+            case "rectangleMip":
+              throw s.rt.error("Error", 3755);
+            case "wrap":
               throw s.rt.error("Error", 3753);
             case "dimension":
               throw s.rt.error("Error", 3754);
@@ -842,13 +889,14 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     const bitmap = storeOf(s, source);
     if (
-      bitmap.width !== Math.max(1, value.width >> level) ||
-      bitmap.height !== Math.max(1, value.height >> level)
+      !value.rectangle &&
+      (bitmap.width !== Math.max(1, value.width >> level) ||
+        bitmap.height !== Math.max(1, value.height >> level))
     ) {
       unsupported();
     }
 
-    value.upload(bitmap.readable, level, face);
+    value.upload(bitmap.readable, level, face, bitmap.width, bitmap.height);
     const entry = textures.get(object);
     if (entry && level === 0 && !value.cube) {
       entry.initialized = true;
@@ -902,6 +950,24 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
   }
 
+  class RectangleTextureNatives {
+    uploadFromByteArray(data: AsObject, offset: number): void {
+      uploadTextureBytes(this as unknown as AsObject, data, offset, 0, 0);
+    }
+
+    uploadFromBitmapData(source: AsObject): void {
+      if (!source) {
+        throw s.rt.error("TypeError", 2007, "source");
+      }
+
+      if (textures.get(this as unknown as AsObject)?.disposed) {
+        return;
+      }
+
+      uploadTexture(this as unknown as AsObject, source, 0, 0);
+    }
+  }
+
   class CubeTextureNatives {
     uploadFromByteArray(data: AsObject, offset: number, face: number, level = 0): void {
       uploadTextureBytes(this as unknown as AsObject, data, offset, level, face);
@@ -933,6 +999,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   avm2.registerNativeClass(natives, "flash.display3D::Program3D", ProgramNatives);
   avm2.registerNativeClass(natives, "flash.display3D.textures::Texture", TextureNatives);
   avm2.registerNativeClass(natives, "flash.display3D.textures::CubeTexture", CubeTextureNatives);
+  avm2.registerNativeClass(
+    natives,
+    "flash.display3D.textures::RectangleTexture",
+    RectangleTextureNatives,
+  );
   avm2.registerNativeClass(natives, "flash.display3D.textures::TextureBase", TextureBaseNatives);
   // Keep the existing Flash-tested position validation and property storage.
   for (const property of ["x", "y", "visible"]) {

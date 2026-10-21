@@ -21,6 +21,7 @@ const fixture =
     "Mipmaps",
     "SamplerStates",
     "LodBias",
+    "RectangleTextures",
     "Scissor",
     "ShaderMath",
     "ScalarMath",
