@@ -319,6 +319,7 @@ function tessellate(nonZero: boolean): number[][] {
 
   edges.sort(byY);
   const polygons: number[][] = [];
+  const spans = new Map<Edge, { right: Edge; band: number; points: number[] }>();
   let activeCount = 0;
   let next = 0;
   for (let i = 1; i < bands; i++) {
@@ -379,7 +380,18 @@ function tessellate(nonZero: boolean): number[][] {
       if (!before && after) {
         left = edge;
       } else if (before && !after && left) {
-        polygons.push([
+        const prior = spans.get(left);
+        if (prior?.right === edge && prior.band === i - 1) {
+          // Unrelated vertices need not split a span with the same straight sides.
+          prior.points[4] = xAt(edge, bottom);
+          prior.points[5] = bottom;
+          prior.points[6] = xAt(left, bottom);
+          prior.points[7] = bottom;
+          prior.band = i;
+          continue;
+        }
+
+        const points = [
           xAt(left, top),
           top,
           xAt(edge, top),
@@ -388,7 +400,9 @@ function tessellate(nonZero: boolean): number[][] {
           bottom,
           xAt(left, bottom),
           bottom,
-        ]);
+        ];
+        polygons.push(points);
+        spans.set(left, { right: edge, band: i, points });
       }
     }
   }
