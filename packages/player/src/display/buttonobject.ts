@@ -289,6 +289,7 @@ function recordPlace(record: ButtonRecord, look: boolean): Place {
     visible: null,
     opaqueBackground: null,
     filters: look ? record.filters : null,
+    metaData: null,
     actions: null,
     corrupt: 0,
   };

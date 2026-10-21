@@ -1,12 +1,19 @@
 // The display list's tags (SWF specification, chapter 3), and the ones that
-// tie a SWF's classes to its symbols: PlaceObject 1 to 3, RemoveObject 1
+// tie a SWF's classes to its symbols: PlaceObject 1 to 4, RemoveObject 1
 // and 2, FrameLabel, DefineSprite, DefineScalingGrid, SymbolClass and
 // DoABC. Filters are kept as their bytes for now, and clip actions are the
 // SWF's action blocks (actions.ts), which a place gives by their indices.
 import type { ActionList } from "./actions.js";
 import { type ColorTransform, type Matrix, readColorTransform, readMatrix } from "./shape.js";
 import { type Rect, readTags, SwfReader, type Tag } from "./swf.js";
-import { DoABC, PlaceObject, PlaceObject3, RemoveObject, RemoveObject2 } from "./tags.js";
+import {
+  DoABC,
+  PlaceObject,
+  PlaceObject3,
+  PlaceObject4,
+  RemoveObject,
+  RemoveObject2,
+} from "./tags.js";
 
 /**
  * A place: a new character at a depth, or a move of the one there, with
@@ -32,6 +39,8 @@ export interface Place {
   opaqueBackground: number | null;
   /** The filter list's bytes, undecoded; null without one. */
   filters: Uint8Array | null;
+  /** PlaceObject4's trailing AMF3 value, undecoded; null without one. */
+  metaData: Uint8Array | null;
   /**
    * The indices of its AVM1 clip actions in the SWF's ActionList; null
    * without them, or when read without the list.
@@ -103,7 +112,7 @@ export function utf8(bytes: Uint8Array): string {
 }
 
 /**
- * A PlaceObject, PlaceObject2 or PlaceObject3 tag's body; given the SWF's
+ * A PlaceObject 1 to 4 tag's body; given the SWF's
  * action list, with the indices of its clip actions.
  */
 export function readPlace(bytes: Uint8Array, tag: Tag, actions?: ActionList): Place {
@@ -113,7 +122,7 @@ export function readPlace(bytes: Uint8Array, tag: Tag, actions?: ActionList): Pl
   return place;
 }
 
-/** Where a PlaceObject2's or 3's clip actions start, -1 without them, and its depth. */
+/** Where a PlaceObject 2 to 4's clip actions start, -1 without them, and its depth. */
 export function clipActionsOffset(bytes: Uint8Array, tag: Tag): { depth: number; offset: number } {
   const { place, clipActions } = parsePlace(bytes, tag);
   return { depth: place.depth, offset: clipActions };
@@ -137,6 +146,7 @@ function parsePlace(bytes: Uint8Array, tag: Tag): { place: Place; clipActions: n
     visible: null,
     opaqueBackground: null,
     filters: null,
+    metaData: null,
     actions: null,
     corrupt: 0,
   };
@@ -153,7 +163,7 @@ function parsePlace(bytes: Uint8Array, tag: Tag): { place: Place; clipActions: n
   }
 
   const flags = r.u8();
-  const flags2 = tag.code === PlaceObject3 ? r.u8() : 0;
+  const flags2 = tag.code === PlaceObject3 || tag.code === PlaceObject4 ? r.u8() : 0;
   place.depth = r.u16();
   place.move = (flags & 0x01) !== 0;
 
@@ -213,6 +223,28 @@ function parsePlace(bytes: Uint8Array, tag: Tag): { place: Place; clipActions: n
   }
 
   const clipActions = flags & 0x80 && r.pos < r.end ? r.pos : -1;
+  if (tag.code === PlaceObject4) {
+    if (clipActions >= 0) {
+      // PlaceObject4 postdates SWF 6: its clip event flags are always 32 bits.
+      r.u16();
+      r.u32();
+      while (r.pos < r.end) {
+        const events = r.u32();
+        if (events === 0) {
+          break;
+        }
+
+        const length = r.u32();
+        // Flash still consumes keyPress's key code when its record says length 0.
+        r.pos += events & (1 << 17) ? Math.max(1, length) : length;
+      }
+    }
+
+    if (r.pos < r.end) {
+      place.metaData = bytes.subarray(r.pos, r.end);
+    }
+  }
+
   return { place, clipActions };
 }
 

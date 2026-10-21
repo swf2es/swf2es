@@ -1584,6 +1584,76 @@ function gotoChild(abc: Uint8Array): Uint8Array {
   });
 }
 
+// PlaceObject4 metadata belongs to each new instance, survives moves and
+// rewinds, and appears after its constructor but before ADDED.
+function placeMetadata(abc: Uint8Array): Uint8Array {
+  // AMF3 dynamic object {kwy: value}, shared as bytes but decoded per instance.
+  const metadata = (value: string) =>
+    new Uint8Array([
+      10,
+      11,
+      1,
+      7,
+      107,
+      119,
+      121,
+      6,
+      value.length * 2 + 1,
+      ...new TextEncoder().encode(value),
+      1,
+    ]);
+  const first = metadata("first");
+
+  return w.swf({
+    version: 36,
+    width: 160,
+    height: 60,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      square(3, 0xff0000, 400),
+      square(4, 0x0000ff, 400),
+      w.sprite(1, 1, [w.place({ depth: 1, character: 3 }), w.showFrame(), w.end()]),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 4 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "PlaceMetadata"),
+      w.symbolClass([
+        [0, "Main"],
+        [1, "MetadataChild"],
+        [2, "MetadataChild"],
+      ]),
+      w.place({ depth: 1, character: 1, name: "a", metaData: first, matrix: { tx: 100, ty: 200 } }),
+      w.place({ depth: 2, character: 1, name: "b", metaData: first, matrix: { tx: 800, ty: 200 } }),
+      w.place({ depth: 3, character: 1, name: "plain", matrix: { tx: 1500, ty: 200 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, metaData: metadata("move") }),
+      w.place({ depth: 2, move: true, matrix: { tx: 800, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, character: 2, move: true, metaData: metadata("replace") }),
+      w.remove(2),
+      w.place({
+        depth: 2,
+        character: 1,
+        name: "b",
+        metaData: metadata("new"),
+        matrix: { tx: 800, ty: 200 },
+      }),
+      w.showFrame(),
+      w.showFrame(),
+      w.place({
+        depth: 4,
+        character: 1,
+        name: "skip",
+        metaData: metadata("skipped"),
+        matrix: { tx: 2200, ty: 200 },
+      }),
+      w.showFrame(),
+      w.place({ depth: 4, move: true, metaData: metadata("ignored") }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Two squares placed on frame 1, given a negative scale and a turn by
 // scripts/Replaces.as, and replaced by another character on frame 3 with no
 // matrix in the place: what the new children report of their transforms.
@@ -8263,6 +8333,15 @@ export const cases: PlayerCase[] = [
     script: "Goto",
     frames: 3,
     capture: [1, 2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "place-metadata",
+    swf: placeMetadata,
+    script: "PlaceMetadata",
+    frames: 6,
+    capture: [1, 6],
     tolerance: 0,
     maxOutliers: 0,
   },

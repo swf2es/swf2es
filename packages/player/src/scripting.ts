@@ -533,6 +533,11 @@ export class Scripting {
    * frame is entered by Sprite's constructChildren on the way.
    */
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
+    // Flash exposes placed metadata only after the child's constructor returns.
+    const bytes = display.metaData;
+    display.metaData = null;
+    const metaData = bytes === null ? null : this.readMetaData(bytes);
+
     // Its first frame's children are there before its constructor runs, made alive in its super().
     if (display instanceof MovieClip) {
       display.timelineChild = true;
@@ -596,6 +601,10 @@ export class Scripting {
         this.broadcast("exitFrame");
         if (object) {
           this.rt.constructSuper(cls, object);
+          if (bytes !== null) {
+            object.$metaData = metaData;
+          }
+
           if (refused) {
             throw refused.error;
           }
@@ -610,8 +619,20 @@ export class Scripting {
       character.type === "bitmap" && display instanceof BitmapObject
         ? this.constructBitmap(display, name, domain)
         : this.constructAs(display, this.rt.classNamed(name, domain));
+    if (bytes !== null) {
+      object.$metaData = metaData;
+    }
+
     named(object);
     this.lifecycle.added(display);
+  }
+
+  private readMetaData(raw: Uint8Array): avm2.Value {
+    const bytes = new avm2.Bytes(this.rt, {});
+    bytes.write(raw);
+    bytes.position = 0;
+
+    return new avm2.Amf3Reader(this.rt, bytes).value();
   }
 
   /**
