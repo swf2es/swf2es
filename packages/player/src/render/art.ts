@@ -399,20 +399,25 @@ export class Art {
 
     let fills: GraphicsContext[];
     node.ownFills = false;
-    if (current && current.layers === node.layers && current.fills.length === node.layers.length) {
+    const build = node.masking && o.drawing ? this.buildMaskFills : this.buildFills;
+    if (
+      current &&
+      current.masking === node.masking &&
+      current.layers === node.layers &&
+      current.fills.length === node.layers.length
+    ) {
       fills = current.fills;
     } else if (shape && !o.drawing && !slicing && !this.fresh) {
       // A shape's, or a morph's blend's, shared and counted: they go once nothing draws them.
-      fills = this.shared.take(shape, node.layers, this.buildFills);
+      fills = this.shared.take(shape, node.layers, build);
       node.sharedFills = shape;
     } else if (shape && !o.drawing && !slicing) {
       // A fresh view borrows the stage's, which its object, off the list, may no longer hold;
       // else builds its own, shared by its instances, which it destroys with the rest.
-      fills =
-        this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? this.buildFills(node.layers);
+      fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? build(node.layers);
       this.fills.set(shape, fills);
     } else {
-      fills = this.buildFills(node.layers);
+      fills = build(node.layers);
       node.ownFills = true;
     }
 
@@ -488,11 +493,17 @@ export class Art {
   }
 
   /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
-  private readonly buildFills = (layers: readonly ShapeLayer[]): GraphicsContext[] => {
+  private readonly buildMaskFills = (layers: readonly ShapeLayer[]): GraphicsContext[] =>
+    this.buildFills(layers, true);
+
+  private readonly buildFills = (
+    layers: readonly ShapeLayer[],
+    masking = false,
+  ): GraphicsContext[] => {
     const fills: GraphicsContext[] = [];
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
-      const make = () => fillContext(layer, this.painter);
+      const make = () => fillContext(layer, this.painter, masking);
       const context = remakeable(make(), make);
       if (this.fresh) {
         this.built.add(context);

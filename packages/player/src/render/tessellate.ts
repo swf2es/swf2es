@@ -1,6 +1,6 @@
 // A shape's fills as Pixi GraphicsContexts: its contours traced, curves
 // flattened finely enough for Flash's, and filled even-odd or non-zero from
-// their containment tree; and the cache that shares them between instances.
+// their containment tree or crossing spans; and the cache sharing instances.
 import type { Fill } from "@swf2es/format";
 import { type FillInput, GraphicsContext } from "pixi.js";
 import type { Region as Area } from "../display/gradients.js";
@@ -18,11 +18,11 @@ import {
 } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import { takeBatchedCopy, weigh } from "./color.js";
+import { crossingFill } from "./fill-polygons.js";
 import { IDLE_MS } from "./pools.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
 interface Region {
-  path: Path;
   points: number[];
   parent: Region | null;
   children: Region[];
@@ -30,15 +30,14 @@ interface Region {
 }
 
 /** The contours as a tree, each under the smallest one that holds it. */
-function containment(paths: Path[]): Region[] {
-  const regions: Region[] = paths.map((path) => {
-    const points = flatten(path);
+function containment(polygons: number[][]): Region[] {
+  const regions: Region[] = polygons.map((points) => {
     let area = 0;
     for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
       area += points[j] * points[i + 1] - points[i] * points[j + 1];
     }
 
-    return { path, points, parent: null, children: [], area: Math.abs(area) / 2 };
+    return { points, parent: null, children: [], area: Math.abs(area) / 2 };
   });
   for (const inner of regions) {
     for (const outer of regions) {
@@ -112,7 +111,10 @@ function onOutline(points: number[], px: number, py: number): boolean {
  */
 const FLATNESS = 0.02;
 
-export function trace(context: GraphicsContext, path: Path): void {
+export function trace(
+  context: { moveTo(x: number, y: number): unknown; lineTo(x: number, y: number): unknown },
+  path: Path,
+): void {
   let x = 0;
   let y = 0;
   for (let i = 0; i < path.length; ) {
@@ -175,6 +177,26 @@ export function trace(context: GraphicsContext, path: Path): void {
     y = ay;
     i += 5;
   }
+}
+
+/** The same chords used for rendering, so a crossing of curves cannot hide between samples. */
+function polygon(path: Path): number[] {
+  const points: number[] = [];
+  const append = (x: number, y: number) => {
+    if (points.length === 0 || points[points.length - 2] !== x || points[points.length - 1] !== y) {
+      points.push(x, y);
+    }
+  };
+  trace({ moveTo: append, lineTo: append }, path);
+  if (
+    points.length > 2 &&
+    points[0] === points[points.length - 2] &&
+    points[1] === points[points.length - 1]
+  ) {
+    points.length -= 2;
+  }
+
+  return points;
 }
 
 /**
@@ -320,7 +342,7 @@ export function forgetCommands(context: GraphicsContext): void {
  * for non-zero: a region inside where its parent is not is filled, with
  * the first regions below it that are not cut out as holes, and so on in.
  */
-export function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContext {
+export function fillContext(layer: ShapeLayer, painter: Painter, masking = false): GraphicsContext {
   const context = shapeContext();
   const held: (() => void)[] = [];
   holds.set(context, held);
@@ -331,16 +353,28 @@ export function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContex
       () => regionOf(contours),
       (release) => held.push(release),
     );
-    const inside = (depth: number, sum: number) =>
-      winding === "nonZero" ? sum !== 0 : depth % 2 === 0;
+    const polygons = contours.map(polygon).filter((points) => points.length >= 6);
+    // A Graphics drawing used as a mask uses non-zero even when drawPath asked for even-odd.
+    const nonZero = masking || winding === "nonZero";
+    const crossing = crossingFill(polygons, nonZero);
+    if (crossing) {
+      context.beginPath();
+      for (const points of crossing) {
+        context.poly(points, true);
+      }
+
+      context.fill(style);
+      continue;
+    }
+
+    const inside = (depth: number, sum: number) => (nonZero ? sum !== 0 : depth % 2 === 0);
     // A region's holes are cut together, then the islands in them filled.
     // Pixi's cut() goes to the fill before the last too once the last has a
     // hole, so a second cut, or one after an island, would land a hole in
     // another region, which then fills across to it.
     const fillRegion = (region: Region, depth: number, sum: number) => {
       context.beginPath();
-      trace(context, region.path);
-      context.closePath().fill(style);
+      context.poly(region.points, true).fill(style);
 
       const cut: [Region, number, number][] = [];
       holes(region, depth, sum, cut);
@@ -350,8 +384,7 @@ export function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContex
 
       context.beginPath();
       for (const [hole] of cut) {
-        trace(context, hole.path);
-        context.closePath();
+        context.poly(hole.points, true);
       }
 
       context.cut();
@@ -380,7 +413,7 @@ export function fillContext(layer: ShapeLayer, painter: Painter): GraphicsContex
         }
       }
     };
-    for (const root of containment(contours)) {
+    for (const root of containment(polygons)) {
       const s = orientation(root.points);
       if (inside(0, s)) {
         fillRegion(root, 0, s);
