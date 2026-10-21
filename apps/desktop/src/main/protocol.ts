@@ -71,6 +71,7 @@ function moduleMounts(): Map<string, string> {
   const format = join(dist("@swf2es/format"), "index.js");
   return new Map([
     ["format", dist("@swf2es/format")],
+    ["mp3", dist("@swf2es/mp3", player)],
     ["codegen", dist("@swf2es/codegen")],
     ["runtime", dist("@swf2es/runtime", player)],
     ["player", dist("@swf2es/player")],

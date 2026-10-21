@@ -1,8 +1,10 @@
 // Sound.extract's counting, as adl counts (the player's sound-extract case
 // has the rest).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { extractSamples } from "../../../../packages/player/dist/media/extract.js";
+import { prepareMp3 } from "../../../../packages/mp3/dist/index.js";
+import { extractSamples, mp3Source } from "../../../../packages/player/dist/media/extract.js";
 
 const ramp = (n: number) => Float32Array.from({ length: n }, (_, i) => i);
 
@@ -31,4 +33,40 @@ test("an MP3's samples come singly, after its skipped ones, in stereo from eithe
   assert.deepEqual([...some.samples], [2, -2, 2, -2, 3, -3]);
   assert.equal(extractSamples(source, 0, Number.NaN).count, 0);
   assert.equal(extractSamples(source, 0, 100).count, 8);
+});
+
+await prepareMp3();
+const tone = new Uint8Array(
+  readFileSync(new URL("../../../player/sounds/tone.mp3", import.meta.url)),
+);
+
+test("MP3 extraction is synchronous, untrimmed, and independent of prior decoders", () => {
+  const first = mp3Source(tone);
+  assert.ok(first);
+  assert.equal(first.rate, 44100);
+  assert.equal(first.channels.length, 2);
+  assert.equal(first.channels[0].length, 12672);
+  assert.ok(first.channels[0].some((value) => Math.abs(value) > 0.01));
+  assert.deepEqual(mp3Source(tone), first);
+  assert.equal(mp3Source(new TextEncoder().encode("not an MP3")), null);
+
+  const mono = mp3Source(
+    new Uint8Array(readFileSync(new URL("../../../player/sounds/tone22.mp3", import.meta.url))),
+  );
+  assert.ok(mono);
+  assert.equal(mono.rate, 22050);
+  assert.equal(mono.channels.length, 1);
+  assert.equal(mono.channels[0].length, 6912);
+});
+
+test("tagged and incomplete MP3s keep whole frames, including a header frame", () => {
+  const tagged = mp3Source(
+    new Uint8Array(
+      readFileSync(new URL("../../../player/sounds/tone-tagged.mp3", import.meta.url)),
+    ),
+  );
+  assert.ok(tagged);
+  assert.equal(tagged.channels[0].length, 13824);
+  assert.ok(tagged.channels[0].subarray(0, 1152).every((value) => value === 0));
+  assert.equal(mp3Source(tone.subarray(0, 1000))?.channels[0].length, 3456);
 });

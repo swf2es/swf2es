@@ -1,0 +1,11 @@
+first Mp3 11567 92536 true
+first Mp3Whole 12672 101376 true
+first Mp3Mono22 6912 110592 true
+cursor 2 3 40
+instance 5 true
+seek 2 0 56
+partial 3456
+appended 12672
+header 13824
+callback 0 2048 16384 true
+played 1 true

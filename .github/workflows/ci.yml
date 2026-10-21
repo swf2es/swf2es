@@ -17,6 +17,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm --filter @swf2es/mp3 build:wasm && git diff --exit-code -- packages/mp3/src/binary.ts packages/mp3/LICENSE.minimp3
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm oracle:pull
