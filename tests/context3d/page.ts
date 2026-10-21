@@ -264,6 +264,7 @@ export async function shaderFixture(
     | "ColorMask"
     | "Stencil"
     | "BufferBytes"
+    | "TextureBytes"
     | "ShaderMath"
     | "Comparisons"
     | "FrameValidation"
@@ -379,6 +380,7 @@ export async function recovery(cancel: "none" | "lost" | "queued") {
     "recovery buffer-bytes Error 3694",
     "recovery index-bytes Error 3694",
     "recovery program Error 3694",
+    "recovery texture-bytes Error 3694",
     "recovery texture Error 3694",
   ];
   let player: Player | null = null;
@@ -753,6 +755,114 @@ export async function renderTargets() {
     c.dispose();
     other.backend.dispose();
     check(live.size === 0 && other.live.size === 0, "render target teardown leaked GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
+export async function textureBytes() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  const framebuffer = gl.createFramebuffer();
+  check(framebuffer, "byte upload readback framebuffer unavailable");
+  const uploads = gl as unknown as { texSubImage2D: (...args: unknown[]) => void };
+  const upload = uploads.texSubImage2D;
+  try {
+    c.configure(32, 32);
+    const flat = c.createTexture(8, 4);
+    const cube = c.createTexture(4, 4, true);
+    const source = new Uint8Array(new ArrayBuffer(144), 5, 131);
+    const readback = new Uint8Array(128);
+    const bitmap = new Uint32Array(32);
+    const staging = new Map<WebGLTexture, unknown>();
+    const allocated = owned.created;
+    let calls = 0;
+    uploads.texSubImage2D = function (...args) {
+      const handle = gl.getParameter(
+        args[0] === gl.TEXTURE_2D ? gl.TEXTURE_BINDING_2D : gl.TEXTURE_BINDING_CUBE_MAP,
+      ) as WebGLTexture;
+      if (!staging.has(handle)) {
+        staging.set(handle, args[8]);
+      }
+      check(staging.get(handle) === args[8], "texture bytes replaced staging storage");
+      calls++;
+      upload.apply(this, args);
+    };
+    for (let iteration = 0; iteration < 8; iteration++) {
+      for (const texture of [flat, cube]) {
+        const target = texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
+        for (let face = 0; face < (texture.cube ? 6 : 1); face++) {
+          for (let level = 0; level < texture.levels; level++) {
+            const w = Math.max(1, texture.width >> level);
+            const h = Math.max(1, texture.height >> level);
+            const seed = iteration + face * 17 + level * 31;
+            for (let i = 0; i < w * h; i++) {
+              const at = 3 + i * 4;
+              source[at] = (i + seed) * 7;
+              source[at + 1] = (i + seed) * 5;
+              source[at + 2] = (i + seed) * 3;
+              source[at + 3] = i + seed;
+            }
+            texture.uploadBytes(source, 3, level, face);
+            source.fill(0);
+            const handle = gl.getParameter(
+              texture.cube ? gl.TEXTURE_BINDING_CUBE_MAP : gl.TEXTURE_BINDING_2D,
+            ) as WebGLTexture;
+            const previous = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.framebufferTexture2D(
+              gl.FRAMEBUFFER,
+              gl.COLOR_ATTACHMENT0,
+              texture.cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + face : target,
+              handle,
+              level,
+            );
+            check(
+              gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE,
+              "byte upload mip cannot be read",
+            );
+            gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, readback);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, previous);
+            for (let i = 0; i < w * h; i++) {
+              check(
+                readback[i * 4] === (((i + seed) * 3) & 255) &&
+                  readback[i * 4 + 1] === (((i + seed) * 5) & 255) &&
+                  readback[i * 4 + 2] === (((i + seed) * 7) & 255) &&
+                  readback[i * 4 + 3] === ((i + seed) & 255),
+                "byte upload changed channel bits, rows, mip or cube face",
+              );
+            }
+          }
+        }
+      }
+      // Both upload paths must share the same storage, even after smaller mip uploads.
+      flat.upload(bitmap);
+      check(owned.created === allocated, "texture byte uploads allocated GPU handles");
+    }
+    check(staging.size === 2 && calls === 184, "missing byte texture uploads");
+    for (const texture of [flat, cube]) {
+      for (const offset of [-1, 0.5, Number.NaN, Infinity, source.length]) {
+        rejects(() => texture.uploadBytes(source, offset));
+      }
+      for (const level of [-1, 0.5, Number.NaN, texture.levels]) {
+        rejects(() => texture.uploadBytes(source, 0, level));
+      }
+      for (const face of [-1, 0.5, Number.NaN, texture.cube ? 6 : 1]) {
+        rejects(() => texture.uploadBytes(source, 0, 0, face));
+      }
+    }
+    rejects(() => flat.uploadBytes(source, 4));
+    check(calls === 184, "invalid texture bytes reached the GPU");
+    check(gl.getError() === gl.NO_ERROR, "texture bytes polluted GL state");
+    flat.dispose();
+    rejects(() => flat.uploadBytes(source, 0));
+    c.dispose();
+    rejects(() => cube.uploadBytes(source, 0));
+    return { passed: true };
+  } finally {
+    uploads.texSubImage2D = upload;
+    gl.deleteFramebuffer(framebuffer);
+    c.dispose();
+    check(live.size === 0, "byte textures retained GPU handles");
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

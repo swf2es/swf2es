@@ -827,6 +827,22 @@ export class WebGLContext3D implements Context3D {
       depthBuffer: null,
       dirty: false,
     };
+    const upload = (level: number, face: number, w: number, h: number): void => {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(target, handle);
+      gl.texSubImage2D(
+        cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + face : target,
+        level,
+        0,
+        0,
+        w,
+        h,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        state.bytes,
+      );
+      state.uploaded[face] |= 1 << level;
+    };
     const texture: Texture3D = {
       width,
       height,
@@ -852,20 +868,26 @@ export class WebGLContext3D implements Context3D {
           state.bytes[at + 3] = pixel >>> 24;
         }
 
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(target, handle);
-        gl.texSubImage2D(
-          cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + face : target,
-          level,
-          0,
-          0,
-          w,
-          h,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          state.bytes,
-        );
-        state.uploaded[face] |= 1 << level;
+        upload(level, face, w, h);
+      },
+      uploadBytes: (data, offset, level = 0, face = 0) => {
+        this.alive();
+        this.textureState(texture);
+        range(level, 1, levels);
+        range(face, 1, faces);
+        const w = Math.max(1, width >> level);
+        const h = Math.max(1, height >> level);
+        const length = w * h * 4;
+        range(offset, length, data.length);
+
+        for (let i = 0; i < length; i += 4) {
+          state.bytes[i] = data[offset + i + 2];
+          state.bytes[i + 1] = data[offset + i + 1];
+          state.bytes[i + 2] = data[offset + i];
+          state.bytes[i + 3] = data[offset + i + 3];
+        }
+
+        upload(level, face, w, h);
       },
       dispose: () => {
         if (!this.textures.delete(texture)) {

@@ -25,6 +25,7 @@ node tests/context3d/oracle.ts --blending
 node tests/context3d/oracle.ts --colormask
 node tests/context3d/oracle.ts --stencil
 node tests/context3d/oracle.ts --bufferbytes
+node tests/context3d/oracle.ts --texturebytes
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
@@ -75,7 +76,25 @@ zero source-length argument would otherwise upload the rest of the view.
 Browser checks cover raw float-bit preservation, nonzero view offsets, source
 independence, unchanged storage/GPU handles, bounds/ownership and cleanup.
 Recovery checks reject uploads to lost buffers and upload fresh byte buffers after
-restoration. Texture ByteArray uploads remain unsupported.
+restoration.
+
+`TextureBytes.as` checks 396 AIR trace lines, including 212 pixel samples, for
+2D/cube `uploadFromByteArray`. Top-down BGRA bytes are copied without multiplying
+or dividing by alpha; the ByteArray's endian flag and position do not affect
+the upload or change afterward. Tests cover offsets 0–7, transparent and
+non-premultiplied values, rectangular mip chains, six cube faces, source mutation,
+bitmap/byte replacements, logical-length bounds and render-target initialization.
+Only a successful base-level upload initializes the target; failed or smaller-mip
+uploads do not. Null data fails first (2007); explicit texture disposal ignores
+non-null uploads even after owner disposal. Other retired owners fail with 3694,
+then invalid faces (3673), mip levels (3674), and source ranges (3669) are checked
+in that order.
+
+The backend swizzles BGRA into the existing RGBA staging array with an indexed
+loop. Both upload paths, every mip and every cube face share that storage;
+uploads create no temporary arrays or views. Browser checks inspect raw GPU
+bytes at each mip/face, including nonzero source-view offsets, assert unchanged
+staging/GPU handles, and check invalid uploads, disposal and context recovery.
 
 `Reconfigure.as` checks 48 AIR pixel samples for an unchanged back-buffer
 configuration: retained color and depth, program/vertex/constant bindings,

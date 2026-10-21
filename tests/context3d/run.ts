@@ -26,6 +26,7 @@ const scripts = compileScripts(
     "ColorMask",
     "Stencil",
     "BufferBytes",
+    "TextureBytes",
     "ShaderMath",
     "Comparisons",
     "FrameValidation",
@@ -55,6 +56,7 @@ for (const name of [
   "ColorMask",
   "Stencil",
   "BufferBytes",
+  "TextureBytes",
   "ShaderMath",
   "Comparisons",
   "FrameValidation",
@@ -145,6 +147,14 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(bytes.exception, null, JSON.stringify(bytes));
       assert.equal(bytes.value?.passed, true);
       console.log("context3d: raw byte uploads preserve bits, reuse storage and validate indices");
+      const textureBytes = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.textureBytes())',
+      );
+      assert.equal(textureBytes.exception, null, JSON.stringify(textureBytes));
+      assert.equal(textureBytes.value?.passed, true);
+      console.log(
+        "context3d: texture byte uploads preserve channels, reuse staging and release resources",
+      );
       const lifecycle: string[] = JSON.parse(
         readFileSync(`${here}lifecycle-reference.json`, "utf8"),
       );
@@ -182,6 +192,7 @@ if (!process.argv.includes("--build-only")) {
         "ColorMask",
         "Stencil",
         "BufferBytes",
+        "TextureBytes",
         "ShaderMath",
         "FrameValidation",
         "FrameValidationFlat",

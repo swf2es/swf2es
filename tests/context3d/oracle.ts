@@ -23,6 +23,7 @@ const fixture =
     "ColorMask",
     "Stencil",
     "BufferBytes",
+    "TextureBytes",
     "Depth",
     "Texturing",
     "Arithmetic",

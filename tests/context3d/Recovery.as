@@ -59,6 +59,7 @@ package {
       probe("buffer-bytes", function():void { vertices.uploadFromByteArray(new ByteArray(), 0, 0, 3); });
       probe("index-bytes", function():void { indices.uploadFromByteArray(new ByteArray(), 0, 0, 3); });
       probe("program", function():void { program.upload(new ByteArray(), new ByteArray()); });
+      probe("texture-bytes", function():void { texture.uploadFromByteArray(new ByteArray(), 0); });
       probe("texture", function():void { texture.uploadFromBitmapData(bitmap); });
     }
 
@@ -116,7 +117,13 @@ package {
       current.setStencilActions("frontAndBack", "never", "invert", "zero", "set");
       current.setStencilReferenceValue(42, 15, 0);
       texture = current.createTexture(2, 2, "bgra", false);
-      texture.uploadFromBitmapData(bitmap);
+      if (generation == 2) {
+        bytes.clear();
+        for (i = 0; i < 4; i++) { bytes.writeUnsignedInt(0xffffffff); }
+        texture.uploadFromByteArray(bytes, 0);
+      } else {
+        texture.uploadFromBitmapData(bitmap);
+      }
     }
 
     private function shader(fragment:Boolean):ByteArray {

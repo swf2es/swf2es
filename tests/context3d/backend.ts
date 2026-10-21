@@ -78,6 +78,8 @@ export interface Texture3D {
   readonly cube: boolean;
   /** Top-down premultiplied ARGB pixels, copied before returning. */
   upload(pixels: Uint32Array, level?: number, face?: number): void;
+  /** Top-down BGRA bytes, copied verbatim without alpha conversion. */
+  uploadBytes(data: Uint8Array, offset: number, level?: number, face?: number): void;
   dispose(): void;
 }
 

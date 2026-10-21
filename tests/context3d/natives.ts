@@ -763,13 +763,58 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
   }
 
+  function uploadTextureBytes(
+    object: AsObject,
+    data: AsObject,
+    offset: number,
+    level: number,
+    face: number,
+  ): void {
+    if (!data) {
+      throw s.rt.error("TypeError", 2007, "data");
+    }
+
+    // Unlike bitmap uploads, explicit disposal wins over owner disposal.
+    if (textures.get(object)?.disposed) {
+      return;
+    }
+
+    const value = texture(object);
+    if (face >= (value.cube ? 6 : 1)) {
+      throw s.rt.error("ArgumentError", 3673);
+    }
+    if (level >= value.levels) {
+      throw s.rt.error("ArgumentError", 3674);
+    }
+
+    const storage = avm2.bytesOf(s.rt, data);
+    const length = Math.max(1, value.width >> level) * Math.max(1, value.height >> level) * 4;
+    if (offset > storage.length - length) {
+      throw s.rt.error("RangeError", 3669);
+    }
+
+    value.uploadBytes(storage.buffer, offset, level, face);
+    const entry = textures.get(object);
+    if (entry && level === 0) {
+      entry.initialized = true;
+    }
+  }
+
   class TextureNatives {
+    uploadFromByteArray(data: AsObject, offset: number, level = 0): void {
+      uploadTextureBytes(this as unknown as AsObject, data, offset, level, 0);
+    }
+
     uploadFromBitmapData(source: AsObject, level = 0): void {
       uploadTexture(this as unknown as AsObject, source, level, 0);
     }
   }
 
   class CubeTextureNatives {
+    uploadFromByteArray(data: AsObject, offset: number, face: number, level = 0): void {
+      uploadTextureBytes(this as unknown as AsObject, data, offset, level, face);
+    }
+
     uploadFromBitmapData(source: AsObject, face: number, level = 0): void {
       uploadTexture(this as unknown as AsObject, source, level, face);
     }
