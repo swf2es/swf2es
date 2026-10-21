@@ -1144,6 +1144,14 @@ display masks: the mask's fills clip its target and its own artwork is
 hidden. An object or path selects a mask, null or undefined clears it,
 and an unresolved path returns false without replacing the existing mask.
 
+`lineStyle`, `moveTo`, `lineTo`, `curveTo`, `beginFill`, `endFill` and
+`clear`, from SWF 6, use the same `Drawing` and renderer as AS3, through
+`globals/drawing.ts`. Coordinates truncate to twips, line widths to whole
+pixels, and alpha is a percentage. Bounds include paths without a style;
+the target clip's SWF version chooses control-point bounds with full line
+width padding before SWF 8, or curve extrema with half width padding from
+SWF 8. Bounds accumulate with each segment, without rescanning the path.
+
 `TextSnapshot` (`globals/TextSnapshot.ts`, as Ruffle's) is a clip's
 static texts' text, its own children's in the order they are drawn, as
 it was when made: `new TextSnapshot(clip)` with the clip alone, or

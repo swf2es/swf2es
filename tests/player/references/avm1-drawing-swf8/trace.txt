@@ -1,0 +1,88 @@
+lineStyle function
+moveTo function
+lineTo function
+curveTo function
+beginFill function
+endFill function
+clear function
+move 0 -1.2 10 40 40
+move 1 1.2 10 40 40
+move 2 0 10 40 40
+move 3 0 10 40 40
+move 4 -107374182.4 10 40 40
+move 5 0 10 40 40
+move 6 0 10 40 40
+move 7 4.25 10 40 40
+width 0 10 10 10 20
+width 1 9.5 9.5 10.5 20.5
+width 2 10 10 10 20
+width 3 10 10 10 20
+width 4 10 10 10 20
+width 5 9.5 9.5 10.5 20.5
+width 6 9.5 9.5 10.5 20.5
+width 7 -117.5 -117.5 137.5 147.5
+width 8 -117.5 -117.5 137.5 147.5
+width 9 10 10 10 20
+width 10 10 10 10 20
+width 11 9.5 9.5 10.5 20.5
+width 12 9 9 11 21
+width 13 -117.5 -117.5 137.5 147.5
+width 14 10 10 10 20
+width 15 8.5 8.5 11.5 21.5
+width 16 10 10 10 20
+width 17 10 10 10 20
+width 18 9.5 9.5 10.5 20.5
+move missing 9 9 31 31
+line missing 9 9 31 31
+curve missing 9 9 31 31
+fill 10 10 30 30
+fill missing 10 10 30 30
+fill stopped 10 10 30 30
+clear style 0 0 50 50
+move only 6710886.35 6710886.35 6710886.35 6710886.35
+line invisible 0 0 10 20
+curve invisible 10 10 60.6 55
+curve stroke 9 9 61.6 56
+curve fill 10 10 60.6 55
+curve negative -60.65 -55 -10 -10
+curve twips 10.05 10.05 60.65 55.05
+number
+number
+number
+string
+string
+string
+number
+alpha 0 0
+fillalpha 0 0
+alpha 1 0
+fillalpha 1 0
+alpha 2 2
+fillalpha 2 2ffffff
+alpha 3 5
+fillalpha 3 5ffffff
+alpha 4 25
+fillalpha 4 19ffffff
+alpha 5 51
+fillalpha 5 33ffffff
+alpha 6 102
+fillalpha 6 66ffffff
+alpha 7 127
+fillalpha 7 7fffffff
+alpha 8 204
+fillalpha 8 -33000001
+alpha 9 252
+fillalpha 9 -3000001
+alpha 10 255
+fillalpha 10 -1
+alpha 11 255
+fillalpha 11 -1
+alpha 12 128
+fillalpha 12 -7f000001
+alpha 13 0
+fillalpha 13 0
+alpha 14 0
+fillalpha 14 0
+alpha 15 0
+fillalpha 15 0
+fillundefined 0

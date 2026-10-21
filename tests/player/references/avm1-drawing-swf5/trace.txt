@@ -1,0 +1,7 @@
+lineStyle undefined
+moveTo undefined
+lineTo undefined
+curveTo undefined
+beginFill undefined
+endFill undefined
+clear undefined

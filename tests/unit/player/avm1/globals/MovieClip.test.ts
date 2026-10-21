@@ -113,6 +113,65 @@ this.onEnterFrame = function () { frames++; if (frames == 2) { trace("7 " + e.ge
   assert.deepEqual(take(played), ["8 6710886.4", "7 6710886.4"]);
 });
 
+test("drawing bounds follow the target clip's SWF version across loaded movies", async () => {
+  // AIR: a SWF 7 caller drawing into a SWF 8 clip still gets the new bounds, and vice versa.
+  const draw = `function draw(d, label) {
+  d.clear(); d.lineStyle(2); d.moveTo(10, 10); d.curveTo(100, 100, 30, 10);
+  var b = d.getBounds(d); trace(label + " " + b.xMin + " " + b.xMax);
+}`;
+  for (const version of [7, 8]) {
+    const played = await play(
+      `${draw}
+var d = createEmptyMovieClip("d", 1); draw(d, "root own");
+createEmptyMovieClip("holder", 2).loadMovie("child.swf");
+onEnterFrame = function() {
+  if (holder.ready) {
+    delete onEnterFrame;
+    draw(holder.d, "root other"); holder.draw(holder.d, "child own");
+    holder.draw(d, "child other"); draw(holder.d, "root other again");
+  }
+};`,
+      {
+        fetch: files({
+          "child.swf": movie(
+            `${draw} var d = createEmptyMovieClip("d", 1); ready = true; stop();`,
+            version === 7 ? 8 : 7,
+          ),
+        }),
+      },
+      version,
+    );
+    const own = version === 7 ? "8 102" : "9 61.6";
+    const other = version === 7 ? "9 61.6" : "8 102";
+    assert.deepEqual(take(played), [`root own ${own}`]);
+    await played.deliver();
+    played.player.tick();
+    assert.deepEqual(take(played), [
+      `root other ${other}`,
+      `child own ${other}`,
+      `child other ${own}`,
+      `root other again ${other}`,
+    ]);
+  }
+});
+
+test("empty drawing calls allocate no geometry, and earlier bounds snapshots stay stable", async () => {
+  const empty = await play("clear(); endFill(); lineStyle(); moveTo(1); lineTo(); curveTo(1, 2);");
+  assert.equal(empty.player.root.drawing, null);
+  assert.deepEqual(take(empty), []);
+
+  const played = await play(`lineStyle(2); moveTo(10, 10); lineTo(20, 20);
+onEnterFrame = function() { lineTo(40, 50); delete onEnterFrame; };`);
+  const drawing = played.player.root.drawing;
+  assert.ok(drawing);
+  const before = drawing.bounds(true);
+  assert.deepEqual(before, { xMin: 9, yMin: 9, xMax: 21, yMax: 21 });
+  played.player.tick();
+  assert.deepEqual(drawing.bounds(true), { xMin: 9, yMin: 9, xMax: 41, yMax: 51 });
+  assert.deepEqual(before, { xMin: 9, yMin: 9, xMax: 21, yMax: 21 });
+  assert.deepEqual(take(played), []);
+});
+
 test("blendMode takes a name or a byte's number, null as normal, and ignores anything else", async () => {
   // The corpus's movieclip_blend_mode_property.
   assert.deepEqual(

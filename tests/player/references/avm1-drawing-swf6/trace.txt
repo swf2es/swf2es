@@ -1,0 +1,51 @@
+lineStyle function
+moveTo function
+lineTo function
+curveTo function
+beginFill function
+endFill function
+clear function
+move 0 -1.2 10 40 40
+move 1 1.2 10 40 40
+move 2 0 10 40 40
+move 3 0 10 40 40
+move 4 -107374182.4 10 40 40
+move 5 0 10 40 40
+move 6 0 10 40 40
+move 7 4.25 10 40 40
+width 0 10 10 10 20
+width 1 9 9 11 21
+width 2 10 10 10 20
+width 3 10 10 10 20
+width 4 10 10 10 20
+width 5 9 9 11 21
+width 6 9 9 11 21
+width 7 -245 -245 265 275
+width 8 -245 -245 265 275
+width 9 10 10 10 20
+width 10 10 10 10 20
+width 11 9 9 11 21
+width 12 8 8 12 22
+width 13 -245 -245 265 275
+width 14 10 10 10 20
+width 15 7 7 13 23
+width 16 10 10 10 20
+width 17 10 10 10 20
+width 18 9 9 11 21
+move missing 8 8 32 32
+line missing 8 8 32 32
+curve missing 8 8 32 32
+fill 10 10 30 30
+fill missing 10 10 30 30
+fill stopped 10 10 30 30
+clear style 0 0 50 50
+move only 6710886.35 6710886.35 6710886.35 6710886.35
+line invisible 0 0 10 20
+curve invisible 10 10 100 100
+curve stroke 8 8 102 102
+curve fill 10 10 100 100
+curve negative -100 -100 -10 -10
+curve twips 10.05 10.05 100.05 100.05
+number
+number
+number
