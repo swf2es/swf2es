@@ -16,7 +16,9 @@ import {
   type CullFace,
   type Program3D,
   ScissorBoundsError,
+  STENCIL_ACTIONS,
   type Stage3DHost,
+  type StencilAction,
   type Texture3D,
   TextureBindingError,
 } from "./backend.ts";
@@ -313,11 +315,11 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         throw s.rt.error("Error", 3698);
       }
 
-      if (stencil !== 0 || (mask !== 0xffffffff && mask > 7)) {
+      if (mask !== 0xffffffff && mask > 7) {
         unsupported();
       }
 
-      backend.clear(r, g, b, a, depth, mask);
+      backend.clear(r, g, b, a, depth, mask, stencil);
       // Only successful AS3 clears count, not the backend's allocation-time clear.
       if (entry.target) {
         entry.target.initialized = true;
@@ -510,6 +512,46 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     setColorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void {
       contexts.get(this as unknown as AsObject)?.backend.setColorMask(red, green, blue, alpha);
+    }
+
+    setStencilActions(
+      face = "frontAndBack",
+      compare = "always",
+      pass = "keep",
+      depthFail = "keep",
+      stencilFail = "keep",
+    ): void {
+      if (!CULL_FACES.includes(face as CullFace)) {
+        throw s.rt.error("ArgumentError", 2008, "triangleFace");
+      }
+      if (!COMPARE_MODES.includes(compare as CompareMode)) {
+        throw s.rt.error("ArgumentError", 2008, "compareMode");
+      }
+      if (!STENCIL_ACTIONS.includes(pass as StencilAction)) {
+        throw s.rt.error("ArgumentError", 2008, "actionOnBothPass");
+      }
+      if (!STENCIL_ACTIONS.includes(depthFail as StencilAction)) {
+        throw s.rt.error("ArgumentError", 2008, "actionOnDepthFail");
+      }
+      if (!STENCIL_ACTIONS.includes(stencilFail as StencilAction)) {
+        throw s.rt.error("ArgumentError", 2008, "actionOnDepthPassStencilFail");
+      }
+
+      contexts
+        .get(this as unknown as AsObject)
+        ?.backend.setStencilActions(
+          face as CullFace,
+          compare as CompareMode,
+          pass as StencilAction,
+          depthFail as StencilAction,
+          stencilFail as StencilAction,
+        );
+    }
+
+    setStencilReferenceValue(reference: number, readMask = 255, writeMask = 255): void {
+      contexts
+        .get(this as unknown as AsObject)
+        ?.backend.setStencilReference(reference, readMask, writeMask);
     }
 
     setDepthTest(write: boolean, compare: string): void {

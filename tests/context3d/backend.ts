@@ -13,6 +13,17 @@ export const COMPARE_MODES = [
 export type CompareMode = (typeof COMPARE_MODES)[number];
 export const CULL_FACES = ["none", "back", "front", "frontAndBack"] as const;
 export type CullFace = (typeof CULL_FACES)[number];
+export const STENCIL_ACTIONS = [
+  "keep",
+  "zero",
+  "set",
+  "incrementSaturate",
+  "decrementSaturate",
+  "invert",
+  "incrementWrap",
+  "decrementWrap",
+] as const;
+export type StencilAction = (typeof STENCIL_ACTIONS)[number];
 export const BLEND_FACTORS = [
   "zero",
   "one",
@@ -93,7 +104,16 @@ export interface Context3D {
     alpha: number,
     depth?: number,
     mask?: number,
+    stencil?: number,
   ): void;
+  setStencilActions(
+    face: CullFace,
+    compare: CompareMode,
+    pass: StencilAction,
+    depthFail: StencilAction,
+    stencilFail: StencilAction,
+  ): void;
+  setStencilReference(reference: number, readMask: number, writeMask: number): void;
   setDepth(write: boolean, compare: CompareMode): void;
   setCulling(face: CullFace): void;
   setBlend(source: BlendFactor, destination: BlendFactor): void;

@@ -8,6 +8,7 @@ import {
   type CullFace,
   type Program3D,
   ScissorBoundsError,
+  type StencilAction,
   type Texture3D,
   TextureBindingError,
 } from "./backend.ts";
@@ -35,6 +36,33 @@ const BLEND_FUNCTIONS = {
   destinationAlpha: "DST_ALPHA",
   oneMinusDestinationAlpha: "ONE_MINUS_DST_ALPHA",
 } as const;
+
+const STENCIL_FUNCTIONS = {
+  keep: "KEEP",
+  zero: "ZERO",
+  set: "REPLACE",
+  incrementSaturate: "INCR",
+  decrementSaturate: "DECR",
+  invert: "INVERT",
+  incrementWrap: "INCR_WRAP",
+  decrementWrap: "DECR_WRAP",
+} as const;
+
+class StencilState {
+  compare: CompareMode = "always";
+  pass: StencilAction = "keep";
+  depthFail: StencilAction = "keep";
+  stencilFail: StencilAction = "keep";
+
+  get active(): boolean {
+    return (
+      this.compare !== "always" ||
+      this.pass !== "keep" ||
+      this.depthFail !== "keep" ||
+      this.stencilFail !== "keep"
+    );
+  }
+}
 
 function range(start: number, count: number, length: number): void {
   if (
@@ -103,6 +131,12 @@ export class WebGLContext3D implements Context3D {
   private antiAlias = 0;
   private depthWrite = true;
   private colorWrite = 15;
+  private readonly stencilFront = new StencilState();
+  private readonly stencilBack = new StencilState();
+  private stencilEnabled = false;
+  private stencilReference = 0;
+  private stencilRead = 255;
+  private stencilWrite = 255;
   private scissor = false;
   private scissorLeft = 0;
   private scissorTop = 0;
@@ -129,6 +163,9 @@ export class WebGLContext3D implements Context3D {
     gl.depthMask(true);
     gl.colorMask(true, true, true, true);
     gl.disable(gl.STENCIL_TEST);
+    gl.stencilFunc(gl.ALWAYS, 0, 255);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.stencilMask(255);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.SCISSOR_TEST);
@@ -307,6 +344,7 @@ export class WebGLContext3D implements Context3D {
     alpha: number,
     depth = 1,
     mask = 0xffffffff,
+    stencil = 0,
   ): void {
     this.target();
     const gl = this.gl;
@@ -321,7 +359,7 @@ export class WebGLContext3D implements Context3D {
       bits |= gl.DEPTH_BUFFER_BIT;
     }
     if (mask & 4) {
-      gl.clearStencil(0);
+      gl.clearStencil(Math.min(stencil >>> 0, 255));
       bits |= gl.STENCIL_BUFFER_BIT;
     }
 
@@ -330,6 +368,11 @@ export class WebGLContext3D implements Context3D {
     const overrideDepth = hasDepth && (mask & 2) !== 0 && !this.depthWrite;
     if (overrideDepth) {
       gl.depthMask(true);
+    }
+
+    const overrideStencil = hasDepth && (mask & 4) !== 0 && this.stencilWrite !== 255;
+    if (overrideStencil) {
+      gl.stencilMask(255);
     }
 
     // AIR clears every color channel regardless of the draw-time mask.
@@ -350,6 +393,95 @@ export class WebGLContext3D implements Context3D {
     }
     if (overrideColor) {
       this.applyColorMask();
+    }
+    if (overrideStencil) {
+      gl.stencilMask(this.stencilWrite);
+    }
+  }
+
+  setStencilActions(
+    face: CullFace,
+    compare: CompareMode,
+    pass: StencilAction,
+    depthFail: StencilAction,
+    stencilFail: StencilAction,
+  ): void {
+    this.alive();
+    const gl = this.gl;
+    if (face === "front" || face === "frontAndBack") {
+      this.stencilFace(gl.FRONT, this.stencilFront, compare, pass, depthFail, stencilFail);
+    }
+    if (face === "back" || face === "frontAndBack") {
+      this.stencilFace(gl.BACK, this.stencilBack, compare, pass, depthFail, stencilFail);
+    }
+
+    const enabled = this.stencilFront.active || this.stencilBack.active;
+    if (enabled !== this.stencilEnabled) {
+      this.stencilEnabled = enabled;
+      if (enabled) {
+        gl.enable(gl.STENCIL_TEST);
+      } else {
+        gl.disable(gl.STENCIL_TEST);
+      }
+    }
+  }
+
+  private stencilFace(
+    face: number,
+    state: StencilState,
+    compare: CompareMode,
+    pass: StencilAction,
+    depthFail: StencilAction,
+    stencilFail: StencilAction,
+  ): void {
+    const gl = this.gl;
+    if (state.compare !== compare) {
+      state.compare = compare;
+      gl.stencilFuncSeparate(
+        face,
+        gl[DEPTH_FUNCTIONS[compare]],
+        this.stencilReference,
+        this.stencilRead,
+      );
+    }
+    if (state.pass !== pass || state.depthFail !== depthFail || state.stencilFail !== stencilFail) {
+      state.pass = pass;
+      state.depthFail = depthFail;
+      state.stencilFail = stencilFail;
+      gl.stencilOpSeparate(
+        face,
+        gl[STENCIL_FUNCTIONS[stencilFail]],
+        gl[STENCIL_FUNCTIONS[depthFail]],
+        gl[STENCIL_FUNCTIONS[pass]],
+      );
+    }
+  }
+
+  setStencilReference(reference: number, readMask: number, writeMask: number): void {
+    this.alive();
+    reference &= 255;
+    readMask &= 255;
+    writeMask &= 255;
+    const gl = this.gl;
+    if (reference !== this.stencilReference || readMask !== this.stencilRead) {
+      this.stencilReference = reference;
+      this.stencilRead = readMask;
+      gl.stencilFuncSeparate(
+        gl.FRONT,
+        gl[DEPTH_FUNCTIONS[this.stencilFront.compare]],
+        reference,
+        readMask,
+      );
+      gl.stencilFuncSeparate(
+        gl.BACK,
+        gl[DEPTH_FUNCTIONS[this.stencilBack.compare]],
+        reference,
+        readMask,
+      );
+    }
+    if (writeMask !== this.stencilWrite) {
+      this.stencilWrite = writeMask;
+      gl.stencilMask(writeMask);
     }
   }
 
@@ -849,8 +981,10 @@ export class WebGLContext3D implements Context3D {
         gl.depthMask(true);
         gl.clearDepth(1);
         gl.clearStencil(0);
+        gl.stencilMask(255);
         gl.clear(gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
         gl.depthMask(this.depthWrite);
+        gl.stencilMask(this.stencilWrite);
       }
       state.framebuffer = framebuffer;
       state.depthBuffer = depthBuffer;

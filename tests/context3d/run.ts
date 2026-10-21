@@ -24,6 +24,7 @@ const scripts = compileScripts(
     "Depth",
     "Blending",
     "ColorMask",
+    "Stencil",
     "ShaderMath",
     "Comparisons",
     "FrameValidation",
@@ -51,6 +52,7 @@ for (const name of [
   "Depth",
   "Blending",
   "ColorMask",
+  "Stencil",
   "ShaderMath",
   "Comparisons",
   "FrameValidation",
@@ -127,6 +129,14 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(masks.exception, null, JSON.stringify(masks));
       assert.equal(masks.value?.passed, true);
       console.log("context3d: color masks preserve resolve/presentation and reuse GPU state");
+      const stencil = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.stencil())',
+      );
+      assert.equal(stencil.exception, null, JSON.stringify(stencil));
+      assert.equal(stencil.value?.passed, true);
+      console.log(
+        "context3d: stencil preserves presentation, reuses GPU state and releases resources",
+      );
       const lifecycle: string[] = JSON.parse(
         readFileSync(`${here}lifecycle-reference.json`, "utf8"),
       );
@@ -162,6 +172,7 @@ if (!process.argv.includes("--build-only")) {
         "Depth",
         "Blending",
         "ColorMask",
+        "Stencil",
         "ShaderMath",
         "FrameValidation",
         "FrameValidationFlat",

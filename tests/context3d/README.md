@@ -23,6 +23,7 @@ node tests/context3d/oracle.ts --texturing
 node tests/context3d/oracle.ts --depth
 node tests/context3d/oracle.ts --blending
 node tests/context3d/oracle.ts --colormask
+node tests/context3d/oracle.ts --stencil
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
@@ -97,8 +98,8 @@ Restoration releases that surface and queues a new context on a fresh
 surface. The AS3 creation listener uploads new buffers and shaders and
 draws a triangle again; the browser checks red, green and blue presentations
 over two recovery cycles.
-The recovered contexts have depth/stencil attachments; depth/culling state set to
-reject all draws, zero blend factors and disabled color writes before loss must
+The recovered contexts have depth/stencil attachments; depth/culling/stencil state
+set to reject all draws, zero blend factors and disabled color writes before loss must
 not survive into the replacement.
 
 These checks also cover retained vertex/index buffers, programs and textures rejecting
@@ -332,9 +333,24 @@ or GPU resources; an attachment is created only when configuring a depth-enabled
 back buffer. The AIR oracle uses a depth-enabled window descriptor for this
 fixture, as AIR requires its window and Context3D flags to agree.
 
-Stencil testing and nonzero stencil clear values remain unsupported. Clear
-masks support color/depth/stencil bits (1/2/4), zero and the default all-bits
-mask; broader numeric validation and precision parity remain future work.
+Clear masks support color/depth/stencil bits (1/2/4), zero and the default
+all-bits mask; broader numeric validation and precision parity remain future work.
+
+`Stencil.as` compares 191 trace lines with AIR for all eight comparisons and actions,
+including saturating/wrapping limits, independent front/back state, both windings,
+and simultaneous depth/stencil failures. It reads stencil values through eight
+masked color tests. Reference/read/write masks use their low eight bits; stencil
+clears clamp to 255 and ignore draw-time write masks and scissor clipping, then
+restore those settings. Selecting `none` leaves both faces' settings unchanged.
+
+The fixture also covers unchanged configuration, resize, ordinary/4× back buffers,
+presentation, retained texture-target stencil contents, target depth toggles,
+target winding, invalid enums preserving state, and disposed setters. State changes
+reuse two face records and skip unchanged GL calls. There are no new per-draw
+allocations or GPU queries. Browser checks verify full-buffer resolve/presentation,
+stable readback storage and GPU handles, color-only targets, teardown, and fresh
+stencil defaults after context loss. Broader stencil error precedence and shader
+discard interactions remain unverified.
 
 `Blending.as` compares all 100 pairs of the ten source/destination blend factors
 against AIR, including fractional color and alpha channels. Additional samples
@@ -392,7 +408,7 @@ node tests/context3d/composition-oracle.ts --update
 This is **not enabled in the player, website, desktop app or game preview**.
 The test installs natives before loading playerglobal and explicitly
 tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
-float vertex attributes, vector/matrix uploads, depth testing, culling, blending,
+float vertex attributes, vector/matrix uploads, depth/stencil testing, culling, blending,
 color rendering and back buffers with optional multisampling are exercised, with sizes limited to
 32×32 through 2048×2048.
 Unsupported operations throw experimental errors, not a claim of

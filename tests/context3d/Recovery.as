@@ -100,6 +100,8 @@ package {
       current.setCulling("frontAndBack");
       current.setBlendFactors("zero", "zero");
       current.setColorMask(false, false, false, false);
+      current.setStencilActions("frontAndBack", "never", "invert", "zero", "set");
+      current.setStencilReferenceValue(42, 15, 0);
       texture = current.createTexture(2, 2, "bgra", false);
       texture.uploadFromBitmapData(bitmap);
     }

@@ -262,6 +262,7 @@ export async function shaderFixture(
     | "Depth"
     | "Blending"
     | "ColorMask"
+    | "Stencil"
     | "ShaderMath"
     | "Comparisons"
     | "FrameValidation"
@@ -749,6 +750,94 @@ export async function renderTargets() {
     c.dispose();
     other.backend.dispose();
     check(live.size === 0 && other.live.size === 0, "render target teardown leaked GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
+export async function stencil() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(32, 32, true, 4);
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    const program = c.createProgram();
+    program.upload(shader(false), shader(true));
+    c.setProgram(program);
+    c.setVertex(0, vertices, 0, 4);
+    c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
+    c.setDepth(false, "always");
+    c.setStencilActions("frontAndBack", "equal", "keep", "keep", "keep");
+    c.setStencilReference(42, 255, 0);
+    const pixels = c.read();
+    const allocated = owned.created;
+    const func = gl.stencilFuncSeparate;
+    const op = gl.stencilOpSeparate;
+    const mask = gl.stencilMask;
+    const query = gl.getParameter;
+    let changes = 0;
+    let queries = 0;
+    gl.stencilFuncSeparate = (...args) => {
+      changes++;
+      func.apply(gl, args);
+    };
+    gl.stencilOpSeparate = (...args) => {
+      changes++;
+      op.apply(gl, args);
+    };
+    gl.stencilMask = (...args) => {
+      changes++;
+      mask.apply(gl, args);
+    };
+    gl.getParameter = (...args) => {
+      queries++;
+      return query.apply(gl, args);
+    };
+    try {
+      for (let i = 0; i < 24; i++) {
+        c.setStencilActions("frontAndBack", "equal", "keep", "keep", "keep");
+        c.setStencilReference(42, 255, 0);
+      }
+      check(changes === 0, "unchanged stencil setters changed GPU state");
+      for (let i = 0; i < 24; i++) {
+        c.clear(0, 0, 1, 1, 1, 7, 42);
+        c.draw(indices, 0, 1);
+        c.setStencilActions("frontAndBack", "never", "keep", "keep", "keep");
+        check(c.read() === pixels, "stencil changed readback storage");
+        check(color(pixels, 16, 16, 32) === "ffff0000", "stencil clear or resolve failed");
+        c.present();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.readPixels(0, 0, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        check(color(pixels, 16, 16, 32) === "ffff0000", "stencil clipped presentation");
+        c.setStencilActions("frontAndBack", "equal", "keep", "keep", "keep");
+      }
+      check(queries === 0, "stencil operations queried GPU state");
+      check(owned.created === allocated, "stencil operations allocated GPU handles");
+    } finally {
+      gl.stencilFuncSeparate = func;
+      gl.stencilOpSeparate = op;
+      gl.stencilMask = mask;
+      gl.getParameter = query;
+    }
+    // A color-only target bypasses stencil, retaining state when depth returns.
+    c.configure(32, 32, false);
+    c.setStencilActions("frontAndBack", "never", "keep", "keep", "keep");
+    c.clear(0, 0, 1, 1);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ffff0000", "stencil rejected color-only draws");
+    c.configure(32, 32, true);
+    c.draw(indices, 0, 1);
+    check(color(c.read(), 16, 16, 32) === "ff000000", "configuration lost stencil state");
+    check(gl.getError() === gl.NO_ERROR, "stencil operations polluted GL state");
+    c.dispose();
+    rejects(() => c.setStencilReference(0, 255, 255));
+    rejects(() => c.setStencilActions("none", "always", "keep", "keep", "keep"));
+    return { passed: true };
+  } finally {
+    c.dispose();
+    check(live.size === 0, "stencil test retained GPU resources");
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }
