@@ -483,9 +483,13 @@ with a binary32 payload, rounded by `Math.fround` when produced. The tag
 preserves its identity through `*`, calls, properties and arrays: AIR treats
 `float(1) === Number(1)` as false. Two float operands produce a rounded float;
 a mixed float/Number operation produces Number. Known Number arithmetic
-keeps its direct JavaScript operators. Float results currently allocate a
-small tagged value; zero, negative zero and NaN are shared. Float locals
-and vectors are not yet stored unboxed.
+keeps its direct JavaScript operators. Float values crossing method and
+object/array storage boundaries use small tags; zero, negative zero and NaN
+are shared. Locals known to hold floats at every use, and float temporaries
+within a basic block, keep their payloads as JS numbers, with `Math.fround`
+at float operations. Live temporaries crossing control-flow edges are boxed;
+locals with mixed or unknown types keep the general tagged representation.
+Typed float-vector accesses also read and write unboxed payloads.
 
 AIR ABC 47.16 and above insert one scalar float pool after the doubles;
 current AIR omits the experimental Tamarin float4 pool. The scalar
@@ -501,9 +505,15 @@ float-vector markers are preserved, including signed zero and NaN. The
 `tests/conformance/cases/air`, outside the avmshell-only runner.
 
 A namespace value is the runtime's
-interned namespace, whose class is Namespace. Arrays and Vectors keep their
-elements in a JavaScript array, `$a`. A script's global object is an instance of its traits like any
-other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
+interned namespace, whose class is Namespace. Arrays and most Vectors keep
+their elements in a JavaScript array, `$a`. For `Vector.<float>`, `$a` holds
+a `FloatVector`: a `Float32Array` buffer, a logical length and spare capacity
+grown by about 1.5x. Explicit-length construction allocates exactly that
+length; setting length to zero releases the buffer. Dynamic reads and
+callbacks box their float values, while enumeration, JSON and AMF respect
+the logical length and float identity without storing a tag per element.
+A script's global object is an instance of its traits like any other.
+Errors thrown by the runtime are AS3 `Error` objects with avmplus'
 error numbers. Their messages are the release player's, as avmshell's
 are: `Error #1009`, and nothing more, since AS3 can read and print them.
 With the runtime's `debugger` option they are the debugger player's,
