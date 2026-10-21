@@ -17,6 +17,7 @@
     "@swf2es/codegen": "workspace:*",
     "@swf2es/format": "workspace:*",
     "@swf2es/runtime": "workspace:*",
-    "pixi.js": "workspace:*"
+    "pixi.js": "workspace:*",
+    "@swf2es/mp3": "workspace:*"
   }
 }

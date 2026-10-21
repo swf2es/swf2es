@@ -6,13 +6,14 @@
 import type { Sound } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { SoundCharacter } from "../../../display/timeline.js";
-import type { ExtractedSamples, SoundMix } from "../../../media/audio.js";
+import type { SoundMix } from "../../../media/audio.js";
 import { startDynamicSound } from "../../../media/dynamic-sound.js";
 import {
   EXTRACT_RATE,
   type ExtractSource,
   embeddedSource,
   extractSamples,
+  mp3Source,
   toExtractRate,
 } from "../../../media/extract.js";
 import { mp3Frames } from "../../../media/mp3.js";
@@ -40,11 +41,10 @@ type Value = avm2.Value;
 const embeddedSources = new WeakMap<SoundCharacter, ExtractSource | null>();
 
 /**
- * An MP3's samples as Flash decodes them, by its DefineSound or by the
- * Sound it was loaded into: decoded the first time a script extracts
- * them, apart from the decode it plays, and kept for the extracts after.
+ * MP3 samples shared by instances of an embedded sound, or kept by the
+ * sound they were loaded into. A first extract decodes them synchronously.
  */
-const mp3Decodes = new WeakMap<object, { samples: ExtractedSamples | null }>();
+const mp3Decodes = new WeakMap<object, ExtractSource | null>();
 
 /** 44.1 kHz samples as an uncompressed 16-bit DefineSound, for the host to play. */
 function pcmSound(channels: Float32Array[]): Sound {
@@ -204,12 +204,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
     return sound.compressed && sound.bytes ? s.audio.decode(sound.bytes) : null;
   };
 
-  /**
-   * What extract reads of a sound now: an MP3's decode only once it is
-   * done, which the browser's decoder gives late where Flash's gives at
-   * once, so that an MP3's first extract starts its decode and gives
-   * nothing.
-   */
+  /** Decode only sounds a script extracts; normal playback stays on the host's decoder. */
   const extractSource = (sound: SoundState): ExtractSource | null => {
     if (sound.pcm) {
       return { rate: EXTRACT_RATE, channels: sound.pcm, skip: 0, whole: false };
@@ -229,33 +224,17 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
     const key = character ?? sound;
     const bytes = definition ? definition.data : sound.bytes;
-    let decode = mp3Decodes.get(key);
-    if (!decode && bytes?.length) {
-      const entry: { samples: ExtractedSamples | null } = { samples: null };
-      decode = entry;
-      mp3Decodes.set(key, entry);
-      const task = s.audio?.extractSamples?.(bytes);
-      if (task) {
-        s.loads.trackRequest(
-          task.then(
-            (samples) => {
-              entry.samples = samples;
-            },
-            () => {},
-          ),
-        );
+    let source = mp3Decodes.get(key);
+    if (source === undefined && bytes?.length) {
+      source = mp3Source(bytes);
+      if (source && definition) {
+        source.skip = Math.max(0, definition.seekSamples);
       }
+
+      mp3Decodes.set(key, source);
     }
 
-    const samples = decode?.samples;
-    return samples
-      ? {
-          rate: samples.rate,
-          channels: samples.channels,
-          skip: definition ? Math.max(0, definition.seekSamples) : 0,
-          whole: false,
-        }
-      : null;
+    return source ?? null;
   };
 
   class SoundNatives {

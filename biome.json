@@ -16,7 +16,8 @@
       "!tests/player/corpus/baseline.json",
       "!tests/programs/as3pb",
       "!tests/programs/com-lz4-as3",
-      "!vendor/pixijs"
+      "!vendor/pixijs",
+      "!vendor/minimp3"
     ]
   },
   "formatter": {

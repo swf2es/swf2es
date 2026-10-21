@@ -4,6 +4,7 @@
 // stack frame is of, the domain, URL and SWF of the code that runs.
 import { libraryLog, moduleKey } from "@swf2es/codegen";
 import { readDoAbc, type Swf, tags } from "@swf2es/format";
+import { prepareMp3 } from "@swf2es/mp3";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
@@ -154,6 +155,7 @@ export class Code {
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   async loadLibraries(abcs: Uint8Array[]): Promise<void> {
+    await prepareMp3();
     const root = this.s.rt.root;
     for (const abc of abcs) {
       const index = await this.add(abc, true, root);

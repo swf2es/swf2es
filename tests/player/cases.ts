@@ -8699,6 +8699,14 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "sound-extract-sync",
+    build: extractSounds("SoundExtractSync"),
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "sound-extract",
     build: extractSounds("SoundExtract"),
     frames: 3,

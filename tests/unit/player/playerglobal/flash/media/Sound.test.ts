@@ -94,6 +94,28 @@ async function setup(audio: AudioHost | null = null) {
   return { s, player, rt, sound, get, call, listen, errors };
 }
 
+test("a first MP3 extract supplies samples synchronously without an audio device", async () => {
+  const { s, player, rt, sound, call, errors } = await setup();
+  try {
+    const source = rt.construct(rt.classNamed("flash.utils::ByteArray"));
+    const bytes = avm2.bytesOf(rt, source);
+    bytes.write(
+      new Uint8Array(
+        await readFile(new URL("../../../../../player/sounds/tone.mp3", import.meta.url)),
+      ),
+    );
+    bytes.position = 0;
+    call(sound, "loadCompressedDataFromByteArray", source, bytes.length);
+    const target = rt.construct(rt.classNamed("flash.utils::ByteArray"));
+    assert.equal(call(sound, "extract", target, 100000), 12672);
+    assert.equal(avm2.bytesOf(rt, target).length, 12672 * 8);
+    assert.deepEqual(errors, []);
+  } finally {
+    player.destroy();
+    s.destroy();
+  }
+});
+
 function samples(rt: avm2.Runtime, event: avm2.AsObject, count: number, little = false) {
   const bytes = avm2.bytesOf(rt, rt.getProperty(event, rt.publicName("data")));
   assert.equal(bytes.position, 0);

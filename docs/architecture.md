@@ -98,7 +98,8 @@ over the builtins, then each conformance case (also compiled with asc's
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
+| `mp3`     | synchronous MP3 frame decoder, minimp3 C compiled to WebAssembly | —                       |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
@@ -4584,8 +4585,19 @@ Flash decodes it rather than trimmed by it as a browser would, and a
 DefineSound's seekSamples skipped. Playback keeps the browser's decode of
 the whole file at the device's rate, gapless trimming and all, which
 resamples better than a buffer played at another rate. Flash's decode is
-at once and the browser's is not: an MP3's first extract starts its
-decode and gives nothing, and the frames after give what Flash gives.
+at once, so extraction uses `@swf2es/mp3`, separately from Web Audio.
+Its upstream source is the pinned `vendor/minimp3` submodule; the C adapter,
+TypeScript wrapper and reproducible WASM build are in `packages/mp3`.
+The module compiles once before ActionScript libraries run, and an extraction
+instantiates a decoder only on first use. Its fixed 128 KiB workspace holds
+one frame's encoded bytes and interleaved PCM, copied into the sound's cached
+channel buffers. No host functions or WASI runtime are imported. The generated
+29 KB binary is embedded in the package; ordinary builds verify its input
+digest, and CI rebuilds it with the pinned WASI SDK image. A first extract
+therefore supplies samples synchronously, including inside `SampleDataEvent`
+callbacks, even without an audio device. Extracted samples are weakly cached
+by the sound character or loaded sound; appending compressed bytes invalidates
+the latter's cache. Unused sounds are never decoded.
 `media/mp3.ts` finds an MP3's frames: a run of three headers where they
 say the next frames are starts it, and it runs on past ID3v2 tags and
 other bytes between frames.

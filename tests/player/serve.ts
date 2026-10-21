@@ -15,6 +15,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 /** URL prefixes and the directories they serve. */
 const mounts: [string, string][] = [
   ["/format/", join(root, "packages/format/dist/")],
+  ["/mp3/", join(root, "packages/mp3/dist/")],
   ["/codegen/", join(root, "packages/codegen/dist/")],
   ["/runtime/", join(root, "packages/runtime/dist/")],
   ["/player/", join(root, "packages/player/dist/")],
@@ -31,6 +32,7 @@ const mounts: [string, string][] = [
 export const importMap = {
   imports: {
     "@swf2es/format": "/format/index.js",
+    "@swf2es/mp3": "/mp3/index.js",
     "@swf2es/codegen": "/codegen/index.js",
     "@swf2es/runtime": "/runtime/index.js",
     "@swf2es/player": "/player/index.js",
