@@ -52,6 +52,15 @@ package {
             var count:float = 0f;
             for (var j:int = 0; j < 10; j++) { count += 0.1f; }
             trace("loop", count, count is float);
+            trace("local-loop", localLoop(10, 0f, 0.1f));
+            trace("local-arithmetic", localArithmetic(0.1f, 0.3f).join(","));
+            trace("local-boundaries", localBoundaries(-0f).join(","));
+            trace("local-nan", localBoundaries(float.NaN).join(","));
+            trace("local-infinity", localBoundaries(float.POSITIVE_INFINITY).join(","));
+            trace("local-changing", localChanging(true) is float, localChanging(false) is float);
+            trace("local-handler", localHandler(0.1f));
+            trace("local-capture", localCapture(0.1f));
+            trace("local-calls", localCalls(0.1f));
             var vec:Vector.<float> = new Vector.<float>(2);
             trace("vector-default", vec[0], vec[0] is float, vec.pop(), new Vector.<float>().pop());
             var vectorTypes:Array = [Vector.<float>, Vector.<Number>, Vector.<int>, Vector.<uint>,
@@ -104,6 +113,65 @@ package {
         private function typed(value:float):float { return value; }
         private function dynamic(value:*):* { return value; }
         private function choose(which:Boolean):* { return which ? 1f : Number(2); }
+
+        private function localLoop(n:int, value:float, step:float):float {
+            for (var i:int = 0; i < n; i++) { value += step; }
+            return value;
+        }
+
+        private function localArithmetic(value:float, step:float):Array {
+            value += step;
+            value -= step;
+            value *= step;
+            value /= step;
+            value %= step;
+            var negative:float = -value;
+            var positive:float = +value;
+            var post:float = value++;
+            var pre:float = --value;
+            return [value, negative, positive, post, pre, value is float,
+                int(value), uint(value), Number(value), Boolean(value),
+                value == Number(value), value === Number(value), value === positive];
+        }
+
+        private function localBoundaries(value:float):Array {
+            var list:Array = [value];
+            var object:Object = {value: value};
+            var vector:Vector.<float> = new Vector.<float>();
+            vector.push(value);
+            return [1 / Number(value), Boolean(value), value is int, value is uint,
+                list[0] is float, object.value is float, vector[0] is float,
+                dynamic(value) is float, typeof value, value.valueOf() is float,
+                value === Number(value), value === float(-0)];
+        }
+
+        private function localChanging(which:Boolean):* {
+            var value:*;
+            if (which) { value = 1f; } else { value = 1; }
+            return value;
+        }
+
+        private function localHandler(value:float):* {
+            try {
+                value += 0.1f;
+                throw value;
+            } catch (caught:*) {
+                return [value, caught, value is float, caught is float].join(",");
+            }
+        }
+
+        private function localCapture(value:float):* {
+            var get:Function = function():* { return value; };
+            value += 0.1f;
+            var result:* = get();
+            return [result, result is float].join(",");
+        }
+
+        private function localCalls(value:float):float {
+            var result:float = typed(value);
+            result += field;
+            return result;
+        }
     }
 }
 

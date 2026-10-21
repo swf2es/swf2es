@@ -17,6 +17,15 @@ typed-primitive-types true true true true true true true false
 call 0.10000000149011612 true true true
 merge true false 3
 loop 1.0000001192092896 true
+local-loop 1.0000001192092896
+local-arithmetic 0.10000002384185791,-0.09999999403953552,0.09999999403953552,0.09999999403953552,0.10000002384185791,true,0,0,0.10000002384185791,true,true,false,false
+local-boundaries -Infinity,false,false,false,true,true,true,true,number,true,false,true
+local-nan NaN,false,false,false,true,true,true,true,number,true,false,false
+local-infinity 0,true,false,false,true,true,true,true,number,true,false,false
+local-changing true false
+local-handler 0.20000000298023224,0.20000000298023224,true,true
+local-capture 0.20000000298023224,true
+local-calls 0.20000000298023224
 vector-default 0 true 0 0
 vector-fixed __AS3__.vec::Vector.<float> false,false,false,true,true
 vector-fixed __AS3__.vec::Vector.<Number> false,false,false,true,true

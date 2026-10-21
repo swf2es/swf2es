@@ -116,6 +116,50 @@ test("AIR Number-only arithmetic keeps the same direct JavaScript as Flash bytec
   }
 });
 
+test("typed float locals round each operation and allocate only when the result escapes", () => {
+  const code = [0xd1, 0xd6];
+  for (let i = 0; i < 64; i++) {
+    code.push(0xd2, 0x22, 1, 0xa0, 0xf0, i + 1, 0x2a, 0x79, 0xd6, 0x29);
+  }
+
+  code.push(0xd2, 0x48);
+  const bytes = abc(
+    {
+      floats: [0.1],
+      strings: ["float", ""],
+      namespaces: [[0x16, 2]],
+      multinames: [[7, 1, 1]],
+    },
+    tables({
+      methods: [{ params: [1], ret: 1 }],
+      scripts: [{ init: 0 }],
+      bodies: [{ method: 0, localCount: 3, maxStack: 2, code }],
+    }),
+  );
+  testing.domainReset(50);
+  testing.domainAdd(builtin, true);
+  testing.domainAdd(avm2.floatLibrary, true);
+  assert.equal(testing.domainAdd(bytes, false), 0);
+  const body = testing.domainEmit(0) as string;
+  const rt = avm2.createRuntime();
+  const input = rt.float(0.1);
+  const float = rt.float.bind(rt);
+  let allocations = 0;
+  rt.float = (value) => {
+    allocations++;
+    return float(value);
+  };
+  const result = new Function("rt", "$dx", `return ${body}`)(rt, rt.defaultXmlNamespace)(input);
+  let expected = input.value;
+  for (let i = 0; i < 64; i++) {
+    expected = Math.fround(expected + Math.fround(0.1));
+  }
+
+  assert.ok(result instanceof avm2.FloatValue);
+  assert.equal(result.value, expected);
+  assert.equal(allocations, 1);
+});
+
 test("float defaults preserve dynamic identity and coerce numeric parameter defaults", () => {
   for (const [param, value, modern] of [
     [0, 0, true],
