@@ -203,6 +203,60 @@ test("PlaceObject3's clip actions follow its own fields", () => {
   assert.equal(readPlace(swf.bytes, swf.tags[0], list).name, "a");
 });
 
+test("PlaceObject4's metadata follows its clip actions and stays inside the tag", () => {
+  const metaData = new Uint8Array([10, 11, 1, 1, 1]);
+  const clipActions = w.clipActions(36, [
+    { events: ClipEvent.enterFrame, actions: NEXT },
+    { events: ClipEvent.keyPress, key: 65, actions: STOP },
+  ]);
+  const swf = movie(36, [
+    w.place({
+      depth: 2,
+      character: 1,
+      name: "a",
+      matrix: { tx: 40 },
+      blurs: [2],
+      blendMode: 3,
+      cacheAsBitmap: true,
+      visible: true,
+      opaqueBackground: 0xff112233,
+      clipActions,
+      metaData,
+    }),
+    w.place({ depth: 3, character: 1, metaData: new Uint8Array() }),
+    w.end(),
+  ]);
+  const list = readActions(swf);
+  const place = readPlace(swf.bytes, swf.tags[0], list);
+
+  assert.equal(swf.tags[0].code, tags.PlaceObject4);
+  assert.deepEqual(
+    list.blocks.map((b) => bytesOf(swf, b)),
+    [NEXT, STOP],
+  );
+  assert.equal(place.depth, 2);
+  assert.equal(place.name, "a");
+  assert.equal(place.matrix?.tx, 40);
+  assert.equal(place.blendMode, 3);
+  assert.equal(place.opaqueBackground, 0xff112233);
+  assert.deepEqual(place.metaData, metaData);
+  assert.equal(place.metaData?.buffer, swf.bytes.buffer);
+  assert.equal(readPlace(swf.bytes, swf.tags[1]).metaData, null);
+
+  // An action length beyond the tag must not turn the following tag into metadata.
+  const bad = movie(36, [
+    w.place({
+      depth: 1,
+      character: 1,
+      clipActions: new w.BitWriter().u16(0).u32(1).u32(1).u32(1000).done(),
+      metaData,
+    }),
+    w.place({ depth: 2, character: 1, metaData }),
+    w.end(),
+  ]);
+  assert.equal(readPlace(bad.bytes, bad.tags[0]).metaData, null);
+});
+
 test("clip actions cut short or of odd flags are read as Flash reads them", () => {
   // The second record's length runs past the tag: Flash stops the SWF, so the first has no block either.
   const past = new w.BitWriter().u16(0).u32(3).u32(1).u32(2).raw(STOP);

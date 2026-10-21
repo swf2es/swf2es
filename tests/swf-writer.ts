@@ -444,6 +444,8 @@ export interface PlaceSpec {
   opaqueBackground?: number;
   /** CLIPACTIONS' bytes, as clipActions() writes them. */
   clipActions?: Uint8Array;
+  /** PlaceObject4's trailing AMF3 value; an empty array writes the tag without a value. */
+  metaData?: Uint8Array;
 }
 
 /** A CXFORMWITHALPHA, its multipliers in 8.8 fixed. */
@@ -465,7 +467,7 @@ function colorTransform(w: BitWriter, cx: { mult?: number[]; add?: number[] }): 
 /** A 16.16 fixed-point number's bits. */
 const fixed = (v: number) => Math.round(v * 65536) >>> 0;
 
-/** A PlaceObject2 tag, or a PlaceObject3 when the spec has fields only it holds. */
+/** A PlaceObject2, 3 or 4 tag, according to the fields the spec holds. */
 export function place(spec: PlaceSpec): Uint8Array {
   const w = new BitWriter();
   let flags = 0;
@@ -535,7 +537,7 @@ export function place(spec: PlaceSpec): Uint8Array {
     flags2 |= 0x40;
   }
 
-  const v3 = flags2 !== 0;
+  const v3 = flags2 !== 0 || spec.metaData !== undefined;
   w.u8(flags);
   if (v3) {
     w.u8(flags2);
@@ -633,7 +635,11 @@ export function place(spec: PlaceSpec): Uint8Array {
     w.raw(spec.clipActions);
   }
 
-  return tag(v3 ? 70 : 26, w.done());
+  if (spec.metaData !== undefined) {
+    w.raw(spec.metaData);
+  }
+
+  return tag(spec.metaData !== undefined ? 94 : v3 ? 70 : 26, w.done());
 }
 
 /** A clip action: its CLIPEVENTFLAGS, keyPress's key code, and its actions' bytes. */

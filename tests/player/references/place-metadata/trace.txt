@@ -1,0 +1,33 @@
+constructor a null
+added a first
+constructor b null
+added b first
+constructor plain null
+added plain constructor
+first a first true
+first b first true
+first plain constructor true
+shared false
+mutated a mutated true
+mutated b first true
+mutated plain constructor true
+move a mutated true
+move b script true
+move plain constructor true
+same true
+constructor b null
+added b new
+replace a mutated true
+replace b new true
+replace plain constructor true
+rewind a mutated true
+rewind b new true
+rewind plain constructor true
+constructor b null
+added b new
+constructor skip null
+added skip skipped
+skipped a mutated true
+skipped b new true
+skipped plain constructor true
+skipped skip skipped true

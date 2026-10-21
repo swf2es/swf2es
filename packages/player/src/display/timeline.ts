@@ -524,6 +524,7 @@ function timelineOf(
       case tags.PlaceObject:
       case tags.PlaceObject2:
       case tags.PlaceObject3:
+      case tags.PlaceObject4:
         frame.push({ type: "place", place: readPlace(bytes, t, actions ?? undefined) });
         break;
       case tags.RemoveObject:

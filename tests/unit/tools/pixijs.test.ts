@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { BROWSER_EXPORTS } from "../../../tools/pixijs.ts";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { BROWSER_EXPORTS, isolatedWorkerPlugins } from "../../../tools/pixijs.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -69,4 +71,57 @@ test("the Pixi bundle exports just what the browser's sources import from pixi.j
   }
 
   assert.deepEqual([...BROWSER_EXPORTS].sort(), [...imported].sort());
+});
+
+test("a worker build cannot reset its parent's in-flight CommonJS dependencies", async () => {
+  const require = createRequire(join(root, "vendor/pixijs/package.json"));
+  const { rollup } = await import(pathToFileURL(require.resolve("rollup")).href);
+  const { default: commonjs } = await import(
+    pathToFileURL(require.resolve("@rollup/plugin-commonjs")).href
+  );
+  const { default: webworker } = await import(
+    pathToFileURL(require.resolve("@pixi/webworker-plugins/rollup-plugin")).href
+  );
+  const dir = mkdtempSync(join(tmpdir(), "swf2es-pixi-worker-"));
+  const workerId = `\0@pixi/webworker-plugins/rollup-plugin:${join(dir, "probe.worker.js")}`;
+  writeFileSync(
+    join(dir, "main.js"),
+    "import dep from './dep.cjs'; import Worker from 'worker:./probe.worker.js'; export const value = dep.value; export { Worker };",
+  );
+  writeFileSync(join(dir, "dep.cjs"), "module.exports = require('./leaf.cjs');");
+  writeFileSync(join(dir, "leaf.cjs"), "module.exports = { value: 42 };");
+  writeFileSync(join(dir, "probe.worker.js"), "postMessage('ready');");
+  const plugins = isolatedWorkerPlugins([webworker(), commonjs()], async () => [
+    webworker(),
+    commonjs(),
+  ]);
+  const worker = plugins[0] as { load(id: string): unknown };
+
+  try {
+    const build = await rollup({
+      input: join(dir, "main.js"),
+      plugins: [
+        {
+          name: "overlap-worker",
+          async load(id: string) {
+            // Start a worker while the parent's CommonJS transform awaits its leaf.
+            if (id === join(dir, "leaf.cjs")) {
+              await worker.load.call(this, workerId);
+            }
+          },
+        },
+        ...plugins,
+      ],
+    });
+    try {
+      const { output } = await build.generate({ format: "es" });
+      const module = await import(`data:text/javascript,${encodeURIComponent(output[0].code)}`);
+      assert.equal(module.value, 42);
+      assert.equal(typeof module.Worker, "function");
+    } finally {
+      await build.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
