@@ -2917,6 +2917,13 @@ cached as usual. A Graphics drawing used as a stencil mask uses non-zero
 regardless of `drawPath`'s winding, while static shapes keep their authored
 winding (`static-mask-winding`). Changing a drawing's mask role rebuilds
 its fills, and a fresh view borrows only from the same role.
+The detector excludes disjoint contour bounds and bounding boxes strictly
+inside a convex contour before building edges. It reuses numeric scratch,
+retaining at most 4,096 edges, contour records or levels after a call;
+larger calls release the scratch. Band levels are collected only after a
+crossing is found, and finished polygons own their coordinates separately.
+`node --expose-gc tests/bench/fills.ts <ref> --allocs` compares construction
+time and sampled allocations with the two render modules from a git ref.
 Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear

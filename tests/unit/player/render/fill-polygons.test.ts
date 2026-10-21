@@ -71,6 +71,65 @@ test("a crossing rounded just below a vertex does not hide the vertex's outgoing
   }
 });
 
+test("contour pruning distinguishes a bounding box from the actual convex enclosure", () => {
+  const diamond = [50, 0, 100, 50, 50, 100, 0, 50];
+  assert.equal(crossingFill([diamond, square(40, 40, 20)], false), null);
+  assert.equal(crossingFill([diamond, [40, 40, 40, 60, 60, 60, 60, 40]], true), null);
+  assert.ok(crossingFill([diamond, square(10, 10, 80)], false));
+  assert.ok(crossingFill([square(0, 0, 100), square(0, 20, 30)], false));
+
+  const outer = square(0, 0, 100);
+  const bowtie = [20, 20, 80, 80, 20, 80, 80, 20];
+  for (const nonZero of [false, true]) {
+    const polygons = crossingFill([outer, bowtie], nonZero);
+    assert.ok(polygons);
+    for (const [x, y] of [
+      [10, 10],
+      [50, 30],
+      [30, 50],
+      [50, 70],
+    ]) {
+      const sum = winding(outer, x, y) + winding(bowtie, x, y);
+      const expected = nonZero ? sum !== 0 : sum % 2 !== 0;
+      assert.equal(polygons.filter((p) => winding(p, x, y) !== 0).length, Number(expected));
+    }
+  }
+});
+
+test("scratch reuse and oversized pool release cannot change previously returned geometry", () => {
+  const contours = [square(0, 0, 20), square(10, 10, 20)];
+  const kept = crossingFill(contours, false);
+  assert.ok(kept);
+  const expected = structuredClone(kept);
+  for (let i = 0; i < 20; i++) {
+    crossingFill([square(5, 5, 2)], true);
+    crossingFill([square(0, 0, 100), [10, 10, 90, 90, 10, 90, 90, 10]], i % 2 === 0);
+    assert.deepEqual(crossingFill(contours, false), expected);
+  }
+
+  const large: number[] = [];
+  for (let i = 0; i < 4200; i++) {
+    const angle = (i * Math.PI) / 2100;
+    const r = i % 2 ? 50 : 100;
+    large.push(r * Math.cos(angle), r * Math.sin(angle));
+  }
+
+  assert.equal(crossingFill([large], false), null);
+  assert.deepEqual(kept, expected);
+  assert.deepEqual(crossingFill(contours, false), expected);
+});
+
+test("dense bands combine coincident edges under both winding rules", () => {
+  const contours = Array.from({ length: 100 }, () => square(0, 0, 20));
+  assert.deepEqual(crossingFill(contours, false), []);
+  const polygons = crossingFill(contours, true);
+  assert.ok(polygons);
+  assert.equal(
+    polygons.reduce((sum, p) => sum + area(p), 0),
+    400,
+  );
+});
+
 /** Signed ray crossings, independent of the tessellator's horizontal bands. */
 function winding(points: number[], x: number, y: number): number {
   let sum = 0;
