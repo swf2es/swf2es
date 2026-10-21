@@ -8022,6 +8022,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 80,
   },
   {
+    name: "zoomed-cones",
+    swf: (abc) => bare(abc, 61, "Main", 256, 192),
+    script: "ZoomedCones",
+    frames: 61,
+    capture: [1, 9, 14, 27, 42, 53, 61],
+    tolerance: 32,
+    maxOutliers: 80,
+  },
+  {
     name: "crossing-fills",
     swf: (abc) => bare(abc, 3, "Main", 480, 360),
     script: "CrossingFills",

@@ -71,6 +71,30 @@ test("a crossing rounded just below a vertex does not hide the vertex's outgoing
   }
 });
 
+test("fractional transforms keep edge endpoints aligned with the source vertex's band", () => {
+  const outer = [0, 0, 256, 0, 256, 192, 0, 192];
+  const outline = [56, -64, 88, 175, 168, 175, 200, -64, 128, 123.04347826086956];
+  for (let frame = 0; frame <= 60; frame++) {
+    const scale = 1 + frame / 60;
+    const inner = outline.map((n, i) => n * scale - (i % 2 === 0 ? 134 : 194) * (scale - 1));
+    for (const nonZero of [false, true]) {
+      const polygons = crossingFill([outer, inner], nonZero);
+      assert.ok(polygons);
+      for (let y = 4.75; y < 192; y += 16) {
+        for (let x = 4.25; x < 256; x += 16) {
+          const sum = winding(outer, x, y) + winding(inner, x, y);
+          const expected = nonZero ? sum !== 0 : sum % 2 !== 0;
+          assert.equal(
+            polygons.filter((points) => winding(points, x, y) !== 0).length,
+            Number(expected),
+            `frame ${frame}, ${nonZero}, (${x},${y})`,
+          );
+        }
+      }
+    }
+  }
+});
+
 test("contour pruning distinguishes a bounding box from the actual convex enclosure", () => {
   const diamond = [50, 0, 100, 50, 50, 100, 0, 50];
   assert.equal(crossingFill([diamond, square(40, 40, 20)], false), null);

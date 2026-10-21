@@ -179,8 +179,10 @@ function loadEdges(contours: number[][], all: boolean): void {
     for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
       const x = points[j];
       const y = points[j + 1];
-      const dx = points[i] - x;
-      const dy = points[i + 1] - y;
+      const endX = points[i];
+      const endY = points[i + 1];
+      const dx = endX - x;
+      const dy = endY - y;
       if (dx === 0 && dy === 0) {
         continue;
       }
@@ -208,10 +210,11 @@ function loadEdges(contours: number[][], all: boolean): void {
       e.y = y;
       e.dx = dx;
       e.dy = dy;
-      e.minX = Math.min(x, x + dx);
-      e.maxX = Math.max(x, x + dx);
-      e.minY = Math.min(y, y + dy);
-      e.maxY = Math.max(y, y + dy);
+      // Reconstructing an endpoint from its delta can move it across its scan band.
+      e.minX = Math.min(x, endX);
+      e.maxX = Math.max(x, endX);
+      e.minY = Math.min(y, endY);
+      e.maxY = Math.max(y, endY);
       e.contour = c;
       e.index = i / 2;
       e.count = points.length / 2;
