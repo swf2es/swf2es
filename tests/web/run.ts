@@ -164,6 +164,7 @@ function colours(image: Image, [x, y, w, h]: number[], scale: number): Map<numbe
 }
 
 const checks: [string, (evaluate: Evaluate, send: Send) => Promise<void>][] = [];
+const boundTextureWarnings: string[] = [];
 const check = (name: string, run: (evaluate: Evaluate, send: Send) => Promise<void>) =>
   checks.push([name, run]);
 
@@ -244,6 +245,7 @@ check("each element boots and draws", async (evaluate, send) => {
 check(
   "the quality attribute draws aliased and unsmoothed at low, while it plays",
   async (evaluate, send) => {
+    boundTextureWarnings.length = 0;
     const shown = async (rect: number[]) => {
       const shot = await send<{ data: string }>("Page.captureScreenshot", { format: "png" });
       const image = decodePng(new Uint8Array(Buffer.from(shot.data, "base64")));
@@ -276,6 +278,11 @@ check(
       assert.ok(medium < high, `${medium} colours at medium, ${high} at high (${most} samples)`);
     }
     await call(evaluate, 'requality("high", "/web-test/shapes.swf")');
+    assert.deepEqual(
+      boundTextureWarnings,
+      [],
+      "quality changes or replacement destroyed a bound texture",
+    );
   },
 );
 
@@ -861,6 +868,17 @@ const failures = await withPage(
   async (evaluate, send, fresh, listen) => {
     // What the page threw, told with a failing check: an error of its own, not a time out.
     const thrown: string[] = [];
+    listen("Runtime.consoleAPICalled", (params) => {
+      if (params.type !== "warning") {
+        return;
+      }
+
+      const args = params.args as { value?: unknown }[];
+      const message = args.map((arg) => String(arg.value ?? "")).join(" ");
+      if (message.includes("destroyed while still bound")) {
+        boundTextureWarnings.push(message);
+      }
+    });
     listen("Runtime.exceptionThrown", (params) => {
       const details = params.exceptionDetails as {
         exception?: { description?: string };
