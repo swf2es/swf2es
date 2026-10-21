@@ -8,9 +8,11 @@
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
+import { FloatValue } from "../float.js";
 import { publicQname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { lowerCase } from "./case.js";
+import { FloatVector } from "./float-vector.js";
 
 export const kCaseInsensitive = 1;
 export const kDescending = 2;
@@ -25,7 +27,7 @@ interface Field {
   options: number;
 }
 
-const isObject = (v: Value) => v !== null && typeof v === "object";
+const isObject = (v: Value) => v !== null && typeof v === "object" && !(v instanceof FloatValue);
 
 function stringCompare(rt: Runtime, lower: boolean): Compare {
   return (x, y) => {
@@ -82,13 +84,13 @@ export function sort(rt: Runtime, d: AsObject, args: Value[]): Value {
         return result > 0 ? 1 : result < 0 ? -1 : 0;
       };
       if (args.length >= 2) {
-        if (typeof args[1] !== "number") {
+        if (typeof args[1] !== "number" && !(args[1] instanceof FloatValue)) {
           throw rt.error("TypeError", 1034, rt.describe(args[1]), "Number");
         }
 
         options = rt.toInt(args[1]);
       }
-    } else if (typeof arg0 === "number") {
+    } else if (typeof arg0 === "number" || arg0 instanceof FloatValue) {
       options = rt.toInt(arg0);
     } else {
       throw rt.error("TypeError", 1034, rt.describe(arg0), "Function");
@@ -246,7 +248,12 @@ function sortWith(
       index[i] = i;
       // As getUintProperty: a hole finds the prototype's element.
       atoms[i] = rt.getProperty(d, rt.publicName(i));
-      if (numeric && typeof atoms[i] !== "number" && Number.isNaN(rt.toNumber(atoms[i]))) {
+      if (
+        numeric &&
+        typeof atoms[i] !== "number" &&
+        !(atoms[i] instanceof FloatValue) &&
+        Number.isNaN(rt.toNumber(atoms[i]))
+      ) {
         throw rt.error("TypeError", 1034, rt.describe(atoms[i]), "Number");
       }
 
@@ -284,6 +291,18 @@ function sortWith(
   const source = fieldAtoms ?? atoms;
   const sorted = index.slice(0, newlen).map((i) => source[i]);
   const target: Value[] = d.$a;
+  if (target instanceof FloatVector) {
+    if (target.length < newlen) {
+      target.length = newlen;
+    }
+
+    for (let i = 0; i < newlen; i++) {
+      target.data[i] = rt.toNumber(sorted[i]);
+    }
+
+    return d;
+  }
+
   for (let i = 0; i < newlen; i++) {
     target[i] = sorted[i];
   }

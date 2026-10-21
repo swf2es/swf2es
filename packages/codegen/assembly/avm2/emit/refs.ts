@@ -6,6 +6,7 @@ import { NS_Private, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
+  BUILTIN_Float,
   BUILTIN_Int,
   BUILTIN_Namespace,
   BUILTIN_Number,
@@ -69,6 +70,9 @@ export function typeExpr(e: MethodEmitter, t: i32): void {
       return;
     case BUILTIN_Uint:
       out.text('"uint"');
+      return;
+    case BUILTIN_Float:
+      out.text('"float"');
       return;
     case BUILTIN_Number:
       out.text('"Number"');
@@ -192,8 +196,30 @@ export function poolString(e: MethodEmitter, index: u32): void {
 export function constant(e: MethodEmitter, value: u32, kind: u8, type: i32): void {
   const out = e.out;
   const pool = e.abc.pool;
+  if (kind === C.CONSTANT_Float && e.abc.hasFloatSupport) {
+    const bt = e.domain.builtin(type);
+    const numeric = bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number;
+    if (!numeric) {
+      out.text("rt.float(");
+    }
+
+    out.double(pool.floats[value]);
+    if (!numeric) {
+      out.text(")");
+    }
+
+    return;
+  }
+
   if (value === 0) {
     defaultOf(e, type);
+    return;
+  }
+
+  if (type >= 0 && type === e.domain.floatType && kind !== C.CONSTANT_Float) {
+    out.text("rt.float(");
+    constant(e, value, kind, TYPE_Any);
+    out.text(")");
     return;
   }
 
@@ -238,6 +264,9 @@ function defaultOf(e: MethodEmitter, type: i32): void {
     case BUILTIN_Int:
     case BUILTIN_Uint:
       out.text("0");
+      return;
+    case BUILTIN_Float:
+      out.text("rt.float(NaN)");
       return;
     case BUILTIN_Number:
       out.text("NaN");

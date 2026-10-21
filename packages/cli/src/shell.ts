@@ -15,6 +15,7 @@ import type {
   ShellFiles,
   Value,
 } from "@swf2es/runtime/avm2";
+import { floatLibrary, hasFloatLibrary } from "@swf2es/runtime/avm2";
 import { RejectedError } from "./aot.js";
 
 /** What the shell needs of a compiler: a Codegen, or a build of it for tests. */
@@ -141,6 +142,16 @@ export async function runShell(
   abcs: { name: string; abc: Uint8Array }[],
   options: ShellOptions,
 ): Promise<number> {
+  if (
+    abcs.some(
+      ({ abc }) =>
+        abc.length >= 4 && abc[2] === 47 && abc[3] === 0 && (abc[0] | (abc[1] << 8)) >= 16,
+    ) &&
+    !hasFloatLibrary(libraries.map((lib) => lib.abc))
+  ) {
+    libraries = [...libraries, { name: "float", abc: floatLibrary }];
+  }
+
   const { print } = options;
   const load = options.load ?? evaluateModule;
   const domain = shellDomain(options.compiler);

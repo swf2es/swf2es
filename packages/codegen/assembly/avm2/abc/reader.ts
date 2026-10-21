@@ -105,6 +105,18 @@ export class Reader {
   }
 
   @inline
+  f32(): f32 {
+    const p = this.pos;
+    if (p + 4 > this.end) {
+      this.fail();
+      return 0;
+    }
+
+    this.pos = p + 4;
+    return load<f32>(p);
+  }
+
+  @inline
   d64(): f64 {
     const p = this.pos;
     if (p + 8 > this.end) {

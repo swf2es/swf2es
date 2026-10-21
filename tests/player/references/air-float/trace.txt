@@ -1,0 +1,73 @@
+values 16777216 16777217 0.10000000149011612 NaN
+types number number true false true false false float
+equality true false true false true false
+integer-types true true -Infinity -Infinity Infinity Infinity
+rounding 16777216 16777217
+conversion 0 NaN 0.10000000149011612 1 Infinity -Infinity 0
+boolean false false false true
+branches no true true
+unary-strings 2 NaN
+dynamic 16777216 16777215 16777216 16777216 0 -16777216 16777216 16777216 1
+dynamic-types true true true true true true true true true
+mixed 16777217 16777215 16777216 16777216 16777216x
+mixed-types false false
+primitive 3 1 true
+typed-primitive 16777215 16777216 16777216 1 -16777216 16777216
+typed-primitive-types true true true true true true true false
+call 0.10000000149011612 true true true
+merge true false 3
+loop 1.0000001192092896 true
+local-loop 1.0000001192092896
+local-arithmetic 0.10000002384185791,-0.09999999403953552,0.09999999403953552,0.09999999403953552,0.10000002384185791,true,0,0,0.10000002384185791,true,true,false,false
+local-boundaries -Infinity,false,false,false,true,true,true,true,number,true,false,true
+local-nan NaN,false,false,false,true,true,true,true,number,true,false,false
+local-infinity 0,true,false,false,true,true,true,true,number,true,false,false
+local-changing true false
+local-handler 0.20000000298023224,0.20000000298023224,true,true
+local-capture 0.20000000298023224,true
+local-calls 0.20000000298023224
+vector-default 0 true 0 0
+vector-fixed __AS3__.vec::Vector.<float> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<Number> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<int> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<uint> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<String> false,false,false,true,true
+vector-fixed __AS3__.vec::Vector.<Object> false,false,false,true,true
+vector-fixed-set true
+vector-fixed-clear false
+vector 4 0.10000000149011612 true 0 true 0.10000000149011612,2,0,0
+search 0 2 -1 -1 0 0 3
+dictionary float float float true true undefined
+methods 0.10000000149011612 true 0.100 1.000e-1 0.100 0.10000000149011612
+constants 3.40282346638528e+38 1.401298464324817e-45 NaN Infinity -Infinity true
+math 0.10000000149011612 0.0998334214091301 2 8 true
+extra-math 0.3333333432674408 0.5773502588272095 -Infinity Infinity Infinity
+json [0.10000000149011612,0,null]
+amf 15 3d cc cc cd  0.10000000149011612 true
+amf-vector-marker 18
+amf-vector __AS3__.vec::Vector.<float> 0.10000000149011612 true
+float-storage 0.10000000149011612,0,NaN true -Infinity true
+float-resize 0.10000000149011612,0,0 true
+float-append 4 0.20000000298023224 true
+float-unshift 3,4,0.10000000149011612,0,0,0.20000000298023224 3 0.20000000298023224 4,0.10000000149011612,0,0
+float-insert 4,0.10000000149011612,0,0 5 true
+float-splice 4,6,7,0,0 0.10000000149011612 true
+float-slice 6,7 4,6,7,0,0,0.10000000149011612
+float-reverse 0,0,7,6,4
+float-callbacks true 0.25,0.25,7.25,6.25,4.25 true 0,0 true true true
+float-sort true 0,0,4,6,7 true
+float-numeric-sort 1,3,NaN
+float-enumeration 0,1,2,3,4 true,true,true,true,true
+float-json [0,0,4,6,7] true
+float-copy 0.10000000149011612,0,Infinity,NaN true -Infinity
+float-copy-types true false
+float-amf true 0.10000000149011612,0,Infinity,NaN true -Infinity
+float-fixed-set 1125
+float-fixed-length 1126
+float-fixed-push 1126
+float-shrink 1125 0
+float-shrink-append 1 0.10000000149011612 true
+float-push-reentry 3 0.10000000149011612,0.20000000298023224,0
+float-typed-read 0.30000001192092896 true false
+float-stack-join 0.10000000149011612 0.1 true false
+float-stack-args true,true,0,0 true,true,0,4

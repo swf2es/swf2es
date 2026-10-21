@@ -21,6 +21,11 @@ export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
       return;
     }
 
+    if (value instanceof avm2.FloatValue) {
+      out.value(value.value);
+      return;
+    }
+
     if (value === null || (typeof value !== "object" && typeof value !== "function")) {
       out.value(value as number | string | boolean | null | undefined);
       return;

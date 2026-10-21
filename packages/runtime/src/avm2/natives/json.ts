@@ -1,3 +1,5 @@
+import { FloatValue } from "../float.js";
+import { FloatVector } from "./float-vector.js";
 // JSON's natives, as avmplus' JSONParser and JSONSerializer: the parser's
 // tokens and SyntaxError 1132, and stringify's toJSON (public only: see
 // toJSONOf), replacers, gaps, numbers as the host writes them, and a
@@ -420,6 +422,10 @@ class Serializer {
       value = rt.callValue(this.replacer, holder, [key, value], null);
     }
 
+    if (value instanceof FloatValue) {
+      return value.value;
+    }
+
     switch (typeof value) {
       case "boolean":
       case "string":
@@ -547,7 +553,9 @@ class Serializer {
       // prototype chain, or a Vector's RangeError.
       const elements: Value[] = value.$a;
       const element =
-        i in elements ? elements[i] : this.rt.getProperty(value, this.rt.publicName(i));
+        !(elements instanceof FloatVector) && i in elements
+          ? elements[i]
+          : this.rt.getProperty(value, this.rt.publicName(i));
       const written = this.str(String(i), element, value);
       out[i] = written === undefined ? null : written;
     }

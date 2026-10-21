@@ -16,6 +16,7 @@ import {
   moduleKey,
 } from "@swf2es/codegen";
 import { type ActionList, isAs3, readActions, readDoAbc, readSwf, tags } from "@swf2es/format";
+import { avm2 } from "@swf2es/runtime";
 
 export { API_VERSION };
 
@@ -91,8 +92,8 @@ export class InputError extends Error {}
 export function readInput(bytes: Uint8Array): Input {
   const signature = String.fromCharCode(...bytes.subarray(0, 3));
   if (!SIGNATURES.has(signature)) {
-    // An ABC starts with its minor and major version, and avmplus reads only major 46.
-    if (bytes.length < 4 || bytes[2] !== 46 || bytes[3] !== 0) {
+    // ABC headers name a minor and major version: 46 for Flash, 47 for AIR float.
+    if (bytes.length < 4 || (bytes[2] !== 46 && bytes[2] !== 47) || bytes[3] !== 0) {
       throw new InputError("neither a SWF nor an ABC");
     }
 
@@ -159,8 +160,18 @@ export function compileAhead(
   libraries: { name: string; abc: Uint8Array }[],
   abcs: AbcInput[],
   keepLibraries = false,
-): { libraries: Module[]; abcs: Module[] } {
+): { libraries: Module[]; libraryInputs: { name: string; abc: Uint8Array }[]; abcs: Module[] } {
   codegen.reset(API_VERSION);
+  if (
+    abcs.some(({ abc }) => {
+      const version = codegen.abcVersion(abc);
+      return version?.major === 47 && version.minor >= 16;
+    }) &&
+    !avm2.hasFloatLibrary(libraries.map((lib) => lib.abc))
+  ) {
+    libraries = [...libraries, { name: "float", abc: avm2.floatLibrary }];
+  }
+
   const hashes: string[] = [];
   const builtins: boolean[] = [];
   const add = (what: string, abc: Uint8Array, builtin: boolean, domain: number) => {
@@ -206,7 +217,7 @@ export function compileAhead(
       : null;
   const modules = abcs.map(({ name, lazy }, i) => ({ name, lazy, ...compile(indices[i], digest) }));
 
-  return { libraries: libraryModules, abcs: modules };
+  return { libraries: libraryModules, libraryInputs: libraries, abcs: modules };
 }
 
 /** An AVM1 SWF's action blocks' module, as the player is to compile it, and its key. */

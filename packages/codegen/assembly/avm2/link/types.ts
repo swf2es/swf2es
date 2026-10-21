@@ -9,6 +9,7 @@ import {
   BKIND_Get,
   BKIND_GetSet,
   BKIND_Var,
+  BUILTIN_Float,
   BUILTIN_Int,
   BUILTIN_Number,
   BUILTIN_Uint,
@@ -231,5 +232,5 @@ export function canAssign(domain: Domain, lhs: i32, rhs: i32): bool {
 /** As Traits::isNumeric: int, uint or Number. */
 export function isNumeric(domain: Domain, type: i32): bool {
   const bt = domain.builtin(type);
-  return bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number;
+  return bt === BUILTIN_Int || bt === BUILTIN_Uint || bt === BUILTIN_Number || bt === BUILTIN_Float;
 }
