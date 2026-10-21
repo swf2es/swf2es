@@ -1,0 +1,19 @@
+[
+  "reconfigure color-0 ffff0000 ffff0000 ff0000ff",
+  "reconfigure depth-0 ffff0000 ffff0000 ff0000ff",
+  "reconfigure bindings-scissor-blend-0 ffff00ff ffff0000 ff0000ff",
+  "reconfigure culling-0 ffff00ff ffff0000 ff0000ff",
+  "reconfigure depth-after-color-clear-0 ff0000ff ff0000ff ff0000ff",
+  "reconfigure after-target-0 ff0000ff ff0000ff ff0000ff",
+  "reconfigure depth-after-target-0 ff0000ff ff0000ff ff0000ff",
+  "reconfigure cleared-after-present-0 ff4080c0 ff4080c0 ff4080c0",
+  "reconfigure color-4 ffff0000 ffff0000 ff0000ff",
+  "reconfigure depth-4 ffff0000 ffff0000 ff0000ff",
+  "reconfigure bindings-scissor-blend-4 ffff00ff ffff0000 ff0000ff",
+  "reconfigure culling-4 ffff00ff ffff0000 ff0000ff",
+  "reconfigure depth-after-color-clear-4 ff0000ff ff0000ff ff0000ff",
+  "reconfigure after-target-4 ff0000ff ff0000ff ff0000ff",
+  "reconfigure depth-after-target-4 ff0000ff ff0000ff ff0000ff",
+  "reconfigure cleared-after-present-4 ff4080c0 ff4080c0 ff4080c0",
+  "reconfigure complete"
+]

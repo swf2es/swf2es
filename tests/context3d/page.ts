@@ -34,6 +34,7 @@ function create() {
   });
   check(gl, "WebGL2 unavailable");
   const live = new Set<object>();
+  let created = 0;
   // Count actual GPU handles, including shaders and resources a failed
   // upload allocates; empty JS ownership maps alone do not prove deletion.
   for (const kind of [
@@ -55,6 +56,7 @@ function create() {
       const value = make(...args);
       if (value) {
         live.add(value);
+        created++;
       }
       return value;
     };
@@ -64,7 +66,15 @@ function create() {
     };
   }
   const backend = new WebGLContext3D(gl);
-  return { canvas, gl, live, backend };
+  return {
+    canvas,
+    gl,
+    live,
+    backend,
+    get created() {
+      return created;
+    },
+  };
 }
 
 function color(bytes: Uint8Array, x: number, y: number, width: number): string {
@@ -253,6 +263,7 @@ export async function shaderFixture(
     | "Blending"
     | "ShaderMath"
     | "Comparisons"
+    | "Reconfigure"
     | "Scissor"
     | "Mipmaps"
     | "Multisampling"
@@ -739,6 +750,82 @@ export async function renderTargets() {
   }
 }
 
+export async function reconfiguration() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    for (const quality of [0, 4]) {
+      for (const depth of [false, true]) {
+        c.configure(64, 64, depth, quality);
+        c.clear(1, 0, 0, 1);
+        const pixels = c.read();
+        const warmed = new Set(live);
+        const allocated = owned.created;
+        const formats = gl.getInternalformatParameter;
+        const status = gl.checkFramebufferStatus;
+        let queries = 0;
+        gl.getInternalformatParameter = (...args) => {
+          queries++;
+          return formats.apply(gl, args);
+        };
+        gl.checkFramebufferStatus = (...args) => {
+          queries++;
+          return status.apply(gl, args);
+        };
+        try {
+          for (let i = 0; i < 24; i++) {
+            c.clear(0, 0, 1, 1);
+            c.configure(64, 64, depth, quality);
+            check(c.read() === pixels, "unchanged configuration replaced readback storage");
+            check(color(pixels, 32, 32, 64) === "ff0000ff", "configuration lost pending color");
+            c.present();
+            c.configure(64, 64, depth, quality);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+            check(color(pixels, 32, 32, 64) === "ff0000ff", "configuration cleared presentation");
+            check(owned.created === allocated, "unchanged configuration allocated GPU handles");
+            check(live.size === warmed.size, "unchanged configuration retired GPU handles");
+            for (const handle of live) {
+              check(warmed.has(handle), "unchanged configuration replaced GPU handles");
+            }
+          }
+          check(queries === 0, "unchanged configuration queried capabilities or completeness");
+        } finally {
+          gl.getInternalformatParameter = formats;
+          gl.checkFramebufferStatus = status;
+        }
+        rejects(() => c.configure(64, 64, depth, Number.NaN));
+        rejects(() => c.configure(64.5, 64, depth, quality));
+        const allocation = gl as unknown as { createTexture(): WebGLTexture | null };
+        const allocate = allocation.createTexture;
+        allocation.createTexture = () => null;
+        try {
+          rejects(() => c.configure(32, 32, depth, quality));
+        } finally {
+          allocation.createTexture = allocate;
+        }
+        const afterFailure = owned.created;
+        c.configure(64, 64, depth, quality);
+        check(owned.created === afterFailure, "failed resize invalidated the previous request");
+        check(c.read() === pixels, "failed resize replaced readback storage");
+        check(color(pixels, 32, 32, 64) === "ff0000ff", "failed resize lost old pixels");
+      }
+    }
+    const texture = c.createTexture(8, 8);
+    c.setRenderTarget(texture);
+    rejects(() => c.configure(64, 64, true, 4));
+    c.setRenderTarget(null);
+    check(gl.getError() === gl.NO_ERROR, "reconfiguration polluted GL state");
+    c.dispose();
+    rejects(() => c.configure(64, 64, true, 4));
+    return { passed: true };
+  } finally {
+    c.dispose();
+    check(live.size === 0, "reconfiguration retained GPU resources");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
 export async function multisampling() {
   const owned = create();
   const { backend: c, gl, live } = owned;
@@ -1147,6 +1234,7 @@ export async function lifetime() {
     loss.loseContext();
     await lost;
     rejects(() => second.backend.clear(1, 0, 0, 1));
+    rejects(() => second.backend.configure(32, 32));
     second.backend.dispose();
     check(second.live.size === 0, "lost context retains resource handles");
     rejects(() => lossCube.upload(pixels));

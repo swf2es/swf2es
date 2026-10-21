@@ -29,6 +29,7 @@ node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
+node tests/context3d/oracle.ts --reconfigure
 # Requires a reference driver that implements pixel-shader predication:
 node tests/context3d/oracle.ts --comparisons
 ```
@@ -51,6 +52,15 @@ unavailable-context fallback, cancellation before creation, resource
 ownership, shader swizzles and clip depth, failed shader replacement,
 resize, disposal and refusal after context loss. They count actual
 created/deleted GPU handles.
+
+`Reconfigure.as` checks 48 AIR pixel samples for an unchanged back-buffer
+configuration: retained color and depth, program/vertex/constant bindings,
+scissor, blending, culling, returning from a texture pass, and clearing after
+presentation. It covers ordinary and multisampled back buffers. Repeating the
+same dimensions, depth setting and antialiasing request now preserves the GPU
+resources and readback arrays, without capability or completeness queries.
+Browser checks cover both depth settings, failed-resize rollback, disposal
+and context loss. A changed request still takes the existing allocation path.
 
 `Lifecycle.as` checks explicit context recreation against AIR:
 `dispose()` clears the slot immediately and queues a fresh context;
@@ -274,12 +284,14 @@ error. It exercises cube uploads and sampling without native overrides. This is
 another smoke check, not AIR image parity; the sample binary is not included.
 
 The local `Basic_Load3DS.swf` smoke check draws its textured ant and moving shadow:
-711 draws, 239 presentations and 239 shadow-target passes over 240 ticks, without
-uncaught or WebGL errors. Live GPU handles stayed at 17 at ticks 60, 120 and 240,
-and teardown released them all. The sample still creates/deletes GPU resources during
-playback, so this is not an allocation-free or performance claim. This exercises
-render-to-texture and fragment comparisons together; it does not establish AIR
-image parity. The downloaded sample stays outside the repository.
+239 presentations and 239 shadow-target passes over 240 ticks, without uncaught
+or WebGL errors. Reusing unchanged back buffers reduced cumulative GPU handle
+creation from 741 to 21; two runs created no further handles after warmup.
+Live handles stayed at 17 at ticks 60, 120 and 240, and teardown released them
+all. These are resource counts, not FPS measurements or a claim that the whole
+player allocates nothing. This exercises render-to-texture and fragment comparisons
+together; it does not establish AIR image parity. The downloaded sample stays
+outside the repository.
 
 `Depth.as` compares 53 pixel samples with AIR. It covers all eight depth
 comparisons and four culling modes, the default strict `less` test with writes

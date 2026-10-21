@@ -100,6 +100,7 @@ export class WebGLContext3D implements Context3D {
   private colorBuffer: WebGLRenderbuffer | null = null;
   private resolveDirty = false;
   private depthBuffer: WebGLRenderbuffer | null = null;
+  private antiAlias = 0;
   private depthWrite = true;
   private scissor = false;
   private scissorLeft = 0;
@@ -187,10 +188,23 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     range(32, width - 32, 2048);
     range(32, height - 32, 2048);
-    const samples = this.samples(antiAlias, depth);
     if (this.renderTexture) {
       throw new Error("Context3D experiment: resize while rendering to texture");
     }
+
+    // AIR preserves color, depth and bindings when the request is unchanged.
+    // Shadow passes can issue this every frame when returning to the back buffer.
+    if (
+      this.framebuffer &&
+      width === this.width &&
+      height === this.height &&
+      depth === (this.depthBuffer !== null) &&
+      antiAlias === this.antiAlias
+    ) {
+      return;
+    }
+
+    const samples = this.samples(antiAlias, depth);
     const gl = this.gl;
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();
@@ -273,6 +287,7 @@ export class WebGLContext3D implements Context3D {
     this.resolveFramebuffer = resolveFramebuffer;
     this.colorBuffer = colorBuffer;
     this.depthBuffer = depthBuffer;
+    this.antiAlias = antiAlias;
     this.width = width;
     this.height = height;
     gl.canvas.width = width;

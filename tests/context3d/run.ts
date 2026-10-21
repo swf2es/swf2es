@@ -24,6 +24,7 @@ const scripts = compileScripts(
     "Blending",
     "ShaderMath",
     "Comparisons",
+    "Reconfigure",
     "Scissor",
     "Mipmaps",
     "Multisampling",
@@ -47,6 +48,7 @@ for (const name of [
   "Blending",
   "ShaderMath",
   "Comparisons",
+  "Reconfigure",
   "Scissor",
   "Mipmaps",
   "Multisampling",
@@ -106,6 +108,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(msaa.exception, null, JSON.stringify(msaa));
       assert.equal(msaa.value?.passed, true);
       console.log("context3d: multisample edges, resolve reuse, resize and allocation failures ok");
+      const reconfiguration = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.reconfiguration())',
+      );
+      assert.equal(reconfiguration.exception, null, JSON.stringify(reconfiguration));
+      assert.equal(reconfiguration.value?.passed, true);
+      console.log("context3d: unchanged back buffers reuse resources and preserve pixels");
       const lifecycle: string[] = JSON.parse(
         readFileSync(`${here}lifecycle-reference.json`, "utf8"),
       );
@@ -141,6 +149,7 @@ if (!process.argv.includes("--build-only")) {
         "Depth",
         "Blending",
         "ShaderMath",
+        "Reconfigure",
         "Scissor",
         "Mipmaps",
         "Multisampling",
