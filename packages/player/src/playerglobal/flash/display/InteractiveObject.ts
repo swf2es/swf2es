@@ -105,7 +105,7 @@ export function interactiveObjectNatives(s: Scripting): avm2.Natives {
       this.$needsSoftKeyboard = !!v;
     }
 
-    /** Kept for the SWF to read back: the player draws no context menu of its own. */
+    /** Read when the host opens the SWF's context menu. */
     get contextMenu(): Value {
       return this.$contextMenu ?? null;
     }

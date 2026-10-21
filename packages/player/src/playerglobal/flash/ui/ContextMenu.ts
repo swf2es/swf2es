@@ -1,6 +1,5 @@
-// flash.ui.ContextMenu: AS3 for its items (as3/playerglobal); the link it
-// would offer is kept for the SWF to read back, as the player shows no
-// context menu of a SWF's.
+// flash.ui.ContextMenu: AS3 keeps the items; input/context-menu.ts snapshots them on opening.
+// Links are kept for readback; link-specific built-in actions are not offered yet.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { coerceArgument } from "../display/InteractiveObject.js";

@@ -2408,6 +2408,35 @@ and no listener runs inside another script. Only the last state told
 counts, so a blur and a focus together send nothing. A host that never
 calls it leaves the player active.
 
+### Context menus
+
+`Player.contextMenu` snapshots an AVM2 menu on demand, using the input
+hit test and the nearest ancestor with a `ContextMenu`. Root artwork
+targets the root for menus, as Flash Player 32 does. `menuSelect` runs
+before the custom items are read, so its listeners can replace items or
+change their captions, visibility and enabled state. A selection sends
+`menuItemSelect` to the captured item, with the original `mouseTarget`
+and `contextMenuOwner`, in a clipboard gesture. Later item changes do
+not rewrite a menu already open. Destruction makes its callbacks inert.
+
+`render/context-menu.ts`, bound with the pointer, presents the snapshot
+in a DOM popover shared by the web element and desktop player. Captions
+are text, never markup. Only an open menu holds DOM nodes and document
+listeners; closing, blur, outside focus, resize or unbinding releases
+them. The top layer escapes a web element's overflow and works in full
+screen. Arrow keys, Home, End, Enter, Escape and Tab navigate or dismiss
+the menu; the popup takes those keys before the SWF does. An embedder
+can capture and prevent the canvas's `contextmenu` event to provide its own UI.
+
+The first implementation supports AVM2 custom items, separators,
+visibility, disabled items, quality actions and an About entry.
+`ContextMenu.isSupported` is true. `Stage.showDefaultContextMenu`,
+the web element's `menu="false"`, and `hideBuiltInItems` control
+built-in quality entries while keeping custom entries. AVM1 custom
+menus, programmatic `ContextMenu.display`, AIR menu trees and the
+other Flash built-in actions remain unimplemented. The model is
+renderer-independent so those can reuse the presentation.
+
 ### The clipboard
 
 Flash Player 10 let a script write the clipboard only while it handled
@@ -2454,11 +2483,10 @@ default the async Clipboard API's `writeText`, or `write` with HTML,
 which a browser allows during a user's activation; null in node, where
 the clipboard is the player's memory alone and a paste without the
 host's data pastes what the SWF last copied. Nothing reads the system's
-clipboard but a paste, as in Flash. Flash's context menu, with its Cut,
-Copy, Paste, Delete and Select All, has no counterpart: a menu of the
-player's own could paste only through the async API's `readText`, which
-asks the user's leave, so the browser's menu stays. `tests/web` presses
-the keys in Chrome.
+clipboard but a paste, as in Flash. The context menu's built-in Cut,
+Copy, Paste, Delete and Select All are not implemented yet; a paste
+from the popup would need the async API's `readText`, which asks the
+user's leave. `tests/web` presses the keys in Chrome.
 
 ### ExternalInterface
 
@@ -4948,7 +4976,7 @@ Not done yet: the SWF's scripts see Flash Player's showAll, the stage
 the SWF's size, whatever the element's `scale`, and noScale does not
 resize the stage or dispatch Event.RESIZE; the letterbox around a
 showAll stage shows the background, not what lies outside the stage;
-`menu` is carried over but there is no context menu; a
+AVM1 custom context menus are not implemented; a
 `javascript:` URL from navigateToURL never runs, allowed or not; and
 `document[name]`, which found an `<embed>` by its name, does not find
 the element. Nor can a page give the element modules compiled ahead of
