@@ -41,6 +41,7 @@ const scripts = compileScripts(
     "CubeTargets",
     "CubeTextures",
     "TemporaryMatrices",
+    "IndirectConstants",
   ].map((name) => ({
     name,
     source: fixtureSource(name),
@@ -74,6 +75,7 @@ for (const name of [
   "CubeTargets",
   "CubeTextures",
   "TemporaryMatrices",
+  "IndirectConstants",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -169,6 +171,12 @@ if (!process.argv.includes("--build-only")) {
       console.log(
         "context3d: texture byte uploads preserve channels, reuse staging and release resources",
       );
+      const indirect = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.indirectConstants())',
+      );
+      assert.equal(indirect.exception, null, JSON.stringify(indirect));
+      assert.equal(indirect.value?.passed, true);
+      console.log("context3d: indexed constants reuse their bank and preserve program lifetime");
       const vertexFormats = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.vertexFormats())',
       );
@@ -228,6 +236,7 @@ if (!process.argv.includes("--build-only")) {
         "CubeTargets",
         "CubeTextures",
         "TemporaryMatrices",
+        "IndirectConstants",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,

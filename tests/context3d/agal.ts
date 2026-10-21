@@ -14,6 +14,7 @@ export interface ShaderSource {
   source: string;
   attributes: number[];
   constants: number[];
+  indirect: boolean;
   samplers: SamplerSource[];
 }
 
@@ -35,6 +36,19 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     bytes[6] !== (stage === "vertex" ? 0 : 1)
   ) {
     throw new Error("Context3D experiment requires an AGAL v1 program");
+  }
+
+  // Direct-only shaders keep their sparse uniform uploads. An indirect shader
+  // shares one bank for direct and indexed reads, without duplicate uniforms.
+  let indirect = false;
+  for (let offset = 7; offset < bytes.length; offset += 24) {
+    const opcode = data.getUint32(offset, true);
+    if (
+      data.getUint32(offset + 12, true) >>> 31 ||
+      (!UNARY.has(opcode) && opcode !== 0x28 && data.getUint32(offset + 20, true) >>> 31)
+    ) {
+      indirect = true;
+    }
   }
 
   const names = new Map<string, string>();
@@ -60,6 +74,12 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         if (write || index >= (stage === "vertex" ? 128 : 28)) {
           throw new Error("Invalid AGAL constant");
         }
+
+        if (indirect && stage === "vertex") {
+          names.set("vc", "uniform vec4 vc[128];");
+          return `vc[${index}]`;
+        }
+
         name = `${stage === "vertex" ? "vc" : "fc"}${index}`;
         declaration = `uniform vec4 ${name};`;
         constants.add(index);
@@ -95,11 +115,33 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const source = (offset: number, row = 0): string => {
     const low = data.getUint32(offset, true);
     const high = data.getUint32(offset + 4, true);
-    if (high >>> 8 || ((low >>> 16) & 255) !== 0) {
-      throw new Error("Unsupported AGAL source encoding");
+    let name: string;
+    if (high >>> 31) {
+      const type = (high >>> 8) & 255;
+      const component = (high >>> 16) & 255;
+      const add = (low >>> 16) & 255;
+      if (
+        stage !== "vertex" ||
+        high >>> 24 !== 128 ||
+        (high & 255) !== 1 ||
+        type > 2 ||
+        component > 3 ||
+        add >= 128
+      ) {
+        throw new Error("Unsupported AGAL indirect constant");
+      }
+
+      const index = register(type, low & 65535, false);
+      names.set("vc", "uniform vec4 vc[128];");
+      name = `readConstant(${index}.${components[component]}, ${add + row}.0)`;
+    } else {
+      if (high >>> 8 || ((low >>> 16) & 255) !== 0) {
+        throw new Error("Unsupported AGAL source encoding");
+      }
+
+      name = register(high & 255, (low & 65535) + row, false);
     }
 
-    const name = register(high & 255, (low & 65535) + row, false);
     const swizzle = low >>> 24;
     let lanes = "";
     for (let c = 0; c < 4; c++) {
@@ -242,9 +284,10 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 0x19: {
         const rows = opcode === 0x18 ? 4 : 3;
         const dimensions = opcode === 0x17 ? ".xyz" : "";
-        const matrixType = data.getUint32(offset + 20, true);
+        const matrixHigh = data.getUint32(offset + 20, true);
+        const matrixType = matrixHigh & 255;
         if (
-          (rows === 3 && (mask & 8 || (matrixType === 2 && mask !== 7))) ||
+          (rows === 3 && (mask & 8 || ((matrixType === 2 || matrixHigh >>> 31) && mask !== 7))) ||
           (matrixType !== 1 && matrixType !== 2) ||
           data.getUint32(offset + 16, true) >>> 24 !== 0xe4
         ) {
@@ -321,6 +364,15 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     source: `#version 300 es
 precision highp float;
 ${declarations}
+${
+  indirect
+    ? `vec4 readConstant(float address, float offset) {
+  float index = roundEven(address) + offset;
+  if (!(index >= 0.0 && index < 128.0)) { return vec4(0.0); }
+  return vc[int(index)];
+}`
+    : ""
+}
 ${stage === "fragment" ? "out vec4 color;" : "uniform float targetY;"}
 void main() {
   vec4 result = vec4(0.0);
@@ -329,6 +381,7 @@ void main() {
 }`,
     attributes: [...attributes],
     constants: [...constants],
+    indirect,
     samplers: [...samplers.values()],
   };
 }

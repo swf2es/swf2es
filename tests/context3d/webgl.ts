@@ -98,6 +98,7 @@ interface ProgramState {
   targetY: WebGLUniformLocation | null;
   attributes: number[];
   vertex: (WebGLUniformLocation | null)[];
+  vertexBank: WebGLUniformLocation | null;
   fragment: (WebGLUniformLocation | null)[];
   samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
   samplerMask: number;
@@ -719,6 +720,7 @@ export class WebGLContext3D implements Context3D {
       targetY: null,
       attributes: [],
       vertex: [],
+      vertexBank: null,
       fragment: [],
       samplers: [],
       samplerMask: 0,
@@ -741,6 +743,7 @@ export class WebGLContext3D implements Context3D {
         state.targetY = gl.getUniformLocation(handle, "targetY");
         state.attributes = vs.attributes;
         state.vertex = [];
+        state.vertexBank = vs.indirect ? gl.getUniformLocation(handle, "vc[0]") : null;
         state.fragment = [];
         state.samplers = [];
         state.samplerMask = 0;
@@ -778,6 +781,7 @@ export class WebGLContext3D implements Context3D {
         state.targetY = null;
         state.attributes.length = 0;
         state.vertex.length = 0;
+        state.vertexBank = null;
         state.fragment.length = 0;
         state.samplers.length = 0;
         state.samplerMask = 0;
@@ -1447,7 +1451,11 @@ export class WebGLContext3D implements Context3D {
       gl.uniform1i(binding.location, slot);
     }
 
-    this.uniforms(state.vertex, this.vertexConstants);
+    if (state.vertexBank) {
+      gl.uniform4fv(state.vertexBank, this.vertexConstants);
+    } else {
+      this.uniforms(state.vertex, this.vertexConstants);
+    }
     this.uniforms(state.fragment, this.fragmentConstants);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);

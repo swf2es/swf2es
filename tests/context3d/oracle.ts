@@ -16,6 +16,7 @@ const fixture =
     "CubeTargets",
     "CubeTextures",
     "TemporaryMatrices",
+    "IndirectConstants",
     "Multisampling",
     "Mipmaps",
     "Scissor",

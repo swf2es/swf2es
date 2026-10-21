@@ -28,11 +28,101 @@ test("AGAL stage, masks, swizzles, constants and clip-depth mapping", () => {
   assert.match(result.source, /result\.z \* 2\.0 - result\.w/);
   const fragment = translate(mov(true), "fragment");
   assert.deepEqual(fragment.constants, [0]);
+  assert.equal(fragment.indirect, false);
   assert.match(fragment.source, /result\.xyzw = fc0\.xyzw/);
   // ByteArray storage need not start at byte zero.
   const larger = new Uint8Array(50);
   larger.set(vertex, 9);
   assert.deepEqual(translate(larger.subarray(9, 40), "vertex"), result);
+});
+
+test("indirect vertex reads share a bank with direct reads and register their index inputs", () => {
+  for (const type of [0, 1, 2]) {
+    for (let lane = 0; lane < 4; lane++) {
+      const bytes = new Uint8Array(55);
+      bytes.set(mov());
+      bytes.set(mov().subarray(7), 31);
+      const view = new DataView(bytes.buffer);
+      view.setUint32(19, 1, true); // Direct vc0 read before the indexed read.
+      view.setUint32(35, 0x04050000, true);
+      view.setUint32(39, 0xc6040007, true);
+      view.setUint32(43, 0x80000001 | (type << 8) | (lane << 16), true);
+      const result = translate(bytes, "vertex");
+      assert.equal(result.indirect, true);
+      assert.deepEqual(result.constants, []);
+      assert.deepEqual(result.attributes, type === 0 ? [7] : []);
+      assert.match(result.source, /uniform vec4 vc\[128\];/);
+      assert.doesNotMatch(result.source, /uniform vec4 vc\d/);
+      assert.match(result.source, /result\.xyzw = vc\[0\]\.xyzw/);
+      const index = type === 0 ? "va7" : type === 1 ? "vc[7]" : "t7";
+      assert.ok(
+        result.source.includes(`v0.xz = readConstant(${index}.${"xyzw"[lane]}, 4.0).zyxw.xz;`),
+      );
+      assert.match(result.source, /roundEven\(address\) \+ offset/);
+    }
+  }
+});
+
+test("indirect sources reject unverified stages, offsets, register types and reserved bits", () => {
+  const valid = mov();
+  new DataView(valid.buffer).setUint32(19, 0x80000001, true);
+  translate(valid, "vertex");
+  for (const [offset, value] of [
+    [15, 8],
+    [17, 128],
+    [19, 0],
+    [19, 2],
+    [20, 3],
+    [20, 16],
+    [21, 4],
+    [22, 129],
+    [22, 1],
+    [22, 0],
+  ]) {
+    const bytes = valid.slice();
+    bytes[offset] = value;
+    // With no indirect flag the nonzero offset is still invalid.
+    if (offset === 22 && value === 0) {
+      bytes[17] = 1;
+    }
+    assert.throws(() => translate(bytes, "vertex"), `byte ${offset}: ${value}`);
+  }
+  for (const [type, limit] of [
+    [0, 8],
+    [1, 128],
+    [2, 8],
+  ]) {
+    const bytes = valid.slice();
+    bytes[20] = type;
+    bytes[15] = limit - 1;
+    translate(bytes, "vertex");
+    bytes[15] = limit;
+    assert.throws(() => translate(bytes, "vertex"));
+  }
+  valid[6] = 1;
+  assert.throws(() => translate(valid, "fragment"), /indirect constant/);
+});
+
+test("indirect matrix rows advance the offset without advancing the index register", () => {
+  for (const opcode of [0x17, 0x18, 0x19]) {
+    const bytes = binary(opcode, 7);
+    bytes[13] = opcode === 0x18 ? 15 : 7;
+    bytes[25] = 126;
+    new DataView(bytes.buffer).setUint32(27, 0x80030201, true);
+    const result = translate(bytes, "vertex");
+    const rows = opcode === 0x18 ? 4 : 3;
+    for (let row = 0; row < rows; row++) {
+      assert.ok(result.source.includes(`readConstant(t7.w, ${126 + row}.0)`));
+    }
+    assert.doesNotMatch(result.source, /t8/);
+    if (opcode !== 0x18) {
+      bytes[13] = 5;
+      assert.throws(() => translate(bytes, "vertex"), /matrix/);
+      bytes[13] = 7;
+    }
+    bytes[26] = 0xc6;
+    assert.throws(() => translate(bytes, "vertex"), /matrix/);
+  }
 });
 
 test("unsupported and malformed AGAL never silently compile", () => {
@@ -111,7 +201,7 @@ test("arithmetic validates both sources and rejects unsupported matrix encodings
     [27, 4],
     [26, 0],
     [25, 1],
-    [30, 128],
+    [30, 129],
   ]) {
     const bytes = binary(0x18, 4);
     bytes[offset] = value;
@@ -240,7 +330,10 @@ test("unary math validates unused operands and three-lane vector destinations", 
       assert.throws(() => translate(bytes, stage), /Nonempty unused AGAL source/);
       bytes[23] = 0;
       bytes[22] = 128;
-      assert.throws(() => translate(bytes, stage), /Unsupported AGAL source encoding/);
+      assert.throws(
+        () => translate(bytes, stage),
+        /Unsupported AGAL (source encoding|indirect constant)/,
+      );
     }
     for (const opcode of [0x0e, 0x11]) {
       const bytes = opcode === 0x11 ? binary(opcode, 1, fragment) : mov(fragment);

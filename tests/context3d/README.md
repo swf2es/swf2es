@@ -33,6 +33,7 @@ node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
+node tests/context3d/oracle.ts --indirectconstants
 node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
 node tests/context3d/oracle.ts --cubetargets
@@ -232,8 +233,8 @@ negative register indices (RangeError 2006) and invalid program types
 and 28 fragment registers; AIR can accept uploads beyond those limits.
 The parser rejects matrix spans beyond those limits before GPU allocation.
 Matrix operands require consecutive, unswizzled constant or temporary registers;
-three-row instructions require a destination mask within xyz (exact xyz for temporaries). Indirect reads,
-other instructions and broader numeric edge-case parity remain future work.
+three-row instructions require a destination mask within xyz (exact xyz for temporary
+or indirect matrices). Other instructions and broader numeric edge-case parity remain future work.
 
 `TemporaryMatrices.as` adds 144 AIR pixel samples for `m33`, `m44` and `m43`
 reading matrices from temporary registers, as Away3D's normal mapping does.
@@ -242,6 +243,29 @@ input vectors or matrix rows, input swizzles and partial `m44` writes. Matrix
 row spans are checked against the eight-register temporary bank. Three-row
 temporary matrices require an exact `.xyz` write mask: AIR rejected `.xz`.
 These remain GPU operations, translated only at program upload.
+
+`IndirectConstants.as` adds 465 AIR pixel samples for indexed vertex constants.
+Attributes, temporaries and constants can supply the index through any component.
+The fixture covers different indices per vertex, source swizzles, masked writes,
+the second arithmetic operand, overlapping index/destination temporaries, all three
+matrix instructions, partial `m44` writes and reads crossing the bank boundary.
+Indirect `m33` and `m43` require an exact `.xyz` destination mask: AIR rejects `.xz`.
+
+The tested AIR D3D backend rounds indices to nearest, with ties to even, before
+adding the immediate offset; out-of-range reads return zero. The shader uses
+`roundEven` and checks bounds before converting to an integer. Fractional and
+negative indices, ties, first/last registers and matrix rows beyond the last
+register are covered. Offsets are restricted to 0–127, vertex constants to 128
+registers, and index registers to their ordinary baseline ranges. Fragment
+indirection, larger/signed offsets, nonfinite/extreme indices and cross-driver
+rounding parity remain unverified and are not claimed.
+
+Shaders using indirection share one uniform bank for direct and indexed reads.
+Each draw uploads the existing 2 KiB Float32Array once; direct-only shaders retain
+their sparse uploads. There are no new per-draw arrays, GPU handles or uniform
+location queries. Browser checks verify storage identity across 32 draws, constant
+updates, optimized-away indexed reads, failed uploads, direct/indirect replacement,
+resize and disposal. Sixteen AGAL unit tests cover accepted and rejected encodings.
 
 `ShaderMath.as` adds 309 AIR pixel samples for `frc`, `sqt`, `rsq`, `pow`,
 `nrm`, `crs`, vertex `sge`/`slt`, and fragment `kil`. Both shader stages exercise
