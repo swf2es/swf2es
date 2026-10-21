@@ -20,6 +20,7 @@ const fixture =
     "Multisampling",
     "Mipmaps",
     "SamplerStates",
+    "LodBias",
     "Scissor",
     "ShaderMath",
     "ScalarMath",

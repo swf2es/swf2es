@@ -52,6 +52,8 @@ export class VertexOffsetError extends Error {}
 
 export class ScissorBoundsError extends Error {}
 
+export class SamplerBiasError extends Error {}
+
 export class TextureBindingError extends Error {
   readonly reason:
     | "unused"

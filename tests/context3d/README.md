@@ -32,6 +32,7 @@ node tests/context3d/oracle.ts --scalarmath
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --samplerstates
+node tests/context3d/oracle.ts --lodbias
 node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --indirectconstants
@@ -338,7 +339,8 @@ The prototype retains only weak ownership records for retired textures.
 
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 and cube `bgra` textures up to 1024×1024 per face,
-with no LOD bias, anisotropic filtering or rectangle/compressed textures.
+with signed LOD bias; anisotropic filtering and rectangle/compressed textures
+remain unsupported.
 Upload dimensions must match the selected mip level. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
@@ -416,7 +418,25 @@ between AIR and the browser. Scale `4 * sqrt(2)` also exposed nearest-mip
 selection differences at the half-LOD boundary. The exact reference uses
 integer LODs for trilinear sampling and stays away from that nearest-mip boundary;
 browser checks additionally inspect the selected GL filter. Anisotropic filtering,
-LOD bias, broader sampler encodings and full validation precedence remain open.
+broader sampler encodings and full validation precedence remain open.
+
+`LodBias.as` compares 390 pixel samples with AIR for signed AGAL texture LOD
+bias, including negative/positive eighth-level fractions, both encoded extremes,
+nearest/trilinear/no mip filtering, 2D and cube textures, and clamping to the
+available mip chain. Repeated uses of one sampler slot must use the same bias
+(upload Error 3696); different slots can sample the same texture with different
+biases. Runtime sampler overrides and `ignoresampler` retain the shader's bias.
+The reference also covers selected-program reupload, texture rebinding, resize
+and presentation. Its solid-color mip levels and controlled derivatives exercise
+fractional bias without asserting general cross-driver filtering precision.
+
+Bias is emitted as a GLSL texture-call constant at upload; there are no new
+per-draw arrays, uniforms, GPU queries or sampler handles. Unit tests decode all
+256 byte values for 2D and cube samplers. Browser sampler lifetime checks now
+use positive/negative biased programs and verify a failed conflicting-bias
+replacement preserves the previous program and creates no GPU handles.
+Hardware LOD-bias limits and implicit-derivative/filter precision remain
+driver-dependent; the checked AIR/browser backends match this reference exactly.
 
 `CubeTextures.as` compares all six cube faces with AIR, including asymmetric
 quadrants to detect flips, nearest/linear filtering, all three mip modes,

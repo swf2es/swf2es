@@ -18,6 +18,7 @@ import {
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
   SAMPLER_WRAPS,
+  SamplerBiasError,
   type SamplerFilter,
   type SamplerMip,
   type SamplerWrap,
@@ -801,7 +802,15 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
   class ProgramNatives {
     upload(vertex: AsObject, fragment: AsObject): void {
-      program(this as unknown as AsObject).upload(bytes(vertex), bytes(fragment));
+      try {
+        program(this as unknown as AsObject).upload(bytes(vertex), bytes(fragment));
+      } catch (error) {
+        if (error instanceof SamplerBiasError) {
+          throw s.rt.error("Error", 3696);
+        }
+
+        throw error;
+      }
     }
 
     dispose(): void {

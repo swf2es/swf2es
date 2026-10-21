@@ -282,6 +282,7 @@ export async function shaderFixture(
     | "Scissor"
     | "Mipmaps"
     | "SamplerStates"
+    | "LodBias"
     | "Multisampling"
     | "TemporaryMatrices"
     | "IndirectConstants"
@@ -996,9 +997,11 @@ export async function samplerStates() {
     const code = new DataView(fragment.buffer);
     code.setUint32(7, 0x28, true);
     code.setUint32(27, 0x40005, true);
+    code.setUint32(23, 8 << 16, true);
     const flat = c.createProgram();
     flat.upload(shader(false), fragment);
     code.setUint32(27, 0x41005, true);
+    code.setUint32(23, 248 << 16, true);
     const spherical = c.createProgram();
     spherical.upload(shader(false), fragment);
     c.setProgram(flat);
@@ -1076,6 +1079,11 @@ export async function samplerStates() {
     const bad = fragment.slice();
     bad[7] = 0xff;
     rejects(() => spherical.upload(shader(false), bad));
+    const conflicting = new Uint8Array(55);
+    conflicting.set(fragment);
+    conflicting.set(fragment.subarray(7), 31);
+    conflicting[49] = 8;
+    rejects(() => spherical.upload(shader(false), conflicting));
     c.draw(indices, 0, 1);
     check(owned.created === allocated, "invalid sampler program allocated handles");
     c.configure(64, 64);

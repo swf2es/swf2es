@@ -1,5 +1,7 @@
 // Deliberately small AGAL v1 slice for the opt-in Context3D probe.
 // Format: https://github.com/adobe/glsl2agal/blob/master/agalassembler/agal.h
+import { SamplerBiasError } from "./backend.ts";
+
 export type ProgramType = "vertex" | "fragment";
 
 export interface SamplerSource {
@@ -9,6 +11,7 @@ export interface SamplerSource {
   mip: number;
   cube: boolean;
   ignore: boolean;
+  bias: number;
 }
 
 export interface ShaderSource {
@@ -305,9 +308,16 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 0x28: {
         const low = data.getUint32(offset + 16, true);
         const high = data.getUint32(offset + 20, true);
-        // LOD bias remains outside this slice.
+        const index = low & 65535;
+        const bias = data.getInt8(offset + 18) / 8;
         const mip = (high >>> 24) & 15;
-        if (stage !== "fragment" || low >= 8 || (high & ~0x13141000) !== 5 || mip > 2) {
+        if (
+          stage !== "fragment" ||
+          index >= 8 ||
+          low >>> 24 !== 0 ||
+          (high & ~0x13141000) !== 5 ||
+          mip > 2
+        ) {
           throw new Error("Unsupported AGAL sampler encoding");
         }
 
@@ -315,7 +325,11 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         const linear = (high & 0x10000000) !== 0;
         const repeat = (high & 0x00100000) !== 0;
         const ignore = (high & 0x00040000) !== 0;
-        const previous = samplers.get(low);
+        const previous = samplers.get(index);
+        if (previous && previous.bias !== bias) {
+          throw new SamplerBiasError("Conflicting AGAL sampler biases");
+        }
+
         if (
           previous &&
           (previous.linear !== linear ||
@@ -327,9 +341,10 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
           throw new Error("Conflicting AGAL sampler states");
         }
 
-        samplers.set(low, { index: low, linear, repeat, mip, cube, ignore });
-        names.set(`fs${low}`, `uniform ${cube ? "samplerCube" : "sampler2D"} fs${low};`);
-        expression = `texture(fs${low}, ${a}.${cube ? "xyz" : "xy"})`;
+        samplers.set(index, { index, linear, repeat, mip, cube, ignore, bias });
+        names.set(`fs${index}`, `uniform ${cube ? "samplerCube" : "sampler2D"} fs${index};`);
+        // Bias stays in the shader even when ignoresampler preserves runtime state.
+        expression = `texture(fs${index}, ${a}.${cube ? "xyz" : "xy"}${bias === 0 ? "" : `, ${bias.toFixed(3)}`})`;
         break;
       }
       case 0x29:
