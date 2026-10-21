@@ -28,6 +28,7 @@ node tests/context3d/oracle.ts --bufferbytes
 node tests/context3d/oracle.ts --texturebytes
 node tests/context3d/oracle.ts --vertexformats
 node tests/context3d/oracle.ts --shader-math
+node tests/context3d/oracle.ts --scalarmath
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --multisampling
@@ -222,6 +223,21 @@ overlapping temporary registers. Discard tests select each scalar lane, cover
 negative/zero/positive values before and after the color write, and discard
 part of a triangle using an interpolated varying.
 
+`ScalarMath.as` checks `rcp`, `log`, `exp`, `sin` and `cos` with 2,184 pixel
+expectations in both AIR and the browser. Logarithm and exponent use base two;
+trigonometric inputs use radians. The fixture calculates expected values in AS3
+and allows one byte per RGB channel for shader approximation and quantization.
+It checks finite inputs, negative reciprocal/trigonometric values, positive log
+inputs below and above one, negative/positive exponents, reversed swizzles,
+masked writes and safe temporary overlaps. Every lane is read as RGB, including
+w, so readback alpha handling cannot hide a failure. Separate scalar writes cover
+all four lanes. Both AIR runs passed the same independent expectations.
+
+Translation happens only at program upload; these operations run on the GPU and
+add no per-draw JavaScript work or allocations. Zero reciprocals, nonpositive
+log inputs, nonfinite values, overflow/underflow and large-angle precision are
+not covered by this fixture.
+
 `Comparisons.as` checks fragment `sge`/`slt` with 368 independently calculated
 pixel expectations: negative, positive and equal inputs, signed zero, both source
 swizzles, every destination lane, vector/partial writes, either input overlapping
@@ -238,9 +254,10 @@ The translator now emits GLSL comparisons in either stage, with no new per-draw
 JavaScript work. Native AIR confirmation remains outstanding.
 
 This slice deliberately rejects other unresolved cases. Swizzled source
-registers overlapping a root/power destination differed when they changed
-a written lane. `sqt`/`pow` reject that overlap; identity and same-lane scalar
-overlap are covered. The scalar probes check every lane in both stages and
+registers overlapping a reciprocal/root/power/log/exponent destination differed
+when they changed a written lane. `rcp`/`sqt`/`pow`/`log`/`exp` reject that overlap;
+identity and same-lane scalar overlap are covered. Sine/cosine also pass reversed
+overlapping writes. The scalar probes check every lane in both stages and
 `pow` with either or both operands sharing its destination. `nrm`/`crs` currently
 require an exact `.xyz` destination mask: AIR rejected the partial `.y` probe.
 `kil` requires a replicated scalar swizzle from a temporary or varying, a zero

@@ -267,6 +267,7 @@ export async function shaderFixture(
     | "TextureBytes"
     | "VertexFormats"
     | "ShaderMath"
+    | "ScalarMath"
     | "Comparisons"
     | "FrameValidation"
     | "FrameValidationFlat"

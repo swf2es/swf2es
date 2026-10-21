@@ -19,6 +19,7 @@ const fixture =
     "Mipmaps",
     "Scissor",
     "ShaderMath",
+    "ScalarMath",
     "Blending",
     "ColorMask",
     "Stencil",

@@ -18,10 +18,10 @@ export interface ShaderSource {
 }
 
 const SUPPORTED = new Set([
-  0, 1, 2, 3, 4, 6, 7, 8, 9, 0x0a, 0x0b, 0x0e, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
-  0x27, 0x28, 0x29, 0x2a,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+  0x15, 0x16, 0x17, 0x18, 0x19, 0x27, 0x28, 0x29, 0x2a,
 ]);
-const UNARY = new Set([0, 8, 9, 0x0a, 0x0e, 0x14, 0x15, 0x16, 0x27]);
+const UNARY = new Set([0, 5, 8, 9, 0x0a, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x14, 0x15, 0x16, 0x27]);
 
 export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -151,13 +151,13 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
     // AIR differs for overlaps that shuffle written lanes. Replicating the
     // destination lane for a scalar write is safe; unused lanes do not matter.
-    if (opcode === 9 || opcode === 0x0b) {
+    if (opcode === 5 || opcode === 9 || opcode === 0x0b || opcode === 0x0c || opcode === 0x0d) {
       for (let operand = offset + 8; operand <= offset + (unary ? 8 : 16); operand += 8) {
         const low = data.getUint32(operand, true);
         if (data.getUint32(operand + 4, true) === dest >>> 24 && (low & 65535) === (dest & 65535)) {
           for (let lane = 0; lane < 4; lane++) {
             if (mask & (1 << lane) && ((low >>> (24 + lane * 2)) & 3) !== lane) {
-              throw new Error("Unsupported AGAL swizzled root/power overlap");
+              throw new Error("Unsupported AGAL swizzled scalar-math overlap");
             }
           }
         }
@@ -181,6 +181,9 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 4:
         expression = `(${a} / ${b})`;
         break;
+      case 5:
+        expression = `(vec4(1.0) / ${a})`;
+        break;
       case 6:
         expression = `min(${a}, ${b})`;
         break;
@@ -198,6 +201,18 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         break;
       case 0x0b:
         expression = `pow(${a}, ${b})`;
+        break;
+      case 0x0c:
+        expression = `log2(${a})`;
+        break;
+      case 0x0d:
+        expression = `exp2(${a})`;
+        break;
+      case 0x0f:
+        expression = `sin(${a})`;
+        break;
+      case 0x10:
+        expression = `cos(${a})`;
         break;
       case 0x0e:
       case 0x11:

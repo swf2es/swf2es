@@ -41,7 +41,7 @@ test("unsupported and malformed AGAL never silently compile", () => {
     [1, 2],
     [5, 0],
     [6, 1], // header and stage
-    [7, 5], // unsupported opcode
+    [7, 0x1a], // unsupported opcode
     [13, 0],
     [13, 16], // empty/invalid destination mask
     [14, 1], // constant destination
@@ -149,9 +149,9 @@ test("temporary matrix spans are bounded independently of constant registers", (
   }
 });
 
-test("scalar root/power overlaps retain the lane being written", () => {
+test("scalar-math overlaps retain the lane being written", () => {
   for (const fragment of [false, true]) {
-    for (const opcode of [9, 0x0b]) {
+    for (const opcode of [5, 9, 0x0b, 0x0c, 0x0d]) {
       for (let lane = 0; lane < 4; lane++) {
         const bytes = new Uint8Array(55);
         bytes.set(binary(opcode, 1, fragment));
@@ -160,7 +160,7 @@ test("scalar root/power overlaps retain the lane being written", () => {
         view.setUint32(11, 0x02000000 | ((1 << lane) << 16), true);
         view.setUint32(15, (lane * 0x55) << 24, true);
         view.setUint32(19, 2, true);
-        if (opcode === 9) {
+        if (opcode !== 0x0b) {
           view.setUint32(23, 0, true);
           view.setUint32(27, 0, true);
         }
@@ -171,11 +171,11 @@ test("scalar root/power overlaps retain the lane being written", () => {
           view.setUint32(27, 2, true);
           translate(bytes, stage);
           view.setUint32(23, (((lane + 1) % 4) * 0x55) << 24, true);
-          assert.throws(() => translate(bytes, stage), /swizzled root\/power overlap/);
+          assert.throws(() => translate(bytes, stage), /swizzled scalar-math overlap/);
           view.setUint32(27, 1, true);
         }
         view.setUint32(15, (((lane + 1) % 4) * 0x55) << 24, true);
-        assert.throws(() => translate(bytes, stage), /swizzled root\/power overlap/);
+        assert.throws(() => translate(bytes, stage), /swizzled scalar-math overlap/);
       }
     }
   }
@@ -230,7 +230,7 @@ test("2D texture samplers preserve filtering/wrapping and reject unsupported enc
 test("unary math validates unused operands and three-lane vector destinations", () => {
   for (const fragment of [false, true]) {
     const stage = fragment ? "fragment" : "vertex";
-    for (const opcode of [8, 9, 0x0a, 0x0e]) {
+    for (const opcode of [5, 8, 9, 0x0a, 0x0c, 0x0d, 0x0e, 0x0f, 0x10]) {
       const bytes = mov(fragment);
       const view = new DataView(bytes.buffer);
       view.setUint32(7, opcode, true);
@@ -294,20 +294,20 @@ test("comparisons support both stages and validate the constant bank", () => {
   }
 });
 
-test("unverified root/power overlaps fail explicitly", () => {
-  for (const opcode of [9, 0x0b]) {
-    const bytes = opcode === 9 ? mov(true) : binary(opcode, 1, true);
+test("unverified scalar-math overlaps fail explicitly", () => {
+  for (const opcode of [5, 9, 0x0b, 0x0c, 0x0d]) {
+    const bytes = opcode === 0x0b ? binary(opcode, 1, true) : mov(true);
     const view = new DataView(bytes.buffer);
     view.setUint32(7, opcode, true);
     view.setUint32(11, 0x02070000, true);
     view.setUint32(15, 0xc6000000, true);
     view.setUint32(19, 2, true);
-    assert.throws(() => translate(bytes, "fragment"), /root\/power overlap/);
+    assert.throws(() => translate(bytes, "fragment"), /scalar-math overlap/);
     if (opcode === 0x0b) {
       view.setUint32(19, 1, true);
       view.setUint32(23, 0, true);
       view.setUint32(27, 2, true);
-      assert.throws(() => translate(bytes, "fragment"), /root\/power overlap/);
+      assert.throws(() => translate(bytes, "fragment"), /scalar-math overlap/);
     }
   }
 });
