@@ -669,6 +669,40 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   }
 
   class BufferNatives {
+    uploadFromByteArray(data: AsObject | null, offset: number, start: number, count: number): void {
+      if (!data) {
+        throw s.rt.error("TypeError", 2007, "data");
+      }
+
+      const entry = buffers.get(this as unknown as AsObject);
+      if (!entry) {
+        throw new Error("Context3D experiment: invalid buffer");
+      }
+
+      // Unlike vector uploads, AIR ignores byte uploads after explicit disposal.
+      if (entry.disposed) {
+        return;
+      }
+
+      context(entry.owner);
+
+      const storage = avm2.bytesOf(s.rt, data);
+      const value = entry.value;
+      const length = count * (value.stride === 0 ? 2 : value.stride * 4);
+      if (
+        offset < 0 ||
+        offset >= storage.length ||
+        start < 0 ||
+        count < 0 ||
+        start > value.count - count ||
+        length > storage.length - offset
+      ) {
+        throw s.rt.error("RangeError", 3669);
+      }
+
+      value.uploadBytes(storage.buffer, offset, start, count);
+    }
+
     uploadFromVector(values: AsObject, start: number, count: number): void {
       buffer(this as unknown as AsObject).upload(values.$a, start, count);
     }

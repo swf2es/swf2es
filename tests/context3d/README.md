@@ -24,6 +24,7 @@ node tests/context3d/oracle.ts --depth
 node tests/context3d/oracle.ts --blending
 node tests/context3d/oracle.ts --colormask
 node tests/context3d/oracle.ts --stencil
+node tests/context3d/oracle.ts --bufferbytes
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
@@ -56,6 +57,25 @@ unavailable-context fallback, cancellation before creation, resource
 ownership, shader swizzles and clip depth, failed shader replacement,
 resize, disposal and refusal after context loss. They count actual
 created/deleted GPU handles.
+
+`BufferBytes.as` compares 334 trace lines (including 117 pixel samples) with AIR
+for vertex/index `uploadFromByteArray`: byte offsets 0 through 7, destination
+subranges, partial replacements, mixing vector/byte uploads, source mutation,
+logical length versus capacity, zero counts and invalid ranges. The bytes are
+little-endian regardless of the ByteArray's endian flag; its position, length and
+flag remain unchanged. Null sources fail with TypeError 2007 before lifetime
+checks. Explicitly disposed buffers ignore non-null uploads, including invalid
+ranges and uploads after owner disposal. Other buffers whose owner is disposed
+fail with Error 3694; live invalid ranges fail with RangeError 3669.
+
+The backend uploads the existing byte view with WebGL2 source offsets and lengths,
+without allocating temporary arrays or views. Index uploads update the existing
+CPU index storage for draw validation. Zero counts skip the GL upload: WebGL's
+zero source-length argument would otherwise upload the rest of the view.
+Browser checks cover raw float-bit preservation, nonzero view offsets, source
+independence, unchanged storage/GPU handles, bounds/ownership and cleanup.
+Recovery checks reject uploads to lost buffers and upload fresh byte buffers after
+restoration. Texture ByteArray uploads remain unsupported.
 
 `Reconfigure.as` checks 48 AIR pixel samples for an unchanged back-buffer
 configuration: retained color and depth, program/vertex/constant bindings,

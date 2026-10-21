@@ -56,6 +56,8 @@ package {
       probe("context", function():void { previous.clear(); });
       probe("buffer", function():void { vertices.uploadFromVector(new Vector.<Number>(12), 0, 3); });
       probe("indices", function():void { indices.uploadFromVector(Vector.<uint>([0, 1, 2]), 0, 3); });
+      probe("buffer-bytes", function():void { vertices.uploadFromByteArray(new ByteArray(), 0, 0, 3); });
+      probe("index-bytes", function():void { indices.uploadFromByteArray(new ByteArray(), 0, 0, 3); });
       probe("program", function():void { program.upload(new ByteArray(), new ByteArray()); });
       probe("texture", function():void { texture.uploadFromBitmapData(bitmap); });
     }
@@ -79,13 +81,24 @@ package {
       current.clear(0, 0, 0, 1);
       previous = current;
       vertices = current.createVertexBuffer(3, 4);
-      vertices.uploadFromVector(Vector.<Number>([
+      var coordinates:Vector.<Number> = Vector.<Number>([
         -0.75, -0.75, 0.5, 1,
          0.75, -0.75, 0.5, 1,
          0,     0.75, 0.5, 1
-      ]), 0, 3);
+      ]);
       indices = current.createIndexBuffer(3);
-      indices.uploadFromVector(Vector.<uint>([0, 1, 2]), 0, 3);
+      if (generation == 2) {
+        var bytes:ByteArray = new ByteArray();
+        bytes.endian = "littleEndian";
+        for (var i:int = 0; i < coordinates.length; i++) { bytes.writeFloat(coordinates[i]); }
+        vertices.uploadFromByteArray(bytes, 0, 0, 3);
+        bytes.clear();
+        bytes.writeShort(0); bytes.writeShort(1); bytes.writeShort(2);
+        indices.uploadFromByteArray(bytes, 0, 0, 3);
+      } else {
+        vertices.uploadFromVector(coordinates, 0, 3);
+        indices.uploadFromVector(Vector.<uint>([0, 1, 2]), 0, 3);
+      }
       program = current.createProgram();
       program.upload(shader(false), shader(true));
       current.setProgram(program);

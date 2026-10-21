@@ -22,6 +22,7 @@ const fixture =
     "Blending",
     "ColorMask",
     "Stencil",
+    "BufferBytes",
     "Depth",
     "Texturing",
     "Arithmetic",

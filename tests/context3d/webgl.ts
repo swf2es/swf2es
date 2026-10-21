@@ -639,6 +639,31 @@ export class WebGLContext3D implements Context3D {
         gl.bindBuffer(target, handle);
         gl.bufferSubData(target, start * size * (stride === 0 ? 2 : 4), data);
       },
+      uploadBytes: (data, offset, start, amount) => {
+        this.alive();
+        this.buffer(buffer);
+        range(start, amount, count);
+        const bytesPerEntry = stride === 0 ? 2 : stride * 4;
+        const length = amount * bytesPerEntry;
+        range(offset, length, data.length);
+        // In WebGL2, a zero source length uploads the rest of the array.
+        if (amount === 0) {
+          return;
+        }
+
+        const indices = state.indices;
+        if (indices) {
+          for (let i = 0; i < amount; i++) {
+            const at = offset + i * 2;
+            indices[start + i] = data[at] | (data[at + 1] << 8);
+          }
+        }
+
+        state.uploaded.fill(1, start, start + amount);
+        gl.bindVertexArray(this.vao);
+        gl.bindBuffer(target, handle);
+        gl.bufferSubData(target, start * bytesPerEntry, data, offset, length);
+      },
       dispose: () => {
         if (!this.buffers.delete(buffer)) {
           return;

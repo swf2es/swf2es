@@ -61,6 +61,8 @@ export interface Buffer3D {
   readonly count: number;
   readonly stride: number;
   upload(values: ArrayLike<number>, start: number, count: number): void;
+  /** Raw little-endian bytes, copied before returning; offset is relative to data. */
+  uploadBytes(data: Uint8Array, offset: number, start: number, count: number): void;
   dispose(): void;
 }
 
