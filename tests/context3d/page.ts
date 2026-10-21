@@ -252,6 +252,7 @@ export async function shaderFixture(
     | "Depth"
     | "Blending"
     | "ShaderMath"
+    | "Comparisons"
     | "Scissor"
     | "Mipmaps"
     | "Multisampling"

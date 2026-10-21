@@ -272,17 +272,9 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         break;
       }
       case 0x29:
-        if (stage !== "vertex") {
-          throw new Error("Unverified AGAL fragment comparison");
-        }
-
         expression = `vec4(greaterThanEqual(${a}, ${b}))`;
         break;
       case 0x2a:
-        if (stage !== "vertex") {
-          throw new Error("Unverified AGAL fragment comparison");
-        }
-
         expression = `vec4(lessThan(${a}, ${b}))`;
         break;
       default:

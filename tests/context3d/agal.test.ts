@@ -281,14 +281,20 @@ test("discard validates its destination, stage, source and unused operand", () =
   assert.throws(() => translate(bytes, "vertex"), /Invalid AGAL discard/);
 });
 
-test("unverified fragment comparisons and root/power overlaps fail explicitly", () => {
+test("comparisons support both stages and validate the constant bank", () => {
   for (const opcode of [0x29, 0x2a]) {
     const bytes = binary(opcode, 127);
     assert.deepEqual(translate(bytes, "vertex").constants, [127]);
     bytes[23] = 128;
     assert.throws(() => translate(bytes, "vertex"), /constant/);
-    assert.throws(() => translate(binary(opcode, 1, true), "fragment"), /fragment comparison/);
+    const fragment = binary(opcode, 27, true);
+    assert.deepEqual(translate(fragment, "fragment").constants, [0, 27]);
+    fragment[23] = 28;
+    assert.throws(() => translate(fragment, "fragment"), /constant/);
   }
+});
+
+test("unverified root/power overlaps fail explicitly", () => {
   for (const opcode of [9, 0x0b]) {
     const bytes = opcode === 9 ? mov(true) : binary(opcode, 1, true);
     const view = new DataView(bytes.buffer);

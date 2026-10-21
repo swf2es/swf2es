@@ -23,6 +23,7 @@ const scripts = compileScripts(
     "Depth",
     "Blending",
     "ShaderMath",
+    "Comparisons",
     "Scissor",
     "Mipmaps",
     "Multisampling",
@@ -45,6 +46,7 @@ for (const name of [
   "Depth",
   "Blending",
   "ShaderMath",
+  "Comparisons",
   "Scissor",
   "Mipmaps",
   "Multisampling",
@@ -156,6 +158,15 @@ if (!process.argv.includes("--build-only")) {
         );
         console.log(`context3d: ${fixture} matches AIR`);
       }
+      const comparisons = await evaluate<{ trace: string[] }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture("Comparisons"))',
+      );
+      assert.equal(comparisons.exception, null, JSON.stringify(comparisons));
+      assert.deepEqual(comparisons.value?.trace, [
+        "comparisons checks 368",
+        "comparisons complete",
+      ]);
+      console.log("context3d: fragment comparisons pass 368 independent pixel checks");
       const composition: { points: number[][]; samples: string[][] } = JSON.parse(
         readFileSync(`${here}composition-reference.json`, "utf8"),
       );

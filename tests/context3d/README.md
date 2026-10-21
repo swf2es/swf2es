@@ -29,6 +29,8 @@ node tests/context3d/oracle.ts --multisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
+# Requires a reference driver that implements pixel-shader predication:
+node tests/context3d/oracle.ts --comparisons
 ```
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
@@ -119,10 +121,23 @@ overlapping temporary registers. Discard tests select each scalar lane, cover
 negative/zero/positive values before and after the color write, and discard
 part of a triangle using an interpolated varying.
 
-This slice deliberately rejects unresolved cases. AIR's fragment comparisons
-did not agree with ordinary GLSL comparisons in the probes, even with separate
-input registers, so fragment `sge`/`slt` remain unsupported. Swizzled source
-registers overlapping a root/power destination also differed when they changed
+`Comparisons.as` checks fragment `sge`/`slt` with 368 independently calculated
+pixel expectations: negative, positive and equal inputs, signed zero, both source
+swizzles, every destination lane, vector/partial writes, either input overlapping
+the destination and interpolated inputs crossing a comparison boundary. Results
+are calculated with AS3 comparisons, following the
+[AGAL rules](https://airsdk.dev/docs/development/appendixes/adobe-graphics-assembly-language-agal/agal-bytecode-format).
+This is not an AIR pixel reference. The available Wine OpenGL backend logs
+`Predicates not implemented` and drops the conditional assignments emitted by
+AIR, making both true and false fragment comparisons produce one. Its Vulkan
+path did not draw the probe; AIR software rendering failed shader compilation.
+The optional oracle command runs the same self-check and fails on that setup,
+even with `--update`; it does not save those broken results as a reference.
+The translator now emits GLSL comparisons in either stage, with no new per-draw
+JavaScript work. Native AIR confirmation remains outstanding.
+
+This slice deliberately rejects other unresolved cases. Swizzled source
+registers overlapping a root/power destination differed when they changed
 a written lane. `sqt`/`pow` reject that overlap; identity and same-lane scalar
 overlap are covered. The scalar probes check every lane in both stages and
 `pow` with either or both operands sharing its destination. `nrm`/`crs` currently
@@ -257,6 +272,14 @@ The local `Basic_SkyBox.swf` check draws its mountain environment and reflective
 torus: 118 draws and 59 presentations over 60 ticks, with no uncaught or WebGL
 error. It exercises cube uploads and sampling without native overrides. This is
 another smoke check, not AIR image parity; the sample binary is not included.
+
+The local `Basic_Load3DS.swf` smoke check draws its textured ant and moving shadow:
+711 draws, 239 presentations and 239 shadow-target passes over 240 ticks, without
+uncaught or WebGL errors. Live GPU handles stayed at 17 at ticks 60, 120 and 240,
+and teardown released them all. The sample still creates/deletes programs during
+playback, so this is not an allocation-free or performance claim. This exercises
+render-to-texture and fragment comparisons together; it does not establish AIR
+image parity. The downloaded sample stays outside the repository.
 
 `Depth.as` compares 53 pixel samples with AIR. It covers all eight depth
 comparisons and four culling modes, the default strict `less` test with writes

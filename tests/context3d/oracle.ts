@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
   [
+    "Comparisons",
     "RenderTargets",
     "CubeTextures",
     "TemporaryMatrices",
@@ -100,7 +101,10 @@ if (triangle) {
   );
 }
 const path = `${here}${triangle ? "" : `${fixture.toLowerCase()}-`}reference.json`;
-if (process.argv.includes("--update")) {
+if (fixture === "Comparisons") {
+  // Self-checking: do not bless a driver's incorrect shader results as a reference.
+  assert.deepEqual(lines, ["comparisons checks 368", "comparisons complete"]);
+} else if (process.argv.includes("--update")) {
   writeFileSync(path, `${JSON.stringify(lines, null, 2)}\n`);
 } else {
   assert.deepEqual(lines, JSON.parse(readFileSync(path, "utf8")));
