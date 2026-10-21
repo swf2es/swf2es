@@ -498,7 +498,7 @@ export class PixiView {
     redrawn ||= visibilityChanged;
     if (remask) {
       container.visibilityRoot = masking;
-      dirty |= TRANSFORM | (o instanceof ShapeObject && o.stale ? CONTENT : 0);
+      dirty |= TRANSFORM | CONTENT;
     }
 
     // Whether its filters were made again, which a direct blend sets again.

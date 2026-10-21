@@ -2901,15 +2901,23 @@ copies, hundreds of MB. They are built
 from Flash's edges (`display/shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours; one with the
 same fill on both sides, a seam Flash Pro leaves inside a fill, goes to
-neither, since the containment tree below takes contours that do not
-cross, and joined both ways along such seams the walk made crossing
-ones that cut part of the fill away, `shared-fill-edges`) and filled
-even-odd through a containment tree of the contours, holes cut: all of a
+neither, so it cannot change the winding, `shared-fill-edges`) and filled
+even-odd through a containment tree of nonintersecting contours, holes cut: all of a
 region's at once, before the islands in them, since Pixi's `cut()` also
 lands a hole in the fill before the last once the last has one
 (`fill-holes`). A contour is in another by a point of it off the other's
-outline, since a pixel font's contours touch at their corners
-(`glyph-contours`). Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
+outline (`glyph-contours`). Crossing or touching contours instead take
+`render/fill-polygons.ts`: an edge sweep finds their crossings, then each
+horizontal band between vertices and crossings is filled as disjoint
+trapezoids under its winding rule. Curves use the same fine chords as
+rendering; separate convex contours skip the edge sweep. No overlapping
+paint is needed, including for translucent fills, gradients, bitmaps and
+masks (`crossing-fills`, `crossing-cones`). The resulting contexts are
+cached as usual. A Graphics drawing used as a stencil mask uses non-zero
+regardless of `drawPath`'s winding, while static shapes keep their authored
+winding (`static-mask-winding`). Changing a drawing's mask role rebuilds
+its fills, and a fresh view borrows only from the same role.
+Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear
 part of its transform on the stage, and is kept by layer and that
@@ -3159,10 +3167,9 @@ path's: even-odd fills by the parity of the contours around a point,
 non-zero by the sum of their orientations, so a square drawn inside
 another the same way round is filled under non-zero and a hole under
 even-odd, and one fill drawn with both rules in turn keeps each path's,
-as Flash does (the `draws` case). The renderer decides a region by its
-nesting in the contours' containment, so two contours of one fill that
-overlap without nesting fill as their union, where Flash's even-odd
-would leave their overlap out: a limit of the triangulation, noted.
+as Flash does (the `draws` case). Crossing contours and self-intersections
+use the same rules through the renderer's disjoint spans, so even-odd
+leaves an overlap empty while non-zero can fill it (`crossing-fills`).
 `clear` takes everything and the styles away; `copyFrom` clears first
 and then copies, so a drawing copied from itself ends empty, as Flash's
 does (the `draws` case). The drawn order is the calls' order but for
@@ -3642,7 +3649,7 @@ empties the store, after which every read, the size included, throws
 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
 `mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels`
-and `setPixels` (ByteArrays of big-endian ARGB), `getVector` and
+and `setPixels` (ByteArrays of ARGB words), `getVector` and
 `setVector`, `clone` and `rect` work on that store, clipped to it, a
 Rectangle's edges rounded to the nearest pixel and a half to the even one,
 as Flash rounds them (`bitmapdata_rectangle_rounding`), each edge, x and
@@ -3955,8 +3962,12 @@ JPEG XR, which Flash also writes, are not supported yet. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
 compression's file is Flash's byte for byte, as pako and zlib deflate
 alike. `getPixels` and
-`copyPixelsToByteArray` write their bytes in one pass, about 13 ms for
-1080p as in Flash.
+`copyPixelsToByteArray` write their bytes in one pass. `setPixels` and
+`copyPixelsToByteArray` honor the supplied ByteArray's `endian`;
+`getPixels` creates a big-endian one with its position after the pixels.
+Reads use the ByteArray's DataView without allocating per pixel, keeping
+complete pixels and the read position when a later word fails with
+EOFError 2030 (`bitmap-pixel-endian`).
 
 ### Text
 

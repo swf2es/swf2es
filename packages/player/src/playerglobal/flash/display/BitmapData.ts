@@ -411,7 +411,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "data");
       }
 
-      (target as AsObject).$bytes.write(store.argbBytes(rectOf(s, rect)));
+      const bytes = (target as AsObject).$bytes;
+      bytes.write(store.argbBytes(rectOf(s, rect), bytes.littleEndian));
     }
 
     /**
@@ -471,8 +472,9 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const values: number[] = [];
       try {
         for (let i = 0; i < c.width * c.height; i++) {
-          const b: Uint8Array = bytes.read(4);
-          values.push(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
+          bytes.checkEOF(4);
+          values.push(bytes.view.getUint32(bytes.position, bytes.littleEndian));
+          bytes.position = (bytes.position + 4) >>> 0;
         }
       } finally {
         store.setVector(c, values);
