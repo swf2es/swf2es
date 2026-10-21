@@ -93,7 +93,7 @@ import { gameInputNatives } from "./flash/ui/GameInput.js";
 import { keyboardNatives } from "./flash/ui/Keyboard.js";
 import { mouseNatives } from "./flash/ui/Mouse.js";
 import { multitouchNatives } from "./flash/ui/Multitouch.js";
-import { byteArrayHooks } from "./flash/utils/ByteArray.js";
+import { byteArrayHooks, byteArrayNatives } from "./flash/utils/ByteArray.js";
 import { timerNatives } from "./flash/utils/Timer.js";
 import { xmlDocumentNatives } from "./flash/xml/XMLDocument.js";
 import { toplevelNatives } from "./toplevel.js";
@@ -106,6 +106,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...accessibilityNatives(s),
     ...toplevelNatives(s),
     ...cryptoNatives(),
+    ...byteArrayNatives(s),
     ...clipboardNatives(s),
     ...eventNatives(s),
     ...keyboardEventNatives(s),
