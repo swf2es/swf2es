@@ -1,5 +1,5 @@
 // A SWF's AVM1 action blocks, listed from its tags: DoAction, DoInitAction,
-// a PlaceObject2 or 3's clip actions and a button's actions, as Ruffle's
+// a PlaceObject 2 to 4's clip actions and a button's actions, as Ruffle's
 // (https://github.com/ruffle-rs/ruffle) swf/src/read.rs reads them
 // (read_clip_actions, read_clip_event_flags, read_define_button_1 and 2,
 // read_button_action) and its swf/src/types.rs numbers their flags: MIT OR
@@ -20,6 +20,7 @@ import {
   DoInitAction,
   PlaceObject2,
   PlaceObject3,
+  PlaceObject4,
   ShowFrame,
 } from "./tags.js";
 
@@ -72,7 +73,7 @@ export type ActionOwner =
   /** DoInitAction: `sprite`'s #initclip actions. */
   | { type: "init"; sprite: number; timeline: number | null; frame: number }
   /**
-   * A clip action of the PlaceObject2 or 3 at `depth`. `events` are those
+   * A clip action of the PlaceObject 2 to 4 at `depth`. `events` are those
    * both its flags and the place's field of all events have, the ones Flash
    * runs it for; `key` is keyPress's key code, else 0.
    */
@@ -106,7 +107,7 @@ export interface ActionList {
   /** The indices of each tag's blocks, by the offset of the tag's body. */
   byTag: Map<number, number[]>;
   /**
-   * The offsets of the PlaceObject2 and 3 tags' bodies whose clip actions
+   * The offsets of the PlaceObject 2 to 4 tags' bodies whose clip actions
    * run past the tag, which have no blocks: Flash reads a place's records
    * as the first of its events comes, and stops playing the whole SWF,
    * every timeline of it, there.
@@ -152,7 +153,8 @@ function walk(bytes: Uint8Array, tags: Tag[], timeline: number | null, list: Act
         }
         break;
       case PlaceObject2:
-      case PlaceObject3: {
+      case PlaceObject3:
+      case PlaceObject4: {
         const { depth, offset } = clipActionsOffset(bytes, tag);
         if (offset >= 0) {
           clipActions(bytes, tag, offset, list, timeline, frame, depth);

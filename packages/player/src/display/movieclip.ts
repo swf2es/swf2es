@@ -331,6 +331,7 @@ export class MovieClip extends Container {
 
       const child = displayFor(character, this.library, place.hasImage);
       child.applyPlace(place);
+      child.metaData = place.metaData;
       child.placeFrame = frame;
       this.library.avm1?.placing(child, place);
       this.placeAtDepth(child, place.depth);
@@ -551,6 +552,7 @@ export class MovieClip extends Container {
 
       const child = displayFor(character, this.library, jump.place.hasImage);
       child.applyPlace(jump.place);
+      child.metaData = jump.place.metaData;
       child.placeFrame = jump.frame;
       this.library.avm1?.placing(child, jump.place);
       this.placeAtDepth(child, depth);

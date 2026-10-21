@@ -55,3 +55,4 @@ export const DefineBinaryData = 87;
 export const StartSound2 = 89;
 export const DefineBitsJPEG4 = 90;
 export const DefineFont4 = 91;
+export const PlaceObject4 = 94;
