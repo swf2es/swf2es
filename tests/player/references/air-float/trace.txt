@@ -1,6 +1,7 @@
 values 16777216 16777217 0.10000000149011612 NaN
 types number number true false true false false float
 equality true false true false true false
+integer-types true true -Infinity -Infinity Infinity Infinity
 rounding 16777216 16777217
 conversion 0 NaN 0.10000000149011612 1 Infinity -Infinity 0
 boolean false false false true

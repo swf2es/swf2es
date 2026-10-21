@@ -2068,9 +2068,9 @@ export class Runtime {
       case "Number":
         return typeof v === "number" || v instanceof FloatValue;
       case "int":
-        return typeof v === "number" && (v | 0) === v && !Object.is(v, -0);
+        return typeof v === "number" && (v | 0) === v;
       case "uint":
-        return typeof v === "number" && v >>> 0 === v && !Object.is(v, -0);
+        return typeof v === "number" && v >>> 0 === v;
       case "String":
         return typeof v === "string";
       case "Boolean":

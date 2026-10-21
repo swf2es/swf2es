@@ -17,6 +17,10 @@ package {
                 f is int, float(0) is uint, getQualifiedClassName(f));
             trace("equality", float(1) == 1, float(1) === 1, float(1) === float(1),
                 float(NaN) === float(NaN), float(1) instanceof Number, float(1) instanceof float);
+            var negativeZero:Number = -0;
+            trace("integer-types", negativeZero is int, negativeZero is uint,
+                1 / (negativeZero as int), 1 / (negativeZero as uint),
+                1 / int(negativeZero), 1 / uint(negativeZero));
             trace("rounding", float(16777216) + float(1), Number(float(16777216)) + Number(float(1)));
             trace("conversion", float(null), float(undefined), float("0.1"), float(true),
                 float(1e40), 1 / Number(float(-0)), float(1e-50));
