@@ -29,6 +29,19 @@ interface Resource<T> {
   disposed: boolean;
 }
 
+interface TextureResource extends Resource<Texture3D> {
+  initialized: boolean;
+}
+
+interface ContextState {
+  backend: Context3D;
+  slot: AsObject;
+  cleared: number;
+  depth: boolean;
+  aa: number;
+  target: TextureResource | null;
+}
+
 const FLOAT_FORMATS = ["float1", "float2", "float3", "float4"];
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
@@ -38,10 +51,10 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
   const pending = new WeakSet<AsObject>();
   const generations = new WeakMap<AsObject, object>();
   const lost = new Map<AsObject, object>();
-  const contexts = new Map<AsObject, { backend: Context3D; slot: AsObject }>();
+  const contexts = new Map<AsObject, ContextState>();
   const buffers = new WeakMap<AsObject, Resource<Buffer3D>>();
   const programs = new WeakMap<AsObject, Resource<Program3D>>();
-  const textures = new WeakMap<AsObject, Resource<Texture3D>>();
+  const textures = new WeakMap<AsObject, TextureResource>();
   const indices = new WeakMap<AsObject, number>();
   const matrixConstants = new Float32Array(16);
   let closed = false;
@@ -70,13 +83,21 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
   };
 
-  const context = (o: AsObject): Context3D => {
+  const state = (o: AsObject): ContextState => {
     const entry = contexts.get(o);
     if (!entry || entry.backend.disposed) {
       throw s.rt.error("Error", 3694);
     }
 
-    return entry.backend;
+    return entry;
+  };
+  const context = (o: AsObject): Context3D => state(o).backend;
+  const requireClear = (entry: ContextState): void => {
+    const target = entry.target;
+    const required = entry.depth ? 7 : 1;
+    if (target ? !target.initialized : (entry.cleared & required) !== required) {
+      throw s.rt.error("Error", target ? 3777 : 3692);
+    }
   };
   const buffer = (o: AsObject): Buffer3D => {
     const value = buffers.get(o);
@@ -169,7 +190,14 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         throw error;
       }
 
-      contexts.set(object, { backend, slot });
+      contexts.set(object, {
+        backend,
+        slot,
+        cleared: 0,
+        depth: false,
+        aa: 0,
+        target: null,
+      });
       slots.set(slot, object);
       place(slot);
       dispatchEvent(
@@ -251,7 +279,8 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       best = false,
       zoom = false,
     ): void {
-      const backend = context(this as unknown as AsObject);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
       if (width < 32) {
         throw s.rt.error("Error", 3780, 32, 2048);
       }
@@ -263,11 +292,23 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         unsupported();
       }
 
+      const changed =
+        width !== backend.width ||
+        height !== backend.height ||
+        depth !== entry.depth ||
+        aa !== entry.aa;
       backend.configure(width, height, depth, aa);
+      if (changed) {
+        entry.cleared = 0;
+      }
+
+      entry.depth = depth;
+      entry.aa = aa;
     }
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {
-      const backend = context(this as unknown as AsObject);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
       if (backend.width === 0) {
         throw s.rt.error("Error", 3698);
       }
@@ -277,6 +318,12 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       }
 
       backend.clear(r, g, b, a, depth, mask);
+      // Only successful AS3 clears count, not the backend's allocation-time clear.
+      if (entry.target) {
+        entry.target.initialized = true;
+      } else {
+        entry.cleared |= mask & (entry.depth ? 7 : 1);
+      }
     }
 
     createVertexBuffer(count: number, stride: number, usage = "staticDraw"): AsObject {
@@ -331,7 +378,12 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         s.rt.classNamed("flash.display3D.textures::Texture"),
       ) as AsObject;
       const value = backend.createTexture(width, height);
-      textures.set(object, { value, owner: this as unknown as AsObject, disposed: false });
+      textures.set(object, {
+        value,
+        owner: this as unknown as AsObject,
+        disposed: false,
+        initialized: false,
+      });
 
       return object;
     }
@@ -346,7 +398,12 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         s.rt.classNamed("flash.display3D.textures::CubeTexture"),
       ) as AsObject;
       const value = backend.createTexture(size, size, true);
-      textures.set(object, { value, owner: this as unknown as AsObject, disposed: false });
+      textures.set(object, {
+        value,
+        owner: this as unknown as AsObject,
+        disposed: false,
+        initialized: false,
+      });
 
       return object;
     }
@@ -366,11 +423,15 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
         unsupported();
       }
 
-      context(this as unknown as AsObject).setRenderTarget(object && texture(object), depth);
+      const entry = state(this as unknown as AsObject);
+      entry.backend.setRenderTarget(object && texture(object), depth);
+      entry.target = object ? (textures.get(object) ?? null) : null;
     }
 
     setRenderToBackBuffer(): void {
-      context(this as unknown as AsObject).setRenderTarget(null);
+      const entry = state(this as unknown as AsObject);
+      entry.backend.setRenderTarget(null);
+      entry.target = null;
     }
 
     setProgram(object: AsObject): void {
@@ -476,7 +537,12 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
 
     drawTriangles(object: AsObject, first = 0, count = -1): void {
       try {
-        context(this as unknown as AsObject).draw(buffer(object), first, count);
+        const entry = state(this as unknown as AsObject);
+        if (this.$checking) {
+          requireClear(entry);
+        }
+
+        entry.backend.draw(buffer(object), first, count);
       } catch (error) {
         if (error instanceof ScissorBoundsError) {
           throw s.rt.error("Error", 3706);
@@ -505,7 +571,13 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     drawToBitmapData(destination: AsObject): void {
-      const backend = context(this as unknown as AsObject);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      if (backend.width === 0) {
+        return;
+      }
+
+      requireClear(entry);
       const store = storeOf(s, destination);
       // AIR can preserve alpha in opaque targets, outside BitmapStore's current
       // opaque-pixel invariant. Different sizes and clipping need separate probes.
@@ -527,7 +599,19 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     present(): void {
-      context(this as unknown as AsObject).present();
+      const entry = state(this as unknown as AsObject);
+      // AIR returns to the back buffer even when the following validation fails.
+      if (entry.target) {
+        entry.backend.setRenderTarget(null);
+        entry.target = null;
+      }
+
+      if (this.$checking) {
+        requireClear(entry);
+      }
+
+      entry.backend.present();
+      entry.cleared = 0;
     }
 
     dispose(recreate = true): void {
@@ -593,6 +677,10 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     }
 
     value.upload(bitmap.readable, level, face);
+    const entry = textures.get(object);
+    if (entry && level === 0) {
+      entry.initialized = true;
+    }
   }
 
   class TextureNatives {
@@ -613,6 +701,10 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
       if (entry && !entry.disposed) {
         entry.value.dispose();
         entry.disposed = true;
+        const owner = contexts.get(entry.owner);
+        if (owner?.target === entry) {
+          owner.target = null;
+        }
       }
     }
   }

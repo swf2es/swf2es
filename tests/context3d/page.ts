@@ -263,6 +263,8 @@ export async function shaderFixture(
     | "Blending"
     | "ShaderMath"
     | "Comparisons"
+    | "FrameValidation"
+    | "FrameValidationFlat"
     | "Reconfigure"
     | "Scissor"
     | "Mipmaps"

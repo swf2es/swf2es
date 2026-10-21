@@ -30,6 +30,8 @@ node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
 node tests/context3d/oracle.ts --reconfigure
+node tests/context3d/oracle.ts --framevalidation
+node tests/context3d/oracle.ts --framevalidationflat
 # Requires a reference driver that implements pixel-shader predication:
 node tests/context3d/oracle.ts --comparisons
 ```
@@ -61,6 +63,22 @@ same dimensions, depth setting and antialiasing request now preserves the GPU
 resources and readback arrays, without capability or completeness queries.
 Browser checks cover both depth settings, failed-resize rollback, disposal
 and context loss. A changed request still takes the existing allocation path.
+
+`FrameValidation.as` and its generated depth-disabled variant compare 514 trace
+lines with AIR. Back-buffer readback requires a color clear, plus depth and stencil
+clears when those attachments are enabled; separate clear masks accumulate.
+Presentation and changed back-buffer configuration invalidate that state.
+Readback always enforces it (3692), while drawing and presenting enforce it only
+with error checking enabled. A failed presentation still returns to the back buffer.
+
+Texture targets have separate initialization state (3777): any successful clear,
+including mask zero, or a level-zero bitmap upload initializes them. Uploading
+only a smaller mip does not. Initialization survives presentation and depth toggles.
+The fixture checks both target depth settings, all clear masks, repeated presentation,
+resize, disposal, and that rejected operations leave the destination bitmap unchanged.
+The adapter keeps this state in existing context/resource records; it adds no
+per-frame objects or GPU queries. These checks do not claim full error-precedence
+or invalid-argument parity.
 
 `Lifecycle.as` checks explicit context recreation against AIR:
 `dispose()` clears the slot immediately and queues a fresh context;
@@ -256,8 +274,8 @@ clip the resolve or presentation. Browser checks verify partially covered edges,
 resolve counts, warm resource reuse, fallback, repeated resizing, disabling MSAA,
 failed allocation/framebuffer rollback and full cleanup. Recovery also uses 4×
 back buffers. Allocations occur at configuration, with no new per-draw arrays.
-AIR's requirement to clear after present before AS3 readback (3692) remains part
-of the broader frame-validation work; this slice does not add that validation.
+AS3 clear-before-read validation lives in the native adapter; the backend's
+readback method remains available to renderer diagnostics after presentation.
 
 `Scissor.as` checks top-left clipping against AIR, including fractional edge
 rounding, empty and negative-sized rectangles, clipping to the viewport, and

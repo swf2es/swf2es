@@ -6,6 +6,7 @@ import { withPage } from "../player/chrome.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
+import { fixtureSource } from "./fixtures.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -24,6 +25,8 @@ const scripts = compileScripts(
     "Blending",
     "ShaderMath",
     "Comparisons",
+    "FrameValidation",
+    "FrameValidationFlat",
     "Reconfigure",
     "Scissor",
     "Mipmaps",
@@ -33,7 +36,7 @@ const scripts = compileScripts(
     "TemporaryMatrices",
   ].map((name) => ({
     name,
-    source: readFileSync(`${here}${name}.as`, "utf8"),
+    source: fixtureSource(name),
   })),
   out,
 );
@@ -48,6 +51,8 @@ for (const name of [
   "Blending",
   "ShaderMath",
   "Comparisons",
+  "FrameValidation",
+  "FrameValidationFlat",
   "Reconfigure",
   "Scissor",
   "Mipmaps",
@@ -149,6 +154,8 @@ if (!process.argv.includes("--build-only")) {
         "Depth",
         "Blending",
         "ShaderMath",
+        "FrameValidation",
+        "FrameValidationFlat",
         "Reconfigure",
         "Scissor",
         "Mipmaps",

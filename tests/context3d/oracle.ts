@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { fixtureSource } from "./fixtures.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
   [
+    "FrameValidation",
+    "FrameValidationFlat",
     "Reconfigure",
     "Comparisons",
     "RenderTargets",
@@ -28,6 +31,7 @@ const triangle = fixture === "Triangle";
 const prefix = fixture === "Lifecycle" ? "life" : fixture.toLowerCase();
 const out = `${here}out/oracle-${fixture}/`;
 mkdirSync(out, { recursive: true });
+writeFileSync(`${out}${fixture}.as`, fixtureSource(fixture));
 writeFileSync(
   `${out}Reference.as`,
   `package {
@@ -68,7 +72,7 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Depth" || fixture === "Multisampling" || fixture === "RenderTargets" || fixture === "Reconfigure"}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Depth" || fixture === "Multisampling" || fixture === "RenderTargets" || fixture === "Reconfigure" || fixture === "FrameValidation"}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>
