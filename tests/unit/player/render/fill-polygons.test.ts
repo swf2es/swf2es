@@ -130,6 +130,55 @@ test("dense bands combine coincident edges under both winding rules", () => {
   );
 });
 
+test("unrelated contour levels do not fragment unchanged filled spans", () => {
+  const contours = [[0, 0, 10, 10, 0, 10, 10, 0]];
+  for (let i = 0; i < 300; i++) {
+    const x = 20 + i * 4;
+    contours.push([x, i + 0.25, x + 2, i + 0.25, x + 2, 700 - i, x, 700 - i]);
+  }
+
+  for (const nonZero of [false, true]) {
+    const polygons = crossingFill(contours, nonZero);
+    assert.ok(polygons);
+    assert.equal(polygons.length, 302);
+    assert.equal(
+      polygons.reduce((sum, points) => sum + area(points), 0),
+      50 + contours.slice(1).reduce((sum, points) => sum + area(points), 0),
+    );
+    for (let i = 0; i < 300; i++) {
+      const x = 21 + i * 4;
+      for (const y of [i, i + 0.5, 699.75 - i, 700.25 - i]) {
+        const expected = winding(contours[i + 1], x, y) !== 0;
+        assert.equal(
+          polygons.filter((points) => winding(points, x, y) !== 0).length,
+          Number(expected),
+        );
+      }
+    }
+  }
+});
+
+test("the same span boundaries cannot merge across an unfilled band", () => {
+  for (const nonZero of [false, true]) {
+    const cut = nonZero ? [-5, 10, -5, 20, 15, 20, 15, 10] : [-5, 10, 15, 10, 15, 20, -5, 20];
+    const polygons = crossingFill([[0, 0, 10, 0, 10, 30, 0, 30], cut], nonZero);
+    assert.ok(polygons);
+    assert.equal(
+      polygons.reduce((sum, points) => sum + area(points), 0),
+      300,
+    );
+    for (const [x, y, expected] of [
+      [5, 5, 1],
+      [5, 15, 0],
+      [5, 25, 1],
+      [-2, 15, 1],
+      [12, 15, 1],
+    ]) {
+      assert.equal(polygons.filter((points) => winding(points, x, y) !== 0).length, expected);
+    }
+  }
+});
+
 /** Signed ray crossings, independent of the tessellator's horizontal bands. */
 function winding(points: number[], x: number, y: number): number {
   let sum = 0;
