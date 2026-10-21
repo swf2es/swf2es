@@ -3604,6 +3604,41 @@ function avm1Script(name: string, version: number): Uint8Array {
   });
 }
 
+function avm1Drawing(version: number): Uint8Array {
+  return w.swf({
+    version,
+    width: 200,
+    height: 120,
+    frameCount: 3,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      as1(
+        `var d = createEmptyMovieClip("d", 1);
+d.lineStyle(2, 0x223344); d.moveTo(10, 10); d.lineTo(80, 10); d.lineTo(80, 45);
+d.lineStyle(4, 0x008800, 50); d.moveTo(100, 10); d.curveTo(180, 10, 180, 50);
+d.lineStyle(); d.beginFill(0xcc3300, 50);
+d.moveTo(10, 60); d.lineTo(70, 60); d.lineTo(70, 100); d.lineTo(10, 100); d.endFill();
+d.lineStyle(2, 0x000080); d.beginFill(0xaaaa00);
+d.moveTo(100, 65); d.curveTo(140, 35, 180, 65); d.lineTo(180, 100); d.lineTo(100, 100); d.endFill();`,
+        version,
+      ),
+      w.showFrame(),
+      w.showFrame(),
+      as1(
+        `d.clear();
+d.lineTo(180, 110);
+d.beginFill(0x336699); d.moveTo(20, 20); d.lineTo(60, 20);
+d.lineTo(60, 60); d.lineTo(20, 60); d.endFill();
+stop();`,
+        version,
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** A DoAction of AS1 source, as Flash's compiler writes it for a SWF of `version`. */
 const as1 = (source: string, version: number) =>
   w.doAction([...script(source, version)(flashAssembler()).end().bytes()]);
@@ -9664,6 +9699,28 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-drawing-swf${version}`,
+      swf: avm1Script("drawing", version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-drawing-frames-swf${version}`,
+      swf: avm1Drawing(version),
+      frames: 4,
+      capture: [2, 4],
+      // The curved strokes anti-alias within a pixel of Flash's, as for shared-lines.
+      tolerance: 32,
+      maxOutliers: 450,
+    }),
+  ),
   ...[false, true].map(
     (distant): PlayerCase => ({
       name: distant ? "avm1-backward-distant" : "avm1-backward-prefix",
