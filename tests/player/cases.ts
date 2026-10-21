@@ -8611,6 +8611,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "bytearray-multibyte",
+    swf: (abc) => bare(abc, 1, "ByteArrayMultibyte"),
+    script: "ByteArrayMultibyte",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "security-domain",
     swf: (abc) => bare(abc, 1, "SecurityDomainNatives"),
     script: "SecurityDomainNatives",
