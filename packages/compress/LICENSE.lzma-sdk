@@ -1,13 +1,20 @@
 LZMA SDK
 
 The LZMA encoder in this package's WebAssembly binary is compiled from the
-LZMA SDK's C sources as 7-Zip 26.05 carries them (C/LzmaEnc.c, C/LzFind.c
-and the headers they include), by Igor Pavlov. Each of those files states:
+LZMA SDK 26.05's C sources (C/LzmaEnc.c, C/LzFind.c and the headers they
+include), by Igor Pavlov, kept unchanged in swf2es's vendor/lzma-sdk. Each
+of those files states:
 
   Igor Pavlov : Public domain
 
-They are in the public domain; no license is required to use, change or
-distribute them. This notice records where they come from.
+and the SDK's DOC/lzma-sdk.txt says:
+
+  LZMA SDK is written and placed in the public domain by Igor Pavlov.
+
+  Anyone is free to copy, modify, publish, use, compile, sell, or distribute
+  the original LZMA SDK code, either in source code form or as a compiled
+  binary, for any purpose, commercial or non-commercial, and by any means.
+
+This notice records where they come from.
 
 https://www.7-zip.org/sdk.html
-https://github.com/ip7z/7zip/tree/26.05/C

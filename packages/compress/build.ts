@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const zlib = fileURLToPath(new URL("../../vendor/zlib/", import.meta.url));
-const sdk = fileURLToPath(new URL("../../vendor/7zip/", import.meta.url));
+const sdk = fileURLToPath(new URL("../../vendor/lzma-sdk/", import.meta.url));
 const lzma = join(sdk, "C");
 
 const ZIG_VERSION = "0.17.0";
@@ -24,7 +24,7 @@ const ZIG_SHA256: Record<string, string> = {
 const zlibSources = ["adler32", "deflate", "inflate", "inftrees", "inffast", "trees", "zutil"];
 const zlibHeaders = ["zlib", "zconf", "zutil", "deflate", "inflate", "inftrees", "inffast"];
 const sdkSources = ["LzmaEnc", "LzFind"];
-const sdkHeaders = ["LzmaEnc", "LzFind", "LzHash", "7zTypes", "7zWindows", "Compiler", "CpuArch"];
+const sdkHeaders = ["LzmaEnc", "LzFind", "LzHash", "7zTypes", "Compiler", "CpuArch"];
 const sources = [
   join(here, "compress.c"),
   ...zlibSources.map((name) => join(zlib, `${name}.c`)),

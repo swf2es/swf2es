@@ -1,10 +1,11 @@
 # @swf2es/compress
 
 Synchronous zlib and LZMA for SWF bodies, bitmaps and `ByteArray`, in one
-WebAssembly module that imports nothing. Upstream sources are pinned
-submodules: zlib 1.3.2 in [`vendor/zlib`](../../vendor/zlib) and the LZMA
-SDK's encoder as 7-Zip 26.05 carries it in [`vendor/7zip`](../../vendor/7zip),
-of which only `C/LzmaEnc.c`, `C/LzFind.c` and their headers are compiled.
+WebAssembly module that imports nothing. zlib 1.3.2 is a pinned submodule
+in [`vendor/zlib`](../../vendor/zlib); the LZMA SDK 26.05's encoder,
+`C/LzmaEnc.c`, `C/LzFind.c` and the headers they include, all public domain,
+is checked in under [`vendor/lzma-sdk`](../../vendor/lzma-sdk), whose README
+names the release and each file's hash.
 LZMA decoding is `lzma.zig`, after the LZMA SDK's specification decoder.
 The C adapter (`compress.c`), the few libc declarations it needs
 (`include/`), the decoder and the TypeScript wrapper live here; upstream

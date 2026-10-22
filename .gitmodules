@@ -23,7 +23,3 @@
 	path = vendor/zlib
 	url = https://github.com/madler/zlib.git
 	shallow = true
-[submodule "vendor/7zip"]
-	path = vendor/7zip
-	url = https://github.com/ip7z/7zip.git
-	shallow = true

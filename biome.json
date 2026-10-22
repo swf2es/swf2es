@@ -19,7 +19,7 @@
       "!vendor/pixijs",
       "!vendor/minimp3",
       "!vendor/zlib",
-      "!vendor/7zip"
+      "!vendor/lzma-sdk/C"
     ]
   },
   "formatter": {

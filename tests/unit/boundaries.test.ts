@@ -27,7 +27,7 @@ const vendored: Record<string, { dir: string; users: string[] }> = {
 };
 
 // C-only libraries are compiled by their wrapper packages, rather than linked by pnpm.
-const nativeVendor = ["7zip", "minimp3", "zlib"];
+const nativeVendor = ["lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
