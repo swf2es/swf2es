@@ -21,11 +21,11 @@ const runtime = await import(
 // The oracle runs avmshell with TZ=UTC, so local time is UTC here too.
 process.env.TZ = "UTC";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
 // avmshell's working directory as the oracle runs it, the repository, which some tests read files from.
 const workDir = fileURLToPath(new URL("../../", import.meta.url));
+// The builtins avmshell loads, as the oracle's libraries() copies them out.
 const builtins = ["builtin", "shell_toplevel"].map(
-  (name) => new Uint8Array(readFileSync(`${here}out/lib/${name}.abc`)),
+  (name) => new Uint8Array(readFileSync(`${workDir}oracle/avmplus/generated/${name}.abc`)),
 );
 
 async function load(js: string): Promise<ShellModule> {

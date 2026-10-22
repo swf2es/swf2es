@@ -29,13 +29,16 @@ pnpm test:checked # the same with every array access bounds-checked
 pnpm determinism              # each module the same however it is compiled, and each method
                               # compiled alone its entry in the module (after the runners)
 pnpm oracle path/to/file.as   # print avmshell's output for a file (oracle:abcdump its dump)
+                              # what ASC, gcc and abcdump made is kept for every checkout in
+                              # ~/.cache/swf2es/oracle ($XDG_CACHE_HOME; SWF2ES_ORACLE_CACHE
+                              # names another directory)
 pnpm oracle:pull              # pull the oracle's pinned container image
 pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
 pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
 pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests in swf2es, vs
-                              # swf2es-baseline.json (after pnpm tamarin compiled them)
+                              # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames

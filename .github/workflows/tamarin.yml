@@ -19,10 +19,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm oracle:pull
-      # Compile keys decide what to recompile, so any earlier output helps.
+      # The oracle's store (oracle/store.ts): its entries are content-keyed, so any
+      # earlier store helps; a new oracle.ts starts over.
       - uses: actions/cache@v4
         with:
-          path: tests/tamarin/out
-          key: tamarin-${{ github.sha }}
-          restore-keys: tamarin-
+          # Not abcdump's dumps, nine tenths of the store: abcdump runs again instead.
+          path: |
+            ~/.cache/swf2es/oracle
+            !~/.cache/swf2es/oracle/**/*.dump
+          key: oracle-tamarin-${{ hashFiles('oracle/oracle.ts') }}-${{ github.sha }}
+          restore-keys: oracle-tamarin-${{ hashFiles('oracle/oracle.ts') }}-
       - run: pnpm tamarin
