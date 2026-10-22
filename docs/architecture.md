@@ -1844,9 +1844,18 @@ One from a URL comes as an AS3 SWF's content does, `OPEN`, the progress
 and the child in the frame's construct phase, `INIT` and `COMPLETE` at
 its end, and plays on from the next frame: that follows Ruffle, which
 loads both kinds alike, not adl, whose harness loads only from bytes.
-The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
-movie go to its `Loader`, as Flash has them (the corpus's
-`mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
+The `AVM1Movie` is no `InteractiveObject`: hits on its noninteractive
+artwork go to its `Loader` (the corpus's `mouse_pick_loader_avm1`). Its
+AVM1 buttons and selectable fields take mouse input themselves, without
+AS3 mouse events on the Loader. `input/avm1.ts` joins their picks into
+the AS3 display-list search, respecting transforms, masks, scrolls,
+overlays and `mouseChildren`. Global AVM1 mouse listeners run before the
+pick, even in a hidden or detached loaded movie; button events go only
+to the winning movie, with hover and capture reconciled as the display
+list changes. Each loaded movie reuses `Avm1Pointer`, and unloading drops
+its input state. Ordinary AS3 content creates no such input manager.
+These rules follow an authored native Flash Player 32 probe.
+The movie's timeline plays at the stage's
 frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
 many frames as its ShowFrame tags end, whatever its header says, and stays
 on its last without an End tag. The loaded movie now runs its AVM1
@@ -1857,7 +1866,7 @@ frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
 and script-driven playback run with the child. Unloading destroys the
 child VM and its connections without closing the parent's audio device.
-Pointer and keyboard routing into these loaded movies, and `AVM1Movie`'s
+Keyboard and wheel routing into these loaded movies, and `AVM1Movie`'s
 `call` and `addCallback`, remain incomplete; those methods still throw #2014.
 
 `LocalConnection` uses one native broker (`player/src/localconnection.ts`)
