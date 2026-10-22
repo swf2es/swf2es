@@ -84,7 +84,7 @@ export function remotingValue(
     w.value(v as Value);
   }
 
-  return join(w.chunks);
+  return w.finish();
 }
 
 /** A u16-long UTF-8 string, no marker. */

@@ -5,6 +5,7 @@ export const CONSTANT_Int: u8 = 0x03;
 export const CONSTANT_UInt: u8 = 0x04;
 export const CONSTANT_PrivateNs: u8 = 0x05;
 export const CONSTANT_Double: u8 = 0x06;
+export const CONSTANT_Float: u8 = 0x02;
 export const CONSTANT_Qname: u8 = 0x07;
 export const CONSTANT_Namespace: u8 = 0x08;
 export const CONSTANT_Multiname: u8 = 0x09;

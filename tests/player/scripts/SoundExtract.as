@@ -7,8 +7,7 @@ package {
   import flash.utils.getDefinitionByName;
 
   // Sound.extract, loadPCMFromByteArray and loadCompressedDataFromByteArray
-  // (cases.ts' extractSounds). An MP3's samples are traced a frame later, as
-  // the player's decoder gives them late; they are checked against adl's to
+  // (cases.ts' extractSounds). MP3 samples are checked against adl's to
   // a tolerance, as two decoders differ in their last bits. adl's
   // loadPCMFromByteArray reads back samples that have nothing to do with
   // those it was given, so only its counts and lengths are traced.

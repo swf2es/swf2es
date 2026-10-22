@@ -35,6 +35,7 @@ import {
   pairIndex,
   pairOf,
 } from "./enumeration.js";
+import { FloatValue, floatValue } from "./float.js";
 import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
 import {
   type CountedMethod,
@@ -68,6 +69,7 @@ import {
   qname,
   TypeName,
 } from "./names.js";
+import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
@@ -317,7 +319,7 @@ export class Runtime {
         );
         qualified.domain = mn.domain;
         return qualified;
-      } else if (typeof part === "object" && part !== null) {
+      } else if (typeof part === "object" && part !== null && !(part instanceof FloatValue)) {
         // Its string only once a lookup needs it: a Dictionary does not.
         const keyed = Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
         keyed.domain = mn.domain;
@@ -578,7 +580,11 @@ export class Runtime {
           throw this.error("TypeError", 1009);
         }
 
-        return v instanceof Namespace ? this.builtinTraits("Namespace") : v.$traits;
+        return v instanceof FloatValue
+          ? this.builtinTraits("float")
+          : v instanceof Namespace
+            ? this.builtinTraits("Namespace")
+            : v.$traits;
       // As avmplus' toVTable: every number is a Number at run time, int or
       // not; int's and uint's traits only bind early, from static types.
       case "number":
@@ -601,7 +607,11 @@ export class Runtime {
     switch (typeof v) {
       case "object":
       case "function":
-        return v === null ? undefined : v.$traits;
+        return v instanceof FloatValue
+          ? this.builtinTraits("float")
+          : v === null
+            ? undefined
+            : v.$traits;
       case "string":
         return this.stringTraits;
       case "number":
@@ -877,7 +887,7 @@ export class Runtime {
         throw this.error("RangeError", 1125, i, a.length);
       }
 
-      return a[i];
+      return a instanceof FloatVector ? this.float(a.data[i]) : a[i];
     }
 
     return this.getIndexed(o, mn, i);
@@ -885,7 +895,36 @@ export class Runtime {
 
   vectorSetObject(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      this.setElement(o, i, o.$traits.cls.$convert(this, o.$traits.cls, v));
+      const value = o.$traits.cls.$convert(this, o.$traits.cls, v);
+      if (o.$a instanceof FloatVector) {
+        setFloatElement(this, o, i, value);
+      } else {
+        this.setElement(o, i, value);
+      }
+
+      return;
+    }
+
+    this.setIndexed(o, mn, i, v);
+  }
+
+  /** Unboxed access for code compiled against Vector.<float>; dynamic access uses its hooks. */
+  vectorGetFloat(o: Value, mn: Multiname, i: number): number {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      const a: FloatVector = o.$a;
+      if (i >= a.length) {
+        throw this.error("RangeError", 1125, i, a.length);
+      }
+
+      return a.data[i];
+    }
+
+    return this.toNumber(this.getIndexed(o, mn, i));
+  }
+
+  vectorSetFloat(o: Value, mn: Multiname, i: number, v: Value): void {
+    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+      setFloatElement(this, o, i, this.toNumber(v));
       return;
     }
 
@@ -1234,6 +1273,7 @@ export class Runtime {
       typeof name === "object" &&
       name !== null &&
       name.$local === undefined &&
+      !(name instanceof FloatValue) &&
       o?.$keys !== undefined
     ) {
       return this.dictionaryHas(o, name);
@@ -1346,7 +1386,12 @@ export class Runtime {
   /** A value's AS3 prototype object: its class's prototype, or its own link for a prototype object. */
   protoOf(o: Value): AsObject | null {
     // A namespace is the runtime's own object: its prototype is its class's.
-    if (typeof o === "object" && o !== null && !(o instanceof Namespace)) {
+    if (
+      typeof o === "object" &&
+      o !== null &&
+      !(o instanceof Namespace) &&
+      !(o instanceof FloatValue)
+    ) {
       return o.$p;
     }
 
@@ -2048,12 +2093,14 @@ export class Runtime {
     switch (traits.name) {
       case "Object":
         return v !== null && v !== undefined;
+      case "float":
+        return v instanceof FloatValue;
       case "Number":
-        return typeof v === "number";
+        return typeof v === "number" || v instanceof FloatValue;
       case "int":
-        return typeof v === "number" && (v | 0) === v && !Object.is(v, -0);
+        return typeof v === "number" && (v | 0) === v;
       case "uint":
-        return typeof v === "number" && v >>> 0 === v && !Object.is(v, -0);
+        return typeof v === "number" && v >>> 0 === v;
       case "String":
         return typeof v === "string";
       case "Boolean":
@@ -2075,10 +2122,12 @@ export class Runtime {
         return this.toInt(v);
       case "uint":
         return this.toUint(v);
+      case "float":
+        return this.float(v);
       case "Number":
         return this.toNumber(v);
       case "Boolean":
-        return !!v;
+        return this.toBoolean(v);
       case "String":
         return this.coerceString(v);
       case "Object":
@@ -2171,6 +2220,10 @@ export class Runtime {
   }
 
   instanceOf(v: Value, f: Value): boolean {
+    if (v instanceof FloatValue) {
+      v = v.value;
+    }
+
     if (f === null || typeof f !== "object" || !(f.$it || f.$f)) {
       throw this.error("TypeError", 1040);
     }
@@ -2197,6 +2250,10 @@ export class Runtime {
           return "object";
         }
 
+        if (v instanceof FloatValue) {
+          return "number";
+        }
+
         return v.$f
           ? "function"
           : v.$traits?.name === "XML" || v.$traits?.name === "XMLList"
@@ -2206,6 +2263,69 @@ export class Runtime {
   }
 
   // Conversions.
+
+  float(v: Value): FloatValue {
+    return v instanceof FloatValue ? v : floatValue(this.toNumber(v));
+  }
+
+  toNumeric(v: Value): number | FloatValue {
+    const primitive =
+      v !== null && typeof v === "object" && !(v instanceof FloatValue)
+        ? this.toPrimitive(v, "number")
+        : v;
+    return primitive instanceof FloatValue ? primitive : this.toNumber(primitive);
+  }
+
+  toBoolean(v: Value): boolean {
+    return v instanceof FloatValue ? !!v.value : !!v;
+  }
+
+  subtract(a: Value, b: Value): Value {
+    const x = this.toNumeric(a);
+    const y = this.toNumeric(b);
+    return x instanceof FloatValue && y instanceof FloatValue
+      ? floatValue(x.value - y.value)
+      : +x - +y;
+  }
+
+  multiply(a: Value, b: Value): Value {
+    const x = this.toNumeric(a);
+    const y = this.toNumeric(b);
+    return x instanceof FloatValue && y instanceof FloatValue
+      ? floatValue(x.value * y.value)
+      : +x * +y;
+  }
+
+  divide(a: Value, b: Value): Value {
+    const x = this.toNumeric(a);
+    const y = this.toNumeric(b);
+    return x instanceof FloatValue && y instanceof FloatValue
+      ? floatValue(x.value / y.value)
+      : +x / +y;
+  }
+
+  modulo(a: Value, b: Value): Value {
+    const x = this.toNumeric(a);
+    const y = this.toNumeric(b);
+    return x instanceof FloatValue && y instanceof FloatValue
+      ? floatValue(x.value % y.value)
+      : +x % +y;
+  }
+
+  negate(v: Value): Value {
+    const value = this.toNumeric(v);
+    return value instanceof FloatValue ? floatValue(-value.value) : -value;
+  }
+
+  increment(v: Value): Value {
+    const value = this.toNumeric(v);
+    return value instanceof FloatValue ? floatValue(value.value + 1) : value + 1;
+  }
+
+  decrement(v: Value): Value {
+    const value = this.toNumeric(v);
+    return value instanceof FloatValue ? floatValue(value.value - 1) : value - 1;
+  }
 
   toNumber(v: Value): number {
     switch (typeof v) {
@@ -2218,7 +2338,11 @@ export class Runtime {
       case "undefined":
         return Number.NaN;
       default:
-        return v === null ? 0 : this.toNumber(this.toPrimitive(v, "number"));
+        return v instanceof FloatValue
+          ? v.value
+          : v === null
+            ? 0
+            : this.toNumber(this.toPrimitive(v, "number"));
     }
   }
 
@@ -2240,12 +2364,20 @@ export class Runtime {
       case "undefined":
         return String(v);
       default:
-        return v === null ? "null" : this.toString(this.toPrimitive(v, "string"));
+        return v instanceof FloatValue
+          ? numberToString(v.value)
+          : v === null
+            ? "null"
+            : this.toString(this.toPrimitive(v, "string"));
     }
   }
 
   /** As [[DefaultValue]]: valueOf and toString, in the hint's order. */
   toPrimitive(o: AsObject, hint: "number" | "string"): Value {
+    if (o instanceof FloatValue) {
+      return o;
+    }
+
     // XML's is its string, as XMLObject::toString gives it.
     const properties: PropertyHook | null | undefined = o.$traits?.properties;
     if (properties) {
@@ -2257,7 +2389,12 @@ export class Runtime {
     const order = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
     for (const name of order) {
       const v = this.callProperty(o, publicQname(name));
-      if (v === null || typeof v !== "object" || v instanceof Namespace) {
+      if (
+        v === null ||
+        typeof v !== "object" ||
+        v instanceof Namespace ||
+        v instanceof FloatValue
+      ) {
         return v;
       }
     }
@@ -2268,6 +2405,10 @@ export class Runtime {
   add(a: Value, b: Value): Value {
     if (typeof a === "number" && typeof b === "number") {
       return a + b;
+    }
+
+    if (a instanceof FloatValue && b instanceof FloatValue) {
+      return floatValue(a.value + b.value);
     }
 
     if (typeof a === "object" && typeof b === "object" && a?.$traits?.properties) {
@@ -2285,11 +2426,13 @@ export class Runtime {
       return this.toString(pa) + this.toString(pb);
     }
 
-    return this.toNumber(pa) + this.toNumber(pb);
+    return pa instanceof FloatValue && pb instanceof FloatValue
+      ? floatValue(pa.value + pb.value)
+      : this.toNumber(pa) + this.toNumber(pb);
   }
 
   private addend(v: Value): Value {
-    if (v === null || typeof v !== "object" || v instanceof Namespace) {
+    if (v === null || typeof v !== "object" || v instanceof Namespace || v instanceof FloatValue) {
       return v;
     }
 
@@ -2301,6 +2444,14 @@ export class Runtime {
   }
 
   equals(a: Value, b: Value): boolean {
+    if (a instanceof FloatValue) {
+      a = a.value;
+    }
+
+    if (b instanceof FloatValue) {
+      b = b.value;
+    }
+
     if (typeof a === "object" || typeof b === "object") {
       const e = this.objectEquals(a, b);
       if (e !== undefined) {
@@ -2358,6 +2509,10 @@ export class Runtime {
   }
 
   strictEquals(a: Value, b: Value): boolean {
+    if (a instanceof FloatValue || b instanceof FloatValue) {
+      return a instanceof FloatValue && b instanceof FloatValue && a.value === b.value;
+    }
+
     return a === b;
   }
 
@@ -2837,7 +2992,9 @@ export class Runtime {
   }
 
   isPrimitive(v: Value): boolean {
-    return v === null || (typeof v !== "object" && typeof v !== "function");
+    return (
+      v instanceof FloatValue || v === null || (typeof v !== "object" && typeof v !== "function")
+    );
   }
 }
 
@@ -2859,7 +3016,7 @@ function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
   );
 }
 
-const BUILTIN_REFS = new Set(["int", "uint", "Number", "String", "Boolean", "Object"]);
+const BUILTIN_REFS = new Set(["int", "uint", "Number", "float", "String", "Boolean", "Object"]);
 
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");

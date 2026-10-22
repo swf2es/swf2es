@@ -41,6 +41,7 @@ const abcs = compileScripts(
     { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
+    { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
     {
       name: "ActivationTest",
       source: readFileSync(`${here}scripts/ActivationTest.as`, "utf8"),
@@ -53,6 +54,10 @@ const abcs = compileScripts(
   out,
 );
 mkdirSync(site, { recursive: true });
+writeFileSync(
+  `${site}context-menu.swf`,
+  bare(abcs.get("ContextMenuTest") as Uint8Array, 1, "ContextMenuTest", 200, 120),
+);
 const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
@@ -164,6 +169,7 @@ function colours(image: Image, [x, y, w, h]: number[], scale: number): Map<numbe
 }
 
 const checks: [string, (evaluate: Evaluate, send: Send) => Promise<void>][] = [];
+const boundTextureWarnings: string[] = [];
 const check = (name: string, run: (evaluate: Evaluate, send: Send) => Promise<void>) =>
   checks.push([name, run]);
 
@@ -244,6 +250,7 @@ check("each element boots and draws", async (evaluate, send) => {
 check(
   "the quality attribute draws aliased and unsmoothed at low, while it plays",
   async (evaluate, send) => {
+    boundTextureWarnings.length = 0;
     const shown = async (rect: number[]) => {
       const shot = await send<{ data: string }>("Page.captureScreenshot", { format: "png" });
       const image = decodePng(new Uint8Array(Buffer.from(shot.data, "base64")));
@@ -276,6 +283,11 @@ check(
       assert.ok(medium < high, `${medium} colours at medium, ${high} at high (${most} samples)`);
     }
     await call(evaluate, 'requality("high", "/web-test/shapes.swf")');
+    assert.deepEqual(
+      boundTextureWarnings,
+      [],
+      "quality changes or replacement destroyed a bound texture",
+    );
   },
 );
 
@@ -571,6 +583,15 @@ check(
   "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",
   async (evaluate, send) => {
     const [left, top] = await call<[number, number]>(evaluate, "touchPlayer()");
+    // Test pointer routing independently of the popup, which takes the pointer while open.
+    await call(
+      evaluate,
+      `(() => {
+      const canvas = document.elementFromPoint(${left + 1}, ${top + 1}).shadowRoot.querySelector("canvas");
+      canvas.addEventListener("contextmenu", e => e.preventDefault(), {capture:true});
+      return true;
+    })()`,
+    );
     const log = () => call<string[]>(evaluate, "touchLog()");
     const mouse = async (type: string, x: number, y: number, buttons = 0, button = "left") => {
       await send("Input.dispatchMouseEvent", {
@@ -856,11 +877,257 @@ check(
   },
 );
 
+check(
+  "custom context menus inherit, snapshot after menuSelect, select and release their DOM",
+  async (evaluate, send) => {
+    const at = await call<number[]>(
+      evaluate,
+      `(async () => {
+    window.menuLines = [];
+    window.menuTrace = line => menuLines.push(line);
+    window.menuPlayer = document.createElement("swf2es-player");
+    menuPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
+    document.body.append(menuPlayer);
+    await menuPlayer.load("/web-test/context-menu.swf");
+    menuPlayer.focus();
+    window.menuHost = () => menuPlayer.shadowRoot.querySelector("[data-swf2es-context-menu]");
+    window.menuButtons = () => Array.from(menuHost().shadowRoot.querySelectorAll("button"));
+    const r = menuPlayer.getBoundingClientRect();
+    return [r.x, r.y];
+  })()`,
+    );
+    const open = async (x = 45, y = 45) => {
+      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: at[0] + x,
+          y: at[1] + y,
+          button: type === "mouseMoved" ? "none" : "right",
+          clickCount: 1,
+        });
+      }
+    };
+    const key = async (name: string, code: number) => {
+      for (const type of ["keyDown", "keyUp"]) {
+        await send("Input.dispatchKeyEvent", { type, key: name, windowsVirtualKeyCode: code });
+      }
+    };
+    try {
+      await open();
+      assert.deepEqual(
+        await call(evaluate, `menuButtons().map(b => [b.textContent, b.disabled])`),
+        [
+          ["Action 1", false],
+          ["Disabled", true],
+          ["<b>Literal</b>", false],
+          ["About swf2es", false],
+        ],
+      );
+      assert.equal(await call(evaluate, 'menuHost().shadowRoot.querySelectorAll("b").length'), 0);
+      assert.equal(
+        await call(evaluate, 'menuHost().shadowRoot.querySelectorAll("[role=separator]").length'),
+        2,
+      );
+      assert.deepEqual(await call(evaluate, "menuLines"), [
+        ["menuSelect", "menu", "child", "owner", false, false, 2],
+      ]);
+      assert.equal(
+        await call(
+          evaluate,
+          `(() => {
+      const h = menuHost(), r = h.getBoundingClientRect();
+      return h.matches(":popover-open") && r.bottom > menuPlayer.getBoundingClientRect().bottom;
+    })()`,
+        ),
+        true,
+      );
+      await key("ArrowDown", 40);
+      assert.equal(
+        await call(evaluate, "menuHost().shadowRoot.activeElement.textContent"),
+        "<b>Literal</b>",
+      );
+      await key("Home", 36);
+      await key("Enter", 13);
+      assert.equal(await call(evaluate, "menuHost() === null"), true);
+      assert.deepEqual(await call(evaluate, "menuLines[1]"), [
+        "menuItemSelect",
+        "item",
+        "child",
+        "owner",
+        false,
+        false,
+        2,
+      ]);
+      assert.equal(await call(evaluate, "document.activeElement === menuPlayer"), true);
+
+      await open();
+      await call(evaluate, "window.cancelledMenuButton = menuButtons()[0]; true");
+      await key("Escape", 27);
+      await call(evaluate, "cancelledMenuButton.click(); true");
+      assert.equal(await call(evaluate, "menuHost() === null"), true);
+      assert.equal(
+        await call(evaluate, 'menuLines.filter(x => x[0] === "menuItemSelect").length'),
+        1,
+      );
+
+      for (const type of ["keyDown", "keyUp"]) {
+        await send("Input.dispatchKeyEvent", {
+          type,
+          key: "F10",
+          code: "F10",
+          windowsVirtualKeyCode: 121,
+          modifiers: 8,
+        });
+      }
+      assert.equal(await call(evaluate, "menuHost() !== null"), true, "Shift+F10 opens the menu");
+      await key("Escape", 27);
+
+      await call(evaluate, 'menuPlayer.menuMode("own"); true');
+      await open();
+      assert.deepEqual(await call(evaluate, "menuLines[menuLines.length - 1]"), [
+        "menuSelect",
+        "menu",
+        "child",
+        "child",
+        false,
+        false,
+        2,
+      ]);
+      const clicked = await call<number[]>(
+        evaluate,
+        `(() => {
+      const r = menuButtons()[0].getBoundingClientRect();
+      return [r.x + r.width / 2, r.y + r.height / 2];
+    })()`,
+      );
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: clicked[0],
+          y: clicked[1],
+          button: "left",
+          clickCount: 1,
+        });
+      }
+      assert.deepEqual(await call(evaluate, "menuLines[menuLines.length - 1]"), [
+        "menuItemSelect",
+        "item",
+        "child",
+        "child",
+        false,
+        false,
+        2,
+      ]);
+
+      await open(160, 90);
+      assert.deepEqual(await call(evaluate, "menuButtons().map(b => b.textContent)"), [
+        "Root action",
+        "About swf2es",
+      ]);
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 300,
+        y: 10,
+        button: "left",
+        clickCount: 1,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 300,
+        y: 10,
+        button: "left",
+        clickCount: 1,
+      });
+      assert.equal(await call(evaluate, "menuHost() === null"), true);
+
+      await call(evaluate, 'menuPlayer.menuMode("defaults"); true');
+      await open();
+      assert.equal(
+        await call(
+          evaluate,
+          'menuButtons().filter(b => b.textContent.startsWith("Quality:")).length',
+        ),
+        4,
+      );
+      await key("Escape", 27);
+      await call(evaluate, 'menuPlayer.setAttribute("menu", "false"); true');
+      await open();
+      assert.deepEqual(await call(evaluate, "menuButtons().map(b => b.textContent)"), [
+        "About swf2es",
+      ]);
+      await key("Escape", 27);
+      await call(evaluate, 'menuPlayer.removeAttribute("menu"); true');
+      await call(evaluate, 'menuPlayer.menuMode("noDefaults"); true');
+      await open();
+      assert.deepEqual(await call(evaluate, "menuButtons().map(b => b.textContent)"), [
+        "About swf2es",
+      ]);
+      await key("Escape", 27);
+      await call(
+        evaluate,
+        `(() => {
+        window.preventMenu = e => e.preventDefault();
+        menuPlayer.shadowRoot.querySelector("canvas").addEventListener("contextmenu", preventMenu, {capture:true});
+        return true;
+      })()`,
+      );
+      await open();
+      assert.equal(
+        await call(evaluate, "menuHost() === null"),
+        true,
+        "an embedder can replace the menu",
+      );
+      await key("ContextMenu", 93);
+      assert.equal(
+        await call(evaluate, "menuHost() === null"),
+        true,
+        "keyboard opening honors cancellation",
+      );
+      await call(
+        evaluate,
+        `menuPlayer.shadowRoot.querySelector("canvas").removeEventListener("contextmenu", preventMenu, {capture:true}); true`,
+      );
+      const fullscreen = await send<{ exceptionDetails?: object }>("Runtime.evaluate", {
+        expression: "menuPlayer.requestFullscreen()",
+        userGesture: true,
+        awaitPromise: true,
+      });
+      assert.equal(fullscreen.exceptionDetails, undefined);
+      await key("ContextMenu", 93);
+      assert.equal(
+        await call(
+          evaluate,
+          'document.fullscreenElement === menuPlayer && menuHost()?.matches(":popover-open")',
+        ),
+        true,
+      );
+      await call(evaluate, "menuPlayer.destroy(); true");
+      assert.equal(await call(evaluate, "menuHost() === null"), true);
+    } finally {
+      await call(
+        evaluate,
+        "(async () => { menuPlayer.destroy(); if (document.fullscreenElement) await document.exitFullscreen(); menuPlayer.remove(); delete window.menuTrace; return true; })()",
+      );
+    }
+  },
+);
+
 const failures = await withPage(
   "survivors",
   async (evaluate, send, fresh, listen) => {
     // What the page threw, told with a failing check: an error of its own, not a time out.
     const thrown: string[] = [];
+    listen("Runtime.consoleAPICalled", (params) => {
+      if (params.type !== "warning") {
+        return;
+      }
+
+      const args = params.args as { value?: unknown }[];
+      const message = args.map((arg) => String(arg.value ?? "")).join(" ");
+      if (message.includes("destroyed while still bound")) {
+        boundTextureWarnings.push(message);
+      }
+    });
     listen("Runtime.exceptionThrown", (params) => {
       const details = params.exceptionDetails as {
         exception?: { description?: string };

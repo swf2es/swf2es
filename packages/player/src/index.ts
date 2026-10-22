@@ -45,8 +45,10 @@ export type {
 } from "./hosts.js";
 export { browserClipboard, globalWebSocketHost } from "./hosts.js";
 export { bindActivation } from "./input/activation.js";
+export type { MenuItem } from "./input/context-menu.js";
 export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js";
 export type { Pointer, PointerState } from "./input/pointer.js";
+export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";
 export { PixiView } from "./render/view.js";

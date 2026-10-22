@@ -1120,6 +1120,8 @@
     "flash.ui::MouseCursorData#set:data",
     "flash.ui::MouseCursorData#set:frameRate",
     "flash.ui::MouseCursorData#set:hotSpot",
+    "flash.utils::ByteArray#readMultiByte",
+    "flash.utils::ObjectInput#readMultiByte",
     "flash.utils::Timer#flash.utils:Timer::_start",
     "flash.utils::Timer#flash.utils:Timer::_timerDispatch",
     "flash.utils::Timer#get:running",
@@ -1362,7 +1364,17 @@
     "flash.text::TextRenderer.set:maxLevel",
     "flash.text::TextRenderer.setAdvancedAntiAliasingTable",
     "flash.ui::ContextMenu#get:link",
-    "flash.ui::ContextMenu#set:link"
+    "flash.ui::ContextMenu#set:link",
+    "flash.net::LocalConnection#allowDomain",
+    "flash.net::LocalConnection#allowInsecureDomain",
+    "flash.net::LocalConnection#close",
+    "flash.net::LocalConnection#connect",
+    "flash.net::LocalConnection#flash.net:LocalConnection::ctor",
+    "flash.net::LocalConnection#get:client",
+    "flash.net::LocalConnection#get:isPerUser",
+    "flash.net::LocalConnection#send",
+    "flash.net::LocalConnection#set:client",
+    "flash.net::LocalConnection#set:isPerUser"
   ],
   "hooks": [
     "flash.desktop::Clipboard",

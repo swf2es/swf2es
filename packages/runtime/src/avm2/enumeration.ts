@@ -4,6 +4,7 @@
 
 import type { AsObject, Value } from "./descriptors.js";
 import { arrayIndex, Namespace } from "./names.js";
+import { FloatVector } from "./natives/float-vector.js";
 import { WeakKeys, WeakName } from "./weak-keys.js";
 
 /**
@@ -37,7 +38,11 @@ export const INT_ATOM_LIMIT = 0x10000000;
 /** An object's own names, its elements', its dynamic properties' and a Dictionary's keys, in that order. */
 export function ownNames(o: AsObject): EnumeratedName[] {
   const names: EnumeratedName[] = [];
-  if (o.$a !== undefined) {
+  if (o.$a instanceof FloatVector) {
+    for (let i = 0; i < o.$a.length; i++) {
+      names.push(String(i));
+    }
+  } else if (o.$a !== undefined) {
     for (const i of Object.keys(o.$a)) {
       names.push(i);
     }
@@ -150,7 +155,7 @@ function stillThere(o: AsObject, name: EnumeratedName): boolean {
   if (o.$a !== undefined) {
     const i = arrayIndex(name);
     if (i >= 0) {
-      return i in o.$a;
+      return o.$a instanceof FloatVector ? i < o.$a.length : i in o.$a;
     }
   }
 

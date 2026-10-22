@@ -50,6 +50,7 @@ export const BUILTIN_Number: u8 = 6;
 export const BUILTIN_String: u8 = 7;
 export const BUILTIN_Namespace: u8 = 8;
 export const BUILTIN_Other: u8 = 9;
+export const BUILTIN_Float: u8 = 10;
 
 function hasGetter(binding: u32): bool {
   const kind = binding & 7;
@@ -1072,7 +1073,10 @@ export function legalDefault(bt: u8, kind: u8, number: f64): bool {
   }
 
   const isNumber =
-    kind === C.CONSTANT_Int || kind === C.CONSTANT_UInt || kind === C.CONSTANT_Double;
+    kind === C.CONSTANT_Int ||
+    kind === C.CONSTANT_UInt ||
+    kind === C.CONSTANT_Double ||
+    kind === C.CONSTANT_Float;
   const isNamespace =
     kind === C.CONSTANT_Namespace ||
     kind === C.CONSTANT_PackageNamespace ||
@@ -1084,6 +1088,7 @@ export function legalDefault(bt: u8, kind: u8, number: f64): bool {
   switch (bt) {
     case BUILTIN_Object:
       return true;
+    case BUILTIN_Float:
     case BUILTIN_Number:
       return isNumber;
     case BUILTIN_Boolean:
@@ -1109,6 +1114,7 @@ export function isDefaultKind(kind: u8): bool {
     kind === C.CONSTANT_Int ||
     kind === C.CONSTANT_UInt ||
     kind === C.CONSTANT_Double ||
+    kind === C.CONSTANT_Float ||
     kind === C.CONSTANT_Utf8 ||
     kind === C.CONSTANT_True ||
     kind === C.CONSTANT_False ||

@@ -221,6 +221,7 @@ export class Swf2esPlayerElement extends ElementBase {
     "wmode",
     "bgcolor",
     "quality",
+    "menu",
   ];
 
   #session: Session | null = null;
@@ -306,6 +307,10 @@ export class Swf2esPlayerElement extends ElementBase {
 
     if (name === "quality" && this.#session?.player) {
       this.#session.player.quality = quality(value);
+    }
+
+    if (name === "menu" && this.#session?.player) {
+      this.#session.player.showDefaultContextMenu = value?.toLowerCase() !== "false";
     }
 
     this.#session?.playback?.changed();
@@ -419,6 +424,7 @@ export class Swf2esPlayerElement extends ElementBase {
 
       session.player = new Player(bytes, session.scripting, avm1);
       session.player.quality = quality(attribute(this, "quality"));
+      session.player.showDefaultContextMenu = attribute(this, "menu")?.toLowerCase() !== "false";
       const playback = await Playback.create(
         this.#box,
         session.player,

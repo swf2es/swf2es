@@ -1122,6 +1122,14 @@ transform's TextFormat in `_styles`; a field with a sheet reads its text
 as HTML styled by it and gives back the HTML as set, and a new sheet
 styles that HTML again.
 
+`StyleSheet.load` uses the host's fetch, like `LoadVars.load`, and delivers
+between frames, with the same hidden byte counts and `loaded` state but no
+`onHTTPStatus` callback (adl). Its default `onData` calls the overridable
+`parse`, sets `loaded` to its return value, and calls `onLoad` with that
+value. Missing or empty responses call it with undefined, which reports
+false. Invalid CSS also reports false; existing styles remain. A custom
+`onData` replaces parsing and the `onLoad` notification.
+
 Input fields use the same editor as AS3 (`input/text-editor.ts`). A click
 focuses a selectable field and places its caret; dragging extends the
 selection. Keys and separate text events edit the focused input field,
@@ -1135,6 +1143,14 @@ listeners. Scripted text changes do not broadcast it.
 display masks: the mask's fills clip its target and its own artwork is
 hidden. An object or path selects a mask, null or undefined clears it,
 and an unresolved path returns false without replacing the existing mask.
+
+`lineStyle`, `moveTo`, `lineTo`, `curveTo`, `beginFill`, `endFill` and
+`clear`, from SWF 6, use the same `Drawing` and renderer as AS3, through
+`globals/drawing.ts`. Coordinates truncate to twips, line widths to whole
+pixels, and alpha is a percentage. Bounds include paths without a style;
+the target clip's SWF version chooses control-point bounds with full line
+width padding before SWF 8, or curve extrema with half width padding from
+SWF 8. Bounds accumulate with each segment, without rescanning the path.
 
 `TextSnapshot` (`globals/TextSnapshot.ts`, as Ruffle's) is a clip's
 static texts' text, its own children's in the order they are drawn, as
@@ -1926,17 +1942,27 @@ streams in, which a whole fetch never reports.
 
 ### AVM1 and AVM2
 
-Two VMs meet in three places, each its own step in the plan:
+An AVM1 SWF loaded by AS3 now runs its actions in an AVM1 realm of its own.
+Its `_root` and `_level0` refer to that movie; its compiler, host services
+and LocalConnection broker come from the parent player. Input routing into
+loaded AVM1 movies remains incomplete.
 
-- **An AVM1 SWF loaded by AS3**: the `AVM1Movie` the player already makes
-  runs its actions; its `_root` and `_level0` are the movie's root, and it
-  shares the player's AVM1 with any other.
-- **`LocalConnection`** between an AS2 and an AS3 SWF, the way Flash's
-  content talks across VMs: messages are copied as AMF0 values, which the
-  runtime's AMF code reads and writes.
-- **`AVM1Movie.call` and `addCallback`**, which throw #2014 today, once
-  both VMs run; the corpus's `avm2/avm1movie_addcallback_call` shows what
-  Flash copies across.
+`LocalConnection` (`globals/LocalConnection.ts`) supports AVM1-to-AVM1 and
+AVM1-to-AVM2 messages within a player. Names are case-insensitive; a leading
+underscore opts out of the domain prefix. `send` copies arguments into
+AMF0 bytes, preserving object references and cycles, and queues delivery
+on the sender's existing host-event queue. Arguments over 40 KiB return
+false. AS3 sends AMF3 snapshots; the broker converts them to AMF0 only
+when an AVM1 receiver needs them, preserving AS3-only types between AS3 peers. Receiver methods, `allowDomain`, `allowInsecureDomain` and `onStatus`
+run in the receiver or sender's own script activation. Status reports
+whether a listener was found, even when its domain callback denies the
+method call. Unloading an AS3-loaded child closes its registrations and
+cancels its queued callbacks. The three `avm1/localconnection*` corpus tests
+match Flash; unit tests cover mixed-VM values and unloading. Connections
+are not shared with other browser tabs or applications.
+
+`AVM1Movie.call` and `addCallback` still throw #2014; the corpus's
+`avm2/avm1movie_addcallback_call` covers that separate interface.
 
 An AS3 SWF loaded by AS2 (`loadMovie`, the corpus's
 `mixed_avm/avm1_loads_avm2*`) plays as AVM1 with none of its code, as
@@ -2294,8 +2320,8 @@ determinism` green, and the corpus baseline may only go up.
     `stylesheet_transform`, `selection`, `edittext_programmatic_focus`...).
     Input fields now support typing, selection, clipboard edits and
     `onChanged`. Left: IME composition, `onScroller` from the user,
-    `asfunction:` links, `StyleSheet.load` with loading (step 15), the
-    HTML of SWF 6 and 7 fields as Flash reads it, and layout metrics
+    `asfunction:` links, the HTML of SWF 6 and 7 fields as Flash reads it,
+    and layout metrics
     (`textWidth`, `maxscroll`) where they part from Flash's, which AS3's
     fields share.
 14. **Drawing, display and sound classes.** The drawing API, `Color`,
@@ -2329,8 +2355,8 @@ determinism` green, and the corpus baseline may only go up.
     test passing. Left: what "Loading movies" lists, and
     `System.useCodepage`'s guess of a file's encoding
     (`form_loader_encoding_3` and `_4`).
-16. **AVM1 in AS3.** An `AVM1Movie` runs its actions, `LocalConnection`
-    across the VMs, `AVM1Movie.call` and `addCallback`; the `avm1-movie`
+16. **Remaining AVM1 interop.** Input routing, `AVM1Movie.call` and
+    `addCallback`; the `avm1-movie`
     case's AVM1 then traces, recorded again with adl. Passes
     `mixed_avm/avm2_loads_avm1*` and `avm2_doaction`, and
     `avm2/avm1movie_addcallback_call`.

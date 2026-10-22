@@ -2,9 +2,8 @@
 // are encoded, whether it can throw, and its name. tests/unit/codegen/
 // opcodes.test.ts checks the table against avmplus' core/opcodes.tbl.
 //
-// Opcodes not defined here are illegal in ABC 46.16, including the float
-// instructions of ABC 47.16 (AIR-only: Flash Player never had them) and
-// those avmplus only uses internally.
+// Scalar float instructions are defined here and gated to AIR ABC 47.16
+// by the decoder. float4 and VM-internal instructions remain illegal.
 
 export const OPERANDS_None: u8 = 0;
 /** One u30: a pool index, register, argument count or slot. */
@@ -83,6 +82,9 @@ export const OP_pushstring: u8 = 0x2c;
 export const OP_pushint: u8 = 0x2d;
 export const OP_pushuint: u8 = 0x2e;
 export const OP_pushdouble: u8 = 0x2f;
+export const OP_pushfloat: u8 = 0x22;
+export const OP_convert_f: u8 = 0x79;
+export const OP_unplus: u8 = 0x7a;
 export const OP_pushscope: u8 = 0x30;
 export const OP_pushnamespace: u8 = 0x31;
 export const OP_hasnext2: u8 = 0x32;
@@ -269,6 +271,9 @@ function defineAll(): void {
   define(0x1f, "hasnext", OPERANDS_None, FLAG_Throws, 2, 1, 0);
   define(0x20, "pushnull", OPERANDS_None, 0, 0, 1, 0);
   define(0x21, "pushundefined", OPERANDS_None, 0, 0, 1, 0);
+  define(0x22, "pushfloat", OPERANDS_U30, 0, 0, 1, 0);
+  define(0x79, "convert_f", OPERANDS_None, FLAG_Throws, 1, 1, 0);
+  define(0x7a, "unplus", OPERANDS_None, FLAG_Throws, 1, 1, 0);
   define(0x23, "nextvalue", OPERANDS_None, FLAG_Throws, 2, 1, 0);
   define(0x24, "pushbyte", OPERANDS_Byte, 0, 0, 1, 0);
   define(0x25, "pushshort", OPERANDS_Short, 0, 0, 1, 0);

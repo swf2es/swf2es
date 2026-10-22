@@ -28,7 +28,7 @@ export function readAbc(base: usize, length: u32, builtin: bool = false): Abc {
     return abc;
   }
 
-  abc.pool = readConstantPool(r, base);
+  abc.pool = readConstantPool(r, base, abc.hasFloatSupport);
   if (abc.pool.error) {
     abc.fail(abc.pool.error);
     return abc;
@@ -57,9 +57,8 @@ export function readAbc(base: usize, length: u32, builtin: bool = false): Abc {
 
 /**
  * The versions avmplus' AbcParser::canParse accepts in Flash Player builds,
- * as the oracle's avmshell does: 46.16 and 47.12 to 47.18. All share the
- * 46.16 layout. HARMAN's AIR reads 47.16 with float constant pools, but Flash
- * Player never had float, so neither does swf2es.
+ * as the oracle's avmshell does: 46.16 and 47.12 to 47.18. From 47.16,
+ * AIR adds a scalar float pool; older ABCs keep the Flash layout.
  */
 function isSupportedVersion(major: u32, minor: u32): bool {
   return (major === 46 && minor === 16) || (major === 47 && minor >= 12 && minor <= 18);

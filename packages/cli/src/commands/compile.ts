@@ -182,7 +182,7 @@ export const compile: Command = {
         sha256: sha256(bytes),
       },
       libraries: await Promise.all(
-        libs.map(async ({ name, abc }, i) => {
+        compiled.libraryInputs.map(async ({ name, abc }, i) => {
           const m = compiled.libraries[i];
           const lib = { name, sha256: sha256(abc) };
           return m ? { ...lib, ...(await entry(`lib-${i}`, m)) } : lib;

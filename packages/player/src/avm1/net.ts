@@ -274,7 +274,7 @@ export class Avm1Net {
     }
   }
 
-  private defer(event: () => void): void {
+  defer(event: () => void): void {
     if (!this.destroyed) {
       this.ready.push(event);
     }

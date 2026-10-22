@@ -1,4 +1,4 @@
-// What a SWF asks to load, and when it comes: a Loader's SWF, from a URL
+// What a SWF asks to load, and when it comes: a Loader's SWF or image, from a URL
 // the host fetches or from bytes, compiled and linked off the frame, in
 // the order asked, and given its LoaderInfo's events in the frame after;
 // a URLStream's or a Sound's bytes, and the host's other callbacks, held
@@ -6,9 +6,11 @@
 // LoaderInfo of each, the main SWF's too.
 import { isAs3, readSwf, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { decodeImages, hasUndecoded } from "../bitmap/images.js";
+import { Avm1, getUrlNavigate } from "../avm1/avm1.js";
+import { BitmapStore } from "../bitmap/bitmap.js";
+import { decodeImageFile, decodeImages, hasUndecoded, imageFormat } from "../bitmap/images.js";
 import { type Container, MovieClip, rootOf, unloads } from "../display/display.js";
-import { type Library, readLibrary } from "../display/timeline.js";
+import { type BitmapPixels, type Library, readLibrary } from "../display/timeline.js";
 import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
@@ -56,6 +58,9 @@ interface Avm1Load {
 }
 
 export class Loads {
+  /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
+  private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
+
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
   /** AVM1 movies from bytes, in the order asked, for the end of a frame. */
@@ -81,6 +86,31 @@ export class Loads {
     this.flashvars = options.parameters ?? {};
   }
 
+  tickAvm1(): void {
+    if (this.avm1Movies.size === 0) {
+      return;
+    }
+
+    for (const [root, movie] of this.avm1Movies) {
+      if (movie.first) {
+        const swf = movie.first;
+        movie.first = null;
+        root.fresh = false;
+        movie.vm.startScripts(swf);
+      } else {
+        movie.vm.tick(this.s.frameRate);
+      }
+    }
+  }
+
+  destroyAvm1(): void {
+    for (const movie of this.avm1Movies.values()) {
+      movie.vm.destroy(false);
+    }
+
+    this.avm1Movies.clear();
+  }
+
   /** Keep an asynchronous host task visible to settled(). */
   trackRequest(task: Promise<void>): void {
     this.pendingRequests.add(task);
@@ -97,7 +127,7 @@ export class Loads {
 
   /**
    * A LoaderInfo for `loader` (null for the main SWF's), empty until its
-   * SWF is known: what its natives read is kept on it as $ fields.
+   * content is known: what its natives read is kept on it as $ fields.
    */
   loaderInfo(loader: AsObject | null): AsObject {
     const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
@@ -105,6 +135,7 @@ export class Loads {
     info.$content = null;
     info.$bytes = null;
     info.$swf = null;
+    info.$image = null;
     info.$url = null;
     info.$params = NO_PARAMETERS;
     info.$loaderURL = loader ? this.ownerUrl(loader) : this.s.url;
@@ -190,7 +221,7 @@ export class Loads {
     domain = this.loadDomain(null),
     parameters: ReadonlyMap<string, string> | null = null,
   ): void {
-    const begun = this.begin(loader, domain, parameters);
+    const begun = this.begin(loader, parameters);
     if (!begun) {
       return;
     }
@@ -213,6 +244,7 @@ export class Loads {
       return;
     }
 
+    info.$domain = domain;
     let swf: Swf | null = null;
     try {
       swf = readSwf(bytes);
@@ -342,7 +374,6 @@ export class Loads {
    */
   private begin(
     loader: AsObject,
-    domain: avm2.Domain,
     parameters: ReadonlyMap<string, string> | null,
   ): { info: AsObject; generation: number } | null {
     this.closeLoad(loader);
@@ -354,7 +385,6 @@ export class Loads {
 
     const info = this.loaderInfoOf(loader);
     info.$loaderURL = this.ownerUrl(loader);
-    info.$domain = domain;
     info.$params = parameters ?? NO_PARAMETERS;
     return { info, generation };
   }
@@ -389,7 +419,7 @@ export class Loads {
     domain = this.loadDomain(null),
     parameters: ReadonlyMap<string, string> | null = null,
   ): void {
-    const begun = this.begin(loader, domain, parameters);
+    const begun = this.begin(loader, parameters);
     if (!begun) {
       return;
     }
@@ -628,7 +658,7 @@ export class Loads {
       try {
         load.ready = await this.prepare(load);
       } catch {
-        // Bytes that are no SWF, or code that does not link.
+        // Unknown or undecodable content, or code that does not link.
         load.failed = this.errorText(2124);
       }
     });
@@ -639,8 +669,18 @@ export class Loads {
     return `Error #${id}: ${avm2.errorMessages[id]}`;
   }
 
-  /** The SWF read and its code linked, off the frame; what the frame then does with it. */
+  /** Decode an image or link a SWF off the frame; return what the frame does with it. */
   private async prepare(load: Load): Promise<() => () => void> {
+    const format = imageFormat(load.bytes);
+    if (format) {
+      const pixels = await decodeImageFile(load.bytes, format, this.s.decodeImage);
+      if (!pixels) {
+        throw new Error("Image decode failed");
+      }
+
+      return () => this.completeImage(load, pixels, `image/${format}`);
+    }
+
     const swf = load.swf ?? readSwf(load.bytes);
     if (!isAs3(swf)) {
       // An AVM1 SWF from a URL: its content comes as an AS3 SWF's does.
@@ -697,6 +737,8 @@ export class Loads {
       info.$content = null;
       info.$bytes = null;
       info.$swf = null;
+      info.$image = null;
+      info.$domain = undefined;
       info.$url = null;
       info.$params = NO_PARAMETERS;
       info.$loaded = 0;
@@ -704,6 +746,12 @@ export class Loads {
     }
 
     if (content) {
+      const movie = this.avm1Movies.get(content.$display);
+      if (movie) {
+        movie.vm.destroy(false);
+        this.avm1Movies.delete(content.$display);
+      }
+
       unloads.count++;
     }
 
@@ -815,41 +863,15 @@ export class Loads {
     run: (() => void) | null,
     made: AsObject | null = null,
   ): () => void {
-    const info = this.loaderInfoOf(load.loader);
-    load.loader.$abort = null;
-    // A listener of any of these may close the Loader or load anew, and this load then ends here.
-    const live = () => load.generation === load.loader.$generation;
-    if (load.url !== null) {
-      // A load from bytes told these in the call; one of a URL tells them as
-      // the bytes come: OPEN knowing nothing, the total, then the bytes.
-      dispatchEvent(this.s, info, this.s.event("open"));
-      if (!live()) {
-        return () => {};
-      }
-
-      info.$total = load.bytes.length;
-      this.progress(info, 0);
-      if (!live()) {
-        return () => {};
-      }
-
-      // Its URL's query comes with the SWF, as Flash tells it from the
-      // second PROGRESS on, unless the context gave parameters.
-      if (!load.parameters) {
-        info.$params = queryParameters(load.url);
-      }
-
-      this.describe(info, load.bytes, swf);
-      this.progress(info, load.bytes.length);
-      if (!live()) {
-        return () => {};
-      }
-    } else {
-      this.describe(info, load.bytes, swf);
+    const info = this.startContent(load, swf);
+    if (!info) {
+      return () => {};
     }
 
+    const live = () => load.generation === load.loader.$generation;
     let object: AsObject;
     let root: MovieClip;
+    let avm1: Avm1 | null = null;
     if (run) {
       run();
       this.s.symbols.addFontLibrary(library);
@@ -867,19 +889,112 @@ export class Loads {
         return () => {};
       }
     } else {
-      // An AVM1 SWF: no code of its own runs, and its root is an AVM1Movie.
+      // Its scripts run in AVM1, sharing only the message broker and host services with AS3.
       object = made ?? this.avm1Movie(library);
       root = object.$display;
       root.loaderInfo = info;
+      const s = this.s;
+      const vm = new Avm1(s.codegen, {
+        print: s.rt.print,
+        onUncaught: (error) => s.reportUncaught(error),
+        url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
+        base: s.base ?? undefined,
+        fetch: s.fetch ?? undefined,
+        socket: s.socket ?? undefined,
+        audio: s.audio,
+        storage: s.storage,
+        fileHost: s.fileHost,
+        decodeImage: s.decodeImage,
+        externalInterface: s.externalInterface ?? undefined,
+        navigate: getUrlNavigate(s.navigate, load.url ?? s.url),
+        fsCommand: s.fsCommand ?? undefined,
+        sendToUrl: s.sendToUrl,
+        localConnections: s.localConnections,
+        realTime: s.timers.realTime,
+      });
+      vm.attach(swf, library, root, load.bytes.length, s.frameRate);
+      this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
+      avm1 = vm;
       root.enterFirstFrame();
     }
 
+    const end = this.attachContent(load, object);
+    if (avm1 && load.url !== null) {
+      avm1.startScripts(swf);
+    }
+
+    return end;
+  }
+
+  /** URL progress precedes image metadata, while a SWF header is known at full progress. */
+  private startContent(load: Load, swf: Swf | null): AsObject | null {
+    const info = this.loaderInfoOf(load.loader);
+    load.loader.$abort = null;
+    // A listener of any of these may close the Loader or load anew, and this load then ends here.
+    const live = () => load.generation === load.loader.$generation;
+    if (load.url !== null) {
+      // A load from bytes told these in the call; one of a URL tells them as
+      // the bytes come: OPEN knowing nothing, the total, then the bytes.
+      dispatchEvent(this.s, info, this.s.event("open"));
+      if (!live()) {
+        return null;
+      }
+
+      info.$total = load.bytes.length;
+      this.progress(info, 0);
+      if (!live()) {
+        return null;
+      }
+
+      // Its URL's query comes with the SWF, as Flash tells it from the
+      // second PROGRESS on, unless the context gave parameters.
+      if (!load.parameters) {
+        info.$params = queryParameters(load.url);
+      }
+
+      info.$domain = load.domain;
+      info.$bytes = load.bytes;
+      if (swf) {
+        this.describe(info, load.bytes, swf);
+      }
+
+      this.progress(info, load.bytes.length);
+      if (!live()) {
+        return null;
+      }
+    } else if (swf) {
+      this.describe(info, load.bytes, swf);
+    }
+
+    return info;
+  }
+
+  private completeImage(load: Load, pixels: BitmapPixels, contentType: string): () => void {
+    const info = this.startContent(load, null);
+    if (!info) {
+      return () => {};
+    }
+
+    info.$image = { width: pixels.width, height: pixels.height, contentType };
+    const rt = this.s.rt;
+    const data = rt.construct(rt.classNamed("flash.display::BitmapData"), 1, 1);
+    data.$store = BitmapStore.of(pixels);
+    const object = rt.construct(rt.classNamed("flash.display::Bitmap"), data);
+    object.$display.loaderInfo = info;
+    return this.attachContent(load, object);
+  }
+
+  private attachContent(load: Load, object: AsObject): () => void {
+    const info = this.loaderInfoOf(load.loader);
+    const root = object.$display;
+    const live = () => load.generation === load.loader.$generation;
     info.$url = load.url ?? info.$dynamic ?? info.$loaderURL;
     info.$content = object;
     load.loader.$content = object;
     const display: Container = load.loader.$display;
     display.addChildAt(root, display.children.length);
     this.s.lifecycle.added(root);
+
     return () => {
       if (!live()) {
         return;

@@ -258,11 +258,13 @@ export class DisplayObject {
   transformed = false;
   /** Its other face, the AS3 object a script sees; null in an AVM1 movie. */
   object: avm2.AsObject | null = null;
+  /** A placed AMF3 value, consumed when the timeline constructs the object. */
+  metaData: Uint8Array | null = null;
   /** In an AVM1 movie, its AS2 face, a clip's, a button's or a text field's (avm1/avm1.ts); null otherwise. */
   avm1: avm1.Avm1Object | null = null;
   /** The root of an AVM1 movie an AS3 Loader loaded: its other face, an AVM1Movie, is no InteractiveObject. */
   avm1Root = false;
-  /** The LoaderInfo of the SWF this is the root of: set on the main root and on each loaded SWF's; null below. */
+  /** Set on the main root, each loaded SWF's root and each loaded Bitmap; null below. */
   loaderInfo: avm2.AsObject | null = null;
   /** What its Graphics drew, for a Shape or Sprite a script draws in; null until one does. */
   drawing: Drawing | null = null;

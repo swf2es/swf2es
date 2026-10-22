@@ -2,9 +2,11 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
-import { arrayIndex } from "../names.js";
+import { arrayIndex, NS_Public, namespace, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
+import { methodKey } from "../traits.js";
 import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
+import { FloatVector, setFloatElement } from "./float-vector.js";
 import { sort } from "./sort.js";
 
 const VEC = "__AS3__.vec";
@@ -42,7 +44,9 @@ for (const [kind] of VECTORS) {
 
       const length = rt.toUint(n);
       const a: Value[] = this.$a;
-      if (length === 0) {
+      if (a instanceof FloatVector) {
+        a.length = length;
+      } else if (length === 0) {
         // A new array: V8 empties one by a call into its runtime.
         this.$a = [];
       } else if (length < a.length) {
@@ -79,7 +83,11 @@ for (const [kind] of VECTORS) {
           throw rt.error("RangeError", 1125, i, a.length);
         }
 
-        a[i] = x;
+        if (a instanceof FloatVector) {
+          setFloatElement(rt, this, i, x);
+        } else {
+          a[i] = x;
+        }
       }
 
       return this.$a.length;
@@ -90,7 +98,8 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1126);
       }
 
-      return this.$a.length ? this.$a.pop() : empty(this);
+      const a = this.$a;
+      return a.length ? (a instanceof FloatVector ? rt.float(a.pop()) : a.pop()) : empty(this);
     };
   // As TypedVectorObject::AS3_insertAt and AS3_removeAt: a negative index
   // counts from the end, no further back than 0; an insert past the end
@@ -120,7 +129,8 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1125, at, a.length);
       }
 
-      return a.splice(at, 1)[0];
+      const value = a.splice(at, 1)[0];
+      return a instanceof FloatVector ? rt.float(value) : value;
     };
   vectorNatives[`${c}#${AS3}::shift`] = (rt) =>
     function (this: AsObject) {
@@ -128,7 +138,8 @@ for (const [kind] of VECTORS) {
         throw rt.error("RangeError", 1126);
       }
 
-      return this.$a.length ? this.$a.shift() : empty(this);
+      const a = this.$a;
+      return a.length ? (a instanceof FloatVector ? rt.float(a.shift()) : a.shift()) : empty(this);
     };
   vectorNatives[`${c}#${AS3}::unshift`] = (rt) =>
     function (this: AsObject, ...args: Value[]) {
@@ -170,7 +181,11 @@ for (const [kind] of VECTORS) {
       const items: Value[] = args?.$a ?? [];
       this.$a.splice(at, rt.toUint(deleteCount), ...new Array(count).fill(cls.$fill));
       for (let k = 0; k < count; k++) {
-        writeElement(this, at + k, cls.$convert(rt, cls, items[from + k]));
+        const value =
+          items instanceof FloatVector
+            ? rt.getProperty(args, rt.publicName(from + k))
+            : items[from + k];
+        writeElement(this, at + k, cls.$convert(rt, cls, value));
       }
     };
   vectorNatives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) =>
@@ -189,7 +204,12 @@ for (const [kind] of VECTORS) {
       const r = rt.constructClass(cls, [this.$a.length]);
       let i = 0;
       eachElement(rt, this, f, receiver, (result) => {
-        r.$a[i++] = cls.$convert(rt, cls, result);
+        const value = cls.$convert(rt, cls, result);
+        if (r.$a instanceof FloatVector) {
+          r.$a.data[i++] = value;
+        } else {
+          r.$a[i++] = value;
+        }
       });
       return r;
     };
@@ -247,8 +267,8 @@ for (const [kind, convert, fill] of VECTORS) {
       prepareVector(rt, cls, convert, fill);
       const o = cls.$it.instance();
       const length = args.length ? rt.toUint(args[0]) : 0;
-      o.$a = new Array(length).fill(fill);
-      o.$fixed = !!args[1];
+      o.$a = cls.$param === "float" ? new FloatVector(length) : new Array(length).fill(cls.$fill);
+      o.$fixed = rt.toBoolean(args[1]);
       return o;
     },
     // As VectorClass::call: a Vector of this class is itself; any other
@@ -273,9 +293,9 @@ for (const [kind, convert, fill] of VECTORS) {
       // the source: past a Vector's end, a RangeError.
       const o = cls.$it.instance();
       const length = rt.toUint(rt.getProperty(source, rt.publicName("length")));
-      const a: Value[] = [];
+      const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : [];
       for (let i = 0; i < length; i++) {
-        a.push(convert(rt, cls, rt.getProperty(source, rt.publicName(i))));
+        a.push(cls.$convert(rt, cls, rt.getProperty(source, rt.publicName(i))));
       }
 
       o.$a = a;
@@ -291,6 +311,15 @@ for (const [kind, convert, fill] of VECTORS) {
  */
 function writeElement(o: AsObject, i: number, x: Value): void {
   const a: Value[] = o.$a;
+  if (a instanceof FloatVector) {
+    if (i >= a.length) {
+      a.length = i + 1;
+    }
+
+    a.data[i] = x;
+    return;
+  }
+
   while (a.length <= i) {
     a.push(o.$traits.cls.$fill);
   }
@@ -314,8 +343,22 @@ function prepareVector(
 ): void {
   if (!cls.$convert) {
     cls.$convert = convert;
-    cls.$fill = fill;
+    cls.$fill = cls.$param === "float" ? rt.float(0) : fill;
     cls.$rt = rt;
+    if (cls.$param === "float") {
+      cls.$convert = (rt: Runtime, _cls: AsObject, value: Value) => rt.toNumber(value);
+      cls.$it.getIndex = (o: AsObject, i: number, rt: Runtime) => {
+        const a: FloatVector = o.$a;
+        if (i >= a.length) {
+          throw rt.error("RangeError", 1125, i, a.length);
+        }
+
+        return rt.float(a.data[i]);
+      };
+      cls.$it.setIndex = (o: AsObject, i: number, value: Value, rt: Runtime) =>
+        setFloatElement(rt, o, i, rt.toNumber(value));
+      floatSearchMethods(rt, cls);
+    }
   }
 }
 
@@ -358,4 +401,45 @@ function makeVector(rt: Runtime, param: AsObject | null): AsObject {
   }
 
   return cls;
+}
+
+/** Float vectors coerce search values to float; the generic object's AS3 methods do not. */
+function floatSearchMethods(rt: Runtime, cls: AsObject): void {
+  const proto = rt.objectTraits.instance();
+  proto.$p = cls.$prototype;
+  proto.$d.set("constructor", cls);
+  proto.$dontEnum = new Set(["constructor", "indexOf", "lastIndexOf"]);
+  cls.$prototype = proto;
+  cls.$it.proto.$p = proto;
+  for (const name of ["indexOf", "lastIndexOf"] as const) {
+    const search = function (
+      this: AsObject,
+      value: Value,
+      from: Value = name === "indexOf" ? 0 : 0x7fffffff,
+    ): number {
+      const needle = Math.fround(rt.toNumber(value));
+      const raw = rt.toInt(from);
+      const elements: FloatVector = this.$a;
+      const start = raw < 0 ? Math.max(elements.length + raw, 0) : Math.min(raw, elements.length);
+      if (name === "indexOf") {
+        for (let i = start; i < elements.length; i++) {
+          if (elements.data[i] === needle) {
+            return i;
+          }
+        }
+      } else {
+        for (let i = Math.min(start, elements.length - 1); i >= 0; i--) {
+          if (elements.data[i] === needle) {
+            return i;
+          }
+        }
+      }
+
+      return -1;
+    };
+    Object.assign(search, { $min: 1, $max: 2, $length: 2 });
+    const binding = cls.$it.find(qname(namespace(NS_Public, AS3), name));
+    cls.$it.proto[methodKey(binding >> 3)] = search;
+    proto.$d.set(name, rt.newFunctionObject(search, null));
+  }
 }

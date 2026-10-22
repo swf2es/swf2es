@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { avm2 } from "@swf2es/runtime";
+import { Traits } from "../../../packages/runtime/dist/avm2/traits.js";
 
 test("int() and uint() coerce like AS3", () => {
   assert.equal(avm2.toInt(2 ** 31), -(2 ** 31));
@@ -9,6 +10,33 @@ test("int() and uint() coerce like AS3", () => {
   assert.equal(avm2.toInt(NaN), 0);
   assert.equal(avm2.toUint(-1), 4294967295);
   assert.equal(avm2.toUint(null), 0);
+});
+
+test("integer type checks include negative zero and enforce the signed and unsigned ranges", () => {
+  const rt = avm2.createRuntime();
+  const int = new Traits("int", null);
+  const uint = new Traits("uint", null);
+  const cases = [
+    [-0, true, true],
+    [0, true, true],
+    [-1, true, false],
+    [2 ** 31 - 1, true, true],
+    [-(2 ** 31), true, false],
+    [2 ** 31, false, true],
+    [2 ** 32 - 1, false, true],
+    [2 ** 32, false, false],
+    [1.5, false, false],
+    [NaN, false, false],
+    [Infinity, false, false],
+    ["1", false, false],
+    [rt.float(0), false, false],
+    [rt.float(1), false, false],
+  ] as const;
+
+  for (const [value, signed, unsigned] of cases) {
+    assert.equal(rt.isInstanceOf(value, int), signed, `int: ${String(value)}`);
+    assert.equal(rt.isInstanceOf(value, uint), unsigned, `uint: ${String(value)}`);
+  }
 });
 
 /** An empty module's descriptor, compiled after `linked`. */

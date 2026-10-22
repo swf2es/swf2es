@@ -550,8 +550,8 @@ export class BitmapStore {
     return out;
   }
 
-  /** The rect's pixels as getPixels gives them: unmultiplied ARGB, big-endian, row by row; the rect clipped to the store. */
-  argbBytes(rect: PixelRect): Uint8Array {
+  /** Unmultiplied ARGB words in the destination's byte order, row by row; the rect clipped to the store. */
+  argbBytes(rect: PixelRect, littleEndian = false): Uint8Array {
     const c = this.clip(rect);
     if (!c) {
       return new Uint8Array(0);
@@ -559,14 +559,12 @@ export class BitmapStore {
 
     const pixels = this.readable;
     const out = new Uint8Array(c.width * c.height * 4);
+    const view = new DataView(out.buffer);
     let j = 0;
     for (let y = c.y; y < c.y + c.height; y++) {
       for (let i = y * this.width + c.x, end = i + c.width; i < end; i++, j += 4) {
         const p = unmultiply(pixels[i]);
-        out[j] = p >>> 24;
-        out[j + 1] = (p >>> 16) & 0xff;
-        out[j + 2] = (p >>> 8) & 0xff;
-        out[j + 3] = p & 0xff;
+        view.setUint32(j, p, littleEndian);
       }
     }
 

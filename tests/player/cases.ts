@@ -669,6 +669,29 @@ function frameLabels(abc: Uint8Array): Uint8Array {
   });
 }
 
+function frameLabelAliases(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 100,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(abc, "FrameLabelAliases"),
+      w.symbolClass([[0, "Main"]]),
+      w.frameLabel("initial"),
+      w.showFrame(),
+      w.frameLabel("first"),
+      w.frameLabel("second"),
+      w.frameLabel("repeat"),
+      w.showFrame(),
+      w.frameLabel("repeat"),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Bodies of ten frames, each holding a looping kid of four and another in a
 // one-frame mid sprite, bound to the classes in scripts/GotoChildren.as that
 // jump or stop in different ways, one unbound that never jumps, and a loop
@@ -1555,6 +1578,76 @@ function gotoChild(abc: Uint8Array): Uint8Array {
       w.showFrame(),
       w.showFrame(),
       w.place({ depth: 1, character: 2, matrix: { tx: 400, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// PlaceObject4 metadata belongs to each new instance, survives moves and
+// rewinds, and appears after its constructor but before ADDED.
+function placeMetadata(abc: Uint8Array): Uint8Array {
+  // AMF3 dynamic object {kwy: value}, shared as bytes but decoded per instance.
+  const metadata = (value: string) =>
+    new Uint8Array([
+      10,
+      11,
+      1,
+      7,
+      107,
+      119,
+      121,
+      6,
+      value.length * 2 + 1,
+      ...new TextEncoder().encode(value),
+      1,
+    ]);
+  const first = metadata("first");
+
+  return w.swf({
+    version: 36,
+    width: 160,
+    height: 60,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      square(3, 0xff0000, 400),
+      square(4, 0x0000ff, 400),
+      w.sprite(1, 1, [w.place({ depth: 1, character: 3 }), w.showFrame(), w.end()]),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 4 }), w.showFrame(), w.end()]),
+      w.doAbc(abc, "PlaceMetadata"),
+      w.symbolClass([
+        [0, "Main"],
+        [1, "MetadataChild"],
+        [2, "MetadataChild"],
+      ]),
+      w.place({ depth: 1, character: 1, name: "a", metaData: first, matrix: { tx: 100, ty: 200 } }),
+      w.place({ depth: 2, character: 1, name: "b", metaData: first, matrix: { tx: 800, ty: 200 } }),
+      w.place({ depth: 3, character: 1, name: "plain", matrix: { tx: 1500, ty: 200 } }),
+      w.showFrame(),
+      w.place({ depth: 1, move: true, metaData: metadata("move") }),
+      w.place({ depth: 2, move: true, matrix: { tx: 800, ty: 400 } }),
+      w.showFrame(),
+      w.place({ depth: 1, character: 2, move: true, metaData: metadata("replace") }),
+      w.remove(2),
+      w.place({
+        depth: 2,
+        character: 1,
+        name: "b",
+        metaData: metadata("new"),
+        matrix: { tx: 800, ty: 200 },
+      }),
+      w.showFrame(),
+      w.showFrame(),
+      w.place({
+        depth: 4,
+        character: 1,
+        name: "skip",
+        metaData: metadata("skipped"),
+        matrix: { tx: 2200, ty: 200 },
+      }),
+      w.showFrame(),
+      w.place({ depth: 4, move: true, metaData: metadata("ignored") }),
       w.showFrame(),
       w.end(),
     ],
@@ -3511,6 +3604,41 @@ function avm1Script(name: string, version: number): Uint8Array {
   });
 }
 
+function avm1Drawing(version: number): Uint8Array {
+  return w.swf({
+    version,
+    width: 200,
+    height: 120,
+    frameCount: 3,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      as1(
+        `var d = createEmptyMovieClip("d", 1);
+d.lineStyle(2, 0x223344); d.moveTo(10, 10); d.lineTo(80, 10); d.lineTo(80, 45);
+d.lineStyle(4, 0x008800, 50); d.moveTo(100, 10); d.curveTo(180, 10, 180, 50);
+d.lineStyle(); d.beginFill(0xcc3300, 50);
+d.moveTo(10, 60); d.lineTo(70, 60); d.lineTo(70, 100); d.lineTo(10, 100); d.endFill();
+d.lineStyle(2, 0x000080); d.beginFill(0xaaaa00);
+d.moveTo(100, 65); d.curveTo(140, 35, 180, 65); d.lineTo(180, 100); d.lineTo(100, 100); d.endFill();`,
+        version,
+      ),
+      w.showFrame(),
+      w.showFrame(),
+      as1(
+        `d.clear();
+d.lineTo(180, 110);
+d.beginFill(0x336699); d.moveTo(20, 20); d.lineTo(60, 20);
+d.lineTo(60, 60); d.lineTo(20, 60); d.endFill();
+stop();`,
+        version,
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** A DoAction of AS1 source, as Flash's compiler writes it for a SWF of `version`. */
 const as1 = (source: string, version: number) =>
   w.doAction([...script(source, version)(flashAssembler()).end().bytes()]);
@@ -3641,6 +3769,44 @@ function avm1Gotos(version: number): Uint8Array {
       [
         as1(
           `trace("root 3 " + a._currentframe); a.gotoAndStop(4); a.prevFrame(); trace(a._currentframe); stop();`,
+          version,
+        ),
+      ],
+    ],
+  );
+}
+
+function avm1FrameLabelAliases(version: number): Uint8Array {
+  const clip = avm1Sprite(1, [
+    [w.frameLabel("initial"), as1("stop();", version)],
+    [w.frameLabel("first"), w.frameLabel("second"), w.frameLabel("repeat")],
+    [w.frameLabel("repeat")],
+  ]);
+  return avm1Swf(
+    version,
+    [clip],
+    [
+      [
+        w.place({ depth: 1, character: 1, name: "a" }),
+        as1(
+          `stop();
+tellTarget ("a") {
+  gotoAndStop("first");
+  trace("literal " + _currentframe);
+  gotoAndStop(1);
+  var label = "second";
+  gotoAndStop(label);
+  trace("dynamic " + _currentframe);
+}
+a.gotoAndStop(1);
+a.gotoAndStop("FIRST");
+trace("method first " + a._currentframe);
+a.gotoAndStop(1);
+a.gotoAndStop("second");
+trace("method second " + a._currentframe);
+a.gotoAndStop(1);
+a.gotoAndStop("repeat");
+trace("repeated " + a._currentframe);`,
           version,
         ),
       ],
@@ -4801,7 +4967,7 @@ function avm1Control(version: number): Uint8Array {
 // version 8 whose FileAttributes leaves out ActionScript 3, three frames
 // that move a square and add another, and one of version 6 without
 // FileAttributes, a green square. The first's frame 1 has a DoAction,
-// `x = "1"`, which shows nothing: the player runs no AVM1 actions.
+// `x = "1"`, which changes no pixels.
 function avm1Movie(compile: Compile): Uint8Array {
   const inner = w.swf({
     version: 8,
@@ -5810,6 +5976,34 @@ function fillHoles(): Uint8Array {
         })),
       }),
       w.place({ depth: 1, character: 1 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** Static shape masks keep their authored winding, unlike Graphics drawings used as masks. */
+function staticMaskWinding(): Uint8Array {
+  return w.swf({
+    width: 220,
+    height: 100,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.shape({
+        id: 1,
+        bounds: [0, 2000, 0, 2000],
+        fills: [0xcc3300],
+        paths: [rectPath(5, 5, 90, 90), rectPath(25, 25, 50, 50)].map((commands) => ({
+          fill1: 1,
+          commands,
+        })),
+      }),
+      square(2, 0x0033cc, 2000),
+      w.place({ depth: 1, character: 1 }),
+      w.place({ depth: 2, character: 1, clipDepth: 3, matrix: { tx: 2200, ty: 0 } }),
+      w.place({ depth: 3, character: 2, matrix: { tx: 2200, ty: 0 } }),
       w.showFrame(),
       w.end(),
     ],
@@ -7774,6 +7968,19 @@ const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
 export const cases: PlayerCase[] = [
+  {
+    name: "air-float",
+    swf: bare(
+      new Uint8Array(readFileSync(new URL("fixtures/AirFloat.abc", import.meta.url))),
+      2,
+      "AirFloat",
+    ),
+    frames: 2,
+    capture: [],
+    traced: true,
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   { name: "moves", swf: moves(true), ...moved },
   { name: "moves-avm1", swf: moves(false), ...moved },
   {
@@ -7797,6 +8004,41 @@ export const cases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "static-mask-winding",
+    swf: staticMaskWinding(),
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "crossing-cones",
+    swf: (abc) => bare(abc, 2, "Main", 256, 192),
+    script: "CrossingCones",
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 32,
+    maxOutliers: 80,
+  },
+  {
+    name: "zoomed-cones",
+    swf: (abc) => bare(abc, 61, "Main", 256, 192),
+    script: "ZoomedCones",
+    frames: 61,
+    capture: [1, 9, 14, 27, 42, 53, 61],
+    tolerance: 32,
+    maxOutliers: 80,
+  },
+  {
+    name: "crossing-fills",
+    swf: (abc) => bare(abc, 3, "Main", 480, 360),
+    script: "CrossingFills",
+    frames: 3,
+    capture: [1, 2, 3],
+    tolerance: 32,
+    maxOutliers: 500,
+  },
   {
     name: "shared-fill-edges",
     swf: sharedFillEdges(),
@@ -8067,6 +8309,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "frame-label-aliases",
+    swf: frameLabelAliases,
+    script: "FrameLabelAliases",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "goto-children",
     swf: gotoChildren,
     script: "GotoChildren",
@@ -8184,6 +8435,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "place-metadata",
+    swf: placeMetadata,
+    script: "PlaceMetadata",
+    frames: 6,
+    capture: [1, 6],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "replaces",
     swf: replaces,
     script: "Replaces",
@@ -8253,6 +8513,16 @@ export const cases: PlayerCase[] = [
     script: "BitmapRects",
     frames: 1,
     capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bitmap-pixel-endian",
+    swf: (abc) => bare(abc, 1, "Main", 40, 40),
+    script: "BitmapPixelEndian",
+    alone: true,
+    frames: 1,
+    capture: [],
     tolerance: 0,
     maxOutliers: 0,
   },
@@ -8449,6 +8719,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "bytearray-multibyte",
+    swf: (abc) => bare(abc, 1, "ByteArrayMultibyte"),
+    script: "ByteArrayMultibyte",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "security-domain",
     swf: (abc) => bare(abc, 1, "SecurityDomainNatives"),
     script: "SecurityDomainNatives",
@@ -8531,6 +8810,14 @@ export const cases: PlayerCase[] = [
     name: "dynamic-sound",
     swf: (abc) => bare(abc, 1, "DynamicSound"),
     script: "DynamicSound",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sound-extract-sync",
+    build: extractSounds("SoundExtractSync"),
     frames: 1,
     capture: [],
     tolerance: 0,
@@ -8621,6 +8908,15 @@ export const cases: PlayerCase[] = [
     script: "HiddenStrokes",
     frames: 7,
     capture: [2, 4, 5, 7],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "mask-ancestors",
+    swf: (abc) => bare(abc, 6, "MaskAncestors", 360, 60),
+    script: "MaskAncestors",
+    frames: 6,
+    capture: [2, 3, 4, 5, 6],
     tolerance: 2,
     maxOutliers: 0,
   },
@@ -9349,6 +9645,33 @@ export const cases: PlayerCase[] = [
   // The unload at INIT follows frame 2's capture (see the harness): frame 3 shows it.
   { name: "loads-init", build: loadsInit, frames: 3, capture: [3], tolerance: 0, maxOutliers: 0 },
   {
+    name: "loader-images",
+    swf: bare,
+    script: "LoaderImages",
+    frames: 5,
+    capture: [3, 5],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "loader-image-alpha",
+    swf: bare,
+    script: "LoaderImageAlpha",
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "loader-image-formats",
+    swf: bare,
+    script: "LoaderImageFormats",
+    frames: 9,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "loader-bytes-frames",
     build: loaderBytesFrames,
     frames: 5,
@@ -9449,6 +9772,28 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-drawing-swf${version}`,
+      swf: avm1Script("drawing", version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-drawing-frames-swf${version}`,
+      swf: avm1Drawing(version),
+      frames: 4,
+      capture: [2, 4],
+      // The curved strokes anti-alias within a pixel of Flash's, as for shared-lines.
+      tolerance: 32,
+      maxOutliers: 450,
+    }),
+  ),
   ...[false, true].map(
     (distant): PlayerCase => ({
       name: distant ? "avm1-backward-distant" : "avm1-backward-prefix",
@@ -9537,6 +9882,17 @@ export const cases: PlayerCase[] = [
       swf: avm1Gotos(version),
       traced: true,
       frames: 5,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-frame-label-aliases-swf${version}`,
+      swf: avm1FrameLabelAliases(version),
+      traced: true,
+      frames: 2,
       capture: [],
       tolerance: 0,
       maxOutliers: 0,

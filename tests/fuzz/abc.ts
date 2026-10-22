@@ -19,6 +19,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
+import { floatLibrary } from "../../packages/runtime/dist/avm2/float-library.js";
+import { abc, tables } from "../unit/codegen/abc-builder.ts";
 import type { Case } from "../unit/codegen/oracle-case.ts";
 import { loadTesting } from "../unit/codegen/testing-module.ts";
 
@@ -39,9 +41,20 @@ const builtins = libraries(["builtin", "shell_toplevel"], `${out}lib`, { engine 
   (l) => l.abc,
 );
 
+builtins.push(floatLibrary);
+
 // Seeds: what the unit tests build by hand, each an edge of the format or the
 // verifier, and the conformance cases, ordinary compiled code.
-const seeds: Uint8Array[] = [];
+const seeds: Uint8Array[] = [
+  abc(
+    { floats: [0.1, 16777216] },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0 }],
+      bodies: [{ method: 0, maxStack: 2, code: [0x22, 1, 0x22, 2, 0xa0, 0x48] }],
+    }),
+  ),
+];
 for (const [module, names] of [
   ["../unit/codegen/verify-cases.ts", ["verifyCases"]],
   ["../unit/codegen/link-cases.ts", ["linkCases", "resolveCases"]],

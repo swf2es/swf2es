@@ -47,9 +47,10 @@ export interface RemotingWays {
   readonly first: number;
 }
 
-/** AMF0 written into chunks, joined once: a long save would overflow a spread. */
+/** AMF0 written into one growing buffer, so primitive values allocate no chunks. */
 export class Writer {
-  readonly chunks: Uint8Array[] = [];
+  private buffer = new Uint8Array(64);
+  private view = new DataView(this.buffer.buffer);
   private length = 0;
   /**
    * The objects and arrays written, by their place: a second sight of one
@@ -78,6 +79,7 @@ export class Writer {
      * or an element that throws undefined, its values bounded.
      */
     private readonly remoting: RemotingWays | null = null,
+    private readonly maxBytes = Infinity,
   ) {
     this.nextReference = remoting?.first ?? 1;
   }
@@ -86,21 +88,53 @@ export class Writer {
     return this.length;
   }
 
+  /** An owned snapshot: queued messages must not retain spare buffer capacity. */
+  finish(): Uint8Array<ArrayBuffer> {
+    return this.buffer.slice(0, this.length);
+  }
+
+  private reserve(size: number): number {
+    if (size > this.maxBytes - this.length) {
+      throw new RangeError("AMF0 message too large");
+    }
+
+    const at = this.length;
+    const end = at + size;
+    if (end > this.buffer.length) {
+      const buffer = new Uint8Array(Math.min(this.maxBytes, Math.max(end, this.buffer.length * 2)));
+      buffer.set(this.buffer.subarray(0, at));
+      this.buffer = buffer;
+      this.view = new DataView(buffer.buffer);
+    }
+
+    this.length = end;
+
+    return at;
+  }
+
+  private byte(n: number): void {
+    const at = this.reserve(1);
+    this.buffer[at] = n;
+  }
+
   bytes(...b: number[]): void {
-    this.push(Uint8Array.from(b));
+    const at = this.reserve(b.length);
+    this.buffer.set(b, at);
   }
 
   push(chunk: Uint8Array): void {
-    this.chunks.push(chunk);
-    this.length += chunk.length;
+    const at = this.reserve(chunk.length);
+    this.buffer.set(chunk, at);
   }
 
   u16(n: number): void {
-    this.bytes((n >> 8) & 0xff, n & 0xff);
+    const at = this.reserve(2);
+    this.view.setUint16(at, n);
   }
 
   u32(n: number): void {
-    this.bytes((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+    const at = this.reserve(4);
+    this.view.setUint32(at, n);
   }
 
   /**
@@ -108,30 +142,37 @@ export class Writer {
    * and -0 as 0, as its AVM1 keeps a whole number as an integer.
    */
   double(n: number): void {
-    const b = new Uint8Array(8);
+    const at = this.reserve(8);
     if (Number.isNaN(n)) {
-      b.set([0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+      this.view.setUint32(at, 0x7fffffff);
+      this.view.setUint32(at + 4, 0xffffffff);
     } else {
-      new DataView(b.buffer).setFloat64(0, n === 0 ? 0 : n);
+      this.view.setFloat64(at, n === 0 ? 0 : n);
     }
-
-    this.push(b);
   }
 
   /** A name, a u16-long UTF-8 string without a marker, cut to fit one. */
   name(text: string): void {
+    if (Math.min(text.length, 0xffff) > this.maxBytes - this.length) {
+      throw new RangeError("AMF0 message too large");
+    }
+
     const b = encoder.encode(text).subarray(0, 0xffff);
     this.u16(b.length);
     this.push(b);
   }
 
   string(text: string): void {
+    if (text.length > this.maxBytes - this.length) {
+      throw new RangeError("AMF0 message too large");
+    }
+
     const b = encoder.encode(text);
     if (b.length > 0xffff) {
-      this.bytes(LONG_STRING);
+      this.byte(LONG_STRING);
       this.u32(b.length);
     } else {
-      this.bytes(STRING);
+      this.byte(STRING);
       this.u16(b.length);
     }
 
@@ -141,22 +182,22 @@ export class Writer {
   value(v: Value): void {
     if (this.remoting !== null && this.left-- <= 0) {
       this.left = 0;
-      this.bytes(UNDEFINED);
+      this.byte(UNDEFINED);
     } else if (v === undefined) {
-      this.bytes(UNDEFINED);
+      this.byte(UNDEFINED);
     } else if (v === null) {
-      this.bytes(NULL);
+      this.byte(NULL);
     } else if (typeof v === "boolean") {
       this.bytes(BOOLEAN, v ? 1 : 0);
     } else if (typeof v === "number") {
-      this.bytes(NUMBER);
+      this.byte(NUMBER);
       this.double(v);
     } else if (typeof v === "string") {
       this.string(v);
     } else if (v instanceof avm1.Avm1Object) {
       this.object(v);
     } else {
-      this.bytes(UNDEFINED);
+      this.byte(UNDEFINED);
     }
   }
 
@@ -191,7 +232,7 @@ export class Writer {
   private object(o: Obj): void {
     // Leave room for the undefined leaf in the reader's depth budget.
     if (this.depth >= MAX_DEPTH - 1) {
-      this.bytes(UNDEFINED);
+      this.byte(UNDEFINED);
       return;
     }
 
@@ -206,7 +247,7 @@ export class Writer {
   private contents(o: Obj): void {
     // A clip is no data: Flash writes undefined for it.
     if (o.display !== null) {
-      this.bytes(UNDEFINED);
+      this.byte(UNDEFINED);
       return;
     }
 
@@ -214,7 +255,7 @@ export class Writer {
     // Flash writes it (adl: -120 at UTC+2), which reading ignores.
     if (o.primitive instanceof avm1.DateCell) {
       const time = o.primitive.time;
-      this.bytes(DATE);
+      this.byte(DATE);
       this.double(time);
       const offset =
         this.remoting === null && Number.isFinite(time) ? new Date(time).getTimezoneOffset() : 0;
@@ -224,21 +265,25 @@ export class Writer {
 
     const xml = this.remoting?.xmlText(o) ?? null;
     if (xml !== null) {
+      if (xml.length > this.maxBytes - this.length) {
+        throw new RangeError("AMF0 message too large");
+      }
+
       const b = encoder.encode(xml);
-      this.bytes(XML);
+      this.byte(XML);
       this.u32(b.length);
       this.push(b);
       return;
     }
 
     if (o === this.data) {
-      this.bytes(UNSUPPORTED);
+      this.byte(UNSUPPORTED);
       return;
     }
 
     const seen = this.references.get(o);
     if (seen !== undefined) {
-      this.bytes(REFERENCE);
+      this.byte(REFERENCE);
       this.u16(seen);
       return;
     }
@@ -250,15 +295,15 @@ export class Writer {
 
     if (o.array) {
       // Its length, as the int it is kept as.
-      this.bytes(ECMA_ARRAY);
+      this.byte(ECMA_ARRAY);
       this.u32(avm1.toNumber(this.read(o, "length"), this.version) >>> 0);
     } else {
       const typed = this.typedName(constructorOf(o, this.version));
       if (typed !== null) {
-        this.bytes(TYPED_OBJECT);
+        this.byte(TYPED_OBJECT);
         this.name(typed);
       } else {
-        this.bytes(OBJECT);
+        this.byte(OBJECT);
       }
     }
 
@@ -290,18 +335,17 @@ export class Writer {
   private array(length: number, read: (index: number) => Value): void {
     // No more than the values left to write, which also keeps it a u32.
     length = Math.min(length, this.left);
-    this.bytes(STRICT_ARRAY);
+    this.byte(STRICT_ARRAY);
 
     // Nested values spend this budget too, so the final count is only known after writing them.
-    const count = new Uint8Array(4);
-    this.push(count);
+    const count = this.reserve(4);
     let written = 0;
     for (let i = 0; i < length && this.left > 0; i++) {
       this.value(read(i));
       written++;
     }
 
-    new DataView(count.buffer).setUint32(0, written);
+    this.view.setUint32(count, written);
   }
 
   /**
@@ -359,6 +403,7 @@ export class Reader {
     data = false,
     /** Remoting's value limit; .sol reads use Infinity to match their uncapped writer. */
     private left = MAX_VALUES,
+    private readonly xml: ((text: string) => Value) | null = null,
   ) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     this.references = data ? [undefined] : [];
@@ -468,6 +513,11 @@ export class Reader {
           put(a, String(i), this.value(), this.version);
         }
 
+        const length = a.own("length", this.version);
+        if (length) {
+          length.value = count;
+        }
+
         return a;
       }
       case DATE: {
@@ -477,10 +527,10 @@ export class Reader {
         // Flash's own Date, whatever a script set _global.Date to.
         return this.realm.construct(this.realm.Date.constr, [time], this.version);
       }
-      case XML:
-        // XML is not AS2's yet: its text, kept, reads as nothing.
-        this.utf8(this.u32());
-        return undefined;
+      case XML: {
+        const text = this.utf8(this.u32());
+        return this.xml?.(text);
+      }
       default:
         throw new RangeError(`AMF0 marker ${marker}`);
     }

@@ -201,6 +201,63 @@ export async function decodeImageFile(
   return pixelsOf({ id: 0, type: "image", format, data, alpha: null, opaque: false }, image);
 }
 
+/** Alpha capability comes from the file, even when every decoded pixel is opaque. */
+function hasAlpha(data: Uint8Array, format: "png" | "gif"): boolean {
+  if (format === "png") {
+    if (data.length < 26 || (data[25] & 4) !== 0) {
+      return true;
+    }
+
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    for (let at = 8; at + 12 <= data.length; ) {
+      const length = view.getUint32(at);
+      if (length > data.length - at - 12) {
+        break;
+      }
+
+      switch (view.getUint32(at + 4)) {
+        case 0x74524e53: // tRNS
+          return true;
+        case 0x49444154: // IDAT: transparency, if any, precedes the pixels.
+          return false;
+      }
+
+      at += length + 12;
+    }
+  } else if (data.length >= 13) {
+    let at = 13 + ((data[10] & 0x80) !== 0 ? 3 * (2 << (data[10] & 7)) : 0);
+    while (at < data.length) {
+      switch (data[at]) {
+        case 0x2c: // The first image uses the preceding graphic control extension.
+        case 0x3b:
+          return false;
+        case 0x21:
+          if (
+            at + 7 < data.length &&
+            data[at + 1] === 0xf9 &&
+            data[at + 2] === 4 &&
+            (data[at + 3] & 1) !== 0
+          ) {
+            return true;
+          }
+
+          at += 2;
+          while (at < data.length && data[at] !== 0) {
+            at += data[at] + 1;
+          }
+
+          at++;
+          break;
+        default:
+          return true;
+      }
+    }
+  }
+
+  // A custom decoder may accept bytes with no recognizable header; keep their alpha.
+  return true;
+}
+
 /** The pixels Flash makes of a decoded image, as adl shows them. */
 function pixelsOf(
   definition: Extract<BitmapCharacter["definition"], { type: "image" }>,
@@ -210,7 +267,7 @@ function pixelsOf(
   const count = width * height;
   const pixels = new Uint32Array(count);
   if (definition.format !== "jpeg") {
-    // A PNG's or GIF's own alpha, premultiplied with the product floored.
+    // Flash uses an 8-bit shift for partial alpha, and preserves opaque channels.
     for (let i = 0; i < count; i++) {
       const p = i * 4;
       const a = rgba[p + 3];
@@ -218,13 +275,13 @@ function pixelsOf(
         a === 255
           ? (0xff000000 | (rgba[p] << 16) | (rgba[p + 1] << 8) | rgba[p + 2]) >>> 0
           : ((a << 24) |
-              (Math.floor((rgba[p] * a) / 255) << 16) |
-              (Math.floor((rgba[p + 1] * a) / 255) << 8) |
-              Math.floor((rgba[p + 2] * a) / 255)) >>>
+              (((rgba[p] * a) >> 8) << 16) |
+              (((rgba[p + 1] * a) >> 8) << 8) |
+              ((rgba[p + 2] * a) >> 8)) >>>
             0;
     }
 
-    return { width, height, transparent: true, pixels };
+    return { width, height, transparent: hasAlpha(definition.data, definition.format), pixels };
   }
 
   // DefineBitsJPEG3's colours are taken as premultiplied by its alpha

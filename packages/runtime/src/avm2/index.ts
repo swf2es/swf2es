@@ -3,8 +3,11 @@ import { builtinHooks, builtinNatives } from "./natives/index.js";
 import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
+export { Reader as Amf3Reader, Writer as Amf3Writer } from "./amf.js";
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
+export { FloatValue, hasFloatLibrary } from "./float.js";
+export { floatLibrary } from "./float-library.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";
 export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";

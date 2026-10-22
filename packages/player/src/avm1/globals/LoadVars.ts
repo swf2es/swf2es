@@ -44,7 +44,13 @@ export function textOf(bytes: Uint8Array): string {
 }
 
 /** `request` loaded for `target`, by LoadVars' and XML's rules (above). */
-export function startLoad(host: LoadHost, target: Obj, request: NetRequest, version: number): void {
+export function startLoad(
+  host: LoadHost,
+  target: Obj,
+  request: NetRequest,
+  version: number,
+  httpStatus = true,
+): void {
   setHidden(target, "_bytesLoaded", 0, version);
   setHidden(target, "_bytesTotal", undefined, version);
   setHidden(target, "loaded", false, version);
@@ -58,7 +64,10 @@ export function startLoad(host: LoadHost, target: Obj, request: NetRequest, vers
       }
     }
 
-    host.callback(target, "onHTTPStatus", [result.status]);
+    if (httpStatus) {
+      host.callback(target, "onHTTPStatus", [result.status]);
+    }
+
     const data = result.bytes !== null && length > 0 ? textFor(textOf(result.bytes), v) : undefined;
     host.callback(target, "onData", [data]);
   });

@@ -51,6 +51,7 @@ import {
   type WebSocketHost,
 } from "./hosts.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
+import { LocalConnections } from "./localconnection.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, soundHostOf, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import {
@@ -173,6 +174,7 @@ export class Scripting {
   private readonly stopped = new AbortController();
   /** Whether destroy has been called: the player plays, loads and connects no more. */
   destroyed = false;
+  readonly localConnections: LocalConnections;
   /** Whether sendToURL sends, as an embedding's allowNetworking "internal" or "none" has it not. */
   readonly sendToUrl: boolean;
   /** Takes what fscommand sends, or nothing does. */
@@ -248,6 +250,7 @@ export class Scripting {
   /** Frames played since the start. */
   frames = 0;
   quality = "HIGH";
+  showDefaultContextMenu = true;
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
   instances = 0;
   private statusClass: AsObject | null = null;
@@ -266,6 +269,7 @@ export class Scripting {
     options: avm2.RuntimeOptions & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
+      localConnections?: LocalConnections;
       /**
        * Security.sandboxType: "remote", "localWithFile", "localWithNetwork"
        * or "localTrusted", as the host placed the SWF; "remote" by default.
@@ -339,6 +343,7 @@ export class Scripting {
       onUncaught?: (error: unknown) => void;
     } = {},
   ) {
+    this.localConnections = options.localConnections ?? new LocalConnections();
     this.screenCapabilities = {
       screenResolutionX:
         options.screenCapabilities?.screenResolutionX ??
@@ -436,6 +441,8 @@ export class Scripting {
     }
 
     this.destroyed = true;
+    this.loads.destroyAvm1();
+    this.localConnections.destroy(this);
     this.flushSharedObjects?.();
     stopAllSounds(this);
     this.audio?.close?.();
@@ -527,6 +534,11 @@ export class Scripting {
    * frame is entered by Sprite's constructChildren on the way.
    */
   construct(display: DisplayObject, character: DisplayCharacter, library: Library): void {
+    // Flash exposes placed metadata only after the child's constructor returns.
+    const bytes = display.metaData;
+    display.metaData = null;
+    const metaData = bytes === null ? null : this.readMetaData(bytes);
+
     // Its first frame's children are there before its constructor runs, made alive in its super().
     if (display instanceof MovieClip) {
       display.timelineChild = true;
@@ -590,6 +602,10 @@ export class Scripting {
         this.broadcast("exitFrame");
         if (object) {
           this.rt.constructSuper(cls, object);
+          if (bytes !== null) {
+            object.$metaData = metaData;
+          }
+
           if (refused) {
             throw refused.error;
           }
@@ -604,8 +620,20 @@ export class Scripting {
       character.type === "bitmap" && display instanceof BitmapObject
         ? this.constructBitmap(display, name, domain)
         : this.constructAs(display, this.rt.classNamed(name, domain));
+    if (bytes !== null) {
+      object.$metaData = metaData;
+    }
+
     named(object);
     this.lifecycle.added(display);
+  }
+
+  private readMetaData(raw: Uint8Array): avm2.Value {
+    const bytes = new avm2.Bytes(this.rt, {});
+    bytes.write(raw);
+    bytes.position = 0;
+
+    return new avm2.Amf3Reader(this.rt, bytes).value();
   }
 
   /**
@@ -1037,6 +1065,7 @@ export class Scripting {
       this.frames++;
       this.broadcast("enterFrame");
       this.timers.frameTimers();
+      this.loads.tickAvm1();
     }
 
     this.constructPending();

@@ -17,7 +17,9 @@ const ours = (testing.opcodeTable() as string).split("\n").map((line) => {
   return { opcode: Number(opcode), name, layout: Number(layout), flags: Number(flags) };
 });
 
-test("defines exactly the opcodes avmplus accepts in ABC 46.16", { skip: !existsSync(tbl) }, () => {
+test("defines Flash opcodes and the scalar AIR float extensions", {
+  skip: !existsSync(tbl),
+}, () => {
   // ABC_OP(opCount, throw, stack, internal, name) // 0xNN; ABC_OP_F entries
   // are the float instructions of ABC 47.16.
   const entries = readFileSync(tbl, "utf8").matchAll(
@@ -27,7 +29,11 @@ test("defines exactly the opcodes avmplus accepts in ABC 46.16", { skip: !exists
   let checked = 0;
   for (const [, kind, count, throws, internal, name, hex] of entries) {
     const op = ours[Number.parseInt(hex, 16)];
-    const legal = kind === "ABC_OP" && Number(count) >= 0 && internal === "0";
+    const legal =
+      (kind === "ABC_OP" ||
+        (kind === "ABC_OP_F" && ["pushfloat", "convert_f", "unplus"].includes(name))) &&
+      Number(count) >= 0 &&
+      internal === "0";
     checked++;
 
     if (!legal) {

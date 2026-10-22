@@ -22,7 +22,8 @@
     "oracle/*.ts",
     "tools/**/*.ts",
     "packages/codegen/src/webassembly.d.ts",
-    "packages/codegen/stamp.ts"
+    "packages/codegen/stamp.ts",
+    "packages/mp3/build.ts"
   ],
   "exclude": [
     "tests/programs/as3pb",

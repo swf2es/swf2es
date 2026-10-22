@@ -7,8 +7,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "build": "node tools/pixijs.ts && pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/* apps/*",
-    "build:debug": "node tools/pixijs.ts && pnpm --filter @swf2es/codegen build:wasm:debug && tsc -b packages/* apps/*",
+    "build": "node packages/mp3/build.ts --check && node tools/pixijs.ts && pnpm --filter @swf2es/codegen build:wasm && tsc -b packages/* apps/*",
+    "build:debug": "node packages/mp3/build.ts --check && node tools/pixijs.ts && pnpm --filter @swf2es/codegen build:wasm:debug && tsc -b packages/* apps/*",
     "clean": "tsc -b --clean packages/* apps/*",
     "test": "pnpm -r --filter './tests/*' test",
     "test:checked": "pnpm --filter @swf2es/codegen build:wasm:checked && SWF2ES_CHECKED=1 pnpm test",
@@ -26,10 +26,11 @@
     "oracle:pull": "node oracle/oracle.ts --pull",
     "oracle:abcdump": "node oracle/oracle.ts --abcdump",
     "oracle:cases": "node oracle/cases.ts",
-    "as3": "pnpm as3:playerglobal && pnpm as3:air",
+    "as3": "pnpm as3:builtin && pnpm as3:playerglobal && pnpm as3:air",
+    "as3:builtin": "node tests/libraries/float.ts --update",
     "as3:playerglobal": "node tools/playerglobal.ts --check --update",
     "as3:air": "node tests/player/air-library.ts --update",
-    "as3:format": "cd as3 && ${ASFORMAT:-asformat} -write-files playerglobal/src air/src"
+    "as3:format": "cd as3 && ${ASFORMAT:-asformat} -write-files builtin/src playerglobal/src air/src"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

@@ -7,6 +7,7 @@ import { IR_Coerce } from "../ir/ir";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
+  BUILTIN_Float,
   BUILTIN_Int,
   BUILTIN_Number,
   BUILTIN_Object,
@@ -32,7 +33,14 @@ export function compare(em: MethodEmitter, i: u32, op: u16, not: bool): void {
   const out = em.out;
   const a = em.src(i, 0);
   const b = em.src(i, 1);
-  const numeric = isNumeric(em, a) && isNumeric(em, b);
+  const af = em.builtinOf(a) === BUILTIN_Float;
+  const bf = em.builtinOf(b) === BUILTIN_Float;
+  const numeric = (af || isNumeric(em, a)) && (bf || isNumeric(em, b));
+  if (op === ops.OP_strictequals && numeric && af !== bf) {
+    out.text(not ? "true" : "false");
+    return;
+  }
+
   const strings = em.builtinOf(a) === BUILTIN_String && em.builtinOf(b) === BUILTIN_String;
   let js = "";
   let runtime = "";
@@ -42,7 +50,7 @@ export function compare(em: MethodEmitter, i: u32, op: u16, not: bool): void {
       runtime = "rt.equals(";
       break;
     case ops.OP_strictequals:
-      js = isPrimitive(em, a) && isPrimitive(em, b) ? " === " : "";
+      js = (af && bf) || (isPrimitive(em, a) && isPrimitive(em, b)) ? " === " : "";
       runtime = "rt.strictEquals(";
       break;
     case ops.OP_lessthan:
@@ -73,9 +81,9 @@ export function compare(em: MethodEmitter, i: u32, op: u16, not: bool): void {
   }
 
   out.text(not ? "!(" : "(");
-  em.reg(a);
+  em.numberReg(a);
   out.text(js);
-  em.reg(b);
+  em.numberReg(b);
   out.text(")");
 }
 
@@ -167,9 +175,9 @@ export function isNumber(em: MethodEmitter, r: i32): bool {
 }
 
 export function binary(em: MethodEmitter, i: u32, operator: string): void {
-  em.reg(em.src(i, 0));
+  em.numberReg(em.src(i, 0));
   em.out.text(operator);
-  em.reg(em.src(i, 1));
+  em.numberReg(em.src(i, 1));
 }
 
 export function binaryInt(em: MethodEmitter, i: u32, operator: string): void {
@@ -244,6 +252,8 @@ export function conversionType(em: MethodEmitter, op: u8, i: u32): i32 {
     case ops.OP_convert_u:
     case ops.OP_coerce_u:
       return domain.uintType;
+    case ops.OP_convert_f:
+      return domain.floatType;
     case ops.OP_convert_d:
     case ops.OP_coerce_d:
       return domain.numberType;
@@ -293,7 +303,7 @@ function upcast(em: MethodEmitter, type: i32, from: i32): bool {
 }
 
 /** The conversion instructions: the value of src as the type they give. */
-export function conversion(em: MethodEmitter, i: u32, op: u8): void {
+export function conversion(em: MethodEmitter, i: u32, op: u8, unboxed: bool = false): void {
   const domain = em.domain;
   const src = em.ir.src[i];
   const from = em.regType[src];
@@ -305,6 +315,9 @@ export function conversion(em: MethodEmitter, i: u32, op: u8): void {
     case ops.OP_convert_u:
     case ops.OP_coerce_u:
       convert(em, "", src, domain.uintType, from);
+      break;
+    case ops.OP_convert_f:
+      convert(em, "", src, domain.floatType, from, unboxed);
       break;
     case ops.OP_convert_d:
     case ops.OP_coerce_d:
@@ -332,7 +345,7 @@ export function conversion(em: MethodEmitter, i: u32, op: u8): void {
       convert(em, "", src, domain.objectType(), from);
       break;
     case ops.OP_coerce:
-      convert(em, "", src, em.ir.c[i], from);
+      convert(em, "", src, em.ir.c[i], from, unboxed);
       break;
     default:
       em.reg(src);
@@ -345,11 +358,42 @@ export function conversion(em: MethodEmitter, i: u32, op: u8): void {
  * `from`, as avmplus' coercions: nothing when it is that type already,
  * plain JavaScript for numbers and booleans, the runtime otherwise.
  */
-export function convert(em: MethodEmitter, prefix: string, r: i32, type: i32, from: i32): void {
+export function convert(
+  em: MethodEmitter,
+  prefix: string,
+  r: i32,
+  type: i32,
+  from: i32,
+  unboxed: bool = false,
+): void {
   const out = em.out;
   const domain = em.domain;
   const bt = domain.builtin(type);
   const fromBt = domain.builtin(from);
+  if (prefix.length === 0 && fromBt === BUILTIN_Float) {
+    switch (bt) {
+      case BUILTIN_Float:
+        if (unboxed) {
+          em.numberReg(r);
+          return;
+        }
+
+        break;
+      case BUILTIN_Int:
+      case BUILTIN_Uint:
+        em.numberReg(r);
+        out.text(bt === BUILTIN_Int ? " | 0" : " >>> 0");
+        return;
+      case BUILTIN_Number:
+        em.numberReg(r);
+        return;
+      case BUILTIN_Boolean:
+        out.text("!!");
+        em.numberReg(r);
+        return;
+    }
+  }
+
   if (type === from || bt === BUILTIN_Any) {
     operand(em, prefix, r);
     return;
@@ -357,6 +401,18 @@ export function convert(em: MethodEmitter, prefix: string, r: i32, type: i32, fr
 
   const numeric = fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number;
   switch (bt) {
+    case BUILTIN_Float:
+      out.text(unboxed ? "Math.fround(" : "rt.float(");
+      if (unboxed && !numeric && fromBt !== BUILTIN_Boolean) {
+        out.text("rt.toNumber(");
+        operand(em, prefix, r);
+        out.text(")");
+      } else {
+        operand(em, prefix, r);
+      }
+
+      out.text(")");
+      return;
     case BUILTIN_Int:
       if (numeric || fromBt === BUILTIN_Boolean) {
         operand(em, prefix, r);
@@ -387,8 +443,14 @@ export function convert(em: MethodEmitter, prefix: string, r: i32, type: i32, fr
       }
       return;
     case BUILTIN_Boolean:
-      out.text("!!");
-      operand(em, prefix, r);
+      if (fromBt === BUILTIN_Float || fromBt === BUILTIN_Any || fromBt === BUILTIN_Object) {
+        out.text("rt.toBoolean(");
+        operand(em, prefix, r);
+        out.text(")");
+      } else {
+        out.text("!!");
+        operand(em, prefix, r);
+      }
       return;
     case BUILTIN_String:
       out.text("rt.coerceString(");

@@ -1,4 +1,4 @@
-// flash.display.LoaderInfo: what is known of a SWF, the main one's or a
+// flash.display.LoaderInfo: what is known of a SWF or image, the main one's or a
 // Loader's; Loads.loaderInfo makes one and keeps its facts on it.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
@@ -14,8 +14,21 @@ interface SwfFacts {
   as3: boolean;
 }
 
+interface ImageFacts {
+  width: number;
+  height: number;
+  contentType: string;
+}
+
 /** A LoaderInfo's facts about its SWF, which Flash refuses to tell before the SWF is loaded: Error #2099. */
-function factsOf(s: Scripting, info: { $swf: SwfFacts | null }): SwfFacts {
+function factsOf(
+  s: Scripting,
+  info: { $swf: SwfFacts | null; $image: ImageFacts | null },
+): SwfFacts {
+  if (info.$image) {
+    throw s.rt.error("Error", 2098);
+  }
+
   if (!info.$swf) {
     throw s.rt.error("Error", 2099);
   }
@@ -40,6 +53,7 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $content: AsObject | null;
     declare $bytes: Uint8Array | null;
     declare $swf: SwfFacts | null;
+    declare $image: ImageFacts | null;
     declare $url: string | null;
     /** What `parameters` tells (Loads.loaderInfo): its LoaderContext's, its URL's query, or the main SWF's flashvars. */
     declare $params: ReadonlyMap<string, string>;
@@ -84,8 +98,9 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
 
     // The domain its load chose (Loads.loadDomain), or the main SWF's.
     get applicationDomain(): Value {
-      factsOf(s, this);
-      return s.code.applicationDomainOf(this.$domain ?? s.mainDomain);
+      return this.$domain || this.$swf
+        ? s.code.applicationDomainOf(this.$domain ?? s.mainDomain)
+        : null;
     }
 
     get swfVersion(): number {
@@ -101,15 +116,15 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     }
 
     get width(): number {
-      return factsOf(s, this).width;
+      return (this.$image ?? factsOf(s, this)).width;
     }
 
     get height(): number {
-      return factsOf(s, this).height;
+      return (this.$image ?? factsOf(s, this)).height;
     }
 
     get contentType(): Value {
-      return this.$swf ? "application/x-shockwave-flash" : null;
+      return this.$image?.contentType ?? (this.$swf ? "application/x-shockwave-flash" : null);
     }
 
     get sharedEvents(): Value {

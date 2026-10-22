@@ -8,15 +8,11 @@
 import { avm1 } from "@swf2es/runtime";
 import { camelCase, fontList, parseCss } from "../../text/css.js";
 import { emptyFormat, type PartialFormat } from "../../text/text.js";
+import { type LoadHost, startLoad } from "./LoadVars.js";
 import { formatOf, newTextFormat } from "./TextFormat.js";
 
 type Value = avm1.Value;
 type Obj = avm1.Avm1Object;
-
-/** What the sheet needs of the movie. */
-export interface StyleSheetHost {
-  readonly realm: avm1.Realm;
-}
 
 const sheets = new WeakMap<Obj, Map<string, PartialFormat>>();
 
@@ -28,7 +24,7 @@ export function stylesOf(value: Value): Map<string, PartialFormat> | null {
 const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY | avm1.VERSION_7;
 
 /** `TextField.StyleSheet`. */
-export function styleSheetClass(host: StyleSheetHost): avm1.Avm1Function {
+export function styleSheetClass(host: LoadHost): avm1.Avm1Function {
   const realm = host.realm;
   const proto = new avm1.Avm1Object(realm.objectProto);
   const constr = realm.classOf(
@@ -89,8 +85,21 @@ export function styleSheetClass(host: StyleSheetHost): avm1.Avm1Function {
   method("getStyleNames", (self, _, version) =>
     realm.newArray(avm1.keys(stored(self, "_css", version), version), version),
   );
-  // AVM1 loads nothing yet: no load starts, and false says so.
-  method("load", () => false);
+  method("load", (self, args, version) => {
+    if (args.length === 0) {
+      return false;
+    }
+
+    // StyleSheet shares the loading state with LoadVars, but sends no HTTP status callback.
+    startLoad(
+      host,
+      self,
+      { url: avm1.stringOf(args[0], version), method: "GET", headers: [], body: null },
+      version,
+      false,
+    );
+    return true;
+  });
   method("getStyle", (self, args, version) =>
     copy(
       avm1.get(stored(self, "_css", version), avm1.stringOf(args[0], version), version),
@@ -124,6 +133,27 @@ export function styleSheetClass(host: StyleSheetHost): avm1.Avm1Function {
     parse(self, avm1.stringOf(args[0], version), version),
   );
   method("parse", (self, args, version) => parse(self, avm1.stringOf(args[0], version), version));
+
+  const callbackFlags = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.VERSION_7;
+  proto.define(
+    "onLoad",
+    realm.method(() => undefined),
+    callbackFlags,
+  );
+  proto.define(
+    "onData",
+    realm.method((self, args, version) => {
+      const data = args[0];
+      const result =
+        data === null || data === undefined
+          ? false
+          : avm1.invoke(avm1.get(self, "parse", version), self, [data], version);
+      avm1.set(self, "loaded", result, version);
+      avm1.invoke(avm1.get(self, "onLoad", version), self, [result], version);
+      return undefined;
+    }),
+    callbackFlags,
+  );
 
   return constr;
 }

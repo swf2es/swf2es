@@ -497,7 +497,8 @@ export class PixiView {
     node.hidden = hidden;
     redrawn ||= visibilityChanged;
     if (remask) {
-      dirty |= TRANSFORM | (o instanceof ShapeObject && o.stale ? CONTENT : 0);
+      container.visibilityRoot = masking;
+      dirty |= TRANSFORM | CONTENT;
     }
 
     // Whether its filters were made again, which a direct blend sets again.
@@ -568,9 +569,9 @@ export class PixiView {
     const rooted =
       node.filters[0] instanceof FilterChain && node.filters[0].filters.length > 0 && !masking;
     const rerooted = rooted !== node.rooted;
-    if (rerooted) {
+    if (rerooted || remask) {
       node.rooted = rooted;
-      container.colorRoot = rooted;
+      container.colorRoot = rooted || masking;
       recolor = true;
     }
 

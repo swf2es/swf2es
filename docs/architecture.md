@@ -98,7 +98,8 @@ over the builtins, then each conformance case (also compiled with asc's
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, runtime  |
+| `mp3`     | synchronous MP3 frame decoder, minimp3 C compiled to WebAssembly | —                       |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
@@ -478,10 +479,42 @@ which `newclass` builds from the module's layout:
   need (`String.fromCharCode = function ...`).
 
 Values are JavaScript's own: `undefined`, `null`, numbers for `Number`,
-`int` and `uint`, booleans, strings. A namespace value is the runtime's
-interned namespace, whose class is Namespace. Arrays and Vectors keep their
-elements in a JavaScript array, `$a`. A script's global object is an instance of its traits like any
-other. Errors thrown by the runtime are AS3 `Error` objects with avmplus'
+`int` and `uint`, booleans, strings. AIR's scalar `float` uses `FloatValue`
+with a binary32 payload, rounded by `Math.fround` when produced. The tag
+preserves its identity through `*`, calls, properties and arrays: AIR treats
+`float(1) === Number(1)` as false. Two float operands produce a rounded float;
+a mixed float/Number operation produces Number. Known Number arithmetic
+keeps its direct JavaScript operators. Float values crossing method and
+object/array storage boundaries use small tags; zero, negative zero and NaN
+are shared. Locals known to hold floats at every use, and float temporaries
+within a basic block, keep their payloads as JS numbers, with `Math.fround`
+at float operations. Live temporaries crossing control-flow edges are boxed;
+locals with mixed or unknown types keep the general tagged representation.
+Typed float-vector accesses also read and write unboxed payloads.
+
+AIR ABC 47.16 and above insert one scalar float pool after the doubles;
+current AIR omits the experimental Tamarin float4 pool. The scalar
+`pushfloat`, `convert_f` and `unplus` instructions are version-gated, and
+`float4` instructions remain rejected. The separate builtin `floatLibrary`,
+generated from `as3/builtin/src/float.as`, declares the primitive beside the
+Flash builtins without replacing them. The player and CLI load it once on demand
+when AIR float bytecode is encountered, before adding any ABC of that SWF;
+direct compiler/runtime users can supply
+`avm2.floatLibrary` as a builtin after `builtin.abc`. AIR's AMF3 float and
+float-vector markers are preserved, including signed zero and NaN. The
+`air-float` player case holds AIR's reference traces; its source is under
+`tests/conformance/cases/air`, outside the avmshell-only runner.
+
+A namespace value is the runtime's
+interned namespace, whose class is Namespace. Arrays and most Vectors keep
+their elements in a JavaScript array, `$a`. For `Vector.<float>`, `$a` holds
+a `FloatVector`: a `Float32Array` buffer, a logical length and spare capacity
+grown by about 1.5x. Explicit-length construction allocates exactly that
+length; setting length to zero releases the buffer. Dynamic reads and
+callbacks box their float values, while enumeration, JSON and AMF respect
+the logical length and float identity without storing a tag per element.
+A script's global object is an instance of its traits like any other.
+Errors thrown by the runtime are AS3 `Error` objects with avmplus'
 error numbers. Their messages are the release player's, as avmshell's
 are: `Error #1009`, and nothing more, since AS3 can read and print them.
 With the runtime's `debugger` option they are the debugger player's,
@@ -1681,7 +1714,7 @@ codegen's memory does not grow where one player loads them all, and that
 a text field kept from a SWF let go still takes a font registered after
 a collection.
 
-### Loading SWFs
+### Loading SWFs and images
 
 A `Loader` is a container whose one child is the root of the SWF it
 loaded, and a `LoaderInfo` is made for each `Loader` and one for the main
@@ -1695,6 +1728,17 @@ and height, `loader`, `applicationDomain`, `bytes`. The main SWF's
 dispatches `init` and then `complete` at the end of its first frame,
 after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
 `delayed_symbolclass` traces), as a loaded SWF's does.
+
+PNG, JPEG and GIF files use the same Loader queue, sniffed from their bytes
+and decoded through the host's image decoder. The content is a `Bitmap` with
+its own `loaderInfo` and `root`; image dimensions and MIME type become available
+after progress and before `INIT`. SWF-only metadata throws Error #2098 for an
+image, and dimensions throw #2099 before any content is ready. Alpha capability
+comes from the file's format and transparency metadata, including unused
+transparent colors. Partial-alpha PNG channels use Flash's eight-bit shift
+when premultiplied. The `loader-images`, `loader-image-alpha` and
+`loader-image-formats` cases compare these behaviors with AIR; unit tests cover
+URL loading, decoder failures, cancellation and replacement during decoding.
 
 `parameters` is a new object at each ask, so a script's changes to one
 stay in it. The main SWF's, which the stage's and every root's under it
@@ -1773,8 +1817,11 @@ constructor or `INIT` among them, ends there: an unload from `INIT` has
 no `COMPLETE`, as Flash has none. An `unload` asked for from `REMOVED`
 finds the content already let go of, and a load asked for there is the
 one that counts. What a `LoaderInfo` knows of its SWF's header
-(`swfVersion`, `frameRate`, `width`, `applicationDomain`...) is refused
-before the SWF is loaded, Error #2099, as Flash refuses it. The SWF a `Loader` belongs to, which its content's
+(`swfVersion`, `frameRate`, `width`...) is refused
+before the SWF is loaded, Error #2099, as Flash refuses it. `applicationDomain`
+is null before loading and after unloading; a byte load publishes its domain
+after the synchronous progress events, before its content is placed.
+The SWF a `Loader` belongs to, which its content's
 `loaderURL` reports and its relative URLs resolve against, is in Flash
 the one whose code made it, even before the first load; the runtime does not
 track callers, so it is the SWF the `Loader` is on the display list of when
@@ -1802,17 +1849,32 @@ movie go to its `Loader`, as Flash has them (the corpus's
 `mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
 frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
 many frames as its ShowFrame tags end, whatever its header says, and stays
-on its last without an End tag. The
-player runs AVM1 actions only in a main AVM1 SWF so far, so what needs
-them is missing here: no AVM1 action runs, its
-DoAction, DoInitAction, clip and button actions read past; its buttons
-show their up state and are inert, with no other state, sound or hand
-cursor; and `AVM1Movie`'s `call` and `addCallback` throw #2014, as Flash's do
-while interop is unavailable (AVM1's plan, compiled by codegen with no
-interpreter, is [avm1.md](avm1.md)). Its timeline sounds do not play either:
-with no action to `stop()` it, its timeline loops where the content would
-have stopped, and its StartSounds would start again on every loop; they
-wait for AVM1 actions (see Timeline sounds).
+on its last without an End tag. The loaded movie now runs its AVM1
+actions in its own realm, using the parent player's codegen and host
+services. A movie from bytes runs its first-frame script after the
+following frame's AS3 ENTER_FRAME; a URL-loaded movie runs it in the load
+frame. Subsequent frames tick that VM once, and the AS3 timeline walker
+skips its subtree. Timeline sounds
+and script-driven playback run with the child. Unloading destroys the
+child VM and its connections without closing the parent's audio device.
+Pointer and keyboard routing into these loaded movies, and `AVM1Movie`'s
+`call` and `addCallback`, remain incomplete; those methods still throw #2014.
+
+`LocalConnection` uses one native broker (`player/src/localconnection.ts`)
+shared by a player's AS3 and loaded AVM1 movies. A standalone AVM1 player
+has its own broker; an embedding may explicitly share a `LocalConnections`
+instance across players. Connections live in a map keyed by ASCII-folded
+names, prefixed with the SWF's domain unless the name starts with `_`.
+Messages snapshot arguments as bounded bytes (40 KiB) and use the
+sender's existing host-event queue. AVM1 sends AMF0; AS3 sends AMF3 to
+preserve ByteArray, XML, Vector and class aliases, converting the snapshot
+to AMF0 only when an AVM1 receiver needs it. AMF3 scratch buffers are
+reused except for externalizable streams that may escape the call. A broker
+with no messages does no frame work. Receiver methods, domain permissions
+and sender status events enter the appropriate VM, never sharing live script objects. Closing or
+destroying a receiver frees its name. This is in-process messaging, not
+Flash's machine-wide transport: browser tabs and desktop processes do not
+share connections.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
@@ -2346,6 +2408,35 @@ and no listener runs inside another script. Only the last state told
 counts, so a blur and a focus together send nothing. A host that never
 calls it leaves the player active.
 
+### Context menus
+
+`Player.contextMenu` snapshots an AVM2 menu on demand, using the input
+hit test and the nearest ancestor with a `ContextMenu`. Root artwork
+targets the root for menus, as Flash Player 32 does. `menuSelect` runs
+before the custom items are read, so its listeners can replace items or
+change their captions, visibility and enabled state. A selection sends
+`menuItemSelect` to the captured item, with the original `mouseTarget`
+and `contextMenuOwner`, in a clipboard gesture. Later item changes do
+not rewrite a menu already open. Destruction makes its callbacks inert.
+
+`render/context-menu.ts`, bound with the pointer, presents the snapshot
+in a DOM popover shared by the web element and desktop player. Captions
+are text, never markup. Only an open menu holds DOM nodes and document
+listeners; closing, blur, outside focus, resize or unbinding releases
+them. The top layer escapes a web element's overflow and works in full
+screen. Arrow keys, Home, End, Enter, Escape and Tab navigate or dismiss
+the menu; the popup takes those keys before the SWF does. An embedder
+can capture and prevent the canvas's `contextmenu` event to provide its own UI.
+
+The first implementation supports AVM2 custom items, separators,
+visibility, disabled items, quality actions and an About entry.
+`ContextMenu.isSupported` is true. `Stage.showDefaultContextMenu`,
+the web element's `menu="false"`, and `hideBuiltInItems` control
+built-in quality entries while keeping custom entries. AVM1 custom
+menus, programmatic `ContextMenu.display`, AIR menu trees and the
+other Flash built-in actions remain unimplemented. The model is
+renderer-independent so those can reuse the presentation.
+
 ### The clipboard
 
 Flash Player 10 let a script write the clipboard only while it handled
@@ -2392,11 +2483,10 @@ default the async Clipboard API's `writeText`, or `write` with HTML,
 which a browser allows during a user's activation; null in node, where
 the clipboard is the player's memory alone and a paste without the
 host's data pastes what the SWF last copied. Nothing reads the system's
-clipboard but a paste, as in Flash. Flash's context menu, with its Cut,
-Copy, Paste, Delete and Select All, has no counterpart: a menu of the
-player's own could paste only through the async API's `readText`, which
-asks the user's leave, so the browser's menu stays. `tests/web` presses
-the keys in Chrome.
+clipboard but a paste, as in Flash. The context menu's built-in Cut,
+Copy, Paste, Delete and Select All are not implemented yet; a paste
+from the popup would need the async API's `readText`, which asks the
+user's leave. `tests/web` presses the keys in Chrome.
 
 ### ExternalInterface
 
@@ -2839,15 +2929,30 @@ copies, hundreds of MB. They are built
 from Flash's edges (`display/shapes.ts`: each edge goes to its right fill
 forward and its left fill reversed, joined into contours; one with the
 same fill on both sides, a seam Flash Pro leaves inside a fill, goes to
-neither, since the containment tree below takes contours that do not
-cross, and joined both ways along such seams the walk made crossing
-ones that cut part of the fill away, `shared-fill-edges`) and filled
-even-odd through a containment tree of the contours, holes cut: all of a
+neither, so it cannot change the winding, `shared-fill-edges`) and filled
+even-odd through a containment tree of nonintersecting contours, holes cut: all of a
 region's at once, before the islands in them, since Pixi's `cut()` also
 lands a hole in the fill before the last once the last has one
 (`fill-holes`). A contour is in another by a point of it off the other's
-outline, since a pixel font's contours touch at their corners
-(`glyph-contours`). Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
+outline (`glyph-contours`). Crossing or touching contours instead take
+`render/fill-polygons.ts`: an edge sweep finds their crossings, then each
+horizontal band between vertices and crossings is filled as disjoint
+trapezoids under its winding rule. Curves use the same fine chords as
+rendering; separate convex contours skip the edge sweep. No overlapping
+paint is needed, including for translucent fills, gradients, bitmaps and
+masks (`crossing-fills`, `crossing-cones`). The resulting contexts are
+cached as usual. A Graphics drawing used as a stencil mask uses non-zero
+regardless of `drawPath`'s winding, while static shapes keep their authored
+winding (`static-mask-winding`). Changing a drawing's mask role rebuilds
+its fills, and a fresh view borrows only from the same role.
+The detector excludes disjoint contour bounds and bounding boxes strictly
+inside a convex contour before building edges. It reuses numeric scratch,
+retaining at most 4,096 edges, contour records or levels after a call;
+larger calls release the scratch. Band levels are collected only after a
+crossing is found, and finished polygons own their coordinates separately.
+`node --expose-gc tests/bench/fills.ts <ref> --allocs` compares construction
+time and sampled allocations with the two render modules from a git ref.
+Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
 strokes a transformed line with one width all along, not the local width
 stretched by the transform: so a line's context depends on the linear
 part of its transform on the stage, and is kept by layer and that
@@ -3097,10 +3202,9 @@ path's: even-odd fills by the parity of the contours around a point,
 non-zero by the sum of their orientations, so a square drawn inside
 another the same way round is filled under non-zero and a hole under
 even-odd, and one fill drawn with both rules in turn keeps each path's,
-as Flash does (the `draws` case). The renderer decides a region by its
-nesting in the contours' containment, so two contours of one fill that
-overlap without nesting fill as their union, where Flash's even-odd
-would leave their overlap out: a limit of the triangulation, noted.
+as Flash does (the `draws` case). Crossing contours and self-intersections
+use the same rules through the renderer's disjoint spans, so even-odd
+leaves an overlap empty while non-zero can fill it (`crossing-fills`).
 `clear` takes everything and the styles away; `copyFrom` clears first
 and then copies, so a drawing copied from itself ends empty, as Flash's
 does (the `draws` case). The drawn order is the calls' order but for
@@ -3580,7 +3684,7 @@ empties the store, after which every read, the size included, throws
 2015, and a second `dispose` is nothing. `copyPixels`
 into an opaque bitmap composites source over destination whether or not
 `mergeAlpha` asks, as Flash does. `fillRect`, `copyPixels`, `getPixels`
-and `setPixels` (ByteArrays of big-endian ARGB), `getVector` and
+and `setPixels` (ByteArrays of ARGB words), `getVector` and
 `setVector`, `clone` and `rect` work on that store, clipped to it, a
 Rectangle's edges rounded to the nearest pixel and a half to the even one,
 as Flash rounds them (`bitmapdata_rectangle_rounding`), each edge, x and
@@ -3893,8 +3997,12 @@ JPEG XR, which Flash also writes, are not supported yet. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
 compression's file is Flash's byte for byte, as pako and zlib deflate
 alike. `getPixels` and
-`copyPixelsToByteArray` write their bytes in one pass, about 13 ms for
-1080p as in Flash.
+`copyPixelsToByteArray` write their bytes in one pass. `setPixels` and
+`copyPixelsToByteArray` honor the supplied ByteArray's `endian`;
+`getPixels` creates a big-endian one with its position after the pixels.
+Reads use the ByteArray's DataView without allocating per pixel, keeping
+complete pixels and the read position when a later word fails with
+EOFError 2030 (`bitmap-pixel-endian`).
 
 ### Text
 
@@ -4103,6 +4211,13 @@ draws the output it kept again in the new colour, with no filter run;
 one that leaves every pixel clear draws nothing and runs none, as Pixi
 skipped an object at an alpha of 0 before its colour went to the chain
 (a rig's faded glowing parts took 12 ms a frame for nothing, 2 skipped).
+
+Stencil masks ignore their own and their ancestors' visibility and colour,
+while retaining ancestor transforms. The view uses the fork's
+`Container.visibilityRoot` and `colorRoot` on mask nodes; removing a mask role
+restores ordinary inheritance. `mask-ancestors` checks hidden, transparent and
+tinted ancestors, moving them, and removing and restoring the masks against
+Flash.
 
 ### Blend modes
 
@@ -4516,8 +4631,19 @@ Flash decodes it rather than trimmed by it as a browser would, and a
 DefineSound's seekSamples skipped. Playback keeps the browser's decode of
 the whole file at the device's rate, gapless trimming and all, which
 resamples better than a buffer played at another rate. Flash's decode is
-at once and the browser's is not: an MP3's first extract starts its
-decode and gives nothing, and the frames after give what Flash gives.
+at once, so extraction uses `@swf2es/mp3`, separately from Web Audio.
+Its upstream source is the pinned `vendor/minimp3` submodule; the C adapter,
+TypeScript wrapper and reproducible WASM build are in `packages/mp3`.
+The module compiles once before ActionScript libraries run, and an extraction
+instantiates a decoder only on first use. Its fixed 128 KiB workspace holds
+one frame's encoded bytes and interleaved PCM, copied into the sound's cached
+channel buffers. No host functions or WASI runtime are imported. The generated
+29 KB binary is embedded in the package; ordinary builds verify its input
+digest, and CI rebuilds it with the pinned WASI SDK image. A first extract
+therefore supplies samples synchronously, including inside `SampleDataEvent`
+callbacks, even without an audio device. Extracted samples are weakly cached
+by the sound character or loaded sound; appending compressed bytes invalidates
+the latter's cache. Unused sounds are never decoded.
 `media/mp3.ts` finds an MP3's frames: a run of three headers where they
 say the next frames are starts it, and it runs on past ID3v2 tags and
 other bytes between frames.
@@ -4850,7 +4976,7 @@ Not done yet: the SWF's scripts see Flash Player's showAll, the stage
 the SWF's size, whatever the element's `scale`, and noScale does not
 resize the stage or dispatch Event.RESIZE; the letterbox around a
 showAll stage shows the background, not what lies outside the stage;
-`menu` is carried over but there is no context menu; a
+AVM1 custom context menus are not implemented; a
 `javascript:` URL from navigateToURL never runs, allowed or not; and
 `document[name]`, which found an `<embed>` by its name, does not find
 the element. Nor can a page give the element modules compiled ahead of

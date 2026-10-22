@@ -292,9 +292,9 @@ test("truncated tables are corrupt", () => {
   }
 });
 
-test("accepts ABC 46.16 and 47.12 to 47.18, as Flash Player builds of avmplus", () => {
+test("accepts Flash ABC versions and AIR 47.16 with a float pool", () => {
   const withVersion = (major: number, minor: number) => {
-    const bytes = abc(pool, tables({}));
+    const bytes = abc(major === 47 && minor >= 16 ? { ...pool, floats: [] } : pool, tables({}));
     bytes.set([minor & 0xff, minor >> 8, major & 0xff, major >> 8], 0);
     return testing.abcDump(bytes) as string;
   };

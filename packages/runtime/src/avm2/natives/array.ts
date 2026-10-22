@@ -1,6 +1,7 @@
 // Array: its natives, and its instances' element storage.
 
 import type { AsObject, Value } from "../descriptors.js";
+import { FloatValue } from "../float.js";
 import type { ClassHook } from "../hooks.js";
 import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
@@ -22,7 +23,8 @@ function sealed(rt: Runtime, o: AsObject, adding: number): boolean {
   return true;
 }
 
-const isObject = (v: Value): v is AsObject => v !== null && typeof v === "object";
+const isObject = (v: Value): v is AsObject =>
+  v !== null && typeof v === "object" && !(v instanceof FloatValue);
 
 /** As ArrayClass::toArray: the elements of an Array or of a subclass's instance, else null. */
 function arrayElements(rt: Runtime, o: Value): Value[] | null {
@@ -297,7 +299,18 @@ export const arrayNatives: Natives = {
   "Array.Array::_indexOf": (rt) => (o: Value, v: Value, from: Value) => {
     const a = arrayElements(rt, o);
     if (a) {
-      return a.indexOf(v, rt.toInt(from));
+      const start = rt.toInt(from);
+      if (v instanceof FloatValue) {
+        for (let i = clampIndexInt(start, a.length); i < a.length; i++) {
+          if (rt.strictEquals(a[i], v)) {
+            return i;
+          }
+        }
+
+        return -1;
+      }
+
+      return a.indexOf(v, start);
     }
 
     // As generic_indexOf: by strict equality, from the start clamped.
@@ -318,7 +331,19 @@ export const arrayNatives: Natives = {
   "Array.Array::_lastIndexOf": (rt) => (o: Value, v: Value, from: Value) => {
     const a = arrayElements(rt, o);
     if (a) {
-      return a.lastIndexOf(v, rt.toInt(from));
+      const start = rt.toInt(from);
+      if (v instanceof FloatValue) {
+        const at = start < 0 ? a.length + start : Math.min(start, a.length - 1);
+        for (let i = at; i >= 0; i--) {
+          if (rt.strictEquals(a[i], v)) {
+            return i;
+          }
+        }
+
+        return -1;
+      }
+
+      return a.lastIndexOf(v, start);
     }
 
     if (!isObject(o)) {

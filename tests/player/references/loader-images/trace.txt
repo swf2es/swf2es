@@ -1,0 +1,79 @@
+before contentType null
+before width Error 2099
+before height Error 2099
+before swfVersion Error 2099
+before actionScriptVersion Error 2099
+before frameRate Error 2099
+before applicationDomain null
+before bytesLoaded 0
+before bytesTotal 0
+event progress null 0
+progress contentType null
+progress width Error 2099
+progress height Error 2099
+progress swfVersion Error 2099
+progress actionScriptVersion Error 2099
+progress frameRate Error 2099
+progress applicationDomain null
+progress bytesLoaded 0
+progress bytesTotal 74
+event progress null 0
+progress contentType null
+progress width Error 2099
+progress height Error 2099
+progress swfVersion Error 2099
+progress actionScriptVersion Error 2099
+progress frameRate Error 2099
+progress applicationDomain null
+progress bytesLoaded 74
+progress bytesTotal 74
+after contentType null
+after width Error 2099
+after height Error 2099
+after swfVersion Error 2099
+after actionScriptVersion Error 2099
+after frameRate Error 2099
+after applicationDomain [object ApplicationDomain]
+after bytesLoaded 74
+after bytesTotal 74
+event init [object Bitmap] 1
+init contentType image/png
+init width 2
+init height 1
+init swfVersion Error 2098
+init actionScriptVersion Error 2098
+init frameRate Error 2098
+init applicationDomain [object ApplicationDomain]
+init bytesLoaded 74
+init bytesTotal 74
+event complete [object Bitmap] 1
+complete contentType image/png
+complete width 2
+complete height 1
+complete swfVersion Error 2098
+complete actionScriptVersion Error 2098
+complete frameRate Error 2098
+complete applicationDomain [object ApplicationDomain]
+complete bytesLoaded 74
+complete bytesTotal 74
+bitmap 2 1 true auto false ffff0000 8000fd00 true true true
+event unload null 1
+unload contentType null
+unload width Error 2099
+unload height Error 2099
+unload swfVersion Error 2099
+unload actionScriptVersion Error 2099
+unload frameRate Error 2099
+unload applicationDomain null
+unload bytesLoaded 0
+unload bytesTotal 0
+after-unload contentType null
+after-unload width Error 2099
+after-unload height Error 2099
+after-unload swfVersion Error 2099
+after-unload actionScriptVersion Error 2099
+after-unload frameRate Error 2099
+after-unload applicationDomain null
+after-unload bytesLoaded 0
+after-unload bytesTotal 0
+retained null true ffff0000

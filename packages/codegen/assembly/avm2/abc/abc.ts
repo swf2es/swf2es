@@ -10,6 +10,10 @@ export class Abc {
   /** Byte length of the ABC block. */
   length: u32 = 0;
   minorVersion: u32 = 0;
+
+  get hasFloatSupport(): bool {
+    return this.majorVersion === 47 && this.minorVersion >= 16;
+  }
   majorVersion: u32 = 0;
   /**
    * Whether this is a builtin ABC, one the player ships (builtin.abc,

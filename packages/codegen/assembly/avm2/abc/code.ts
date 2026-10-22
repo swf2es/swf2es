@@ -1140,7 +1140,11 @@ export class BodyDecoder {
 
       const opcode = load<u8>(this.start + pc);
       const operands = opcodeOperands[opcode];
-      if (operands === OPERANDS_Illegal) {
+      if (
+        operands === OPERANDS_Illegal ||
+        (!this.abc.hasFloatSupport &&
+          (opcode === ops.OP_pushfloat || opcode === ops.OP_convert_f || opcode === ops.OP_unplus))
+      ) {
         code.fail(C.kIllegalOpcodeError);
         return false;
       }
@@ -1407,7 +1411,12 @@ export class BodyDecoder {
 
         if (this.typed) {
           const integer = opcode === ops.OP_inclocal_i || opcode === ops.OP_declocal_i;
-          this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
+          const numeric = this.numericType(this.typeOf(a));
+          if (!integer && this.abc.hasFloatSupport && numeric !== this.domain.numberType) {
+            this.retype(a, numeric);
+          } else {
+            this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
+          }
         }
 
         if (this.emitPass) {
@@ -1493,6 +1502,8 @@ export class BodyDecoder {
         return a === 0 || a >= <u32>pool.ints.length ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_pushuint:
         return a === 0 || a >= <u32>pool.uints.length ? this.fail(C.kCpoolIndexRangeError) : true;
+      case ops.OP_pushfloat:
+        return a === 0 || a >= <u32>pool.floats.length ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_pushdouble:
         return a === 0 || a >= <u32>pool.doubles.length ? this.fail(C.kCpoolIndexRangeError) : true;
       case ops.OP_pushnamespace:
@@ -1575,6 +1586,10 @@ export class BodyDecoder {
       case ops.OP_pushnan:
       case ops.OP_pushdouble:
         return this.push(domain.numberType, NOT_NULL);
+      case ops.OP_pushfloat:
+        return domain.floatType < 0
+          ? this.fail(C.kClassNotFoundError)
+          : this.push(domain.floatType, NOT_NULL);
       case ops.OP_pushbyte:
       case ops.OP_pushshort:
       case ops.OP_pushint:
@@ -1700,6 +1715,16 @@ export class BodyDecoder {
       case ops.OP_convert_u:
       case ops.OP_coerce_u:
         this.retype(top, domain.uintType);
+        return true;
+      case ops.OP_convert_f:
+        if (domain.floatType < 0) {
+          return this.fail(C.kClassNotFoundError);
+        }
+
+        this.retype(top, domain.floatType);
+        return true;
+      case ops.OP_unplus:
+        this.retype(top, this.numericType(this.typeOf(top)));
         return true;
       case ops.OP_convert_d:
       case ops.OP_coerce_d:
@@ -1957,6 +1982,10 @@ export class BodyDecoder {
           return this.popPush(2, string, NOT_NULL);
         }
 
+        if (domain.floatType >= 0 && lt === domain.floatType && rt === domain.floatType) {
+          return this.popPush(2, domain.floatType, NOT_NULL);
+        }
+
         if (isNumeric(domain, lt) && isNumeric(domain, rt)) {
           return this.popPush(2, domain.numberType, NOT_NULL);
         }
@@ -1968,12 +1997,32 @@ export class BodyDecoder {
       case ops.OP_subtract:
       case ops.OP_divide:
       case ops.OP_multiply:
+        if (this.abc.hasFloatSupport) {
+          const lt = this.numericType(this.typeOf(this.peek(2)));
+          const rt = this.numericType(this.typeOf(top));
+          if (lt === domain.floatType && rt === domain.floatType) {
+            return this.popPush(2, domain.floatType, NOT_NULL);
+          }
+
+          if (lt === TYPE_Any || rt === TYPE_Any) {
+            return this.popPush(2, TYPE_Any, NOT_NULL);
+          }
+        }
+
         this.coerce(this.peek(2), domain.numberType);
         this.coerce(top, domain.numberType);
         return this.popPush(2, domain.numberType, NOT_NULL);
       case ops.OP_negate:
       case ops.OP_increment:
       case ops.OP_decrement:
+        if (this.abc.hasFloatSupport) {
+          const numeric = this.numericType(this.typeOf(top));
+          if (numeric !== domain.numberType) {
+            this.retype(top, numeric);
+            return true;
+          }
+        }
+
         this.coerce(top, domain.numberType);
         return true;
       case ops.OP_increment_i:
@@ -2043,6 +2092,26 @@ export class BodyDecoder {
     }
 
     return true;
+  }
+
+  /** ToNumeric may preserve a float returned by an object's valueOf. */
+  numericType(type: i32): i32 {
+    const domain = this.domain;
+    if (type >= 0 && type === domain.floatType) {
+      return type;
+    }
+
+    if (
+      isNumeric(domain, type) ||
+      type === domain.booleanType ||
+      type === domain.stringType ||
+      type === domain.nullType ||
+      type === domain.voidType
+    ) {
+      return domain.numberType;
+    }
+
+    return TYPE_Any;
   }
 
   // Typed helpers, working on the stack before the instruction's depth change.

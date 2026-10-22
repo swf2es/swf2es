@@ -23,6 +23,7 @@ import { apply, contains, invert, type Rect, transformRect } from "../../display
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
 import { blendModeOf, storeOf } from "./BitmapData.js";
+import { drawingMethods } from "./drawing.js";
 import { type FilterFaces, filtersProperty } from "./filters.js";
 import { assignTransform, type GeomHost, transformOf } from "./geom.js";
 import { formVars } from "./LoadVars.js";
@@ -978,6 +979,7 @@ export function movieClipClass(movie: Movie): {
 
   proto.define("useHandCursor", true, avm1.DONT_ENUM);
   proto.define("enabled", true, avm1.DONT_ENUM);
+  drawingMethods(method, (clip) => movie.swfOf(clip).version);
   method("attachMovie", 0, (clip, args, version) => {
     if (args.length < 3) {
       return undefined;
