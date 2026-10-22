@@ -5,7 +5,7 @@
 // beside this file; memcpy and the rest of what they call come from Zig's
 // compiler-rt, and their allocations from the arena, through callbacks.
 const std = @import("std");
-// zlib.h, LzmaEnc.h and LzmaDec.h, as build.ts has `zig translate-c` give them.
+// zlib.h, LzmaEnc.h and LzmaDec.h, as build.zig translates them.
 const c = @import("c");
 
 pub const panic = std.debug.no_panic;
@@ -107,8 +107,9 @@ fn finish(out: usize, length: usize, used: usize, status: i32) i32 {
     return status;
 }
 
+// Saturating: a product past 4 GB fails in alloc as NO_MEMORY.
 fn zalloc(_: c.voidpf, items: c.uInt, size: c.uInt) callconv(.c) c.voidpf {
-    return @ptrFromInt(alloc(@as(usize, items) * size));
+    return @ptrFromInt(alloc(@as(usize, items) *| size));
 }
 
 fn zfree(_: c.voidpf, _: c.voidpf) callconv(.c) void {}
@@ -120,7 +121,7 @@ fn zfree(_: c.voidpf, _: c.voidpf) callconv(.c) void {}
 var window: usize = 0;
 
 fn windowAlloc(_: c.voidpf, items: c.uInt, size: c.uInt) callconv(.c) c.voidpf {
-    if (window != 0 and @as(usize, items) * size <= 1 << 15) {
+    if (window != 0 and @as(usize, items) *| size <= 1 << 15) {
         const p = window;
         window = 0;
         return @ptrFromInt(p);
@@ -312,10 +313,11 @@ export fn lzmaEncode(input: usize, length: usize) i32 {
     // 12 times the dictionary, are allocated and cleared for every call.
     props.reduceSize = length;
     props.numThreads = 1;
-    // Never more than the input and a little: what does not compress is stored as literals.
-    const bound = length + length / 3 + 256;
+    // Never more than the input and a little: what does not compress is stored
+    // as literals. Saturating, so a length near 4 GB fails in alloc.
+    const bound = length +| length / 3 +| 256;
     const header: usize = c.LZMA_PROPS_SIZE + 8;
-    const out = alloc(header + bound);
+    const out = alloc(header +| bound);
     if (out == 0) {
         return NO_MEMORY;
     }

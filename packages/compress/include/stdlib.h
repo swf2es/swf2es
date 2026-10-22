@@ -1,4 +1,4 @@
-// Declared for the LZMA SDK's headers; compress.zig gives every library its
+// Declared for the LZMA SDK's headers; src/root.zig gives every library its
 // own allocator, so nothing calls these.
 #ifndef SWF2ES_STDLIB_H
 #define SWF2ES_STDLIB_H

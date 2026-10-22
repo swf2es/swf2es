@@ -136,11 +136,12 @@ What a failed decode wrote stays in the module and goes with its
 instance: a bomb cut short is never copied out only to be dropped. An
 output that does not fit is `CompressedDataTooLargeError`, which
 ByteArray turns into MemoryError 1000 as avmplus does, where corrupt
-data is IOError 2058. The package's own code is `compress.zig`, which
+data is IOError 2058. The package's own code is `src/root.zig`, which
 gives the libraries the arena through their allocator callbacks, and the
-TypeScript wrapper; `packages/compress/build.ts`
-rebuilds the module with a pinned Zig 0.17.0 (its clang compiles the C),
-and `pnpm build` checks its inputs' digest. `codegen` knows the runtime's function names and signatures
+TypeScript wrapper. The package is also a Zig project (`build.zig`,
+`build.zig.zon`); `packages/compress/build.ts` runs its `zig build` with a
+pinned Zig 0.17.0 (whose clang compiles the C), and `pnpm build` checks
+its inputs' digest. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
