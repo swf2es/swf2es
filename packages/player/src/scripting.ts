@@ -111,6 +111,8 @@ export class Scripting {
   hostCalls = 0;
   /** Calls to an event's updateAfterEvent, and Stage.color set: a redraw asked for before the next frame. */
   updates = 0;
+  /** The requests already prepared by a frame or an intermediate render. */
+  private renderedUpdates = 0;
   /** How many goto cycles run inside one another now. */
   private cycles = 0;
   /**
@@ -1097,12 +1099,22 @@ export class Scripting {
     this.render();
   }
 
+  /** Prepare an input's requested redraw without advancing the timeline. */
+  renderPending(): void {
+    if (!this.destroyed && this.renderedUpdates !== this.updates) {
+      this.render();
+    }
+  }
+
   /**
-   * The stage renders, at the end of a frame or between frames for a
-   * timer's updateAfterEvent: RENDER if a script invalidated the stage,
+   * The stage renders, at the end of a frame or between frames for an
+   * event's updateAfterEvent: RENDER if a script invalidated the stage,
    * and the scroll rectangles set since take effect, as Flash's do.
    */
   render(): void {
+    // A request made by a RENDER listener belongs to a later rendering opportunity.
+    this.renderedUpdates = this.updates;
+
     if (this.invalidated) {
       this.invalidated = false;
       this.broadcast("render");

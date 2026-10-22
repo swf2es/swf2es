@@ -470,6 +470,7 @@ export class Player {
       timers?.betweenFrames(frame);
       // An AVM1 SWF's setInterval timers too.
       this.avm1?.idle();
+      this.scripting?.renderPending();
     }
 
     return n;
