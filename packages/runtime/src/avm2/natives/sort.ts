@@ -10,7 +10,7 @@
 import type { AsObject, Value } from "../descriptors.js";
 import { FloatValue } from "../float.js";
 import { publicQname } from "../names.js";
-import { NOT_FOUND, type Runtime, SEALED_ELEMENTS } from "../runtime.js";
+import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import { lowerCase } from "./case.js";
 import { getElement, isObject, lengthOf } from "./define.js";
 import { FloatVector } from "./float-vector.js";
@@ -222,7 +222,8 @@ function sortWith(
     j--;
     const temp = index[i];
     index[i] = index[j];
-    if (!(a !== null ? i in a : rt.getOwn(d, String(i)) !== NOT_FOUND)) {
+    // As hasUintProperty: a Proxy is asked through its hasProperty.
+    if (!(a !== null ? i in a : rt.in(i, d))) {
       newlen--;
       index[j] = index[newlen];
       index[newlen] = temp;
