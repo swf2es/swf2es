@@ -37,7 +37,10 @@ samples are the same arithmetic as before. The target enables wasm SIMD
 for what LLVM vectorises on its own, some 12% faster with bit-identical
 samples, for 12.7 KB more; minimp3's own SIMD paths are SSE and NEON only
 and stay off. Fixed-width SIMD is in every current engine (Chrome 91,
-Firefox 89, Safari 16.4, node 16).
+Firefox 89, Safari 16.4, node 16). Where the module does not compile, as
+in an engine without it, `prepareMp3()` still resolves, `mp3Available()`
+is false, and the player plays on: `Sound.extract()` writes no samples
+for an MP3, as Flash does for a sound it cannot decode.
 
 The binary is checked in, so ordinary builds need no compiler. `pnpm build`
 verifies its input digest. To rebuild after changing the sources or the
