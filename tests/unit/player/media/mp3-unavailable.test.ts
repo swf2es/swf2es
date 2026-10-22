@@ -17,9 +17,9 @@ import { compiler } from "../../../player/scripts.ts";
 
 const mp3Length = atob(binary).length;
 const compile = WebAssembly.compile;
-WebAssembly.compile = (bytes: BufferSource) =>
+WebAssembly.compile = (bytes: Parameters<typeof compile>[0]) =>
   bytes.byteLength === mp3Length
-    ? Promise.reject(new WebAssembly.CompileError("SIMD unsupported"))
+    ? Promise.reject(new TypeError("WebAssembly.compile(): SIMD unsupported"))
     : compile(bytes);
 
 const out = fileURLToPath(new URL("../../out/mp3-unavailable/", import.meta.url));
