@@ -321,7 +321,12 @@ for (const [kind, convert, fill] of VECTORS) {
       const length = lengthOf(rt, source);
       const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : [];
       for (let i = 0; i < length; i++) {
-        a.push(cls.$convert(rt, cls, getElement(rt, source, i)));
+        // The storage read here too, where only this loop's sources are
+        // seen, as getElement reads it for every walk's.
+        const elements: Value[] | undefined = source.$a;
+        const value =
+          elements !== undefined && i in elements ? elements[i] : getElement(rt, source, i);
+        a.push(cls.$convert(rt, cls, value));
       }
 
       o.$a = a;
