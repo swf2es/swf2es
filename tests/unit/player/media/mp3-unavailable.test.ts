@@ -1,6 +1,6 @@
-// An engine that cannot compile the MP3 decoder, such as one without wasm
-// SIMD: node runs each test file in a process of its own, and this one's
-// WebAssembly.compile rejects that module alone.
+// An engine that cannot compile the MP3 decoder: node runs each test file
+// in a process of its own, and this one's WebAssembly.compile rejects that
+// module alone.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -19,7 +19,7 @@ const mp3Length = atob(binary).length;
 const compile = WebAssembly.compile;
 WebAssembly.compile = (bytes: Parameters<typeof compile>[0]) =>
   bytes.byteLength === mp3Length
-    ? Promise.reject(new TypeError("WebAssembly.compile(): SIMD unsupported"))
+    ? Promise.reject(new TypeError("WebAssembly.compile(): unsupported"))
     : compile(bytes);
 
 const out = fileURLToPath(new URL("../../out/mp3-unavailable/", import.meta.url));

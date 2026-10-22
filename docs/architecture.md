@@ -4691,14 +4691,13 @@ and reproducible WASM build are in `packages/mp3`, a Zig project like `compress`
 The module compiles once before ActionScript libraries run, and an extraction
 instantiates a decoder only on first use. Its fixed 128 KiB workspace holds
 one frame's encoded bytes and interleaved PCM, copied into the sound's cached
-channel buffers. No host functions are imported. The generated
-41 KB binary, with wasm SIMD for what LLVM vectorises, is embedded in the
-package; ordinary builds verify its input digest, and CI rebuilds it with the
-pinned Zig 0.17.0, whose clang compiles minimp3 unchanged. An engine that
-cannot compile it, one without wasm SIMD, loads SWFs as usual, and extract
-writes no samples for an MP3. Otherwise a first extract supplies samples
-synchronously, including inside `SampleDataEvent`
-callbacks, even without an audio device. Extracted samples are weakly cached
+channel buffers. No host functions are imported. The generated 29 KB
+binary is embedded in the package; ordinary builds verify its input
+digest, and CI rebuilds it with the pinned Zig 0.17.0, whose clang
+compiles minimp3 unchanged. An engine that cannot compile it loads SWFs
+as usual, and extract writes no samples for an MP3. Otherwise a first
+extract supplies samples synchronously, including inside
+`SampleDataEvent` callbacks, even without an audio device. Extracted samples are weakly cached
 by the sound character or loaded sound; appending compressed bytes invalidates
 the latter's cache. Unused sounds are never decoded.
 `media/mp3.ts` finds an MP3's frames: a run of three headers where they

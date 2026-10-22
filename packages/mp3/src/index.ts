@@ -15,9 +15,8 @@ let preparing: Promise<void> | null = null;
 
 /**
  * Compile before scripts run; the decoder itself is instantiated only on
- * demand. Never rejects: an engine that cannot compile the module, one
- * without wasm SIMD, leaves MP3 decoding unavailable (mp3Available) rather
- * than failing every load.
+ * demand. Never rejects: an engine that cannot compile the module leaves
+ * MP3 decoding unavailable (mp3Available) rather than failing every load.
  */
 export function prepareMp3(): Promise<void> {
   preparing ??= WebAssembly.compile(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0))).then(
