@@ -249,3 +249,27 @@ function within(ptr: usize, k: u32, lo: u8, hi: u8): bool {
 function bits(ptr: usize, k: u32): u32 {
   return <u32>load<u8>(ptr + k) & 0x3f;
 }
+
+let handedLength: u32 = 0;
+
+/**
+ * `out`'s bytes handed to the host where they are, by their address, 0 for
+ * none; outputLength gives how many there are. A copy into a Uint8Array
+ * took as much again as the module, in the call that set codegen's
+ * high-water mark. The host reads them before it calls in again: the next
+ * call may move them, or a collection free them.
+ */
+export function handOut(out: Output | null): usize {
+  if (out === null) {
+    handedLength = 0;
+    return 0;
+  }
+
+  handedLength = out.length;
+  return changetype<usize>(out.bytes);
+}
+
+/** How many bytes the last call that handed some out (handOut) gave. */
+export function outputLength(): u32 {
+  return handedLength;
+}

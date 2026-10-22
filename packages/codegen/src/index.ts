@@ -349,10 +349,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     // Its bytes decoded here: lifted as a string, a module of megabytes took
     // longer than compiling it. The emitter writes only well-formed UTF-8,
     // which decodes alike either way.
-    const bytes = lazy
+    const address = lazy
       ? wasm.domainLazyModuleBytes(named.join("\n"), at)
       : wasm.domainModuleBytes(named.join("\n"), at, keep, true);
-    const module = utf8.decode(collected(bytes, lazy));
+    const module = collected(handed(address, wasm.outputLength()), lazy);
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
@@ -366,10 +366,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     ] as const;
   const actionsModule = (bytes: Uint8Array, actions: ActionBlocks, keep: boolean) => {
     const [offsets, lengths] = ranges(actions);
-    return utf8.decode(
-      collected(wasm.actionsModuleBytes(bytes, offsets, lengths, actions.version, keep)),
-    );
+    const address = wasm.actionsModuleBytes(bytes, offsets, lengths, actions.version, keep);
+    return collected(handed(address, wasm.outputLength()));
   };
+  // UTF-8 a call handed out in codegen's memory, not copied (see handOut in
+  // assembly/output.ts), decoded before anything else calls in: the next
+  // call may grow memory or move them, and a collection may free them.
+  const handed = (address: number, length: number) =>
+    length === 0 ? "" : utf8.decode(new Uint8Array(wasm.memory.buffer, address, length));
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
@@ -539,9 +543,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return new Map();
       }
 
-      const bytes = wasm.domainEmitEachBytes(indices.join(","), true, indexOf(index));
-      methodBytes += bytes.length;
-      return parseEntries(utf8.decode(collected(bytes, methodBytes >= COLLECT_METHOD_BYTES)));
+      const address = wasm.domainEmitEachBytes(indices.join(","), true, indexOf(index));
+      const length = wasm.outputLength();
+      methodBytes += length;
+      const text = handed(address, length);
+      return parseEntries(collected(text, methodBytes >= COLLECT_METHOD_BYTES));
     },
     compileActions(bytes, actions) {
       const module = actionsModule(bytes, actions, true);
@@ -558,23 +564,18 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       }
 
       const [offsets, lengths] = ranges(actions);
-      return parseEntries(
-        utf8.decode(
-          collected(
-            wasm.actionsEmitEachBytes(
-              bytes,
-              offsets,
-              lengths,
-              actions.version,
-              indices.join(","),
-              true,
-            ),
-            // Each lazy block copies the whole backing SWF into wasm. Its
-            // analysis and that copy can go before the next block runs.
-            true,
-          ),
-        ),
+      const address = wasm.actionsEmitEachBytes(
+        bytes,
+        offsets,
+        lengths,
+        actions.version,
+        indices.join(","),
+        true,
       );
+      const text = handed(address, wasm.outputLength());
+      // Each lazy block copies the whole backing SWF into wasm. Its
+      // analysis and that copy can go before the next block runs.
+      return parseEntries(collected(text, true));
     },
   };
 }
