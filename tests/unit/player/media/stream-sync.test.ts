@@ -146,8 +146,9 @@ async function avm1(nested = false, event = false) {
 }
 
 for (const nested of [false, true]) {
-  test(`AVM1 ${nested ? "nested" : "root"} stream keeps up at 10 presentations/s, without losing actions or events`, async () => {
+  test(`AVM1 ${nested ? "nested" : "root"} stream keeps up at 10 presentations/s, without losing actions or events`, async (t) => {
     const { clock, player, clip } = await avm1(nested);
+    t.mock.method(performance, "now", () => 0);
     let ticks = 0;
     for (let i = 0; i < 80; i++) {
       clock.pass(100);
@@ -194,8 +195,9 @@ test("even a stream that has ended catches up in bounded batches without restart
   player.destroy();
 });
 
-test("cheap stream frames keep up even when more than five are needed per presentation", async () => {
+test("cheap stream frames keep up even when more than five are needed per presentation", async (t) => {
   const { clock, player, clip } = await avm1();
+  t.mock.method(performance, "now", () => 0);
   for (let i = 0; i < 20; i++) {
     clock.pass(250);
     player.advance(250);
@@ -283,7 +285,7 @@ test("a host without a device cursor retains ordinary pacing without restarting 
   player.destroy();
 });
 
-test("MP3 block gaps do not turn sample offsets into jumps past intervening frames", async () => {
+test("MP3 block gaps do not turn sample offsets into jumps past intervening frames", async (t) => {
   const frames = [w.soundStreamHead({ format: 2, rate: 1, samplesPerBlock: 441 })];
   for (let i = 0; i < 100; i++) {
     if (i < 10 || (i >= 40 && i < 50)) {
@@ -309,6 +311,7 @@ test("MP3 block gaps do not turn sample offsets into jumps past intervening fram
   );
   await player.start();
   await settle();
+  t.mock.method(performance, "now", () => 0);
   clock.pass(400);
   player.advance(400);
   assert.equal(player.root.currentFrame, 11);
@@ -371,8 +374,9 @@ for (const [nested, loaded] of [
   [true, false],
   [true, true],
 ]) {
-  test(`AS3 stream catches up: nested=${nested}, loaded AVM1=${loaded}`, { skip }, async () => {
+  test(`AS3 stream catches up: nested=${nested}, loaded AVM1=${loaded}`, { skip }, async (t) => {
     const { clock, player, clip, scripting } = await as3(nested, loaded);
+    t.mock.method(performance, "now", () => 0);
     const rt = scripting.rt;
     const eventsBefore = rt.getProperty(player.root.object, rt.publicName("events")) as number;
     let ticks = 0;
@@ -389,8 +393,9 @@ for (const [nested, loaded] of [
   });
 }
 
-test("AS3 stream time follows changes to the stage frame rate", { skip }, async () => {
+test("AS3 stream time follows changes to the stage frame rate", { skip }, async (t) => {
   const { clock, player, clip, scripting } = await as3();
+  t.mock.method(performance, "now", () => 0);
   for (let i = 0; i < 20; i++) {
     clock.pass(40);
     player.advance(40);
