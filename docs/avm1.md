@@ -272,10 +272,10 @@ code is the same are written once. A runtime finds a SWF's units by the
 regions of its blocks and units (`realm.units`); a module's are given it
 with `Runtime.adoptUnits`.
 
-On the obfuscated SWF above, the module is 43 MB, of which the blocks'
-own code is 16 MB, and after a replay of its first minutes in Chrome the
-code compiled is 44 MB rather than 132 MB, the JS heap 72 MB rather than
-192 MB.
+On the obfuscated SWF above, with the folding of pushes (below), the
+module is 33 MB, of which the blocks' own code is 11.5 MB, its 3 KB block
+16 KB; after a replay of its first minutes in Chrome, V8 holds 29 MB of
+code rather than 132 MB, and the JS heap is 55 MB rather than 192 MB.
 
 ### The dispatcher
 
@@ -356,8 +356,7 @@ return [
 [function (cx) {
 const st = cx.st;
 V.constantPool(cx, ["frame"]);
-st.push("frame");
-V.trace(cx, st.pop());
+V.trace(cx, "frame");
 return;
 }],
 [function (cx) {
@@ -365,8 +364,7 @@ const st = cx.st;
 let b = 0;
 for (;;) switch (b) {
 case 0:
-st.push(cx.pool[0]);
-if (V.toBoolean(st.pop())) { b = 2; continue; }
+if (V.toBoolean(cx.pool[0])) { b = 2; continue; }
 case 1:
 V.notYet("GetVariable");
 V.stop(cx);
@@ -375,8 +373,7 @@ return;
 }
 }, function (cx) {
 const st = cx.st;
-st.push("in a function");
-V.trace(cx, st.pop());
+V.trace(cx, "in a function");
 return;
 }],
 ];
@@ -398,6 +395,14 @@ object), or that pop them themselves where their number is on the stack
 throws, so the steps after fill them in one at a time (`GetUrl` and
 `GetUrl2`, step 15, were the last); an unknown opcode is
 skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
+
+Where an action takes the value the one before it pushed, nothing coming
+between them, `st.push(value);` and the `st.pop()` that takes it are the
+value itself, `V.trace(cx, "frame")`, `if (V.toBoolean(V.not(V.equals(720,
+st.pop()))))`: it is evaluated where the push was, and popped as the
+action's first operand, the top, is popped first, so the stack and every
+call see what they saw before. Only the top folds; values under it are
+still pushed and popped.
 
 ### Version-dependent semantics
 

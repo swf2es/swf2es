@@ -285,7 +285,7 @@ test("Jump and If loop back, and leave the block past its end or before its star
 test("a block of straight code is written without the dispatcher", async () => {
   const { module } = await run([asm().push("a").trace().stop().bytes()]);
   assert.ok(!module.includes("switch"), module);
-  assert.ok(module.includes('st.push("a");\nV.trace(cx, st.pop());\nV.stop(cx);\nreturn;\n'));
+  assert.ok(module.includes('V.trace(cx, "a");\nV.stop(cx);\nreturn;\n'));
 });
 
 test("Play, Stop and End", async () => {
