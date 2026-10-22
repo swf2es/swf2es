@@ -345,6 +345,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly fileHost: FileHost | null;
   readonly fileLifetime = new AbortController();
 
+  get frameRate(): number {
+    return this.rate;
+  }
+
   constructor(
     readonly codegen: Codegen,
     options: Avm1Options = {},

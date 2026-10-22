@@ -18,6 +18,8 @@ export interface PlayingSound {
   setMix(mix: SoundMix): void;
   /** Whether the device is done with it, stopped or played out; a host that cannot tell leaves it out. */
   readonly ended?: boolean;
+  /** Elapsed playback in ms, including atMs; NaN until started. Optional for hosts without a cursor. */
+  readonly positionMs?: number;
 }
 
 /** A point of a sound's envelope: its time from the start of playing, in ms, and each channel's level. */
@@ -151,11 +153,19 @@ export function browserAudioHost(): AudioHost | null {
           const sourceNode = ctx.createBufferSource();
           let ended = false;
           let started = false;
+          let beganAt = 0;
+          let from = 0;
+          let position = Number.NaN;
+          const positionMs = () =>
+            started && !ended
+              ? Math.min(total, from + Math.max(0, ctx.currentTime - beganAt)) * 1000
+              : position;
           const finish = () => {
             if (ended) {
               return;
             }
 
+            position = positionMs();
             ended = true;
             ctx.removeEventListener?.("statechange", running);
             sourceNode.disconnect();
@@ -207,13 +217,15 @@ export function browserAudioHost(): AudioHost | null {
           const asked = performance.now();
           // `late` seconds after it was asked for, as a stream waits for the device to run.
           const begin = (late: number) => {
-            const from = at + late;
+            from = at + late;
             if (from >= total) {
+              position = total * 1000;
               finish();
               return;
             }
 
             started = true;
+            beganAt = ctx.currentTime;
             if (shape?.envelope) {
               envelopeLevels(levels[0].gain, levels[1].gain, shape.envelope, ctx.currentTime, from);
             }
@@ -257,6 +269,9 @@ export function browserAudioHost(): AudioHost | null {
             setMix,
             get ended() {
               return ended;
+            },
+            get positionMs() {
+              return positionMs();
             },
           };
         },
