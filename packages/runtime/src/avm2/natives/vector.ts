@@ -295,7 +295,14 @@ for (const [kind, convert, fill] of VECTORS) {
       const length = rt.toUint(rt.getProperty(source, rt.publicName("length")));
       const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : [];
       for (let i = 0; i < length; i++) {
-        a.push(cls.$convert(rt, cls, rt.getProperty(source, rt.publicName(i))));
+        const getIndex = source.$traits?.getIndex;
+        const elements: Value[] | undefined = source.$a;
+        const value = getIndex
+          ? getIndex(source, i, rt)
+          : elements !== undefined && i in elements
+            ? elements[i]
+            : rt.getProperty(source, rt.publicName(i));
+        a.push(cls.$convert(rt, cls, value));
       }
 
       o.$a = a;
