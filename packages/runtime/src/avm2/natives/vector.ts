@@ -198,30 +198,45 @@ for (const [kind] of VECTORS) {
   vectorNatives[`${c}.${own}::_forEach`] = (rt) => (o: AsObject, f: Value, receiver: Value) => {
     eachElement(rt, o, f, receiver, () => undefined);
   };
-  // As TypedVectorObject's _map and _filter: a new Vector of the same type.
+  // As TypedVectorObject's _map and _filter: a new Vector of the same type,
+  // a method closure called whatever the receiver.
   vectorNatives[`${c}#${own}::_map`] = (rt) =>
     function (this: AsObject, f: Value, receiver: Value) {
       const cls = this.$traits.cls;
       const r = rt.constructClass(cls, [this.$a.length]);
       let i = 0;
-      eachElement(rt, this, f, receiver, (result) => {
-        const value = cls.$convert(rt, cls, result);
-        if (r.$a instanceof FloatVector) {
-          r.$a.data[i++] = value;
-        } else {
-          r.$a[i++] = value;
-        }
-      });
+      eachElement(
+        rt,
+        this,
+        f,
+        receiver,
+        (result) => {
+          const value = cls.$convert(rt, cls, result);
+          if (r.$a instanceof FloatVector) {
+            r.$a.data[i++] = value;
+          } else {
+            r.$a[i++] = value;
+          }
+        },
+        true,
+      );
       return r;
     };
   vectorNatives[`${c}#${own}::_filter`] = (rt) =>
     function (this: AsObject, f: Value, receiver: Value) {
       const r = rt.constructClass(this.$traits.cls, []);
-      eachElement(rt, this, f, receiver, (result, element) => {
-        if (result === true) {
-          r.$a.push(element);
-        }
-      });
+      eachElement(
+        rt,
+        this,
+        f,
+        receiver,
+        (result, element) => {
+          if (result === true) {
+            r.$a.push(element);
+          }
+        },
+        true,
+      );
       return r;
     };
 }

@@ -2,6 +2,7 @@
 // families of builtins use.
 
 import type { AsObject, Method, Value } from "../descriptors.js";
+import { FloatValue } from "../float.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
 import type { Traits } from "../traits.js";
@@ -85,7 +86,15 @@ export function elements(v: Value): Value[] {
   return v?.$a ?? [];
 }
 
-/** Native uint indices need a property name only for a hole or a generic source. */
+/** Whether `v` is an object to avmplus (AvmCore::isObject): not null, a primitive or a float. */
+export const isObject = (v: Value): v is AsObject =>
+  v !== null && typeof v === "object" && !(v instanceof FloatValue);
+
+/**
+ * As getUintProperty, element i of an Array, a Vector or any other object:
+ * from the elements' own storage when it holds i, else as the property the
+ * index names, so that an Array's hole finds the prototype's.
+ */
 export function getElement(rt: Runtime, o: AsObject, i: number): Value {
   const traits: Traits | undefined = o.$traits;
   if (traits?.getIndex) {
@@ -97,28 +106,45 @@ export function getElement(rt: Runtime, o: AsObject, i: number): Value {
 }
 
 /**
+ * As getLengthProperty, the length Array's natives walk to: an Array's or
+ * a Vector's own, which nothing can override, else the length property's,
+ * through the getter an Array subclass may override, as a uint.
+ */
+export function lengthOf(rt: Runtime, o: AsObject): number {
+  const traits: Traits = o.$traits;
+  if (traits === rt.builtinClass("Array").$it || traits.cls?.$convert !== undefined) {
+    const n: number = o.$a.length;
+    return n;
+  }
+
+  return rt.toUint(rt.getProperty(o, rt.publicName("length")));
+}
+
+/**
  * As ArrayClass's every, filter, forEach, map and some: `f` called with
- * each element, its index and the array, up to the length at the start;
+ * each element, its index and the receiver, up to the length at the start;
  * `each` sees each result and the element, and a value it returns ends the
- * walk with that value. A method closure takes no other receiver.
+ * walk with that value. What is not an object has no elements. A method
+ * closure takes no other receiver, but where `anyReceiver` (map's, and a
+ * Vector's map and filter, do not check).
  */
 export function eachElement(
   rt: Runtime,
-  o: AsObject,
+  o: Value,
   f: Value,
   receiver: Value,
   each: (result: Value, element: Value) => Value,
+  anyReceiver = false,
 ): Value {
-  if (f === null || f === undefined) {
+  if (!isObject(o) || f === null || f === undefined) {
     return undefined;
   }
 
-  if (f.$closure && receiver !== null && receiver !== undefined) {
+  if (!anyReceiver && f.$closure && receiver !== null && receiver !== undefined) {
     throw rt.error("TypeError", 1510);
   }
 
-  // Each element as a get of its index: a hole finds the prototype's.
-  const length: number = o.$a.length;
+  const length: number = lengthOf(rt, o);
   for (let i = 0; i < length; i++) {
     const element = getElement(rt, o, i);
     const done = each(rt.callValue(f, receiver, [element, i, o], null), element);
