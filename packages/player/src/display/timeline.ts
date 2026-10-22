@@ -137,7 +137,7 @@ export interface SoundStream {
   /** The block on each frame that has one, by frame. */
   byFrame: Map<number, number>;
   /** The blocks as one sound and the sample each starts at, made when the stream first plays. */
-  sound?: { character: SoundCharacter; starts: number[] };
+  sound?: { character: SoundCharacter; starts: number[]; endFrame: number };
 }
 
 /**

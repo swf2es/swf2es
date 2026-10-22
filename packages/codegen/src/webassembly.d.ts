@@ -10,8 +10,13 @@ declare namespace WebAssembly {
     name: string;
     kind: "function" | "global" | "memory" | "table" | "tag";
   }
+  interface ModuleExportDescriptor {
+    name: string;
+    kind: "function" | "global" | "memory" | "table" | "tag";
+  }
   var Module: {
     imports(module: Module): ModuleImportDescriptor[];
+    exports(module: Module): ModuleExportDescriptor[];
     customSections(module: Module, name: string): ArrayBuffer[];
   };
   function compile(bytes: ArrayBufferView | ArrayBuffer): Promise<Module>;

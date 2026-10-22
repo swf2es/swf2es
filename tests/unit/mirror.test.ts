@@ -15,6 +15,8 @@ const crossCutting: Record<string, string> = {
   "display/transform.test.ts": "a display object's scales and rotation, apart from display.test.ts",
   "media/timeline-sounds.test.ts":
     "timeline sounds through the timeline, audio.ts, sounds.ts and the player",
+  "media/stream-sync.test.ts":
+    "stream cursors and catch-up across the player, audio hosts, AVM1 and AS3 loaders",
   "playerglobal/natives-coverage.test.ts":
     "the natives the player's libraries declare against the runtime's and playerglobal's",
 };

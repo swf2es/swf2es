@@ -1068,3 +1068,4 @@ export {
   domainUsage,
   domainWantsCompact,
 } from "./compile";
+export { outputLength } from "./output";

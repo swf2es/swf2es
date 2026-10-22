@@ -17,7 +17,7 @@ import {
   LOG_Verify,
 } from "./avm2/link/domain";
 import { TRAITS_Activation, TRAITS_Instance, TRAITS_Script } from "./avm2/link/traits";
-import { Output } from "./output";
+import { handOut, Output } from "./output";
 
 export let domain = new Domain();
 
@@ -264,34 +264,21 @@ export function domainModule(
 /**
  * domainModule's module as its UTF-8 bytes, which the host decodes: a
  * module of megabytes is decoded there many times faster than made a
- * string here and lifted a code unit at a time. Empty where it is "".
+ * string here and lifted a code unit at a time. Handed out where they are
+ * (handOut), none where it is "".
  */
 export function domainModuleBytes(
   hashes: string = "",
   index: i32 = -1,
   keep: bool = true,
   linkedOnly: bool = false,
-): Uint8Array {
-  const out = writeModule(hashes, index, keep, linkedOnly);
-  if (out === null) {
-    return new Uint8Array(0);
-  }
-
-  const bytes = new Uint8Array(out.length);
-  memory.copy(bytes.dataStart, changetype<usize>(out.bytes), out.length);
-  return bytes;
+): usize {
+  return handOut(writeModule(hashes, index, keep, linkedOnly));
 }
 
-/** A module's tables and lazy method factories; method entries are emitted separately. */
-export function domainLazyModuleBytes(hashes: string = "", index: i32 = -1): Uint8Array {
-  const out = writeModule(hashes, index, false, true, true);
-  if (out === null) {
-    return new Uint8Array(0);
-  }
-
-  const bytes = new Uint8Array(out.length);
-  memory.copy(bytes.dataStart, changetype<usize>(out.bytes), out.length);
-  return bytes;
+/** A module's tables and lazy method factories, handed out as domainModuleBytes's; method entries are emitted separately. */
+export function domainLazyModuleBytes(hashes: string = "", index: i32 = -1): usize {
+  return handOut(writeModule(hashes, index, false, true, true));
 }
 
 function writeModule(
@@ -373,12 +360,9 @@ export function domainEmitEach(bodies: string, reuse: bool, which: i32 = -1): st
   return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
 }
 
-/** Entries transferred as UTF-8, avoiding AssemblyScript string lifting. */
-export function domainEmitEachBytes(bodies: string, reuse: bool, which: i32 = -1): Uint8Array {
-  const entries = emitEach(bodies, reuse, which);
-  const bytes = new Uint8Array(entries.length);
-  memory.copy(bytes.dataStart, changetype<usize>(entries.bytes), entries.length);
-  return bytes;
+/** Entries as UTF-8, handed out where they are (handOut), avoiding AssemblyScript string lifting. */
+export function domainEmitEachBytes(bodies: string, reuse: bool, which: i32 = -1): usize {
+  return handOut(emitEach(bodies, reuse, which));
 }
 
 function emitEach(bodies: string, reuse: bool, which: i32): Output {
