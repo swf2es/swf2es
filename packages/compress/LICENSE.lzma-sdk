@@ -1,8 +1,9 @@
 LZMA SDK
 
-The LZMA encoder in this package's WebAssembly binary is compiled from the
-LZMA SDK 26.05's C sources (C/LzmaEnc.c, C/LzFind.c and the headers they
-include), by Igor Pavlov, unchanged but for line endings in swf2es/lzma-sdk. Each
+The LZMA encoder and decoder in this package's WebAssembly binary are
+compiled from the LZMA SDK 26.05's C sources (C/LzmaEnc.c, C/LzFind.c,
+C/LzmaDec.c and the headers they include), by Igor Pavlov, unchanged but
+for line endings in swf2es/lzma-sdk. Each
 of those files states:
 
   Igor Pavlov : Public domain

@@ -1,5 +1,5 @@
-// The libc that zlib and the LZMA SDK call, for wasm32-freestanding: bulk
-// memory instructions copy and fill, and compress.c defines the rest.
+// Declarations of the libc functions zlib and the LZMA SDK call, for
+// wasm32-freestanding, which has no libc headers: Zig's compiler-rt defines them.
 #ifndef SWF2ES_STRING_H
 #define SWF2ES_STRING_H
 

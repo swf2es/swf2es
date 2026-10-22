@@ -8,7 +8,8 @@ of madler/zlib, at tag `v1.3.2`), and the LZMA SDK 26.05 in
 [`vendor/lzma-sdk`](../../vendor/lzma-sdk)
 (https://github.com/swf2es/lzma-sdk at tag `v26.05`: the release as
 published, line endings made LF, whose README names the archive and its
-SHA-256). Of the SDK only the encoder is compiled, all public domain:
+SHA-256). Of the SDK only the encoder and the decoder are compiled, all
+public domain:
 
 | File | SHA-256 |
 |---|---|
@@ -21,11 +22,17 @@ SHA-256). Of the SDK only the encoder is compiled, all public domain:
 | `C/LzmaEnc.c` | `67f23656339b5e19015acac41acbcf36ea7787a8419907dce91c1dd336a2fb0f` |
 | `C/LzmaEnc.h` | `c5e78398309363dd181840b7ba0bcb856f66619f755d5e2f5e04f7437186ba5f` |
 | `C/Precomp.h` | `c8903f2e36a771a272d8981e1e9ffed5ba16ca3d2f3dca6d1414d2340a6829d0` |
+| `C/LzmaDec.c` | `4e6ec665a6df01f1722e2b2fc36dc5e3aa7c3890e0f8cb11c6a07c9a01f3309b` |
+| `C/LzmaDec.h` | `3aaf07b4ae4173a2d103179455dc7089b5ddbc7fc3db3c0e40964a7499c69266` |
 
-LZMA decoding is `lzma.zig`, after the LZMA SDK's specification decoder.
-The C adapter (`compress.c`), the few libc declarations it needs
-(`include/`), the decoder and the TypeScript wrapper live here; upstream
-sources stay unchanged.
+The package's own code is `compress.zig` and the TypeScript wrapper.
+`compress.zig` exports the module's calls, gives zlib and the SDK a bump
+arena through their allocator callbacks, and calls them through bindings
+that `build.ts` has `zig translate-c` make of `zlib.h`, `LzmaEnc.h` and
+`LzmaDec.h` (Zig 0.17 has no `@cImport`). `memcpy`, `memset`, `memmove`
+and `memcmp` come from Zig's compiler-rt; `include/` only declares them,
+since wasm32-freestanding has no libc headers. Upstream sources stay
+unchanged.
 
 - `inflate(data, raw, limit)` inflates a zlib or raw deflate stream to at
   most `limit` bytes, stopping at the stream's end.

@@ -95,7 +95,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `compress` | synchronous zlib and LZMA, zlib's and the LZMA SDK's C and a Zig LZMA decoder compiled to WebAssembly | — |
+| `compress` | synchronous zlib and LZMA, zlib and the LZMA SDK compiled to WebAssembly with a Zig adapter | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | compress |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
@@ -117,13 +117,13 @@ failure, so a SWF cut short still has its header.
 `compress` is one WebAssembly module that imports nothing, compiled
 synchronously from base64 on first use. zlib 1.3.2 (`vendor/zlib`, swf2es/zlib)
 inflates and deflates, so ByteArray's `compress` and `deflate` write
-zlib's own bytes; the LZMA SDK 26.05's encoder
-(`vendor/lzma-sdk`, swf2es/lzma-sdk, the release as published; only `C/LzmaEnc.c`, `C/LzFind.c` and their headers, all
-public domain), writes ByteArray's LZMA with avmplus' settings (level 9,
-a 1 MB dictionary or less for less data, no end marker). Its LZMA decoder, `lzma.zig`, follows
-the LZMA SDK's specification decoder, as avmplus' LzmaDec reads a
-stream: a properties byte past 224 is refused, a dictionary is 4 KB at
-least, and it fails as soon as it would read past the stream's end, so a
+zlib's own bytes; the LZMA SDK 26.05's encoder (`vendor/lzma-sdk`,
+swf2es/lzma-sdk, the release as published; only `C/LzmaEnc.c`,
+`C/LzFind.c`, `C/LzmaDec.c` and their headers, all public domain) writes
+ByteArray's LZMA with avmplus' settings (level 9, a 1 MB dictionary or
+less for less data, no end marker), and its LzmaDec, which avmplus uses
+too, decodes: a properties byte past 224 is refused, a dictionary is 4 KB
+at least, and it fails as soon as it would read past the stream's end, so a
 header's length costs at most some 7000 bytes for each of the stream's;
 a ZWS whose header names more than 8192 times its stream is refused
 before decoding. Each call resets a bump arena in the module's memory;
@@ -136,7 +136,9 @@ What a failed decode wrote stays in the module and goes with its
 instance: a bomb cut short is never copied out only to be dropped. An
 output that does not fit is `CompressedDataTooLargeError`, which
 ByteArray turns into MemoryError 1000 as avmplus does, where corrupt
-data is IOError 2058. `packages/compress/build.ts`
+data is IOError 2058. The package's own code is `compress.zig`, which
+gives the libraries the arena through their allocator callbacks, and the
+TypeScript wrapper; `packages/compress/build.ts`
 rebuilds the module with a pinned Zig 0.17.0 (its clang compiles the C),
 and `pnpm build` checks its inputs' digest. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
