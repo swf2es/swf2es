@@ -8,7 +8,8 @@
 //   node tests/player/corpus/run.ts [--update-baseline | --relax] [--diff [--dump]] [path prefix...]
 //
 // --diff prints, for each test that does not pass, the lines where the
-// player's trace and Flash's part, and what stopped the player.
+// player's trace and Flash's part, and what stopped the player; a
+// regression shows them without it, below its standing before and after.
 //
 // The avm1/, avm2/ and timeline/ tests with an output.txt, less those the
 // collector ignores (input, audio, video, fonts). Only traces compare: the
@@ -96,10 +97,17 @@ for (const [i, t] of tests.entries()) {
   }
 }
 
-/** Where the traces part, three lines of each side from there (every line from the start with --dump), and the error. */
-function showDiff(t: RuffleTest, r: PlayerResult, s: Standing): void {
+/**
+ * Where the traces part, three lines of each side from there (every line
+ * from the start with --dump), after a line naming the test and its error
+ * unless the caller has.
+ */
+function showDiff(t: RuffleTest, r: PlayerResult, s: Standing, named = false): void {
   const expected = expectedLines(t);
-  console.log(`\n${t.path}: ${s.matched} of ${s.lines} lines${s.error ? `, ${s.error}` : ""}`);
+  if (!named) {
+    console.log(`\n${t.path}: ${s.matched} of ${s.lines} lines${s.error ? `, ${s.error}` : ""}`);
+  }
+
   const last = Math.max(expected.length, r.trace.length);
   for (let i = dump ? 0 : s.matched; i < (dump ? last : Math.min(s.matched + 3, last)); i++) {
     if (i < expected.length) {
@@ -157,11 +165,11 @@ if (update) {
 
   writeBaseline(prefixes.length ? { ...baseline, ...standings } : standings);
 } else {
-  const regressions: string[] = [];
-  let improved = 0;
+  const regressions: { path: string; was: Standing | undefined }[] = [];
+  const improved: string[] = [];
   for (const [path, s] of Object.entries(standings)) {
     if (!(path in baseline)) {
-      regressions.push(`${path}: not in baseline.json (run with --update-baseline)`);
+      regressions.push({ path, was: undefined });
       continue;
     }
 
@@ -174,33 +182,55 @@ if (update) {
       s.matched < before.matched ||
       (s.error && !before.error)
     ) {
-      regressions.push(`${path}: ${JSON.stringify(s)}, was ${JSON.stringify(before)}`);
+      regressions.push({ path, was: before });
     } else if (s.matched > before.matched || (passed(s) && !passed(before))) {
-      improved++;
+      improved.push(`${path}: ${describe(s)}, was ${describe(before)}`);
     }
   }
 
-  if (improved) {
+  if (improved.length) {
     console.log(
-      `  ${improved} tests stand higher than baseline.json (record with --update-baseline)`,
+      `  ${improved.length} tests stand higher than baseline.json (record with --update-baseline):`,
     );
+    for (const line of improved.slice(0, 50)) {
+      console.log(`    ${line}`);
+    }
   }
 
   if (relax) {
     for (const r of regressions) {
-      baseline[r.split(":")[0]] = null;
+      baseline[r.path] = null;
     }
 
     writeBaseline(baseline);
     console.log(`  baseline: relaxed ${regressions.length} tests`);
   } else if (regressions.length) {
-    console.log(`  ${regressions.length} regressions:`);
-    for (const r of regressions.slice(0, 50)) {
-      console.log(`    ${r}`);
+    console.log(`\n${regressions.length} regressions:`);
+    const index = new Map(tests.map((t, i) => [t.path, i]));
+    for (const { path, was } of regressions.slice(0, 50)) {
+      const line = was
+        ? `${path}: ${describe(standings[path])}, was ${describe(was)}`
+        : `${path}: ${describe(standings[path])}, not in baseline.json (run with --update-baseline)`;
+      // As an annotation, CI shows it on the run's summary too.
+      console.log(
+        process.env.GITHUB_ACTIONS ? `::error title=corpus regression::${line}` : `\n${line}`,
+      );
+
+      // --diff has shown it already.
+      const i = index.get(path) as number;
+      if (!diff && !passed(standings[path])) {
+        showDiff(tests[i], results[i], standings[path], true);
+      }
     }
 
     process.exitCode = 1;
   }
+}
+
+/** A standing in words: "3 of 5 lines, 4 traced, timeout". */
+function describe(s: Standing): string {
+  const traced = s.traced === s.lines ? "" : `, ${s.traced} traced`;
+  return `${s.matched} of ${s.lines} lines${traced}${s.error ? `, ${s.error}` : ""}`;
 }
 
 function readBaseline(): Record<string, Standing | null> {
