@@ -1,8 +1,9 @@
 // minimp3 for wasm32-freestanding, behind the calls src/index.ts makes. The
 // host writes a whole frame at input(), calls decode() and reads the PCM at
 // output(). Every buffer is static, so memory never grows; minimp3 is
-// compiled unchanged beside this file, and memcpy and the rest of what it
-// calls come from Zig's compiler-rt.
+// compiled unchanged beside this file. Its memcpy, memset and memmove are
+// clang's builtins by include/string.h, so they become bulk memory
+// instructions and none of compiler-rt's is linked.
 const std = @import("std");
 // minimp3.h, as build.zig translates it.
 const c = @import("c");
