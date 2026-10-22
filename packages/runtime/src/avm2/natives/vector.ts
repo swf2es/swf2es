@@ -9,7 +9,9 @@ import {
   AS3,
   eachElement,
   elements,
+  getElement,
   isObject,
+  lengthOf,
   type Natives,
   plain,
   withStorage,
@@ -316,17 +318,10 @@ for (const [kind, convert, fill] of VECTORS) {
       // Each element as a get of the source's, as its conversion may change
       // the source: past a Vector's end, a RangeError.
       const o = cls.$it.instance();
-      const length = rt.toUint(rt.getProperty(source, rt.publicName("length")));
+      const length = lengthOf(rt, source);
       const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : [];
       for (let i = 0; i < length; i++) {
-        const getIndex = source.$traits?.getIndex;
-        const elements: Value[] | undefined = source.$a;
-        const value = getIndex
-          ? getIndex(source, i, rt)
-          : elements !== undefined && i in elements
-            ? elements[i]
-            : rt.getProperty(source, rt.publicName(i));
-        a.push(cls.$convert(rt, cls, value));
+        a.push(cls.$convert(rt, cls, getElement(rt, source, i)));
       }
 
       o.$a = a;

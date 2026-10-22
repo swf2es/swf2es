@@ -97,13 +97,15 @@ export const isObject = (v: Value): v is AsObject =>
  * index names, so that an Array's hole finds the prototype's.
  */
 export function getElement(rt: Runtime, o: AsObject, i: number): Value {
-  const traits: Traits | undefined = o.$traits;
-  if (traits?.getIndex) {
-    return traits.getIndex(o, i, rt);
+  // An element in storage first: a Vector's own hook gives the same, or
+  // throws its RangeError for what is not there.
+  const a: Value[] | undefined = o.$a;
+  if (a !== undefined && i in a) {
+    return a[i];
   }
 
-  const a: Value[] | undefined = o.$a;
-  return a !== undefined && i in a ? a[i] : rt.getProperty(o, rt.publicName(i));
+  const getIndex = (o.$traits as Traits | undefined)?.getIndex;
+  return getIndex ? getIndex(o, i, rt) : rt.getProperty(o, rt.publicName(i));
 }
 
 /**
