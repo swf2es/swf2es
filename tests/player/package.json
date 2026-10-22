@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node run.ts && node leak.ts && node module-cache.ts && node precompiled.ts && node resize.ts && node context-loss.ts && node hidden-groups.ts && node table-runs.ts && node text.ts"
+    "test": "node run.ts && node audio.ts && node leak.ts && node module-cache.ts && node precompiled.ts && node resize.ts && node context-loss.ts && node hidden-groups.ts && node table-runs.ts && node text.ts"
   },
   "dependencies": {
     "@swf2es/codegen": "workspace:*",
