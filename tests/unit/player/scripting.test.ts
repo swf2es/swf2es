@@ -1504,3 +1504,61 @@ for (const lazy of [false, true]) {
     assert.equal(scripting.frames, frame);
   });
 }
+
+for (const lazyCompilation of [false, true]) {
+  test(`RENDER reaches only objects currently on stage (${lazyCompilation ? "lazy" : "eager"})`, {
+    skip,
+  }, async (t) => {
+    const source = `package {
+      import flash.display.*;
+      import flash.events.Event;
+      public class RenderMembership extends Sprite {
+        private var kept:Array = [];
+        private var on:Sprite = new Sprite();
+        private var group:Sprite = new Sprite();
+        public function RenderMembership() {
+          watch(this, "root"); watch(stage, "stage");
+          addChild(on); watch(on, "on");
+          watch(new Sprite(), "off");
+          var removed:Sprite = new Sprite(); addChild(removed); removeChild(removed); watch(removed, "removed");
+          var hidden:Sprite = new Sprite(); hidden.visible = false; addChild(hidden); watch(hidden, "hidden");
+          var child:Sprite = new Sprite(); group.addChild(child); watch(child, "offChild");
+          addEventListener(Event.ENTER_FRAME, function(e:Event):void { stage.invalidate(); });
+        }
+        private function watch(o:DisplayObject, label:String):void {
+          kept.push(o);
+          o.addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("E:" + label); });
+          o.addEventListener(Event.RENDER, function(e:Event):void { trace("R:" + label); });
+        }
+        public function swap():void { removeChild(on); addChild(group); }
+      }
+    }`;
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      lazyCompilation,
+      print: (line) => lines.push(line),
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(
+      bare(compiler(out)("RenderMembership", source), 1, "RenderMembership"),
+      scripting,
+    );
+    t.after(() => player.destroy());
+    await player.start();
+    lines.length = 0;
+    player.tick();
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("R:")),
+      ["R:root", "R:stage", "R:on", "R:hidden"],
+    );
+    assert.equal(lines.filter((line) => line.startsWith("E:")).length, 7);
+    scripting.rt.callProperty(player.root.object, scripting.rt.publicName("swap"));
+    lines.length = 0;
+    player.tick();
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("R:")),
+      ["R:root", "R:stage", "R:hidden", "R:offChild"],
+    );
+    assert.equal(lines.filter((line) => line.startsWith("E:")).length, 7);
+  });
+}
