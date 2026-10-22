@@ -20,9 +20,12 @@ sources stay unchanged.
   length and the stream, at level 9 with a 1 MB dictionary as avmplus, or
   a smaller one for less data.
 
-Decoders return a status, the bytes decoded (also on a failure, up to it)
-and how much input they read, and can leave room before their output so
-that a SWF's header needs no second copy.
+Decoders return a status, the bytes decoded and how much input they read,
+and can leave room before their output so that a SWF's header needs no
+second copy. A failure gives the bytes decoded before it only when the
+caller asks (`partial`), so a bomb that fails is never copied out of the
+module; an output the page cannot allocate is `NO_MEMORY`. An instance
+whose call threw is dropped too.
 
 The module is compiled synchronously on first use from the base64 in
 `src/binary.ts`. Each call resets a bump arena in the module's memory,

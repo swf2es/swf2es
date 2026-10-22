@@ -160,13 +160,41 @@ test("a compressed SWF whose header gives it fewer bytes than the header is refu
   }
 });
 
-test("a truncated CWS still gives its start", () => {
+test("a truncated CWS or ZWS still gives its start", () => {
   const plain = fws(body);
-  const whole = cws(plain);
-  const truncated = whole.subarray(0, whole.length - 6);
-  const prefix = decompressSwfPrefix(truncated, 64);
-  assert.ok(prefix.length > 8);
-  assert.deepEqual(prefix, plain.subarray(0, prefix.length));
+  for (const whole of [cws(plain), zws(plain)]) {
+    const truncated = whole.subarray(0, whole.length - 6);
+    const prefix = decompressSwfPrefix(truncated, 64);
+    assert.ok(prefix.length > 8);
+    assert.deepEqual(prefix, plain.subarray(0, prefix.length));
+  }
+});
+
+test("a SWF's start needs no more of a large SWF than its first kilobytes", () => {
+  // Noise, so the stream is about as long as what it holds: 2 MB of it.
+  const noise = new Uint8Array(2 << 20);
+  let x = 1;
+  for (let i = 0; i < noise.length; i++) {
+    x = (Math.imul(x, 1103515245) + 12345) >>> 0;
+    noise[i] = x >>> 24;
+  }
+
+  const plain = fws(noise);
+  for (const swf of [cws(plain), zws(plain)]) {
+    assert.deepEqual(decompressSwfPrefix(swf, 64), plain.subarray(0, 64));
+    assert.deepEqual(decompressSwfPrefix(swf, 100_000), plain.subarray(0, 100_000));
+  }
+});
+
+test("a zlib bomb that fails is corrupt data, and nothing of it is copied out", () => {
+  const zeros = new Uint8Array(64 << 20);
+  const cut = zlibCompress(zeros, 1).slice(0, -4);
+  assert.throws(() => zlibUncompress(cut), CompressedDataError);
+
+  const swf = new Uint8Array(8 + cut.length);
+  swf.set([0x43, 0x57, 0x53, 10, 0xff, 0xff, 0xff, 0xff]);
+  swf.set(cut, 8);
+  assert.throws(() => decompressSwf(swf), CompressedDataError);
 });
 
 test("a SWF whose body is not the length its header says is refused", () => {

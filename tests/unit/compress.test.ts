@@ -47,12 +47,12 @@ test("zlib and raw deflate round trip at every level", () => {
 test("inflate stops at its limit, leaves room before its output and reports what it read", () => {
   const data = sample(300_000);
   const z = deflate(data, 6, false);
-  const part = inflate(z, false, 1000, 8);
+  const part = inflate(z, false, 1000, { offset: 8 });
   assert.equal(part.status, FULL);
   assert.equal(part.bytes.length, 1008);
   assert.deepEqual(part.bytes.subarray(8), data.subarray(0, 1000));
 
-  const cut = inflate(z.subarray(0, z.length >> 1), false, 2 ** 32 - 1);
+  const cut = inflate(z.subarray(0, z.length >> 1), false, 2 ** 32 - 1, { partial: true });
   assert.equal(cut.status, TRUNCATED);
   assert.deepEqual(cut.bytes, data.subarray(0, cut.bytes.length));
 
@@ -71,7 +71,7 @@ test("LZMA round trips, and its decoder stops at a size or where its input does"
   assert.equal(new DataView(l.buffer).getUint32(1, true), 1 << 16);
   assert.equal(new DataView(l.buffer).getUint32(5, true), data.length);
 
-  const whole = lzmaDecode(l, 0, 13, data.length, 3);
+  const whole = lzmaDecode(l, 0, 13, data.length, { offset: 3 });
   assert.equal(whole.status, DONE);
   assert.deepEqual(whole.bytes.subarray(3), data);
 
@@ -109,4 +109,25 @@ test("a header that names far more than the stream holds allocates only what dec
   assert.equal(inflate(z, false, 2 ** 32 - 1).status, DONE);
   assert.equal(lzmaDecode(l.subarray(0, 40), 0, 13, 2 ** 32 - 1).status, TRUNCATED);
   assert.ok(memoryInUse() < 1 << 20);
+});
+
+test("a bomb that fails is not copied out, and its instance is let go", () => {
+  // 64 MB of zeros in some 64 KB, its checksum cut off: zlib inflates it all, then fails.
+  const zeros = new Uint8Array(64 << 20);
+  const cut = deflate(zeros, 1, false).slice(0, -4);
+
+  const failed = inflate(cut, false, 2 ** 32 - 1);
+  assert.equal(failed.status, TRUNCATED);
+  assert.equal(failed.bytes.length, 0);
+  assert.equal(memoryInUse(), 0);
+
+  const asked = inflate(cut, false, 2 ** 32 - 1, { offset: 8, partial: true });
+  assert.equal(asked.bytes.length, 8 + zeros.length);
+});
+
+test("an instance whose call threw is let go", () => {
+  deflate(new Uint8Array(10), 9, false);
+  assert.ok(memoryInUse() > 0);
+  assert.throws(() => inflate(null as unknown as Uint8Array, false, 100), TypeError);
+  assert.equal(memoryInUse(), 0);
 });

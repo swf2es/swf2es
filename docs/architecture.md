@@ -110,7 +110,8 @@ browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
 (`compress`, below): ByteArray's `compress` and a SWF's body are the
 same code. `decompressSwfPrefix` decodes a SWF's start alone, for its
-FileAttributes (`fileAttributes`), and keeps whatever inflated before a
+FileAttributes (`fileAttributes`), from the first kilobytes of the body,
+more only as it needs them, and keeps whatever decoded before a
 failure, so a SWF cut short still has its header.
 
 `compress` is one WebAssembly module that imports nothing, compiled
@@ -130,7 +131,12 @@ an output of unknown size is the arena's top allocation and grows in
 place, so a header that names more than the stream holds costs nothing
 until the bytes are there, and nothing is copied as it grows. Memory
 never shrinks, so an instance whose memory passed 8 MiB is dropped after
-its call and the next starts a new one. `packages/compress/build.ts`
+its call, as is one whose call threw, and the next starts a new one.
+What a failed decode wrote stays in the module and goes with its
+instance: a bomb cut short is never copied out only to be dropped. An
+output that does not fit is `CompressedDataTooLargeError`, which
+ByteArray turns into MemoryError 1000 as avmplus does, where corrupt
+data is IOError 2058. `packages/compress/build.ts`
 rebuilds the module with a pinned Zig 0.17.0 (its clang compiles the C),
 and `pnpm build` checks its inputs' digest. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
@@ -1185,7 +1191,8 @@ with CORS headers, as a module script from another origin is fetched
 with CORS. Codegen still runs:
 the player adds each ABC to it, keys each module by its context and
 replays each log there, so that the domain is as compiling would have
-left it, which no host can skip, and `codegen.wasm` needs
+left it, which no host can skip, and `codegen.wasm`, like `compress`'s
+module, which decompresses the SWF, needs
 `'wasm-unsafe-eval'` to be compiled. A policy for such a page is
 `script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
 module the cache lacks is compiled and its evaluation refused

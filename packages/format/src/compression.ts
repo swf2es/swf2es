@@ -20,6 +20,13 @@ import {
 /** Data a decompressor cannot read: corrupt, truncated, or not what it says. */
 export class CompressedDataError extends Error {}
 
+/**
+ * Data whose output does not fit: more than the decompressor's memory, or
+ * the page's, can hold. avmplus' ByteArray fails such an uncompress with
+ * MemoryError 1000, where it fails corrupt data with IOError 2058.
+ */
+export class CompressedDataTooLargeError extends CompressedDataError {}
+
 /** A deflate level: 0 stores, 1 is fastest, 9 smallest. */
 export type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
@@ -46,7 +53,7 @@ function failure(result: Decoded): CompressedDataError {
     case DICTIONARY:
       return new CompressedDataError("needs a preset dictionary");
     default:
-      return new CompressedDataError("out of memory");
+      return new CompressedDataTooLargeError("out of memory");
   }
 }
 
@@ -134,16 +141,30 @@ export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array
   }
 
   const want = Math.max(0, length - 8);
+  const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
+  const options = { offset: 8, partial: true };
   let out: Uint8Array = new Uint8Array(8);
-  if (signature === "CWS") {
-    // What was inflated before any failure is kept: a SWF cut short still has its start.
-    out = inflate(swf.subarray(8), false, want, 8).bytes;
-  } else if (signature === "ZWS" && swf.length >= 17) {
-    const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
-    const result = lzmaDecode(swf, 12, 17, Math.min(want, Math.max(0, fileLength - 8)), 8);
-    // Corrupt or cut short: no body to read.
-    if (result.status === DONE) {
-      out = result.bytes;
+  // A kilobyte of the body first, as a header and the first tags need, and
+  // more only while the input runs out before the output: a large SWF is
+  // not copied whole for its first bytes. What decoded before any failure
+  // is kept, so a SWF cut short still has its start.
+  for (let input = 1024; ; input *= 16) {
+    const end = Math.min(swf.length, (signature === "ZWS" ? 17 : 8) + input);
+    let result: Decoded | null = null;
+    if (signature === "CWS") {
+      result = inflate(swf.subarray(8, end), false, want, options);
+    } else if (signature === "ZWS" && swf.length >= 17) {
+      const size = Math.min(want, Math.max(0, fileLength - 8));
+      result = lzmaDecode(swf.subarray(0, end), 12, 17, size, options);
+    }
+
+    if (result === null) {
+      break;
+    }
+
+    out = result.bytes;
+    if (result.status !== TRUNCATED || end === swf.length) {
+      break;
     }
   }
 
@@ -172,7 +193,7 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
   let result: Decoded;
   if (signature === "CWS") {
     // A byte past the header's length tells a longer body from one that fits.
-    result = inflate(swf.subarray(8), false, fileLength - 8 + 1, 8);
+    result = inflate(swf.subarray(8), false, fileLength - 8 + 1, { offset: 8 });
     if (result.status === FULL) {
       throw new CompressedDataError(
         `a body of more than ${fileLength - 8} bytes where the header says ${fileLength - 8}`,
@@ -189,7 +210,7 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
       throw new CompressedDataError(`a body of ${fileLength - 8} bytes in ${swf.length} of SWF`);
     }
 
-    result = lzmaDecode(swf, 12, 17, fileLength - 8, 8);
+    result = lzmaDecode(swf, 12, 17, fileLength - 8, { offset: 8 });
   } else {
     throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
   }

@@ -73,6 +73,15 @@ var checksum:ByteArray = text(sample);
 checksum.compress();
 checksum[checksum.length - 1] ^= 1;
 probe("bad checksum", function():* { checksum.uncompress(); });
+// A bomb: 16 MB of zeros in a few KB, cut short. It inflates whole, then
+// fails as corrupt data, the ByteArray as it was.
+var bomb:ByteArray = new ByteArray();
+bomb.length = 16 << 20;
+bomb.compress();
+bomb.length = bomb.length - 4;
+var bombLength:uint = bomb.length;
+probe("zlib bomb cut short", function():* { bomb.uncompress(); });
+trace("after bomb", bomb.length == bombLength, bomb.position);
 probe("unknown algorithm", function():* { text("x").compress("gzip"); });
 probe("null algorithm", function():* { text("x").compress(null); });
 probe("unknown uncompress", function():* { text("x").uncompress("zip"); });

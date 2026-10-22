@@ -137,9 +137,10 @@ static void zfree(voidpf opaque, voidpf p) {
   (void)p;
 }
 
-// What zlib allocates once its stream has begun: inflate's window, which it
-// asks for only when an output buffer fills. Kept below the output so the
-// output stays at the arena's top.
+// What zlib allocates once its stream has begun: inflate's window, which
+// updatewindow asks for at the end of the first inflate() call that wrote
+// output (short of Z_FINISH). Reserved below the output so the output stays
+// at the arena's top.
 static void *window;
 static voidpf windowAlloc(voidpf opaque, uInt items, uInt size) {
   (void)opaque;
@@ -173,9 +174,15 @@ int inflateData(const uint8_t *input, size_t length, int windowBits, size_t limi
 
   window = alloc(1u << 15);
   s.zalloc = windowAlloc;
-  size_t capacity = length < limit / 4 ? length * 4 : limit;
+  // A first guess of four times the input, between 64 KB and 16 MB, then
+  // doubling: a large input need not reserve memory its output never uses.
+  size_t capacity = length < (16u << 20) / 4 ? length * 4 : 16u << 20;
   if (capacity < 65536) {
-    capacity = limit < 65536 ? limit : 65536;
+    capacity = 65536;
+  }
+
+  if (capacity > limit) {
+    capacity = limit;
   }
 
   uint8_t *out = alloc(capacity);

@@ -148,7 +148,8 @@ const Output = struct {
             return;
         }
 
-        const size = @min(o.length, @max(o.bytes.len * 2, at + n));
+        // Saturating: past 2 GB, doubling would wrap a 32-bit length.
+        const size = @min(o.length, @max(o.bytes.len *| 2, at +| n));
         if (extend(o.base, size) == 0) {
             return error.Memory;
         }

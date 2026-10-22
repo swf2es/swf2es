@@ -1,8 +1,9 @@
 // zlib and LZMA, synchronously, in one module that imports nothing. Each call
 // copies its input into the module's memory, works there in an arena reset
 // first, and copies the output out. Memory never shrinks, so an instance
-// whose memory has grown past MEMORY_KEPT is dropped after its call and the
-// next call starts a new one from the compiled module.
+// whose memory has grown past MEMORY_KEPT is dropped after its call, as is
+// one whose call threw, and the next call starts a new one from the
+// compiled module.
 import { binary } from "./binary.js";
 
 interface Exports {
@@ -27,21 +28,34 @@ export const FULL = 1;
 export const CORRUPT = -1;
 /** The input ended before the stream did. */
 export const TRUNCATED = -2;
-/** The module could not have the memory it needed. */
+/** The module, or the page, could not have the memory the output needed. */
 export const NO_MEMORY = -3;
 /** A zlib stream asked for a preset dictionary. */
 export const DICTIONARY = -4;
 
 /** What a decoder made of its input. */
 export interface Decoded {
-  /** DONE, FULL or one of the failures; on a failure, `bytes` holds what was decoded before it. */
+  /** DONE, FULL or one of the failures. */
   status: number;
-  /** The output, after `offset` bytes left for the caller. */
+  /**
+   * The output, after `offset` bytes left for the caller: on DONE and FULL,
+   * and on a failure only when `partial` asked for what decoded before it;
+   * otherwise only the `offset` bytes, so that what a bomb inflated is
+   * never copied out of the module only to be dropped.
+   */
   bytes: Uint8Array;
   /** How many bytes of the input it read. */
   used: number;
   /** zlib's account of corrupt data, if it gave one. */
   message: string | null;
+}
+
+/** How a decoder hands its output over. */
+export interface DecodeOptions {
+  /** Bytes to leave before the output, for the caller to fill. */
+  offset?: number;
+  /** Whether a failure still gives what decoded before it. */
+  partial?: boolean;
 }
 
 /**
@@ -55,18 +69,25 @@ let compiled: WebAssembly.Module | null = null;
 let instance: Exports | null = null;
 
 /**
- * The module, compiled synchronously the first time (about 90 KB; browsers
- * allow a synchronous compile of that size on the main thread), and an
- * instance of it.
+ * Run `f` on the instance, made first if there is none (the module compiled
+ * synchronously the first time: about 90 KB, which browsers allow on the
+ * main thread). An instance that threw, or whose memory grew past
+ * MEMORY_KEPT, is let go.
  */
-function wasm(): Exports {
-  if (instance) {
-    return instance;
-  }
-
+function call<T>(f: (x: Exports) => T): T {
   compiled ??= new WebAssembly.Module(decodeBase64(binary));
-  instance = new WebAssembly.Instance(compiled).exports as unknown as Exports;
-  return instance;
+  instance ??= new WebAssembly.Instance(compiled).exports as unknown as Exports;
+  const x = instance;
+  try {
+    return f(x);
+  } catch (e) {
+    instance = null;
+    throw e;
+  } finally {
+    if (x.memory.buffer.byteLength > MEMORY_KEPT) {
+      instance = null;
+    }
+  }
 }
 
 /** Base64 to bytes with a plain loop: Uint8Array.from with a callback takes some 8 times as long. */
@@ -91,10 +112,20 @@ function input(x: Exports, data: Uint8Array): number {
   return at;
 }
 
-/** The result, copied out after `offset` bytes, and the instance let go if it grew too large. */
-function output(x: Exports, offset: number): Uint8Array {
+/** The result, copied out after `offset` bytes; null if the page cannot have that much. */
+function output(x: Exports, offset: number): Uint8Array | null {
   const n = x.resultSize();
-  const bytes = new Uint8Array(offset + n);
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(offset + n);
+  } catch (e) {
+    if (e instanceof RangeError) {
+      return null;
+    }
+
+    throw e;
+  }
+
   if (n) {
     bytes.set(new Uint8Array(x.memory.buffer, x.resultPointer(), n), offset);
   }
@@ -102,10 +133,18 @@ function output(x: Exports, offset: number): Uint8Array {
   return bytes;
 }
 
-function release(x: Exports): void {
-  if (x.memory.buffer.byteLength > MEMORY_KEPT) {
-    instance = null;
+/** A decoder's result: its output copied out only when it is wanted. */
+function decoded(x: Exports, status: number, options: DecodeOptions): Decoded {
+  const offset = options.offset ?? 0;
+  const used = x.inputUsed();
+  const message = status === CORRUPT ? cString(x, x.errorMessage()) : null;
+  const wanted = status === DONE || status === FULL || options.partial === true;
+  const bytes = wanted ? output(x, offset) : new Uint8Array(offset);
+  if (bytes === null) {
+    return { status: NO_MEMORY, bytes: new Uint8Array(offset), used, message: null };
   }
+
+  return { status, bytes, used, message };
 }
 
 function cString(x: Exports, at: number): string | null {
@@ -126,38 +165,36 @@ function cString(x: Exports, at: number): string | null {
  * Inflate a zlib stream, or with `raw` a raw deflate stream, to at most
  * `limit` bytes. What follows the stream's end is not read.
  */
-export function inflate(data: Uint8Array, raw: boolean, limit: number, offset = 0): Decoded {
-  const x = wasm();
-  try {
+export function inflate(
+  data: Uint8Array,
+  raw: boolean,
+  limit: number,
+  options: DecodeOptions = {},
+): Decoded {
+  return call((x) => {
     const at = input(x, data);
     const status =
       at === 0
         ? NO_MEMORY
         : x.inflateData(at, data.length, raw ? -15 : 15, Math.min(limit, 2 ** 32 - 1));
-    return {
-      status,
-      bytes: output(x, offset),
-      used: x.inputUsed(),
-      message: status === CORRUPT ? cString(x, x.errorMessage()) : null,
-    };
-  } finally {
-    release(x);
-  }
+    return decoded(x, status, options);
+  });
 }
 
 /** `data` deflated at `level` (0 to 9) with zlib's default memory and window, as a zlib stream or, `raw`, a raw one. */
 export function deflate(data: Uint8Array, level: number, raw: boolean): Uint8Array {
-  const x = wasm();
-  try {
+  return call((x) => {
     const at = input(x, data);
-    if (at === 0 || x.deflateData(at, data.length, level, raw ? -15 : 15) !== DONE) {
+    const bytes =
+      at === 0 || x.deflateData(at, data.length, level, raw ? -15 : 15) !== DONE
+        ? null
+        : output(x, 0);
+    if (bytes === null) {
       throw new RangeError(`no memory to deflate ${data.length} bytes`);
     }
 
-    return output(x, 0);
-  } finally {
-    release(x);
-  }
+    return bytes;
+  });
 }
 
 /**
@@ -171,14 +208,18 @@ export function lzmaDecode(
   properties: number,
   start: number,
   size: number,
-  offset = 0,
+  options: DecodeOptions = {},
 ): Decoded {
   if (properties < 0 || properties + 5 > data.length || start < 0 || start > data.length) {
-    return { status: TRUNCATED, bytes: new Uint8Array(offset), used: 0, message: null };
+    return {
+      status: TRUNCATED,
+      bytes: new Uint8Array(options.offset ?? 0),
+      used: 0,
+      message: null,
+    };
   }
 
-  const x = wasm();
-  try {
+  return call((x) => {
     const from = Math.min(properties, start);
     const at = input(x, data.subarray(from));
     const status =
@@ -190,29 +231,25 @@ export function lzmaDecode(
             data.length - start,
             Math.min(size, 2 ** 32 - 1),
           );
-    return { status, bytes: output(x, offset), used: x.inputUsed(), message: null };
-  } finally {
-    release(x);
-  }
+    return decoded(x, status, options);
+  });
 }
 
 /**
  * `data` as LZMA, as avmplus' ByteArray writes it: 5 property bytes, the
  * length in 8 bytes, little-endian, and the stream, at level 9 with a 1 MB
- * dictionary and no end marker.
+ * dictionary, or a smaller one for less data, and no end marker.
  */
 export function lzmaEncode(data: Uint8Array): Uint8Array {
-  const x = wasm();
-  try {
+  return call((x) => {
     const at = input(x, data);
-    if (at === 0 || x.lzmaEncode(at, data.length) !== DONE) {
+    const bytes = at === 0 || x.lzmaEncode(at, data.length) !== DONE ? null : output(x, 0);
+    if (bytes === null) {
       throw new RangeError(`no memory to compress ${data.length} bytes`);
     }
 
-    return output(x, 0);
-  } finally {
-    release(x);
-  }
+    return bytes;
+  });
 }
 
 /** The module's memory now, for measuring: 0 when no instance is kept. */
