@@ -31,10 +31,20 @@ const out = join(here, "dist/site/");
 const SOURCE = "https://github.com/swf2es/swf2es/blob/";
 
 /** The packages the page loads, by the name the import map gives each directory. */
-const PACKAGES = ["format", "mp3", "codegen", "runtime", "player", "player-hosts", "web"];
+const PACKAGES = [
+  "compress",
+  "format",
+  "mp3",
+  "codegen",
+  "runtime",
+  "player",
+  "player-hosts",
+  "web",
+];
 
 const importMap = {
   imports: {
+    "@swf2es/compress": "./modules/compress/index.js",
     "@swf2es/format": "./modules/format/index.js",
     "@swf2es/mp3": "./modules/mp3/index.js",
     "@swf2es/codegen": "./modules/codegen/index.js",
@@ -46,8 +56,6 @@ const importMap = {
     "@swf2es/web": "./modules/web/index.js",
     "@swf2es/codegen/codegen.wasm": "./modules/codegen/codegen.wasm",
     "pixi.js": "./modules/pixi/pixi.mjs",
-    pako: "./modules/pako/pako.esm.mjs",
-    lzma1: "./modules/lzma1/index.js",
   },
 };
 
@@ -146,14 +154,6 @@ copyFileSync(
 copyTree(join(root, "vendor/pixijs/dist"), join(out, "modules/pixi"), (file) =>
   /\.(m?js)$/.test(file),
 );
-mkdirSync(join(out, "modules/pako"), { recursive: true });
-copyFileSync(
-  join(root, "packages/format/node_modules/pako/dist/pako.esm.mjs"),
-  join(out, "modules/pako/pako.esm.mjs"),
-);
-copyTree(join(root, "packages/format/node_modules/lzma1/lib"), join(out, "modules/lzma1"), (f) =>
-  f.endsWith(".js"),
-);
 copyTree(join(here, "dist/js"), join(out, "app"), (file) => file.endsWith(".js"));
 
 mkdirSync(join(out, "libraries"), { recursive: true });
@@ -192,10 +192,10 @@ copyFileSync(join(root, "LICENSE"), join(licenses, "swf2es-Apache-2.0.txt"));
 copyFileSync(join(root, "oracle/avmplus/LICENSE"), join(licenses, "MPL-2.0.txt"));
 copyFileSync(join(root, "vendor/pixijs/LICENSE"), join(licenses, "pixijs-MIT.txt"));
 copyFileSync(join(root, "vendor/minimp3/LICENSE"), join(licenses, "minimp3-CC0.txt"));
-copyFileSync(join(root, "packages/format/node_modules/pako/LICENSE"), join(licenses, "pako.txt"));
+copyFileSync(join(root, "vendor/zlib/LICENSE"), join(licenses, "zlib.txt"));
 copyFileSync(
-  join(root, "packages/format/node_modules/lzma1/LICENSE"),
-  join(licenses, "lzma1-MIT.txt"),
+  join(root, "packages/compress/LICENSE.lzma-sdk"),
+  join(licenses, "lzma-sdk-public-domain.txt"),
 );
 // What Pixi's bundle takes in of its dependencies, each under its own
 // licence, whose notice goes with it; a package with no licence file of its

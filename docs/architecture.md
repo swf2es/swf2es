@@ -95,7 +95,8 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
+| `compress` | synchronous zlib and LZMA, zlib and the LZMA SDK compiled to WebAssembly with a Zig adapter | — |
+| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | compress |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `mp3`     | synchronous MP3 frame decoder, minimp3 C compiled to WebAssembly | —                       |
@@ -104,18 +105,43 @@ over the builtins, then each conformance case (also compiled with asc's
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
-`format`, `codegen` and `runtime` load no DOM or node types, so they run in
+`compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
-(zlib through pako; LZMA compressed through lzma1 and decoded by
-`format`'s own `lzma.ts`): ByteArray's `compress` and a SWF's body are the
-same code. The decoder follows the LZMA SDK's specification decoder, as
-avmplus' LzmaDec reads a stream: a properties byte past 224 is refused,
-a dictionary is 4 KB at least, and it fails as soon as it would read past
-the stream's end, so a header's length costs at most some 7000 bytes for
-each of the stream's; a ZWS whose header names more than 8192 times its
-stream is refused before decoding, and `decompressSwfPrefix` decodes a
-SWF's start alone, for its FileAttributes (`fileAttributes`). `codegen` knows the runtime's function names and signatures
+(`compress`, below): ByteArray's `compress` and a SWF's body are the
+same code. `decompressSwfPrefix` decodes a SWF's start alone, for its
+FileAttributes (`fileAttributes`), from the first kilobytes of the body,
+more only as it needs them, and keeps whatever decoded before a
+failure, so a SWF cut short still has its header.
+
+`compress` is one WebAssembly module that imports nothing, compiled
+synchronously from base64 on first use. zlib 1.3.2 (`vendor/zlib`, swf2es/zlib)
+inflates and deflates, so ByteArray's `compress` and `deflate` write
+zlib's own bytes; the LZMA SDK 26.05's encoder (`vendor/lzma-sdk`,
+swf2es/lzma-sdk, the release as published; only `C/LzmaEnc.c`,
+`C/LzFind.c`, `C/LzmaDec.c` and their headers, all public domain) writes
+ByteArray's LZMA with avmplus' settings (level 9, a 1 MB dictionary or
+less for less data, no end marker), and its LzmaDec, which avmplus uses
+too, decodes: a properties byte past 224 is refused, a dictionary is 4 KB
+at least, and it fails as soon as it would read past the stream's end, so a
+header's length costs at most some 7000 bytes for each of the stream's;
+a ZWS whose header names more than 8192 times its stream is refused
+before decoding. Each call resets a bump arena in the module's memory;
+an output of unknown size is the arena's top allocation and grows in
+place, so a header that names more than the stream holds costs nothing
+until the bytes are there, and nothing is copied as it grows. Memory
+never shrinks, so an instance whose memory passed 8 MiB is dropped after
+its call, as is one whose call threw, and the next starts a new one.
+What a failed decode wrote stays in the module and goes with its
+instance: a bomb cut short is never copied out only to be dropped. An
+output that does not fit is `CompressedDataTooLargeError`, which
+ByteArray turns into MemoryError 1000 as avmplus does, where corrupt
+data is IOError 2058. The package's own code is `src/root.zig`, which
+gives the libraries the arena through their allocator callbacks, and the
+TypeScript wrapper. The package is also a Zig project (`build.zig`,
+`build.zig.zon`); `packages/compress/build.ts` runs its `zig build` with a
+pinned Zig 0.17.0 (whose clang compiles the C), and `pnpm build` checks
+its inputs' digest. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
@@ -1168,7 +1194,8 @@ with CORS headers, as a module script from another origin is fetched
 with CORS. Codegen still runs:
 the player adds each ABC to it, keys each module by its context and
 replays each log there, so that the domain is as compiling would have
-left it, which no host can skip, and `codegen.wasm` needs
+left it, which no host can skip, and `codegen.wasm`, like `compress`'s
+module, which decompresses the SWF, needs
 `'wasm-unsafe-eval'` to be compiled. A policy for such a page is
 `script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
 module the cache lacks is compiled and its evaluation refused
@@ -4021,8 +4048,8 @@ empty one is ArgumentError 2006; a null rect or compressor is TypeError
 goes into the ByteArray given, from its position, or a new one. JPEG and
 JPEG XR, which Flash also writes, are not supported yet. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
-compression's file is Flash's byte for byte, as pako and zlib deflate
-alike. `getPixels` and
+compression's file is Flash's byte for byte, as it is deflated
+by zlib itself. `getPixels` and
 `copyPixelsToByteArray` write their bytes in one pass. `setPixels` and
 `copyPixelsToByteArray` honor the supplied ByteArray's `endian`;
 `getPixels` creates a big-endian one with its position after the pixels.
@@ -5051,7 +5078,7 @@ standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
 as https, has two hosts. `swf2es://app/` is the page,
 `static/index.html` and its stylesheet, the renderer's build,
 `/modules/<package>/` for the packages' builds and their libraries
-(pixi.js, pako, lzma1), which the page's import map names as
+(pixi.js), which the page's import map names as
 `tests/player/serve.ts`'s does, and `/libraries/builtin.abc` and
 `/libraries/playerglobal.abc`, read from where the settings say.
 `swf2es://file/` is the local files the SWF playing may read, by its
@@ -5099,7 +5126,7 @@ elsewhere is best kept in a directory of its own.
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.
-The page decompresses the SWF whole, with what `format`'s LZMA decoder
+The page decompresses the SWF whole, with what `compress`'s LZMA decoder
 bounds (see [Packages](#packages)).
 
 Only the SWF playing has a grant: opening another or closing it revokes
@@ -5413,7 +5440,7 @@ URLs, so it plays under Pages' `/swf2es/` as at a server's root.
   crowd. The workflow pulls the oracle's image for the first.
 - **Licences**: `notices.html` gives builtin.abc's MPL-2.0 and lists the
   files translated from avmplus and taken from Ruffle, found by their
-  headers as the site builds, with PixiJS's, pako's and lzma1's licences.
+  headers as the site builds, with the licences of PixiJS, zlib and the LZMA SDK.
 
 `tests/site/run.ts`, part of `pnpm test`, builds the site and checks it in
 Chrome under `/swf2es/`; `--serve` serves it to look at.

@@ -16,7 +16,8 @@ must give **identical output** in both modes.
 
 ```sh
 git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
-                              # vendor/pixijs (the Pixi fork the player draws with)
+                              # vendor/pixijs (the Pixi fork the player draws with), and
+                              # vendor/minimp3, vendor/zlib and vendor/lzma-sdk (C compiled to wasm)
 pnpm install
 pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
@@ -49,6 +50,9 @@ node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never
 node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks: the decoder
                               # and flow never trap, and decode a block the same after others
                               # (SWF2ES_CHECKED=1 for the checked build)
+node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib and LZMA: the
+                              # decoders never trap, refuse with CompressedDataError, and a
+                              # SWF that decodes has its prefix
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
 SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
@@ -113,11 +117,11 @@ calling a change done; CI runs the same steps.
 - **Codegen is pure.** No DOM or node APIs, no clock, no randomness, and a
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
-- **Package boundaries.** `format` depends on nothing, `codegen` and
+- **Package boundaries.** `compress` depends on nothing, `format` on `compress`, `codegen` and
   `runtime` on `format`, `mp3` on nothing, `cli` on `format`, `codegen` and
   `runtime`, `player` on those and `mp3`, `player-hosts` on `player`, `web` on
   `codegen`, `format`, `player` and `player-hosts`. `codegen` never imports the runtime implementation.
-  `format`, `codegen` and `runtime` load no DOM or node types. Apps
+  `compress`, `format`, `codegen` and `runtime` load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.

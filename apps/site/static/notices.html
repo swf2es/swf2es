@@ -82,11 +82,13 @@
   </section>
 
   <section class="panel">
-    <h2>pako and lzma1</h2>
+    <h2>zlib and the LZMA SDK</h2>
     <p>
-      Compressed SWFs are inflated by <a href="https://github.com/nodeca/pako">pako</a>
-      (MIT and Zlib, <a href="licenses/pako.txt">licence text</a>) and
-      <a href="https://github.com/xseman/lzma1">lzma1</a> (MIT, <a href="licenses/lzma1-MIT.txt">licence text</a>).
+      Compressed SWFs, bitmaps and <code>ByteArray</code>s are inflated and deflated by
+      <a href="https://zlib.net/">zlib</a> (<a href="licenses/zlib.txt">zlib licence text</a>),
+      and <code>ByteArray</code>'s LZMA is written by the
+      <a href="https://www.7-zip.org/sdk.html">LZMA SDK</a>'s encoder (public domain,
+      <a href="licenses/lzma-sdk-public-domain.txt">notice</a>), both compiled to WebAssembly.
     </p>
   </section>
 

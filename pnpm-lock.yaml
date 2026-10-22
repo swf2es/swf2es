@@ -76,18 +76,13 @@ importers:
         specifier: ^0.28.20
         version: 0.28.20
 
+  packages/compress: {}
+
   packages/format:
     dependencies:
-      lzma1:
-        specifier: 0.3.0
-        version: 0.3.0
-      pako:
-        specifier: 2.1.0
-        version: 2.1.0
-    devDependencies:
-      '@types/pako':
-        specifier: 2.0.3
-        version: 2.0.3
+      '@swf2es/compress':
+        specifier: workspace:*
+        version: link:../compress
 
   packages/mp3: {}
 
@@ -709,9 +704,6 @@ packages:
   '@types/node@24.19.0':
     resolution: {integrity: sha512-zY+5tKxXdhGh1PYI0ac+7juvEu4OI6vWtVVoj5i2m42jxAY1U+zHGt6QCyOFwykdP62sM3MJ9stoYYUw5aCWew==}
 
-  '@types/pako@2.0.3':
-    resolution: {integrity: sha512-bq0hMV9opAcrmE0Byyo0fY3Ew4tgOevJmQ9grUhpXQhYfyLJ1Kqg3P33JT5fdbT2AjeAjR51zqqVjAL/HMkx7Q==}
-
   '@types/resolve@1.20.2':
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
 
@@ -992,10 +984,6 @@ packages:
   long@5.3.2:
     resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
 
-  lzma1@0.3.0:
-    resolution: {integrity: sha512-ETg5CT6Ojybzjx2YG48NuPcN7kGzhLO6FfKbkvUwt0bxIEOq+wXykCZBoNBrkGq66zwJT1ZdUI71F0wC6pP9TQ==}
-    engines: {bun: '>=1.0.0', node: '>=18.0.0'}
-
   magic-string@0.25.9:
     resolution: {integrity: sha512-RmF0AsMzgt25qzqqLc1+MbHmhdx0ojF2Fvs4XnOqz2ZOBXzzkEwc/dJQZCYHAn7v1jbVOjAZfK8msRn4BxO4VQ==}
 
@@ -1011,9 +999,6 @@ packages:
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
-
-  pako@2.1.0:
-    resolution: {integrity: sha512-w+eufiZ1WuJYgPXbV/PO3NCMEc3xqylkKHzp8bxp1uW4qaSNQUkwmLLEc3kKsfz8lpV1F8Ht3U1Cm+9Srog2ug==}
 
   parse-svg-path@0.2.0:
     resolution: {integrity: sha512-Tf7FFIrguPKQwzD4pWnYkR2VOv3raoHeKED80Bm+BYHI3KxC8KsgsGC5+fSMzAGDA6UEk4bHvmi+RsjmL3khpg==}
@@ -1417,8 +1402,6 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
-  '@types/pako@2.0.3': {}
-
   '@types/resolve@1.20.2': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
@@ -1635,8 +1618,6 @@ snapshots:
 
   long@5.3.2: {}
 
-  lzma1@0.3.0: {}
-
   magic-string@0.25.9:
     dependencies:
       sourcemap-codec: 1.4.8
@@ -1654,8 +1635,6 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
-
-  pako@2.1.0: {}
 
   parse-svg-path@0.2.0: {}
 
