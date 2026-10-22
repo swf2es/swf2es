@@ -1,5 +1,12 @@
-// Native collection walks against avmshell, with two runtime builds interleaved.
-// node tests/bench/native-collections/run.ts <runtime A dist> <runtime B dist> [runs, 5]
+// Times the natives that walk an Array or a Vector (map, filter, forEach,
+// every, some, sort, Vector conversion), Collections.as compiled by swf2es
+// and run in node; its other lines must match avmshell's.
+//
+//   node tests/bench/native-collections/run.ts [runs, 5]                   the builds now
+//   node tests/bench/native-collections/run.ts <dir A> <dir B> [runs, 5]   two snapshots
+//
+// Snapshots are tests/programs/ab.ts's (--snapshot <dir>), run interleaved
+// as tests/bench/untyped/run.ts runs them.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -43,7 +50,13 @@ for (let round = 0; round < runs; round++) {
   for (const [name, directory] of round % 2 ? order.reverse() : order) {
     const text = execFileSync(process.execPath, [fileURLToPath(import.meta.url), "--child"], {
       encoding: "utf8",
-      env: directory ? { ...process.env, SWF2ES_RUNTIME: resolve(directory) } : process.env,
+      env: directory
+        ? {
+            ...process.env,
+            SWF2ES_RUNTIME: resolve(directory, "runtime"),
+            SWF2ES_CODEGEN: resolve(directory, "codegen"),
+          }
+        : process.env,
     });
     assert.equal(checked(text), expected, `${name} must match avmshell`);
     const times = results.get(name) as Map<string, number[]>;

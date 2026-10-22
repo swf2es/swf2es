@@ -2411,6 +2411,13 @@ export class Runtime {
       return floatValue(a.value + b.value);
     }
 
+    // As op_add: a String or a Date beside anything concatenates both as
+    // strings, so an object there is converted with the hint String
+    // (toString first), not without a hint as below.
+    if (typeof a === "string" || typeof b === "string" || this.isDate(a) || this.isDate(b)) {
+      return this.toString(a) + this.toString(b);
+    }
+
     if (typeof a === "object" && typeof b === "object" && a?.$traits?.properties) {
       const sum = a.$traits.properties.add(this, a, b);
       if (sum !== undefined) {
@@ -2436,7 +2443,12 @@ export class Runtime {
       return v;
     }
 
-    return this.toPrimitive(v, this.hintOf(v));
+    // No hint: a Date, whose hint is String, concatenated above.
+    return this.toPrimitive(v, "number");
+  }
+
+  private isDate(v: Value): boolean {
+    return typeof v === "object" && v !== null && v.$traits?.name === "Date";
   }
 
   private hintOf(o: AsObject): "number" | "string" {
@@ -2705,7 +2717,7 @@ export class Runtime {
 
   /** A value as avmplus names it in an error message. */
   describe(v: Value): string {
-    if (v === null || typeof v !== "object") {
+    if (v === null || typeof v !== "object" || v instanceof FloatValue || v instanceof Namespace) {
       return this.toString(v);
     }
 

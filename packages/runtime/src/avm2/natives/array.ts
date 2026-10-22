@@ -4,7 +4,17 @@ import type { AsObject, Value } from "../descriptors.js";
 import { FloatValue } from "../float.js";
 import type { ClassHook } from "../hooks.js";
 import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
-import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
+import {
+  AS3,
+  eachElement,
+  elements,
+  getElement,
+  isObject,
+  lengthOf,
+  type Natives,
+  plain,
+  withStorage,
+} from "./define.js";
 import { sort, sortOn } from "./sort.js";
 
 /**
@@ -23,9 +33,6 @@ function sealed(rt: Runtime, o: AsObject, adding: number): boolean {
   return true;
 }
 
-const isObject = (v: Value): v is AsObject =>
-  v !== null && typeof v === "object" && !(v instanceof FloatValue);
-
 /** As ArrayClass::toArray: the elements of an Array or of a subclass's instance, else null. */
 function arrayElements(rt: Runtime, o: Value): Value[] | null {
   if (!isObject(o) || o.$a === undefined) {
@@ -33,6 +40,16 @@ function arrayElements(rt: Runtime, o: Value): Value[] | null {
   }
 
   return rt.traitsOf(o).isSubtypeOf(rt.builtinClass("Array").$it) ? o.$a : null;
+}
+
+/**
+ * The elements of an Array whose length, as the natives that walk to
+ * getLengthProperty read it, is their count: else null, for the generic
+ * path, as for a subclass that overrides its length getter.
+ */
+function arrayElementsOf(rt: Runtime, o: AsObject, length: number): Value[] | null {
+  const a = arrayElements(rt, o);
+  return a !== null && a.length === length ? a : null;
 }
 
 /** As AvmCore::toInteger: a number, truncated, NaN as 0. */
@@ -43,8 +60,8 @@ function toInteger(rt: Runtime, v: Value): number {
 
 /**
  * What Array's generic functions see of an object that is not an Array, a
- * Vector or a ByteArray among them: its length property, as a uint, and
- * its properties named by an index.
+ * Vector or a ByteArray among them, or of an Array whose length getter is
+ * overridden: its length property, as a uint, and its elements.
  */
 class Generic {
   constructor(
@@ -61,7 +78,7 @@ class Generic {
   }
 
   get(i: number): Value {
-    return this.rt.getProperty(this.o, this.rt.publicName(i));
+    return getElement(this.rt, this.o, i);
   }
 
   set(i: number, v: Value): void {
@@ -144,12 +161,22 @@ function genericReverse(g: Generic): void {
   }
 }
 
-/** As generic_splice: the deleted elements out, the rest moved, the inserted set, then the length. */
-function genericSplice(rt: Runtime, g: Generic, args: Value[]): AsObject {
-  const length = g.length;
+/** As generic_splice: where to splice, and how many to delete, within the length. */
+function spliceRange(rt: Runtime, length: number, args: Value[]): [number, number] {
   const at = clampIndex(toInteger(rt, args[0]), length);
   const wanted = args.length > 1 ? toInteger(rt, args[1]) : length - at;
-  const deleted = Math.min(wanted < 0 ? 0 : Math.trunc(wanted), length - at);
+  return [at, Math.min(wanted < 0 ? 0 : Math.trunc(wanted), length - at)];
+}
+
+/** As generic_splice: the deleted elements out, the rest moved, the inserted set, then the length. */
+function genericSplice(
+  rt: Runtime,
+  g: Generic,
+  length: number,
+  at: number,
+  deleted: number,
+  args: Value[],
+): AsObject {
   const end = at + deleted;
   const inserted = args.length > 2 ? args.length - 2 : 0;
   const shift = inserted - deleted;
@@ -179,6 +206,26 @@ function genericSplice(rt: Runtime, g: Generic, args: Value[]): AsObject {
 
   g.length = length + shift;
   return rt.array(out);
+}
+
+/**
+ * As array_concat reads an Array: its elements up to its length as
+ * getLengthProperty reads it; its own storage, not to be changed, when
+ * that is their count.
+ */
+function concatElements(rt: Runtime, o: AsObject): Value[] {
+  const length = lengthOf(rt, o);
+  const a = arrayElementsOf(rt, o, length);
+  if (a) {
+    return a;
+  }
+
+  const out: Value[] = [];
+  for (let i = 0; i < length; i++) {
+    out.push(getElement(rt, o, i));
+  }
+
+  return out;
 }
 
 export const arrayNatives: Natives = {
@@ -239,17 +286,22 @@ export const arrayNatives: Natives = {
     return o;
   },
   "Array.Array::_unshift": (rt) => (o: AsObject, args: Value) => {
+    // As generic_unshift: the length after is getLengthProperty's.
     const a = elements(args);
-    return sealed(rt, o, a.length) ? 0 : o.$a.unshift(...a);
+    if (sealed(rt, o, a.length)) {
+      return 0;
+    }
+
+    o.$a.unshift(...a);
+    return lengthOf(rt, o);
   },
   // As generic_concat: what is not an Array is left out as the receiver,
   // and is one element as an argument.
   "Array.Array::_concat": (rt) => (o: Value, args: Value) => {
-    const out = arrayElements(rt, o)?.slice() ?? [];
+    const out = arrayElements(rt, o) ? concatElements(rt, o).slice() : [];
     for (const a of elements(args)) {
-      const from = arrayElements(rt, a);
-      if (from) {
-        out.push(...from);
+      if (arrayElements(rt, a)) {
+        out.push(...concatElements(rt, a));
       } else {
         out.push(a);
       }
@@ -258,17 +310,17 @@ export const arrayNatives: Natives = {
     return rt.array(out);
   },
   "Array.Array::_slice": (rt) => (o: Value, start: Value, end: Value) => {
-    const a = arrayElements(rt, o);
-    if (a) {
-      return rt.array(a.slice(rt.toNumber(start), rt.toNumber(end)));
-    }
-
     if (!isObject(o)) {
       return null;
     }
 
+    const length = lengthOf(rt, o);
+    const a = arrayElementsOf(rt, o, length);
+    if (a) {
+      return rt.array(a.slice(rt.toNumber(start), rt.toNumber(end)));
+    }
+
     const g = new Generic(rt, o);
-    const length = g.length;
     const from = clampIndex(rt.toNumber(start), length);
     const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const out: Value[] = [];
@@ -284,20 +336,33 @@ export const arrayNatives: Natives = {
       return rt.array([]);
     }
 
-    if (!arrayElements(rt, o)) {
-      return isObject(o) ? genericSplice(rt, new Generic(rt, o), a) : null;
+    if (!isObject(o)) {
+      return null;
     }
 
-    if (sealed(rt, o, a.length - 2)) {
+    // As generic_splice: the range within the length getLengthProperty
+    // reads, spliced in an Array's storage where the storage holds it
+    // (ArrayObject::try_splice), else element by element.
+    const length = lengthOf(rt, o);
+    const storage = arrayElements(rt, o);
+    if (storage !== null && sealed(rt, o, a.length - 2)) {
       return rt.array([]);
     }
 
-    const start = rt.toNumber(a[0]);
-    const count = a.length > 1 ? rt.toNumber(a[1]) : o.$a.length;
-    return rt.array(o.$a.splice(start, count, ...a.slice(2)));
+    const [at, deleted] = spliceRange(rt, length, a);
+    if (storage !== null && at + deleted <= storage.length) {
+      return rt.array(storage.splice(at, deleted, ...a.slice(2)));
+    }
+
+    return genericSplice(rt, new Generic(rt, o), length, at, deleted, a);
   },
   "Array.Array::_indexOf": (rt) => (o: Value, v: Value, from: Value) => {
-    const a = arrayElements(rt, o);
+    if (!isObject(o)) {
+      return -1;
+    }
+
+    const length = lengthOf(rt, o);
+    const a = arrayElementsOf(rt, o, length);
     if (a) {
       const start = rt.toInt(from);
       if (v instanceof FloatValue) {
@@ -314,12 +379,7 @@ export const arrayNatives: Natives = {
     }
 
     // As generic_indexOf: by strict equality, from the start clamped.
-    if (!isObject(o)) {
-      return -1;
-    }
-
     const g = new Generic(rt, o);
-    const length = g.length;
     for (let i = clampIndexInt(rt.toInt(from), length); i < length; i++) {
       if (rt.strictEquals(g.get(i), v)) {
         return i;
@@ -329,7 +389,12 @@ export const arrayNatives: Natives = {
     return -1;
   },
   "Array.Array::_lastIndexOf": (rt) => (o: Value, v: Value, from: Value) => {
-    const a = arrayElements(rt, o);
+    if (!isObject(o)) {
+      return -1;
+    }
+
+    const length = lengthOf(rt, o);
+    const a = arrayElementsOf(rt, o, length);
     if (a) {
       const start = rt.toInt(from);
       if (v instanceof FloatValue) {
@@ -346,12 +411,7 @@ export const arrayNatives: Natives = {
       return a.lastIndexOf(v, start);
     }
 
-    if (!isObject(o)) {
-      return -1;
-    }
-
     const g = new Generic(rt, o);
-    const length = g.length;
     let start = clampIndexInt(rt.toInt(from), length);
     if (start === length) {
       start--;
@@ -365,17 +425,17 @@ export const arrayNatives: Natives = {
 
     return -1;
   },
-  "Array.Array::_sort": (rt) => (o: AsObject, args: Value) => sort(rt, o, elements(args)),
-  "Array.Array::_sortOn": (rt) => (o: AsObject, names: Value, options: Value) =>
+  "Array.Array::_sort": (rt) => (o: Value, args: Value) => sort(rt, o, elements(args)),
+  "Array.Array::_sortOn": (rt) => (o: Value, names: Value, options: Value) =>
     sortOn(rt, o, names, options),
-  "Array.Array::_every": (rt) => (o: AsObject, f: Value, receiver: Value) =>
+  "Array.Array::_every": (rt) => (o: Value, f: Value, receiver: Value) =>
     eachElement(rt, o, f, receiver, (result) => (result === true ? undefined : false)) ?? true,
-  "Array.Array::_some": (rt) => (o: AsObject, f: Value, receiver: Value) =>
+  "Array.Array::_some": (rt) => (o: Value, f: Value, receiver: Value) =>
     eachElement(rt, o, f, receiver, (result) => (result === true ? true : undefined)) ?? false,
-  "Array.Array::_forEach": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+  "Array.Array::_forEach": (rt) => (o: Value, f: Value, receiver: Value) => {
     eachElement(rt, o, f, receiver, () => undefined);
   },
-  "Array.Array::_filter": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+  "Array.Array::_filter": (rt) => (o: Value, f: Value, receiver: Value) => {
     const out: Value[] = [];
     eachElement(rt, o, f, receiver, (result, element) => {
       if (result === true) {
@@ -384,11 +444,19 @@ export const arrayNatives: Natives = {
     });
     return rt.array(out);
   },
-  "Array.Array::_map": (rt) => (o: AsObject, f: Value, receiver: Value) => {
+  // As generic_map, which alone of them lets a method closure have any receiver.
+  "Array.Array::_map": (rt) => (o: Value, f: Value, receiver: Value) => {
     const out: Value[] = [];
-    eachElement(rt, o, f, receiver, (result) => {
-      out.push(result);
-    });
+    eachElement(
+      rt,
+      o,
+      f,
+      receiver,
+      (result) => {
+        out.push(result);
+      },
+      true,
+    );
     return rt.array(out);
   },
 };
