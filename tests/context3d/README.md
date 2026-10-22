@@ -8,6 +8,9 @@ BitmapData, presents, and disposes its resources.
 pnpm build
 node --test tests/context3d/agal.test.ts
 node tests/context3d/run.ts
+node tests/context3d/stress.ts
+# Longer local resource/memory soak:
+node tests/context3d/stress.ts --loads 200
 ```
 
 `reference.json` is the trace from the same AS3 source in AIR, using direct
@@ -65,6 +68,26 @@ unavailable-context fallback, cancellation before creation, resource
 ownership, shader swizzles and clip depth, failed shader replacement,
 resize, disposal and refusal after context loss. They count actual
 created/deleted GPU handles.
+
+`stress.ts` repeatedly loads a real AS3 SWF with two Stage3D slots. Each load
+churns vertex/index buffers, shaders, 2D/cube/rectangle textures, mip generation,
+render targets, unchanged/changed back-buffer configurations, and pixel readback.
+It keeps disposed AS wrappers alive until unloading and leaves some resources
+for context teardown to release. It also injects failed resizes, recreates
+contexts, periodically loses/restores an actual WebGL context, and closes the
+host with creation queued.
+
+The default 48-load check runs in `pnpm test`; `--loads 200` extends it locally.
+Created/deleted GPU handles and attached/detached loss listeners are counted.
+After garbage collection, weak references must show that retired AS roots,
+resources, players, scripting instances, backends and canvases are collectible.
+Heap plus backing storage is checked at multiple checkpoints after eight warm
+loads, allowing 512 KiB plus 32 KiB per additional load for JIT/test bookkeeping.
+Codegen memory must stay within its warmed high-water mark or 32 MiB, whichever
+is larger. Results go to `out/stress-results.json`. These checks measure logical
+GPU resource release and browser-reported JS memory, not a driver's physical
+VRAM reclamation. The software WebGL run is reproducible; driver-specific soak
+coverage remains separate.
 
 `BufferBytes.as` compares 334 trace lines (including 117 pixel samples) with AIR
 for vertex/index `uploadFromByteArray`: byte offsets 0 through 7, destination
@@ -641,3 +664,24 @@ The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim
 complete pixel parity for arbitrary Stage3D content.
+
+## Package extraction and production integration
+
+After the lifecycle checks pass, extract the implementation into
+`packages/context3d` as a separate change. Its main entry should expose the
+renderer-neutral resource/lifecycle contracts and AGAL translation; an optional
+`@swf2es/context3d/webgl` entry should own WebGL resources. Neither entry should
+import player AS objects or Pixi. This keeps another GPU backend possible
+without moving Flash semantics into it.
+
+The AS native adapter and Flash validation belong in `player`, depending on the
+core contracts. DOM canvas placement, clipping and loss/restoration wiring
+belong in `player-hosts`. Web and desktop hosts can then opt in through their
+existing lifecycle. Update package-boundary tests and `docs/architecture.md`
+when those dependencies are introduced. The extraction itself should preserve
+the existing opt-in behavior; enabling production playback is a later change.
+
+Before enabling it, carry the current AIR fixtures and stress checks through the
+package boundary, then exercise real samples with repeated loads/scene changes,
+resize, host removal and context loss. Stage3D canvas composition and ownership
+need a defined host API rather than depending on the current test page.

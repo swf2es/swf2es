@@ -30,7 +30,7 @@ function rejects(fn: () => void): void {
   check(threw, "operation should have been rejected");
 }
 
-function create() {
+export function create() {
   const canvas = document.createElement("canvas");
   const gl = canvas.getContext("webgl2", {
     alpha: false,
