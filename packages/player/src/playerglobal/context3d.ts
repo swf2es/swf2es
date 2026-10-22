@@ -34,11 +34,13 @@ import type { Scripting } from "../scripting.js";
 import { storeOf } from "./flash/display/BitmapData.js";
 
 type AsObject = avm2.AsObject;
+type ResourceValue = Buffer3D | Program3D | Texture3D;
 
 interface Resource<T> {
   value: T;
   owner: AsObject;
   disposed: boolean;
+  reference: WeakRef<AsObject>;
 }
 
 interface TextureResource extends Resource<Texture3D> {
@@ -52,6 +54,11 @@ interface ContextState {
   depth: boolean;
   aa: number;
   target: TextureResource | null;
+  targetObject: AsObject | null;
+  program: AsObject | null;
+  vertices: (AsObject | null)[];
+  textures: (AsObject | null)[];
+  resources: Set<Resource<ResourceValue>>;
 }
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
@@ -68,6 +75,87 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
   const indices = new WeakMap<AsObject, number>();
   const matrixConstants = new Float32Array(16);
   let closed = false;
+
+  const release = (entry: Resource<ResourceValue>): void => {
+    contexts.get(entry.owner)?.resources.delete(entry);
+    finalized.unregister(entry);
+    entry.value.dispose();
+    entry.disposed = true;
+  };
+  // Held records never strongly reference their own AS wrapper. Active bindings
+  // keep wrappers alive through ContextState until they are replaced or cleared.
+  const finalized = new FinalizationRegistry<Resource<ResourceValue>>((entry) => {
+    if (contexts.get(entry.owner)?.resources.has(entry)) {
+      release(entry);
+    }
+  });
+  const own = <T extends Resource<ResourceValue>>(object: AsObject, entry: T): T => {
+    contexts.get(entry.owner)?.resources.add(entry);
+    finalized.register(object, entry, entry);
+    return entry;
+  };
+  const allocate = <T>(owner: AsObject, create: () => T): T => {
+    try {
+      return create();
+    } catch (error) {
+      // A full collection can precede its finalizers. Recover that capacity
+      // before refusing an allocation, without scanning warm draw paths.
+      let collected = false;
+      const resources = contexts.get(owner)?.resources;
+      if (resources) {
+        for (const entry of resources) {
+          if (!entry.reference.deref()) {
+            release(entry);
+            collected = true;
+          }
+        }
+      }
+      if (!collected) {
+        throw error;
+      }
+
+      return create();
+    }
+  };
+  const closeContext = (entry: ContextState): void => {
+    for (const resource of entry.resources) {
+      finalized.unregister(resource);
+    }
+    entry.resources.clear();
+    entry.vertices.fill(null);
+    entry.textures.fill(null);
+    entry.program = null;
+    entry.target = null;
+    entry.targetObject = null;
+    entry.backend.dispose();
+  };
+  const disposeResource = (object: AsObject, entry: Resource<ResourceValue> | undefined): void => {
+    if (!entry || entry.disposed) {
+      return;
+    }
+
+    release(entry);
+    const owner = contexts.get(entry.owner);
+    if (!owner) {
+      return;
+    }
+
+    for (let i = 0; i < 8; i++) {
+      if (owner.vertices[i] === object) {
+        owner.vertices[i] = null;
+      }
+      if (owner.textures[i] === object) {
+        owner.textures[i] = null;
+      }
+    }
+    if (owner.program === object) {
+      owner.program = null;
+    }
+    if (owner.targetObject === object) {
+      owner.target = null;
+      owner.targetObject = null;
+    }
+  };
 
   function unsupported(): never {
     throw new Error("Unsupported operation in Context3D triangle experiment");
@@ -133,8 +221,18 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
 
     return value.value;
   };
-  const construct = (name: string): AsObject =>
-    s.rt.construct(s.rt.classNamed(`flash.display3D::${name}`)) as AsObject;
+  const construct = (
+    name: string,
+    resource?: ResourceValue,
+    namespace = "flash.display3D",
+  ): AsObject => {
+    try {
+      return s.rt.construct(s.rt.classNamed(`${namespace}::${name}`)) as AsObject;
+    } catch (error) {
+      resource?.dispose();
+      throw error;
+    }
+  };
   const texture = (o: AsObject): Texture3D => {
     const entry = textures.get(o);
     if (!entry) {
@@ -177,7 +275,9 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
           contexts.delete(object);
           slots.delete(slot);
           lost.set(slot, generation);
-          entry?.backend.dispose();
+          if (entry) {
+            closeContext(entry);
+          }
         },
         restored: () => {
           if (closed || s.destroyed || lost.get(slot) !== generation) {
@@ -207,6 +307,11 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
         depth: false,
         aa: 0,
         target: null,
+        targetObject: null,
+        program: null,
+        vertices: new Array(8).fill(null),
+        textures: new Array(8).fill(null),
+        resources: new Set(),
       });
       slots.set(slot, object);
       place(slot);
@@ -227,7 +332,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
     contexts.delete(object);
     slots.delete(entry.slot);
     generations.delete(entry.slot);
-    entry.backend.dispose();
+    closeContext(entry);
     host.remove(indexOf(entry.slot));
     return entry.slot;
   };
@@ -341,9 +446,18 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
         unsupported();
       }
 
-      const resource = context(this as unknown as AsObject).createBuffer(count, stride);
-      const object = construct("VertexBuffer3D");
-      buffers.set(object, { value: resource, owner: this as unknown as AsObject, disposed: false });
+      const owner = this as unknown as AsObject;
+      const resource = allocate(owner, () => context(owner).createBuffer(count, stride));
+      const object = construct("VertexBuffer3D", resource);
+      buffers.set(
+        object,
+        own(object, {
+          value: resource,
+          owner,
+          disposed: false,
+          reference: new WeakRef(object),
+        }),
+      );
 
       return object;
     }
@@ -353,21 +467,35 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
         unsupported();
       }
 
-      const resource = context(this as unknown as AsObject).createBuffer(count, 0);
-      const object = construct("IndexBuffer3D");
-      buffers.set(object, { value: resource, owner: this as unknown as AsObject, disposed: false });
+      const owner = this as unknown as AsObject;
+      const resource = allocate(owner, () => context(owner).createBuffer(count, 0));
+      const object = construct("IndexBuffer3D", resource);
+      buffers.set(
+        object,
+        own(object, {
+          value: resource,
+          owner,
+          disposed: false,
+          reference: new WeakRef(object),
+        }),
+      );
 
       return object;
     }
 
     createProgram(): AsObject {
-      const resource = context(this as unknown as AsObject).createProgram();
-      const object = construct("Program3D");
-      programs.set(object, {
-        value: resource,
-        owner: this as unknown as AsObject,
-        disposed: false,
-      });
+      const owner = this as unknown as AsObject;
+      const resource = allocate(owner, () => context(owner).createProgram());
+      const object = construct("Program3D", resource);
+      programs.set(
+        object,
+        own(object, {
+          value: resource,
+          owner,
+          disposed: false,
+          reference: new WeakRef(object),
+        }),
+      );
 
       return object;
     }
@@ -387,13 +515,19 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       const object = s.rt.construct(
         s.rt.classNamed("flash.display3D.textures::Texture"),
       ) as AsObject;
-      const value = backend.createTexture(width, height);
-      textures.set(object, {
-        value,
-        owner: this as unknown as AsObject,
-        disposed: false,
-        initialized: false,
-      });
+      const value = allocate(this as unknown as AsObject, () =>
+        backend.createTexture(width, height),
+      );
+      textures.set(
+        object,
+        own(object, {
+          value,
+          owner: this as unknown as AsObject,
+          disposed: false,
+          initialized: false,
+          reference: new WeakRef(object),
+        }),
+      );
 
       return object;
     }
@@ -429,16 +563,20 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
         unsupported();
       }
 
-      const value = backend.createRectangleTexture(width, height);
-      const object = s.rt.construct(
-        s.rt.classNamed("flash.display3D.textures::RectangleTexture"),
-      ) as AsObject;
-      textures.set(object, {
-        value,
-        owner: this as unknown as AsObject,
-        disposed: false,
-        initialized: false,
-      });
+      const value = allocate(this as unknown as AsObject, () =>
+        backend.createRectangleTexture(width, height),
+      );
+      const object = construct("RectangleTexture", value, "flash.display3D.textures");
+      textures.set(
+        object,
+        own(object, {
+          value,
+          owner: this as unknown as AsObject,
+          disposed: false,
+          initialized: false,
+          reference: new WeakRef(object),
+        }),
+      );
 
       return object;
     }
@@ -452,13 +590,19 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       const object = s.rt.construct(
         s.rt.classNamed("flash.display3D.textures::CubeTexture"),
       ) as AsObject;
-      const value = backend.createTexture(size, size, true);
-      textures.set(object, {
-        value,
-        owner: this as unknown as AsObject,
-        disposed: false,
-        initialized: false,
-      });
+      const value = allocate(this as unknown as AsObject, () =>
+        backend.createTexture(size, size, true),
+      );
+      textures.set(
+        object,
+        own(object, {
+          value,
+          owner: this as unknown as AsObject,
+          disposed: false,
+          initialized: false,
+          reference: new WeakRef(object),
+        }),
+      );
 
       return object;
     }
@@ -507,7 +651,9 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
     }
 
     setTextureAt(index: number, object: AsObject | null): void {
-      context(this as unknown as AsObject).setTexture(index, object && texture(object));
+      const entry = state(this as unknown as AsObject);
+      entry.backend.setTexture(index, object && texture(object));
+      entry.textures[index] = object;
     }
 
     setRenderToTexture(
@@ -532,20 +678,25 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
 
       entry.backend.setRenderTarget(value, depth, surface);
       entry.target = value && object ? (textures.get(object) ?? null) : null;
+      entry.targetObject = value ? object : null;
     }
 
     setRenderToBackBuffer(): void {
       const entry = state(this as unknown as AsObject);
       entry.backend.setRenderTarget(null);
       entry.target = null;
+      entry.targetObject = null;
     }
 
     setProgram(object: AsObject): void {
-      context(this as unknown as AsObject).setProgram(program(object));
+      const entry = state(this as unknown as AsObject);
+      entry.backend.setProgram(program(object));
+      entry.program = object;
     }
 
     setVertexBufferAt(index: number, object: AsObject | null, offset = 0, format = "float4"): void {
-      const backend = contexts.get(this as unknown as AsObject)?.backend;
+      const owner = contexts.get(this as unknown as AsObject);
+      const backend = owner?.backend;
       const entry = object && buffers.get(object);
       const live = entry && !entry.disposed && contexts.has(entry.owner);
       if (backend && live) {
@@ -571,6 +722,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       }
 
       backend.setVertex(index, live ? entry.value : null, offset, format as VertexFormat);
+      owner.vertices[index] = live ? object : null;
     }
 
     setProgramConstantsFromVector(type: string, first: number, values: AsObject, count = -1): void {
@@ -781,6 +933,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       if (entry.target) {
         entry.backend.setRenderTarget(null);
         entry.target = null;
+        entry.targetObject = null;
       }
 
       if (this.$checking) {
@@ -839,11 +992,8 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
     }
 
     dispose(): void {
-      const entry = buffers.get(this as unknown as AsObject);
-      if (entry && !entry.disposed) {
-        entry.value.dispose();
-        entry.disposed = true;
-      }
+      const object = this as unknown as AsObject;
+      disposeResource(object, buffers.get(object));
     }
   }
 
@@ -861,11 +1011,8 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
     }
 
     dispose(): void {
-      const entry = programs.get(this as unknown as AsObject);
-      if (entry && !entry.disposed) {
-        entry.value.dispose();
-        entry.disposed = true;
-      }
+      const object = this as unknown as AsObject;
+      disposeResource(object, programs.get(object));
     }
   }
 
@@ -980,15 +1127,8 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
 
   class TextureBaseNatives {
     dispose(): void {
-      const entry = textures.get(this as unknown as AsObject);
-      if (entry && !entry.disposed) {
-        entry.value.dispose();
-        entry.disposed = true;
-        const owner = contexts.get(entry.owner);
-        if (owner?.target === entry) {
-          owner.target = null;
-        }
-      }
+      const object = this as unknown as AsObject;
+      disposeResource(object, textures.get(object));
     }
   }
 

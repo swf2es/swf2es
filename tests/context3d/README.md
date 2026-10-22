@@ -9,6 +9,7 @@ pnpm build
 node --test tests/context3d/agal.test.ts
 node tests/context3d/run.ts
 node tests/context3d/stress.ts
+node tests/context3d/reclamation.ts
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
 ```
@@ -89,17 +90,35 @@ clock; it is an execution/lifetime check rather than an FPS or AIR parity result
 The downloaded SWF and diagnostic harness remain outside the repository.
 
 The public Away3D `Intermediate_Lines` Flash SWF renders its scrolling terrain,
-three wireframe spheres and particles after adding `seq`. A 60-tick hardware
-check produces 59 presentations and 295 draws, with changing pixels and no AS or
-GL errors. It also exposes a lifetime gap: the downloaded SWF replaces its terrain
-vertex buffer every frame without calling `dispose()`. After collection at tick
-60, only six of its 64 vertex-buffer wrappers remain, but the backend still owns
-69 buffers including index buffers (about 41 MiB). A longer run reaches the
-default 64 MiB buffer budget. Automatic reclamation of resources whose AS wrappers
-are unreachable remains to be implemented; raising the budget would only postpone
-the failure. Full teardown still releases every GPU handle and byte counter.
+three wireframe spheres and particles after adding `seq`. The downloaded SWF
+replaces its terrain vertex buffer every frame without calling `dispose()`.
+Before automatic reclamation, only six of its 64 vertex-buffer wrappers survived
+collection at tick 60, while the backend retained 69 buffers (about 41 MiB);
+a longer run reached the default 64 MiB buffer budget. The Flash adapter now
+registers resource wrappers for cleanup and strongly retains active bindings.
+An allocation failure first releases already collected wrappers whose finalizers
+have not run, then retries once. There is no resource scan on draws or presents.
+Explicit disposal and context loss/teardown cancel registrations immediately.
+The unchanged SWF now completes 3,600 hardware-WebGL ticks, 3,599 presentations
+and 17,995 draws with the default budgets and no forced GC during playback.
+At six 600-tick checkpoints it retains 12–13 buffers (1.8–2.5 MiB), two programs
+and one texture, with no AS/browser/GL errors and unchanged 32 MiB codegen memory.
+Teardown releases all 3,621 created handles, returns every tracked byte counter
+to zero and permits collection of the player, scripting, backend and canvas.
 The sample and diagnostics stay outside the repository. This is an execution
 check, not an FPS benchmark or an AIR pixel reference.
+
+`reclamation.ts` keeps one AS3 context alive while repeatedly abandoning or
+explicitly disposing vertex/index buffers, programs and 2D/cube/rectangle
+textures. Real browser collection must release their tracked storage and GPU
+handles while resources held only by active bindings remain drawable. Failed
+bindings preserve the previous resources; `present()` releases the render-target
+binding. Wrapper-construction failures roll back backend allocations. The test
+also holds actual finalizer notifications to exercise count/byte budget recovery
+before delivery and stale callbacks after reclamation, recreation and real context
+loss/restoration. Explicitly disposed wrappers remain reachable during part of the
+test; live-context post-GC heap growth is bounded. Finalization timing remains
+nondeterministic and does not replace explicit disposal or the hard budgets.
 
 `stress.ts` repeatedly loads a real AS3 SWF with two Stage3D slots. Each load
 churns vertex/index buffers, shaders, 2D/cube/rectangle textures, mip generation,
@@ -693,9 +712,8 @@ color rendering and back buffers with optional multisampling are exercised, with
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are automatic reclamation of unreachable AS resources, the unresolved
-shader cases above, target MSAA and broader texture formats, alongside broader
-Flash error semantics and numeric coverage.
+Next gates are the unresolved shader cases above, target MSAA and broader texture
+formats, alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim
