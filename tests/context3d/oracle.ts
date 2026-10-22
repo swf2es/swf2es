@@ -119,7 +119,7 @@ if (triangle) {
 const path = `${here}${triangle ? "" : `${fixture.toLowerCase()}-`}reference.json`;
 if (fixture === "Comparisons") {
   // Self-checking: do not bless a driver's incorrect shader results as a reference.
-  assert.deepEqual(lines, ["comparisons checks 368", "comparisons complete"]);
+  assert.deepEqual(lines, ["comparisons checks 1452", "comparisons complete"]);
 } else if (process.argv.includes("--update")) {
   writeFileSync(path, `${JSON.stringify(lines, null, 2)}\n`);
 } else {

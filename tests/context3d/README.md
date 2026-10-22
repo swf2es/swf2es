@@ -88,6 +88,19 @@ backend and canvas. This uses hardware WebGL on Intel Iris Xe with a frame
 clock; it is an execution/lifetime check rather than an FPS or AIR parity result.
 The downloaded SWF and diagnostic harness remain outside the repository.
 
+The public Away3D `Intermediate_Lines` Flash SWF renders its scrolling terrain,
+three wireframe spheres and particles after adding `seq`. A 60-tick hardware
+check produces 59 presentations and 295 draws, with changing pixels and no AS or
+GL errors. It also exposes a lifetime gap: the downloaded SWF replaces its terrain
+vertex buffer every frame without calling `dispose()`. After collection at tick
+60, only six of its 64 vertex-buffer wrappers remain, but the backend still owns
+69 buffers including index buffers (about 41 MiB). A longer run reaches the
+default 64 MiB buffer budget. Automatic reclamation of resources whose AS wrappers
+are unreachable remains to be implemented; raising the budget would only postpone
+the failure. Full teardown still releases every GPU handle and byte counter.
+The sample and diagnostics stay outside the repository. This is an execution
+check, not an FPS benchmark or an AIR pixel reference.
+
 `stress.ts` repeatedly loads a real AS3 SWF with two Stage3D slots. Each load
 churns vertex/index buffers, shaders, 2D/cube/rectangle textures, mip generation,
 render targets, unchanged/changed back-buffer configurations, and pixel readback.
@@ -334,15 +347,18 @@ add no per-draw JavaScript work or allocations. Zero reciprocals, nonpositive
 log inputs, nonfinite values, overflow/underflow and large-angle precision are
 not covered by this fixture.
 
-`Comparisons.as` checks fragment `sge`/`slt` with 368 independently calculated
-pixel expectations: negative, positive and equal inputs, signed zero, both source
-swizzles, every destination lane, vector/partial writes, either input overlapping
-the destination and interpolated inputs crossing a comparison boundary. Results
+`Comparisons.as` checks vertex and fragment `sge`/`slt`/`seq` with 1,452 independently
+calculated pixel expectations: negative, positive and equal inputs, signed zero,
+adjacent float values, both source swizzles, every destination lane, vector/partial
+writes, either input overlapping the destination and interpolated fragment inputs
+crossing a comparison boundary. Results
 are calculated with AS3 comparisons, following the
 [AGAL rules](https://airsdk.dev/docs/development/appendixes/adobe-graphics-assembly-language-agal/agal-bytecode-format).
 This is not an AIR pixel reference. The available Wine OpenGL backend logs
 `Predicates not implemented` and drops the conditional assignments emitted by
-AIR, making both true and false fragment comparisons produce one. Its Vulkan
+AIR, making both true and false fragment comparisons produce one. Vertex `seq`
+also produces one for unequal inputs, including 1.5 versus 1, on that setup;
+the fixture fails rather than recording this as expected behavior. Its Vulkan
 path did not draw the probe; AIR software rendering failed shader compilation.
 The optional oracle command runs the same self-check and fails on that setup,
 even with `--update`; it does not save those broken results as a reference.
@@ -677,8 +693,9 @@ color rendering and back buffers with optional multisampling are exercised, with
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are the unresolved shader cases above, target MSAA and broader texture formats,
-alongside broader Flash error semantics and numeric coverage.
+Next gates are automatic reclamation of unreachable AS resources, the unresolved
+shader cases above, target MSAA and broader texture formats, alongside broader
+Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim

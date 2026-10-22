@@ -36,6 +36,11 @@ creation of a new context. The host detaches both listeners when removing it.
 Uploads copy source storage before returning; `read()` reuses its output until
 the next read. No AS objects or DOM objects cross the backend's core interface.
 
+Resources currently remain owned until explicit disposal or context teardown.
+Automatic reclamation after an AS resource wrapper becomes unreachable is still
+pending. Content that repeatedly abandons buffers without disposing them can
+reach the configured budgets, as the public Away3D Lines sample does.
+
 The current API and validation are experimental. Supported operations, AIR
 references, unsupported formats/profiles and lifecycle stress tests are tracked
 in [tests/context3d](../../tests/context3d/README.md). Web/desktop integration and

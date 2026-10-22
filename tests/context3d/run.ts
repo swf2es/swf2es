@@ -288,10 +288,10 @@ if (!process.argv.includes("--build-only")) {
       );
       assert.equal(comparisons.exception, null, JSON.stringify(comparisons));
       assert.deepEqual(comparisons.value?.trace, [
-        "comparisons checks 368",
+        "comparisons checks 1452",
         "comparisons complete",
       ]);
-      console.log("context3d: fragment comparisons pass 368 independent pixel checks");
+      console.log("context3d: vertex/fragment comparisons pass 1452 independent pixel checks");
       const composition: { points: number[][]; samples: string[][] } = JSON.parse(
         readFileSync(`${here}composition-reference.json`, "utf8"),
       );

@@ -377,13 +377,23 @@ test("discard validates its destination, stage, source and unused operand", () =
 });
 
 test("comparisons support both stages and validate the constant bank", () => {
-  for (const opcode of [0x29, 0x2a]) {
+  for (const opcode of [0x29, 0x2a, 0x2c]) {
     const bytes = binary(opcode, 127);
-    assert.deepEqual(translate(bytes, "vertex").constants, [127]);
+    const vertex = translate(bytes, "vertex");
+    assert.deepEqual(vertex.constants, [127]);
+    if (opcode === 0x2c) {
+      assert.match(vertex.source, /vec4\(equal\(va0\.xyzw, vc127\.xyzw\)\)/);
+    }
+
     bytes[23] = 128;
     assert.throws(() => translate(bytes, "vertex"), /constant/);
     const fragment = binary(opcode, 27, true);
-    assert.deepEqual(translate(fragment, "fragment").constants, [0, 27]);
+    const result = translate(fragment, "fragment");
+    assert.deepEqual(result.constants, [0, 27]);
+    if (opcode === 0x2c) {
+      assert.match(result.source, /vec4\(equal\(fc0\.xyzw, fc27\.xyzw\)\)/);
+    }
+
     fragment[23] = 28;
     assert.throws(() => translate(fragment, "fragment"), /constant/);
   }
