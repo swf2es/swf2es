@@ -114,10 +114,11 @@ calling a change done; CI runs the same steps.
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
 - **Package boundaries.** `format` depends on nothing, `codegen` and
-  `runtime` on `format`, `mp3` on nothing, `cli` on `format`, `codegen` and
-  `runtime`, `player` on those and `mp3`, `player-hosts` on `player`, `web` on
-  `codegen`, `format`, `player` and `player-hosts`. `codegen` never imports the runtime implementation.
-  `format`, `codegen` and `runtime` load no DOM or node types. Apps
+  `runtime` on `format`, `mp3` and `context3d` on nothing, `cli` on `format`,
+  `codegen` and `runtime`, `player` on those plus `context3d` and `mp3`,
+  `player-hosts` on `player`, `web` on `codegen`, `format`, `player` and
+  `player-hosts`. `codegen` never imports the runtime implementation.
+  `format`, `codegen`, `runtime` and `context3d`'s core load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.

@@ -1,10 +1,9 @@
-import { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.ts";
+import { type ProgramType, type SamplerSource, type ShaderSource, translate } from "../agal.js";
 import {
   type BlendFactor,
   type Buffer3D,
   type CompareMode,
   type Context3D,
-  type Context3DLifecycle,
   type CullFace,
   type Program3D,
   SAMPLER_FILTERS,
@@ -20,7 +19,7 @@ import {
   VERTEX_FORMATS,
   type VertexFormat,
   VertexOffsetError,
-} from "./backend.ts";
+} from "../backend.js";
 
 const DEPTH_FUNCTIONS = {
   always: "ALWAYS",
@@ -1667,20 +1666,4 @@ export class WebGLContext3D implements Context3D {
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
   }
-}
-
-/** The surface outlives its lost resources so the browser can signal recovery. */
-export function observeLoss(canvas: HTMLCanvasElement, lifecycle: Context3DLifecycle): () => void {
-  const lost = (event: Event): void => {
-    event.preventDefault();
-    lifecycle.lost();
-  };
-  const restored = (): void => lifecycle.restored();
-  canvas.addEventListener("webglcontextlost", lost);
-  canvas.addEventListener("webglcontextrestored", restored);
-
-  return () => {
-    canvas.removeEventListener("webglcontextlost", lost);
-    canvas.removeEventListener("webglcontextrestored", restored);
-  };
 }

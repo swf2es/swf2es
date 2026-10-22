@@ -55,8 +55,8 @@ from `oracle/flash.ts`: that harness uses CPU display-list capture, which
 does not capture Stage3D.
 
 The native adapter exchanges buffers, programs, textures and pixels through
-`backend.ts`; it imports no Pixi or WebGL code. The WebGL2 backend owns its
-context and resources. Presentation copies the offscreen back buffer to
+`@swf2es/context3d`; the adapter imports no Pixi or WebGL code. The WebGL2
+backend owns its context and resources. Presentation copies the offscreen back buffer to
 the canvas, so a subsequent clear does not alter the presented image.
 Readback reuses its storage and converts GL's bottom-up rows to top-down
 RGBA before the native adapter writes transparent BitmapData. AIR preserves
@@ -650,8 +650,8 @@ node tests/context3d/composition-oracle.ts --update
 ```
 
 This is **not enabled in the player, website, desktop app or game preview**.
-The test installs natives before loading playerglobal and explicitly
-tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
+The test imports `@swf2es/player/context3d`, installs natives before loading
+playerglobal and explicitly tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
 float and packed-byte vertex attributes, vector/matrix uploads, depth/stencil testing, culling, blending,
 color rendering and back buffers with optional multisampling are exercised, with sizes limited to
 32×32 through 2048×2048.
@@ -665,23 +665,29 @@ layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim
 complete pixel parity for arbitrary Stage3D content.
 
-## Package extraction and production integration
+## Package layout and production integration
 
-After the lifecycle checks pass, extract the implementation into
-`packages/context3d` as a separate change. Its main entry should expose the
-renderer-neutral resource/lifecycle contracts and AGAL translation; an optional
-`@swf2es/context3d/webgl` entry should own WebGL resources. Neither entry should
-import player AS objects or Pixi. This keeps another GPU backend possible
-without moving Flash semantics into it.
+The implementation is extracted into [packages/context3d](../../packages/context3d/README.md).
+`@swf2es/context3d` exposes renderer-neutral resource/lifecycle contracts and AGAL
+translation, built without DOM or node types. The optional
+`@swf2es/context3d/webgl` entry owns WebGL resources. Neither entry imports player
+AS objects or Pixi. The normal build checks both projects.
 
-The AS native adapter and Flash validation belong in `player`, depending on the
-core contracts. DOM canvas placement, clipping and loss/restoration wiring
-belong in `player-hosts`. Web and desktop hosts can then opt in through their
-existing lifecycle. Update package-boundary tests and `docs/architecture.md`
-when those dependencies are introduced. The extraction itself should preserve
-the existing opt-in behavior; enabling production playback is a later change.
+The AS native adapter and Flash validation are in `player`, exposed through the
+separate experimental `@swf2es/player/context3d` entry. `installContext3D` runs
+before loading playerglobal and returns teardown to call before destroying
+Scripting. The default player entry never imports or installs it; ordinary
+playback retains the ErrorEvent #3702 fallback.
 
-Before enabling it, carry the current AIR fixtures and stress checks through the
-package boundary, then exercise real samples with repeated loads/scene changes,
-resize, host removal and context loss. Stage3D canvas composition and ownership
-need a defined host API rather than depending on the current test page.
+`@swf2es/player-hosts/stage3d` owns canvas placement and loss/restoration wiring.
+`stage3DCanvasHost` takes a surface factory and a caller-supplied clipped parent;
+the display-list canvas stays above slots 0..3. It keeps a lost surface attached
+until restoration or teardown and detaches both listeners on removal. The
+composition references and repeated-load stress tests use this host and the
+built package entries, including weak-reference checks for retired hosts.
+
+Enabling production playback is a later change. Web/desktop integration still
+needs viewport sizing/scaling and presentation ownership through the normal
+host lifecycle. Before enabling it, exercise real samples with repeated
+loads/scene changes, resize, host removal and context loss. Broader formats,
+profiles and validation gaps remain listed above.

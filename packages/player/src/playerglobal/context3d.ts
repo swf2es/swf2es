@@ -1,10 +1,6 @@
-// Test-only native installation, before playerglobal binds. This is not a
-// public Context3D implementation: unsupported states and Flash error numbers
-// still need their own oracle coverage before promotion into the player.
-import { storeOf } from "../../packages/player/dist/playerglobal/flash/display/BitmapData.js";
-import { dispatchEvent } from "../../packages/player/dist/scripting/events.js";
-import type { Scripting } from "../../packages/player/dist/scripting.js";
-import { avm2 } from "../../packages/runtime/dist/index.js";
+// Experimental opt-in bindings. Install before loading playerglobal and close
+// the host before destroying Scripting; default playback keeps ErrorEvent #3702.
+
 import {
   BLEND_FACTORS,
   type BlendFactor,
@@ -31,7 +27,11 @@ import {
   VERTEX_FORMATS,
   type VertexFormat,
   VertexOffsetError,
-} from "./backend.ts";
+} from "@swf2es/context3d";
+import { avm2 } from "@swf2es/runtime";
+import { dispatchEvent } from "../scripting/events.js";
+import type { Scripting } from "../scripting.js";
+import { storeOf } from "./flash/display/BitmapData.js";
 
 type AsObject = avm2.AsObject;
 
@@ -55,7 +55,7 @@ interface ContextState {
 }
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
-export function install(s: Scripting, host: Stage3DHost): () => void {
+export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
   const natives: avm2.Natives = {};
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
@@ -1032,3 +1032,5 @@ export function install(s: Scripting, host: Stage3DHost): () => void {
     lost.clear();
   };
 }
+
+export type { Context3D, Context3DLifecycle, Stage3DHost } from "@swf2es/context3d";

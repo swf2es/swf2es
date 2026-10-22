@@ -117,6 +117,12 @@ if (!process.argv.includes("--build-only")) {
         }
         console.log(`context3d: ${mode} ok`);
       }
+      const host = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.canvasHost())',
+      );
+      assert.equal(host.exception, null, JSON.stringify(host));
+      assert.equal(host.value?.passed, true);
+      console.log("context3d: canvas host placement, failure rollback and listener cleanup ok");
       const result = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.lifetime())',
       );

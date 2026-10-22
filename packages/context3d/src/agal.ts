@@ -1,6 +1,6 @@
 // Deliberately small AGAL v1 slice for the opt-in Context3D probe.
 // Format: https://github.com/adobe/glsl2agal/blob/master/agalassembler/agal.h
-import { SamplerBiasError } from "./backend.ts";
+import { SamplerBiasError } from "./backend.js";
 
 export type ProgramType = "vertex" | "fragment";
 

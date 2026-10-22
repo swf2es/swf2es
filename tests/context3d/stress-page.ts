@@ -1,10 +1,9 @@
+import { installContext3D as install } from "@swf2es/player/context3d";
+import { stage3DCanvasHost } from "@swf2es/player-hosts/stage3d";
 import { type Codegen, createCodegen } from "../../packages/codegen/dist/index.js";
 import { Player } from "../../packages/player/dist/player.js";
 import { Scripting } from "../../packages/player/dist/scripting.js";
-import type { Context3DLifecycle } from "./backend.ts";
-import { install } from "./natives.ts";
 import { create } from "./page.ts";
-import { observeLoss } from "./webgl.ts";
 
 function check(value: unknown, message: string): asserts value {
   if (!value) {
@@ -14,8 +13,6 @@ function check(value: unknown, message: string): asserts value {
 
 interface Surface {
   owned: ReturnType<typeof create>;
-  detach: () => void;
-  events: Context3DLifecycle;
 }
 
 let data: { codegen: Codegen; libraries: Uint8Array[]; swf: Uint8Array } | null = null;
@@ -113,24 +110,25 @@ export async function load(): Promise<void> {
     onUncaught: (error) => errors.push(scripting.rt.toString(error)),
   });
   const active = new Map<number, Surface>();
+  const host = stage3DCanvasHost(document.body, (slot) => {
+    check(slot < 2 && !active.has(slot), "stress created a duplicate surface");
+    const owned = create();
+    trackListeners(owned.canvas);
+    active.set(slot, { owned });
+    made++;
+    watch("backend", owned.backend);
+    watch("canvas", owned.canvas);
+    return { canvas: owned.canvas, context: owned.backend };
+  });
+  watch("canvas host", host);
   const close = install(scripting, {
-    create: (slot, events) => {
-      check(slot < 2 && !active.has(slot), "stress created a duplicate surface");
-      const owned = create();
-      trackListeners(owned.canvas);
-      const surface = { owned, events, detach: observeLoss(owned.canvas, events) };
-      active.set(slot, surface);
-      document.body.append(owned.canvas);
-      made++;
-      watch("backend", owned.backend);
-      watch("canvas", owned.canvas);
-      return owned.backend;
-    },
+    create: host.create,
     place: (slot, x, y, visible) => {
       check(
         active.has(slot) && x === slot * 13 && y === slot * 7 && visible,
         "stress lost Stage3D placement",
       );
+      host.place(slot, x, y, visible);
     },
     remove: (slot) => {
       const surface = active.get(slot);
@@ -138,8 +136,7 @@ export async function load(): Promise<void> {
       check(surface.owned.live.size === 0, "stress retained GPU handles after disposal");
       handlesCreated += surface.owned.created;
       handlesDeleted += surface.owned.created - surface.owned.live.size;
-      surface.detach();
-      surface.owned.canvas.remove();
+      host.remove(slot);
       surface.owned.gl.getExtension("WEBGL_lose_context")?.loseContext();
       active.delete(slot);
       removed++;

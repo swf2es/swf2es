@@ -1,8 +1,3 @@
-import { autoDetectRenderer } from "pixi.js";
-import { createCodegen } from "../../packages/codegen/dist/index.js";
-import { Player } from "../../packages/player/dist/player.js";
-import { PixiView } from "../../packages/player/dist/render/view.js";
-import { Scripting } from "../../packages/player/dist/scripting.js";
 import {
   type Context3DLifecycle,
   SAMPLER_FILTERS,
@@ -10,9 +5,15 @@ import {
   SAMPLER_WRAPS,
   type SamplerWrap,
   type VertexFormat,
-} from "./backend.ts";
-import { install } from "./natives.ts";
-import { observeLoss, WebGLContext3D } from "./webgl.ts";
+} from "@swf2es/context3d";
+import { WebGLContext3D } from "@swf2es/context3d/webgl";
+import { installContext3D as install } from "@swf2es/player/context3d";
+import { observeLoss, stage3DCanvasHost } from "@swf2es/player-hosts/stage3d";
+import { autoDetectRenderer } from "pixi.js";
+import { createCodegen } from "../../packages/codegen/dist/index.js";
+import { Player } from "../../packages/player/dist/player.js";
+import { PixiView } from "../../packages/player/dist/render/view.js";
+import { Scripting } from "../../packages/player/dist/scripting.js";
 
 function check(value: unknown, message: string): asserts value {
   if (!value) {
@@ -82,6 +83,79 @@ export function create() {
       return created;
     },
   };
+}
+
+export function canvasHost(): { passed: boolean } {
+  const parent = document.createElement("div");
+  const surfaces: ReturnType<typeof create>[] = [];
+  const host = stage3DCanvasHost(parent, () => {
+    const surface = create();
+    surfaces.push(surface);
+    return { canvas: surface.canvas, context: surface.backend };
+  });
+  let lost = 0;
+  let restored = 0;
+  const lifecycle = {
+    lost: () => lost++,
+    restored: () => restored++,
+  };
+
+  try {
+    const context = host.create(2, lifecycle);
+    context.configure(64, 64);
+    host.place(2, -7, 11, false);
+    const surface = surfaces[0];
+    const style = surface.canvas.style;
+    check(surface.canvas.parentElement === parent, "canvas host did not attach the surface");
+    check(
+      style.position === "absolute" &&
+        style.zIndex === "2" &&
+        style.left === "-7px" &&
+        style.top === "11px" &&
+        style.visibility === "hidden",
+      "canvas host lost placement",
+    );
+    rejects(() => host.create(2, lifecycle));
+    check(surfaces.length === 1, "duplicate slot allocated a surface");
+    const event = new Event("webglcontextlost", { cancelable: true });
+    surface.canvas.dispatchEvent(event);
+    surface.canvas.dispatchEvent(new Event("webglcontextrestored"));
+    check(event.defaultPrevented && lost === 1 && restored === 1, "loss callbacks were not wired");
+    context.dispose();
+    host.remove(2);
+    host.remove(2);
+    check(!surface.canvas.parentElement && surface.live.size === 0, "surface not released");
+    surface.canvas.dispatchEvent(new Event("webglcontextlost"));
+    surface.canvas.dispatchEvent(new Event("webglcontextrestored"));
+    check(lost === 1 && restored === 1, "removed surface kept its listeners");
+
+    const append = parent.append;
+    parent.append = () => {
+      throw new Error("injected canvas attachment failure");
+    };
+    try {
+      rejects(() => host.create(1, lifecycle));
+    } finally {
+      parent.append = append;
+    }
+    const failed = surfaces[1];
+    check(failed.backend.disposed && failed.live.size === 0, "failed attachment leaked handles");
+    failed.canvas.dispatchEvent(new Event("webglcontextlost"));
+    check(lost === 1, "failed attachment leaked listeners");
+    const retry = host.create(1, lifecycle);
+    retry.dispose();
+    host.remove(1);
+    check(parent.children.length === 0, "canvas host retained retired surfaces");
+  } finally {
+    for (let i = 0; i < surfaces.length; i++) {
+      surfaces[i].backend.dispose();
+      surfaces[i].gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+    host.remove(1);
+    host.remove(2);
+  }
+
+  return { passed: true };
 }
 
 function color(bytes: Uint8Array, x: number, y: number, width: number): string {
@@ -538,26 +612,19 @@ export async function composition(): Promise<void> {
   document.body.append(frame);
   const scripting = new Scripting(codegen, { audio: null });
   const owned = new Map<number, ReturnType<typeof create>>();
+  const host = stage3DCanvasHost(frame, (slot) => {
+    const entry = create();
+    owned.set(slot, entry);
+    return { canvas: entry.canvas, context: entry.backend };
+  });
   const close = install(scripting, {
-    create: (slot) => {
-      const entry = create();
-      entry.canvas.style.cssText = `position:absolute;z-index:${slot + 1}`;
-      owned.set(slot, entry);
-      frame.append(entry.canvas);
-      return entry.backend;
-    },
-    place: (slot, x, y, visible) => {
-      const entry = owned.get(slot);
-      check(entry, "missing layer");
-      entry.canvas.style.left = `${x}px`;
-      entry.canvas.style.top = `${y}px`;
-      entry.canvas.style.visibility = visible ? "visible" : "hidden";
-    },
+    create: host.create,
+    place: host.place,
     remove: (slot) => {
       const entry = owned.get(slot);
       check(entry, "missing retired layer");
       check(entry.live.size === 0, "retired layer retained GPU handles");
-      entry.canvas.remove();
+      host.remove(slot);
       entry.gl.getExtension("WEBGL_lose_context")?.loseContext();
       owned.delete(slot);
     },

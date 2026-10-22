@@ -1,4 +1,4 @@
-import type { ProgramType } from "./agal.ts";
+import type { ProgramType } from "./agal.js";
 
 export const COMPARE_MODES = [
   "always",

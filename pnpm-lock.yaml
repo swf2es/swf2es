@@ -76,6 +76,8 @@ importers:
         specifier: ^0.28.20
         version: 0.28.20
 
+  packages/context3d: {}
+
   packages/format:
     dependencies:
       lzma1:
@@ -96,6 +98,9 @@ importers:
       '@swf2es/codegen':
         specifier: workspace:*
         version: link:../codegen
+      '@swf2es/context3d':
+        specifier: workspace:*
+        version: link:../context3d
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
@@ -142,6 +147,18 @@ importers:
   tests/bench: {}
 
   tests/conformance: {}
+
+  tests/context3d:
+    dependencies:
+      '@swf2es/context3d':
+        specifier: workspace:*
+        version: link:../../packages/context3d
+      '@swf2es/player':
+        specifier: workspace:*
+        version: link:../../packages/player
+      '@swf2es/player-hosts':
+        specifier: workspace:*
+        version: link:../../packages/player-hosts
 
   tests/desktop:
     dependencies:

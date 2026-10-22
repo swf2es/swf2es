@@ -1,0 +1,10 @@
+{
+  "name": "@swf2es/tests-context3d",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@swf2es/context3d": "workspace:*",
+    "@swf2es/player": "workspace:*",
+    "@swf2es/player-hosts": "workspace:*"
+  }
+}

@@ -10,9 +10,10 @@ import { fileURLToPath } from "node:url";
 const allowed: Record<string, string[]> = {
   format: [],
   mp3: [],
+  context3d: [],
   codegen: ["format"],
   runtime: ["format"],
-  player: ["codegen", "format", "mp3", "runtime"],
+  player: ["codegen", "context3d", "format", "mp3", "runtime"],
   "player-hosts": ["player"],
   web: ["codegen", "format", "player", "player-hosts"],
   cli: ["codegen", "format", "runtime"],
@@ -136,6 +137,12 @@ for (const name of portable) {
     );
   });
 }
+
+test("context3d's core has no DOM or node types", () => {
+  const { compilerOptions } = readJsonc("context3d/tsconfig.core.json");
+  assert.deepEqual(compilerOptions.types, []);
+  assert.deepEqual(compilerOptions.lib, ["ES2022"]);
+});
 
 // Inside the player, playerglobal/ is AS3's bindings only: it imports the
 // player, and the player imports it once, where Scripting registers its

@@ -99,9 +99,10 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `mp3`     | synchronous MP3 frame decoder, minimp3 C compiled to WebAssembly | —                       |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, mp3, runtime |
+| `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
+| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
 `format`, `codegen` and `runtime` load no DOM or node types, so they run in
@@ -119,6 +120,24 @@ SWF's start alone, for its FileAttributes (`fileAttributes`). `codegen` knows th
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
+
+`@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL v1
+translation. Its core is built without DOM or node types; the separate
+`@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
+Neither entry depends on player AS objects or Pixi. The two TypeScript projects
+keep browser types out of the core while the normal package build checks both.
+Flash bindings and validation are an explicit experimental entry,
+`@swf2es/player/context3d`. `installContext3D` must run before loading
+playerglobal, and its returned teardown must run before destroying Scripting.
+It does not install itself or change default playback.
+
+`@swf2es/player-hosts/stage3d` supplies canvas placement and browser loss/restoration
+listeners. Its host takes a surface factory, so it need not import a GPU backend.
+The caller supplies the clipped stage container and puts the display-list canvas
+above Stage3D slots 0..3. A lost surface stays attached until restoration or
+teardown; removing it detaches its listeners. `tests/context3d` exercises these
+package entries against AIR references and repeated-load resource checks.
+Production web/desktop integration remains a separate opt-in change.
 
 `format`'s `readActions` lists a SWF's AVM1 action blocks ([avm1.md](avm1.md)):
 DoAction, DoInitAction, a PlaceObject2 or 3's clip actions record by record
@@ -1199,7 +1218,9 @@ and updated where the display object marks itself changed.
 `packages/player/src` is grouped by what each part of the player does,
 and the player's paths in this document are relative to it:
 
-- `index.ts` is the package's one entry point; `player.ts` runs a SWF,
+- `index.ts` is the package's default entry point; the separate experimental
+  `@swf2es/player/context3d` entry installs Stage3D natives only when requested.
+  `player.ts` runs a SWF,
   `scripting.ts` connects it to the runtime and the compiler, with its
   parts in `scripting/`: `code.ts` compiles and links the SWFs' code
   into their application domains and tells whose code runs, `sha256.ts`
@@ -2817,7 +2838,7 @@ hosts; the web tests exercise Chrome's actual file input and File reads.
 Some of playerglobal stands for what the player does not have, and acts
 as Flash does without it (the `system-natives` case). `Stage.stage3Ds` are Flash's four Stage3Ds, whose
 positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
-each request for a Context3D gets ErrorEvent #3702 in the next frame, as
+by default each request for a Context3D gets ErrorEvent #3702 in the next frame, as
 Flash without a GPU gives, so content can fall back to the display list.
 `stageVideos` is empty, and a `Video` is a box of the size it was made
 at, 320 by 240 where either is 0, RangeError 2006 for a negative one,

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { translate } from "./agal.ts";
-import { SamplerBiasError } from "./backend.ts";
+import { SamplerBiasError, translate } from "@swf2es/context3d";
 
 function mov(fragment = false): Uint8Array {
   const bytes = new Uint8Array(31);
