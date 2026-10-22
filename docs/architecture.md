@@ -115,10 +115,10 @@ more only as it needs them, and keeps whatever decoded before a
 failure, so a SWF cut short still has its header.
 
 `compress` is one WebAssembly module that imports nothing, compiled
-synchronously from base64 on first use. zlib 1.3.2 (`vendor/zlib`)
+synchronously from base64 on first use. zlib 1.3.2 (`vendor/zlib`, swf2es/zlib)
 inflates and deflates, so ByteArray's `compress` and `deflate` write
 zlib's own bytes; the LZMA SDK 26.05's encoder
-(`vendor/lzma-sdk`, checked in: only `C/LzmaEnc.c`, `C/LzFind.c` and their headers, all
+(`vendor/lzma-sdk`, swf2es/lzma-sdk, the release as published; only `C/LzmaEnc.c`, `C/LzFind.c` and their headers, all
 public domain), writes ByteArray's LZMA with avmplus' settings (level 9,
 a 1 MB dictionary or less for less data, no end marker). Its LZMA decoder, `lzma.zig`, follows
 the LZMA SDK's specification decoder, as avmplus' LzmaDec reads a

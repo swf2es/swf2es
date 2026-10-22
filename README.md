@@ -236,8 +236,8 @@ apps/
   site/          the demo site on GitHub Pages: <swf2es-player> on a static page
 vendor/
   pixijs/        the swf2es fork of PixiJS (MIT), a submodule built by pnpm build
-  zlib/          zlib 1.3.2, a submodule compiled into packages/compress
-  lzma-sdk/      the LZMA SDK 26.05's encoder files (public domain), compiled into packages/compress
+  zlib/          zlib 1.3.2 (swf2es's fork), a submodule compiled into packages/compress
+  lzma-sdk/      the LZMA SDK 26.05 (public domain), a submodule compiled into packages/compress
 oracle/          avmshell and Flash (adl) references
 tests/           unit, conformance, player, web, desktop and fuzz tests
 docs/            architecture, references, coverage, benchmarks, roadmap

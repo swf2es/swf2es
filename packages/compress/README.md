@@ -1,11 +1,27 @@
 # @swf2es/compress
 
 Synchronous zlib and LZMA for SWF bodies, bitmaps and `ByteArray`, in one
-WebAssembly module that imports nothing. zlib 1.3.2 is a pinned submodule
-in [`vendor/zlib`](../../vendor/zlib); the LZMA SDK 26.05's encoder,
-`C/LzmaEnc.c`, `C/LzFind.c` and the headers they include, all public domain,
-is checked in under [`vendor/lzma-sdk`](../../vendor/lzma-sdk), whose README
-names the release and each file's hash.
+WebAssembly module that imports nothing. Its upstream sources are pinned
+submodules of swf2es's own repositories: zlib 1.3.2 in
+[`vendor/zlib`](../../vendor/zlib) (https://github.com/swf2es/zlib, a fork
+of madler/zlib, at tag `v1.3.2`), and the LZMA SDK 26.05 in
+[`vendor/lzma-sdk`](../../vendor/lzma-sdk)
+(https://github.com/swf2es/lzma-sdk at tag `v26.05`: the release as
+published, line endings made LF, whose README names the archive and its
+SHA-256). Of the SDK only the encoder is compiled, all public domain:
+
+| File | SHA-256 |
+|---|---|
+| `C/7zTypes.h` | `a5d03b8cb65cd3a2a56bde46dd68fb356d2ebacd9d70283e7d4d20b4e0a64713` |
+| `C/Compiler.h` | `d5e42be77d26beaa8c81d3e62ef99fc5685736cfc079779fdb9154d05fa8bc4a` |
+| `C/CpuArch.h` | `259145c6f4b085f44284014574f39f3f562fc78466746bfb388efe06b4dd59b4` |
+| `C/LzFind.c` | `f73da68845094a85b006a0d2da80b3ecdec92a1ca0f85df637e565c642e8d5ba` |
+| `C/LzFind.h` | `42732b38df9bb18f82866d7deaa8663f6c6f9cb10e2a2cdfa9e6f420c2e2f239` |
+| `C/LzHash.h` | `42d146d2130dfe49d0b21d15cc6f0fe9d79ac0ebb629985fe3aedde7b2bee80e` |
+| `C/LzmaEnc.c` | `67f23656339b5e19015acac41acbcf36ea7787a8419907dce91c1dd336a2fb0f` |
+| `C/LzmaEnc.h` | `c5e78398309363dd181840b7ba0bcb856f66619f755d5e2f5e04f7437186ba5f` |
+| `C/Precomp.h` | `c8903f2e36a771a272d8981e1e9ffed5ba16ca3d2f3dca6d1414d2340a6829d0` |
+
 LZMA decoding is `lzma.zig`, after the LZMA SDK's specification decoder.
 The C adapter (`compress.c`), the few libc declarations it needs
 (`include/`), the decoder and the TypeScript wrapper live here; upstream

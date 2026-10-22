@@ -21,5 +21,9 @@
 	shallow = true
 [submodule "vendor/zlib"]
 	path = vendor/zlib
-	url = https://github.com/madler/zlib.git
+	url = https://github.com/swf2es/zlib.git
+	shallow = true
+[submodule "vendor/lzma-sdk"]
+	path = vendor/lzma-sdk
+	url = https://github.com/swf2es/lzma-sdk.git
 	shallow = true
