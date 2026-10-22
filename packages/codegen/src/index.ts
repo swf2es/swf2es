@@ -310,6 +310,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     );
   }
 
+  // Of the same version, but built before its modules were handed out in
+  // place: its *Bytes exports return copies, which this wrapper cannot read.
+  // Asked of the module, as the bindings define every export they know of.
+  if (!WebAssembly.Module.exports(module).some((e) => e.name === "outputLength")) {
+    throw new Error(
+      "codegen.wasm has no outputLength export, which the wrapper expects: it is older than the wrapper",
+    );
+  }
+
   // codegen.wasm uses AssemblyScript's minimal runtime, which collects
   // garbage only when asked. Nothing runs in wasm between calls, so that is
   // when: every COLLECT_EVERY calls, and after a call that grew memory.
