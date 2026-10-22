@@ -14,9 +14,12 @@ export class Output {
       return;
     }
 
-    const grown = new StaticArray<u8>(max(this.length + more, <u32>this.bytes.length * 2));
-    memory.copy(changetype<usize>(grown), changetype<usize>(this.bytes), this.length);
-    this.bytes = grown;
+    // Grown in place where it can be, else moved and the old block freed at
+    // once: a new buffer each time left every smaller one as garbage until
+    // the call returned, as much again as the module. Nothing holds the old
+    // address across a reserve; every write takes `bytes` after it.
+    const size = max(this.length + more, <u32>this.bytes.length * 2);
+    this.bytes = changetype<StaticArray<u8>>(__renew(changetype<usize>(this.bytes), size));
   }
 
   /** Text of the emitter's own, all ASCII, put in at offset `at`, what follows moved after it. */
