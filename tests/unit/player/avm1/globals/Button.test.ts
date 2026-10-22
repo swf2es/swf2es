@@ -5,8 +5,11 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { avm1 } from "@swf2es/runtime";
 import { Avm1 } from "../../../../../packages/player/dist/avm1/avm1.js";
+import { ButtonObject } from "../../../../../packages/player/dist/display/buttonobject.js";
 import { Player } from "../../../../../packages/player/dist/player.js";
+import { buttonStatesMovie } from "../../../../avm1-button-states.ts";
 import { flashAssembler, script } from "../../../../avm1-script.ts";
 import * as w from "../../../../swf-writer.ts";
 
@@ -79,4 +82,101 @@ trace(line.join(" ") + " " + listed);`;
   await player.start();
 
   assert.deepEqual(lines, ["normal layer normal multiply invert invert add true"]);
+});
+
+for (const version of [6, 8]) {
+  test(`button state clips restart on re-entry while shared records keep playing (SWF ${version})`, async () => {
+    let decodes = 0;
+    const plays: { loops: number; endMs: number | undefined }[] = [];
+    const vm = new Avm1(codegen, {
+      realTime: null,
+      audio: {
+        async decode() {
+          decodes++;
+          return {
+            durationMs: 100,
+            play(_start, loops, _mix, shape) {
+              plays.push({ loops, endMs: shape?.endMs });
+              return { stop() {}, setMix() {} };
+            },
+          };
+        },
+      },
+    });
+    const player = new Player(buttonStatesMovie(version), null, vm);
+    await player.start();
+    try {
+      const face = player.root.avm1;
+      assert.ok(face);
+      const events = () => avm1.get(face, "events", version);
+      const button = player.root.children[0];
+      assert.ok(button instanceof ButtonObject);
+      const up = button.depths.get(1);
+      const shared = button.depths.get(2);
+      assert.ok(up);
+      assert.ok(shared);
+      assert.equal(events(), "US");
+      assert.equal(decodes, 0);
+      player.tick();
+      const move = (type: "move" | "down" | "up", x = 20) =>
+        player.pointer?.handle(type, { x, y: 20, button: 0 });
+      move("move");
+      assert.equal(events(), "USO");
+      assert.equal(up.parent, null);
+      assert.equal(button.depths.get(2), shared);
+      move("down");
+      const down = button.depths.get(1);
+      assert.equal(events(), "USOD");
+      player.tick();
+      avm1.set(face, "ticks", "", version);
+      player.tick();
+      assert.equal(avm1.get(face, "ticks", version), "DS");
+      move("up");
+      assert.equal(events(), "USODO");
+      move("down");
+      assert.equal(events(), "USODOD");
+      assert.notEqual(button.depths.get(1), down);
+      move("up");
+      move("move", 140);
+      assert.equal(events(), "USODODOU");
+      assert.equal(button.depths.get(2), shared);
+      assert.notEqual(button.depths.get(1), up);
+      for (let i = 0; i < 6; i++) {
+        await Promise.resolve();
+      }
+
+      assert.equal(decodes, 1);
+      assert.deepEqual(plays, [
+        { loops: 8, endMs: 3000 / 44.1 },
+        { loops: 8, endMs: 3000 / 44.1 },
+      ]);
+    } finally {
+      player.destroy();
+    }
+  });
+}
+
+test("separate records at one depth recreate the same character when states change", async () => {
+  // Native Flash Player 32: sharing a record and sharing only its character differ.
+  const vm = new Avm1(codegen, { audio: null, realTime: null });
+  const player = new Player(buttonStatesMovie(6, true), null, vm);
+  await player.start();
+  try {
+    const face = player.root.avm1;
+    assert.ok(face);
+    const button = player.root.children[0];
+    assert.ok(button instanceof ButtonObject);
+    const shared = button.depths.get(2);
+    const move = (type: "move" | "down" | "up") =>
+      player.pointer?.handle(type, { x: 20, y: 20, button: 0 });
+    move("move");
+    assert.equal(button.depths.get(2), shared);
+    move("down");
+    assert.notEqual(button.depths.get(2), shared);
+    assert.equal(avm1.get(face, "events", 6), "USODS");
+    move("up");
+    assert.equal(avm1.get(face, "events", 6), "USODSOS");
+  } finally {
+    player.destroy();
+  }
 });
