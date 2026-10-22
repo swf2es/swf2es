@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { readActions, readSwf } from "../../../packages/format/dist/index.js";
+import { lazyBlocks } from "../../../packages/player/dist/avm1/compile.js";
 import { type Region as Avm1Region, Runtime } from "../../../packages/runtime/dist/avm1/index.js";
 import {
   Avm1Assembler,
@@ -15,7 +16,7 @@ import {
   register,
   TryFlag,
 } from "../../avm1-assembler.ts";
-import { backwardActions, sharedBackwardSwf } from "../../avm1-backward.ts";
+import { backwardActions, branch, sharedBackwardSwf, unitActions } from "../../avm1-backward.ts";
 import { loadTesting, testing } from "./testing-module.ts";
 
 // AVM1 blocks assembled in the tests, compiled by codegen's emitter
@@ -103,8 +104,13 @@ function stub(conditions: boolean[] = []) {
 
 async function load(module: string, rt: unknown): Promise<Region[][]> {
   const url = `data:text/javascript;base64,${Buffer.from(module).toString("base64")}`;
-  const { default: factory } = await import(url);
-  return factory(rt);
+  const { default: factory, units } = await import(url);
+  const blocks = factory(rt);
+  if (units !== undefined && rt instanceof Runtime) {
+    rt.adoptUnits(blocks, units(rt));
+  }
+
+  return blocks;
 }
 
 /**
@@ -1192,6 +1198,61 @@ test("backward branches read SWF prefixes, including functions and chained dista
         : ["outside é", "callback", "42", "conditional prefix", "done"],
     );
   }
+});
+
+test("code outside a block's bytes runs in units, as it would in the block, alone as in the module", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  const { bytes, offset } = unitActions();
+  for (const version of [4, 6]) {
+    const actions = { version, blocks: [{ offset, length: bytes.length - offset }] };
+    const compiled = codegen.compileActions(bytes, actions);
+    assert.match(compiled.module, /return V\.far\(cx, 0, /);
+    assert.ok(compiled.units.size >= 2);
+    assert.equal(
+      [...compiled.units.values()].some(({ unit }) => unit.five),
+      version < 5,
+      "a function's body runs as a SWF 5's",
+    );
+    for (const { unit, code, high, reach } of compiled.units.values()) {
+      assert.deepEqual(codegen.compileActionUnit(bytes, actions, unit), { code, high, reach });
+    }
+
+    // The same as the JIT runs it and as the module does.
+    for (const jit of [false, true]) {
+      const lines: string[] = [];
+      const rt = new Runtime();
+      const blocks = jit
+        ? lazyBlocks(codegen, bytes, actions, rt)
+        : ((await load(compiled.module, rt)) as unknown as Avm1Region[][]);
+      const host = { trace: (text: string) => lines.push(text), play() {}, stop() {}, halt() {} };
+      rt.run(blocks[0], rt.activation([], [], {}, rt.newObject(), host));
+      assert.deepEqual(lines, ["1", "2", "3", "done", "in f", "7"], `SWF ${version}, JIT ${jit}`);
+    }
+  }
+});
+
+test("a region that holds a With or a Try as control leaves its bytes keeps all it reaches", () => {
+  // A With whose body jumps back before the block: its scope holds there.
+  const prefix = new Avm1Assembler().push("x").op("GetVariable").trace().end().bytes();
+  const block = new Avm1Assembler()
+    .push("o")
+    .op("GetVariable")
+    .with("w")
+    .raw([0x99, 2, 0, 0, 0])
+    .label("w")
+    .end()
+    .bytes();
+  const bytes = new Uint8Array([...prefix, ...block]);
+  branch(bytes, prefix.length + block.indexOf(0x99), 0);
+  const module = utf8.decode(
+    testing.actionsModuleBytes(bytes, Int32Array.of(prefix.length), Int32Array.of(block.length), 6),
+  );
+  assert.doesNotMatch(module, /V\.far/);
+  assert.match(module, /V\.getVariable/g);
 });
 
 test("SWF context does not extend an action block's upper decoding bound", () => {

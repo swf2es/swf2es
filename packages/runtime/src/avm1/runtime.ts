@@ -1,7 +1,7 @@
 // What a SWF's AVM1 module calls (docs/avm1.md, "Compiling"): its factory
 // takes the runtime, asks it for the operations of the SWF's version,
 // `V`, once, and each region of each block takes its activation, `cx`.
-import { Activation, type Blocks, type Region } from "./activation.js";
+import { Activation, type Blocks, type Region, type Units } from "./activation.js";
 import {
   callFrame,
   cloneSprite,
@@ -74,7 +74,17 @@ import {
   type Value,
 } from "./values.js";
 
-export { Activation, Avm1Throw, type Blocks, Disabled, Halt, NotYet, type Region, TimedOut };
+export {
+  Activation,
+  Avm1Throw,
+  type Blocks,
+  Disabled,
+  Halt,
+  NotYet,
+  type Region,
+  TimedOut,
+  type Units,
+};
 
 /** The most timers a pass fires, as Ruffle's MAX_TICKS: a timer far behind catches up over frames. */
 const MAX_TICKS = 10;
@@ -277,6 +287,13 @@ export interface Operations {
   budget: number;
   /** The budget ran out: past the script timeout, the movie's actions are disabled. */
   timeout(cx: Activation): void;
+  /**
+   * Control going on at `at` in the SWF, outside the home the region
+   * running was compiled within, in units until it leaves the region, which
+   * ends at `end`, its actions' bytes at `bound`, `five` if it runs as a
+   * SWF 5's function: what the region returns.
+   */
+  far(cx: Activation, at: number, end: number, bound: number, five: boolean): Value;
   /** An action Flash cannot read: the SWF stops there. */
   halt(cx: Activation): never;
   /** A block larger than the compiler takes. */
@@ -679,6 +696,37 @@ function operations(version: number): Operations {
       this.budget = BUDGET;
       cx.realm.timeout();
     },
+    far(cx, at, end, bound, five) {
+      const code = cx.code;
+      const units = cx.realm.units.get(code);
+      if (units === undefined) {
+        throw new Error("swf2es: AVM1 code whose SWF has no units");
+      }
+
+      try {
+        for (;;) {
+          // Each unit may be where a loop goes round.
+          if (--this.budget < 0) {
+            this.timeout(cx);
+          }
+
+          const unit = units.unit(at, end, bound, five);
+          cx.code = unit;
+          const next = unit[0](cx) as number;
+          if (next < 0) {
+            return next === -2 ? cx.ret : undefined;
+          }
+
+          if (next >= end) {
+            return undefined;
+          }
+
+          at = next;
+        }
+      } finally {
+        cx.code = code;
+      }
+    },
     halt(cx) {
       cx.host.halt();
       throw new Halt("the SWF stopped at an action Flash cannot read");
@@ -937,6 +985,13 @@ function stackOverflow(error: unknown): boolean {
   );
 }
 
+/**
+ * What a module's `units` export gives: by key, a unit's regions and how
+ * far a region's end and its bytes' end must reach for it to run for that
+ * region, -1 for only the one its key names (codegen's emit/module.ts).
+ */
+export type UnitTable = Record<string, [Region[], number, number]>;
+
 /** The operations of each version asked for, made once and shared by every runtime. */
 const versions = new Map<number, Operations>();
 
@@ -999,6 +1054,38 @@ export class Runtime {
   /** The player's scripts are done until it begins again. */
   end(): void {
     this.realm.deadline = Number.POSITIVE_INFINITY;
+  }
+
+  /**
+   * A module's blocks, as its default export gave them, and the units its
+   * `units` export gave, if it has them: V.far finds their units there.
+   */
+  adoptUnits(blocks: Blocks, table: UnitTable): void {
+    const units: Units = {
+      blocks,
+      unit(at, end, bound, five) {
+        const flag = five ? 1 : 0;
+        const first = table[`${at},${flag}`];
+        if (first !== undefined && first[1] >= 0 && first[1] <= end && first[2] <= bound) {
+          return first[0];
+        }
+
+        const own = table[`${at},${end},${bound},${flag}`];
+        if (own === undefined) {
+          throw new Error(`swf2es: no AVM1 unit at ${at}`);
+        }
+
+        return own[0];
+      },
+    };
+    const known = this.realm.units;
+    for (const regions of blocks) {
+      known.set(regions, units);
+    }
+
+    for (const key in table) {
+      known.set(table[key][0], units);
+    }
   }
 
   /**

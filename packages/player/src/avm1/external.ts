@@ -52,7 +52,9 @@ export class ExternalCalls implements ExternalHost {
    * calls a native straight, every URL of a SWF that has had code.
    */
   callerUrls(): string[] {
-    const caller = this.codeSwfs.get(this.movie.realm.current?.code ?? []);
+    // A unit's code is its SWF's blocks'.
+    const code = this.movie.realm.current?.code ?? [];
+    const caller = this.codeSwfs.get(this.movie.realm.units.get(code)?.blocks[0] ?? code);
     return caller !== undefined ? [caller.url] : [...this.codeUrls];
   }
 
