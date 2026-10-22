@@ -50,6 +50,7 @@ import {
   type SocketHost,
   type WebSocketHost,
 } from "./hosts.js";
+import type { LoadedAvm1Input } from "./input/avm1.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import { LocalConnections } from "./localconnection.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
@@ -263,6 +264,8 @@ export class Scripting {
   /** The cursors Mouse.registerCursor registered, by name, as CSS cursor values. */
   readonly cursors = new Map<string, Cursor>();
   pointer: PointerInput | null = null;
+  /** Created only when a Loader holds AVM1 content. */
+  avm1Input: LoadedAvm1Input | null = null;
   /** Whether an HTML assignment drops its final line break, as some players do. */
   readonly trimTrailingHtmlBreak: boolean;
 
