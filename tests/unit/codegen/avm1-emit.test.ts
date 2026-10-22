@@ -1235,6 +1235,42 @@ test("code outside a block's bytes runs in units, as it would in the block, alon
   }
 });
 
+test("the SWFs whose units compile are held, the few used last, until let go", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  const { bytes, offset } = unitActions();
+  const swfs = [bytes, bytes.slice()].map((b) => ({
+    bytes: b,
+    actions: { version: 6, blocks: [{ offset, length: b.length - offset }] },
+  }));
+  const units = [...codegen.compileActions(bytes, swfs[0].actions).units.values()];
+  // Units of two SWFs in turn copy each in once.
+  for (let round = 0; round < 3; round++) {
+    for (const { bytes: b, actions } of swfs) {
+      for (const { unit } of units) {
+        codegen.compileActionUnit(b, actions, unit);
+      }
+    }
+  }
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 2 });
+
+  // One let go is copied in again if its units are asked for since.
+  codegen.releaseActions(swfs[0].bytes);
+  assert.deepEqual(codegen.heldActions(), { held: 1, copies: 2 });
+  codegen.compileActionUnit(swfs[0].bytes, swfs[0].actions, units[0].unit);
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 3 });
+
+  // Past a few, the one used least lately goes.
+  for (let k = 0; k < 6; k++) {
+    const b = bytes.slice();
+    codegen.compileActionUnit(b, { ...swfs[0].actions }, units[0].unit);
+  }
+  assert.equal(codegen.heldActions().held, 4);
+});
+
 test("a region that holds a With or a Try as control leaves its bytes keeps all it reaches", () => {
   // A With whose body jumps back before the block: its scope holds there.
   const prefix = new Avm1Assembler().push("x").op("GetVariable").trace().end().bytes();

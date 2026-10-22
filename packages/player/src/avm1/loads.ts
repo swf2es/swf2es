@@ -444,6 +444,13 @@ export class MovieLoads {
 
     const parent = this.movie.levelOf(d) !== null ? null : d.parent;
     const swf = parent === null ? this.movie.swfOf(d) : this.movie.swfOf(parent);
+    // The movie it played goes with it, and what codegen keeps of it: compiling its units again
+    // copies it in again.
+    const unloading = this.movie.swfOf(d);
+    if (unloading.root === d) {
+      this.movie.releaseCode(unloading);
+    }
+
     this.movie.unload(d);
     this.movie.fill(
       d,

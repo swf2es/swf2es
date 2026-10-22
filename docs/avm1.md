@@ -119,8 +119,11 @@ collects after that call rather than letting those copies accumulate
 across its usual collection interval. This bounds the compiler's working
 memory by the block being compiled, rather than all the SWF's output.
 Code for scenes never entered is never generated or parsed. Units (below)
-are smaller and many, so the wrapper keeps the SWF they are of in Wasm
-from one to the next instead (`actionsHold`).
+are smaller and many, so the wrapper keeps the SWFs they are of in Wasm
+from one to the next instead (`actionsHold`), by a handle each: the four
+whose units it compiled last, each let go as the player lets its SWF go
+(`releaseActions`, as a movie is unloaded or the player destroyed) or
+its bytes are collected.
 Entries cross the Wasm boundary as UTF-8 bytes decoded by the wrapper,
 as whole modules do, avoiding the bindings' per-character string lifting
 when an obfuscated block expands to megabytes.

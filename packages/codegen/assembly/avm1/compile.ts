@@ -144,44 +144,61 @@ export function actionsModuleUnits(): string {
 let unitLimits = new Float64Array(2);
 
 /**
- * The SWF whose units actionsHeldUnitBytes compiles, held from one call to
+ * A SWF whose units actionsHeldUnitBytes compiles, held from one call to
  * the next: a unit is small, and copying the SWF in for each would cost
  * more than compiling it.
  */
-let heldSwf: Uint8Array | null = null;
-let heldOffsets: Int32Array | null = null;
-let heldLengths: Int32Array | null = null;
-let heldEmitter: ModuleEmitter | null = null;
+@final
+class HeldSwf {
+  emitter: ModuleEmitter = new ModuleEmitter();
 
-/** Hold `swf`, its blocks those of the ranges given, for actionsHeldUnitBytes; null lets it go. */
-export function actionsHold(
-  swf: Uint8Array | null,
-  offsets: Int32Array | null,
-  lengths: Int32Array | null,
-): void {
-  heldSwf = swf;
-  heldOffsets = offsets;
-  heldLengths = lengths;
-  heldEmitter = swf === null ? null : new ModuleEmitter();
+  constructor(
+    public swf: Uint8Array,
+    public offsets: Int32Array,
+    public lengths: Int32Array,
+  ) {}
 }
 
-/** actionsUnitBytes of the SWF actionsHold holds; nothing if none. */
+/** The SWFs held, by the handle the caller gave each; it lets them go. */
+const held = new Map<i32, HeldSwf>();
+
+/** Hold `swf`, its blocks those of the ranges given, by `handle`, for actionsHeldUnitBytes. */
+export function actionsHold(
+  handle: i32,
+  swf: Uint8Array,
+  offsets: Int32Array,
+  lengths: Int32Array,
+): void {
+  held.set(handle, new HeldSwf(swf, offsets, lengths));
+}
+
+/** Let the SWF held by `handle` go, if one is. */
+export function actionsRelease(handle: i32): void {
+  if (held.has(handle)) {
+    held.delete(handle);
+  }
+}
+
+/** How many SWFs are held. */
+export function actionsHeldCount(): i32 {
+  return held.size;
+}
+
+/** actionsUnitBytes of the SWF held by `handle`; nothing if none is. */
 export function actionsHeldUnitBytes(
+  handle: i32,
   version: i32,
   at: i32,
   end: i32,
   bound: i32,
   five: bool,
 ): usize {
-  const swf = heldSwf;
-  const offsets = heldOffsets;
-  const lengths = heldLengths;
-  const emitter = heldEmitter;
-  if (swf === null || offsets === null || lengths === null || emitter === null) {
+  if (!held.has(handle)) {
     return handOut(null);
   }
 
-  return unitBytes(emitter, swf, offsets, lengths, version, at, end, bound, five);
+  const h = held.get(handle);
+  return unitBytes(h.emitter, h.swf, h.offsets, h.lengths, version, at, end, bound, five);
 }
 
 /**

@@ -257,6 +257,13 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * loaded ones among them.
    */
   private main = new Avm1Swf(null, null, 0, "", 0);
+  /**
+   * The bytes of each SWF whose blocks it compiled, by its blocks, which
+   * codegen may keep a copy of to compile their units, to let go as the
+   * SWF goes; and those still here.
+   */
+  private readonly codeBytes = new WeakMap<avm1.Blocks, Uint8Array>();
+  private readonly codeLive = new Set<Uint8Array>();
   private readonly swfs = new WeakMap<Library, Avm1Swf>();
   /** The levels, the main SWF's root level 0, by number, and each one's number. */
   private readonly levels = new Map<number, MovieClip>();
@@ -651,7 +658,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     // first frame and its actions than the timeline's sounds have.
     const list = this.main.list;
     if (list !== null && list.blocks.length > 0) {
-      this.main.blocks = lazyBlocks(this.codegen, swf.bytes, list, this.rt);
+      this.main.blocks = this.lazyBlocks(swf.bytes, list);
       this.external.ownCode(this.main);
     }
 
@@ -682,7 +689,22 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       return [];
     }
 
-    return lazyBlocks(this.codegen, swf.bytes, list, this.rt);
+    return this.lazyBlocks(swf.bytes, list);
+  }
+
+  private lazyBlocks(bytes: Uint8Array, list: ActionList): avm1.Blocks {
+    const blocks = lazyBlocks(this.codegen, bytes, list, this.rt);
+    this.codeBytes.set(blocks, bytes);
+    this.codeLive.add(bytes);
+    return blocks;
+  }
+
+  /** `swf` gone: what codegen keeps of it to compile its units goes too. */
+  releaseCode(swf: Avm1Swf): void {
+    const bytes = this.codeBytes.get(swf.blocks);
+    if (bytes !== undefined && this.codeLive.delete(bytes)) {
+      this.codegen.releaseActions(bytes);
+    }
   }
 
   /**
@@ -1086,6 +1108,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(closeAudio = true): void {
+    for (const bytes of this.codeLive) {
+      this.codegen.releaseActions(bytes);
+    }
+    this.codeLive.clear();
     this.localConnections.destroy(this);
     this.fileLifetime.abort();
     this.net.destroy();
