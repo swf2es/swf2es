@@ -7,26 +7,19 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
-  existsSync,
-  mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findZig, ZIG_VERSION } from "../../tools/zig.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const vendor = fileURLToPath(new URL("../../vendor/minimp3/", import.meta.url));
-
-const ZIG_VERSION = "0.17.0";
-/** The release's tarballs, from ziglang.org/download/index.json. */
-const ZIG_SHA256: Record<string, string> = {
-  "x86_64-linux": "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026",
-  "aarch64-linux": "9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8",
-};
 
 const include = join(here, "include");
 const inputs = [
@@ -55,8 +48,7 @@ if (process.argv.includes("--check")) {
 } else {
   const zig = findZig();
   // Fresh caches and prefix each time, so nothing of an earlier build is reused.
-  const work = join(tmpdir(), `swf2es-mp3-${process.pid}`);
-  mkdirSync(work, { recursive: true });
+  const work = mkdtempSync(join(tmpdir(), "swf2es-mp3-"));
   try {
     execFileSync(zig, ["build", "--prefix", work], {
       cwd: here,
@@ -84,46 +76,4 @@ if (process.argv.includes("--check")) {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-}
-
-/** Zig on the PATH if it is the pinned version, else the pinned release, downloaded and checked once. */
-function findZig(): string {
-  try {
-    if (execFileSync("zig", ["version"]).toString().trim() === ZIG_VERSION) {
-      return "zig";
-    }
-  } catch {
-    // Not on the PATH.
-  }
-
-  const platform = `${process.arch === "arm64" ? "aarch64" : "x86_64"}-${process.platform}`;
-  const sha256 = ZIG_SHA256[platform];
-  if (!sha256 || (process.arch !== "x64" && process.arch !== "arm64")) {
-    throw new Error(`put Zig ${ZIG_VERSION} on the PATH to rebuild the MP3 decoder`);
-  }
-
-  const name = `zig-${platform}-${ZIG_VERSION}`;
-  const cache = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "swf2es");
-  const zig = join(cache, name, "zig");
-  if (existsSync(zig)) {
-    return zig;
-  }
-
-  mkdirSync(cache, { recursive: true });
-  const archive = join(cache, `${name}.tar.xz`);
-  execFileSync("curl", [
-    "-fsSL",
-    "-o",
-    archive,
-    `https://ziglang.org/download/${ZIG_VERSION}/${name}.tar.xz`,
-  ]);
-  const actual = createHash("sha256").update(readFileSync(archive)).digest("hex");
-  if (actual !== sha256) {
-    rmSync(archive);
-    throw new Error(`${name}.tar.xz has SHA-256 ${actual}, not ${sha256}`);
-  }
-
-  execFileSync("tar", ["-xJf", archive, "-C", cache]);
-  rmSync(archive);
-  return zig;
 }
