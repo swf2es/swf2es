@@ -85,6 +85,17 @@ export function elements(v: Value): Value[] {
   return v?.$a ?? [];
 }
 
+/** Native uint indices need a property name only for a hole or a generic source. */
+export function getElement(rt: Runtime, o: AsObject, i: number): Value {
+  const traits: Traits | undefined = o.$traits;
+  if (traits?.getIndex) {
+    return traits.getIndex(o, i, rt);
+  }
+
+  const a: Value[] | undefined = o.$a;
+  return a !== undefined && i in a ? a[i] : rt.getProperty(o, rt.publicName(i));
+}
+
 /**
  * As ArrayClass's every, filter, forEach, map and some: `f` called with
  * each element, its index and the array, up to the length at the start;
@@ -109,7 +120,7 @@ export function eachElement(
   // Each element as a get of its index: a hole finds the prototype's.
   const length: number = o.$a.length;
   for (let i = 0; i < length; i++) {
-    const element = rt.getProperty(o, rt.publicName(i));
+    const element = getElement(rt, o, i);
     const done = each(rt.callValue(f, receiver, [element, i, o], null), element);
     if (done !== undefined) {
       return done;
