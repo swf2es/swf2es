@@ -107,6 +107,8 @@ node tools/pixijs.ts [--force]   # build vendor/pixijs's lib/ and the bundles sw
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
+node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
+                              # and Vectors (map, filter, sort, conversion), as the one above
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
