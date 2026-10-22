@@ -1672,6 +1672,17 @@ BitmapData at a depth as a bitmap with no AVM1 object of its own, which
 the bitmap's later changes show on. Real content caches its art in them:
 a level's tiles drawn from its clips once, then attached.
 
+### Stage dimensions
+
+`Stage.width` and `Stage.height` (`globals/Stage.ts`) read the player's
+stage size, including for AVM1 content loaded by AS3. They stay unchanged
+when scripts transform the root or load another SWF into a clip or level.
+Native Flash Player 32 exposes them as enumerable, deletable getters:
+assignment does nothing, even after clearing their property flags. Stage
+also has AsBroadcaster's listener methods from SWF 6. Scaling, alignment,
+fullscreen and resize notifications remain unimplemented; the host sizes
+the stage as before.
+
 ### flash.filters
 
 `flash.filters`' nine classes and BitmapFilter (`globals/filters.ts`, as

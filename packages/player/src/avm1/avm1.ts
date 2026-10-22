@@ -89,6 +89,7 @@ import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
+import { type StageSize, stageObject } from "./globals/Stage.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
@@ -475,6 +476,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     root: MovieClip,
     size = swf.header.fileLength,
     frameRate = swf.frameRate,
+    stageSize: StageSize = {
+      stageWidth: Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
+      stageHeight: Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
+    },
   ): void {
     this.movieRoot = root;
     this.swfVersion = swf.header.version;
@@ -515,6 +520,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("Key", this.input.keyFace, avm1.DONT_ENUM);
     this.input.mouseFace = mouseObject(realm, this.input, this.swfVersion);
     realm.global.define("Mouse", this.input.mouseFace, avm1.DONT_ENUM);
+    realm.global.define("Stage", stageObject(realm, stageSize), avm1.DONT_ENUM);
     this.focusTracker.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.focusTracker.selectionFace, avm1.DONT_ENUM);
     realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
