@@ -29,6 +29,9 @@ pnpm test:checked # the same with every array access bounds-checked
 pnpm determinism              # each module the same however it is compiled, and each method
                               # compiled alone its entry in the module (after the runners)
 pnpm oracle path/to/file.as   # print avmshell's output for a file (oracle:abcdump its dump)
+                              # what ASC, gcc and abcdump made is kept for every checkout in
+                              # ~/.cache/swf2es/oracle ($XDG_CACHE_HOME; SWF2ES_ORACLE_CACHE
+                              # names another directory)
 pnpm oracle:pull              # pull the oracle's pinned container image
 pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes

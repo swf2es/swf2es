@@ -21,6 +21,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readDoAbc, readSwf, tags } from "../packages/format/dist/index.js";
+import { put, stored, take } from "./store.ts";
 
 export const IMAGE =
   "ghcr.io/33tu/crossbridge@sha256:486ae832869e84cc25be62d3332ffffde64a8d42cd415f0a3346dddc5c98d84c";
@@ -80,7 +81,10 @@ const SHELL_IMPORTS = ["builtin", "shell_toplevel"];
 
 const ASC = ascCommand(SHELL_IMPORTS);
 
-/** Shell lines that compile abcdump into $out/tools, once. */
+/**
+ * Shell lines that compile abcdump into $out/tools, once. abcdumpTool puts
+ * the store's copy there first, and storeAbcdump keeps a new one.
+ */
 const buildAbcdump = [
   `if [ ! -f "$out/tools/abcdump.abc" ]; then`,
   `  ${ASC} -outdir "$out/tools" ${ABCDUMP_SOURCE} > "$out/tools/abcdump.log" 2>&1`,
@@ -148,19 +152,32 @@ export function pull(engine = containerEngine()): void {
   }
 }
 
+/** A path relative to the repository root, as the container sees it. */
+const rel = (p: string) => relative(root, resolve(p));
+
+/** A key made of a list of strings. */
+function keyOf(...parts: string[]): string {
+  return createHash("sha256").update(parts.join("\0")).digest("hex");
+}
+
 /**
- * What a compile depends on: the image, the arguments, and the contents of
- * the source and of every file passed with -in or -import.
+ * What a compile depends on: the image, the arguments, the contents of the
+ * source and of every file passed with -in or -import, and `output`, the
+ * outputs' path without extension, which ASC's log names. Paths are the
+ * repository's, so every checkout computes the same key and shares the
+ * store's entry (store.ts).
  */
-function compileKey(job: OracleJob, imports: string[]): string {
+function compileKey(job: OracleJob, imports: string[], output: string): string {
   const hash = createHash("sha256")
     .update(IMAGE)
     .update("\0")
     .update((job.ascArgs ?? []).join(" "))
-    .update(imports.join(" "));
+    .update(imports.join(" "))
+    .update("\0")
+    .update(output);
   const args = job.ascArgs ?? [];
   const inputs = [
-    job.source,
+    rel(job.source),
     ...args.filter((_, i) => args[i - 1] === "-in" || args[i - 1] === "-import"),
   ];
   for (const file of inputs) {
@@ -176,14 +193,47 @@ function compileKey(job: OracleJob, imports: string[]): string {
 }
 
 /**
+ * A failed compile is kept in the store like a successful one, unless the
+ * JVM itself failed, as when it runs out of memory: another try may succeed.
+ */
+function storableLog(log: string): boolean {
+  return !/java\.lang\.|Exception in thread|^Error occurred during initialization/m.test(log);
+}
+
+/**
+ * Put abcdump's ABC into `out`/tools from the store unless it is there
+ * already, and return its key, which a dump's key includes.
+ */
+function abcdumpTool(out: string): string {
+  const key = compileKey({ source: ABCDUMP_SOURCE }, SHELL_IMPORTS, `${out}/tools/abcdump`);
+  const abc = join(root, out, "tools/abcdump.abc");
+  if (!existsSync(abc) && stored(key, "log") && take(key, "abc", abc)) {
+    take(key, "log", join(root, out, "tools/abcdump.log"));
+  }
+
+  return key;
+}
+
+/** Keep the abcdump ABC a container built in `out`/tools. */
+function storeAbcdump(out: string, key: string): void {
+  const abc = join(root, out, "tools/abcdump.abc");
+  if (existsSync(abc) && !stored(key, "log")) {
+    put(key, "abc", abc);
+    put(key, "log", join(root, out, "tools/abcdump.log"));
+  }
+}
+
+/**
  * Compile and run each job in one container, so the image starts once per
  * batch, with `parallel` jobs at a time. An ABC whose compile key (see
- * compileKey) is unchanged is reused instead of recompiled. With `abcdump`,
- * each ABC is also dumped; with `repeat`, it runs twice to find output that
- * changes from run to run. Each avmshell run gets `timeoutSeconds`.
- * `imports` names the image's library ABCs to compile against, and with
- * `run` false nothing runs: for a SWF's script, compiled against
- * playerglobal, which avmshell has no natives for.
+ * compileKey) is unchanged is reused instead of recompiled, from outDir or
+ * else from the store shared by every checkout (store.ts). With `abcdump`,
+ * each ABC is also dumped, or the dump taken from the store; with `repeat`,
+ * it runs twice to find output that changes from run to run. Each avmshell
+ * run gets `timeoutSeconds`. `imports` names the image's library ABCs to
+ * compile against, and with `run` false nothing runs: for a SWF's script,
+ * compiled against playerglobal, which avmshell has no natives for, or to
+ * compile only. No container starts when nothing is left to do in one.
  */
 export function runOracle(
   jobs: (string | OracleJob)[],
@@ -201,7 +251,6 @@ export function runOracle(
   const asc = ascCommand(imports);
   mkdirSync(join(outDir, "tools"), { recursive: true });
 
-  const rel = (p: string) => relative(root, resolve(p));
   const out = rel(outDir);
   if (out.startsWith("..")) {
     throw new Error(`outDir must be inside ${root}`);
@@ -211,9 +260,10 @@ export function runOracle(
     throw new Error(`${ABCDUMP_SOURCE} is missing; run git submodule update --init`);
   }
 
+  const abcdumpKey = abcdump ? abcdumpTool(out) : "";
   const all = jobs.map((j) => (typeof j === "string" ? { source: j } : j));
   const names = new Set<string>();
-  const lines = all.map((job) => {
+  const plan = all.map((job) => {
     const name = job.name ?? basename(job.source, ".as");
     if (basename(name) !== basename(job.source, ".as")) {
       throw new Error(`Job ${name} must end with the base name of ${job.source}`);
@@ -224,24 +274,51 @@ export function runOracle(
     }
 
     names.add(name);
-    const cached =
-      existsSync(join(outDir, `${name}.abc`)) &&
-      existsSync(join(outDir, `${name}.key`)) &&
-      readFileSync(join(outDir, `${name}.key`), "utf8") === compileKey(job, imports);
-    return [name, rel(job.source), cached ? "0" : "1", (job.ascArgs ?? []).join(" ")].join("\t");
+    const n = join(outDir, name);
+    const key = compileKey(job, imports, `${out}/${name}`);
+    let compile =
+      !existsSync(`${n}.abc`) ||
+      !existsSync(`${n}.key`) ||
+      readFileSync(`${n}.key`, "utf8") !== key;
+    // The log is stored last, so with it the entry is whole.
+    if (compile && stored(key, "log")) {
+      if (take(key, "abc", `${n}.abc`)) {
+        writeFileSync(`${n}.key`, key);
+      } else {
+        rmSync(`${n}.abc`, { force: true });
+        rmSync(`${n}.key`, { force: true });
+      }
+
+      take(key, "log", `${n}.log`);
+      compile = false;
+    }
+
+    const dumpKey = keyOf(key, abcdumpKey);
+    const dump = abcdump && (compile || (existsSync(`${n}.abc`) && !stored(dumpKey, "dump")));
+    const line = [name, rel(job.source), compile ? "1" : "0", dump ? "1" : "0"];
+    return {
+      job,
+      name,
+      key,
+      dumpKey,
+      compile,
+      dump,
+      line: [...line, (job.ascArgs ?? []).join(" ")],
+    };
   });
 
   const avmshell = `timeout ${timeoutSeconds} /opt/crossbridge/sdk/usr/bin/avmshell`;
   const script = [
     `out="${out}"`,
-    ...(abcdump ? buildAbcdump : []),
+    ...(plan.some((p) => p.dump) ? buildAbcdump : []),
     "job() {",
-    `  IFS=$'\t' read -r n f compile args <<< "$1"`,
+    `  IFS=$'\t' read -r n f compile dump args <<< "$1"`,
     `  d=$(dirname "$out/$n")`,
     `  mkdir -p "$d"`,
     `  rm -f "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
     `  if [ "$compile" = 1 ]; then`,
-    `    rm -f "$out/$n.abc" "$out/$n.key"`,
+    // Removed, not overwritten: the old files may be links to the store's.
+    `    rm -f "$out/$n.abc" "$out/$n.key" "$out/$n.log"`,
     `    ${asc} $args -outdir "$d" "$f" > "$out/$n.log" 2>&1`,
     "  fi",
     `  if [ -f "$out/$n.abc" ]; then`,
@@ -249,9 +326,9 @@ export function runOracle(
     `    b=$(basename "$n")`,
     ...(run ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out" 2>&1; echo $? > "$b.code")`] : []),
     ...(repeat && run ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out2" 2>&1)`] : []),
-    ...(abcdump
-      ? [`    (cd "$d" && ${avmshell} "/work/$out/tools/abcdump.abc" -- "$b.abc" > "$b.dump" 2>&1)`]
-      : []),
+    `    if [ "$dump" = 1 ]; then`,
+    `      (cd "$d" && ${avmshell} "/work/$out/tools/abcdump.abc" -- "$b.abc" > "$b.dump" 2>&1)`,
+    "    fi",
     "  fi",
     // Results are read from the files; an avmshell error must not fail xargs.
     "  return 0",
@@ -261,12 +338,27 @@ export function runOracle(
     `xargs -a "$out/jobs.tsv" -d '\n' -P ${parallel} -I{} bash -c 'job "$1"' _ {}`,
   ].join("\n");
 
-  writeFileSync(join(outDir, "jobs.tsv"), `${lines.join("\n")}\n`);
+  writeFileSync(join(outDir, "jobs.tsv"), `${plan.map((p) => p.line.join("\t")).join("\n")}\n`);
   writeFileSync(join(outDir, "run.sh"), `${script}\n`);
 
-  const r = container(engine, [`${out}/run.sh`]);
-  if (r.status !== 0) {
-    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+  if (run || plan.some((p) => p.compile || p.dump)) {
+    const r = container(engine, [`${out}/run.sh`]);
+    if (r.status !== 0) {
+      throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+    }
+  } else {
+    // What the script would have removed.
+    for (const { name } of plan) {
+      for (const ext of [".code", ".out", ".out2", ".dump"]) {
+        rmSync(join(outDir, name + ext), { force: true });
+      }
+    }
+  }
+
+  // A dump made without abcdump's ABC is only its error.
+  const dumper = abcdump && existsSync(join(outDir, "tools/abcdump.abc"));
+  if (dumper) {
+    storeAbcdump(out, abcdumpKey);
   }
 
   const read = (p: string) => {
@@ -280,28 +372,44 @@ export function runOracle(
   // The JVM announces _JAVA_OPTIONS on every run.
   const clean = (log: string) => log.replace(/^Picked up _JAVA_OPTIONS:.*\n/m, "");
 
-  return all.map((job, i) => {
-    const [name, , compile] = lines[i].split("\t");
+  return plan.map(({ job, name, key, dumpKey, compile, dump: dumped }) => {
     const n = join(outDir, name);
     const code = read(`${n}.code`);
     const output = read(`${n}.out`) ?? "";
+    const log = read(`${n}.log`) ?? "";
+    const compiled = existsSync(`${n}.abc`);
 
-    if (compile === "1") {
-      if (existsSync(`${n}.abc`)) {
-        writeFileSync(`${n}.key`, compileKey(job, imports));
+    if (compile) {
+      if (compiled) {
+        writeFileSync(`${n}.key`, key);
+        put(key, "abc", `${n}.abc`);
       } else {
         rmSync(`${n}.key`, { force: true });
+      }
+
+      if (existsSync(`${n}.log`) && storableLog(log)) {
+        put(key, "log", `${n}.log`);
+      }
+    }
+
+    if (abcdump && compiled) {
+      if (dumped) {
+        if (dumper && existsSync(`${n}.dump`)) {
+          put(dumpKey, "dump", `${n}.dump`);
+        }
+      } else {
+        take(dumpKey, "dump", `${n}.dump`);
       }
     }
 
     return {
       file: rel(job.source),
       name,
-      compiled: run ? code !== null : existsSync(`${n}.abc`),
-      compileLog: clean(read(`${n}.log`) ?? ""),
+      compiled: run ? code !== null : compiled,
+      compileLog: clean(log),
       exitCode: code === null ? null : Number(code),
       output,
-      dump: abcdump && existsSync(`${n}.abc`) ? read(`${n}.dump`) : null,
+      dump: abcdump && compiled ? read(`${n}.dump`) : null,
       nondeterministic: repeat && code !== null && read(`${n}.out2`) !== output,
     };
   });
@@ -318,7 +426,8 @@ export interface Library {
  * Copy library ABCs (such as "builtin" or "playerglobal") out of the image
  * into outDir and dump each with abcdump. They are what ASC compiles
  * against; playerglobal and airglobal are Adobe's, so they stay out of the
- * repository.
+ * repository. Each ABC and dump is kept in the store (store.ts), so that
+ * when all are there no container starts.
  */
 export function libraries(
   names: string[],
@@ -326,25 +435,60 @@ export function libraries(
   { engine = containerEngine() } = {},
 ): Library[] {
   mkdirSync(join(outDir, "tools"), { recursive: true });
-  const out = relative(root, resolve(outDir));
+  const out = rel(outDir);
   if (out.startsWith("..")) {
     throw new Error(`outDir must be inside ${root}`);
   }
 
-  const script = [
-    `out="${out}"`,
-    ...buildAbcdump,
-    ...names.flatMap((n) => [
-      // The standard library is the submodule's own; the player's and AIR's declarations are the image's.
-      `cp ${SUBMODULE_LIBRARIES.includes(n) ? `oracle/avmplus/generated/${n}` : `${LIBRARY}/${n}`}.abc "$out/${n}.abc"`,
-      `(cd "$out" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- ${n}.abc > ${n}.dump 2>&1)`,
-    ]),
-  ].join("\n");
-  writeFileSync(join(outDir, "libraries.sh"), `${script}\n`);
+  const abcdumpKey = abcdumpTool(out);
+  // The standard library is the submodule's own; the player's and AIR's declarations are the image's.
+  const source = (n: string) =>
+    SUBMODULE_LIBRARIES.includes(n) ? `oracle/avmplus/generated/${n}.abc` : `${LIBRARY}/${n}.abc`;
+  const keys = names.map((n) => {
+    const file = join(root, source(n));
+    const contents = SUBMODULE_LIBRARIES.includes(n) && existsSync(file) ? readFileSync(file) : "";
+    return keyOf(
+      IMAGE,
+      source(n),
+      createHash("sha256").update(contents).digest("hex"),
+      abcdumpKey,
+      `${out}/${n}`,
+    );
+  });
+  const missing = names.filter((n, i) => {
+    // The dump is stored last, so with it the entry is whole.
+    if (!stored(keys[i], "dump")) {
+      return true;
+    }
 
-  const r = container(engine, [`${out}/libraries.sh`]);
-  if (r.status !== 0) {
-    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+    take(keys[i], "abc", join(outDir, `${n}.abc`));
+    take(keys[i], "dump", join(outDir, `${n}.dump`));
+    return false;
+  });
+
+  if (missing.length) {
+    const script = [
+      `out="${out}"`,
+      ...buildAbcdump,
+      ...missing.flatMap((n) => [
+        `rm -f "$out/${n}.abc" "$out/${n}.dump"`,
+        `cp ${source(n)} "$out/${n}.abc"`,
+        `(cd "$out" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- ${n}.abc > ${n}.dump 2>&1)`,
+      ]),
+    ].join("\n");
+    writeFileSync(join(outDir, "libraries.sh"), `${script}\n`);
+
+    const r = container(engine, [`${out}/libraries.sh`]);
+    if (r.status !== 0) {
+      throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+    }
+
+    storeAbcdump(out, abcdumpKey);
+    for (const n of missing) {
+      const i = names.indexOf(n);
+      put(keys[i], "abc", join(outDir, `${n}.abc`));
+      put(keys[i], "dump", join(outDir, `${n}.dump`));
+    }
   }
 
   return names.map((name) => ({
@@ -420,10 +564,17 @@ export interface CrossbridgeResult {
 
 /**
  * What a build depends on: the image, gcc's arguments, and every file they
- * name or that sits in a directory they put on the include path.
+ * name or that sits in a directory they put on the include path; and
+ * `output`, where the projector goes. Paths are the repository's, as in
+ * compileKey.
  */
-function crossbridgeKey(job: CrossbridgeJob): string {
-  const hash = createHash("sha256").update(IMAGE).update("\0").update(job.gccArgs.join(" "));
+function crossbridgeKey(job: CrossbridgeJob, output: string): string {
+  const hash = createHash("sha256")
+    .update(IMAGE)
+    .update("\0")
+    .update(job.gccArgs.join(" "))
+    .update("\0")
+    .update(output);
   for (const arg of job.gccArgs) {
     const path = resolve(root, arg.startsWith("-I") ? arg.slice(2) : arg);
     const files = !existsSync(path)
@@ -434,7 +585,7 @@ function crossbridgeKey(job: CrossbridgeJob): string {
             .map((f) => join(path, f))
         : [path];
     for (const f of files) {
-      hash.update("\0").update(f).update("\0").update(readFileSync(f));
+      hash.update("\0").update(relative(root, f)).update("\0").update(readFileSync(f));
     }
   }
 
@@ -467,7 +618,9 @@ function projectorAbc(projector: Uint8Array): Uint8Array {
  * Build each job with the image's gcc and run it, then take its ABC out of
  * the projector and dump it with abcdump, in two containers for the whole
  * batch. A projector whose build key (see crossbridgeKey) is unchanged is
- * reused. Each run gets `timeoutSeconds`.
+ * reused, from outDir or else from the store (store.ts), and so are the
+ * dumps, which need no container when all are stored. Each run gets
+ * `timeoutSeconds`.
  */
 export function runCrossbridge(
   jobs: CrossbridgeJob[],
@@ -475,19 +628,28 @@ export function runCrossbridge(
   { engine = containerEngine(), timeoutSeconds = 120 } = {},
 ): CrossbridgeResult[] {
   mkdirSync(join(outDir, "tools"), { recursive: true });
-  const out = relative(root, resolve(outDir));
+  const out = rel(outDir);
   if (out.startsWith("..")) {
     throw new Error(`outDir must be inside ${root}`);
   }
 
   const build = jobs.map((job) => {
     const n = join(outDir, job.name);
-    const key = crossbridgeKey(job);
-    const cached =
+    const key = crossbridgeKey(job, `${out}/${job.name}`);
+    let cached =
       existsSync(n) && existsSync(`${n}.key`) && readFileSync(`${n}.key`, "utf8") === key;
     if (!cached) {
       rmSync(n, { force: true });
       rmSync(`${n}.key`, { force: true });
+      // The log is stored last, so with it the entry is whole.
+      if (stored(key, "log")) {
+        if (take(key, "projector", n)) {
+          writeFileSync(`${n}.key`, key);
+        }
+
+        take(key, "log", `${n}.log`);
+        cached = true;
+      }
     }
 
     return { job, key, cached };
@@ -500,6 +662,8 @@ export function runCrossbridge(
       ...(cached
         ? []
         : [
+            // Removed, not overwritten: the old log may be a link to the store's.
+            `rm -f "$out/${job.name}.log"`,
             `/opt/crossbridge/sdk/usr/bin/gcc ${job.gccArgs.join(" ")} -o "$out/${job.name}" > "$out/${job.name}.log" 2>&1`,
           ]),
       `if [ -f "$out/${job.name}" ]; then`,
@@ -513,12 +677,21 @@ export function runCrossbridge(
     throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
   }
 
+  const abcdumpKey = abcdumpTool(out);
   const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
   const results = build.map(({ job, key, cached }) => {
     const n = join(outDir, job.name);
     const compiled = existsSync(n);
-    if (compiled && !cached) {
-      writeFileSync(`${n}.key`, key);
+    const log = read(`${n}.log`);
+    if (!cached) {
+      if (compiled) {
+        writeFileSync(`${n}.key`, key);
+        put(key, "projector", n);
+      }
+
+      if (log !== null && storableLog(log)) {
+        put(key, "log", `${n}.log`);
+      }
     }
 
     const abc = compiled ? projectorAbc(new Uint8Array(readFileSync(n))) : null;
@@ -530,35 +703,45 @@ export function runCrossbridge(
     return {
       name: job.name,
       compiled,
-      compileLog: read(`${n}.log`) ?? "",
+      compileLog: log ?? "",
       exitCode: code === null ? null : Number(code),
       output: read(`${n}.out`) ?? "",
       abc,
       dump: null as string | null,
+      dumpKey: keyOf(key, abcdumpKey),
     };
   });
 
-  const dump = [
-    `out="${out}"`,
-    ...buildAbcdump,
-    ...results
-      .filter((x) => x.abc)
-      .map(
+  const missing = results.filter(
+    (x) => x.abc && !take(x.dumpKey, "dump", join(outDir, `${x.name}.dump`)),
+  );
+  if (missing.length) {
+    const dump = [
+      `out="${out}"`,
+      ...buildAbcdump,
+      ...missing.map(
         (x) =>
-          `(cd "$out" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- "${x.name}.abc" > "${x.name}.dump" 2>&1)`,
+          `(cd "$out" && rm -f "${x.name}.dump" && /opt/crossbridge/sdk/usr/bin/avmshell tools/abcdump.abc -- "${x.name}.abc" > "${x.name}.dump" 2>&1)`,
       ),
-  ].join("\n");
-  writeFileSync(join(outDir, "crossbridge-dump.sh"), `${dump}\n`);
-  r = container(engine, [`${out}/crossbridge-dump.sh`]);
-  if (r.status !== 0) {
-    throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+    ].join("\n");
+    writeFileSync(join(outDir, "crossbridge-dump.sh"), `${dump}\n`);
+    r = container(engine, [`${out}/crossbridge-dump.sh`]);
+    if (r.status !== 0) {
+      throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+    }
+
+    if (existsSync(join(outDir, "tools/abcdump.abc"))) {
+      storeAbcdump(out, abcdumpKey);
+      for (const x of missing) {
+        put(x.dumpKey, "dump", join(outDir, `${x.name}.dump`));
+      }
+    }
   }
 
-  for (const x of results) {
-    x.dump = x.abc ? read(join(outDir, `${x.name}.dump`)) : null;
-  }
-
-  return results;
+  return results.map(({ dumpKey: _, ...x }) => ({
+    ...x,
+    dump: x.abc ? read(join(outDir, `${x.name}.dump`)) : null,
+  }));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
