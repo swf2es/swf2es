@@ -57,7 +57,9 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 
 /** A module's source as a script of its own: its default export returned, `name` its sourceURL. */
 export function evaluateModule(js: string, name: string): ShellModule {
-  const script = `${js.replace(/^export default /, "return ")}//# sourceURL=${name}\n`;
+  // Strict, as a module is: a sloppy function boxes a primitive `this`, such
+  // as the string a String method is called on.
+  const script = `"use strict";${js.replace(/^export default /, "return ")}//# sourceURL=${name}\n`;
   return new Function(script)();
 }
 

@@ -10,9 +10,9 @@
 import type { AsObject, Value } from "../descriptors.js";
 import { FloatValue } from "../float.js";
 import { publicQname } from "../names.js";
-import type { Runtime } from "../runtime.js";
+import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import { lowerCase } from "./case.js";
-import { getElement } from "./define.js";
+import { getElement, isObject, lengthOf } from "./define.js";
 import { FloatVector } from "./float-vector.js";
 
 export const kCaseInsensitive = 1;
@@ -27,8 +27,6 @@ interface Field {
   name: string;
   options: number;
 }
-
-const isObject = (v: Value) => v !== null && typeof v === "object" && !(v instanceof FloatValue);
 
 function stringCompare(rt: Runtime, lower: boolean): Compare {
   return (x, y) => {
@@ -64,7 +62,7 @@ function compareOf(rt: Runtime, options: number): Compare {
 }
 
 /** As ArrayClass::generic_sort: sort(), sort(compare), sort(options) or sort(compare, options). */
-export function sort(rt: Runtime, d: AsObject, args: Value[]): Value {
+export function sort(rt: Runtime, d: Value, args: Value[]): Value {
   if (!isObject(d)) {
     return undefined;
   }
@@ -91,7 +89,7 @@ export function sort(rt: Runtime, d: AsObject, args: Value[]): Value {
 
         options = rt.toInt(args[1]);
       }
-    } else if (typeof arg0 === "number" || arg0 instanceof FloatValue) {
+    } else if (typeof arg0 === "number" || (arg0 as unknown) instanceof FloatValue) {
       options = rt.toInt(arg0);
     } else {
       throw rt.error("TypeError", 1034, rt.describe(arg0), "Function");
@@ -110,7 +108,7 @@ export function sort(rt: Runtime, d: AsObject, args: Value[]): Value {
 }
 
 /** As ArrayClass::generic_sortOn: by one field or several, each with its options. */
-export function sortOn(rt: Runtime, d: AsObject, names: Value, optionsIn: Value): Value {
+export function sortOn(rt: Runtime, d: Value, names: Value, optionsIn: Value): Value {
   if (!isObject(d)) {
     return undefined;
   }
@@ -201,9 +199,14 @@ function sortWith(
   numeric: boolean,
   fields: Field[] | null,
 ): Value {
-  const a: Value[] = d.$a;
-  const len = a.length;
-  if (len === 0) {
+  // The length as getLengthProperty reads it: an Array subclass may
+  // override its getter. An Array's or a Vector's elements are in their
+  // storage; anything else's are its properties.
+  const len = lengthOf(rt, d);
+  const storage: Value[] | undefined = d.$a;
+  const a = storage !== undefined && storage !== SEALED_ELEMENTS ? storage : null;
+  // As ArraySort, which leaves what it cannot index unsorted.
+  if (len === 0 || len >= 0x10000000) {
     return d;
   }
 
@@ -219,7 +222,8 @@ function sortWith(
     j--;
     const temp = index[i];
     index[i] = index[j];
-    if (!(i in a)) {
+    // As hasUintProperty: a Proxy is asked through its hasProperty.
+    if (!(a !== null ? i in a : rt.in(i, d))) {
       newlen--;
       index[j] = index[newlen];
       index[newlen] = temp;
@@ -291,7 +295,20 @@ function sortWith(
   // Vector's length, which gives it a new array.
   const source = fieldAtoms ?? atoms;
   const sorted = index.slice(0, newlen).map((i) => source[i]);
-  const target: Value[] = d.$a;
+  const target: Value[] | undefined = d.$a;
+  if (target === undefined || target === SEALED_ELEMENTS) {
+    // As setUintProperty and delUintProperty: the length is left as it is.
+    for (let i = 0; i < newlen; i++) {
+      rt.setProperty(d, rt.publicName(i), sorted[i]);
+    }
+
+    for (let i = newlen; i < len; i++) {
+      rt.deleteProperty(d, rt.publicName(i));
+    }
+
+    return d;
+  }
+
   if (target instanceof FloatVector) {
     if (target.length < newlen) {
       target.length = newlen;

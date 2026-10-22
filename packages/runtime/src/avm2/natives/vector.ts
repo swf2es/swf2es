@@ -5,7 +5,17 @@ import type { ClassHook } from "../hooks.js";
 import { arrayIndex, NS_Public, namespace, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { methodKey } from "../traits.js";
-import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
+import {
+  AS3,
+  eachElement,
+  elements,
+  getElement,
+  isObject,
+  lengthOf,
+  type Natives,
+  plain,
+  withStorage,
+} from "./define.js";
 import { FloatVector, setFloatElement } from "./float-vector.js";
 import { sort } from "./sort.js";
 
@@ -27,7 +37,8 @@ const VECTORS: [string, (rt: Runtime, cls: AsObject, v: Value) => Value, Value][
   ["Vector$int", (rt, _cls, v) => rt.toInt(v), 0],
   ["Vector$uint", (rt, _cls, v) => rt.toUint(v), 0],
   ["Vector$double", (rt, _cls, v) => rt.toNumber(v), 0],
-  ["Vector$object", (rt, cls, v) => rt.coerce(v, cls.$param ?? null), null],
+  // Vector.<*> holds Objects, as ObjectVectorObject does: undefined is null there.
+  ["Vector$object", (rt, cls, v) => rt.coerce(v, cls.$param ?? "Object"), null],
 ];
 
 for (const [kind] of VECTORS) {
@@ -197,30 +208,45 @@ for (const [kind] of VECTORS) {
   vectorNatives[`${c}.${own}::_forEach`] = (rt) => (o: AsObject, f: Value, receiver: Value) => {
     eachElement(rt, o, f, receiver, () => undefined);
   };
-  // As TypedVectorObject's _map and _filter: a new Vector of the same type.
+  // As TypedVectorObject's _map and _filter: a new Vector of the same type,
+  // a method closure called whatever the receiver.
   vectorNatives[`${c}#${own}::_map`] = (rt) =>
     function (this: AsObject, f: Value, receiver: Value) {
       const cls = this.$traits.cls;
       const r = rt.constructClass(cls, [this.$a.length]);
       let i = 0;
-      eachElement(rt, this, f, receiver, (result) => {
-        const value = cls.$convert(rt, cls, result);
-        if (r.$a instanceof FloatVector) {
-          r.$a.data[i++] = value;
-        } else {
-          r.$a[i++] = value;
-        }
-      });
+      eachElement(
+        rt,
+        this,
+        f,
+        receiver,
+        (result) => {
+          const value = cls.$convert(rt, cls, result);
+          if (r.$a instanceof FloatVector) {
+            r.$a.data[i++] = value;
+          } else {
+            r.$a[i++] = value;
+          }
+        },
+        true,
+      );
       return r;
     };
   vectorNatives[`${c}#${own}::_filter`] = (rt) =>
     function (this: AsObject, f: Value, receiver: Value) {
       const r = rt.constructClass(this.$traits.cls, []);
-      eachElement(rt, this, f, receiver, (result, element) => {
-        if (result === true) {
-          r.$a.push(element);
-        }
-      });
+      eachElement(
+        rt,
+        this,
+        f,
+        receiver,
+        (result, element) => {
+          if (result === true) {
+            r.$a.push(element);
+          }
+        },
+        true,
+      );
       return r;
     };
 }
@@ -281,7 +307,7 @@ for (const [kind, convert, fill] of VECTORS) {
       }
 
       const source = args[0];
-      if (source === null || source === undefined || typeof source !== "object") {
+      if (!isObject(source)) {
         throw rt.error("TypeError", 1034, rt.describe(source), cls.$it.name);
       }
 
@@ -292,16 +318,14 @@ for (const [kind, convert, fill] of VECTORS) {
       // Each element as a get of the source's, as its conversion may change
       // the source: past a Vector's end, a RangeError.
       const o = cls.$it.instance();
-      const length = rt.toUint(rt.getProperty(source, rt.publicName("length")));
+      const length = lengthOf(rt, source);
       const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : [];
       for (let i = 0; i < length; i++) {
-        const getIndex = source.$traits?.getIndex;
+        // The storage read here too, where only this loop's sources are
+        // seen, as getElement reads it for every walk's.
         const elements: Value[] | undefined = source.$a;
-        const value = getIndex
-          ? getIndex(source, i, rt)
-          : elements !== undefined && i in elements
-            ? elements[i]
-            : rt.getProperty(source, rt.publicName(i));
+        const value =
+          elements !== undefined && i in elements ? elements[i] : getElement(rt, source, i);
         a.push(cls.$convert(rt, cls, value));
       }
 

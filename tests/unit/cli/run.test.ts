@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { createRuntime } from "@swf2es/runtime/avm2";
 import { containerEngine, runAbcs } from "../../../oracle/oracle.ts";
-import { runShell } from "../../../packages/cli/dist/index.js";
+import { evaluateModule, runShell } from "../../../packages/cli/dist/index.js";
 import * as w from "../../swf-writer.ts";
 import { abc, tables, u30 } from "../codegen/abc-builder.ts";
 
@@ -173,6 +173,15 @@ test("run refuses what is not an ABC", () => {
 
   refused(write("a.swf", swf), /a\.swf: a SWF; run takes ABCs/);
   refused(write("text.abc", new TextEncoder().encode("trace(1)")), /neither a SWF nor an ABC/);
+});
+
+test("run evaluates a module strict, as a module is", () => {
+  // A sloppy function would see the string it is called on boxed, an object.
+  const kind = evaluateModule(
+    'export default (function () { return typeof this; }).call("s");',
+    "strict.js",
+  );
+  assert.equal(kind, "string");
 });
 
 test("runShell runs ABCs for a host, with the release codegen", { skip }, async () => {
