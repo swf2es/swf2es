@@ -39,9 +39,12 @@ arena through their allocator callbacks, and calls them through bindings
 that `build.zig` translates from `zlib.h`, `LzmaEnc.h` and `LzmaDec.h`
 (Zig 0.17 has no `@cImport`), with the same defines as it compiles the C
 with, so a define cannot change a struct's layout on one side only.
-`memcpy`, `memset`, `memmove` and `memcmp` come from Zig's compiler-rt;
-`include/` only declares them, since wasm32-freestanding has no libc
-headers. Upstream sources stay unchanged.
+wasm32-freestanding has no libc headers, so `include/` declares what the
+C calls. Zig compiles C there with `-ffreestanding`, which would leave
+`memcpy`, `memset` and `memmove` calls to compiler-rt's loops, so
+`include/string.h` maps them to clang's builtins, which become bulk memory
+instructions; `memcmp` and `strlen` come from Zig's compiler-rt.
+Upstream sources stay unchanged.
 
 - `inflate(data, raw, limit)` inflates a zlib or raw deflate stream to at
   most `limit` bytes, stopping at the stream's end.
