@@ -37,7 +37,15 @@ import { Output } from "../../output";
 import { Action, Actions, ERROR_None } from "../actions/decode";
 import * as ops from "../actions/opcodes";
 import { POOL_Unknown, poolAfter, poolsOf } from "../flow/pool";
-import { branches, Flow, fallsThrough, fallsTo, REGION_Function, Region } from "../flow/regions";
+import {
+  branches,
+  Flow,
+  fallsThrough,
+  fallsTo,
+  REGION_Function,
+  REGION_Unit,
+  Region,
+} from "../flow/regions";
 import { avm1String } from "./strings";
 
 @final
@@ -75,6 +83,39 @@ export class BlockEmitter {
   private tries: bool = false;
   /** The registers the region's catches take values into. */
   private catchRegisters: i32[] = [];
+  /**
+   * The push the last action wrote, whose last value the next action may
+   * take as it is (`top`): where its statement and that value start, and
+   * where it ends, 0 where there is none; whether values come before it.
+   */
+  private pendStmt: u32 = 0;
+  private pendExpr: u32 = 0;
+  private pendEnd: u32 = 0;
+  private pendMulti: bool = false;
+  private scratch: StaticArray<u8> = new StaticArray<u8>(256);
+  /** How long the value `detach` took is, -1 for none. */
+  private detached: i32 = -1;
+  /** Whether the region being written is a unit's own, which returns where control goes. */
+  private inUnit: bool = false;
+  /** Whether the unit being written runs as a SWF 5's function, `V5`. */
+  private unitFive: bool = false;
+  /** Whether the region being written runs as a SWF 5's function. */
+  private five: bool = false;
+  /**
+   * The units the code written so far goes on in through V.far, four
+   * numbers each: the offset in the SWF, where its region ends, where its
+   * actions' bytes end and whether it runs as a SWF 5's function.
+   */
+  units: i32[] = [];
+  /** The offsets in the SWF a unit's own code returns, where control goes on. */
+  exits: i32[] = [];
+  /**
+   * What the last unit written depends on: the same unit runs for a
+   * region that ends at or past `unitHigh`, its actions' bytes ending at
+   * or past `unitReach` (V.far); -1 for neither, only its own.
+   */
+  unitHigh: i64 = 0;
+  unitReach: i64 = 0;
 
   // The minimal runtime cannot reclaim each block's analysis during a module call.
   private actions: Actions = new Actions(new Uint8Array(0));
@@ -86,7 +127,6 @@ export class BlockEmitter {
 
   /** The block's entry, retaining the surrounding SWF for backward jumps. */
   block(bytes: Uint8Array, offset: i32, length: i32): void {
-    const out = this.out;
     if (offset < 0 || length < 0 || <i64>offset + <i64>length > <i64>bytes.length) {
       bytes = new Uint8Array(0);
       offset = 0;
@@ -95,8 +135,48 @@ export class BlockEmitter {
 
     const actions = this.actions;
     actions.reset(bytes, offset, length);
+    this.flow.reset();
+    this.unitFive = false;
+    this.regions(actions);
+  }
+
+  /**
+   * The unit of the code at `at` in the SWF, of a region that runs until
+   * control is at or past `end`, its actions read up to `bound`; `five` if
+   * it runs as a SWF 5's function. Written as a block is, its own code
+   * returning where control goes on: an offset in the SWF, -1 where the
+   * region ends, -2 where it returns `cx.ret`.
+   *
+   * Its home is the bytes from `at` up to `high` (units.ts): what it
+   * reaches there, a loop that stays there included, runs in one function,
+   * and a jump back before `at` goes on in another unit, so that a loop
+   * whose head is before it goes round through V.far.
+   */
+  unit(bytes: Uint8Array, at: i32, end: i32, bound: i32, five: bool, high: i32): void {
+    const actions = this.actions;
+    const home = high - at;
+    actions.reset(bytes, at, bound - at, home);
     const flow = this.flow;
-    flow.reset();
+    flow.reset(REGION_Unit, 0, end - at, 0, home);
+    this.unitFive = five;
+    const calls = this.units.length;
+    this.regions(actions);
+    // A region that keeps all it reaches, which may reach the region's end,
+    // a call of V.far, which names the bound, or an action that the bytes'
+    // end cut short, which more bytes might not, make the unit this
+    // region's alone.
+    if (flow.widened || flow.tooLarge || this.units.length > calls || actions.reach > bound - at) {
+      this.unitHigh = -1;
+      this.unitReach = -1;
+    } else {
+      this.unitHigh = <i64>high;
+      this.unitReach = <i64>at + actions.reach;
+    }
+  }
+
+  private regions(actions: Actions): void {
+    const out = this.out;
+    const flow = this.flow;
     out.byte(0x5b);
     if (flow.tooLarge) {
       out.text("function (cx) {\nV.tooLarge();\n}]");
@@ -117,8 +197,13 @@ export class BlockEmitter {
   private region(actions: Actions, region: Region): void {
     const out = this.out;
     this.registers = 0;
+    this.inUnit = region.kind === REGION_Unit;
+    this.five = region.kind === REGION_Function ? this.version < 5 : this.inUnit && this.unitFive;
     if (region.kind !== REGION_Function) {
       out.text("function (cx) {\nconst st = cx.st;\n");
+      if (this.five) {
+        out.text("const V = V5;\n");
+      }
     } else {
       // A body is called with its `this` and its arguments (docs/avm1.md, "Functions and
       // registers"); a SWF 4's runs as a SWF 5's (the corpus's `swf4_function_calls`).
@@ -150,7 +235,7 @@ export class BlockEmitter {
         this.tries ? ";\nfor (;;) try { for (;;) switch (b) {\n" : ";\nfor (;;) switch (b) {\n",
       );
       if (this.holds) {
-        out.text("case -1:\nreturn cx.ret;\n");
+        out.text(this.inUnit ? "case -1:\nreturn -2;\n" : "case -1:\nreturn cx.ret;\n");
       }
     }
 
@@ -280,6 +365,7 @@ export class BlockEmitter {
   /** Block `k` of the region, which starts with pool `pool`. */
   private code(actions: Actions, region: Region, k: i32, pool: i32): void {
     const out = this.out;
+    this.pendEnd = 0;
     const first = region.blockFirst[k];
     const last = region.blockFirst[k + 1] - 1;
     // A late block's first action runs in the scopes whose body it is past, which come off
@@ -310,12 +396,12 @@ export class BlockEmitter {
     const action = actions.actions[region.order[last]];
     if (!fallsThrough(action)) {
       if (action.error !== ERROR_None) {
-        out.text("return;\n");
+        this.end();
       } else if (action.opcode === ops.OP_End) {
         this.exit();
         out.byte(0x0a);
       } else if (action.opcode !== ops.OP_Jump && action.opcode !== ops.OP_Return) {
-        out.text("return;\n");
+        this.end();
       }
 
       return;
@@ -365,7 +451,7 @@ export class BlockEmitter {
         out.text("]);\n");
         break;
       case ops.OP_Trace:
-        out.text("V.trace(cx, st.pop());\n");
+        this.top("V.trace(cx, ", ");\n");
         break;
       case ops.OP_Pop:
         out.text("st.pop();\n");
@@ -494,34 +580,34 @@ export class BlockEmitter {
         this.operation("typeOf", 1);
         break;
       case ops.OP_GetVariable:
-        out.text("st.push(V.getVariable(cx, st.pop()));\n");
+        this.pushed(this.top("st.push(V.getVariable(cx, ", "));\n"));
         break;
       case ops.OP_SetVariable:
-        out.text("V.setVariable(cx, st.pop(), st.pop());\n");
+        this.top("V.setVariable(cx, ", ", st.pop());\n");
         break;
       case ops.OP_DefineLocal:
-        out.text("V.defineLocal(cx, st.pop(), st.pop());\n");
+        this.top("V.defineLocal(cx, ", ", st.pop());\n");
         break;
       case ops.OP_DefineLocal2:
-        out.text("V.defineLocal2(cx, st.pop());\n");
+        this.top("V.defineLocal2(cx, ", ");\n");
         break;
       case ops.OP_GetMember:
-        out.text("st.push(V.getMember(cx, st.pop(), st.pop()));\n");
+        this.pushed(this.top("st.push(V.getMember(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_SetMember:
-        out.text("V.setMember(cx, st.pop(), st.pop(), st.pop());\n");
+        this.top("V.setMember(cx, ", ", st.pop(), st.pop());\n");
         break;
       case ops.OP_Delete:
-        out.text("st.push(V.deleteMember(cx, st.pop(), st.pop()));\n");
+        this.pushed(this.top("st.push(V.deleteMember(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_Delete2:
-        out.text("st.push(V.deleteVariable(cx, st.pop()));\n");
+        this.pushed(this.top("st.push(V.deleteVariable(cx, ", "));\n"));
         break;
       case ops.OP_Enumerate:
-        out.text("V.enumerate(cx, st.pop());\n");
+        this.top("V.enumerate(cx, ", ");\n");
         break;
       case ops.OP_Enumerate2:
-        out.text("V.enumerate2(cx, st.pop());\n");
+        this.top("V.enumerate2(cx, ", ");\n");
         break;
       case ops.OP_InitObject:
         out.text("V.initObject(cx);\n");
@@ -542,19 +628,19 @@ export class BlockEmitter {
         out.text("V.newMethod(cx);\n");
         break;
       case ops.OP_Extends:
-        out.text("V.extends(cx, st.pop(), st.pop());\n");
+        this.top("V.extends(cx, ", ", st.pop());\n");
         break;
       case ops.OP_InstanceOf:
-        out.text("st.push(V.instanceOf(cx, st.pop(), st.pop()));\n");
+        this.pushed(this.top("st.push(V.instanceOf(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_CastOp:
-        out.text("st.push(V.castOp(cx, st.pop(), st.pop()));\n");
+        this.pushed(this.top("st.push(V.castOp(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_ImplementsOp:
         out.text("V.implementsOp(cx);\n");
         break;
       case ops.OP_RandomNumber:
-        out.text("st.push(V.randomNumber(st.pop()));\n");
+        this.pushed(this.top("st.push(V.randomNumber(", "));\n"));
         break;
       case ops.OP_DefineFunction:
       case ops.OP_DefineFunction2:
@@ -572,8 +658,10 @@ export class BlockEmitter {
         // A Try's finally runs first, where one holds.
         if (within(this.returns, this.k)) {
           out.text("b = V.ret(cx); continue;\n");
+        } else if (this.inUnit) {
+          this.top("cx.ret = ", "; return -2;\n");
         } else {
-          out.text("return st.pop();\n");
+          this.top("return ", ";\n");
         }
         break;
       case ops.OP_With:
@@ -589,7 +677,7 @@ export class BlockEmitter {
         this.try(actions, region, action);
         break;
       case ops.OP_Throw:
-        out.text("V.throw(st.pop());\n");
+        this.top("V.throw(", ");\n");
         break;
       case ops.OP_PushDuplicate:
         out.text("{ const a = st.pop(); st.push(a, a); }\n");
@@ -602,7 +690,7 @@ export class BlockEmitter {
         out.byte(0x0a);
         break;
       case ops.OP_If:
-        out.text("if (V.toBoolean(st.pop())) ");
+        this.top("if (V.toBoolean(", ")) ");
         this.branch(region, action.target);
         break;
       case ops.OP_WaitForFrame:
@@ -613,7 +701,7 @@ export class BlockEmitter {
         this.branch(region, action.target);
         break;
       case ops.OP_WaitForFrame2:
-        out.text("if (!V.frameLoaded2(cx, st.pop())) ");
+        this.top("if (!V.frameLoaded2(cx, ", ")) ");
         this.branch(region, action.target);
         break;
       case ops.OP_GotoFrame:
@@ -627,11 +715,7 @@ export class BlockEmitter {
         out.text(");\n");
         break;
       case ops.OP_GotoFrame2:
-        out.text(
-          action.a !== 0
-            ? "V.gotoFrame2(cx, st.pop(), true, "
-            : "V.gotoFrame2(cx, st.pop(), false, ",
-        );
+        this.top("V.gotoFrame2(cx, ", action.a !== 0 ? ", true, " : ", false, ");
         out.uint(action.b);
         out.text(");\n");
         break;
@@ -647,31 +731,31 @@ export class BlockEmitter {
         out.text(");\n");
         break;
       case ops.OP_SetTarget2:
-        out.text("V.setTarget2(cx, st.pop());\n");
+        this.top("V.setTarget2(cx, ", ");\n");
         break;
       case ops.OP_GetProperty:
-        out.text("st.push(V.getProperty(cx, st.pop(), st.pop()));\n");
+        this.pushed(this.top("st.push(V.getProperty(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_SetProperty:
-        out.text("V.setProperty(cx, st.pop(), st.pop(), st.pop());\n");
+        this.top("V.setProperty(cx, ", ", st.pop(), st.pop());\n");
         break;
       case ops.OP_TargetPath:
-        out.text("st.push(V.targetPath(cx, st.pop()));\n");
+        this.pushed(this.top("st.push(V.targetPath(cx, ", "));\n"));
         break;
       case ops.OP_Call:
-        out.text("V.callFrame(cx, st.pop());\n");
+        this.top("V.callFrame(cx, ", ");\n");
         break;
       case ops.OP_StopSounds:
         out.text("V.stopSounds(cx);\n");
         break;
       case ops.OP_GetTime:
-        out.text("st.push(V.getTime(cx));\n");
+        this.pushed(out.length, "st.push(V.getTime(cx));\n");
         break;
       case ops.OP_CloneSprite:
-        out.text("V.cloneSprite(cx, st.pop(), st.pop(), st.pop());\n");
+        this.top("V.cloneSprite(cx, ", ", st.pop(), st.pop());\n");
         break;
       case ops.OP_RemoveSprite:
-        out.text("V.removeSprite(cx, st.pop());\n");
+        this.top("V.removeSprite(cx, ", ");\n");
         break;
       case ops.OP_StartDrag:
         out.text("V.startDrag(cx);\n");
@@ -690,7 +774,7 @@ export class BlockEmitter {
         out.text(");\n");
         break;
       case ops.OP_GetUrl2:
-        out.text("V.getUrl2(cx, st.pop(), st.pop(), ");
+        this.top("V.getUrl2(cx, ", ", st.pop(), ");
         out.uint(action.a);
         out.text(");\n");
         break;
@@ -706,12 +790,12 @@ export class BlockEmitter {
   /** The branch of an If or a WaitForFrame to `target`: there, or the region's exit. */
   private branch(region: Region, target: i32): void {
     const out = this.out;
-    if (region.runs(target) || within(this.finallies, this.k)) {
+    if (region.runs(target) || within(this.finallies, this.k) || this.transfers(region, target)) {
       out.text("{ ");
       this.goto(region, target);
       out.text(" }\n");
     } else {
-      out.text("return;\n");
+      this.end();
     }
   }
 
@@ -869,7 +953,11 @@ export class BlockEmitter {
   private goto(region: Region, offset: i32): void {
     const out = this.out;
     if (!region.runs(offset)) {
-      this.exit();
+      if (this.transfers(region, offset)) {
+        this.transfer(region, offset);
+      } else {
+        this.exit();
+      }
       return;
     }
 
@@ -892,7 +980,59 @@ export class BlockEmitter {
 
   /** Control out of the region: through V.leave where a finally may hold a throw or a Return. */
   private exit(): void {
-    this.out.text(within(this.finallies, this.k) ? "b = V.leave(cx, -1); continue;" : "return;");
+    if (within(this.finallies, this.k)) {
+      this.out.text("b = V.leave(cx, -1); continue;");
+    } else {
+      this.out.text(this.inUnit ? "return -1;" : "return;");
+    }
+  }
+
+  /** The region's exit as a line of its own. */
+  private end(): void {
+    this.out.text(this.inUnit ? "return -1;\n" : "return;\n");
+  }
+
+  /**
+   * Whether control at `offset`, outside the region's home, goes on in a
+   * unit. A unit's own code hands every offset in the SWF to V.far, which
+   * knows where the region ends; another region's only those it runs.
+   */
+  private transfers(region: Region, offset: i32): bool {
+    if (region.runs(offset)) {
+      return false;
+    }
+
+    // One that keeps all it reaches goes on nowhere else, and is its own region's alone.
+    return this.inUnit && !region.kept ? offset >= region.minimum : region.continues(offset);
+  }
+
+  /** Control to `offset` in the unit there, without a line's end. */
+  private transfer(region: Region, offset: i32): void {
+    const out = this.out;
+    const actions = this.actions;
+    const at = actions.start + offset;
+    const end = actions.start + region.end;
+    const bound = actions.start + actions.length;
+    if (this.inUnit) {
+      this.exits.push(at);
+      out.text("return ");
+      out.uint(at);
+      out.byte(0x3b);
+      return;
+    }
+
+    const units = this.units;
+    units.push(at);
+    units.push(end);
+    units.push(bound);
+    units.push(this.five ? 1 : 0);
+    out.text("return V.far(cx, ");
+    out.uint(at);
+    out.text(", ");
+    out.uint(end);
+    out.text(", ");
+    out.uint(bound);
+    out.text(this.five ? ", true);" : ", false);");
   }
 
   /** V.scopes after the first action of the late block `k`. */
@@ -946,11 +1086,15 @@ export class BlockEmitter {
       return;
     }
 
+    const start = out.length;
     out.text("st.push(");
+    let last = out.length;
     for (let i = action.first; i < action.first + action.count; i++) {
       if (i > action.first) {
         out.text(", ");
       }
+
+      last = out.length;
 
       const number = actions.valueNumber[i];
       const index = actions.valueIndex[i];
@@ -985,6 +1129,10 @@ export class BlockEmitter {
     }
 
     out.text(");\n");
+    this.pendStmt = start;
+    this.pendExpr = last;
+    this.pendMulti = action.count > 1;
+    this.pendEnd = out.length;
   }
 
   /** Constant `index` of pool `pool`: its string, undefined past its end, or the activation's. */
@@ -1020,14 +1168,94 @@ export class BlockEmitter {
    */
   private operation(name: string, operands: i32): void {
     const out = this.out;
+    const start = this.detach();
     out.text("st.push(V.");
     out.text(name);
     out.byte(0x28);
-    for (let i = 0; i < operands; i++) {
-      out.text(i > 0 ? ", st.pop()" : "st.pop()");
+    this.value();
+    out.text(
+      operands === 3 ? ", st.pop(), st.pop()));\n" : operands === 2 ? ", st.pop()));\n" : "));\n",
+    );
+    this.pushed(start);
+  }
+
+  /**
+   * `prefix`, the value on top of the stack, popped, and `rest`: where the
+   * action before pushed it, `st.push(value);` and `st.pop()` become the
+   * value itself, evaluated where the push was, as nothing comes between.
+   * Where the statement it writes starts.
+   */
+  private top(prefix: string, rest: string): u32 {
+    const out = this.out;
+    const start = this.detach();
+    out.text(prefix);
+    this.value();
+    out.text(rest);
+    return start;
+  }
+
+  /**
+   * The value the action before pushed, if any, taken out of its push into
+   * `scratch`; where the statement that takes it starts.
+   */
+  private detach(): u32 {
+    const out = this.out;
+    this.detached = -1;
+    if (this.pendEnd === 0 || this.pendEnd !== out.length) {
+      return out.length;
     }
 
-    out.text("));\n");
+    // The value, out of its push, after what stays of that push.
+    const from = this.pendExpr;
+    const length = out.length - 3 - from;
+    if (length > <u32>this.scratch.length) {
+      this.scratch = new StaticArray<u8>(max(<i32>length, this.scratch.length * 2));
+    }
+
+    memory.copy(changetype<usize>(this.scratch), changetype<usize>(out.bytes) + from, length);
+    if (this.pendMulti) {
+      out.length = from - 2;
+      out.text(");\n");
+    } else {
+      out.length = this.pendStmt;
+    }
+
+    this.detached = <i32>length;
+    return out.length;
+  }
+
+  /** The value detach took, else `st.pop()`. */
+  private value(): void {
+    const out = this.out;
+    const length = this.detached;
+    if (length < 0) {
+      out.text("st.pop()");
+    } else {
+      out.reserve(<u32>length);
+      memory.copy(
+        changetype<usize>(out.bytes) + out.length,
+        changetype<usize>(this.scratch),
+        <usize>length,
+      );
+      out.length += <u32>length;
+    }
+
+    this.pendEnd = 0;
+  }
+
+  /**
+   * The statement from `start`, `st.push(value);`, then `text` if given,
+   * whose value the next action may take.
+   */
+  private pushed(start: u32, text: string | null = null): void {
+    if (text !== null) {
+      this.out.text(text);
+    }
+
+    this.pendStmt = start;
+    this.pendExpr = start + 8;
+    this.pendMulti = false;
+    this.pendEnd = this.out.length;
   }
 
   private notYet(name: string): void {

@@ -1,12 +1,17 @@
-/** Dense within the action block; preceding SWF bytes cost space only when reached. */
+/**
+ * Dense over the code a compile mostly reaches, the block's own bytes;
+ * other SWF bytes, before or past them, cost space only when reached.
+ */
 @final
 export class Offsets {
   private local: StaticArray<i32>;
-  private before: Map<i32, i32> | null = null;
+  private dense: i32 = 0;
+  private outside: Map<i32, i32> | null = null;
   private touched: i32[] = [];
 
   constructor(length: i32) {
     this.local = new StaticArray<i32>(length);
+    this.dense = length;
   }
 
   reset(length: i32): void {
@@ -16,11 +21,12 @@ export class Offsets {
       memory.fill(changetype<usize>(this.local), 0, <usize>length * sizeof<i32>());
     }
 
+    this.dense = length;
     // Map.clear allocates new storage, so reset only the entries the last block touched.
-    const before = this.before;
-    if (before !== null) {
+    const outside = this.outside;
+    if (outside !== null) {
       for (let i = 0; i < this.touched.length; i++) {
-        before.set(this.touched[i], 0);
+        outside.set(this.touched[i], 0);
       }
     }
 
@@ -29,35 +35,35 @@ export class Offsets {
 
   @inline
   get(offset: i32): i32 {
-    if (offset >= 0) {
+    if (<u32>offset < <u32>this.dense) {
       return this.local[offset];
     }
 
-    const before = this.before;
-    if (before === null) {
+    const outside = this.outside;
+    if (outside === null) {
       return 0;
     }
 
-    return before.has(offset) ? before.get(offset) : 0;
+    return outside.has(offset) ? outside.get(offset) : 0;
   }
 
   @inline
   set(offset: i32, value: i32): void {
-    if (offset >= 0) {
+    if (<u32>offset < <u32>this.dense) {
       this.local[offset] = value;
       return;
     }
 
-    let before = this.before;
-    if (before === null) {
-      before = new Map<i32, i32>();
-      this.before = before;
+    let outside = this.outside;
+    if (outside === null) {
+      outside = new Map<i32, i32>();
+      this.outside = outside;
     }
 
-    if (!before.has(offset) || before.get(offset) === 0) {
+    if (!outside.has(offset) || outside.get(offset) === 0) {
       this.touched.push(offset);
     }
 
-    before.set(offset, value);
+    outside.set(offset, value);
   }
 }

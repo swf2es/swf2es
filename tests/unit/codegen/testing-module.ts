@@ -19,6 +19,7 @@ const HANDED_OUT = new Set([
   "domainEmitEachBytes",
   "actionsModuleBytes",
   "actionsEmitEachBytes",
+  "actionsUnitBytes",
 ]);
 
 /** A new instance of `build`, with a memory of its own. */

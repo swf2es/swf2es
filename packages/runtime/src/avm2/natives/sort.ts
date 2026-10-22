@@ -12,6 +12,7 @@ import { FloatValue } from "../float.js";
 import { publicQname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { lowerCase } from "./case.js";
+import { getElement } from "./define.js";
 import { FloatVector } from "./float-vector.js";
 
 export const kCaseInsensitive = 1;
@@ -233,7 +234,7 @@ function sortWith(
     const name = publicQname(fields[0].name);
     for (let i = len - 1; i >= 0; i--) {
       index[i] = i;
-      const v = rt.getProperty(d, rt.publicName(i));
+      const v = getElement(rt, d, i);
       fieldAtoms[i] = v;
       if (isObject(v)) {
         atoms[i] = rt.getProperty(v, name);
@@ -247,7 +248,7 @@ function sortWith(
     for (let i = len - 1; i >= 0; i--) {
       index[i] = i;
       // As getUintProperty: a hole finds the prototype's element.
-      atoms[i] = rt.getProperty(d, rt.publicName(i));
+      atoms[i] = getElement(rt, d, i);
       if (
         numeric &&
         typeof atoms[i] !== "number" &&

@@ -150,6 +150,16 @@ if (values.child) {
     compiled += result.size;
     return result;
   };
+  // Units, where control leaves a block's own bytes, compile as they first run too.
+  if ("compileActionUnit" in codegen) {
+    const unit = codegen.compileActionUnit.bind(codegen);
+    codegen.compileActionUnit = (...args) => {
+      const begin = performance.now();
+      const result = unit(...args);
+      compileMs += performance.now() - begin;
+      return result;
+    };
+  }
   const module = codegen.compileActionsModule.bind(codegen);
   codegen.compileActionsModule = (...args) => {
     const begin = performance.now();
