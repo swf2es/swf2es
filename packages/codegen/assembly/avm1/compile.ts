@@ -4,7 +4,7 @@
 // alone, as its entry in the module (the JIT/AOT invariant of
 // docs/architecture.md). Nothing is kept from one SWF to the next but
 // the emitter's buffers.
-import { Output } from "../output";
+import { handOut, Output } from "../output";
 import { ModuleEmitter } from "./emit/module";
 
 /** Keep entry text without retaining the compiler's reusable analysis storage. */
@@ -22,7 +22,8 @@ let written: WrittenActions | null = null;
 /**
  * The ES module of a SWF of version `version` whose blocks are
  * `lengths[k]` bytes from `offsets[k]` in `swf`, its decompressed bytes, as
- * UTF-8; with `keep`, its entries for actionsModuleEntries.
+ * UTF-8 handed out where it is (handOut); with `keep`, its entries for
+ * actionsModuleEntries.
  */
 export function actionsModuleBytes(
   swf: Uint8Array,
@@ -30,7 +31,7 @@ export function actionsModuleBytes(
   lengths: Int32Array,
   version: i32,
   keep: bool = false,
-): Uint8Array {
+): usize {
   written = null;
   const emitter = new ModuleEmitter();
   emitter.module(swf, offsets, lengths, version);
@@ -38,10 +39,7 @@ export function actionsModuleBytes(
     written = new WrittenActions(emitter.out, emitter.entryStart, emitter.entryEnd);
   }
 
-  const out = emitter.out;
-  const bytes = new Uint8Array(out.length);
-  memory.copy(bytes.dataStart, changetype<usize>(out.bytes), out.length);
-  return bytes;
+  return handOut(emitter.out);
 }
 
 /**
@@ -94,7 +92,7 @@ export function actionsEmitEach(
   return String.UTF8.decodeUnsafe(changetype<usize>(entries.bytes), entries.length);
 }
 
-/** The same entries as UTF-8, avoiding the bindings' per-character string lifting. */
+/** The same entries as UTF-8, handed out where they are (handOut), avoiding the bindings' per-character string lifting. */
 export function actionsEmitEachBytes(
   swf: Uint8Array,
   offsets: Int32Array,
@@ -102,11 +100,8 @@ export function actionsEmitEachBytes(
   version: i32,
   blocks: string,
   reuse: bool,
-): Uint8Array {
-  const entries = emitEach(swf, offsets, lengths, version, blocks, reuse);
-  const bytes = new Uint8Array(entries.length);
-  memory.copy(bytes.dataStart, changetype<usize>(entries.bytes), entries.length);
-  return bytes;
+): usize {
+  return handOut(emitEach(swf, offsets, lengths, version, blocks, reuse));
 }
 
 function emitEach(

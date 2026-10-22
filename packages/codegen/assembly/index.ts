@@ -57,3 +57,5 @@ export {
   domainUsage,
   domainWantsCompact,
 } from "./compile";
+// How many bytes the *Bytes exports handed out at the address they return.
+export { outputLength } from "./output";
