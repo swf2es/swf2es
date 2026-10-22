@@ -48,6 +48,9 @@ export class Avm1Sounds implements SoundClassHost {
       get frames() {
         return media.frames;
       },
+      get frameRate() {
+        return movie.frameRate;
+      },
       soundClip: (character) => this.soundClip(character),
       ownMix: (d) => {
         const t = this.soundTransforms.get(d);

@@ -30,6 +30,7 @@ export interface SoundHost {
   readonly now: number;
   /** The SWF frames played: what the timeline took off this frame plays its streams no more. */
   readonly frames: number;
+  readonly frameRate: number;
   /** A sound decoded for the device, once; null where there is no device. */
   soundClip(character: SoundCharacter): Promise<DecodedSound> | null;
   /** A display object's own transform, where a script gave it one. */
@@ -121,6 +122,9 @@ export function soundHostOf(s: Scripting): SoundHost {
       get frames() {
         return s.frames;
       },
+      get frameRate() {
+        return s.frameRate;
+      },
       soundClip: (character) => s.symbols.soundClip(character),
       ownMix: (o) => o.object?.$soundMix,
       get mixer() {
@@ -194,7 +198,7 @@ export interface TimelineSound {
   decoding: boolean;
   /**
    * When the player's clock ran its length, or null while it plays: over,
-   * it no longer counts for SyncNoMultiple or its clip's stream, but the
+   * it no longer counts for SyncNoMultiple, but the
    * device may still play it, later than the clock has it where the page
    * held the device, and a stop still reaches it until the device is done
    * with it (`PlayingSound.ended`), or, for a host that cannot tell, until
@@ -205,9 +209,12 @@ export interface TimelineSound {
   onEnd: (() => void) | null;
   /** When it was stopped, by the clock, for AVM1 Sound's position; null while it plays. */
   stoppedAt: number | null;
+  /** A stream's elapsed timeline time and the frame after its final block; null for event sounds. */
+  stream: { elapsedMs: number; endFrame: number } | null;
 }
 
 const timelineSounds = new WeakMap<SoundHost, Set<TimelineSound>>();
+const streamSounds = new WeakMap<SoundHost, Set<TimelineSound>>();
 
 /** How long a sound over by the clock may still sound on the device before it is stopped. */
 const TAIL = 100;
@@ -221,6 +228,10 @@ export const MAX_SOUNDS = 32;
 
 /** Whether the device has, or will have, a timeline sound playing. */
 function onDevice(sound: TimelineSound): boolean {
+  if (sound.stream) {
+    return sound.decoding || (!!sound.playing && sound.playing.ended !== true);
+  }
+
   return (
     sound.endedAt === null || sound.decoding || (!!sound.playing && sound.playing.ended !== true)
   );
@@ -283,6 +294,9 @@ export function stopTimelineSound(h: SoundHost, sound: TimelineSound): void {
   sound.stopped = true;
   sound.playing?.stop();
   timelineSounds.get(h)?.delete(sound);
+  if (sound.stream) {
+    streamSounds.get(h)?.delete(sound);
+  }
   if (sound.clip?.stream === sound) {
     sound.clip.stream = null;
   }
@@ -315,6 +329,7 @@ function playTimelineSound(
     endedAt: null,
     onEnd: null,
     stoppedAt: null,
+    stream: null,
   };
   let active = timelineSounds.get(h);
   if (!active) {
@@ -480,7 +495,12 @@ function startSoundCharacter(library: Library, start: StartSound): SoundCharacte
 function streamOf(stream: SoundStream): NonNullable<SoundStream["sound"]> {
   if (!stream.sound) {
     const { sound, starts } = streamSound(stream.head, stream.blocks);
-    stream.sound = { character: { type: "sound", id: 0, definition: sound }, starts };
+    let endFrame = 0;
+    for (const frame of stream.byFrame.keys()) {
+      endFrame = frame + 1;
+    }
+
+    stream.sound = { character: { type: "sound", id: 0, definition: sound }, starts, endFrame };
   }
 
   return stream.sound;
@@ -490,8 +510,8 @@ function streamOf(stream: SoundStream): NonNullable<SoundStream["sound"]> {
  * The block on `frame` of a playing clip with no stream playing starts it
  * from there, as Ruffle's sound_stream_block does, to the end of the run of
  * frames with blocks after it, where Ruffle's stream ends; MP3's runs on
- * over gaps, to its last block. It keeps on as the clip plays on; Flash's
- * skipping of frames to keep the timeline with it is not done.
+ * over gaps, to its last block. Its device cursor lets the player advance
+ * overdue frames together, drawing only after the batch.
  */
 function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: number): void {
   const block = stream.byFrame.get(frame);
@@ -516,7 +536,7 @@ function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: 
     }
   }
 
-  const { character, starts } = streamOf(stream);
+  const { character, starts, endFrame } = streamOf(stream);
   let last = block + 1;
   if (stream.head.format === 2) {
     last = stream.blocks.length;
@@ -529,7 +549,42 @@ function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: 
   const rate = character.definition.sampleRate;
   const start = (starts[block] * 1000) / rate;
   const end = (starts[last] * 1000) / rate;
-  clip.stream = playTimelineSound(h, clip, character, clip, start, 1, { endMs: end }, end - start);
+  const sound = playTimelineSound(h, clip, character, clip, start, 1, { endMs: end }, end - start);
+  clip.stream = sound;
+  if (sound) {
+    sound.stream = {
+      elapsedMs: 0,
+      endFrame: stream.head.format === 2 ? endFrame : frame + last - block,
+    };
+    let active = streamSounds.get(h);
+    if (!active) {
+      active = new Set();
+      streamSounds.set(h, active);
+    }
+
+    active.add(sound);
+  }
+}
+
+/** Whole frames by which a playing stream's device is ahead of its timeline. */
+export function streamFrames(h: SoundHost): number {
+  const active = streamSounds.get(h);
+  if (!active || active.size === 0) {
+    return 0;
+  }
+
+  let frames = 0;
+  const frameMs = 1000 / h.frameRate;
+  for (const sound of active) {
+    if (sound.stream && sound.clip?.stream === sound) {
+      const position = sound.playing?.positionMs;
+      if (position !== undefined && Number.isFinite(position)) {
+        frames = Math.max(frames, Math.floor((position - sound.stream.elapsedMs) / frameMs + 1e-7));
+      }
+    }
+  }
+
+  return frames;
 }
 
 /** What the timeline took off, by the frame it did. */
@@ -565,6 +620,15 @@ export function timelineSoundsOf(h: SoundHost): TimelineSounds {
       }
 
       const timeline = clip.timeline;
+      const sound = clip.stream as TimelineSound | null;
+      if (sound?.stream) {
+        if (frame >= sound.stream.endFrame) {
+          stopTimelineSound(h, sound);
+        } else {
+          sound.stream.elapsedMs += 1000 / h.frameRate;
+        }
+      }
+
       for (const start of timeline.sounds.get(frame) ?? []) {
         const character = startSoundCharacter(clip.library, start);
         if (character) {
@@ -607,12 +671,17 @@ export function timelineSoundsOf(h: SoundHost): TimelineSounds {
 
 /**
  * The timeline's sounds that have played their time are over, with the
- * frame: a NoMultiple may start one again, its clip's stream at the next
- * block, and AVM1 Sound's hears it.
+ * frame: a NoMultiple may start one again, and AVM1 Sound's hears it.
+ * Streams remain attached until the timeline passes their blocks: the
+ * device finishing first must not restart one from a lagging frame.
  */
 export function finishTimelineSounds(h: SoundHost): void {
   const ended: TimelineSound[] = [];
   for (const sound of [...(timelineSounds.get(h) ?? [])]) {
+    if (sound.stream) {
+      continue;
+    }
+
     if (sound.endedAt === null && h.now - sound.started >= sound.duration) {
       sound.endedAt = h.now;
       if (sound.clip?.stream === sound) {

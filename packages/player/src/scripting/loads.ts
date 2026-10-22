@@ -13,6 +13,7 @@ import { type Container, MovieClip, rootOf, unloads } from "../display/display.j
 import { type BitmapPixels, type Library, readLibrary } from "../display/timeline.js";
 import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import { LoadedAvm1Input } from "../input/avm1.js";
+import { streamFrames } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
@@ -102,6 +103,19 @@ export class Loads {
         movie.vm.tick(this.s.frameRate);
       }
     }
+  }
+
+  streamFrames(): number {
+    if (this.avm1Movies.size === 0) {
+      return 0;
+    }
+
+    let frames = 0;
+    for (const movie of this.avm1Movies.values()) {
+      frames = Math.max(frames, streamFrames(movie.vm.sounds));
+    }
+
+    return frames;
   }
 
   destroyAvm1(): void {

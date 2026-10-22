@@ -740,6 +740,7 @@ test("a stream on a device not yet running starts when it runs, as far in as it 
     assert.ok(stream);
     assert.equal(started.length, 1);
     assert.equal(stream.ended, false);
+    assert.ok(Number.isNaN(stream.positionMs));
     const asked = performance.now();
     while (performance.now() - asked < 20) {
       // Time passes while the page has not yet let the device run.
@@ -761,8 +762,26 @@ test("a stream on a device not yet running starts when it runs, as far in as it 
     assert.ok(started[1][1] >= 0.12 && started[1][1] < 0.5, String(started[1][1]));
     assert.equal(listeners.length, 0);
     assert.equal(stream.ended, false);
+    const position = stream.positionMs as number;
+    assert.ok(Math.abs(position - started[1][1] * 1000) < 0.01);
+    context.currentTime += 0.25;
+    assert.ok(Math.abs((stream.positionMs as number) - position - 250) < 0.01);
     stream.stop();
     assert.equal(stream.ended, true);
+    const stopped = stream.positionMs;
+    context.currentTime += 10;
+    assert.equal(stream.positionMs, stopped);
+
+    // The cursor is elapsed across loops, relative to the requested in
+    // point, and cannot advance beyond the full play's duration.
+    const loop = clip.play(200, 2, mix, { endMs: 700, atMs: 100 });
+    assert.ok(loop);
+    assert.equal(loop.positionMs, 100);
+    context.currentTime += 0.7;
+    assert.ok(Math.abs((loop.positionMs as number) - 800) < 0.01);
+    context.currentTime += 10;
+    assert.ok(Math.abs((loop.positionMs as number) - 1000) < 0.01);
+    loop.stop();
   } finally {
     if (previous) {
       Object.defineProperty(globalThis, "AudioContext", previous);

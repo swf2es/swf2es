@@ -2009,8 +2009,9 @@ stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
 `Player.advance(dt)` with the time passed, which plays frames on a grid
-of the frame's duration and drops those a long frame or a stall lost, as
-Flash does, rather than catch up with them as Ruffle does. Measured in
+of the frame's duration and, without streamed audio, drops those a long
+frame or a stall lost, as Flash does, rather than catch up with them as
+Ruffle does. Measured in
 adl at 24 fps with a 200 ms busy loop in some frames' ENTER_FRAME, Flash
 runs the next frame at once after the long one, the one after at its
 slot on the grid (8 to 9 ms later, 24 ms after three long frames in a
@@ -2041,12 +2042,22 @@ is dropped but for the part of a frame, which keeps the grid's phase;
 not within half an interval of the next frame, though, where a call that
 came a little early would leave a frame owed under ordinary jitter and
 the next drop it. A `dt` that is not a finite positive number counts as
-none. Two limits remain: a SWF faster than the display still runs its
-frames back to back, so a walk placed by the wall clock at 60 fps on a
-30 Hz display can still stop short; and a stream sound runs on by its
-own clock while frames are dropped, drifting from the timeline after a
-hitch, where Flash skipped frames to keep the timeline with the stream
-(`startStream` in `media/sounds.ts` does not yet). `advance` returns how
+none. A SWF faster than the display still runs its frames back to back,
+so a walk placed by the wall clock at 60 fps on a 30 Hz display can still
+stop short. Streamed audio instead requests catch-up from its device
+cursor: the player runs up to 60 logical frames per call, preserving
+every frame's scripts and events, while the host draws only once after
+that batch. A stop, seek or removal cancels the old stream's remaining
+catch-up. The device cursor, rather than wall time, keeps a suspended
+AudioContext from requesting frames for audio it has not played. This
+applies to streams in nested clips and AVM1 content loaded by AS3 too;
+event sounds keep the ordinary pacing. Extra frames yield after an 8 ms
+CPU budget, as well as the frame-count bound, so a long stall does not
+block input indefinitely. This cannot guarantee sync when scripts alone
+cannot run at the required rate. Native Flash 32,
+with a 600 ms busy loop at 25 fps, ran the streamed timeline's frames
+6–20 back to back, including their actions, while the equivalent
+non-streamed movie resumed at ordinary pace. `advance` returns how
 many frames it ran, and `Player.changes` counts what may change the
 picture: each frame, each key, each call from the page into an
 ExternalInterface callback, each `updateAfterEvent`, and the pointer
@@ -4728,10 +4739,8 @@ and a SoundStreamBlock a frame), and a button's DefineButtonSound. The
 library's `sounds` hook (`TimelineSounds`, made by `media/sounds.ts`
 for every AS3 library a `Scripting` loads) plays them through
 the page's `AudioHost`; a player without one plays none, and a SWF without
-them pays nothing. An AVM1 SWF's library has none: in a `Loader` its
-actions do not run, so its timeline loops where a `stop()` would have
-held it, and its StartSounds would start again on every loop; its sounds
-wait for AVM1's later steps.
+them pays nothing. AVM1 libraries use the same hooks through their own
+SoundHost, including AVM1 movies loaded by an AS3 Loader.
 
 A frame's StartSound tags play as the playhead enters it, played on to,
 looped to, or landed on by a goto, but a goto to the frame the clip is on,
@@ -4768,9 +4777,14 @@ keeps its stream, and adl cannot show Flash's. A clip a script takes off
 plays on as an orphan and keeps its stream, as in Ruffle. `unloadAndStop`
 stops the timeline sounds of all under the content, event sounds too, and
 `stopAll` every one, a stream starting again at the next block its clip
-plays on to. Flash drops frames to keep a timeline with its stream when
-the stream runs ahead; the player keeps the frame rate and lets the stream
-drift.
+plays on to. A stream counts the time its clip advances, using the stage
+frame rate of each frame. `PlayingSound.positionMs`, when supplied by the
+host, is elapsed playback from the requested start, including `atMs` and
+any wait for the device to start; it is NaN before playback begins, follows
+the audio device clock, and freezes when stopped or ended. Whole frames of
+audio lead request the bounded catch-up described above. Hosts without a
+cursor retain ordinary pacing. MP3 gaps retain their timeline duration:
+cumulative sample offsets are not treated as jumps to later block frames.
 
 A button's change of state plays DefineButtonSound's sound for it, as
 Ruffle's button events pick them: up to over, over to down, down to over,
@@ -4793,13 +4807,14 @@ with its timeline; on a device the page has not yet let run (a suspended
 through a slow resume), the browser host starts it when it runs, as far
 in again as it waited. An event sound plays whole, late if its decode or
 the device kept it waiting: a click's start is not lost. A sound is over,
-for SyncNoMultiple and for its clip's stream, once the clock has run its
-length, in and out points and loops counted; the device may still play
-it, and a stop still reaches it until the device is done with it
+for SyncNoMultiple, once the clock has run its length, in and out points
+and loops counted; the device may still play it, and a stop still reaches
+it until the device is done with it
 (`PlayingSound.ended`), or, for a host that cannot tell, until 100 ms
-later, when it is stopped for good; the last of a clip's stream is
-stopped when its next one starts. At most 32 sounds play at once, Flash's
-32 channels and Ruffle's `AudioManager::MAX_SOUNDS`: a script's channels
+later, when it is stopped for good. A stream stays attached until its
+clip passes its final block, stops, seeks, loops or is removed. The device
+ending first must not restart audio from a lagging timeline block. At
+most 32 sounds play at once, Flash's 32 channels and Ruffle's `AudioManager::MAX_SOUNDS`: a script's channels
 whose sound is there to play, and the timeline's sounds the device has,
 or will have once decoded, together. Past them a timeline sound does not
 start, nor queue on a device that is not running, and `Sound.play` gives
