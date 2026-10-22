@@ -740,9 +740,9 @@ export class Scripting {
 
   /**
    * Dispatch an event of `type` to every display object that listens for
-   * it, on the display list or not, in the order they first listened, each
-   * its own event and its own target only: Flash's frame events have no
-   * capture or bubble phase.
+   * it, in the order they first listened, each its own event and target.
+   * RENDER reaches only objects on stage; the other frame events reach
+   * off-stage objects too. None has a capture or bubble phase.
    */
   broadcast(type: string): void {
     const targets = this.broadcasts.get(type);
@@ -751,6 +751,10 @@ export class Scripting {
     }
 
     for (const target of [...targets]) {
+      if (type === "render" && !this.lifecycle.onStage(target.$display)) {
+        continue;
+      }
+
       dispatchTo(this, target, this.event(type));
     }
   }
@@ -1044,14 +1048,29 @@ export class Scripting {
    * frame has ended: one alone, or several as an AggregateError, after any
    * that stopped the frame early.
    */
-  frame(root: DisplayObject, entered = true): void {
+  frame(root: DisplayObject, entered = true, render = true): void {
     const errors: unknown[] = [];
     try {
-      this.playFrame(root, entered);
+      this.playFrame(root, entered, render);
     } catch (error) {
       errors.push(error);
     }
 
+    this.throwUncaught(errors);
+  }
+
+  /** The rendering opportunity after a batch of frames that skipped drawing. */
+  renderFrame(errors: unknown[] = []): void {
+    try {
+      this.render();
+    } catch (error) {
+      errors.push(error);
+    }
+
+    this.throwUncaught(errors);
+  }
+
+  private throwUncaught(errors: unknown[]): void {
     // Those of a goto between frames, as a pointer handler's, come with this frame's.
     errors.push(...this.uncaught.splice(0));
     if (errors.length === 1) {
@@ -1063,7 +1082,7 @@ export class Scripting {
     }
   }
 
-  private playFrame(root: DisplayObject, entered: boolean): void {
+  private playFrame(root: DisplayObject, entered: boolean, render: boolean): void {
     this.overflowed = false;
     finishSounds(this);
     if (entered) {
@@ -1099,7 +1118,9 @@ export class Scripting {
     this.loads.deliverAvm1Loads();
     // What is under a mouse that stands still, as the frame left the list.
     this.pointer?.frameEnded();
-    this.render();
+    if (render) {
+      this.render();
+    }
   }
 
   /** Prepare an input's requested redraw without advancing the timeline. */

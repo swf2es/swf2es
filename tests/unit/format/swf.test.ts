@@ -148,6 +148,23 @@ test("places, removes, sprites, scaling grids and symbols read as written", () =
   );
 });
 
+test("SymbolClass preserves every class alias of a shared character in order", () => {
+  const aliases: [number, string][] = [
+    [1, "First"],
+    [2, "Other"],
+    [1, "Second"],
+  ];
+  const swf = readSwf(
+    w.swf({
+      width: 1,
+      height: 1,
+      frameCount: 1,
+      tags: [w.symbolClass(aliases), w.showFrame(), w.end()],
+    }),
+  );
+  assert.deepEqual(readSymbolClass(swf.bytes, swf.tags[0]), aliases);
+});
+
 test("a tag past the file's end is cut there, and marked", () => {
   const cut = movie.slice(0, movie.length - 10);
   new DataView(cut.buffer).setUint32(4, cut.length, true);
