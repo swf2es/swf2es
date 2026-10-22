@@ -98,6 +98,8 @@ export class SourceMap {
     let prevSource: i32 = 0;
     let prevLine: i32 = 0;
     let first = true;
+    // Held while `out` grows, so `out` must never be `module`: a reserve
+    // frees the block it outgrows (Output.reserve), and this would read it.
     const bytes = module.bytes;
     for (let m = 0; m < this.offset.length; m++) {
       const to = min(this.offset[m], module.length);
