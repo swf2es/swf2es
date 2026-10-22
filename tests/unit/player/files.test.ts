@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import {
   FileReference,
   type FileServices,
@@ -104,6 +105,29 @@ test("save snapshots bytes and downloads fetch only after a destination was sele
   await h.frame();
   assert.equal(h.requests.length, 0);
   assert.equal(h.events.at(-1), "cancel");
+});
+
+test("a host's promise from another realm is still waited for", async () => {
+  const h = harness();
+  // As a host built in another window answers: a promise, but not this realm's.
+  const Foreign = runInNewContext("Promise") as PromiseConstructor;
+  const later = <T>(value: T) =>
+    new Foreign<T>((resolve) => setTimeout(() => resolve(value))) as never;
+  assert.equal((later(null) as object) instanceof Promise, false);
+  h.services.host = { browse: () => later([selected]), save: () => later(null) };
+  h.reference.browse([]);
+  h.nextFrame();
+  assert.deepEqual(h.events, []);
+  await new Promise((resolve) => setTimeout(resolve));
+  await h.frame();
+  assert.equal(h.reference.file, selected);
+  assert.deepEqual(h.events, ["select"]);
+  h.reference.save("a.bin", Uint8Array.of(1));
+  h.nextFrame();
+  assert.deepEqual(h.events, ["select"]);
+  await new Promise((resolve) => setTimeout(resolve));
+  await h.frame();
+  assert.deepEqual(h.events, ["select", "cancel"]);
 });
 
 test("a dialog a host refuses at once cancels in the very next frame", () => {

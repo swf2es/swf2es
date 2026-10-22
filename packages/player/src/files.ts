@@ -225,19 +225,26 @@ export class FileReference {
     }
   }
 
-  /** Deliver what `task` gives in the next frame; a value already known goes without a promise's delay. */
-  private after<T>(operation: Operation, task: T | Promise<T>, deliver: (value: T) => void): void {
-    if (!(task instanceof Promise)) {
+  /**
+   * Deliver what `task` gives in the next frame; a value already known goes without a promise's
+   * delay. Any thenable is a promise here: a host built in another window has that realm's.
+   */
+  private after<T>(
+    operation: Operation,
+    task: T | PromiseLike<T>,
+    deliver: (value: T) => void,
+  ): void {
+    if (typeof (task as PromiseLike<T> | null)?.then !== "function") {
       this.services.defer(() => {
         if (!operation.signal.aborted && operation.generation === this.generation) {
-          deliver(task);
+          deliver(task as T);
         }
       });
       return;
     }
 
     this.services.track(
-      task.then(
+      Promise.resolve(task as PromiseLike<T>).then(
         (value) =>
           this.services.defer(() => {
             if (!operation.signal.aborted && operation.generation === this.generation) {
