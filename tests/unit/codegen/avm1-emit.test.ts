@@ -104,13 +104,9 @@ function stub(conditions: boolean[] = []) {
 
 async function load(module: string, rt: unknown): Promise<Region[][]> {
   const url = `data:text/javascript;base64,${Buffer.from(module).toString("base64")}`;
-  const { default: factory, units } = await import(url);
-  const blocks = factory(rt);
-  if (units !== undefined && rt instanceof Runtime) {
-    rt.adoptUnits(blocks, units(rt));
-  }
-
-  return blocks;
+  const { default: factory } = await import(url);
+  // A module with units gives them to the runtime itself.
+  return factory(rt);
 }
 
 /**
@@ -1217,8 +1213,10 @@ test("code outside a block's bytes runs in units, as it would in the block, alon
       version < 5,
       "a function's body runs as a SWF 5's",
     );
-    for (const { unit, code, high, reach } of compiled.units.values()) {
+    for (const [key, { unit, code, high, reach }] of compiled.units) {
       assert.deepEqual(codegen.compileActionUnit(bytes, actions, unit), { code, high, reach });
+      // A first choice only its own region could run is never asked for, so never written.
+      assert.ok(key.split(",").length === 4 || high >= 0, key);
     }
 
     // The same as the JIT runs it and as the module does.

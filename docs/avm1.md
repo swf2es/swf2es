@@ -270,10 +270,13 @@ return {
 ```
 
 keyed `at,five` for the first choice, with its `high` and `reach`, and
-`at,end,bound,five` for a region's own, -1 for both limits; units whose
-code is the same are written once. A runtime finds a SWF's units by the
-regions of its blocks and units (`realm.units`); a module's are given it
-with `Runtime.adoptUnits`.
+`at,end,bound,five` for a region's own, -1 for both limits; a first
+choice only its own region could run is not written, nor evaluated by
+the JIT, as V.far never runs it as one. Units whose code is the same are
+written once, and evaluated once. A runtime finds a SWF's units by the
+regions of its blocks and units (`realm.units`); a module with units
+gives them to the runtime as its default export makes its blocks,
+`rt.adoptUnits(b, units(rt))`, so it runs as any other.
 
 On the obfuscated SWF above, with the folding of pushes (below), the
 module is 33 MB, of which the blocks' own code is 11.5 MB, its 3 KB block

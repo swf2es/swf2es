@@ -46,6 +46,7 @@ export {
   Halt,
   NotYet,
   type Operations,
+  OwnUnits,
   type Region,
   Runtime,
   TimedOut,

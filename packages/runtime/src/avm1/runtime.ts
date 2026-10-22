@@ -985,6 +985,34 @@ function stackOverflow(error: unknown): boolean {
   );
 }
 
+/** Units of a region alone, by the numbers V.far is called with. */
+export class OwnUnits<T> {
+  private readonly byEnd = new Map<number, Map<number, Map<number, T>>>();
+
+  get(at: number, end: number, bound: number, five: boolean): T | undefined {
+    return this.byEnd
+      .get(end)
+      ?.get(bound)
+      ?.get(at * 2 + (five ? 1 : 0));
+  }
+
+  set(at: number, end: number, bound: number, five: boolean, unit: T): void {
+    let byBound = this.byEnd.get(end);
+    if (byBound === undefined) {
+      byBound = new Map();
+      this.byEnd.set(end, byBound);
+    }
+
+    let byAt = byBound.get(bound);
+    if (byAt === undefined) {
+      byAt = new Map();
+      byBound.set(bound, byAt);
+    }
+
+    byAt.set(at * 2 + (five ? 1 : 0), unit);
+  }
+}
+
 /**
  * What a module's `units` export gives: by key, a unit's regions and how
  * far a region's end and its bytes' end must reach for it to run for that
@@ -1061,24 +1089,36 @@ export class Runtime {
    * `units` export gave, if it has them: V.far finds their units there.
    */
   adoptUnits(blocks: Blocks, table: UnitTable): void {
+    // By numbers, as V.far asks, not by the keys' text.
+    const first = new Map<number, [Region[], number, number]>();
+    const own = new OwnUnits<Region[]>();
+    const known = this.realm.units;
+    for (const key in table) {
+      const entry = table[key];
+      const [at, a, b, c] = key.split(",").map(Number);
+      if (b === undefined) {
+        first.set(at * 2 + a, entry);
+      } else {
+        own.set(at, a, b, c !== 0, entry[0]);
+      }
+    }
+
     const units: Units = {
       blocks,
       unit(at, end, bound, five) {
-        const flag = five ? 1 : 0;
-        const first = table[`${at},${flag}`];
-        if (first !== undefined && first[1] >= 0 && first[1] <= end && first[2] <= bound) {
-          return first[0];
+        const entry = first.get(at * 2 + (five ? 1 : 0));
+        if (entry !== undefined && entry[1] >= 0 && entry[1] <= end && entry[2] <= bound) {
+          return entry[0];
         }
 
-        const own = table[`${at},${end},${bound},${flag}`];
-        if (own === undefined) {
+        const regions = own.get(at, end, bound, five);
+        if (regions === undefined) {
           throw new Error(`swf2es: no AVM1 unit at ${at}`);
         }
 
-        return own[0];
+        return regions;
       },
     };
-    const known = this.realm.units;
     for (const regions of blocks) {
       known.set(regions, units);
     }

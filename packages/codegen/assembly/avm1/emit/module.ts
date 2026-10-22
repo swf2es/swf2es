@@ -20,9 +20,19 @@
 // offset and SWF 5 flag, with how far a region's end and bytes' end must
 // reach for it to run for that region (BlockEmitter.unit), -1 for only
 // its own; where it does not, for the region's own, keyed by its offset,
-// end, bytes' end and SWF 5 flag. Units whose code is the same are written
-// once:
+// end, bytes' end and SWF 5 flag; a first choice only its own region
+// could run is left out. Units whose code is the same are written once.
+// The default export then gives the runtime the units as it makes the
+// blocks:
 //
+//   export default function (rt) {
+//   const V = rt.version(6);
+//   const b = [
+//   ...
+//   ];
+//   rt.adoptUnits(b, units(rt));
+//   return b;
+//   }
 //   export function units(rt) {
 //   const V = rt.version(6);
 //   const u = [
@@ -69,6 +79,9 @@ export class ModuleEmitter {
   private exits: i32[] = [];
   private calls: i32[] = [];
   private work: i32[] = [];
+  // The code of the unit compiled last, and whether it was the first with it.
+  private lastText: string = "";
+  private lastAdded: bool = false;
 
   constructor() {
     const out = new Output();
@@ -102,6 +115,7 @@ export class ModuleEmitter {
     blocks.units.length = 0;
     blocks.exits.length = 0;
     this.prologue("export default function (rt) {\n", version);
+    const opening = out.length;
     out.text("return [\n");
     const count = min(offsets.length, lengths.length);
     for (let k = 0; k < count; k++) {
@@ -111,9 +125,18 @@ export class ModuleEmitter {
       out.text(",\n");
     }
 
-    out.text("];\n}\n");
     if (blocks.units.length === 0) {
+      out.text("];\n}\n");
       return;
+    }
+
+    // The blocks give the runtime the module's units as they are made, so V.far finds them.
+    out.text("];\nrt.adoptUnits(b, units(rt));\nreturn b;\n}\n");
+    out.insert(opening, "const b = ");
+    out.remove(opening + 10, 7);
+    for (let k = 0; k < this.entryStart.length; k++) {
+      this.entryStart[k] += 3;
+      this.entryEnd[k] += 3;
     }
 
     this.prologue("export function units(rt) {\n", version);
@@ -168,11 +191,17 @@ export class ModuleEmitter {
       // The unit of a region and bytes that end with the stretch between blocks bounds `at` is
       // in, if it runs for this region too, else the region's own.
       const first = segmentEnd(offsets, lengths, size, at);
-      let unit = this.unit(swf, offsets, lengths, at, first, first, five, compiled, texts);
-      this.list(`${at},${five}`, unit, listed);
+      let unit = this.unit(swf, offsets, lengths, at, first, first, five, compiled, texts, false);
       const high = this.unitHigh[unit];
+      if (high >= 0) {
+        this.list(`${at},${five}`, unit, listed);
+      } else if (end !== first || bound !== first) {
+        // A region's own alone, and not this region's: V.far never runs it.
+        this.drop(unit, texts);
+      }
+
       if (high < 0 || high > <i64>end || this.unitReach[unit] > <i64>bound) {
-        unit = this.unit(swf, offsets, lengths, at, end, bound, five, compiled, texts);
+        unit = this.unit(swf, offsets, lengths, at, end, bound, five, compiled, texts, true);
         this.list(key, unit, listed);
       }
 
@@ -195,6 +224,21 @@ export class ModuleEmitter {
     }
   }
 
+  /**
+   * The code of `unit`, just compiled, out of the module's units where it
+   * was the first with that code: no key names it.
+   */
+  private drop(unit: i32, texts: Map<string, i32>): void {
+    if (!this.lastAdded) {
+      return;
+    }
+
+    texts.delete(this.lastText);
+    this.unitEnd.pop();
+    this.out.length = this.unitStart.pop();
+    this.unitIndex[unit] = -1;
+  }
+
   /** `unit` in the module's units by `key`, once. */
   private list(key: string, unit: i32, listed: Map<string, bool>): void {
     if (listed.has(key)) {
@@ -206,7 +250,10 @@ export class ModuleEmitter {
     this.unitOf.push(unit);
   }
 
-  /** The unit of these numbers, compiled once: its place in unitIndex. */
+  /**
+   * The unit of these numbers, compiled once: its place in unitIndex; its
+   * code written again if dropped where it `runs`.
+   */
   private unit(
     swf: Uint8Array,
     offsets: Int32Array,
@@ -217,9 +264,12 @@ export class ModuleEmitter {
     five: i32,
     compiled: Map<string, i32>,
     texts: Map<string, i32>,
+    runs: bool,
   ): i32 {
     const key = unitKey(at, end, bound, five);
-    if (compiled.has(key)) {
+    // One whose code was dropped is written again where it is to run.
+    this.lastAdded = false;
+    if (compiled.has(key) && (this.unitIndex[compiled.get(key)] >= 0 || !runs)) {
       return compiled.get(key);
     }
 
@@ -249,7 +299,9 @@ export class ModuleEmitter {
     }
 
     const text = String.UTF8.decodeUnsafe(changetype<usize>(out.bytes) + start, out.length - start);
-    if (texts.has(text)) {
+    this.lastText = text;
+    this.lastAdded = !texts.has(text);
+    if (!this.lastAdded) {
       out.length = start;
       this.unitIndex.push(texts.get(text));
       return unit;

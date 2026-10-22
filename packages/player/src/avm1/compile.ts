@@ -1,7 +1,7 @@
 // AVM1's blocks compiled on first use, each byte for byte its AOT entry,
 // and the units their code goes on in (docs/avm1.md, "Units") likewise.
 import type { ActionBlocks, Codegen } from "@swf2es/codegen";
-import type { avm1 } from "@swf2es/runtime";
+import { avm1 } from "@swf2es/runtime";
 import { evaluateFunction } from "../scripting/evaluate.js";
 
 let scripts = 0;
@@ -51,8 +51,10 @@ export function lazyBlocks(
   return blocks;
 }
 
+/** A unit's first choice: its code until it runs, then its regions; and its limits. */
 interface Unit {
-  regions: avm1.Region[];
+  code: string | null;
+  regions: avm1.Region[] | null;
   high: number;
   reach: number;
 }
@@ -73,9 +75,10 @@ function unitsOf(
   const bounds = blockBounds(bytes.length, actions);
   // By offset, twice and once more for SWF 5's functions; by key, those of a region alone.
   const first = new Map<number, Unit>();
-  const own = new Map<string, avm1.Region[]>();
-  // Units of the same code are one, as the module writes them once.
-  const byCode = new Map<string, avm1.Region[]>();
+  const own = new avm1.OwnUnits<avm1.Region[]>();
+  // Units of the same code are one, as the module writes them once: by
+  // the code's hash and length, the code itself not kept.
+  const byCode = new Map<number, avm1.Region[][]>();
   const units: avm1.Units = {
     blocks,
     unit(at, end, bound, five) {
@@ -83,41 +86,67 @@ function unitsOf(
       let unit = first.get(index);
       if (unit === undefined) {
         const segment = segmentEnd(bounds, bytes.length, at);
-        unit = compile(at, segment, segment, five);
+        const compiled = codegen.compileActionUnit(bytes, actions, {
+          at,
+          end: segment,
+          bound: segment,
+          five,
+        });
+        // One that only its own region runs never runs as a first choice.
+        unit = { ...compiled, code: compiled.high >= 0 ? compiled.code : null, regions: null };
         first.set(index, unit);
       }
 
       if (unit.high >= 0 && unit.high <= end && unit.reach <= bound) {
+        if (unit.regions === null) {
+          unit.regions = regionsOf(unit.code ?? "", at);
+          unit.code = null;
+        }
+
         return unit.regions;
       }
 
-      const key = `${at},${end},${bound},${five ? 1 : 0}`;
-      let regions = own.get(key);
+      let regions = own.get(at, end, bound, five);
       if (regions === undefined) {
-        regions = compile(at, end, bound, five).regions;
-        own.set(key, regions);
+        const { code } = codegen.compileActionUnit(bytes, actions, { at, end, bound, five });
+        regions = regionsOf(code, at);
+        own.set(at, end, bound, five, regions);
       }
 
       return regions;
     },
   };
-  const compile = (at: number, end: number, bound: number, five: boolean): Unit => {
-    const { code, high, reach } = codegen.compileActionUnit(bytes, actions, {
-      at,
-      end,
-      bound,
-      five,
-    });
-    let regions = byCode.get(code);
-    if (regions === undefined) {
-      regions = evaluate(code, `at-${at}`);
-      byCode.set(code, regions);
-      known.set(regions, units);
+  const regionsOf = (code: string, at: number): avm1.Region[] => {
+    const hash = hashOf(code);
+    const same = byCode.get(hash);
+    for (const regions of same ?? []) {
+      // The regions' source is the code they were made of.
+      if (`[${regions.join(", ")}]` === code) {
+        return regions;
+      }
     }
 
-    return { regions, high, reach };
+    const regions = evaluate(code, `at-${at}`);
+    known.set(regions, units);
+    if (same === undefined) {
+      byCode.set(hash, [regions]);
+    } else {
+      same.push(regions);
+    }
+
+    return regions;
   };
   return units;
+}
+
+/** FNV-1a of `text`'s code units, and its length. */
+function hashOf(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+  }
+
+  return (hash >>> 0) * 0x100000 + (text.length & 0xfffff);
 }
 
 /** The starts and ends of the SWF's blocks within its bytes, ascending, once each. */
