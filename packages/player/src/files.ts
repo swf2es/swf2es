@@ -19,9 +19,18 @@ export interface SaveFile {
   write(bytes: Uint8Array, signal: AbortSignal): Promise<void>;
 }
 
+/**
+ * A host answers at once, not with a promise, where it shows no dialog: the
+ * player then cancels in the next frame, as Flash does, where a promise's
+ * answer comes only after that frame has begun.
+ */
 export interface FileHost {
-  browse(filters: FileFilter[], multiple: boolean, signal: AbortSignal): Promise<SelectedFile[]>;
-  save(name: string, signal: AbortSignal): Promise<SaveFile | null>;
+  browse(
+    filters: FileFilter[],
+    multiple: boolean,
+    signal: AbortSignal,
+  ): SelectedFile[] | Promise<SelectedFile[]>;
+  save(name: string, signal: AbortSignal): SaveFile | null | Promise<SaveFile | null>;
 }
 
 /** Browser dialogs are asked synchronously, while transient user activation is still present. */
@@ -34,7 +43,7 @@ export function browserFileHost(): FileHost | null {
   return {
     browse(filters, multiple, signal) {
       if (!active() || signal.aborted) {
-        return Promise.resolve([]);
+        return [];
       }
 
       return new Promise((resolve, reject) => {
@@ -82,66 +91,71 @@ export function browserFileHost(): FileHost | null {
         }
       });
     },
-    async save(name, signal) {
+    save(name, signal) {
       if (!active() || signal.aborted) {
         return null;
       }
 
-      const picker = (
-        globalThis as typeof globalThis & {
-          showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{
-            name: string;
-            createWritable(): Promise<{
-              write(bytes: Uint8Array): Promise<void>;
-              close(): Promise<void>;
-              abort(): Promise<void>;
-            }>;
-          }>;
-        }
-      ).showSaveFilePicker;
-      if (picker) {
-        try {
-          const handle = await picker.call(globalThis, { suggestedName: name });
-          return {
-            name: handle.name,
-            async write(bytes, signal) {
-              signal.throwIfAborted();
-              const stream = await handle.createWritable();
-              try {
-                await stream.write(bytes);
-                signal.throwIfAborted();
-                await stream.close();
-              } catch (error) {
-                await stream.abort();
-                throw error;
-              }
-            },
-          };
-        } catch (error) {
-          if ((error as { name?: string }).name === "AbortError") {
-            return null;
-          }
+      return pickSaveFile(name);
+    },
+  };
+}
 
-          throw error;
-        }
-      }
-
+/** Where `save` writes: a file the user picks, or a download where the browser has no picker. */
+async function pickSaveFile(name: string): Promise<SaveFile | null> {
+  const picker = (
+    globalThis as typeof globalThis & {
+      showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{
+        name: string;
+        createWritable(): Promise<{
+          write(bytes: Uint8Array): Promise<void>;
+          close(): Promise<void>;
+          abort(): Promise<void>;
+        }>;
+      }>;
+    }
+  ).showSaveFilePicker;
+  if (picker) {
+    try {
+      const handle = await picker.call(globalThis, { suggestedName: name });
       return {
-        name,
+        name: handle.name,
         async write(bytes, signal) {
           signal.throwIfAborted();
-          const url = URL.createObjectURL(new Blob([bytes.slice().buffer]));
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = name;
-          link.hidden = true;
-          document.body.append(link);
-          link.click();
-          link.remove();
-          // The browser may consume the URL after click returns.
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          const stream = await handle.createWritable();
+          try {
+            await stream.write(bytes);
+            signal.throwIfAborted();
+            await stream.close();
+          } catch (error) {
+            await stream.abort();
+            throw error;
+          }
         },
       };
+    } catch (error) {
+      if ((error as { name?: string }).name === "AbortError") {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  return {
+    name,
+    async write(bytes, signal) {
+      signal.throwIfAborted();
+      const url = URL.createObjectURL(new Blob([bytes.slice().buffer]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.hidden = true;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      // The browser may consume the URL after click returns.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
   };
 }
@@ -211,7 +225,17 @@ export class FileReference {
     }
   }
 
-  private after<T>(operation: Operation, task: Promise<T>, deliver: (value: T) => void): void {
+  /** Deliver what `task` gives in the next frame; a value already known goes without a promise's delay. */
+  private after<T>(operation: Operation, task: T | Promise<T>, deliver: (value: T) => void): void {
+    if (!(task instanceof Promise)) {
+      this.services.defer(() => {
+        if (!operation.signal.aborted && operation.generation === this.generation) {
+          deliver(task);
+        }
+      });
+      return;
+    }
+
     this.services.track(
       task.then(
         (value) =>
@@ -236,8 +260,7 @@ export class FileReference {
     selected?: (files: SelectedFile[]) => void,
   ): void {
     const operation = this.begin();
-    const task =
-      this.services.host?.browse(filters, multiple, operation.signal) ?? Promise.resolve([]);
+    const task = this.services.host?.browse(filters, multiple, operation.signal) ?? [];
     this.after(operation, task, (files) => {
       this.operation = null;
       if (files.length) {
@@ -267,7 +290,7 @@ export class FileReference {
 
   save(name: string, bytes: Uint8Array | FetchRequest): void {
     const operation = this.begin();
-    const task = this.services.host?.save(name, operation.signal) ?? Promise.resolve(null);
+    const task = this.services.host?.save(name, operation.signal) ?? null;
     this.after(operation, task, (destination) => {
       if (!destination) {
         this.operation = null;

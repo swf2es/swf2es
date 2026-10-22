@@ -52,7 +52,14 @@ function harness() {
       deliver();
     }
   };
-  return { reference, services, events, writes, requests, frame, lifetime };
+  // A frame that begins at once, with no promise settled since: the player's first, after
+  // the document class's constructor.
+  const nextFrame = () => {
+    for (const deliver of ready.splice(0)) {
+      deliver();
+    }
+  };
+  return { reference, services, events, writes, requests, frame, nextFrame, lifetime };
 }
 
 test("selection and load cross the frame boundary; cancellation drops stale results", async () => {
@@ -97,6 +104,22 @@ test("save snapshots bytes and downloads fetch only after a destination was sele
   await h.frame();
   assert.equal(h.requests.length, 0);
   assert.equal(h.events.at(-1), "cancel");
+});
+
+test("a dialog a host refuses at once cancels in the very next frame", () => {
+  const h = harness();
+  h.services.host = { browse: () => [], save: () => null };
+  h.reference.browse([]);
+  assert.deepEqual(h.events, []);
+  h.nextFrame();
+  assert.deepEqual(h.events, ["cancel"]);
+  h.reference.save("a.bin", Uint8Array.of(1));
+  h.nextFrame();
+  assert.deepEqual(h.events, ["cancel", "cancel"]);
+  h.services.host = null;
+  h.reference.browse([]);
+  h.nextFrame();
+  assert.deepEqual(h.events, ["cancel", "cancel", "cancel"]);
 });
 
 test("multipart preserves binary bytes and URLVariables; raw upload sends the file alone", async () => {
