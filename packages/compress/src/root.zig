@@ -2,8 +2,10 @@
 // src/index.ts makes. Each call works in a bump arena that the host resets
 // first; outputs grow in place at the arena's top, so a buffer of unknown
 // size is never copied as it grows. The C libraries are compiled unchanged
-// beside this file; memcpy and the rest of what they call come from Zig's
-// compiler-rt, and their allocations from the arena, through callbacks.
+// beside this file; their memcpy, memset and memmove are clang's builtins
+// by include/string.h, so bulk memory instructions, memcmp and strlen come
+// from Zig's compiler-rt, and their allocations from the arena, through
+// callbacks.
 const std = @import("std");
 // zlib.h, LzmaEnc.h and LzmaDec.h, as build.zig translates them.
 const c = @import("c");

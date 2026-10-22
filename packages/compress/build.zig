@@ -30,8 +30,8 @@ pub fn build(b: *std.Build) void {
 
     const zlib = b.path("../../vendor/zlib");
     const sdk = b.path("../../vendor/lzma-sdk/C");
-    // Declarations of the libc functions the C calls, which Zig's compiler-rt
-    // defines: wasm32-freestanding has no libc headers.
+    // The libc functions the C calls, which wasm32-freestanding has no
+    // headers for: bulk memory instructions or Zig's compiler-rt.
     const include = b.path("include");
 
     // The C API compress.zig calls, translated: Zig 0.17 has no @cImport.

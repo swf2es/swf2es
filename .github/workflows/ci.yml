@@ -17,6 +17,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # The pinned Zig, which ziglang.org asks CI to cache rather than fetch each run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/swf2es
+          key: zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/zig.ts') }}
       - run: pnpm --filter @swf2es/mp3 build:wasm && git diff --exit-code -- packages/mp3/src/binary.ts packages/mp3/LICENSE.minimp3
       - run: pnpm --filter @swf2es/compress build:wasm && git diff --exit-code -- packages/compress/src/binary.ts packages/compress/LICENSE.zlib
       - run: pnpm build

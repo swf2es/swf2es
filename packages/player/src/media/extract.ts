@@ -5,7 +5,7 @@
 // those it writes. Ruffle's extract writes zeros (sound.rs's extract is a
 // stub).
 import type { Sound } from "@swf2es/format";
-import { Mp3Decoder } from "@swf2es/mp3";
+import { Mp3Decoder, mp3Available } from "@swf2es/mp3";
 import { decodeAdpcm } from "./audio.js";
 import { mp3Frames } from "./mp3.js";
 
@@ -30,10 +30,14 @@ export interface ExtractSource {
   seek?: (start: number) => number;
 }
 
-/** Whole MP3 frames, including a header frame's silence, without gapless trimming. */
+/**
+ * Whole MP3 frames, including a header frame's silence, without gapless
+ * trimming. None where the engine could not compile the decoder: extract
+ * then writes nothing, as Flash does for a sound it cannot decode.
+ */
 export function mp3Source(bytes: Uint8Array): ExtractSource | null {
   const mp3 = mp3Frames(bytes);
-  if (!mp3?.whole.length) {
+  if (!mp3?.whole.length || !mp3Available()) {
     return null;
   }
 
