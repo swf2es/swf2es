@@ -466,9 +466,9 @@ filter/wrap/mip combinations use lazily cached sampler objects. Browser checks
 verify stable staging storage and GPU handles across mip reuploads, with cleanup
 after disposal and context loss. Mip sampling adds no per-draw arrays.
 
-`SamplerStates.as` adds 203 AIR trace lines, including 750 pixel samples, for
+`SamplerStates.as` adds 268 AIR trace lines, including 1,056 pixel samples, for
 `setSamplerStateAt` and the AGAL `ignoresampler` flag. Runtime overrides cover
-nearest/linear filtering, all three mip modes, and clamp/repeat independently
+nearest/linear and 2×/4×/8×/16× anisotropic filtering, all three mip modes, and clamp/repeat independently
 on U and V. A fresh context starts with clamp/nearest/no mip filtering on the
 tested AIR backend. State setters accept slots 0–15; the current shaders still
 address only slots 0–7.
@@ -483,21 +483,30 @@ The fixture covers those transitions, independent slots, cube sampling, failed
 setters preserving state, null/invalid arguments and disposed contexts. Enums
 are validated before slot ranges; valid calls on disposed contexts are ignored.
 
-A fixed 16-byte table stores the slot settings. The 24 supported combinations
+A fixed 16-byte table stores the slot settings. The 72 supported combinations
 share cached WebGL sampler handles across textures and programs. Browser checks
-cover a 90-draw loop (60 after warming the cache), repeated cube-wrap
-rejections, sampler-allocation failure, reuse, failed shader replacement, resize
-and teardown. Recovery draws through `ignoresampler` with a base-only texture
-after deliberately setting mip filtering in the previous context, verifying
-fresh defaults. Setters and warmed draws add no arrays or GPU queries.
+cover 306 draws per capability configuration (204 after warming the cache),
+2D/cube/rectangle textures, wrap/mip rejections, sampler-allocation failure, reuse,
+failed shader replacement, resize and teardown. AGAL filter flags and runtime
+overrides use the same sampler cache. Recovery draws through `ignoresampler`
+with a base-only texture after deliberately setting anisotropic/mip filtering in
+the previous context, verifying fresh defaults. Setters and warmed draws add no
+arrays or GPU queries.
+
+The WebGL backend enables `EXT_texture_filter_anisotropic` on its first
+anisotropic draw and queries the limit once per context. Requests are clamped to
+that limit; a missing extension uses linear filtering with the requested mip
+mode. Separate browser runs cover native capabilities, a reduced 2× limit and
+extension absence. The AIR samples use uniform mip levels to verify acceptance
+and state transitions without claiming driver-independent anisotropic pixels.
 
 Fractional trilinear precision is not an exact-parity claim: with this fixture's
 quarter-colored base level, scale 6 produced a color-channel difference of up to 5/255
 between AIR and the browser. Scale `4 * sqrt(2)` also exposed nearest-mip
 selection differences at the half-LOD boundary. The exact reference uses
 integer LODs for trilinear sampling and stays away from that nearest-mip boundary;
-browser checks additionally inspect the selected GL filter. Anisotropic filtering,
-broader sampler encodings and full validation precedence remain open.
+browser checks additionally inspect the selected GL filter and anisotropy.
+Broader sampler encodings and full validation precedence remain open.
 
 `LodBias.as` compares 390 pixel samples with AIR for signed AGAL texture LOD
 bias, including negative/positive eighth-level fractions, both encoded extremes,

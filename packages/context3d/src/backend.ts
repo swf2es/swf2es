@@ -40,7 +40,14 @@ export type BlendFactor = (typeof BLEND_FACTORS)[number];
 
 export const SAMPLER_WRAPS = ["clamp", "repeat_u_clamp_v", "clamp_u_repeat_v", "repeat"] as const;
 export type SamplerWrap = (typeof SAMPLER_WRAPS)[number];
-export const SAMPLER_FILTERS = ["nearest", "linear"] as const;
+export const SAMPLER_FILTERS = [
+  "nearest",
+  "linear",
+  "anisotropic2x",
+  "anisotropic4x",
+  "anisotropic8x",
+  "anisotropic16x",
+] as const;
 export type SamplerFilter = (typeof SAMPLER_FILTERS)[number];
 export const SAMPLER_MIPS = ["mipnone", "mipnearest", "miplinear"] as const;
 export type SamplerMip = (typeof SAMPLER_MIPS)[number];

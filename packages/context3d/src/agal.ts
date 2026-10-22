@@ -6,7 +6,7 @@ export type ProgramType = "vertex" | "fragment";
 
 export interface SamplerSource {
   index: number;
-  linear: boolean;
+  filter: number;
   repeat: boolean;
   mip: number;
   cube: boolean;
@@ -311,18 +311,19 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         const index = low & 65535;
         const bias = data.getInt8(offset + 18) / 8;
         const mip = (high >>> 24) & 15;
+        const filter = high >>> 28;
         if (
           stage !== "fragment" ||
           index >= 8 ||
           low >>> 24 !== 0 ||
-          (high & ~0x13141000) !== 5 ||
+          (high & ~0x73141000) !== 5 ||
+          filter > 5 ||
           mip > 2
         ) {
           throw new Error("Unsupported AGAL sampler encoding");
         }
 
         const cube = (high & 0x1000) !== 0;
-        const linear = (high & 0x10000000) !== 0;
         const repeat = (high & 0x00100000) !== 0;
         const ignore = (high & 0x00040000) !== 0;
         const previous = samplers.get(index);
@@ -332,7 +333,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
         if (
           previous &&
-          (previous.linear !== linear ||
+          (previous.filter !== filter ||
             previous.repeat !== repeat ||
             previous.mip !== mip ||
             previous.cube !== cube ||
@@ -341,7 +342,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
           throw new Error("Conflicting AGAL sampler states");
         }
 
-        samplers.set(index, { index, linear, repeat, mip, cube, ignore, bias });
+        samplers.set(index, { index, filter, repeat, mip, cube, ignore, bias });
         names.set(`fs${index}`, `uniform ${cube ? "samplerCube" : "sampler2D"} fs${index};`);
         // Bias stays in the shader even when ignoresampler preserves runtime state.
         expression = `texture(fs${index}, ${a}.${cube ? "xyz" : "xy"}${bias === 0 ? "" : `, ${bias.toFixed(3)}`})`;

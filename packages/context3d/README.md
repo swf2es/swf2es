@@ -39,6 +39,12 @@ An optional `Stage3DSurface.destroy` hook runs once when the surface is removed,
 after backend disposal and listener removal; it also runs after failed attachment.
 Use it to release the browser context without interfering with loss/restoration.
 
+Sampler filters include nearest, linear and 2×/4×/8×/16× anisotropic filtering.
+WebGL uses cached sampler objects and clamps anisotropy to the extension's
+hardware limit. Without `EXT_texture_filter_anisotropic`, those requests use
+linear filtering with the requested mip mode. Capability queries happen only on
+the first anisotropic draw; warmed sampler changes allocate no new GPU objects.
+
 The Flash adapter reclaims resources after their AS wrappers become unreachable.
 Active vertex, program, texture and render-target bindings keep their wrappers
 alive until replaced, cleared or disposed. Explicit disposal and context teardown

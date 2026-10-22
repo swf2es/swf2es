@@ -104,6 +104,36 @@ package {
       catch (error:Error) { trace("samplerstates", label, error.name, error.errorID); }
     }
 
+    private function anisotropy(ignored:Program3D):void {
+      var solid:Texture = context.createTexture(16, 8, "bgra", false);
+      for (var level:int = 0; level < 5; level++) {
+        var bitmap:BitmapData = new BitmapData(Math.max(1, 16 >> level), Math.max(1, 8 >> level), true, 0xff4080c0);
+        solid.uploadFromBitmapData(bitmap, level); bitmap.dispose();
+      }
+      context.setTextureAt(0, solid);
+      var filters:Array = ["anisotropic2x", "anisotropic4x", "anisotropic8x", "anisotropic16x"];
+      var mips:Array = ["mipnone", "mipnearest", "miplinear"];
+      for (var f:int = 0; f < filters.length; f++) {
+        for (var m:int = 0; m < mips.length; m++) {
+          var label:String = "aniso-" + f + "-" + m;
+          var encoded:Program3D = program(((f + 2) << 28) | (m << 24));
+          context.setProgram(encoded); draw(label + "-encoded");
+          context.setProgram(ignored); draw(label + "-ignore");
+          set(label + "-set", 0, "clamp", filters[f], mips[m]);
+          draw(label + "-manual");
+          context.setProgram(encoded); draw(label + "-reset");
+          encoded.dispose();
+        }
+      }
+      context.setProgram(ignored);
+      context.present(); draw("aniso-present");
+      context.configureBackBuffer(64, 64, 0, false); draw("aniso-configure");
+      set("aniso-invalid", 0, "clamp", "anisotropic32x", "mipnone"); draw("aniso-after-invalid");
+      context.setTextureAt(0, texture);
+      context.setSamplerStateAt(0, "repeat_u_clamp_v", "nearest", "mipnone");
+      solid.dispose();
+    }
+
     private function run():void {
       texture = context.createTexture(16, 8, "bgra", false);
       context.setTextureAt(0, texture);
@@ -191,6 +221,7 @@ package {
       }
       context.setTextureAt(0, texture); context.setProgram(ignored);
       cube.dispose(); cubeProgram.dispose();
+      anisotropy(ignored);
       var cases:Array = [
         [-1,"bad","bad","bad"], [8,"repeat","nearest","mipnone"],
         [0,"bad","bad","bad"], [0,"repeat","bad","bad"], [0,"repeat","nearest","bad"],
@@ -217,6 +248,7 @@ package {
       context.dispose(false);
       for (i = 0; i < cases.length; i++) { set("disposed-" + i, cases[i][0], cases[i][1], cases[i][2], cases[i][3]); }
       set("disposed-valid",0,"repeat","nearest","mipnone");
+      set("disposed-aniso",0,"clamp","anisotropic16x","miplinear");
     }
   }
 }

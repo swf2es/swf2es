@@ -177,8 +177,11 @@ export class WebGLContext3D implements Context3D {
   private renderFace = 0;
   private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
   private textureMask = 0;
-  private readonly samplers: (WebGLSampler | null)[] = new Array(24).fill(null);
+  private readonly samplers: (WebGLSampler | null)[] = new Array(96).fill(null);
+  // Two wrap bits, three filter bits and two mip bits fit each slot in one byte.
   private readonly samplerStates = new Uint8Array(16);
+  private anisotropy: EXT_texture_filter_anisotropic | null | undefined;
+  private maxAnisotropy = 1;
   private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
@@ -1301,7 +1304,7 @@ export class WebGLContext3D implements Context3D {
       throw new Error("Context3D experiment: invalid sampler state");
     }
 
-    this.samplerStates[index] = w | (f << 2) | (m << 3);
+    this.samplerStates[index] = w | (f << 2) | (m << 5);
   }
 
   private sampler(index: number): WebGLSampler {
@@ -1313,10 +1316,11 @@ export class WebGLContext3D implements Context3D {
         throw new Error("Context3D experiment: cannot create sampler");
       }
 
-      const linear = (index & 4) !== 0;
+      const mode = (index >>> 2) & 7;
+      const linear = mode !== 0;
       const filter = linear ? gl.LINEAR : gl.NEAREST;
       let minFilter: number = filter;
-      switch (index >>> 3) {
+      switch (index >>> 5) {
         case 1:
           minFilter = linear ? gl.LINEAR_MIPMAP_NEAREST : gl.NEAREST_MIPMAP_NEAREST;
           break;
@@ -1326,6 +1330,22 @@ export class WebGLContext3D implements Context3D {
       }
       gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, minFilter);
       gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
+      if (mode > 1) {
+        if (this.anisotropy === undefined) {
+          this.anisotropy = gl.getExtension("EXT_texture_filter_anisotropic");
+          if (this.anisotropy) {
+            this.maxAnisotropy = gl.getParameter(this.anisotropy.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+          }
+        }
+
+        if (this.anisotropy) {
+          gl.samplerParameterf(
+            sampler,
+            this.anisotropy.TEXTURE_MAX_ANISOTROPY_EXT,
+            Math.min(1 << (mode - 1), this.maxAnisotropy),
+          );
+        }
+      }
       gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, index & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
       gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, index & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
       gl.samplerParameteri(
@@ -1399,7 +1419,7 @@ export class WebGLContext3D implements Context3D {
       const source = state.samplers[i].source;
       if (!source.ignore) {
         this.samplerStates[source.index] =
-          (source.repeat ? 3 : 0) | (Number(source.linear) << 2) | (source.mip << 3);
+          (source.repeat ? 3 : 0) | (source.filter << 2) | (source.mip << 5);
       }
     }
   }
@@ -1541,7 +1561,7 @@ export class WebGLContext3D implements Context3D {
       if ((texture.cube || texture.rectangle) && (this.samplerStates[slot] & 3) !== 0) {
         throw new TextureBindingError("wrap");
       }
-      if (texture.rectangle && this.samplerStates[slot] >> 3 !== 0) {
+      if (texture.rectangle && this.samplerStates[slot] >> 5 !== 0) {
         throw new TextureBindingError("rectangleMip");
       }
       if (texture.cube) {
@@ -1559,7 +1579,7 @@ export class WebGLContext3D implements Context3D {
         }
         // AIR requires every cube face and mip even with mip filtering disabled.
         if (
-          (texture.cube || this.samplerStates[slot] >>> 3 !== 0) &&
+          (texture.cube || this.samplerStates[slot] >>> 5 !== 0) &&
           resource.uploaded[face] !== (1 << texture.levels) - 1
         ) {
           throw new TextureBindingError("mipmaps");

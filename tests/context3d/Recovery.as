@@ -138,7 +138,7 @@ package {
       current.setColorMask(false, false, false, false);
       current.setStencilActions("frontAndBack", "never", "invert", "zero", "set");
       current.setStencilReferenceValue(42, 15, 0);
-      current.setSamplerStateAt(0, "clamp", "linear", "miplinear");
+      current.setSamplerStateAt(0, "clamp", "anisotropic16x", "miplinear");
     }
 
     private function shader(fragment:Boolean):ByteArray {

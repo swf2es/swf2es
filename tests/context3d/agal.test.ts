@@ -284,21 +284,25 @@ test("2D texture samplers preserve filtering/wrapping and reject unsupported enc
   const view = new DataView(bytes.buffer);
   view.setUint32(7, 0x28, true);
   view.setUint32(23, 7, true);
-  for (const linear of [false, true]) {
+  for (let filter = 0; filter < 6; filter++) {
     for (const repeat of [false, true]) {
       for (let mip = 0; mip < 3; mip++) {
-        view.setUint32(27, 5 | (Number(linear) << 28) | (Number(repeat) << 20) | (mip << 24), true);
+        view.setUint32(27, 5 | (filter << 28) | (Number(repeat) << 20) | (mip << 24), true);
         const result = translate(bytes, "fragment");
         assert.deepEqual(result.samplers, [
-          { index: 7, linear, repeat, mip, cube: false, ignore: false, bias: 0 },
+          { index: 7, filter, repeat, mip, cube: false, ignore: false, bias: 0 },
         ]);
         assert.match(result.source, /uniform sampler2D fs7/);
         assert.match(result.source, /texture\(fs7, fc0\.xyzw\.xy\)/);
       }
     }
   }
-  for (const flags of [6, 0x105, 0x2005, 0x10005, 0x200005, 0x3000005, 0x4000005, 0x20000005]) {
+  for (const flags of [6, 0x105, 0x2005, 0x10005, 0x200005, 0x3000005, 0x4000005]) {
     view.setUint32(27, flags, true);
+    assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
+  }
+  for (let filter = 6; filter < 16; filter++) {
+    view.setUint32(27, 5 | (filter << 28), true);
     assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
   }
   view.setUint32(27, 5, true);
@@ -316,6 +320,9 @@ test("2D texture samplers preserve filtering/wrapping and reject unsupported enc
   new DataView(doubled.buffer).setUint32(51, 0x10000005, true);
   assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
   new DataView(doubled.buffer).setUint32(51, 0x01000005, true);
+  assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
+  new DataView(doubled.buffer).setUint32(27, 0x20000005, true);
+  new DataView(doubled.buffer).setUint32(51, 0x30000005, true);
   assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
 });
 
@@ -425,7 +432,7 @@ test("cube samplers use three coordinates and cannot share a slot with 2D sample
     view.setUint32(27, 0x10001005 | (mip << 24), true);
     const result = translate(bytes, "fragment");
     assert.deepEqual(result.samplers, [
-      { index: 0, cube: true, linear: true, repeat: false, mip, ignore: false, bias: 0 },
+      { index: 0, cube: true, filter: 1, repeat: false, mip, ignore: false, bias: 0 },
     ]);
     assert.match(result.source, /uniform samplerCube fs0/);
     assert.match(result.source, /texture\(fs0, fc0\.xyzw\.xyz\)/);
@@ -445,7 +452,7 @@ test("ignoresampler preserves dimensionality and cannot silently conflict within
     view.setUint32(27, 0x12140005 | (cube ? 0x1000 : 0), true);
     const translated = translate(bytes, "fragment");
     assert.deepEqual(translated.samplers, [
-      { index: 0, cube, linear: true, repeat: true, mip: 2, ignore: true, bias: 0 },
+      { index: 0, cube, filter: 1, repeat: true, mip: 2, ignore: true, bias: 0 },
     ]);
     assert.match(translated.source, cube ? /samplerCube fs0/ : /sampler2D fs0/);
     const doubled = new Uint8Array(55);
@@ -471,7 +478,7 @@ test("sampler bias is signed eighths, independent of sampler flags and register 
       view.setUint32(23, ((raw & 255) << 16) | 7, true);
       const result = translate(bytes, "fragment");
       assert.deepEqual(result.samplers, [
-        { index: 7, linear: false, repeat: false, mip: 2, cube, ignore: true, bias: raw / 8 },
+        { index: 7, filter: 0, repeat: false, mip: 2, cube, ignore: true, bias: raw / 8 },
       ]);
       const bias = raw === 0 ? "" : `, ${(raw / 8).toFixed(3)}`;
       assert.ok(result.source.includes(`texture(fs7, fc0.xyzw.${cube ? "xyz" : "xy"}${bias})`));

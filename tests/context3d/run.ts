@@ -195,11 +195,13 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(rectangles.exception, null, JSON.stringify(rectangles));
       assert.equal(rectangles.value?.passed, true);
       console.log("context3d: rectangle textures reuse staging and targets without mip generation");
-      const samplers = await evaluate<{ passed: boolean }>(
-        'import("/repo/tests/context3d/page.ts").then(m => m.samplerStates())',
-      );
-      assert.equal(samplers.exception, null, JSON.stringify(samplers));
-      assert.equal(samplers.value?.passed, true);
+      for (const mode of ["native", "clamped", "missing"]) {
+        const samplers = await evaluate<{ passed: boolean }>(
+          `import("/repo/tests/context3d/page.ts").then(m => m.samplerStates(${JSON.stringify(mode)}))`,
+        );
+        assert.equal(samplers.exception, null, JSON.stringify(samplers));
+        assert.equal(samplers.value?.passed, true);
+      }
       console.log(
         "context3d: runtime samplers share cached handles and preserve resource lifetime",
       );

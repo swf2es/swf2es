@@ -622,12 +622,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       if (filter === null) {
         throw s.rt.error("TypeError", 2007, "filter");
       }
-      const anisotropic =
-        filter === "anisotropic2x" ||
-        filter === "anisotropic4x" ||
-        filter === "anisotropic8x" ||
-        filter === "anisotropic16x";
-      if (!anisotropic && !SAMPLER_FILTERS.includes(filter as SamplerFilter)) {
+      if (!SAMPLER_FILTERS.includes(filter as SamplerFilter)) {
         throw s.rt.error("ArgumentError", 2008, "filter");
       }
       if (mip === null) {
@@ -642,10 +637,6 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
 
       const backend = contexts.get(this as unknown as AsObject)?.backend;
       if (backend) {
-        if (anisotropic) {
-          unsupported();
-        }
-
         backend.setSampler(index, wrap as SamplerWrap, filter as SamplerFilter, mip as SamplerMip);
       }
     }

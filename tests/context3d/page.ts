@@ -1335,10 +1335,33 @@ export async function rectangleTextures() {
   }
 }
 
-export async function samplerStates() {
+export async function samplerStates(mode: "native" | "clamped" | "missing" = "native") {
   const owned = create();
   const { backend: c, gl, live } = owned;
   try {
+    const getExtension = gl.getExtension.bind(gl);
+    const getParameter = gl.getParameter.bind(gl);
+    const extension = getExtension("EXT_texture_filter_anisotropic");
+    const maximum = extension ? getParameter(extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT) : 1;
+    const limit = mode === "clamped" ? Math.min(2, maximum) : maximum;
+    let extensionQueries = 0;
+    let limitQueries = 0;
+    gl.getExtension = ((name: string) => {
+      if (name === "EXT_texture_filter_anisotropic") {
+        extensionQueries++;
+        return mode === "missing" ? null : extension;
+      }
+
+      return getExtension(name);
+    }) as typeof gl.getExtension;
+    gl.getParameter = (name: number) => {
+      if (extension && name === extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT) {
+        limitQueries++;
+        return limit;
+      }
+
+      return getParameter(name);
+    };
     c.configure(32, 32);
     const vertices = c.createBuffer(3, 4);
     vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
@@ -1348,7 +1371,9 @@ export async function samplerStates() {
     c.setConstants("fragment", 0, [1, 0.25, 0.25, 1], 1);
     const texture = c.createTexture(4, 4);
     const cube = c.createTexture(4, 4, true);
+    const rectangle = c.createRectangleTexture(4, 4);
     const pixels = new Uint32Array(16).fill(0xffff0000);
+    rectangle.upload(pixels);
     for (let level = 0; level < 3; level++) {
       const data = pixels.subarray(0, (4 >> level) ** 2);
       texture.upload(data, level);
@@ -1368,6 +1393,13 @@ export async function samplerStates() {
     code.setUint32(23, 248 << 16, true);
     const spherical = c.createProgram();
     spherical.upload(shader(false), fragment);
+    const encoded = [];
+    for (let f = 0; f < SAMPLER_FILTERS.length; f++) {
+      code.setUint32(27, 5 | (f << 28) | (2 << 24), true);
+      const program = c.createProgram();
+      program.upload(shader(false), fragment);
+      encoded.push(program);
+    }
     c.setProgram(flat);
     c.setTexture(0, texture);
     const readback = c.read();
@@ -1386,22 +1418,23 @@ export async function samplerStates() {
     ];
     let allocated = 0;
     for (let pass = 0; pass < 3; pass++) {
-      for (let dimension = 0; dimension < 2; dimension++) {
-        c.setProgram(dimension ? spherical : flat);
-        c.setTexture(0, dimension ? cube : texture);
+      for (let dimension = 0; dimension < 3; dimension++) {
+        c.setProgram(dimension === 1 ? spherical : flat);
+        c.setTexture(0, dimension === 1 ? cube : dimension === 2 ? rectangle : texture);
         for (let w = 0; w < SAMPLER_WRAPS.length; w++) {
           for (let f = 0; f < SAMPLER_FILTERS.length; f++) {
             for (let m = 0; m < SAMPLER_MIPS.length; m++) {
               c.setSampler(0, SAMPLER_WRAPS[w], SAMPLER_FILTERS[f], SAMPLER_MIPS[m]);
               c.clear(0, 0, 0, 1);
-              if (dimension && w !== 0) {
+              if ((dimension !== 0 && w !== 0) || (dimension === 2 && m !== 0)) {
                 rejects(() => c.draw(indices, 0, 1));
                 continue;
               }
               c.draw(indices, 0, 1);
               const sampler = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler;
               check(
-                gl.getSamplerParameter(sampler, gl.TEXTURE_MIN_FILTER) === minFilters[m * 2 + f],
+                gl.getSamplerParameter(sampler, gl.TEXTURE_MIN_FILTER) ===
+                  minFilters[m * 2 + Number(f !== 0)],
                 "wrong mip/filter combination",
               );
               check(
@@ -1419,6 +1452,13 @@ export async function samplerStates() {
                   (w & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE),
                 "wrong V wrap",
               );
+              if (extension) {
+                check(
+                  gl.getSamplerParameter(sampler, extension.TEXTURE_MAX_ANISOTROPY_EXT) ===
+                    (f > 1 && mode !== "missing" ? Math.min(1 << (f - 1), limit) : 1),
+                  "wrong anisotropy or retained previous filter",
+                );
+              }
               check(c.read() === readback, "samplers replaced readback storage");
               check(color(readback, 16, 16, 32) === "ffff0000", "sampler lost texture contents");
               if (pass) {
@@ -1428,11 +1468,39 @@ export async function samplerStates() {
           }
         }
       }
+      c.setTexture(0, texture);
+      for (let f = 0; f < encoded.length; f++) {
+        c.setProgram(encoded[f]);
+        c.clear(0, 0, 0, 1);
+        c.draw(indices, 0, 1);
+        const sampler = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler;
+        check(
+          gl.getSamplerParameter(sampler, gl.TEXTURE_MIN_FILTER) ===
+            minFilters[4 + Number(f !== 0)],
+          "AGAL sampler did not replace the previous filter",
+        );
+        if (extension) {
+          check(
+            gl.getSamplerParameter(sampler, extension.TEXTURE_MAX_ANISOTROPY_EXT) ===
+              (f > 1 && mode !== "missing" ? Math.min(1 << (f - 1), limit) : 1),
+            "AGAL sampler did not replace anisotropy",
+          );
+        }
+        if (pass) {
+          check(owned.created === allocated, "warm AGAL sampler draw allocated GPU handles");
+        }
+      }
       if (!pass) {
         allocated = owned.created;
       }
     }
 
+    check(extensionQueries === 1, "anisotropy extension was queried more than once");
+    check(
+      limitQueries === (extension && mode !== "missing" ? 1 : 0),
+      "anisotropy limit was queried during warm draws",
+    );
+    c.setTexture(0, texture);
     c.setSampler(0, "clamp", "linear", "miplinear");
     rejects(() => c.setSampler(0, "bad" as SamplerWrap, "nearest", "mipnone"));
     rejects(() => c.setSampler(-1, "repeat", "nearest", "mipnone"));
