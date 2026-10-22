@@ -13,15 +13,25 @@ interface Exports {
 let compiled: WebAssembly.Module | null = null;
 let preparing: Promise<void> | null = null;
 
-/** Compile before scripts run; the decoder itself is instantiated only on demand. */
+/**
+ * Compile before scripts run; the decoder itself is instantiated only on
+ * demand. Never rejects: an engine that cannot compile the module leaves
+ * MP3 decoding unavailable (mp3Available) rather than failing every load.
+ */
 export function prepareMp3(): Promise<void> {
   preparing ??= WebAssembly.compile(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0))).then(
     (module) => {
       compiled = module;
     },
+    () => {},
   );
 
   return preparing;
+}
+
+/** Whether prepareMp3 compiled the decoder, so an Mp3Decoder can be made. */
+export function mp3Available(): boolean {
+  return compiled !== null;
 }
 
 /** A sequence of whole MP3 frames. PCM is overwritten by the next read, and must be copied out. */
