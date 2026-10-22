@@ -121,6 +121,44 @@ interface TextureState {
   depthAttached: boolean;
 }
 
+/** Per-context resource budgets; byte counts cover buffer storage, texture mip
+ * chains and texture-target depth/stencil attachments, not physical driver VRAM. */
+export interface WebGLContext3DLimits {
+  maxBuffers: number;
+  maxPrograms: number;
+  maxTextures: number;
+  maxBufferBytes: number;
+  maxTextureBytes: number;
+  maxTargetDepthBytes: number;
+}
+
+const DEFAULT_LIMITS: WebGLContext3DLimits = {
+  maxBuffers: 128,
+  maxPrograms: 128,
+  maxTextures: 128,
+  maxBufferBytes: 64 * 1024 * 1024,
+  maxTextureBytes: 64 * 1024 * 1024,
+  maxTargetDepthBytes: 64 * 1024 * 1024,
+};
+const LIMIT_NAMES = Object.keys(DEFAULT_LIMITS) as (keyof WebGLContext3DLimits)[];
+
+function resourceLimits(overrides: Partial<WebGLContext3DLimits>): Readonly<WebGLContext3DLimits> {
+  const limits = { ...DEFAULT_LIMITS };
+  for (let i = 0; i < LIMIT_NAMES.length; i++) {
+    const name = LIMIT_NAMES[i];
+    const value = overrides[name];
+    if (value !== undefined) {
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new RangeError(`Context3D resource limit ${name} must be a nonnegative safe integer`);
+      }
+
+      limits[name] = value;
+    }
+  }
+
+  return Object.freeze(limits);
+}
+
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
 export class WebGLContext3D implements Context3D {
   readonly gl: WebGL2RenderingContext;
@@ -169,8 +207,10 @@ export class WebGLContext3D implements Context3D {
   private pixels = new Uint8Array(0);
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
+  private readonly limits: Readonly<WebGLContext3DLimits>;
 
-  constructor(gl: WebGL2RenderingContext) {
+  constructor(gl: WebGL2RenderingContext, limits: Partial<WebGLContext3DLimits> = {}) {
+    this.limits = resourceLimits(limits);
     this.gl = gl;
     const vao = gl.createVertexArray();
     if (!vao) {
@@ -615,8 +655,13 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     range(1, count - 1, stride === 0 ? 524287 : 65535);
     range(0, stride, 64);
-    if (this.buffers.size >= 128) {
+    if (this.buffers.size >= this.limits.maxBuffers) {
       throw new Error("Context3D experiment: buffer limit");
+    }
+
+    const bytes = count * (stride === 0 ? 2 : stride * 4);
+    if (this.bufferBytes + bytes > this.limits.maxBufferBytes) {
+      throw new Error("Context3D experiment: buffer memory limit");
     }
 
     const gl = this.gl;
@@ -626,12 +671,6 @@ export class WebGLContext3D implements Context3D {
     }
 
     const target = stride === 0 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
-    const bytes = count * (stride === 0 ? 2 : stride * 4);
-    if (this.bufferBytes + bytes > 64 * 1024 * 1024) {
-      gl.deleteBuffer(handle);
-      throw new Error("Context3D experiment: buffer memory limit");
-    }
-
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(target, handle);
     gl.bufferData(target, bytes, gl.STATIC_DRAW);
@@ -717,7 +756,7 @@ export class WebGLContext3D implements Context3D {
 
   createProgram(): Program3D {
     this.alive();
-    if (this.programs.size >= 128) {
+    if (this.programs.size >= this.limits.maxPrograms) {
       throw new Error("Context3D experiment: program limit");
     }
 
@@ -842,8 +881,8 @@ export class WebGLContext3D implements Context3D {
     }
     if (
       (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) ||
-      this.textures.size >= 128 ||
-      this.textureBytes + size > 64 * 1024 * 1024
+      this.textures.size >= this.limits.maxTextures ||
+      this.textureBytes + size > this.limits.maxTextureBytes
     ) {
       throw new Error("Context3D experiment: texture size or memory limit");
     }
@@ -1056,7 +1095,10 @@ export class WebGLContext3D implements Context3D {
           0,
         );
         if (depth && !depthBuffer) {
-          if (this.targetDepthBytes + texture.width * texture.height * 4 > 64 * 1024 * 1024) {
+          if (
+            this.targetDepthBytes + texture.width * texture.height * 4 >
+            this.limits.maxTargetDepthBytes
+          ) {
             throw new Error("Context3D experiment: target depth memory limit");
           }
           depthBuffer = gl.createRenderbuffer();

@@ -123,6 +123,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(host.exception, null, JSON.stringify(host));
       assert.equal(host.value?.passed, true);
       console.log("context3d: canvas host placement, failure rollback and listener cleanup ok");
+      const limits = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.resourceLimits())',
+      );
+      assert.equal(limits.exception, null, JSON.stringify(limits));
+      assert.equal(limits.value?.passed, true);
+      console.log("context3d: configurable count/byte budgets, rollback and budget release ok");
       const result = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.lifetime())',
       );

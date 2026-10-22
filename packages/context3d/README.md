@@ -19,6 +19,17 @@ Create the WebGL2 context with `alpha: false`, `antialias: false`, `depth: false
 `stencil: false` and `preserveDrawingBuffer: true`. The backend manages its own
 back-buffer attachments and copies to the canvas only at `present()`.
 
+An optional second constructor argument sets resource budgets, for example
+`new WebGLContext3D(gl, { maxBuffers: 4096 })` for models with many animation
+frames. Defaults are 128 buffers, programs and textures each, with separate
+64 MiB budgets for buffer storage, texture mip chains and texture-target
+depth/stencil storage (`maxBufferBytes`, `maxTextureBytes`, `maxTargetDepthBytes`).
+`maxBuffers`, `maxPrograms` and `maxTextures` change the count limits. Raising a
+count leaves the byte budgets intact. Values must be nonnegative safe integers;
+zero denies new allocations in that category. Options are copied at creation,
+and disposal returns each resource's budget. These counts cover tracked storage,
+not the driver's physical VRAM, back-buffer attachments or all CPU staging memory.
+
 The adapter disposes GPU resources before the host removes the surface. After
 browser context loss, the old surface stays attached so restoration can trigger
 creation of a new context. The host detaches both listeners when removing it.
@@ -29,3 +40,11 @@ The current API and validation are experimental. Supported operations, AIR
 references, unsupported formats/profiles and lifecycle stress tests are tracked
 in [tests/context3d](../../tests/context3d/README.md). Web/desktop integration and
 enabling production playback are separate work.
+
+A future WebGPU backend can reuse the Flash adapter, resource contracts and AIR
+fixtures. It still needs AGAL-to-WGSL translation, GPU resource/binding handling,
+render-pipeline caching and device-loss recovery. Immediate readback needs a
+separate execution design: `Context3D.read()` returns synchronously to Flash,
+while WebGPU's [`GPUBuffer.mapAsync`](https://gpuweb.github.io/types/interfaces/GPUBuffer.html#mapAsync)
+provides CPU access asynchronously. A worker bridge or another way to suspend
+Flash execution would need validation before full compatibility could be claimed.

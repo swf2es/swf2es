@@ -69,6 +69,25 @@ ownership, shader swizzles and clip depth, failed shader replacement,
 resize, disposal and refusal after context loss. They count actual
 created/deleted GPU handles.
 
+The optional WebGL constructor budgets cover buffer/program/texture counts and
+separate byte limits for buffers, all texture mips/faces and target depth/stencil.
+Browser checks cover invalid values before GPU allocation, exact boundaries,
+immutable option snapshots, zero limits, raised counts, failed allocation
+rollback, cached depth reuse and budget recovery after disposal. Default budgets
+are unchanged; higher count limits do not raise the byte limits.
+
+A local integration check of the public Away3D Perelith Knight SWF runs with
+`maxBuffers: 4096` while retaining the default byte budgets. Across 3,600 ticks
+it completes 3,599 presentations and 2,316,472 draws without AS or GL errors.
+From tick 1,200 onward, counts remain at 400 buffers, four programs and six
+textures, with unchanged tracked byte totals and GPU handles. Buffer storage
+is about 7.8 MiB; post-GC heap plus backing storage stays within 0.07 MiB over
+the remaining 2,400 ticks. Teardown releases all 427 created GL handles, returns
+all byte counters to zero, and permits collection of the player, scripting,
+backend and canvas. This uses hardware WebGL on Intel Iris Xe with a frame
+clock; it is an execution/lifetime check rather than an FPS or AIR parity result.
+The downloaded SWF and diagnostic harness remain outside the repository.
+
 `stress.ts` repeatedly loads a real AS3 SWF with two Stage3D slots. Each load
 churns vertex/index buffers, shaders, 2D/cube/rectangle textures, mip generation,
 render targets, unchanged/changed back-buffer configurations, and pixel readback.
