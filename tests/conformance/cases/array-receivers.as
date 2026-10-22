@@ -2,6 +2,8 @@
 // length as getLengthProperty reads it (an Array's own, else its length
 // property, whose getter an Array subclass may override), each element as
 // getUintProperty, and nothing done for what is not an object.
+import flash.utils.Proxy;
+import flash.utils.flash_proxy;
 dynamic class LenArr extends Array {
   public function LenArr(...rest) {
     for (var i:int = 0; i < rest.length; i++) {
@@ -77,3 +79,41 @@ var ns:Namespace = new Namespace("p", "u");
 t("namespace receiver", function():* { log = []; P.forEach.call(ns, rec); return log.length + " " + P.map.call(ns, id).length + " " + P.sort.call(ns) + " " + P.indexOf.call(ns, 1) + " " + P.slice.call(ns) + " " + P.pop.call(ns); });
 t("namespace to Vector", function():* { return Vector.<int>(ns); });
 t("namespace comparator", function():* { return [3, 1].sort(ns); });
+
+// splice takes its range within the length getLengthProperty reads, and
+// splices the storage where that holds the range; unshift returns that length.
+dynamic class Shorter extends Array {
+  public function Shorter() { AS3::push(1, 2, 3, 4); }
+  override public function get length():uint { return 2; }
+}
+function all(s:Array):String {
+  var o:Array = [];
+  for (var i:int = 0; i < 6; i++) {
+    o.push(s[i]);
+  }
+  return o.join(",");
+}
+t("shorter splice insert", function():* { var s:Shorter = new Shorter(); var r:* = s.splice(0, 1, 7, 8); return r + " / " + all(s); });
+t("shorter splice rest", function():* { var s:Shorter = new Shorter(); var r:* = s.splice(1); return r + " / " + all(s); });
+t("shorter splice past", function():* { var s:Shorter = new Shorter(); var r:* = s.splice(5, 1, 9); return r + " / " + all(s); });
+t("shorter unshift", function():* { var s:Shorter = new Shorter(); return s.unshift(5) + " / " + all(s); });
+t("longer splice", function():* { var s:LenArr = new LenArr(1, 2, 3); var r:* = s.splice(2, 2, "x"); return r + " / " + all(s); });
+
+// What sort and sortOn find missing they ask about as hasUintProperty
+// does: a Proxy through its hasProperty.
+dynamic class Logged extends Proxy {
+  public var log:Array = [];
+  public var has:Boolean;
+  public function Logged(has:Boolean) { this.has = has; }
+  override flash_proxy function getProperty(n:*):* {
+    log.push("get " + n);
+    return String(n) == "length" ? 3 : String(n) == "1" ? undefined : "e" + n;
+  }
+  override flash_proxy function setProperty(n:*, v:*):void { log.push("set " + n + "=" + v); }
+  override flash_proxy function hasProperty(n:*):Boolean { log.push("has " + n); return has; }
+  override flash_proxy function deleteProperty(n:*):Boolean { log.push("del " + n); return true; }
+}
+t("proxy sort", function():* { var p:Logged = new Logged(true); P.sort.call(p); return p.log; });
+t("proxy sort missing", function():* { var p:Logged = new Logged(false); P.sort.call(p); return p.log; });
+t("proxy sortOn", function():* { var p:Logged = new Logged(true); P.sortOn.call(p, "x"); return p.log; });
+t("proxy sortOn missing", function():* { var p:Logged = new Logged(false); P.sortOn.call(p, "x"); return p.log; });

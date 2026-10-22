@@ -161,11 +161,22 @@ function genericReverse(g: Generic): void {
   }
 }
 
-/** As generic_splice: the deleted elements out, the rest moved, the inserted set, then the length. */
-function genericSplice(rt: Runtime, g: Generic, length: number, args: Value[]): AsObject {
+/** As generic_splice: where to splice, and how many to delete, within the length. */
+function spliceRange(rt: Runtime, length: number, args: Value[]): [number, number] {
   const at = clampIndex(toInteger(rt, args[0]), length);
   const wanted = args.length > 1 ? toInteger(rt, args[1]) : length - at;
-  const deleted = Math.min(wanted < 0 ? 0 : Math.trunc(wanted), length - at);
+  return [at, Math.min(wanted < 0 ? 0 : Math.trunc(wanted), length - at)];
+}
+
+/** As generic_splice: the deleted elements out, the rest moved, the inserted set, then the length. */
+function genericSplice(
+  rt: Runtime,
+  g: Generic,
+  length: number,
+  at: number,
+  deleted: number,
+  args: Value[],
+): AsObject {
   const end = at + deleted;
   const inserted = args.length > 2 ? args.length - 2 : 0;
   const shift = inserted - deleted;
@@ -275,8 +286,14 @@ export const arrayNatives: Natives = {
     return o;
   },
   "Array.Array::_unshift": (rt) => (o: AsObject, args: Value) => {
+    // As generic_unshift: the length after is getLengthProperty's.
     const a = elements(args);
-    return sealed(rt, o, a.length) ? 0 : o.$a.unshift(...a);
+    if (sealed(rt, o, a.length)) {
+      return 0;
+    }
+
+    o.$a.unshift(...a);
+    return lengthOf(rt, o);
   },
   // As generic_concat: what is not an Array is left out as the receiver,
   // and is one element as an argument.
@@ -323,18 +340,21 @@ export const arrayNatives: Natives = {
       return null;
     }
 
+    // As generic_splice: the range within the length getLengthProperty
+    // reads, spliced in an Array's storage where the storage holds it
+    // (ArrayObject::try_splice), else element by element.
     const length = lengthOf(rt, o);
-    if (!arrayElementsOf(rt, o, length)) {
-      return genericSplice(rt, new Generic(rt, o), length, a);
-    }
-
-    if (sealed(rt, o, a.length - 2)) {
+    const storage = arrayElements(rt, o);
+    if (storage !== null && sealed(rt, o, a.length - 2)) {
       return rt.array([]);
     }
 
-    const start = rt.toNumber(a[0]);
-    const count = a.length > 1 ? rt.toNumber(a[1]) : o.$a.length;
-    return rt.array(o.$a.splice(start, count, ...a.slice(2)));
+    const [at, deleted] = spliceRange(rt, length, a);
+    if (storage !== null && at + deleted <= storage.length) {
+      return rt.array(storage.splice(at, deleted, ...a.slice(2)));
+    }
+
+    return genericSplice(rt, new Generic(rt, o), length, at, deleted, a);
   },
   "Array.Array::_indexOf": (rt) => (o: Value, v: Value, from: Value) => {
     if (!isObject(o)) {
