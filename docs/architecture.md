@@ -2046,8 +2046,12 @@ button or a sprite in `buttonMode`, as Ruffle redraws for, and, more
 than Ruffle, any press, release or leave, which may move focus and a
 caret, and a drag selecting text. A plain move does not: what its
 listeners change shows at the next frame, as in Flash, so a fast mouse
-draws a 24 fps SWF 24 times a second, not at the screen's rate. Loads
-and socket data are delivered in a frame. A host draws when it moved,
+draws a 24 fps SWF 24 times a second, not at the screen's rate.
+An input's `updateAfterEvent` also prepares the requested redraw between
+timeline frames: it dispatches `RENDER` if the stage was invalidated and
+applies pending scroll rectangles. Invalidation alone requests no extra redraw;
+a frame or timer that already prepared the request consumes it.
+Loads and socket data are delivered in a frame. A host draws when it moved,
 not on every animation frame: at 60 Hz a 24 fps SWF drew each picture
 two or three times over, and drawing it once took a quarter to a third
 of Chrome's CPU off 32 animated characters, the pictures alike. Frame
