@@ -376,15 +376,15 @@ export function readBinaryData(bytes: Uint8Array, tag: Tag): { id: number; data:
   };
 }
 
-/** SymbolClass's links from character ids to class names; id 0 is the main timeline's class. */
-export function readSymbolClass(bytes: Uint8Array, tag: Tag): Map<number, string> {
+/** SymbolClass's links, including multiple classes of one character; id 0 is the document class. */
+export function readSymbolClass(bytes: Uint8Array, tag: Tag): [number, string][] {
   const r = new SwfReader(bytes, tag.offset, tag.offset + tag.length);
   const count = r.u16();
-  const symbols = new Map<number, string>();
+  const symbols: [number, string][] = [];
 
   for (let i = 0; i < count && !r.overrun; i++) {
     const id = r.u16();
-    symbols.set(id, readString(r));
+    symbols.push([id, readString(r)]);
   }
 
   return symbols;

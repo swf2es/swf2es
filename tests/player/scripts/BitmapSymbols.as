@@ -39,6 +39,13 @@ package {
       var bitmap:Bitmap = new BB();
       trace("BB", getQualifiedClassName(bitmap.bitmapData), bitmap.bitmapData.width, bitmap.smoothing,
         bitmap.pixelSnapping, "fresh data", bitmap.bitmapData != new BB().bitmapData);
+      var BB2:Class = getDefinitionByName("BB2") as Class;
+      var alias:Bitmap = new BB2();
+      trace("BB2", alias.bitmapData.width, alias.bitmapData.height,
+        "same pixels", same(bitmap.bitmapData, alias.bitmapData),
+        "fresh data", bitmap.bitmapData != alias.bitmapData);
+      var dataAlias:BitmapData = make("L2Alias", 0, 0);
+      trace("L2Alias", dataAlias.width, dataAlias.height, "same pixels", same(dataAlias, make("L2", 1, 1)));
       for each (name in ["Bad", "Short"]) {
         invalid(name, make(name, 1, 1));
       }

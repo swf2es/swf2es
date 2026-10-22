@@ -350,7 +350,7 @@ test("MP3 block gaps do not turn sample offsets into jumps past intervening fram
   player.destroy();
 });
 
-async function as3(nested = false, loaded = false) {
+async function as3(nested = false, loaded = false, lazyCompilation = false) {
   const clock = device();
   const compile = compiler(out);
   const abc = compile(
@@ -360,13 +360,21 @@ async function as3(nested = false, loaded = false) {
       import flash.events.Event;
       public dynamic class StreamRoot extends MovieClip {
         public var events:int = 0;
+        public var renders:int = 0;
+        public var failFrame:Boolean = false;
+        public var failRender:Boolean = false;
         public function StreamRoot() {
-          addEventListener(Event.ENTER_FRAME, function(event:Event):void { events++; });
+          addEventListener(Event.ENTER_FRAME, function(event:Event):void {
+            events++; if (stage) stage.invalidate(); if (failFrame) throw new Error("frame");
+          });
+          addEventListener(Event.RENDER, function(event:Event):void {
+            renders++; if (failRender) throw new Error("render");
+          });
         }
       }
     }`,
   );
-  const scripting = new Scripting(await createCodegen(wasm), clock);
+  const scripting = new Scripting(await createCodegen(wasm), { ...clock, lazyCompilation });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   const bytes = loaded ? bare(abc, 1, "StreamRoot", 20, 20) : movie(nested, abc);
   const player = new Player(bytes, scripting);
@@ -386,6 +394,77 @@ async function as3(nested = false, loaded = false) {
 
   await settle();
   return { clock, player, clip, scripting, bytes };
+}
+
+for (const lazy of [false, true]) {
+  test(`stream catch-up dispatches RENDER only after the last frame (${lazy ? "lazy" : "eager"})`, {
+    skip,
+  }, async (t) => {
+    const { clock, player, scripting } = await as3(false, false, lazy);
+    t.after(() => player.destroy());
+    t.mock.method(performance, "now", () => 0);
+    const rt = scripting.rt;
+    const get = (name: string) => rt.getProperty(player.root.object, rt.publicName(name)) as number;
+    const events = get("events");
+    const renders = get("renders");
+    clock.pass(800);
+    const n = player.advance(800);
+    assert.ok(n > 1);
+    assert.equal(get("events"), events + n);
+    assert.equal(get("renders"), renders + 1);
+    assert.equal(scripting.invalidated, false);
+    assert.equal(player.advance(0), 0);
+    assert.equal(get("renders"), renders + 1);
+    player.tick();
+    assert.equal(get("renders"), renders + 2, "a standalone tick still presents its frame");
+  });
+
+  test(`catch-up still renders once when its CPU budget ends early (${lazy ? "lazy" : "eager"})`, {
+    skip,
+  }, async (t) => {
+    const { clock, player, scripting } = await as3(false, false, lazy);
+    t.after(() => player.destroy());
+    let cost = 0;
+    t.mock.method(performance, "now", () => cost);
+    const tick = player.tick.bind(player);
+    player.tick = (render = true) => {
+      cost += 6;
+      tick(render);
+    };
+    clock.pass(800);
+    const n = player.advance(800);
+    assert.ok(n > 1 && n < 20);
+    const rt = scripting.rt;
+    assert.equal(rt.getProperty(player.root.object, rt.publicName("events")), n);
+    assert.equal(rt.getProperty(player.root.object, rt.publicName("renders")), 1);
+  });
+
+  test(`a catch-up frame and its RENDER report both errors in the same call (${lazy ? "lazy" : "eager"})`, {
+    skip,
+  }, async (t) => {
+    const { clock, player, scripting } = await as3(false, false, lazy);
+    t.after(() => player.destroy());
+    t.mock.method(performance, "now", () => 0);
+    const rt = scripting.rt;
+    rt.setProperty(player.root.object, rt.publicName("failFrame"), true);
+    rt.setProperty(player.root.object, rt.publicName("failRender"), true);
+    clock.pass(800);
+    assert.throws(
+      () => player.advance(800),
+      (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.deepEqual(
+          error.errors.map((e) => rt.toString(e)),
+          ["Error: frame", "Error: render"],
+        );
+        return true;
+      },
+    );
+    assert.equal(rt.getProperty(player.root.object, rt.publicName("renders")), 1);
+    rt.setProperty(player.root.object, rt.publicName("failFrame"), false);
+    rt.setProperty(player.root.object, rt.publicName("failRender"), false);
+    assert.doesNotThrow(() => player.advance(0));
+  });
 }
 
 for (const [nested, loaded] of [
@@ -450,8 +529,8 @@ test("a load begun during stream catch-up holds further frames until its content
   const loader = rt.construct(rt.classNamed("flash.display::Loader")) as avm2.AsObject;
   const tick = player.tick.bind(player);
   let requested = false;
-  player.tick = () => {
-    tick();
+  player.tick = (render = true) => {
+    tick(render);
     if (!requested) {
       requested = true;
       scripting.loads.requestLoad(loader, bytes);

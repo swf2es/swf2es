@@ -470,6 +470,8 @@ export class Player {
           Math.max(MIN_STREAM_BUDGET_MS, Math.min(MAX_STREAM_BUDGET_MS, passed / 2))
         : Infinity;
     timers?.hostPassed(passed);
+    const deferRender = n > 1;
+    let ran = false;
     try {
       for (let i = 0; i < n; i++) {
         if (
@@ -486,14 +488,25 @@ export class Player {
         // Owed as each frame starts: a frame that throws leaves those after it owed.
         this.owed = rest + Math.max(0, ordinary - 1 - i) * frame;
         timers?.frameAt((n - 1 - i) * frame, rest);
-        this.tick();
+        ran = true;
+        this.tick(!deferRender);
       }
+    } catch (error) {
+      if (ran && deferRender) {
+        this.scripting?.renderFrame([error]);
+      }
+
+      throw error;
     } finally {
       timers?.frameAt(Number.NaN, Number.NaN);
       this.lastRan = n;
       if (resuming) {
         timers?.release();
       }
+    }
+
+    if (ran && deferRender) {
+      this.scripting?.renderFrame();
     }
 
     // Flash fires timers shorter than a frame between frames too: a call
@@ -547,8 +560,9 @@ export class Player {
    * before children, loaded SWFs' too, and the orphans a script took off it,
    * which play on; all of them, found first, so that one a parent's frame
    * takes off still has its frame, as in Flash. Then the frame's scripts.
+   * A batch defers rendering until its last frame has played.
    */
-  tick(): void {
+  tick(render = true): void {
     this.applyActive();
     // An AVM1 SWF halted at what Flash cannot read plays no more.
     if (this.stopped || this.avm1?.halted) {
@@ -624,7 +638,7 @@ export class Player {
     }
 
     if (this.scripting) {
-      this.scripting.frame(this.stage);
+      this.scripting.frame(this.stage, true, render);
       this.frameRate = this.scripting.frameRate;
     }
   }
