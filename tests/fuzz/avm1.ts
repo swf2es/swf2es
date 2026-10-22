@@ -296,6 +296,22 @@ async function emitted(block: Uint8Array, version: number, start = 0): Promise<s
     }
   }
 
+  // Each unit the blocks go on in, compiled alone as V.far asks for it, is its entry.
+  for (const item of (testing.actionsModuleUnits() as string).split("\u0002")) {
+    const [key, numbers, limits, unit] = item.split("\u0001");
+    if (unit === undefined) {
+      continue;
+    }
+
+    const [at, end, bound, five] = numbers.split(",").map(Number);
+    const code = utf8.decode(
+      testing.actionsUnitBytes(block, offsets, lengths, version, at, end, bound, five !== 0),
+    );
+    if (code !== unit || testing.actionsUnitLimits().join(",") !== limits) {
+      return `unit ${key} compiled alone differs from its entry`;
+    }
+  }
+
   return null;
 }
 

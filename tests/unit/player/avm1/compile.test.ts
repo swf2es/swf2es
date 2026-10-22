@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createCodegen } from "@swf2es/codegen";
+import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
 import { lazyBlocks } from "../../../../packages/player/dist/avm1/compile.js";
+import { Player } from "../../../../packages/player/dist/player.js";
 import { Runtime } from "../../../../packages/runtime/dist/avm1/index.js";
 import { Avm1Assembler, constant } from "../../../avm1-assembler.ts";
+import { backwardSwf } from "../../../avm1-backward.ts";
 
 const module = await WebAssembly.compile(
   await readFile(new URL("../../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
@@ -64,3 +67,14 @@ for (const version of [4, 8]) {
     assert.deepEqual(lines, ["from the pool", "42", "from the pool", "42"]);
   });
 }
+
+test("a SWF whose code jumps back before its blocks is let go of with the player", async () => {
+  const codegen = await createCodegen(module);
+  const avm1 = new Avm1(codegen, { print() {}, realTime: null, audio: null });
+  const player = new Player(backwardSwf(), null, avm1);
+  await player.start();
+  player.tick();
+  assert.equal(codegen.heldActions().held, 1, "its units compiled");
+  player.destroy();
+  assert.equal(codegen.heldActions().held, 0);
+});

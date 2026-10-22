@@ -35,6 +35,13 @@ export class Output {
     this.length += n;
   }
 
+  /** The `n` bytes from offset `at` taken out, what follows moved back. */
+  remove(at: u32, n: u32): void {
+    const base = changetype<usize>(this.bytes);
+    memory.copy(base + at, base + at + n, this.length - at - n);
+    this.length -= n;
+  }
+
   byte(b: u8): void {
     this.reserve(1);
     this.bytes[this.length++] = b;

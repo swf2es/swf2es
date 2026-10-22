@@ -1037,8 +1037,15 @@ function hex(kind: u8): string {
 export {
   actionsEmitEach,
   actionsEmitEachBytes,
+  actionsHeldCount,
+  actionsHeldUnitBytes,
+  actionsHold,
   actionsModuleBytes,
   actionsModuleEntries,
+  actionsModuleUnits,
+  actionsRelease,
+  actionsUnitBytes,
+  actionsUnitLimits,
 } from "./avm1/compile";
 export {
   domainAdd,

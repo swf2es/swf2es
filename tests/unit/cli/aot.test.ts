@@ -248,7 +248,7 @@ test("an AVM1 SWF compiles to one module of its action blocks, without libraries
   const read = readSwf(swf);
   const codegen = await createCodegen(wasm);
   assert.equal(module, codegen.compileActionsModule(read.bytes, readActions(read)));
-  assert.match(module, /V\.trace\(cx, st\.pop\(\)\)/);
+  assert.match(module, /V\.trace\(cx, "one"\)/);
   assert.deepEqual(manifest.abcs, []);
   assert.equal(manifest.input.version, 6);
   const sha = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex");

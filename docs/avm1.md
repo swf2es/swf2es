@@ -118,8 +118,12 @@ Each per-block compilation copies the backing SWF into Wasm; the wrapper
 collects after that call rather than letting those copies accumulate
 across its usual collection interval. This bounds the compiler's working
 memory by the block being compiled, rather than all the SWF's output.
-Obfuscated movies whose backward jumps expand into large entries benefit
-especially: code for scenes never entered is never generated or parsed.
+Code for scenes never entered is never generated or parsed. Units (below)
+are smaller and many, so the wrapper keeps the SWFs they are of in Wasm
+from one to the next instead (`actionsHold`), by a handle each: the four
+whose units it compiled last, each let go as the player lets its SWF go
+(`releaseActions`, as a movie is unloaded or the player destroyed) or
+its bytes are collected.
 Entries cross the Wasm boundary as UTF-8 bytes decoded by the wrapper,
 as whole modules do, avoiding the bindings' per-character string lifting
 when an obfuscated block expands to megabytes.
@@ -165,7 +169,10 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   byte, including another tag's contents; only a target before the file's
   start exits. The block's upper bound still limits operands and nested
   bodies, and forward jumps past it still exit. Blocks compiled alone
-  retain the same SWF context as their entries in a module. The constant pool is tracked along
+  retain the same SWF context as their entries in a module. A region is
+  compiled within its **home**, the block's own bytes, and code it
+  reaches outside them goes on in **units** (below), compiled once for
+  the SWF, not again in every block that jumps there. The constant pool is tracked along
   the flow: where one `ConstantPool` reaches a `Push` on every path, its
   strings are literals, and a constant past the pool's end `undefined`, as
   Ruffle pushes it; where none or several may, the push reads the
@@ -202,6 +209,79 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   U+0081; a byte that leads nothing is its own character; a surrogate or
   a code point past U+10FFFF is U+FFFD; and a code point of 0, or a
   sequence the string's end cuts short, ends the string there.
+
+### Units
+
+Obfuscators jump back into other tags' bytes: other frames' code, or
+data that decodes as junk. Compiled into each block that reaches it,
+that code made each a closure of most of the SWF before it: an
+obfuscated real-world SWF of 2.2 MB of actions compiled to 128 MB of
+JavaScript, a block of 3 KB to 1 MB. So a region's code is what it
+reaches within its home, the block's own bytes (`flow/regions.ts`), and
+where control leaves the home while staying in the region, the region
+returns `V.far(cx, at, end, bound, five)`: go on at offset `at` of the
+SWF in a region that ends at `end`, whose actions' bytes end at `bound`,
+as a SWF 5's function if `five` (a SWF 4's functions'). V.far runs
+**units** until control leaves the region, and returns what it returns.
+
+A unit is the code from `at` that it reaches within its own home, the
+bytes from `at` to the next bound of a block, at most 32 KB
+(`emit/units.ts`), compiled as a block is, its own code first, the
+functions it defines after. Its own code returns where control goes on,
+an offset in the SWF, or -1 where the region ends and -2 where it
+returns `cx.ret`, and V.far looks the next unit up, counting down the
+script timeout's budget as a jump back does. A loop within a unit's home
+goes round in it; one whose head is before `at` goes round through
+V.far. A unit starts with the activation's pool, `cx.pool`, as a region
+does, and runs with `cx.code` its own regions, which its DefineFunctions
+make functions of. Its registers are the movie's four, `cx.g`.
+
+A region keeps all it reaches, as before, where a unit could not run
+its code as it runs: where control leaves the home from a With's or a
+Try's bytes, their bodies' or the first action past a body, while what
+they hold stays on the activation; and in a DefineFunction2 with
+registers of its own, `let`s a unit cannot see. Nowhere else is anything
+held as control leaves the home, so a unit takes over as a jump to a new
+block would.
+
+What a unit compiles to depends on `end` and `bound` only where its home
+or its actions reach them, so V.far asks first for the unit of a region
+and bytes that end at the next bound of a block past `at`, and runs it
+where it says it can (its `high` at most `end`, its `reach` at most
+`bound`), else the region's own. A unit is compiled on first use, as a
+block is, byte for byte its entry in the module's units (AOT), which hold
+every unit V.far may ask for from the module's blocks:
+
+```js
+export function units(rt) {
+const V = rt.version(6);
+const u = [
+[function (cx) {
+const st = cx.st;
+st.push("in a unit");
+V.trace(cx, st.pop());
+return 412;
+}],
+];
+return {
+"120,0": [u[0], 412, 130],
+};
+}
+```
+
+keyed `at,five` for the first choice, with its `high` and `reach`, and
+`at,end,bound,five` for a region's own, -1 for both limits; a first
+choice only its own region could run is not written, nor evaluated by
+the JIT, as V.far never runs it as one. Units whose code is the same are
+written once, and evaluated once. A runtime finds a SWF's units by the
+regions of its blocks and units (`realm.units`); a module with units
+gives them to the runtime as its default export makes its blocks,
+`rt.adoptUnits(b, units(rt))`, so it runs as any other.
+
+On the obfuscated SWF above, with the folding of pushes (below), the
+module is 33 MB, of which the blocks' own code is 11.5 MB, its 3 KB block
+16 KB; after a replay of its first minutes in Chrome, V8 holds 29 MB of
+code rather than 132 MB, and the JS heap is 55 MB rather than 192 MB.
 
 ### The dispatcher
 
@@ -282,8 +362,7 @@ return [
 [function (cx) {
 const st = cx.st;
 V.constantPool(cx, ["frame"]);
-st.push("frame");
-V.trace(cx, st.pop());
+V.trace(cx, "frame");
 return;
 }],
 [function (cx) {
@@ -291,8 +370,7 @@ const st = cx.st;
 let b = 0;
 for (;;) switch (b) {
 case 0:
-st.push(cx.pool[0]);
-if (V.toBoolean(st.pop())) { b = 2; continue; }
+if (V.toBoolean(cx.pool[0])) { b = 2; continue; }
 case 1:
 V.notYet("GetVariable");
 V.stop(cx);
@@ -301,8 +379,7 @@ return;
 }
 }, function (cx) {
 const st = cx.st;
-st.push("in a function");
-V.trace(cx, st.pop());
+V.trace(cx, "in a function");
 return;
 }],
 ];
@@ -324,6 +401,14 @@ object), or that pop them themselves where their number is on the stack
 throws, so the steps after fill them in one at a time (`GetUrl` and
 `GetUrl2`, step 15, were the last); an unknown opcode is
 skipped, and an action Flash cannot read is `V.halt(cx)`. A block the flow finds too large is `V.tooLarge()`.
+
+Where an action takes the value the one before it pushed, nothing coming
+between them, `st.push(value);` and the `st.pop()` that takes it are the
+value itself, `V.trace(cx, "frame")`, `if (V.toBoolean(V.not(V.equals(720,
+st.pop()))))`: it is evaluated where the push was, and popped as the
+action's first operand, the top, is popped first, so the stack and every
+call see what they saw before. Only the top folds; values under it are
+still pushed and popped.
 
 ### Version-dependent semantics
 

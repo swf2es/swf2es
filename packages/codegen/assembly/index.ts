@@ -26,8 +26,15 @@ export function abcVersion(abc: Uint8Array): i32 {
 export {
   actionsEmitEach,
   actionsEmitEachBytes,
+  actionsHeldCount,
+  actionsHeldUnitBytes,
+  actionsHold,
   actionsModuleBytes,
   actionsModuleEntries,
+  actionsModuleUnits,
+  actionsRelease,
+  actionsUnitBytes,
+  actionsUnitLimits,
 } from "./avm1/compile";
 // The compiler: see compile.ts.
 export {
