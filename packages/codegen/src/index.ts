@@ -333,7 +333,7 @@ export interface Codegen {
   /**
    * Let go of the copy of a SWF compileActionBlocks and compileActionUnit
    * keep, as the host lets the SWF go; it is let go too once `bytes` are
-   * collected, and when blocks or units of others SWFs are asked for since.
+   * collected, and when blocks or units of other SWFs are asked for since.
    */
   releaseActions(bytes: Uint8Array): void;
   /** How many SWFs compileActionBlocks and compileActionUnit keep a copy of, and how many times they have copied one in. */

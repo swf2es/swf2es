@@ -163,7 +163,10 @@ class HeldSwf {
 /** The SWFs held, by the handle the caller gave each; it lets them go. */
 const held = new Map<i32, HeldSwf>();
 
-/** Hold `swf`, its blocks those of the ranges given, by `handle`, for actionsHeldUnitBytes. */
+/**
+ * Hold `swf`, its blocks those of the ranges given, by `handle`, for
+ * actionsHeldEmitEachBytes and actionsHeldUnitBytes.
+ */
 export function actionsHold(
   handle: i32,
   swf: Uint8Array,
