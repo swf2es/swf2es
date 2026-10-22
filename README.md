@@ -223,6 +223,7 @@ dialogs. Browser dialogs require a recent user click or keypress.
 
 ```
 packages/
+  compress/      zlib and LZMA, synchronous, in one WebAssembly module (zlib, the LZMA SDK)
   format/        SWF container and tag parsers (a DoABC's bytes; codegen parses the ABC)
   codegen/       bytecode → ES modules, in AssemblyScript (codegen.wasm), for JIT and AOT
   runtime/       the AS3 language runtime
@@ -235,6 +236,7 @@ apps/
   site/          the demo site on GitHub Pages: <swf2es-player> on a static page
 vendor/
   pixijs/        the swf2es fork of PixiJS (MIT), a submodule built by pnpm build
+  zlib/, 7zip/   zlib 1.3.2 and 7-Zip 26.05's LZMA SDK, compiled into packages/compress
 oracle/          avmshell and Flash (adl) references
 tests/           unit, conformance, player, web, desktop and fuzz tests
 docs/            architecture, references, coverage, benchmarks, roadmap

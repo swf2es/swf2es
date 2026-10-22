@@ -95,6 +95,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
+| `compress` | synchronous zlib and LZMA, zlib's and the LZMA SDK's C and a Zig LZMA decoder compiled to WebAssembly | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |

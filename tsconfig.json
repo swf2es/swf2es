@@ -23,7 +23,8 @@
     "tools/**/*.ts",
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts",
-    "packages/mp3/build.ts"
+    "packages/mp3/build.ts",
+    "packages/compress/build.ts"
   ],
   "exclude": [
     "tests/programs/as3pb",

@@ -76,6 +76,8 @@ importers:
         specifier: ^0.28.20
         version: 0.28.20
 
+  packages/compress: {}
+
   packages/format:
     dependencies:
       lzma1:

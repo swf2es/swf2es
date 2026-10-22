@@ -16,7 +16,8 @@ must give **identical output** in both modes.
 
 ```sh
 git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
-                              # vendor/pixijs (the Pixi fork the player draws with)
+                              # vendor/pixijs (the Pixi fork the player draws with), and
+                              # vendor/minimp3, vendor/zlib and vendor/7zip (C compiled to wasm)
 pnpm install
 pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
