@@ -14,10 +14,6 @@
     "dist"
   ],
   "dependencies": {
-    "lzma1": "0.3.0",
-    "pako": "2.1.0"
-  },
-  "devDependencies": {
-    "@types/pako": "2.0.3"
+    "@swf2es/compress": "workspace:*"
   }
 }

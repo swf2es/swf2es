@@ -70,6 +70,7 @@ function moduleMounts(): Map<string, string> {
   const player = join(dist("@swf2es/player"), "index.js");
   const format = join(dist("@swf2es/format"), "index.js");
   return new Map([
+    ["compress", dist("@swf2es/compress", format)],
     ["format", dist("@swf2es/format")],
     ["mp3", dist("@swf2es/mp3", player)],
     ["codegen", dist("@swf2es/codegen")],
@@ -78,8 +79,6 @@ function moduleMounts(): Map<string, string> {
     ["player-hosts", dist("@swf2es/player-hosts/indexeddb")],
     ["web", dist("@swf2es/web")],
     ["pixi", dist("pixi.js", player)],
-    ["pako", dist("pako", format)],
-    ["lzma1", join(packageRoot("lzma1", format), "lib")],
   ]);
 }
 

@@ -19,3 +19,11 @@
 	path = vendor/minimp3
 	url = https://github.com/lieff/minimp3.git
 	shallow = true
+[submodule "vendor/zlib"]
+	path = vendor/zlib
+	url = https://github.com/swf2es/zlib.git
+	shallow = true
+[submodule "vendor/lzma-sdk"]
+	path = vendor/lzma-sdk
+	url = https://github.com/swf2es/lzma-sdk.git
+	shallow = true

@@ -10,6 +10,7 @@
 // License, v. 2.0: http://mozilla.org/MPL/2.0/.
 import {
   CompressedDataError,
+  CompressedDataTooLargeError,
   deflateCompress,
   LZMA_HEADER,
   lzmaByteArrayCompress,
@@ -972,6 +973,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
             ? lzmaByteArrayUncompress(data)
             : zlibUncompress(data, kind === "deflate");
       } catch (e) {
+        // As avmplus: an output it cannot allocate is a MemoryError, corrupt data an IOError.
+        if (e instanceof CompressedDataTooLargeError) {
+          throw rt.error("flash.errors::MemoryError", 1000);
+        }
+
         if (e instanceof CompressedDataError) {
           throw rt.error("flash.errors::IOError", 2058);
         }

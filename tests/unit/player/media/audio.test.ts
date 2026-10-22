@@ -234,3 +234,90 @@ test("a closed browser audio host closes its context and decodes nothing more", 
     }
   }
 });
+
+test("embedded MP3 loops and cursors use the SWF origin at the source sample rate", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const starts: number[][] = [];
+  const stops: number[] = [];
+  const buffer = { duration: 1.2, sampleRate: 48000, numberOfChannels: 1 };
+  const node = { connect() {}, disconnect() {} };
+  const sources: {
+    buffer: unknown;
+    loop: boolean;
+    loopStart: number;
+    loopEnd: number;
+    onended: (() => void) | null;
+  }[] = [];
+  class FakeAudioContext {
+    currentTime = 2;
+    destination = {};
+    async decodeAudioData() {
+      return buffer;
+    }
+    createBufferSource() {
+      const source = {
+        ...node,
+        buffer: null as unknown,
+        loop: false,
+        loopStart: 0,
+        loopEnd: 0,
+        onended: null as (() => void) | null,
+        start: (...args: number[]) => starts.push(args),
+        stop: (when: number) => stops.push(when),
+      };
+      sources.push(source);
+      return source;
+    }
+    createChannelSplitter() {
+      return node;
+    }
+    createChannelMerger() {
+      return node;
+    }
+    createGain() {
+      return { ...node, gain: { value: 0 } };
+    }
+    async resume() {}
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host);
+    const clip = await host.decode({
+      id: 1,
+      format: 2,
+      sampleRate: 11025,
+      sampleSize: 16,
+      channels: 1,
+      sampleCount: 11025,
+      seekSamples: 1661,
+      data: new Uint8Array(),
+    });
+    assert.equal(clip.durationMs, 1000);
+    const mix = { volume: 1, leftToLeft: 1, leftToRight: 0, rightToLeft: 0, rightToRight: 1 };
+    const origin = 1661 / 11025;
+    const playing = clip.play(10, 8, mix, { endMs: 70, atMs: 150 });
+    assert.ok(playing);
+    assert.equal(sources[0].buffer, buffer);
+    assert.equal(sources[0].loopStart, origin + 0.01);
+    assert.equal(sources[0].loopEnd, origin + 0.07);
+    assert.ok(Math.abs(starts[0][1] - (origin + 0.04)) < 1e-12);
+    assert.ok(Math.abs(stops[0] - 2.33) < 1e-12);
+    assert.equal(playing.positionMs, 150);
+
+    assert.ok(clip.play(0, 1, mix));
+    assert.deepEqual(starts[1], [0, origin, 1]);
+    assert.equal(sources[1].buffer, buffer);
+    assert.equal(clip.play(1001, 1, mix), null);
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});

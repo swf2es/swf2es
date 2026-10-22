@@ -1,45 +1,68 @@
 /**
  * Compression as SWF files and ByteArray use it, synchronously and with no
- * platform API: zlib and raw deflate through pako, a port of zlib whose
- * output is zlib's byte for byte, and LZMA, compressed through lzma1 and
- * decoded by lzma.ts.
+ * platform API, through @swf2es/compress: zlib itself for zlib and raw
+ * deflate, the LZMA SDK's encoder for LZMA, and an LZMA decoder after the
+ * SDK's specification.
  */
-import { compress as lzmaCompress } from "lzma1";
-import pako from "pako";
-import { LzmaError, lzmaDecode } from "./lzma.js";
+import {
+  CORRUPT,
+  type Decoded,
+  DICTIONARY,
+  DONE,
+  deflate,
+  FULL,
+  inflate,
+  lzmaDecode,
+  lzmaEncode,
+  TRUNCATED,
+} from "@swf2es/compress";
 
 /** Data a decompressor cannot read: corrupt, truncated, or not what it says. */
 export class CompressedDataError extends Error {}
 
 /**
- * zlib's settings as avmplus' ByteArray.compress uses them: the best
- * compression, 8 for memory. A new object each time: pako's deflateRaw sets
- * `raw` on the one it is given.
+ * Data whose output does not fit: more than the decompressor's memory, or
+ * the page's, can hold. avmplus' ByteArray fails such an uncompress with
+ * MemoryError 1000, where it fails corrupt data with IOError 2058.
  */
-const zlibOptions = (level: ZlibLevel = 9) => ({ level, memLevel: 8 as const });
+export class CompressedDataTooLargeError extends CompressedDataError {}
 
 /** A deflate level: 0 stores, 1 is fastest, 9 smallest. */
 export type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
-/** `data` as a zlib stream, as zlib's deflate writes it at `level`, 9 by default. */
+/** `data` as a zlib stream, as zlib's deflate writes it at `level`, 9 by default, as avmplus' ByteArray. */
 export function zlibCompress(data: Uint8Array, level: ZlibLevel = 9): Uint8Array {
-  return pako.deflate(data, zlibOptions(level));
+  return deflate(data, level, false);
 }
 
 /** `data` as a raw deflate stream, with no zlib header or checksum. */
 export function deflateCompress(data: Uint8Array): Uint8Array {
-  return pako.deflateRaw(data, zlibOptions());
+  return deflate(data, 9, true);
+}
+
+/** The most an inflate may write: as much as a wasm32 memory holds. */
+const NO_LIMIT = 2 ** 32 - 1;
+
+/** A failed decode's status as a CompressedDataError. */
+function failure(result: Decoded): CompressedDataError {
+  switch (result.status) {
+    case TRUNCATED:
+      return new CompressedDataError("truncated");
+    case CORRUPT:
+      return new CompressedDataError(result.message ?? "corrupt");
+    case DICTIONARY:
+      return new CompressedDataError("needs a preset dictionary");
+    default:
+      return new CompressedDataTooLargeError("out of memory");
+  }
 }
 
 /**
  * The bytes of a zlib stream (or, `raw`, of a raw deflate stream), up to its
- * end: anything after is left, as zlib's inflate leaves it. pako, given a
- * zlib stream, would read what follows as another; so the deflate stream
- * inside is inflated raw, where pako stops at its end, and the header and
- * the Adler-32 after it are checked here.
+ * end: anything after is left, as zlib's inflate leaves it. The header is
+ * checked here, so that every way it can be wrong reads as avmplus' does.
  */
 export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array {
-  let start = 0;
   if (!raw) {
     if (data.length < 2) {
       throw new CompressedDataError("truncated");
@@ -54,71 +77,14 @@ export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array {
     if (flg & 0x20) {
       throw new CompressedDataError("needs a preset dictionary");
     }
-
-    start = 2;
   }
 
-  const inflator = new pako.Inflate({ raw: true });
-  inflator.push(data.subarray(start), true);
-
-  // Ended at the stream's end; its types leave `ended` and `strm` out.
-  const state = inflator as unknown as { ended: boolean; strm: { next_in: number } };
-  if (inflator.err || !state.ended) {
-    throw new CompressedDataError(inflator.msg || "truncated");
+  const result = inflate(data, raw, NO_LIMIT);
+  if (result.status !== DONE) {
+    throw failure(result);
   }
 
-  const bytes = (inflator.result as Uint8Array | undefined) ?? new Uint8Array(0);
-  if (!raw) {
-    const end = start + state.strm.next_in;
-    if (end + 4 > data.length) {
-      throw new CompressedDataError("truncated");
-    }
-
-    const check =
-      ((data[end] << 24) | (data[end + 1] << 16) | (data[end + 2] << 8) | data[end + 3]) >>> 0;
-    if (check !== adler32(bytes)) {
-      throw new CompressedDataError("incorrect data check");
-    }
-  }
-
-  return bytes;
-}
-
-/** The Adler-32 checksum of `data`, as zlib's trailer holds it. */
-function adler32(data: Uint8Array): number {
-  let a = 1;
-  let b = 0;
-
-  for (let i = 0; i < data.length; ) {
-    // 5552 bytes at most before the modulo keep the sums exact, as zlib's
-    // NMAX; eight at a time, then the rest.
-    const end = Math.min(i + 5552, data.length);
-    const unrolledEnd = end - ((end - i) % 8);
-    for (; i < unrolledEnd; i += 8) {
-      // The eight steps of b += a at once: each byte counted once for each
-      // step after it.
-      const x0 = data[i];
-      const x1 = data[i + 1];
-      const x2 = data[i + 2];
-      const x3 = data[i + 3];
-      const x4 = data[i + 4];
-      const x5 = data[i + 5];
-      const x6 = data[i + 6];
-      const x7 = data[i + 7];
-      b += 8 * a + 8 * x0 + 7 * x1 + 6 * x2 + 5 * x3 + 4 * x4 + 3 * x5 + 2 * x6 + x7;
-      a += x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7;
-    }
-
-    for (; i < end; i++) {
-      a += data[i];
-      b += a;
-    }
-
-    a %= 65521;
-    b %= 65521;
-  }
-
-  return ((b << 16) | a) >>> 0;
+  return result.bytes;
 }
 
 /** The size of an LZMA header: its 5 property bytes and the 8-byte length of what it holds. */
@@ -126,7 +92,7 @@ export const LZMA_HEADER = 13;
 
 /** `data` as ByteArray's LZMA: the 5 property bytes, its length in 8 bytes, little-endian, and the stream. */
 export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array {
-  return lzmaCompress(data, 9);
+  return lzmaEncode(data);
 }
 
 /**
@@ -140,49 +106,27 @@ export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
     throw new CompressedDataError(`${length} bytes in a stream of ${data.length}`);
   }
 
-  const bytes = lzma(data, 0, LZMA_HEADER, length);
-  if (bytes.length !== length) {
+  const result = lzmaDecode(data, 0, LZMA_HEADER, length);
+  if (result.status !== DONE) {
+    throw failure(result);
+  }
+
+  if (result.bytes.length !== length) {
     throw new CompressedDataError("length mismatch");
   }
 
-  return bytes;
-}
-
-/** lzmaDecode, its failures CompressedDataErrors. */
-function lzma(
-  data: Uint8Array,
-  properties: number,
-  start: number,
-  length: number,
-  offset = 0,
-): Uint8Array {
-  try {
-    return lzmaDecode(data, properties, start, length, offset);
-  } catch (e) {
-    if (e instanceof LzmaError) {
-      throw new CompressedDataError(e.message);
-    }
-
-    throw e;
-  }
+  return result.bytes;
 }
 
 /**
  * More than LZMA can expand a byte to. Its best case, a long run of one
  * byte, is matches of 273 bytes that each cost 14 decisions, each at least
  * the 0.022 bits of LZMA's likeliest probability (2017/2048): 7090:1,
- * which lzma1 nears on 32 MB of zeros (6959:1). A header naming more than
- * this of its stream is refused before decoding; one naming less is
+ * which an encoder nears on 32 MB of zeros (6959:1). A header naming more
+ * than this of its stream is refused before decoding; one naming less is
  * decoded, and a decoder that would read past the stream's end fails.
  */
 const MAX_LZMA_RATIO = 8192;
-
-/** What pako's Inflate keeps of its output; its types leave it out. */
-interface InflateStream {
-  output: Uint8Array;
-  next_out: number;
-  avail_out: number;
-}
 
 /**
  * The first `length` bytes of a SWF as an uncompressed one, or fewer if it
@@ -197,47 +141,35 @@ export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array
   }
 
   const want = Math.max(0, length - 8);
-  let body: Uint8Array = new Uint8Array(0);
-  if (signature === "CWS") {
-    const chunks: Uint8Array[] = [];
-    let have = 0;
-    const inflator = new pako.Inflate({ chunkSize: 4096 });
-    inflator.onData = (chunk: Uint8Array) => {
-      chunks.push(chunk);
-      have += chunk.length;
-    };
-    // A little input at a time: a kilobyte of deflate inflates to a megabyte at most.
-    for (let at = 8; at < swf.length && have < want && !inflator.err; at += 1024) {
-      inflator.push(swf.subarray(at, at + 1024), false);
+  const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
+  const options = { offset: 8, partial: true };
+  let out: Uint8Array = new Uint8Array(8);
+  // A kilobyte of the body first, as a header and the first tags need, and
+  // more only while the input runs out before the output: a large SWF is
+  // not copied whole for its first bytes. What decoded before any failure
+  // is kept, so a SWF cut short still has its start.
+  for (let input = 1024; ; input *= 16) {
+    const end = Math.min(swf.length, (signature === "ZWS" ? 17 : 8) + input);
+    let result: Decoded | null = null;
+    if (signature === "CWS") {
+      result = inflate(swf.subarray(8, end), false, want, options);
+    } else if (signature === "ZWS" && swf.length >= 17) {
+      const size = Math.min(want, Math.max(0, fileLength - 8));
+      result = lzmaDecode(swf.subarray(0, end), 12, 17, size, options);
     }
 
-    // What pako holds back until its chunk fills: a SWF cut short ends in it.
-    // (A sync flush does not hand it over: pako 2.1 calls onData for full chunks alone.)
-    const { strm, ended } = inflator as unknown as { strm: InflateStream; ended: boolean };
-    if (have < want && !ended && strm.avail_out !== 0 && strm.next_out > 0) {
-      chunks.push(strm.output.slice(0, strm.next_out));
-      have += strm.next_out;
+    if (result === null) {
+      break;
     }
 
-    body = new Uint8Array(have);
-    let at = 0;
-    for (const chunk of chunks) {
-      body.set(chunk, at);
-      at += chunk.length;
-    }
-  } else if (signature === "ZWS" && swf.length >= 17) {
-    const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
-    try {
-      body = lzma(swf, 12, 17, Math.min(want, Math.max(0, fileLength - 8)));
-    } catch {
-      // Corrupt or cut short: no body to read.
+    out = result.bytes;
+    if (result.status !== TRUNCATED || end === swf.length) {
+      break;
     }
   }
 
-  const out = new Uint8Array(8 + Math.min(want, body.length));
   out.set(swf.subarray(0, 8), 0);
   out[0] = 0x46; // F
-  out.set(body.subarray(0, out.length - 8), 8);
   return out;
 }
 
@@ -258,11 +190,15 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
     throw new CompressedDataError(`a file length of ${fileLength}, shorter than its header`);
   }
 
-  let file: Uint8Array;
+  let result: Decoded;
   if (signature === "CWS") {
-    const body = zlibUncompress(swf.subarray(8));
-    file = new Uint8Array(8 + body.length);
-    file.set(body, 8);
+    // A byte past the header's length tells a longer body from one that fits.
+    result = inflate(swf.subarray(8), false, fileLength - 8 + 1, { offset: 8 });
+    if (result.status === FULL) {
+      throw new CompressedDataError(
+        `a body of more than ${fileLength - 8} bytes where the header says ${fileLength - 8}`,
+      );
+    }
   } else if (signature === "ZWS") {
     if (swf.length < 17) {
       throw new CompressedDataError("truncated");
@@ -274,12 +210,16 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
       throw new CompressedDataError(`a body of ${fileLength - 8} bytes in ${swf.length} of SWF`);
     }
 
-    // Decoded after room for the header, so the file is not copied whole.
-    file = lzma(swf, 12, 17, fileLength - 8, 8);
+    result = lzmaDecode(swf, 12, 17, fileLength - 8, { offset: 8 });
   } else {
     throw new TypeError(`Not a SWF file (signature ${JSON.stringify(signature)})`);
   }
 
+  if (result.status !== DONE) {
+    throw failure(result);
+  }
+
+  const file = result.bytes;
   if (file.length !== fileLength) {
     throw new CompressedDataError(
       `body of ${file.length - 8} bytes where the header says ${fileLength - 8}`,

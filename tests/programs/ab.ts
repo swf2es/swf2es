@@ -40,20 +40,12 @@ if (process.argv[2] === "--snapshot") {
   rmSync(dir, { recursive: true, force: true });
   cpSync(`${root}packages/runtime/dist`, join(dir, "runtime"), { recursive: true });
   cpSync(`${root}packages/codegen/dist-test`, join(dir, "codegen"), { recursive: true });
-  // The runtime imports format, and format pako and lzma1: a copy of each
-  // where the runtime's imports find them, as node resolves a package.
-  const format = join(dir, "node_modules/@swf2es/format");
-  cpSync(`${root}packages/format/dist`, join(format, "dist"), { recursive: true });
-  cpSync(`${root}packages/format/package.json`, join(format, "package.json"));
-  for (const dependency of ["pako", "lzma1"]) {
-    cpSync(
-      `${root}packages/format/node_modules/${dependency}`,
-      join(dir, "node_modules", dependency),
-      {
-        recursive: true,
-        dereference: true,
-      },
-    );
+  // The runtime imports format, and format compress: a copy of each where
+  // the runtime's imports find them, as node resolves a package.
+  for (const name of ["format", "compress"]) {
+    const copy = join(dir, "node_modules/@swf2es", name);
+    cpSync(`${root}packages/${name}/dist`, join(copy, "dist"), { recursive: true });
+    cpSync(`${root}packages/${name}/package.json`, join(copy, "package.json"));
   }
 
   console.log(`snapshot of the builds in ${dir}`);

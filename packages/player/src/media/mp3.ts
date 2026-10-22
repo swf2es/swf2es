@@ -209,6 +209,16 @@ function isHeaderFrame(bytes: Uint8Array, at: number, h: Header): boolean {
   return xing === "Xing" || xing === "Info" || tag(36) === "VBRI";
 }
 
+/** The first frame's gapless metadata, without scanning and retaining every frame of a long sound. */
+export function mp3HeaderFrame(bytes: Uint8Array): [number, number] | null {
+  const first = nextRun(bytes, 0, null);
+  if (!first || !isHeaderFrame(bytes, first[0], first[1])) {
+    return null;
+  }
+
+  return [first[0], Math.min(bytes.length, first[0] + first[1].length)];
+}
+
 /** The whole frames of MP3 bytes back to back, all else left out, a Xing, Info or VBRI header too. */
 export function mp3Bytes(bytes: Uint8Array, mp3: Mp3Frames): Uint8Array<ArrayBuffer> {
   const from = mp3.header ? 2 : 0;
