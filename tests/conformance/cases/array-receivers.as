@@ -71,3 +71,9 @@ t("closure vector map", function():* { return new <int>[1].map(h.same, other); }
 t("closure vector filter", function():* { return new <int>[1].filter(h.same, other).length; });
 t("closure vector forEach", function():* { return new <int>[1].forEach(h.same, other); });
 t("closure vector every", function():* { return new <int>[1].every(h.same, other); });
+
+// A Namespace is no object to avmplus: nothing to walk, and no Vector's source.
+var ns:Namespace = new Namespace("p", "u");
+t("namespace receiver", function():* { log = []; P.forEach.call(ns, rec); return log.length + " " + P.map.call(ns, id).length + " " + P.sort.call(ns) + " " + P.indexOf.call(ns, 1) + " " + P.slice.call(ns) + " " + P.pop.call(ns); });
+t("namespace to Vector", function():* { return Vector.<int>(ns); });
+t("namespace comparator", function():* { return [3, 1].sort(ns); });

@@ -5,7 +5,15 @@ import type { ClassHook } from "../hooks.js";
 import { arrayIndex, NS_Public, namespace, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import { methodKey } from "../traits.js";
-import { AS3, eachElement, elements, type Natives, plain, withStorage } from "./define.js";
+import {
+  AS3,
+  eachElement,
+  elements,
+  isObject,
+  type Natives,
+  plain,
+  withStorage,
+} from "./define.js";
 import { FloatVector, setFloatElement } from "./float-vector.js";
 import { sort } from "./sort.js";
 
@@ -297,7 +305,7 @@ for (const [kind, convert, fill] of VECTORS) {
       }
 
       const source = args[0];
-      if (source === null || source === undefined || typeof source !== "object") {
+      if (!isObject(source)) {
         throw rt.error("TypeError", 1034, rt.describe(source), cls.$it.name);
       }
 

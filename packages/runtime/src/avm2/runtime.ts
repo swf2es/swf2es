@@ -2717,7 +2717,7 @@ export class Runtime {
 
   /** A value as avmplus names it in an error message. */
   describe(v: Value): string {
-    if (v === null || typeof v !== "object") {
+    if (v === null || typeof v !== "object" || v instanceof FloatValue || v instanceof Namespace) {
       return this.toString(v);
     }
 

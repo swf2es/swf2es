@@ -4,6 +4,7 @@
 import type { AsObject, Method, Value } from "../descriptors.js";
 import { FloatValue } from "../float.js";
 import type { ClassHook } from "../hooks.js";
+import { Namespace } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import type { Traits } from "../traits.js";
 
@@ -86,9 +87,9 @@ export function elements(v: Value): Value[] {
   return v?.$a ?? [];
 }
 
-/** Whether `v` is an object to avmplus (AvmCore::isObject): not null, a primitive or a float. */
+/** Whether `v` is an object to avmplus (AvmCore::isObject): not null, a primitive, a float or a Namespace. */
 export const isObject = (v: Value): v is AsObject =>
-  v !== null && typeof v === "object" && !(v instanceof FloatValue);
+  v !== null && typeof v === "object" && !(v instanceof FloatValue) && !(v instanceof Namespace);
 
 /**
  * As getUintProperty, element i of an Array, a Vector or any other object:
