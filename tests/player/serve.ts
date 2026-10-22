@@ -14,6 +14,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 
 /** URL prefixes and the directories they serve. */
 const mounts: [string, string][] = [
+  ["/compress/", join(root, "packages/compress/dist/")],
   ["/format/", join(root, "packages/format/dist/")],
   ["/mp3/", join(root, "packages/mp3/dist/")],
   ["/codegen/", join(root, "packages/codegen/dist/")],
@@ -24,13 +25,12 @@ const mounts: [string, string][] = [
   // The ABCs a SWF's code links against, the player tests' own copies (libraries.ts).
   ["/libraries/", join(here, "out/libraries/")],
   ["/pixi/", join(root, "packages/player/node_modules/pixi.js/dist/")],
-  ["/pako/", join(root, "packages/format/node_modules/pako/dist/")],
-  ["/lzma1/", join(root, "packages/format/node_modules/lzma1/lib/")],
   ["/page/", here],
 ];
 
 export const importMap = {
   imports: {
+    "@swf2es/compress": "/compress/index.js",
     "@swf2es/format": "/format/index.js",
     "@swf2es/mp3": "/mp3/index.js",
     "@swf2es/codegen": "/codegen/index.js",
@@ -42,8 +42,6 @@ export const importMap = {
     "@swf2es/web": "/web/index.js",
     "@swf2es/codegen/codegen.wasm": "/codegen/codegen.wasm",
     "pixi.js": "/pixi/pixi.mjs",
-    pako: "/pako/pako.esm.mjs",
-    lzma1: "/lzma1/index.js",
   },
 };
 

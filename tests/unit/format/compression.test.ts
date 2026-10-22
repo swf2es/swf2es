@@ -187,8 +187,8 @@ test("zlib stops at its stream's end, as zlib does, and refuses what is corrupt"
   assert.deepEqual(zlibUncompress(deflateCompress(body), true), body);
 });
 
-test("compressing twice gives the same bytes: pako's options are not left changed", () => {
-  // pako's deflateRaw sets raw on the options it is given; a later zlib stream must keep its header.
+test("compressing twice gives the same bytes: nothing of one call is left for the next", () => {
+  // A raw stream between two zlib ones: the second must keep its header.
   const first = zlibCompress(body);
   deflateCompress(body);
   assert.deepEqual(zlibCompress(body), first);

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // declared; this test guards the declarations themselves.
 const allowed: Record<string, string[]> = {
   compress: [],
-  format: [],
+  format: ["compress"],
   mp3: [],
   codegen: ["format"],
   runtime: ["format"],
