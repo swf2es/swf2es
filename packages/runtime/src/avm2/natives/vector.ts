@@ -27,7 +27,8 @@ const VECTORS: [string, (rt: Runtime, cls: AsObject, v: Value) => Value, Value][
   ["Vector$int", (rt, _cls, v) => rt.toInt(v), 0],
   ["Vector$uint", (rt, _cls, v) => rt.toUint(v), 0],
   ["Vector$double", (rt, _cls, v) => rt.toNumber(v), 0],
-  ["Vector$object", (rt, cls, v) => rt.coerce(v, cls.$param ?? null), null],
+  // Vector.<*> holds Objects, as ObjectVectorObject does: undefined is null there.
+  ["Vector$object", (rt, cls, v) => rt.coerce(v, cls.$param ?? "Object"), null],
 ];
 
 for (const [kind] of VECTORS) {
