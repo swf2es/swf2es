@@ -427,7 +427,7 @@
   "avm1/movieclip_gettextsnapshot": {"matched":112,"lines":112,"traced":112,"error":null},
   "avm1/movieclip_hittest": {"matched":93,"lines":93,"traced":93,"error":null},
   "avm1/movieclip_hittest_shapeflag": {"matched":134,"lines":339,"traced":339,"error":null},
-  "avm1/movieclip_in_removed_button": {"matched":0,"lines":4,"traced":4,"error":null},
+  "avm1/movieclip_in_removed_button": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm1/movieclip_init_object": {"matched":5,"lines":5,"traced":5,"error":null},
   "avm1/movieclip_invalid_get_bounds_1": {"matched":75,"lines":75,"traced":75,"error":null},
   "avm1/movieclip_invalid_get_bounds_2": {"matched":75,"lines":75,"traced":75,"error":null},
