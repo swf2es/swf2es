@@ -23,5 +23,6 @@ export {
 export { ExternalInterfaceError, type PageValue } from "./external.js";
 export { type Placement, place, type ScaleMode, scaleMode } from "./layout.js";
 export { flashAttributes, isFlash, replaceFlash, watchFlash } from "./replace.js";
+export type { Stage3DSurfaceFactory } from "./stage3d.js";
 
 defineElement();

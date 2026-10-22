@@ -32,6 +32,7 @@
     "tests/web/page.ts",
     "tests/context3d/page.ts",
     "tests/context3d/stress-page.ts",
-    "tests/context3d/reclamation-page.ts"
+    "tests/context3d/reclamation-page.ts",
+    "tests/context3d/host-page.ts"
   ]
 }

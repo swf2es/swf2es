@@ -3,6 +3,8 @@ import type { Context3D, Context3DLifecycle, Stage3DHost } from "@swf2es/player/
 export interface Stage3DSurface {
   canvas: HTMLCanvasElement;
   context: Context3D;
+  /** Called once after resource disposal and listener removal, including failed attachment. */
+  destroy?: () => void;
 }
 
 /** The caller supplies a positioned, clipped parent, with the display-list canvas
@@ -30,6 +32,7 @@ export function stage3DCanvasHost(
         detach();
         surface.context.dispose();
         surface.canvas.remove();
+        surface.destroy?.();
         throw error;
       }
 
@@ -50,6 +53,7 @@ export function stage3DCanvasHost(
         surface.detach();
         surface.canvas.remove();
         surfaces.delete(slot);
+        surface.destroy?.();
       }
     },
   };

@@ -10,6 +10,7 @@ node --test tests/context3d/agal.test.ts
 node tests/context3d/run.ts
 node tests/context3d/stress.ts
 node tests/context3d/reclamation.ts
+node tests/context3d/host.ts
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
 ```
@@ -701,9 +702,10 @@ under `out/composition-oracle/`, with sample values in
 ```sh
 node tests/context3d/composition-oracle.ts
 node tests/context3d/composition-oracle.ts --update
+node tests/context3d/viewport-oracle.ts
 ```
 
-This is **not enabled in the player, website, desktop app or game preview**.
+This is **off by default in the player, website and desktop app**.
 The test imports `@swf2es/player/context3d`, installs natives before loading
 playerglobal and explicitly tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
 float and packed-byte vertex attributes, vector/matrix uploads, depth/stencil testing, culling, blending,
@@ -740,8 +742,29 @@ until restoration or teardown and detaches both listeners on removal. The
 composition references and repeated-load stress tests use this host and the
 built package entries, including weak-reference checks for retired hosts.
 
-Enabling production playback is a later change. Web/desktop integration still
-needs viewport sizing/scaling and presentation ownership through the normal
-host lifecycle. Before enabling it, exercise real samples with repeated
-loads/scene changes, resize, host removal and context loss. Broader formats,
-profiles and validation gaps remain listed above.
+The web element can opt in with `configure({ stage3D: surfaceFactory })`, as shown
+in the package README. Each load owns its layers, and tears them down before
+destroying Scripting, including replacement, removal, failed attachment and
+cancelled startup. Default loads retain the unavailable-context fallback.
+An optional surface `destroy` callback releases its browser context after its
+resources, loss listeners and DOM attachment are gone.
+
+`host.ts` runs the actual web element against the nine AIR composition states and
+`viewport-reference.json`: eight AIR layouts, 18 pixel points each, covering
+four scale modes with top-left and centered alignment. AIR scales a viewport's
+position but leaves its configured width/height in pixels. Checks cover resize,
+DPR 2, zero-size hosts, overlapping players, explicit reload, queued creation,
+cancelled library startup, attachment rollback and real context loss/restoration.
+Twenty repeated loads alternate explicit destroy and DOM removal, with extra
+reloads; every handle/listener is released and retired players, scripting,
+backends, canvases and elements must be collectible. Heap plus backing storage
+may grow at most 1 MiB between warm load 4 and load 20.
+
+Web teardown also disposes its display-list scene before its renderer. The web
+suite checks collection of device-font scenes held by Pixi's measurement cache,
+including when Stage3D is disabled.
+
+Desktop controls and production enablement remain later work. The existing AS
+Stage.scaleMode/align setters and dynamic stage dimensions/resize events remain
+unimplemented; embedding attributes choose placement in this slice. Broader
+formats, profiles and validation gaps remain listed above.

@@ -214,7 +214,7 @@ export class PixiView {
     return bindPointer(this.renderer, this.stage, player);
   }
 
-  /** Destroy what this fresh view built, and its containers; what it borrowed stays its owner's. */
+  /** Destroy the view's containers and what it built; borrowed resources stay their owner's. */
   dispose(root: PixiContainer): void {
     this.planes.dropAll();
 

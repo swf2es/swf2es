@@ -10,6 +10,7 @@ import {
 } from "@swf2es/player";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
 import { type Placement, place, type ScaleMode } from "./layout.js";
+import type { Stage3DSession } from "./stage3d.js";
 
 /** How the element shows its player, read again as the page changes them. */
 export interface Look {
@@ -49,10 +50,14 @@ export class Playback {
     private readonly renderer: Renderer,
     private readonly look: () => Look,
     private readonly report: (error: unknown) => void,
+    private readonly stage3D: Stage3DSession | null,
   ) {
     const canvas = renderer.canvas as HTMLCanvasElement;
     canvas.style.position = "absolute";
     canvas.style.display = "block";
+    if (stage3D) {
+      canvas.style.zIndex = "1";
+    }
     box.append(canvas);
     this.view = new PixiView(renderer);
     if (scripting) {
@@ -86,6 +91,7 @@ export class Playback {
     scripting: Scripting | null,
     look: () => Look,
     report: (error: unknown) => void,
+    stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
     const renderer = await autoDetectRenderer({
       preference: "webgl",
@@ -94,11 +100,11 @@ export class Playback {
       resolution: 1,
       autoDensity: false,
       antialias: false,
-      backgroundAlpha: look().wmode === "transparent" ? 0 : 1,
+      backgroundAlpha: stage3D || look().wmode === "transparent" ? 0 : 1,
       // Filter-backed blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
-    return new Playback(box, player, scripting, renderer, look, report);
+    return new Playback(box, player, scripting, renderer, look, report, stage3D);
   }
 
   /** Play and draw on every animation frame, from now. */
@@ -112,6 +118,11 @@ export class Playback {
   changed(): void {
     this.dirty = true;
     this.layout();
+  }
+
+  /** A host layer changed composition without changing stage placement. */
+  invalidate(): void {
+    this.dirty = true;
   }
 
   private readonly tick = (now: number) => {
@@ -192,8 +203,11 @@ export class Playback {
     // A script may set Stage.color, which moves `changes`: read it as it draws.
     const color = look.bgcolor ?? this.player.background;
     const transparent = look.wmode === "transparent";
-    this.renderer.background.color = color;
-    this.renderer.background.alpha = transparent ? 0 : 1;
+    const overlay = this.stage3D?.active ?? false;
+    // A transparent clear must contain no RGB for the browser's premultiplied
+    // compositor; the stage color belongs below the opaque Stage3D viewports.
+    this.renderer.background.color = overlay ? 0 : color;
+    this.renderer.background.alpha = transparent || overlay ? 0 : 1;
     // What showAll leaves around the stage is the stage's colour, as in Flash.
     this.box.style.background = transparent ? "" : `#${color.toString(16).padStart(6, "0")}`;
     this.drawn = this.player.changes;
@@ -234,6 +248,7 @@ export class Playback {
     }
 
     this.placed = placed;
+    this.stage3D?.layout(placed, this.player.width, this.player.height);
     this.dirty = true;
   }
 
@@ -259,6 +274,8 @@ export class Playback {
     }
 
     this.view.dropSpares();
+    // Cached text measurements hold styles; destroying the scene detaches their text listeners.
+    this.view.dispose(this.view.stage);
 
     // Pixi loses the GL context as it goes, which a browser allows only so many of.
     this.renderer.destroy({ removeView: true });

@@ -137,7 +137,20 @@ The caller supplies the clipped stage container and puts the display-list canvas
 above Stage3D slots 0..3. A lost surface stays attached until restoration or
 teardown; removing it detaches its listeners. `tests/context3d` exercises these
 package entries against AIR references and repeated-load resource checks.
-Production web/desktop integration remains a separate opt-in change.
+`@swf2es/web` accepts an experimental `configure({ stage3D: surfaceFactory })`
+for subsequent loads. It lazily installs the optional bindings before libraries,
+owns each load's layers and closes them before destroying Scripting. Its display
+canvas supports transparency from creation and clears to transparent black while
+Stage3D contexts exist; the stage background sits below the opaque viewports.
+An isolated stack keeps different players' layers from interleaving. Viewport
+positions follow embedding scale/alignment, while configured buffer dimensions
+stay in pixels, as AIR's window capture verifies. Resize/DPR changes never
+silently reconfigure AS buffers. An optional surface `destroy` hook releases the
+browser context after resources and listeners are gone, also on attachment failure.
+Web teardown disposes the display-list scene before the renderer so cached font
+measurements cannot retain the scene through text style listeners.
+Default playback still reports unavailable Context3D. Desktop controls, dynamic
+AS stage size/scale/align handling and production enablement remain separate work.
 
 `format`'s `readActions` lists a SWF's AVM1 action blocks ([avm1.md](avm1.md)):
 DoAction, DoInitAction, a PlaceObject2 or 3's clip actions record by record

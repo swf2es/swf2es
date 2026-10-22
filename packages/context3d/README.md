@@ -9,7 +9,7 @@ This package does not enable Stage3D playback. The separate
 `@swf2es/player/context3d` entry installs experimental Flash bindings, and
 `@swf2es/player-hosts/stage3d` places canvases and attaches browser loss/restoration
 listeners. Install the bindings before loading playerglobal, and call their
-returned teardown before destroying Scripting. Normal playback still reports
+returned teardown before destroying Scripting. Default playback still reports
 unavailable Context3D through ErrorEvent #3702.
 
 The host supplies a positioned, clipped stage container, with the transparent
@@ -35,6 +35,9 @@ browser context loss, the old surface stays attached so restoration can trigger
 creation of a new context. The host detaches both listeners when removing it.
 Uploads copy source storage before returning; `read()` reuses its output until
 the next read. No AS objects or DOM objects cross the backend's core interface.
+An optional `Stage3DSurface.destroy` hook runs once when the surface is removed,
+after backend disposal and listener removal; it also runs after failed attachment.
+Use it to release the browser context without interfering with loss/restoration.
 
 The Flash adapter reclaims resources after their AS wrappers become unreachable.
 Active vertex, program, texture and render-target bindings keep their wrappers
@@ -47,8 +50,46 @@ must dispose them or the context.
 
 The current API and validation are experimental. Supported operations, AIR
 references, unsupported formats/profiles and lifecycle stress tests are tracked
-in [tests/context3d](../../tests/context3d/README.md). Web/desktop integration and
-enabling production playback are separate work.
+in [tests/context3d](../../tests/context3d/README.md). Stage3D playback remains off
+by default. A web host can explicitly opt in before loading its first player:
+
+```ts
+import { configure } from "@swf2es/web";
+import { WebGLContext3D } from "@swf2es/context3d/webgl";
+
+configure({
+  stage3D: () => {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2", {
+      alpha: false, antialias: false, depth: false, stencil: false,
+      preserveDrawingBuffer: true,
+    });
+    if (!gl) {
+      throw new Error("WebGL2 is unavailable");
+    }
+
+    return {
+      canvas,
+      context: new WebGLContext3D(gl),
+      destroy: () => gl.getExtension("WEBGL_lose_context")?.loseContext(),
+    };
+  },
+});
+```
+
+Each requested slot needs a fresh surface. `configure({ stage3D: null })` disables
+the experiment for subsequent loads. The web element owns native installation,
+composition, cancellation, restoration and teardown for each load. GPU backend
+selection stays with the host; the default web entry does not eagerly import
+the optional bindings or a backend. No new dependencies are required by `web`.
+
+Stage3D positions follow the embedding's `scale`/`salign` placement. Configured
+buffer sizes remain in pixels; resizing or changing device pixel ratio never
+implicitly reallocates them. The host clips the viewports, makes the display
+list transparent while contexts exist, and keeps overlapping players' canvases
+in separate stacks. ActionScript changes to `Stage.scaleMode`/`align`, dynamic
+stage dimensions/resize events and best-resolution buffers remain separate work.
+Desktop controls and enabling the public demo remain later changes.
 
 A future WebGPU backend can reuse the Flash adapter, resource contracts and AIR
 fixtures. It still needs AGAL-to-WGSL translation, GPU resource/binding handling,

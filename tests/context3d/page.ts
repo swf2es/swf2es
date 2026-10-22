@@ -225,10 +225,21 @@ export function resourceLimits(): { passed: boolean } {
 export function canvasHost(): { passed: boolean } {
   const parent = document.createElement("div");
   const surfaces: ReturnType<typeof create>[] = [];
+  let destroyed = 0;
   const host = stage3DCanvasHost(parent, () => {
     const surface = create();
     surfaces.push(surface);
-    return { canvas: surface.canvas, context: surface.backend };
+    return {
+      canvas: surface.canvas,
+      context: surface.backend,
+      destroy: () => {
+        check(
+          surface.backend.disposed && surface.live.size === 0,
+          "surface destroyed before resources",
+        );
+        destroyed++;
+      },
+    };
   });
   let lost = 0;
   let restored = 0;
@@ -261,6 +272,7 @@ export function canvasHost(): { passed: boolean } {
     context.dispose();
     host.remove(2);
     host.remove(2);
+    check(Number(destroyed) === 1, "surface destroy was repeated or omitted");
     check(!surface.canvas.parentElement && surface.live.size === 0, "surface not released");
     surface.canvas.dispatchEvent(new Event("webglcontextlost"));
     surface.canvas.dispatchEvent(new Event("webglcontextrestored"));
@@ -276,12 +288,14 @@ export function canvasHost(): { passed: boolean } {
       parent.append = append;
     }
     const failed = surfaces[1];
+    check(Number(destroyed) === 2, "failed attachment omitted surface destroy");
     check(failed.backend.disposed && failed.live.size === 0, "failed attachment leaked handles");
     failed.canvas.dispatchEvent(new Event("webglcontextlost"));
     check(lost === 1, "failed attachment leaked listeners");
     const retry = host.create(1, lifecycle);
     retry.dispose();
     host.remove(1);
+    check(Number(destroyed) === 3, "retry omitted surface destroy");
     check(parent.children.length === 0, "canvas host retained retired surfaces");
   } finally {
     for (let i = 0; i < surfaces.length; i++) {
