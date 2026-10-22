@@ -220,7 +220,7 @@ test("costly stream catch-up yields when its CPU budget is spent", async () => {
   };
   try {
     clock.pass(2000);
-    assert.equal(player.advance(2000), 2);
+    assert.equal(player.advance(2000), 10);
     assert.equal(player.advance(0), 2, "the remaining debt survives for another bounded turn");
   } finally {
     if (previous) {
@@ -231,6 +231,25 @@ test("costly stream catch-up yields when its CPU budget is spent", async () => {
 
     player.destroy();
   }
+});
+
+test("render lag gives affordable catch-up frames a larger CPU budget", async (t) => {
+  const { clock, player, clip } = await avm1();
+  let cost = 0;
+  t.mock.method(performance, "now", () => cost);
+  const advance = clip.advance.bind(clip);
+  clip.advance = () => {
+    cost += 3;
+    advance();
+  };
+  for (let i = 0; i < 20; i++) {
+    clock.pass(250);
+    player.advance(250);
+  }
+
+  assert.ok(clip.currentFrame >= 125 && clip.currentFrame <= 127, `${clip.currentFrame}`);
+  assert.equal(clock.plays.length, 1);
+  player.destroy();
 });
 
 test("stopping the stream in a catch-up frame cancels the rest of the batch", async () => {

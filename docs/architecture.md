@@ -2051,8 +2051,10 @@ that batch. A stop, seek or removal cancels the old stream's remaining
 catch-up. The device cursor, rather than wall time, keeps a suspended
 AudioContext from requesting frames for audio it has not played. This
 applies to streams in nested clips and AVM1 content loaded by AS3 too;
-event sounds keep the ordinary pacing. Extra frames yield after an 8 ms
-CPU budget, as well as the frame-count bound, so a long stall does not
+event sounds keep the ordinary pacing. Extra frames get half the previous
+presentation interval as a CPU budget, bounded to 8–50 ms, so sustained
+render lag still leaves time for affordable timeline work. The budget and
+frame-count bound make batches yield, so a long stall does not
 block input indefinitely. This cannot guarantee sync when scripts alone
 cannot run at the required rate. Native Flash 32,
 with a 600 ms busy loop at 25 fps, ran the streamed timeline's frames

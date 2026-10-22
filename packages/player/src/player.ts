@@ -32,7 +32,8 @@ import type { Scripting } from "./scripting.js";
 const MAX_FRAMES_PER_CALL = 5;
 /** A stream may catch up further when its scripts are cheap; input still gets a bounded turn. */
 const MAX_STREAM_FRAMES = 60;
-const STREAM_BUDGET_MS = 8;
+const MIN_STREAM_BUDGET_MS = 8;
+const MAX_STREAM_BUDGET_MS = 50;
 /** The host's recent calls to advance() whose lower median is its typical interval. */
 const INTERVALS = 9;
 /** Calls seen before the typical interval is trusted; until then, a frame per call at most. */
@@ -461,7 +462,13 @@ export class Player {
       n = Math.max(n, Math.min(MAX_STREAM_FRAMES, this.streamFrames()));
     }
 
-    const deadline = n > ordinary ? performance.now() + STREAM_BUDGET_MS : Infinity;
+    // Render lag leaves fewer calls to do the same timeline work. Give
+    // those calls more CPU time, while still yielding between batches.
+    const deadline =
+      n > ordinary
+        ? performance.now() +
+          Math.max(MIN_STREAM_BUDGET_MS, Math.min(MAX_STREAM_BUDGET_MS, passed / 2))
+        : Infinity;
     timers?.hostPassed(passed);
     try {
       for (let i = 0; i < n; i++) {
