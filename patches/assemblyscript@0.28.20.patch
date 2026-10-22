@@ -1,0 +1,42 @@
+diff --git a/dist/asc.js b/dist/asc.js
+index a4b24df5579e995d1a79d1eaa3a91d349e00ac9c..dfcc1d0c54995a6d96920f792efc1da0797aef30 100644
+--- a/dist/asc.js
++++ b/dist/asc.js
+@@ -17602,7 +17602,15 @@ function genDigits(buffer: usize, w_frc: u64, w_exp: i32, mp_frc: u64, mp_exp: i
+     --kappa;
+     if (p2 < delta) {
+       _K += kappa;
+-      wp_w_frc *= <u64>load<u32>(POWERS10 + (<usize>-kappa << alignof<u32>()));
++      // swf2es: POWERS10 ends at 10^9, and from the tenth fractional digit
++      // on this read past it, into whatever static data followed. 0 leaves
++      // the last digit unrounded, as every build has printed it: the word
++      // after the table was padding, and from the eleventh digit no u32 is
++      // large enough to round (at digit k it takes more than 10^(k-1)/2).
++      let index = -kappa;
++      wp_w_frc = index < 10
++        ? wp_w_frc * <u64>load<u32>(POWERS10 + (<usize>index << alignof<u32>()))
++        : 0;
+       grisuRound(buffer, len, delta, p2, one_frc, wp_w_frc);
+       return len;
+     }
+diff --git a/std/assembly/util/number.ts b/std/assembly/util/number.ts
+index ebd9d093cde4b30d7af814d0d457306cbe3676b0..082e3de54a8768442b154ba90d125baf3bdebb50 100644
+--- a/std/assembly/util/number.ts
++++ b/std/assembly/util/number.ts
+@@ -652,7 +652,15 @@ function genDigits(buffer: usize, w_frc: u64, w_exp: i32, mp_frc: u64, mp_exp: i
+     --kappa;
+     if (p2 < delta) {
+       _K += kappa;
+-      wp_w_frc *= <u64>load<u32>(POWERS10 + (<usize>-kappa << alignof<u32>()));
++      // swf2es: POWERS10 ends at 10^9, and from the tenth fractional digit
++      // on this read past it, into whatever static data followed. 0 leaves
++      // the last digit unrounded, as every build has printed it: the word
++      // after the table was padding, and from the eleventh digit no u32 is
++      // large enough to round (at digit k it takes more than 10^(k-1)/2).
++      let index = -kappa;
++      wp_w_frc = index < 10
++        ? wp_w_frc * <u64>load<u32>(POWERS10 + (<usize>index << alignof<u32>()))
++        : 0;
+       grisuRound(buffer, len, delta, p2, one_frc, wp_w_frc);
+       return len;
+     }
