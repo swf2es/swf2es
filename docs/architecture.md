@@ -4692,7 +4692,8 @@ The module compiles once before ActionScript libraries run, and an extraction
 instantiates a decoder only on first use. Its fixed 128 KiB workspace holds
 one frame's encoded bytes and interleaved PCM, copied into the sound's cached
 channel buffers. No host functions are imported. The generated
-29 KB binary is embedded in the package; ordinary builds verify its input digest, and CI rebuilds it with the
+41 KB binary, with wasm SIMD for what LLVM vectorises, is embedded in the
+package; ordinary builds verify its input digest, and CI rebuilds it with the
 pinned Zig 0.17.0, whose clang compiles minimp3 unchanged. A first extract
 therefore supplies samples synchronously, including inside `SampleDataEvent`
 callbacks, even without an audio device. Extracted samples are weakly cached
