@@ -38,7 +38,7 @@ pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
 pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
 pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests in swf2es, vs
-                              # swf2es-baseline.json (after pnpm tamarin compiled them)
+                              # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames
