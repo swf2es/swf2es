@@ -331,12 +331,12 @@ export interface Codegen {
    */
   compileActionUnit(bytes: Uint8Array, actions: ActionBlocks, unit: ActionUnit): CompiledUnit;
   /**
-   * Let go of the copy of a SWF compileActionUnit keeps, as the host lets
-   * the SWF go; it is let go too once `bytes` are collected, and when units
-   * of others SWFs are asked for since.
+   * Let go of the copy of a SWF compileActionBlocks and compileActionUnit
+   * keep, as the host lets the SWF go; it is let go too once `bytes` are
+   * collected, and when blocks or units of others SWFs are asked for since.
    */
   releaseActions(bytes: Uint8Array): void;
-  /** How many SWFs compileActionUnit keeps a copy of, and how many times it has copied one in. */
+  /** How many SWFs compileActionBlocks and compileActionUnit keep a copy of, and how many times they have copied one in. */
   heldActions(): { held: number; copies: number };
 }
 
@@ -417,9 +417,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       Int32Array.from(actions.blocks, (b) => b.offset),
       Int32Array.from(actions.blocks, (b) => b.length),
     ] as const;
-  // The SWFs whose units compileActionUnit compiles, which wasm holds by a
-  // handle each: the few used last, so that units of SWFs that alternate
-  // do not copy them in again, each let go as its bytes are collected.
+  // The SWFs whose blocks or units compileActionBlocks and compileActionUnit
+  // compile, which wasm holds by a handle each: the few used last, so that
+  // blocks and units of SWFs that alternate do not copy them in again, each
+  // let go as its bytes are collected.
   const holding = new WeakMap<Uint8Array, { handle: number; actions: ActionBlocks }>();
   const holds: number[] = [];
   let handles = 0;
@@ -668,18 +669,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return new Map();
       }
 
-      const [offsets, lengths] = ranges(actions);
-      const address = wasm.actionsEmitEachBytes(
-        bytes,
-        offsets,
-        lengths,
-        actions.version,
-        indices.join(","),
-        true,
-      );
+      // The SWF held, as for units: a block needs it whole, and copying it
+      // in for each block cost a copy of the SWF in codegen's memory
+      // beside the one held for units, and the time to copy it.
+      const handle = hold(bytes, actions);
+      const address = wasm.actionsHeldEmitEachBytes(handle, actions.version, indices.join(","));
       const text = handed(address, wasm.outputLength());
-      // Each lazy block copies the whole backing SWF into wasm. Its
-      // analysis and that copy can go before the next block runs.
+      // A block's analysis can go before the next block runs.
       return parseEntries(collected(text, true));
     },
     compileActionUnit(bytes, actions, { at, end, bound, five }) {
@@ -717,7 +713,7 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
-/** How many SWFs whose units are compiled codegen holds a copy of at most. */
+/** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
 // Large method entries should not accumulate sixty-four calls of garbage.
 const COLLECT_METHOD_BYTES = 256 * 1024;

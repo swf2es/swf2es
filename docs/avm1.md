@@ -114,16 +114,19 @@ placeholder is replaced, so defined functions and ExternalInterface still
 identify the code's SWF by that array. AVM1 needs no domain: a block
 links to nothing at compile time, every name resolves at run time.
 
-Each per-block compilation copies the backing SWF into Wasm; the wrapper
-collects after that call rather than letting those copies accumulate
-across its usual collection interval. This bounds the compiler's working
-memory by the block being compiled, rather than all the SWF's output.
-Code for scenes never entered is never generated or parsed. Units (below)
-are smaller and many, so the wrapper keeps the SWFs they are of in Wasm
-from one to the next instead (`actionsHold`), by a handle each: the four
-whose units it compiled last, each let go as the player lets its SWF go
+A block needs the whole SWF, which its backward jumps may reach, and so
+do units (below), which are smaller and many. The wrapper copies a SWF
+into Wasm once and keeps it there from one block or unit to the next
+(`actionsHold`), by a handle each: the four whose blocks or units it
+compiled last, each let go as the player lets its SWF go
 (`releaseActions`, as a movie is unloaded or the player destroyed) or
-its bytes are collected.
+its bytes are collected. Copying it in for each block took the time to
+copy the SWF, some 2 ms a block for one of 35 MB, and a second copy in
+the compiler's memory beside the one held for its units. The wrapper
+collects after each block, so that a block's analysis does not
+accumulate across its usual collection interval: the compiler's working
+memory is bounded by the block being compiled, rather than all the SWF's
+output. Code for scenes never entered is never generated or parsed.
 Entries cross the Wasm boundary as UTF-8 bytes decoded by the wrapper,
 as whole modules do, avoiding the bindings' per-character string lifting
 when an obfuscated block expands to megabytes.

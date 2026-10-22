@@ -1357,7 +1357,7 @@ test("each block compiled alone is its entry in the module, in the test and rele
   });
 });
 
-test("lazy blocks reclaim their full SWF copy before the next compilation", async () => {
+test("lazy blocks copy their SWF in once, which its units then share", async () => {
   const codegen = await createCodegen(
     await WebAssembly.compile(
       await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
@@ -1371,6 +1371,30 @@ test("lazy blocks reclaim their full SWF copy before the next compilation", asyn
 
   const memory = codegen.usage().memory;
   assert.ok(memory < 32 * 1024 * 1024, `per-block compilation grew memory to ${memory} bytes`);
+  assert.deepEqual(codegen.heldActions(), { held: 1, copies: 1 });
+
+  // A unit of the same SWF compiles from the copy its blocks made, and a
+  // block after it too, each byte for byte its entry in the module.
+  const unit = unitActions();
+  const swf = {
+    version: 6,
+    blocks: [{ offset: unit.offset, length: unit.bytes.length - unit.offset }],
+  };
+  const compiled = codegen.compileActions(unit.bytes, swf);
+  assert.deepEqual(codegen.compileActionBlocks(unit.bytes, swf, [0]).get(0), compiled.entries[0]);
+  const units = [...compiled.units.values()];
+  assert.ok(units.length > 0);
+  for (const { unit: u, code } of units) {
+    assert.equal(codegen.compileActionUnit(unit.bytes, swf, u).code, code);
+  }
+
+  assert.deepEqual(codegen.compileActionBlocks(unit.bytes, swf, [0]).get(0), compiled.entries[0]);
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 2 });
+
+  // Let go, its next block copies it in again.
+  codegen.releaseActions(unit.bytes);
+  codegen.compileActionBlocks(unit.bytes, swf, [0]);
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 3 });
 });
 
 /** Entries 2, 0, 1 of `entries`, in that order, as actionsEmitEach writes them. */
