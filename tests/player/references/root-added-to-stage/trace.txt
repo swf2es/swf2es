@@ -1,0 +1,3 @@
+constructed
+addedToStage true false frames 0
+entered 2 true

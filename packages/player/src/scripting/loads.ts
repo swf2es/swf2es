@@ -788,11 +788,16 @@ export class Loads {
   /**
    * The main SWF, all of it loaded, as its LoaderInfo tells it: INIT, then
    * COMPLETE, at the end of its first frame, after EXIT_FRAME, as Flash
-   * (the corpus's loaderinfo_events and delayed_symbolclass).
+   * (the corpus's loaderinfo_events and delayed_symbolclass). Where its
+   * document class's constructor threw (`constructed` false), Flash sends
+   * COMPLETE alone (measured in adl).
    */
-  mainLoaded(info: AsObject): void {
+  mainLoaded(info: AsObject, constructed = true): void {
     this.frameEnds.push(() => {
-      dispatchEvent(this.s, info, this.s.event("init"));
+      if (constructed) {
+        dispatchEvent(this.s, info, this.s.event("init"));
+      }
+
       dispatchEvent(this.s, info, this.s.event("complete"));
     });
   }

@@ -8606,6 +8606,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "root-added-to-stage",
+    swf: (abc) => bare(abc, 1, "RootAddedToStage"),
+    script: "RootAddedToStage",
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "tab-stop-natives",
     swf: (abc) => bare(abc, 1, "TabStopNatives"),
     script: "TabStopNatives",

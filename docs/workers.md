@@ -137,6 +137,12 @@ the demo site isolated by its service worker, and in the desktop app:
 | `09_Pthreads/pthreads.swf` | runs: the mouse's moves reach its thread, which prints each |
 | `11_OpenMP/mandel.swf` | runs; each click adds a thread, up to 6 measured: its own count of frames a second stays between about 55 and 140 at every count, as its zoom deepens, with no gain from more threads |
 
+`09_Pthreads/pthread_swc2.swf` traced nothing because its document class
+starts on `addedToStage`, which Flash and AIR send a main SWF's root once
+its constructor returns, and swf2es did not. Since it does, the sample
+starts its two threads in node's player as it does as AIR's main content
+(adl), each `AlcWorkerSprite::run` traced.
+
 Crossbridge therefore needs, all at once: workers, a shareable ByteArray
 whose memory every thread sees (as domain memory), Mutex and Condition
 across threads with real blocking in workers and short blocking on the

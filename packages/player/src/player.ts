@@ -196,17 +196,20 @@ export class Player {
     // A document class's constructor that throws is reported, and the SWF
     // plays on as far as it got, as in Flash and Ruffle: the object is the
     // root's from its super() on, its listeners and frame scripts kept.
+    let constructed = false;
     try {
       s.constructAs(
         this.root,
         s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),
       );
+      constructed = true;
+      s.lifecycle.rootConstructed(this.root);
     } catch (error) {
       s.reportUncaught(error);
     }
 
     info.$content = this.root.object ?? null;
-    s.loads.mainLoaded(info);
+    s.loads.mainLoaded(info, constructed);
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;
