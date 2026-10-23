@@ -8,7 +8,7 @@
 /** How long the first visit waits for the service worker before it plays without it. */
 const WAIT = 4000;
 
-/** Set while a reload for isolation is under way, so that one that does not isolate the page is the last. */
+/** When the tab last loaded the page again for isolation. */
 const RELOADING = "swf2es-isolation-reload";
 
 function session(): Storage | null {
@@ -19,23 +19,50 @@ function session(): Storage | null {
   }
 }
 
-/** Load the page again, once: false if this tab already did so to no end. */
+/** How soon after a reload for isolation a page counts as the one it loaded. */
+const HOLD = 10_000;
+
+/**
+ * Load the page again, isolated, unless this page is what such a reload
+ * just loaded, which it did not isolate: then false, and the page plays
+ * as it is. A reload the user asked for, even at once, may try again.
+ */
 function reloadOnce(): boolean {
   const storage = session();
-  if (!storage || storage.getItem(RELOADING)) {
+  if (!storage) {
     return false;
   }
 
-  storage.setItem(RELOADING, "1");
-  location.reload();
+  const last = Number(storage.getItem(RELOADING) ?? Number.NaN);
+  const entry = performance.getEntriesByType("navigation")[0] as
+    | PerformanceNavigationTiming
+    | undefined;
+  const since = performance.timeOrigin - last;
+  if (entry?.type === "navigate" && since >= 0 && since < HOLD) {
+    return false;
+  }
+
+  storage.setItem(RELOADING, String(Date.now()));
+  // A navigation, not a reload: a reload into the isolated page's group of
+  // browsing contexts leaves this page in the back/forward cache, and
+  // Chrome gives it back, unisolated, for a later reload that bypasses the
+  // worker. Replacing it leaves nothing to give back.
+  location.replace(location.href);
   return true;
 }
+
+// A page unisolated that comes back from the back/forward cache, its code
+// long past its own reload, is loaded again.
+addEventListener("pageshow", (e) => {
+  if (e.persisted && !crossOriginIsolated && isSecureContext && navigator.serviceWorker) {
+    reloadOnce();
+  }
+});
 
 /** Whether the page goes on: false while it is about to load again, isolated. */
 export async function isolate(): Promise<boolean> {
   const container = navigator.serviceWorker;
   if (crossOriginIsolated) {
-    session()?.removeItem(RELOADING);
     return true;
   }
 
