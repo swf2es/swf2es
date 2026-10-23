@@ -58,6 +58,7 @@ import {
   isNumeric,
   isStaticInit,
   keeps,
+  typeTestLate,
   wraps,
 } from "./values";
 
@@ -2446,12 +2447,9 @@ export class MethodEmitter {
         call2(this, "rt.instanceOf(", i);
         return true;
       case ops.OP_istypelate:
-        this.assign(i);
-        call2(this, "rt.isTypeLate(", i);
-        return true;
       case ops.OP_astypelate:
         this.assign(i);
-        call2(this, "rt.asTypeLate(", i);
+        typeTestLate(this, i, <u8>op);
         return true;
       case ops.OP_istype:
       case ops.OP_astype:

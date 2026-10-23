@@ -18,6 +18,7 @@ import {
   TRAITS_Instance,
   TYPE_Any,
 } from "../link/traits";
+import { CONSTANT } from "./copies";
 import { MethodEmitter } from "./method";
 import { isClassRef, typeRef } from "./refs";
 
@@ -229,6 +230,57 @@ export function call2(em: MethodEmitter, fn: string, i: u32): void {
   em.out.text(", ");
   em.reg(em.src(i, 1));
   em.out.text(")");
+}
+
+/**
+ * istypelate or astypelate: against a class the verifier knows the
+ * operand is (or null), as `getlex C` of a script's class, an object of
+ * that very class answers from its traits in place, and anything else
+ * from the runtime, which also throws for a null class. Only a class
+ * whose test is of traits: Object, the number types, String and Boolean
+ * take primitives, and an interface is never an object's own traits.
+ */
+export function typeTestLate(em: MethodEmitter, i: u32, op: u8): void {
+  const v = em.src(i, 0);
+  const c = em.src(i, 1);
+  const out = em.out;
+  const domain = em.domain;
+  const itraits = domain.instanceTraitsOf(em.regType[c]);
+  const fn = op === ops.OP_istypelate ? "rt.isTypeLate(" : "rt.asTypeLate(";
+  // A primitive, a constant among them, is never a class's own object.
+  const vt = domain.builtin(em.regType[v]);
+  if (
+    !isClassRef(em, itraits) ||
+    domain.traits.isInterface[itraits] !== 0 ||
+    em.copyOf[v] <= CONSTANT ||
+    (vt !== BUILTIN_Any && vt !== BUILTIN_Object && vt !== BUILTIN_Other)
+  ) {
+    call2(em, fn, i);
+    return;
+  }
+
+  // v != null && c != null && v.$traits === c.$it || rt.isTypeLate(v, c)
+  em.reg(v);
+  out.text(" != null && ");
+  em.reg(c);
+  out.text(" != null && ");
+  em.member(v);
+  out.text(".$traits === ");
+  em.member(c);
+  out.text(".$it");
+  if (op === ops.OP_istypelate) {
+    out.text(" || ");
+  } else {
+    out.text(" ? ");
+    em.read(v);
+    out.text(" : ");
+  }
+
+  out.text(fn);
+  em.read(v);
+  out.text(", ");
+  em.read(c);
+  out.text(")");
 }
 
 /** A conditional branch comparing two values; the `n` forms are true when the comparison is not. */
