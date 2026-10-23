@@ -1922,8 +1922,9 @@ locally for `connect(null)`, at once, its `onStatus` told
 `NetConnection.Connect.Success`, and to Flash Remoting for an http or
 https URL; any other connects nothing, and a new connection closes the
 one before (`Connect.Closed`). A remoting `call` is queued, and at the
-frame's end each connection's calls go as one AMF0 packet POSTed to its
-URL with its headers (`addHeader`, one of a name, its case aside), the
+frame's end (the first frame's too, before the next frame delivers what
+the network answered) each connection's calls go as one AMF0 packet
+POSTed to its URL with its headers (`addHeader`, one of a name, its case aside), the
 calls answered at `/1`, `/2`...: an answer's `/n/onResult` or
 `/n/onStatus` goes to that call's responder; one that is no packet is
 ignored, and a failed request tells the connection's `onStatus`
