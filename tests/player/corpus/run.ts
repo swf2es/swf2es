@@ -211,9 +211,11 @@ if (update) {
       const line = was
         ? `${path}: ${describe(standings[path])}, was ${describe(was)}`
         : `${path}: ${describe(standings[path])}, not in baseline.json (run with --update-baseline)`;
-      // As an annotation, CI shows it on the run's summary too.
+      // As an annotation, CI shows it on the run's summary too; escaped, an error's
+      // lines stay one annotation.
+      const escaped = line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
       console.log(
-        process.env.GITHUB_ACTIONS ? `::error title=corpus regression::${line}` : `\n${line}`,
+        process.env.GITHUB_ACTIONS ? `::error title=corpus regression::${escaped}` : `\n${line}`,
       );
 
       // --diff has shown it already.
