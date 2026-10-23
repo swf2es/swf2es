@@ -136,8 +136,8 @@ A DPR change affects display-list resolution without changing Stage dimensions
 or reallocating Stage3D buffers. Script settings override embedding defaults
 independently. The desktop app offers the same host through View › Stage3D
 (Experimental), off by default, with a remembered choice that restarts the
-movie when changed. It raises only the buffer count limit to 4,096 for animated
-models, keeping the default byte budgets. Best-resolution buffers and enabling
+movie when changed. It uses the backend's per-type resource count limits and
+byte budgets. Best-resolution buffers and enabling
 the public demo remain later changes. None of this uses the unfinished Worker API.
 
 A future WebGPU backend can reuse the Flash adapter, resource contracts and AIR

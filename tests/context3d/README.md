@@ -837,15 +837,13 @@ Desktop layout controls, best-resolution buffers and production enablement
 remain later work. These hooks are independent of the unfinished ActionScript
 Worker API. Broader formats, profiles and validation gaps remain listed above.
 
-The desktop's opt-in surface factory allows 4,096 buffers and 1,024 textures per
-context, retaining the backend's separate 64 MiB byte budgets. Small textures
-used by sprite effects can exceed the backend's default 128-resource count while
-using much less storage. `tests/desktop/stage3d-limits.ts` runs that actual factory
-inside the desktop integration test: 1,024 mixed 2D/rectangle/cube allocations,
-count rejection before GL allocation, capacity recovery after disposal, and the
-exact 64 MiB boundary including full mip chains. It tracks texture handles through
-explicit disposal and context teardown, checks GL errors and releases the browser
-context. The default backend limits and allocation/draw paths are unchanged.
+The desktop's opt-in surface factory uses the backend's independent 4,096-resource
+count limits and separate 64 MiB byte budgets. `tests/desktop/stage3d-limits.ts`
+runs that actual factory inside the desktop integration test: 12,288 mixed
+2D/rectangle/cube allocations, per-type count rejection before GL allocation,
+capacity recovery after disposal, and the exact 64 MiB boundary including full
+mip chains. It tracks texture handles through explicit disposal and context
+teardown, checks GL errors and releases the browser context.
 
 `StageWorker.as` covers the combined web startup path: the primordial presents
 a green Stage3D surface while a real background Worker sends a channel reply.

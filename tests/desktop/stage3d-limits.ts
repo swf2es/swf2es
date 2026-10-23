@@ -28,7 +28,7 @@ export async function textureLimits(app: App): Promise<void> {
     let peak = 0, error;
     try {
       const textures = [];
-      for (let i = 0; i < 1024; i++) {
+      for (let i = 0; i < 12288; i++) {
         switch (i % 3) {
           case 0: textures.push(c.createTexture(8, 8)); break;
           case 1: textures.push(c.createRectangleTexture(8, 8)); break;
@@ -66,5 +66,5 @@ export async function textureLimits(app: App): Promise<void> {
     }
     return { peak, live: live.size, error, lost: gl.isContextLost() };
   })()`);
-  assert.deepEqual(result, { peak: 1024, live: 0, error: 0, lost: true });
+  assert.deepEqual(result, { peak: 12288, live: 0, error: 0, lost: true });
 }
