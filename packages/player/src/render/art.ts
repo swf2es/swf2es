@@ -361,7 +361,9 @@ export class Art {
     const { fills, lines, shapes } = this.giving;
     try {
       for (let i = 0; i < fills.length; i++) {
-        destroyContext(fills[i]);
+        if (fills[i] !== NO_LINES) {
+          destroyContext(fills[i]);
+        }
       }
 
       for (let i = 0; i < lines.length; i++) {
@@ -469,7 +471,7 @@ export class Art {
       fills = this.source?.shared.peek(shape) ?? this.fills.get(shape) ?? build(node.layers);
       this.fills.set(shape, fills);
     } else {
-      fills = build(node.layers);
+      fills = this.buildFills(node.layers, build === this.buildMaskFills, true);
       node.ownFills = true;
     }
 
@@ -592,17 +594,28 @@ export class Art {
     view.smoothing = gpuBitmaps(this.renderer).smoothing;
   }
 
-  /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
+  /**
+   * The fills of `layers`, built: a fresh view's to destroy with the rest.
+   * A node's `own`, which it gives back as it is drawn again, show NO_LINES
+   * for a layer of no fills, as drawTriangles' textured triangles leave
+   * two a call, which a 3D engine makes hundreds of every frame.
+   */
   private readonly buildMaskFills = (layers: readonly ShapeLayer[]): GraphicsContext[] =>
     this.buildFills(layers, true);
 
   private readonly buildFills = (
     layers: readonly ShapeLayer[],
     masking = false,
+    own = false,
   ): GraphicsContext[] => {
     const fills: GraphicsContext[] = [];
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
+      if (own && layer.fills.length === 0) {
+        fills.push(NO_LINES);
+        continue;
+      }
+
       const make = () => fillContext(layer, this.painter, masking);
       const context = remakeable(make(), make);
       if (this.fresh) {
