@@ -93,7 +93,7 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
 
     const bitmap = storeOf(s, source);
     if (
-      !value.rectangle &&
+      value.cube &&
       (bitmap.width !== Math.max(1, value.width >> level) ||
         bitmap.height !== Math.max(1, value.height >> level))
     ) {

@@ -42,6 +42,7 @@ node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scalarmath
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
+node tests/context3d/oracle.ts --bitmapuploads
 node tests/context3d/oracle.ts --samplerstates
 node tests/context3d/oracle.ts --lodbias
 node tests/context3d/oracle.ts --rectangletextures
@@ -427,13 +428,25 @@ This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 `bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
 bias. Compressed textures remain unsupported.
-Ordinary 2D/cube upload dimensions must match the selected mip level. Each context
+2D bitmap uploads clip from the top-left and clear uncovered pixels without
+scaling, including non-power-of-two sources and sources reused across mip levels.
+Cube bitmap uploads still require exact face/mip dimensions. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
 between backends; the fixture uses representable byte values.
+
+`BitmapUploads.as` checks 2D source-size handling against AIR: matching, larger,
+smaller, mixed-axis and non-power-of-two bitmaps at the base level and smaller
+mips. Its 30 sampled pixels distinguish cropping from scaling, padding from
+retaining previous contents, and verify copying before source disposal. The
+browser checks also exercise 81 uploads through one bounded staging array,
+preserve the source row stride, clear only the active mip's bytes, and allocate
+no GPU handles during warmed uploads. Invalid dimensions/lengths never reach
+WebGL; cube size validation remains unchanged. This covers engines that reuse
+a full-size bitmap while drawing each mip's content into its top-left corner.
 
 `RenderTargets.as` checks level-zero 2D render targets against AIR: switching
 between differently sized targets and the back buffer, retained color and

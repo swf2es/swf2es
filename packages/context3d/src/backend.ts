@@ -100,8 +100,8 @@ export interface Texture3D {
   readonly levels: number;
   readonly cube: boolean;
   readonly rectangle: boolean;
-  /** Top-down premultiplied ARGB pixels, copied before returning. Rectangle
-   * textures clip/pad source dimensions; other textures require exact mip sizes. */
+  /** Top-down premultiplied ARGB pixels, copied before returning. 2D/rectangle
+   * textures clip/pad source dimensions; cube textures require exact mip sizes. */
   upload(
     pixels: Uint32Array,
     level?: number,
