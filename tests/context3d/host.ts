@@ -14,13 +14,21 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Composition", "StageLayout", "StageWorker"].map((name) => ({
-    name,
-    source: fixtureSource(name),
-  })),
+  ["Composition", "StageLayout", "StageWorker", "ProfileFallback", "StageWorkerLive"].map(
+    (name) => ({
+      name,
+      source: fixtureSource(name),
+    }),
+  ),
   out,
 );
-for (const name of ["Composition", "StageLayout", "StageWorker"]) {
+for (const name of [
+  "Composition",
+  "StageLayout",
+  "StageWorker",
+  "ProfileFallback",
+  "StageWorkerLive",
+]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   writeFileSync(`${out}${name}.swf`, bare(abc, 1, name, 96, 96));
@@ -306,6 +314,30 @@ await withPage(
     } finally {
       await call("close");
     }
+    await collect();
+    await call("open", true, true, "ProfileFallback");
+    try {
+      assert.equal(await call("rootProperty", "fallback"), "3702,true,true,false,false");
+      assert.equal((await call<Status>("status")).canvases, 2);
+      await capture("unsupported-profile-fallback", 96, 96, [[8, 8]], ["00ff00ff"]);
+      assert.deepEqual((await call<Status>("status")).errors, []);
+    } finally {
+      await call("close");
+    }
+    await collect();
+    await call("open", true, true, "StageWorkerLive");
+    try {
+      assert.equal(await call("rootProperty", "workerState"), "running");
+      assert.ok((await call<number>("rootProperty", "replies")) >= 2);
+      assert.equal(await call("workerThreads"), 1);
+      const live = await call<Status>("status");
+      assert.equal(live.surfaces.filter((s) => !s.destroyed).length, 1);
+      assert.deepEqual(live.errors, []);
+      await capture("live-worker-no-child-stage3d", 96, 96, [[8, 8]], ["00ff00ff"]);
+    } finally {
+      await call("close");
+    }
+    await call("workersStopped");
     await collect();
     await call("queued");
     await collect();

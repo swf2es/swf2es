@@ -5,7 +5,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 import { registerContext } from "./context3d/context.js";
 import { translateErrors } from "./context3d/errors.js";
-import { type AsObject, createBindings, unsupported } from "./context3d/lifecycle.js";
+import { type AsObject, createBindings } from "./context3d/lifecycle.js";
 import { registerResources } from "./context3d/resources.js";
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
@@ -13,27 +13,70 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
   s.liveStageLayout = true;
   const natives: avm2.Natives = {};
   const bindings = createBindings(s, host);
-  const { slots, pending, lost, place, request } = bindings;
+  const { slots, place, request, unavailable } = bindings;
+  const profileName = (value: string | null): string => {
+    switch (value) {
+      case null:
+        return "baseline";
+      case "baseline":
+      case "baselineConstrained":
+      case "baselineExtended":
+      case "standardConstrained":
+      case "standard":
+      case "standardExtended":
+        return value;
+      default:
+        throw s.rt.error("ArgumentError", 2008, "profile");
+    }
+  };
 
   class StageNatives {
     get context3D(): AsObject | null {
       return slots.get(this as unknown as AsObject) ?? null;
     }
 
-    requestContext3D(mode = "auto", profile = "baseline"): void {
+    requestContext3D(mode: string | null = "auto", profile: string | null = "baseline"): void {
       const slot = this as unknown as AsObject;
-      if (
-        bindings.closed ||
-        mode !== "auto" ||
-        profile !== "baseline" ||
-        slots.has(slot) ||
-        pending.has(slot) ||
-        lost.has(slot)
-      ) {
-        unsupported();
+      if (mode === null) {
+        throw s.rt.error("TypeError", 2007, "context3DRenderMode");
+      }
+      if (mode !== "auto" && mode !== "software") {
+        throw s.rt.error("ArgumentError", 2008, "context3DRenderMode");
+      }
+
+      const selected = profileName(profile);
+      if (bindings.closed) {
+        throw s.rt.error("Error", 3694);
+      }
+      if (mode !== "auto" || selected !== "baseline") {
+        unavailable(slot);
+        return;
       }
 
       request(slot);
+    }
+
+    requestContext3DMatchingProfiles(profiles: AsObject | null): void {
+      if (!profiles) {
+        throw s.rt.error("ArgumentError", 1508, "profiles");
+      }
+
+      const values = profiles.$a as (string | null)[];
+      if (!values.length) {
+        throw s.rt.error("ArgumentError", 2008, "profiles");
+      }
+      let baseline = false;
+      for (let i = 0; i < values.length; i++) {
+        baseline = profileName(values[i]) === "baseline" || baseline;
+      }
+      if (bindings.closed) {
+        throw s.rt.error("Error", 3694);
+      }
+      if (baseline) {
+        request(this as unknown as AsObject);
+      } else {
+        unavailable(this as unknown as AsObject);
+      }
     }
   }
 
