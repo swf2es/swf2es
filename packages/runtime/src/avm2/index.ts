@@ -15,8 +15,13 @@ export {
   Bytes,
   byteArrayHook,
   bytesOf,
+  canShareMemory,
   GLOBAL_MEMORY_MIN_SIZE,
+  notIsolated,
+  type SharedBytesMemory,
   setDomainMemory,
+  shareBytes,
+  sharedByteArray,
 } from "./natives/bytearray.js";
 export type { Natives } from "./natives/define.js";
 export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";

@@ -1,0 +1,5 @@
+shareable false
+shareable true
+same true 16
+same true 16
+seen 200 64 6 7 1 1 9
