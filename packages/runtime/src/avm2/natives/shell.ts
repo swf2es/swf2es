@@ -31,7 +31,6 @@ import {
   RUNNING,
   STATE_NAMES,
   sleep,
-  TERMINATED,
   Workers,
 } from "./shell-workers.js";
 
@@ -438,29 +437,25 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     // As Aggregate::requestIsolateExit: true for a worker started and not
-    // yet ended, which is terminated at once, its thread stopped and its
-    // properties let go; false for one not started or ended. The primordial,
+    // yet ended, which is terminated at once, with the workers it started,
+    // its thread stopped and their properties let go; false for one not started or ended. The primordial,
     // or a worker terminating itself, ends with Error 1513.
     terminate(this: WorkerObject): boolean {
       const { workers, threads } = workersOf(rt);
       if (this.$id === 0 || this.$id === workers.self) {
         if (this.$id !== 0) {
-          workers.setState(this.$id, TERMINATED);
-          workers.release(this.$id);
+          workers.terminate(this.$id);
         }
 
         throw rt.error("Error", 1513);
       }
 
-      const state = workers.state(this.$id);
-      if (state <= NEW || state > RUNNING) {
+      if (!workers.terminate(this.$id)) {
         return false;
       }
 
       threads.get(this.$id)?.terminate();
       threads.delete(this.$id);
-      workers.setState(this.$id, TERMINATED);
-      workers.release(this.$id);
       return true;
     }
   }

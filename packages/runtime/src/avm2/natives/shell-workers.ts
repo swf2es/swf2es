@@ -122,6 +122,13 @@ function waitOn(words: Int32Array, index: number, value: number, ms: number): vo
   }
 }
 
+/** Thrown in a worker that was terminated, as avmplus interrupts it: its code stops. */
+export class WorkerTerminated extends Error {
+  constructor() {
+    super("swf2es: the worker was terminated");
+  }
+}
+
 /** The workers as one VM sees them, over the memory they share. */
 export class Workers {
   readonly control: Int32Array;
@@ -204,22 +211,62 @@ export class Workers {
     });
   }
 
-  /** Let go of a terminated worker's properties, as Isolate::releaseActiveResources. */
-  release(id: number): void {
-    this.locked(() => {
-      this.read();
-      let changed = false;
-      for (const [k, e] of this.entries) {
-        if (e.id === id) {
-          this.entries.delete(k);
-          changed = true;
+  /**
+   * Terminate worker `id`, started and not yet ended, and the workers it
+   * started, theirs and so on, whose threads stop with its own: each
+   * `terminated`, its properties let go, as Isolate::releaseActiveResources.
+   * Whether `id` was running. Done holding the lock, so that none of them
+   * is in the table then, and none takes the lock again (see locked): its
+   * thread may be stopped anywhere once this returns.
+   */
+  terminate(id: number): boolean {
+    return this.locked(() => {
+      const state = this.state(id);
+      if (state <= NEW || state > RUNNING) {
+        return false;
+      }
+
+      const ended = new Set([id]);
+      // A worker's number is above its parent's.
+      for (let d = id + 1; d < this.count(); d++) {
+        const s = this.state(d);
+        if (ended.has(this.parent(d)) && s > NEW && s <= RUNNING) {
+          ended.add(d);
         }
       }
 
-      if (changed) {
-        this.write();
+      for (const d of ended) {
+        this.setState(d, TERMINATED);
+      }
+
+      this.drop(ended);
+      return true;
+    });
+  }
+
+  /** This VM's worker has ended, as `to`, its properties let go; unless it was terminated already. */
+  end(to: number): void {
+    this.locked(() => {
+      if (this.transition(this.self, RUNNING, to)) {
+        this.drop(new Set([this.self]));
       }
     });
+  }
+
+  /** Remove the properties of the workers `ids`, holding the lock. */
+  private drop(ids: Set<number>): void {
+    this.read();
+    let changed = false;
+    for (const [k, e] of this.entries) {
+      if (ids.has(e.id)) {
+        this.entries.delete(k);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.write();
+    }
   }
 
   private words(id: number): boolean {
@@ -228,8 +275,10 @@ export class Workers {
 
   /**
    * Run `f` holding the table's lock, whose word holds its holder's id
-   * plus one. A holder terminated meanwhile, its thread stopped mid-way,
-   * leaves it held: it is taken from a holder no longer running.
+   * plus one. A worker's thread is stopped only after it was terminated
+   * under the lock (terminate), and a terminated worker never takes the
+   * lock again: it throws WorkerTerminated instead, so no thread is
+   * stopped holding it.
    */
   private locked<T>(f: () => T): T {
     const me = this.self + 1;
@@ -239,18 +288,17 @@ export class Workers {
         break;
       }
 
-      if (this.state(holder - 1) >= TERMINATED) {
-        Atomics.compareExchange(this.control, LOCK, holder, 0);
-        continue;
-      }
-
       waitOn(this.control, LOCK, holder, 1);
     }
 
     try {
+      if (this.self !== 0 && this.state(this.self) > RUNNING) {
+        throw new WorkerTerminated();
+      }
+
       return f();
     } finally {
-      Atomics.store(this.control, LOCK, 0);
+      Atomics.compareExchange(this.control, LOCK, me, 0);
       Atomics.notify(this.control, LOCK);
     }
   }
@@ -340,10 +388,18 @@ export function startShellWorker(init: ShellWorkerInit): boolean {
  * core. One terminated meanwhile stays so.
  */
 export function endShellWorker(init: ShellWorkerInit, exception: boolean): void {
-  const workers = new Workers(init.memory, init.id);
-  if (workers.transition(init.id, RUNNING, exception ? EXCEPTION : TERMINATED)) {
-    workers.release(init.id);
+  try {
+    new Workers(init.memory, init.id).end(exception ? EXCEPTION : TERMINATED);
+  } catch (e) {
+    if (!(e instanceof WorkerTerminated)) {
+      throw e;
+    }
   }
+}
+
+/** Whether a background worker was terminated: its thread's end is then no failure. */
+export function shellWorkerTerminated(init: ShellWorkerInit): boolean {
+  return new Workers(init.memory, init.id).state(init.id) > RUNNING;
 }
 
 /** Sleep `ms` milliseconds, as System.sleep: blocking where the thread can, else spinning. */
