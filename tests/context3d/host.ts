@@ -285,7 +285,7 @@ await withPage(
     try {
       assert.equal((await call<Status>("status")).canvases, 2);
       assert.deepEqual((await call<Status>("status")).errors, []);
-      await capture("worker-and-stage3d", 96, 96, [[8, 8]], ["ff00ff00"]);
+      await capture("worker-and-stage3d", 96, 96, [[8, 8]], ["00ff00ff"]);
     } finally {
       await call("close");
     }
