@@ -8584,6 +8584,20 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Two workers writing one shareable ByteArray: needs a cross-origin isolated page.
+    name: "worker-shared-bytes",
+    swf: (abc) => {
+      const bytes = bare(abc, 1, "WorkerSharedBytes");
+      bytes[3] = 26;
+      return bytes;
+    },
+    script: "WorkerSharedBytes",
+    frames: 120,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "accessibility-natives",
     swf: (abc) => bare(abc, 1, "AccessibilityNatives"),
     script: "AccessibilityNatives",

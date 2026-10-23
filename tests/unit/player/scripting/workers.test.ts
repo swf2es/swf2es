@@ -1,6 +1,6 @@
-// flash.system's workers through a SWF's scripts: a background worker
-// started on a node worker_threads thread, played against Flash's trace of
-// the same case, and what a player without a worker host reports.
+// flash.system's workers through a SWF's scripts: background workers
+// started on node worker_threads threads, played against Flash's trace of
+// the same cases, and what a player without a worker host reports.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -29,37 +29,46 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-test("a background worker on a thread of its own answers as Flash's does", { skip }, async () => {
-  const lines: string[] = [];
-  const uncaught: unknown[] = [];
-  const scripting = new Scripting(await createCodegen(wasm), {
-    print: (line) => lines.push(line),
-    realTime: null,
-    onUncaught: (error) => uncaught.push(error),
-    workerHost: nodeWorkerHost({ codegen: wasm }),
-  });
-  try {
-    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-    const testCase = cases.find((c) => c.name === "worker-basics");
-    assert.ok(testCase && typeof testCase.swf === "function");
-    const player = new Player(testCase.swf(compiler(out)("WorkerBasics")), scripting);
-    await player.start();
-    // As the player's tests step it: what was posted to the worker has been run before each frame.
-    for (let frame = 2; frame <= (testCase.frames ?? 1); frame++) {
-      await scripting.settled();
-      player.tick();
-    }
+for (const [name, script, what] of [
+  ["worker-basics", "WorkerBasics", "a background worker on a thread of its own answers"],
+  [
+    "worker-shared-bytes",
+    "WorkerSharedBytes",
+    "two workers on threads of their own share a ByteArray",
+  ],
+]) {
+  test(`${what} as Flash's do`, { skip }, async () => {
+    const lines: string[] = [];
+    const uncaught: unknown[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      realTime: null,
+      onUncaught: (error) => uncaught.push(error),
+      workerHost: nodeWorkerHost({ codegen: wasm }),
+    });
+    try {
+      await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+      const testCase = cases.find((c) => c.name === name);
+      assert.ok(testCase && typeof testCase.swf === "function");
+      const player = new Player(testCase.swf(compiler(out)(script)), scripting);
+      await player.start();
+      // As the player's tests step it: what was posted to the worker has been run before each frame.
+      for (let frame = 2; frame <= (testCase.frames ?? 1); frame++) {
+        await scripting.settled();
+        player.tick();
+      }
 
-    assert.deepEqual(uncaught, []);
-    const expected = await readFile(
-      fileURLToPath(new URL("../../../player/references/worker-basics/trace.txt", import.meta.url)),
-      "utf8",
-    );
-    assert.deepEqual(lines, expected.trimEnd().split("\n"));
-  } finally {
-    scripting.destroy();
-  }
-});
+      assert.deepEqual(uncaught, []);
+      const expected = await readFile(
+        fileURLToPath(new URL(`../../../player/references/${name}/trace.txt`, import.meta.url)),
+        "utf8",
+      );
+      assert.deepEqual(lines, expected.trimEnd().split("\n"));
+    } finally {
+      scripting.destroy();
+    }
+  });
+}
 
 test("without a worker host no worker is supported, and none is created", { skip }, async () => {
   const lines: string[] = [];

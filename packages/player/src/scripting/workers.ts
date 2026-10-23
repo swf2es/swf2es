@@ -3,9 +3,9 @@
 // routes what crosses between them; a background worker's VM reaches only
 // the primordial. Shared properties and channels' messages cross as copies,
 // made as avmplus' ChannelItem makes them, so a host's channel carries
-// plain data. Without shared memory each side keeps its own copy of a
-// worker's shared properties, and what one side sets reaches the other
-// between its frames.
+// plain data, but for a shareable ByteArray's memory, which every worker
+// shares. Each side keeps its own copy of a worker's shared properties,
+// and what one side sets reaches the other between its frames.
 import { avm2 } from "@swf2es/runtime";
 import type { WorkerHost, WorkerThread } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
@@ -658,6 +658,12 @@ export class Workers {
 
     if (rt.isInstance(value, rt.classNamed("flash.utils::ByteArray"))) {
       const bytes = avm2.bytesOf(rt, value);
+      // Its memory, shared from now on; on a page that is not cross-origin
+      // isolated, the error that says so rather than a copy nobody writes.
+      if (bytes.shareable) {
+        return { kind: "shared", memory: bytes.share() };
+      }
+
       return { kind: "bytes", bytes: bytes.buffer.slice(0, bytes.length) };
     }
 
@@ -680,6 +686,8 @@ export class Workers {
         return wire.value;
       case "channel":
         return this.channelObject(wire.channel);
+      case "shared":
+        return avm2.sharedByteArray(rt, wire.memory);
       case "bytes":
       case "amf": {
         const holder = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
