@@ -594,15 +594,16 @@ export class Art {
     view.smoothing = gpuBitmaps(this.renderer).smoothing;
   }
 
+  /** The fills of `layers` for a mask, built as buildFills builds them. */
+  private readonly buildMaskFills = (layers: readonly ShapeLayer[]): GraphicsContext[] =>
+    this.buildFills(layers, true);
+
   /**
    * The fills of `layers`, built: a fresh view's to destroy with the rest.
    * A node's `own`, which it gives back as it is drawn again, show NO_LINES
    * for a layer of no fills, as drawTriangles' textured triangles leave
-   * two a call, which a 3D engine makes hundreds of every frame.
+   * one a call, which a 3D engine makes hundreds of every frame.
    */
-  private readonly buildMaskFills = (layers: readonly ShapeLayer[]): GraphicsContext[] =>
-    this.buildFills(layers, true);
-
   private readonly buildFills = (
     layers: readonly ShapeLayer[],
     masking = false,

@@ -3306,8 +3306,9 @@ again every frame, so a redraw keeps the meshes, taken in place where the
 layers lay out as before or from those the view keeps, with their
 buffers, vertex arrays and shaders: new vertices go into the same
 buffers, and every mesh draws from one buffer of indices in order. Kept
-ones no content takes go after `IDLE_MS`, and all as the context is lost. adl maps u and v from 0 to 1 onto the bitmap's
-first texel's centre to its last's, wrapped there when the fill repeats
+ones no content takes go after `IDLE_MS`, and all as the context is lost.
+adl maps u and v from 0 to 1 onto the bitmap's first texel's centre to
+its last's, wrapped there when the fill repeats
 or clamped, a hair nearer 0 as its fixed-point steps come out, and
 samples once a pixel at the pixel's top left corner: the nearer texel,
 or the four around weighed when smoothed; a bitmap a texel high shows its
