@@ -36,6 +36,7 @@ import {
   STATE_NAMES,
   sleep,
   Workers,
+  WorkerTerminated,
 } from "./shell-workers.js";
 
 const started = Date.now();
@@ -171,8 +172,20 @@ export function shellNatives(rt: Runtime): Natives {
 
     static exit(): void {}
 
+    // A terminated worker's code stops in a sleep, as avmplus interrupts it there.
     static sleep(ms: Value): void {
-      sleep(rt.toInt(ms));
+      const { workers } = workersOf(rt);
+      const stopped = () => {
+        if (workers.terminated) {
+          throw new WorkerTerminated();
+        }
+      };
+
+      stopped();
+      for (let left = rt.toInt(ms); left > 0; left -= SLEEP_STEP) {
+        sleep(Math.min(left, SLEEP_STEP));
+        stopped();
+      }
     }
 
     // There is no shell to run a command in: system()'s -1, of no process made.
@@ -452,24 +465,32 @@ export function shellNatives(rt: Runtime): Natives {
 
     // As Aggregate::requestIsolateExit: true for a worker started and not
     // yet ended, which is terminated at once, with the workers it started,
-    // its thread stopped and their properties let go; false for one not started or ended. The primordial,
-    // or a worker terminating itself, ends with Error 1513.
+    // its thread stopped and their properties let go; false for one not
+    // started or ended. The primordial ends with Error 1513; a worker that
+    // terminates itself stops at once, as avmshell's does.
     terminate(this: WorkerObject): boolean {
       const { workers, threads } = workersOf(rt);
-      if (this.$id === 0 || this.$id === workers.self) {
-        if (this.$id !== 0) {
-          workers.terminate(this.$id);
-        }
+      // A worker terminating itself stops there, which no script catches.
+      if (this.$id !== 0 && this.$id === workers.self) {
+        workers.terminateSelf();
+        throw new WorkerTerminated();
+      }
 
+      if (this.$id === 0) {
         throw rt.error("Error", 1513);
       }
 
-      if (!workers.terminate(this.$id)) {
+      const ended = workers.terminate(this.$id);
+      if (ended.size === 0) {
         return false;
       }
 
-      threads.get(this.$id)?.terminate();
+      const thread = threads.get(this.$id);
       threads.delete(this.$id);
+      if (thread) {
+        stopThread(rt, this.$id, thread, ended);
+      }
+
       return true;
     }
   }
@@ -508,6 +529,30 @@ export function shellNatives(rt: Runtime): Natives {
   registerNativeClass(natives, "flash.system::Worker", WorkerNatives);
   registerNativeClass(natives, "flash.system::WorkerDomain", WorkerDomainNatives);
   return natives;
+}
+
+/** How long a sleep goes before it looks whether its worker was terminated. */
+const SLEEP_STEP = 50;
+
+/** How long a terminated worker's thread is given to stop at its next wait or sleep before it is stopped. */
+const STOP_GRACE = 100;
+
+/**
+ * Stop the thread of worker `id`, terminated with the workers in `ended`,
+ * whose threads stop with its own. A thread may be stopped anywhere, even
+ * where it writes what a Mutex it holds guards, so their Mutexes are let go
+ * only once it has stopped: at once where its code stops at its next wait,
+ * lock or sleep, as avmplus interrupts it, and which it is given a moment
+ * to reach; else once the host says the thread has gone.
+ */
+function stopThread(rt: Runtime, id: number, thread: ShellThread, ended: Set<number>): void {
+  const sync = syncOf(rt);
+  sync.waitStopped(id, STOP_GRACE);
+  void Promise.resolve(thread.terminate()).then(() => {
+    for (const d of ended) {
+      sync.end(d);
+    }
+  });
 }
 
 interface WorkerObject extends AsObject {

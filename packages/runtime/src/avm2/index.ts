@@ -23,7 +23,13 @@ export {
   shareBytes,
   sharedByteArray,
 } from "./natives/bytearray.js";
-export { type SyncRef, syncObject, syncOf, syncRef } from "./natives/concurrent.js";
+export {
+  type SyncRef,
+  syncError,
+  syncObject,
+  syncOf,
+  syncRef,
+} from "./natives/concurrent.js";
 export type { Natives } from "./natives/define.js";
 export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";
 // The builtins' natives and hooks, for a player that adds playerglobal's to them.
@@ -37,8 +43,10 @@ export {
   newSyncMemory,
   SCRIPT_TIMEOUT,
   Sync,
+  SyncFull,
   type SyncInit,
   type SyncMemory,
+  SyncTerminated,
   SyncTimeout,
 } from "./natives/sync.js";
 // avmplus' XML tokenizer, which playerglobal's flash.xml.XMLDocument parses with too.

@@ -114,8 +114,8 @@ test("a worker terminated as it writes stops at its next write, the lock left fr
   }
 
   assert.equal(primordial.state(id), RUNNING);
-  assert.equal(primordial.terminate(id), true);
-  assert.equal(primordial.terminate(id), false);
+  assert.deepEqual(primordial.terminate(id), new Set([id]));
+  assert.equal(primordial.terminate(id).size, 0);
   assert.match(await stopped, /^WorkerTerminated/);
   for (let i = 0; i < 200; i++) {
     primordial.set(0, `after${i}`, number(i));
@@ -143,7 +143,7 @@ test("terminating a worker terminates the workers it started", () => {
   primordial.setState(other, RUNNING);
   new Workers(memory, grandchild).set(grandchild, "x", number(1));
 
-  assert.equal(primordial.terminate(child), true);
+  assert.deepEqual(primordial.terminate(child), new Set([child, grandchild]));
   assert.equal(primordial.state(child), TERMINATED);
   assert.equal(primordial.state(grandchild), TERMINATED);
   assert.equal(primordial.state(unstarted), 1);

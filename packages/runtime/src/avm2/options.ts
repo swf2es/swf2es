@@ -69,8 +69,8 @@ export interface ShellWorkerHost {
 }
 
 export interface ShellThread {
-  /** Stop the thread, wherever its code is. */
-  terminate(): void;
+  /** Stop the thread, wherever its code is; what it gives resolves once the thread has stopped. */
+  terminate(): Promise<unknown> | undefined;
 }
 
 /** What a background worker's thread is given, which crosses to it as it is (structured clone). */

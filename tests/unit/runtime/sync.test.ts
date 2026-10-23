@@ -4,7 +4,9 @@
 // passes over those that ended, a wait's result tells a timeout from a
 // notify, a mutex held by a thread that ended is free to take, a queue
 // loses and reorders nothing, and a thread that must spin gives up after
-// its script timeout.
+// its script timeout. A terminated worker's thread, which may run on until
+// it is stopped, gets nothing more of the memory, and keeps the locks it
+// holds until it has stopped, at its next wait or for good.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Worker } from "node:worker_threads";
@@ -359,4 +361,145 @@ test("a thread that must spin gives up after its script timeout", async () => {
     }
   }, SyncTimeout);
   assert.ok(Date.now() - loop >= 150);
+});
+
+test("threads allocating from the shared heap at once never share a block", async () => {
+  const memory = newSyncMemory();
+  const sync = new Sync(memory, 0);
+  const body = `const t = Date.now();
+    let bad = 0;
+    while (Date.now() - t < 500) {
+      const a = sync.alloc(6);
+      for (let i = 0; i < 6; i++) { sync.words[a + i] = data.mark; }
+      for (let j = 0; j < 20; j++) {}
+      for (let i = 0; i < 6; i++) { if (sync.words[a + i] !== data.mark) { bad++; break; } }
+      sync.free(a);
+    }
+    post(bad);`;
+  const workers = [1, 2, 3].map((id) => {
+    sync.addThread(id);
+    return messages(thread(memory, id, body, { mark: 0x1000 + id }));
+  });
+  for (const next of workers) {
+    assert.equal(await next(), 0);
+    assert.equal(await next(), "done");
+  }
+});
+
+test("a terminated worker's thread that runs on gets nothing more of the shared memory", async () => {
+  const memory = newSyncMemory();
+  const sync = new Sync(memory, 0);
+  sync.addThread(1);
+  const w = messages(
+    thread(
+      memory,
+      1,
+      `post("running");
+      for (;;) {
+        const a = sync.alloc(6);
+        for (let i = 0; i < 6; i++) { sync.words[a + i] = 0x11111111; }
+        sync.free(a);
+      }`,
+    ),
+  );
+  assert.equal(await w(), "running");
+  sync.stop(1);
+  assert.equal(await w(), "SyncTerminated: swf2es: the worker was terminated");
+  // Its code stopped there: what it held is free to take.
+  assert.ok(sync.stopped(1));
+
+  // The heap is whole: blocks come and go with none overwritten.
+  for (let n = 0; n < 1000; n++) {
+    const a = sync.alloc(6);
+    sync.words.fill(0x22222222, a, a + 6);
+    assert.ok(sync.words.subarray(a, a + 6).every((v) => v === 0x22222222));
+    sync.free(a);
+  }
+});
+
+test("a Mutex held by a terminated worker is let go only once its thread has stopped", async () => {
+  const memory = newSyncMemory();
+  const sync = new Sync(memory, 0);
+  const m = sync.newMutex();
+  const counter = sync.alloc(1);
+  sync.addThread(1);
+  const worker = thread(
+    memory,
+    1,
+    `sync.lock(data.m);
+    post("locked");
+    for (;;) { Atomics.add(sync.words, data.counter, 1); }`,
+    { m, counter },
+  );
+  assert.equal(await messages(worker)(), "locked");
+
+  // Terminated, and still writing what the Mutex guards: not to be taken.
+  sync.stop(1);
+  assert.equal(sync.tryLock(m), false);
+  const before = Atomics.load(sync.words, counter);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.notEqual(Atomics.load(sync.words, counter), before);
+  assert.equal(sync.tryLock(m), false);
+
+  // Stopped: free to take, and nothing writes any more.
+  await worker.terminate();
+  sync.end(1);
+  assert.equal(sync.tryLock(m), true);
+  const after = Atomics.load(sync.words, counter);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(Atomics.load(sync.words, counter), after);
+  sync.unlock(m);
+});
+
+test("a terminated worker that waits stops there, letting go of its Mutex, and a notify reaches the next waiter", async () => {
+  const memory = newSyncMemory();
+  const sync = new Sync(memory, 0);
+  const m = sync.newMutex();
+  const c = sync.newCondition(m);
+  const other = sync.newMutex();
+  sync.addThread(1);
+  sync.addThread(2);
+  // Thread 1 holds `other` and waits on c; thread 2 waits on c after it.
+  const first = messages(
+    thread(
+      memory,
+      1,
+      `sync.lock(data.other);
+      sync.lock(data.m);
+      post("waiting");
+      sync.wait(data.c, -1);
+      post("woke");`,
+      { m, c, other },
+    ),
+  );
+  assert.equal(await first(), "waiting");
+  sync.lock(m);
+  sync.unlock(m);
+  const second = messages(
+    thread(
+      memory,
+      2,
+      `sync.lock(data.m);
+      post("waiting");
+      post(sync.wait(data.c, -1));
+      sync.unlock(data.m);`,
+      { m, c },
+    ),
+  );
+  assert.equal(await second(), "waiting");
+  sync.lock(m);
+  sync.unlock(m);
+
+  // Its thread is not stopped: it stops itself at its wait, within a step.
+  sync.stop(1);
+  assert.equal(await first(), "SyncTerminated: swf2es: the worker was terminated");
+  assert.ok(sync.waitStopped(1, 1000));
+  assert.equal(sync.tryLock(other), true);
+  sync.unlock(other);
+
+  sync.lock(m);
+  sync.notify(c, false);
+  sync.unlock(m);
+  assert.equal(await second(), false);
+  assert.equal(await second(), "done");
 });

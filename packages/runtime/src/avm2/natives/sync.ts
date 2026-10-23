@@ -9,7 +9,13 @@
 // A worker may be stopped anywhere, so nothing here waits for ever on a
 // worker that has ended: a lock held by one is taken over by the next
 // thread that wants it, as avmplus lets go of the Mutexes a terminated
-// worker held, and a notify passes over the waiters that have ended.
+// worker held, and a notify passes over the waiters that have ended. A
+// terminated worker's thread is stopped some time after it is terminated,
+// and may run on meanwhile, so terminating it (stop) only makes this memory
+// refuse it anything more, and notifies pass over it; its locks are taken
+// over only once its thread has stopped (end), which the thread that
+// stops it learns from its host, or the worker says itself as its code
+// ends.
 
 /** The memory every thread of a primordial's shares, plain data a structured clone carries. */
 export interface SyncMemory {
@@ -59,9 +65,14 @@ const BLOCK_HEAD = 2;
 const HEAP_MAX = 1 << 30;
 const THREADS_MAX = 1 << 20;
 
-/** A thread's state in its table: 0 before it runs, then RUNNING, then ENDED. */
+/**
+ * A thread's state in its table: 0 before it runs, then RUNNING; STOPPING
+ * once it is terminated, while its thread may still run, and ENDED once
+ * its thread has stopped, or it has ended its own code.
+ */
 const RUNNING = 2;
 const ENDED = 1;
+const STOPPING = 3;
 
 /** How long a blocked thread sleeps before it looks again whether a lock's holder has ended. */
 const CHUNK = 50;
@@ -177,6 +188,24 @@ function canWaitHere(): boolean {
   return threadCanWait;
 }
 
+/**
+ * What a terminated worker's thread gets for anything it asks of the shared
+ * memory while it still runs: it changes nothing there any more, and its
+ * code stops, as avmplus interrupts a terminated worker.
+ */
+export class SyncTerminated extends Error {
+  constructor() {
+    super("swf2es: the worker was terminated");
+  }
+}
+
+/** The shared heap has no room for a block, or a block would be larger than it. */
+export class SyncFull extends RangeError {
+  constructor() {
+    super("swf2es: the memory the workers share is full");
+  }
+}
+
 /** A lock or wait that spun for longer than the script timeout. */
 export class SyncTimeout extends Error {
   constructor() {
@@ -288,13 +317,27 @@ export class Sync {
     grow(this.memory.threads, (id + 1) * 8);
   }
 
-  /** Whether worker `id` has not ended. */
+  private stateOf(id: number): number {
+    return 2 * id + 1 < this.threads.length ? Atomics.load(this.threads, 2 * id + 1) : 0;
+  }
+
+  /** Whether worker `id` is neither terminated nor ended: a notify may pick it, a queue waits for it. */
   alive(id: number): boolean {
     if (id < 0) {
       return false;
     }
 
-    return 2 * id + 1 >= this.threads.length || Atomics.load(this.threads, 2 * id + 1) !== ENDED;
+    const state = this.stateOf(id);
+    return state !== ENDED && state !== STOPPING;
+  }
+
+  /**
+   * Whether worker `id`'s thread has stopped, or ended its code: a lock it
+   * holds is free to take. A worker terminated while its thread may still
+   * run is not, as it may still be writing what the lock guards.
+   */
+  stopped(id: number): boolean {
+    return this.stateOf(id) === ENDED;
   }
 
   /** Whether worker `id` has started and not ended, as its own thread says. */
@@ -308,10 +351,69 @@ export class Sync {
     Atomics.compareExchange(this.threads, 2 * id + 1, 0, RUNNING);
   }
 
-  /** Worker `id` has ended: the locks it held are free to take, and no notify picks it. */
+  /**
+   * Worker `id` was terminated: no notify picks it, no queue waits for it,
+   * and its thread, while it still runs, gets SyncTerminated for anything
+   * it asks of this memory. The locks it holds stay held until end.
+   */
+  stop(id: number): void {
+    this.addThread(id);
+    if (Atomics.compareExchange(this.threads, 2 * id + 1, 0, STOPPING) !== 0) {
+      Atomics.compareExchange(this.threads, 2 * id + 1, RUNNING, STOPPING);
+    }
+  }
+
+  /**
+   * Worker `id`'s thread has stopped, or the worker has ended its own code:
+   * the locks it held are free to take. Only the thread itself, or one that
+   * knows it has stopped, may say so.
+   */
   end(id: number): void {
     this.addThread(id);
     Atomics.store(this.threads, 2 * id + 1, ENDED);
+    Atomics.notify(this.threads, 2 * id + 1);
+  }
+
+  /**
+   * Refuse anything more of a thread whose worker was terminated. Its code
+   * stops here, as avmplus' interrupts a terminated worker that waits, and
+   * runs no more of the worker's code on the way out (the runtime lets no
+   * script catch the error), so the locks it holds are free to take from
+   * now on, as avmplus lets go of them when the worker goes.
+   */
+  private refuse(): void {
+    if (this.thread !== 0) {
+      const state = this.stateOf(this.thread);
+      if (state === STOPPING || state === ENDED) {
+        Atomics.store(this.threads, 2 * this.thread + 1, ENDED);
+        Atomics.notify(this.threads, 2 * this.thread + 1);
+        throw new SyncTerminated();
+      }
+    }
+  }
+
+  /** Whether this thread's worker was terminated, which the next thing it asks of this memory says too. */
+  get terminated(): boolean {
+    const state = this.thread === 0 ? 0 : this.stateOf(this.thread);
+    return state === STOPPING || state === ENDED;
+  }
+
+  /** Wait until worker `id`'s thread says it has stopped, up to `ms`; whether it has. */
+  waitStopped(id: number, ms: number): boolean {
+    const end = Date.now() + ms;
+    for (;;) {
+      const state = this.stateOf(id);
+      if (state === ENDED) {
+        return true;
+      }
+
+      const left = end - Date.now();
+      if (left <= 0 || !this.waits) {
+        return false;
+      }
+
+      Atomics.wait(this.threads, 2 * id + 1, state, Math.min(left, 5));
+    }
   }
 
   /** A block of at least `n` words, zeroed: the address of its first. */
@@ -322,7 +424,7 @@ export class Sync {
     }
 
     if (k > MAX_CLASS) {
-      throw new RangeError("swf2es: a block larger than the shared heap");
+      throw new SyncFull();
     }
 
     const words = this.words;
@@ -335,7 +437,7 @@ export class Sync {
       } else {
         block = Atomics.load(words, HEAP_NEXT);
         if (!grow(this.memory.heap, (block + (1 << k)) * 4)) {
-          throw new RangeError("swf2es: the shared heap is full");
+          throw new SyncFull();
         }
 
         Atomics.store(words, HEAP_NEXT, block + (1 << k));
@@ -363,19 +465,20 @@ export class Sync {
 
   /**
    * Take the lock in word `index`, which holds its holder's number plus
-   * one; from a holder that has ended, at once. `start` is when the
+   * one; from a holder whose thread has stopped, at once. `start` is when the
    * operation began, for the script timeout of a thread that spins.
    */
   acquire(index: number, start: number): void {
     const me = this.thread + 1;
     for (;;) {
+      this.refuse();
       const holder = Atomics.compareExchange(this.words, index, 0, me);
       if (holder === 0) {
         return;
       }
 
       if (
-        !this.alive(holder - 1) &&
+        this.stopped(holder - 1) &&
         Atomics.compareExchange(this.words, index, holder, me) === holder
       ) {
         return;
@@ -385,19 +488,23 @@ export class Sync {
     }
   }
 
-  /** Take the lock in word `index` if it is free, or its holder has ended. */
+  /** Take the lock in word `index` if it is free, or its holder's thread has stopped. */
   tryAcquire(index: number): boolean {
+    this.refuse();
     const me = this.thread + 1;
     const holder = Atomics.compareExchange(this.words, index, 0, me);
     return (
       holder === 0 ||
-      (!this.alive(holder - 1) && Atomics.compareExchange(this.words, index, holder, me) === holder)
+      (this.stopped(holder - 1) &&
+        Atomics.compareExchange(this.words, index, holder, me) === holder)
     );
   }
 
+  /** Let go of the lock in word `index`, unless another thread has taken it over meanwhile. */
   release(index: number): void {
-    Atomics.store(this.words, index, 0);
-    Atomics.notify(this.words, index, 1);
+    if (Atomics.compareExchange(this.words, index, this.thread + 1, 0) === this.thread + 1) {
+      Atomics.notify(this.words, index, 1);
+    }
   }
 
   /**
@@ -410,6 +517,7 @@ export class Sync {
    * loop to tell, from `start`, when the operation began.
    */
   park(index: number, value: number, ms: number, start: number): void {
+    this.refuse();
     this.poll?.();
     Atomics.store(this.threads, 2 * this.thread, 1);
     try {
@@ -529,7 +637,7 @@ export class Sync {
     }
 
     if (--this.words[m + COUNT] === 0) {
-      Atomics.store(this.words, m + HOLDER, 0);
+      Atomics.compareExchange(this.words, m + HOLDER, this.thread + 1, 0);
       // The first in its queue takes it; the others look again whether they are first.
       Atomics.notify(this.words, m + HOLDER);
     }
@@ -620,6 +728,7 @@ export class Sync {
    * take the mutex again in that order. Whether the time ran out.
    */
   wait(c: number, ms: number): boolean {
+    this.refuse();
     const words = this.words;
     const m = this.conditionMutex(c);
     const r = this.ownRecord();
@@ -677,6 +786,8 @@ export class Sync {
    * it in turn once this thread lets go of it.
    */
   notify(c: number, all: boolean): void {
+    // Before it changes anything: a notify half done would lose a waiter.
+    this.refuse();
     const words = this.words;
     const m = this.conditionMutex(c);
     for (;;) {

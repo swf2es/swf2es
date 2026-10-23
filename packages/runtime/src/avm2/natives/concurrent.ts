@@ -9,7 +9,7 @@ import type { AsObject, Value } from "../descriptors.js";
 import type { Runtime } from "../runtime.js";
 import { bytesOf } from "./bytearray.js";
 import { type Natives, plain, registerNativeClass } from "./define.js";
-import { newSyncMemory, Sync, SyncTimeout } from "./sync.js";
+import { newSyncMemory, Sync, SyncFull, SyncTimeout } from "./sync.js";
 
 interface MutexObject extends AsObject {
   /** Its address in the shared memory. */
@@ -96,16 +96,34 @@ export function syncObject(rt: Runtime, ref: SyncRef): AsObject {
   return o;
 }
 
-/** Flash's script timeout, which a lock or wait that spun too long on the primordial hits. */
-function scriptTimeout(rt: Runtime): Value {
+/** An error of class `name`, or a plain Error where the VM has no such class, as avmshell has none of flash.errors'. */
+function errorOf(rt: Runtime, name: string, id: number): Value {
   let cls: AsObject | undefined;
   try {
-    cls = rt.classNamed("flash.errors::ScriptTimeoutError");
+    cls = rt.classNamed(name);
   } catch {
     cls = undefined;
   }
 
-  return rt.error(cls ? "flash.errors::ScriptTimeoutError" : "Error", 1502);
+  return rt.error(cls ? name : "Error", id);
+}
+
+/**
+ * What a script gets for what the sync memory threw: Flash's script
+ * timeout (1502) for a lock or wait that spun too long on the primordial,
+ * MemoryError 1000 where the memory is full; anything else as it is, as a
+ * terminated worker's SyncTerminated, which no script catches.
+ */
+export function syncError(rt: Runtime, e: unknown): unknown {
+  if (e instanceof SyncTimeout) {
+    return errorOf(rt, "flash.errors::ScriptTimeoutError", 1502);
+  }
+
+  if (e instanceof SyncFull) {
+    return errorOf(rt, "flash.errors::MemoryError", 1000);
+  }
+
+  return e;
 }
 
 export function concurrentNatives(rt: Runtime): Natives {
@@ -115,11 +133,7 @@ export function concurrentNatives(rt: Runtime): Natives {
     try {
       return f();
     } catch (e) {
-      if (e instanceof SyncTimeout) {
-        throw scriptTimeout(rt);
-      }
-
-      throw e;
+      throw syncError(rt, e);
     }
   };
 
@@ -130,7 +144,7 @@ export function concurrentNatives(rt: Runtime): Natives {
 
     "flash.concurrent:Mutex::ctor"(this: MutexObject): void {
       const vm = vmSync(rt);
-      this.$mutex = vm.sync.newMutex();
+      this.$mutex = blocking(() => vm.sync.newMutex());
       vm.objects.set(this.$mutex, new WeakRef(this));
     }
 
@@ -139,7 +153,7 @@ export function concurrentNatives(rt: Runtime): Natives {
     }
 
     tryLock(this: MutexObject): boolean {
-      return syncOf(rt).tryLock(this.$mutex);
+      return blocking(() => syncOf(rt).tryLock(this.$mutex));
     }
 
     unlock(this: MutexObject): void {
@@ -161,7 +175,7 @@ export function concurrentNatives(rt: Runtime): Natives {
 
       const vm = vmSync(rt);
       this.$mutexObject = mutex as MutexObject;
-      this.$condition = vm.sync.newCondition((mutex as MutexObject).$mutex);
+      this.$condition = blocking(() => vm.sync.newCondition((mutex as MutexObject).$mutex));
       vm.objects.set(this.$condition, new WeakRef(this));
     }
 
@@ -202,7 +216,7 @@ export function concurrentNatives(rt: Runtime): Natives {
         throw rt.error("flash.errors::IllegalOperationError", 1516);
       }
 
-      sync.notify(this.$condition, false);
+      blocking(() => sync.notify(this.$condition, false));
     }
 
     notifyAll(this: ConditionObject): void {
@@ -211,7 +225,7 @@ export function concurrentNatives(rt: Runtime): Natives {
         throw rt.error("flash.errors::IllegalOperationError", 1517);
       }
 
-      sync.notify(this.$condition, true);
+      blocking(() => sync.notify(this.$condition, true));
     }
   }
 
