@@ -285,8 +285,12 @@ ByteArray for an id, as avmplus interns one for a Buffer:
   an `Int32Array` over the bytes; `atomicCompareAndSwapLength` reads the
   length once, grows the capacity, then swaps the length word, so that of
   workers growing it at once one wins. The memory only ever grows, so a
-  swap that fails undoes nothing another worker did; what a smaller
-  buffer would have dropped is zeroed only once a length is lowered.
+  swap that fails undoes nothing another worker did. Nor is what a
+  smaller buffer would drop zeroed when the length is lowered: avmplus
+  zeroes it under a safepoint, and without one the zeroing would race
+  with a worker growing the length again and writing there, so on a
+  shared ByteArray bytes past a lowered length may come back when it
+  grows again.
   Writes past the end raise the length by a compare and swap, never
   lowering what another worker made it.
 - Domain memory over it keeps the loads and stores generated code makes in

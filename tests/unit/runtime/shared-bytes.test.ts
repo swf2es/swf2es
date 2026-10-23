@@ -73,14 +73,55 @@ test("a write past the end never lowers a length another worker raised", () => {
   assert.deepEqual([...b.buffer.subarray(16, 20)], [1, 2, 3, 4]);
 });
 
-test("a length swap that lowers it zeroes what a smaller buffer drops, once it is swapped", () => {
-  const [a, b] = shared(60 * MB);
-  b.buffer[59 * MB] = 7;
-  b.buffer[30 * MB] = 9;
+test("a lowered length leaves what another worker grew and wrote again meanwhile", () => {
+  // Past 24 MB a lower length means a smaller buffer, which drops what is past it: shared, nothing is
+  // zeroed, as without avmplus' safepoint the zeroing would race with a worker growing it again.
+  for (const via of ["setter", "swap"]) {
+    const [a, b] = shared(60 * MB);
+    const regrow = () => {
+      assert.equal(b.compareAndSwapLength(30 * MB, 60 * MB), 30 * MB);
+      b.buffer[55 * MB] = 0xab;
+    };
+    const own = Object.getOwnPropertyDescriptor(a, "length") as PropertyDescriptor;
+    let armed = via === "setter";
+    Object.defineProperty(a, "length", {
+      configurable: true,
+      get: own.get,
+      set(length: number) {
+        own.set?.call(a, length);
+        if (armed) {
+          armed = false;
+          regrow();
+        }
+      },
+    });
+    if (via === "setter") {
+      a.setLength(30 * MB, true);
+    } else {
+      // Right after its swap succeeds.
+      const swap = Atomics.compareExchange;
+      Atomics.compareExchange = ((...args: Parameters<typeof swap>) => {
+        const previous = swap(...args);
+        Atomics.compareExchange = swap;
+        regrow();
+        return previous;
+      }) as typeof swap;
+      assert.equal(a.compareAndSwapLength(60 * MB, 30 * MB), 60 * MB);
+    }
+
+    assert.equal(b.buffer[55 * MB], 0xab, via);
+    assert.equal(b.length, 60 * MB, via);
+  }
+});
+
+test("a ByteArray that shares nothing drops what a smaller buffer drops, as avmplus does", () => {
+  const a = new Bytes(rt, {});
+  a.setLength(60 * MB, true);
+  a.buffer[59 * MB] = 7;
+  a.buffer[29 * MB] = 9;
   assert.equal(a.compareAndSwapLength(60 * MB, 30 * MB), 60 * MB);
-  assert.equal(b.length, 30 * MB);
-  // Kept up to 48 MB, as avmplus' reallocation keeps it: below, back as it was when it grows again.
-  b.setLength(60 * MB, true);
-  assert.equal(b.buffer[59 * MB], 0);
-  assert.equal(b.buffer[30 * MB], 9);
+  // A new buffer each time, with the bytes within the length and zeroes past it.
+  a.setLength(60 * MB, true);
+  assert.equal(a.buffer[59 * MB], 0);
+  assert.equal(a.buffer[29 * MB], 9);
 });

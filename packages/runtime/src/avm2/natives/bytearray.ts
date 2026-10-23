@@ -241,15 +241,10 @@ export class Bytes {
       throw this.rt.error("RangeError", 1506);
     }
 
-    const old = this.length;
     this.reserve(length, fromSetter);
     this.length = length >>> 0;
     if (this.position > length) {
       this.position = length >>> 0;
-    }
-
-    if (this.shared !== null) {
-      this.dropped(length, old, fromSetter);
     }
 
     this.notify();
@@ -279,28 +274,6 @@ export class Bytes {
       if (now >= length || Atomics.compareExchange(words, 0, now | 0, length | 0) >>> 0 === now) {
         return;
       }
-    }
-  }
-
-  /**
-   * Shared memory, its length lowered from `old` to `length`, which the
-   * memory cannot shrink to: what the setter's reallocation to a smaller
-   * buffer would have dropped is zeroed instead, as a later growth would
-   * find it, once the length is lowered and never before.
-   */
-  private dropped(length: number, old: number, fromSetter: boolean): void {
-    if (
-      length >= old ||
-      !fromSetter ||
-      (length < kHugeGrowthThreshold && old < kHugeGrowthThreshold)
-    ) {
-      return;
-    }
-
-    const rounded = Math.ceil(length / kHugeGrowthIncr) * kHugeGrowthIncr;
-    const kept = rounded <= 0xffffffff - 2 * 4096 ? rounded : length;
-    if (kept < old) {
-      this.buffer.fill(0, kept, old);
     }
   }
 
@@ -423,7 +396,10 @@ export class Bytes {
   /**
    * A shared memory's capacity made at least `capacity`: it grows in place,
    * which every worker sees, and never shrinks, as another worker may have
-   * grown it past what this one asks for since (dropped zeroes instead).
+   * grown it past what this one asks for since. Nor is what a smaller
+   * buffer would drop zeroed: without avmplus' safepoint, another worker
+   * may have grown the length again and written there meanwhile, so bytes
+   * past a lowered length may come back when it grows again.
    */
   private reshare(capacity: number): void {
     const data = (this.shared as SharedBytesMemory).data as unknown as GrowableShared;
@@ -489,12 +465,8 @@ export class Bytes {
     this.reserve(next, true);
     const previous =
       Atomics.compareExchange(this.sharedWords as Int32Array, 0, expected | 0, next | 0) >>> 0;
-    if (previous === expected) {
-      if (this.position > next) {
-        this.position = next;
-      }
-
-      this.dropped(next, expected, true);
+    if (previous === expected && this.position > next) {
+      this.position = next;
     }
 
     this.notify();
