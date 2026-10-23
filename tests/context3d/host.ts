@@ -244,6 +244,21 @@ await withPage(
         clickCount: 1,
       });
       assert.equal(await call("pointerState"), "28,56,28,56");
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 84,
+        y: 36,
+        button: "left",
+        clickCount: 1,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 84,
+        y: 36,
+        button: "left",
+        clickCount: 1,
+      });
+      assert.equal(await call("pointerState"), "-12,-12,-12,-12");
       await call("scriptLayout", "noScale", "TL");
       await call("resize", 220, 160);
       assert.equal(await call("scriptState"), "noScale|TL|220|160|220,160,false,false,2,true;");

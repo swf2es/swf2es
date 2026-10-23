@@ -1700,3 +1700,22 @@ test("a card turned in 3D takes the pointer where it is drawn in perspective", {
   ]);
   assert.deepEqual(input("up", 370, 200), ["click card 56,0 true true"]);
 });
+
+test("pointer targets cover the translated viewport, including negative stage coordinates", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const button = new Container();
+  button.object = { $display: button } as never;
+  button.matrix.tx = -16;
+  button.matrix.ty = -16;
+  button.addChildAt(new BitmapObject(new BitmapStore(8, 8, true, 0xffffffff)), 0);
+  stage.addChildAt(button, 0);
+  assert.equal(pointerTarget(stage, -12, -12, 192, 144, undefined, -96, -48), button);
+  assert.equal(pointerTarget(stage, -90, -40, 192, 144, undefined, -96, -48), stage);
+  assert.equal(pointerTarget(stage, -97, -12, 192, 144, undefined, -96, -48), null);
+  assert.equal(pointerTarget(stage, -12, -49, 192, 144, undefined, -96, -48), null);
+  assert.equal(pointerTarget(stage, 96, 0, 192, 144, undefined, -96, -48), null);
+  assert.equal(pointerTarget(stage, 0, 96, 192, 144, undefined, -96, -48), null);
+  assert.equal(pointerTarget(stage, -12, -12, 192, 144), null);
+});

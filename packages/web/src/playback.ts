@@ -268,6 +268,11 @@ export class Playback {
       this.player.avm1.pixelRatio = placed.resolution;
     }
 
+    if (scripting) {
+      scripting.stageViewportX = noScale ? -placed.x : 0;
+      scripting.stageViewportY = noScale ? -placed.y : 0;
+    }
+
     this.view.setViewport(
       noScale ? -placed.x : 0,
       noScale ? -placed.y : 0,

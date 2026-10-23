@@ -847,3 +847,8 @@ setters, fixed getters and authored dimensions. The host regression loads the
 same StageLayout fixture without a surface factory and checks the 96×96 Stage
 in a 192×144 embed, no RESIZE and no artwork in the margin. Shared embedding
 alignment retains the old LR/TB centering for ordinary AS3 and AVM1 loads.
+
+Pointer, touch and context-menu picking use the translated viewport rectangle.
+The host test clicks the visible negative-coordinate artwork under bottom-right
+noScale alignment and checks stageX/stageY and Stage.mouseX/mouseY at (-12,-12),
+while the pure picking test rejects coordinates beyond each viewport edge.

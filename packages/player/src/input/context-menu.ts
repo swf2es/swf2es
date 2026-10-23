@@ -24,7 +24,16 @@ export function customContextMenu(s: Scripting, stage: Container, p: PointerStat
   s.mouseStageY = p.y;
   const rt = s.rt;
   const get = (o: avm2.Value, name: string) => rt.getProperty(o, rt.publicName(name));
-  const picked = pointerTarget(stage, p.x, p.y, s.stageWidth, s.stageHeight);
+  const picked = pointerTarget(
+    stage,
+    p.x,
+    p.y,
+    s.stageWidth,
+    s.stageHeight,
+    undefined,
+    s.stageViewportX,
+    s.stageViewportY,
+  );
   const target = picked === stage ? s.root : picked;
   let owner = target;
   let menu: avm2.AsObject | null = null;
