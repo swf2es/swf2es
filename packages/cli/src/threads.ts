@@ -37,11 +37,18 @@ export interface ShellThreads {
    * when the primordial ends, once what they printed so far has come.
    */
   close(): Promise<void>;
+  /**
+   * Wait for every thread to end by itself, those started meanwhile too:
+   * a worker whose code has ended leaves the workers it started running,
+   * as avmshell does, and its thread, which theirs belong to, waits for them.
+   */
+  ended(): Promise<void>;
 }
 
 /** Threads for the background workers of a primordial that runs `options.abcs`. */
 export function nodeShellThreads(options: ShellThreadsOptions): ShellThreads {
-  const running = new Set<Worker>();
+  // Each thread running, with its exit.
+  const running = new Map<Worker, Promise<unknown>>();
   // Only what a thread can be posted: a library's loaded module is not.
   const libraries = options.libraries.map(({ name, abc }) => ({ name, abc }));
   const abcs = options.abcs.map(({ name, abc }) => ({ name, abc }));
@@ -59,7 +66,7 @@ export function nodeShellThreads(options: ShellThreadsOptions): ShellThreads {
         stdout: false,
         stderr: false,
       });
-      running.add(worker);
+      running.set(worker, new Promise((resolve) => worker.once("exit", resolve)));
       worker.on("message", (line: string) => {
         if (options.print) {
           options.print(line);
@@ -76,8 +83,6 @@ export function nodeShellThreads(options: ShellThreadsOptions): ShellThreads {
         }
       });
       worker.on("exit", () => running.delete(worker));
-      // The primordial's process ends with its own code, not its workers'.
-      worker.unref();
       return {
         terminate() {
           running.delete(worker);
@@ -91,8 +96,13 @@ export function nodeShellThreads(options: ShellThreadsOptions): ShellThreads {
     host,
     async close() {
       await new Promise((resolve) => setImmediate(resolve));
-      await Promise.all([...running].map((w) => w.terminate()));
+      await Promise.all([...running.keys()].map((w) => w.terminate()));
       running.clear();
+    },
+    async ended() {
+      while (running.size) {
+        await Promise.all(running.values());
+      }
     },
   };
 }
