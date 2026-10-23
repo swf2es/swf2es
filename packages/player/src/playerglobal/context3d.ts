@@ -654,7 +654,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       surface = 0,
       output = 0,
     ): void {
-      if (aa !== 0 || output !== 0) {
+      if (output !== 0) {
         unsupported();
       }
 
@@ -667,7 +667,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
         value = null;
       }
 
-      entry.backend.setRenderTarget(value, depth, surface);
+      entry.backend.setRenderTarget(value, depth, surface, aa);
       entry.target = value && object ? (textures.get(object) ?? null) : null;
       entry.targetObject = value ? object : null;
     }

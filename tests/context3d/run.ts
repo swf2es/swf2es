@@ -40,6 +40,7 @@ const scripts = compileScripts(
     "LodBias",
     "RectangleTextures",
     "Multisampling",
+    "TargetMultisampling",
     "RenderTargets",
     "CubeTargets",
     "CubeTextures",
@@ -77,6 +78,7 @@ for (const name of [
   "LodBias",
   "RectangleTextures",
   "Multisampling",
+  "TargetMultisampling",
   "RenderTargets",
   "CubeTargets",
   "CubeTextures",
@@ -155,6 +157,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(msaa.exception, null, JSON.stringify(msaa));
       assert.equal(msaa.value?.passed, true);
       console.log("context3d: multisample edges, resolve reuse, resize and allocation failures ok");
+      const targetMsaa = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.targetMultisampling())',
+      );
+      assert.equal(targetMsaa.exception, null, JSON.stringify(targetMsaa));
+      assert.equal(targetMsaa.value?.passed, true);
+      console.log("context3d: texture MSAA edges, cube faces, budgets, rollback and cleanup ok");
       const reconfiguration = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.reconfiguration())',
       );
@@ -269,6 +277,7 @@ if (!process.argv.includes("--build-only")) {
         "LodBias",
         "RectangleTextures",
         "Multisampling",
+        "TargetMultisampling",
         "RenderTargets",
         "CubeTargets",
         "CubeTextures",

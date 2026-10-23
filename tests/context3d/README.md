@@ -40,6 +40,7 @@ node tests/context3d/oracle.ts --samplerstates
 node tests/context3d/oracle.ts --lodbias
 node tests/context3d/oracle.ts --rectangletextures
 node tests/context3d/oracle.ts --multisampling
+node tests/context3d/oracle.ts --targetmultisampling
 node tests/context3d/oracle.ts --temporarymatrices
 node tests/context3d/oracle.ts --indirectconstants
 node tests/context3d/oracle.ts --cubetextures
@@ -419,7 +420,7 @@ The prototype retains only weak ownership records for retired textures.
 This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 `bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
-bias. Anisotropic filtering and compressed textures remain unsupported.
+bias. Compressed textures remain unsupported.
 Ordinary 2D/cube upload dimensions must match the selected mip level. Each context
 is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
 for CPU staging arrays; these are experimental resource limits.
@@ -449,8 +450,8 @@ feedback rejection, disposal and context loss. Failed switches preserve the
 previous target; all tracked GPU handles are released on teardown.
 
 This slice limits render targets to power-of-two 2D textures from 8×8 through
-2048×2048 and cube faces from 8×8 through 1024×1024, without target antialiasing
-or multiple color outputs.
+2048×2048 and cube faces from 8×8 through 1024×1024, with optional target
+antialiasing and a single color output.
 A 1×1 AIR rasterization probe differed; smaller targets remain unverified.
 Resizing the back buffer while a texture is selected is explicitly rejected.
 Target depth storage has a separate 64 MiB budget. Full validation/error parity
@@ -588,6 +589,28 @@ back buffers. Allocations occur at configuration, with no new per-draw arrays.
 AS3 clear-before-read validation lives in the native adapter; the backend's
 readback method remains available to renderer diagnostics after presentation.
 
+`TargetMultisampling.as` grounds baseline-profile antialiasing requests for 2D,
+rectangle and cube targets in AIR. It checks interior colors, retained color
+across rebindings and quality changes, independent single/multisample depth
+storage, and uploads after a cached target has been used. First-use uncleared
+MSAA pixels vary on AIR's driver, so portable references clear them explicitly.
+Exact edge coverage remains GPU-dependent.
+
+The backend caches multisample color and optional depth/stencil per texture,
+resolves changed color on target exit, then updates mipmaps. A shader copies
+retained single-sample color when returning from non-MSAA draws or switching
+cube faces. Cube resolves pass through a cached 2D surface before a GPU copy:
+a minimal SwiftShader test reproduced scrambled direct MSAA-to-cube blits,
+while Intel hardware drew correctly. All copies remain on the GPU.
+
+Multisample color plus cube resolve storage has a separate 64 MiB default
+budget (`maxTargetColorBytes`); actual sample counts also scale depth accounting
+under `maxTargetDepthBytes`. Browser checks cover partial edge coverage,
+resolve reuse after depth-only clears, all six patterned cube faces, warm handle
+reuse, failed fresh/cached target allocations, framebuffer rollback, quota
+release, fallback, resizing and context-loss teardown. Supported count queries
+are cached, and warmed draws create no new JavaScript arrays or GPU handles.
+
 `Scissor.as` checks top-left clipping against AIR, including fractional edge
 rounding, empty and negative-sized rectangles, clipping to the viewport, and
 error 3706 for a nonempty rectangle outside the target. Rectangles are copied
@@ -723,7 +746,7 @@ color rendering and back buffers with optional multisampling are exercised, with
 Unsupported operations throw experimental errors, not a claim of
 Flash-compatible validation.
 
-Next gates are the unresolved shader cases above, target MSAA and broader texture
+Next gates are the unresolved shader cases above and broader texture
 formats, alongside broader Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own

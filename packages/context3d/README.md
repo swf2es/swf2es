@@ -22,8 +22,11 @@ back-buffer attachments and copies to the canvas only at `present()`.
 An optional second constructor argument sets resource budgets, for example
 `new WebGLContext3D(gl, { maxBuffers: 4096 })` for models with many animation
 frames. Defaults are 128 buffers, programs and textures each, with separate
-64 MiB budgets for buffer storage, texture mip chains and texture-target
-depth/stencil storage (`maxBufferBytes`, `maxTextureBytes`, `maxTargetDepthBytes`).
+64 MiB budgets for buffer storage, texture mip chains, texture-target
+depth/stencil storage and multisample target color storage (`maxBufferBytes`,
+`maxTextureBytes`, `maxTargetDepthBytes`, `maxTargetColorBytes`).
+Multisample storage counts actual samples; cube targets also count a cached
+single-sample color surface used during resolution.
 `maxBuffers`, `maxPrograms` and `maxTextures` change the count limits. Raising a
 count leaves the byte budgets intact. Values must be nonnegative safe integers;
 zero denies new allocations in that category. Options are copied at creation,
@@ -44,6 +47,13 @@ WebGL uses cached sampler objects and clamps anisotropy to the extension's
 hardware limit. Without `EXT_texture_filter_anisotropic`, those requests use
 linear filtering with the requested mip mode. Capability queries happen only on
 the first anisotropic draw; warmed sampler changes allocate no new GPU objects.
+
+Texture targets support hardware-dependent antialiasing requests up to 4×,
+falling back to single-sample rendering when no compatible count is available.
+The backend caches target attachments, retains color/depth across rebindings,
+and resolves changed color before generating mipmaps. Warm target switches
+allocate no GPU handles. Cube resolves use a cached 2D surface and a GPU copy,
+which avoids corrupted direct multisample-to-cube blits in SwiftShader.
 
 The Flash adapter reclaims resources after their AS wrappers become unreachable.
 Active vertex, program, texture and render-target bindings keep their wrappers

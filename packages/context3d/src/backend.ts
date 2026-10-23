@@ -160,7 +160,12 @@ export interface Context3D {
   createTexture(width: number, height: number, cube?: boolean): Texture3D;
   createRectangleTexture(width: number, height: number): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
-  setRenderTarget(texture: Texture3D | null, depth?: boolean, face?: number): void;
+  setRenderTarget(
+    texture: Texture3D | null,
+    depth?: boolean,
+    face?: number,
+    antiAlias?: number,
+  ): void;
   setSampler(index: number, wrap: SamplerWrap, filter: SamplerFilter, mip: SamplerMip): void;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;

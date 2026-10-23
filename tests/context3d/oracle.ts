@@ -18,6 +18,7 @@ const fixture =
     "TemporaryMatrices",
     "IndirectConstants",
     "Multisampling",
+    "TargetMultisampling",
     "Mipmaps",
     "SamplerStates",
     "LodBias",
@@ -83,7 +84,7 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Stencil" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation"}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Stencil" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation"}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>

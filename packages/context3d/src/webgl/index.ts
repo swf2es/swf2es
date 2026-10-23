@@ -1,4 +1,4 @@
-import { type ProgramType, type SamplerSource, type ShaderSource, translate } from "../agal.js";
+import { type ProgramType, type SamplerSource, translate } from "../agal.js";
 import {
   type BlendFactor,
   type Buffer3D,
@@ -109,6 +109,25 @@ interface ProgramState {
   samplerMask: number;
 }
 
+interface MultisampleTarget {
+  framebuffer: WebGLFramebuffer;
+  color: WebGLRenderbuffer;
+  depth: WebGLRenderbuffer | null;
+  samples: number;
+  resolve: WebGLFramebuffer | null;
+  texture: WebGLTexture | null;
+  valid: boolean;
+  dirty: boolean;
+  face: number;
+  depthAttached: boolean;
+}
+
+interface CopyProgram {
+  handle: WebGLProgram;
+  size: WebGLUniformLocation | null;
+  face: WebGLUniformLocation | null;
+}
+
 interface TextureState {
   handle: WebGLTexture;
   bytes: Uint8Array;
@@ -119,10 +138,13 @@ interface TextureState {
   face: number;
   mipFramebuffer: WebGLFramebuffer | null;
   depthAttached: boolean;
+  multisample: MultisampleTarget | null;
+  samples: number;
+  antiAlias: number;
 }
 
 /** Per-context resource budgets; byte counts cover buffer storage, texture mip
- * chains and texture-target depth/stencil attachments, not physical driver VRAM. */
+ * chains and texture-target attachments, not physical driver VRAM. */
 export interface WebGLContext3DLimits {
   maxBuffers: number;
   maxPrograms: number;
@@ -130,6 +152,7 @@ export interface WebGLContext3DLimits {
   maxBufferBytes: number;
   maxTextureBytes: number;
   maxTargetDepthBytes: number;
+  maxTargetColorBytes: number;
 }
 
 const DEFAULT_LIMITS: WebGLContext3DLimits = {
@@ -139,6 +162,7 @@ const DEFAULT_LIMITS: WebGLContext3DLimits = {
   maxBufferBytes: 64 * 1024 * 1024,
   maxTextureBytes: 64 * 1024 * 1024,
   maxTargetDepthBytes: 64 * 1024 * 1024,
+  maxTargetColorBytes: 64 * 1024 * 1024,
 };
 const LIMIT_NAMES = Object.keys(DEFAULT_LIMITS) as (keyof WebGLContext3DLimits)[];
 
@@ -172,6 +196,10 @@ export class WebGLContext3D implements Context3D {
   private readonly textureOwners = new WeakSet<Texture3D>();
   private textureBytes = 0;
   private targetDepthBytes = 0;
+  private targetColorBytes = 0;
+  private copy2D: CopyProgram | null = null;
+  private copyCube: CopyProgram | null = null;
+  private readonly targetSamples = new Int8Array(10).fill(-1);
   private renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
@@ -192,6 +220,8 @@ export class WebGLContext3D implements Context3D {
   private depthBuffer: WebGLRenderbuffer | null = null;
   private antiAlias = 0;
   private depthWrite = true;
+  private blendEnabled = false;
+  private cullEnabled = false;
   private colorWrite = 15;
   private readonly stencilFront = new StencilState();
   private readonly stencilBack = new StencilState();
@@ -244,16 +274,24 @@ export class WebGLContext3D implements Context3D {
     }
   }
 
-  private target(back = false): void {
+  private target(back = false, discardColor = false): void {
     this.alive();
     if (!this.framebuffer) {
       throw new Error("Context3D experiment: configure the back buffer first");
     }
 
     const texture = back ? null : this.renderTexture;
+    const state = texture && this.textureState(texture);
+    if (texture && state?.samples && state.multisample && !state.multisample.valid) {
+      if (discardColor) {
+        state.multisample.valid = true;
+      } else {
+        this.seedTarget(texture, state);
+      }
+    }
     this.gl.bindFramebuffer(
       this.gl.FRAMEBUFFER,
-      texture ? this.textureState(texture).framebuffer : this.framebuffer,
+      state ? this.targetFramebuffer(state) : this.framebuffer,
     );
     this.gl.viewport(0, 0, texture?.width ?? this.width, texture?.height ?? this.height);
   }
@@ -410,7 +448,7 @@ export class WebGLContext3D implements Context3D {
     mask = 0xffffffff,
     stencil = 0,
   ): void {
-    this.target();
+    this.target(false, (mask & 1) !== 0);
     const gl = this.gl;
     let bits = 0;
     if (mask & 1) {
@@ -624,6 +662,7 @@ export class WebGLContext3D implements Context3D {
   setBlend(source: BlendFactor, destination: BlendFactor): void {
     this.alive();
     const gl = this.gl;
+    this.blendEnabled = source !== "one" || destination !== "zero";
     if (source === "one" && destination === "zero") {
       gl.disable(gl.BLEND);
     } else {
@@ -635,6 +674,7 @@ export class WebGLContext3D implements Context3D {
   setCulling(face: CullFace): void {
     this.alive();
     const gl = this.gl;
+    this.cullEnabled = face !== "none";
     if (face === "none") {
       gl.disable(gl.CULL_FACE);
       return;
@@ -780,7 +820,7 @@ export class WebGLContext3D implements Context3D {
         // Translate both before allocating anything on the GPU.
         const vs = translate(vertex, "vertex");
         const fs = translate(fragment, "fragment");
-        const handle = this.link(vs, fs);
+        const handle = this.link(vs.source, fs.source);
         const gl = this.gl;
         if (state.handle && gl.getParameter(gl.CURRENT_PROGRAM) === state.handle) {
           gl.useProgram(null);
@@ -911,6 +951,9 @@ export class WebGLContext3D implements Context3D {
       face: 0,
       mipFramebuffer: null,
       depthAttached: false,
+      multisample: null,
+      samples: 0,
+      antiAlias: 0,
     };
     const upload = (level: number, face: number, w: number, h: number): void => {
       gl.activeTexture(gl.TEXTURE0);
@@ -1018,6 +1061,10 @@ export class WebGLContext3D implements Context3D {
         gl.deleteFramebuffer(state.framebuffer);
         gl.deleteFramebuffer(state.mipFramebuffer);
         gl.deleteRenderbuffer(state.depthBuffer);
+        if (state.multisample) {
+          this.deleteMultisample(texture, state.multisample);
+          state.multisample = null;
+        }
         if (state.depthBuffer) {
           this.targetDepthBytes -= width * height * 4;
         }
@@ -1056,24 +1103,348 @@ export class WebGLContext3D implements Context3D {
     return state;
   }
 
-  setRenderTarget(texture: Texture3D | null, depth = false, face = 0): void {
+  private targetFramebuffer(state: TextureState): WebGLFramebuffer | null {
+    return state.samples ? (state.multisample?.framebuffer ?? null) : state.framebuffer;
+  }
+
+  private copyProgram(cube: boolean): CopyProgram {
+    const cached = cube ? this.copyCube : this.copy2D;
+    if (cached) {
+      return cached;
+    }
+
+    const vertex = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+    const fragment = cube
+      ? `#version 300 es
+precision highp float;
+uniform samplerCube uSource;
+uniform vec2 uSize;
+uniform int uFace;
+out vec4 color;
+void main() {
+  vec2 p = gl_FragCoord.xy * 2.0 / uSize - 1.0;
+  vec3 direction;
+  switch (uFace) {
+    case 0: direction = vec3(1.0, -p.y, -p.x); break;
+    case 1: direction = vec3(-1.0, -p.y, p.x); break;
+    case 2: direction = vec3(p.x, 1.0, p.y); break;
+    case 3: direction = vec3(p.x, -1.0, -p.y); break;
+    case 4: direction = vec3(p.x, -p.y, 1.0); break;
+    default: direction = vec3(-p.x, -p.y, -1.0); break;
+  }
+  color = textureLod(uSource, direction, 0.0);
+}`
+      : `#version 300 es
+precision highp float;
+uniform sampler2D uSource;
+out vec4 color;
+void main() {
+  color = texelFetch(uSource, ivec2(gl_FragCoord.xy), 0);
+}`;
+    const gl = this.gl;
+    const handle = this.link(vertex, fragment);
+    const program = {
+      handle,
+      size: gl.getUniformLocation(handle, "uSize"),
+      face: gl.getUniformLocation(handle, "uFace"),
+    };
+    gl.useProgram(handle);
+    gl.uniform1i(gl.getUniformLocation(handle, "uSource"), 0);
+    if (cube) {
+      this.copyCube = program;
+    } else {
+      this.copy2D = program;
+    }
+
+    return program;
+  }
+
+  private seedTarget(texture: Texture3D, state: TextureState): void {
+    const target = state.multisample;
+    if (!target) {
+      return;
+    }
+
+    const gl = this.gl;
+    const program = this.copyProgram(texture.cube);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.viewport(0, 0, texture.width, texture.height);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.STENCIL_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.CULL_FACE);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.colorMask(true, true, true, true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, state.handle);
+    gl.bindSampler(0, this.sampler(0));
+    gl.bindVertexArray(this.vao);
+    gl.useProgram(program.handle);
+    if (texture.cube) {
+      gl.uniform2f(program.size, texture.width, texture.height);
+      gl.uniform1i(program.face, this.renderFace);
+    }
+    // WebGL cannot blit single-sample color into a multisample framebuffer.
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.enable(gl.DEPTH_TEST);
+    if (this.stencilEnabled) {
+      gl.enable(gl.STENCIL_TEST);
+    }
+    if (this.blendEnabled) {
+      gl.enable(gl.BLEND);
+    }
+    if (this.cullEnabled) {
+      gl.enable(gl.CULL_FACE);
+    }
+    if (this.scissor) {
+      gl.enable(gl.SCISSOR_TEST);
+    }
+    this.applyColorMask();
+    target.valid = true;
+  }
+
+  private resolveTarget(texture: Texture3D, state: TextureState): void {
+    const target = state.multisample;
+    if (!state.samples || !target?.dirty) {
+      return;
+    }
+
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.resolve ?? state.framebuffer);
+    if (this.scissor) {
+      gl.disable(gl.SCISSOR_TEST);
+    }
+    gl.blitFramebuffer(
+      0,
+      0,
+      texture.width,
+      texture.height,
+      0,
+      0,
+      texture.width,
+      texture.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    if (target.resolve) {
+      // SwiftShader corrupts direct multisample blits into cube faces.
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.resolve);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, state.handle);
+      gl.copyTexSubImage2D(
+        gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.renderFace,
+        0,
+        0,
+        0,
+        0,
+        0,
+        texture.width,
+        texture.height,
+      );
+    }
+    target.dirty = false;
+  }
+
+  private multisamples(quality: number, depth: boolean): number {
+    if (!Number.isInteger(quality)) {
+      throw new Error("Context3D experiment: invalid antialiasing quality");
+    }
+
+    const key = Math.max(0, Math.min(quality, 4)) * 2 + Number(depth);
+    if (this.targetSamples[key] < 0) {
+      this.targetSamples[key] = this.samples(quality, depth);
+    }
+
+    return this.targetSamples[key];
+  }
+
+  private deleteMultisample(texture: Texture3D, target: MultisampleTarget): void {
+    const gl = this.gl;
+    gl.deleteFramebuffer(target.framebuffer);
+    gl.deleteRenderbuffer(target.color);
+    gl.deleteRenderbuffer(target.depth);
+    gl.deleteFramebuffer(target.resolve);
+    gl.deleteTexture(target.texture);
+    const bytes = texture.width * texture.height * 4 * target.samples;
+    this.targetColorBytes -= bytes + (target.texture ? texture.width * texture.height * 4 : 0);
+    if (target.depth) {
+      this.targetDepthBytes -= bytes;
+    }
+  }
+
+  private prepareMultisample(
+    texture: Texture3D,
+    state: TextureState,
+    samples: number,
+    depth: boolean,
+  ): void {
+    const old = state.multisample;
+    const same = old?.samples === samples;
+    const bytes = texture.width * texture.height * 4 * samples;
+    const previous = old ? texture.width * texture.height * 4 * old.samples : 0;
+    const resolveBytes = texture.cube ? texture.width * texture.height * 4 : 0;
+    const newDepth = depth && (!same || !old.depth);
+    if (
+      this.targetColorBytes + (same ? 0 : bytes - previous + (old ? 0 : resolveBytes)) >
+        this.limits.maxTargetColorBytes ||
+      this.targetDepthBytes + (newDepth ? bytes : 0) - (!same && old?.depth ? previous : 0) >
+        this.limits.maxTargetDepthBytes
+    ) {
+      throw new Error("Context3D experiment: multisample target memory limit");
+    }
+
+    this.copyProgram(texture.cube);
+    this.sampler(0);
+    const gl = this.gl;
+    const framebuffer = same ? old.framebuffer : gl.createFramebuffer();
+    const color = same ? old.color : gl.createRenderbuffer();
+    const depthBuffer = newDepth ? gl.createRenderbuffer() : same ? old.depth : null;
+    const resolve = same ? old.resolve : texture.cube ? gl.createFramebuffer() : null;
+    const resolved = same ? old.texture : texture.cube ? gl.createTexture() : null;
+    try {
+      if (texture.cube && (!resolve || !resolved)) {
+        throw new Error("Context3D experiment: cannot allocate cube resolve target");
+      }
+      if (texture.cube && !same) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, resolved);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, texture.width, texture.height);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, resolve);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resolved, 0);
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+          throw new Error("Context3D experiment: incomplete cube resolve target");
+        }
+      }
+      if (!framebuffer || !color || (newDepth && !depthBuffer)) {
+        throw new Error("Context3D experiment: cannot allocate multisample target");
+      }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      if (!same) {
+        gl.bindRenderbuffer(gl.RENDERBUFFER, color);
+        gl.renderbufferStorageMultisample(
+          gl.RENDERBUFFER,
+          samples,
+          gl.RGBA8,
+          texture.width,
+          texture.height,
+        );
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, color);
+      }
+      if (newDepth) {
+        gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
+        gl.renderbufferStorageMultisample(
+          gl.RENDERBUFFER,
+          samples,
+          gl.DEPTH24_STENCIL8,
+          texture.width,
+          texture.height,
+        );
+      }
+      gl.framebufferRenderbuffer(
+        gl.FRAMEBUFFER,
+        gl.DEPTH_STENCIL_ATTACHMENT,
+        gl.RENDERBUFFER,
+        depth ? depthBuffer : null,
+      );
+      if (
+        (!same || newDepth) &&
+        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+      ) {
+        throw new Error("Context3D experiment: incomplete multisample target");
+      }
+    } catch (error) {
+      if (!same) {
+        gl.deleteFramebuffer(framebuffer);
+        gl.deleteRenderbuffer(color);
+        gl.deleteFramebuffer(resolve);
+        gl.deleteTexture(resolved);
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, old.framebuffer);
+        gl.framebufferRenderbuffer(
+          gl.FRAMEBUFFER,
+          gl.DEPTH_STENCIL_ATTACHMENT,
+          gl.RENDERBUFFER,
+          old.depthAttached ? old.depth : null,
+        );
+      }
+      if (newDepth) {
+        gl.deleteRenderbuffer(depthBuffer);
+      }
+      throw error;
+    }
+
+    if (newDepth) {
+      gl.disable(gl.SCISSOR_TEST);
+      gl.depthMask(true);
+      gl.stencilMask(255);
+      gl.clearDepth(1);
+      gl.clearStencil(0);
+      gl.clear(gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+      gl.depthMask(this.depthWrite);
+      gl.stencilMask(this.stencilWrite);
+    }
+    if (same) {
+      old.depth = depthBuffer;
+      old.depthAttached = depth;
+      if (newDepth) {
+        this.targetDepthBytes += bytes;
+      }
+    } else {
+      if (old) {
+        this.deleteMultisample(texture, old);
+      }
+      state.multisample = {
+        framebuffer,
+        color,
+        depth: depthBuffer,
+        samples,
+        resolve,
+        texture: resolved,
+        valid: false,
+        dirty: false,
+        face: 0,
+        depthAttached: depth,
+      };
+      this.targetColorBytes += bytes + resolveBytes;
+      if (depthBuffer) {
+        this.targetDepthBytes += bytes;
+      }
+    }
+  }
+
+  setRenderTarget(texture: Texture3D | null, depth = false, face = 0, antiAlias = 0): void {
     this.alive();
     if (texture) {
       range(face, 1, texture.cube ? 6 : 1);
     }
     if (
       texture === this.renderTexture &&
-      (!texture || (depth === this.renderDepth && face === this.renderFace))
+      (!texture ||
+        (depth === this.renderDepth &&
+          face === this.renderFace &&
+          antiAlias === this.textureState(texture).antiAlias))
     ) {
       return;
     }
 
     const gl = this.gl;
     if (texture) {
-      const state = this.textureState(texture);
+      this.textureState(texture);
       if (texture.width < 8 || texture.height < 8) {
         throw new Error("Context3D experiment: render targets must be at least 8 by 8");
       }
+    }
+    const samples = texture ? this.multisamples(antiAlias, depth) : 0;
+    this.finishTarget();
+    if (texture) {
+      const state = this.textureState(texture);
+      const singleDepth = depth && samples === 0;
 
       let framebuffer = state.framebuffer;
       let mipFramebuffer = state.mipFramebuffer;
@@ -1097,7 +1468,7 @@ export class WebGLContext3D implements Context3D {
           state.handle,
           0,
         );
-        if (depth && !depthBuffer) {
+        if (singleDepth && !depthBuffer) {
           if (
             this.targetDepthBytes + texture.width * texture.height * 4 >
             this.limits.maxTargetDepthBytes
@@ -1120,18 +1491,22 @@ export class WebGLContext3D implements Context3D {
           gl.FRAMEBUFFER,
           gl.DEPTH_STENCIL_ATTACHMENT,
           gl.RENDERBUFFER,
-          depth ? depthBuffer : null,
+          singleDepth ? depthBuffer : null,
         );
         if (
-          (!state.framebuffer || (depth && !state.depthBuffer)) &&
+          (!state.framebuffer || (singleDepth && !state.depthBuffer)) &&
           gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
         ) {
           throw new Error("Context3D experiment: incomplete texture framebuffer");
+        }
+        if (samples) {
+          this.prepareMultisample(texture, state, samples, depth);
         }
       } catch (error) {
         if (framebuffer !== state.framebuffer) {
           gl.deleteFramebuffer(framebuffer);
         } else if (framebuffer) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
           gl.framebufferTexture2D(
             gl.FRAMEBUFFER,
             gl.COLOR_ATTACHMENT0,
@@ -1156,8 +1531,11 @@ export class WebGLContext3D implements Context3D {
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);
         gl.bindFramebuffer(
           gl.FRAMEBUFFER,
-          this.renderTexture ? this.textureState(this.renderTexture).framebuffer : this.framebuffer,
+          this.renderTexture
+            ? this.targetFramebuffer(this.textureState(this.renderTexture))
+            : this.framebuffer,
         );
+        this.applyScissor();
         throw error;
       }
 
@@ -1175,12 +1553,17 @@ export class WebGLContext3D implements Context3D {
       state.framebuffer = framebuffer;
       state.mipFramebuffer = mipFramebuffer;
       state.face = face;
-      state.depthAttached = depth;
+      state.depthAttached = singleDepth;
       state.depthBuffer = depthBuffer;
+      state.samples = samples;
+      state.antiAlias = antiAlias;
+      if (samples && state.multisample && state.multisample.face !== face) {
+        state.multisample.face = face;
+        state.multisample.valid = false;
+      }
       gl.bindRenderbuffer(gl.RENDERBUFFER, null);
     }
 
-    this.finishTarget();
     this.renderTexture = texture;
     this.renderFace = texture ? face : 0;
     this.renderDepth = texture !== null && depth;
@@ -1190,7 +1573,15 @@ export class WebGLContext3D implements Context3D {
 
   private changedTarget(): void {
     if (this.renderTexture) {
-      this.textureState(this.renderTexture).dirty = true;
+      const state = this.textureState(this.renderTexture);
+      state.dirty = true;
+      if (state.multisample) {
+        if (state.samples) {
+          state.multisample.dirty = true;
+        } else {
+          state.multisample.valid = false;
+        }
+      }
     } else {
       this.resolveDirty = true;
     }
@@ -1204,6 +1595,7 @@ export class WebGLContext3D implements Context3D {
     const state = this.textureState(texture);
     if (state.dirty) {
       const gl = this.gl;
+      this.resolveTarget(texture, state);
       gl.activeTexture(gl.TEXTURE0);
       if (texture.cube) {
         // generateMipmap(CUBE_MAP) would overwrite manually uploaded mips on
@@ -1359,7 +1751,7 @@ export class WebGLContext3D implements Context3D {
     return sampler;
   }
 
-  private link(vertex: ShaderSource, fragment: ShaderSource): WebGLProgram {
+  private link(vertex: string, fragment: string): WebGLProgram {
     const gl = this.gl;
     const v = gl.createShader(gl.VERTEX_SHADER);
     const f = gl.createShader(gl.FRAGMENT_SHADER);
@@ -1371,8 +1763,8 @@ export class WebGLContext3D implements Context3D {
         throw new Error("Context3D experiment: cannot allocate shader");
       }
 
-      gl.shaderSource(v, vertex.source);
-      gl.shaderSource(f, fragment.source);
+      gl.shaderSource(v, vertex);
+      gl.shaderSource(f, fragment);
       gl.compileShader(v);
       gl.compileShader(f);
       if (
@@ -1718,6 +2110,10 @@ export class WebGLContext3D implements Context3D {
     this.gl.deleteFramebuffer(this.framebuffer);
     this.gl.deleteFramebuffer(this.resolveFramebuffer);
     this.gl.deleteRenderbuffer(this.colorBuffer);
+    this.gl.deleteProgram(this.copy2D?.handle ?? null);
+    this.gl.deleteProgram(this.copyCube?.handle ?? null);
+    this.copy2D = null;
+    this.copyCube = null;
     this.gl.deleteTexture(this.texture);
     this.gl.deleteRenderbuffer(this.depthBuffer);
     this.framebuffer = null;

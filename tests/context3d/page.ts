@@ -103,6 +103,7 @@ export function resourceLimits(): { passed: boolean } {
       "maxBufferBytes",
       "maxTextureBytes",
       "maxTargetDepthBytes",
+      "maxTargetColorBytes",
     ] as const;
     const invalid = [-1, 0.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1];
     const handles = owned.created;
@@ -510,6 +511,7 @@ export async function shaderFixture(
     | "LodBias"
     | "RectangleTextures"
     | "Multisampling"
+    | "TargetMultisampling"
     | "TemporaryMatrices"
     | "IndirectConstants"
     | "CubeTargets"
@@ -522,9 +524,19 @@ export async function shaderFixture(
   const trace: string[] = [];
   const scripting = new Scripting(codegen, { print: (line) => trace.push(line), audio: null });
   const owned: ReturnType<typeof create>[] = [];
+  let targetSamples = 0;
   const close = install(scripting, {
     create: () => {
       const entry = create();
+      if (fixture === "TargetMultisampling") {
+        const select = entry.backend.setRenderTarget.bind(entry.backend);
+        entry.backend.setRenderTarget = (texture, depth, face, antiAlias) => {
+          select(texture, depth, face, antiAlias);
+          if (texture) {
+            targetSamples = Math.max(targetSamples, entry.gl.getParameter(entry.gl.SAMPLES));
+          }
+        };
+      }
       owned.push(entry);
       return entry.backend;
     },
@@ -556,6 +568,9 @@ export async function shaderFixture(
     );
     check(owned.length === 1, "unexpected shader context count");
     check(owned[0].gl.getError() === owned[0].gl.NO_ERROR, "GL error after shader fixture");
+    if (fixture === "TargetMultisampling") {
+      check(targetSamples > 0, "AS antialiasing requests did not reach texture targets");
+    }
     return { trace };
   } finally {
     close();
@@ -2309,6 +2324,306 @@ export async function multisampling() {
     check(live.size === 0, "multisampling retained GPU resources");
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
+}
+
+export async function targetMultisampling() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  try {
+    c.configure(64, 64);
+    const vertices = c.createBuffer(4, 6);
+    vertices.upload(
+      [-1, -1, 0.5, 1, 0, 1, 1, -1, 0.5, 1, 1, 1, -1, 1, 0.5, 1, 0, 0, 1, 1, 0.5, 1, 1, 0],
+      0,
+      4,
+    );
+    const triangle = c.createBuffer(3, 4);
+    triangle.upload([-0.8, -0.8, 0.5, 1, 0.8, -0.8, 0.5, 1, 0, 0.8, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(6, 0);
+    indices.upload([0, 1, 2, 2, 1, 3], 0, 6);
+    const solid = c.createProgram();
+    solid.upload(shader(false), shader(true));
+    const vertex = new Uint8Array(55);
+    vertex.set(shader(false));
+    const v = new DataView(vertex.buffer);
+    v.setUint32(35, 0x040f0000, true);
+    v.setUint32(39, 0xe4000001, true);
+    const fragment = shader(true);
+    const f = new DataView(fragment.buffer);
+    f.setUint32(7, 0x28, true);
+    f.setUint32(19, 4, true);
+    f.setUint32(27, 5, true);
+    const sampled = c.createProgram();
+    sampled.upload(vertex, fragment);
+    const texture = c.createTexture(64, 64);
+    const rectangle = c.createRectangleTexture(64, 48);
+    const draw = () => {
+      c.setVertex(0, triangle, 0, "float4");
+      c.setVertex(1, null, 0, "float2");
+      c.setProgram(solid);
+      c.setConstants("fragment", 0, [1, 0, 0, 1], 1);
+      c.draw(indices, 0, 1);
+    };
+    const show = (target: typeof texture) => {
+      c.setRenderTarget(null);
+      c.setScissor(null);
+      c.setDepth(false, "always");
+      c.clear(0, 0, 0, 1);
+      c.setVertex(0, vertices, 0, "float4");
+      c.setVertex(1, vertices, 4, "float2");
+      c.setProgram(sampled);
+      c.setTexture(0, target);
+      c.draw(indices, 0, 2);
+      c.setTexture(0, null);
+      return c.read();
+    };
+    const partial = (pixels: Uint8Array) => {
+      let count = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] > 0 && pixels[i] < 255) {
+          count++;
+        }
+      }
+      return count;
+    };
+    c.setDepth(false, "always");
+    c.setRenderTarget(texture);
+    c.clear(0, 0, 1, 1);
+    draw();
+    check(partial(show(texture)) === 0, "single-sample texture has partial coverage");
+    c.setRenderTarget(texture, true, 0, 4);
+    c.clear(0, 0, 1, 1);
+    draw();
+    check(partial(show(texture)) > 0, "multisample texture lost antialiased edges");
+    c.setRenderTarget(rectangle, false, 0, 4);
+    c.clear(0, 0, 1, 1);
+    draw();
+    check(partial(show(rectangle)) > 0, "multisample rectangle lost antialiased edges");
+
+    const handles = owned.created;
+    for (let i = 0; i < 16; i++) {
+      c.setRenderTarget(texture, i % 2 === 0, 0, 4);
+      c.setRenderTarget(texture, i % 2 === 0, 0, 4);
+      c.clear(0, 0, 1, 1);
+      draw();
+      c.setScissor(30, 30, 4, 4);
+      const pixels = show(texture);
+      check(color(pixels, 32, 32, 64) === "ffff0000", "warm target lost color");
+      check(partial(pixels) > 0, "scissor clipped the multisample resolve");
+      check(owned.created === handles, "warm multisample targets allocated GPU handles");
+    }
+
+    const blit = gl.blitFramebuffer;
+    let resolves = 0;
+    gl.blitFramebuffer = (...args) => {
+      resolves++;
+      blit.apply(gl, args);
+    };
+    try {
+      c.setRenderTarget(texture, true, 0, 4);
+      c.clear(0, 1, 0, 1);
+      c.setRenderTarget(null);
+      check(resolves === 1, "color changes did not resolve once");
+      c.setRenderTarget(texture, true, 0, 4);
+      c.clear(0, 0, 0, 1, 1, 6);
+      c.setRenderTarget(null);
+      check(resolves === 1, "depth-only clear repeated the color resolve");
+    } finally {
+      gl.blitFramebuffer = blit;
+    }
+
+    c.setRenderTarget(texture, true, 0, 4);
+    c.clear(0, 1, 0, 1);
+    const before = live.size;
+    const fresh = c.createTexture(32, 32);
+    const baseline = live.size;
+    const allocation = gl as unknown as {
+      createRenderbuffer(): WebGLRenderbuffer | null;
+      createTexture(): WebGLTexture | null;
+    };
+    const allocate = allocation.createRenderbuffer;
+    const status = gl.checkFramebufferStatus;
+    for (const failure of ["color", "depth", "single", "multi"] as const) {
+      let allocations = 0;
+      let checks = 0;
+      allocation.createRenderbuffer = () =>
+        ++allocations === (failure === "color" ? 1 : failure === "depth" ? 2 : 0)
+          ? null
+          : allocate.call(gl);
+      gl.checkFramebufferStatus = (target) =>
+        ++checks === (failure === "single" ? 1 : failure === "multi" ? 2 : 0)
+          ? gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT
+          : status.call(gl, target);
+      try {
+        rejects(() => c.setRenderTarget(fresh, true, 0, 4));
+      } finally {
+        allocation.createRenderbuffer = allocate;
+        gl.checkFramebufferStatus = status;
+      }
+      check(live.size === baseline, "failed multisample target leaked handles");
+      check(color(show(texture), 32, 32, 64) === "ff00ff00", "failed target lost old color");
+      c.setRenderTarget(texture, true, 0, 4);
+    }
+    c.setRenderTarget(fresh, false, 0, 4);
+    c.clear(0, 1, 0, 1);
+    const warm = live.size;
+    for (const fail of ["allocation", "framebuffer"]) {
+      allocation.createRenderbuffer = () => (fail === "allocation" ? null : allocate.call(gl));
+      gl.checkFramebufferStatus = (target) =>
+        fail === "framebuffer" ? gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT : status.call(gl, target);
+      try {
+        rejects(() => c.setRenderTarget(fresh, true, 0, 4));
+      } finally {
+        allocation.createRenderbuffer = allocate;
+        gl.checkFramebufferStatus = status;
+      }
+      check(live.size === warm, "failed cached target upgrade leaked handles");
+      draw();
+      check(color(show(fresh), 32, 32, 64) === "ffff0000", "cached target rollback broke drawing");
+      check(gl.getError() === gl.NO_ERROR, "cached target rollback polluted GL state");
+      c.setRenderTarget(fresh, false, 0, 4);
+    }
+    c.setRenderTarget(null);
+    fresh.dispose();
+    check(live.size === before, "failed target retained resources after disposal");
+
+    const cube = c.createTexture(16, 16, true);
+    for (let face = 0; face < 6; face++) {
+      for (let level = 0; level < cube.levels; level++) {
+        const size = 16 >> level;
+        const pixels = new Uint32Array(size * size);
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            pixels[y * size + x] =
+              (0xff000000 |
+                (((face + 1) * 24) << 16) |
+                (x < size / 2 ? 0x2000 : 0x8000) |
+                (y < size / 2 ? 0x40 : 0xc0)) >>>
+              0;
+          }
+        }
+        cube.upload(pixels, level, face);
+      }
+    }
+    const cubeFragment = shader(true);
+    new DataView(cubeFragment.buffer).setUint32(7, 0x28, true);
+    new DataView(cubeFragment.buffer).setUint32(27, 0x1005, true);
+    const cubeProgram = c.createProgram();
+    cubeProgram.upload(shader(false), cubeFragment);
+    const directions = [
+      [1, -0.5, -0.5, 1],
+      [-1, -0.5, 0.5, 1],
+      [0.5, 1, 0.5, 1],
+      [0.5, -1, -0.5, 1],
+      [0.5, -0.5, 1, 1],
+      [-0.5, -0.5, -1, 1],
+    ];
+    c.setRenderTarget(null);
+    c.clear(0, 0, 0, 1);
+    c.setVertex(0, triangle, 0, "float4");
+    c.setVertex(1, null, 0, "float2");
+    c.setProgram(cubeProgram);
+    c.setConstants("fragment", 0, directions[0], 1);
+    c.setTexture(0, cube);
+    c.draw(indices, 0, 1);
+    const cubeBaseline = color(c.read(), 32, 32, 64);
+    check(cubeBaseline === "ff1880c0", `cube source baseline: ${cubeBaseline}`);
+    c.setTexture(0, null);
+    for (let face = 0; face < 6; face++) {
+      c.setRenderTarget(cube, false, face, 4);
+      c.setScissor(0, 0, 8, 8);
+      draw();
+      c.setRenderTarget(null);
+      c.setScissor(null);
+      c.clear(0, 0, 0, 1);
+      c.setProgram(cubeProgram);
+      c.setConstants("fragment", 0, directions[face], 1);
+      c.setTexture(0, cube);
+      c.draw(indices, 0, 1);
+      const expected = ((0xff000000 | (((face + 1) * 24) << 16) | 0x80c0) >>> 0).toString(16);
+      const actual = color(c.read(), 32, 32, 64);
+      check(
+        actual === expected,
+        `cube multisample seed lost face ${face}: ${actual} != ${expected}`,
+      );
+      c.setTexture(0, null);
+    }
+    const unbound = c.createTexture(16, 16, true);
+    const originalTexture = allocation.createTexture;
+    const count = live.size;
+    allocation.createTexture = () => null;
+    try {
+      rejects(() => c.setRenderTarget(unbound, false, 0, 4));
+    } finally {
+      allocation.createTexture = originalTexture;
+    }
+    check(live.size === count, "failed cube resolve allocation leaked handles");
+    check(gl.getError() === gl.NO_ERROR, "failed cube resolve polluted GL state");
+    unbound.dispose();
+
+    const warmed = owned.created;
+    for (let i = 0; i < 12; i++) {
+      c.setRenderTarget(cube, false, i % 6, 4);
+      c.clear(0, 1, 0, 1);
+      c.setRenderTarget(null);
+      check(owned.created === warmed, "cube face switching allocated GPU handles");
+    }
+    c.configure(32, 32, true, 4);
+    c.setRenderTarget(texture, true, 0, 4);
+    c.clear(0, 0, 1, 1);
+    c.setRenderTarget(null);
+    c.read();
+    check(gl.getError() === gl.NO_ERROR, "multisample targets polluted GL state");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rejects(() => c.setRenderTarget(texture, true, 0, 4));
+  } finally {
+    c.dispose();
+    check(live.size === 0, "multisample target teardown retained GPU handles");
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+
+  const bytes = 32 * 32 * 4 * 4;
+  for (const budget of ["color", "cube", "depth", "fallback"] as const) {
+    const owned = create({
+      maxTargetColorBytes:
+        budget === "cube" ? bytes + 32 * 32 * 4 : budget === "color" ? bytes : bytes * 2,
+      maxTargetDepthBytes: bytes,
+    });
+    const { backend: c, gl } = owned;
+    try {
+      c.configure(32, 32);
+      if (budget === "fallback") {
+        gl.getInternalformatParameter = () => new Int32Array();
+      }
+      const first = c.createTexture(32, 32, budget === "cube");
+      const second = c.createTexture(32, 32, budget === "cube");
+      c.setRenderTarget(first, true, 0, 4);
+      const count = owned.live.size;
+      if (budget === "color" || budget === "cube") {
+        rejects(() => c.setRenderTarget(second, false, 0, 4));
+        check(owned.live.size === count, "color budget failure leaked handles");
+      } else if (budget === "depth") {
+        c.setRenderTarget(second, false, 0, 4);
+        const count = owned.live.size;
+        rejects(() => c.setRenderTarget(second, true, 0, 4));
+        check(owned.live.size === count, "depth budget failure leaked handles");
+      } else {
+        check(gl.getParameter(gl.SAMPLES) === 0, "unsupported MSAA did not fall back");
+      }
+      c.setRenderTarget(null);
+      first.dispose();
+      c.setRenderTarget(second, true, 0, 4);
+      c.setRenderTarget(null);
+      second.dispose();
+      check(gl.getError() === gl.NO_ERROR, "multisample target quotas polluted GL state");
+    } finally {
+      c.dispose();
+      check(owned.live.size === 0, "multisample target budgets retained GPU handles");
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+  }
+  return { passed: true };
 }
 
 export async function lifetime() {
