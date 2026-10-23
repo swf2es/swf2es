@@ -178,8 +178,11 @@ measurements cannot retain the scene through text style listeners.
 Default playback still reports unavailable Context3D. Desktop layout controls,
 best-resolution buffers and production enablement remain separate work.
 
-The web host shares live Stage scale/alignment settings with player natives
-through Scripting's synchronous `onStageLayout` callback. It resizes the display
+The opt-in Context3D installation enables live Stage scale/alignment settings.
+The web host then shares them with player natives through Scripting's synchronous
+`onStageLayout` callback. Ordinary loads retain fixed Stage getters, ignored
+setters and authored dimensions; AVM1 and default embedding alignment keep their
+existing behavior when both opposite edges are named. It resizes the display
 viewport before `resizeStage` dispatches a Stage-only RESIZE event in noScale;
 other scale modes retain the SWF's authored dimensions. PixiView's viewport
 keeps display-list translation, its hit area and pointer coordinates aligned.

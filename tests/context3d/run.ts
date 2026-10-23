@@ -31,6 +31,9 @@ const scripts = compileScripts(
     "ShaderMath",
     "ScalarMath",
     "Comparisons",
+    "ContextRequests",
+    "AGALValidation",
+    "ResourceLimits",
     "FrameValidation",
     "FrameValidationFlat",
     "Reconfigure",
@@ -70,6 +73,9 @@ for (const name of [
   "ShaderMath",
   "ScalarMath",
   "Comparisons",
+  "ContextRequests",
+  "AGALValidation",
+  "ResourceLimits",
   "FrameValidation",
   "FrameValidationFlat",
   "Reconfigure",
@@ -133,6 +139,18 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(uploads.exception, null, JSON.stringify(uploads));
       assert.equal(uploads.value?.passed, true);
       console.log("context3d: clipped/padded bitmap uploads reuse bounded staging storage");
+      const attributes = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.contextAttributes())',
+      );
+      assert.equal(attributes.exception, null, JSON.stringify(attributes));
+      assert.equal(attributes.value?.passed, true);
+      console.log("context3d: incompatible antialiased host contexts rejected before allocation");
+      const validation = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.drawValidation())',
+      );
+      assert.equal(validation.exception, null, JSON.stringify(validation));
+      assert.equal(validation.value?.passed, true);
+      console.log("context3d: draw validation reuses cached ranges and invalidates uploaded data");
       const limits = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.resourceLimits())',
       );
@@ -276,6 +294,9 @@ if (!process.argv.includes("--build-only")) {
         "VertexFormats",
         "ShaderMath",
         "ScalarMath",
+        "ContextRequests",
+        "AGALValidation",
+        "ResourceLimits",
         "FrameValidation",
         "FrameValidationFlat",
         "Reconfigure",

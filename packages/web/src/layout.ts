@@ -45,6 +45,7 @@ export function place(
   mode: ScaleMode,
   salign: string | null,
   dpr: number,
+  leadingEdge = false,
 ): Placement {
   const sx = boxWidth / stageWidth;
   const sy = boxHeight / stageHeight;
@@ -58,7 +59,8 @@ export function place(
   }
 
   const align = (salign ?? "").toUpperCase();
-  const along = (free: number, start: boolean, end: boolean) => (start ? 0 : end ? free : free / 2);
+  const along = (free: number, start: boolean, end: boolean) =>
+    start && (leadingEdge || !end) ? 0 : end && !start ? free : free / 2;
   // Stretched one way more than the other, it is drawn as fine as its finer axis needs.
   const finest = Math.max(width / stageWidth, height / stageHeight) * dpr;
   const largest = MAX_SIDE / Math.max(stageWidth, stageHeight);

@@ -16,6 +16,37 @@ const retired: WeakRef<object>[] = [];
 const errors: string[] = [];
 let failAttachment = false;
 let creations = 0;
+const workerThreadsRunning = new Set<Worker>();
+const BrowserWorker = globalThis.Worker;
+globalThis.Worker = class extends BrowserWorker {
+  postMessage(message: unknown, options?: Transferable[] | StructuredSerializeOptions): void {
+    if (message && typeof message === "object" && "codegen" in message && "init" in message) {
+      workerThreadsRunning.add(this);
+    }
+    if (Array.isArray(options)) {
+      super.postMessage(message, options);
+    } else {
+      super.postMessage(message, options);
+    }
+  }
+
+  terminate(): void {
+    workerThreadsRunning.delete(this);
+    super.terminate();
+  }
+};
+
+export function workerThreads(): number {
+  return workerThreadsRunning.size;
+}
+export async function workersStopped(): Promise<void> {
+  await until(() => workerThreadsRunning.size === 0);
+}
+export function rootProperty(name: string): unknown {
+  const { scripting, object } = root();
+  return scripting.rt.getProperty(object, scripting.rt.publicName(name));
+}
+
 const report = console.error.bind(console);
 console.error = (...args) => {
   errors.push(args.map(String).join(" "));

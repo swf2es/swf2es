@@ -1,4 +1,5 @@
 import { type SamplerSource, translate } from "../agal.js";
+import { Context3DError } from "../errors.js";
 
 export interface ProgramState {
   handle: WebGLProgram | null;
@@ -26,6 +27,23 @@ export function uploadProgram(
   // Translate both before allocating anything on the GPU.
   const vs = translate(vertex, "vertex");
   const fs = translate(fragment, "fragment");
+  for (let i = 0; i < 8; i++) {
+    if (fs.varyings[i] & ~vs.varyings[i]) {
+      throw new Context3DError(
+        "agalVaryingMissing",
+        "Fragment program reads an unwritten varying component",
+      );
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    if (vs.varyings[i] && vs.varyings[i] !== 15) {
+      throw new Context3DError(
+        "agalVaryingPartial",
+        "Vertex program only partially writes a varying",
+      );
+    }
+  }
+
   const handle = linkProgram(gl, vs.source, fs.source);
   if (state.handle && gl.getParameter(gl.CURRENT_PROGRAM) === state.handle) {
     gl.useProgram(null);
@@ -72,7 +90,7 @@ export function linkProgram(
   let attached = false;
   try {
     if (!v || !f || !p) {
-      throw new Error("Context3D experiment: cannot allocate shader");
+      throw new Context3DError("operation", "Context3D experiment: cannot allocate shader");
     }
 
     gl.shaderSource(v, vertex);
@@ -83,7 +101,10 @@ export function linkProgram(
       !gl.getShaderParameter(v, gl.COMPILE_STATUS) ||
       !gl.getShaderParameter(f, gl.COMPILE_STATUS)
     ) {
-      throw new Error(`Context3D shader: ${gl.getShaderInfoLog(v)} ${gl.getShaderInfoLog(f)}`);
+      throw new Context3DError(
+        "nativeShader",
+        `Context3D shader: ${gl.getShaderInfoLog(v)} ${gl.getShaderInfoLog(f)}`,
+      );
     }
 
     gl.attachShader(p, v);
@@ -91,7 +112,7 @@ export function linkProgram(
     attached = true;
     gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new Error(`Context3D link: ${gl.getProgramInfoLog(p)}`);
+      throw new Context3DError("nativeShader", `Context3D link: ${gl.getProgramInfoLog(p)}`);
     }
 
     linked = true;

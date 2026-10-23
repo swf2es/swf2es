@@ -14,13 +14,21 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Composition", "StageLayout", "StageWorker"].map((name) => ({
-    name,
-    source: fixtureSource(name),
-  })),
+  ["Composition", "StageLayout", "StageWorker", "ProfileFallback", "StageWorkerLive"].map(
+    (name) => ({
+      name,
+      source: fixtureSource(name),
+    }),
+  ),
   out,
 );
-for (const name of ["Composition", "StageLayout", "StageWorker"]) {
+for (const name of [
+  "Composition",
+  "StageLayout",
+  "StageWorker",
+  "ProfileFallback",
+  "StageWorkerLive",
+]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   writeFileSync(`${out}${name}.swf`, bare(abc, 1, name, 96, 96));
@@ -244,6 +252,21 @@ await withPage(
         clickCount: 1,
       });
       assert.equal(await call("pointerState"), "28,56,28,56");
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 84,
+        y: 36,
+        button: "left",
+        clickCount: 1,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 84,
+        y: 36,
+        button: "left",
+        clickCount: 1,
+      });
+      assert.equal(await call("pointerState"), "-12,-12,-12,-12");
       await call("scriptLayout", "noScale", "TL");
       await call("resize", 220, 160);
       assert.equal(await call("scriptState"), "noScale|TL|220|160|220,160,false,false,2,true;");
@@ -276,7 +299,9 @@ await withPage(
     try {
       await call("layout", "noScale", "TL", 192, 144);
       assert.equal((await call<Status>("status")).canvases, 1);
-      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
+      assert.equal(await call("scriptState"), "showAll||96|96|");
+      assert.equal((await call<Status>("status")).overlayWidth, 96);
+      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["112233ff"]);
     } finally {
       await call("close");
     }
@@ -289,6 +314,30 @@ await withPage(
     } finally {
       await call("close");
     }
+    await collect();
+    await call("open", true, true, "ProfileFallback");
+    try {
+      assert.equal(await call("rootProperty", "fallback"), "3702,true,true,false,false");
+      assert.equal((await call<Status>("status")).canvases, 2);
+      await capture("unsupported-profile-fallback", 96, 96, [[8, 8]], ["00ff00ff"]);
+      assert.deepEqual((await call<Status>("status")).errors, []);
+    } finally {
+      await call("close");
+    }
+    await collect();
+    await call("open", true, true, "StageWorkerLive");
+    try {
+      assert.equal(await call("rootProperty", "workerState"), "running");
+      assert.ok((await call<number>("rootProperty", "replies")) >= 2);
+      assert.equal(await call("workerThreads"), 1);
+      const live = await call<Status>("status");
+      assert.equal(live.surfaces.filter((s) => !s.destroyed).length, 1);
+      assert.deepEqual(live.errors, []);
+      await capture("live-worker-no-child-stage3d", 96, 96, [[8, 8]], ["00ff00ff"]);
+    } finally {
+      await call("close");
+    }
+    await call("workersStopped");
     await collect();
     await call("queued");
     await collect();

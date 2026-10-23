@@ -1,0 +1,15 @@
+[
+  "resourcelimits vertex 4096 Error 3691",
+  "resourcelimits vertex reused 4096",
+  "resourcelimits index 4096 Error 3691",
+  "resourcelimits index reused 4096",
+  "resourcelimits program 4096 Error 3691",
+  "resourcelimits program reused 4096",
+  "resourcelimits texture 4096 Error 3691",
+  "resourcelimits texture reused 4096",
+  "resourcelimits rectangle 4096 Error 3691",
+  "resourcelimits rectangle reused 4096",
+  "resourcelimits cube 4096 Error 3691",
+  "resourcelimits cube reused 4096",
+  "resourcelimits complete"
+]

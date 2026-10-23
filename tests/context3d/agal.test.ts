@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SamplerBiasError, translate } from "@swf2es/context3d";
+import { Context3DError, type ProgramType, SamplerBiasError, translate } from "@swf2es/context3d";
 
 function mov(fragment = false): Uint8Array {
   const bytes = new Uint8Array(31);
@@ -16,9 +16,13 @@ function mov(fragment = false): Uint8Array {
 }
 
 test("AGAL stage, masks, swizzles, constants and clip-depth mapping", () => {
-  const vertex = mov();
-  // va3.zyxw to op.xy: only the two selected destination lanes are read.
+  const vertex = new Uint8Array(55);
+  vertex.set(mov());
+  vertex.set(mov().subarray(7), 31);
+  // Both writes together define the complete vertex output.
   const view = new DataView(vertex.buffer);
+  view.setUint32(35, 0x030c0000, true);
+  view.setUint32(39, 0xc6000003, true);
   view.setUint32(11, 0x03030000, true);
   view.setUint32(15, 0xc6000003, true);
   const result = translate(vertex, "vertex");
@@ -31,9 +35,9 @@ test("AGAL stage, masks, swizzles, constants and clip-depth mapping", () => {
   assert.equal(fragment.indirect, false);
   assert.match(fragment.source, /result\.xyzw = fc0\.xyzw/);
   // ByteArray storage need not start at byte zero.
-  const larger = new Uint8Array(50);
+  const larger = new Uint8Array(vertex.length + 20);
   larger.set(vertex, 9);
-  assert.deepEqual(translate(larger.subarray(9, 40), "vertex"), result);
+  assert.deepEqual(translate(larger.subarray(9, 9 + vertex.length), "vertex"), result);
 });
 
 test("indirect vertex reads share a bank with direct reads and register their index inputs", () => {
@@ -47,10 +51,10 @@ test("indirect vertex reads share a bank with direct reads and register their in
       view.setUint32(35, 0x04050000, true);
       view.setUint32(39, 0xc6040007, true);
       view.setUint32(43, 0x80000001 | (type << 8) | (lane << 16), true);
-      const result = translate(bytes, "vertex");
+      const result = translate(initialized(bytes, "vertex"), "vertex");
       assert.equal(result.indirect, true);
       assert.deepEqual(result.constants, []);
-      assert.deepEqual(result.attributes, type === 0 ? [7] : []);
+      assert.deepEqual(result.attributes, type === 0 ? [0, 7] : [0]);
       assert.match(result.source, /uniform vec4 vc\[128\];/);
       assert.doesNotMatch(result.source, /uniform vec4 vc\d/);
       assert.match(result.source, /result\.xyzw = vc\[0\]\.xyzw/);
@@ -85,7 +89,10 @@ test("indirect sources reject unverified stages, offsets, register types and res
     if (offset === 22 && value === 0) {
       bytes[17] = 1;
     }
-    assert.throws(() => translate(bytes, "vertex"), `byte ${offset}: ${value}`);
+    assert.throws(
+      () => translate(initialized(bytes, "vertex"), "vertex"),
+      `byte ${offset}: ${value}`,
+    );
   }
   for (const [type, limit] of [
     [0, 8],
@@ -95,9 +102,9 @@ test("indirect sources reject unverified stages, offsets, register types and res
     const bytes = valid.slice();
     bytes[20] = type;
     bytes[15] = limit - 1;
-    translate(bytes, "vertex");
+    translate(initialized(bytes, "vertex"), "vertex");
     bytes[15] = limit;
-    assert.throws(() => translate(bytes, "vertex"));
+    assert.throws(() => translate(initialized(bytes, "vertex"), "vertex"));
   }
   valid[6] = 1;
   assert.throws(() => translate(valid, "fragment"), /indirect constant/);
@@ -109,7 +116,7 @@ test("indirect matrix rows advance the offset without advancing the index regist
     bytes[13] = opcode === 0x18 ? 15 : 7;
     bytes[25] = 126;
     new DataView(bytes.buffer).setUint32(27, 0x80030201, true);
-    const result = translate(bytes, "vertex");
+    const result = translate(computation(bytes, "vertex"), "vertex");
     const rows = opcode === 0x18 ? 4 : 3;
     for (let row = 0; row < rows; row++) {
       assert.ok(result.source.includes(`readConstant(t7.w, ${126 + row}.0)`));
@@ -117,11 +124,11 @@ test("indirect matrix rows advance the offset without advancing the index regist
     assert.doesNotMatch(result.source, /t8/);
     if (opcode !== 0x18) {
       bytes[13] = 5;
-      assert.throws(() => translate(bytes, "vertex"), /matrix/);
+      assert.throws(() => translate(computation(bytes, "vertex"), "vertex"), /matrix/);
       bytes[13] = 7;
     }
     bytes[26] = 0xc6;
-    assert.throws(() => translate(bytes, "vertex"), /matrix/);
+    assert.throws(() => translate(computation(bytes, "vertex"), "vertex"), /matrix/);
   }
 });
 
@@ -158,6 +165,32 @@ test("unsupported and malformed AGAL never silently compile", () => {
   assert.throws(() => translate(fragment, "fragment"));
 });
 
+function initialized(bytes: Uint8Array, stage: ProgramType): Uint8Array {
+  const prefix = new Uint8Array(8 * 24);
+  const move = mov(stage === "fragment").subarray(7);
+  for (let i = 0; i < 8; i++) {
+    prefix.set(move, i * 24);
+    new DataView(prefix.buffer).setUint32(i * 24 + 4, 0x020f0000 | i, true);
+  }
+  const program = new Uint8Array(bytes.length + prefix.length);
+  program.set(bytes.subarray(0, 7));
+  program.set(prefix, 7);
+  program.set(bytes.subarray(7), 7 + prefix.length);
+
+  return program;
+}
+
+/** A computation under test writes a temporary, then a complete output. */
+function computation(bytes: Uint8Array, stage: ProgramType): Uint8Array {
+  const program = new Uint8Array(bytes.length + 24);
+  program.set(bytes);
+  program[14] = 2;
+  program.set(mov(stage === "fragment").subarray(7), bytes.length);
+  new DataView(program.buffer).setUint32(bytes.length + 12, 2, true);
+
+  return initialized(program, stage);
+}
+
 function binary(opcode: number, first: number, fragment = false): Uint8Array {
   const bytes = mov(fragment);
   const view = new DataView(bytes.buffer);
@@ -175,13 +208,13 @@ test("matrix register spans respect stage limits and retain every referenced row
       const rows = opcode === 0x18 ? 4 : 3;
       const bytes = binary(opcode, end - rows, fragment);
       bytes[13] = rows === 4 ? 15 : 7;
-      const translated = translate(bytes, stage);
+      const translated = translate(computation(bytes, stage), stage);
       const expected = Array.from({ length: rows }, (_, i) => end - rows + i);
       assert.deepEqual(translated.constants, fragment ? [0, ...expected] : expected);
       // Even a masked matrix read must not hide an out-of-range register span.
       bytes[13] = 1;
       bytes[23]++;
-      assert.throws(() => translate(bytes, stage));
+      assert.throws(() => translate(computation(bytes, stage), stage));
     }
   }
 });
@@ -190,12 +223,12 @@ test("arithmetic validates both sources and rejects unsupported matrix encodings
   for (const opcode of [1, 2, 3, 4, 6, 7, 0x0b, 0x11, 0x12, 0x13]) {
     const bytes = binary(opcode, 27, true);
     bytes[13] = 7;
-    assert.deepEqual(translate(bytes, "fragment").constants, [0, 27]);
+    assert.deepEqual(translate(computation(bytes, "fragment"), "fragment").constants, [0, 27]);
     bytes[23] = 28;
-    assert.throws(() => translate(bytes, "fragment"));
+    assert.throws(() => translate(computation(bytes, "fragment"), "fragment"));
     bytes[23] = 0;
     bytes[30] = 128;
-    assert.throws(() => translate(bytes, "fragment"));
+    assert.throws(() => translate(computation(bytes, "fragment"), "fragment"));
   }
   for (const [offset, value] of [
     [27, 4],
@@ -220,21 +253,21 @@ test("temporary matrix spans are bounded independently of constant registers", (
       bytes[13] = 7;
       bytes[27] = 2;
       const stage = fragment ? "fragment" : "vertex";
-      const translated = translate(bytes, stage);
+      const translated = translate(computation(bytes, stage), stage);
       assert.deepEqual(translated.constants, fragment ? [0] : []);
       for (let row = 8 - rows; row < 8; row++) {
         assert.match(translated.source, new RegExp(`vec4 t${row};`));
       }
       if (rows === 3) {
         bytes[13] = 5;
-        assert.throws(() => translate(bytes, stage), /Unsupported AGAL matrix/);
+        assert.throws(() => translate(computation(bytes, stage), stage), /Unsupported AGAL matrix/);
         bytes[13] = 7;
       }
       bytes[23]++;
-      assert.throws(() => translate(bytes, stage), /Invalid AGAL temporary/);
+      assert.throws(() => translate(computation(bytes, stage), stage), /Invalid AGAL temporary/);
       bytes[23]--;
       bytes[26] = 0xc6;
-      assert.throws(() => translate(bytes, stage), /Unsupported AGAL matrix/);
+      assert.throws(() => translate(computation(bytes, stage), stage), /Unsupported AGAL matrix/);
     }
   }
 });
@@ -255,17 +288,23 @@ test("scalar-math overlaps retain the lane being written", () => {
           view.setUint32(27, 0, true);
         }
         const stage = fragment ? "fragment" : "vertex";
-        translate(bytes, stage);
+        translate(initialized(bytes, stage), stage);
         if (opcode === 0x0b) {
           view.setUint32(23, (lane * 0x55) << 24, true);
           view.setUint32(27, 2, true);
-          translate(bytes, stage);
+          translate(initialized(bytes, stage), stage);
           view.setUint32(23, (((lane + 1) % 4) * 0x55) << 24, true);
-          assert.throws(() => translate(bytes, stage), /swizzled scalar-math overlap/);
+          assert.throws(
+            () => translate(initialized(bytes, stage), stage),
+            /swizzled scalar-math overlap/,
+          );
           view.setUint32(27, 1, true);
         }
         view.setUint32(15, (((lane + 1) % 4) * 0x55) << 24, true);
-        assert.throws(() => translate(bytes, stage), /swizzled scalar-math overlap/);
+        assert.throws(
+          () => translate(initialized(bytes, stage), stage),
+          /swizzled scalar-math overlap/,
+        );
       }
     }
   }
@@ -334,24 +373,27 @@ test("unary math validates unused operands and three-lane vector destinations", 
       const view = new DataView(bytes.buffer);
       view.setUint32(7, opcode, true);
       bytes[13] = 7;
-      translate(bytes, stage);
+      translate(computation(bytes, stage), stage);
       bytes[23] = 1;
-      assert.throws(() => translate(bytes, stage), /Nonempty unused AGAL source/);
+      assert.throws(
+        () => translate(computation(bytes, stage), stage),
+        /Nonempty unused AGAL source/,
+      );
       bytes[23] = 0;
       bytes[22] = 128;
       assert.throws(
-        () => translate(bytes, stage),
+        () => translate(computation(bytes, stage), stage),
         /Unsupported AGAL (source encoding|indirect constant)/,
       );
     }
     for (const opcode of [0x0e, 0x11]) {
       const bytes = opcode === 0x11 ? binary(opcode, 1, fragment) : mov(fragment);
       new DataView(bytes.buffer).setUint32(7, opcode, true);
-      assert.throws(() => translate(bytes, stage), /vector write mask/);
+      assert.throws(() => translate(computation(bytes, stage), stage), /vector write mask/);
       bytes[13] = 2;
-      assert.throws(() => translate(bytes, stage), /vector write mask/);
+      assert.throws(() => translate(computation(bytes, stage), stage), /vector write mask/);
       bytes[13] = 7;
-      translate(bytes, stage);
+      translate(computation(bytes, stage), stage);
     }
   }
 });
@@ -414,12 +456,18 @@ test("unverified scalar-math overlaps fail explicitly", () => {
     view.setUint32(11, 0x02070000, true);
     view.setUint32(15, 0xc6000000, true);
     view.setUint32(19, 2, true);
-    assert.throws(() => translate(bytes, "fragment"), /scalar-math overlap/);
+    assert.throws(
+      () => translate(initialized(bytes, "fragment"), "fragment"),
+      /scalar-math overlap/,
+    );
     if (opcode === 0x0b) {
       view.setUint32(19, 1, true);
       view.setUint32(23, 0, true);
       view.setUint32(27, 2, true);
-      assert.throws(() => translate(bytes, "fragment"), /scalar-math overlap/);
+      assert.throws(
+        () => translate(initialized(bytes, "fragment"), "fragment"),
+        /scalar-math overlap/,
+      );
     }
   }
 });
@@ -498,4 +546,25 @@ test("sampler bias is signed eighths, independent of sampler flags and register 
     doubled[50] = 1;
     assert.throws(() => translate(doubled, "fragment"), /Unsupported AGAL sampler/);
   }
+});
+
+test("AIR rejects unwritten temporary lanes and incomplete outputs during upload", () => {
+  const untouched = mov();
+  untouched[19] = 2;
+  assert.throws(
+    () => translate(untouched, "vertex"),
+    (error) => error instanceof Context3DError && error.reason === "agalTemporaryRead",
+  );
+  const partial = mov();
+  partial[13] = 3;
+  assert.throws(
+    () => translate(partial, "vertex"),
+    (error) => error instanceof Context3DError && error.reason === "agalVertexOutput",
+  );
+  const color = mov(true);
+  color[13] = 3;
+  assert.throws(
+    () => translate(color, "fragment"),
+    (error) => error instanceof Context3DError && error.reason === "agalColorMask",
+  );
 });

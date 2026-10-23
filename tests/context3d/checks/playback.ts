@@ -166,6 +166,9 @@ export async function lifecycle(cancel: boolean) {
 
 export async function shaderFixture(
   fixture:
+    | "ContextRequests"
+    | "ResourceLimits"
+    | "AGALValidation"
     | "Arithmetic"
     | "Texturing"
     | "Depth"
@@ -243,8 +246,11 @@ export async function shaderFixture(
       trace.at(-1) === `${fixture.toLowerCase()} complete`,
       `incomplete shader trace: ${trace}`,
     );
-    check(owned.length === 1, "unexpected shader context count");
-    check(owned[0].gl.getError() === owned[0].gl.NO_ERROR, "GL error after shader fixture");
+    const expectedContexts = fixture === "ContextRequests" ? 3 : 1;
+    check(owned.length === expectedContexts, "unexpected shader context count");
+    for (let i = 0; i < owned.length; i++) {
+      check(owned[i].gl.getError() === owned[i].gl.NO_ERROR, "GL error after shader fixture");
+    }
     if (fixture === "TargetMultisampling") {
       check(targetSamples > 0, "AS antialiasing requests did not reach texture targets");
     }

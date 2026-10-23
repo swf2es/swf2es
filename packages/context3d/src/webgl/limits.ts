@@ -2,8 +2,13 @@
  * chains and texture-target attachments, not physical driver VRAM. */
 export interface WebGLContext3DLimits {
   maxBuffers: number;
+  maxVertexBuffers: number;
+  maxIndexBuffers: number;
   maxPrograms: number;
   maxTextures: number;
+  max2DTextures: number;
+  maxRectangleTextures: number;
+  maxCubeTextures: number;
   maxBufferBytes: number;
   maxTextureBytes: number;
   maxTargetDepthBytes: number;
@@ -11,9 +16,14 @@ export interface WebGLContext3DLimits {
 }
 
 const DEFAULT_LIMITS: WebGLContext3DLimits = {
-  maxBuffers: 128,
-  maxPrograms: 128,
-  maxTextures: 128,
+  maxBuffers: 8192,
+  maxVertexBuffers: 4096,
+  maxIndexBuffers: 4096,
+  maxPrograms: 4096,
+  maxTextures: 12288,
+  max2DTextures: 4096,
+  maxRectangleTextures: 4096,
+  maxCubeTextures: 4096,
   maxBufferBytes: 64 * 1024 * 1024,
   maxTextureBytes: 64 * 1024 * 1024,
   maxTargetDepthBytes: 64 * 1024 * 1024,
