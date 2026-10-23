@@ -747,9 +747,12 @@ describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
 default. Date is JavaScript's Date, with avmplus' string formats.
-flash.concurrent's Mutex and Condition are avmplus' on its one thread:
-locks are counted, a wait ends at once, as nothing else can notify it
-(`natives/concurrent.ts`). ByteArray's atomic operations and `casi32` are
+flash.concurrent's Mutex and Condition are avmplus', in a heap of int32
+words every worker of a primordial's shares (`natives/concurrent.ts`,
+`natives/sync.ts`): `RuntimeOptions.sync` names it and the worker a
+runtime runs, by default memory of its own, or for avmshell's workers
+their `ShellWorkersMemory`'s. A thread blocks with `Atomics.wait`, or
+spins where it cannot, up to Flash's script timeout (Error 1502). ByteArray's atomic operations and `casi32` are
 `Atomics` on a shareable ByteArray's memory once another worker shares it
 (a growable SharedArrayBuffer, see [workers.md](workers.md)). Crossbridge's code
 uses them all as it starts. avmshell's Worker and WorkerDomain

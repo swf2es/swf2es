@@ -8643,6 +8643,20 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // A Mutex and a Condition shared with two workers, and receive(true): needs a cross-origin isolated page.
+    name: "worker-mutex",
+    swf: (abc) => {
+      const bytes = bare(abc, 1, "WorkerMutex");
+      bytes[3] = 26;
+      return bytes;
+    },
+    script: "WorkerMutex",
+    frames: 10,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "accessibility-natives",
     swf: (abc) => bare(abc, 1, "AccessibilityNatives"),
     script: "AccessibilityNatives",
