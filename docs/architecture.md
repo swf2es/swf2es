@@ -747,9 +747,11 @@ describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
 default. Date is JavaScript's Date, with avmplus' string formats.
-flash.concurrent's Mutex and Condition and ByteArray's atomic operations
-are avmplus' on its one thread: locks are counted, a wait ends at once, as
-nothing else can notify it (`natives/concurrent.ts`). Crossbridge's code
+flash.concurrent's Mutex and Condition are avmplus' on its one thread:
+locks are counted, a wait ends at once, as nothing else can notify it
+(`natives/concurrent.ts`). ByteArray's atomic operations and `casi32` are
+`Atomics` on a shareable ByteArray's memory once another worker shares it
+(a growable SharedArrayBuffer, see [workers.md](workers.md)). Crossbridge's code
 uses them all as it starts. avmshell's Worker and WorkerDomain
 (`natives/shell.ts`, `natives/shell-workers.ts`) keep each worker's state,
 parent and shared properties in memory every thread sees, a
@@ -2935,8 +2937,9 @@ starts module Web Workers, `nodeWorkerHost` node's `worker_threads`, each
 given codegen's compiled module. Without a host, `Worker.isSupported` is
 false. `scripting/workers.ts` is what one VM sees: the primordial routes
 every message between workers, and shared properties and channels' messages
-cross as copies, made as avmplus' `ChannelItem` makes them, so that the
-threads share no memory yet. What content needs, shared memory and
+cross as copies, made as avmplus' `ChannelItem` makes them, but for a
+shareable ByteArray's memory, which the threads share where the page is
+cross-origin isolated. What content needs, shared memory and
 blocking, and the order the rest comes in are in
 [docs/workers.md](workers.md).
 
