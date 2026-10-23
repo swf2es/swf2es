@@ -59,9 +59,11 @@ export class WebGLContext3D implements Context3D {
   height = 0;
   disposed = false;
   private readonly buffers = new Map<Buffer3D, BufferState>();
+  private vertexBuffers = 0;
   private bufferBytes = 0;
   private readonly programs = new Map<Program3D, ProgramState>();
   private readonly textures = new Map<Texture3D, TextureState>();
+  private readonly textureCounts = new Float64Array(3);
   private readonly textureOwners = new WeakSet<Texture3D>();
   private textureBytes = 0;
   private targetDepthBytes = 0;
@@ -544,7 +546,9 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     range(1, count - 1, stride === 0 ? 524287 : 65535);
     range(0, stride, 64);
-    if (this.buffers.size >= this.limits.maxBuffers) {
+    const countLimit = stride === 0 ? this.limits.maxIndexBuffers : this.limits.maxVertexBuffers;
+    const used = stride === 0 ? this.buffers.size - this.vertexBuffers : this.vertexBuffers;
+    if (this.buffers.size >= this.limits.maxBuffers || used >= countLimit) {
       throw new Context3DError("limit", "Context3D experiment: buffer limit");
     }
 
@@ -588,6 +592,9 @@ export class WebGLContext3D implements Context3D {
 
         gl.deleteBuffer(handle);
         this.bufferBytes -= bytes;
+        if (stride !== 0) {
+          this.vertexBuffers--;
+        }
         state.indices = null;
         state.uploaded = new Uint8Array(0);
         for (let i = 0; i < this.vertices.length; i++) {
@@ -598,6 +605,9 @@ export class WebGLContext3D implements Context3D {
       },
     };
     this.buffers.set(buffer, state);
+    if (stride !== 0) {
+      this.vertexBuffers++;
+    }
     this.bufferBytes += bytes;
     return buffer;
   }
@@ -717,8 +727,15 @@ export class WebGLContext3D implements Context3D {
       );
     }
 
+    const kind = cube ? 2 : rectangle ? 1 : 0;
+    const countLimit = cube
+      ? this.limits.maxCubeTextures
+      : rectangle
+        ? this.limits.maxRectangleTextures
+        : this.limits.max2DTextures;
     if (
       this.textures.size >= this.limits.maxTextures ||
+      this.textureCounts[kind] >= countLimit ||
       this.textureBytes + size > this.limits.maxTextureBytes
     ) {
       throw new Context3DError("limit", "Context3D experiment: texture count or memory limit");
@@ -770,6 +787,8 @@ export class WebGLContext3D implements Context3D {
           return;
         }
 
+        this.textureCounts[kind]--;
+
         if (this.renderTexture === texture) {
           this.renderTexture = null;
           this.renderDepth = false;
@@ -807,6 +826,7 @@ export class WebGLContext3D implements Context3D {
       },
     };
     this.textures.set(texture, state);
+    this.textureCounts[kind]++;
     this.textureOwners.add(texture);
     this.textureBytes += size;
 
