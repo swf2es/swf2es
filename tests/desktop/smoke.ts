@@ -534,6 +534,43 @@ async function withApp(
       connected.addEventListener("error", fail);
     });
     const devtools = new DevTools(connected);
+    /**
+     * Wait until the page on `devtools` shows the document whose URL starts
+     * with `prefix`. DevTools lists a new window by the URL it is navigating
+     * to while it still shows its first about:blank, and the app's pages are
+     * cross-origin isolated, so that navigation moves the window to another
+     * renderer: an evaluation sent across the move finds no context, which
+     * means only that the document is still on its way.
+     */
+    const shown = async (page: DevTools, prefix: string) => {
+      for (let waited = 0; ; waited += 50) {
+        const href = await page
+          .send<{ result: { value?: string } }>("Runtime.evaluate", {
+            expression: "location.href",
+            returnByValue: true,
+          })
+          .then(
+            ({ result }) => result.value ?? "",
+            (error: Error) => {
+              if (!/Cannot find default execution context/.test(error.message)) {
+                throw error;
+              }
+
+              return "";
+            },
+          );
+        if (href.startsWith(prefix)) {
+          return;
+        }
+
+        if (exited || waited > TIMEOUT) {
+          throw new Error(`the page on ${prefix}: ${exited ?? "timed out"} at ${href}`);
+        }
+
+        await sleep(50);
+      }
+    };
+    await shown(devtools, "swf2es://app/");
     const evaluate = async <T>(expression: string): Promise<T> => {
       const { result, exceptionDetails } = await devtools.send<{
         result: { value: T };
@@ -569,7 +606,9 @@ async function withApp(
         other.addEventListener("open", done);
         other.addEventListener("error", fail);
       });
-      return new DevTools(other);
+      const page = new DevTools(other);
+      await shown(page, prefix);
+      return page;
     };
     await run({
       stdout,
