@@ -193,6 +193,7 @@ export class Runtime {
     this.swfVersion = options.swfVersion ?? 31;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
+    this.objectTraits.testsValues = true;
     this.classTraits = new Traits("Class", this.objectTraits);
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
@@ -996,7 +997,7 @@ export class Runtime {
       case BIND_Method:
         return this.methodClosure(o, traits, id);
       case BIND_Set: {
-        const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
+        const slot = traits.hooks?.setOnlySlots?.[mn.name ?? ""];
         if (slot !== undefined) {
           return o[slot];
         }
@@ -1754,11 +1755,11 @@ export class Runtime {
 
   /** A builtin class's hook; hooks are not inherited, but a specialized Vector has its base's. */
   private hookOf(cls: AsObject, kind: "construct" | "call"): ClassHook["construct"] | null {
-    // Looked up by name once, then kept on the class.
+    // Looked up once, then kept on the class.
     const key = kind === "construct" ? "$constructHook" : "$callHook";
     let hook = cls[key];
     if (hook === undefined) {
-      hook = this.classHooks[cls.$hook ?? cls.$it.name]?.[kind] ?? null;
+      hook = (cls.$it as Traits).hooks?.[kind] ?? null;
       cls[key] = hook;
     }
 
@@ -1777,6 +1778,7 @@ export class Runtime {
     );
     itraits.dynamic = base.$it.dynamic;
     itraits.refusesNames = base.$it.refusesNames;
+    itraits.hooks = base.$it.hooks;
     const cls = Object.create(Object.getPrototypeOf(base));
     cls.$d = null;
     cls.$it = itraits;
@@ -1784,7 +1786,6 @@ export class Runtime {
     cls.$base = base;
     cls.$prototype = base.$prototype;
     cls.$param = this.refOf(param);
-    cls.$hook = base.$it.name;
     itraits.cls = cls;
     return cls;
   }
@@ -1905,7 +1906,7 @@ export class Runtime {
   readonly defining = new Map<string, AsObject>();
 
   applyType(factory: AsObject, params: Value[]): AsObject {
-    const hook = this.classHooks[factory.$it.name]?.apply;
+    const hook = (factory.$it as Traits).hooks?.apply;
     if (!hook) {
       throw this.error("TypeError", 1127);
     }

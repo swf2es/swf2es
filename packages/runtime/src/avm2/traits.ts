@@ -13,7 +13,7 @@ import type {
   Value,
 } from "./descriptors.js";
 import type { Domain } from "./domain.js";
-import type { IndexHook, PropertyHook } from "./hooks.js";
+import type { ClassHook, IndexHook, PropertyHook } from "./hooks.js";
 import type { Multiname, Namespace } from "./names.js";
 import { invalidate } from "./property-cache.js";
 
@@ -55,8 +55,8 @@ export function instanceVarField(cls: AsObject, name: string): string | null {
   return null;
 }
 
-/** The names whose type tests isInstanceOf answers from the value, not its traits. */
-const VALUE_TESTS = new Set(["Object", "float", "Number", "int", "uint", "String", "Boolean"]);
+/** The builtins besides Object whose type tests isInstanceOf answers from the value, not its traits. */
+export const VALUE_TESTS = new Set(["float", "Number", "int", "uint", "String", "Boolean"]);
 
 /** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
 const TRAIT_Slot = 0;
@@ -104,6 +104,8 @@ export class Traits {
   refusesNames = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
+  /** The class's own hook, a builtin's or a player's; not inherited, but a specialized Vector has its base's. */
+  hooks: ClassHook | null = null;
   /** How its instances resolve the names it does not bind, if not as dynamic properties. */
   properties: PropertyHook | null = null;
   /** Its own slots with [Transient] metadata, if any. */
@@ -131,16 +133,15 @@ export class Traits {
   /**
    * Whether a type test against these traits looks at more than an object's
    * traits, as one against Object, a number type, String or Boolean does,
-   * which takes primitives.
+   * which takes primitives: those builtins' own, not a class named as one.
    */
-  readonly testsValues: boolean;
+  testsValues = false;
 
   constructor(
     readonly name: string,
     readonly base: Traits | null,
     proto?: AsObject,
   ) {
-    this.testsValues = VALUE_TESTS.has(name);
     this.proto = proto ?? Object.create(base ? base.proto : null);
     this.proto.$traits = this;
     this.create = base ? base.create : null;
