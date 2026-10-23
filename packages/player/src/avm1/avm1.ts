@@ -678,6 +678,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
       this.queue.run();
       this.timers.afterFrame(this.rate);
+      // The first frame's remoting calls go now, as a later frame's do at its end:
+      // before anything the network delivers on the next.
+      this.remoting.flush();
     } finally {
       this.timers.end();
     }

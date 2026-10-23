@@ -7,7 +7,7 @@
   "avm1/add_swf4": {"matched":28,"lines":28,"traced":28,"error":null},
   "avm1/add_swf5": {"matched":28,"lines":28,"traced":28,"error":null},
   "avm1/amf0_serde_suite": {"matched":0,"lines":144,"traced":73,"error":null},
-  "avm1/amf_array_serialization": {"matched":9,"lines":10,"traced":9,"error":null},
+  "avm1/amf_array_serialization": {"matched":10,"lines":10,"traced":10,"error":null},
   "avm1/amf_serialize_typed_objects": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm1/amf_sharedobject_strict_array_serialization": {"matched":3,"lines":3,"traced":3,"error":null},
   "avm1/amf_strict_array_serialization": {"matched":7,"lines":7,"traced":7,"error":null},

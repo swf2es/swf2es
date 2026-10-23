@@ -61,7 +61,7 @@ trace("called");`,
       },
     },
   );
-  played.player.tick();
+  // The first frame's calls go at its end, before the next frame takes what the network answered.
   assert.deepEqual(take(played), ["called"]);
   assert.equal(asked.length, 1);
   assert.equal(asked[0].method, "POST");
