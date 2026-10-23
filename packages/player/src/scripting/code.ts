@@ -11,6 +11,13 @@ import type { Library } from "../display/timeline.js";
 import type { CachedModule, ModuleCache } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
 import { type Evaluated, evaluate, evaluateFunction, type Factory } from "./evaluate.js";
+import {
+  type HandedModule,
+  type HandedModules,
+  type ModuleHandover,
+  type ModuleRecorder,
+  namesWorkerDomain,
+} from "./handover.js";
 import { methodCompiler, supportsLazyCompilation } from "./lazy.js";
 import { sha256 } from "./sha256.js";
 
@@ -62,6 +69,7 @@ export class Code {
       return;
     }
 
+    this.unmodelled();
     this.s.codegen.dropDomain(target, epoch);
     this.compactSoon();
     for (const index of this.codegenAbcs.get(id) ?? []) {
@@ -151,7 +159,46 @@ export class Code {
     }
   });
 
+  /**
+   * The primordial's journal of its compiler, while it may hand its
+   * modules to workers; a worker's side of it, where it was handed some
+   * (see handover.ts).
+   */
+  recorder: ModuleRecorder | null = null;
+  handover: ModuleHandover | null = null;
+  private mainLinked = false;
+
   constructor(private readonly s: Scripting) {}
+
+  /** A call on the compiler that changes what it compiles to, journaled. */
+  private journal(op: string): void {
+    this.recorder?.op(op, this.s.codegen.epoch);
+    this.handover?.op(op);
+  }
+
+  /** ABC `index` compiled, read or imported, journaled with its module and log. */
+  private recorded(
+    index: number,
+    module: { text?: string; url?: string },
+    log: string | null,
+  ): void {
+    this.recorder?.compiled(index, this.s.codegen.epoch, module, log);
+    this.handover?.op(`compile ${index}`);
+  }
+
+  /** A call the journal does not follow: no module is handed past it. */
+  private unmodelled(): void {
+    if (this.recorder) {
+      this.recorder.open = false;
+    }
+
+    this.handover?.stop();
+  }
+
+  /** What a worker is handed of this VM's modules, or null. */
+  handedModules(): HandedModules | null {
+    return this.recorder?.handed(this.hashes) ?? null;
+  }
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   async loadLibraries(abcs: Uint8Array[]): Promise<void> {
@@ -223,6 +270,16 @@ export class Code {
       // the link goes on in the same turn, as it did before scripts.
       const linked = this.compileAll(indices, domain, false, { url, library }, ready);
       const modules = linked instanceof Promise ? await linked : linked;
+      if (domain === this.s.mainDomain && !this.mainLinked) {
+        // Workers are handed what was compiled up to the main SWF's code,
+        // and only by a SWF that can make one.
+        this.mainLinked = true;
+        if (namesWorkerDomain(abcs.map(({ abc }) => abc))) {
+          this.recorder?.freeze(this.hashes);
+        } else {
+          this.recorder?.drop();
+        }
+      }
       for (const [k, { lazy }] of added.entries()) {
         const linked = modules[k];
         if (!lazy) {
@@ -256,6 +313,7 @@ export class Code {
         const at = this.codegenAbcs.get(f.domain)?.[f.index];
         if (at !== undefined && !told.has(key)) {
           told.add(key);
+          this.journal(`found ${key} ${target} ${at}`);
           this.s.codegen.found({ ...f, domain: target, abc: at });
         }
       }
@@ -265,6 +323,9 @@ export class Code {
     if (error) {
       throw new Error(`an ABC was rejected: VerifyError #${error}`);
     }
+
+    // Its bytes are checked by their hash, before a module is handed.
+    this.journal(`add ${builtin} ${target}`);
 
     this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
     this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
@@ -285,7 +346,9 @@ export class Code {
   private codegenDomainOf(domain: avm2.Domain): number {
     let target = this.codegenDomains.get(domain.id);
     if (target === undefined) {
-      target = this.s.codegen.childDomain(this.codegenDomainOf(domain.parent ?? this.s.rt.root));
+      const parent = this.codegenDomainOf(domain.parent ?? this.s.rt.root);
+      target = this.s.codegen.childDomain(parent);
+      this.journal(`domain ${parent} ${target}`);
       this.codegenDomains.set(domain.id, target);
       this.codegenAbcs.set(domain.id, []);
       if (domain !== this.s.mainDomain) {
@@ -309,6 +372,7 @@ export class Code {
         this.revived.add(d.id);
       }
 
+      this.unmodelled();
       this.s.codegen.reviveDomain(target, abcs);
     }
 
@@ -349,6 +413,7 @@ export class Code {
       !this.revived.has(domain.id) &&
       !this.linking.has(domain.id)
     ) {
+      this.unmodelled();
       this.s.codegen.evictDomain(target);
       this.compactSoon();
     }
@@ -396,11 +461,7 @@ export class Code {
     ) => {
       const script = `swf2es-${++this.modules}.js`;
       const epoch = this.s.codegen.epoch;
-      const source =
-        module ??
-        (lazy
-          ? this.s.codegen.compileLazyModule(this.hashes, index)
-          : this.s.codegen.compileModule(this.hashes, index));
+      const source = module ?? this.compileNow(index, lazy);
       const evaluated = builtin
         ? { factory: evaluateFunction(source, script), script }
         : evaluate(source, script);
@@ -411,6 +472,22 @@ export class Code {
       });
       return evaluated instanceof Promise ? evaluated.then(mark) : mark(evaluated);
     };
+    if (!ready) {
+      const lazy = !builtin && this.s.lazyCompilation && supportsLazyCompilation();
+      const handed = lazy ? null : this.handover?.take(index, this.hashes);
+      if (handed) {
+        if (handed.url !== undefined) {
+          return this.importHanded(handed);
+        }
+
+        // Read only once taken: a worker on other ABCs never reads the SWF's.
+        const source = handed.module;
+        return typeof source === "string" || source === undefined
+          ? compiled(source ?? "", false)
+          : source.text().then((text) => compiled(text, false));
+      }
+    }
+
     if (!ready?.cached) {
       return compiled(
         ready?.module,
@@ -423,6 +500,7 @@ export class Code {
     }
 
     const recompiled = () => {
+      this.unmodelled();
       this.discard(ready.key, ready.entry);
       return compiled();
     };
@@ -472,6 +550,7 @@ export class Code {
           throw e;
         }
 
+        this.unmodelled();
         script = `swf2es-${++this.modules}.js`;
         linked = run(evaluateFunction(this.s.codegen.compileModule(this.hashes, index), script));
       }
@@ -490,6 +569,40 @@ export class Code {
     }
 
     return linked;
+  }
+
+  /**
+   * ABC `index`'s module compiled now, `lazy` or whole, and journaled;
+   * with its log where it may be handed to a worker.
+   */
+  private compileNow(index: number, lazy: boolean): string {
+    const codegen = this.s.codegen;
+    if (lazy) {
+      const module = codegen.compileLazyModule(this.hashes, index);
+      this.journal(`lazy ${index}`);
+      return module;
+    }
+
+    if (this.recorder?.open) {
+      const { module, log } = codegen.compileModuleLogged(this.hashes, index);
+      this.recorded(index, { text: module }, log);
+      return module;
+    }
+
+    const module = codegen.compileModule(this.hashes, index);
+    this.journal(`compile ${index}`);
+    return module;
+  }
+
+  /** A module handed by the primordial that it had imported, imported again from its URL. */
+  private async importHanded(handed: HandedModule): Promise<Module> {
+    const url = this.uniqueUrl(handed.url as string);
+    const factory = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)).default;
+    if (typeof factory !== "function") {
+      throw new Error(`swf2es: ${handed.url} is no module the player wrote`);
+    }
+
+    return { factory, script: url, cached: true };
   }
 
   /** The host's module cache, where it has one and the compiler has an identity to key it by. */
@@ -513,12 +626,8 @@ export class Code {
     const smallest = cache?.minBytes ?? MIN_CACHED_ABC;
     for (const index of indices) {
       const lazy = !this.builtins[index] && this.s.lazyCompilation && supportsLazyCompilation();
-      const compile = () =>
-        lazy
-          ? this.s.codegen.compileLazyModule(this.hashes, index)
-          : this.s.codegen.compileModule(this.hashes, index);
       if (this.sizes[index] < smallest) {
-        const module = compile();
+        const module = this.compileNow(index, lazy);
         ready.push({ module, key: null, cached: false, lazy });
         continue;
       }
@@ -552,22 +661,29 @@ export class Code {
       if (key !== null && entry !== undefined) {
         const { entry: cached, imported } = entry;
         if (this.s.codegen.replay(cached.log, index)) {
+          this.recorded(
+            index,
+            cached.url === undefined ? { text: cached.module } : { url: cached.url },
+            cached.log,
+          );
           ready.push({ module: cached.module, key, cached: true, entry: cached, imported });
           continue;
         }
 
         // Done part way, the log left the domain as no compile would: the
         // module compiled now is not that key's, and the entry goes.
+        this.unmodelled();
         failed = true;
         this.discard(key, cached);
       }
 
       if (lazy) {
-        ready.push({ module: compile(), key, cached: false, lazy: true });
+        ready.push({ module: this.compileNow(index, true), key, cached: false, lazy: true });
         continue;
       }
 
       const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
+      this.recorded(index, { text: module }, log);
       if (log !== null && !failed) {
         this.store(key, module, log);
       }
