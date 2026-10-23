@@ -1,5 +1,6 @@
 // The demo site (apps/site) in headless Chrome, built as GitHub Pages gets
-// it and served under /swf2es/ as Pages serves it: a demo by ?swf= plays
+// it and served under /swf2es/ as Pages serves it, without the headers its
+// service worker adds to isolate it, which it is then: a demo by ?swf= plays
 // and traces, a key's uncaught error reaches the console, a file opened
 // with the picker and a URL load play, a URL the browser may not fetch
 // says why, the report link carries the SWF's facts and the errors, and the
@@ -43,7 +44,7 @@ const mounts: [string, string][] = [["/swf2es/", site]];
 execFileSync(process.execPath, [`${root}apps/site/build.ts`], { stdio: "inherit" });
 
 if (process.argv.includes("--serve")) {
-  const { url } = await serve(mounts);
+  const { url } = await serve(mounts, undefined, false);
   console.log(`the site: ${url}swf2es/index.html`);
 } else {
   await check();
@@ -106,6 +107,26 @@ async function check(): Promise<void> {
       });
 
       const checks: [string, () => Promise<void>][] = [
+        [
+          "its service worker makes the page cross-origin isolated, as Pages sends no headers",
+          async () => {
+            // The first visit loads the page again once the worker serves it.
+            let isolated = false;
+            for (const start = Date.now(); !isolated && Date.now() - start < 30_000; ) {
+              isolated =
+                (
+                  await evaluate<boolean>(
+                    "crossOriginIsolated && !!navigator.serviceWorker.controller",
+                  )
+                ).value === true;
+              await new Promise((done) => setTimeout(done, 100));
+            }
+
+            assert.ok(isolated, "the page is not cross-origin isolated");
+            await navigate("index.html");
+            assert.equal(await value<boolean>("crossOriginIsolated"), true);
+          },
+        ],
         [
           "?swf= plays a demo, which traces and draws",
           async () => {
@@ -439,7 +460,8 @@ async function check(): Promise<void> {
       return failed;
     },
     false,
-    { page: "swf2es/index.html", mounts },
+    // As GitHub Pages serves it: with no headers that isolate it.
+    { page: "swf2es/index.html", mounts, isolated: false },
   );
 
   if (failures > 0) {
