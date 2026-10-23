@@ -21,6 +21,7 @@ import {
   type FilterSystem,
   type FilterWithShader,
   GlProgram,
+  GpuProgram,
   Texture as PixiTexture,
   type RenderSurface,
   type Texture,
@@ -1091,6 +1092,51 @@ void main(void) {
   finalColor = c;
 }`;
 
+// Plain layers use the colour pass under WebGPU too; Flash's other filters remain WebGL-only.
+const COPY_GPU = `struct GlobalFilterUniforms {
+  uInputSize: vec4<f32>,
+  uInputPixel: vec4<f32>,
+  uInputClamp: vec4<f32>,
+  uOutputFrame: vec4<f32>,
+  uGlobalFrame: vec4<f32>,
+  uOutputTexture: vec4<f32>,
+};
+struct ColorUniforms {
+  uColored: f32,
+  uMul: vec4<f32>,
+  uAdd: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
+@group(0) @binding(1) var uTexture: texture_2d<f32>;
+@group(0) @binding(2) var uSampler: sampler;
+@group(1) @binding(0) var<uniform> colorUniforms: ColorUniforms;
+struct Output {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+@vertex fn mainVertex(@location(0) aPosition: vec2<f32>) -> Output {
+  var p = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
+  p.x = p.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
+  p.y = p.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) - gfu.uOutputTexture.z;
+  return Output(vec4<f32>(p, 0.0, 1.0), aPosition * gfu.uOutputFrame.zw * gfu.uInputSize.zw);
+}
+@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  var c = textureSample(uTexture, uSampler, uv);
+  if (colorUniforms.uColored > 0.5 && c.a > 0.0) {
+    let t = clamp(vec4<f32>(c.rgb / c.a, c.a) * colorUniforms.uMul + colorUniforms.uAdd,
+                  vec4<f32>(0.0), vec4<f32>(1.0));
+    c = vec4<f32>(t.rgb * t.a, t.a);
+  }
+  return c;
+}`;
+
+function copyGpuProgram(): GpuProgram {
+  return GpuProgram.from({
+    vertex: { source: COPY_GPU, entryPoint: "mainVertex" },
+    fragment: { source: COPY_GPU, entryPoint: "mainFragment" },
+  });
+}
+
 /** A chain's object's area on the stage, and its transform on the stage then. */
 interface Measured {
   minX: number;
@@ -1146,6 +1192,7 @@ let plainCopyFilter: Filter | null = null;
 function plainCopy(): Filter {
   plainCopyFilter ??= new Filter({
     glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
+    gpuProgram: copyGpuProgram(),
     resources: {
       colorUniforms: {
         uColored: { value: 0, type: "f32" },
@@ -1215,6 +1262,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   ) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
+      gpuProgram: copyGpuProgram(),
       resources: {
         colorUniforms: {
           uColored: { value: 0, type: "f32" },
@@ -1492,6 +1540,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     output: RenderSurface,
     clear: boolean,
   ): void {
+    // No inner filters: this copy can colour and blend the input directly, as AlphaFilter did.
+    if (this.filters.length === 0) {
+      system.applyFilter(this, input, output, clear);
+      return;
+    }
+
     if (this.blendMode === "normal" && !this.colored) {
       this.run(system, input, output, clear);
       return;
