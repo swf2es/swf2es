@@ -3,7 +3,6 @@
 // layer blended with what is below by the mode's formula, which a filter
 // that reads the back buffer computes. Colours are premultiplied.
 import {
-  AlphaFilter,
   BlendModeFilter,
   type Bounds,
   Container,
@@ -221,25 +220,17 @@ function blendFilter(mode: string): Filter {
 const filters = new Map<string, Filter[]>();
 
 /**
- * The filters that composite an object in `mode`: none for normal; for
- * layer one that only makes it a layer; for any other the mode's blend.
+ * The filters that composite an object in `mode`: none for normal or layer, whose colour
+ * chain already isolates it (view.ts); for any other the mode's blend.
  */
 export function blendFilters(mode: string): Filter[] | null {
-  if (mode === "normal" || !(mode === "layer" || SEPARABLE[mode] || SPECIAL[mode])) {
+  if (!(SEPARABLE[mode] || SPECIAL[mode])) {
     return null;
   }
 
   let made = filters.get(mode);
   if (!made) {
-    if (mode === "layer") {
-      const layer = new AlphaFilter({ alpha: 1 });
-      layer.resolution = "inherit";
-      layer.antialias = "inherit";
-      made = [layer];
-    } else {
-      made = [blendFilter(mode)];
-    }
-
+    made = [blendFilter(mode)];
     filters.set(mode, made);
   }
 
