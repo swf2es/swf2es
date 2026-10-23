@@ -65,11 +65,14 @@ export class Lifecycle {
    * The main SWF's root, on the stage before its constructor ran, once
    * that has returned: ADDED and ADDED_TO_STAGE to it alone, as Flash and
    * AIR tell it (measured in adl); what its constructor added to it was
-   * told as it was added.
+   * told as it was added. ADDED comes even to a root that its constructor
+   * took off the stage, ADDED_TO_STAGE only to one still on it after that.
    */
   rootConstructed(root: DisplayObject): void {
     this.dispatch(root.object, "added", true);
-    this.dispatch(root.object, "addedToStage", false);
+    if (this.onStage(root)) {
+      this.dispatch(root.object, "addedToStage", false);
+    }
   }
 
   /**

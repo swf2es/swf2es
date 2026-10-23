@@ -891,6 +891,84 @@ test("a document class's constructor that throws is reported, and its SWF plays 
   assert.deepEqual(await run(false), { lines, errors });
 });
 
+for (const [name, body, expected] of [
+  [
+    "RootSelfRemove",
+    `stage.removeChild(this);
+        trace("ctor end parent " + (parent != null));`,
+    [
+      "removed stage true parent true",
+      "removedFromStage stage true parent true",
+      "ctor end parent false",
+      "added stage false parent false",
+    ],
+  ],
+  [
+    "RootRemoveInAdded",
+    `addEventListener("added", function(e:Event):void {
+          parent.removeChild(e.currentTarget as Sprite);
+          trace("after remove parent " + (parent != null));
+        });
+        trace("ctor end");`,
+    [
+      "ctor end",
+      "added stage true parent true",
+      "removed stage true parent true",
+      "removedFromStage stage true parent true",
+      "after remove parent false",
+    ],
+  ],
+  [
+    "RootThrows",
+    `loaderInfo.addEventListener("init", function(e:Event):void { trace("init"); });
+        loaderInfo.addEventListener("complete", function(e:Event):void { trace("complete"); });
+        addEventListener("enterFrame", function(e:Event):void {
+          if (++frames == 2) trace("enterFrame 2");
+        });
+        trace("throwing");
+        throw new Error("boom");`,
+    ["throwing", "complete", "enterFrame 2"],
+  ],
+] as const) {
+  test(`a main SWF's root is told it was added as adl tells it: ${name}`, { skip }, async () => {
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const scripting: Scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      onUncaught: (error) => errors.push(scripting.rt.toString(error as avm2.Value)),
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const abc = compiler(out)(
+      name,
+      `package {
+    import flash.display.Sprite;
+    import flash.events.Event;
+    public class ${name} extends Sprite {
+      private var frames:int = 0;
+      public function ${name}() {
+        for each (var t:String in ["added", "addedToStage", "removed", "removedFromStage"]) {
+          addEventListener(t, function(e:Event):void {
+            trace(e.type + " stage " + (stage != null) + " parent " + (parent != null));
+          });
+        }
+        ${body}
+      }
+    }
+  }`,
+    );
+    const player = new Player(bare(abc, 1, name), scripting);
+    await player.start();
+    player.tick();
+    player.tick();
+
+    // adl, the SWF as AIR's main content; a root its constructor or its
+    // own ADDED listener took off the stage gets no ADDED_TO_STAGE, and
+    // one whose constructor threw no INIT, though COMPLETE comes.
+    assert.deepEqual(lines, expected);
+    assert.deepEqual(errors, name === "RootThrows" ? ["Error: boom"] : []);
+  });
+}
+
 test("an onUncaught that throws stops no listener, and its error comes when the frame ends", {
   skip,
 }, async () => {
