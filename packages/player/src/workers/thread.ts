@@ -44,8 +44,13 @@ export function runWorkerThread(port: ThreadPort): void {
   };
 
   const boot = async ({ codegen, init }: ThreadStart): Promise<void> => {
+    // What the embedder gave the primordial lives on its thread, as
+    // functions no message carries: a worker gets none of it, and none of
+    // the defaults that would reach past the primordial's (docs/workers.md).
+    const storage = new Map<string, Uint8Array>();
     const s = new Scripting(await createCodegen(codegen), {
       url: init.url,
+      sandboxType: init.sandboxType,
       print: (line) => port.post({ type: "trace", line }),
       onUncaught: (error) => port.post({ type: "uncaught", text: describe(error) }),
       workerParent: { id: init.id, post: (message) => port.post(message), shared: init.shared },
@@ -53,6 +58,17 @@ export function runWorkerThread(port: ThreadPort): void {
       navigate: null,
       fileHost: null,
       clipboard: null,
+      webSocket: null,
+      sendToUrl: false,
+      storage: {
+        get: (key) => storage.get(key) ?? null,
+        set: (key, bytes) => {
+          storage.set(key, bytes.slice());
+        },
+        remove: (key) => {
+          storage.delete(key);
+        },
+      },
     });
     await s.loadLibraries(init.libraries);
     const player = new Player(init.swf, s);

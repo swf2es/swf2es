@@ -38,6 +38,7 @@ export interface ParentLink {
 /** A background worker the primordial made. */
 interface Background {
   id: number;
+  /** Empty once it has started: the thread was given its copy. */
   swf: Uint8Array<ArrayBuffer>;
   /** "starting" from start() until the thread runs, which scripts see as "new". */
   state: "new" | "starting" | "running" | "terminated";
@@ -60,6 +61,7 @@ interface Channel {
    * cannot see the receiver's queue without shared memory.
    */
   undelivered: number;
+  /** Its AS3 object in this VM, made when a script first has it. */
   object: AsObject | null;
 }
 
@@ -76,10 +78,13 @@ export class Workers {
   readonly id: number;
   private readonly host: WorkerHost | null;
   private readonly parent: ParentLink | null;
+  /** The background workers made and not terminated; what they held goes with them. */
   private readonly backgrounds = new Map<number, Background>();
+  /** Those terminated, by id alone. */
+  private readonly ended = new Set<number>();
   /** The Worker objects of this VM, one a worker. */
   private readonly objects = new Map<number, AsObject>();
-  private readonly shared = new Map<number, Map<string, Shared>>();
+  private readonly shared = new Map<number, Map<string | null, Shared>>();
   private readonly channels = new Map<number, Channel>();
   private nextWorker = 1;
   private nextChannel = 1;
@@ -153,7 +158,7 @@ export class Workers {
     if (!background) {
       throw rt.error(
         "flash.errors::IllegalOperationError",
-        id === this.id || id === PRIMORDIAL ? 1511 : 1521,
+        id === this.id || id === PRIMORDIAL || this.ended.has(id) ? 1511 : 1521,
       );
     }
 
@@ -168,25 +173,37 @@ export class Workers {
         ([key, p]): SharedMessage => ({ type: "shared", worker, key, value: p.wire }),
       ),
     );
+    const swf = background.swf;
+    background.swf = new Uint8Array(0);
     background.sent = 1;
     this.wait(background, 1);
-    background.thread = host.start(
-      {
-        type: "init",
-        id,
-        swf: background.swf,
-        url: this.s.url,
-        libraries: this.libraries,
-        shared,
-      },
-      (message) => this.fromBackground(background, message),
-      (error) => {
-        if (background.state !== "terminated") {
-          this.s.reportUncaught(error);
-          this.end(background);
-        }
-      },
-    );
+    try {
+      background.thread = host.start(
+        {
+          type: "init",
+          id,
+          swf,
+          url: this.s.url,
+          sandboxType: this.s.sandboxType,
+          libraries: this.libraries,
+          shared,
+        },
+        (message) => this.fromBackground(background, message),
+        (error) => {
+          if (background.state !== "terminated") {
+            this.s.reportUncaught(error);
+            this.end(background);
+          }
+        },
+      );
+    } catch {
+      // The host could start no thread, as a page's policy may forbid the
+      // worker's script. Flash's nearest is a player that has workers
+      // disabled, which start reports with 3807; the worker is terminated.
+      this.end(background);
+      throw rt.error("flash.errors::IllegalOperationError", 3807);
+    }
+
     for (const message of background.pending.splice(0)) {
       this.post(background, message);
     }
@@ -235,7 +252,11 @@ export class Workers {
     return [this.objectOf(PRIMORDIAL), ...running.map((b) => this.objectOf(b.id))];
   }
 
-  setShared(id: number, key: string, value: Value): void {
+  setShared(id: number, key: string | null, value: Value): void {
+    if (this.ended.has(id)) {
+      return;
+    }
+
     const own = this.propertiesOf(id);
     if (value === undefined) {
       own.delete(key);
@@ -271,7 +292,7 @@ export class Workers {
     }
   }
 
-  getShared(id: number, key: string): Value {
+  getShared(id: number, key: string | null): Value {
     const p = this.shared.get(id)?.get(key);
     if (!p) {
       return undefined;
@@ -321,8 +342,11 @@ export class Workers {
       return undefined;
     }
 
+    // The last of a closing channel's closes it, with no event here: Flash
+    // dispatches one at a close, which tells the state as the event comes.
     if (channel.state === "closing" && channel.queue.length === 0) {
       channel.state = "closed";
+      this.drained(channel);
     }
 
     return this.decode(wire);
@@ -344,8 +368,8 @@ export class Workers {
       return;
     }
 
+    this.route({ type: "close", channel: channel.ref, drained: false }, this.id);
     this.closed(channel);
-    this.route({ type: "close", channel: channel.ref }, this.id);
   }
 
   /** Stop every background worker's thread, as the player goes. */
@@ -422,6 +446,21 @@ export class Workers {
    */
   private route(message: ChannelMessage | ChannelClose, from: number): void {
     const ref = message.channel;
+    // The primordial's own copy of a channel between two others follows its state.
+    if (
+      !this.parent &&
+      message.type === "close" &&
+      ref.sender !== this.id &&
+      ref.receiver !== this.id
+    ) {
+      const channel = this.channels.get(ref.id);
+      const state = message.drained ? "closed" : "closing";
+      if (channel && channel.state !== state && channel.state !== "closed") {
+        channel.state = state;
+        this.stateEvent(channel);
+      }
+    }
+
     const ends = message.type === "close" ? [ref.sender, ref.receiver] : [ref.receiver];
     let parentPosted = false;
     for (const to of new Set(ends)) {
@@ -453,7 +492,12 @@ export class Workers {
   private arrive(message: ChannelMessage | ChannelClose): void {
     const channel = this.channel(message.channel);
     if (message.type === "close") {
-      if (channel.state === "open") {
+      if (message.drained) {
+        if (channel.state !== "closed") {
+          channel.state = "closed";
+          this.stateEvent(channel);
+        }
+      } else if (channel.state === "open") {
         this.closed(channel);
       }
 
@@ -464,9 +508,28 @@ export class Workers {
     this.s.loads.deferHostEvent(() => this.dispatch(channel, "channelMessage"));
   }
 
+  /**
+   * This end closed, by itself or by the other: closing until the
+   * receiver's queue is empty, which only the receiver sees, so a sender on
+   * another worker is closing until the receiver tells it (drained).
+   */
   private closed(channel: Channel): void {
-    const pending = channel.ref.receiver === this.id ? channel.queue.length : channel.undelivered;
-    channel.state = pending > 0 ? "closing" : "closed";
+    const receiving = channel.ref.receiver === this.id;
+    channel.state = receiving && channel.queue.length === 0 ? "closed" : "closing";
+    this.stateEvent(channel);
+    if (receiving) {
+      this.drained(channel);
+    }
+  }
+
+  /** At the receiver, a channel just closed: the sender on another worker is told. */
+  private drained(channel: Channel): void {
+    if (channel.state === "closed" && channel.ref.sender !== this.id) {
+      this.route({ type: "close", channel: channel.ref, drained: true }, this.id);
+    }
+  }
+
+  private stateEvent(channel: Channel): void {
     this.s.loads.deferHostEvent(() => this.dispatch(channel, "channelState"));
   }
 
@@ -476,25 +539,45 @@ export class Workers {
     }
   }
 
-  private stateChanged(id: number): void {
+  /** workerState for worker `id` in the next frame; `last`, its object is let go after it. */
+  private stateChanged(id: number, last = false): void {
     this.s.loads.deferHostEvent(() => {
       const o = this.objects.get(id);
       if (o) {
         dispatchEvent(this.s, o, this.s.event("workerState"));
       }
+
+      // A script that still holds a terminated worker's object reads its state by its id.
+      if (last) {
+        this.objects.delete(id);
+      }
     });
   }
 
+  /** Stop its thread, and let go of what it held: its SWF, its shared properties, its channels. */
   private end(background: Background): void {
+    const id = background.id;
     background.state = "terminated";
     background.thread?.terminate();
     background.thread = null;
     background.pending.length = 0;
+    background.swf = new Uint8Array(0);
     for (const w of background.waits.splice(0)) {
       w.done();
     }
 
-    this.stateChanged(background.id);
+    this.backgrounds.delete(id);
+    this.ended.add(id);
+    this.shared.delete(id);
+    // A channel's AS3 objects keep theirs; nothing more is routed to it.
+    for (const [key, channel] of this.channels) {
+      if (channel.ref.sender === id || channel.ref.receiver === id) {
+        channel.undelivered = 0;
+        this.channels.delete(key);
+      }
+    }
+
+    this.stateChanged(id, true);
   }
 
   private post(background: Background, message: ToWorker): void {
@@ -526,7 +609,7 @@ export class Workers {
     }
   }
 
-  private propertiesOf(id: number): Map<string, Shared> {
+  private propertiesOf(id: number): Map<string | null, Shared> {
     let own = this.shared.get(id);
     if (!own) {
       own = new Map();

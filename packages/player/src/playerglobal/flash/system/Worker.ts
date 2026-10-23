@@ -9,6 +9,10 @@ import { eventDispatcherNatives } from "../events/EventDispatcher.js";
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
+/** A shared property's key: null is one of its own, apart from "null", as in avmplus. */
+const keyOf = (s: Scripting, key: Value): string | null =>
+  key === null || key === undefined ? null : s.rt.toString(key);
+
 export function workerNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
@@ -28,20 +32,20 @@ export function workerNatives(s: Scripting): avm2.Natives {
     }
 
     getSharedProperty(key: Value): Value {
-      return s.workers.getShared(this.$worker, s.rt.toString(key));
+      return s.workers.getShared(this.$worker, keyOf(s, key));
     }
 
     setSharedProperty(key: Value, value: Value): void {
-      s.workers.setShared(this.$worker, s.rt.toString(key), value);
+      s.workers.setShared(this.$worker, keyOf(s, key), value);
     }
 
     // Flash's own setSharedProperty and getSharedProperty call these.
     "flash.system:Worker::internalGetSharedProperty"(key: Value): Value {
-      return s.workers.getShared(this.$worker, s.rt.toString(key));
+      return s.workers.getShared(this.$worker, keyOf(s, key));
     }
 
     "flash.system:Worker::internalSetSharedProperty"(key: Value, value: Value): void {
-      s.workers.setShared(this.$worker, s.rt.toString(key), value);
+      s.workers.setShared(this.$worker, keyOf(s, key), value);
     }
 
     // workerState is dispatched to the Worker object whoever listens.

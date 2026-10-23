@@ -30,6 +30,8 @@ export interface WorkerInit {
   swf: Uint8Array<ArrayBuffer>;
   /** The URL its LoaderInfo reports: the primordial's SWF's. */
   url: string;
+  /** Security.sandboxType, the primordial's. */
+  sandboxType: string;
   /** builtin and playerglobal, as the primordial loaded them. */
   libraries: Uint8Array[];
   /** Its shared properties and the primordial's, as set before it started. */
@@ -40,7 +42,8 @@ export interface WorkerInit {
 export interface SharedMessage {
   type: "shared";
   worker: number;
-  key: string;
+  /** Its name; null is a key of its own, apart from "null", as in avmplus. */
+  key: string | null;
   value: WireValue | null;
 }
 
@@ -55,6 +58,8 @@ export interface ChannelMessage {
 export interface ChannelClose {
   type: "close";
   channel: ChannelRef;
+  /** Sent by the receiver to the sender once its queue is empty: the channel is closed at both ends. */
+  drained: boolean;
 }
 
 /** From the primordial to a thread. */
