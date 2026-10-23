@@ -430,9 +430,14 @@ cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 bias. Compressed textures remain unsupported.
 2D bitmap uploads clip from the top-left and clear uncovered pixels without
 scaling, including non-power-of-two sources and sources reused across mip levels.
-Cube bitmap uploads still require exact face/mip dimensions. Each context
-is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
-for CPU staging arrays; these are experimental resource limits.
+Cube bitmap uploads still require exact face/mip dimensions. This differs from
+AIR, which accepts other source sizes for cube faces and mips. The adapter's
+plain JavaScript `Error("Unsupported operation in Context3D triangle experiment")`
+also differs from an AS3 error; a full-sized bitmap reused for a smaller cube mip
+fails here. Cube crop/pad behavior and AIR-backed cases remain a follow-up rather
+than part of this 2D slice. Each context is limited to 128 textures and 64 MiB of
+texels (including mip chains), with another 64 MiB maximum for CPU staging arrays;
+these are experimental resource limits.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
@@ -440,11 +445,12 @@ between backends; the fixture uses representable byte values.
 
 `BitmapUploads.as` checks 2D source-size handling against AIR: matching, larger,
 smaller, mixed-axis and non-power-of-two bitmaps at the base level and smaller
-mips. Its 30 sampled pixels distinguish cropping from scaling, padding from
-retaining previous contents, and verify copying before source disposal. The
+mips. Odd source sizes include levels 1, 2 and 4. Its 42 sampled pixels distinguish
+cropping from scaling, padding from retaining previous contents, and verify
+copying before source disposal. The
 browser checks also exercise 81 uploads through one bounded staging array,
-preserve the source row stride, clear only the active mip's bytes, and allocate
-no GPU handles during warmed uploads. Invalid dimensions/lengths never reach
+preserve even and odd source row strides at every mip, clear only the active
+mip's bytes, and allocate no GPU handles during warmed uploads. Invalid dimensions/lengths never reach
 WebGL; cube size validation remains unchanged. This covers engines that reuse
 a full-size bitmap while drawing each mip's content into its top-left corner.
 

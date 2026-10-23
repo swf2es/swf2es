@@ -20,6 +20,8 @@ export function bitmapUploads() {
     const texture = c.createTexture(16, 8);
     const large = new Uint32Array(32 * 16).fill(0xff4488cc);
     large[7 * 32 + 15] = 0xff112233;
+    const odd = new Uint32Array(19 * 11).fill(0xff667788);
+    odd[7 * 19 + 15] = 0xffaabbcc;
     const small = new Uint32Array([0x80402010]);
     texture.upload(large, 0, 0, 32, 16);
     check(staging, "no bitmap staging storage");
@@ -32,8 +34,11 @@ export function bitmapUploads() {
         const width = Math.max(1, 16 >> level);
         const height = Math.max(1, 8 >> level);
         const length = width * height * 4;
-        texture.upload(large, level, 0, 32, 16);
-        const source = large[(height - 1) * 32 + width - 1];
+        const bitmap = pass % 2 ? odd : large;
+        const stride = pass % 2 ? 19 : 32;
+        const rows = pass % 2 ? 11 : 16;
+        texture.upload(bitmap, level, 0, stride, rows);
+        const source = bitmap[(height - 1) * stride + width - 1];
         const offset = length - 4;
         check(
           bytes[offset] === ((source >>> 16) & 255) &&

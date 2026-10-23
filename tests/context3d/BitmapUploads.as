@@ -103,7 +103,9 @@ package {
         ["same", 16, 8, 0], ["large-base", 32, 16, 0],
         ["small-base", 8, 4, 0], ["wider", 32, 4, 0], ["taller", 8, 16, 0],
         ["nonpow2-large", 19, 11, 0], ["nonpow2-small", 11, 5, 0],
-        ["large-mip1", 16, 8, 1], ["small-mip1", 4, 2, 1], ["large-mip4", 16, 8, 4]
+        ["large-mip1", 16, 8, 1], ["small-mip1", 4, 2, 1], ["large-mip4", 16, 8, 4],
+        ["nonpow2-large-mip1", 19, 11, 1], ["nonpow2-small-mip1", 5, 3, 1],
+        ["nonpow2-mixed-mip2", 7, 1, 2], ["nonpow2-mip4", 3, 5, 4]
       ];
       for (var i:int = 0; i < cases.length; i++) {
         for (var level:int = 0; level < 5; level++) { upload(level, 0xff112233); }

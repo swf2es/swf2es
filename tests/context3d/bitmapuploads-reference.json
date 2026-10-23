@@ -19,5 +19,13 @@
   "bitmapuploads small-mip1 ff000000 0 0",
   "bitmapuploads large-mip4 accepted",
   "bitmapuploads large-mip4 ff000000 ff000000 ff000000",
+  "bitmapuploads nonpow2-large-mip1 accepted",
+  "bitmapuploads nonpow2-large-mip1 ff000000 ff77636e ff55424d",
+  "bitmapuploads nonpow2-small-mip1 accepted",
+  "bitmapuploads nonpow2-small-mip1 ff000000 0 0",
+  "bitmapuploads nonpow2-mixed-mip2 accepted",
+  "bitmapuploads nonpow2-mixed-mip2 ff000000 0 ff11000b",
+  "bitmapuploads nonpow2-mip4 accepted",
+  "bitmapuploads nonpow2-mip4 ff000000 ff000000 ff000000",
   "bitmapuploads complete"
 ]
