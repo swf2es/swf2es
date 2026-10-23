@@ -458,16 +458,13 @@ export class Runtime {
    * first definition of a name wins, so later modules cannot change it.
    */
   private definingScript(mn: Multiname): Script | null {
-    const known = (mn as Multiname & { $script?: Script }).$script;
+    const known = mn.script;
     if (known) {
       return known;
     }
 
     const script = this.findScript(mn);
-    if (script) {
-      (mn as Multiname & { $script?: Script }).$script = script;
-    }
-
+    mn.script = script;
     return script;
   }
 
@@ -490,19 +487,21 @@ export class Runtime {
     return chain;
   }
 
+  /**
+   * The global object of the script that defines `mn`, run first if it has
+   * not run. A module reads `mn.global` before calling this: once set it
+   * stays right, as the defining script never changes and initScript
+   * returns its global object without running it again.
+   */
   findDef(mn: Multiname): AsObject {
-    // A script already run, as nearly every `new` and call by name finds.
-    const known = (mn as Multiname & { $script?: Script }).$script;
-    if (known !== undefined && known.state === 2) {
-      return known.global as AsObject;
-    }
-
     const script = this.definingScript(mn);
     if (!script) {
       throw this.error("ReferenceError", 1065, mn.toString());
     }
 
-    return this.initScript(script);
+    const g = this.initScript(script);
+    mn.global = g;
+    return g;
   }
 
   /**
@@ -547,7 +546,9 @@ export class Runtime {
   private global(mn: Multiname, global: AsObject, strict: boolean): AsObject {
     const script = this.definingScript(mn);
     if (script) {
-      return this.initScript(script);
+      const g = this.initScript(script);
+      mn.global = g;
+      return g;
     }
 
     if (global != null && this.hasProperty(global, mn)) {
@@ -2025,13 +2026,13 @@ export class Runtime {
       return this.applyType(base, [param ? this.resolveName(param) : null]);
     }
 
-    const cached = (mn as Multiname & { $cls?: AsObject }).$cls;
+    const cached = mn.cls;
     if (cached) {
       return cached;
     }
 
     const cls = this.getProperty(this.findDef(mn), mn);
-    (mn as Multiname & { $cls?: AsObject }).$cls = cls;
+    mn.cls = cls;
     return cls;
   }
 

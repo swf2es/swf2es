@@ -144,9 +144,10 @@ export function actionsModuleUnits(): string {
 let unitLimits = new Float64Array(2);
 
 /**
- * A SWF whose units actionsHeldUnitBytes compiles, held from one call to
- * the next: a unit is small, and copying the SWF in for each would cost
- * more than compiling it.
+ * A SWF whose blocks and units actionsHeldEmitEachBytes and
+ * actionsHeldUnitBytes compile, held from one call to the next: a block or
+ * a unit is small, and copying the SWF in for each would cost more than
+ * compiling it.
  */
 @final
 class HeldSwf {
@@ -162,7 +163,10 @@ class HeldSwf {
 /** The SWFs held, by the handle the caller gave each; it lets them go. */
 const held = new Map<i32, HeldSwf>();
 
-/** Hold `swf`, its blocks those of the ranges given, by `handle`, for actionsHeldUnitBytes. */
+/**
+ * Hold `swf`, its blocks those of the ranges given, by `handle`, for
+ * actionsHeldEmitEachBytes and actionsHeldUnitBytes.
+ */
 export function actionsHold(
   handle: i32,
   swf: Uint8Array,
@@ -273,6 +277,20 @@ export function actionsEmitEachBytes(
   reuse: bool,
 ): usize {
   return handOut(emitEach(swf, offsets, lengths, version, blocks, reuse));
+}
+
+/**
+ * actionsEmitEachBytes of the SWF held by `handle` (actionsHold), which a
+ * block needs whole for its backward jumps: copied in once, not for each
+ * block the JIT compiles. Nothing if none is held.
+ */
+export function actionsHeldEmitEachBytes(handle: i32, version: i32, blocks: string): usize {
+  if (!held.has(handle)) {
+    return handOut(null);
+  }
+
+  const h = held.get(handle);
+  return handOut(emitEach(h.swf, h.offsets, h.lengths, version, blocks, true));
 }
 
 function emitEach(
