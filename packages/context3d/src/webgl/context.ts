@@ -51,6 +51,7 @@ import {
   targetFramebuffer,
 } from "./targets.js";
 import { type TextureState, uploadTexture, uploadTextureBytes } from "./textures.js";
+import { validateIndices, validateVertices } from "./validation.js";
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
 export class WebGLContext3D implements Context3D {
@@ -571,6 +572,12 @@ export class WebGLContext3D implements Context3D {
       handle,
       indices: stride === 0 ? new Uint16Array(count) : null,
       uploaded: new Uint8Array(count),
+      prefix: 0,
+      version: 0,
+      checkedVersion: -1,
+      checkedFirst: 0,
+      checkedCount: 0,
+      maximum: -1,
     };
     const buffer: Buffer3D = {
       count,
@@ -598,8 +605,11 @@ export class WebGLContext3D implements Context3D {
         state.indices = null;
         state.uploaded = new Uint8Array(0);
         for (let i = 0; i < this.vertices.length; i++) {
-          if (this.vertices[i]?.buffer === buffer) {
+          const binding = this.vertices[i];
+          if (binding?.buffer === buffer) {
             this.vertices[i] = null;
+          } else if (binding?.checkedIndex === state) {
+            binding.checkedIndex = null;
           }
         }
       },
@@ -1364,13 +1374,27 @@ export class WebGLContext3D implements Context3D {
     const valid = offset >= 0 && offset <= buffer.stride - (packed ? 1 : size);
     const previous = this.vertices[index];
     if (previous) {
+      if (previous.buffer !== buffer) {
+        previous.checkedIndex = null;
+      }
       previous.buffer = buffer;
       previous.offset = offset;
       previous.size = size;
       previous.packed = packed;
       previous.valid = valid;
     } else {
-      this.vertices[index] = { buffer, offset, size, packed, valid };
+      this.vertices[index] = {
+        buffer,
+        offset,
+        size,
+        packed,
+        valid,
+        checkedIndex: null,
+        checkedIndexVersion: -1,
+        checkedVertexVersion: -1,
+        checkedFirst: 0,
+        checkedCount: 0,
+      };
     }
   }
 
@@ -1428,11 +1452,7 @@ export class WebGLContext3D implements Context3D {
       throw new Context3DError("triangleCount", "Context3D experiment: incomplete triangle");
     }
 
-    for (let i = first; i < first + count; i++) {
-      if (!index.uploaded[i]) {
-        throw new Context3DError("indexData", "Context3D index not uploaded");
-      }
-    }
+    const maximum = validateIndices(index, first, count);
 
     const gl = this.gl;
     gl.bindVertexArray(this.vao);
@@ -1452,14 +1472,7 @@ export class WebGLContext3D implements Context3D {
         throw new VertexOffsetError("Vertex attribute exceeds its stride");
       }
 
-      for (let j = first; j < first + count; j++) {
-        if (index.indices[j] >= buffer.uploaded.length) {
-          throw new Context3DError("vertexData", "Context3D vertex outside its buffer");
-        }
-        if (!buffer.uploaded[index.indices[j]]) {
-          throw new Context3DError("vertexStream", "Context3D vertex not uploaded");
-        }
-      }
+      validateVertices(buffer, index, binding, first, count, maximum);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer.handle);
       gl.enableVertexAttribArray(slot);

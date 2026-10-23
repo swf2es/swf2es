@@ -131,6 +131,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(host.exception, null, JSON.stringify(host));
       assert.equal(host.value?.passed, true);
       console.log("context3d: canvas host placement, failure rollback and listener cleanup ok");
+      const validation = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.drawValidation())',
+      );
+      assert.equal(validation.exception, null, JSON.stringify(validation));
+      assert.equal(validation.value?.passed, true);
+      console.log("context3d: draw validation reuses cached ranges and invalidates uploaded data");
       const limits = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.resourceLimits())',
       );
