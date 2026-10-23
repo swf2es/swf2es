@@ -119,6 +119,28 @@ globalThis.AudioContext = class extends PageAudio {
   }
 };
 
+/** The Web Workers flash.system.Worker's host made, and those not yet terminated. */
+const webWorkers = { made: 0, live: 0 };
+const PageWorker = globalThis.Worker;
+globalThis.Worker = class extends PageWorker {
+  private live = true;
+
+  constructor(url: string | URL, options?: WorkerOptions) {
+    super(url, options);
+    webWorkers.made++;
+    webWorkers.live++;
+  }
+
+  terminate(): void {
+    if (this.live) {
+      this.live = false;
+      webWorkers.live--;
+    }
+
+    super.terminate();
+  }
+};
+
 /** What the SWFs asked of the page: pageHello's arguments, and each report. */
 const calls: {
   hello: unknown[][];
@@ -418,6 +440,52 @@ async function lazyChurn(n: number) {
 }
 
 /**
+ * Play `src` in an element with `attributes`, the page configured with
+ * `workers` and `workerUrl`, until it traces `last`, reports an error or
+ * `ms` pass, and take it away: its traces, its errors, and how many Web
+ * Workers the page made meanwhile.
+ */
+async function workerRun(
+  src: string,
+  attributes: Record<string, string>,
+  options: { workers?: boolean; workerUrl?: string },
+  last: string,
+  ms = 30_000,
+) {
+  const { web } = await loading;
+  const { workers, workerUrl } = web.configuration();
+  web.configure(options);
+  const traces: string[] = [];
+  const errors: string[] = [];
+  const { log, error } = console;
+  console.log = (...args: unknown[]) => traces.push(args.join(" "));
+  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+  const made = webWorkers.made;
+  const p = document.createElement("swf2es-player") as Player;
+  for (const [name, value] of Object.entries(attributes)) {
+    p.setAttribute(name, value);
+  }
+
+  p.setAttribute("src", src);
+  try {
+    document.body.append(p);
+    await p.ready;
+    const start = performance.now();
+    while (!traces.includes(last) && errors.length === 0 && performance.now() - start < ms) {
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  } finally {
+    console.log = log;
+    console.error = error;
+    p.destroy();
+    p.remove();
+    web.configure({ workers, workerUrl });
+  }
+
+  return { traces, errors, made: webWorkers.made - made };
+}
+
+/**
  * Make an element for the AVM1 SWF, play it until its actions stop its
  * root on frame 2, and take it away, `n` times; how many stopped there.
  */
@@ -638,5 +706,7 @@ Object.assign(globalThis, {
   avm1Churn,
   avm1External,
   survivors,
+  workerRun,
+  webWorkers: () => ({ ...webWorkers }),
   webCounts: () => ({ ...counts }),
 });

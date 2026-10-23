@@ -12,6 +12,7 @@ import {
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
+import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 
 /** A flash.net.Socket's host and port, and the WebSocket relay that reaches it, as Ruffle's socketProxy lists them. */
 export interface SocketProxy {
@@ -61,6 +62,22 @@ export interface Configuration {
   cache?: boolean;
   /** Experimental AVM2 compilation on first method-factory use; off by default. */
   lazyCompilation?: boolean;
+  /**
+   * Whether flash.system.Worker runs a SWF's background workers, each on
+   * a Web Worker: on by default, as in Flash; an element's `workers`
+   * attribute decides for its own SWFs. Off, Worker.isSupported is false.
+   * A shareable ByteArray, a Mutex or a Condition crosses to another
+   * worker only on a cross-origin isolated page (docs/workers.md).
+   */
+  workers?: boolean;
+  /**
+   * The Web Workers' script: by default @swf2es/player-hosts'
+   * dist/thread/player-hosts/web-worker.js beside the module the page
+   * loaded @swf2es/player-hosts/workers from, which resolves its imports
+   * without the page's import map. One of another origin, as a CDN's,
+   * starts through a `blob:` module that imports it.
+   */
+  workerUrl?: string | URL;
 }
 
 let config: Configuration = {};
@@ -89,6 +106,11 @@ export function configuration(): Readonly<Configuration> {
  * player's domains, which a second player's reset would take over.
  */
 export async function codegenForPlayer(): Promise<Codegen> {
+  return createCodegen(await compiledCodegen());
+}
+
+/** codegen.wasm compiled, once a page. */
+async function compiledCodegen(): Promise<WebAssembly.Module> {
   codegenModule ??= (async () => {
     const url = config.codegen ?? import.meta.resolve("@swf2es/codegen/codegen.wasm");
     const response = await fetch(url);
@@ -99,12 +121,27 @@ export async function codegenForPlayer(): Promise<Codegen> {
     return WebAssembly.compileStreaming(response);
   })();
   // A failed fetch is not kept: the next player tries again.
-  const module = await codegenModule.catch((error) => {
+  return codegenModule.catch((error) => {
     codegenModule = null;
     throw error;
   });
+}
 
-  return createCodegen(module);
+/**
+ * The Web Workers of one player, whose release (as the player goes) lets
+ * the page's workers started ahead go once no player uses them. `ahead`
+ * starts some ahead, for a SWF that may start a worker and wait for it at
+ * once, as Crossbridge's do; others start one when the SWF asks.
+ */
+export async function workerHostForPlayer(ahead: boolean): Promise<WebWorkerHost> {
+  // Loaded only where a SWF has workers: a page's import map that names no
+  // @swf2es/player-hosts/workers still loads the element.
+  const { webWorkerHost } = await import("@swf2es/player-hosts/workers");
+  return webWorkerHost({
+    codegen: await compiledCodegen(),
+    url: config.workerUrl,
+    spares: ahead ? undefined : 0,
+  });
 }
 
 /** builtin.abc and playerglobal, fetched once a page; every player reads the same bytes. */

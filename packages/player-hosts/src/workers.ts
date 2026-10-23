@@ -16,9 +16,13 @@ export interface WebWorkerHostOptions {
   /** codegen.wasm compiled, as the player's own codegen was made from. */
   codegen: WebAssembly.Module;
   /**
-   * The worker script, web-worker.js of this package by default: a page
-   * that serves the packages unbundled must give one whose imports a
-   * worker can resolve, as a worker sees no import map.
+   * The worker script: by default this package's dist/thread/, which
+   * holds web-worker.js and the modules it imports with their bare
+   * specifiers made relative (build-thread.ts), so that it loads wherever
+   * the package is served, as a worker sees no import map. One from
+   * another origin, as a CDN's, starts through a module of the page's own
+   * that imports it, which a Content-Security-Policy must allow as a
+   * worker's `blob:` source.
    */
   url?: string | URL;
   /**
@@ -46,7 +50,9 @@ interface Spare {
   worker: Worker;
   ready: boolean;
   failed: string | null;
+  /** Resolves once it has loaded or failed, whoever took it meanwhile. */
   settled: Promise<void>;
+  settle(): void;
 }
 
 /**
@@ -89,6 +95,7 @@ function release(url: string | URL): void {
 
   u.idle = setTimeout(() => {
     for (const spare of pools.get(key) ?? []) {
+      spare.settle();
       spare.worker.terminate();
     }
 
@@ -97,8 +104,28 @@ function release(url: string | URL): void {
   }, IDLE);
 }
 
+/** The page's own modules that import a worker script from another origin, by its URL. */
+const importers = new Map<string, string>();
+
 function spawn(url: string | URL): Worker {
-  return new Worker(url, { type: "module" });
+  try {
+    return new Worker(url, { type: "module" });
+  } catch (error) {
+    // A browser starts a worker only on a script of the page's origin.
+    if (!(error instanceof DOMException && error.name === "SecurityError")) {
+      throw error;
+    }
+
+    const href = new URL(url, globalThis.location?.href).href;
+    let importer = importers.get(href);
+    if (importer === undefined) {
+      const source = `import ${JSON.stringify(href)};`;
+      importer = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      importers.set(href, importer);
+    }
+
+    return new Worker(importer, { type: "module" });
+  }
 }
 
 /** Keep `count` workers started ahead for `url`; where the page cannot start one, fewer. */
@@ -127,17 +154,18 @@ function fill(url: string | URL, count: number): Spare[] {
       settled: new Promise((resolve) => {
         settle = resolve;
       }),
+      settle: () => settle(),
     };
     worker.onmessage = (event) => {
       if (event.data?.type === "ready") {
         spare.ready = true;
-        settle();
+        spare.settle();
       }
     };
     worker.onerror = (event) => {
       event.preventDefault();
       spare.failed = event.message;
-      settle();
+      spare.settle();
     };
     pool.push(spare);
   }
@@ -161,7 +189,7 @@ function take(pool: Spare[]): Spare | undefined {
 
 /** Background workers on module Web Workers. */
 export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
-  const url = options.url ?? new URL("./web-worker.js", import.meta.url);
+  const url = options.url ?? new URL("./thread/player-hosts/web-worker.js", import.meta.url);
   const cores = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
     ?.hardwareConcurrency;
   const spares = options.spares ?? Math.min(4, Math.max(2, cores ?? 2));
@@ -181,14 +209,18 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
       const worker = spare?.worker ?? spawn(url);
       // One in its place, loaded once the page's thread is free.
       fill(url, spares);
+      // Taken before it loaded, it still settles the ready of the host that started it ahead.
       worker.onmessage = (event) => {
         // A worker taken before it loaded says so first.
-        if (event.data?.type !== "ready") {
+        if (event.data?.type === "ready") {
+          spare?.settle();
+        } else {
           receive(event.data);
         }
       };
       worker.onerror = (event) => {
         event.preventDefault();
+        spare?.settle();
         worker.terminate();
         failed(new Error(`a background worker's thread failed: ${event.message}`));
       };
@@ -198,6 +230,7 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
         post: (message) => worker.postMessage(message),
         // A browser tells nobody when a Web Worker has stopped.
         terminate: () => {
+          spare?.settle();
           worker.terminate();
           return new Promise((resolve) => setTimeout(resolve, STOPPED_GRACE));
         },
