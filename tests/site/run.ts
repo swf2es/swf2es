@@ -1,8 +1,9 @@
 // The demo site (apps/site) in headless Chrome, built as GitHub Pages gets
 // it and served under /swf2es/ as Pages serves it, without the headers its
 // service worker adds to isolate it, which it is then: a demo by ?swf= plays
-// and traces, a key's uncaught error reaches the console, a file opened
-// with the picker and a URL load play, a URL the browser may not fetch
+// and traces, a SWF's workers share a Mutex and memory, a key's uncaught
+// error reaches the console, a file opened with the picker and a URL
+// load play, a URL the browser may not fetch
 // says why, the report link carries the SWF's facts and the errors, and the
 // licences are there. It leaves a screenshot in tests/site/out/site.png.
 //
@@ -10,8 +11,9 @@
 //   node tests/site/run.ts --serve    build it and serve it to look at, until ^C
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { cases } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { serve } from "../player/serve.ts";
@@ -34,6 +36,8 @@ const PROBE = `package {
     }
   }
 }`;
+
+type WorkerSwf = (abc: Uint8Array) => Uint8Array;
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -359,6 +363,41 @@ async function check(): Promise<void> {
             ).searchParams.get("body");
             assert.match(failed ?? "", /did not play/);
             assert.doesNotMatch(failed ?? "", /private-name/);
+          },
+        ],
+        [
+          "a SWF's workers share a Mutex and memory, the page isolated by its service worker",
+          async () => {
+            const abc = compileScripts(["WorkerMutex"], `${out}scripts`).get(
+              "WorkerMutex",
+            ) as Uint8Array;
+            const swf = (
+              (cases.find((c) => c.name === "worker-mutex") as (typeof cases)[number])
+                .swf as WorkerSwf
+            )(abc);
+            writeFileSync(`${out}worker-mutex.swf`, swf);
+            await value("document.getElementById('log').replaceChildren()");
+            const { result } = await send<{ result: { objectId: string } }>("Runtime.evaluate", {
+              expression: "document.getElementById('file')",
+            });
+            await send("DOM.setFileInputFiles", {
+              objectId: result.objectId,
+              files: [`${out}worker-mutex.swf`],
+            });
+            await until(logHas("free true"));
+            const lines = await value<string[]>(
+              "[...document.querySelectorAll('#log div')].map((d) => d.textContent)",
+            );
+            const expected = readFileSync(
+              `${root}tests/player/references/worker-mutex/trace.txt`,
+              "utf8",
+            )
+              .trim()
+              .split("\n");
+            assert.deepEqual(
+              lines.filter((l) => expected.includes(l ?? "")),
+              expected,
+            );
           },
         ],
         [
