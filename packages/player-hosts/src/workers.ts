@@ -16,9 +16,10 @@ export interface WebWorkerHostOptions {
   /** codegen.wasm compiled, as the player's own codegen was made from. */
   codegen: WebAssembly.Module;
   /**
-   * The worker script, web-worker.js of this package by default: a page
-   * that serves the packages unbundled must give one whose imports a
-   * worker can resolve, as a worker sees no import map.
+   * The worker script: by default this package's dist/thread/, which
+   * holds web-worker.js and the modules it imports with their bare
+   * specifiers made relative (build-thread.ts), so that it loads wherever
+   * the package is served, as a worker sees no import map.
    */
   url?: string | URL;
   /**
@@ -161,7 +162,7 @@ function take(pool: Spare[]): Spare | undefined {
 
 /** Background workers on module Web Workers. */
 export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
-  const url = options.url ?? new URL("./web-worker.js", import.meta.url);
+  const url = options.url ?? new URL("./thread/player-hosts/web-worker.js", import.meta.url);
   const cores = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
     ?.hardwareConcurrency;
   const spares = options.spares ?? Math.min(4, Math.max(2, cores ?? 2));
