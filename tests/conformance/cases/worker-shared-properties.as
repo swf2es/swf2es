@@ -41,3 +41,7 @@ w.setSharedProperty("t", true);
 print("primitives " + w.getSharedProperty("s") + " " + w.getSharedProperty("i") + " " + w.getSharedProperty("t"));
 w.setSharedProperty("o2", {inner: m});
 print("inner " + (w.getSharedProperty("o2").inner == m) + " " + w.getSharedProperty("o2").inner);
+w.setSharedProperty(null, 3);
+print("null key " + w.getSharedProperty("null") + " " + w.getSharedProperty(null));
+w.setSharedProperty("null", 4);
+print("null name " + w.getSharedProperty("null") + " " + w.getSharedProperty(null));

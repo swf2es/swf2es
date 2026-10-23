@@ -309,7 +309,7 @@ export function shellNatives(rt: Runtime): Natives {
   }
 
   class WorkerNatives {
-    declare $shared: Map<string, Value>;
+    declare $shared: Map<string | null, Value>;
 
     static pr(s: Value): void {
       rt.print(rt.toString(s));
@@ -332,15 +332,15 @@ export function shellNatives(rt: Runtime): Natives {
     setSharedProperty(key: Value, value: Value): void {
       this.$shared ??= new Map();
       if (value === undefined) {
-        this.$shared.delete(rt.toString(key));
+        this.$shared.delete(sharedKey(rt, key));
         return;
       }
 
-      this.$shared.set(rt.toString(key), sharedItem(rt, value));
+      this.$shared.set(sharedKey(rt, key), sharedItem(rt, value));
     }
 
     getSharedProperty(key: Value): Value {
-      const item = this.$shared?.get(rt.toString(key));
+      const item = this.$shared?.get(sharedKey(rt, key));
       return item instanceof SharedAmf ? item.read(rt) : item;
     }
 
@@ -383,6 +383,10 @@ class SharedAmf {
     return new Reader(rt, b).value();
   }
 }
+
+/** A shared property's key: null is one of its own, apart from "null". */
+const sharedKey = (rt: Runtime, key: Value): string | null =>
+  key === null || key === undefined ? null : rt.toString(key);
 
 /** What a shared property keeps of `value`: itself, or its AMF3 bytes. */
 function sharedItem(rt: Runtime, value: Value): Value {
