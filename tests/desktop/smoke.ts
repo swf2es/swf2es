@@ -9,7 +9,8 @@
 // sandbox: it reads its own origin and another whose crossdomain.xml
 // grants it, not one without, no local file, and connects only the socket
 // whose server answers with a socket policy. The page's policy refuses
-// nothing it needs, and playing the SWF again leaves one canvas.
+// nothing it needs, the page is cross-origin isolated, and playing the SWF
+// again leaves one canvas.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
@@ -654,6 +655,9 @@ try {
     const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
     const centre = ((image.height >> 1) * image.width + (image.width >> 1)) * 4;
     assert.deepEqual([...image.data.subarray(centre, centre + 3)], [255, 0, 0]);
+
+    // Cross-origin isolated, as a shareable ByteArray's shared memory needs.
+    assert.equal(await evaluate<boolean>("crossOriginIsolated"), true);
 
     // Played again, the last player let go of: one canvas, and the SWF starts anew.
     const canvases = await evaluate<number>(`(async () => {

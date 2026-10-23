@@ -39,9 +39,9 @@ const BUTTON_SOUNDS: Record<ButtonState, Record<ButtonState, number>> = {
 /**
  * A button (SimpleButton): four states, each a display object, of which it
  * shows the up, over or down one, as the pointer has it, and hit tests with
- * the fourth. The state it shows is its one child, which it is drawn and
- * bounded by; the others are its own, off the display list, but each has
- * its frames as Flash's do (`frameChildren`). Not a container to a script.
+ * the fourth. AS3 keeps all four states, showing one child while each state
+ * plays its frames (`frameChildren`). AVM1 keeps just the current state's
+ * records as its children. Not a container to a script.
  */
 export class ButtonObject extends Container {
   private up: DisplayObject | null = null;
@@ -50,6 +50,8 @@ export class ButtonObject extends Container {
   private hitTest: DisplayObject | null = null;
   state: ButtonState = "up";
   private firstOrder = false;
+  private avm1Made: ((display: DisplayObject, character: DisplayCharacter) => void) | null = null;
+  private avm1Flag = BUTTON_UP;
   enabled = true;
   useHandCursor = true;
   trackAsMenu = false;
@@ -104,6 +106,11 @@ export class ButtonObject extends Container {
    * new list, so that none it let go of stays held.
    */
   private statesChanged(): void {
+    if (this.avm1Made) {
+      this.frameChildren = this.children;
+      return;
+    }
+
     // A state that holds the button plays as its parent's child, not as the button's.
     const states = [this.hitTest, this.up, this.down, this.over].filter(
       (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i && !o.encloses(this),
@@ -176,6 +183,11 @@ export class ButtonObject extends Container {
    * does not show are parented to nothing, as Flash has them once made.
    */
   show(): void {
+    if (this.avm1Made) {
+      this.showAvm1();
+      return;
+    }
+
     const current = this.stateObject(this.state);
     for (const child of [...this.children]) {
       if (child !== current) {
@@ -204,11 +216,78 @@ export class ButtonObject extends Container {
       scriptWork.changes++;
     }
   }
+
+  /** AVM1 keeps only the current state's records alive, reusing records shared by both states. */
+  makeAvm1States(made: (display: DisplayObject, character: DisplayCharacter) => void): void {
+    this.avm1Made = made;
+    this.frameChildren = this.children;
+    this.show();
+  }
+
+  private showAvm1(): void {
+    const character = this.character;
+    const library = this.library;
+    if (character?.type !== "button" || !library) {
+      return;
+    }
+
+    const flag =
+      this.state === "up" ? BUTTON_UP : this.state === "over" ? BUTTON_OVER : BUTTON_DOWN;
+    const records = character.records;
+    for (let i = this.children.length - 1; i >= 0; i--) {
+      const child = this.children[i];
+      let keep = false;
+      for (let j = 0; j < records.length; j++) {
+        const record = records[j];
+        if (
+          record.states & flag &&
+          record.states & this.avm1Flag &&
+          record.depth === child.depth &&
+          record.character === child.character?.id
+        ) {
+          keep = true;
+          break;
+        }
+      }
+
+      if (!keep && child.depth !== null && child.depth >= 0) {
+        this.removeAtDepth(child.depth);
+      }
+    }
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      const c = record.states & flag ? library.characters.get(record.character) : undefined;
+      if (
+        !c ||
+        c.type === "binary" ||
+        c.type === "font" ||
+        c.type === "fontCff" ||
+        c.type === "sound"
+      ) {
+        continue;
+      }
+
+      const previous = this.depths.get(record.depth);
+      const display = previous?.character?.id === c.id ? previous : displayFor(c, library);
+      display.applyPlace(recordPlace(record, true));
+      if (display !== previous) {
+        this.placeAtDepth(display, record.depth);
+        this.avm1Made?.(display, c);
+      }
+    }
+
+    if (this.hitTest?.parent === this) {
+      this.hitTest.parent = null;
+    }
+
+    this.avm1Flag = flag;
+  }
 }
 
 /**
- * Make a button's states from its records, as Flash does when the button
- * is made, up, over, down, then hit test: each state the one character it
+ * Make a button's states from its records. AVM1 builds only the state it
+ * shows; AS3 makes up, over, down, then hit test: each state the one character it
  * shows, else a container of its characters by depth, one for none too. A
  * character in several states is made once for each. `made` brings a
  * character to life once placed, and `holderMade` each container, once all
@@ -259,6 +338,13 @@ export function buttonStates(
     holders.push(holder);
     return holder;
   };
+
+  if (library.avm1) {
+    button.makeAvm1States(made);
+    button.hitTestState = state(BUTTON_HIT_TEST);
+    button.show();
+    return;
+  }
 
   button.upState = state(BUTTON_UP);
   button.overState = state(BUTTON_OVER);

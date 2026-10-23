@@ -26,6 +26,7 @@ export {
 } from "./button.js";
 export {
   CompressedDataError,
+  CompressedDataTooLargeError,
   decompressSwf,
   decompressSwfPrefix,
   deflateCompress,

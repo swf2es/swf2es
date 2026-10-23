@@ -12,6 +12,16 @@ export type Build = "dist-test" | "dist-test-checked";
 
 const COLLECT_EVERY = 64;
 
+/** The exports that hand UTF-8 out where it is in memory, by address, outputLength bytes of it. */
+const HANDED_OUT = new Set([
+  "domainModuleBytes",
+  "domainLazyModuleBytes",
+  "domainEmitEachBytes",
+  "actionsModuleBytes",
+  "actionsEmitEachBytes",
+  "actionsUnitBytes",
+]);
+
 /** A new instance of `build`, with a memory of its own. */
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
 export async function loadTesting(build: Build): Promise<any> {
@@ -48,7 +58,13 @@ async function instance(
       }
 
       return (...args: unknown[]) => {
-        const result = value.apply(target, args);
+        let result = value.apply(target, args);
+        // Copied out before a collection may free them, or another call move
+        // them; an older build (SWF2ES_CODEGEN) gave a copy already.
+        if (HANDED_OUT.has(String(name)) && typeof result === "number") {
+          result = new Uint8Array(target.memory.buffer, result, target.outputLength()).slice();
+        }
+
         const grown = target.memory.buffer.byteLength;
         if (grown > size || ++calls >= COLLECT_EVERY) {
           target.__collect();

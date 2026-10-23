@@ -91,7 +91,7 @@ Near-term work, in order. The goal of milestone 1 is in
     them what does not change, where the IR proves it cannot.
 11. **Compatibility left from steps 6 and 7**: `Date.parse` as avmplus
     parses; `compress` and `uncompress`, and SWF decompression in `format`
-    (issue #3), both through pako and lzma1; AMF0, and Date, XML and
+    (issue #3), first through pako and lzma1, now @swf2es/compress; AMF0, and Date, XML and
     Dictionary in AMF; `[Transient]`, carried from the ABC's metadata; and
     PR #9, rebased.
 12. **Faster verification**: the minimal runtime halved decoding to about
@@ -149,18 +149,3 @@ stalling. These are measured candidates, not planned steps:
 - **The rest of AMF3 decoding:** 457 ms on as3pb against avmshell's 317.
   Most of it is constructing the objects read, two thirds of it as3pb's own
   constructors, which avmshell runs too.
-
-## Not planned
-
-- **`float` (ABC 47.16 with float pools).** Only HARMAN's AIR runtime has it
-  (AIR 51.x, 32-bit `float` only, AIR-6279); Flash Player never did, and
-  neither does Ruffle. swf2es reads every 47.x version with the 46.16
-  layout, as Flash Player builds of avmplus do. Supporting AIR content
-  would mean the float pools and opcodes, starting from avmplus' open
-  `VMCFG_FLOAT` code and its float tests. HARMAN differs from that design in
-  places (`typeof` of a float is `"number"`), so the exact semantics would
-  need AIR itself as the oracle: `adl` from the AIR SDK, as
-  [as3pb-conformance](https://github.com/33TU/as3pb-conformance) uses it.
-  AIR allows one instance per application id, so parallel runs need a
-  descriptor copy with a unique `<id>` each, and AIR apps cannot use binary
-  stdio (as3pb-conformance goes through a loopback TCP shim).

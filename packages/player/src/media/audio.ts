@@ -3,6 +3,7 @@
 // ADPCM and the blocks of a timeline's stream become a sound the host
 // decodes as it decodes any other: PCM, or MP3 frames back to back.
 import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
+import { mp3HeaderFrame } from "./mp3.js";
 import { browserStream } from "./streaming-audio.js";
 
 export interface SoundMix {
@@ -18,6 +19,8 @@ export interface PlayingSound {
   setMix(mix: SoundMix): void;
   /** Whether the device is done with it, stopped or played out; a host that cannot tell leaves it out. */
   readonly ended?: boolean;
+  /** Elapsed playback in ms, including atMs; NaN until started. Optional for hosts without a cursor. */
+  readonly positionMs?: number;
 }
 
 /** A point of a sound's envelope: its time from the start of playing, in ms, and each channel's level. */
@@ -101,8 +104,17 @@ export function browserAudioHost(): AudioHost | null {
       const source = given instanceof Uint8Array || given.format !== 1 ? given : adpcmSound(given);
       let buffer: AudioBuffer;
       if (source instanceof Uint8Array || source.format === 2) {
-        const data = source instanceof Uint8Array ? source : source.data;
-        buffer = await ctx.decodeAudioData(data.slice().buffer);
+        const data = (source instanceof Uint8Array ? source : source.data).slice();
+        if (!(source instanceof Uint8Array)) {
+          // SWF supplies the delay itself. Keep the header frame's silence,
+          // without letting the browser trim it by Xing/LAME metadata too.
+          const header = mp3HeaderFrame(data);
+          if (header) {
+            data.fill(0, header[0] + 4, header[1]);
+          }
+        }
+
+        buffer = await ctx.decodeAudioData(data.buffer);
       } else if (source.format === 0 || source.format === 3) {
         buffer = ctx.createBuffer(source.channels, source.sampleCount, source.sampleRate);
         const view = new DataView(
@@ -135,11 +147,22 @@ export function browserAudioHost(): AudioHost | null {
         throw new Error(`Unsupported SWF sound format ${source.format}`);
       }
 
+      // DefineSound's offsets count from after the encoder delay, in its
+      // own sample rate; Web Audio may have resampled the decoded buffer.
+      const origin =
+        !(source instanceof Uint8Array) && source.format === 2
+          ? Math.max(0, source.seekSamples) / source.sampleRate
+          : 0;
+      const duration =
+        !(source instanceof Uint8Array) && source.format === 2
+          ? Math.max(0, Math.min(buffer.duration - origin, source.sampleCount / source.sampleRate))
+          : buffer.duration;
+
       return {
-        durationMs: buffer.duration * 1000,
+        durationMs: duration * 1000,
         play(startMs, loops, mix, shape) {
           const offset = Math.max(0, startMs / 1000);
-          const end = Math.min(buffer.duration, (shape?.endMs ?? Infinity) / 1000);
+          const end = Math.min(duration, (shape?.endMs ?? Infinity) / 1000);
           const keepsTime = shape?.atMs !== undefined;
           const at = Math.max(0, (shape?.atMs ?? 0) / 1000);
           const length = end - offset;
@@ -151,11 +174,19 @@ export function browserAudioHost(): AudioHost | null {
           const sourceNode = ctx.createBufferSource();
           let ended = false;
           let started = false;
+          let beganAt = 0;
+          let from = 0;
+          let position = Number.NaN;
+          const positionMs = () =>
+            started && !ended
+              ? Math.min(total, from + Math.max(0, ctx.currentTime - beganAt)) * 1000
+              : position;
           const finish = () => {
             if (ended) {
               return;
             }
 
+            position = positionMs();
             ended = true;
             ctx.removeEventListener?.("statechange", running);
             sourceNode.disconnect();
@@ -202,29 +233,31 @@ export function browserAudioHost(): AudioHost | null {
           };
           setMix(mix);
           sourceNode.loop = loops > 1;
-          sourceNode.loopStart = offset;
-          sourceNode.loopEnd = end;
+          sourceNode.loopStart = origin + offset;
+          sourceNode.loopEnd = origin + end;
           const asked = performance.now();
           // `late` seconds after it was asked for, as a stream waits for the device to run.
           const begin = (late: number) => {
-            const from = at + late;
+            from = at + late;
             if (from >= total) {
+              position = total * 1000;
               finish();
               return;
             }
 
             started = true;
+            beganAt = ctx.currentTime;
             if (shape?.envelope) {
               envelopeLevels(levels[0].gain, levels[1].gain, shape.envelope, ctx.currentTime, from);
             }
 
             if (loops > 1) {
-              sourceNode.start(0, offset + (from % length));
+              sourceNode.start(0, origin + offset + (from % length));
               sourceNode.stop(ctx.currentTime + total - from);
-            } else if (end < buffer.duration) {
-              sourceNode.start(0, offset + from, length - from);
+            } else if (origin + end < buffer.duration) {
+              sourceNode.start(0, origin + offset + from, length - from);
             } else {
-              sourceNode.start(0, offset + from);
+              sourceNode.start(0, origin + offset + from);
             }
           };
           // A suspended context's time stands still, before the page's first
@@ -257,6 +290,9 @@ export function browserAudioHost(): AudioHost | null {
             setMix,
             get ended() {
               return ended;
+            },
+            get positionMs() {
+              return positionMs();
             },
           };
         },

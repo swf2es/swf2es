@@ -119,12 +119,18 @@ export class Actions {
    * the same long run of bytes for a string's zero costs this, not its size.
    */
   read: i64 = 0;
+  /**
+   * How far decoding has looked, as an offset: the bytes past it, and
+   * whether the block ends before it, change nothing decoded so far.
+   */
+  reach: i64 = 0;
 
   // The operand reader: a position, and whether a read ran past the end.
   private pos: i32 = 0;
   private failed: bool = false;
 
   private size: i32;
+  private denseSize: i32;
   private reusable: Action[] = [];
 
   constructor(
@@ -134,14 +140,20 @@ export class Actions {
   ) {
     const size = length < 0 ? bytes.length - start : length;
     this.size = size;
+    this.denseSize = size;
     this.at = new Offsets(size);
   }
 
-  reset(bytes: Uint8Array, start: i32, length: i32): void {
+  /**
+   * The block `length` bytes from `start` in `bytes`, the offsets from 0 to
+   * `dense` those the compile mostly reaches.
+   */
+  reset(bytes: Uint8Array, start: i32, length: i32, dense: i32 = -1): void {
     this.bytes = bytes;
     this.start = start;
     this.size = length;
-    this.at.reset(length);
+    this.denseSize = dense < 0 ? length : min(dense, length);
+    this.at.reset(this.denseSize);
 
     this.actions.length = 0;
     this.stringStart.length = 0;
@@ -152,12 +164,18 @@ export class Actions {
     this.valueIndex.length = 0;
 
     this.read = 0;
+    this.reach = 0;
     this.pos = 0;
     this.failed = false;
   }
 
   get length(): i32 {
     return this.size;
+  }
+
+  /** The offsets from 0 that lookup tables keep dense. */
+  get dense(): i32 {
+    return this.denseSize;
   }
 
   get minimum(): i32 {
@@ -202,6 +220,8 @@ export class Actions {
       p = this.decode(p).next;
     }
 
+    this.looks(<i64>p + 1);
+
     action.target = p;
     action.skips = true;
   }
@@ -210,6 +230,7 @@ export class Actions {
     const end = this.length;
     const opcode = this.bytes[this.start + action.offset];
     action.opcode = opcode;
+    this.looks(<i64>action.offset + 1);
     if (opcode < 0x80) {
       action.next = action.offset + 1;
       return;
@@ -307,6 +328,9 @@ export class Actions {
     // A length past the block's end, read or not, is as truncated: adl
     // stops the whole SWF there, even with the bytes that follow in it.
     const next = <i64>start + length;
+    // Reads that went well end at `pos`; those that failed looked as they did.
+    this.looks(<i64>this.pos);
+    this.looks(next);
     if (next > <i64>end) {
       this.failed = true;
     }
@@ -378,6 +402,7 @@ export class Actions {
     action.s1 = at + trySize;
     action.s2 = action.s1 + catchSize;
     action.s3 = action.s2 + finallySize;
+    this.looks(action.s3);
     if (action.s3 > this.length) {
       this.failed = true;
     }
@@ -390,6 +415,7 @@ export class Actions {
   private body(action: Action, size: i32): void {
     action.s0 = this.pos;
     action.s1 = this.pos + size;
+    this.looks(action.s1);
     if (action.s1 > this.length) {
       this.failed = true;
     }
@@ -450,9 +476,18 @@ export class Actions {
     }
   }
 
+  /** Decoding looked up to `offset`, excluded, or found the block ends before it. */
+  @inline
+  private looks(offset: i64): void {
+    if (offset > this.reach) {
+      this.reach = offset;
+    }
+  }
+
   private u8(): u32 {
     const p = this.pos;
     if (p >= this.length) {
+      this.looks(<i64>p + 1);
       this.failed = true;
       return 0;
     }
@@ -464,6 +499,7 @@ export class Actions {
   private u16(): u32 {
     const p = this.pos;
     if (p + 2 > this.length) {
+      this.looks(<i64>p + 2);
       this.failed = true;
       return 0;
     }
@@ -480,6 +516,7 @@ export class Actions {
   private u32(): u32 {
     const p = this.pos;
     if (p + 4 > this.length) {
+      this.looks(<i64>p + 4);
       this.failed = true;
       return 0;
     }
@@ -509,6 +546,7 @@ export class Actions {
 
     this.read += <i64>(p - from);
     if (p >= this.length) {
+      this.looks(<i64>p + 1);
       this.failed = true;
       return -1;
     }

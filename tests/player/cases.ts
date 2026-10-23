@@ -5225,17 +5225,17 @@ function bitmapSymbols(compile: Compile): Uint8Array {
     [16, "Bad"],
     [17, "Short"],
     [20, "TL"],
+    [1, "L2Alias"],
   ];
   const helpers = compileScripts([
     ...classes.map(([, name]) => ({
       name,
       source: `package { import flash.display.BitmapData; public class ${name} extends BitmapData { public function ${name}(w:int, h:int) { super(w, h); } } }`,
     })),
-    {
-      name: "BB",
-      source:
-        "package { import flash.display.Bitmap; public class BB extends Bitmap { public function BB() { super(); } } }",
-    },
+    ...["BB", "BB2"].map((name) => ({
+      name,
+      source: `package { import flash.display.Bitmap; public class ${name} extends Bitmap { public function ${name}() { super(); } } }`,
+    })),
   ]);
   const main = compile("BitmapSymbols");
   const scaled = (depth: number, character: number, scale: number, tx: number, ty: number) =>
@@ -5331,8 +5331,9 @@ function bitmapSymbols(compile: Compile): Uint8Array {
       bitmap(36, lossless(21, 5, 4, 3, premultiplied)),
       ...classes.map(([, name]) => w.doAbc(helpers.get(name) as Uint8Array, name)),
       w.doAbc(helpers.get("BB") as Uint8Array, "BB"),
+      w.doAbc(helpers.get("BB2") as Uint8Array, "BB2"),
       w.doAbc(main, "BitmapSymbols"),
-      w.symbolClass([...classes, [21, "BB"], [0, "BitmapSymbols"]]),
+      w.symbolClass([...classes, [21, "BB"], [21, "BB2"], [0, "BitmapSymbols"]]),
       scaled(1, 20, 8, 200, 100),
       scaled(2, 10, 8, 900, 100),
       scaled(3, 11, 8, 1700, 100),
@@ -8564,6 +8565,34 @@ export const cases: PlayerCase[] = [
     swf: (abc) => bare(abc, 1, "TabStopNatives"),
     script: "TabStopNatives",
     frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // Worker needs SWF 17; frames enough for Flash to start the worker and answer.
+    name: "worker-basics",
+    swf: (abc) => {
+      const bytes = bare(abc, 1, "WorkerBasics");
+      bytes[3] = 26;
+      return bytes;
+    },
+    script: "WorkerBasics",
+    frames: 120,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // Two workers writing one shareable ByteArray: needs a cross-origin isolated page.
+    name: "worker-shared-bytes",
+    swf: (abc) => {
+      const bytes = bare(abc, 1, "WorkerSharedBytes");
+      bytes[3] = 26;
+      return bytes;
+    },
+    script: "WorkerSharedBytes",
+    frames: 120,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

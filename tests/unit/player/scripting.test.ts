@@ -1356,3 +1356,209 @@ test("a button's state that holds the button stays where it is, its #2150 report
     "frame 3 a.parent null b.parent is this true b in stage true",
   ]);
 });
+
+async function inputRender(lazyCompilation: boolean) {
+  const lines: string[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => now,
+    maxTouchPoints: 1,
+    lazyCompilation,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(compiler(out)("InputRender"), 1, "InputRender", 400, 300),
+    scripting,
+  );
+  await player.start();
+  lines.length = 0;
+  const cursor = player.root.children.find((child) => child.name === "cursor");
+  assert.ok(cursor);
+
+  return {
+    player,
+    scripting,
+    cursor,
+    take: () => lines.splice(0),
+    command: (op: string) =>
+      scripting.rt.callProperty(player.root.object, scripting.rt.publicName("command"), op),
+    advance: (dt = 0) => {
+      now += dt;
+      return player.advance(dt);
+    },
+  };
+}
+
+for (const lazy of [false, true]) {
+  const mode = lazy ? "lazy" : "eager";
+
+  test(`input redraws prepare RENDER after the handler, coalescing moves without a timeline frame (${mode})`, {
+    skip,
+  }, async (t) => {
+    const { player, scripting, cursor, take, advance } = await inputRender(lazy);
+    t.after(() => player.destroy());
+    const frame = scripting.frames;
+    assert.equal(player.frameRate, 5);
+    player.pointer?.post({ x: 10, y: 20 });
+    player.pointer?.post({ x: 30, y: 40 });
+    assert.deepEqual(take(), []);
+    assert.equal(advance(10), 0);
+    assert.deepEqual(take(), ["mouseMove begin", "mouseMove end", "render 30,40"]);
+    assert.equal(cursor.matrix.tx, 30);
+    assert.equal(cursor.matrix.ty, 40);
+    assert.equal(scripting.frames, frame);
+
+    player.pointer?.handle("move", { x: 50, y: 60 });
+    assert.deepEqual(take(), ["mouseMove begin", "mouseMove end"]);
+    assert.equal(advance(10), 0);
+    assert.deepEqual(take(), ["render 50,60"]);
+    assert.equal(scripting.frames, frame);
+    assert.equal(advance(10), 0);
+    assert.deepEqual(take(), []);
+  });
+
+  test(`invalidate without updateAfterEvent still waits for a timeline frame (${mode})`, {
+    skip,
+  }, async (t) => {
+    const { player, scripting, cursor, take, command, advance } = await inputRender(lazy);
+    t.after(() => player.destroy());
+    command("noUpdate");
+    player.pointer?.post({ x: 30, y: 40 });
+    assert.equal(advance(), 0);
+    assert.deepEqual(take(), ["mouseMove begin", "mouseMove end"]);
+    assert.equal(scripting.invalidated, true);
+    assert.equal(cursor.matrix.tx, 0);
+    assert.equal(cursor.matrix.ty, 0);
+    assert.equal(advance(200), 1);
+    assert.deepEqual(take(), ["frame", "render 30,40"]);
+    assert.equal(scripting.invalidated, false);
+  });
+
+  test(`keyboard and touch redraw requests also prepare RENDER between frames (${mode})`, {
+    skip,
+  }, async (t) => {
+    const { player, scripting, take, advance } = await inputRender(lazy);
+    t.after(() => player.destroy());
+    const frame = scripting.frames;
+    player.keyboard?.handle("down", { keyCode: 65, charCode: 97 });
+    assert.deepEqual(take(), ["keyDown begin", "keyDown end"]);
+    assert.equal(advance(), 0);
+    assert.deepEqual(take(), ["render 0,0"]);
+
+    scripting.inputMode = "touchPoint";
+    scripting.mapTouchToMouse = false;
+    player.touch?.handle("begin", { id: 1, primary: true, x: 10, y: 20 });
+    player.touch?.post({ id: 1, primary: true, x: 30, y: 40 });
+    player.touch?.post({ id: 1, primary: true, x: 50, y: 60 });
+    assert.equal(advance(), 0);
+    assert.deepEqual(take(), ["touchMove begin", "touchMove end", "render 0,0"]);
+    assert.equal(scripting.frames, frame);
+  });
+
+  test(`a requested redraw applies scrollRect even without a RENDER broadcast (${mode})`, {
+    skip,
+  }, async (t) => {
+    const { player, scripting, cursor, take, command, advance } = await inputRender(lazy);
+    t.after(() => player.destroy());
+    command("noInvalidate");
+    command("scroll");
+    assert.equal(cursor.scroll, null);
+    player.pointer?.post({ x: 30, y: 40 });
+    assert.equal(advance(), 0);
+    assert.deepEqual(take(), ["mouseMove begin", "mouseMove end"]);
+    assert.equal(scripting.invalidated, false);
+    assert.deepEqual(cursor.scroll, { xMin: 10, yMin: 20, xMax: 40, yMax: 60 });
+  });
+
+  test(`a frame consumes its redraw request without consuming a later invalidation (${mode})`, {
+    skip,
+  }, async (t) => {
+    const { player, scripting, take, command, advance } = await inputRender(lazy);
+    t.after(() => player.destroy());
+    command("requestInFrame");
+    command("invalidateOnRender");
+    assert.equal(advance(200), 1);
+    assert.deepEqual(take(), ["frame", "render 0,0"]);
+    assert.equal(scripting.invalidated, true);
+    assert.equal(advance(), 0);
+    assert.equal(advance(), 0);
+    assert.deepEqual(take(), []);
+    assert.equal(advance(200), 1);
+    assert.deepEqual(take(), ["frame", "render 0,0"]);
+  });
+
+  test(`a timer's intermediate render consumes its request without a second broadcast (${mode})`, {
+    skip,
+  }, async (t) => {
+    const { player, scripting, take, command, advance } = await inputRender(lazy);
+    t.after(() => player.destroy());
+    command("invalidateOnRender");
+    command("timer");
+    const frame = scripting.frames;
+    assert.equal(advance(20), 0);
+    assert.deepEqual(take(), ["timer begin", "timer end", "render 0,0"]);
+    assert.equal(scripting.invalidated, true);
+    assert.equal(advance(), 0);
+    assert.deepEqual(take(), []);
+    assert.equal(scripting.frames, frame);
+  });
+}
+
+for (const lazyCompilation of [false, true]) {
+  test(`RENDER reaches only objects currently on stage (${lazyCompilation ? "lazy" : "eager"})`, {
+    skip,
+  }, async (t) => {
+    const source = `package {
+      import flash.display.*;
+      import flash.events.Event;
+      public class RenderMembership extends Sprite {
+        private var kept:Array = [];
+        private var on:Sprite = new Sprite();
+        private var group:Sprite = new Sprite();
+        public function RenderMembership() {
+          watch(this, "root"); watch(stage, "stage");
+          addChild(on); watch(on, "on");
+          watch(new Sprite(), "off");
+          var removed:Sprite = new Sprite(); addChild(removed); removeChild(removed); watch(removed, "removed");
+          var hidden:Sprite = new Sprite(); hidden.visible = false; addChild(hidden); watch(hidden, "hidden");
+          var child:Sprite = new Sprite(); group.addChild(child); watch(child, "offChild");
+          addEventListener(Event.ENTER_FRAME, function(e:Event):void { stage.invalidate(); });
+        }
+        private function watch(o:DisplayObject, label:String):void {
+          kept.push(o);
+          o.addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("E:" + label); });
+          o.addEventListener(Event.RENDER, function(e:Event):void { trace("R:" + label); });
+        }
+        public function swap():void { removeChild(on); addChild(group); }
+      }
+    }`;
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      lazyCompilation,
+      print: (line) => lines.push(line),
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(
+      bare(compiler(out)("RenderMembership", source), 1, "RenderMembership"),
+      scripting,
+    );
+    t.after(() => player.destroy());
+    await player.start();
+    lines.length = 0;
+    player.tick();
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("R:")),
+      ["R:root", "R:stage", "R:on", "R:hidden"],
+    );
+    assert.equal(lines.filter((line) => line.startsWith("E:")).length, 7);
+    scripting.rt.callProperty(player.root.object, scripting.rt.publicName("swap"));
+    lines.length = 0;
+    player.tick();
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("R:")),
+      ["R:root", "R:stage", "R:hidden", "R:offChild"],
+    );
+    assert.equal(lines.filter((line) => line.startsWith("E:")).length, 7);
+  });
+}

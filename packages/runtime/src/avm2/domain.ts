@@ -209,6 +209,32 @@ export function findScript(domain: Domain, mn: Multiname, asType: boolean): Scri
   return null;
 }
 
+/**
+ * The script of the first definition of `mn` from the root down to
+ * `domain`, what no cache has changed, and caching none: for a question
+ * that must not decide what a later lookup finds.
+ */
+export function firstDefinition(domain: Domain, mn: Multiname): Script | null {
+  const name = mn.name;
+  if (name === null) {
+    return null;
+  }
+
+  const chain: Domain[] = [];
+  for (let d: Domain | null = domain; d; d = d.parent) {
+    chain.push(d);
+  }
+
+  for (let k = chain.length - 1; k >= 0; k--) {
+    const found = match(chain[k].globals, mn, name);
+    if (found) {
+      return found.script;
+    }
+  }
+
+  return null;
+}
+
 /** What an ABC loaded into `domain` now compiles in. */
 export function compileUnit(domain: Domain): CompileUnit {
   const domains: number[] = [];

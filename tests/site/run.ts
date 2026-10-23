@@ -1,5 +1,6 @@
 // The demo site (apps/site) in headless Chrome, built as GitHub Pages gets
-// it and served under /swf2es/ as Pages serves it: a demo by ?swf= plays
+// it and served under /swf2es/ as Pages serves it, without the headers its
+// service worker adds to isolate it, which it is then: a demo by ?swf= plays
 // and traces, a key's uncaught error reaches the console, a file opened
 // with the picker and a URL load play, a URL the browser may not fetch
 // says why, the report link carries the SWF's facts and the errors, and the
@@ -43,7 +44,7 @@ const mounts: [string, string][] = [["/swf2es/", site]];
 execFileSync(process.execPath, [`${root}apps/site/build.ts`], { stdio: "inherit" });
 
 if (process.argv.includes("--serve")) {
-  const { url } = await serve(mounts);
+  const { url } = await serve(mounts, undefined, false);
   console.log(`the site: ${url}swf2es/index.html`);
 } else {
   await check();
@@ -106,6 +107,46 @@ async function check(): Promise<void> {
       });
 
       const checks: [string, () => Promise<void>][] = [
+        [
+          "its service worker makes the page cross-origin isolated, as Pages sends no headers",
+          async () => {
+            // Until the page is isolated, through the reloads that make it so.
+            const isolation = async (ms: number) => {
+              const start = Date.now();
+              for (let isolated = false; !isolated; ) {
+                assert.ok(Date.now() - start < ms, "the page is not cross-origin isolated");
+                await new Promise((done) => setTimeout(done, 100));
+                // A document the page leaves while it is asked answers nothing.
+                isolated = await evaluate<boolean>(
+                  "crossOriginIsolated && !!navigator.serviceWorker.controller",
+                ).then(
+                  (r) => r.value === true,
+                  () => false,
+                );
+              }
+            };
+            // As a busy machine runs it, which CI's is: the reloads' timing is what this tests.
+            await send("Emulation.setCPUThrottlingRate", { rate: 6 });
+            try {
+              // The first visit loads the page again once the worker serves it.
+              await isolation(30_000);
+              // A reload that bypasses the worker, as Shift-reload does, loads it again too:
+              // at once, while the isolated page still loads, and once it has loaded.
+              await send("Page.reload", { ignoreCache: true });
+              await isolation(20_000);
+              await navigate("index.html");
+              assert.equal(await value<boolean>("crossOriginIsolated"), true);
+              await send("Page.reload", { ignoreCache: true });
+              await isolation(20_000);
+            } finally {
+              await send("Emulation.setCPUThrottlingRate", { rate: 1 });
+            }
+
+            await until(
+              "document.readyState === 'complete' && !!customElements.get('swf2es-player')",
+            );
+          },
+        ],
         [
           "?swf= plays a demo, which traces and draws",
           async () => {
@@ -439,7 +480,8 @@ async function check(): Promise<void> {
       return failed;
     },
     false,
-    { page: "swf2es/index.html", mounts },
+    // As GitHub Pages serves it: with no headers that isolate it.
+    { page: "swf2es/index.html", mounts, isolated: false },
   );
 
   if (failures > 0) {

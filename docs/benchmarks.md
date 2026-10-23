@@ -307,6 +307,25 @@ In a worklist that reaches a fixed point, each block's last visit follows
 the last change to its entry state, so the IR could be kept from that visit
 instead, once whatever only the second pass does is done in the first.
 
+### finddef at the site
+
+Step 10 kept findDef's result on the multiname inside `rt.findDef` and
+gained nothing, as V8 inlined the call. In a large method it does not:
+in Away3D's Lines demo, whose noise function reads its own class's
+statics some forty times a call, `findDef` itself was 6% of a frame. The
+module now reads the global object kept on the name, `M[k].global ??
+rt.findDef(M[k])`, and calls the runtime only until the defining script
+has been asked to run. Medians in ms, interleaved, on an idle machine
+(load under 2.5):
+
+| | A, before | B, after | B/A |
+|---|---|---|---|
+| as3pb ByteArray (9 pairs, twice) | 170, 169 | 155, 154 | −8.8%, −8.9% |
+| as3pb domain memory | 181, 182 | 148, 149 | −18.2%, −18.1% |
+| Untyped display / data / object / poly / string (7 pairs) | 193 / 86 / 594 / 114 / 130 | 183 / 83 / 582 / 104 / 128 | −5.2% / −3.5% / −2.0% / −8.8% / −1.5% |
+| Lines, busy ms per frame (headless Chrome on the GPU, 4 pairs) | 12.10 (11.96–12.47) | 10.51 (10.33–10.89) | −13.1% |
+| Perelith Knight MD2, busy ms per frame | 13.30 | 13.41 | +0.8% |
+
 ### Untyped property access
 
 `tests/bench/untyped/Untyped.as` reads, writes and calls names on values

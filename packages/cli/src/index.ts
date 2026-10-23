@@ -21,3 +21,4 @@ export {
   type ShellOptions,
   shellDomain,
 } from "./shell.js";
+export { nodeShellThreads, type ShellThreads, type ShellThreadsOptions } from "./threads.js";

@@ -83,6 +83,37 @@ export interface CompiledActions {
   module: string;
   /** By block index: the block's entry in the module, as it compiles alone. */
   entries: string[];
+  /** By key, each unit in the module's units, as it compiles alone. */
+  units: Map<string, ModuleUnit>;
+}
+
+/**
+ * Where control goes on in a unit, as V.far is called: an offset in the
+ * SWF's decompressed bytes, where the region it goes on in ends, where its
+ * actions' bytes end, and whether it runs as a SWF 5's function. The
+ * module's units are keyed by these, joined with commas.
+ */
+export interface ActionUnit {
+  readonly at: number;
+  readonly end: number;
+  readonly bound: number;
+  readonly five: boolean;
+}
+
+/**
+ * A unit's code, and what it depends on: it runs as well for any region
+ * that ends at or past `high` whose actions' bytes end at or past `reach`,
+ * -1 for only the one it was compiled for.
+ */
+export interface CompiledUnit {
+  code: string;
+  high: number;
+  reach: number;
+}
+
+/** A unit of a module's units, and what it was compiled for. */
+export interface ModuleUnit extends CompiledUnit {
+  unit: ActionUnit;
 }
 
 /**
@@ -294,6 +325,19 @@ export interface Codegen {
     actions: ActionBlocks,
     blocks: number[],
   ): Map<number, string>;
+  /**
+   * A unit of a SWF compiled alone, as V.far asks for it when control first
+   * goes on there: byte for byte its entry in the module's units.
+   */
+  compileActionUnit(bytes: Uint8Array, actions: ActionBlocks, unit: ActionUnit): CompiledUnit;
+  /**
+   * Let go of the copy of a SWF compileActionBlocks and compileActionUnit
+   * keep, as the host lets the SWF go; it is let go too once `bytes` are
+   * collected, and when blocks or units of other SWFs are asked for since.
+   */
+  releaseActions(bytes: Uint8Array): void;
+  /** How many SWFs compileActionBlocks and compileActionUnit keep a copy of, and how many times they have copied one in. */
+  heldActions(): { held: number; copies: number };
 }
 
 /**
@@ -307,6 +351,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   if (version !== COMPILER_VERSION) {
     throw new Error(
       `codegen.wasm is version ${version} but the wrapper expects ${COMPILER_VERSION}`,
+    );
+  }
+
+  // Of the same version, but built before its modules were handed out in
+  // place: its *Bytes exports return copies, which this wrapper cannot read.
+  // Asked of the module, as the bindings define every export they know of.
+  if (!WebAssembly.Module.exports(module).some((e) => e.name === "outputLength")) {
+    throw new Error(
+      "codegen.wasm has no outputLength export, which the wrapper expects: it is older than the wrapper",
     );
   }
 
@@ -349,10 +402,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     // Its bytes decoded here: lifted as a string, a module of megabytes took
     // longer than compiling it. The emitter writes only well-formed UTF-8,
     // which decodes alike either way.
-    const bytes = lazy
+    const address = lazy
       ? wasm.domainLazyModuleBytes(named.join("\n"), at)
       : wasm.domainModuleBytes(named.join("\n"), at, keep, true);
-    const module = utf8.decode(collected(bytes, lazy));
+    const module = collected(handed(address, wasm.outputLength()), lazy);
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
@@ -364,12 +417,59 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       Int32Array.from(actions.blocks, (b) => b.offset),
       Int32Array.from(actions.blocks, (b) => b.length),
     ] as const;
+  // The SWFs whose blocks or units compileActionBlocks and compileActionUnit
+  // compile, which wasm holds by a handle each: the few used last, so that
+  // blocks and units of SWFs that alternate do not copy them in again, each
+  // let go as its bytes are collected.
+  const holding = new WeakMap<Uint8Array, { handle: number; actions: ActionBlocks }>();
+  const holds: number[] = [];
+  let handles = 0;
+  let copies = 0;
+  const release = (handle: number) => {
+    const at = holds.indexOf(handle);
+    if (at >= 0) {
+      holds.splice(at, 1);
+      wasm.actionsRelease(handle);
+    }
+  };
+  const collectedSwfs = new FinalizationRegistry<number>(release);
+  const hold = (bytes: Uint8Array, actions: ActionBlocks): number => {
+    const known = holding.get(bytes);
+    if (known !== undefined && known.actions === actions && holds.includes(known.handle)) {
+      holds.splice(holds.indexOf(known.handle), 1);
+      holds.push(known.handle);
+      return known.handle;
+    }
+
+    if (known !== undefined) {
+      release(known.handle);
+      collectedSwfs.unregister(known);
+    }
+
+    const handle = ++handles;
+    const [offsets, lengths] = ranges(actions);
+    wasm.actionsHold(handle, bytes, offsets, lengths);
+    copies++;
+    const record = { handle, actions };
+    holding.set(bytes, record);
+    collectedSwfs.register(bytes, handle, record);
+    holds.push(handle);
+    while (holds.length > HELD_SWFS) {
+      release(holds[0]);
+    }
+
+    return handle;
+  };
   const actionsModule = (bytes: Uint8Array, actions: ActionBlocks, keep: boolean) => {
     const [offsets, lengths] = ranges(actions);
-    return utf8.decode(
-      collected(wasm.actionsModuleBytes(bytes, offsets, lengths, actions.version, keep)),
-    );
+    const address = wasm.actionsModuleBytes(bytes, offsets, lengths, actions.version, keep);
+    return collected(handed(address, wasm.outputLength()));
   };
+  // UTF-8 a call handed out in codegen's memory, not copied (see handOut in
+  // assembly/output.ts), decoded before anything else calls in: the next
+  // call may grow memory or move them, and a collection may free them.
+  const handed = (address: number, length: number) =>
+    length === 0 ? "" : utf8.decode(new Uint8Array(wasm.memory.buffer, address, length));
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
@@ -539,14 +639,26 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return new Map();
       }
 
-      const bytes = wasm.domainEmitEachBytes(indices.join(","), true, indexOf(index));
-      methodBytes += bytes.length;
-      return parseEntries(utf8.decode(collected(bytes, methodBytes >= COLLECT_METHOD_BYTES)));
+      const address = wasm.domainEmitEachBytes(indices.join(","), true, indexOf(index));
+      const length = wasm.outputLength();
+      methodBytes += length;
+      const text = handed(address, length);
+      return parseEntries(collected(text, methodBytes >= COLLECT_METHOD_BYTES));
     },
     compileActions(bytes, actions) {
       const module = actionsModule(bytes, actions, true);
       const entries = parseEntries(collected(wasm.actionsModuleEntries()));
-      return { module, entries: actions.blocks.map((_, k) => entries.get(k) ?? "") };
+      const units = new Map<string, ModuleUnit>();
+      for (const item of collected(wasm.actionsModuleUnits()).split("\u0002")) {
+        const [key, numbers, limits, code] = item.split("\u0001");
+        if (code !== undefined) {
+          const [at, end, bound, five] = numbers.split(",").map(Number);
+          const [high, reach] = limits.split(",").map(Number);
+          units.set(key, { code, high, reach, unit: { at, end, bound, five: five !== 0 } });
+        }
+      }
+
+      return { module, entries: actions.blocks.map((_, k) => entries.get(k) ?? ""), units };
     },
     compileActionsModule(bytes, actions) {
       return actionsModule(bytes, actions, false);
@@ -557,24 +669,32 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return new Map();
       }
 
-      const [offsets, lengths] = ranges(actions);
-      return parseEntries(
-        utf8.decode(
-          collected(
-            wasm.actionsEmitEachBytes(
-              bytes,
-              offsets,
-              lengths,
-              actions.version,
-              indices.join(","),
-              true,
-            ),
-            // Each lazy block copies the whole backing SWF into wasm. Its
-            // analysis and that copy can go before the next block runs.
-            true,
-          ),
-        ),
-      );
+      // The SWF held, as for units: a block needs it whole, and copying it
+      // in for each block cost a copy of the SWF in codegen's memory
+      // beside the one held for units, and the time to copy it.
+      const handle = hold(bytes, actions);
+      const address = wasm.actionsHeldEmitEachBytes(handle, actions.version, indices.join(","));
+      const text = handed(address, wasm.outputLength());
+      // A block's analysis can go before the next block runs.
+      return parseEntries(collected(text, true));
+    },
+    compileActionUnit(bytes, actions, { at, end, bound, five }) {
+      const handle = hold(bytes, actions);
+      const address = wasm.actionsHeldUnitBytes(handle, actions.version, at, end, bound, five);
+      const code = handed(address, wasm.outputLength());
+      const [high, reach] = wasm.actionsUnitLimits();
+      return collected({ code, high, reach });
+    },
+    releaseActions(bytes) {
+      const known = holding.get(bytes);
+      if (known !== undefined) {
+        release(known.handle);
+        holding.delete(bytes);
+        collectedSwfs.unregister(known);
+      }
+    },
+    heldActions() {
+      return { held: collected(wasm.actionsHeldCount()), copies };
     },
   };
 }
@@ -593,6 +713,8 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+/** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
+const HELD_SWFS = 4;
 // Large method entries should not accumulate sixty-four calls of garbage.
 const COLLECT_METHOD_BYTES = 256 * 1024;
 

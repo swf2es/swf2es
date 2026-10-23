@@ -1,7 +1,7 @@
 {
   "name": "@swf2es/player-hosts",
   "version": "0.0.0",
-  "description": "Optional Node and WebSocket transports, an IndexedDB module cache and precompiled modules for the swf2es player",
+  "description": "Optional Node and WebSocket transports, worker threads, an IndexedDB module cache and precompiled modules for the swf2es player",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -20,6 +20,18 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
+    },
+    "./workers": {
+      "types": "./dist/workers.d.ts",
+      "default": "./dist/workers.js"
+    },
+    "./web-worker": {
+      "types": "./dist/web-worker.d.ts",
+      "default": "./dist/web-worker.js"
+    },
+    "./node-worker": {
+      "types": "./dist/node-worker.d.ts",
+      "default": "./dist/node-worker.js"
     },
     "./websocket": {
       "types": "./dist/websocket.d.ts",

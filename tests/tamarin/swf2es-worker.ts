@@ -10,7 +10,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { codegenModule } from "../../packages/cli/dist/files.js";
 import { runShell, type ShellModule } from "../../packages/cli/dist/shell.js";
+import { nodeShellThreads } from "../../packages/cli/dist/threads.js";
 import { testingCompiler } from "../conformance/abc-compiler.ts";
 import { testing } from "../unit/codegen/testing-module.ts";
 
@@ -21,11 +23,11 @@ const runtime = await import(
 // The oracle runs avmshell with TZ=UTC, so local time is UTC here too.
 process.env.TZ = "UTC";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
 // avmshell's working directory as the oracle runs it, the repository, which some tests read files from.
 const workDir = fileURLToPath(new URL("../../", import.meta.url));
+// The builtins avmshell loads, as the oracle's libraries() copies them out.
 const builtins = ["builtin", "shell_toplevel"].map(
-  (name) => new Uint8Array(readFileSync(`${here}out/lib/${name}.abc`)),
+  (name) => new Uint8Array(readFileSync(`${workDir}oracle/avmplus/generated/${name}.abc`)),
 );
 
 async function load(js: string): Promise<ShellModule> {
@@ -55,6 +57,9 @@ function testFiles() {
   };
 }
 
+// What the background workers' threads compile with: the release build.
+const codegen = await codegenModule();
+
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 // The builtins' modules, compiled once: each test's runtime runs them.
@@ -69,21 +74,32 @@ const builtinModules: ShellModule[] = [];
   }
 }
 
-/** Run `abc`, tracing into `lines`: avmshell's exit code for how it ended. */
-function run(abc: Uint8Array, lines: string[]): Promise<number> {
+/**
+ * Run `abc`, tracing into `lines`, its background workers' too as they come:
+ * avmshell's exit code for how it ended.
+ */
+async function run(abc: Uint8Array, lines: string[]): Promise<number> {
   // Linked again in a domain of the test's own, but not compiled again.
   const libraries = builtins.map((bytes, i) => ({
     name: `builtin-${i}`,
     abc: bytes,
     module: builtinModules[i],
   }));
-  return runShell(libraries, [{ name: "test", abc }], {
-    compiler: testingCompiler(testing),
-    createRuntime: runtime.createRuntime,
-    print: (line) => lines.push(line),
-    files: testFiles(),
-    load,
-  });
+  const abcs = [{ name: "test", abc }];
+  const print = (line: string) => lines.push(line);
+  const threads = nodeShellThreads({ codegen, libraries, abcs, print });
+  try {
+    return await runShell(libraries, abcs, {
+      compiler: testingCompiler(testing),
+      createRuntime: runtime.createRuntime,
+      print,
+      files: testFiles(),
+      load,
+      workers: threads.host,
+    });
+  } finally {
+    await threads.close();
+  }
 }
 
 process.on("message", async (message: { path: string; abc: string }) => {

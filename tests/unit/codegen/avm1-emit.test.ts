@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { readActions, readSwf } from "../../../packages/format/dist/index.js";
+import { lazyBlocks } from "../../../packages/player/dist/avm1/compile.js";
 import { type Region as Avm1Region, Runtime } from "../../../packages/runtime/dist/avm1/index.js";
 import {
   Avm1Assembler,
@@ -15,7 +16,7 @@ import {
   register,
   TryFlag,
 } from "../../avm1-assembler.ts";
-import { backwardActions, sharedBackwardSwf } from "../../avm1-backward.ts";
+import { backwardActions, branch, sharedBackwardSwf, unitActions } from "../../avm1-backward.ts";
 import { loadTesting, testing } from "./testing-module.ts";
 
 // AVM1 blocks assembled in the tests, compiled by codegen's emitter
@@ -104,6 +105,7 @@ function stub(conditions: boolean[] = []) {
 async function load(module: string, rt: unknown): Promise<Region[][]> {
   const url = `data:text/javascript;base64,${Buffer.from(module).toString("base64")}`;
   const { default: factory } = await import(url);
+  // A module with units gives them to the runtime itself.
   return factory(rt);
 }
 
@@ -279,7 +281,7 @@ test("Jump and If loop back, and leave the block past its end or before its star
 test("a block of straight code is written without the dispatcher", async () => {
   const { module } = await run([asm().push("a").trace().stop().bytes()]);
   assert.ok(!module.includes("switch"), module);
-  assert.ok(module.includes('st.push("a");\nV.trace(cx, st.pop());\nV.stop(cx);\nreturn;\n'));
+  assert.ok(module.includes('V.trace(cx, "a");\nV.stop(cx);\nreturn;\n'));
 });
 
 test("Play, Stop and End", async () => {
@@ -1194,6 +1196,99 @@ test("backward branches read SWF prefixes, including functions and chained dista
   }
 });
 
+test("code outside a block's bytes runs in units, as it would in the block, alone as in the module", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  const { bytes, offset } = unitActions();
+  for (const version of [4, 6]) {
+    const actions = { version, blocks: [{ offset, length: bytes.length - offset }] };
+    const compiled = codegen.compileActions(bytes, actions);
+    assert.match(compiled.module, /return V\.far\(cx, 0, /);
+    assert.ok(compiled.units.size >= 2);
+    assert.equal(
+      [...compiled.units.values()].some(({ unit }) => unit.five),
+      version < 5,
+      "a function's body runs as a SWF 5's",
+    );
+    for (const [key, { unit, code, high, reach }] of compiled.units) {
+      assert.deepEqual(codegen.compileActionUnit(bytes, actions, unit), { code, high, reach });
+      // A first choice only its own region could run is never asked for, so never written.
+      assert.ok(key.split(",").length === 4 || high >= 0, key);
+    }
+
+    // The same as the JIT runs it and as the module does.
+    for (const jit of [false, true]) {
+      const lines: string[] = [];
+      const rt = new Runtime();
+      const blocks = jit
+        ? lazyBlocks(codegen, bytes, actions, rt)
+        : ((await load(compiled.module, rt)) as unknown as Avm1Region[][]);
+      const host = { trace: (text: string) => lines.push(text), play() {}, stop() {}, halt() {} };
+      rt.run(blocks[0], rt.activation([], [], {}, rt.newObject(), host));
+      assert.deepEqual(lines, ["1", "2", "3", "done", "in f", "7"], `SWF ${version}, JIT ${jit}`);
+    }
+  }
+});
+
+test("the SWFs whose units compile are held, the few used last, until let go", async () => {
+  const codegen = await createCodegen(
+    await WebAssembly.compile(
+      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+    ),
+  );
+  const { bytes, offset } = unitActions();
+  const swfs = [bytes, bytes.slice()].map((b) => ({
+    bytes: b,
+    actions: { version: 6, blocks: [{ offset, length: b.length - offset }] },
+  }));
+  const units = [...codegen.compileActions(bytes, swfs[0].actions).units.values()];
+  // Units of two SWFs in turn copy each in once.
+  for (let round = 0; round < 3; round++) {
+    for (const { bytes: b, actions } of swfs) {
+      for (const { unit } of units) {
+        codegen.compileActionUnit(b, actions, unit);
+      }
+    }
+  }
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 2 });
+
+  // One let go is copied in again if its units are asked for since.
+  codegen.releaseActions(swfs[0].bytes);
+  assert.deepEqual(codegen.heldActions(), { held: 1, copies: 2 });
+  codegen.compileActionUnit(swfs[0].bytes, swfs[0].actions, units[0].unit);
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 3 });
+
+  // Past a few, the one used least lately goes.
+  for (let k = 0; k < 6; k++) {
+    const b = bytes.slice();
+    codegen.compileActionUnit(b, { ...swfs[0].actions }, units[0].unit);
+  }
+  assert.equal(codegen.heldActions().held, 4);
+});
+
+test("a region that holds a With or a Try as control leaves its bytes keeps all it reaches", () => {
+  // A With whose body jumps back before the block: its scope holds there.
+  const prefix = new Avm1Assembler().push("x").op("GetVariable").trace().end().bytes();
+  const block = new Avm1Assembler()
+    .push("o")
+    .op("GetVariable")
+    .with("w")
+    .raw([0x99, 2, 0, 0, 0])
+    .label("w")
+    .end()
+    .bytes();
+  const bytes = new Uint8Array([...prefix, ...block]);
+  branch(bytes, prefix.length + block.indexOf(0x99), 0);
+  const module = utf8.decode(
+    testing.actionsModuleBytes(bytes, Int32Array.of(prefix.length), Int32Array.of(block.length), 6),
+  );
+  assert.doesNotMatch(module, /V\.far/);
+  assert.match(module, /V\.getVariable/g);
+});
+
 test("SWF context does not extend an action block's upper decoding bound", () => {
   const bytes = Uint8Array.of(0x07, 0x96, 5, 0, 7, 1, 0, 0, 0);
   const module = utf8.decode(
@@ -1262,7 +1357,7 @@ test("each block compiled alone is its entry in the module, in the test and rele
   });
 });
 
-test("lazy blocks reclaim their full SWF copy before the next compilation", async () => {
+test("lazy blocks copy their SWF in once, which its units then share", async () => {
   const codegen = await createCodegen(
     await WebAssembly.compile(
       await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
@@ -1276,6 +1371,30 @@ test("lazy blocks reclaim their full SWF copy before the next compilation", asyn
 
   const memory = codegen.usage().memory;
   assert.ok(memory < 32 * 1024 * 1024, `per-block compilation grew memory to ${memory} bytes`);
+  assert.deepEqual(codegen.heldActions(), { held: 1, copies: 1 });
+
+  // A unit of the same SWF compiles from the copy its blocks made, and a
+  // block after it too, each byte for byte its entry in the module.
+  const unit = unitActions();
+  const swf = {
+    version: 6,
+    blocks: [{ offset: unit.offset, length: unit.bytes.length - unit.offset }],
+  };
+  const compiled = codegen.compileActions(unit.bytes, swf);
+  assert.deepEqual(codegen.compileActionBlocks(unit.bytes, swf, [0]).get(0), compiled.entries[0]);
+  const units = [...compiled.units.values()];
+  assert.ok(units.length > 0);
+  for (const { unit: u, code } of units) {
+    assert.equal(codegen.compileActionUnit(unit.bytes, swf, u).code, code);
+  }
+
+  assert.deepEqual(codegen.compileActionBlocks(unit.bytes, swf, [0]).get(0), compiled.entries[0]);
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 2 });
+
+  // Let go, its next block copies it in again.
+  codegen.releaseActions(unit.bytes);
+  codegen.compileActionBlocks(unit.bytes, swf, [0]);
+  assert.deepEqual(codegen.heldActions(), { held: 2, copies: 3 });
 });
 
 /** Entries 2, 0, 1 of `entries`, in that order, as actionsEmitEach writes them. */

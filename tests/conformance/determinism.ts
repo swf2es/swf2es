@@ -39,7 +39,7 @@ const avm1Started = Date.now();
 const avm1 = await avm1Determinism();
 const avm1Seconds = ((Date.now() - avm1Started) / 1000).toFixed(1);
 console.log(
-  `determinism: ${avm1.swfs} AVM1 SWFs, each the same 5 ways, and ${avm1.blocks} blocks each alone as in its module, 2 ways${avm1.differences ? `, ${avm1.differences} differ` : ""} (${avm1Seconds} s)`,
+  `determinism: ${avm1.swfs} AVM1 SWFs, each the same 5 ways, and ${avm1.blocks} blocks and ${avm1.units} units each alone as in its module, 2 ways${avm1.differences ? `, ${avm1.differences} differ` : ""} (${avm1Seconds} s)`,
 );
 if (avm1.differences) {
   process.exit(1);

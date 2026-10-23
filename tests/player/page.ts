@@ -36,6 +36,7 @@ import {
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
+import { webWorkerHost } from "@swf2es/player-hosts/workers";
 import { autoDetectRenderer } from "pixi.js";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
@@ -115,6 +116,8 @@ async function scriptingFor(
     navigate: null,
     onUncaught: (error) => uncaught.push(error),
     fetch: pageFetch,
+    // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
+    workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
   });
   const libraries = await Promise.all(
     LIBRARIES.map(async (n) => {

@@ -10,13 +10,17 @@
 //   - in the release build, codegen.wasm, through the package's API;
 //
 // then each block alone, in order with a new emitter each, and in the
-// reverse order with one for all. The SWFs are blocks the tests assemble,
-// at SWF 5 and 10, and the AVM1 SWFs of Ruffle's corpus where it is
-// fetched (tests/player/corpus/fetch-ruffle.ts; not in CI).
+// reverse order with one for all, and each unit of the module's units
+// alone, in order and in reverse, with what it depends on. The SWFs are
+// blocks the tests assemble, at SWF 4, 5 and 10, code before a block that
+// it jumps back into, and the AVM1 SWFs of
+// Ruffle's corpus where it is fetched (tests/player/corpus/fetch-ruffle.ts;
+// not in CI).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { isAs3, readActions, readSwf } from "../../packages/format/dist/index.js";
 import { Avm1Assembler, constant, register, Simple } from "../avm1-assembler.ts";
+import { backwardActions, unitActions } from "../avm1-backward.ts";
 import { testingInstances } from "../unit/codegen/testing-module.ts";
 
 interface Avm1Swf {
@@ -207,6 +211,23 @@ function corpusSwfs(): Avm1Swf[] {
   return swfs;
 }
 
+/**
+ * Units as actionsModuleUnits writes them: key, U+0001, the numbers it was
+ * compiled for, U+0001, its high and reach, U+0001, its entry, U+0002; by
+ * key, the numbers, and the limits and entry.
+ */
+function parseUnits(text: string): Map<string, { numbers: number[]; unit: string }> {
+  const units = new Map<string, { numbers: number[]; unit: string }>();
+  for (const item of text.split("\u0002")) {
+    const [key, numbers, limits, entry] = item.split("\u0001");
+    if (entry !== undefined) {
+      units.set(key, { numbers: numbers.split(",").map(Number), unit: `${limits}\u0001${entry}` });
+    }
+  }
+
+  return units;
+}
+
 /** Entries as actionsModuleEntries and actionsEmitEach write them: index, U+0001, entry, U+0002. */
 function parseEntries(text: string): Map<number, string> {
   const entries = new Map<number, string>();
@@ -226,12 +247,30 @@ const utf8 = new TextDecoder();
 export async function avm1Determinism(): Promise<{
   swfs: number;
   blocks: number;
+  units: number;
   differences: number;
 }> {
   const tests = testBlocks();
   const swfs = [
+    assembled("the tests' blocks, SWF 4", 4, tests),
     assembled("the tests' blocks, SWF 5", 5, tests),
     assembled("the tests' blocks, SWF 10", 10, tests),
+    ...[4, 8].flatMap((version) =>
+      (
+        [
+          ["code before a block in units", unitActions()],
+          ["code before a block", backwardActions(false)],
+          ["code far before a block", backwardActions(true)],
+        ] as const
+      ).map(([name, { bytes, offset }]) => ({
+        name: `${name}, SWF ${version}`,
+        bytes,
+        version,
+        // The code before the block is a block too, as an earlier frame's.
+        offsets: Int32Array.of(0, offset),
+        lengths: Int32Array.of(offset, bytes.length - offset),
+      })),
+    ),
     ...corpusSwfs(),
   ];
   let differences = 0;
@@ -259,10 +298,12 @@ export async function avm1Determinism(): Promise<{
   const fresh = await testingInstances("dist-test");
   const reference = new Map<Avm1Swf, string>();
   const entries = new Map<Avm1Swf, Map<number, string>>();
+  const units = new Map<Avm1Swf, Map<string, { numbers: number[]; unit: string }>>();
   for (const swf of swfs) {
     const testing = await fresh();
     reference.set(swf, module(testing, swf, true));
     entries.set(swf, parseEntries(testing.actionsModuleEntries()));
+    units.set(swf, parseUnits(testing.actionsModuleUnits()));
   }
 
   const oneInstance = async (way: string, instance: () => Promise<unknown>, order: Avm1Swf[]) => {
@@ -290,6 +331,7 @@ export async function avm1Determinism(): Promise<{
   // The JIT/AOT invariant: each block alone, byte for byte its entry.
   const testing = await fresh();
   let blocks = 0;
+  let unitCount = 0;
   for (const swf of swfs) {
     const want = entries.get(swf) ?? new Map();
     const indices = [...want.keys()];
@@ -316,7 +358,57 @@ export async function avm1Determinism(): Promise<{
     }
 
     blocks += indices.length;
+
+    // Each unit alone, as V.far compiles it, with what it depends on: with an emitter of its
+    // own, and in reverse with the one the release build keeps for the SWF it holds.
+    const wantUnits = units.get(swf) ?? new Map();
+    const keys = [...wantUnits.keys()];
+    const actions = {
+      version: swf.version,
+      blocks: [...swf.offsets].map((offset, k) => ({ offset, length: swf.lengths[k] })),
+    };
+    for (const [way, order] of [
+      ["alone, in order", keys],
+      ["alone, in reverse, held", [...keys].reverse()],
+    ] as const) {
+      for (const key of order) {
+        const { numbers, unit } = wantUnits.get(key) ?? { numbers: [], unit: "" };
+        const [at, end, bound, five] = numbers;
+        let got: string;
+        if (way === "alone, in order") {
+          const code = utf8.decode(
+            testing.actionsUnitBytes(
+              swf.bytes,
+              swf.offsets,
+              swf.lengths,
+              swf.version,
+              at,
+              end,
+              bound,
+              five !== 0,
+            ),
+          );
+          const [high, reach] = testing.actionsUnitLimits();
+          got = `${high},${reach}\u0001${code}`;
+        } else {
+          const { code, high, reach } = codegen.compileActionUnit(swf.bytes, actions, {
+            at,
+            end,
+            bound,
+            five: five !== 0,
+          });
+          got = `${high},${reach}\u0001${code}`;
+        }
+
+        if (got !== unit) {
+          differ(swf, `unit ${key} ${way}`, got, unit);
+          break;
+        }
+      }
+    }
+
+    unitCount += keys.length;
   }
 
-  return { swfs: swfs.length, blocks, differences };
+  return { swfs: swfs.length, blocks, units: unitCount, differences };
 }

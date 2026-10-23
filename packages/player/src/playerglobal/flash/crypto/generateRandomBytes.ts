@@ -26,7 +26,8 @@ export function cryptoNatives(): avm2.Natives {
       const bytes = avm2.bytesOf(rt, array);
       bytes.setLength(length);
       try {
-        crypto.getRandomValues(bytes.buffer.subarray(0, length));
+        // A new ByteArray, never shared.
+        crypto.getRandomValues(bytes.buffer.subarray(0, length) as Uint8Array<ArrayBuffer>);
       } catch {
         throw rt.error("Error", 0);
       }

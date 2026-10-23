@@ -1,8 +1,8 @@
 // Runs the Tamarin acceptance tests in swf2es, as run.ts runs them in
 // avmshell, and scores swf2es against avmshell: a test matches when it
-// passes and fails the same checks, and nothing stopped it. Run after
-// run.ts, which compiles the tests and records avmshell's results in
-// baseline.json.
+// passes and fails the same checks, and nothing stopped it. avmshell's
+// results are those run.ts recorded in baseline.json; the tests are
+// compiled as run.ts compiles them, mostly from the oracle's store.
 //
 //   node tests/tamarin/swf2es.ts [--update-baseline | --relax] [path prefix...]
 //
@@ -17,6 +17,7 @@ import { type ChildProcess, fork } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
+import { runOracle } from "../../oracle/oracle.ts";
 import { collectTests } from "./collect.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -50,15 +51,26 @@ interface Avmshell {
 
 const avmshell: Record<string, Avmshell> = JSON.parse(readFileSync(`${here}baseline.json`, "utf8"));
 const { tests } = collectTests(prefixes);
+const compileStarted = performance.now();
+// Compiled as run.ts compiles them, into the same directory, but not run:
+// mostly taken from the oracle's store.
+const toCompile = tests.filter((t) => avmshell[t.path]?.compiled);
+runOracle(
+  toCompile.map((t) => ({ source: t.source, name: t.path, ascArgs: t.ascArgs })),
+  `${here}out`,
+  { run: false },
+);
+console.log(
+  `tamarin in swf2es: compiled ${toCompile.length} tests in ${((performance.now() - compileStarted) / 1000).toFixed(0)} s`,
+);
+
 // A test avmshell compiled must have its ABC: a missing one would drop out
 // of the comparison, and out of the baseline on an update.
-const compiled = tests
-  .map((t) => ({ path: t.path, abc: `${here}out/${t.path}.abc` }))
-  .filter((t) => avmshell[t.path]?.compiled);
+const compiled = toCompile.map((t) => ({ path: t.path, abc: `${here}out/${t.path}.abc` }));
 const missing = compiled.filter((t) => !existsSync(t.abc));
 if (missing.length) {
   for (const t of missing.slice(0, 20)) {
-    console.log(`FAIL ${t.path}: no ${t.abc}; pnpm tamarin compiles it`);
+    console.log(`FAIL ${t.path}: no ${t.abc}; ASC did not compile it`);
   }
 
   console.log(`tamarin in swf2es: ${missing.length} compiled tests have no ABC`);

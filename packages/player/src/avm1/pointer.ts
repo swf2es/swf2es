@@ -39,6 +39,8 @@ interface Spot {
 
 export class Avm1Pointer implements Pointer {
   redraws = 0;
+  /** An AS3 host chooses which loaded movie may pick buttons; global mouse events still reach all. */
+  pickable = true;
   onCursor: ((cursor: Cursor) => void) | null = null;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
@@ -56,6 +58,7 @@ export class Avm1Pointer implements Pointer {
   constructor(
     private readonly stage: Container,
     private readonly avm1: Avm1,
+    private readonly root: MovieClip | null = null,
   ) {
     avm1.pointer = this;
   }
@@ -74,8 +77,8 @@ export class Avm1Pointer implements Pointer {
             yMax: Math.max(top, bottom),
           }
         : null,
-      lastX: this.avm1.mouseX,
-      lastY: this.avm1.mouseY,
+      lastX: this.last?.x ?? 0,
+      lastY: this.last?.y ?? 0,
     };
     this.dragged();
   }
@@ -102,7 +105,9 @@ export class Avm1Pointer implements Pointer {
       return;
     }
 
-    if (dragTo(this.stage, drag, this.avm1.mouseX, this.avm1.mouseY)) {
+    const x = this.last?.x ?? 0;
+    const y = this.last?.y ?? 0;
+    if (dragTo(this.stage, drag, x, y)) {
       this.redraws++;
     }
 
@@ -110,7 +115,7 @@ export class Avm1Pointer implements Pointer {
       const visible = d.visible;
       d.visible = false;
       try {
-        this.avm1.dropTargets.set(d, this.pick(this.avm1.mouseX, this.avm1.mouseY, true));
+        this.avm1.dropTargets.set(d, this.pick(x, y, true));
       } finally {
         d.visible = visible;
       }
@@ -151,7 +156,43 @@ export class Avm1Pointer implements Pointer {
     return true;
   }
 
-  handle(type: "move" | "down" | "up" | "leave", p: PointerState): void {
+  /** The host broadcasts first, before either VM chooses the button an event reaches. */
+  broadcast(type: "move" | "down" | "up", p: PointerState): void {
+    this.last = p;
+    this.position(p);
+    if (type !== "move") {
+      this.avm1.input.mouseButton(p.button ?? 0, type === "down");
+    }
+
+    if (type === "move") {
+      this.avm1.clipEvent(ClipEvent.mouseMove);
+    } else if ((p.button ?? 0) === 0) {
+      this.avm1.clipEvent(type === "down" ? ClipEvent.mouseDown : ClipEvent.mouseUp);
+    }
+  }
+
+  private position(p: PointerState): void {
+    if (!this.root) {
+      this.avm1.mouseX = p.x;
+      this.avm1.mouseY = p.y;
+      return;
+    }
+
+    const inverse = this.root.parent && invert(toStage(this.root.parent, this.stage));
+    const [x, y] = inverse ? apply(inverse, p.x, p.y) : [p.x, p.y];
+    this.avm1.mouseX = x;
+    this.avm1.mouseY = y;
+  }
+
+  /** Reconcile an AS3 host's pick before it dispatches its own mouse events. */
+  sync(p: PointerState, pickable: boolean): void {
+    this.last = p;
+    this.position(p);
+    this.pickable = pickable;
+    this.frameEnded(true);
+  }
+
+  handle(type: "move" | "down" | "up" | "leave", p: PointerState, broadcast = true): void {
     // A move posted before this input comes first; a move given now replaces it.
     if (type === "move") {
       this.moved = null;
@@ -172,23 +213,17 @@ export class Avm1Pointer implements Pointer {
     }
 
     const at = this.last;
-    if (type === "move" && at && at.x === p.x && at.y === p.y) {
+    if (broadcast && type === "move" && at && at.x === p.x && at.y === p.y) {
       return;
     }
 
     this.last = p;
-    this.avm1.mouseX = p.x;
-    this.avm1.mouseY = p.y;
     const left = (p.button ?? 0) === 0;
-    if (type !== "move") {
-      this.avm1.input.mouseButton(p.button ?? 0, type === "down");
-    }
-
     // Every clip's clip event first, and what they queue runs, before the pick.
-    if (type === "move") {
-      this.avm1.clipEvent(ClipEvent.mouseMove);
-    } else if (left) {
-      this.avm1.clipEvent(type === "down" ? ClipEvent.mouseDown : ClipEvent.mouseUp);
+    if (broadcast) {
+      this.broadcast(type, p);
+    } else {
+      this.position(p);
     }
 
     this.dragged();
@@ -263,12 +298,12 @@ export class Avm1Pointer implements Pointer {
    * Ruffle's update does, so a button that comes under an idle pointer
    * gets its roll over, and one hidden from under it its roll out.
    */
-  frameEnded(): void {
+  frameEnded(repick = false): void {
     this.replaced();
     this.dragged();
     const p = this.last;
     const hover = this.hover;
-    if (p === null || (hover?.visible && this.onStage(hover))) {
+    if (p === null || (!repick && hover?.visible && this.onStage(hover))) {
       return;
     }
 
@@ -407,6 +442,19 @@ export class Avm1Pointer implements Pointer {
    * (Ruffle's mouse_pick_avm1).
    */
   private pick(x: number, y: number, any = false): DisplayObject | null {
+    return any || this.pickable ? this.targetAt(x, y, any) : null;
+  }
+
+  /** Whether this movie has a button or selectable field under the host's pointer. */
+  hit(x: number, y: number): boolean {
+    return this.targetAt(x, y) !== null;
+  }
+
+  private targetAt(x: number, y: number, any = false): DisplayObject | null {
+    if (this.root) {
+      return this.pickIn(this.root, x, y, any);
+    }
+
     const children = this.stage.children;
     for (let i = children.length - 1; i >= 0; i--) {
       const found = this.pickIn(children[i], x, y, any);

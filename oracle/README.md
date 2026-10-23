@@ -21,6 +21,14 @@ pnpm oracle tests/conformance/cases/int-coercion.as
 `tests/conformance` uses the same module to get the expected output for every
 case.
 
+What ASC, gcc and abcdump produce is kept in a store shared by every checkout
+on the machine, `~/.cache/swf2es/oracle` (under `$XDG_CACHE_HOME` if set, or
+wherever `SWF2ES_ORACLE_CACHE` says), by a key that hashes the image, the
+arguments and the inputs (`store.ts`). A new worktree takes its ABCs from
+there instead of compiling them again, and starts no container when nothing
+is left to compile or run. avmshell's runs are never stored. Deleting the
+directory is always safe.
+
 ## avmplus
 
 `avmplus/` is a submodule of [swf2es/avmplus](https://github.com/swf2es/avmplus),

@@ -10,7 +10,7 @@
 // conversions need of them, which step 9 completes with their classes.
 // The realm also holds what runs AVM1 code across calls: the activation
 // running, how many function calls are, and the movie's global registers.
-import type { Activation, Region } from "./activation.js";
+import type { Activation, Region, Units } from "./activation.js";
 import { TimedOut } from "./errors.js";
 import { pendingLocal, ScriptFunction } from "./functions.js";
 import { arrayClass } from "./globals/array.js";
@@ -84,6 +84,8 @@ export class Realm implements Boxer {
   readonly globalScope: Scope;
   /** The four registers outside DefineFunction2's own, which every activation shares. */
   readonly registers: Value[] = [undefined, undefined, undefined, undefined];
+  /** By the regions of a block or a unit, the units of its SWF, which V.far runs. */
+  readonly units = new WeakMap<Region[], Units>();
   /** The activation running, null between the player's calls into AVM1 code. */
   current: Activation | null = null;
   /** How many function calls are running, one in another. */

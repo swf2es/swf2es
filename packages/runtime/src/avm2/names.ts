@@ -4,7 +4,8 @@
 // interns them, so two modules' `public` are one object and names compare by
 // identity. A private namespace is only ever equal to itself.
 
-import type { Domain } from "./domain.js";
+import type { AsObject } from "./descriptors.js";
+import type { Domain, Script } from "./domain.js";
 import { NO_CACHE, type PropertyCache } from "./property-cache.js";
 
 /** Namespace kinds, numbered as the compiler's NS_* constants. */
@@ -108,6 +109,18 @@ export class Multiname {
   domain: Domain | null = null;
   /** What its lookups found, for a module's name (property-cache.ts); a name made at run time keeps none. */
   cache: PropertyCache = NO_CACHE;
+  /**
+   * The script that defines it, once found: the first definition of a name
+   * wins, so later modules cannot change it (Runtime.definingScript).
+   */
+  script: Script | null = null;
+  /**
+   * That script's global object, once the script has been asked to run: a
+   * module's finddef reads it before calling the runtime (Runtime.findDef).
+   */
+  global: AsObject | null = null;
+  /** The class it names, once resolved (Runtime.resolveName). */
+  cls: AsObject | null = null;
   /** Fixed at construction so indexed access needs no getter in its hot path. */
   readonly elementName: boolean;
 

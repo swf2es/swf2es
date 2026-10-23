@@ -95,28 +95,54 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | — |
+| `compress` | synchronous zlib and LZMA, zlib and the LZMA SDK compiled to WebAssembly with a Zig adapter | — |
+| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | compress |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
-| `mp3`     | synchronous MP3 frame decoder, minimp3 C compiled to WebAssembly | —                       |
+| `mp3`     | synchronous MP3 frame decoder, minimp3 compiled to WebAssembly with a Zig adapter | — |
 | `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers | player |
+| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
-`format`, `codegen` and `runtime` load no DOM or node types, so they run in
+`compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
-(zlib through pako; LZMA compressed through lzma1 and decoded by
-`format`'s own `lzma.ts`): ByteArray's `compress` and a SWF's body are the
-same code. The decoder follows the LZMA SDK's specification decoder, as
-avmplus' LzmaDec reads a stream: a properties byte past 224 is refused,
-a dictionary is 4 KB at least, and it fails as soon as it would read past
-the stream's end, so a header's length costs at most some 7000 bytes for
-each of the stream's; a ZWS whose header names more than 8192 times its
-stream is refused before decoding, and `decompressSwfPrefix` decodes a
-SWF's start alone, for its FileAttributes (`fileAttributes`). `codegen` knows the runtime's function names and signatures
+(`compress`, below): ByteArray's `compress` and a SWF's body are the
+same code. `decompressSwfPrefix` decodes a SWF's start alone, for its
+FileAttributes (`fileAttributes`), from the first kilobytes of the body,
+more only as it needs them, and keeps whatever decoded before a
+failure, so a SWF cut short still has its header.
+
+`compress` is one WebAssembly module that imports nothing, compiled
+synchronously from base64 on first use. zlib 1.3.2 (`vendor/zlib`, swf2es/zlib)
+inflates and deflates, so ByteArray's `compress` and `deflate` write
+zlib's own bytes; the LZMA SDK 26.05's encoder (`vendor/lzma-sdk`,
+swf2es/lzma-sdk, the release as published; only `C/LzmaEnc.c`,
+`C/LzFind.c`, `C/LzmaDec.c` and their headers, all public domain) writes
+ByteArray's LZMA with avmplus' settings (level 9, a 1 MB dictionary or
+less for less data, no end marker), and its LzmaDec, which avmplus uses
+too, decodes: a properties byte past 224 is refused, a dictionary is 4 KB
+at least, and it fails as soon as it would read past the stream's end, so a
+header's length costs at most some 7000 bytes for each of the stream's;
+a ZWS whose header names more than 8192 times its stream is refused
+before decoding. Each call resets a bump arena in the module's memory;
+an output of unknown size is the arena's top allocation and grows in
+place, so a header that names more than the stream holds costs nothing
+until the bytes are there, and nothing is copied as it grows. Memory
+never shrinks, so an instance whose memory passed 8 MiB is dropped after
+its call, as is one whose call threw, and the next starts a new one.
+What a failed decode wrote stays in the module and goes with its
+instance: a bomb cut short is never copied out only to be dropped. An
+output that does not fit is `CompressedDataTooLargeError`, which
+ByteArray turns into MemoryError 1000 as avmplus does, where corrupt
+data is IOError 2058. The package's own code is `src/root.zig`, which
+gives the libraries the arena through their allocator callbacks, and the
+TypeScript wrapper. The package is also a Zig project (`build.zig`,
+`build.zig.zon`); `packages/compress/build.ts` runs its `zig build` with a
+pinned Zig 0.17.0 (whose clang compiles the C), and `pnpm build` checks
+its inputs' digest. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
@@ -753,11 +779,18 @@ describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
 default. Date is JavaScript's Date, with avmplus' string formats.
-flash.concurrent's Mutex and Condition and ByteArray's atomic operations
-are avmplus' on its one thread: locks are counted, a wait ends at once, as
-nothing else can notify it, and Worker.current is the primordial worker,
-the one there is (`natives/concurrent.ts`); starting another is not
-supported. Crossbridge's code uses them all as it starts.
+flash.concurrent's Mutex and Condition are avmplus' on its one thread:
+locks are counted, a wait ends at once, as nothing else can notify it
+(`natives/concurrent.ts`). ByteArray's atomic operations and `casi32` are
+`Atomics` on a shareable ByteArray's memory once another worker shares it
+(a growable SharedArrayBuffer, see [workers.md](workers.md)). Crossbridge's code
+uses them all as it starts. avmshell's Worker and WorkerDomain
+(`natives/shell.ts`, `natives/shell-workers.ts`) keep each worker's state,
+parent and shared properties in memory every thread sees, a
+SharedArrayBuffer, so that one worker sees at once what another set, and
+start each background worker on a thread of `RuntimeOptions.workers`, the
+host's, which runs a runtime made with that worker's `RuntimeOptions.worker`
+(see [workers.md](workers.md)).
 
 ### Application domains
 
@@ -934,7 +967,12 @@ with a VerifyError, or an exception nothing catches, is printed there as
 avmshell prints it (`VerifyError: Error #1107`, `TypeError: Error
 #1009`), and ends the run with avmshell's exit status, 1. avmshell's `File`
 reads and writes the working directory. A SWF is refused: its code needs
-the player's playerglobal, which the command does not depend on.
+the player's playerglobal, which the command does not depend on. avmshell's
+background workers run on node's threads (`threads.ts`, each thread
+`shell-thread.ts`): each compiles its libraries and its code, the ABCs
+given or those of `createWorkerFromByteArray`, with codegen.wasm's module
+posted to it, and writes what it prints to stdout itself. They stop when
+the ABCs given end, as avmshell interrupts its workers then.
 
 The command and the tests that run ABCs share one host, `runShell` in
 `shell.ts`: one compiler domain for the runtime, each ABC compiled into the
@@ -944,7 +982,9 @@ findings the runtime reports (`RuntimeOptions.compileAbc`). The
 conformance runner and the Tamarin runner give it the test build of
 codegen (`tests/conformance/abc-compiler.ts`), which `pnpm test:checked`
 checks every array access of, a loader that keeps source maps, and for
-Tamarin the builtins' modules compiled once for every test.
+Tamarin the builtins' modules compiled once for every test. Their
+background workers' threads compile with the release build, and post
+what they print back to the runner's lines.
 
 ## Compiling ahead of time and caching modules
 
@@ -1200,7 +1240,8 @@ with CORS headers, as a module script from another origin is fetched
 with CORS. Codegen still runs:
 the player adds each ABC to it, keys each module by its context and
 replays each log there, so that the domain is as compiling would have
-left it, which no host can skip, and `codegen.wasm` needs
+left it, which no host can skip, and `codegen.wasm`, like `compress`'s
+module, which decompresses the SWF, needs
 `'wasm-unsafe-eval'` to be compiled. A policy for such a page is
 `script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
 module the cache lacks is compiled and its evaluation refused
@@ -1233,6 +1274,8 @@ and the player's paths in this document are relative to it:
 
 - `index.ts` is the package's default entry point; the separate experimental
   `@swf2es/player/context3d` entry installs Stage3D natives only when requested.
+  `workers/thread.ts` is the entry a background worker imports
+  (`@swf2es/player/worker`, with the primordial's messages in `workers/protocol.ts`);
   `player.ts` runs a SWF,
   `scripting.ts` connects it to the runtime and the compiler, with its
   parts in `scripting/`: `code.ts` compiles and links the SWFs' code
@@ -1244,12 +1287,14 @@ and the player's paths in this document are relative to it:
   `symbols.ts` keeps what SymbolClass
   bound classes to, the fonts registered and the sounds' shared decodes,
   `timers.ts` keeps the clock and the timers that fire by it,
-  `clipboard.ts` what the clipboard holds and when scripts may touch it.
+  `clipboard.ts` what the clipboard holds and when scripts may touch it,
+  `workers.ts` the workers as one VM sees them (see [Workers](#workers)).
   `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports, the
   clipboard's writes) with the browser's defaults, and the interfaces of what only a host supplies
-  (ExternalInterface's page, a renderer's draws, fetches, sockets).
+  (ExternalInterface's page, a renderer's draws, fetches, sockets, the
+  threads workers run on).
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings and what they read back as, bounds and hit
   tests, 9-slice scaling, geometry, 3D matrices, colour transforms,
@@ -1295,7 +1340,7 @@ the display object its `create` hook takes, and the frame: its events,
 frame scripts, gotos' cycles and the construction of what timelines
 placed. What else scripts need that keeps state of its own is a part it
 holds, a class in `scripting/` given the `Scripting` for what they
-share: `code`, `symbols`, `lifecycle`, `loads` and `timers`. The natives
+share: `code`, `symbols`, `lifecycle`, `loads`, `timers` and `workers`. The natives
 and the player reach a part through it, as `s.loads.requestLoad`; the
 host's own calls, `loadLibraries` and `settled`, stay on `Scripting`.
 
@@ -1878,9 +1923,18 @@ One from a URL comes as an AS3 SWF's content does, `OPEN`, the progress
 and the child in the frame's construct phase, `INIT` and `COMPLETE` at
 its end, and plays on from the next frame: that follows Ruffle, which
 loads both kinds alike, not adl, whose harness loads only from bytes.
-The `AVM1Movie` is no `InteractiveObject`: the pointer's hits on the
-movie go to its `Loader`, as Flash has them (the corpus's
-`mouse_pick_loader_avm1`). The movie's timeline plays at the stage's
+The `AVM1Movie` is no `InteractiveObject`: hits on its noninteractive
+artwork go to its `Loader` (the corpus's `mouse_pick_loader_avm1`). Its
+AVM1 buttons and selectable fields take mouse input themselves, without
+AS3 mouse events on the Loader. `input/avm1.ts` joins their picks into
+the AS3 display-list search, respecting transforms, masks, scrolls,
+overlays and `mouseChildren`. Global AVM1 mouse listeners run before the
+pick, even in a hidden or detached loaded movie; button events go only
+to the winning movie, with hover and capture reconciled as the display
+list changes. Each loaded movie reuses `Avm1Pointer`, and unloading drops
+its input state. Ordinary AS3 content creates no such input manager.
+These rules follow an authored native Flash Player 32 probe.
+The movie's timeline plays at the stage's
 frame rate as an AVM1 main SWF's does, and, as an AVM1 timeline, has as
 many frames as its ShowFrame tags end, whatever its header says, and stays
 on its last without an End tag. The loaded movie now runs its AVM1
@@ -1891,7 +1945,7 @@ frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
 and script-driven playback run with the child. Unloading destroys the
 child VM and its connections without closing the parent's audio device.
-Pointer and keyboard routing into these loaded movies, and `AVM1Movie`'s
+Keyboard and wheel routing into these loaded movies, and `AVM1Movie`'s
 `call` and `addCallback`, remain incomplete; those methods still throw #2014.
 
 `LocalConnection` uses one native broker (`player/src/localconnection.ts`)
@@ -2034,8 +2088,9 @@ stepped by `Player.tick()` moves the clock by one frame's duration at
 the stage's frame rate, the first frame's included, so a test that steps
 frames gets the same clock every time; a host playing in real time calls
 `Player.advance(dt)` with the time passed, which plays frames on a grid
-of the frame's duration and drops those a long frame or a stall lost, as
-Flash does, rather than catch up with them as Ruffle does. Measured in
+of the frame's duration and, without streamed audio, drops those a long
+frame or a stall lost, as Flash does, rather than catch up with them as
+Ruffle does. Measured in
 adl at 24 fps with a 200 ms busy loop in some frames' ENTER_FRAME, Flash
 runs the next frame at once after the long one, the one after at its
 slot on the grid (8 to 9 ms later, 24 ms after three long frames in a
@@ -2066,12 +2121,24 @@ is dropped but for the part of a frame, which keeps the grid's phase;
 not within half an interval of the next frame, though, where a call that
 came a little early would leave a frame owed under ordinary jitter and
 the next drop it. A `dt` that is not a finite positive number counts as
-none. Two limits remain: a SWF faster than the display still runs its
-frames back to back, so a walk placed by the wall clock at 60 fps on a
-30 Hz display can still stop short; and a stream sound runs on by its
-own clock while frames are dropped, drifting from the timeline after a
-hitch, where Flash skipped frames to keep the timeline with the stream
-(`startStream` in `media/sounds.ts` does not yet). `advance` returns how
+none. A SWF faster than the display still runs its frames back to back,
+so a walk placed by the wall clock at 60 fps on a 30 Hz display can still
+stop short. Streamed audio instead requests catch-up from its device
+cursor: the player runs up to 60 logical frames per call, preserving
+every frame's scripts and events, while the host draws only once after
+that batch. A stop, seek or removal cancels the old stream's remaining
+catch-up. The device cursor, rather than wall time, keeps a suspended
+AudioContext from requesting frames for audio it has not played. This
+applies to streams in nested clips and AVM1 content loaded by AS3 too;
+event sounds keep the ordinary pacing. Extra frames get half the previous
+presentation interval as a CPU budget, bounded to 8–50 ms, so sustained
+render lag still leaves time for affordable timeline work. The budget and
+frame-count bound make batches yield, so a long stall does not
+block input indefinitely. This cannot guarantee sync when scripts alone
+cannot run at the required rate. Native Flash 32,
+with a 600 ms busy loop at 25 fps, ran the streamed timeline's frames
+6–20 back to back, including their actions, while the equivalent
+non-streamed movie resumed at ordinary pace. `advance` returns how
 many frames it ran, and `Player.changes` counts what may change the
 picture: each frame, each key, each call from the page into an
 ExternalInterface callback, each `updateAfterEvent`, and the pointer
@@ -2080,8 +2147,12 @@ button or a sprite in `buttonMode`, as Ruffle redraws for, and, more
 than Ruffle, any press, release or leave, which may move focus and a
 caret, and a drag selecting text. A plain move does not: what its
 listeners change shows at the next frame, as in Flash, so a fast mouse
-draws a 24 fps SWF 24 times a second, not at the screen's rate. Loads
-and socket data are delivered in a frame. A host draws when it moved,
+draws a 24 fps SWF 24 times a second, not at the screen's rate.
+An input's `updateAfterEvent` also prepares the requested redraw between
+timeline frames: it dispatches `RENDER` if the stage was invalidated and
+applies pending scroll rectangles. Invalidation alone requests no extra redraw;
+a frame or timer that already prepared the request consumes it.
+Loads and socket data are delivered in a frame. A host draws when it moved,
 not on every animation frame: at 60 Hz a 24 fps SWF drew each picture
 two or three times over, and drawing it once took a quarter to a third
 of Chrome's CPU off 32 animated characters, the pictures alike. Frame
@@ -2888,13 +2959,31 @@ attributes as an object, and playerglobal builds the tree and throws its
 errors from the status (the `legacy-xml` case). `XMLNode`'s escaping
 replaces the five XML characters.
 
+### Workers
+
+`flash.system.Worker` runs each background worker as a VM of its own on a
+thread the host starts (`WorkerHost`, hosts.ts): its own codegen, runtime
+and playerglobal playing the SWF `createWorker` was given, headless, its
+frames on a timer at the SWF's rate (`workers/thread.ts`, the entry of
+`@swf2es/player/worker`). `player-hosts` has the threads: `webWorkerHost`
+starts module Web Workers, `nodeWorkerHost` node's `worker_threads`, each
+given codegen's compiled module. Without a host, `Worker.isSupported` is
+false. `scripting/workers.ts` is what one VM sees: the primordial routes
+every message between workers, and shared properties and channels' messages
+cross as copies, made as avmplus' `ChannelItem` makes them, but for a
+shareable ByteArray's memory, which the threads share where the page is
+cross-origin isolated. What content needs, shared memory and
+blocking, and the order the rest comes in are in
+[docs/workers.md](workers.md).
+
 ### Shutting down
 
 A page that takes its player away calls `Player.destroy`. No frame plays
 after it: `advance` and `tick` do nothing. With scripts, `Scripting.destroy`
 then stops every sound and closes the audio host (`AudioHost.close`, which
 closes the browser's AudioContext, whose thread a page otherwise keeps),
-closes the Sockets' and WebSockets' connections still open, and aborts
+terminates the background workers' threads, closes the Sockets' and
+WebSockets' connections still open, and aborts
 the fetches under way of the host's `fetch`. First it writes the
 SharedObjects scripts opened and changed since they were read or last
 written, as Flash wrote them as a SWF unloaded, so data a SWF set without
@@ -3282,8 +3371,14 @@ draws nothing, nor its lines, though without a fill the lines draw. The
 textured triangles are a layer's `meshes`, drawn after its fills by a
 Pixi mesh of their own (`render/triangles.ts`, WebGL alone): u·t, v·t and
 t a vertex, which the GPU interpolates straight and each pixel divides,
-so t is a perspective. adl maps u and v from 0 to 1 onto the bitmap's
-first texel's centre to its last's, wrapped there when the fill repeats
+so t is a perspective. A 3D engine clears its Graphics and draws them
+again every frame, so a redraw keeps the meshes, taken in place where the
+layers lay out as before or from those the view keeps, with their
+buffers, vertex arrays and shaders: new vertices go into the same
+buffers, and every mesh draws from one buffer of indices in order. Kept
+ones no content takes go after `IDLE_MS`, and all as the context is lost.
+adl maps u and v from 0 to 1 onto the bitmap's first texel's centre to
+its last's, wrapped there when the fill repeats
 or clamped, a hair nearer 0 as its fixed-point steps come out, and
 samples once a pixel at the pixel's top left corner: the nearer texel,
 or the four around weighed when smoothed; a bitmap a texel high shows its
@@ -4029,8 +4124,8 @@ empty one is ArgumentError 2006; a null rect or compressor is TypeError
 goes into the ByteArray given, from its position, or a new one. JPEG and
 JPEG XR, which Flash also writes, are not supported yet. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
-compression's file is Flash's byte for byte, as pako and zlib deflate
-alike. `getPixels` and
+compression's file is Flash's byte for byte, as it is deflated
+by zlib itself. `getPixels` and
 `copyPixelsToByteArray` write their bytes in one pass. `setPixels` and
 `copyPixelsToByteArray` honor the supplied ByteArray's `endian`;
 `getPixels` creates a big-endian one with its position after the pixels.
@@ -4666,16 +4761,19 @@ DefineSound's seekSamples skipped. Playback keeps the browser's decode of
 the whole file at the device's rate, gapless trimming and all, which
 resamples better than a buffer played at another rate. Flash's decode is
 at once, so extraction uses `@swf2es/mp3`, separately from Web Audio.
-Its upstream source is the pinned `vendor/minimp3` submodule; the C adapter,
-TypeScript wrapper and reproducible WASM build are in `packages/mp3`.
+Its upstream source is the pinned `vendor/minimp3` submodule (swf2es/minimp3,
+a fork of lieff/minimp3); the Zig adapter (`src/root.zig`), TypeScript wrapper
+and reproducible WASM build are in `packages/mp3`, a Zig project like `compress`.
 The module compiles once before ActionScript libraries run, and an extraction
 instantiates a decoder only on first use. Its fixed 128 KiB workspace holds
 one frame's encoded bytes and interleaved PCM, copied into the sound's cached
-channel buffers. No host functions or WASI runtime are imported. The generated
-29 KB binary is embedded in the package; ordinary builds verify its input
-digest, and CI rebuilds it with the pinned WASI SDK image. A first extract
-therefore supplies samples synchronously, including inside `SampleDataEvent`
-callbacks, even without an audio device. Extracted samples are weakly cached
+channel buffers. No host functions are imported. The generated 29 KB
+binary is embedded in the package; ordinary builds verify its input
+digest, and CI rebuilds it with the pinned Zig 0.17.0, whose clang
+compiles minimp3 unchanged. An engine that cannot compile it loads SWFs
+as usual, and extract writes no samples for an MP3. Otherwise a first
+extract supplies samples synchronously, including inside
+`SampleDataEvent` callbacks, even without an audio device. Extracted samples are weakly cached
 by the sound character or loaded sound; appending compressed bytes invalidates
 the latter's cache. Unused sounds are never decoded.
 `media/mp3.ts` finds an MP3's frames: a run of three headers where they
@@ -4749,10 +4847,8 @@ and a SoundStreamBlock a frame), and a button's DefineButtonSound. The
 library's `sounds` hook (`TimelineSounds`, made by `media/sounds.ts`
 for every AS3 library a `Scripting` loads) plays them through
 the page's `AudioHost`; a player without one plays none, and a SWF without
-them pays nothing. An AVM1 SWF's library has none: in a `Loader` its
-actions do not run, so its timeline loops where a `stop()` would have
-held it, and its StartSounds would start again on every loop; its sounds
-wait for AVM1's later steps.
+them pays nothing. AVM1 libraries use the same hooks through their own
+SoundHost, including AVM1 movies loaded by an AS3 Loader.
 
 A frame's StartSound tags play as the playhead enters it, played on to,
 looped to, or landed on by a goto, but a goto to the frame the clip is on,
@@ -4789,9 +4885,14 @@ keeps its stream, and adl cannot show Flash's. A clip a script takes off
 plays on as an orphan and keeps its stream, as in Ruffle. `unloadAndStop`
 stops the timeline sounds of all under the content, event sounds too, and
 `stopAll` every one, a stream starting again at the next block its clip
-plays on to. Flash drops frames to keep a timeline with its stream when
-the stream runs ahead; the player keeps the frame rate and lets the stream
-drift.
+plays on to. A stream counts the time its clip advances, using the stage
+frame rate of each frame. `PlayingSound.positionMs`, when supplied by the
+host, is elapsed playback from the requested start, including `atMs` and
+any wait for the device to start; it is NaN before playback begins, follows
+the audio device clock, and freezes when stopped or ended. Whole frames of
+audio lead request the bounded catch-up described above. Hosts without a
+cursor retain ordinary pacing. MP3 gaps retain their timeline duration:
+cumulative sample offsets are not treated as jumps to later block frames.
 
 A button's change of state plays DefineButtonSound's sound for it, as
 Ruffle's button events pick them: up to over, over to down, down to over,
@@ -4814,13 +4915,14 @@ with its timeline; on a device the page has not yet let run (a suspended
 through a slow resume), the browser host starts it when it runs, as far
 in again as it waited. An event sound plays whole, late if its decode or
 the device kept it waiting: a click's start is not lost. A sound is over,
-for SyncNoMultiple and for its clip's stream, once the clock has run its
-length, in and out points and loops counted; the device may still play
-it, and a stop still reaches it until the device is done with it
+for SyncNoMultiple, once the clock has run its length, in and out points
+and loops counted; the device may still play it, and a stop still reaches
+it until the device is done with it
 (`PlayingSound.ended`), or, for a host that cannot tell, until 100 ms
-later, when it is stopped for good; the last of a clip's stream is
-stopped when its next one starts. At most 32 sounds play at once, Flash's
-32 channels and Ruffle's `AudioManager::MAX_SOUNDS`: a script's channels
+later, when it is stopped for good. A stream stays attached until its
+clip passes its final block, stops, seeks, loops or is removed. The device
+ending first must not restart audio from a lagging timeline block. At
+most 32 sounds play at once, Flash's 32 channels and Ruffle's `AudioManager::MAX_SOUNDS`: a script's channels
 whose sound is there to play, and the timeline's sounds the device has,
 or will have once decoded, together. Past them a timeline sound does not
 start, nor queue on a device that is not running, and `Sound.play` gives
@@ -5055,7 +5157,7 @@ standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
 as https, has two hosts. `swf2es://app/` is the page,
 `static/index.html` and its stylesheet, the renderer's build,
 `/modules/<package>/` for the packages' builds and their libraries
-(pixi.js, pako, lzma1), which the page's import map names as
+(pixi.js), which the page's import map names as
 `tests/player/serve.ts`'s does, and `/libraries/builtin.abc` and
 `/libraries/playerglobal.abc`, read from where the settings say.
 `swf2es://file/` is the local files the SWF playing may read, by its
@@ -5103,7 +5205,7 @@ elsewhere is best kept in a directory of its own.
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.
-The page decompresses the SWF whole, with what `format`'s LZMA decoder
+The page decompresses the SWF whole, with what `compress`'s LZMA decoder
 bounds (see [Packages](#packages)).
 
 Only the SWF playing has a grant: opening another or closing it revokes
@@ -5417,7 +5519,7 @@ URLs, so it plays under Pages' `/swf2es/` as at a server's root.
   crowd. The workflow pulls the oracle's image for the first.
 - **Licences**: `notices.html` gives builtin.abc's MPL-2.0 and lists the
   files translated from avmplus and taken from Ruffle, found by their
-  headers as the site builds, with PixiJS's, pako's and lzma1's licences.
+  headers as the site builds, with the licences of PixiJS, zlib and the LZMA SDK.
 
 `tests/site/run.ts`, part of `pnpm test`, builds the site and checks it in
 Chrome under `/swf2es/`; `--serve` serves it to look at.
@@ -5474,8 +5576,8 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   `visual/` within their tolerance or a pixel's anti-aliasing of it, so
   the oracle decides, not the corpus's PNGs (`tests/player/corpus/check-references.ts`).
 - **Ruffle's corpus, as a baseline for the player** (`pnpm corpus`,
-  `tests/player/corpus/run.ts`): the player plays each `avm2/` and
-  `timeline/` test that has Flash's `output.txt` for the frames its
+  `tests/player/corpus/run.ts`): the player plays each `avm1/`, `avm2/`
+  and `timeline/` test that has Flash's `output.txt` for the frames its
   `test.toml` names, in Chrome as the player's tests run, and its trace is
   compared to Flash's line by line. The page runs the runtime as the
   debugger player, since Ruffle recorded its traces with one and adl is
@@ -5503,9 +5605,13 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   Flash's harness plays no input, so `check-references.ts` leaves these
   tests out.
   A test that does not finish in its time is a timeout, a standing of its
-  own. The corpus is fetched, not committed, so the baseline runs where
-  the corpus is, like adl, not in CI; it is what says, in order of what
-  real SWFs hit first, what the player lacks.
+  own. The corpus is fetched, not committed: CI's `corpus` job, beside
+  the build job on every pull request and every push to main or dev,
+  fetches it at
+  `RUFFLE_COMMIT`, caches it by that commit, and fails on a lowered
+  standing, naming the test, its standing before and after, and where its
+  trace parts from Flash's. It is what says, in order of what real SWFs
+  hit first, what the player lacks.
 
 The AS3 half of a player test is an `.as` file beside its case, compiled
 in the oracle's container by ASC against `builtin.abc` and

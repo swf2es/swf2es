@@ -8,3 +8,5 @@ tests/**/out/
 .DS_Store
 tests/player/corpus/ruffle/
 as3/*/bin/
+.zig-cache/
+zig-out/

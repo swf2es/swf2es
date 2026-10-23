@@ -67,6 +67,8 @@ J4 16 12 true same as J2 true
 ignores 0 by 0 4 and -5 by 100000 3
 a copy each ff102030 ff00ff00
 BB flash.display::BitmapData 4 false auto fresh data true
+BB2 4 3 same pixels true fresh data true
+L2Alias 4 3 same pixels true
 Bad 0 0 false (x=0, y=0, w=0, h=0)
   getPixel32 2015
   clone 2015

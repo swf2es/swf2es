@@ -26,8 +26,16 @@ export function abcVersion(abc: Uint8Array): i32 {
 export {
   actionsEmitEach,
   actionsEmitEachBytes,
+  actionsHeldCount,
+  actionsHeldEmitEachBytes,
+  actionsHeldUnitBytes,
+  actionsHold,
   actionsModuleBytes,
   actionsModuleEntries,
+  actionsModuleUnits,
+  actionsRelease,
+  actionsUnitBytes,
+  actionsUnitLimits,
 } from "./avm1/compile";
 // The compiler: see compile.ts.
 export {
@@ -57,3 +65,5 @@ export {
   domainUsage,
   domainWantsCompact,
 } from "./compile";
+// How many bytes the *Bytes exports handed out at the address they return.
+export { outputLength } from "./output";

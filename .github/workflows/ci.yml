@@ -17,17 +17,66 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # The pinned Zig, which ziglang.org asks CI to cache rather than fetch each run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/swf2es/zig-*
+          key: zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/zig.ts') }}
       - run: pnpm --filter @swf2es/mp3 build:wasm && git diff --exit-code -- packages/mp3/src/binary.ts packages/mp3/LICENSE.minimp3
+      - run: pnpm --filter @swf2es/compress build:wasm && git diff --exit-code -- packages/compress/src/binary.ts packages/compress/LICENSE.zlib
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm oracle:pull
+      # The oracle's store (oracle/store.ts): what ASC compiled for the tests below. Its
+      # entries are content-keyed, so any earlier store helps; a new oracle.ts starts over.
+      - uses: actions/cache@v4
+        with:
+          # Not abcdump's dumps, nine tenths of the store: abcdump runs again instead.
+          path: |
+            ~/.cache/swf2es/oracle
+            !~/.cache/swf2es/oracle/**/*.dump
+          key: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-${{ github.sha }}
+          restore-keys: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-
       - run: pnpm test
       - run: pnpm test:checked
       - run: pnpm determinism
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
-      - uses: actions/cache@v4
-        with:
-          path: tests/tamarin/out
-          key: tamarin-subset-${{ github.sha }}
-          restore-keys: tamarin-subset-
       - run: pnpm tamarin ecma3/Array as3/Types
+  # Ruffle's corpus against tests/player/corpus/baseline.json, beside the build job and
+  # done well before it, so a change that lowers a test's standing fails its PR.
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # builtin.abc, which the tests' code links against, comes out of the oracle's image.
+      - run: pnpm oracle:pull
+      # Fetched, never committed; a commit's corpus never changes, so it keys the cache.
+      - id: ruffle
+        run: |
+          commit=$(sed -n 's/^export const RUFFLE_COMMIT = "\(.*\)";$/\1/p' tests/player/corpus/ruffle.ts)
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/player/corpus/ruffle
+          key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: node tests/player/corpus/fetch-ruffle.ts
+      # Saved before the run, which a failing run would otherwise prevent.
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: tests/player/corpus/ruffle
+          key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
+      - run: pnpm corpus

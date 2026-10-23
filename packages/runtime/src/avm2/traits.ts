@@ -13,7 +13,7 @@ import type {
   Value,
 } from "./descriptors.js";
 import type { Domain } from "./domain.js";
-import type { IndexHook, PropertyHook } from "./hooks.js";
+import type { ClassHook, IndexHook, PropertyHook } from "./hooks.js";
 import type { Multiname, Namespace } from "./names.js";
 import { invalidate } from "./property-cache.js";
 
@@ -54,6 +54,9 @@ export function instanceVarField(cls: AsObject, name: string): string | null {
 
   return null;
 }
+
+/** The builtins besides Object whose type tests isInstanceOf answers from the value, not its traits. */
+export const VALUE_TESTS = new Set(["float", "Number", "int", "uint", "String", "Boolean"]);
 
 /** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
 const TRAIT_Slot = 0;
@@ -101,6 +104,8 @@ export class Traits {
   refusesNames = false;
   /** How to allocate an instance, for classes whose instances hold native state. */
   create: ((traits: Traits) => AsObject) | null;
+  /** The class's own hook, a builtin's or a player's; not inherited, but a specialized Vector has its base's. */
+  hooks: ClassHook | null = null;
   /** How its instances resolve the names it does not bind, if not as dynamic properties. */
   properties: PropertyHook | null = null;
   /** Its own slots with [Transient] metadata, if any. */
@@ -125,6 +130,12 @@ export class Traits {
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
   index?: IndexHook["index"];
+  /**
+   * Whether a type test against these traits looks at more than an object's
+   * traits, as one against Object, a number type, String or Boolean does,
+   * which takes primitives: those builtins' own, not a class named as one.
+   */
+  testsValues = false;
 
   constructor(
     readonly name: string,
@@ -353,11 +364,28 @@ export class Traits {
     }
   }
 
+  /**
+   * The interfaces of this class and its bases, once none of them has one
+   * pending: from then on what isSubtypeOf answers no more changes, and
+   * a class that is not t answers by this alone, as `is` on a 3D
+   * engine's scene nodes asks every frame.
+   */
+  private allInterfaces: Set<Traits> | null = null;
+
   isSubtypeOf(t: Traits): boolean {
     for (let c: Traits | null = this; c; c = c.base) {
       if (c === t) {
         return true;
       }
+    }
+
+    // A class is a supertype only as a base; only interfaces are in the sets below.
+    if (!t.isInterface) {
+      return false;
+    }
+
+    if (this.allInterfaces !== null) {
+      return this.allInterfaces.has(t);
     }
 
     if (this.interfaces.has(t)) {
@@ -366,13 +394,23 @@ export class Traits {
 
     // An interface a base settled after this class copied its interfaces.
     this.settleInterfaces();
+    let settled = true;
+    const all = new Set<Traits>();
     for (let c: Traits | null = this; c; c = c.base) {
-      if (c.interfaces.has(t)) {
-        return true;
+      if (c.pendingInterfaces) {
+        settled = false;
+      }
+
+      for (const i of c.interfaces) {
+        all.add(i);
       }
     }
 
-    return false;
+    if (settled) {
+      this.allInterfaces = all;
+    }
+
+    return all.has(t);
   }
 }
 

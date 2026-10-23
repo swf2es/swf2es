@@ -11,8 +11,11 @@ import {
   BUILTIN_Int,
   BUILTIN_Number,
   BUILTIN_Object,
+  BUILTIN_Other,
   BUILTIN_String,
   BUILTIN_Uint,
+  TRAITS_Class,
+  TRAITS_Instance,
   TYPE_Any,
 } from "../link/traits";
 import { MethodEmitter } from "./method";
@@ -27,7 +30,9 @@ const CONVERTS: i32 = -2;
  * runtime's. For numbers and Booleans the relational operators and ==
  * are the same in both, NaN included; === is for any two primitives; and
  * == for two Strings, null included. A String compared otherwise would
- * convert as JavaScript does, which differs from AS3 for "0b1".
+ * convert as JavaScript does, which differs from AS3 for "0b1". Two
+ * objects that compare by identity (byIdentity) are JavaScript's == and
+ * === too: neither converts the other, and null == undefined in both.
  */
 export function compare(em: MethodEmitter, i: u32, op: u16, not: bool): void {
   const out = em.out;
@@ -42,15 +47,16 @@ export function compare(em: MethodEmitter, i: u32, op: u16, not: bool): void {
   }
 
   const strings = em.builtinOf(a) === BUILTIN_String && em.builtinOf(b) === BUILTIN_String;
+  const objects = byIdentity(em, a) && byIdentity(em, b);
   let js = "";
   let runtime = "";
   switch (op) {
     case ops.OP_equals:
-      js = numeric || strings ? " == " : "";
+      js = numeric || strings || objects ? " == " : "";
       runtime = "rt.equals(";
       break;
     case ops.OP_strictequals:
-      js = (af && bf) || (isPrimitive(em, a) && isPrimitive(em, b)) ? " === " : "";
+      js = (af && bf) || (isPrimitive(em, a) && isPrimitive(em, b)) || objects ? " === " : "";
       runtime = "rt.strictEquals(";
       break;
     case ops.OP_lessthan:
@@ -85,6 +91,38 @@ export function compare(em: MethodEmitter, i: u32, op: u16, not: bool): void {
   out.text(js);
   em.numberReg(b);
   out.text(")");
+}
+
+/**
+ * Whether register r holds null or an object that AS3's == compares by
+ * identity (AvmCore::equals): null itself, a class object, or an instance
+ * of a class or interface other than the builtins that compare otherwise.
+ * Those are XML, XMLList and QName, final, so no other class's instance
+ * is one, and Namespace, float and the primitives, builtins of their own;
+ * Object and * may be any of them.
+ */
+function byIdentity(em: MethodEmitter, r: i32): bool {
+  const type = em.regType[r];
+  const domain = em.domain;
+  if (type < 0) {
+    return false;
+  }
+
+  if (type === domain.nullType) {
+    return true;
+  }
+
+  if (
+    domain.builtin(type) !== BUILTIN_Other ||
+    type === domain.xmlType ||
+    type === domain.xmlListType ||
+    type === domain.qnameType
+  ) {
+    return false;
+  }
+
+  const kind = domain.traits.kind[type];
+  return kind === TRAITS_Instance || kind === TRAITS_Class;
 }
 
 /** Whether register r holds an int, uint, Number or Boolean now. */
@@ -287,7 +325,8 @@ export function keeps(em: MethodEmitter, type: i32, from: i32): bool {
     bt === BUILTIN_Any ||
     (bt === BUILTIN_Number &&
       (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number)) ||
-    upcast(em, type, from)
+    upcast(em, type, from) ||
+    nullStays(em, type, from)
   );
 }
 
@@ -300,6 +339,19 @@ function upcast(em: MethodEmitter, type: i32, from: i32): bool {
   return (
     isClassRef(em, type) && isClassRef(em, from) && em.domain.traits.subtypeOf(<u32>from, <u32>type)
   );
+}
+
+/**
+ * Whether a value of type `from` is null, which converting to `type` keeps:
+ * a String, an Object, and any class's instances are null as they are.
+ */
+function nullStays(em: MethodEmitter, type: i32, from: i32): bool {
+  if (from < 0 || from !== em.domain.nullType) {
+    return false;
+  }
+
+  const bt = em.domain.builtin(type);
+  return bt === BUILTIN_String || bt === BUILTIN_Object || isClassRef(em, type);
 }
 
 /** The conversion instructions: the value of src as the type they give. */
@@ -394,7 +446,7 @@ export function convert(
     }
   }
 
-  if (type === from || bt === BUILTIN_Any) {
+  if (type === from || bt === BUILTIN_Any || nullStays(em, type, from)) {
     operand(em, prefix, r);
     return;
   }

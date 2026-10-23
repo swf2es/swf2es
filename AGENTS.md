@@ -16,7 +16,8 @@ must give **identical output** in both modes.
 
 ```sh
 git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
-                              # vendor/pixijs (the Pixi fork the player draws with)
+                              # vendor/pixijs (the Pixi fork the player draws with), and
+                              # vendor/minimp3, vendor/zlib and vendor/lzma-sdk (C compiled to wasm)
 pnpm install
 pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
@@ -28,27 +29,34 @@ pnpm test:checked # the same with every array access bounds-checked
 pnpm determinism              # each module the same however it is compiled, and each method
                               # compiled alone its entry in the module (after the runners)
 pnpm oracle path/to/file.as   # print avmshell's output for a file (oracle:abcdump its dump)
+                              # what ASC, gcc and abcdump made is kept for every checkout in
+                              # ~/.cache/swf2es/oracle ($XDG_CACHE_HOME; SWF2ES_ORACLE_CACHE
+                              # names another directory)
 pnpm oracle:pull              # pull the oracle's pinned container image
 pnpm oracle:cases             # the unit tests' hand-built ABCs vs avmshell
 pnpm tamarin [prefix...]      # Tamarin acceptance tests vs baseline.json (about 10 minutes
                               # uncached; SWF2ES_ORACLE_JOBS sets parallelism, default 10)
 pnpm tamarin --update-baseline [prefix...]   # after an oracle or harness change
 pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests in swf2es, vs
-                              # swf2es-baseline.json (after pnpm tamarin compiled them)
+                              # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
-pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm2 and
-                              # timeline tests vs corpus/baseline.json (Chrome; about 5 minutes); --diff
-                              # shows where a failing test parts from Flash, --dump its whole trace
+pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm1, avm2
+                              # and timeline tests vs corpus/baseline.json (Chrome; about 5 minutes; CI's
+                              # corpus job); a regression shows where it parts from Flash, --diff does so
+                              # for every failing test, --dump with its whole trace
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
 node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks: the decoder
                               # and flow never trap, and decode a block the same after others
                               # (SWF2ES_CHECKED=1 for the checked build)
+node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib and LZMA: the
+                              # decoders never trap, refuse with CompressedDataError, and a
+                              # SWF that decodes has its prefix
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
 SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
@@ -103,22 +111,25 @@ node tools/pixijs.ts [--force]   # build vendor/pixijs's lib/ and the bundles sw
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
+node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
+                              # and Vectors (map, filter, sort, conversion), as the one above
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
-calling a change done; CI runs the same steps.
+calling a change done; CI runs the same steps, and `pnpm corpus` in a job
+of its own.
 
 ## Rules that must hold
 
 - **Codegen is pure.** No DOM or node APIs, no clock, no randomness, and a
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
-- **Package boundaries.** `format` depends on nothing, `codegen` and
-  `runtime` on `format`, `mp3` and `context3d` on nothing, `cli` on `format`,
-  `codegen` and `runtime`, `player` on those plus `context3d` and `mp3`,
-  `player-hosts` on `player`, `web` on `codegen`, `format`, `player` and
-  `player-hosts`. `codegen` never imports the runtime implementation.
-  `format`, `codegen`, `runtime` and `context3d`'s core load no DOM or node types. Apps
+- **Package boundaries.** `compress` depends on nothing, `format` on `compress`,
+  `codegen` and `runtime` on `format`, `mp3` and `context3d` on nothing,
+  `cli` on `format`, `codegen` and `runtime`, `player` on those plus `context3d`
+  and `mp3`, `player-hosts` on `player`, `web` on `codegen`, `format`, `player`
+  and `player-hosts`. `codegen` never imports the runtime implementation.
+  `compress`, `format`, `codegen`, `runtime` and `context3d`'s core load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.

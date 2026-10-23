@@ -12,6 +12,8 @@ import { decodeImageFile, decodeImages, hasUndecoded, imageFormat } from "../bit
 import { type Container, MovieClip, rootOf, unloads } from "../display/display.js";
 import { type BitmapPixels, type Library, readLibrary } from "../display/timeline.js";
 import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
+import { LoadedAvm1Input } from "../input/avm1.js";
+import { streamFrames } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
@@ -103,12 +105,26 @@ export class Loads {
     }
   }
 
+  streamFrames(): number {
+    if (this.avm1Movies.size === 0) {
+      return 0;
+    }
+
+    let frames = 0;
+    for (const movie of this.avm1Movies.values()) {
+      frames = Math.max(frames, streamFrames(movie.vm.sounds));
+    }
+
+    return frames;
+  }
+
   destroyAvm1(): void {
     for (const movie of this.avm1Movies.values()) {
       movie.vm.destroy(false);
     }
 
     this.avm1Movies.clear();
+    this.s.avm1Input = null;
   }
 
   /** Keep an asynchronous host task visible to settled(). */
@@ -318,7 +334,7 @@ export class Loads {
   /**
    * An AVM1 SWF's root, not yet on its first frame, as AS3 sees it: an
    * AVM1Movie, which is no InteractiveObject, so the pointer's hits on the
-   * movie go to its Loader (input/pointer.ts).
+   * movie's artwork go to its Loader; its own VM picks its buttons (input/avm1.ts).
    */
   private avm1Movie(library: Library): AsObject {
     const root = new MovieClip(library.root, library);
@@ -750,6 +766,9 @@ export class Loads {
       if (movie) {
         movie.vm.destroy(false);
         this.avm1Movies.delete(content.$display);
+        if (this.s.avm1Input?.remove(content.$display)) {
+          this.s.avm1Input = null;
+        }
       }
 
       unloads.count++;
@@ -912,8 +931,10 @@ export class Loads {
         localConnections: s.localConnections,
         realTime: s.timers.realTime,
       });
-      vm.attach(swf, library, root, load.bytes.length, s.frameRate);
+      vm.attach(swf, library, root, load.bytes.length, s.frameRate, s);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
+      s.avm1Input ??= new LoadedAvm1Input(s);
+      s.avm1Input.add(root, vm);
       avm1 = vm;
       root.enterFirstFrame();
     }

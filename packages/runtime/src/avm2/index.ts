@@ -15,16 +15,33 @@ export {
   Bytes,
   byteArrayHook,
   bytesOf,
+  canShareMemory,
   GLOBAL_MEMORY_MIN_SIZE,
+  notIsolated,
+  type SharedBytesMemory,
   setDomainMemory,
+  shareBytes,
+  sharedByteArray,
 } from "./natives/bytearray.js";
 export type { Natives } from "./natives/define.js";
 export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";
 // The builtins' natives and hooks, for a player that adds playerglobal's to them.
 export { builtinHooks, builtinNatives } from "./natives/index.js";
+export {
+  endShellWorker,
+  shellWorkerTerminated,
+  startShellWorker,
+} from "./natives/shell-workers.js";
 // avmplus' XML tokenizer, which playerglobal's flash.xml.XMLDocument parses with too.
 export { XMLParser, XMLTag } from "./natives/xml/parser.js";
-export type { RuntimeOptions, ShellFiles } from "./options.js";
+export type {
+  RuntimeOptions,
+  ShellFiles,
+  ShellThread,
+  ShellWorkerHost,
+  ShellWorkerInit,
+  ShellWorkersMemory,
+} from "./options.js";
 export { errorMessages } from "./player-messages.js";
 // A destroyed host must not remain reachable through shared inline-cache entries.
 export { invalidate as clearPropertyCaches } from "./property-cache.js";

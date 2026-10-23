@@ -1,6 +1,7 @@
 // What a host gives a runtime when it makes one, and what it does without.
 
 import type { Abc, CompileUnit } from "./descriptors.js";
+import type { SharedBytesMemory } from "./natives/bytearray.js";
 import type { Runtime } from "./runtime.js";
 
 export interface RuntimeOptions {
@@ -30,6 +31,53 @@ export interface RuntimeOptions {
    * SWF's.
    */
   swfVersion?: number;
+  /**
+   * What starts avmshell's background workers, each on a thread of its
+   * own; without it a Worker can be made but not started.
+   */
+  workers?: ShellWorkerHost;
+  /** The background worker this runtime runs, as its host's thread was given it; by default the primordial. */
+  worker?: ShellWorkerInit;
+}
+
+/** Starts the threads of avmshell's background workers. */
+export interface ShellWorkerHost {
+  /**
+   * Start a thread that runs `init`'s worker: a runtime made with
+   * `worker: init`, in which init.code runs as avmshell runs an ABC, or,
+   * when it is null, the ABCs the primordial was given, as
+   * createWorkerFromPrimordial has them. What it prints goes where the
+   * primordial's does.
+   */
+  start(init: ShellWorkerInit): ShellThread;
+  /**
+   * Make a shareable ByteArray's memory known to every thread of the
+   * primordial's, those started later too, before a shared property names
+   * it; without it, one is shared only with this thread.
+   */
+  share?(memory: SharedBytesMemory): void;
+  /** The memory another thread shared by `id`, or undefined if it has not come. */
+  shared?(id: number): SharedBytesMemory | undefined;
+}
+
+export interface ShellThread {
+  /** Stop the thread, wherever its code is. */
+  terminate(): void;
+}
+
+/** What a background worker's thread is given, which crosses to it as it is (structured clone). */
+export interface ShellWorkerInit {
+  /** The worker's number among those its primordial made, 0 being the primordial. */
+  id: number;
+  memory: ShellWorkersMemory;
+  /** The ABC it runs, or null for the primordial's. */
+  code: Uint8Array | null;
+}
+
+/** The memory the workers share: their states and parents, and their shared properties. */
+export interface ShellWorkersMemory {
+  control: ArrayBuffer | SharedArrayBuffer;
+  table: ArrayBuffer | SharedArrayBuffer;
 }
 
 /** avmshell's file system, as its File sees it. */

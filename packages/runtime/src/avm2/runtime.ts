@@ -72,7 +72,14 @@ import {
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
-import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
+import {
+  defaultPrint,
+  memoryFiles,
+  type RuntimeOptions,
+  type ShellFiles,
+  type ShellWorkerHost,
+  type ShellWorkerInit,
+} from "./options.js";
 import { errorMessages } from "./player-messages.js";
 import {
   cached,
@@ -123,6 +130,9 @@ export class Runtime {
     | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
   readonly files: ShellFiles;
+  /** See RuntimeOptions.workers and worker. */
+  readonly workerHost: ShellWorkerHost | null;
+  readonly workerInit: ShellWorkerInit | null;
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
@@ -150,6 +160,11 @@ export class Runtime {
   view: DataView = this.scratchMemory;
   memoryLength: number = this.scratchMemory.byteLength;
   memoryProvider: AsObject | null = null;
+  /**
+   * For domain memory another worker shares: its length read again, which
+   * that worker may have changed, before an address past it is rejected.
+   */
+  refreshMemory: (() => void) | null = null;
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
@@ -190,9 +205,12 @@ export class Runtime {
     this.debugger = options.debugger ?? false;
     this.compileAbc = options.compileAbc ?? null;
     this.files = options.files ?? memoryFiles();
+    this.workerHost = options.workers ?? null;
+    this.workerInit = options.worker ?? null;
     this.swfVersion = options.swfVersion ?? 31;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
+    this.objectTraits.testsValues = true;
     this.classTraits = new Traits("Class", this.objectTraits);
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
@@ -458,16 +476,13 @@ export class Runtime {
    * first definition of a name wins, so later modules cannot change it.
    */
   private definingScript(mn: Multiname): Script | null {
-    const known = (mn as Multiname & { $script?: Script }).$script;
+    const known = mn.script;
     if (known) {
       return known;
     }
 
     const script = this.findScript(mn);
-    if (script) {
-      (mn as Multiname & { $script?: Script }).$script = script;
-    }
-
+    mn.script = script;
     return script;
   }
 
@@ -490,19 +505,21 @@ export class Runtime {
     return chain;
   }
 
+  /**
+   * The global object of the script that defines `mn`, run first if it has
+   * not run. A module reads `mn.global` before calling this: once set it
+   * stays right, as the defining script never changes and initScript
+   * returns its global object without running it again.
+   */
   findDef(mn: Multiname): AsObject {
-    // A script already run, as nearly every `new` and call by name finds.
-    const known = (mn as Multiname & { $script?: Script }).$script;
-    if (known !== undefined && known.state === 2) {
-      return known.global as AsObject;
-    }
-
     const script = this.definingScript(mn);
     if (!script) {
       throw this.error("ReferenceError", 1065, mn.toString());
     }
 
-    return this.initScript(script);
+    const g = this.initScript(script);
+    mn.global = g;
+    return g;
   }
 
   /**
@@ -547,7 +564,9 @@ export class Runtime {
   private global(mn: Multiname, global: AsObject, strict: boolean): AsObject {
     const script = this.definingScript(mn);
     if (script) {
-      return this.initScript(script);
+      const g = this.initScript(script);
+      mn.global = g;
+      return g;
     }
 
     if (global != null && this.hasProperty(global, mn)) {
@@ -995,7 +1014,7 @@ export class Runtime {
       case BIND_Method:
         return this.methodClosure(o, traits, id);
       case BIND_Set: {
-        const slot = this.classHooks[traits.name]?.setOnlySlots?.[mn.name ?? ""];
+        const slot = traits.hooks?.setOnlySlots?.[mn.name ?? ""];
         if (slot !== undefined) {
           return o[slot];
         }
@@ -1753,11 +1772,11 @@ export class Runtime {
 
   /** A builtin class's hook; hooks are not inherited, but a specialized Vector has its base's. */
   private hookOf(cls: AsObject, kind: "construct" | "call"): ClassHook["construct"] | null {
-    // Looked up by name once, then kept on the class.
+    // Looked up once, then kept on the class.
     const key = kind === "construct" ? "$constructHook" : "$callHook";
     let hook = cls[key];
     if (hook === undefined) {
-      hook = this.classHooks[cls.$hook ?? cls.$it.name]?.[kind] ?? null;
+      hook = (cls.$it as Traits).hooks?.[kind] ?? null;
       cls[key] = hook;
     }
 
@@ -1776,6 +1795,7 @@ export class Runtime {
     );
     itraits.dynamic = base.$it.dynamic;
     itraits.refusesNames = base.$it.refusesNames;
+    itraits.hooks = base.$it.hooks;
     const cls = Object.create(Object.getPrototypeOf(base));
     cls.$d = null;
     cls.$it = itraits;
@@ -1783,7 +1803,6 @@ export class Runtime {
     cls.$base = base;
     cls.$prototype = base.$prototype;
     cls.$param = this.refOf(param);
-    cls.$hook = base.$it.name;
     itraits.cls = cls;
     return cls;
   }
@@ -1904,7 +1923,7 @@ export class Runtime {
   readonly defining = new Map<string, AsObject>();
 
   applyType(factory: AsObject, params: Value[]): AsObject {
-    const hook = this.classHooks[factory.$it.name]?.apply;
+    const hook = (factory.$it as Traits).hooks?.apply;
     if (!hook) {
       throw this.error("TypeError", 1127);
     }
@@ -2025,13 +2044,13 @@ export class Runtime {
       return this.applyType(base, [param ? this.resolveName(param) : null]);
     }
 
-    const cached = (mn as Multiname & { $cls?: AsObject }).$cls;
+    const cached = mn.cls;
     if (cached) {
       return cached;
     }
 
     const cls = this.getProperty(this.findDef(mn), mn);
-    (mn as Multiname & { $cls?: AsObject }).$cls = cls;
+    mn.cls = cls;
     return cls;
   }
 
@@ -2090,9 +2109,17 @@ export class Runtime {
   }
 
   isInstanceOf(v: Value, traits: Traits): boolean {
+    if (!traits.testsValues) {
+      if (v === null || v === undefined) {
+        return false;
+      }
+
+      // An object's own traits, mostly: traitsOf's instanceof checks walk its prototypes.
+      const own: Traits | undefined = v.$traits;
+      return own === traits || (own ?? this.traitsOf(v)).isSubtypeOf(traits);
+    }
+
     switch (traits.name) {
-      case "Object":
-        return v !== null && v !== undefined;
       case "float":
         return v instanceof FloatValue;
       case "Number":
@@ -2106,11 +2133,8 @@ export class Runtime {
       case "Boolean":
         return typeof v === "boolean";
       default:
-        if (v === null || v === undefined) {
-          return false;
-        }
-
-        return this.traitsOf(v).isSubtypeOf(traits);
+        // Object, whose instances are any value but null and undefined.
+        return v !== null && v !== undefined;
     }
   }
 
@@ -2202,17 +2226,21 @@ export class Runtime {
   }
 
   isTypeLate(v: Value, cls: Value): boolean {
+    // A class, which only class objects have instance traits for.
+    if (cls !== null && typeof cls === "object") {
+      const traits: Traits | undefined = cls.$it;
+      if (traits) {
+        return this.isInstanceOf(v, traits);
+      }
+    }
+
     // As Toplevel::toClassITraits: what is not an object, a Namespace
     // among them, as a null or undefined one is; an object not a class 1041.
     if (cls === null || typeof cls !== "object" || cls instanceof Namespace) {
       throw this.error("TypeError", cls === undefined ? 1010 : 1009);
     }
 
-    if (!cls.$it) {
-      throw this.error("TypeError", 1041);
-    }
-
-    return this.isInstance(v, cls);
+    throw this.error("TypeError", 1041);
   }
 
   asTypeLate(v: Value, cls: Value): Value {
@@ -2411,6 +2439,13 @@ export class Runtime {
       return floatValue(a.value + b.value);
     }
 
+    // As op_add: a String or a Date beside anything concatenates both as
+    // strings, so an object there is converted with the hint String
+    // (toString first), not without a hint as below.
+    if (typeof a === "string" || typeof b === "string" || this.isDate(a) || this.isDate(b)) {
+      return this.toString(a) + this.toString(b);
+    }
+
     if (typeof a === "object" && typeof b === "object" && a?.$traits?.properties) {
       const sum = a.$traits.properties.add(this, a, b);
       if (sum !== undefined) {
@@ -2436,11 +2471,12 @@ export class Runtime {
       return v;
     }
 
-    return this.toPrimitive(v, this.hintOf(v));
+    // No hint: a Date, whose hint is String, concatenated above.
+    return this.toPrimitive(v, "number");
   }
 
-  private hintOf(o: AsObject): "number" | "string" {
-    return this.traitsOf(o).name === "Date" ? "string" : "number";
+  private isDate(v: Value): boolean {
+    return typeof v === "object" && v !== null && v.$traits?.name === "Date";
   }
 
   equals(a: Value, b: Value): boolean {
@@ -2471,12 +2507,14 @@ export class Runtime {
       return false;
     }
 
+    // Without a hint, which is valueOf first, a Date's too: AvmCore::equals
+    // compares a Date with a String by its time, unlike ECMAScript.
     if (typeof a === "object") {
-      return this.equals(this.toPrimitive(a, this.hintOf(a)), b);
+      return this.equals(this.toPrimitive(a, "number"), b);
     }
 
     if (typeof b === "object") {
-      return this.equals(a, this.toPrimitive(b, this.hintOf(b)));
+      return this.equals(a, this.toPrimitive(b, "number"));
     }
 
     return this.toNumber(a) === this.toNumber(b);
@@ -2705,7 +2743,7 @@ export class Runtime {
 
   /** A value as avmplus names it in an error message. */
   describe(v: Value): string {
-    if (v === null || typeof v !== "object") {
+    if (v === null || typeof v !== "object" || v instanceof FloatValue || v instanceof Namespace) {
       return this.toString(v);
     }
 
@@ -2834,7 +2872,10 @@ export class Runtime {
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
     if (a < 0 || a + size > this.memoryLength) {
-      throw this.error("RangeError", 1506);
+      this.refreshMemory?.();
+      if (a < 0 || a + size > this.memoryLength) {
+        throw this.error("RangeError", 1506);
+      }
     }
 
     return a;

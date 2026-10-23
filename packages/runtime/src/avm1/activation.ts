@@ -13,6 +13,23 @@ export type Region = (cx: Activation, self?: Value, args?: Value[]) => Value;
 /** What the factory of a SWF's module gives: by block, its regions, its own code first. */
 export type Blocks = Region[][];
 
+/**
+ * A SWF's units (docs/avm1.md, "Units"): where its code goes on outside the
+ * home it was compiled within, as V.far asks for them.
+ */
+export interface Units {
+  /** The SWF's blocks, whose code the units are of too. */
+  readonly blocks: Blocks;
+  /**
+   * The regions of the unit for control at `at` in the SWF, in a region
+   * that ends at `end` whose actions' bytes end at `bound`, run as a SWF
+   * 5's function if `five`: its own code first, which returns where
+   * control goes on, an offset in the SWF, -1 where the region ends, -2
+   * where it returns `cx.ret`.
+   */
+  unit(at: number, end: number, bound: number, five: boolean): Region[];
+}
+
 /** A function's `arguments`, made as its activation object is first asked for it. */
 export const PENDING_Arguments = 1;
 /** A function's `super`, likewise. */

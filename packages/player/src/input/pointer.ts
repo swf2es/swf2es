@@ -16,6 +16,7 @@ import {
   CONTENT,
   Container,
   type DisplayObject,
+  type MovieClip,
   pickWork,
   ShapeObject,
   StaticTextObject,
@@ -139,6 +140,8 @@ export function hitAreaOf(sprite: DisplayObject): DisplayObject | null {
  * The area itself is left as it was, mouseEnabled and all, as adl leaves
  * it: shown and enabled, it takes the pointer itself where it is on top,
  * as Flash's documentation warns. Ruffle reads AVM2's hitArea for nothing.
+ * With `avm1`, a loaded movie may stand in for an AVM1 button: the host
+ * routes that hit to its VM rather than dispatching an AS3 mouse event.
  */
 export function pointerTarget(
   stage: Container,
@@ -146,6 +149,7 @@ export function pointerTarget(
   y: number,
   width: number,
   height: number,
+  avm1?: (root: MovieClip, x: number, y: number) => boolean,
 ): DisplayObject | null {
   if (x < 0 || y < 0 || x >= width || y >= height) {
     return null;
@@ -197,6 +201,10 @@ export function pointerTarget(
 
     const lx = d === stage ? px : at.x;
     const ly = d === stage ? py : at.y;
+    if (d.avm1Root && avm1) {
+      return avm1(d as MovieClip, x, y) ? d : drawn(d, px, py) ? PROPAGATE : null;
+    }
+
     // A button is hit where its hit test state is, whatever state it shows,
     // and is the target itself, its states' objects never. The hit test
     // state is in no container: it is tested as the button's child.
@@ -238,7 +246,7 @@ export function pointerTarget(
     let propagated = false;
 
     for (let i = children.length - 1; i >= 0; i--) {
-      if (!isInteractive(children[i])) {
+      if (!isInteractive(children[i]) && !(avm1 && children[i].avm1Root)) {
         continue;
       }
 
@@ -586,6 +594,11 @@ export class PointerInput implements Pointer {
     private readonly keyboard: KeyboardInput | null = null,
   ) {}
 
+  private pick(p: PointerState): DisplayObject | null {
+    const s = this.scripting;
+    return pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight, s.avm1Input?.hit);
+  }
+
   /** Flash has one active drag for the whole stage, independent of mouse button state. */
   startDrag(target: DisplayObject, lockCenter: boolean, bounds: Rect | null): void {
     this.drag = {
@@ -697,6 +710,7 @@ export class PointerInput implements Pointer {
       if (!this.held) {
         this.handled++;
         this.redraws++;
+        this.redraws += this.scripting.avm1Input?.leave(p) ?? 0;
         this.leave(p);
         this.updateCursor();
       }
@@ -710,7 +724,7 @@ export class PointerInput implements Pointer {
     // the release it was, there, and the leave after it where that is outside.
     if (type === "move" && this.held && p.buttons !== undefined && !(p.buttons & 1)) {
       this.handle("up", { ...p, button: 0 });
-      if (!pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight)) {
+      if (!this.pick(p)) {
         this.handle("leave", p);
       }
 
@@ -727,10 +741,14 @@ export class PointerInput implements Pointer {
     s.mouseStageY = p.y;
     this.last = p;
     this.updateDrag();
+    s.avm1Input?.broadcast(type, p);
     this.picked = pickWork.changes;
-    const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
-    // Outside the stage while the button is down, the mouse is still the stage's.
-    const target = found ?? (this.held && this.stage.object ? this.stage : null);
+    const found = this.pick(p);
+    this.redraws += s.avm1Input?.prepare(type, p, found) ?? 0;
+    // AVM1 buttons send no AS3 events. Outside, a held mouse stays the stage's.
+    const target = found?.avm1Root
+      ? null
+      : (found ?? (this.held && this.stage.object ? this.stage : null));
     if (found) {
       this.gone = false;
     }
@@ -770,6 +788,10 @@ export class PointerInput implements Pointer {
       // A press or a release is a user's gesture, in whose handlers alone a
       // script may write to the clipboard: not the hover's events around it.
       this.scripting.clipboard.gesture(() => this.button(type, target, p));
+    }
+
+    if (type !== "move") {
+      this.redraws += s.avm1Input?.finish(type, p) ?? 0;
     }
 
     if (!moved) {
@@ -837,8 +859,11 @@ export class PointerInput implements Pointer {
     if (p && !this.gone && this.picked !== pickWork.changes) {
       const s = this.scripting;
       this.picked = pickWork.changes;
-      const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
-      const target = found ?? (this.held && this.stage.object ? this.stage : null);
+      const found = this.pick(p);
+      this.redraws += s.avm1Input?.sync(p, found) ?? 0;
+      const target = found?.avm1Root
+        ? null
+        : (found ?? (this.held && this.stage.object ? this.stage : null));
       const over = target === this.stage ? null : target;
       if (over !== this.hover) {
         this.handled++;
@@ -1022,6 +1047,11 @@ export class PointerInput implements Pointer {
       if (forced) {
         return forced;
       }
+    }
+
+    const legacy = s.avm1Input?.cursor();
+    if (legacy) {
+      return legacy;
     }
 
     const d = this.hover;

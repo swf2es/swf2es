@@ -50,6 +50,8 @@ export interface RunOptions {
   csp?: string;
   /** The served page to open, by its path: page.ts's by default. */
   page?: string;
+  /** Whether the page is cross-origin isolated, as it is by default (serve.ts). */
+  isolated?: boolean;
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -152,8 +154,8 @@ export async function withPage<T>(
   gpu = false,
   options: RunOptions = {},
 ): Promise<T> {
-  const { timeout, mounts, csp, page = "" } = options;
-  const { server, url } = await serve(mounts, csp);
+  const { timeout, mounts, csp, page = "", isolated = true } = options;
+  const { server, url } = await serve(mounts, csp, isolated);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
   try {

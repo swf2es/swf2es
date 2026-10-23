@@ -3,10 +3,11 @@
 // object and its methods bound to the scope chain it is made in.
 
 import type { Abc, AsObject, ClassDesc, Method, Scope, Value } from "./descriptors.js";
-import { type Multiname, qualifiedName } from "./names.js";
+import { firstDefinition } from "./domain.js";
+import { type Multiname, NS_Public, qualifiedName } from "./names.js";
 import { invalidate } from "./property-cache.js";
 import type { Runtime } from "./runtime.js";
-import { BIND_Set, methodKey, Traits } from "./traits.js";
+import { BIND_Set, methodKey, Traits, VALUE_TESTS } from "./traits.js";
 
 /**
  * As OP_newclass: a class from its module's descriptor, extending `base`,
@@ -50,20 +51,30 @@ export function newClass(
     }
   }
 
+  // A builtin or a player's class, whose hook and type tests are its own,
+  // is the first definition of its name, as avmplus' natives belong to
+  // their ABC; a top-level one is public. A class only named as one, as a
+  // file's own internal Boolean is, is a class like any other.
+  const ns = name.namespaces[0];
+  const own =
+    (ns?.kind === NS_Public || !!ns?.uri) &&
+    firstDefinition(name.domain ?? rt.root, name)?.abc === abc;
   const baseTraits: Traits | null = base ? base.$it : null;
   let itraits: Traits;
-  if (qualified === "Object") {
+  if (own && qualified === "Object") {
     itraits = rt.objectTraits;
-  } else if (qualified === "Class") {
+  } else if (own && qualified === "Class") {
     itraits = rt.classTraits;
-  } else if (qualified === "Function") {
+  } else if (own && qualified === "Function") {
     itraits = rt.functionTraits;
   } else {
     itraits = new Traits(qualified, baseTraits);
+    itraits.testsValues = own && VALUE_TESTS.has(qualified);
   }
 
   itraits.describe(desc.instance);
-  const hooks = rt.classHooks[qualified];
+  const hooks = own ? rt.classHooks[qualified] : undefined;
+  itraits.hooks = hooks ?? null;
   itraits.dynamic = !desc.sealed;
   itraits.final = desc.final;
   itraits.isInterface = desc.interface;

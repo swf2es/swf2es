@@ -16,6 +16,8 @@ test("integer type checks include negative zero and enforce the signed and unsig
   const rt = avm2.createRuntime();
   const int = new Traits("int", null);
   const uint = new Traits("uint", null);
+  int.testsValues = true;
+  uint.testsValues = true;
   const cases = [
     [-0, true, true],
     [0, true, true],

@@ -943,10 +943,14 @@ const TRIANGLES_SOURCE = `package {
       for (var i:int = 0; i < COUNT; i++) {
         var square:int = i >> 1;
         var at:int = (square / side) * (side + 1) + square % side;
-        if (i & 1) {
-          indices.push(at + 1, at + side + 2, at + side + 1);
+        // Every other square wound the other way, so that culling drops half the triangles.
+        var a:int = i & 1 ? at + 1 : at;
+        var b:int = i & 1 ? at + side + 2 : at + 1;
+        var c:int = at + side + 1;
+        if (square & 1) {
+          indices.push(a, c, b);
         } else {
-          indices.push(at, at + 1, at + side + 1);
+          indices.push(a, b, c);
         }
       }
 

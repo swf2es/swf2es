@@ -18,6 +18,7 @@ import {
   IR_CallSetter,
   IR_CheckNull,
   IR_Coerce,
+  IR_ConstructSlot,
   IR_FindPropGlobal,
   IR_FindPropGlobalStrict,
   IR_GetGlobalScope,
@@ -361,6 +362,7 @@ export class MethodEmitter {
       case ops.OP_callproplex:
       case ops.OP_callpropvoid:
       case ops.OP_constructprop:
+      case IR_ConstructSlot:
       case ops.OP_construct:
       case ops.OP_newfunction:
       case ops.OP_newclass:
@@ -2034,8 +2036,12 @@ export class MethodEmitter {
         this.globalScope();
         return true;
       case ops.OP_finddef:
+        // The name keeps its script's global object once found, so a static
+        // read in a loop costs a load and no call.
         this.assign(i);
-        out.text("rt.findDef(M[");
+        out.text("M[");
+        out.uint(a);
+        out.text("].global ?? rt.findDef(M[");
         out.uint(a);
         out.text("])");
         return true;
@@ -2043,6 +2049,9 @@ export class MethodEmitter {
       case IR_FindPropGlobalStrict:
         this.assign(i);
         // Not found statically: a script's name, or else the global object's.
+        out.text("M[");
+        out.uint(a);
+        out.text("].global ?? ");
         out.text(op === IR_FindPropGlobalStrict ? "rt.findGlobalStrict(M[" : "rt.findGlobal(M[");
         out.uint(a);
         out.text("], ");
@@ -2134,6 +2143,16 @@ export class MethodEmitter {
             out.text("rt.float(");
           }
 
+          // An Array's element read in place, so that each site keeps its own
+          // feedback in the engine: a hole, a number that is no index, null
+          // and undefined read none, and getIndexed finds them as before.
+          if (this.arrayElements(a, src)) {
+            this.receiver(src);
+            out.text(".$a[");
+            this.reg(src + 1);
+            out.text("] ?? ");
+          }
+
           out.text(kind.length ? "rt.vectorGet" : "rt.getIndexed(");
           if (kind.length) {
             out.text(kind);
@@ -2163,6 +2182,35 @@ export class MethodEmitter {
       case ops.OP_setproperty:
         if (this.indexed(a, src + 1)) {
           const kind = this.vectorKind(this.regType[src]);
+          // An Array's element below its length written in place, as
+          // setIndexed writes it; the receiver read first, as the call
+          // reads it first. Anything else goes to setIndexed.
+          if (this.arrayElements(a, src)) {
+            const index = this.builtinOf(src + 1);
+            out.text("if (");
+            this.receiver(src);
+            out.text(".$a.length > ");
+            this.reg(src + 1);
+            if (index === BUILTIN_Int) {
+              out.text(" && ");
+              this.reg(src + 1);
+              out.text(" >= 0");
+            } else if (index !== BUILTIN_Uint) {
+              out.text(" && ");
+              this.reg(src + 1);
+              out.text(" >>> 0 === ");
+              this.reg(src + 1);
+            }
+
+            out.text(") ");
+            this.reg(src);
+            out.text(".$a[");
+            this.reg(src + 1);
+            out.text("] = ");
+            this.reg(src + 2);
+            out.text("; else ");
+          }
+
           out.text(kind.length ? "rt.vectorSet" : "rt.setIndexed(");
           if (kind.length) {
             out.text(kind);
@@ -2277,6 +2325,15 @@ export class MethodEmitter {
         out.text("rt.construct(");
         this.reg(src);
         this.args(src + 1, a);
+        out.text(")");
+        return true;
+      case IR_ConstructSlot:
+        this.assign(i);
+        out.text("rt.construct(");
+        this.member(src);
+        out.text(".$");
+        out.uint(a);
+        this.args(src + 1, ir.b[i]);
         out.text(")");
         return true;
       case ops.OP_call:
@@ -2620,6 +2677,47 @@ export class MethodEmitter {
     return this.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && isNumber(this, r);
   }
 
+  /**
+   * Whether the indexed access by multiname `a` on register r reads an
+   * Array's elements, as getIndexed and setIndexed do: r an Array, or of a
+   * class that extends it, and a public namespace in the set.
+   */
+  arrayElements(a: u32, r: i32): bool {
+    const domain = this.domain;
+    const t = this.regType[r];
+    return (
+      t >= 0 &&
+      domain.arrayType >= 0 &&
+      domain.traits.subtypeOf(<u32>t, <u32>domain.arrayType) &&
+      domain.hasPublicNamespace(this.index, a)
+    );
+  }
+
+  /**
+   * Register r read before a `.`, null checked unless it is known not to
+   * be null here: `(r ?? nn(r))` or `r`.
+   */
+  receiver(r: i32): void {
+    const copy = this.copyOf[r];
+    const checked = copy === NONE ? r : copy;
+    if (r !== this.pendingNull && checked >= 0 && this.checked[checked]) {
+      this.read(r);
+      return;
+    }
+
+    this.out.byte(0x28); // (
+    if (r === this.pendingNull) {
+      this.reg(r);
+    } else {
+      this.checkedRead(r);
+      if (checked >= 0) {
+        this.checked[checked] = 1;
+      }
+    }
+
+    this.out.byte(0x29); // )
+  }
+
   /** `, r, r+1, ...` for `count` arguments from register `from`. */
   args(from: i32, count: u32): void {
     for (let k: u32 = 0; k < count; k++) {
@@ -2722,6 +2820,7 @@ function readsFirst(op: u16): bool {
     case ops.OP_callproplex:
     case ops.OP_callpropvoid:
     case ops.OP_constructprop:
+    case IR_ConstructSlot:
     case ops.OP_callsuper:
     case ops.OP_callsupervoid:
     case ops.OP_getsuper:

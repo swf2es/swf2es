@@ -25,10 +25,15 @@ import { customContextMenu, type MenuItem } from "./input/context-menu.js";
 import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
 import { type Pointer, PointerInput, type PointerState } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
+import { soundHostOf, streamFrames } from "./media/sounds.js";
 import type { Scripting } from "./scripting.js";
 
-/** Frames one advance() may run at most, however fast the SWF and slow the display. */
+/** Ordinary frames one advance() may run at most, however fast the SWF and slow the display. */
 const MAX_FRAMES_PER_CALL = 5;
+/** A stream may catch up further when its scripts are cheap; input still gets a bounded turn. */
+const MAX_STREAM_FRAMES = 60;
+const MIN_STREAM_BUDGET_MS = 8;
+const MAX_STREAM_BUDGET_MS = 50;
 /** The host's recent calls to advance() whose lower median is its typical interval. */
 const INTERVALS = 9;
 /** Calls seen before the typical interval is trusted; until then, a frame per call at most. */
@@ -361,9 +366,9 @@ export class Player {
 
   /**
    * Play what `dt` milliseconds are worth, as Flash paces: frames on a
-   * grid of the frame rate's duration, and those a long frame or a stall
-   * lost dropped, not caught up with. Flash runs the frame due at once
-   * after an overrun and the next one at its slot on the grid, never two
+   * grid of the frame rate's duration. Without streamed audio, those a
+   * long frame or a stall lost are dropped, not caught up with. Flash runs
+   * the frame due at once after an overrun and the next at its grid slot, never two
    * back to back (measured in adl, docs/architecture.md), so content that
    * moves by the time between frames always sees time pass between them.
    * A call runs as many frames as the host's typical interval holds, the
@@ -379,7 +384,9 @@ export class Player {
    * frames a call would wait twice as long. A `dt` that is
    * not a finite positive number counts as none. A host playing in real
    * time calls this each animation frame; the tests step frames with
-   * tick(). Returns how many frames it played.
+   * tick(). A stream's device cursor can request a bounded batch of frames
+   * to catch its timeline up, with scripts and events on each; the host
+   * draws once after the batch. Returns how many frames it played.
    */
   advance(dt: number, busy = 0): number {
     if (this.stopped) {
@@ -447,20 +454,59 @@ export class Player {
       rest %= frame;
     }
 
+    // Streamed audio keeps running through render lag. Catch its timeline
+    // up in bounded batches, without drawing the intermediate frames or
+    // changing the pacing of movies with only event sounds.
+    const ordinary = n;
+    if (!holding && !resuming) {
+      n = Math.max(n, Math.min(MAX_STREAM_FRAMES, this.streamFrames()));
+    }
+
+    // Render lag leaves fewer calls to do the same timeline work. Give
+    // those calls more CPU time, while still yielding between batches.
+    const deadline =
+      n > ordinary
+        ? performance.now() +
+          Math.max(MIN_STREAM_BUDGET_MS, Math.min(MAX_STREAM_BUDGET_MS, passed / 2))
+        : Infinity;
     timers?.hostPassed(passed);
+    const deferRender = n > 1;
+    let ran = false;
     try {
       for (let i = 0; i < n; i++) {
+        if (
+          i >= ordinary &&
+          (this.streamFrames() === 0 ||
+            (i > 0 &&
+              (performance.now() >= deadline ||
+                (this.scripting?.heldTime() && this.scripting.holdsFrame()))))
+        ) {
+          n = i;
+          break;
+        }
+
         // Owed as each frame starts: a frame that throws leaves those after it owed.
-        this.owed = rest + (n - 1 - i) * frame;
+        this.owed = rest + Math.max(0, ordinary - 1 - i) * frame;
         timers?.frameAt((n - 1 - i) * frame, rest);
-        this.tick();
+        ran = true;
+        this.tick(!deferRender);
       }
+    } catch (error) {
+      if (ran && deferRender) {
+        this.scripting?.renderFrame([error]);
+      }
+
+      throw error;
     } finally {
       timers?.frameAt(Number.NaN, Number.NaN);
       this.lastRan = n;
       if (resuming) {
         timers?.release();
       }
+    }
+
+    if (ran && deferRender) {
+      this.scripting?.renderFrame();
     }
 
     // Flash fires timers shorter than a frame between frames too: a call
@@ -470,9 +516,19 @@ export class Player {
       timers?.betweenFrames(frame);
       // An AVM1 SWF's setInterval timers too.
       this.avm1?.idle();
+      this.scripting?.renderPending();
     }
 
     return n;
+  }
+
+  private streamFrames(): number {
+    if (this.avm1) {
+      return streamFrames(this.avm1.sounds);
+    }
+
+    const s = this.scripting;
+    return s ? Math.max(streamFrames(soundHostOf(s)), s.loads.streamFrames()) : 0;
   }
 
   /** `dt` recorded, and the lower median of the recent intervals; 0 until there are a few. */
@@ -504,8 +560,9 @@ export class Player {
    * before children, loaded SWFs' too, and the orphans a script took off it,
    * which play on; all of them, found first, so that one a parent's frame
    * takes off still has its frame, as in Flash. Then the frame's scripts.
+   * A batch defers rendering until its last frame has played.
    */
-  tick(): void {
+  tick(render = true): void {
     this.applyActive();
     // An AVM1 SWF halted at what Flash cannot read plays no more.
     if (this.stopped || this.avm1?.halted) {
@@ -581,7 +638,7 @@ export class Player {
     }
 
     if (this.scripting) {
-      this.scripting.frame(this.stage);
+      this.scripting.frame(this.stage, true, render);
       this.frameRate = this.scripting.frameRate;
     }
   }

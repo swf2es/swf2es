@@ -46,9 +46,12 @@ export {
   Halt,
   NotYet,
   type Operations,
+  OwnUnits,
   type Region,
   Runtime,
   TimedOut,
+  type Units,
+  type UnitTable,
 } from "./runtime.js";
 export { Scope, targetPath } from "./scope.js";
 export { getUrlMethod } from "./urls.js";

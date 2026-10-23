@@ -16,6 +16,7 @@ import type { FetchRequest } from "../../../../packages/player/dist/hosts.js";
 import { pointerTarget } from "../../../../packages/player/dist/input/pointer.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
+import { flashAssembler, script } from "../../../avm1-script.ts";
 import { bare, innerSwf } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
@@ -712,6 +713,36 @@ test("an AVM1 SWF from a URL comes as an AS3 one's content does, its INIT and CO
 
   assert.deepEqual(frames, [1, 2, 1, 2]);
 });
+
+for (const bytes of [false, true]) {
+  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const actions = script(`trace(Stage.width + " " + Stage.height);`, 8)(flashAssembler());
+    const inner = avm1Swf([w.doAction([...actions.end().bytes()])]);
+    const { scripting, player, loader } = await avm1Loading({
+      print: (line) => lines.push(line),
+      fetch: async () => ({ bytes: inner, status: 200, headers: [] }),
+    });
+    if (bytes) {
+      scripting.loads.requestLoad(loader, inner);
+    } else {
+      scripting.loads.requestLoadUrl(loader, "avm1.swf");
+      await scripting.settled();
+    }
+
+    player.tick();
+    if (bytes) {
+      assert.deepEqual(lines, []);
+      player.tick();
+    }
+
+    assert.deepEqual(lines, [`${player.width} ${player.height}`]);
+    assert.notDeepEqual([player.width, player.height], [30, 20]);
+    player.destroy();
+  });
+}
 
 test("an AVM1 SWF from bytes comes at the end of the frame, its context's parameters on it", {
   skip,

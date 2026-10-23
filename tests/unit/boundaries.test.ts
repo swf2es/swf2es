@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 // package.json lists, so the build already rejects imports that are not
 // declared; this test guards the declarations themselves.
 const allowed: Record<string, string[]> = {
-  format: [],
+  compress: [],
+  format: ["compress"],
   mp3: [],
   context3d: [],
   codegen: ["format"],
@@ -27,11 +28,11 @@ const vendored: Record<string, { dir: string; users: string[] }> = {
 };
 
 // C-only libraries are compiled by their wrapper packages, rather than linked by pnpm.
-const nativeVendor = ["minimp3"];
+const nativeVendor = ["lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
-const portable = ["format", "codegen", "runtime"];
+const portable = ["compress", "format", "codegen", "runtime"];
 
 const root = new URL("../../packages/", import.meta.url);
 const appsRoot = new URL("../../apps/", import.meta.url);

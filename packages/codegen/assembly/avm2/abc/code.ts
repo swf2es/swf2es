@@ -16,7 +16,7 @@
 //
 // One BodyDecoder serves every body of every ABC (bodyDecoder): its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
-import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
+import { IR_CheckNull, IR_Coerce, IR_ConstructSlot, Ir } from "../ir/ir";
 import { Domain, LOG_None, LOG_Verify } from "../link/domain";
 import { Scope, TYPE_Any } from "../link/traits";
 import { BIND_Ambiguous, canAssign, commonBase, isNumeric } from "../link/types";
@@ -1798,7 +1798,15 @@ export class BodyDecoder {
         this.checkNull(obj);
         this.rowC = ctraits;
         const itraits = domain.instanceTraitsOf(ctraits);
-        return this.popPush(n, itraits, itraits === TYPE_Any ? 0 : NOT_NULL);
+        const pushed = this.popPush(n, itraits, itraits === TYPE_Any ? 0 : NOT_NULL);
+        // A name bound to a slot, as `new` of a script's class names one:
+        // what the slot holds, constructed, with no lookup by name.
+        const kind = found & 7;
+        if (pushed && (kind === 2 || kind === 3) && n === b + 1) {
+          return this.emitOn(IR_ConstructSlot, <i32>obj, <i32>obj, n, found >> 3, b, ctraits);
+        }
+
+        return pushed;
       }
       case ops.OP_applytype:
         return this.popPush(a + 1, TYPE_Any, NOT_NULL);
