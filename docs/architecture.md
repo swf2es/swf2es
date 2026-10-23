@@ -749,9 +749,14 @@ avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
 default. Date is JavaScript's Date, with avmplus' string formats.
 flash.concurrent's Mutex and Condition and ByteArray's atomic operations
 are avmplus' on its one thread: locks are counted, a wait ends at once, as
-nothing else can notify it, and Worker.current is the primordial worker,
-the one there is (`natives/concurrent.ts`); starting another is not
-supported. Crossbridge's code uses them all as it starts.
+nothing else can notify it (`natives/concurrent.ts`). Crossbridge's code
+uses them all as it starts. avmshell's Worker and WorkerDomain
+(`natives/shell.ts`, `natives/shell-workers.ts`) keep each worker's state,
+parent and shared properties in memory every thread sees, a
+SharedArrayBuffer, so that one worker sees at once what another set, and
+start each background worker on a thread of `RuntimeOptions.workers`, the
+host's, which runs a runtime made with that worker's `RuntimeOptions.worker`
+(see [workers.md](workers.md)).
 
 ### Application domains
 
@@ -928,7 +933,12 @@ with a VerifyError, or an exception nothing catches, is printed there as
 avmshell prints it (`VerifyError: Error #1107`, `TypeError: Error
 #1009`), and ends the run with avmshell's exit status, 1. avmshell's `File`
 reads and writes the working directory. A SWF is refused: its code needs
-the player's playerglobal, which the command does not depend on.
+the player's playerglobal, which the command does not depend on. avmshell's
+background workers run on node's threads (`threads.ts`, each thread
+`shell-thread.ts`): each compiles its libraries and its code, the ABCs
+given or those of `createWorkerFromByteArray`, with codegen.wasm's module
+posted to it, and writes what it prints to stdout itself. They stop when
+the ABCs given end, as avmshell interrupts its workers then.
 
 The command and the tests that run ABCs share one host, `runShell` in
 `shell.ts`: one compiler domain for the runtime, each ABC compiled into the
@@ -938,7 +948,9 @@ findings the runtime reports (`RuntimeOptions.compileAbc`). The
 conformance runner and the Tamarin runner give it the test build of
 codegen (`tests/conformance/abc-compiler.ts`), which `pnpm test:checked`
 checks every array access of, a loader that keeps source maps, and for
-Tamarin the builtins' modules compiled once for every test.
+Tamarin the builtins' modules compiled once for every test. Their
+background workers' threads compile with the release build, and post
+what they print back to the runner's lines.
 
 ## Compiling ahead of time and caching modules
 

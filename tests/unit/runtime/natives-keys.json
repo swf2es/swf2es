@@ -345,6 +345,7 @@
   "avmplus::System.isGlobal",
   "avmplus::System.pauseForGCIfCollectionImminent",
   "avmplus::System.queueCollection",
+  "avmplus::System.sleep",
   "avmplus::System.trace",
   "avmplus::System.write",
   "avmplus::describeTypeJSON",

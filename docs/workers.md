@@ -4,8 +4,7 @@ What ActionScript 3's workers (`flash.system.Worker`, `WorkerDomain`,
 `MessageChannel`, shared properties, a shareable `ByteArray` and
 `flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, how they map
 onto a browser's and node's threads, and the order to build them in. The
-first slice is built (see [Slice 1](#slice-1-message-passing-workers)); the
-rest is the plan.
+first two slices are built (see [Slices](#slices)); the rest is the plan.
 
 ## What content needs
 
@@ -16,22 +15,19 @@ them all with every assertion passing (`tests/tamarin/baseline.json`; four
 print nondeterministic output, so only their counts are compared). Its API is
 the shell's own, not Flash's: `WorkerDomain.createWorkerFromPrimordial()` and
 `createWorkerFromByteArray(bytes)`, no `MessageChannel`, no events, and
-`avmplus.System.sleep` to wait. swf2es's runtime, as avmshell's
-`natives/shell.ts`, keeps the primordial's shared properties as avmshell
-does (the `worker-shared-properties` conformance case: an object copied by
-AMF3 at the set and at each get, a ByteArray, Mutex or Condition kept as
-itself) and throws "not supported" on creating a worker, so, by
+`avmplus.System.sleep` to wait. Since slice 2, swf2es runs them as avmshell
+does, its background workers on node's threads (see
+[avmshell's workers](#avmshells-workers)), so, by
 `tests/tamarin/swf2es-baseline.json` (assertions passed and failed before
 the test stops):
 
 | Test | Needs | swf2es now |
 |------|-------|------------|
-| `Worker`, `WorkerDomain` | create, start, terminate, state, `listWorkers`, errors 1511 | 1 passed 2 failed, and 3 passed 1 failed: what precedes the first creation |
-| `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | the same | stop at the first creation, no assertion run |
+| `Worker`, `WorkerDomain`, `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | create, start, terminate, state, `listWorkers`, errors 1511 | as avmshell (8, 9, 2, 2, 1 and 1 passed); before slice 2 they stopped at the first creation, 4 assertions passed of 23 |
 | `ConditionAndMutexAPI` | Mutex and Condition on one thread | passes (12/12) |
 | `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` | 14/17: the three `shareable` assertions |
-| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | 5 passed 1 failed of the six before the first creation, where it stops |
-| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | stop at the first creation |
+| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | the six assertions on one thread pass; it stops where it passes the shareable ByteArray to the worker |
+| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | stop where they pass the shareable ByteArray to the first worker |
 
 The last three are what real threads need: the primordial spins reading
 the shared bytes while five workers write them, and takes the shared Mutex
@@ -328,6 +324,66 @@ Recommended: spin (1) now, with the 15 s limit; reconsider 3 on its own
 merits, as the render-worker evaluation planned, and let it take over
 blocking if it lands.
 
+### avmshell's workers
+
+The runtime's shell natives (`natives/shell.ts`) run avmshell's Worker
+and WorkerDomain as avmplus' Aggregate and Isolate do, with
+`natives/shell-workers.ts` keeping what every thread must see in memory
+they share (`ShellWorkersMemory`, two growable SharedArrayBuffers): each
+worker's state and parent, by its number (0 the primordial), and every
+worker's shared properties in one table under a lock, with a version that
+tells a VM when to read it again. A property set on any thread is seen by
+the next get on any other, so a primordial that waits in `System.sleep`
+(an `Atomics.wait`) for a worker's answer sees it, as in avmshell. Values
+are kept as avmplus' ChannelItem keeps them: a Number as itself, a
+ByteArray's bytes copied at the set (the VM that set it gets its own
+object back, another one object of its own for the item), anything else
+as AMF3. A shareable ByteArray, a Mutex or a Condition stays with the VM
+that set it: setting one on another worker, or reading one another worker
+set, throws "not supported" until slices 3 and 4 share them.
+
+A thread may be stopped anywhere, so none is stopped holding the lock:
+`terminate` marks the worker, and the workers it started, theirs and so
+on, `terminated` and lets their properties go while it holds the lock,
+and only then stops the thread. A terminated worker never takes the lock
+again: its next property access throws, which ends its code, as a
+worker another one terminated, whose thread it does not hold, ends at
+that access too. A worker that ends marks itself under the lock as well.
+
+The runtime knows no threads: `RuntimeOptions.workers`, a host, starts
+one for a worker, given its `ShellWorkerInit` (its number, the memory, and
+its code or null for the primordial's), and the thread makes a runtime
+with `RuntimeOptions.worker` set to it. The CLI's host (`threads.ts`)
+starts a `worker_threads` Worker on `shell-thread.js`, posted codegen's
+compiled module, the libraries and the primordial's ABCs; it marks the
+worker running (`startShellWorker`), runs its code with `runShell` and,
+when that ends, marks it terminated, or `exception` after an exception
+nothing caught, and lets its properties go (`endShellWorker`). The
+workers it started run on, as in avmshell: their threads are its
+thread's, so it waits for them before it ends. `swf2es
+run`, the conformance runner and the Tamarin runner all give it, the
+last two with their lines posted back to the runner, the CLI with each
+thread writing to stdout itself.
+
+Where swf2es differs from the oracle's avmshell:
+
+- `terminate` on a running worker stops its thread and makes it
+  `terminated` at once. avmshell reports it `running` until it reaches an
+  interrupt check, and the oracle's avmshell runs without them, so a
+  worker spinning in a loop is never stopped there, and the shell waits
+  for it at exit, for ever.
+- Terminating a worker terminates the workers it started too, whose
+  threads node stops with its thread; in avmshell they run on.
+- A worker terminated by one that did not start it, and so does not hold
+  its thread, is `terminated` at once but runs on until its next shared
+  property access or its end.
+- A worker's lines reach the runners only when their event loop runs,
+  so after the primordial's own in the tests, where avmshell interleaves
+  them as they come; the CLI writes them as they come.
+- When the primordial's ABCs end, its workers' threads are stopped, as
+  avmshell interrupts them; what a thread had printed and not yet posted
+  may be lost.
+
 ## Slices
 
 Each a PR, in this order:
@@ -345,12 +401,14 @@ Each a PR, in this order:
    and the `worker-shared-properties` conformance case against avmshell.
    Unlocks: AS3 content that only passes messages (image or data
    processing workers). No Crossbridge sample.
-2. **avmshell's workers** in the runtime's shell natives and the CLI, over
-   node's threads: `createWorkerFromPrimordial`, `createWorkerFromByteArray`,
-   `start`, `terminate`, `state`, `listWorkers`, shared properties. Tests:
-   the six lifecycle Tamarin tests, and conformance cases checked against
-   avmshell. Unlocks: avmshell-checked semantics for what the rest builds
-   on.
+2. **avmshell's workers** (built, see
+   [avmshell's workers](#avmshells-workers)) in the runtime's shell
+   natives and the CLI, over node's threads: `createWorkerFromPrimordial`,
+   `createWorkerFromByteArray`, `start`, `terminate`, `state`,
+   `listWorkers`, `isParentOf`, shared properties seen at once across
+   threads, `System.sleep`. Tests: the six lifecycle Tamarin tests, and
+   the `worker-threads` conformance case against avmshell. Unlocks:
+   avmshell-checked semantics for what the rest builds on.
 3. **Shared memory**: a shareable ByteArray over a growable
    SharedArrayBuffer, passed by reference (one object a worker, as
    avmplus interns it), real `atomicCompareAndSwapIntAt` and `Length`,

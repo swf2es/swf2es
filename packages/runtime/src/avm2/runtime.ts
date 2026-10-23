@@ -72,7 +72,14 @@ import {
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
-import { defaultPrint, memoryFiles, type RuntimeOptions, type ShellFiles } from "./options.js";
+import {
+  defaultPrint,
+  memoryFiles,
+  type RuntimeOptions,
+  type ShellFiles,
+  type ShellWorkerHost,
+  type ShellWorkerInit,
+} from "./options.js";
 import { errorMessages } from "./player-messages.js";
 import {
   cached,
@@ -123,6 +130,9 @@ export class Runtime {
     | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
   readonly files: ShellFiles;
+  /** See RuntimeOptions.workers and worker. */
+  readonly workerHost: ShellWorkerHost | null;
+  readonly workerInit: ShellWorkerInit | null;
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
@@ -190,6 +200,8 @@ export class Runtime {
     this.debugger = options.debugger ?? false;
     this.compileAbc = options.compileAbc ?? null;
     this.files = options.files ?? memoryFiles();
+    this.workerHost = options.workers ?? null;
+    this.workerInit = options.worker ?? null;
     this.swfVersion = options.swfVersion ?? 31;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
