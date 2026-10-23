@@ -1,6 +1,6 @@
 // swf2es run: ABCs run as avmshell runs them, each compiled by codegen and
 // loaded into the runtime, their trace and print on stdout.
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createCodegen } from "@swf2es/codegen";
@@ -10,6 +10,7 @@ import { COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
 import { codegenModule, defaultLibraries, read, readLibraries } from "../files.js";
 import { fail, usageError } from "../output.js";
 import { runShell } from "../shell.js";
+import { nodeShellThreads } from "../threads.js";
 
 const USAGE = `usage: swf2es run <file.abc> [more.abc ...] [options]
 
@@ -18,7 +19,8 @@ first use, then each ABC in the order given, in one domain, its entry
 point run once it loads. What they trace and print goes to stdout. An ABC
 rejected with a VerifyError, or an exception nothing catches, is printed
 there too, as avmshell prints it, and ends the run; the ABCs after it do
-not run. avmshell's File reads and writes in the working directory.
+not run. avmshell's File reads and writes in the working directory, and
+its workers run on threads of their own, stopped when the ABCs end.
 
 options:
   --lib <file.abc>     a library to load first, into the root domain, in
@@ -108,16 +110,20 @@ export const run: Command = {
     }
 
     const libs = await readLibraries(libraries);
-    const compiler = await createCodegen(await codegenModule());
-    // A line at a time, as avmshell's console writes it.
-    const print = (line: string) => process.stdout.write(`${line}\n`);
+    const codegen = await codegenModule();
+    const compiler = await createCodegen(codegen);
+    // A line at a time, as avmshell's console writes it; its workers' threads write their own.
+    const print = (line: string) => writeSync(1, `${line}\n`);
+    const threads = nodeShellThreads({ codegen, libraries: libs, abcs });
     try {
       process.exitCode = await runShell(libs, abcs, {
         compiler,
         createRuntime,
         print,
         files: workingFiles(),
+        workers: threads.host,
       });
+      await threads.close();
     } catch (e) {
       if (e instanceof RejectedError) {
         fail(e.message);
