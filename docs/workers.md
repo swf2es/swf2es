@@ -20,14 +20,18 @@ the shell's own, not Flash's: `WorkerDomain.createWorkerFromPrimordial()` and
 `natives/shell.ts`, keeps the primordial's shared properties as avmshell
 does (the `worker-shared-properties` conformance case: an object copied by
 AMF3 at the set and at each get, a ByteArray, Mutex or Condition kept as
-itself) and throws "not supported" on creating a worker, so:
+itself) and throws "not supported" on creating a worker, so, by
+`tests/tamarin/swf2es-baseline.json` (assertions passed and failed before
+the test stops):
 
 | Test | Needs | swf2es now |
 |------|-------|------------|
-| `Worker`, `WorkerDomain`, `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | create, start, terminate, state, `listWorkers`, errors 1511 | fail at the first creation |
+| `Worker`, `WorkerDomain` | create, start, terminate, state, `listWorkers`, errors 1511 | 1 passed 2 failed, and 3 passed 1 failed: what precedes the first creation |
+| `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | the same | stop at the first creation, no assertion run |
 | `ConditionAndMutexAPI` | Mutex and Condition on one thread | passes (12/12) |
 | `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` | 14/17: the three `shareable` assertions |
-| `ByteArrayWorkers`, `ByteArrayWorkersLzma`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | fail at the first creation |
+| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | 5 passed 1 failed of the six before the first creation, where it stops |
+| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | stop at the first creation |
 
 The last three are what real threads need: the primordial spins reading
 the shared bytes while five workers write them, and takes the shared Mutex
@@ -186,9 +190,13 @@ writable from both the worker and its parent. Slice 1 keeps a copy of
 each worker's properties on both sides and posts each set to the other:
 what the primordial sets before `start` is there when the worker starts,
 and what one side sets reaches the other between its frames. Code that
-spins on `getSharedProperty` waiting for the other side to change it never
-sees the change without shared memory; with it (slice 4) the properties
-live in shared memory, read and written under a lock, and are seen at once.
+spins synchronously waiting for the other side never sees it without
+shared memory, and spins for ever: on `getSharedProperty` until the other
+side changes it, or on a channel, `while (ch.messageAvailable) {}` on the
+primordial until a worker takes what it sent, `while (!ch.messageAvailable) {}`
+in a worker until a message comes. With shared memory (slice 4) the
+properties and the queues live in it, read and written under a lock, and
+are seen at once.
 
 The primordial's own shared properties go to every worker, those set
 before a worker starts with its `WorkerInit`.
@@ -201,7 +209,36 @@ supported" with nothing queued. The sender's `messageAvailable` cannot see
 the receiver's queue without shared memory either: on the primordial it is
 true from a send to a background worker until that worker has run a frame
 since, which is what Flash shows for messages sent before `start`; on a
-background worker's side it is false.
+background worker's side it is false. A channel's state is one at both
+ends: closed by either, it is `closing` until the receiver has taken what
+was queued, which only the receiver sees, so a sender on another worker
+stays `closing` until the receiver tells it, and gets a second
+`channelState` then. The primordial's copy of a channel between two other
+workers follows it as it routes their closes.
+
+A worker's lifecycle frees what it held: a terminated worker's SWF (its
+thread had its own copy from `start`), its shared properties and its
+channels are let go, and its Worker object once its last `workerState`
+has been dispatched; a script that still holds one reads `terminated`.
+A host that cannot start a thread at all, such as a page whose policy
+forbids the worker's script, has `start` throw IllegalOperationError 3807,
+Flash's error for a player whose workers are disabled, and the worker is
+terminated. A thread that fails later, as on a SWF that is not one, is an
+error nothing caught on the primordial, and the worker is terminated.
+
+What the embedder gives the primordial is functions on its own thread,
+which no message carries, so a worker's VM has none of it: no `fetch`
+(a worker's loads fail as with no network), no sockets or WebSockets (not
+even the global WebSocket the primordial defaults to), no
+ExternalInterface, `fscommand`, `navigateToURL`, `sendToURL`, policy
+files, file dialogs, clipboard or sound, and its SharedObjects are kept in
+memory, for its life only. It reports the primordial's
+`Security.sandboxType`. A worker never has more than the primordial; giving
+it the primordial's hosts through the thread is later work.
+
+Every worker compiles its SWF with the JIT, so with `new Function`: a page
+whose Content-Security-Policy has no `'unsafe-eval'` cannot run workers
+until slice 5 gives them modules compiled ahead of time.
 
 A background worker's `trace` goes to the primordial's output, an error
 nothing caught in it to the primordial's `onUncaught`, prefixed "a
@@ -331,8 +368,11 @@ Each a PR, in this order:
 5. **Compiled code shared with workers**: a worker takes the primordial's
    compiled modules, as a module cache would give them, rather than
    compiling its SWF again: each Crossbridge thread is a worker, and
-   `mc.swf` takes minutes to compile. Tests: a worker's modules equal to
-   the primordial's, and the desktop smoke test.
+   `mc.swf` takes minutes to compile. The same path gives workers the
+   modules compiled ahead of time (`precompiledModules`), so that a page
+   without `'unsafe-eval'` runs them too. Tests: a worker's modules equal
+   to the primordial's, a worker under the precompiled test's policy, and
+   the desktop smoke test.
 6. **The embeddings**: `@swf2es/web`'s configuration of the worker host,
    the demo site and the desktop app (isolated, so with shared memory).
    Tests: the web and desktop smoke tests start a worker. Unlocks
