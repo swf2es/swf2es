@@ -1184,9 +1184,17 @@ async function contextLossPlanSwf(
     for (let step = 0; step < plan.length; step++) {
       switch (plan[step]) {
         case "t": {
-          for (const r of [steady, losing]) {
-            r.player.tick();
-            r.view.render(r.player.stage);
+          // Both scenes represent one frame. GPU work must not let just one cross a settle deadline.
+          const now = performance.now;
+          const time = performance.now();
+          performance.now = () => time;
+          try {
+            for (const r of [steady, losing]) {
+              r.player.tick();
+              r.view.render(r.player.stage);
+            }
+          } finally {
+            performance.now = now;
           }
 
           if (!lost) {
