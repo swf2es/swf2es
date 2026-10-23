@@ -4,7 +4,7 @@ What ActionScript 3's workers (`flash.system.Worker`, `WorkerDomain`,
 `MessageChannel`, shared properties, a shareable `ByteArray` and
 `flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, how they map
 onto a browser's and node's threads, and the order to build them in. The
-first three slices are built (see [Slices](#slices)); the rest is the plan.
+first four slices are built (see [Slices](#slices)); the rest is the plan.
 
 ## What content needs
 
@@ -27,15 +27,26 @@ the test stops):
 | `ConditionAndMutexAPI` | Mutex and Condition on one thread | passes (12/12) |
 | `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` | passes (17/17) since slice 3; 14/17 before |
 | `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | as avmshell (12 passed) since slice 3; before, it stopped after the six on one thread, where it passed the shareable ByteArray to the worker |
-| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | stop where they pass the Mutex to the first worker (slice 4); before slice 3, at the shareable ByteArray |
+| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | as avmshell (4 and 8 passed) since slice 4; before, they stopped where they passed the Mutex to the first worker, and before slice 3 at the shareable ByteArray |
 
-The last three are what real threads need: the primordial spins reading
-the shared bytes while five workers write them, and takes the shared Mutex
-around `trace`. They run only where memory is truly shared.
+So all 76 of avmshell's checks pass in swf2es. The last three are what
+real threads need: the primordial spins reading the shared bytes while
+five workers write them, and takes the shared Mutex around `trace`. They
+run only where memory is truly shared.
+
+The `worker-mutex` conformance case holds the rest of what avmshell shows
+of Mutex and Condition across workers: each crosses by reference, one
+object a worker; a notify picks the waiters in the order they waited, and
+they take the mutex again in that order; `wait` gives true only when its
+time ran out, a notify with no waiter is lost, a wait lets go of a mutex
+however many times it was held; and a worker terminated while it holds a
+mutex lets go of it.
 
 A known avmshell bug is not ours to copy: `Condition.wait(ms)` returns
 false at a whole second less a millisecond, from an overflow of its
-nanoseconds.
+nanoseconds. Nor is one of the oracle's: a waiter that is terminated is
+still reported running, and a notify then reaches none of the other
+waiters; swf2es passes over it.
 
 ### Crossbridge
 
@@ -88,6 +99,30 @@ further: `createWorker` succeeds, and `newThread` stops at setting
 `flascc.threadArbMutex`, "passing a Mutex to another worker is not
 supported yet". Slice 3 shares `flascc.ram` and its domain memory, but
 the Mutex comes first, so they stop there still.
+
+Since slice 4, in Chrome on an isolated page with a worker host:
+
+| Sample | Now |
+|--------|-----|
+| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits |
+| `09_Pthreads/pthread_swc1.swf` | runs: its thread proc runs and is joined |
+| `11_OpenMP/mandel.swf` | runs and draws its zoom, at 36 to 67 fps with one thread in headless Chrome (software GL), the deeper the zoom the slower; a click, which should add a thread, fails with Crossbridge's "null function pointer called" in the click's callback on the primordial |
+| `09_Pthreads/pthreads.swf` | its threads start; the mouse callback it registers fails the same way, so the circle does not follow the mouse |
+| `09_Pthreads/sound.swf` | its threads start and the Sound plays; its `sampleData` callback fails the same way |
+| `09_Pthreads/pthread_swc2.swf` | nothing traced, as before |
+
+What was missing on the way: a worker a background worker makes (each
+pthread is one, made by the C main thread's worker), a primordial that
+takes such a request while it waits (Crossbridge's primordial waits for
+the main thread, which waits for the thread it starts), Web Workers
+started ahead (a browser starts one only while the page's thread is in
+its event loop), and shared properties seen at once (the primordial reads
+`flascc.uiThread.*` back while it waits). The callbacks C code registers
+with AS3 events (`AS3_DELEGATE`) are left: they run on the primordial
+through Crossbridge's function pointer table (`ptr2fun`), which has no
+entry for them there. Why is not known yet; how avmplus initializes the C
+module's script on the primordial, which registers them (`regFun`), is the
+first thing to look at.
 
 Crossbridge therefore needs, all at once: workers, a shareable ByteArray
 whose memory every thread sees (as domain memory), Mutex and Condition
@@ -161,8 +196,17 @@ supported" error; `@swf2es/web`, the demo site and the desktop app give
 none yet (slice 6).
 
 The primordial is the hub: every background thread talks only to the
-thread that made it, which routes messages between workers. Workers made
-by a background worker are left for later.
+primordial, which routes messages between workers. A background worker
+may make workers too, which the primordial starts on its host for it:
+the worker that makes one puts the request in a queue in shared memory
+and tells the primordial, which takes the queue when told and also
+whenever it waits in a lock or a wait (`Sync.poll`), as Crossbridge's
+primordial waits for the C main thread, which waits for the thread it is
+starting. The maker sees its worker `running` as soon as the worker's own
+thread says so in shared memory; its `workerState` events come through
+the primordial. This needs shared memory: without it a background worker
+cannot make one. The workers a background worker made run on when it is
+terminated, as avmshell's do; the primordial runs them.
 
 ### What crosses, and how
 
@@ -176,37 +220,48 @@ As Flash and avmplus:
 | ByteArray, not shareable | its bytes, copied at the set or send |
 | ByteArray, shareable | its memory, shared: one ByteArray a worker for it, as avmplus interns its Buffer |
 | MessageChannel | a reference: one object a worker, by id |
-| Mutex, Condition | a reference: shared state (slice 4) |
+| Mutex, Condition | a reference: its address in the memory every worker shares (see [Blocking](#blocking)); one object a worker |
 
 Only the top value is looked at so, as in avmplus: a MessageChannel inside
-an Object is an empty AMF object on the other side. Slice 1 refuses a Mutex
-or a Condition with "not supported" rather than copy it.
+an Object is an empty AMF object on the other side.
 
 A shared property belongs to the worker it is set on, readable and
-writable from both the worker and its parent. Slice 1 keeps a copy of
-each worker's properties on both sides and posts each set to the other:
-what the primordial sets before `start` is there when the worker starts,
-and what one side sets reaches the other between its frames. Code that
-spins synchronously waiting for the other side never sees it without
-shared memory, and spins for ever: on `getSharedProperty` until the other
-side changes it, or on a channel, `while (ch.messageAvailable) {}` on the
-primordial until a worker takes what it sent, `while (!ch.messageAvailable) {}`
-in a worker until a message comes. With shared memory (slice 4) the
-properties and the queues live in it, read and written under a lock, and
-are seen at once.
+writable from both the worker and its parent. Where memory is shared, the
+properties are a table in it (`Sync`'s table, rewritten whole under its
+lock with a version a VM reads again on), so a set is seen by the next
+get on any worker, as in avmshell. A value is kept packed as it crosses
+(`workers/wire.ts`), a shareable ByteArray's memory by its id: a VM finds
+the memory in the messages it has had, so one that reads a ByteArray
+another worker shared while it never returned to its event loop since
+gets swf2es's "not supported" error. A VM's own set keeps its token, so
+that a ByteArray reads back as itself to the worker that set it.
+
+Where memory is not shared, each side keeps a copy of each worker's
+properties and posts each set to the other: what the primordial sets
+before `start` is there when the worker starts, and what one side sets
+reaches the other between its frames. Code that spins synchronously
+waiting for the other side never sees it then, and spins for ever: on
+`getSharedProperty` until the other side changes it, or on a channel.
 
 The primordial's own shared properties go to every worker, those set
 before a worker starts with its `WorkerInit`.
 
-A channel's queue likewise: slice 1 posts each message to the receiver's
-thread, which dispatches `channelMessage` between its frames, as Flash
-dispatches it on the receiver's event loop. `receive(true)`, which blocks
-until a message comes, needs slice 4's shared queues, and throws "not
-supported" with nothing queued. The sender's `messageAvailable` cannot see
-the receiver's queue without shared memory either: on the primordial it is
-true from a send to a background worker until that worker has run a frame
-since, which is what Flash shows for messages sent before `start`; on a
-background worker's side it is false. A channel's state is one at both
+A channel's queue likewise. Where memory is shared it is in it (`Sync`'s
+queues, of packed values): `send` adds to it at once, `messageAvailable`
+is exact at both ends, and `receive(true)` blocks until a message comes
+or the channel closes, with `Atomics.wait` in a worker and spinning on a
+page's main thread (see [Blocking](#blocking)); a message the memory has
+no room for (it holds up to 1 GB) fails with MemoryError 1000, as a
+property too large for it does. A notice still goes to the
+receiver's thread, which dispatches `channelMessage` between its frames,
+as Flash dispatches it on the receiver's event loop, and brings it the
+memory of a shareable ByteArray the message names. Where it is not, each
+message is posted to the receiver's thread; `receive(true)` with nothing
+queued throws "not supported", and the sender's `messageAvailable`, which
+cannot see the receiver's queue, is true on the primordial from a send to
+a background worker until that worker has run a frame since, which is
+what Flash shows for messages sent before `start`, and false on a
+background worker's side. A channel's state is one at both
 ends: closed by either, it is `closing` until the receiver has taken what
 was queued, which only the receiver sees, so a sender on another worker
 stays `closing` until the receiver tells it, and gets a second
@@ -322,7 +377,13 @@ true as Flash reports it, and passing a shareable ByteArray to another
 worker throws "sharing a shareable ByteArray with another worker needs
 shared memory, which a browser gives only a cross-origin isolated page
 (...)", rather than copy it and leave a program waiting on memory nobody
-writes. `flash.system.Worker` is not hidden (see [Decisions](#decisions-for-the-user)).
+writes; a Mutex or a Condition the same ("sharing a Mutex with another
+worker needs shared memory, ..."), rather than a lock no other worker
+takes. A background worker cannot make a worker there either. Mutexes
+and Conditions work on the one thread, as in slice 1, and a
+`Condition.wait` without a timeout spins to the script timeout, as
+nothing can notify it. `flash.system.Worker` is not hidden (see
+[Decisions](#decisions-for-the-user)).
 
 Where swf2es's own pages are isolated:
 
@@ -351,11 +412,59 @@ Where swf2es's own pages are isolated:
 
 ### Blocking
 
-`Mutex.lock` and `Condition.wait` block. A background worker can: a
-mutex is an `Int32Array` word in shared memory, locked by
-`Atomics.compareExchange` and waited on with `Atomics.wait`, a condition a
-sequence word notified with `Atomics.notify`, and `wait` releases the mutex
-while it waits, as Flash's.
+`Mutex.lock` and `Condition.wait` block. They live in a heap of int32
+words every thread of a primordial's shares (`natives/sync.ts`'s
+`SyncMemory`, a growable SharedArrayBuffer, given to each worker at its
+start), which also holds the channels' queues, the player's shared
+property table and the queue of requests for the primordial, so that
+none of them needs memory to be posted after it: a Mutex or a Condition
+is an address there, the same in every worker, and each VM keeps one
+object for it, as avmplus interns one for its State. As avmplus'
+ConcurrencyGlue:
+
+- A mutex is its holder's number and how many times it holds it, and a
+  queue of the threads waiting for it, which take it in the order they
+  came. `tryLock` fails while any thread waits, as avmplus' `hasWaiters`.
+- A condition is its mutex and a queue of waiting threads. `wait` lets go
+  of the mutex however many times it was held, sleeps until a notify
+  picks its thread or its time runs out, then takes the mutex again,
+  that many times; it gives true only when its time ran out (and false
+  for a wait without a timeout). A notify picks waiters in the order they
+  came and moves them to the mutex's queue in that order, so they take
+  the mutex again in it. A notify with no waiter is lost.
+- A worker that is terminated is not stopped at once: its thread runs on
+  until it or its host stops it, and may be writing what a mutex it holds
+  guards. So terminating it only marks it stopping (`Sync.stop`): a
+  notify passes over it, a mutex's queue does not wait for it, and its
+  thread gets `SyncTerminated` for anything more it asks of the memory,
+  which no script catches, so the script that asked stops there, as
+  avmplus interrupts a terminated worker at its waits. The locks it holds,
+  a mutex or the heap's own short locks (its allocator, a queue, the
+  table), are free to take only once no code of it can run any more
+  (`Sync.end`):
+  - an avmshell worker's code ends with that script, so it is ended there,
+    as it is when it ends its code;
+  - a player's worker plays on to the end of its frame, so its own thread
+    (`workers/thread.ts`) looks after each frame, and every 10 ms between
+    them, whether it was terminated, and if so stops its player for good
+    and only then says it has ended: at once where it is idle or waits, at
+    the end of the frame where it plays;
+  - one that does not, as a script that loops without asking anything, is
+    stopped by its host after a second, and is ended once the host says
+    its thread has gone: node's `exit`, but a browser says nothing, and
+    Chrome lets a busy Web Worker's script run on for 2.5 to 4 s after its
+    `terminate` (measured in Chrome 156), so a Web Worker is taken to have
+    stopped 8 s after it (Firefox and Safari were not measured).
+
+  Only the primordial, which runs the threads, stops one; a background
+  worker that terminates a worker it made asks the primordial through its
+  queue of requests, which it takes even while it waits. An avmshell
+  worker terminated by its parent is given 100 ms to stop at its next
+  wait or sleep before its thread is stopped.
+
+A thread blocks with `Atomics.wait`, in steps of at most 50 ms, between
+which it looks whether a holder has ended and the primordial takes its
+requests.
 
 A browser's main thread cannot `Atomics.wait`: it throws there.
 `Atomics.waitAsync` can wait, but only by returning to the event loop,
@@ -389,9 +498,31 @@ The options for the primordial:
    ExternalInterface both ways, `BitmapData.draw`. It would make blocking
    free, but blocking does not need it.
 
-Recommended: spin (1) now, with the 15 s limit; reconsider 3 on its own
+Decided and built: spin (1), with the 15 s limit; reconsider 3 on its own
 merits, as the render-worker evaluation planned, and let it take over
-blocking if it lands.
+blocking if it lands. A thread that cannot `Atomics.wait` (a browser's
+main thread) spins on `Atomics.load` with a backoff that never sleeps,
+and fails with Error 1502 (ScriptTimeoutError in a player) once it has
+spun for 15 s without returning to its event loop: Crossbridge's startup
+waits a millisecond at a time in a loop, which a limit on each wait would
+never stop. The page is frozen meanwhile, as Flash's was.
+
+A browser also starts a Web Worker only while the page's thread is in its
+event loop, so a primordial that starts a worker and waits for it in the
+same script, as Crossbridge's does, would wait for ever. `webWorkerHost`
+therefore keeps a few Web Workers loaded ahead (as many as the machine
+has cores, from two up to four, by default, shared by the page's hosts for
+one script and let go ten seconds after the last player that used them
+is), as Emscripten's thread pool does: a
+worker that starts takes one, which runs what it is posted whatever the
+page's thread does, and another is started in its place. Its `ready`
+resolves once they have loaded, for a page to await before it plays a
+SWF that blocks at once. A script that starts more workers than that
+while it blocks waits for one that is not loaded, and fails with the
+script timeout. Node's threads start without the parent's event loop.
+
+For tests that step a SWF's frames, `settled()` counts a worker blocked
+in a lock or a wait as settled, as nothing but another worker ends that.
 
 ### avmshell's workers
 
@@ -407,18 +538,22 @@ the next get on any other, so a primordial that waits in `System.sleep`
 are kept as avmplus' ChannelItem keeps them: a Number as itself, a
 ByteArray's bytes copied at the set (the VM that set it gets its own
 object back, another one object of its own for the item), anything else
-as AMF3, and a shareable ByteArray's memory by its id (see [Shared
-memory](#shared-memory)). A Mutex or a Condition stays with the VM that
-set it: setting one on another worker, or reading one another worker
-set, throws "not supported" until slice 4 shares them.
+as AMF3, a shareable ByteArray's memory by its id (see [Shared
+memory](#shared-memory)), and a Mutex or a Condition by its address in the
+workers' sync memory, which `ShellWorkersMemory` carries (see
+[Blocking](#blocking)).
 
 A thread may be stopped anywhere, so none is stopped holding the lock:
-`terminate` marks the worker, and the workers it started, theirs and so
-on, `terminated` and lets their properties go while it holds the lock,
-and only then stops the thread. A terminated worker never takes the lock
-again: its next property access throws, which ends its code, as a
-worker another one terminated, whose thread it does not hold, ends at
-that access too. A worker that ends marks itself under the lock as well.
+`terminate` lets the properties of the worker, and of the workers it
+started, theirs and so on, go while it holds the lock, then marks them
+`terminated`, and only then stops the thread. A terminated worker changes
+nothing holding the lock: its next property access throws, which ends
+its code, as a worker another one terminated, whose thread it does not
+hold, ends at that access too. It may still take the lock to find that
+out, having waited for it while it was terminated, and be stopped there,
+so a lock held by a terminated worker is taken from it; a worker that
+ends lets its properties go and marks itself last, under the lock, so
+that nothing it still does holding it is taken over.
 
 The runtime knows no threads: `RuntimeOptions.workers`, a host, starts
 one for a worker, given its `ShellWorkerInit` (its number, the memory, and
@@ -446,7 +581,12 @@ Where swf2es differs from the oracle's avmshell:
   threads node stops with its thread; in avmshell they run on.
 - A worker terminated by one that did not start it, and so does not hold
   its thread, is `terminated` at once but runs on until its next shared
-  property access or its end.
+  property access, sleep, lock or wait, or its end.
+- A terminated worker's code stops at its next `System.sleep`, lock or
+  wait, as it would at avmshell's interrupt checks; the Mutexes it holds
+  are let go then, or once its thread has stopped. A worker that
+  terminates itself stops at once, as avmshell's does: no catch around
+  the call runs (the `worker-self-terminate` conformance case).
 - A worker's lines reach the runners only when their event loop runs,
   so after the primordial's own in the tests, where avmshell interleaves
   them as they come; the CLI writes them as they come.
@@ -493,13 +633,23 @@ Each a PR, in this order:
    adl's trace in Chrome and on node's threads, `tests/player/isolation.ts`
    on a page that is not isolated, and the site's and desktop app's
    isolation in their tests.
-4. **Blocking across threads**: Mutex and Condition in shared memory,
-   `Atomics.wait` in workers, the spinning primordial with the 15 s limit,
-   shared properties and channel queues in shared memory (seen at once,
-   `receive(true)`). Tests: Tamarin's `ByteArrayWorkers`,
-   `ByteArrayWorkersLzma` and `RemoteCall`, conformance cases for
-   wait/notify. Unlocks: Crossbridge's Hello World, `pthreads`, `sound`,
-   `pthread_swc1`, `mandel`, if nothing else in them is missing.
+4. **Blocking across threads** (built, see [Blocking](#blocking)): Mutex
+   and Condition in shared memory for the player's and avmshell's
+   workers, `Atomics.wait` in workers, the spinning primordial with the
+   15 s limit, shared properties and channel queues in shared memory
+   (seen at once, `receive(true)`), workers made by background workers,
+   and Web Workers started ahead. Tests: Tamarin's `ByteArrayWorkers` and
+   `RemoteCall` (as3/Workers 76/76), the `worker-mutex` conformance case
+   against avmshell, the `worker-mutex` player case against adl's trace
+   in Chrome and on node's threads, `isolation.ts` for a Mutex on a page
+   that is not isolated, stress tests of the sync memory on node's
+   threads (`tests/unit/runtime/sync.test.ts`: contention, ordering,
+   timeouts, holders and waiters that end, queues, the spinning timeout),
+   and the player's on node's threads (blocking receive, locks across
+   threads, properties seen at once, a background worker making one).
+   Unlocks: Crossbridge's Hello World, `pthread_swc1` and `mandel` with
+   one thread; `pthreads`, `sound` and `mandel`'s added threads wait for
+   the C callbacks (see [Crossbridge](#crossbridge)).
 5. **Compiled code shared with workers**: a worker takes the primordial's
    compiled modules, as a module cache would give them, rather than
    compiling its SWF again: each Crossbridge thread is a worker, and
@@ -534,9 +684,9 @@ Each a PR, in this order:
   a user disabled shared memory after Spectre (error 3807, "Worker.start
   has been disabled by the user"); that could be the error instead, if its
   exact behaviour is checked first.
-- **The primordial's blocking.** Recommended: spin, with Flash's 15 s
-  script timeout (above). The alternative is the primordial in a worker,
-  which is the render-worker project.
+- **The primordial's blocking.** Decided: spin, with Flash's 15 s
+  script timeout (built in slice 4). The alternative is the primordial in
+  a worker, which is the render-worker project.
 - **Which embedder policy the embeddings ask for.** `credentialless`
   keeps a SWF's cross-origin no-cors loads working but is not in Safari;
   `require-corp` works everywhere but blocks what does not opt in.

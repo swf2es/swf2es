@@ -12,3 +12,5 @@ runWorkerThread({
     scope.onmessage = (event) => receive(event.data);
   },
 });
+// Started: what the host waits for before it counts on this worker while the page's thread is blocked.
+scope.postMessage({ type: "ready" });

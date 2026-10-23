@@ -476,8 +476,11 @@ export function browserClipboard(): ClipboardHost | null {
 /** A thread a background flash.system.Worker runs on, as a WorkerHost started it. */
 export interface WorkerThread {
   post(message: ToWorker): void;
-  /** Stops it at once, wherever its scripts are. */
-  terminate(): void;
+  /**
+   * Stops it, wherever its scripts are; what it gives resolves once the
+   * thread has stopped, when the Mutexes its worker held are let go.
+   */
+  terminate(): Promise<unknown> | undefined;
 }
 
 /**
@@ -497,4 +500,6 @@ export interface WorkerHost {
     receive: (message: FromWorker) => void,
     failed: (error: unknown) => void,
   ): WorkerThread;
+  /** The player that used it is gone: what the host keeps for its threads may go too. */
+  release?(): void;
 }

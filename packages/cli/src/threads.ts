@@ -171,7 +171,7 @@ export function nodeShellThreads(options: ShellThreadsOptions): ShellThreads {
       return {
         terminate() {
           running.delete(worker);
-          void worker.terminate();
+          return worker.terminate();
         },
       };
     },
