@@ -77,9 +77,9 @@ function transformPath(path: Path, m: Linear): Path {
 }
 
 /**
- * The context a line's Graphics shows until restroke gives it its own: one
- * for all, never given back nor destroyed, where each made one of its own
- * to throw away.
+ * The context a line's Graphics shows until restroke gives it its own, and
+ * a drawing's layer of no fills: one for all, never given back nor
+ * destroyed, where each made one of its own to throw away.
  */
 export const NO_LINES = shapeContext();
 

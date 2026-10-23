@@ -3831,3 +3831,164 @@ test("multiply and subtract blend directly only while the stage's pixels are opa
   view.prepare(root);
   assert.deepEqual(direct(), ["multiply", "subtract", "add"]);
 });
+
+test("textured triangles drawn anew keep their meshes, buffers and shaders, and those taken off go idle, or with a lost context", async (t) => {
+  // Pixi as the player loads it; node has no canvas, whose WebGL a program asks its precision of.
+  const cjs = createRequire(new URL("../../../../packages/player/package.json", import.meta.url));
+  const entry = pathToFileURL(cjs.resolve("pixi.js").replace(/\.js$/, ".mjs")).href;
+  const pixi = (await import(entry)) as {
+    DOMAdapter: { get(): object; set(adapter: object): void };
+  };
+  const adapter = pixi.DOMAdapter.get();
+  pixi.DOMAdapter.set({ ...adapter, createCanvas: () => ({ getContext: () => null }) });
+  t.after(() => pixi.DOMAdapter.set(adapter));
+  const { ShapeObject } = await import("../../../../packages/player/dist/display/display.js");
+  const { Drawing } = await import("../../../../packages/player/dist/display/drawing.js");
+  const { TriangleView } = await import("../../../../packages/player/dist/render/triangles.js");
+  const changes: { contextChange(): void }[] = [];
+  const renderer = {
+    ...standIn([]).renderer,
+    // WebGL's, which alone draws textured triangles.
+    type: 1,
+    runners: {
+      contextChange: { add: (runner: { contextChange(): void }) => changes.push(runner) },
+    },
+  } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const stores = [new BitmapStore(4, 4, true, 0xff336699), new BitmapStore(2, 2, true, 0xffcc0000)];
+  const root = new Container();
+  const shape = new ShapeObject(null);
+  const drawing = new Drawing();
+  shape.drawing = drawing;
+  root.placeAtDepth(shape, 1);
+
+  type View = InstanceType<typeof TriangleView>;
+  const drawn = (): View[] => {
+    const found: View[] = [];
+    const walk = (c: { children: unknown[] }) => {
+      for (const child of c.children) {
+        if (child instanceof TriangleView) {
+          found.push(child);
+        }
+
+        walk(child as { children: unknown[] });
+      }
+    };
+    walk(view.stage);
+    return found;
+  };
+  // Meshes of fans of so many triangles each, textured by one store or the other.
+  const draw = (counts: number[], store: number) => {
+    drawing.clear();
+    for (const n of counts) {
+      drawing.beginFill({
+        type: "image",
+        image: stores[store],
+        matrix: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+        repeat: store === 1,
+        smooth: false,
+      });
+      const vertices: number[] = [];
+      const uvt: number[] = [];
+      for (let i = 0; i < n; i++) {
+        vertices.push(0, 0, 10 + i, 0, 0, 10 + i);
+        uvt.push(0, 0, 1, 1, 0, 1, 0, 1, 1);
+      }
+
+      drawing.drawTriangles(vertices, null, uvt, 0);
+      drawing.endFill();
+    }
+
+    shape.invalidate(CONTENT);
+    view.prepare(root);
+  };
+  const seen = new Set<View>();
+  const buffers = new Set<unknown>();
+  const check = (counts: number[], store: number) => {
+    const views = drawn();
+    const meshes = drawing.layers.flatMap((layer) => layer.meshes ?? []);
+    assert.equal(views.length, counts.length);
+    for (let i = 0; i < views.length; i++) {
+      const v = views[i];
+      seen.add(v);
+      const geometry = v.geometry;
+      for (const buffer of geometry.buffers) {
+        buffers.add(buffer);
+      }
+
+      assert.equal(v.source, meshes[i]);
+      assert.equal(v.visible, true);
+      assert.deepEqual(
+        [...geometry.getAttribute("aPosition").buffer.data],
+        [...meshes[i].positions],
+      );
+      assert.deepEqual([...geometry.getAttribute("aUVT").buffer.data], [...meshes[i].uvt]);
+      assert.equal(geometry.indexCount, counts[i] * 3);
+      assert.ok(geometry.indexBuffer.data.length >= counts[i] * 3);
+      assert.equal(geometry.indexBuffer, views[0].geometry.indexBuffer);
+      const { uTexture, triangleUniforms } = (
+        v.shader as unknown as {
+          resources: {
+            uTexture: unknown;
+            triangleUniforms: { uniforms: Record<string, Float32Array> };
+          };
+        }
+      ).resources;
+      assert.equal(uTexture, v.texture.source);
+      const { uSize, uMode } = triangleUniforms.uniforms;
+      assert.deepEqual([...uSize], store ? [2, 2] : [4, 4]);
+      assert.equal(uMode[0], store);
+    }
+  };
+
+  // Drawn again with more triangles, fewer, and another texture: the same mesh each time.
+  for (const [n, store] of [
+    [1, 0],
+    [5, 1],
+    [2, 0],
+    [400, 1],
+    [3, 0],
+  ]) {
+    draw([n], store);
+    check([n], store);
+  }
+
+  assert.equal(seen.size, 1);
+  // Its two buffers of vertices, and the indices all share.
+  assert.equal(buffers.size, 3);
+
+  // A second mesh, then one again, then two: the one taken off comes back.
+  draw([2, 3], 0);
+  check([2, 3], 0);
+  draw([4], 1);
+  check([4], 1);
+  draw([1, 6], 1);
+  check([1, 6], 1);
+  assert.equal(seen.size, 2);
+  assert.equal(buffers.size, 5);
+
+  // Cleared for good, they are kept a while, then destroyed; a lost context takes them at once.
+  await withClock((clock) => {
+    drawing.clear();
+    shape.invalidate(CONTENT);
+    view.prepare(root);
+    assert.equal(drawn().length, 0);
+    assert.ok([...seen].every((v) => !v.destroyed));
+    clock.at += 6000;
+    view.prepare(root);
+    assert.ok([...seen].every((v) => v.destroyed));
+  });
+
+  seen.clear();
+  draw([2, 2], 0);
+  check([2, 2], 0);
+  drawing.clear();
+  shape.invalidate(CONTENT);
+  view.prepare(root);
+  assert.ok([...seen].every((v) => !v.destroyed));
+  for (const runner of changes) {
+    runner.contextChange();
+  }
+
+  assert.ok([...seen].every((v) => v.destroyed));
+});

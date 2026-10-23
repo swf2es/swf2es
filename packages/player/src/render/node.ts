@@ -16,6 +16,7 @@ import type { ShapeCharacter } from "../display/timeline.js";
 import type { SharedGraphics } from "./shared.js";
 import type { Linear } from "./strokes.js";
 import type { Plane } from "./three.js";
+import type { TriangleView } from "./triangles.js";
 
 /** No filters, the records of an object that has none or is a mask. */
 export const NO_RECORDS: readonly FilterRecord[] = [];
@@ -73,10 +74,10 @@ export interface Node {
   lines: SharedGraphics[];
   /**
    * Between a redraw's clear and its draw (while `spared`), the Graphics
-   * the content left, and which are lines, for the next to take in place;
-   * kept, emptied, for the next redraw.
+   * and meshes the content left, and what each was (FILL, LINE or MESH),
+   * for the next to take in place; kept, emptied, for the next redraw.
    */
-  spare: { graphics: SharedGraphics[]; lines: boolean[] } | null;
+  spare: { art: (SharedGraphics | TriangleView)[]; kinds: number[] } | null;
   spared: boolean;
   /** Whether the object is a mask or in one, as of the last sync. */
   masking: boolean;
