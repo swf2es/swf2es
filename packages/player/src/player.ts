@@ -201,6 +201,7 @@ export class Player {
         this.root,
         s.rt.classNamed(this.library.classes.get(0) ?? "flash.display::MovieClip", s.mainDomain),
       );
+      s.lifecycle.rootConstructed(this.root);
     } catch (error) {
       s.reportUncaught(error);
     }
