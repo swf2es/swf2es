@@ -19,7 +19,10 @@ export interface WebWorkerHostOptions {
    * The worker script: by default this package's dist/thread/, which
    * holds web-worker.js and the modules it imports with their bare
    * specifiers made relative (build-thread.ts), so that it loads wherever
-   * the package is served, as a worker sees no import map.
+   * the package is served, as a worker sees no import map. One from
+   * another origin, as a CDN's, starts through a module of the page's own
+   * that imports it, which a Content-Security-Policy must allow as a
+   * worker's `blob:` source.
    */
   url?: string | URL;
   /**
@@ -98,8 +101,28 @@ function release(url: string | URL): void {
   }, IDLE);
 }
 
+/** The page's own modules that import a worker script from another origin, by its URL. */
+const importers = new Map<string, string>();
+
 function spawn(url: string | URL): Worker {
-  return new Worker(url, { type: "module" });
+  try {
+    return new Worker(url, { type: "module" });
+  } catch (error) {
+    // A browser starts a worker only on a script of the page's origin.
+    if (!(error instanceof DOMException && error.name === "SecurityError")) {
+      throw error;
+    }
+
+    const href = new URL(url, globalThis.location?.href).href;
+    let importer = importers.get(href);
+    if (importer === undefined) {
+      const source = `import ${JSON.stringify(href)};`;
+      importer = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      importers.set(href, importer);
+    }
+
+    return new Worker(importer, { type: "module" });
+  }
 }
 
 /** Keep `count` workers started ahead for `url`; where the page cannot start one, fewer. */
