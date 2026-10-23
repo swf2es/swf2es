@@ -7306,6 +7306,51 @@ function blendLayerRetirement(): Uint8Array {
   return w.swf({ width: 200, height: 100, frameRate: 24, frameCount: 4, tags });
 }
 
+// A timeline fades a shape, and the same shape inside an explicit layer. Only the latter
+// colours its rectangles together, as the parent clip's alpha changes.
+function blendLayerFade(): Uint8Array {
+  const rect = (x: number, y: number): w.PathCommand[] => [
+    { move: [x, y] },
+    { line: [x + 640, y] },
+    { line: [x + 640, y + 480] },
+    { line: [x, y + 480] },
+    { line: [x, y] },
+  ];
+  const tags = [
+    w.backgroundColor(0xffffff),
+    w.shape({
+      id: 1,
+      bounds: [0, 960, 0, 720],
+      fills: [0xff0000, 0x00ff00],
+      paths: [
+        { fill1: 1, commands: rect(0, 0) },
+        { fill1: 2, commands: rect(320, 240) },
+      ],
+    }),
+    w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+    w.sprite(3, 1, [w.place({ depth: 1, character: 2, blendMode: 2 }), w.showFrame(), w.end()]),
+  ];
+  const alphas = [1, 0.5, 0, 0.75];
+  for (let frame = 0; frame < alphas.length; frame++) {
+    for (let side = 0; side < 2; side++) {
+      tags.push(
+        w.place({
+          depth: side + 1,
+          character: frame === 0 ? side + 2 : undefined,
+          move: frame !== 0,
+          matrix: { tx: 200 + side * 1400, ty: 200 },
+          colorTransform: { mult: [1, 1, 1, alphas[frame]] },
+        }),
+      );
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 140, height: 60, frameRate: 24, frameCount: alphas.length, tags });
+}
+
 // A pale band in overlay drifting a quarter pixel each way a frame over a
 // checkerboard, once on the root and once inside a clip drawn as a layer,
 // whose blend reads the layer's pixels: what shows through the band must
@@ -9113,6 +9158,25 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3, 4],
     tolerance: 3,
     maxOutliers: 0,
+  },
+  {
+    name: "blend-layer-fade",
+    swf: blendLayerFade(),
+    frames: 4,
+    capture: [1, 2, 3, 4],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-layer-colors",
+    swf: (abc) => bare(abc, 1, "BlendLayerColors", 580, 170),
+    script: "BlendLayerColors",
+    frames: 6,
+    capture: [1, 2, 3, 4, 5, 6],
+    tolerance: 3,
+    // A newly isolated drawing's alpha offset exposes 76 edge pixels of linear sampling,
+    // at most 16 in two channels; its interiors and the other frames stay within 3.
+    maxOutliers: 152,
   },
   {
     name: "blend-drift",

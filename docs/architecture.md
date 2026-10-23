@@ -4320,6 +4320,14 @@ Flash.
 adl composites an object with a blend mode as a layer, its children
 together in the normal way, and blends that with what is below, the
 stage's colour included, where Pixi would blend each child on its own.
+An explicit `layer` with children also applies its colour transform to
+their combined pixels, including any graphics on the clip itself. Without
+children, it colours its fills individually. The view resets colour
+inheritance at the former and colours the empty filter chain's output;
+that pass replaces the plain layer copy, without keeping another bitmap.
+`blend-layer-fade` checks an AVM1 timeline's fading layer, and
+`blend-layer-colors` checks colour and alpha offsets, adding and removing
+children, mode changes and ancestor colours against AIR.
 Where Pixi draws such a layer at once, as a single fill with no masks or
 as a filtered object's result, and the GPU's own blending computes
 Flash's blend, the GPU blends it, with no copy of what is below:

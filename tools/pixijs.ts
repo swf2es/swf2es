@@ -65,6 +65,7 @@ export const BROWSER_EXPORTS = [
   "Geometry",
   "GlProgram",
   "GpuGraphicsContext",
+  "GpuProgram",
   "Graphics",
   "GraphicsContext",
   "GraphicsContextRenderData",
