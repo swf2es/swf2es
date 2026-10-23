@@ -22,6 +22,8 @@ export interface LibraryState {
 
 /** What the page starts from: the libraries, and the SWF to play, if one is open. */
 export interface StartState {
+  /** The user's opt-in; changing it restarts the page. */
+  stage3D: boolean;
   libraries: LibraryState;
   movie: OpenedMovie | null;
 }

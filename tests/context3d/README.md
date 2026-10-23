@@ -11,6 +11,7 @@ node tests/context3d/run.ts
 node tests/context3d/stress.ts
 node tests/context3d/reclamation.ts
 node tests/context3d/host.ts
+node tests/desktop/stage3d.ts    # normal Electron View-menu opt-in (needs its binary)
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
 ```

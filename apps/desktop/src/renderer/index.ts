@@ -102,10 +102,32 @@ document.addEventListener("drop", (event) => {
   }
 });
 
-desktop.onOpen(play);
-desktop.onClose(close);
+// An open or close during optional backend loading takes precedence over the startup snapshot.
+let started = false;
+let pending: OpenedMovie | null | undefined;
+desktop.onOpen((movie) => {
+  if (started) {
+    play(movie);
+  } else {
+    pending = movie;
+  }
+});
+desktop.onClose(() => {
+  if (started) {
+    close();
+  } else {
+    pending = null;
+  }
+});
 const state = await desktop.start();
+if (state.stage3D) {
+  const { createStage3D } = await import("./stage3d.js");
+  configure({ stage3D: createStage3D });
+}
+
 showLibraries(state.libraries);
-if (state.movie) {
-  play(state.movie);
+started = true;
+const movie = pending === undefined ? state.movie : pending;
+if (movie) {
+  play(movie);
 }
