@@ -257,9 +257,9 @@ server send them, which an embedder decides: `require-corp` blocks every
 cross-origin subresource that does not opt in with CORP or CORS, the
 SWF's own loads included; `credentialless` lets no-cors ones through
 without cookies, the gentler choice for a page that plays Flash content
-(Chrome and Firefox; Safari has only `require-corp`). Both cut the page
-off from cross-origin popups it opened, which `navigateToURL` to `_blank`
-and ExternalInterface pages may rely on. Where swf2es's own pages get
+(Chrome and Firefox; Safari has only `require-corp`). COOP
+`same-origin` cuts the page off from cross-origin popups it opened, which
+`navigateToURL` to `_blank` and ExternalInterface pages may rely on. Where swf2es's own pages get
 them is below.
 
 A shareable ByteArray (`natives/bytearray.ts`) keeps memory of its own
@@ -282,9 +282,13 @@ ByteArray for an id, as avmplus interns one for a Buffer:
   it for every worker, zeroing the memory; `compress()` and the others
   rewrite the bytes in place for all.
 - `atomicCompareAndSwapIntAt` and `casi32` are `Atomics.compareExchange` on
-  an `Int32Array` over the bytes; `atomicCompareAndSwapLength` makes the
-  capacity, then swaps the length word, so that of workers growing it at
-  once one wins.
+  an `Int32Array` over the bytes; `atomicCompareAndSwapLength` reads the
+  length once, grows the capacity, then swaps the length word, so that of
+  workers growing it at once one wins. The memory only ever grows, so a
+  swap that fails undoes nothing another worker did; what a smaller
+  buffer would have dropped is zeroed only once a length is lowered.
+  Writes past the end raise the length by a compare and swap, never
+  lowering what another worker made it.
 - Domain memory over it keeps the loads and stores generated code makes in
   place, against `rt.memoryLength`, the length this thread last saw: only
   an address past it reads the length again (`Runtime.refreshMemory`)
@@ -301,7 +305,10 @@ its id; the host makes the memory known to the other threads
 BroadcastChannel of the primordial's threads, and a thread reads that
 channel synchronously (`receiveMessageOnPort`) when a property names
 memory it has not seen, as its code never returns to its event loop. A
-thread started later is given what its parent has seen. The CLI's threads
+thread started later is given what its parent has seen; one that was
+still starting when a memory was shared, and missed it on the channel,
+asks the primordial's memory thread (`shell-memories.ts`), which
+subscribed before any other thread started, and waits for its answer. The CLI's threads
 keep what was shared until the primordial ends.
 
 Where memory cannot be shared, a page that is not cross-origin isolated,
@@ -324,7 +331,8 @@ Where swf2es's own pages are isolated:
 - **The demo site** registers a service worker at its root
   (`apps/site/src/service-worker.ts`, `isolation.ts`) that adds both to the
   site's own responses; the first visit loads the page again once it
-  serves it, and other origins' responses pass as they are. A browser
+  serves it, or at once after a reload that bypassed it (Shift-reload),
+  and other origins' responses pass as they are. A browser
   that is still not isolated with it, Safari without `credentialless`, is
   not reloaded again. `tests/site/run.ts` serves the site without the
   headers, as Pages does, and checks it becomes isolated. It gives
