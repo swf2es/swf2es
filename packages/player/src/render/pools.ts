@@ -10,6 +10,13 @@ import { BatchableGraphics, BigPool, GraphicsContextRenderData, RenderTexture } 
 export const SPARE_GRAPHICS_MOST = 4096;
 
 /**
+ * The most meshes of textured triangles a view keeps for the next content
+ * to take, of those taken off: a 3D engine clears its Graphics and draws
+ * its triangles again every frame, some hundreds of them.
+ */
+export const SPARE_MESHES_MOST = 1024;
+
+/**
  * The most released nodes a view keeps, of all characters, for a new
  * object of their character to take (render/spares.ts), the oldest going
  * first. A crowd of 32 of one animated character releases some 340 a
