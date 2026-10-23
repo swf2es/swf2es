@@ -2106,12 +2106,15 @@ export class Runtime {
         return typeof v === "string";
       case "Boolean":
         return typeof v === "boolean";
-      default:
+      default: {
         if (v === null || v === undefined) {
           return false;
         }
 
-        return this.traitsOf(v).isSubtypeOf(traits);
+        // An object's own traits, mostly: traitsOf's instanceof checks walk its prototypes.
+        const own: Traits | undefined = v.$traits;
+        return (own ?? this.traitsOf(v)).isSubtypeOf(traits);
+      }
     }
   }
 
@@ -2452,10 +2455,6 @@ export class Runtime {
     return typeof v === "object" && v !== null && v.$traits?.name === "Date";
   }
 
-  private hintOf(o: AsObject): "number" | "string" {
-    return this.traitsOf(o).name === "Date" ? "string" : "number";
-  }
-
   equals(a: Value, b: Value): boolean {
     if (a instanceof FloatValue) {
       a = a.value;
@@ -2484,12 +2483,14 @@ export class Runtime {
       return false;
     }
 
+    // Without a hint, which is valueOf first, a Date's too: AvmCore::equals
+    // compares a Date with a String by its time, unlike ECMAScript.
     if (typeof a === "object") {
-      return this.equals(this.toPrimitive(a, this.hintOf(a)), b);
+      return this.equals(this.toPrimitive(a, "number"), b);
     }
 
     if (typeof b === "object") {
-      return this.equals(a, this.toPrimitive(b, this.hintOf(b)));
+      return this.equals(a, this.toPrimitive(b, "number"));
     }
 
     return this.toNumber(a) === this.toNumber(b);
