@@ -3,8 +3,11 @@
 // terminate true only while it runs), listWorkers listing those running,
 // and shared properties crossing threads as avmplus' ChannelItem copies
 // them, seen at once while the other side waits in System.sleep. A
-// worker's properties are let go when it ends. The background workers run
-// this same code, createWorkerFromPrimordial's, and print nothing.
+// worker's properties are let go when it ends, and the workers it started
+// run on. The background workers run this same code,
+// createWorkerFromPrimordial's, and print nothing. A running worker is not
+// terminated here: the oracle's avmshell runs without interrupts, and
+// waits for such a worker at times for ever (the CLI's unit test has it).
 import flash.system.Worker;
 import flash.system.WorkerDomain;
 import flash.utils.ByteArray;
@@ -59,20 +62,31 @@ if (me.isPrimordial) {
     print("let go " + w.getSharedProperty("in") + " " + w.getSharedProperty("bytes"));
     print("terminate ended " + w.terminate());
 
-    var spinner:Worker = WorkerDomain.current.createWorkerFromPrimordial();
-    spinner.setSharedProperty("spin", true);
-    spinner.start();
-    print("running " + waitFor(function():Boolean { return spinner.state == "running"; }) + " " + spinner.state);
+    // A worker that ends leaves the worker it started running.
+    var parent:Worker = WorkerDomain.current.createWorkerFromPrimordial();
+    parent.setSharedProperty("role", "parent");
+    parent.start();
+    print("parent ended " + waitFor(function():Boolean { return parent.state == "terminated"; }) + " " + parent.state);
+    print("grandchild running " + waitFor(function():Boolean { return WorkerDomain.current.listWorkers().length == 2; }));
+    var grandchild:Worker = null;
+    var listed:Vector.<Worker> = WorkerDomain.current.listWorkers();
+    for (var i:int = 0; i < listed.length; i++) {
+        if (!listed[i].isPrimordial) {
+            grandchild = listed[i];
+        }
+    }
+
+    print("grandchild " + grandchild.isPrimordial + " " + grandchild.state + " " + parent.isParentOf(grandchild) + " " + me.isParentOf(grandchild));
+    me.setSharedProperty("stop", true);
+    print("grandchild ended " + waitFor(function():Boolean { return grandchild.state == "terminated"; }) + " " + grandchild.state);
     print("listed " + WorkerDomain.current.listWorkers().length);
-    print("terminate running " + spinner.terminate());
-    // avmshell interrupts a worker only where its interrupts are on, which
-    // the oracle's are not: told to stop, it ends by itself.
-    spinner.setSharedProperty("stop", true);
-    print("stopped " + waitFor(function():Boolean { return spinner.state == "terminated"; }) + " " + spinner.state);
-    print("listed " + WorkerDomain.current.listWorkers().length);
-    print("terminate again " + spinner.terminate());
-} else if (me.getSharedProperty("spin")) {
-    while (!me.getSharedProperty("stop")) {
+} else if (me.getSharedProperty("role") == "parent") {
+    var child:Worker = WorkerDomain.current.createWorkerFromPrimordial();
+    child.setSharedProperty("role", "grandchild");
+    child.start();
+} else if (me.getSharedProperty("role") == "grandchild") {
+    var top:Worker = primordialOf(WorkerDomain.current.listWorkers());
+    while (!top.getSharedProperty("stop")) {
         System.sleep(5);
     }
 } else {

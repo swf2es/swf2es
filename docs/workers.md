@@ -342,6 +342,14 @@ as AMF3. A shareable ByteArray, a Mutex or a Condition stays with the VM
 that set it: setting one on another worker, or reading one another worker
 set, throws "not supported" until slices 3 and 4 share them.
 
+A thread may be stopped anywhere, so none is stopped holding the lock:
+`terminate` marks the worker, and the workers it started, theirs and so
+on, `terminated` and lets their properties go while it holds the lock,
+and only then stops the thread. A terminated worker never takes the lock
+again: its next property access throws, which ends its code, as a
+worker another one terminated, whose thread it does not hold, ends at
+that access too. A worker that ends marks itself under the lock as well.
+
 The runtime knows no threads: `RuntimeOptions.workers`, a host, starts
 one for a worker, given its `ShellWorkerInit` (its number, the memory, and
 its code or null for the primordial's), and the thread makes a runtime
@@ -350,7 +358,9 @@ starts a `worker_threads` Worker on `shell-thread.js`, posted codegen's
 compiled module, the libraries and the primordial's ABCs; it marks the
 worker running (`startShellWorker`), runs its code with `runShell` and,
 when that ends, marks it terminated, or `exception` after an exception
-nothing caught, and lets its properties go (`endShellWorker`). `swf2es
+nothing caught, and lets its properties go (`endShellWorker`). The
+workers it started run on, as in avmshell: their threads are its
+thread's, so it waits for them before it ends. `swf2es
 run`, the conformance runner and the Tamarin runner all give it, the
 last two with their lines posted back to the runner, the CLI with each
 thread writing to stdout itself.
@@ -362,9 +372,11 @@ Where swf2es differs from the oracle's avmshell:
   interrupt check, and the oracle's avmshell runs without them, so a
   worker spinning in a loop is never stopped there, and the shell waits
   for it at exit, for ever.
-- Only the worker that started a worker holds its thread: another that
-  terminates it marks it `terminated`, but its thread runs on until its
-  code ends.
+- Terminating a worker terminates the workers it started too, whose
+  threads node stops with its thread; in avmshell they run on.
+- A worker terminated by one that did not start it, and so does not hold
+  its thread, is `terminated` at once but runs on until its next shared
+  property access or its end.
 - A worker's lines reach the runners only when their event loop runs,
   so after the primordial's own in the tests, where avmshell interleaves
   them as they come; the CLI writes them as they come.
