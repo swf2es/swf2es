@@ -254,6 +254,13 @@ export class Code {
       await this.floatReady;
     }
 
+    // Workers are handed what was compiled up to the main SWF's code, and
+    // only by a SWF that can make one: another records none of its modules.
+    const main = domain === this.s.mainDomain && !this.mainLinked;
+    if (main && !namesWorkerDomain(abcs.map(({ abc }) => abc))) {
+      this.recorder?.drop();
+    }
+
     const added: { index: number; lazy: boolean }[] = [];
     const runs: (() => void)[] = [];
     this.pin(domain, 1);
@@ -270,16 +277,11 @@ export class Code {
       // the link goes on in the same turn, as it did before scripts.
       const linked = this.compileAll(indices, domain, false, { url, library }, ready);
       const modules = linked instanceof Promise ? await linked : linked;
-      if (domain === this.s.mainDomain && !this.mainLinked) {
-        // Workers are handed what was compiled up to the main SWF's code,
-        // and only by a SWF that can make one.
+      if (main) {
         this.mainLinked = true;
-        if (namesWorkerDomain(abcs.map(({ abc }) => abc))) {
-          this.recorder?.freeze(this.hashes);
-        } else {
-          this.recorder?.drop();
-        }
+        this.recorder?.freeze(this.hashes);
       }
+
       for (const [k, { lazy }] of added.entries()) {
         const linked = modules[k];
         if (!lazy) {

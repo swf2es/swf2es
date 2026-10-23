@@ -58,9 +58,13 @@ function workerSwf(name: string, extra = ""): Uint8Array {
   return bare(abc, 1, name);
 }
 
-/** `codegen`, counting the modules it compiles and keeping their text. */
-function counted(codegen: Codegen): { codegen: Codegen; modules: string[] } {
+/**
+ * `codegen`, keeping the text of the modules it compiles, and the indices
+ * of those compiled with their logs, as a primordial that may hand them is.
+ */
+function counted(codegen: Codegen): { codegen: Codegen; modules: string[]; logged: number[] } {
   const modules: string[] = [];
+  const logged: number[] = [];
   const spy = Object.create(codegen) as Codegen;
   Object.assign(spy, {
     compileModule: (...args: Parameters<Codegen["compileModule"]>) => {
@@ -69,9 +73,10 @@ function counted(codegen: Codegen): { codegen: Codegen; modules: string[] } {
       return module;
     },
     compileModuleLogged: (...args: Parameters<Codegen["compileModuleLogged"]>) => {
-      const logged = codegen.compileModuleLogged(...args);
-      modules.push(logged.module);
-      return logged;
+      const compiled = codegen.compileModuleLogged(...args);
+      modules.push(compiled.module);
+      logged.push(args[1] ?? -1);
+      return compiled;
     },
     compileLazyModule: (...args: Parameters<Codegen["compileLazyModule"]>) => {
       const module = codegen.compileLazyModule(...args);
@@ -79,7 +84,7 @@ function counted(codegen: Codegen): { codegen: Codegen; modules: string[] } {
       return module;
     },
   });
-  return { codegen: spy, modules };
+  return { codegen: spy, modules, logged };
 }
 
 /** Plays `swf` for a frame: its traces, the modules it compiled, and what a worker it started was handed. */
@@ -89,11 +94,12 @@ async function play(
 ): Promise<{
   lines: string[];
   compiled: string[];
+  logged: number[];
   handed: HandedModules | null;
   scripting: Scripting;
 }> {
   const lines: string[] = [];
-  const { codegen, modules } = counted(await createCodegen(wasm));
+  const { codegen, modules, logged } = counted(await createCodegen(wasm));
   let handed: HandedModules | null = null;
   const host: WorkerHost = {
     start(init) {
@@ -109,7 +115,7 @@ async function play(
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   await new Player(swf, scripting).start();
-  return { lines, compiled: modules, handed, scripting };
+  return { lines, compiled: modules, logged, handed, scripting };
 }
 
 test("a worker on the primordial's SWF loads its modules and compiles none", { skip }, async () => {
@@ -160,7 +166,7 @@ test("a worker on other ABCs takes the libraries' modules only", { skip }, async
   worker.scripting.destroy();
 });
 
-test("a SWF that names no WorkerDomain keeps no modules to hand", { skip }, async () => {
+test("a SWF that names no WorkerDomain records none of its modules", { skip }, async () => {
   const abc = compiler(out)(
     "NoWorkers",
     `package { import flash.display.Sprite; public class NoWorkers extends Sprite {
@@ -169,6 +175,8 @@ test("a SWF that names no WorkerDomain keeps no modules to hand", { skip }, asyn
   );
   const played = await play(bare(abc, 1, "NoWorkers"), { host: true });
   assert.deepEqual(played.lines, ["none"]);
+  // The libraries were, before the SWF was seen; its own ABC is not.
+  assert.deepEqual(played.logged, [0, 1]);
   assert.equal(played.scripting.code.handedModules(), null);
   played.scripting.destroy();
 });

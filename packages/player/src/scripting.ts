@@ -475,6 +475,7 @@ export class Scripting {
     this.destroyed = true;
     this.loads.destroyAvm1();
     this.workers.stopAll();
+    this.code.recorder?.drop();
     this.localConnections.destroy(this);
     this.flushSharedObjects?.();
     stopAllSounds(this);
