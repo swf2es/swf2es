@@ -32,8 +32,8 @@ own installer. A relative path is taken from the directory pnpm was run in.
   with the usual unavailable-context fallback and logs the cause. The saved
   choice remains enabled. Each slot owns a separate WebGL2 context;
   closing or reloading the movie releases its resources and browser contexts.
-  Animated models and sprite effects can retain up to 4,096 buffers and 1,024
-  textures per context. The separate 64 MiB buffer and texture budgets, including
+  Each resource type has its own 4,096-resource count limit.
+  The separate 64 MiB buffer and texture budgets, including
   all texture mips and cube faces, and other default budgets still apply. Supported
   formats and remaining gaps are in [Context3D](../../packages/context3d/README.md).
 - **Libraries.** ActionScript 3 needs `builtin.abc` (avmplus', MPL-2.0)
