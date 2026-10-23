@@ -13,6 +13,8 @@ import type { WorkerHost } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import {
   type HandedModules,
+  ModuleHandover,
+  ModuleRecorder,
   namesWorkerDomain,
 } from "../../../../packages/player/dist/scripting/handover.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
@@ -179,6 +181,45 @@ test("a SWF that names no WorkerDomain records none of its modules", { skip }, a
   assert.deepEqual(played.logged, [0, 1]);
   assert.equal(played.scripting.code.handedModules(), null);
   played.scripting.destroy();
+});
+
+test("a module that did not load is not handed", () => {
+  const recorder = new ModuleRecorder();
+  recorder.op("add true 0", 1);
+  recorder.compiled(0, 1, { text: "a" }, "");
+  recorder.op("add false 1", 1);
+  recorder.compiled(1, 1, { text: "b" }, "");
+  recorder.freeze(["x", "y"]);
+  recorder.forget(1);
+  assert.deepEqual(
+    recorder.handed([])?.modules.map(([at]) => at),
+    [1],
+  );
+
+  recorder.drop();
+  assert.equal(recorder.handed([]), null);
+});
+
+test("a log that does not replay fails every later use of the worker's compiler", () => {
+  const handover = new ModuleHandover({
+    ops: ["add true 0", "compile 0"],
+    hashes: ["x"],
+    modules: [[1, { module: "m", log: "bad" }]],
+  });
+  handover.op("add true 0");
+  assert.ok(handover.take(0, ["x"]));
+
+  let replays = 0;
+  const codegen = handover.guard({
+    replay: () => {
+      replays++;
+      return false;
+    },
+    revision: () => "r",
+  } as unknown as Codegen);
+  assert.throws(() => codegen.revision(), /did not replay/);
+  assert.throws(() => codegen.revision(), /did not replay/);
+  assert.equal(replays, 1);
 });
 
 test("namesWorkerDomain finds the name anywhere in an ABC's bytes", () => {

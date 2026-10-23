@@ -186,6 +186,16 @@ export class Code {
     this.handover?.op(`compile ${index}`);
   }
 
+  /**
+   * ABC `index`'s module, read from the cache, refused as it loaded and
+   * compiled again: not handed to a worker, which would fail on it too,
+   * nor any after it.
+   */
+  private refused(index: number): void {
+    this.recorder?.forget(index);
+    this.unmodelled();
+  }
+
   /** A call the journal does not follow: no module is handed past it. */
   private unmodelled(): void {
     if (this.recorder) {
@@ -502,7 +512,7 @@ export class Code {
     }
 
     const recompiled = () => {
-      this.unmodelled();
+      this.refused(index);
       this.discard(ready.key, ready.entry);
       return compiled();
     };
@@ -552,7 +562,7 @@ export class Code {
           throw e;
         }
 
-        this.unmodelled();
+        this.refused(index);
         script = `swf2es-${++this.modules}.js`;
         linked = run(evaluateFunction(this.s.codegen.compileModule(this.hashes, index), script));
       }

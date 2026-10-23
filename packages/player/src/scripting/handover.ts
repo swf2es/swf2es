@@ -35,6 +35,8 @@ export interface HandedModules {
 export class ModuleRecorder {
   private readonly ops: string[] = [];
   private readonly modules = new Map<number, HandedModule>();
+  /** Where in the journal each ABC's module was last compiled, by its index. */
+  private readonly places = new Map<number, number>();
   private epoch: number | null = null;
   private frozen: HandedModules | null = null;
   /** Whether calls are still journaled. */
@@ -67,6 +69,7 @@ export class ModuleRecorder {
       return;
     }
 
+    this.places.set(index, this.ops.length - 1);
     const text =
       module.text === undefined || typeof Blob !== "function"
         ? module.text
@@ -88,11 +91,25 @@ export class ModuleRecorder {
     this.frozen = { ops: this.ops, hashes: hashes.slice(), modules: [...this.modules] };
   }
 
+  /** Let go of ABC `index`'s module, which did not load: a worker compiles it. */
+  forget(index: number): void {
+    const place = this.places.get(index);
+    if (place === undefined) {
+      return;
+    }
+
+    this.modules.delete(place);
+    if (this.frozen) {
+      this.frozen.modules = this.frozen.modules.filter(([at]) => at !== place);
+    }
+  }
+
   /** Stop journaling and let the modules go: no worker will be handed them. */
   drop(): void {
     this.open = false;
     this.ops.length = 0;
     this.modules.clear();
+    this.places.clear();
     this.frozen = { ops: [], hashes: [], modules: [] };
   }
 
@@ -111,6 +128,8 @@ export class ModuleHandover {
   /** How many of the worker's ABCs are known to be the primordial's. */
   private same = 0;
   private readonly pending: { index: number; log: string }[] = [];
+  /** A replay that failed: the domain is as no compile left it, and the compiler is not used again. */
+  private failed: Error | null = null;
 
   constructor(private readonly handed: HandedModules) {
     this.modules = new Map(handed.modules);
@@ -190,12 +209,22 @@ export class ModuleHandover {
     });
   }
 
-  /** Replay the logs of the modules taken, in order. */
+  /** Replay the logs of the modules taken, in order; once one fails, every call fails. */
   private flush(codegen: Codegen): void {
-    for (const { index, log } of this.pending.splice(0)) {
+    if (this.failed) {
+      throw this.failed;
+    }
+
+    while (this.pending.length > 0) {
+      const { index, log } = this.pending[0];
       if (!codegen.replay(log, index)) {
-        throw new Error("swf2es: a module the primordial handed to a worker did not replay");
+        this.failed = new Error(
+          "swf2es: a module the primordial handed to a worker did not replay",
+        );
+        throw this.failed;
       }
+
+      this.pending.shift();
     }
   }
 }
