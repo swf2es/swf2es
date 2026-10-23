@@ -182,6 +182,29 @@ export interface Job {
   shared: { worker: number; key: string | null; value: PackedValue }[];
 }
 
+/** A request for the primordial: a worker a background worker made, to start or to terminate. */
+export type Request = { type: "start"; job: Job } | { type: "end"; id: number; creator: number };
+
+const START = 0;
+const END = 1;
+
+export function packEnd(id: number, creator: number): Uint8Array {
+  const out = new DataView(new ArrayBuffer(9));
+  out.setUint8(0, END);
+  out.setInt32(1, id, true);
+  out.setInt32(5, creator, true);
+  return new Uint8Array(out.buffer);
+}
+
+export function unpackRequest(bytes: Uint8Array): Request {
+  if (bytes[0] === END) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { type: "end", id: view.getInt32(1, true), creator: view.getInt32(5, true) };
+  }
+
+  return { type: "start", job: unpackJob(bytes.subarray(1)) };
+}
+
 export function packJob(
   id: number,
   creator: number,
@@ -193,7 +216,7 @@ export function packJob(
   head.setInt32(4, creator, true);
   head.setUint32(8, swf.length, true);
   head.setUint32(12, shared.length, true);
-  const parts: Uint8Array[] = [new Uint8Array(head.buffer), swf];
+  const parts: Uint8Array[] = [new Uint8Array([START]), new Uint8Array(head.buffer), swf];
   for (const p of shared) {
     const key = p.key === null ? null : encoder.encode(p.key);
     const value = pack(p.value);
@@ -214,7 +237,7 @@ export function packJob(
   return out;
 }
 
-export function unpackJob(bytes: Uint8Array): Job {
+function unpackJob(bytes: Uint8Array): Job {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const swfLength = view.getUint32(8, true);
   const count = view.getUint32(12, true);

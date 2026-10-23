@@ -105,13 +105,11 @@ export type FromWorker =
   | { type: "uncaught"; text: string }
   | { type: "terminate" }
   /**
-   * A worker this one made is in the primordial's queue of requests (see
-   * workers.ts): for the primordial to take it at once if it is not
-   * waiting, when it would take it as it waits.
+   * A worker this one made, to start or terminate, is in the primordial's
+   * queue of requests (see workers.ts): for the primordial to take it at
+   * once if it is not waiting, when it would take it as it waits.
    */
-  | { type: "create" }
-  /** Terminate a worker this one made. */
-  | { type: "end"; worker: number }
+  | { type: "requests" }
   | SharedMessage
   | ChannelMessage
   | ChannelClose;

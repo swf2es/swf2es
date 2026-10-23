@@ -129,7 +129,9 @@ async function play(
   const scripting = new Scripting(await createCodegen(wasm), {
     print: (line) => lines.push(line),
     realTime: null,
-    onUncaught: (error) => uncaught.push((error as Error).message),
+    // An AS3 error is no JavaScript Error: its own text.
+    onUncaught: (error) =>
+      uncaught.push(error instanceof Error ? error.message : scripting.rt.toString(error as never)),
     workerHost: options.workerHost ?? nodeWorkerHost({ codegen: wasm }),
   });
   try {
@@ -438,7 +440,16 @@ test("a Mutex and a Condition cross to a worker by reference, and block across t
           trace(back.receive(true));
           trace("held by a worker " + m.tryLock());
           ws[1].terminate();
-          trace("after terminate " + m.tryLock());
+          // Let go once its thread stops, at its blocked receive.
+          var nap:Condition = new Condition(new Mutex());
+          nap.mutex.lock();
+          var start:int = getTimer();
+          var got:Boolean = false;
+          while (!(got = m.tryLock()) && getTimer() - start < 10000) {
+            nap.wait(1);
+          }
+
+          trace("after terminate " + got);
           trace("waited " + c.wait(5));
           m.unlock();
         }
@@ -563,4 +574,77 @@ test("a background worker makes and starts a worker, even while the primordial w
   assert.deepEqual(uncaught, []);
   // The child's trace comes once the primordial is back in its event loop.
   assert.deepEqual(lines, ["made true hi running", "child new false"]);
+});
+
+test("a Mutex a terminated worker held is free to take only once its thread has stopped", {
+  skip,
+}, async () => {
+  const { lines, uncaught } = await play(
+    "KilledHolder",
+    `      var m:Mutex = new Mutex();
+      var log:ByteArray = new ByteArray();
+      log.shareable = true;
+      log.length = 16;
+      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      w.setSharedProperty("role", "maker");
+      w.setSharedProperty("m", m);
+      w.setSharedProperty("log", log);
+      w.start();
+      var got:Boolean = false;
+      var seen:int = -1;
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        if (log[3] != 1 || seen == -2) {
+          return;
+        }
+
+        if (seen == -1) {
+          trace("held right after terminate " + (log[4] == 0));
+          seen = -3;
+        }
+
+        // Taken once the child's thread has stopped, and nothing writes after.
+        if (got) {
+          trace("written after it was taken " + (log[1] != seen));
+          seen = -2;
+          m.unlock();
+        } else if (m.tryLock()) {
+          got = true;
+          seen = log[1];
+          trace("taken");
+        }
+      });`,
+    `      var m:Mutex = Worker.current.getSharedProperty("m");
+      var log:ByteArray = Worker.current.getSharedProperty("log");
+      if (Worker.current.getSharedProperty("role") == "maker") {
+        var child:Worker = WorkerDomain.current.createWorker(loaderInfo.bytes);
+        child.setSharedProperty("role", "child");
+        child.setSharedProperty("m", m);
+        child.setSharedProperty("log", log);
+        child.start();
+        var nap:Condition = new Condition(new Mutex());
+        nap.mutex.lock();
+        while (log[0] != 1) {
+          nap.wait(1);
+        }
+
+        child.terminate();
+        // Its thread has not stopped yet, and still writes.
+        log[4] = m.tryLock() ? 1 : 0;
+        log[3] = 1;
+      } else {
+        m.lock();
+        log[0] = 1;
+        for (;;) {
+          log[1] = (log[1] + 1) & 255;
+        }
+      }`,
+    { frames: 150, blocking: true },
+  );
+
+  assert.deepEqual(uncaught, []);
+  assert.deepEqual(lines, [
+    "held right after terminate true",
+    "taken",
+    "written after it was taken false",
+  ]);
 });

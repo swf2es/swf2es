@@ -23,8 +23,10 @@ export interface WebWorkerHostOptions {
   url?: string | URL;
   /**
    * How many Web Workers to keep started ahead, for workers a script starts
-   * and then waits for without returning to the event loop: 2 by default.
-   * The page's hosts for one script URL share them.
+   * and then waits for without returning to the event loop: by default as
+   * many as the machine has cores, from 2 up to 4. The page's hosts for one
+   * script URL share them, and they are let go a while after the last
+   * player that used them is.
    */
   spares?: number;
 }
@@ -47,8 +49,46 @@ interface Spare {
   settled: Promise<void>;
 }
 
+/** How long after a Web Worker's terminate it is taken to have stopped. */
+const STOPPED_GRACE = 100;
+
 /** The workers started ahead, by script URL. */
 const pools = new Map<string, Spare[]>();
+
+/** How many hosts not yet released use each pool, and the timer that lets an unused one go. */
+const users = new Map<string, { count: number; idle: ReturnType<typeof setTimeout> | null }>();
+
+/** How long a pool no player uses keeps its workers, for the next player a page makes. */
+const IDLE = 10_000;
+
+function use(url: string | URL): void {
+  const key = String(url);
+  const u = users.get(key) ?? { count: 0, idle: null };
+  if (u.idle !== null) {
+    clearTimeout(u.idle);
+    u.idle = null;
+  }
+
+  u.count++;
+  users.set(key, u);
+}
+
+function release(url: string | URL): void {
+  const key = String(url);
+  const u = users.get(key);
+  if (!u || --u.count > 0) {
+    return;
+  }
+
+  u.idle = setTimeout(() => {
+    for (const spare of pools.get(key) ?? []) {
+      spare.worker.terminate();
+    }
+
+    pools.delete(key);
+    users.delete(key);
+  }, IDLE);
+}
 
 function spawn(url: string | URL): Worker {
   return new Worker(url, { type: "module" });
@@ -115,10 +155,20 @@ function take(pool: Spare[]): Spare | undefined {
 /** Background workers on module Web Workers. */
 export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
   const url = options.url ?? new URL("./web-worker.js", import.meta.url);
-  const spares = options.spares ?? 2;
+  const cores = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+    ?.hardwareConcurrency;
+  const spares = options.spares ?? Math.min(4, Math.max(2, cores ?? 2));
+  use(url);
   const pool = fill(url, spares);
+  let released = false;
   return {
     ready: Promise.all(pool.map((s) => s.settled)).then(() => {}),
+    release() {
+      if (!released) {
+        released = true;
+        release(url);
+      }
+    },
     start(init, receive, failed) {
       const spare = take(fill(url, spares));
       const worker = spare?.worker ?? spawn(url);
@@ -139,7 +189,12 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
       worker.postMessage(start);
       return {
         post: (message) => worker.postMessage(message),
-        terminate: () => worker.terminate(),
+        // A browser tells nobody when a Web Worker has stopped: it stops
+        // its script at once, which a moment's grace leaves time for.
+        terminate: () => {
+          worker.terminate();
+          return new Promise((resolve) => setTimeout(resolve, STOPPED_GRACE));
+        },
       };
     },
   };
