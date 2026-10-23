@@ -5008,11 +5008,17 @@ element's `workers` attribute, `"true"` or `"false"`, decides for its own
 SWFs over the configuration, and off, `Worker.isSupported` is false. A
 player's host starts Web Workers ahead only for a SWF whose ABCs name
 `WorkerDomain`, and the element awaits them before the SWF's first
-frame, as Crossbridge's start a worker and wait for it in one script; a
+frame, as Crossbridge's start a worker and wait for it in one script, for
+ten seconds at most, so that a script that never says it loaded keeps
+no SWF from playing; a
 SWF that names no worker starts none, and one that a loaded SWF starts
 later starts as it is asked for. The workers started ahead are the
 page's, shared by its players, and go ten seconds after the last player
-that used them does, the element's destroy among them.
+that used them does, the element's destroy among them. A host's
+`ready` waits for each worker it started ahead though another player's
+host took it before it loaded. The element imports
+`player-hosts/workers` only when a SWF has workers, so a page whose
+import map does not name it plays its SWFs without them.
 
 A Web Worker sees no import map, so the worker script is
 `player-hosts`' `dist/thread/`: `build-thread.ts`, after tsc, copies

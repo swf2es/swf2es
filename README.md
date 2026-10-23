@@ -69,7 +69,8 @@ back its GL context, audio and sockets. It fires `load`, `error` and
 ActionScript's workers (`flash.system.Worker`) run on Web Workers by
 default, as in Flash. `configure({ workers: false })` turns them off for
 the page, and `workers="false"` or `"true"` on an element for its own
-SWFs. Under an import map, map `@swf2es/player-hosts/workers` too: the
+SWFs. Under an import map, map `@swf2es/player-hosts/workers` too, or
+SWFs play without workers (the console says why). The
 workers load `@swf2es/player-hosts`' `dist/thread/`, which needs no import
 map, from wherever the package is served (a CDN's needs CORS, and a
 Content-Security-Policy that allows `blob:` workers);

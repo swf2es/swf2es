@@ -183,6 +183,23 @@ export function namesWorkers(swf: Swf): boolean {
   return false;
 }
 
+/**
+ * How long a SWF that names workers waits for the Web Workers started
+ * ahead before its first frame: past it, it plays on, and a worker it
+ * starts takes one still loading.
+ */
+const READY_WAIT = 10_000;
+
+/** A player's Web Workers, or none where their module does not load, as under an import map that does not name it. */
+async function workersOrNone(ahead: boolean): Promise<WebWorkerHost | null> {
+  try {
+    return await workerHostForPlayer(ahead);
+  } catch (error) {
+    console.warn(`swf2es: workers are off, as their host did not load: ${error}`);
+    return null;
+  }
+}
+
 /** Flash's quality names; the auto ones as what they start at. */
 function quality(value: string | null): string {
   const named = (value ?? "high").toUpperCase();
@@ -414,11 +431,12 @@ export class Swf2esPlayerElement extends ElementBase {
       const scripted =
         isAs3(swf) && swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
       if (scripted) {
-        const [codegen, abcs, host] = await Promise.all([
-          codegenForPlayer(),
-          libraries(),
-          this.#workers() ? workerHostForPlayer(namesWorkers(swf)) : null,
-        ]);
+        const [codegen, abcs] = await Promise.all([codegenForPlayer(), libraries()]);
+        if (!current()) {
+          return;
+        }
+
+        const host = this.#workers() ? await workersOrNone(namesWorkers(swf)) : null;
         if (!current()) {
           host?.release?.();
           return;
@@ -484,8 +502,14 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.playback = playback;
-      // The workers started ahead, loaded before a script may wait for one.
-      await session.workers?.ready;
+      // The workers started ahead, loaded before a script may wait for one;
+      // a script that never says it loaded does not keep the SWF from playing.
+      if (session.workers) {
+        await Promise.race([
+          session.workers.ready,
+          new Promise((done) => setTimeout(done, READY_WAIT)),
+        ]);
+      }
       if (!current()) {
         return;
       }

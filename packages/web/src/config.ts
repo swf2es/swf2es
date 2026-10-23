@@ -12,7 +12,7 @@ import {
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
-import { type WebWorkerHost, webWorkerHost } from "@swf2es/player-hosts/workers";
+import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 
 /** A flash.net.Socket's host and port, and the WebSocket relay that reaches it, as Ruffle's socketProxy lists them. */
 export interface SocketProxy {
@@ -134,6 +134,9 @@ async function compiledCodegen(): Promise<WebAssembly.Module> {
  * once, as Crossbridge's do; others start one when the SWF asks.
  */
 export async function workerHostForPlayer(ahead: boolean): Promise<WebWorkerHost> {
+  // Loaded only where a SWF has workers: a page's import map that names no
+  // @swf2es/player-hosts/workers still loads the element.
+  const { webWorkerHost } = await import("@swf2es/player-hosts/workers");
   return webWorkerHost({
     codegen: await compiledCodegen(),
     url: config.workerUrl,
