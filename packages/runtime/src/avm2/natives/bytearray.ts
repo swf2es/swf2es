@@ -80,6 +80,11 @@ export class Bytes {
   objectEncoding: number;
   /** Whether it is the domain memory, which it then tells when its buffer or length changes. */
   subscribed = false;
+  /**
+   * Whether `shareable` was set true, which no memory shares yet: a worker
+   * refuses to pass it to another rather than copy it.
+   */
+  shareRequested = false;
   /** Its runtime's capacity count, and its own part of it. */
   private readonly capacity: { runtime: Count; own: Count };
 
@@ -674,8 +679,9 @@ export function byteArrayNatives(rt: Runtime): Natives {
       return false;
     }
 
-    set shareable(_v: Value) {
-      // Shareable byte arrays are not shared here.
+    // Shareable byte arrays are not shared here; workers refuse to pass one.
+    set shareable(v: Value) {
+      bytesOf(rt, this).shareRequested = rt.toBoolean(v);
     }
 
     clear() {

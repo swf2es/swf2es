@@ -1,11 +1,12 @@
 // avmshell's own classes, which a player has not: its System, File and
-// Domain, and its Worker as the one that runs, the primordial, with no
-// others to start.
+// Domain, and its Worker and WorkerDomain, whose workers run on threads
+// the host starts (RuntimeOptions.workers; shell-workers.ts).
 
 import { Reader, Writer } from "../amf.js";
 import type { AsObject, Value } from "../descriptors.js";
 import type { Domain } from "../domain.js";
 import type { ClassHook } from "../hooks.js";
+import type { ShellThread } from "../options.js";
 import type { Runtime } from "../runtime.js";
 import { setStaticVar } from "../traits.js";
 import {
@@ -17,6 +18,22 @@ import {
   utf8,
 } from "./bytearray.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
+import {
+  CANSTART,
+  entryKey,
+  FAILED,
+  ITEM_AMF,
+  ITEM_BYTES,
+  ITEM_LOCAL,
+  ITEM_NUMBER,
+  NEW,
+  newWorkersMemory,
+  RUNNING,
+  STATE_NAMES,
+  sleep,
+  TERMINATED,
+  Workers,
+} from "./shell-workers.js";
 
 const started = Date.now();
 
@@ -150,6 +167,10 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     static exit(): void {}
+
+    static sleep(ms: Value): void {
+      sleep(rt.toInt(ms));
+    }
 
     // There is no shell to run a command in: system()'s -1, of no process made.
     static exec(command: Value): number {
@@ -308,58 +329,167 @@ export function shellNatives(rt: Runtime): Natives {
     }
   }
 
+  // A Worker is one of the workers its VM knows (workersOf), by id; one
+  // made and not started keeps its code, as avmplus' m_byteCode.
   class WorkerNatives {
-    declare $shared: Map<string | null, Value>;
-
     static pr(s: Value): void {
       rt.print(rt.toString(s));
     }
 
-    "flash.system:Worker::internalGetState"(): string {
-      return "running";
+    // As WorkerObjectBase::get_state.
+    "flash.system:Worker::internalGetState"(this: WorkerObject): string {
+      return STATE_NAMES[workersOf(rt).workers.state(this.$id)] || "aborted";
     }
 
     get isPrimordial(): boolean {
-      return true;
+      return (this as unknown as WorkerObject).$id === 0;
     }
 
-    isParentOf(_other: Value): boolean {
-      return false;
+    isParentOf(this: WorkerObject, other: Value): boolean {
+      if (other === null || other === undefined) {
+        throw rt.error("TypeError", 2007, "worker");
+      }
+
+      return workersOf(rt).workers.parent((other as WorkerObject).$id) === this.$id;
     }
 
-    // As avmplus' ChannelItem: undefined deletes, and an object other than a
-    // ByteArray, a Mutex or a Condition is kept as AMF3 and read back as a new copy.
-    setSharedProperty(key: Value, value: Value): void {
-      this.$shared ??= new Map();
+    // As avmplus' ChannelItem: undefined deletes; a number is kept as itself,
+    // a ByteArray's bytes copied, and anything else as AMF3, read back as a
+    // new copy. A shareable ByteArray, a Mutex or a Condition is kept as the
+    // object, which only this VM has: one set on another worker, or read
+    // there, fails, as no memory is shared yet.
+    setSharedProperty(this: WorkerObject, key: Value, value: Value): void {
+      const { workers } = workersOf(rt);
+      const k = sharedKey(rt, key);
       if (value === undefined) {
-        this.$shared.delete(sharedKey(rt, key));
+        workers.set(this.$id, k, null);
+        workers.objects.delete(entryKey(this.$id, k));
         return;
       }
 
-      this.$shared.set(sharedKey(rt, key), sharedItem(rt, value));
+      const item = sharedItem(rt, value);
+      if (item.kind === ITEM_LOCAL && this.$id !== workers.self) {
+        throw rt.unsupported(`passing ${localName(rt, value)} to another worker`);
+      }
+
+      const token = workers.set(this.$id, k, item);
+      if (item.kind === ITEM_BYTES || item.kind === ITEM_LOCAL) {
+        workers.objects.set(entryKey(this.$id, k), { token, value });
+      }
     }
 
-    getSharedProperty(key: Value): Value {
-      const item = this.$shared?.get(sharedKey(rt, key));
-      return item instanceof SharedAmf ? item.read(rt) : item;
+    getSharedProperty(this: WorkerObject, key: Value): Value {
+      const { workers } = workersOf(rt);
+      const k = sharedKey(rt, key);
+      const entry = workers.get(this.$id, k);
+      if (!entry) {
+        return undefined;
+      }
+
+      switch (entry.kind) {
+        case ITEM_NUMBER:
+          return new DataView(entry.bytes.buffer).getFloat64(0, true);
+        case ITEM_AMF:
+          return readAmf(rt, entry.bytes);
+      }
+
+      // One object a VM for the item, as avmplus interns it.
+      const cached = workers.objects.get(entryKey(this.$id, k));
+      if (cached?.token === entry.token) {
+        return cached.value;
+      }
+
+      if (entry.kind === ITEM_LOCAL) {
+        throw rt.unsupported(
+          "passing a shareable ByteArray, a Mutex or a Condition to another worker",
+        );
+      }
+
+      const value = newByteArray(rt, entry.bytes);
+      workers.objects.set(entryKey(this.$id, k), { token: entry.token, value });
+      return value;
     }
 
-    start(): void {
-      throw rt.unsupported("starting a Worker");
+    // As WorkerObjectBase::internalStart: its parent starts it, once, on a
+    // thread of the host's that runs its code, or the primordial's.
+    start(this: WorkerObject): void {
+      const { workers, threads } = workersOf(rt);
+      if (workers.state(this.$id) !== NEW) {
+        throw rt.error("flash.errors::IllegalOperationError", 1511);
+      }
+
+      if (workers.parent(this.$id) !== workers.self) {
+        throw rt.error("flash.errors::IllegalOperationError", 1521);
+      }
+
+      if (!rt.workerHost) {
+        throw rt.unsupported("starting a Worker without RuntimeOptions.workers");
+      }
+
+      const code = this.$code === null || this.$code === undefined ? null : copyOf(rt, this.$code);
+      this.$code = null;
+      workers.setState(this.$id, CANSTART);
+      try {
+        threads.set(this.$id, rt.workerHost.start({ id: this.$id, memory: workers.memory, code }));
+      } catch (e) {
+        workers.setState(this.$id, FAILED);
+        throw e;
+      }
     }
 
-    terminate(): boolean {
-      return false;
+    // As Aggregate::requestIsolateExit: true for a worker started and not
+    // yet ended, which is terminated at once, its thread stopped and its
+    // properties let go; false for one not started or ended. The primordial,
+    // or a worker terminating itself, ends with Error 1513.
+    terminate(this: WorkerObject): boolean {
+      const { workers, threads } = workersOf(rt);
+      if (this.$id === 0 || this.$id === workers.self) {
+        if (this.$id !== 0) {
+          workers.setState(this.$id, TERMINATED);
+          workers.release(this.$id);
+        }
+
+        throw rt.error("Error", 1513);
+      }
+
+      const state = workers.state(this.$id);
+      if (state <= NEW || state > RUNNING) {
+        return false;
+      }
+
+      threads.get(this.$id)?.terminate();
+      threads.delete(this.$id);
+      workers.setState(this.$id, TERMINATED);
+      workers.release(this.$id);
+      return true;
     }
   }
 
   class WorkerDomainNatives {
+    // As Aggregate::listWorkers: those running, the primordial among them.
     listWorkers(): Value {
-      throw rt.unsupported("WorkerDomain.listWorkers");
+      const { workers } = workersOf(rt);
+      const list: Value[] = [];
+      for (let id = 0; id < workers.count(); id++) {
+        if (workers.state(id) === RUNNING) {
+          list.push(workerObject(rt, id));
+        }
+      }
+
+      const cls = rt.applyType(rt.classNamed("__AS3__.vec::Vector"), [
+        rt.classNamed("flash.system::Worker"),
+      ]);
+      const o = cls.$it.instance();
+      o.$a = list;
+      o.$fixed = false;
+      return o;
     }
 
-    "flash.system:WorkerDomain::createWorkerFromByteArrayInternal"(): Value {
-      throw rt.unsupported("creating a Worker");
+    // A worker of this one's, NEW; its code is `bytes`, or the primordial's for null.
+    "flash.system:WorkerDomain::createWorkerFromByteArrayInternal"(bytes: Value): Value {
+      const o = workerObject(rt, workersOf(rt).workers.create());
+      o.$code = bytes;
+      return o;
     }
   }
 
@@ -371,43 +501,114 @@ export function shellNatives(rt: Runtime): Natives {
   return natives;
 }
 
-/** An object kept as a shared property by its AMF3 bytes, which each read decodes anew. */
-class SharedAmf {
-  constructor(readonly bytes: Uint8Array) {}
+interface WorkerObject extends AsObject {
+  $id: number;
+  $code: Value;
+}
 
-  read(rt: Runtime): Value {
-    const holder = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
-    const b = bytesOf(rt, holder);
-    b.write(this.bytes);
-    b.position = 0;
-    return new Reader(rt, b).value();
+/** What a VM keeps of the workers: their shared memory, its Worker objects and its threads. */
+interface VmWorkers {
+  workers: Workers;
+  objects: Map<number, WorkerObject>;
+  threads: Map<number, ShellThread>;
+}
+
+const vmWorkers = new WeakMap<Runtime, VmWorkers>();
+
+/** The workers as `rt` sees them: those of its primordial, which it is unless a host started it. */
+function workersOf(rt: Runtime): VmWorkers {
+  let vm = vmWorkers.get(rt);
+  if (!vm) {
+    const init = rt.workerInit;
+    vm = {
+      workers: init ? new Workers(init.memory, init.id) : new Workers(newWorkersMemory(), 0),
+      objects: new Map(),
+      threads: new Map(),
+    };
+    vmWorkers.set(rt, vm);
   }
+
+  return vm;
+}
+
+/** The VM's one Worker for worker `id`, as avmplus interns it; Worker's own constructor refuses. */
+function workerObject(
+  rt: Runtime,
+  id: number,
+  cls = rt.classNamed("flash.system::Worker"),
+): WorkerObject {
+  const { objects } = workersOf(rt);
+  let o = objects.get(id);
+  if (!o) {
+    o = cls.$it.instance() as WorkerObject;
+    cls.$it.proto.$init.apply(o, []);
+    o.$id = id;
+    o.$code = null;
+    objects.set(id, o);
+  }
+
+  return o;
+}
+
+function newByteArray(rt: Runtime, bytes: Uint8Array): AsObject {
+  const o = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
+  const b = bytesOf(rt, o);
+  b.write(bytes);
+  b.position = 0;
+  return o;
+}
+
+/** A ByteArray's bytes, copied. */
+function copyOf(rt: Runtime, o: Value): Uint8Array {
+  const b = bytesOf(rt, o);
+  return b.buffer.slice(0, b.length);
+}
+
+function readAmf(rt: Runtime, bytes: Uint8Array): Value {
+  return new Reader(rt, bytesOf(rt, newByteArray(rt, bytes))).value();
 }
 
 /** A shared property's key: null is one of its own, apart from "null". */
 const sharedKey = (rt: Runtime, key: Value): string | null =>
   key === null || key === undefined ? null : rt.toString(key);
 
-/** What a shared property keeps of `value`: itself, or its AMF3 bytes. */
-function sharedItem(rt: Runtime, value: Value): Value {
-  if (value === null || typeof value !== "object") {
-    return value;
+/** What an object only its own VM has is, in an error. */
+const localName = (rt: Runtime, value: Value): string =>
+  rt.isInstance(value, rt.classNamed("flash.utils::ByteArray"))
+    ? "a shareable ByteArray"
+    : rt.isInstance(value, rt.classNamed("flash.concurrent::Mutex"))
+      ? "a Mutex"
+      : "a Condition";
+
+/**
+ * What a shared property keeps of `value`, as makeChannelItem; a shareable
+ * ByteArray as itself, until memory is shared.
+ */
+function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Array } {
+  if (typeof value === "number") {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setFloat64(0, value, true);
+    return { kind: ITEM_NUMBER, bytes };
   }
 
-  for (const name of [
-    "flash.utils::ByteArray",
-    "flash.concurrent::Mutex",
-    "flash.concurrent::Condition",
-  ]) {
-    if (rt.isInstance(value, rt.classNamed(name))) {
-      return value;
+  if (value !== null && typeof value === "object") {
+    if (rt.isInstance(value, rt.classNamed("flash.utils::ByteArray"))) {
+      return bytesOf(rt, value).shareRequested
+        ? { kind: ITEM_LOCAL, bytes: new Uint8Array(0) }
+        : { kind: ITEM_BYTES, bytes: copyOf(rt, value) };
+    }
+
+    for (const name of ["flash.concurrent::Mutex", "flash.concurrent::Condition"]) {
+      if (rt.isInstance(value, rt.classNamed(name))) {
+        return { kind: ITEM_LOCAL, bytes: new Uint8Array(0) };
+      }
     }
   }
 
-  const holder = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
+  const holder = newByteArray(rt, new Uint8Array(0));
   const b = bytesOf(rt, holder);
   new Writer(rt, b).value(value);
-  return new SharedAmf(b.buffer.slice(0, b.length));
+  return { kind: ITEM_AMF, bytes: b.buffer.slice(0, b.length) };
 }
 
 /** As construct="abstract" and "native": AS3 does not construct the class itself, a subclass it may. */
@@ -435,8 +636,17 @@ export const shellHooks: Record<string, ClassHook> = {
     },
   },
   "flash.system::Worker": {
+    ...abstract("Worker"),
     created(rt: Runtime, cls: AsObject): void {
-      setStaticVar(cls, "m_current", rt.constructClass(cls, []));
+      // Before the class is defined, which classNamed would find.
+      setStaticVar(cls, "m_current", workerObject(rt, workersOf(rt).workers.self, cls));
+    },
+  },
+  // As ShellWorkerDomainClass: WorkerDomain.current, made with the class,
+  // its constructor empty. A player's WorkerDomain has no m_current to set.
+  "flash.system::WorkerDomain": {
+    created(_rt: Runtime, cls: AsObject): void {
+      setStaticVar(cls, "m_current", cls.$it.instance());
     },
   },
 };
