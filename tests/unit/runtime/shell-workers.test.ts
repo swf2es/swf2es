@@ -9,6 +9,7 @@ import {
   newWorkersMemory,
   Workers,
 } from "../../../packages/runtime/dist/avm2/natives/shell-workers.js";
+import { newSyncMemory } from "../../../packages/runtime/dist/avm2/natives/sync.js";
 
 const module = new URL(
   "../../../packages/runtime/dist/avm2/natives/shell-workers.js",
@@ -63,7 +64,7 @@ const first = (w: Worker) =>
   });
 
 test("workers that end as the primordial writes lose and corrupt nothing", async () => {
-  const memory = newWorkersMemory();
+  const memory = newWorkersMemory(newSyncMemory());
   const primordial = new Workers(memory, 0);
   const threads: { done: Promise<string>; exited: Promise<unknown>; id: number }[] = [];
   let key = 0;
@@ -101,7 +102,7 @@ test("workers that end as the primordial writes lose and corrupt nothing", async
 });
 
 test("a worker terminated as it writes stops at its next write, the lock left free", async () => {
-  const memory = newWorkersMemory();
+  const memory = newWorkersMemory(newSyncMemory());
   const primordial = new Workers(memory, 0);
   const id = primordial.create();
   primordial.setState(id, CANSTART);
@@ -113,8 +114,8 @@ test("a worker terminated as it writes stops at its next write, the lock left fr
   }
 
   assert.equal(primordial.state(id), RUNNING);
-  assert.equal(primordial.terminate(id), true);
-  assert.equal(primordial.terminate(id), false);
+  assert.deepEqual(primordial.terminate(id), new Set([id]));
+  assert.equal(primordial.terminate(id).size, 0);
   assert.match(await stopped, /^WorkerTerminated/);
   for (let i = 0; i < 200; i++) {
     primordial.set(0, `after${i}`, number(i));
@@ -131,7 +132,7 @@ test("a worker terminated as it writes stops at its next write, the lock left fr
 });
 
 test("terminating a worker terminates the workers it started", () => {
-  const memory = newWorkersMemory();
+  const memory = newWorkersMemory(newSyncMemory());
   const primordial = new Workers(memory, 0);
   const child = primordial.create();
   primordial.setState(child, RUNNING);
@@ -142,7 +143,7 @@ test("terminating a worker terminates the workers it started", () => {
   primordial.setState(other, RUNNING);
   new Workers(memory, grandchild).set(grandchild, "x", number(1));
 
-  assert.equal(primordial.terminate(child), true);
+  assert.deepEqual(primordial.terminate(child), new Set([child, grandchild]));
   assert.equal(primordial.state(child), TERMINATED);
   assert.equal(primordial.state(grandchild), TERMINATED);
   assert.equal(primordial.state(unstarted), 1);

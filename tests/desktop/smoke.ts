@@ -10,7 +10,7 @@
 // grants it, not one without, no local file, and connects only the socket
 // whose server answers with a socket policy. The page's policy refuses
 // nothing it needs, the page is cross-origin isolated, and playing the SWF
-// again leaves one canvas.
+// again leaves one canvas. A SWF's workers share a Mutex and memory there.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
@@ -23,6 +23,7 @@ import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { missing } from "../../apps/desktop/electron.ts";
+import { cases } from "../player/cases.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
@@ -139,10 +140,7 @@ const remoteSource = `package {
 const libraries = `${out}libraries/`;
 libraryAbcs(libraries);
 const abcs = compileScripts(
-  [
-    { name: "DesktopSmoke", source },
-    { name: "RemoteSmoke", source: remoteSource },
-  ],
+  [{ name: "DesktopSmoke", source }, { name: "RemoteSmoke", source: remoteSource }, "WorkerMutex"],
   out,
 );
 const abc = abcs.get("DesktopSmoke");
@@ -189,6 +187,16 @@ function smokeSwf(name: string, network: boolean): string {
 }
 
 const local = smokeSwf("local", false);
+// The player tests' worker-mutex case: two workers and the primordial share a Mutex and memory.
+const workerMutex = `${site}worker-mutex.swf`;
+writeFileSync(
+  workerMutex,
+  (
+    (cases.find((c) => c.name === "worker-mutex") as (typeof cases)[number]).swf as (
+      abc: Uint8Array,
+    ) => Uint8Array
+  )(abcs.get("WorkerMutex") as Uint8Array),
+);
 const networked = smokeSwf("network", true);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -543,6 +551,19 @@ try {
     })`);
     assert.equal(panel.hidden, true);
     assert.equal(panel.playerglobal, "swf2es's own");
+  });
+
+  // A SWF's workers run on Web Workers whose script the app's protocol serves, sharing a Mutex
+  // and memory on its isolated page.
+  await withApp(both, [workerMutex], async ({ stdout, until }) => {
+    await until("the workers' SWF", () => stdout.includes("free true"));
+    const expected = readFileSync(`${here}../player/references/worker-mutex/trace.txt`, "utf8")
+      .trim()
+      .split("\n");
+    assert.deepEqual(
+      stdout.filter((l) => expected.includes(l)),
+      expected,
+    );
   });
 
   await remote();

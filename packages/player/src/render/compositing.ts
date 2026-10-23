@@ -87,6 +87,11 @@ export class Compositing {
    * stale, so draws the object afresh.
    */
   private layer(node: Node, isolated: boolean): boolean {
+    // An explicit layer is owned by the view, including inside another isolated object.
+    if (node.blend === "layer") {
+      return false;
+    }
+
     const chain = node.filters[0];
     const empty = chain instanceof FilterChain && chain.filters.length === 0;
     const wanted =

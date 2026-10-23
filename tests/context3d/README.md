@@ -845,3 +845,9 @@ count rejection before GL allocation, capacity recovery after disposal, and the
 exact 64 MiB boundary including full mip chains. It tracks texture handles through
 explicit disposal and context teardown, checks GL errors and releases the browser
 context. The default backend limits and allocation/draw paths are unchanged.
+
+`StageWorker.as` covers the combined web startup path: the primordial presents
+a green Stage3D surface while a real background Worker sends a channel reply.
+The host waits for both before checking pixels, then destroys the player and
+checks collection through the existing lifetime harness. This exercises the
+worker-host readiness path together with opt-in Context3D bindings.

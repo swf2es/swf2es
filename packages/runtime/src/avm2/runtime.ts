@@ -70,6 +70,7 @@ import {
   TypeName,
 } from "./names.js";
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
+import type { SyncInit } from "./natives/sync.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
@@ -133,6 +134,8 @@ export class Runtime {
   /** See RuntimeOptions.workers and worker. */
   readonly workerHost: ShellWorkerHost | null;
   readonly workerInit: ShellWorkerInit | null;
+  /** See RuntimeOptions.sync. */
+  readonly syncInit: SyncInit | null;
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
@@ -207,6 +210,7 @@ export class Runtime {
     this.files = options.files ?? memoryFiles();
     this.workerHost = options.workers ?? null;
     this.workerInit = options.worker ?? null;
+    this.syncInit = options.sync ?? null;
     this.swfVersion = options.swfVersion ?? 31;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
@@ -426,9 +430,12 @@ export class Runtime {
       traits.isGlobal = true;
       traits.describe(script.desc.traits);
       const g = traits.instance();
-      const scope = Object.assign([g], { w: 0 });
+      // As the script's initializer, its methods run in an empty scope chain,
+      // as avmplus' script traits' declaring scope is, and as the compiler
+      // indexes the scopes their closures capture: the global object is
+      // only what they push.
       for (const [d, factory, id] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = withId(factory(scope, null), id);
+        traits.proto[methodKey(d)] = withId(factory(this.empty, null), id);
       }
 
       // Caches keep the methods.

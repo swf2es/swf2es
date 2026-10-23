@@ -11,7 +11,10 @@
 // Last, Chrome's own Ctrl+C, X and V and a press reach a SWF's field and
 // its Clipboard through the element's copy, cut and paste events, the
 // mouse's events come in Flash's order, and touches as TouchEvents and as
-// the mouse.
+// the mouse. Workers: on by default and sharing memory on this isolated
+// page, off by the attribute or configure, from a script of another
+// origin, and on a page that is not isolated passing messages, refusing
+// to share memory, and their Web Workers let go after the last player.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -51,6 +54,8 @@ const abcs = compileScripts(
       name: "StageQuality",
       source: readFileSync(`${here}../player/scripts/StageQuality.as`, "utf8"),
     },
+    "WorkerBasics",
+    "WorkerMutex",
   ],
   out,
 );
@@ -108,6 +113,38 @@ writeFileSync(
 writeFileSync(
   `${site}activation.swf`,
   bare(abcs.get("ActivationTest") as Uint8Array, 1, "ActivationTest", 100, 100),
+);
+// The player tests' worker cases, and the traces Flash gave them.
+const workerCase = (name: string, script: string) =>
+  (
+    (cases.find((c) => c.name === name) as (typeof cases)[number]).swf as (
+      abc: Uint8Array,
+    ) => Uint8Array
+  )(abcs.get(script) as Uint8Array);
+const reference = (name: string) =>
+  readFileSync(`${here}../player/references/${name}/trace.txt`, "utf8")
+    .replace(/\n$/, "")
+    .split(/\r|\n/);
+writeFileSync(`${site}worker-basics.swf`, workerCase("worker-basics", "WorkerBasics"));
+writeFileSync(`${site}worker-mutex.swf`, workerCase("worker-mutex", "WorkerMutex"));
+// Played in real time, up to its terminate: its last steps count frames from the first, which
+// may pass before a Web Worker has loaded, and trace its self-channel early then.
+const basicsFull = reference("worker-basics");
+const workerBasicsTrace = basicsFull.slice(0, basicsFull.indexOf("terminate again false") + 1);
+/** A run's own traces: without the page's other players' frames, or an early self-channel line. */
+const own = (traces: string[]) =>
+  traces.filter((t) => !/^frame \d/.test(t) && !t.startsWith("self events "));
+const workerMutexTrace = reference("worker-mutex");
+// A page of no players of its own, for the workers on a page that is not isolated.
+writeFileSync(
+  `${site}workers.html`,
+  `<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<script type="importmap">${JSON.stringify(importMap)}</script>
+</head>
+<body><script type="module" src="/web-src/page.ts"></script></body>
+</html>`,
 );
 writeFileSync(
   `${site}index.html`,
@@ -251,6 +288,58 @@ check("each element boots and draws", async (evaluate, send) => {
   // Drawn at the device's pixels: two a CSS pixel here.
   assert.deepEqual(byId("shapes").canvas, [400, 120]);
 });
+
+interface WorkerRun {
+  traces: string[];
+  errors: string[];
+  made: number;
+}
+
+check(
+  "workers: on by default, sharing memory on this isolated page, off by attribute or configure",
+  async (evaluate) => {
+    // None of the page's SWFs names a worker: none was started ahead for them.
+    assert.equal((await call<{ made: number }>(evaluate, "webWorkers()")).made, 0);
+
+    const mutex = await call<WorkerRun>(
+      evaluate,
+      `workerRun("/web-test/worker-mutex.swf", {}, {}, "free true")`,
+    );
+    assert.deepEqual(mutex.errors, []);
+    assert.deepEqual(own(mutex.traces), workerMutexTrace);
+    assert.ok(mutex.made >= 2, `${mutex.made} Web Workers for two workers`);
+
+    const off = `workerRun("/web-test/worker-basics.swf"`;
+    for (const run of [
+      `${off}, { workers: "false" }, {}, "supported false false")`,
+      `${off}, {}, { workers: false }, "supported false false")`,
+    ]) {
+      const r = await call<WorkerRun>(evaluate, run);
+      assert.equal(own(r.traces)[0], "supported false false", run);
+      assert.equal(r.made, 0, run);
+    }
+
+    const on = await call<WorkerRun>(
+      evaluate,
+      `${off}, { workers: "true" }, { workers: false }, ${JSON.stringify(workerBasicsTrace.at(-1))})`,
+    );
+    assert.deepEqual(on.errors, []);
+    assert.deepEqual(own(on.traces), workerBasicsTrace);
+  },
+);
+
+check(
+  "a worker script from another origin, as a CDN's, starts through a module of the page's",
+  async (evaluate) => {
+    // The same server under another name: another origin, which serves the script with CORS.
+    const r = await call<WorkerRun>(
+      evaluate,
+      `workerRun("/web-test/worker-basics.swf", {}, { workerUrl: "http://localhost:" + location.port + "/player-hosts/thread/player-hosts/web-worker.js" }, ${JSON.stringify(workerBasicsTrace.at(-1))})`,
+    );
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(own(r.traces), workerBasicsTrace);
+  },
+);
 
 check(
   "the quality attribute draws aliased and unsmoothed at low, while it plays",
@@ -1203,7 +1292,58 @@ const failures = await withPage(
   },
 );
 
-if (failures > 0) {
-  console.log(`${failures} of ${checks.length} checks failed`);
+// On a page that is not cross-origin isolated, workers pass messages as on
+// one that is, and sharing memory with one says it needs isolation; the
+// Web Workers started ahead go once the page's last player has.
+const unisolated = await withPage(
+  "workerRun",
+  async (evaluate) => {
+    try {
+      const basics = await call<WorkerRun>(
+        evaluate,
+        `workerRun("/web-test/worker-basics.swf", {}, {}, ${JSON.stringify(workerBasicsTrace.at(-1))})`,
+      );
+      assert.deepEqual(basics.errors, []);
+      assert.deepEqual(own(basics.traces), workerBasicsTrace);
+      const mutex = await call<WorkerRun>(
+        evaluate,
+        `workerRun("/web-test/worker-mutex.swf", {}, {}, "free true")`,
+      );
+      assert.deepEqual(mutex.traces, []);
+      assert.match(
+        mutex.errors.join("\n"),
+        /sharing a Mutex with another worker needs shared memory, which a browser gives only a cross-origin isolated page/,
+      );
+      const start = Date.now();
+      let live = -1;
+      while (live !== 0 && Date.now() - start < 30_000) {
+        await new Promise((done) => setTimeout(done, 250));
+        live = (await call<{ live: number }>(evaluate, "webWorkers()")).live;
+      }
+
+      assert.equal(live, 0, "the Web Workers started ahead outlived the last player");
+      console.log("ok workers on a page that is not isolated, and let go after the last player");
+      return 0;
+    } catch (e) {
+      console.log(
+        `not ok workers on a page that is not isolated\n  ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return 1;
+    }
+  },
+  false,
+  {
+    page: "web-test/workers.html",
+    isolated: false,
+    mounts: [
+      ["/web-test/", site],
+      ["/web-src/", here],
+      ["/libraries/", `${out}libraries/`],
+    ],
+  },
+);
+
+if (failures + unisolated > 0) {
+  console.log(`${failures + unisolated} of ${checks.length + 1} checks failed`);
   process.exitCode = 1;
 }

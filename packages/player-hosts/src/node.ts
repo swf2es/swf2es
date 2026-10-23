@@ -42,7 +42,7 @@ export function nodeWorkerHost(options: { codegen: WebAssembly.Module }): Worker
       worker.postMessage(start);
       return {
         post: (message) => worker.postMessage(message),
-        terminate: () => void worker.terminate(),
+        terminate: () => worker.terminate(),
       };
     },
   };

@@ -14,10 +14,13 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Composition", "StageLayout"].map((name) => ({ name, source: fixtureSource(name) })),
+  ["Composition", "StageLayout", "StageWorker"].map((name) => ({
+    name,
+    source: fixtureSource(name),
+  })),
   out,
 );
-for (const name of ["Composition", "StageLayout"]) {
+for (const name of ["Composition", "StageLayout", "StageWorker"]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   writeFileSync(`${out}${name}.swf`, bare(abc, 1, name, 96, 96));
@@ -274,6 +277,15 @@ await withPage(
       await call("layout", "noScale", "TL", 192, 144);
       assert.equal((await call<Status>("status")).canvases, 1);
       await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
+    } finally {
+      await call("close");
+    }
+    await collect();
+    await call("open", true, true, "StageWorker");
+    try {
+      assert.equal((await call<Status>("status")).canvases, 2);
+      assert.deepEqual((await call<Status>("status")).errors, []);
+      await capture("worker-and-stage3d", 96, 96, [[8, 8]], ["ff00ff00"]);
     } finally {
       await call("close");
     }

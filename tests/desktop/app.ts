@@ -182,20 +182,43 @@ export async function withApp(
       return result.value;
     };
     const evaluate = <T>(expression: string) => evaluateOn<T>(devtools, expression);
-    // DevTools can list a navigating page before its execution context exists.
-    const pageContext = async (client: DevTools) => {
-      let ready = false;
-      client.listeners.set("Runtime.executionContextCreated", (params) => {
-        const context = params.context as { auxData?: { isDefault?: boolean } };
-        if (context.auxData?.isDefault) {
-          ready = true;
+    /**
+     * Wait until the page on `devtools` shows the document whose URL starts
+     * with `prefix`. DevTools lists a new window by the URL it is navigating
+     * to while it still shows its first about:blank, and the app's pages are
+     * cross-origin isolated, so that navigation moves the window to another
+     * renderer: an evaluation sent across the move finds no context, which
+     * means only that the document is still on its way.
+     */
+    const shown = async (page: DevTools, prefix: string) => {
+      for (let waited = 0; ; waited += 50) {
+        const href = await page
+          .send<{ result: { value?: string } }>("Runtime.evaluate", {
+            expression: "location.href",
+            returnByValue: true,
+          })
+          .then(
+            ({ result }) => result.value ?? "",
+            (error: Error) => {
+              if (!/Cannot find default execution context/.test(error.message)) {
+                throw error;
+              }
+
+              return "";
+            },
+          );
+        if (href.startsWith(prefix)) {
+          return;
         }
-      });
-      await client.send("Runtime.enable");
-      await until("the page's execution context", () => ready);
-      client.listeners.delete("Runtime.executionContextCreated");
+
+        if (exited || waited > TIMEOUT) {
+          throw new Error(`the page on ${prefix}: ${exited ?? "timed out"} at ${href}`);
+        }
+
+        await sleep(50);
+      }
     };
-    await pageContext(devtools);
+    await shown(devtools, "swf2es://app/");
 
     let inspector: DevTools | null = null;
     const main = async <T>(expression: string): Promise<T> => {
@@ -245,7 +268,7 @@ export async function withApp(
         other.addEventListener("error", fail);
       });
       const client = new DevTools(other);
-      await pageContext(client);
+      await shown(client, prefix);
 
       return client;
     };

@@ -539,10 +539,11 @@ export class PixiView {
                   ? gpuBitmaps(this.renderer).texture(store, false)
                   : null;
               });
-        // A view drawn once keeps no output.
+        // A plain layer colours its combined children in one pass, without keeping a bitmap.
+        // A view drawn once keeps no output either.
         node.filters =
-          chain.length > 0
-            ? [new FilterChain(chain, container, !this.fresh, this.filterUnits)]
+          chain.length > 0 || blend === "layer"
+            ? [new FilterChain(chain, container, chain.length > 0 && !this.fresh, this.filterUnits)]
             : [];
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
@@ -567,10 +568,13 @@ export class PixiView {
     // other is what is drawn's own (render/color.ts), and the tint stays white.
     let recolor = false;
     // A 3D one's chain runs in its bitmap, where it colours what its filters make as any does.
-    // A chain of filters colours what it makes; an empty one (a blend's layer) leaves its
-    // children their colours.
+    // A layer colours its combined children, including its own art when it has children. With
+    // none, Flash colours each of its fills separately, even with blendMode LAYER.
     const rooted =
-      node.filters[0] instanceof FilterChain && node.filters[0].filters.length > 0 && !masking;
+      node.filters[0] instanceof FilterChain &&
+      (node.filters[0].filters.length > 0 ||
+        (node.blend === "layer" && o instanceof Container && o.children.length > 0)) &&
+      !masking;
     const rerooted = rooted !== node.rooted;
     if (rerooted || remask) {
       node.rooted = rooted;
@@ -591,8 +595,8 @@ export class PixiView {
       }
     }
 
-    if (rooted && (recolor || refilled)) {
-      (node.filters[0] as FilterChain).recolor(node.color);
+    if (node.filters[0] instanceof FilterChain && (recolor || refilled)) {
+      node.filters[0].recolor(rooted ? node.color : null);
     }
 
     const flash = !rooted && node.color && !multipliesOnly(node.color) ? node.color : null;

@@ -24,7 +24,8 @@
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts",
     "packages/mp3/build.ts",
-    "packages/compress/build.ts"
+    "packages/compress/build.ts",
+    "packages/player-hosts/build-thread.ts"
   ],
   "exclude": [
     "tests/programs/as3pb",
