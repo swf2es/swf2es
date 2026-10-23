@@ -16,6 +16,7 @@ import {
   IR_CallSetter,
   IR_CheckNull,
   IR_Coerce,
+  IR_ConstructSlot,
   IR_FindPropGlobal,
   IR_FindPropGlobalStrict,
   IR_GetGlobalScope,
@@ -715,6 +716,8 @@ function irName(op: u16): string {
       return "getglobalscope";
     case IR_Nip:
       return "nip";
+    case IR_ConstructSlot:
+      return "constructslot";
     default:
       return `ir${op}`;
   }

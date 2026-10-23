@@ -55,6 +55,9 @@ export function instanceVarField(cls: AsObject, name: string): string | null {
   return null;
 }
 
+/** The names whose type tests isInstanceOf answers from the value, not its traits. */
+const VALUE_TESTS = new Set(["Object", "float", "Number", "int", "uint", "String", "Boolean"]);
+
 /** Trait kinds as the ABC has them, which the descriptors' metadata is keyed by. */
 const TRAIT_Slot = 0;
 const TRAIT_Getter = 2;
@@ -125,12 +128,19 @@ export class Traits {
   setIndex?: IndexHook["setIndex"];
   hasIndex?: IndexHook["hasIndex"];
   index?: IndexHook["index"];
+  /**
+   * Whether a type test against these traits looks at more than an object's
+   * traits, as one against Object, a number type, String or Boolean does,
+   * which takes primitives.
+   */
+  readonly testsValues: boolean;
 
   constructor(
     readonly name: string,
     readonly base: Traits | null,
     proto?: AsObject,
   ) {
+    this.testsValues = VALUE_TESTS.has(name);
     this.proto = proto ?? Object.create(base ? base.proto : null);
     this.proto.$traits = this;
     this.create = base ? base.create : null;
@@ -366,6 +376,11 @@ export class Traits {
       if (c === t) {
         return true;
       }
+    }
+
+    // A class is a supertype only as a base; only interfaces are in the sets below.
+    if (!t.isInterface) {
+      return false;
     }
 
     if (this.allInterfaces !== null) {
