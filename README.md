@@ -66,6 +66,21 @@ element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality` and
 back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
 
+ActionScript's workers (`flash.system.Worker`) run on Web Workers by
+default, as in Flash. `configure({ workers: false })` turns them off for
+the page, and `workers="false"` or `"true"` on an element for its own
+SWFs. Under an import map, map `@swf2es/player-hosts/workers` too: the
+workers load `@swf2es/player-hosts`' `dist/thread/`, which needs no import
+map, from wherever the package is served (a CDN's needs CORS, and a
+Content-Security-Policy that allows `blob:` workers);
+`configure({ workerUrl })` names another script, such as a bundler's.
+Sharing memory between workers (a shareable ByteArray, Mutex, Condition)
+needs a cross-origin isolated page: serve it with
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: credentialless`. Elsewhere workers only
+pass messages, and sharing throws an error that says so
+([docs/workers.md](docs/workers.md)).
+
 ### Replace the Flash tags on an existing page
 
 ```js

@@ -4923,7 +4923,8 @@ and on player-hosts, whose WebSocket relay carries flash.net.Socket.
 The element (`element.ts`) takes an `<embed>`'s attributes: `src`,
 `width` and `height` (a number is pixels, as an `<embed>`'s, anything
 else a CSS length), `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`,
-`base`, `allowscriptaccess`, `allownetworking` and `quality`. Its
+`base`, `allowscriptaccess`, `allownetworking` and `quality`, and
+`workers` of its own ([Workers in the page](#workers-in-the-page)). Its
 JavaScript side is `load(url | ArrayBuffer | Uint8Array)`, which plays a SWF in place of the
 one playing; `ready`, which resolves once the SWF loading plays and
 rejects with what kept it from playing; `destroy()`; and the events
@@ -4998,6 +4999,40 @@ true` gives every player one IndexedDB module cache
 (`player-hosts/indexeddb`, see [Caching modules](#caching-modules)); it
 is off by default, as the player's is, a first visit being slower for
 the writes.
+
+### Workers in the page
+
+`workers`, on by default as Flash had them, gives each player a
+`webWorkerHost` (`player-hosts/workers`, see [Workers](#workers)); the
+element's `workers` attribute, `"true"` or `"false"`, decides for its own
+SWFs over the configuration, and off, `Worker.isSupported` is false. A
+player's host starts Web Workers ahead only for a SWF whose ABCs name
+`WorkerDomain`, and the element awaits them before the SWF's first
+frame, as Crossbridge's start a worker and wait for it in one script; a
+SWF that names no worker starts none, and one that a loaded SWF starts
+later starts as it is asked for. The workers started ahead are the
+page's, shared by its players, and go ten seconds after the last player
+that used them does, the element's destroy among them.
+
+A Web Worker sees no import map, so the worker script is
+`player-hosts`' `dist/thread/`: `build-thread.ts`, after tsc, copies
+`web-worker.js` and every module it imports, from player-hosts and the
+packages under it, with each bare specifier made a relative path inside
+the tree. The tree resolves wherever the package is served, under a
+page's import map, from a CDN or from the demo site and the desktop app
+as they serve the packages, at the cost of its 3.9 MB loaded again by
+the workers; `webWorkerHost` finds it beside its own module.
+`workerUrl` names another script, a bundler's. A browser starts a
+worker only on a script of the page's origin, and throws SecurityError
+for another's, so a script from another origin starts through a `blob:`
+module of the page's whose one line imports it: the script needs CORS,
+as a CDN serves it, and a Content-Security-Policy that names
+`worker-src` (or `script-src`) must allow `blob:`; where it does not,
+the worker never runs, and the player reports its thread's failure
+(where the browser refuses at once, `Worker.start` throws 3807). Shared memory
+needs a cross-origin isolated page, which the demo site and the desktop
+app are (see [docs/workers.md](workers.md)); elsewhere workers pass
+messages, and sharing memory with one throws the error that says so.
 
 ### ExternalInterface in the page
 
