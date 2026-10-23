@@ -2,6 +2,7 @@
 // Domain, and its Worker as the one that runs, the primordial, with no
 // others to start.
 
+import { Reader, Writer } from "../amf.js";
 import type { AsObject, Value } from "../descriptors.js";
 import type { Domain } from "../domain.js";
 import type { ClassHook } from "../hooks.js";
@@ -308,7 +309,7 @@ export function shellNatives(rt: Runtime): Natives {
   }
 
   class WorkerNatives {
-    declare $shared: Map<string, Value>;
+    declare $shared: Map<string | null, Value>;
 
     static pr(s: Value): void {
       rt.print(rt.toString(s));
@@ -326,13 +327,21 @@ export function shellNatives(rt: Runtime): Natives {
       return false;
     }
 
+    // As avmplus' ChannelItem: undefined deletes, and an object other than a
+    // ByteArray, a Mutex or a Condition is kept as AMF3 and read back as a new copy.
     setSharedProperty(key: Value, value: Value): void {
       this.$shared ??= new Map();
-      this.$shared.set(rt.toString(key), value);
+      if (value === undefined) {
+        this.$shared.delete(sharedKey(rt, key));
+        return;
+      }
+
+      this.$shared.set(sharedKey(rt, key), sharedItem(rt, value));
     }
 
     getSharedProperty(key: Value): Value {
-      return this.$shared?.get(rt.toString(key));
+      const item = this.$shared?.get(sharedKey(rt, key));
+      return item instanceof SharedAmf ? item.read(rt) : item;
     }
 
     start(): void {
@@ -360,6 +369,45 @@ export function shellNatives(rt: Runtime): Natives {
   registerNativeClass(natives, "flash.system::Worker", WorkerNatives);
   registerNativeClass(natives, "flash.system::WorkerDomain", WorkerDomainNatives);
   return natives;
+}
+
+/** An object kept as a shared property by its AMF3 bytes, which each read decodes anew. */
+class SharedAmf {
+  constructor(readonly bytes: Uint8Array) {}
+
+  read(rt: Runtime): Value {
+    const holder = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
+    const b = bytesOf(rt, holder);
+    b.write(this.bytes);
+    b.position = 0;
+    return new Reader(rt, b).value();
+  }
+}
+
+/** A shared property's key: null is one of its own, apart from "null". */
+const sharedKey = (rt: Runtime, key: Value): string | null =>
+  key === null || key === undefined ? null : rt.toString(key);
+
+/** What a shared property keeps of `value`: itself, or its AMF3 bytes. */
+function sharedItem(rt: Runtime, value: Value): Value {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  for (const name of [
+    "flash.utils::ByteArray",
+    "flash.concurrent::Mutex",
+    "flash.concurrent::Condition",
+  ]) {
+    if (rt.isInstance(value, rt.classNamed(name))) {
+      return value;
+    }
+  }
+
+  const holder = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
+  const b = bytesOf(rt, holder);
+  new Writer(rt, b).value(value);
+  return new SharedAmf(b.buffer.slice(0, b.length));
 }
 
 /** As construct="abstract" and "native": AS3 does not construct the class itself, a subclass it may. */
