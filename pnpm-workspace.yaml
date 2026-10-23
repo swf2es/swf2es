@@ -14,3 +14,7 @@ ignoredBuiltDependencies:
 # (GHSA-mw96-cpmx-2vgc); the Pixi fork's range would still take 4.55.
 overrides:
   rollup: ^4.59.0
+# AssemblyScript's Grisu2 reads past its table of powers of ten; the patch
+# keeps the digits codegen has always printed (tests/unit/codegen/double.test.ts).
+patchedDependencies:
+  assemblyscript@0.28.20: patches/assemblyscript@0.28.20.patch

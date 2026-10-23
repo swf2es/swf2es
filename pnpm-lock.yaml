@@ -9,6 +9,11 @@ overrides:
 
 pnpmfileChecksum: sha256-fUsn61SKIU8vgaUvFfOHrbsNs0/HnaNIxMT/JrWPepM=
 
+patchedDependencies:
+  assemblyscript@0.28.20:
+    hash: 54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f
+    path: patches/assemblyscript@0.28.20.patch
+
 importers:
 
   .:
@@ -74,7 +79,7 @@ importers:
     devDependencies:
       assemblyscript:
         specifier: ^0.28.20
-        version: 0.28.20
+        version: 0.28.20(patch_hash=54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f)
 
   packages/compress: {}
 
@@ -1468,7 +1473,7 @@ snapshots:
 
   '@xmldom/xmldom@0.8.15': {}
 
-  assemblyscript@0.28.20:
+  assemblyscript@0.28.20(patch_hash=54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f):
     dependencies:
       binaryen: 131.0.0-nightly.20260721
       long: 5.3.2
