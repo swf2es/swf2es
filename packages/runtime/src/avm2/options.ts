@@ -2,6 +2,7 @@
 
 import type { Abc, CompileUnit } from "./descriptors.js";
 import type { SharedBytesMemory } from "./natives/bytearray.js";
+import type { SyncInit, SyncMemory } from "./natives/sync.js";
 import type { Runtime } from "./runtime.js";
 
 export interface RuntimeOptions {
@@ -38,6 +39,13 @@ export interface RuntimeOptions {
   workers?: ShellWorkerHost;
   /** The background worker this runtime runs, as its host's thread was given it; by default the primordial. */
   worker?: ShellWorkerInit;
+  /**
+   * The memory this runtime's Mutexes and Conditions live in, shared with
+   * the other workers of its primordial, and the worker it runs: by
+   * default, for avmshell's workers, worker's; else memory of its own, as
+   * the primordial's (natives/sync.ts).
+   */
+  sync?: SyncInit;
 }
 
 /** Starts the threads of avmshell's background workers. */
@@ -61,8 +69,8 @@ export interface ShellWorkerHost {
 }
 
 export interface ShellThread {
-  /** Stop the thread, wherever its code is. */
-  terminate(): void;
+  /** Stop the thread, wherever its code is; what it gives resolves once the thread has stopped. */
+  terminate(): Promise<unknown> | undefined;
 }
 
 /** What a background worker's thread is given, which crosses to it as it is (structured clone). */
@@ -78,6 +86,8 @@ export interface ShellWorkerInit {
 export interface ShellWorkersMemory {
   control: ArrayBuffer | SharedArrayBuffer;
   table: ArrayBuffer | SharedArrayBuffer;
+  /** Their Mutexes and Conditions. */
+  sync: SyncMemory;
 }
 
 /** avmshell's file system, as its File sees it. */

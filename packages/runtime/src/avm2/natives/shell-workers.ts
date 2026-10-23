@@ -12,6 +12,7 @@
 import type { Value } from "../descriptors.js";
 import type { ShellWorkerInit, ShellWorkersMemory } from "../options.js";
 import { fromUtf8, utf8 } from "./bytearray.js";
+import { Sync, type SyncMemory } from "./sync.js";
 
 /** avmplus' Isolate::State. */
 export const NEW = 1;
@@ -50,13 +51,14 @@ const CONTROL_MAX = 16 << 20;
 const TABLE_MAX = 256 << 20;
 
 /**
- * How a shared property is kept: AMF3, a ByteArray's bytes, an object only
- * its setter's VM has, a Number's float64, or a shareable ByteArray's
- * memory by its id, as a float64.
+ * How a shared property is kept: AMF3, a ByteArray's bytes, a Mutex or a
+ * Condition by its address in the sync memory (a byte, 0 for a Mutex, then
+ * an int32), a Number's float64, or a shareable ByteArray's memory by its
+ * id, as a float64.
  */
 export const ITEM_AMF = 0;
 export const ITEM_BYTES = 1;
-export const ITEM_LOCAL = 2;
+export const ITEM_SYNC = 2;
 export const ITEM_NUMBER = 3;
 export const ITEM_SHARED = 4;
 
@@ -102,11 +104,12 @@ function grow(buffer: ArrayBuffer | SharedArrayBuffer, length: number): void {
   }
 }
 
-/** New memory for the workers of a primordial, itself worker 0, running. */
-export function newWorkersMemory(): ShellWorkersMemory {
+/** New memory for the workers of a primordial, itself worker 0, running, whose Mutexes live in `sync`. */
+export function newWorkersMemory(sync: SyncMemory): ShellWorkersMemory {
   const memory = {
     control: growable((WORKERS + 2) * 4, CONTROL_MAX),
     table: growable(4, TABLE_MAX),
+    sync,
   };
   const control = new Int32Array(memory.control);
   control[COUNT] = 1;
@@ -134,12 +137,14 @@ export class WorkerTerminated extends Error {
 /** The workers as one VM sees them, over the memory they share. */
 export class Workers {
   readonly control: Int32Array;
+  /** The Mutexes' and Conditions' memory, told which workers have ended. */
+  private readonly sync: Sync;
   /** The table as last read, and its version. */
   private entries = new Map<string, SharedEntry>();
   private version = 0;
   /**
    * This VM's object for each property whose identity it keeps, a
-   * ByteArray, a Mutex or a Condition, by entryKey, with its item's token.
+   * ByteArray, by entryKey, with its item's token.
    */
   readonly objects = new Map<string, { token: number; value: Value }>();
 
@@ -149,6 +154,7 @@ export class Workers {
     readonly self: number,
   ) {
     this.control = new Int32Array(memory.control);
+    this.sync = new Sync(memory.sync, self);
   }
 
   /** A worker's state; one past those made has none. */
@@ -177,6 +183,7 @@ export class Workers {
       grow(this.memory.control, (WORKERS + 2 * (id + 1)) * 4);
       this.control[WORKERS + 2 * id] = NEW;
       this.control[WORKERS + 2 * id + 1] = this.self;
+      this.sync.addThread(id);
       Atomics.store(this.control, COUNT, id + 1);
       return id;
     });
@@ -217,15 +224,18 @@ export class Workers {
    * Terminate worker `id`, started and not yet ended, and the workers it
    * started, theirs and so on, whose threads stop with its own: each
    * `terminated`, its properties let go, as Isolate::releaseActiveResources.
-   * Whether `id` was running. Done holding the lock, so that none of them
-   * is in the table then, and none takes the lock again (see locked): its
-   * thread may be stopped anywhere once this returns.
+   * The workers terminated, none where `id` was not running. Done holding
+   * the lock, so that none of them is in the table then, and none takes
+   * the lock again (see locked): its thread may be stopped anywhere once
+   * this returns. Their threads may run on until they are stopped, so the
+   * sync memory refuses them anything more, and keeps the locks they hold
+   * until the caller says their threads have stopped (Sync.end).
    */
-  terminate(id: number): boolean {
+  terminate(id: number): Set<number> {
     return this.locked(() => {
       const state = this.state(id);
       if (state <= NEW || state > RUNNING) {
-        return false;
+        return new Set<number>();
       }
 
       const ended = new Set([id]);
@@ -237,22 +247,42 @@ export class Workers {
         }
       }
 
+      // Their properties first: once a worker holding the lock is
+      // terminated, another may take the lock from it (see locked).
+      this.drop(ended);
       for (const d of ended) {
         this.setState(d, TERMINATED);
+        this.sync.stop(d);
       }
 
-      this.drop(ended);
-      return true;
+      return ended;
     });
   }
 
   /** This VM's worker has ended, as `to`, its properties let go; unless it was terminated already. */
   end(to: number): void {
     this.locked(() => {
-      if (this.transition(this.self, RUNNING, to)) {
+      // Its state last, as in terminate; one that terminated itself is so.
+      if (this.state(this.self) === RUNNING) {
+        const terminated = this.sync.terminated;
         this.drop(new Set([this.self]));
+        this.sync.end(this.self);
+        this.setState(this.self, terminated ? TERMINATED : to);
       }
-    });
+    }, true);
+  }
+
+  /**
+   * This VM's worker terminates itself: its code stops, and once it has,
+   * it is terminated and what it held let go (endShellWorker).
+   */
+  terminateSelf(): void {
+    this.sync.stop(this.self);
+  }
+
+  /** Whether this VM's worker was terminated, by another or by itself: its code is to stop. */
+  get terminated(): boolean {
+    return this.self !== 0 && (this.state(this.self) > RUNNING || this.sync.terminated);
   }
 
   /** Remove the properties of the workers `ids`, holding the lock. */
@@ -278,11 +308,13 @@ export class Workers {
   /**
    * Run `f` holding the table's lock, whose word holds its holder's id
    * plus one. A worker's thread is stopped only after it was terminated
-   * under the lock (terminate), and a terminated worker never takes the
-   * lock again: it throws WorkerTerminated instead, so no thread is
-   * stopped holding it.
+   * under the lock (terminate), and a terminated worker changes nothing
+   * holding it: it throws WorkerTerminated instead. It may still take the
+   * lock to find that out, as it can have been waiting for it while it
+   * was terminated, and be stopped there; so a lock held by a worker that
+   * was terminated is taken from it.
    */
-  private locked<T>(f: () => T): T {
+  private locked<T>(f: () => T, ending = false): T {
     const me = this.self + 1;
     for (;;) {
       const holder = Atomics.compareExchange(this.control, LOCK, 0, me);
@@ -290,11 +322,22 @@ export class Workers {
         break;
       }
 
+      if (
+        holder !== 1 &&
+        this.state(holder - 1) > RUNNING &&
+        Atomics.compareExchange(this.control, LOCK, holder, me) === holder
+      ) {
+        break;
+      }
+
       waitOn(this.control, LOCK, holder, 1);
     }
 
     try {
-      if (this.self !== 0 && this.state(this.self) > RUNNING) {
+      if (
+        this.self !== 0 &&
+        (this.state(this.self) > RUNNING || (!ending && this.sync.terminated))
+      ) {
         throw new WorkerTerminated();
       }
 
@@ -396,12 +439,16 @@ export function endShellWorker(init: ShellWorkerInit, exception: boolean): void 
     if (!(e instanceof WorkerTerminated)) {
       throw e;
     }
+  } finally {
+    // Its code has ended, and asks nothing more of the sync memory: the
+    // locks it held are free to take, a terminated one's too.
+    new Sync(init.memory.sync, init.id).end(init.id);
   }
 }
 
 /** Whether a background worker was terminated: its thread's end is then no failure. */
 export function shellWorkerTerminated(init: ShellWorkerInit): boolean {
-  return new Workers(init.memory, init.id).state(init.id) > RUNNING;
+  return new Workers(init.memory, init.id).terminated;
 }
 
 /** Sleep `ms` milliseconds, as System.sleep: blocking where the thread can, else spinning. */

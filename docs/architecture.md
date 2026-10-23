@@ -787,9 +787,12 @@ describeType (`natives/describe.ts`).
 Each of these files is MPL-2.0, as its source is, and says so at its top.
 avmshell's `File` reads and writes `RuntimeOptions.files`, in memory by
 default. Date is JavaScript's Date, with avmplus' string formats.
-flash.concurrent's Mutex and Condition are avmplus' on its one thread:
-locks are counted, a wait ends at once, as nothing else can notify it
-(`natives/concurrent.ts`). ByteArray's atomic operations and `casi32` are
+flash.concurrent's Mutex and Condition are avmplus', in a heap of int32
+words every worker of a primordial's shares (`natives/concurrent.ts`,
+`natives/sync.ts`): `RuntimeOptions.sync` names it and the worker a
+runtime runs, by default memory of its own, or for avmshell's workers
+their `ShellWorkersMemory`'s. A thread blocks with `Atomics.wait`, or
+spins where it cannot, up to Flash's script timeout (Error 1502). ByteArray's atomic operations and `casi32` are
 `Atomics` on a shareable ByteArray's memory once another worker shares it
 (a growable SharedArrayBuffer, see [workers.md](workers.md)). Crossbridge's code
 uses them all as it starts. avmshell's Worker and WorkerDomain
@@ -4361,6 +4364,14 @@ Flash.
 adl composites an object with a blend mode as a layer, its children
 together in the normal way, and blends that with what is below, the
 stage's colour included, where Pixi would blend each child on its own.
+An explicit `layer` with children also applies its colour transform to
+their combined pixels, including any graphics on the clip itself. Without
+children, it colours its fills individually. The view resets colour
+inheritance at the former and colours the empty filter chain's output;
+that pass replaces the plain layer copy, without keeping another bitmap.
+`blend-layer-fade` checks an AVM1 timeline's fading layer, and
+`blend-layer-colors` checks colour and alpha offsets, adding and removing
+children, mode changes and ancestor colours against AIR.
 Where Pixi draws such a layer at once, as a single fill with no masks or
 as a filtered object's result, and the GPU's own blending computes
 Flash's blend, the GPU blends it, with no copy of what is below:
@@ -4953,7 +4964,8 @@ and on player-hosts, whose WebSocket relay carries flash.net.Socket.
 The element (`element.ts`) takes an `<embed>`'s attributes: `src`,
 `width` and `height` (a number is pixels, as an `<embed>`'s, anything
 else a CSS length), `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`,
-`base`, `allowscriptaccess`, `allownetworking` and `quality`. Its
+`base`, `allowscriptaccess`, `allownetworking` and `quality`, and
+`workers` of its own ([Workers in the page](#workers-in-the-page)). Its
 JavaScript side is `load(url | ArrayBuffer | Uint8Array)`, which plays a SWF in place of the
 one playing; `ready`, which resolves once the SWF loading plays and
 rejects with what kept it from playing; `destroy()`; and the events
@@ -5028,6 +5040,46 @@ true` gives every player one IndexedDB module cache
 (`player-hosts/indexeddb`, see [Caching modules](#caching-modules)); it
 is off by default, as the player's is, a first visit being slower for
 the writes.
+
+### Workers in the page
+
+`workers`, on by default as Flash had them, gives each player a
+`webWorkerHost` (`player-hosts/workers`, see [Workers](#workers)); the
+element's `workers` attribute, `"true"` or `"false"`, decides for its own
+SWFs over the configuration, and off, `Worker.isSupported` is false. A
+player's host starts Web Workers ahead only for a SWF whose ABCs name
+`WorkerDomain`, and the element awaits them before the SWF's first
+frame, as Crossbridge's start a worker and wait for it in one script, for
+ten seconds at most, so that a script that never says it loaded keeps
+no SWF from playing; a
+SWF that names no worker starts none, and one that a loaded SWF starts
+later starts as it is asked for. The workers started ahead are the
+page's, shared by its players, and go ten seconds after the last player
+that used them does, the element's destroy among them. A host's
+`ready` waits for each worker it started ahead though another player's
+host took it before it loaded. The element imports
+`player-hosts/workers` only when a SWF has workers, so a page whose
+import map does not name it plays its SWFs without them.
+
+A Web Worker sees no import map, so the worker script is
+`player-hosts`' `dist/thread/`: `build-thread.ts`, after tsc, copies
+`web-worker.js` and every module it imports, from player-hosts and the
+packages under it, with each bare specifier made a relative path inside
+the tree. The tree resolves wherever the package is served, under a
+page's import map, from a CDN or from the demo site and the desktop app
+as they serve the packages, at the cost of its 3.9 MB loaded again by
+the workers; `webWorkerHost` finds it beside its own module.
+`workerUrl` names another script, a bundler's. A browser starts a
+worker only on a script of the page's origin, and throws SecurityError
+for another's, so a script from another origin starts through a `blob:`
+module of the page's whose one line imports it: the script needs CORS,
+as a CDN serves it, and a Content-Security-Policy that names
+`worker-src` (or `script-src`) must allow `blob:`; where it does not,
+the worker never runs, and the player reports its thread's failure
+(where the browser refuses at once, `Worker.start` throws 3807). Shared memory
+needs a cross-origin isolated page, which the demo site and the desktop
+app are (see [docs/workers.md](workers.md)); elsewhere workers pass
+messages, and sharing memory with one throws the error that says so.
 
 ### ExternalInterface in the page
 

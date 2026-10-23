@@ -19,6 +19,7 @@ const browserSources = [
     readdirSync(join(root, dir)).map((name) => join(dir, name, "src")),
   ),
   "tests/player/page.ts",
+  "tests/player/hidden-groups-page.ts",
   "tests/web/page.ts",
 ];
 

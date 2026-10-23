@@ -53,6 +53,7 @@ const importMap = {
     "@swf2es/player-hosts/indexeddb": "./modules/player-hosts/indexeddb.js",
     "@swf2es/player-hosts/precompiled": "./modules/player-hosts/precompiled.js",
     "@swf2es/player-hosts/websocket": "./modules/player-hosts/websocket.js",
+    "@swf2es/player-hosts/workers": "./modules/player-hosts/workers.js",
     "@swf2es/web": "./modules/web/index.js",
     "@swf2es/codegen/codegen.wasm": "./modules/codegen/codegen.wasm",
     "pixi.js": "./modules/pixi/pixi.mjs",

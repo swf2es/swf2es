@@ -19,6 +19,7 @@ import {
   sharedByteArray,
   utf8,
 } from "./bytearray.js";
+import { syncObject, syncOf, syncRef } from "./concurrent.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
 import {
   CANSTART,
@@ -26,15 +27,16 @@ import {
   FAILED,
   ITEM_AMF,
   ITEM_BYTES,
-  ITEM_LOCAL,
   ITEM_NUMBER,
   ITEM_SHARED,
+  ITEM_SYNC,
   NEW,
   newWorkersMemory,
   RUNNING,
   STATE_NAMES,
   sleep,
   Workers,
+  WorkerTerminated,
 } from "./shell-workers.js";
 
 const started = Date.now();
@@ -170,8 +172,20 @@ export function shellNatives(rt: Runtime): Natives {
 
     static exit(): void {}
 
+    // A terminated worker's code stops in a sleep, as avmplus interrupts it there.
     static sleep(ms: Value): void {
-      sleep(rt.toInt(ms));
+      const { workers } = workersOf(rt);
+      const stopped = () => {
+        if (workers.terminated) {
+          throw new WorkerTerminated();
+        }
+      };
+
+      stopped();
+      for (let left = rt.toInt(ms); left > 0; left -= SLEEP_STEP) {
+        sleep(Math.min(left, SLEEP_STEP));
+        stopped();
+      }
     }
 
     // There is no shell to run a command in: system()'s -1, of no process made.
@@ -356,10 +370,9 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     // As avmplus' ChannelItem: undefined deletes; a number is kept as itself,
-    // a ByteArray's bytes copied, a shareable one's memory shared, and
-    // anything else as AMF3, read back as a new copy. A Mutex or a
-    // Condition is kept as the object, which only this VM has: one set on
-    // another worker, or read there, fails until slice 4 shares them.
+    // a ByteArray's bytes copied, a shareable one's memory shared, a Mutex
+    // or a Condition by reference, and anything else as AMF3, read back as
+    // a new copy.
     setSharedProperty(this: WorkerObject, key: Value, value: Value): void {
       const { workers } = workersOf(rt);
       const k = sharedKey(rt, key);
@@ -370,12 +383,8 @@ export function shellNatives(rt: Runtime): Natives {
       }
 
       const item = sharedItem(rt, value);
-      if (item.kind === ITEM_LOCAL && this.$id !== workers.self) {
-        throw rt.unsupported(`passing ${localName(rt, value)} to another worker`);
-      }
-
       const token = workers.set(this.$id, k, item);
-      if (item.kind !== ITEM_AMF && item.kind !== ITEM_NUMBER) {
+      if (item.kind === ITEM_BYTES || item.kind === ITEM_SHARED) {
         workers.objects.set(entryKey(this.$id, k), { token, value });
       }
     }
@@ -393,16 +402,17 @@ export function shellNatives(rt: Runtime): Natives {
           return new DataView(entry.bytes.buffer).getFloat64(0, true);
         case ITEM_AMF:
           return readAmf(rt, entry.bytes);
+        case ITEM_SYNC: {
+          // The VM's one object for it, as avmplus interns one for its State.
+          const address = new DataView(entry.bytes.buffer).getInt32(1, true);
+          return syncObject(rt, { kind: entry.bytes[0] === 0 ? "mutex" : "condition", address });
+        }
       }
 
       // One object a VM for the item, as avmplus interns it.
       const cached = workers.objects.get(entryKey(this.$id, k));
       if (cached?.token === entry.token) {
         return cached.value;
-      }
-
-      if (entry.kind === ITEM_LOCAL) {
-        throw rt.unsupported("passing a Mutex or a Condition to another worker");
       }
 
       if (entry.kind === ITEM_SHARED) {
@@ -455,24 +465,32 @@ export function shellNatives(rt: Runtime): Natives {
 
     // As Aggregate::requestIsolateExit: true for a worker started and not
     // yet ended, which is terminated at once, with the workers it started,
-    // its thread stopped and their properties let go; false for one not started or ended. The primordial,
-    // or a worker terminating itself, ends with Error 1513.
+    // its thread stopped and their properties let go; false for one not
+    // started or ended. The primordial ends with Error 1513; a worker that
+    // terminates itself stops at once, as avmshell's does.
     terminate(this: WorkerObject): boolean {
       const { workers, threads } = workersOf(rt);
-      if (this.$id === 0 || this.$id === workers.self) {
-        if (this.$id !== 0) {
-          workers.terminate(this.$id);
-        }
+      // A worker terminating itself stops there, which no script catches.
+      if (this.$id !== 0 && this.$id === workers.self) {
+        workers.terminateSelf();
+        throw new WorkerTerminated();
+      }
 
+      if (this.$id === 0) {
         throw rt.error("Error", 1513);
       }
 
-      if (!workers.terminate(this.$id)) {
+      const ended = workers.terminate(this.$id);
+      if (ended.size === 0) {
         return false;
       }
 
-      threads.get(this.$id)?.terminate();
+      const thread = threads.get(this.$id);
       threads.delete(this.$id);
+      if (thread) {
+        stopThread(rt, this.$id, thread, ended);
+      }
+
       return true;
     }
   }
@@ -513,6 +531,30 @@ export function shellNatives(rt: Runtime): Natives {
   return natives;
 }
 
+/** How long a sleep goes before it looks whether its worker was terminated. */
+const SLEEP_STEP = 50;
+
+/** How long a terminated worker's thread is given to stop at its next wait or sleep before it is stopped. */
+const STOP_GRACE = 100;
+
+/**
+ * Stop the thread of worker `id`, terminated with the workers in `ended`,
+ * whose threads stop with its own. A thread may be stopped anywhere, even
+ * where it writes what a Mutex it holds guards, so their Mutexes are let go
+ * only once it has stopped: at once where its code stops at its next wait,
+ * lock or sleep, as avmplus interrupts it, and which it is given a moment
+ * to reach; else once the host says the thread has gone.
+ */
+function stopThread(rt: Runtime, id: number, thread: ShellThread, ended: Set<number>): void {
+  const sync = syncOf(rt);
+  sync.waitStopped(id, STOP_GRACE);
+  void Promise.resolve(thread.terminate()).then(() => {
+    for (const d of ended) {
+      sync.end(d);
+    }
+  });
+}
+
 interface WorkerObject extends AsObject {
   $id: number;
   $code: Value;
@@ -533,7 +575,9 @@ function workersOf(rt: Runtime): VmWorkers {
   if (!vm) {
     const init = rt.workerInit;
     vm = {
-      workers: init ? new Workers(init.memory, init.id) : new Workers(newWorkersMemory(), 0),
+      workers: init
+        ? new Workers(init.memory, init.id)
+        : new Workers(newWorkersMemory(syncOf(rt).memory), 0),
       objects: new Map(),
       threads: new Map(),
     };
@@ -584,14 +628,7 @@ function readAmf(rt: Runtime, bytes: Uint8Array): Value {
 const sharedKey = (rt: Runtime, key: Value): string | null =>
   key === null || key === undefined ? null : rt.toString(key);
 
-/** What an object only its own VM has is, in an error. */
-const localName = (rt: Runtime, value: Value): string =>
-  rt.isInstance(value, rt.classNamed("flash.concurrent::Mutex")) ? "a Mutex" : "a Condition";
-
-/**
- * What a shared property keeps of `value`, as makeChannelItem; a Mutex or
- * a Condition as itself, until slice 4 shares them.
- */
+/** What a shared property keeps of `value`, as makeChannelItem. */
 function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Array } {
   if (typeof value === "number") {
     const bytes = new Uint8Array(8);
@@ -614,10 +651,12 @@ function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Arra
       return { kind: ITEM_SHARED, bytes };
     }
 
-    for (const name of ["flash.concurrent::Mutex", "flash.concurrent::Condition"]) {
-      if (rt.isInstance(value, rt.classNamed(name))) {
-        return { kind: ITEM_LOCAL, bytes: new Uint8Array(0) };
-      }
+    const ref = syncRef(value);
+    if (ref) {
+      const bytes = new Uint8Array(5);
+      bytes[0] = ref.kind === "mutex" ? 0 : 1;
+      new DataView(bytes.buffer).setInt32(1, ref.address, true);
+      return { kind: ITEM_SYNC, bytes };
     }
   }
 

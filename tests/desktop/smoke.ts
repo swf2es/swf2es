@@ -10,7 +10,7 @@
 // grants it, not one without, no local file, and connects only the socket
 // whose server answers with a socket policy. The page's policy refuses
 // nothing it needs, the page is cross-origin isolated, and playing the SWF
-// again leaves one canvas.
+// again leaves one canvas. A SWF's workers share a Mutex and memory there.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { electronBinary, missing } from "../../apps/desktop/electron.ts";
+import { cases } from "../player/cases.ts";
 import { DevTools } from "../player/chrome.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
@@ -151,10 +152,7 @@ const remoteSource = `package {
 const libraries = `${out}libraries/`;
 libraryAbcs(libraries);
 const abcs = compileScripts(
-  [
-    { name: "DesktopSmoke", source },
-    { name: "RemoteSmoke", source: remoteSource },
-  ],
+  [{ name: "DesktopSmoke", source }, { name: "RemoteSmoke", source: remoteSource }, "WorkerMutex"],
   out,
 );
 const abc = abcs.get("DesktopSmoke");
@@ -201,6 +199,16 @@ function smokeSwf(name: string, network: boolean): string {
 }
 
 const local = smokeSwf("local", false);
+// The player tests' worker-mutex case: two workers and the primordial share a Mutex and memory.
+const workerMutex = `${site}worker-mutex.swf`;
+writeFileSync(
+  workerMutex,
+  (
+    (cases.find((c) => c.name === "worker-mutex") as (typeof cases)[number]).swf as (
+      abc: Uint8Array,
+    ) => Uint8Array
+  )(abcs.get("WorkerMutex") as Uint8Array),
+);
 const networked = smokeSwf("network", true);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -534,6 +542,43 @@ async function withApp(
       connected.addEventListener("error", fail);
     });
     const devtools = new DevTools(connected);
+    /**
+     * Wait until the page on `devtools` shows the document whose URL starts
+     * with `prefix`. DevTools lists a new window by the URL it is navigating
+     * to while it still shows its first about:blank, and the app's pages are
+     * cross-origin isolated, so that navigation moves the window to another
+     * renderer: an evaluation sent across the move finds no context, which
+     * means only that the document is still on its way.
+     */
+    const shown = async (page: DevTools, prefix: string) => {
+      for (let waited = 0; ; waited += 50) {
+        const href = await page
+          .send<{ result: { value?: string } }>("Runtime.evaluate", {
+            expression: "location.href",
+            returnByValue: true,
+          })
+          .then(
+            ({ result }) => result.value ?? "",
+            (error: Error) => {
+              if (!/Cannot find default execution context/.test(error.message)) {
+                throw error;
+              }
+
+              return "";
+            },
+          );
+        if (href.startsWith(prefix)) {
+          return;
+        }
+
+        if (exited || waited > TIMEOUT) {
+          throw new Error(`the page on ${prefix}: ${exited ?? "timed out"} at ${href}`);
+        }
+
+        await sleep(50);
+      }
+    };
+    await shown(devtools, "swf2es://app/");
     const evaluate = async <T>(expression: string): Promise<T> => {
       const { result, exceptionDetails } = await devtools.send<{
         result: { value: T };
@@ -569,7 +614,9 @@ async function withApp(
         other.addEventListener("open", done);
         other.addEventListener("error", fail);
       });
-      return new DevTools(other);
+      const page = new DevTools(other);
+      await shown(page, prefix);
+      return page;
     };
     await run({
       stdout,
@@ -778,6 +825,19 @@ try {
     })`);
     assert.equal(panel.hidden, true);
     assert.equal(panel.playerglobal, "swf2es's own");
+  });
+
+  // A SWF's workers run on Web Workers whose script the app's protocol serves, sharing a Mutex
+  // and memory on its isolated page.
+  await withApp(both, [workerMutex], async ({ stdout, until }) => {
+    await until("the workers' SWF", () => stdout.includes("free true"));
+    const expected = readFileSync(`${here}../player/references/worker-mutex/trace.txt`, "utf8")
+      .trim()
+      .split("\n");
+    assert.deepEqual(
+      stdout.filter((l) => expected.includes(l)),
+      expected,
+    );
   });
 
   await remote();

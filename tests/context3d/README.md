@@ -847,3 +847,9 @@ the layout callback and the repeated-load collection checks still apply.
 Desktop layout controls, best-resolution buffers and production enablement
 remain later work. These hooks are independent of the unfinished ActionScript
 Worker API. Broader formats, profiles and validation gaps remain listed above.
+
+`StageWorker.as` covers the combined web startup path: the primordial presents
+a green Stage3D surface while a real background Worker sends a channel reply.
+The host waits for both before checking pixels, then destroys the player and
+checks collection through the existing lifetime harness. This exercises the
+worker-host readiness path together with opt-in Context3D bindings.
