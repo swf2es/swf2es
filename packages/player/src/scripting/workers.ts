@@ -52,20 +52,30 @@ export interface ParentLink {
   shared: SharedMessage[];
 }
 
-/** How long a terminated worker's thread is given to stop at its next wait or lock before it is stopped. */
-const STOP_GRACE = 100;
+/** How long a terminated worker's thread is given to stop itself before its host stops it. */
+const STOP_WAIT = 1000;
 
 /**
  * Stop the thread of worker `id`, terminated. A thread may be stopped
  * anywhere, even where it writes what a Mutex it holds guards, so its
- * Mutexes are let go only once it has stopped: where its code stops at its
- * next wait or lock, as avmplus interrupts it, which it is given a moment
- * to reach, at once; else once the host says the thread has gone.
+ * Mutexes are let go only once it has stopped. The thread stops itself
+ * between frames once it sees it was terminated, which one that waits or
+ * is idle does at once and one that plays at the end of its frame, and
+ * says so (thread.ts); one that has not within STOP_WAIT is stopped by its
+ * host, and its Mutexes let go once the host says it has gone.
  */
 function stopThread(sync: avm2.Sync, id: number, thread: WorkerThread): void {
-  setTimeout(() => {
-    void Promise.resolve(thread.terminate()).then(() => sync.end(id));
-  }, STOP_GRACE);
+  const start = Date.now();
+  const look = () => {
+    if (sync.stopped(id)) {
+      void thread.terminate();
+    } else if (Date.now() - start >= STOP_WAIT) {
+      void Promise.resolve(thread.terminate()).then(() => sync.end(id));
+    } else {
+      setTimeout(look, 10);
+    }
+  };
+  setTimeout(look, 10);
 }
 
 /**

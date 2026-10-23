@@ -233,11 +233,15 @@ export class Sync {
    */
   poll: (() => void) | null = null;
 
+  /** Whether a refused thread's code has ended with it (see refuse). */
+  private readonly selfEnds: boolean;
+
   constructor(
     readonly memory: SyncMemory,
     readonly thread: number,
-    options: { spin?: boolean; timeout?: number } = {},
+    options: { spin?: boolean; timeout?: number; selfEnds?: boolean } = {},
   ) {
+    this.selfEnds = options.selfEnds ?? false;
     this.words = new Int32Array(memory.heap);
     this.bytes = new Uint8Array(memory.heap);
     this.threads = new Int32Array(memory.threads);
@@ -375,18 +379,22 @@ export class Sync {
   }
 
   /**
-   * Refuse anything more of a thread whose worker was terminated. Its code
-   * stops here, as avmplus' interrupts a terminated worker that waits, and
-   * runs no more of the worker's code on the way out (the runtime lets no
-   * script catch the error), so the locks it holds are free to take from
-   * now on, as avmplus lets go of them when the worker goes.
+   * Refuse anything more of a thread whose worker was terminated: the
+   * script that asked stops here, as avmplus interrupts a terminated worker
+   * that waits (the runtime lets no script catch the error). Where that
+   * ends all of the worker's code, as an avmshell worker's (`selfEnds`),
+   * the locks it holds are free to take from now on, as avmplus lets go of
+   * them when the worker goes; a player's worker plays on to the end of its
+   * frame, and says it has stopped itself (end) once no code of it can run.
    */
   private refuse(): void {
     if (this.thread !== 0) {
       const state = this.stateOf(this.thread);
       if (state === STOPPING || state === ENDED) {
-        Atomics.store(this.threads, 2 * this.thread + 1, ENDED);
-        Atomics.notify(this.threads, 2 * this.thread + 1);
+        if (this.selfEnds) {
+          this.end(this.thread);
+        }
+
         throw new SyncTerminated();
       }
     }

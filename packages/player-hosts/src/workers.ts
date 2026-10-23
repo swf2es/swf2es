@@ -49,8 +49,15 @@ interface Spare {
   settled: Promise<void>;
 }
 
-/** How long after a Web Worker's terminate it is taken to have stopped. */
-const STOPPED_GRACE = 100;
+/**
+ * How long after a Web Worker's terminate it is taken to have stopped. A
+ * browser does not say, and Chrome lets a busy worker's script run on for
+ * some seconds (2.5 to 4 s measured, in Chrome 156) before it stops it by
+ * force; Firefox's and Safari's were not measured. The player stops a
+ * terminated worker's thread so only when the worker has not stopped
+ * itself first (scripting/workers.ts).
+ */
+const STOPPED_GRACE = 8000;
 
 /** The workers started ahead, by script URL. */
 const pools = new Map<string, Spare[]>();
@@ -189,8 +196,7 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
       worker.postMessage(start);
       return {
         post: (message) => worker.postMessage(message),
-        // A browser tells nobody when a Web Worker has stopped: it stops
-        // its script at once, which a moment's grace leaves time for.
+        // A browser tells nobody when a Web Worker has stopped.
         terminate: () => {
           worker.terminate();
           return new Promise((resolve) => setTimeout(resolve, STOPPED_GRACE));

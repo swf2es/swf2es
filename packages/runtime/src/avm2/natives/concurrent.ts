@@ -37,7 +37,8 @@ function vmSync(rt: Runtime): VmSync {
     const sync = init
       ? new Sync(init.memory, init.thread, init)
       : rt.workerInit
-        ? new Sync(rt.workerInit.memory.sync, rt.workerInit.id)
+        ? // A refused avmshell worker's code ends: its runShell stops.
+          new Sync(rt.workerInit.memory.sync, rt.workerInit.id, { selfEnds: true })
         : new Sync(newSyncMemory(), 0);
     vm = { sync, objects: new Map() };
     vmSyncs.set(rt, vm);

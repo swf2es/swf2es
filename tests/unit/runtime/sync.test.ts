@@ -14,6 +14,7 @@ import {
   newSyncMemory,
   Sync,
   type SyncMemory,
+  SyncTerminated,
   SyncTimeout,
 } from "../../../packages/runtime/dist/avm2/natives/sync.js";
 
@@ -29,7 +30,8 @@ function thread(memory: SyncMemory, id: number, body: string, data: unknown = nu
     const { parentPort, workerData } = await import("node:worker_threads");
     const { Sync } = await import(${JSON.stringify(module)});
     const { memory, id, data } = workerData;
-    const sync = new Sync(memory, id);
+    // As an avmshell worker's: refused, its code ends.
+    const sync = new Sync(memory, id, { selfEnds: true });
     const post = (m) => parentPort.postMessage(m);
     try {
       await (async () => { ${body} })();
@@ -502,4 +504,20 @@ test("a terminated worker that waits stops there, letting go of its Mutex, and a
   sync.unlock(m);
   assert.equal(await second(), false);
   assert.equal(await second(), "done");
+});
+
+test("a player's worker refused for its termination keeps its locks until it says it has stopped", () => {
+  const memory = newSyncMemory();
+  const sync = new Sync(memory, 0);
+  const worker = new Sync(memory, 1);
+  const m = worker.newMutex();
+  worker.lock(m);
+  sync.stop(1);
+  // Refused, but its frame plays on: what it holds stays held.
+  assert.throws(() => worker.newMutex(), SyncTerminated);
+  assert.equal(sync.stopped(1), false);
+  assert.equal(sync.tryLock(m), false);
+  // Its thread has stopped its player: free to take.
+  worker.end(1);
+  assert.equal(sync.tryLock(m), true);
 });

@@ -31,6 +31,28 @@ export function runWorkerThread(port: ThreadPort): void {
   // How many of the parent's messages have been applied, the start the first.
   let applied = 0;
   let idled = 0;
+  let player: Player | null = null;
+  let stopped = false;
+
+  /**
+   * Once its worker is terminated, stop it for good, between frames, so
+   * that none of its code runs again, then say so in the shared memory: the
+   * Mutexes it held are free to take from then on. A lock or wait it asks
+   * for after it was terminated is refused, but the frame that asked plays
+   * on, its other listeners too, so this waits for the frame's end.
+   */
+  const stopIfTerminated = (): boolean => {
+    if (stopped || !scripting || !avm2.syncOf(scripting.rt).terminated) {
+      return stopped;
+    }
+
+    stopped = true;
+    player?.destroy();
+    scripting.destroy();
+    avm2.syncOf(scripting.rt).end(id);
+    return true;
+  };
+  let id = 0;
 
   const describe = (error: unknown): string => {
     if (error instanceof Error) {
@@ -45,6 +67,7 @@ export function runWorkerThread(port: ThreadPort): void {
   };
 
   const boot = async ({ codegen, init }: ThreadStart): Promise<void> => {
+    id = init.id;
     // What the embedder gave the primordial lives on its thread, as
     // functions no message carries: a worker gets none of it, and none of
     // the defaults that would reach past the primordial's (docs/workers.md).
@@ -74,7 +97,8 @@ export function runWorkerThread(port: ThreadPort): void {
       },
     });
     await s.loadLibraries(init.libraries);
-    const player = new Player(init.swf, s);
+    player = new Player(init.swf, s);
+    const playing = player;
     scripting = s;
     applied++;
     for (const message of early.splice(0)) {
@@ -85,30 +109,51 @@ export function runWorkerThread(port: ThreadPort): void {
     // Running, which the worker that made it sees at once.
     avm2.syncOf(s.rt).start(init.id);
     port.post({ type: "running" });
-    await player.start();
+    await playing.start();
+    if (stopIfTerminated()) {
+      return;
+    }
+
+    // Between frames none of its code runs: it stops there at once.
+    const watch = setInterval(() => {
+      if (stopIfTerminated()) {
+        clearInterval(watch);
+      }
+    }, 10);
 
     // What was applied before a frame has had its events in it: the parent's settled() waits for that.
     let last = performance.now();
     const frame = () => {
+      if (stopIfTerminated()) {
+        return;
+      }
+
       const upTo = applied;
       const now = performance.now();
-      const played = player.advance(now - last);
+      const played = playing.advance(now - last);
       last = now;
+      if (stopIfTerminated()) {
+        return;
+      }
+
       if (played > 0 && upTo > idled) {
         idled = upTo;
         port.post({ type: "idle", received: upTo });
       }
 
-      setTimeout(frame, 1000 / player.frameRate);
+      setTimeout(frame, 1000 / playing.frameRate);
     };
-    setTimeout(frame, 1000 / player.frameRate);
+    setTimeout(frame, 1000 / playing.frameRate);
   };
 
   port.listen((message) => {
     if ("codegen" in message) {
       boot(message).catch((error) => {
-        port.post({ type: "uncaught", text: describe(error) });
-        port.post({ type: "terminate" });
+        // A worker terminated while its constructor waited stops quietly.
+        if (!stopIfTerminated()) {
+          port.post({ type: "uncaught", text: describe(error) });
+          port.post({ type: "terminate" });
+        }
       });
       return;
     }

@@ -638,7 +638,7 @@ test("a Mutex a terminated worker held is free to take only once its thread has 
           log[1] = (log[1] + 1) & 255;
         }
       }`,
-    { frames: 150, blocking: true },
+    { frames: 400, blocking: true },
   );
 
   assert.deepEqual(uncaught, []);
@@ -648,3 +648,106 @@ test("a Mutex a terminated worker held is free to take only once its thread has 
     "written after it was taken false",
   ]);
 });
+
+for (const [role, what] of [
+  ["self", "a worker that terminates itself"],
+  ["maker", "a worker terminated by the worker that made it"],
+]) {
+  test(`${what} keeps its Mutex while its frames still play`, { skip }, async () => {
+    const { lines, uncaught } = await play(
+      role === "self" ? "SelfStop" : "MakerStop",
+      `      var m:Mutex = new Mutex();
+      var log:ByteArray = new ByteArray();
+      log.shareable = true;
+      log.length = 16;
+      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      w.setSharedProperty("role", "${role}");
+      w.setSharedProperty("m", m);
+      w.setSharedProperty("log", log);
+      w.start();
+      var seen:int = -1;
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        // Once the worker plays its frames.
+        if (log[0] != 1 || log[1] == 0 || seen == -2) {
+          return;
+        }
+
+        // Taken once the terminated worker's thread has stopped playing,
+        // after which nothing more is written. This one never returns to
+        // its event loop meanwhile, so no host stops that thread for it:
+        // the worker is terminated only once this one waits (log[5]).
+        log[5] = 1;
+        var nap:Condition = new Condition(new Mutex());
+        nap.mutex.lock();
+        var start:int = getTimer();
+        while (!m.tryLock()) {
+          if (getTimer() - start > 10000) {
+            trace("never taken");
+            seen = -2;
+            return;
+          }
+
+          nap.wait(1);
+        }
+
+        seen = log[1];
+        trace("taken");
+        nap.wait(200);
+        trace("written after it was taken " + (log[1] != seen));
+        seen = -2;
+        m.unlock();
+      });`,
+      `      var m:Mutex = Worker.current.getSharedProperty("m");
+      var log:ByteArray = Worker.current.getSharedProperty("log");
+      var role:String = Worker.current.getSharedProperty("role");
+      if (role == "maker") {
+        var child:Worker = WorkerDomain.current.createWorker(loaderInfo.bytes);
+        child.setSharedProperty("role", "child");
+        child.setSharedProperty("m", m);
+        child.setSharedProperty("log", log);
+        child.start();
+        addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+          if (log[5] == 1 && log[3] == 0) {
+            child.terminate();
+            log[3] = 1;
+          }
+        });
+        return;
+      }
+
+      m.lock();
+      log[0] = 1;
+      // Its frames write on, and ask the shared memory for something,
+      // which it refuses once the worker is terminated.
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        log[1] = (log[1] + 1) & 255;
+      });
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        // In a frame until it is terminated, once the primordial waits.
+        var t:int = getTimer();
+        do {
+          log[1] = (log[1] + 1) & 255;
+          if (role == "self" && log[5] == 1 && log[3] == 0) {
+            Worker.current.terminate();
+            log[3] = 1;
+          }
+
+          if (log[3] == 1) {
+            new Mutex();
+          }
+        } while (getTimer() - t < 10000);
+      });
+      // The rest of the frame plays on after the refusal, for a while.
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        var t:int = getTimer();
+        do {
+          log[1] = (log[1] + 1) & 255;
+        } while (log[3] == 1 && getTimer() - t < 300);
+      });`,
+      { frames: 300, blocking: true },
+    );
+
+    assert.deepEqual(uncaught, []);
+    assert.deepEqual(lines, ["taken", "written after it was taken false"]);
+  });
+}
