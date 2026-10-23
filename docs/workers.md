@@ -592,8 +592,11 @@ its hash, its domain and whether a library; each finding reported; each
 domain made; each module compiled, read from the module cache or
 imported), with each module's source, or the URL it was imported from,
 and the log of what compiling it fixed (`compileModuleLogged`), until its
-main SWF has linked. A SWF whose ABCs do not name `WorkerDomain` keeps
-none of it then. The sources are kept as Blobs, which a browser keeps out
+main SWF has linked. A SWF whose ABCs do not name `WorkerDomain` records
+none of its own modules, which is decided before they compile, and lets
+go of the libraries' then; a player let go of lets go of them all. A
+module read from the cache that then fails to load is not handed, and
+the journal ends there. The sources are kept as Blobs, which a browser keeps out
 of the page's heap and a message carries to a thread without a copy. A
 worker journals its own calls the same way, and loads the primordial's
 module for a compile while its journal is the primordial's so far and
