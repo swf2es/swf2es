@@ -3,6 +3,7 @@
 export { bufferBytes, vertexFormats } from "./checks/buffers.ts";
 export { closeComposition, composition, compositionStep } from "./checks/composition.ts";
 export { create } from "./checks/context.ts";
+export { contextAttributes } from "./checks/context-attributes.ts";
 export { canvasHost } from "./checks/host.ts";
 export { lifetime } from "./checks/lifetime.ts";
 export { resourceLimits } from "./checks/limits.ts";

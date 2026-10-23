@@ -117,6 +117,13 @@ export class WebGLContext3D implements Context3D {
   constructor(gl: WebGL2RenderingContext, limits: Partial<WebGLContext3DLimits> = {}) {
     this.limits = resourceLimits(limits);
     this.gl = gl;
+    if (gl.getContextAttributes()?.antialias) {
+      throw new Context3DError(
+        "unsupported",
+        "Context3D requires a WebGL2 context with antialias: false",
+      );
+    }
+
     const vao = gl.createVertexArray();
     if (!vao) {
       throw new Context3DError("operation", "Context3D experiment: cannot create vertex array");

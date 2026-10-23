@@ -131,6 +131,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(host.exception, null, JSON.stringify(host));
       assert.equal(host.value?.passed, true);
       console.log("context3d: canvas host placement, failure rollback and listener cleanup ok");
+      const attributes = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.contextAttributes())',
+      );
+      assert.equal(attributes.exception, null, JSON.stringify(attributes));
+      assert.equal(attributes.value?.passed, true);
+      console.log("context3d: incompatible antialiased host contexts rejected before allocation");
       const validation = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.drawValidation())',
       );
