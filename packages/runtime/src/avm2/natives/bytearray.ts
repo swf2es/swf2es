@@ -265,20 +265,8 @@ export class Bytes {
     }
   }
 
-  /**
-   * Its length or bytes changed: the length told to the other workers, if
-   * the memory is shared, and the domain memory, if this is it.
-   */
-  notify(): void {
-    if (this.shared !== null) {
-      Atomics.store(this.sharedWords as Int32Array, 0, this.length | 0);
-    }
-
-    this.notifyMemory();
-  }
-
   /** Tell the domain memory, if this is it, where the bytes are now: a new view only if they moved or their length changed. */
-  notifyMemory(): void {
+  notify(): void {
     const rt = this.rt;
     if (
       this.subscribed &&
@@ -299,18 +287,12 @@ export class Bytes {
       // The memory cannot shrink: what it held is zeroed, as a new buffer
       // would be once it grows again.
       this.length = 0;
-      this.notify();
       this.buffer.fill(0);
       return;
     }
 
     this.setBuffer(new Uint8Array(0));
     this.length = 0;
-  }
-
-  /** A shared memory's length, as another worker may have changed it. */
-  sync(): void {
-    this.length = Atomics.load(this.sharedWords as Int32Array, 0) >>> 0;
   }
 
   /**
@@ -354,11 +336,22 @@ export class Bytes {
     return memory;
   }
 
-  /** Use `memory`, shared, as its bytes and length from now on. */
+  /**
+   * Use `memory`, shared, as its bytes and length from now on. Its length
+   * becomes an accessor of the memory's word on this object alone, so that
+   * every read sees another worker's change and every write is seen, and
+   * a ByteArray that shares nothing reads a plain field as before.
+   */
   adopt(memory: SharedBytesMemory): void {
     this.shared = memory;
     this.shareable = true;
-    this.sharedWords = new Int32Array(memory.meta);
+    const words = new Int32Array(memory.meta);
+    this.sharedWords = words;
+    Object.defineProperty(this, "length", {
+      get: () => Atomics.load(words, 0) >>> 0,
+      set: (length: number) => Atomics.store(words, 0, length | 0),
+      configurable: true,
+    });
     // Views that track the memory's length as any worker grows it.
     this.buffer = new Uint8Array(memory.data);
     this.view = new DataView(memory.data);
@@ -366,12 +359,11 @@ export class Bytes {
     const { runtime, own } = this.capacity;
     runtime.bytes += memory.data.byteLength - own.bytes;
     own.bytes = memory.data.byteLength;
-    this.sync();
     if (this.subscribed) {
-      this.rt.refreshMemory = () => refreshMemory(this);
+      this.rt.refreshMemory = () => this.notify();
     }
 
-    this.notifyMemory();
+    this.notify();
   }
 
   /**
@@ -441,16 +433,11 @@ export class Bytes {
     this.reserve(next, true);
     const previous =
       Atomics.compareExchange(this.sharedWords as Int32Array, 0, expected | 0, next | 0) >>> 0;
-    if (previous === expected) {
-      this.length = next;
-      if (this.position > next) {
-        this.position = next;
-      }
-    } else {
-      this.length = previous;
+    if (previous === expected && this.position > next) {
+      this.position = next;
     }
 
-    this.notifyMemory();
+    this.notify();
     return previous;
   }
 
@@ -581,42 +568,24 @@ export const byteArrayHook: IndexHook & { create: (traits: Traits, rt: Runtime) 
   },
   getIndex: (o, i) => {
     const b: Bytes | undefined = o.$bytes;
-    if (b && i < b.length) {
-      return b.buffer[i];
-    }
-
-    // Shared, another worker may have made it longer.
-    if (b?.shared) {
-      b.sync();
-      return i < b.length ? b.buffer[i] : undefined;
-    }
-
-    return undefined;
+    return b && i < b.length ? b.buffer[i] : undefined;
   },
   setIndex: (o, i, v, rt) => {
     bytesOf(rt, o).setByte(i, rt.toInt(v) & 0xff);
   },
   hasIndex: (o, i) => {
     const b: Bytes | undefined = o.$bytes;
-    if (b?.shared) {
-      b.sync();
-    }
-
     return b !== undefined && i < b.length;
   },
 };
 
 /** A ByteArray's state, made the first time a native needs it. */
 export function bytesOf(rt: Runtime, o: AsObject): Bytes {
-  let b: Bytes | undefined = o.$bytes;
-  if (!b) {
-    b = new Bytes(rt, o);
-    o.$bytes = b;
-  } else if (b.shared !== null) {
-    b.sync();
+  if (!o.$bytes) {
+    o.$bytes = new Bytes(rt, o);
   }
 
-  return b;
+  return o.$bytes;
 }
 
 /**
@@ -863,13 +832,14 @@ function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
     // In place, for every worker, as avmplus swaps the shared Buffer's array.
     const previous = b.length;
     b.position = 0;
-    b.length = 0;
     b.write(bytes);
     if (previous > bytes.length) {
       b.buffer.fill(0, bytes.length, previous);
     }
 
+    b.length = bytes.length;
     b.position = position >>> 0;
+    b.notify();
     return;
   }
 
@@ -1462,11 +1432,6 @@ export function setDomainMemory(rt: Runtime, v: Value): void {
   }
 
   rt.memoryProvider = v;
-  rt.refreshMemory = b.shared !== null ? () => refreshMemory(b) : null;
-}
-
-/** Shared domain memory's length as the other workers left it, its view made again if it changed. */
-function refreshMemory(b: Bytes): void {
-  b.sync();
-  b.notifyMemory();
+  // Shared, its length as the other workers left it, its view made again if it changed.
+  rt.refreshMemory = b.shared !== null ? () => b.notify() : null;
 }
