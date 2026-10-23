@@ -125,3 +125,25 @@ test("a ByteArray that shares nothing drops what a smaller buffer drops, as avmp
   assert.equal(a.buffer[59 * MB], 0);
   assert.equal(a.buffer[29 * MB], 9);
 });
+
+test("a worker that grows a cleared ByteArray keeps what it writes", () => {
+  const [a, b] = shared(64);
+  b.buffer[10] = 1;
+  const own = Object.getOwnPropertyDescriptor(a, "length") as PropertyDescriptor;
+  Object.defineProperty(a, "length", {
+    configurable: true,
+    get: own.get,
+    set(length: number) {
+      own.set?.call(a, length);
+      // Right after the cleared length is told, another worker grows it and writes.
+      if (length === 0) {
+        assert.equal(b.compareAndSwapLength(0, 32), 0);
+        b.buffer[20] = 0xab;
+      }
+    },
+  });
+  a.clear();
+  assert.equal(b.buffer[20], 0xab);
+  assert.equal(b.buffer[10], 0);
+  assert.equal(b.length, 32);
+});

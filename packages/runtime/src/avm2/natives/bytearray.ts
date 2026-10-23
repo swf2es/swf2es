@@ -312,9 +312,10 @@ export class Bytes {
     this.position = 0;
     if (this.shared !== null) {
       // The memory cannot shrink: what it held is zeroed, as a new buffer
-      // would be once it grows again.
-      this.length = 0;
+      // would be once it grows again, before the length is told, so that a
+      // worker that grows it once it is empty writes into zeroes already.
       this.buffer.fill(0);
+      this.length = 0;
       return;
     }
 

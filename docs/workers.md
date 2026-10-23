@@ -279,7 +279,8 @@ ByteArray for an id, as avmplus interns one for a Buffer:
   that shares nothing keeps its plain field, and its natives are as fast
   as before (`as3pb`, interleaved against the slice before).
 - `shareable` cannot be set back to false, as in avmplus. `clear()` empties
-  it for every worker, zeroing the memory; `compress()` and the others
+  it for every worker, zeroing the memory before it makes the length 0,
+  so that a worker growing it then writes into zeroes; `compress()` and the others
   rewrite the bytes in place for all.
 - `atomicCompareAndSwapIntAt` and `casi32` are `Atomics.compareExchange` on
   an `Int32Array` over the bytes; `atomicCompareAndSwapLength` reads the
