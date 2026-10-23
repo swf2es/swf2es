@@ -304,6 +304,8 @@ export class Domain {
   /** XML's and XMLList's traits. */
   xmlType: i32 = -1;
   xmlListType: i32 = -1;
+  /** QName's traits, whose == compares names as XML's compares content. */
+  qnameType: i32 = -1;
   /** Class's traits, the type of a value that is a class. */
   classType: i32 = -1;
   vectorClass: i32 = -1;
@@ -1071,6 +1073,7 @@ export class Domain {
     this.namespaceType = this.builtinType("Namespace");
     this.xmlType = this.builtinType("XML");
     this.xmlListType = this.builtinType("XMLList");
+    this.qnameType = this.builtinType("QName");
     this.classType = this.builtinType("Class");
     this.vectorClass = this.findBuiltin("Vector");
     this.vectorObjectType = this.builtinType("Vector$object");
