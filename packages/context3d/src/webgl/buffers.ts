@@ -5,6 +5,12 @@ export interface BufferState {
   handle: WebGLBuffer;
   indices: Uint16Array | null;
   uploaded: Uint8Array;
+  prefix: number;
+  version: number;
+  checkedVersion: number;
+  checkedFirst: number;
+  checkedCount: number;
+  maximum: number;
 }
 
 export interface VertexBinding {
@@ -13,6 +19,23 @@ export interface VertexBinding {
   size: number;
   packed: boolean;
   valid: boolean;
+  checkedIndex: BufferState | null;
+  checkedIndexVersion: number;
+  checkedVertexVersion: number;
+  checkedFirst: number;
+  checkedCount: number;
+}
+
+function uploaded(state: BufferState, start: number, amount: number): void {
+  if (amount === 0) {
+    return;
+  }
+
+  state.uploaded.fill(1, start, start + amount);
+  state.version++;
+  while (state.prefix < state.uploaded.length && state.uploaded[state.prefix]) {
+    state.prefix++;
+  }
 }
 
 export function uploadBuffer(
@@ -36,7 +59,7 @@ export function uploadBuffer(
   }
 
   state.indices?.set(data, start);
-  state.uploaded.fill(1, start, start + amount);
+  uploaded(state, start, amount);
   gl.bindVertexArray(vao);
   gl.bindBuffer(target, handle);
   gl.bufferSubData(target, start * size * (stride === 0 ? 2 : 4), data);
@@ -72,7 +95,7 @@ export function uploadBufferBytes(
     }
   }
 
-  state.uploaded.fill(1, start, start + amount);
+  uploaded(state, start, amount);
   gl.bindVertexArray(vao);
   gl.bindBuffer(target, handle);
   gl.bufferSubData(target, start * bytesPerEntry, data, offset, length);

@@ -168,7 +168,16 @@ export class TouchInput {
     primary: boolean,
   ): void {
     const s = this.scripting;
-    const target = pointerTarget(this.stage, t.x, t.y, s.stageWidth, s.stageHeight);
+    const target = pointerTarget(
+      this.stage,
+      t.x,
+      t.y,
+      s.stageWidth,
+      s.stageHeight,
+      undefined,
+      s.stageViewportX,
+      s.stageViewportY,
+    );
     // The empty stage takes the point's events, but no one is over it, as for the mouse.
     const over = target === this.stage ? null : target;
     // A move first, then the hover, in the mouse's order.

@@ -1,4 +1,5 @@
 /** Experimental renderer contracts and AGAL v1 translation, without browser dependencies. */
+
 export { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.js";
 export {
   BLEND_FACTORS,
@@ -28,3 +29,4 @@ export {
   type VertexFormat,
   VertexOffsetError,
 } from "./backend.js";
+export { Context3DError, type Context3DErrorReason } from "./errors.js";

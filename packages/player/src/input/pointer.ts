@@ -150,8 +150,10 @@ export function pointerTarget(
   width: number,
   height: number,
   avm1?: (root: MovieClip, x: number, y: number) => boolean,
+  left = 0,
+  top = 0,
 ): DisplayObject | null {
-  if (x < 0 || y < 0 || x >= width || y >= height) {
+  if (x < left || y < top || x >= left + width || y >= top + height) {
     return null;
   }
 
@@ -596,7 +598,16 @@ export class PointerInput implements Pointer {
 
   private pick(p: PointerState): DisplayObject | null {
     const s = this.scripting;
-    return pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight, s.avm1Input?.hit);
+    return pointerTarget(
+      this.stage,
+      p.x,
+      p.y,
+      s.stageWidth,
+      s.stageHeight,
+      s.avm1Input?.hit,
+      s.stageViewportX,
+      s.stageViewportY,
+    );
   }
 
   /** Flash has one active drag for the whole stage, independent of mouse button state. */
@@ -815,7 +826,16 @@ export class PointerInput implements Pointer {
   wheel(p: PointerState, delta: number): boolean {
     this.handle("move", p);
     const s = this.scripting;
-    const found = pointerTarget(this.stage, p.x, p.y, s.stageWidth, s.stageHeight);
+    const found = pointerTarget(
+      this.stage,
+      p.x,
+      p.y,
+      s.stageWidth,
+      s.stageHeight,
+      undefined,
+      s.stageViewportX,
+      s.stageViewportY,
+    );
     const target = found ?? (this.held && this.stage.object ? this.stage : null);
     if (!target?.object) {
       return false;

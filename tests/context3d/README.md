@@ -429,8 +429,9 @@ cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 `bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
 bias. Compressed textures remain unsupported.
 Ordinary 2D/cube upload dimensions must match the selected mip level. Each context
-is limited to 128 textures and 64 MiB of texels (including mip chains), with another 64 MiB maximum
-for CPU staging arrays; these are experimental resource limits.
+has independent 4,096-resource caps for 2D, rectangle and cube textures and a
+shared 64 MiB texel budget (including mip chains). Byte budgets remain an
+experimental host policy rather than AIR's larger storage allowances.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
@@ -855,3 +856,40 @@ The desktop integration test runs the same fixture through normal SWF opening,
 checks cross-origin isolation and the green presentation after the worker reply.
 It also aborts the optional backend import: the movie must keep playing with
 ErrorEvent #3702, and a page reload must allow the backend to load successfully.
+
+Live Stage getters, setter validation, resize events and leading-edge alignment
+are gated by the Context3D opt-in. Default playback keeps dev's ignored Stage
+setters, fixed getters and authored dimensions. The host regression loads the
+same StageLayout fixture without a surface factory and checks the 96×96 Stage
+in a 192×144 embed, no RESIZE and no artwork in the margin. Shared embedding
+alignment retains the old LR/TB centering for ordinary AS3 and AVM1 loads.
+
+Pointer, touch and context-menu picking use the translated viewport rectangle.
+The host test clicks the visible negative-coordinate artwork under bottom-right
+noScale alignment and checks stageX/stageY and Stage.mouseX/mouseY at (-12,-12),
+while the pure picking test rejects coordinates beyond each viewport edge.
+
+`ResourceLimits.as` retains all six resource kinds at once, reaches AIR's 4,096
+limit independently for each, observes Error #3691, then disposes/replaces one
+at capacity. Separate buffer/texture aggregate overrides still bound combined
+counts without raising the shared byte budgets. `ContextRequests.as` checks AIR's
+mode/profile/null errors, pending coalescing, profile-vector selection and
+replacement of an existing context, with explicit error checking enabled when
+probing its retired predecessor. `AGALValidation.as` checks unwritten temporary
+registers/components, masked reads, complete outputs and varying linkage against
+AIR. Every encoded source-swizzle lane is validated, including masked MOV and
+dp3 operands. These references are captured and independently repeated in adl.
+
+Backend checks reject antialiased host contexts before GPU allocation and count
+index reads with eight attributes over 6,000 indices: one cold scan and none on
+warm draws. Partial uploads, sparse vertex streams, range changes and disposal
+must invalidate caches without losing pixels or retaining handles. The normal
+host checks asynchronous unsupported-profile fallback, worker isolation from the
+Stage3D factory, and closing/collecting a player while a worker is still sending
+messages. Worker-pool spares are distinct from running Flash worker threads.
+
+Stage3D and the display list occupy separate canvases. Blend effects on the 2D
+list sample transparency rather than Stage3D pixels; cross-layer blend parity is
+an experimental limitation. Default `Playback.destroy()` also disposes its Pixi
+scene before its renderer, intentionally releasing cached text-style listeners;
+ordinary web collection checks cover this shared change.

@@ -1,6 +1,7 @@
 // Deliberately small AGAL v1 slice for the opt-in Context3D probe.
 // Format: https://github.com/adobe/glsl2agal/blob/master/agalassembler/agal.h
 import { SamplerBiasError } from "./backend.js";
+import { Context3DError } from "./errors.js";
 
 export type ProgramType = "vertex" | "fragment";
 
@@ -16,6 +17,8 @@ export interface SamplerSource {
 
 export interface ShaderSource {
   source: string;
+  /** Written lanes for vertex programs, read lanes for fragment programs. */
+  varyings: Uint8Array;
   attributes: number[];
   constants: number[];
   indirect: boolean;
@@ -30,16 +33,29 @@ const UNARY = new Set([0, 5, 8, 9, 0x0a, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x14, 0x1
 
 export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (
-    bytes.length < 31 ||
-    (bytes.length - 7) % 24 !== 0 ||
-    (bytes.length - 7) / 24 > 200 ||
-    bytes[0] !== 0xa0 ||
-    data.getUint32(1, true) !== 1 ||
-    bytes[5] !== 0xa1 ||
-    bytes[6] !== (stage === "vertex" ? 0 : 1)
-  ) {
-    throw new Error("Context3D experiment requires an AGAL v1 program");
+  if (bytes.length < 31 || (bytes.length - 7) % 24 !== 0) {
+    throw new Context3DError("agalLength", "Invalid AGAL program length");
+  }
+  if ((bytes.length - 7) / 24 > 200) {
+    throw new Context3DError("agalTokens", "Too many AGAL instructions");
+  }
+  if (bytes[0] !== 0xa0) {
+    throw new Context3DError("agalMagic", "Invalid AGAL magic byte");
+  }
+  if (data.getUint32(1, true) !== 1) {
+    throw new Context3DError("agalVersion", "Context3D experiment requires an AGAL v1 program");
+  }
+  if (bytes[5] !== 0xa1) {
+    throw new Context3DError("agalStageMarker", "Invalid AGAL stage marker");
+  }
+  if (bytes[6] > 1) {
+    throw new Context3DError("agalStage", "Invalid AGAL shader type");
+  }
+  if (bytes[6] !== (stage === "vertex" ? 0 : 1)) {
+    throw new Context3DError(
+      stage === "vertex" ? "agalVertexStage" : "agalFragmentStage",
+      "Invalid AGAL shader type",
+    );
   }
 
   // Direct-only shaders keep their sparse uniform uploads. An indirect shader
@@ -61,14 +77,32 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const samplers = new Map<number, SamplerSource>();
   const lines: string[] = [];
   const components = "xyzw";
-  let output = false;
+  let output = 0;
+  const temporaries = new Uint8Array(8);
+  const varyings = new Uint8Array(8);
+  const readTemporary = (index: number, mask: number): void => {
+    if (!temporaries[index]) {
+      throw new Context3DError("agalTemporaryRead", "AGAL temporary read before writing");
+    }
+    if ((temporaries[index] & mask) !== mask) {
+      throw new Context3DError(
+        "agalTemporaryComponent",
+        "AGAL temporary component read before writing",
+      );
+    }
+  };
   const register = (type: number, index: number, write: boolean): string => {
     let name: string;
     let declaration: string;
     switch (type) {
       case 0:
-        if (stage !== "vertex" || write || index >= 8) {
-          throw new Error("Invalid AGAL attribute");
+        if (write || stage !== "vertex" || index >= 8) {
+          const reason = write
+            ? "agalAttributeWrite"
+            : stage !== "vertex"
+              ? "agalAttributeStage"
+              : "agalAttributeIndex";
+          throw new Context3DError(reason, "Invalid AGAL attribute");
         }
         name = `va${index}`;
         declaration = `layout(location = ${index}) in vec4 ${name};`;
@@ -76,7 +110,10 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         break;
       case 1:
         if (write || index >= (stage === "vertex" ? 128 : 28)) {
-          throw new Error("Invalid AGAL constant");
+          throw new Context3DError(
+            write ? "agalConstantWrite" : "agalConstantIndex",
+            "Invalid AGAL constant",
+          );
         }
 
         if (indirect && stage === "vertex") {
@@ -90,26 +127,31 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         break;
       case 2:
         if (index >= 8) {
-          throw new Error("Invalid AGAL temporary");
+          throw new Context3DError("agalTemporaryIndex", "Invalid AGAL temporary");
         }
         name = `t${index}`;
         declaration = `vec4 ${name};`;
         break;
       case 3:
         if (!write || index !== 0) {
-          throw new Error("Invalid AGAL output");
+          throw new Context3DError(
+            write ? "agalOutputIndex" : "agalOutputRead",
+            "Invalid AGAL output",
+          );
         }
-        output = true;
         return "result";
       case 4:
         if (index >= 8 || write !== (stage === "vertex")) {
-          throw new Error("Invalid AGAL varying");
+          throw new Context3DError(
+            index >= 8 ? "agalVaryingIndex" : write ? "agalVaryingWrite" : "agalVaryingRead",
+            "Invalid AGAL varying",
+          );
         }
         name = `v${index}`;
         declaration = `${stage === "vertex" ? "out" : "in"} vec4 ${name};`;
         break;
       default:
-        throw new Error("Unsupported AGAL register");
+        throw new Context3DError("agalRegister", "Unsupported AGAL register");
     }
 
     names.set(name, declaration);
@@ -132,15 +174,18 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         component > 3 ||
         add >= 128
       ) {
-        throw new Error("Unsupported AGAL indirect constant");
+        throw new Context3DError("agalIndirect", "Unsupported AGAL indirect constant");
       }
 
       const index = register(type, low & 65535, false);
+      if (type === 2) {
+        readTemporary(low & 65535, 1 << component);
+      }
       names.set("vc", "uniform vec4 vc[128];");
       name = `readConstant(${index}.${components[component]}, ${add + row}.0)`;
     } else {
       if (high >>> 8 || ((low >>> 16) & 255) !== 0) {
-        throw new Error("Unsupported AGAL source encoding");
+        throw new Context3DError("agalSourceEncoding", "Unsupported AGAL source encoding");
       }
 
       name = register(high & 255, (low & 65535) + row, false);
@@ -148,8 +193,20 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
     const swizzle = low >>> 24;
     let lanes = "";
+    let readMask = 0;
     for (let c = 0; c < 4; c++) {
-      lanes += components[(swizzle >>> (c * 2)) & 3];
+      const lane = (swizzle >>> (c * 2)) & 3;
+      lanes += components[lane];
+      readMask |= 1 << lane;
+    }
+    if (!(high >>> 31)) {
+      const type = high & 255;
+      const index = (low & 65535) + row;
+      if (type === 2) {
+        readTemporary(index, readMask);
+      } else if (type === 4) {
+        varyings[index] |= readMask;
+      }
     }
 
     return `${name}.${lanes}`;
@@ -160,13 +217,13 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     // Unsupported instructions may have no destination or a sampler operand;
     // do not misreport those layouts as malformed arithmetic registers.
     if (!SUPPORTED.has(opcode)) {
-      throw new Error("Unsupported AGAL opcode");
+      throw new Context3DError("agalOpcode", "Unsupported AGAL opcode");
     }
 
     const dest = data.getUint32(offset + 4, true);
     const unary = UNARY.has(opcode);
     if (unary && (data.getUint32(offset + 16, true) || data.getUint32(offset + 20, true))) {
-      throw new Error("Nonempty unused AGAL source");
+      throw new Context3DError("agalUnusedSource", "Nonempty unused AGAL source");
     }
 
     if (opcode === 0x27) {
@@ -179,7 +236,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         (type !== 2 && type !== 4) ||
         swizzle !== (swizzle & 3) * 0x55
       ) {
-        throw new Error("Invalid AGAL discard");
+        throw new Context3DError("agalDiscard", "Invalid AGAL discard");
       }
 
       lines.push(`if (${source(offset + 8)}.x < 0.0) { discard; }`);
@@ -188,10 +245,15 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
     const mask = (dest >>> 16) & 255;
     if (mask === 0 || mask > 15) {
-      throw new Error("Invalid AGAL write mask");
+      throw new Context3DError("agalMask", "Invalid AGAL write mask");
     }
 
-    const target = register(dest >>> 24, dest & 65535, true);
+    const targetType = dest >>> 24;
+    const targetIndex = dest & 65535;
+    const target = register(targetType, targetIndex, true);
+    if (stage === "fragment" && targetType === 3 && mask !== 15) {
+      throw new Context3DError("agalColorMask", "AGAL color output must write all components");
+    }
     const a = source(offset + 8);
     const b = unary || opcode === 0x28 ? "" : source(offset + 16);
 
@@ -203,7 +265,10 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         if (data.getUint32(operand + 4, true) === dest >>> 24 && (low & 65535) === (dest & 65535)) {
           for (let lane = 0; lane < 4; lane++) {
             if (mask & (1 << lane) && ((low >>> (24 + lane * 2)) & 3) !== lane) {
-              throw new Error("Unsupported AGAL swizzled scalar-math overlap");
+              throw new Context3DError(
+                "unsupported",
+                "Unsupported AGAL swizzled scalar-math overlap",
+              );
             }
           }
         }
@@ -263,7 +328,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 0x0e:
       case 0x11:
         if (mask !== 7) {
-          throw new Error("Unsupported AGAL vector write mask");
+          throw new Context3DError("unsupported", "Unsupported AGAL vector write mask");
         }
 
         expression = opcode === 0x0e ? `normalize(${a}.xyz)` : `cross(${a}.xyz, ${b}.xyz)`;
@@ -295,7 +360,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
           (matrixType !== 1 && matrixType !== 2) ||
           data.getUint32(offset + 16, true) >>> 24 !== 0xe4
         ) {
-          throw new Error("Unsupported AGAL matrix operand or write mask");
+          throw new Context3DError("unsupported", "Unsupported AGAL matrix operand or write mask");
         }
 
         const dots: string[] = [];
@@ -320,7 +385,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
           filter > 5 ||
           mip > 2
         ) {
-          throw new Error("Unsupported AGAL sampler encoding");
+          throw new Context3DError("agalSampler", "Unsupported AGAL sampler encoding");
         }
 
         const cube = (high & 0x1000) !== 0;
@@ -339,7 +404,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
             previous.cube !== cube ||
             previous.ignore !== ignore)
         ) {
-          throw new Error("Conflicting AGAL sampler states");
+          throw new Context3DError("agalSampler", "Conflicting AGAL sampler states");
         }
 
         samplers.set(index, { index, filter, repeat, mip, cube, ignore, bias });
@@ -358,7 +423,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         expression = `vec4(equal(${a}, ${b}))`;
         break;
       default:
-        throw new Error("Unsupported AGAL opcode");
+        throw new Context3DError("agalOpcode", "Unsupported AGAL opcode");
     }
 
     let lanes = "";
@@ -371,10 +436,24 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     // One vector assignment evaluates every source before changing any lane,
     // including overlapping temporary registers in matrix operations.
     lines.push(`${target}.${lanes} = ${expression}.${lanes};`);
+    switch (targetType) {
+      case 2:
+        temporaries[targetIndex] |= mask;
+        break;
+      case 3:
+        output |= mask;
+        break;
+      case 4:
+        varyings[targetIndex] |= mask;
+        break;
+    }
   }
 
-  if (!output) {
-    throw new Error("AGAL program does not write its output");
+  if (output !== 15) {
+    throw new Context3DError(
+      stage === "vertex" ? "agalVertexOutput" : "agalFragmentOutput",
+      "AGAL program does not write its complete output",
+    );
   }
 
   const declarations = [...names.values()].join("\n");
@@ -401,6 +480,7 @@ void main() {
   ${lines.join("\n  ")}
   ${finish}
 }`,
+    varyings,
     attributes: [...attributes],
     constants: [...constants],
     indirect,

@@ -535,6 +535,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     }
 
     drawTriangles(object: AsObject, first = 0, count = -1): void {
+      if (!object) {
+        throw s.rt.error("TypeError", 2007, "indexBuffer");
+      }
+
       try {
         const entry = state(this as unknown as AsObject);
         if (this.$checking) {

@@ -10,8 +10,9 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-async function stage() {
+async function stage(live = true) {
   const scripting = new Scripting(await createCodegen(wasm));
+  scripting.liveStageLayout = live;
   const natives = playerNatives(scripting);
   return {
     scripting,
@@ -75,4 +76,29 @@ test("Stage script settings override embedding defaults independently, including
   scripting.onStageLayout = () => {};
   scripting.destroy();
   assert.equal(scripting.onStageLayout, null);
+});
+
+test("default Stage layout retains the dev getters, ignored setters and authored dimensions", async () => {
+  const { scripting, get, set } = await stage(false);
+  try {
+    scripting.stageWidth = 96;
+    scripting.stageHeight = 96;
+    let changes = 0;
+    scripting.onStageLayout = () => {
+      changes++;
+    };
+    scripting.setStageDefaults("noScale", "BR");
+    for (const value of ["noScale", "NOSCALE", "", null, undefined]) {
+      set("scaleMode", value);
+      set("align", value);
+    }
+    scripting.resizeStage(192, 144);
+    assert.equal(get("scaleMode"), "showAll");
+    assert.equal(get("align"), "");
+    assert.equal(scripting.stageWidth, 96);
+    assert.equal(scripting.stageHeight, 96);
+    assert.equal(changes, 0);
+  } finally {
+    scripting.destroy();
+  }
 });

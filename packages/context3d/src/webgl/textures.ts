@@ -1,4 +1,5 @@
 import type { Texture3D } from "../backend.js";
+import { Context3DError } from "../errors.js";
 import { range } from "./state.js";
 import type { MultisampleTarget } from "./targets.js";
 
@@ -70,7 +71,7 @@ export function uploadTexture(
     pixels.length !== sw * sh ||
     (!rectangle && (sw !== w || sh !== h))
   ) {
-    throw new Error("Context3D experiment: texture upload size mismatch");
+    throw new Context3DError("textureUpload", "Context3D experiment: texture upload size mismatch");
   }
 
   if (sw === w && sh === h) {

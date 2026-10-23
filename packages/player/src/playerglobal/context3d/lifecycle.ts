@@ -1,4 +1,11 @@
-import type { Buffer3D, Context3D, Program3D, Stage3DHost, Texture3D } from "@swf2es/context3d";
+import {
+  type Buffer3D,
+  type Context3D,
+  Context3DError,
+  type Program3D,
+  type Stage3DHost,
+  type Texture3D,
+} from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent } from "../../scripting/events.js";
 import type { Scripting } from "../../scripting.js";
@@ -32,7 +39,7 @@ export interface ContextState {
 }
 
 export function unsupported(): never {
-  throw new Error("Unsupported operation in Context3D triangle experiment");
+  throw new Context3DError("unsupported", "Unsupported operation in Context3D triangle experiment");
 }
 
 export function createBindings(s: Scripting, host: Stage3DHost) {
@@ -158,6 +165,10 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   };
   const context = (o: AsObject): Context3D => state(o).backend;
   const requireClear = (entry: ContextState): void => {
+    if (!entry.backend.width || !entry.backend.height) {
+      throw s.rt.error("Error", 3698);
+    }
+
     const target = entry.target;
     const required = entry.depth ? 7 : 1;
     if (target ? !target.initialized : (entry.cleared & required) !== required) {
@@ -216,47 +227,92 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     return storage.buffer.subarray(0, storage.length);
   };
 
+  const created = (slot: AsObject): void => {
+    dispatchEvent(
+      s,
+      slot,
+      s.rt.construct(s.rt.classNamed("flash.events::Event"), "context3DCreate") as AsObject,
+    );
+  };
+  const unavailable = (slot: AsObject): void => {
+    s.loads.deferHostEvent(() => {
+      if (!closed && !s.destroyed) {
+        dispatchEvent(
+          s,
+          slot,
+          s.rt.construct(
+            s.rt.classNamed("flash.events::ErrorEvent"),
+            "error",
+            false,
+            false,
+            "Error #3702: Context3D not available.",
+            3702,
+          ) as AsObject,
+        );
+      }
+    });
+  };
   const request = (slot: AsObject): void => {
-    const generation = {};
-    generations.set(slot, generation);
+    if (pending.has(slot) || lost.has(slot)) {
+      return;
+    }
+
     pending.add(slot);
     s.loads.deferHostEvent(() => {
       pending.delete(slot);
-      if (closed || s.destroyed) {
+      if (closed || s.destroyed || lost.has(slot)) {
         return;
       }
+      const previous = slots.get(slot);
+      if (previous) {
+        dispose(previous);
+      }
 
+      const generation = {};
+      generations.set(slot, generation);
       const index = indexOf(slot);
-      const backend = host.create(index, {
-        lost: () => {
-          if (closed || s.destroyed || generations.get(slot) !== generation || lost.has(slot)) {
-            return;
-          }
+      let backend: Context3D;
+      try {
+        backend = host.create(index, {
+          lost: () => {
+            if (closed || s.destroyed || generations.get(slot) !== generation || lost.has(slot)) {
+              return;
+            }
 
-          const object = slots.get(slot);
-          if (!object) {
-            return;
-          }
+            const object = slots.get(slot);
+            if (!object) {
+              return;
+            }
 
-          const entry = contexts.get(object);
-          contexts.delete(object);
-          slots.delete(slot);
-          lost.set(slot, generation);
-          if (entry) {
-            closeContext(entry);
-          }
-        },
-        restored: () => {
-          if (closed || s.destroyed || lost.get(slot) !== generation) {
-            return;
-          }
+            const entry = contexts.get(object);
+            contexts.delete(object);
+            slots.delete(slot);
+            lost.set(slot, generation);
+            if (entry) {
+              closeContext(entry);
+            }
+          },
+          restored: () => {
+            if (closed || s.destroyed || lost.get(slot) !== generation) {
+              return;
+            }
 
-          lost.delete(slot);
-          generations.delete(slot);
+            lost.delete(slot);
+            generations.delete(slot);
+            host.remove(index);
+            request(slot);
+          },
+        });
+      } catch (error) {
+        generations.delete(slot);
+        if (error instanceof Context3DError) {
           host.remove(index);
-          request(slot);
-        },
-      });
+          unavailable(slot);
+          return;
+        }
+
+        throw error;
+      }
       let object: AsObject;
       try {
         object = construct("Context3D");
@@ -282,11 +338,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       });
       slots.set(slot, object);
       place(slot);
-      dispatchEvent(
-        s,
-        slot,
-        s.rt.construct(s.rt.classNamed("flash.events::Event"), "context3DCreate") as AsObject,
-      );
+      created(slot);
     });
   };
 
@@ -337,6 +389,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     texture,
     bytes,
     request,
+    unavailable,
     dispose,
     close,
     get closed() {

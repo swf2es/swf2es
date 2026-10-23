@@ -15,8 +15,13 @@ export function resourceLimits(): { passed: boolean } {
   try {
     const names = [
       "maxBuffers",
+      "maxVertexBuffers",
+      "maxIndexBuffers",
       "maxPrograms",
       "maxTextures",
+      "max2DTextures",
+      "maxRectangleTextures",
+      "maxCubeTextures",
       "maxBufferBytes",
       "maxTextureBytes",
       "maxTargetDepthBytes",
@@ -119,9 +124,9 @@ export function resourceLimits(): { passed: boolean } {
   }
 
   for (let raised = 0; raised < 2; raised++) {
-    const entry = create(raised ? { maxBuffers: 129 } : { maxBuffers: undefined });
+    const entry = create(raised ? { maxIndexBuffers: 4097 } : { maxIndexBuffers: undefined });
     try {
-      for (let i = 0; i < 128; i++) {
+      for (let i = 0; i < 4096; i++) {
         entry.backend.createBuffer(1, 0);
       }
       if (raised) {

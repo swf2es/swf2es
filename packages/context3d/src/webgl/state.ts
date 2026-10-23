@@ -1,4 +1,5 @@
 import type { CompareMode, StencilAction } from "../backend.js";
+import { Context3DError } from "../errors.js";
 
 export const DEPTH_FUNCTIONS = {
   always: "ALWAYS",
@@ -59,6 +60,6 @@ export function range(start: number, count: number, length: number): void {
     count < 0 ||
     start > length - count
   ) {
-    throw new Error("Context3D experiment: range outside resource");
+    throw new Context3DError("range", "Context3D experiment: range outside resource");
   }
 }
