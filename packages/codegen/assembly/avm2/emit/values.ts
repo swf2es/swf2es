@@ -325,7 +325,8 @@ export function keeps(em: MethodEmitter, type: i32, from: i32): bool {
     bt === BUILTIN_Any ||
     (bt === BUILTIN_Number &&
       (fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number)) ||
-    upcast(em, type, from)
+    upcast(em, type, from) ||
+    nullStays(em, type, from)
   );
 }
 
@@ -338,6 +339,19 @@ function upcast(em: MethodEmitter, type: i32, from: i32): bool {
   return (
     isClassRef(em, type) && isClassRef(em, from) && em.domain.traits.subtypeOf(<u32>from, <u32>type)
   );
+}
+
+/**
+ * Whether a value of type `from` is null, which converting to `type` keeps:
+ * a String, an Object, and any class's instances are null as they are.
+ */
+function nullStays(em: MethodEmitter, type: i32, from: i32): bool {
+  if (from < 0 || from !== em.domain.nullType) {
+    return false;
+  }
+
+  const bt = em.domain.builtin(type);
+  return bt === BUILTIN_String || bt === BUILTIN_Object || isClassRef(em, type);
 }
 
 /** The conversion instructions: the value of src as the type they give. */
@@ -432,7 +446,7 @@ export function convert(
     }
   }
 
-  if (type === from || bt === BUILTIN_Any) {
+  if (type === from || bt === BUILTIN_Any || nullStays(em, type, from)) {
     operand(em, prefix, r);
     return;
   }
