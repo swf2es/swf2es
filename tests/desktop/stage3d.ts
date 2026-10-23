@@ -129,19 +129,41 @@ try {
       mobile: false,
     });
     let paused = "";
+    let sessionPaused = "";
     app.devtools.listeners.set("Fetch.requestPaused", (params) => {
-      paused = String(params.requestId);
+      const request = params.request as { url: string };
+      if (request.url.endsWith("/modules/web/stage3d.js")) {
+        sessionPaused = String(params.requestId);
+      } else {
+        paused = String(params.requestId);
+      }
     });
     await app.devtools.send("Fetch.enable", {
-      patterns: [{ urlPattern: "*/modules/context3d/webgl/index.js" }],
+      patterns: [
+        { urlPattern: "*/modules/context3d/webgl/index.js" },
+        { urlPattern: "*/modules/web/stage3d.js" },
+      ],
     });
     await menu(app, "stage3d", true);
     await app.until("the delayed optional backend", () => paused !== "");
     assert.equal(await app.again([replacement]), 0);
     await app.devtools.send("Fetch.continueRequest", { requestId: paused });
+    await app.until("the delayed Stage3D session", () => sessionPaused !== "");
+    await menu(app, "close-movie");
+    await waitFor(app, `${player}.hidden && ${player}.player === null`);
+    await frame(app);
+    assert.equal(
+      await app.evaluate('document.getElementById("failure").hidden'),
+      true,
+      "closing a pending movie reported a failure",
+    );
+    assert.equal(await app.again([replacement]), 0);
+    await app.devtools.send("Fetch.continueRequest", { requestId: sessionPaused });
     await app.devtools.send("Fetch.disable");
     app.devtools.listeners.delete("Fetch.requestPaused");
     await waitFor(app, ready);
+    assert.equal(await app.evaluate(`${player}.hidden`), false, "a cancelled load hid the movie");
+    assert.equal(await app.evaluate('document.getElementById("failure").hidden'), true);
     assert.equal(
       await app.evaluate(`(() => {
       const p = ${player}.player, rt = p.scripting.rt;

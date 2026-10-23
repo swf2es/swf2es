@@ -53,14 +53,25 @@ function showFailure(message: string | null): void {
   failure.textContent = message ?? "";
 }
 
+let loadGeneration = 0;
+
 function play(movie: OpenedMovie): void {
+  const generation = ++loadGeneration;
   configure({ sandboxType: movie.sandbox });
   showFailure(null);
   welcome.hidden = true;
   player.hidden = false;
   player.load(movie.url).then(
-    () => player.focus(),
+    () => {
+      if (generation === loadGeneration) {
+        player.focus();
+      }
+    },
     (error: unknown) => {
+      if (generation !== loadGeneration) {
+        return;
+      }
+
       player.hidden = true;
       welcome.hidden = false;
       // An ActionScript 3 SWF fails for want of the libraries: say so, not the 404.
@@ -76,6 +87,7 @@ function play(movie: OpenedMovie): void {
 }
 
 function close(): void {
+  loadGeneration++;
   player.destroy();
   player.hidden = true;
   welcome.hidden = false;
