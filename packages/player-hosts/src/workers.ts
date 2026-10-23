@@ -50,7 +50,9 @@ interface Spare {
   worker: Worker;
   ready: boolean;
   failed: string | null;
+  /** Resolves once it has loaded or failed, whoever took it meanwhile. */
   settled: Promise<void>;
+  settle(): void;
 }
 
 /**
@@ -93,6 +95,7 @@ function release(url: string | URL): void {
 
   u.idle = setTimeout(() => {
     for (const spare of pools.get(key) ?? []) {
+      spare.settle();
       spare.worker.terminate();
     }
 
@@ -151,17 +154,18 @@ function fill(url: string | URL, count: number): Spare[] {
       settled: new Promise((resolve) => {
         settle = resolve;
       }),
+      settle: () => settle(),
     };
     worker.onmessage = (event) => {
       if (event.data?.type === "ready") {
         spare.ready = true;
-        settle();
+        spare.settle();
       }
     };
     worker.onerror = (event) => {
       event.preventDefault();
       spare.failed = event.message;
-      settle();
+      spare.settle();
     };
     pool.push(spare);
   }
@@ -205,14 +209,18 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
       const worker = spare?.worker ?? spawn(url);
       // One in its place, loaded once the page's thread is free.
       fill(url, spares);
+      // Taken before it loaded, it still settles the ready of the host that started it ahead.
       worker.onmessage = (event) => {
         // A worker taken before it loaded says so first.
-        if (event.data?.type !== "ready") {
+        if (event.data?.type === "ready") {
+          spare?.settle();
+        } else {
           receive(event.data);
         }
       };
       worker.onerror = (event) => {
         event.preventDefault();
+        spare?.settle();
         worker.terminate();
         failed(new Error(`a background worker's thread failed: ${event.message}`));
       };
@@ -222,6 +230,7 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
         post: (message) => worker.postMessage(message),
         // A browser tells nobody when a Web Worker has stopped.
         terminate: () => {
+          spare?.settle();
           worker.terminate();
           return new Promise((resolve) => setTimeout(resolve, STOPPED_GRACE));
         },
