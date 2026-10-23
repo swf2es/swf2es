@@ -432,23 +432,34 @@ ConcurrencyGlue:
   came and moves them to the mutex's queue in that order, so they take
   the mutex again in it. A notify with no waiter is lost.
 - A worker that is terminated is not stopped at once: its thread runs on
-  until its host stops it, and may be writing what a mutex it holds
+  until it or its host stops it, and may be writing what a mutex it holds
   guards. So terminating it only marks it stopping (`Sync.stop`): a
   notify passes over it, a mutex's queue does not wait for it, and its
   thread gets `SyncTerminated` for anything more it asks of the memory,
-  which no script catches, so its code stops at its next lock, wait or
-  notify, as avmplus interrupts a terminated worker there. The locks it
-  holds, a mutex or the heap's own short locks (its allocator, a queue,
-  the table), are free to take only once it has stopped (`Sync.end`): as
-  its code stops so, as it ends its code (avmshell's workers), or once
-  the thread that stopped its thread knows it has stopped (node's `exit`;
-  a browser says nothing, so a Web Worker is taken to have stopped a
-  moment, 100 ms, after its `terminate`). Only the primordial, which runs
-  the threads, says so of another; a background worker that terminates a
-  worker it made asks the primordial through its queue of requests, which
-  it takes even while it waits. A terminated worker is given 100 ms to
-  stop at its next wait before its thread is stopped, as one blocked in a
-  wait does within a step.
+  which no script catches, so the script that asked stops there, as
+  avmplus interrupts a terminated worker at its waits. The locks it holds,
+  a mutex or the heap's own short locks (its allocator, a queue, the
+  table), are free to take only once no code of it can run any more
+  (`Sync.end`):
+  - an avmshell worker's code ends with that script, so it is ended there,
+    as it is when it ends its code;
+  - a player's worker plays on to the end of its frame, so its own thread
+    (`workers/thread.ts`) looks after each frame, and every 10 ms between
+    them, whether it was terminated, and if so stops its player for good
+    and only then says it has ended: at once where it is idle or waits, at
+    the end of the frame where it plays;
+  - one that does not, as a script that loops without asking anything, is
+    stopped by its host after a second, and is ended once the host says
+    its thread has gone: node's `exit`, but a browser says nothing, and
+    Chrome lets a busy Web Worker's script run on for 2.5 to 4 s after its
+    `terminate` (measured in Chrome 156), so a Web Worker is taken to have
+    stopped 8 s after it (Firefox and Safari were not measured).
+
+  Only the primordial, which runs the threads, stops one; a background
+  worker that terminates a worker it made asks the primordial through its
+  queue of requests, which it takes even while it waits. An avmshell
+  worker terminated by its parent is given 100 ms to stop at its next
+  wait or sleep before its thread is stopped.
 
 A thread blocks with `Atomics.wait`, in steps of at most 50 ms, between
 which it looks whether a holder has ended and the primordial takes its
