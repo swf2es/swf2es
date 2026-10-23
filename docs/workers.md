@@ -3,8 +3,9 @@
 What ActionScript 3's workers (`flash.system.Worker`, `WorkerDomain`,
 `MessageChannel`, shared properties, a shareable `ByteArray` and
 `flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, how they map
-onto a browser's and node's threads, and the order to build them in. The
-first four slices are built (see [Slices](#slices)); the rest is the plan.
+onto a browser's and node's threads, and the order to build them in.
+Slices 1 to 4 and 6 are built (see [Slices](#slices)); slice 5 is the
+plan.
 
 ## What content needs
 
@@ -118,11 +119,23 @@ the main thread, which waits for the thread it starts), Web Workers
 started ahead (a browser starts one only while the page's thread is in
 its event loop), and shared properties seen at once (the primordial reads
 `flascc.uiThread.*` back while it waits). The callbacks C code registers
-with AS3 events (`AS3_DELEGATE`) are left: they run on the primordial
-through Crossbridge's function pointer table (`ptr2fun`), which has no
-entry for them there. Why is not known yet; how avmplus initializes the C
-module's script on the primordial, which registers them (`regFun`), is the
-first thing to look at.
+with AS3 events (`AS3_DELEGATE`) failed then: they run on the primordial
+through Crossbridge's function pointer table (`ptr2fun`), which had no
+entry for them there. They run since a script's methods run in an empty
+scope chain, as avmplus runs them (#532), before which closures made in
+them read the wrong scope: most likely what kept the table's entries
+from them.
+
+Since slice 6, through `<swf2es-player>` with its default worker host,
+in headless Chrome (software GL) on the player tests' isolated page, on
+the demo site isolated by its service worker, and in the desktop app:
+
+| Sample | Now |
+|--------|-----|
+| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits; `hello-debug.swf`, the first SWF in a cold browser, once in a few runs stops with the script timeout (1502, caught by its `Console`, which then fails with 1009 on `getStackTrace()`'s null) while its C main thread's worker still compiles the SWF (slice 5) |
+| `09_Pthreads/pthread_swc1.swf` | runs: its thread proc runs and is joined |
+| `09_Pthreads/pthreads.swf` | runs: the mouse's moves reach its thread, which prints each |
+| `11_OpenMP/mandel.swf` | runs; each click adds a thread, up to 6 measured: its own count of frames a second stays between about 55 and 140 at every count, as its zoom deepens, with no gain from more threads |
 
 Crossbridge therefore needs, all at once: workers, a shareable ByteArray
 whose memory every thread sees (as domain memory), Mutex and Condition
@@ -185,15 +198,42 @@ and `Player`, and runs frames by `advance` on a timer.
 
 `@swf2es/player-hosts` has two hosts: `webWorkerHost` (`/workers`) starts
 a module Web Worker on its `web-worker.js`, and `nodeWorkerHost` (`/node`)
-a `worker_threads` Worker on `node-worker.js`. A worker sees no import map,
-so a page that serves the packages unbundled gives `webWorkerHost` a
-script URL whose imports resolve: the player tests' server serves every
-file again under `/worker/` with its bare specifiers resolved
-(`tests/player/serve.ts`). A bundler that knows `new URL(…, import.meta.url)`
-workers bundles the default. A player made without a worker host has
-`Worker.isSupported` false, and `createWorker` throws swf2es's "not
-supported" error; `@swf2es/web`, the demo site and the desktop app give
-none yet (slice 6).
+a `worker_threads` Worker on `node-worker.js`. A worker sees no import
+map, so `webWorkerHost`'s default script is the package's `dist/thread/`,
+which `build-thread.ts` writes after tsc: `web-worker.js` and every
+module it imports, from the packages under it too, with their bare
+specifiers made relative paths inside the tree, which therefore loads
+wherever the package is served. A script from another origin, as a
+CDN's, which a browser refuses to start a worker on, starts through a
+`blob:` module of the page's that imports it (see
+[The embeddings](#the-embeddings)). The player tests' page still gives
+its own: its server serves every file again under `/worker/` with its
+bare specifiers resolved (`tests/player/serve.ts`). A player made
+without a worker host has `Worker.isSupported` false, and
+`createWorker` throws swf2es's "not supported" error.
+
+### The embeddings
+
+`@swf2es/web` gives every player a `webWorkerHost` by default, as Flash
+had workers on: `configure({ workers: false })` turns them off for the
+page, and an element's `workers` attribute, `"false"` or `"true"`, for
+its own SWFs over the configuration (docs/architecture.md, "Workers in
+the page"). `configure({ workerUrl })` names another script, a
+bundler's. A player's host starts Web Workers ahead only for a SWF
+whose ABCs name `WorkerDomain`, which may block on one at once, and the
+element awaits them, ten seconds at most, before the SWF's first frame;
+other SWFs start none until they ask. The page's workers started ahead go ten seconds
+after its last player that used them does.
+
+The demo site and the desktop app take the default, both cross-origin
+isolated, the site through its service worker, which serves the worker
+scripts too, and the app through its protocol, which serves them under
+`/modules/player-hosts/thread/`; their import maps name
+`@swf2es/player-hosts/workers`, which the element imports only when a
+SWF has workers, and without which its SWFs play without them. On a page that is not isolated, workers pass
+messages, and sharing a shareable ByteArray, a Mutex or a Condition
+throws the error that says it needs isolation (decision 1 of
+[Decisions](#decisions-for-the-user)).
 
 The primordial is the hub: every background thread talks only to the
 primordial, which routes messages between workers. A background worker
@@ -392,8 +432,8 @@ Where swf2es's own pages are isolated:
   workers' scripts too; a test can ask for a page that is not
   (`tests/player/isolation.ts` plays there).
 - **The desktop app** (`apps/desktop/src/main/protocol.ts`) sends both
-  with its own pages and modules; the smoke test checks the page is
-  isolated. It gives workers no host yet (slice 6).
+  with its own pages and modules, its workers' scripts among them; the
+  smoke test checks the page is isolated, and plays `worker-mutex`.
 - **The demo site** registers a service worker at its root
   (`apps/site/src/service-worker.ts`, `isolation.ts`) that adds both to the
   site's own responses; the first visit loads the page again once it
@@ -401,8 +441,8 @@ Where swf2es's own pages are isolated:
   and other origins' responses pass as they are. A browser
   that is still not isolated with it, Safari without `credentialless`, is
   not reloaded again. `tests/site/run.ts` serves the site without the
-  headers, as Pages does, and checks it becomes isolated. It gives
-  workers no host yet either (slice 6).
+  headers, as Pages does, checks it becomes isolated, and plays
+  `worker-mutex` there.
 - **Another page** that embeds the player with a worker host serves its
   document, and its workers' scripts, with
   `Cross-Origin-Opener-Policy: same-origin` and
@@ -658,10 +698,20 @@ Each a PR, in this order:
    without `'unsafe-eval'` runs them too. Tests: a worker's modules equal
    to the primordial's, a worker under the precompiled test's policy, and
    the desktop smoke test.
-6. **The embeddings**: `@swf2es/web`'s configuration of the worker host,
-   the demo site and the desktop app (isolated, so with shared memory).
-   Tests: the web and desktop smoke tests start a worker. Unlocks
-   `10_MessageChannel`, once 5 makes it start in time.
+6. **The embeddings** (built, see [The embeddings](#the-embeddings)):
+   `@swf2es/web`'s worker host, on by default, with the `workers`
+   attribute and configuration and `workerUrl`; `player-hosts`' worker
+   script tree that loads without an import map, and through a `blob:`
+   module from another origin; the demo site and the desktop app
+   (isolated, so with shared memory). Tests: `tests/web/run.ts` plays
+   `worker-mutex` through the element by default, `worker-basics` with
+   workers off by the attribute and by `configure`, and on again by the
+   attribute, the script from another origin, and on a page that is not
+   isolated `worker-basics` passing messages, `worker-mutex` refused with
+   the isolation error, and the page's Web Workers gone after its last
+   player; `tests/site/run.ts` and the desktop smoke test play
+   `worker-mutex`. Unlocks `10_MessageChannel`, once 5 makes it start in
+   time.
 
 ## Decisions for the user
 

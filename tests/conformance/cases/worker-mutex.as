@@ -1,7 +1,9 @@
 // flash.concurrent's Mutex and Condition across avmshell's workers: each
 // crosses by reference, one object a worker, a Condition's mutex its
 // Mutex there too; a notify picks the waiters in the order they came,
-// which take the mutex again in that order; wait gives false when
+// each woken alone, as two woken together race to take the mutex again
+// (avmplus' ConditionObject::State::wait), and notifyAll wakes the last
+// one; wait gives false when
 // notified and true when its time runs out, a notify with no waiter is
 // lost, and a wait lets go of a mutex however many times it was held. A
 // worker terminated while it holds a mutex lets go of it. (A waiter
@@ -69,11 +71,13 @@ if (me.isPrimordial) {
     }
 
     print("back " + (me.getSharedProperty("mback") === m) + " " + (me.getSharedProperty("cback") === c));
-    m.lock();
-    c.notify();
-    c.notify();
-    m.unlock();
-    waitFor(function():Boolean { return log[48] == 2; });
+    for (var k:int = 1; k <= 3; k++) {
+        m.lock();
+        c.notify();
+        m.unlock();
+        waitFor(function():Boolean { return log[48] == k; });
+    }
+
     m.lock();
     c.notifyAll();
     m.unlock();
@@ -90,7 +94,9 @@ if (me.isPrimordial) {
     m.lock();
     c.notify();
     c.notifyAll();
-    print("timed out " + c.wait(20));
+    // wait(0): a timed wait avmshell ends wrongly, at once and false, where its
+    // time crosses a second (its VMPI_condVarTimedWait), which no wait of 0 does.
+    print("timed out " + c.wait(0));
     m.unlock();
     m.unlock();
     try {
