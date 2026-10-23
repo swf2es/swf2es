@@ -13,6 +13,8 @@ import type {
   Runtime,
   RuntimeOptions,
   ShellFiles,
+  ShellWorkerHost,
+  ShellWorkerInit,
   Value,
 } from "@swf2es/runtime/avm2";
 import { floatLibrary, hasFloatLibrary } from "@swf2es/runtime/avm2";
@@ -48,6 +50,10 @@ export interface ShellOptions {
    * script of its own.
    */
   load?: (js: string, name: string) => ShellModule | Promise<ShellModule>;
+  /** What starts the background workers' threads (RuntimeOptions.workers), as nodeShellThreads does. */
+  workers?: ShellWorkerHost;
+  /** The background worker these ABCs run as, in the thread its host started (RuntimeOptions.worker). */
+  worker?: ShellWorkerInit;
 }
 
 /** avmshell's API version for the ABCs it runs, Flash Player's. */
@@ -162,6 +168,8 @@ export async function runShell(
     // Domain.loadBytes runs the ABC at once, so its module is evaluated, not imported.
     compileAbc: (bytes, unit) => domain.compileAbc(bytes, unit),
     ...(options.files ? { files: options.files } : {}),
+    ...(options.workers ? { workers: options.workers } : {}),
+    ...(options.worker ? { worker: options.worker } : {}),
   });
 
   for (const { name, abc, module } of libraries) {

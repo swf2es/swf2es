@@ -4,7 +4,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { codegenModule } from "../../packages/cli/dist/files.js";
 import { runShell, type ShellModule } from "../../packages/cli/dist/shell.js";
+import { nodeShellThreads } from "../../packages/cli/dist/threads.js";
 import { testing } from "../unit/codegen/testing-module.ts";
 import { testingCompiler } from "./abc-compiler.ts";
 
@@ -16,6 +18,8 @@ const runtime = await import(
 );
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+// What the background workers' threads compile with: the release build.
+const codegen = await codegenModule();
 
 // The oracle runs avmshell with TZ=UTC, so local time is UTC here too.
 process.env.TZ = "UTC";
@@ -56,15 +60,21 @@ async function load(js: string): Promise<ShellModule> {
  */
 export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promise<string[]> {
   const lines: string[] = [];
-  await runShell(
-    builtins.map((bytes, i) => ({ name: `builtin-${i}`, abc: bytes })),
-    [{ name: "main", abc }],
-    {
+  const print = (line: string) => lines.push(line);
+  const libraries = builtins.map((bytes, i) => ({ name: `builtin-${i}`, abc: bytes }));
+  const abcs = [{ name: "main", abc }];
+  const threads = nodeShellThreads({ codegen, libraries, abcs, print });
+  try {
+    await runShell(libraries, abcs, {
       compiler: testingCompiler(testing),
       createRuntime: runtime.createRuntime,
-      print: (line) => lines.push(line),
+      print,
       load,
-    },
-  );
+      workers: threads.host,
+    });
+  } finally {
+    await threads.close();
+  }
+
   return lines;
 }
