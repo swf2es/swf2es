@@ -13,12 +13,15 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
-const abc = compileScripts(
-  [{ name: "Composition", source: fixtureSource("Composition") }],
+const scripts = compileScripts(
+  ["Composition", "StageLayout"].map((name) => ({ name, source: fixtureSource(name) })),
   out,
-).get("Composition");
-assert.ok(abc);
-writeFileSync(`${out}Composition.swf`, bare(abc, 1, "Composition", 96, 96));
+);
+for (const name of ["Composition", "StageLayout"]) {
+  const abc = scripts.get(name);
+  assert.ok(abc);
+  writeFileSync(`${out}${name}.swf`, bare(abc, 1, name, 96, 96));
+}
 
 interface Surface {
   slot: number;
@@ -174,6 +177,107 @@ await withPage(
       await call("close");
     }
     await collect();
+    const liveLayout: {
+      width: number;
+      height: number;
+      points: number[][];
+      validation: string;
+      states: { mode: string; align: string; state: string; samples: string[] }[];
+    } = JSON.parse(readFileSync(`${here}stage-layout-reference.json`, "utf8"));
+    await call("open", true, true, "StageLayout");
+    try {
+      await call("layout", "showAll", "", liveLayout.width, liveLayout.height);
+      assert.equal(await call("scriptState", true), liveLayout.validation);
+      const handles = (await call<Status>("status")).surfaces
+        .filter((s) => !s.destroyed)
+        .map((s) => s.handles);
+      for (let i = 0; i < liveLayout.states.length; i++) {
+        const state = liveLayout.states[i];
+        assert.equal(await call("scriptLayout", state.mode, state.align), state.state);
+        await call("idle");
+        await capture(
+          `stage-layout-${i}`,
+          liveLayout.width,
+          liveLayout.height,
+          liveLayout.points,
+          state.samples,
+        );
+        const active = (await call<Status>("status")).surfaces.filter((s) => !s.destroyed);
+        assert.deepEqual(
+          active.map((s) => s.handles),
+          handles,
+        );
+        assert.ok(active.every((s) => s.width === 48 && s.height === 48));
+      }
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 124,
+        y: 104,
+        button: "left",
+        clickCount: 1,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 124,
+        y: 104,
+        button: "left",
+        clickCount: 1,
+      });
+      assert.equal(await call("pointerState"), "124,104,124,104");
+      await call("scriptLayout", "noScale", "BR");
+      await call("idle");
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 124,
+        y: 104,
+        button: "left",
+        clickCount: 1,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 124,
+        y: 104,
+        button: "left",
+        clickCount: 1,
+      });
+      assert.equal(await call("pointerState"), "28,56,28,56");
+      await call("scriptLayout", "noScale", "TL");
+      await call("resize", 220, 160);
+      assert.equal(await call("scriptState"), "noScale|TL|220|160|220,160,false,false,2,true;");
+      await send("Emulation.setDeviceMetricsOverride", {
+        width: 400,
+        height: 400,
+        deviceScaleFactor: 2,
+        mobile: false,
+      });
+      await call("idle");
+      const dense = await call<Status>("status");
+      assert.equal(dense.overlayWidth, 440);
+      assert.ok(
+        dense.surfaces.filter((s) => !s.destroyed).every((s) => s.width === 48 && s.height === 48),
+      );
+      assert.equal(await call("scriptState"), "noScale|TL|220|160|220,160,false,false,2,true;");
+      await send("Emulation.clearDeviceMetricsOverride");
+      await call("idle");
+      await call("scriptLayout", "noScale", "TL");
+      await call("resizeToShowAll");
+      await call("resize", 240, 180);
+      assert.equal(await call("scriptState"), "showAll|TL|96|96|240,180,false,false,2,true;");
+      assert.equal((await call<Status>("status")).overlayWidth, 180);
+      assert.deepEqual((await call<Status>("status")).errors, []);
+    } finally {
+      await call("close");
+    }
+    await collect();
+    await call("open", false, true, "StageLayout");
+    try {
+      await call("layout", "noScale", "TL", 192, 144);
+      assert.equal((await call<Status>("status")).canvases, 1);
+      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
+    } finally {
+      await call("close");
+    }
+    await collect();
     await call("queued");
     await collect();
     await call("cancelled");
@@ -198,7 +302,7 @@ await withPage(
     }
     assert.ok(heaps[1] - heaps[0] < 1024 * 1024, `host heap growth: ${heaps}`);
     console.log(
-      "context3d host: opt-in fallback, AIR composition/viewport, resize, reload, queued destroy, attachment rollback, loss/restoration and 20-load collection ok",
+      "context3d host: opt-in fallback, AIR composition/live Stage layout, input, resize/DPR, reentrancy, reload, loss/restoration and 20-load collection ok",
     );
   },
   false,

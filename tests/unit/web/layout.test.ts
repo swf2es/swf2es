@@ -33,8 +33,10 @@ test("salign holds the edges it names, in any order and case", () => {
   assert.deepEqual(at("rb"), [200, 100]);
   assert.deepEqual(at("T"), [100, 0]);
   assert.deepEqual(at("R"), [200, 50]);
-  // Both edges of an axis named: centred along it, as neither.
-  assert.deepEqual(at("LR"), [100, 50]);
+  // AIR gives the top/left edge precedence when both ends are named.
+  assert.deepEqual(at("LR"), [0, 50]);
+  assert.deepEqual(at("TB"), [100, 0]);
+  assert.deepEqual(at("TBLR"), [0, 0]);
 });
 
 test("noBorder fills the box and crops; exactFit stretches at its finer axis's resolution", () => {

@@ -9,7 +9,7 @@ import {
   type Scripting,
 } from "@swf2es/player";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
-import { type Placement, place, type ScaleMode } from "./layout.js";
+import { MAX_SIDE, place, type ScaleMode } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
 
 /** How the element shows its player, read again as the page changes them. */
@@ -34,7 +34,6 @@ export class Playback {
   private drawn = -1;
   /** Something the host changed, a size or a look, which the next frame draws though the player has not. */
   private dirty = true;
-  private placed: Placement | null = null;
   private dpr = 0;
   private readonly resize: ResizeObserver;
   private readonly unbind: (() => void)[] = [];
@@ -62,6 +61,7 @@ export class Playback {
     this.view = new PixiView(renderer);
     if (scripting) {
       scripting.drawer = this.view;
+      scripting.onStageLayout = this.stageLayout;
     }
 
     // An AVM1 movie's BitmapData draws display objects by it too.
@@ -215,6 +215,8 @@ export class Playback {
     this.view.render(this.player.stage);
   }
 
+  private readonly stageLayout = () => this.layout();
+
   /** The canvas placed in the box by the look, and drawn at the device's pixels. */
   private layout(): void {
     if (this.destroyed) {
@@ -222,23 +224,39 @@ export class Playback {
     }
 
     const look = this.look();
+    const scripting = this.scripting;
+    scripting?.setStageDefaults(look.scale, look.salign ?? "");
+    const mode = scripting?.stageScaleMode ?? look.scale;
+    const align = scripting?.stageAlign ?? look.salign;
+    const noScale = !!scripting && mode === "noScale";
+    const width = noScale ? this.box.clientWidth : this.player.width;
+    const height = noScale ? this.box.clientHeight : this.player.height;
     this.dpr = devicePixelRatio || 1;
     const placed = place(
       this.player.width || 1,
       this.player.height || 1,
       this.box.clientWidth,
       this.box.clientHeight,
-      look.scale,
-      look.salign,
+      mode,
+      align,
       this.dpr,
     );
     const canvas = this.renderer.canvas as HTMLCanvasElement;
-    canvas.style.left = `${placed.x}px`;
-    canvas.style.top = `${placed.y}px`;
-    canvas.style.width = `${placed.width}px`;
-    canvas.style.height = `${placed.height}px`;
-    if (placed.resolution !== this.placed?.resolution) {
-      this.renderer.resize(this.player.width, this.player.height, placed.resolution);
+    canvas.style.left = `${noScale ? 0 : placed.x}px`;
+    canvas.style.top = `${noScale ? 0 : placed.y}px`;
+    canvas.style.width = `${noScale ? width : placed.width}px`;
+    canvas.style.height = `${noScale ? height : placed.height}px`;
+    // noScale can show artwork beyond the SWF's authored rectangle. Keep its
+    // origin aligned while drawing the whole viewport, including negative coordinates.
+    const resolution = noScale
+      ? Math.max(1 / 64, Math.min(this.dpr, MAX_SIDE / Math.max(width, height, 1)))
+      : placed.resolution;
+    if (
+      resolution !== this.renderer.resolution ||
+      this.renderer.screen.width !== Math.max(1, width) ||
+      this.renderer.screen.height !== Math.max(1, height)
+    ) {
+      this.renderer.resize(Math.max(1, width), Math.max(1, height), resolution);
       this.resample();
     }
 
@@ -247,9 +265,17 @@ export class Playback {
       this.player.avm1.pixelRatio = placed.resolution;
     }
 
-    this.placed = placed;
+    this.view.setViewport(
+      noScale ? -placed.x : 0,
+      noScale ? -placed.y : 0,
+      Math.max(1, width),
+      Math.max(1, height),
+    );
     this.stage3D?.layout(placed, this.player.width, this.player.height);
     this.dirty = true;
+    // Dispatch only after placement is current: a resize listener may set
+    // another layout or reconfigure its Stage3D back buffer synchronously.
+    scripting?.resizeStage(width, height);
   }
 
   /** Stop the loop and let go of the renderer, its GL context, the canvas and the input. */
@@ -267,6 +293,9 @@ export class Playback {
 
     if (this.scripting?.drawer === this.view) {
       this.scripting.drawer = null;
+    }
+    if (this.scripting?.onStageLayout === this.stageLayout) {
+      this.scripting.onStageLayout = null;
     }
 
     if (this.player.avm1?.drawer === this.view) {

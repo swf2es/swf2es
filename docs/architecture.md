@@ -175,8 +175,16 @@ silently reconfigure AS buffers. An optional surface `destroy` hook releases the
 browser context after resources and listeners are gone, also on attachment failure.
 Web teardown disposes the display-list scene before the renderer so cached font
 measurements cannot retain the scene through text style listeners.
-Default playback still reports unavailable Context3D. Desktop controls, dynamic
-AS stage size/scale/align handling and production enablement remain separate work.
+Default playback still reports unavailable Context3D. Desktop layout controls,
+best-resolution buffers and production enablement remain separate work.
+
+The web host shares live Stage scale/alignment settings with player natives
+through Scripting's synchronous `onStageLayout` callback. It resizes the display
+viewport before `resizeStage` dispatches a Stage-only RESIZE event in noScale;
+other scale modes retain the SWF's authored dimensions. PixiView's viewport
+keeps display-list translation, its hit area and pointer coordinates aligned.
+Context3D canvases retain their explicit back-buffer sizes across embedding and
+DPR changes. These host hooks do not depend on ActionScript workers.
 
 `format`'s `readActions` lists a SWF's AVM1 action blocks ([avm1.md](avm1.md)):
 DoAction, DoInitAction, a PlaceObject2 or 3's clip actions record by record

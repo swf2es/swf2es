@@ -174,6 +174,7 @@ export class Player {
     s.root = this.root;
     s.stageWidth = this.width;
     s.stageHeight = this.height;
+    s.onStageLayout?.();
     s.stageColor = this.swfBackground;
     s.frameRate = this.frameRate;
     s.constructAs(this.stage, s.rt.classNamed("flash.display::Stage"));

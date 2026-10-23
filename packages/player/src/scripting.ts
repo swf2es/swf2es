@@ -64,12 +64,13 @@ import {
 } from "./playerglobal/index.js";
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
-import { dispatchTo, type EventFields, WeakTargets } from "./scripting/events.js";
+import { dispatchTo, type EventFields, heard, WeakTargets } from "./scripting/events.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
 import { type ParentLink, Workers } from "./scripting/workers.js";
+import { type StageScaleMode, stageAlignment } from "./stage.js";
 
 // For index.ts, which reaches playerglobal only through here.
 export { airLibrary, playerglobalLibrary };
@@ -248,6 +249,13 @@ export class Scripting {
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
+  stageScaleMode: StageScaleMode = "showAll";
+  stageAlign = "";
+  /** A script's setting takes precedence over the embedding's defaults. */
+  stageScaleModeSet = false;
+  stageAlignSet = false;
+  /** A host updates placement synchronously before the setter returns. */
+  onStageLayout: (() => void) | null = null;
   /** Stage.color's 0xRRGGBB, the SWF's background until a script sets it; null before the stage is made. */
   stageColor: number | null = null;
   /** The latest pointer position in stage coordinates. */
@@ -454,6 +462,7 @@ export class Scripting {
    * frame plays again (Player.destroy).
    */
   destroy(): void {
+    this.onStageLayout = null;
     this.fileLifetime.abort();
     if (this.destroyed) {
       return;
@@ -728,6 +737,30 @@ export class Scripting {
     }
 
     return targets;
+  }
+
+  /** Embedding defaults apply until ActionScript sets the corresponding property. */
+  setStageDefaults(scaleMode: StageScaleMode, align: string): void {
+    if (!this.stageScaleModeSet) {
+      this.stageScaleMode = scaleMode;
+    }
+    if (!this.stageAlignSet) {
+      this.stageAlign = stageAlignment(align);
+    }
+  }
+
+  /** The host's visible size in noScale, the authored size in other modes. */
+  resizeStage(width: number, height: number): void {
+    if (width === this.stageWidth && height === this.stageHeight) {
+      return;
+    }
+
+    this.stageWidth = width;
+    this.stageHeight = height;
+    const stage = this.stage?.object;
+    if (this.stageScaleMode === "noScale" && stage && heard(stage, "resize")) {
+      dispatchTo(this, stage, this.event("resize"));
+    }
   }
 
   /** The dispatchers a broadcast of ACTIVATE or DEACTIVATE reaches, for EventDispatcher to keep. */

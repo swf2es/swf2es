@@ -735,6 +735,7 @@ under `out/composition-oracle/`, with sample values in
 node tests/context3d/composition-oracle.ts
 node tests/context3d/composition-oracle.ts --update
 node tests/context3d/viewport-oracle.ts
+node tests/context3d/stage-layout-oracle.ts [--update]
 ```
 
 This is **off by default in the player, website and desktop app**.
@@ -796,7 +797,28 @@ Web teardown also disposes its display-list scene before its renderer. The web
 suite checks collection of device-font scenes held by Pixi's measurement cache,
 including when Stage3D is disabled.
 
-Desktop controls and production enablement remain later work. The existing AS
-Stage.scaleMode/align setters and dynamic stage dimensions/resize events remain
-unimplemented; embedding attributes choose placement in this slice. Broader
-formats, profiles and validation gaps remain listed above.
+`StageLayout.as` and `stage-layout-reference.json` add AIR references for live
+ActionScript settings: nine layouts with 22 pixel points each, including content
+beyond the authored rectangle and negative stage coordinates. The reference
+also records case-sensitive scale-mode validation, null errors, canonical TBLR
+alignment flags and synchronous resize-event fields. Top/left win when both
+opposite edges are requested. Entering `noScale` updates dimensions and sends
+resize only if the dimensions change; leaving it restores authored dimensions
+without resize. The optional oracle records the live setter/event sequence in
+one AIR window and captures each pixel layout in a fresh window: Wine can retain
+the preceding layout's pixels in a reused Stage3D window. The browser suite
+checks actual live pixel changes against those independent samples.
+
+The web host applies script changes synchronously, before a resize listener runs.
+`noScale` draws the whole visible viewport and maps mouse/touch/wheel/context-menu
+coordinates through its aligned origin. A listener can select another scale mode
+without the outer resize restoring stale layout. Browser checks cover real input
+beyond authored bounds, alignment changes, embedding resize, DPR changes without
+extra resize events or Stage3D buffer allocations, and display-only playback with
+Stage3D disabled. Script settings override the embedding's defaults separately;
+even assigning the existing value establishes that override. Teardown detaches
+the layout callback and the repeated-load collection checks still apply.
+
+Desktop layout controls, best-resolution buffers and production enablement
+remain later work. These hooks are independent of the unfinished ActionScript
+Worker API. Broader formats, profiles and validation gaps remain listed above.

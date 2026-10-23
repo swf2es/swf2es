@@ -103,9 +103,15 @@ Stage3D positions follow the embedding's `scale`/`salign` placement. Configured
 buffer sizes remain in pixels; resizing or changing device pixel ratio never
 implicitly reallocates them. The host clips the viewports, makes the display
 list transparent while contexts exist, and keeps overlapping players' canvases
-in separate stacks. ActionScript changes to `Stage.scaleMode`/`align`, dynamic
-stage dimensions/resize events and best-resolution buffers remain separate work.
-Desktop controls and enabling the public demo remain later changes.
+in separate stacks. The web host honors ActionScript changes to
+`Stage.scaleMode` and `Stage.align`. In `noScale`, Stage dimensions follow the
+embedding's CSS size and resize events are synchronous after placement updates;
+other modes report the authored dimensions. Display-list pixels and input use
+the same viewport, including coordinates outside the authored rectangle.
+A DPR change affects display-list resolution without changing Stage dimensions
+or reallocating Stage3D buffers. Script settings override embedding defaults
+independently. Desktop layout controls, best-resolution buffers and enabling the
+public demo remain later changes. None of this uses the unfinished Worker API.
 
 A future WebGPU backend can reuse the Flash adapter, resource contracts and AIR
 fixtures. It still needs AGAL-to-WGSL translation, GPU resource/binding handling,

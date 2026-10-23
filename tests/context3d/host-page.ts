@@ -118,7 +118,7 @@ function factory(slot: number) {
   };
 }
 
-export async function open(enabled = true, settle = true): Promise<void> {
+export async function open(enabled = true, settle = true, fixture = "Composition"): Promise<void> {
   check(!element, "previous element not removed");
   errors.length = 0;
   configure({
@@ -136,7 +136,7 @@ export async function open(enabled = true, settle = true): Promise<void> {
     errors.push(String((event as unknown as CustomEvent).detail.error)),
   );
   document.body.append(element);
-  await element.load("/context3d/Composition.swf");
+  await element.load(`/context3d/${fixture}.swf`);
   if (settle) {
     if (enabled) {
       await until(() => ready() || errors.length !== 0);
@@ -167,6 +167,54 @@ export async function layout(
   check(element, "no player element");
   element.setAttribute("scale", scale);
   element.setAttribute("salign", salign);
+  element.style.width = `${width}px`;
+  element.style.height = `${height}px`;
+  // The AIR viewport reference changes the Stage properties after startup.
+  const { scripting, player } = root();
+  scripting.rt.setProperty(player.stage.object, scripting.rt.publicName("scaleMode"), scale);
+  scripting.rt.setProperty(player.stage.object, scripting.rt.publicName("align"), salign);
+  await idle();
+}
+
+export function scriptLayout(mode: string, align: string): string {
+  const { scripting, object } = root();
+  return String(
+    scripting.rt.callValue(
+      scripting.rt.getProperty(object, scripting.rt.publicName("configureLayout")),
+      object,
+      [mode, align],
+      null,
+    ),
+  );
+}
+
+export function scriptState(validate = false): string {
+  const { scripting, object } = root();
+  return String(
+    scripting.rt.callValue(
+      scripting.rt.getProperty(
+        object,
+        scripting.rt.publicName(validate ? "validateSettings" : "layoutState"),
+      ),
+      object,
+      [],
+      null,
+    ),
+  );
+}
+
+export function resizeToShowAll(): void {
+  const { scripting, object } = root();
+  scripting.rt.setProperty(object, scripting.rt.publicName("resizeToShowAll"), true);
+}
+
+export function pointerState(): string {
+  const { scripting, object } = root();
+  return String(scripting.rt.getProperty(object, scripting.rt.publicName("pointerState")));
+}
+
+export async function resize(width: number, height: number): Promise<void> {
+  check(element, "no player element");
   element.style.width = `${width}px`;
   element.style.height = `${height}px`;
   await idle();

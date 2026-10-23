@@ -14,6 +14,7 @@ import {
   Graphics,
   Matrix,
   Container as PixiContainer,
+  Rectangle,
   type Renderer,
   RendererType,
 } from "pixi.js";
@@ -107,6 +108,7 @@ function maskLink(
 
 export class PixiView {
   readonly stage = new PixiContainer();
+  private readonly viewport: { bounds: Rectangle | null } = { bounds: null };
   /** What the view has built since it was made, for measuring: lines' contexts made and reused. */
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   /** The released nodes, for a new object of their character to take (render/spares.ts). */
@@ -211,7 +213,7 @@ export class PixiView {
 
   /** Let Pixi normalize browser coordinates; Flash's display list chooses the target (render/pointer.ts). */
   bindPointer(player: Player): () => void {
-    return bindPointer(this.renderer, this.stage, player);
+    return bindPointer(this.renderer, this.stage, player, this.viewport);
   }
 
   /** Destroy the view's containers and what it built; borrowed resources stay their owner's. */
@@ -1432,6 +1434,20 @@ export class PixiView {
     samples = 4,
   ): boolean {
     return drawInto(this, store, o, m, x, y, width, height, samples);
+  }
+
+  /** The visible rectangle in stage coordinates; its size matches the renderer's screen. */
+  setViewport(x: number, y: number, width: number, height: number): void {
+    this.viewport.bounds ??= new Rectangle();
+    const bounds = this.viewport.bounds;
+    bounds.x = x;
+    bounds.y = y;
+    bounds.width = width;
+    bounds.height = height;
+    this.stage.position.set(-x, -y);
+    if (this.stage.hitArea instanceof Rectangle) {
+      this.stage.hitArea.copyFrom(bounds);
+    }
   }
 
   /** Draw `root`'s display list, synced first. */
