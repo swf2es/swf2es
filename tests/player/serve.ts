@@ -4,7 +4,8 @@
 // bundled; the browser loads the modules as tsc wrote them. A worker sees
 // no import map, so under /worker/ the same files are served with their
 // bare specifiers resolved by it, for the Web Workers flash.system.Worker
-// runs on.
+// runs on. The page is cross-origin isolated, as a shareable ByteArray
+// needs (docs/workers.md), unless a test asks for one that is not.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -93,15 +94,28 @@ function page(): string {
 }
 
 /**
+ * What makes a page cross-origin isolated, sent with every response so
+ * that its workers' scripts are too. credentialless, not require-corp: a
+ * SWF's cross-origin loads go on, without cookies.
+ */
+export const ISOLATION_HEADERS = {
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-embedder-policy": "credentialless",
+};
+
+/**
  * Start serving on a free port of the loopback interface; `extra` mounts
- * more directories, as the corpus runner's SWFs, and `csp` is the page's
- * Content-Security-Policy, if it has one.
+ * more directories, as the corpus runner's SWFs, `csp` is the page's
+ * Content-Security-Policy, if it has one, and `isolated` false serves a
+ * page that is not cross-origin isolated.
  */
 export async function serve(
   extra: [string, string][] = [],
   csp?: string,
+  isolated = true,
 ): Promise<{ server: Server; url: string }> {
   const served = [...extra, ...mounts];
+  const isolation = isolated ? ISOLATION_HEADERS : {};
   const server = createServer((request, response) => {
     let path: string;
     try {
@@ -116,6 +130,7 @@ export async function serve(
     if (path === "/") {
       response.writeHead(200, {
         "content-type": "text/html",
+        ...isolation,
         ...(csp ? { "content-security-policy": csp } : {}),
       });
       response.end(page());
@@ -153,6 +168,7 @@ export async function serve(
 
         response.writeHead(200, {
           "content-type": types[extname(file)] ?? "application/octet-stream",
+          ...isolation,
         });
         response.end(body);
         return;
