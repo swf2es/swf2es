@@ -4,8 +4,7 @@ What ActionScript 3's workers (`flash.system.Worker`, `WorkerDomain`,
 `MessageChannel`, shared properties, a shareable `ByteArray` and
 `flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, how they map
 onto a browser's and node's threads, and the order to build them in.
-Slices 1 to 4 and 6 are built (see [Slices](#slices)); slice 5 is the
-plan.
+Slices 1 to 6 are built (see [Slices](#slices)).
 
 ## What content needs
 
@@ -132,7 +131,7 @@ the demo site isolated by its service worker, and in the desktop app:
 
 | Sample | Now |
 |--------|-----|
-| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits; `hello-debug.swf`, the first SWF in a cold browser, once in a few runs stops with the script timeout (1502, caught by its `Console`, which then fails with 1009 on `getStackTrace()`'s null) while its C main thread's worker still compiles the SWF (slice 5) |
+| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits; `hello-debug.swf`, the first SWF in a cold browser, once in a few runs stopped with the script timeout (1502, caught by its `Console`, which then fails with 1009 on `getStackTrace()`'s null), as `mandel.swf` did about every other run: the start of its C main thread's worker was held by the page (see [Blocking](#blocking)); since slice 5, 10 of 10 cold runs of each play |
 | `09_Pthreads/pthread_swc1.swf` | runs: its thread proc runs and is joined |
 | `09_Pthreads/pthreads.swf` | runs: the mouse's moves reach its thread, which prints each |
 | `11_OpenMP/mandel.swf` | runs; each click adds a thread, up to 6 measured: its own count of frames a second stays between about 55 and 140 at every count, as its zoom deepens, with no gain from more threads |
@@ -178,7 +177,9 @@ traced in adl (AIR 51), and is the reference for slice 1:
 Each background worker is a thread of the host's running a VM of its own:
 its own `codegen.wasm` instance, runtime and playerglobal, on the bytes
 `createWorker` was given (`WorkerDomain.createWorker(bytes)`), with no
-renderer, no sound and no input. In a browser the thread is a Web Worker;
+renderer, no sound and no input. It compiles none of the ABCs it shares
+with the primordial: it loads the primordial's modules (see [Compiled
+code](#compiled-code)). In a browser the thread is a Web Worker;
 in node (unit tests, and later the CLI's avmshell) a `worker_threads`
 Worker. The worker plays its SWF headless, `Player` and `Scripting` as the
 node tests use them: its document class is constructed, and its frames run
@@ -328,9 +329,15 @@ memory, for its life only. It reports the primordial's
 `Security.sandboxType`. A worker never has more than the primordial; giving
 it the primordial's hosts through the thread is later work.
 
-Every worker compiles its SWF with the JIT, so with `new Function`: a page
-whose Content-Security-Policy has no `'unsafe-eval'` cannot run workers
-until slice 5 gives them modules compiled ahead of time.
+A worker evaluates what it is handed as the primordial did: the modules
+the primordial evaluated, by `new Function`, and those it imported, as
+the modules compiled ahead of time are under a Content-Security-Policy
+without `'unsafe-eval'` (`precompiledModules` with `importModules`), by
+importing them from the same URLs. So a page that plays a SWF from its
+modules compiled ahead of time runs its workers under that policy too,
+their own scripts served with it; a worker on ABCs the primordial did
+not compile ahead of time, or with lazy compilation, compiles them, and
+needs `'unsafe-eval'` as the primordial would.
 
 A background worker's `trace` goes to the primordial's output, an error
 nothing caught in it to the primordial's `onUncaught`, prefixed "a
@@ -549,13 +556,19 @@ never stop. The page is frozen meanwhile, as Flash's was.
 
 A browser also starts a Web Worker only while the page's thread is in its
 event loop, so a primordial that starts a worker and waits for it in the
-same script, as Crossbridge's does, would wait for ever. `webWorkerHost`
+same script, as Crossbridge's does, would wait for ever. Nor does a
+started worker take what the page posts it until the page's thread has
+run its own task for the worker script's end, which in Chrome may come
+after the worker's first message; a start posted then waits for the page
+to stop blocking. `webWorkerHost`
 therefore keeps a few Web Workers loaded ahead (as many as the machine
 has cores, from two up to four, by default, shared by the page's hosts for
 one script and let go ten seconds after the last player that used them
 is), as Emscripten's thread pool does: a
 worker that starts takes one, which runs what it is posted whatever the
-page's thread does, and another is started in its place. Its `ready`
+page's thread does, and another is started in its place. A Web Worker
+counts as loaded once it answers a message the host posted it as it made
+it, so once what the page posts reaches it. Its `ready`
 resolves once they have loaded, for a page to await before it plays a
 SWF that blocks at once. A script that starts more workers than that
 while it blocks waits for one that is not loaded, and fails with the
@@ -564,7 +577,72 @@ script timeout. Node's threads start without the parent's event loop.
 For tests that step a SWF's frames, `settled()` counts a worker blocked
 in a lock or a wait as settled, as nothing but another worker ends that.
 
-### avmshell's workers
+### Compiled code
+
+A worker on the primordial's SWF, as each Crossbridge thread is (its
+`retargetSWF` rewrites the SymbolClass, so the bytes differ, the ABCs do
+not), would compile the same ABCs again: the libraries, about 0.1 s, and
+the SWF, 0.3 s for `mandel.swf`, three minutes for `mc.swf`'s 40 MB. So
+the primordial hands its workers its modules (`scripting/handover.ts`).
+
+The compiler is deterministic: the same calls on a fresh one compile the
+same modules. The primordial, given a worker host, keeps a journal of
+each call that changes what its compiler compiles to (each ABC added, by
+its hash, its domain and whether a library; each finding reported; each
+domain made; each module compiled, read from the module cache or
+imported), with each module's source, or the URL it was imported from,
+and the log of what compiling it fixed (`compileModuleLogged`), until its
+main SWF has linked. A SWF whose ABCs do not name `WorkerDomain` keeps
+none of it then. The sources are kept as Blobs, which a browser keeps out
+of the page's heap and a message carries to a thread without a copy. A
+worker journals its own calls the same way, and loads the primordial's
+module for a compile while its journal is the primordial's so far and
+its ABCs are the same bytes; from the first call that differs, as on
+ABCs of another SWF after the libraries', it compiles. Where it is not
+ABCs of the primordial's that it loads, it therefore compiles what it
+would have, and a worker on other bytes still takes the libraries'
+modules.
+
+What the logs fix is replayed only if the worker's compiler is used
+again, for a method compiled lazily or a SWF the worker loads, before
+that use (`ModuleHandover.guard`): replaying verifies every method again,
+about half a compile (86 s of `mc.swf`'s 176), and a worker that only
+runs what it was handed never needs it. The modules are those the
+worker's compile would have written, which the unit tests check, so code
+compiled ahead of time and by the JIT stays the same, and the compiler
+itself does not change.
+
+Not chosen:
+
+- Module cache keys (`moduleKey`), as a cache is read: a key names the
+  log so far, so a worker would replay every module's log to key the
+  next, the cost above.
+- The page's IndexedDB module cache, read by the worker: the cache is
+  the embedder's choice and off by default, a key needs the replays
+  above, the primordial's write may not have landed when Crossbridge
+  starts a thread in the same frame, and node has no IndexedDB. Where an
+  embedder gives one, the primordial's reads from it are in its journal,
+  so its workers get those modules too.
+
+Measured with Crossbridge's `mandel.swf`, three runs each, the worker
+compiling its SWF (before) against loading the primordial's modules,
+from the worker's start to its first message after its SWF's code ran:
+
+| | Before | After |
+|---|---|---|
+| Chrome (headless, software GL, through `<swf2es-player>`), a thread a click adds | 650 to 920 ms | 365 to 535 ms |
+| the same, the C main thread's worker, which the primordial waits for | 1350 to 1390 ms | 813 to 819 ms |
+| the same, the SWF's load to its first frame drawn | 2366 to 2391 ms | 1753 to 1872 ms |
+| node's threads, the second worker | 791 to 820 ms | 531 to 546 ms |
+| node, the process's memory once both workers ran | 562 to 567 MB | 522 to 534 MB |
+
+What is left of a worker's start is its thread's own: loading the
+player's modules, evaluating the modules it is handed, and making its
+VM. `mc.swf` and `02_Interop/bitmapdata.swf` (40 MB) compile in
+three to four minutes on the primordial, then fail with 1009 in their
+`Console.init` before they make any worker, in node too, which is
+another gap.
+
 
 The runtime's shell natives (`natives/shell.ts`) run avmshell's Worker
 and WorkerDomain as avmplus' Aggregate and Isolate do, with
@@ -690,14 +768,17 @@ Each a PR, in this order:
    Unlocks: Crossbridge's Hello World, `pthread_swc1` and `mandel` with
    one thread; `pthreads`, `sound` and `mandel`'s added threads wait for
    the C callbacks (see [Crossbridge](#crossbridge)).
-5. **Compiled code shared with workers**: a worker takes the primordial's
-   compiled modules, as a module cache would give them, rather than
-   compiling its SWF again: each Crossbridge thread is a worker, and
-   `mc.swf` takes minutes to compile. The same path gives workers the
-   modules compiled ahead of time (`precompiledModules`), so that a page
-   without `'unsafe-eval'` runs them too. Tests: a worker's modules equal
-   to the primordial's, a worker under the precompiled test's policy, and
-   the desktop smoke test.
+5. **Compiled code shared with workers** (built, see [Compiled
+   code](#compiled-code)): a worker loads the primordial's compiled
+   modules rather than compiling its SWF again, and imports those the
+   primordial imported, so that a page without `'unsafe-eval'` that
+   plays from modules compiled ahead of time runs its workers too; Web
+   Workers counted loaded once the page's messages reach them. Tests: a
+   worker's modules equal to those it would compile, and its compiler as
+   compiling them would leave it (`tests/unit/player/scripting/handover.test.ts`),
+   a worker under the precompiled test's policy (`tests/player/precompiled.ts`),
+   and the worker cases in Chrome and on node's threads, the web, site
+   and desktop tests as before.
 6. **The embeddings** (built, see [The embeddings](#the-embeddings)):
    `@swf2es/web`'s worker host, on by default, with the `workers`
    attribute and configuration and `workerUrl`; `player-hosts`' worker

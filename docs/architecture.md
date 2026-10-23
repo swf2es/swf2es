@@ -1258,7 +1258,8 @@ and the player's paths in this document are relative to it:
   bound classes to, the fonts registered and the sounds' shared decodes,
   `timers.ts` keeps the clock and the timers that fire by it,
   `clipboard.ts` what the clipboard holds and when scripts may touch it,
-  `workers.ts` the workers as one VM sees them (see [Workers](#workers)).
+  `workers.ts` the workers as one VM sees them, `handover.ts` the
+  modules the primordial hands them (see [Workers](#workers)).
   `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports, the
@@ -2937,8 +2938,10 @@ and playerglobal playing the SWF `createWorker` was given, headless, its
 frames on a timer at the SWF's rate (`workers/thread.ts`, the entry of
 `@swf2es/player/worker`). `player-hosts` has the threads: `webWorkerHost`
 starts module Web Workers, `nodeWorkerHost` node's `worker_threads`, each
-given codegen's compiled module. Without a host, `Worker.isSupported` is
-false. `scripting/workers.ts` is what one VM sees: the primordial routes
+given codegen's compiled module. A worker on the primordial's ABCs loads
+the modules the primordial compiled, read from its cache or imported, in
+place of compiling them (`scripting/handover.ts`). Without a host,
+`Worker.isSupported` is false. `scripting/workers.ts` is what one VM sees: the primordial routes
 every message between workers, and shared properties and channels' messages
 cross as copies, made as avmplus' `ChannelItem` makes them, but for a
 shareable ByteArray's memory, which the threads share where the page is
