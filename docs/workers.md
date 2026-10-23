@@ -205,7 +205,8 @@ primordial waits for the C main thread, which waits for the thread it is
 starting. The maker sees its worker `running` as soon as the worker's own
 thread says so in shared memory; its `workerState` events come through
 the primordial. This needs shared memory: without it a background worker
-cannot make one.
+cannot make one. The workers a background worker made run on when it is
+terminated, as avmshell's do; the primordial runs them.
 
 ### What crosses, and how
 

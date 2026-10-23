@@ -751,3 +751,79 @@ for (const [role, what] of [
     assert.deepEqual(lines, ["taken", "written after it was taken false"]);
   });
 }
+
+for (const channel of [false, true]) {
+  test(`a worker that made a worker${channel ? " and a channel to it" : ""} and terminates itself lets go of its Mutex`, {
+    skip,
+  }, async () => {
+    const { lines, uncaught } = await play(
+      channel ? "MakerChannelStop" : "MakerSelfStop",
+      `      var m:Mutex = new Mutex();
+      var log:ByteArray = new ByteArray();
+      log.shareable = true;
+      log.length = 16;
+      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      w.setSharedProperty("m", m);
+      w.setSharedProperty("log", log);
+      w.setSharedProperty("channel", ${channel});
+      w.start();
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        if (++n != 3) {
+          return;
+        }
+
+        // Never back in its event loop: the worker stops itself, or never.
+        var nap:Condition = new Condition(new Mutex());
+        nap.mutex.lock();
+        var start:int = getTimer();
+        while (log[0] != 1 && getTimer() - start < 10000) {
+          nap.wait(1);
+        }
+
+        var got:Boolean = false;
+        start = getTimer();
+        while (!(got = m.tryLock()) && getTimer() - start < 5000) {
+          nap.wait(1);
+        }
+
+        trace("taken " + got);
+        if (got) {
+          var seen:int = log[1];
+          nap.wait(200);
+          trace("written after it was taken " + (log[1] != seen));
+          m.unlock();
+        }
+      });`,
+      `      var m:Mutex = Worker.current.getSharedProperty("m");
+      var log:ByteArray = Worker.current.getSharedProperty("log");
+      if (Worker.current.getSharedProperty("role") == "child") {
+        return;
+      }
+
+      // Its destroy closes and empties the channel's queue, which the
+      // shared memory refuses it: that must not keep it from ending.
+      var child:Worker = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      child.setSharedProperty("role", "child");
+      if (Worker.current.getSharedProperty("channel")) {
+        ch = Worker.current.createMessageChannel(child);
+        child.setSharedProperty("ch", ch);
+      }
+
+      child.start();
+      if (ch) {
+        ch.send("x");
+      }
+
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        log[1] = (log[1] + 1) & 255;
+      });
+      m.lock();
+      log[0] = 1;
+      Worker.current.terminate();`,
+      { frames: 6, blocking: true },
+    );
+
+    assert.deepEqual(uncaught, []);
+    assert.deepEqual(lines, ["taken true", "written after it was taken false"]);
+  });
+}

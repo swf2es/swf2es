@@ -617,6 +617,12 @@ export class Workers {
 
   /** Stop every background worker's thread, as the player goes. */
   stopAll(): void {
+    // A terminated background worker leaves the workers it made to the
+    // primordial, which runs them; the shared memory refuses it anything.
+    if (this.parent && avm2.syncOf(this.s.rt).terminated) {
+      return;
+    }
+
     for (const background of this.backgrounds.values()) {
       if (background.state !== "new" && background.state !== "terminated") {
         this.end(background);
@@ -961,7 +967,7 @@ export class Workers {
     for (const [key, channel] of this.channels) {
       if (channel.ref.sender === id || channel.ref.receiver === id) {
         channel.undelivered = 0;
-        if (channel.ref.queue !== 0) {
+        if (channel.ref.queue !== 0 && !sync.terminated) {
           // What it had not taken, or would have, goes with it.
           sync.close(channel.ref.queue);
           while (sync.shift(channel.ref.queue) !== null) {

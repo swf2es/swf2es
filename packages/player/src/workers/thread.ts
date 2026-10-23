@@ -47,9 +47,17 @@ export function runWorkerThread(port: ThreadPort): void {
     }
 
     stopped = true;
-    player?.destroy();
-    scripting.destroy();
-    avm2.syncOf(scripting.rt).end(id);
+    try {
+      player?.destroy();
+      scripting.destroy();
+    } catch (error) {
+      if (!(error instanceof avm2.SyncTerminated)) {
+        port.post({ type: "uncaught", text: describe(error) });
+      }
+    } finally {
+      avm2.syncOf(scripting.rt).end(id);
+    }
+
     return true;
   };
   let id = 0;
@@ -149,11 +157,20 @@ export function runWorkerThread(port: ThreadPort): void {
   port.listen((message) => {
     if ("codegen" in message) {
       boot(message).catch((error) => {
-        // A worker terminated while its constructor waited stops quietly.
-        if (!stopIfTerminated()) {
-          port.post({ type: "uncaught", text: describe(error) });
-          port.post({ type: "terminate" });
+        // A worker terminated while it started, its constructor waiting or
+        // its VM still being made, stops quietly.
+        if (stopIfTerminated()) {
+          return;
         }
+
+        if (error instanceof avm2.SyncTerminated) {
+          stopped = true;
+          new avm2.Sync(message.init.sync, message.init.id).end(message.init.id);
+          return;
+        }
+
+        port.post({ type: "uncaught", text: describe(error) });
+        port.post({ type: "terminate" });
       });
       return;
     }
