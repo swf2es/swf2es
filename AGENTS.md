@@ -44,9 +44,10 @@ node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
 node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
-pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm2 and
-                              # timeline tests vs corpus/baseline.json (Chrome; about 5 minutes); --diff
-                              # shows where a failing test parts from Flash, --dump its whole trace
+pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm1, avm2
+                              # and timeline tests vs corpus/baseline.json (Chrome; about 5 minutes; CI's
+                              # corpus job); a regression shows where it parts from Flash, --diff does so
+                              # for every failing test, --dump with its whole trace
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
@@ -115,7 +116,8 @@ node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the nati
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
-calling a change done; CI runs the same steps.
+calling a change done; CI runs the same steps, and `pnpm corpus` in a job
+of its own.
 
 ## Rules that must hold
 

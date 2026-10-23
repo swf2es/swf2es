@@ -5500,8 +5500,8 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   `visual/` within their tolerance or a pixel's anti-aliasing of it, so
   the oracle decides, not the corpus's PNGs (`tests/player/corpus/check-references.ts`).
 - **Ruffle's corpus, as a baseline for the player** (`pnpm corpus`,
-  `tests/player/corpus/run.ts`): the player plays each `avm2/` and
-  `timeline/` test that has Flash's `output.txt` for the frames its
+  `tests/player/corpus/run.ts`): the player plays each `avm1/`, `avm2/`
+  and `timeline/` test that has Flash's `output.txt` for the frames its
   `test.toml` names, in Chrome as the player's tests run, and its trace is
   compared to Flash's line by line. The page runs the runtime as the
   debugger player, since Ruffle recorded its traces with one and adl is
@@ -5529,9 +5529,13 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   Flash's harness plays no input, so `check-references.ts` leaves these
   tests out.
   A test that does not finish in its time is a timeout, a standing of its
-  own. The corpus is fetched, not committed, so the baseline runs where
-  the corpus is, like adl, not in CI; it is what says, in order of what
-  real SWFs hit first, what the player lacks.
+  own. The corpus is fetched, not committed: CI's `corpus` job, beside
+  the build job on every pull request and every push to main or dev,
+  fetches it at
+  `RUFFLE_COMMIT`, caches it by that commit, and fails on a lowered
+  standing, naming the test, its standing before and after, and where its
+  trace parts from Flash's. It is what says, in order of what real SWFs
+  hit first, what the player lacks.
 
 The AS3 half of a player test is an `.as` file beside its case, compiled
 in the oracle's container by ASC against `builtin.abc` and
