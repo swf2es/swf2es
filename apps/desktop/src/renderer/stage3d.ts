@@ -17,8 +17,8 @@ export const createStage3D: Stage3DSurfaceFactory = () => {
   try {
     return {
       canvas,
-      // Animated meshes can keep one vertex buffer per animation frame. Byte budgets stay intact.
-      context: new WebGLContext3D(gl, { maxBuffers: 4096 }),
+      // Animated meshes and sprite effects retain many small resources. Byte budgets stay intact.
+      context: new WebGLContext3D(gl, { maxBuffers: 4096, maxTextures: 1024 }),
       destroy: () => gl.getExtension("WEBGL_lose_context")?.loseContext(),
     };
   } catch (error) {

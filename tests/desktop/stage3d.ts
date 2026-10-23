@@ -8,6 +8,7 @@ import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { type App, display, withApp } from "./app.ts";
+import { textureLimits } from "./stage3d-limits.ts";
 
 const why = missing();
 if (why) {
@@ -225,6 +226,7 @@ try {
       ),
       true,
     );
+    await textureLimits(app);
     const previousPage = await app.evaluate<number>("performance.timeOrigin");
     await menu(app, "stage3d", false);
     await waitFor(
