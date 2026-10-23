@@ -19,6 +19,7 @@ import {
   sharedByteArray,
   utf8,
 } from "./bytearray.js";
+import { syncObject, syncOf, syncRef } from "./concurrent.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
 import {
   CANSTART,
@@ -26,9 +27,9 @@ import {
   FAILED,
   ITEM_AMF,
   ITEM_BYTES,
-  ITEM_LOCAL,
   ITEM_NUMBER,
   ITEM_SHARED,
+  ITEM_SYNC,
   NEW,
   newWorkersMemory,
   RUNNING,
@@ -356,10 +357,9 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     // As avmplus' ChannelItem: undefined deletes; a number is kept as itself,
-    // a ByteArray's bytes copied, a shareable one's memory shared, and
-    // anything else as AMF3, read back as a new copy. A Mutex or a
-    // Condition is kept as the object, which only this VM has: one set on
-    // another worker, or read there, fails until slice 4 shares them.
+    // a ByteArray's bytes copied, a shareable one's memory shared, a Mutex
+    // or a Condition by reference, and anything else as AMF3, read back as
+    // a new copy.
     setSharedProperty(this: WorkerObject, key: Value, value: Value): void {
       const { workers } = workersOf(rt);
       const k = sharedKey(rt, key);
@@ -370,12 +370,8 @@ export function shellNatives(rt: Runtime): Natives {
       }
 
       const item = sharedItem(rt, value);
-      if (item.kind === ITEM_LOCAL && this.$id !== workers.self) {
-        throw rt.unsupported(`passing ${localName(rt, value)} to another worker`);
-      }
-
       const token = workers.set(this.$id, k, item);
-      if (item.kind !== ITEM_AMF && item.kind !== ITEM_NUMBER) {
+      if (item.kind === ITEM_BYTES || item.kind === ITEM_SHARED) {
         workers.objects.set(entryKey(this.$id, k), { token, value });
       }
     }
@@ -393,16 +389,17 @@ export function shellNatives(rt: Runtime): Natives {
           return new DataView(entry.bytes.buffer).getFloat64(0, true);
         case ITEM_AMF:
           return readAmf(rt, entry.bytes);
+        case ITEM_SYNC: {
+          // The VM's one object for it, as avmplus interns one for its State.
+          const address = new DataView(entry.bytes.buffer).getInt32(1, true);
+          return syncObject(rt, { kind: entry.bytes[0] === 0 ? "mutex" : "condition", address });
+        }
       }
 
       // One object a VM for the item, as avmplus interns it.
       const cached = workers.objects.get(entryKey(this.$id, k));
       if (cached?.token === entry.token) {
         return cached.value;
-      }
-
-      if (entry.kind === ITEM_LOCAL) {
-        throw rt.unsupported("passing a Mutex or a Condition to another worker");
       }
 
       if (entry.kind === ITEM_SHARED) {
@@ -533,7 +530,9 @@ function workersOf(rt: Runtime): VmWorkers {
   if (!vm) {
     const init = rt.workerInit;
     vm = {
-      workers: init ? new Workers(init.memory, init.id) : new Workers(newWorkersMemory(), 0),
+      workers: init
+        ? new Workers(init.memory, init.id)
+        : new Workers(newWorkersMemory(syncOf(rt).memory), 0),
       objects: new Map(),
       threads: new Map(),
     };
@@ -584,14 +583,7 @@ function readAmf(rt: Runtime, bytes: Uint8Array): Value {
 const sharedKey = (rt: Runtime, key: Value): string | null =>
   key === null || key === undefined ? null : rt.toString(key);
 
-/** What an object only its own VM has is, in an error. */
-const localName = (rt: Runtime, value: Value): string =>
-  rt.isInstance(value, rt.classNamed("flash.concurrent::Mutex")) ? "a Mutex" : "a Condition";
-
-/**
- * What a shared property keeps of `value`, as makeChannelItem; a Mutex or
- * a Condition as itself, until slice 4 shares them.
- */
+/** What a shared property keeps of `value`, as makeChannelItem. */
 function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Array } {
   if (typeof value === "number") {
     const bytes = new Uint8Array(8);
@@ -614,10 +606,12 @@ function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Arra
       return { kind: ITEM_SHARED, bytes };
     }
 
-    for (const name of ["flash.concurrent::Mutex", "flash.concurrent::Condition"]) {
-      if (rt.isInstance(value, rt.classNamed(name))) {
-        return { kind: ITEM_LOCAL, bytes: new Uint8Array(0) };
-      }
+    const ref = syncRef(value);
+    if (ref) {
+      const bytes = new Uint8Array(5);
+      bytes[0] = ref.kind === "mutex" ? 0 : 1;
+      new DataView(bytes.buffer).setInt32(1, ref.address, true);
+      return { kind: ITEM_SYNC, bytes };
     }
   }
 

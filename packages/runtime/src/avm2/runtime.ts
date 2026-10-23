@@ -70,6 +70,7 @@ import {
   TypeName,
 } from "./names.js";
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
+import type { SyncInit } from "./natives/sync.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
@@ -133,6 +134,8 @@ export class Runtime {
   /** See RuntimeOptions.workers and worker. */
   readonly workerHost: ShellWorkerHost | null;
   readonly workerInit: ShellWorkerInit | null;
+  /** See RuntimeOptions.sync. */
+  readonly syncInit: SyncInit | null;
   /** See RuntimeOptions.swfVersion. */
   swfVersion: number;
   readonly natives: Record<string, (rt: Runtime) => Method>;
@@ -207,6 +210,7 @@ export class Runtime {
     this.files = options.files ?? memoryFiles();
     this.workerHost = options.workers ?? null;
     this.workerInit = options.worker ?? null;
+    this.syncInit = options.sync ?? null;
     this.swfVersion = options.swfVersion ?? 31;
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;

@@ -9,6 +9,7 @@ import {
   newWorkersMemory,
   Workers,
 } from "../../../packages/runtime/dist/avm2/natives/shell-workers.js";
+import { newSyncMemory } from "../../../packages/runtime/dist/avm2/natives/sync.js";
 
 const module = new URL(
   "../../../packages/runtime/dist/avm2/natives/shell-workers.js",
@@ -63,7 +64,7 @@ const first = (w: Worker) =>
   });
 
 test("workers that end as the primordial writes lose and corrupt nothing", async () => {
-  const memory = newWorkersMemory();
+  const memory = newWorkersMemory(newSyncMemory());
   const primordial = new Workers(memory, 0);
   const threads: { done: Promise<string>; exited: Promise<unknown>; id: number }[] = [];
   let key = 0;
@@ -101,7 +102,7 @@ test("workers that end as the primordial writes lose and corrupt nothing", async
 });
 
 test("a worker terminated as it writes stops at its next write, the lock left free", async () => {
-  const memory = newWorkersMemory();
+  const memory = newWorkersMemory(newSyncMemory());
   const primordial = new Workers(memory, 0);
   const id = primordial.create();
   primordial.setState(id, CANSTART);
@@ -131,7 +132,7 @@ test("a worker terminated as it writes stops at its next write, the lock left fr
 });
 
 test("terminating a worker terminates the workers it started", () => {
-  const memory = newWorkersMemory();
+  const memory = newWorkersMemory(newSyncMemory());
   const primordial = new Workers(memory, 0);
   const child = primordial.create();
   primordial.setState(child, RUNNING);

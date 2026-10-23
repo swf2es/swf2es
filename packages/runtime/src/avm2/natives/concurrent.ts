@@ -1,25 +1,127 @@
-// flash.concurrent's Mutex and Condition, and avm2.intrinsics.memory's
-// compare and swap, as avmplus' ConcurrencyGlue on its one thread: a mutex
-// is held or not, recursively, and nothing else runs to take it, to notify
-// a condition or to see memory out of order. Crossbridge uses them all on
+// flash.concurrent's Mutex and Condition, as avmplus' ConcurrencyGlue, over
+// the memory a primordial's workers share (sync.ts): a Mutex or a Condition
+// is an address in it, the same in every worker, and each VM keeps one
+// object for each, as avmplus interns one for its State. And
+// avm2.intrinsics.memory's compare and swap. Crossbridge uses them all on
 // startup whether or not it starts workers.
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { Runtime } from "../runtime.js";
 import { bytesOf } from "./bytearray.js";
 import { type Natives, plain, registerNativeClass } from "./define.js";
+import { newSyncMemory, Sync, SyncTimeout } from "./sync.js";
 
-/** A mutex's state: how many times this one thread holds it. */
 interface MutexObject extends AsObject {
-  $held: number;
+  /** Its address in the shared memory. */
+  $mutex: number;
 }
 
 interface ConditionObject extends AsObject {
-  $mutex: MutexObject;
+  $condition: number;
+  /** Its Mutex object in this VM, once known. */
+  $mutexObject: MutexObject | null;
+}
+
+interface VmSync {
+  sync: Sync;
+  /** This VM's one object for each Mutex and Condition, by its address. */
+  objects: Map<number, WeakRef<AsObject>>;
+}
+
+const vmSyncs = new WeakMap<Runtime, VmSync>();
+
+function vmSync(rt: Runtime): VmSync {
+  let vm = vmSyncs.get(rt);
+  if (!vm) {
+    const init = rt.syncInit;
+    const sync = init
+      ? new Sync(init.memory, init.thread, init)
+      : rt.workerInit
+        ? new Sync(rt.workerInit.memory.sync, rt.workerInit.id)
+        : new Sync(newSyncMemory(), 0);
+    vm = { sync, objects: new Map() };
+    vmSyncs.set(rt, vm);
+  }
+
+  return vm;
+}
+
+/** The shared memory as `rt` sees it: its own, or that of the primordial whose worker it runs. */
+export function syncOf(rt: Runtime): Sync {
+  return vmSync(rt).sync;
+}
+
+/** What a Mutex or a Condition crosses to another worker as: its address. */
+export interface SyncRef {
+  kind: "mutex" | "condition";
+  address: number;
+}
+
+/** The address of a Mutex or a Condition; null for anything else. */
+export function syncRef(value: Value): SyncRef | null {
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+
+  const o = value as AsObject;
+  if (typeof o.$mutex === "number") {
+    return { kind: "mutex", address: o.$mutex };
+  }
+
+  if (typeof o.$condition === "number") {
+    return { kind: "condition", address: o.$condition };
+  }
+
+  return null;
+}
+
+/** This VM's one Mutex or Condition for `ref`, made without running its constructor. */
+export function syncObject(rt: Runtime, ref: SyncRef): AsObject {
+  const { objects } = vmSync(rt);
+  const known = objects.get(ref.address)?.deref();
+  if (known) {
+    return known;
+  }
+
+  const name = ref.kind === "mutex" ? "flash.concurrent::Mutex" : "flash.concurrent::Condition";
+  const o = rt.classNamed(name).$it.instance() as AsObject;
+  if (ref.kind === "mutex") {
+    o.$mutex = ref.address;
+  } else {
+    o.$condition = ref.address;
+    o.$mutexObject = null;
+  }
+
+  objects.set(ref.address, new WeakRef(o));
+  return o;
+}
+
+/** Flash's script timeout, which a lock or wait that spun too long on the primordial hits. */
+function scriptTimeout(rt: Runtime): Value {
+  let cls: AsObject | undefined;
+  try {
+    cls = rt.classNamed("flash.errors::ScriptTimeoutError");
+  } catch {
+    cls = undefined;
+  }
+
+  return rt.error(cls ? "flash.errors::ScriptTimeoutError" : "Error", 1502);
 }
 
 export function concurrentNatives(rt: Runtime): Natives {
   const natives: Natives = {};
+
+  const blocking = <T>(f: () => T): T => {
+    try {
+      return f();
+    } catch (e) {
+      if (e instanceof SyncTimeout) {
+        throw scriptTimeout(rt);
+      }
+
+      throw e;
+    }
+  };
 
   class MutexNatives {
     static get isSupported(): boolean {
@@ -27,25 +129,23 @@ export function concurrentNatives(rt: Runtime): Natives {
     }
 
     "flash.concurrent:Mutex::ctor"(this: MutexObject): void {
-      this.$held = 0;
+      const vm = vmSync(rt);
+      this.$mutex = vm.sync.newMutex();
+      vm.objects.set(this.$mutex, new WeakRef(this));
     }
 
     lock(this: MutexObject): void {
-      this.$held++;
+      blocking(() => syncOf(rt).lock(this.$mutex));
     }
 
-    // No waiter can be ahead of this thread, so the lock is always had.
     tryLock(this: MutexObject): boolean {
-      this.$held++;
-      return true;
+      return syncOf(rt).tryLock(this.$mutex);
     }
 
     unlock(this: MutexObject): void {
-      if (this.$held === 0) {
+      if (!syncOf(rt).unlock(this.$mutex)) {
         throw rt.error("flash.errors::IllegalOperationError", 1514);
       }
-
-      this.$held--;
     }
   }
 
@@ -59,40 +159,59 @@ export function concurrentNatives(rt: Runtime): Natives {
         throw rt.error("ArgumentError", 2007, "mutex");
       }
 
-      this.$mutex = mutex as MutexObject;
+      const vm = vmSync(rt);
+      this.$mutexObject = mutex as MutexObject;
+      this.$condition = vm.sync.newCondition((mutex as MutexObject).$mutex);
+      vm.objects.set(this.$condition, new WeakRef(this));
     }
 
+    // As ConditionObject::get_mutex: one that crossed from another worker
+    // finds its Mutex in this VM, or makes it.
     get mutex(): Value {
-      return (this as unknown as ConditionObject).$mutex;
+      const self = this as unknown as ConditionObject;
+      if (!self.$mutexObject) {
+        const address = syncOf(rt).conditionMutex(self.$condition);
+        self.$mutexObject = syncObject(rt, { kind: "mutex", address }) as MutexObject;
+      }
+
+      return self.$mutexObject;
     }
 
-    // Nothing else runs to notify it or change what it waits for: a wait
-    // ends at once, the mutex held again as it was, and gives true, as
-    // avmshell's does once its time is up. avmshell's waits that long,
-    // and forever without a timeout; a page cannot block.
+    // As ConditionObject::wait: true when the time ran out, false when
+    // notified, and false for a wait without a timeout (-1), which only a
+    // notify ends.
     wait(this: ConditionObject, timeout: Value): boolean {
-      const t = rt.toNumber(timeout);
+      // Left out, it is the declared -1, which a native is not given.
+      const t = timeout === undefined ? -1 : rt.toNumber(timeout);
       if (t < 0 && t !== -1) {
         throw rt.error("ArgumentError", 1515);
       }
 
-      if (this.$mutex.$held === 0) {
+      const sync = syncOf(rt);
+      if (!sync.holds(sync.conditionMutex(this.$condition))) {
         throw rt.error("flash.errors::IllegalOperationError", 1518);
       }
 
-      return true;
+      const ms = t === -1 ? -1 : Number.isNaN(t) ? 0 : Math.min(Math.ceil(t), 0x7fffffff);
+      return blocking(() => sync.wait(this.$condition, ms));
     }
 
     notify(this: ConditionObject): void {
-      if (this.$mutex.$held === 0) {
+      const sync = syncOf(rt);
+      if (!sync.holds(sync.conditionMutex(this.$condition))) {
         throw rt.error("flash.errors::IllegalOperationError", 1516);
       }
+
+      sync.notify(this.$condition, false);
     }
 
     notifyAll(this: ConditionObject): void {
-      if (this.$mutex.$held === 0) {
+      const sync = syncOf(rt);
+      if (!sync.holds(sync.conditionMutex(this.$condition))) {
         throw rt.error("flash.errors::IllegalOperationError", 1517);
       }
+
+      sync.notify(this.$condition, true);
     }
   }
 
