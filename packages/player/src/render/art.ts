@@ -9,6 +9,7 @@ import {
   type Renderer,
   RendererType,
   Sprite,
+  type Texture,
 } from "pixi.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import {
@@ -24,7 +25,7 @@ import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js
 import type { ShapeCharacter } from "../display/timeline.js";
 import { characterStore, gpuBitmaps } from "./bitmaps.js";
 import type { Node } from "./node.js";
-import { SPARE_GRAPHICS_MOST } from "./pools.js";
+import { SPARE_GRAPHICS_MOST, SPARE_MESHES_MOST } from "./pools.js";
 import { SaffronView } from "./saffron.js";
 import { SharedGraphics } from "./shared.js";
 import {
@@ -73,10 +74,18 @@ const IDENTITY = new Matrix();
 const NO_LAYERS: ShapeLayer[] = [];
 const NO_FILLS: GraphicsContext[] = [];
 
-/** Whether every one of `art` is a SharedGraphics, which a redraw keeps for its new content. */
-function allShared(art: readonly PixiContainer[]): boolean {
+/** What a node's art child draws: a layer's fills, its lines, or textured triangles. */
+const FILL = 0;
+const LINE = 1;
+const MESH = 2;
+
+/**
+ * Whether every one of `art` is a SharedGraphics or a TriangleView, which
+ * a redraw keeps for its new content.
+ */
+function allKept(art: readonly PixiContainer[]): boolean {
   for (let i = 0; i < art.length; i++) {
-    if (!(art[i] instanceof SharedGraphics)) {
+    if (!(art[i] instanceof SharedGraphics || art[i] instanceof TriangleView)) {
       return false;
     }
   }
@@ -85,18 +94,39 @@ function allShared(art: readonly PixiContainer[]): boolean {
 }
 
 /**
- * Whether Graphics that were lines where `lines` says lay out `layers`
- * alike: a fill's for each layer, then its lines' if it has any.
+ * Whether art of the `kinds` lays out `layers` alike: a fill's for each
+ * layer, a mesh for each of its triangles' that has a texture in
+ * `textures` (in order; null where no layer has any), then its lines'
+ * if it has any.
  */
-function laidOutAs(lines: readonly boolean[], layers: readonly ShapeLayer[]): boolean {
+function laidOutAs(
+  kinds: readonly number[],
+  layers: readonly ShapeLayer[],
+  textures: readonly (Texture | null)[] | null,
+): boolean {
   let k = 0;
+  let t = 0;
   for (let i = 0; i < layers.length; i++) {
-    if (lines[k++] !== false || (layers[i].strokes.length > 0 && lines[k++] !== true)) {
+    const layer = layers[i];
+    if (kinds[k++] !== FILL) {
+      return false;
+    }
+
+    const meshes = layer.meshes;
+    if (meshes && textures) {
+      for (let m = 0; m < meshes.length; m++) {
+        if (textures[t++] && kinds[k++] !== MESH) {
+          return false;
+        }
+      }
+    }
+
+    if (layer.strokes.length > 0 && kinds[k++] !== LINE) {
       return false;
     }
   }
 
-  return k === lines.length;
+  return k === kinds.length;
 }
 
 /** Whether any of the layers has drawTriangles' textured triangles. */
@@ -114,6 +144,15 @@ function meshed(layers: readonly ShapeLayer[]): boolean {
 export class Art {
   /** Graphics of children taken off, kept for the next content to take (SPARE_GRAPHICS_MOST). */
   private readonly spareGraphics: SharedGraphics[] = [];
+  /**
+   * Meshes of textured triangles taken off, oldest first, and when each
+   * was, kept for the next content to take with their buffers, vertex
+   * arrays and shaders (SPARE_MESHES_MOST, dropMeshes).
+   */
+  private readonly spareMeshes: TriangleView[] = [];
+  private readonly sparedAt: number[] = [];
+  /** The textures of a redraw's meshes, in order, null for one not drawn (draw). */
+  private readonly meshTextures: (Texture | null)[] = [];
   /** What the nodes cleared give back once their new content is drawn (clear, giveBack). */
   private readonly giving = {
     fills: [] as GraphicsContext[],
@@ -179,6 +218,10 @@ export class Art {
   ) {
     this.lines = new StrokeContexts(counts);
     this.saffron = new SaffronView(renderer, !fresh);
+    if (!fresh) {
+      // Their GPU copies went with the context: made again as drawn, they are no better than new.
+      renderer.runners?.contextChange?.add({ contextChange: () => this.dropMeshes() });
+    }
   }
 
   /**
@@ -271,25 +314,34 @@ export class Art {
     // off and put on, they changed the structure of its render group, which Pixi then rebuilt
     // whole, an animated character's every frame its timeline swapped a shape.
     const art = node.art.children;
-    if (keep && art.length > 0 && allShared(art)) {
+    if (keep && art.length > 0 && allKept(art)) {
       const lines = node.lines;
-      node.spare ??= { graphics: [], lines: [] };
+      node.spare ??= { art: [], kinds: [] };
       const spare = node.spare;
-      spare.graphics.length = 0;
-      spare.lines.length = 0;
+      spare.art.length = 0;
+      spare.kinds.length = 0;
       for (let i = 0; i < art.length; i++) {
-        spare.graphics.push(art[i] as SharedGraphics);
-        spare.lines.push(lines.includes(art[i] as SharedGraphics));
+        const child = art[i] as SharedGraphics | TriangleView;
+        spare.art.push(child);
+        spare.kinds.push(
+          child instanceof TriangleView
+            ? MESH
+            : lines.includes(child as SharedGraphics)
+              ? LINE
+              : FILL,
+        );
       }
 
       node.spared = true;
     } else {
       // A text's characters are in a container of their own; their shared
-      // glyph fills stay, not being theirs. A shape's Graphics are kept for
-      // the next content to take.
+      // glyph fills stay, not being theirs. A shape's Graphics and meshes
+      // are kept for the next content to take.
       for (const child of node.art.removeChildren()) {
         if (child instanceof SharedGraphics && !this.fresh) {
           this.recycle(child);
+        } else if (child instanceof TriangleView && !this.fresh) {
+          this.recycleMesh(child);
         } else if (!child.destroyed) {
           child.destroy({ children: true });
         }
@@ -433,12 +485,13 @@ export class Art {
       this.source?.view.leastWidth === this.view.leastWidth
         ? current.strokes
         : null;
-    // The Graphics the last content left, taken in place where it laid out
-    // its fills and lines alike.
-    // Textured triangles are meshes among the Graphics, which a spare's places do not allow for.
+    // The textures of the meshes first, which decide the meshes drawn.
+    const textures = meshed(node.layers) ? this.texturesOf(node.layers) : null;
+    // The Graphics and meshes the last content left, taken in place where it laid out its fills,
+    // meshes and lines alike.
     const spare =
-      node.spared && node.spare && laidOutAs(node.spare.lines, node.layers) && !meshed(node.layers)
-        ? node.spare.graphics
+      node.spared && node.spare && laidOutAs(node.spare.kinds, node.layers, textures)
+        ? node.spare.art
         : null;
     if (!spare) {
       this.dropSpare(node);
@@ -447,6 +500,7 @@ export class Art {
     node.spared = false;
     // A loop, not forEach with closures: a crowd's shapes are drawn again hundreds of times a frame.
     let next = 0;
+    let t = 0;
     node.widest = 0;
     const layers = node.layers;
     for (let i = 0; i < layers.length; i++) {
@@ -457,9 +511,12 @@ export class Art {
 
       this.graphic(node, spare, next++, fills[i]);
       const meshes = layer.meshes;
-      if (meshes) {
+      if (meshes && textures) {
         for (let k = 0; k < meshes.length; k++) {
-          this.drawMesh(node, meshes[k]);
+          const texture = textures[t++];
+          if (texture) {
+            this.drawMesh(node, spare, next++, meshes[k], texture);
+          }
         }
       }
 
@@ -481,15 +538,58 @@ export class Art {
     this.restroke(node);
   }
 
-  /** Textured triangles, after what the node draws so far; none where the renderer is not WebGL's. */
-  private drawMesh(node: Node, mesh: TriangleMesh): void {
+  /**
+   * The texture each of the layers' meshes is drawn with, in order: null
+   * for one of no triangles, or where the renderer is not WebGL's.
+   */
+  private texturesOf(layers: readonly ShapeLayer[]): (Texture | null)[] {
+    const textures = this.meshTextures;
+    textures.length = 0;
     const bitmaps = gpuBitmaps(this.renderer);
-    const texture = this.renderer.type === RendererType.WEBGL ? bitmaps.texture(mesh.image) : null;
-    if (texture && mesh.positions.length) {
-      const view = new TriangleView(mesh, texture, this.view.flashPixel, this.meshes);
-      view.smoothing = bitmaps.smoothing;
+    const gl = this.renderer.type === RendererType.WEBGL;
+    for (let i = 0; i < layers.length; i++) {
+      const meshes = layers[i].meshes;
+      if (meshes) {
+        for (let k = 0; k < meshes.length; k++) {
+          const mesh = meshes[k];
+          textures.push(gl && mesh.positions.length ? bitmaps.texture(mesh.image) : null);
+        }
+      }
+    }
+
+    return textures;
+  }
+
+  /**
+   * Textured triangles, after what the node draws so far: the `k`th mesh
+   * the last content left, in place, or one kept or made, put on.
+   */
+  private drawMesh(
+    node: Node,
+    spare: (SharedGraphics | TriangleView)[] | null,
+    k: number,
+    mesh: TriangleMesh,
+    texture: Texture,
+  ): void {
+    const pixel = this.view.flashPixel;
+    let view: TriangleView;
+    if (spare) {
+      view = spare[k] as TriangleView;
+      view.draw(mesh, texture, pixel);
+    } else {
+      const kept = this.spareMeshes.pop();
+      this.sparedAt.pop();
+      if (kept) {
+        kept.draw(mesh, texture, pixel);
+        view = kept;
+      } else {
+        view = new TriangleView(mesh, texture, pixel, this.meshes);
+      }
+
       node.art.addChild(view);
     }
+
+    view.smoothing = gpuBitmaps(this.renderer).smoothing;
   }
 
   /** The fills of `layers`, built: a fresh view's to destroy with the rest. */
@@ -521,7 +621,7 @@ export class Art {
    */
   private graphic(
     node: Node,
-    spare: SharedGraphics[] | null,
+    spare: (SharedGraphics | TriangleView)[] | null,
     k: number,
     context: GraphicsContext | undefined,
   ): SharedGraphics {
@@ -532,7 +632,7 @@ export class Art {
       return made;
     }
 
-    const kept = spare[k];
+    const kept = spare[k] as SharedGraphics;
     // A line's shows none till restroke gives it its own, and gives back the old.
     kept.swap(context ?? NO_LINES);
     return kept;
@@ -561,18 +661,54 @@ export class Art {
     }
 
     node.spared = false;
-    for (let i = 0; i < spare.graphics.length; i++) {
-      const graphic = spare.graphics[i];
-      graphic.parent?.removeChild(graphic);
+    for (let i = 0; i < spare.art.length; i++) {
+      const leaf = spare.art[i];
+      leaf.parent?.removeChild(leaf);
       if (this.fresh) {
-        graphic.destroy();
+        leaf.destroy();
+      } else if (leaf instanceof TriangleView) {
+        this.recycleMesh(leaf);
       } else {
-        this.recycle(graphic);
+        this.recycle(leaf);
       }
     }
 
-    spare.graphics.length = 0;
-    spare.lines.length = 0;
+    spare.art.length = 0;
+    spare.kinds.length = 0;
+  }
+
+  /** Keep a mesh taken off for the next content to take, or destroy it past the most kept. */
+  private recycleMesh(view: TriangleView): void {
+    if (view.destroyed) {
+      return;
+    }
+
+    if (this.spareMeshes.length >= SPARE_MESHES_MOST) {
+      view.destroy();
+      return;
+    }
+
+    view.park();
+    this.spareMeshes.push(view);
+    this.sparedAt.push(performance.now());
+  }
+
+  /**
+   * Destroy the meshes kept that no content took since `before`, or all:
+   * as the renderer's context is lost, which took their GPU copies, or the
+   * view goes.
+   */
+  dropMeshes(before = Number.POSITIVE_INFINITY): void {
+    const spare = this.spareMeshes;
+    let n = 0;
+    while (n < spare.length && this.sparedAt[n] < before) {
+      spare[n++].destroy();
+    }
+
+    if (n > 0) {
+      spare.splice(0, n);
+      this.sparedAt.splice(0, n);
+    }
   }
 
   /**

@@ -10,7 +10,16 @@
 // texture's sampling, and every sample of a pixel the page draws finer to
 // average down takes the pixel's value.
 import type { ColorTransform } from "@swf2es/format";
-import { GlProgram, Mesh, MeshGeometry, Shader, type Texture, UniformGroup } from "pixi.js";
+import {
+  Buffer,
+  BufferUsage,
+  Geometry,
+  GlProgram,
+  Mesh,
+  Shader,
+  type Texture,
+  UniformGroup,
+} from "pixi.js";
 import type { TriangleMesh } from "../display/shapes.js";
 
 const vertex = `#version 300 es
@@ -97,42 +106,68 @@ void main(void) {
 `;
 
 let program: GlProgram | null = null;
-let ascending = new Uint32Array(0);
+/** Indices 0 up, the vertices drawn as they are: one buffer, of which each view draws a start. */
+let ascending: Buffer | null = null;
 
 /**
- * Indices 0 to `count` in order, the vertices drawn as they are: views of
- * one array, which only ever grows, as no buffer writes to its data.
+ * The indices, `count` long at least: grown in place, never shrunk, so
+ * that the views' vertex arrays keep the buffer as it grows.
  */
-function inOrder(count: number): Uint32Array {
-  if (ascending.length < count) {
-    ascending = new Uint32Array(Math.max(count, ascending.length * 2));
-    for (let i = 0; i < ascending.length; i++) {
-      ascending[i] = i;
-    }
+function inOrder(count: number): Buffer {
+  const length = ascending?.data.length ?? 0;
+  if (ascending && length >= count) {
+    return ascending;
   }
 
-  return ascending.subarray(0, count);
+  const data = new Uint32Array(Math.max(count, length * 2, 1024));
+  for (let i = 0; i < data.length; i++) {
+    data[i] = i;
+  }
+
+  if (ascending) {
+    ascending.data = data;
+  } else {
+    ascending = new Buffer({ data, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
+  }
+
+  return ascending;
+}
+
+/** A buffer of a view's vertices, written over as it draws again, grown only past its size. */
+function vertexBuffer(data: Float32Array): Buffer {
+  return new Buffer({ data, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST, shrinkToFit: false });
 }
 
 /**
  * A drawing's textured triangles: a mesh of their vertices under its own
- * shader, one draw. It destroys its geometry, buffers and all, and its
- * shader with itself, and leaves the texture, its store's.
+ * shader, one draw. A redraw gives it new triangles (draw) and keeps its
+ * buffers, vertex array, shader and uniforms, as a 3D engine draws anew
+ * every frame. It destroys its geometry, its own buffers and its shader
+ * with itself, and leaves the texture, its store's, and the indices,
+ * which all share.
  */
-export class TriangleView extends Mesh<MeshGeometry, Shader> {
+export class TriangleView extends Mesh<Geometry, Shader> {
   /** What it draws, the drawing's. */
-  readonly source: TriangleMesh;
+  source: TriangleMesh;
   private readonly uniforms: UniformGroup;
-  /** The views it is listed in while it lives. */
+  private readonly positions: Buffer;
+  private readonly uvt: Buffer;
+  /** The views it is listed in while it draws (park). */
   private readonly owner: Set<TriangleView>;
   private flash: ColorTransform | null;
 
   constructor(source: TriangleMesh, texture: Texture, pixel: number, owner: Set<TriangleView>) {
-    const geometry = new MeshGeometry({
-      positions: source.positions,
-      indices: inOrder(source.positions.length / 2),
+    const count = source.positions.length / 2;
+    const positions = vertexBuffer(source.positions);
+    const uvt = vertexBuffer(source.uvt);
+    const geometry = new Geometry({
+      attributes: {
+        aPosition: { buffer: positions, format: "float32x2" },
+        aUVT: { buffer: uvt, format: "float32x3" },
+      },
+      indexBuffer: inOrder(count),
+      indexCount: count,
     });
-    geometry.addAttribute("aUVT", { buffer: source.uvt, format: "float32x3" });
     program ??= new GlProgram({ vertex, fragment, name: "flash-triangles" });
     const uniforms = new UniformGroup({
       uSize: { value: new Float32Array([1, 1]), type: "vec2<f32>" },
@@ -150,10 +185,37 @@ export class TriangleView extends Mesh<MeshGeometry, Shader> {
     super({ geometry, shader });
     this.source = source;
     this.uniforms = uniforms;
+    this.positions = positions;
+    this.uvt = uvt;
     this.owner = owner;
     this.flash = null;
     this.show(texture);
     owner.add(this);
+  }
+
+  /** Draw `source` in place of what it drew, its vertices into the same buffers. */
+  draw(source: TriangleMesh, texture: Texture, pixel: number): void {
+    const count = source.positions.length / 2;
+    // Grown first, so that no draw reads past its indices.
+    inOrder(count);
+    this.geometry.indexCount = count;
+    this.positions.data = source.positions;
+    this.uvt.data = source.uvt;
+    this.source = source;
+    this.visible = true;
+    const mode = this.uniforms.uniforms.uMode as Float32Array;
+    mode[0] = source.repeat ? 1 : 0;
+    mode[1] = source.smooth ? 1 : 0;
+    mode[2] = pixel;
+    this.show(texture);
+    this.owner.add(this);
+  }
+
+  /** Off the view's list, kept for a redraw to take: uncoloured and shown, as a new one is. */
+  park(): void {
+    this.owner.delete(this);
+    this.flashColor = null;
+    this.visible = true;
   }
 
   /** The store's texture as it now is. */
@@ -208,8 +270,11 @@ export class TriangleView extends Mesh<MeshGeometry, Shader> {
     const shader = this.shader as Shader;
     this.owner.delete(this);
     super.destroy();
-    // Its buffers too: the renderer holds a buffer, and its data, till the buffer goes.
-    geometry.destroy(true);
+    // Its own buffers too, not the shared indices: the renderer holds a buffer, and its data, till
+    // the buffer goes.
+    geometry.destroy();
+    this.positions.destroy();
+    this.uvt.destroy();
     shader.destroy();
   }
 }

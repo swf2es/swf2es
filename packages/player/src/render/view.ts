@@ -256,6 +256,7 @@ export class PixiView {
   dropSpares(): void {
     this.spares.clear();
     this.art.lines.unloaded();
+    this.art.dropMeshes();
   }
 
   /**
@@ -1264,6 +1265,7 @@ export class PixiView {
 
     trimPools();
     trimBatchers(this.renderer, now);
+    this.art.dropMeshes(now - IDLE_MS);
     const pixel = this.flashPixel;
     // Flash's pixels to a unit of the world, whose units are the renderer's resolution in pixels.
     this.art.saffron.unit = this.fresh ? 1 / this.samples : (this.renderer.resolution ?? 1) / pixel;
