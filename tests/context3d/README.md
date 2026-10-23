@@ -15,6 +15,12 @@ node tests/context3d/host.ts
 node tests/context3d/stress.ts --loads 200
 ```
 
+`page.ts` retains the browser runners' exports and routes them to `checks/`.
+Those modules group playback, composition, resource limits/lifetime, targets,
+uploads, samplers, state and multisampling checks. `checks/context.ts` supplies
+the shared assertions, shader fixture and tracked WebGL context; it does not
+own a running test's resources.
+
 `reference.json` is the trace from the same AS3 source in AIR, using direct
 render mode. To check it with an installed AIR SDK:
 
@@ -767,6 +773,12 @@ separate experimental `@swf2es/player/context3d` entry. `installContext3D` runs
 before loading playerglobal and returns teardown to call before destroying
 Scripting. The default player entry never imports or installs it; ordinary
 playback retains the ErrorEvent #3702 fallback.
+
+The native entry registers Stage3D and delegates to `playerglobal/context3d/`:
+`lifecycle.ts` owns context creation, recovery and resource reclamation;
+`context.ts` registers Context3D commands; `resources.ts` registers buffer,
+program and texture commands. They share one installation's ownership maps and
+capture their helpers during registration, without rebuilding them for draws.
 
 `@swf2es/player-hosts/stage3d` owns canvas placement and loss/restoration wiring.
 `stage3DCanvasHost` takes a surface factory and a caller-supplied clipped parent;
