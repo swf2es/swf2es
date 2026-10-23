@@ -2034,8 +2034,12 @@ export class MethodEmitter {
         this.globalScope();
         return true;
       case ops.OP_finddef:
+        // The name keeps its script's global object once found, so a static
+        // read in a loop costs a load and no call.
         this.assign(i);
-        out.text("rt.findDef(M[");
+        out.text("M[");
+        out.uint(a);
+        out.text("].global ?? rt.findDef(M[");
         out.uint(a);
         out.text("])");
         return true;
@@ -2043,6 +2047,9 @@ export class MethodEmitter {
       case IR_FindPropGlobalStrict:
         this.assign(i);
         // Not found statically: a script's name, or else the global object's.
+        out.text("M[");
+        out.uint(a);
+        out.text("].global ?? ");
         out.text(op === IR_FindPropGlobalStrict ? "rt.findGlobalStrict(M[" : "rt.findGlobal(M[");
         out.uint(a);
         out.text("], ");
