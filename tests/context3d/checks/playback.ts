@@ -166,6 +166,7 @@ export async function lifecycle(cancel: boolean) {
 
 export async function shaderFixture(
   fixture:
+    | "AGALValidation"
     | "Arithmetic"
     | "Texturing"
     | "Depth"

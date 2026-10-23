@@ -20,6 +20,7 @@ import {
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
+import { Context3DError } from "../errors.js";
 
 import {
   type BufferState,
@@ -115,7 +116,7 @@ export class WebGLContext3D implements Context3D {
     this.gl = gl;
     const vao = gl.createVertexArray();
     if (!vao) {
-      throw new Error("Context3D experiment: cannot create vertex array");
+      throw new Context3DError("operation", "Context3D experiment: cannot create vertex array");
     }
 
     this.vao = vao;
@@ -138,14 +139,17 @@ export class WebGLContext3D implements Context3D {
 
   private alive(): void {
     if (this.disposed || this.gl.isContextLost()) {
-      throw new Error("Context3D experiment: context disposed or lost");
+      throw new Context3DError("disposed", "Context3D experiment: context disposed or lost");
     }
   }
 
   private target(back = false, discardColor = false): void {
     this.alive();
     if (!this.framebuffer) {
-      throw new Error("Context3D experiment: configure the back buffer first");
+      throw new Context3DError(
+        "backBuffer",
+        "Context3D experiment: configure the back buffer first",
+      );
     }
 
     const texture = back ? null : this.renderTexture;
@@ -169,7 +173,10 @@ export class WebGLContext3D implements Context3D {
     range(32, width - 32, 2048);
     range(32, height - 32, 2048);
     if (this.renderTexture) {
-      throw new Error("Context3D experiment: resize while rendering to texture");
+      throw new Context3DError(
+        "operation",
+        "Context3D experiment: resize while rendering to texture",
+      );
     }
 
     // AIR preserves color, depth and bindings when the request is unchanged.
@@ -198,7 +205,7 @@ export class WebGLContext3D implements Context3D {
         (depth && !depthBuffer) ||
         (samples && (!resolveFramebuffer || !colorBuffer))
       ) {
-        throw new Error("Context3D experiment: cannot allocate back buffer");
+        throw new Context3DError("operation", "Context3D experiment: cannot allocate back buffer");
       }
 
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -209,7 +216,7 @@ export class WebGLContext3D implements Context3D {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
       if (resolveFramebuffer) {
         if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-          throw new Error("Context3D experiment: incomplete resolve buffer");
+          throw new Context3DError("operation", "Context3D experiment: incomplete resolve buffer");
         }
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -244,7 +251,7 @@ export class WebGLContext3D implements Context3D {
       }
       gl.bindRenderbuffer(gl.RENDERBUFFER, null);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error("Context3D experiment: incomplete back buffer");
+        throw new Context3DError("operation", "Context3D experiment: incomplete back buffer");
       }
     } catch (error) {
       gl.deleteTexture(texture);
@@ -458,7 +465,7 @@ export class WebGLContext3D implements Context3D {
         !Number.isFinite(width) ||
         !Number.isFinite(height))
     ) {
-      throw new Error("Context3D experiment: non-finite scissor rectangle");
+      throw new Context3DError("operation", "Context3D experiment: non-finite scissor rectangle");
     }
 
     this.scissor = x !== null;
@@ -538,18 +545,18 @@ export class WebGLContext3D implements Context3D {
     range(1, count - 1, stride === 0 ? 524287 : 65535);
     range(0, stride, 64);
     if (this.buffers.size >= this.limits.maxBuffers) {
-      throw new Error("Context3D experiment: buffer limit");
+      throw new Context3DError("limit", "Context3D experiment: buffer limit");
     }
 
     const bytes = count * (stride === 0 ? 2 : stride * 4);
     if (this.bufferBytes + bytes > this.limits.maxBufferBytes) {
-      throw new Error("Context3D experiment: buffer memory limit");
+      throw new Context3DError("limit", "Context3D experiment: buffer memory limit");
     }
 
     const gl = this.gl;
     const handle = gl.createBuffer();
     if (!handle) {
-      throw new Error("Context3D experiment: cannot allocate buffer");
+      throw new Context3DError("bufferAllocation", "Context3D experiment: cannot allocate buffer");
     }
 
     const target = stride === 0 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
@@ -598,7 +605,10 @@ export class WebGLContext3D implements Context3D {
   private buffer(buffer: Buffer3D): BufferState {
     const state = this.buffers.get(buffer);
     if (!state) {
-      throw new Error("Context3D experiment: buffer disposed or from another context");
+      throw new Context3DError(
+        "disposed",
+        "Context3D experiment: buffer disposed or from another context",
+      );
     }
 
     return state;
@@ -607,7 +617,7 @@ export class WebGLContext3D implements Context3D {
   createProgram(): Program3D {
     this.alive();
     if (this.programs.size >= this.limits.maxPrograms) {
-      throw new Error("Context3D experiment: program limit");
+      throw new Context3DError("limit", "Context3D experiment: program limit");
     }
 
     const state: ProgramState = {
@@ -661,7 +671,10 @@ export class WebGLContext3D implements Context3D {
   private program(program: Program3D): ProgramState {
     const state = this.programs.get(program);
     if (!state) {
-      throw new Error("Context3D experiment: program disposed or from another context");
+      throw new Context3DError(
+        "disposed",
+        "Context3D experiment: program disposed or from another context",
+      );
     }
 
     return state;
@@ -684,8 +697,11 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     range(1, width - 1, 2048);
     range(1, height - 1, 2048);
-    if (cube && (width !== height || width > 1024)) {
-      throw new Error("Context3D experiment: cube faces must be square and at most 1024");
+    if (cube && width !== height) {
+      throw new Context3DError("textureShape", "Context3D cube faces must be square");
+    }
+    if (cube && width > 1024) {
+      throw new Context3DError("textureSize", "Context3D cube faces must be at most 1024");
     }
 
     const faces = cube ? 6 : 1;
@@ -694,19 +710,25 @@ export class WebGLContext3D implements Context3D {
     for (let level = 0; level < levels; level++) {
       size += Math.max(1, width >> level) * Math.max(1, height >> level) * 4 * faces;
     }
+    if (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) {
+      throw new Context3DError(
+        "texturePowerOfTwo",
+        "Context3D texture size must be a power of two",
+      );
+    }
+
     if (
-      (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) ||
       this.textures.size >= this.limits.maxTextures ||
       this.textureBytes + size > this.limits.maxTextureBytes
     ) {
-      throw new Error("Context3D experiment: texture size or memory limit");
+      throw new Context3DError("limit", "Context3D experiment: texture count or memory limit");
     }
 
     const bytes = new Uint8Array(width * height * 4);
     const gl = this.gl;
     const handle = gl.createTexture();
     if (!handle) {
-      throw new Error("Context3D experiment: cannot create texture");
+      throw new Context3DError("textureAllocation", "Context3D experiment: cannot create texture");
     }
 
     gl.activeTexture(gl.TEXTURE0);
@@ -794,7 +816,10 @@ export class WebGLContext3D implements Context3D {
   private textureState(texture: Texture3D): TextureState {
     const state = this.textures.get(texture);
     if (!state) {
-      throw new Error("Context3D experiment: texture disposed or from another context");
+      throw new Context3DError(
+        "disposed",
+        "Context3D experiment: texture disposed or from another context",
+      );
     }
 
     return state;
@@ -862,7 +887,7 @@ export class WebGLContext3D implements Context3D {
 
   private multisamples(quality: number, depth: boolean): number {
     if (!Number.isInteger(quality)) {
-      throw new Error("Context3D experiment: invalid antialiasing quality");
+      throw new Context3DError("operation", "Context3D experiment: invalid antialiasing quality");
     }
 
     const key = Math.max(0, Math.min(quality, 4)) * 2 + Number(depth);
@@ -901,7 +926,7 @@ export class WebGLContext3D implements Context3D {
       this.targetDepthBytes + (newDepth ? bytes : 0) - (!same && old?.depth ? previous : 0) >
         this.limits.maxTargetDepthBytes
     ) {
-      throw new Error("Context3D experiment: multisample target memory limit");
+      throw new Context3DError("limit", "Context3D experiment: multisample target memory limit");
     }
 
     this.copyProgram(texture.cube);
@@ -950,7 +975,10 @@ export class WebGLContext3D implements Context3D {
     if (texture) {
       this.textureState(texture);
       if (texture.width < 8 || texture.height < 8) {
-        throw new Error("Context3D experiment: render targets must be at least 8 by 8");
+        throw new Context3DError(
+          "operation",
+          "Context3D experiment: render targets must be at least 8 by 8",
+        );
       }
     }
     const samples = texture ? this.multisamples(antiAlias, depth) : 0;
@@ -965,12 +993,18 @@ export class WebGLContext3D implements Context3D {
       try {
         framebuffer ??= gl.createFramebuffer();
         if (!framebuffer) {
-          throw new Error("Context3D experiment: cannot create texture framebuffer");
+          throw new Context3DError(
+            "operation",
+            "Context3D experiment: cannot create texture framebuffer",
+          );
         }
         if (texture.cube && !mipFramebuffer) {
           mipFramebuffer = gl.createFramebuffer();
           if (!mipFramebuffer) {
-            throw new Error("Context3D experiment: cannot create cube mip framebuffer");
+            throw new Context3DError(
+              "operation",
+              "Context3D experiment: cannot create cube mip framebuffer",
+            );
           }
         }
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -986,11 +1020,14 @@ export class WebGLContext3D implements Context3D {
             this.targetDepthBytes + texture.width * texture.height * 4 >
             this.limits.maxTargetDepthBytes
           ) {
-            throw new Error("Context3D experiment: target depth memory limit");
+            throw new Context3DError("limit", "Context3D experiment: target depth memory limit");
           }
           depthBuffer = gl.createRenderbuffer();
           if (!depthBuffer) {
-            throw new Error("Context3D experiment: cannot create texture depth buffer");
+            throw new Context3DError(
+              "operation",
+              "Context3D experiment: cannot create texture depth buffer",
+            );
           }
           gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
           gl.renderbufferStorage(
@@ -1010,7 +1047,10 @@ export class WebGLContext3D implements Context3D {
           (!state.framebuffer || (singleDepth && !state.depthBuffer)) &&
           gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
         ) {
-          throw new Error("Context3D experiment: incomplete texture framebuffer");
+          throw new Context3DError(
+            "operation",
+            "Context3D experiment: incomplete texture framebuffer",
+          );
         }
         if (samples) {
           this.prepareMultisample(texture, state, samples, depth);
@@ -1185,7 +1225,7 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     range(index, 1, 8);
     if (texture && !this.textureOwners.has(texture)) {
-      throw new Error("Context3D experiment: texture from another context");
+      throw new Context3DError("disposed", "Context3D experiment: texture from another context");
     }
 
     // AIR accepts a disposed texture binding and reports 3663 when drawing.
@@ -1206,7 +1246,7 @@ export class WebGLContext3D implements Context3D {
     const f = SAMPLER_FILTERS.indexOf(filter);
     const m = SAMPLER_MIPS.indexOf(mip);
     if (w < 0 || f < 0 || m < 0) {
-      throw new Error("Context3D experiment: invalid sampler state");
+      throw new Context3DError("operation", "Context3D experiment: invalid sampler state");
     }
 
     this.samplerStates[index] = w | (f << 2) | (m << 5);
@@ -1218,7 +1258,7 @@ export class WebGLContext3D implements Context3D {
       const gl = this.gl;
       sampler = gl.createSampler();
       if (!sampler) {
-        throw new Error("Context3D experiment: cannot create sampler");
+        throw new Context3DError("operation", "Context3D experiment: cannot create sampler");
       }
 
       const mode = (index >>> 2) & 7;
@@ -1268,7 +1308,7 @@ export class WebGLContext3D implements Context3D {
     this.alive();
     const state = this.program(program);
     if (!state.handle) {
-      throw new Error("Context3D experiment: program not uploaded");
+      throw new Context3DError("program", "Context3D experiment: program not uploaded");
     }
 
     this.selected = program;
@@ -1294,7 +1334,10 @@ export class WebGLContext3D implements Context3D {
     const size = packed ? 4 : VERTEX_FORMATS.indexOf(format) + 1;
     range(1, size - 1, 4);
     if (!Number.isInteger(offset)) {
-      throw new Error("Context3D experiment: vertex offset must be an integer");
+      throw new Context3DError(
+        "operation",
+        "Context3D experiment: vertex offset must be an integer",
+      );
     }
 
     // AIR reports stride overruns at draw time, including on an existing binding.
@@ -1328,8 +1371,11 @@ export class WebGLContext3D implements Context3D {
     }
 
     const index = this.buffer(indices);
-    if (!index.indices || !this.selected) {
-      throw new Error("Context3D experiment: draw needs indices and a program");
+    if (!index.indices) {
+      throw new Context3DError("indexBuffer", "Context3D draw needs an index buffer");
+    }
+    if (!this.selected) {
+      throw new Context3DError("program", "Context3D draw needs a program");
     }
 
     const state = this.program(this.selected);
@@ -1351,15 +1397,20 @@ export class WebGLContext3D implements Context3D {
       }
     }
 
-    const count = triangles === -1 ? indices.count - first : triangles * 3;
-    range(first, count, indices.count);
+    const count = triangles === -1 ? Math.floor((indices.count - first) / 3) * 3 : triangles * 3;
+    if (!Number.isInteger(first) || !Number.isInteger(count) || first < 0 || count < 0) {
+      throw new Context3DError("triangleCount", "Context3D draw has invalid triangle parameters");
+    }
+    if (first > indices.count - count) {
+      throw new Context3DError("drawRange", "Context3D draw exceeds its index buffer");
+    }
     if (count % 3 !== 0) {
-      throw new Error("Context3D experiment: incomplete triangle");
+      throw new Context3DError("triangleCount", "Context3D experiment: incomplete triangle");
     }
 
     for (let i = first; i < first + count; i++) {
       if (!index.uploaded[i]) {
-        throw new Error("Context3D experiment: index not uploaded");
+        throw new Context3DError("indexData", "Context3D index not uploaded");
       }
     }
 
@@ -1373,7 +1424,7 @@ export class WebGLContext3D implements Context3D {
       const slot = state.attributes[i];
       const binding = this.vertices[slot];
       if (!binding) {
-        throw new Error("Context3D experiment: missing vertex binding");
+        throw new Context3DError("vertexBinding", "Context3D experiment: missing vertex binding");
       }
 
       const buffer = this.buffer(binding.buffer);
@@ -1382,8 +1433,11 @@ export class WebGLContext3D implements Context3D {
       }
 
       for (let j = first; j < first + count; j++) {
+        if (index.indices[j] >= buffer.uploaded.length) {
+          throw new Context3DError("vertexData", "Context3D vertex outside its buffer");
+        }
         if (!buffer.uploaded[index.indices[j]]) {
-          throw new Error("Context3D experiment: vertex not uploaded or out of range");
+          throw new Context3DError("vertexStream", "Context3D vertex not uploaded");
         }
       }
 

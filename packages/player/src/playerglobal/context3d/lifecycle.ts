@@ -1,4 +1,11 @@
-import type { Buffer3D, Context3D, Program3D, Stage3DHost, Texture3D } from "@swf2es/context3d";
+import {
+  type Buffer3D,
+  type Context3D,
+  Context3DError,
+  type Program3D,
+  type Stage3DHost,
+  type Texture3D,
+} from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent } from "../../scripting/events.js";
 import type { Scripting } from "../../scripting.js";
@@ -32,7 +39,7 @@ export interface ContextState {
 }
 
 export function unsupported(): never {
-  throw new Error("Unsupported operation in Context3D triangle experiment");
+  throw new Context3DError("unsupported", "Unsupported operation in Context3D triangle experiment");
 }
 
 export function createBindings(s: Scripting, host: Stage3DHost) {
@@ -158,6 +165,10 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   };
   const context = (o: AsObject): Context3D => state(o).backend;
   const requireClear = (entry: ContextState): void => {
+    if (!entry.backend.width || !entry.backend.height) {
+      throw s.rt.error("Error", 3698);
+    }
+
     const target = entry.target;
     const required = entry.depth ? 7 : 1;
     if (target ? !target.initialized : (entry.cleared & required) !== required) {

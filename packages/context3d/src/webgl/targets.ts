@@ -1,4 +1,5 @@
 import type { Texture3D } from "../backend.js";
+import { Context3DError } from "../errors.js";
 import type { TextureState } from "./textures.js";
 
 export interface MultisampleTarget {
@@ -16,7 +17,7 @@ export interface MultisampleTarget {
 
 export function selectSamples(gl: WebGL2RenderingContext, quality: number, depth: boolean): number {
   if (!Number.isInteger(quality)) {
-    throw new Error("Context3D experiment: invalid antialiasing quality");
+    throw new Context3DError("operation", "Context3D experiment: invalid antialiasing quality");
   }
   if (quality < 2) {
     return 0;
@@ -116,7 +117,10 @@ export function allocateMultisample(
   const resolved = same ? old.texture : texture.cube ? gl.createTexture() : null;
   try {
     if (texture.cube && (!resolve || !resolved)) {
-      throw new Error("Context3D experiment: cannot allocate cube resolve target");
+      throw new Context3DError(
+        "operation",
+        "Context3D experiment: cannot allocate cube resolve target",
+      );
     }
     if (texture.cube && !same) {
       gl.activeTexture(gl.TEXTURE0);
@@ -125,11 +129,17 @@ export function allocateMultisample(
       gl.bindFramebuffer(gl.FRAMEBUFFER, resolve);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resolved, 0);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error("Context3D experiment: incomplete cube resolve target");
+        throw new Context3DError(
+          "operation",
+          "Context3D experiment: incomplete cube resolve target",
+        );
       }
     }
     if (!framebuffer || !color || (newDepth && !depthBuffer)) {
-      throw new Error("Context3D experiment: cannot allocate multisample target");
+      throw new Context3DError(
+        "operation",
+        "Context3D experiment: cannot allocate multisample target",
+      );
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -164,7 +174,7 @@ export function allocateMultisample(
       (!same || newDepth) &&
       gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
     ) {
-      throw new Error("Context3D experiment: incomplete multisample target");
+      throw new Context3DError("operation", "Context3D experiment: incomplete multisample target");
     }
   } catch (error) {
     if (!same) {

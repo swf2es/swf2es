@@ -8,6 +8,7 @@ import { fixtureSource } from "./fixtures.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
   [
+    "AGALValidation",
     "FrameValidation",
     "FrameValidationFlat",
     "Reconfigure",

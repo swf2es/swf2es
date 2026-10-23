@@ -4,6 +4,7 @@ import type { Stage3DHost } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 import { registerContext } from "./context3d/context.js";
+import { translateErrors } from "./context3d/errors.js";
 import { type AsObject, createBindings, unsupported } from "./context3d/lifecycle.js";
 import { registerResources } from "./context3d/resources.js";
 
@@ -53,6 +54,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
     };
   }
 
+  translateErrors(natives, s);
   Object.assign(s.rt.natives, natives);
 
   return bindings.close;
