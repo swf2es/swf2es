@@ -110,21 +110,34 @@ async function check(): Promise<void> {
         [
           "its service worker makes the page cross-origin isolated, as Pages sends no headers",
           async () => {
-            // The first visit loads the page again once the worker serves it.
-            let isolated = false;
-            for (const start = Date.now(); !isolated && Date.now() - start < 30_000; ) {
-              isolated =
-                (
-                  await evaluate<boolean>(
-                    "crossOriginIsolated && !!navigator.serviceWorker.controller",
-                  )
-                ).value === true;
-              await new Promise((done) => setTimeout(done, 100));
-            }
+            // Until the page is isolated, through the reloads that make it so; how long it took.
+            const isolation = async (ms: number) => {
+              const start = Date.now();
+              for (let isolated = false; !isolated; ) {
+                assert.ok(Date.now() - start < ms, "the page is not cross-origin isolated");
+                await new Promise((done) => setTimeout(done, 100));
+                isolated =
+                  (
+                    await evaluate<boolean>(
+                      "crossOriginIsolated && !!navigator.serviceWorker.controller",
+                    )
+                  ).value === true;
+              }
 
-            assert.ok(isolated, "the page is not cross-origin isolated");
+              return Date.now() - start;
+            };
+            // The first visit loads the page again once the worker serves it.
+            await isolation(30_000);
             await navigate("index.html");
             assert.equal(await value<boolean>("crossOriginIsolated"), true);
+            // A reload that bypasses the worker, as Shift-reload does, loads the page again at
+            // once, not after the first visit's wait for the worker to claim it.
+            await send("Page.reload", { ignoreCache: true });
+            const took = await isolation(10_000);
+            assert.ok(took < 3000, `isolated again after ${took} ms`);
+            await until(
+              "document.readyState === 'complete' && !!customElements.get('swf2es-player')",
+            );
           },
         ],
         [
