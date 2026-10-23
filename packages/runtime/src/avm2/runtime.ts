@@ -426,9 +426,12 @@ export class Runtime {
       traits.isGlobal = true;
       traits.describe(script.desc.traits);
       const g = traits.instance();
-      const scope = Object.assign([g], { w: 0 });
+      // As the script's initializer, its methods run in an empty scope chain,
+      // as avmplus' script traits' declaring scope is, and as the compiler
+      // indexes the scopes their closures capture: the global object is
+      // only what they push.
       for (const [d, factory, id] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = withId(factory(scope, null), id);
+        traits.proto[methodKey(d)] = withId(factory(this.empty, null), id);
       }
 
       // Caches keep the methods.
