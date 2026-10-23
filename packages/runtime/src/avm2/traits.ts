@@ -353,11 +353,23 @@ export class Traits {
     }
   }
 
+  /**
+   * The interfaces of this class and its bases, once none of them has one
+   * pending: from then on what isSubtypeOf answers no more changes, and
+   * a class that is not t answers by this alone, as `is` on a 3D
+   * engine's scene nodes asks every frame.
+   */
+  private allInterfaces: Set<Traits> | null = null;
+
   isSubtypeOf(t: Traits): boolean {
     for (let c: Traits | null = this; c; c = c.base) {
       if (c === t) {
         return true;
       }
+    }
+
+    if (this.allInterfaces !== null) {
+      return this.allInterfaces.has(t);
     }
 
     if (this.interfaces.has(t)) {
@@ -366,13 +378,23 @@ export class Traits {
 
     // An interface a base settled after this class copied its interfaces.
     this.settleInterfaces();
+    let settled = true;
+    const all = new Set<Traits>();
     for (let c: Traits | null = this; c; c = c.base) {
-      if (c.interfaces.has(t)) {
-        return true;
+      if (c.pendingInterfaces) {
+        settled = false;
+      }
+
+      for (const i of c.interfaces) {
+        all.add(i);
       }
     }
 
-    return false;
+    if (settled) {
+      this.allInterfaces = all;
+    }
+
+    return all.has(t);
   }
 }
 

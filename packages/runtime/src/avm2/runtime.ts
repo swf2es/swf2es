@@ -2106,12 +2106,15 @@ export class Runtime {
         return typeof v === "string";
       case "Boolean":
         return typeof v === "boolean";
-      default:
+      default: {
         if (v === null || v === undefined) {
           return false;
         }
 
-        return this.traitsOf(v).isSubtypeOf(traits);
+        // An object's own traits, mostly: traitsOf's instanceof checks walk its prototypes.
+        const own: Traits | undefined = v.$traits;
+        return (own ?? this.traitsOf(v)).isSubtypeOf(traits);
+      }
     }
   }
 
