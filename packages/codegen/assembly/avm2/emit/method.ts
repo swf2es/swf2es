@@ -18,6 +18,7 @@ import {
   IR_CallSetter,
   IR_CheckNull,
   IR_Coerce,
+  IR_ConstructSlot,
   IR_FindPropGlobal,
   IR_FindPropGlobalStrict,
   IR_GetGlobalScope,
@@ -361,6 +362,7 @@ export class MethodEmitter {
       case ops.OP_callproplex:
       case ops.OP_callpropvoid:
       case ops.OP_constructprop:
+      case IR_ConstructSlot:
       case ops.OP_construct:
       case ops.OP_newfunction:
       case ops.OP_newclass:
@@ -2325,6 +2327,15 @@ export class MethodEmitter {
         this.args(src + 1, a);
         out.text(")");
         return true;
+      case IR_ConstructSlot:
+        this.assign(i);
+        out.text("rt.construct(");
+        this.member(src);
+        out.text(".$");
+        out.uint(a);
+        this.args(src + 1, ir.b[i]);
+        out.text(")");
+        return true;
       case ops.OP_call:
         this.assign(i);
         out.text("rt.call(");
@@ -2809,6 +2820,7 @@ function readsFirst(op: u16): bool {
     case ops.OP_callproplex:
     case ops.OP_callpropvoid:
     case ops.OP_constructprop:
+    case IR_ConstructSlot:
     case ops.OP_callsuper:
     case ops.OP_callsupervoid:
     case ops.OP_getsuper:

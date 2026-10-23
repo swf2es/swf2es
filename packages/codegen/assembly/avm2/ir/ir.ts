@@ -61,6 +61,12 @@ export const IR_FindPropGlobalStrict: u16 = 0x106;
 export const IR_GetGlobalScope: u16 = 0x107;
 /** dst = src + count - 1, dropping the `count - 1` values below it (a call's receiver and function). */
 export const IR_Nip: u16 = 0x108;
+/**
+ * dst = a new instance of what slot `a` of src holds, constructed with the
+ * `b` arguments after src: constructprop of a name bound to a slot, as a
+ * script's class is on its global object; c the slot's type.
+ */
+export const IR_ConstructSlot: u16 = 0x109;
 
 @final
 export class Ir {
