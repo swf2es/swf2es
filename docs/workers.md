@@ -249,7 +249,9 @@ A channel's queue likewise. Where memory is shared it is in it (`Sync`'s
 queues, of packed values): `send` adds to it at once, `messageAvailable`
 is exact at both ends, and `receive(true)` blocks until a message comes
 or the channel closes, with `Atomics.wait` in a worker and spinning on a
-page's main thread (see [Blocking](#blocking)). A notice still goes to the
+page's main thread (see [Blocking](#blocking)); a message the memory has
+no room for (it holds up to 1 GB) fails with MemoryError 1000, as a
+property too large for it does. A notice still goes to the
 receiver's thread, which dispatches `channelMessage` between its frames,
 as Flash dispatches it on the receiver's event loop, and brings it the
 memory of a shareable ByteArray the message names. Where it is not, each
@@ -429,11 +431,24 @@ ConcurrencyGlue:
   for a wait without a timeout). A notify picks waiters in the order they
   came and moves them to the mutex's queue in that order, so they take
   the mutex again in it. A notify with no waiter is lost.
-- A thread may be stopped anywhere, so a lock held by a worker that has
-  ended is free to take, as avmplus lets go of the mutexes a terminated
-  worker held, and a notify passes over a waiter that has ended. The
-  heap's own short locks (its allocator, a queue, the table) are taken
-  over the same way.
+- A worker that is terminated is not stopped at once: its thread runs on
+  until its host stops it, and may be writing what a mutex it holds
+  guards. So terminating it only marks it stopping (`Sync.stop`): a
+  notify passes over it, a mutex's queue does not wait for it, and its
+  thread gets `SyncTerminated` for anything more it asks of the memory,
+  which no script catches, so its code stops at its next lock, wait or
+  notify, as avmplus interrupts a terminated worker there. The locks it
+  holds, a mutex or the heap's own short locks (its allocator, a queue,
+  the table), are free to take only once it has stopped (`Sync.end`): as
+  its code stops so, as it ends its code (avmshell's workers), or once
+  the thread that stopped its thread knows it has stopped (node's `exit`;
+  a browser says nothing, so a Web Worker is taken to have stopped a
+  moment, 100 ms, after its `terminate`). Only the primordial, which runs
+  the threads, says so of another; a background worker that terminates a
+  worker it made asks the primordial through its queue of requests, which
+  it takes even while it waits. A terminated worker is given 100 ms to
+  stop at its next wait before its thread is stopped, as one blocked in a
+  wait does within a step.
 
 A thread blocks with `Atomics.wait`, in steps of at most 50 ms, between
 which it looks whether a holder has ended and the primordial takes its
@@ -483,13 +498,16 @@ never stop. The page is frozen meanwhile, as Flash's was.
 A browser also starts a Web Worker only while the page's thread is in its
 event loop, so a primordial that starts a worker and waits for it in the
 same script, as Crossbridge's does, would wait for ever. `webWorkerHost`
-therefore keeps a few Web Workers loaded ahead (two by default, shared by
-the page's hosts for one script), as Emscripten's thread pool does: a
+therefore keeps a few Web Workers loaded ahead (as many as the machine
+has cores, from two up to four, by default, shared by the page's hosts for
+one script and let go ten seconds after the last player that used them
+is), as Emscripten's thread pool does: a
 worker that starts takes one, which runs what it is posted whatever the
 page's thread does, and another is started in its place. Its `ready`
 resolves once they have loaded, for a page to await before it plays a
-SWF that blocks at once. Node's threads start without the parent's event
-loop.
+SWF that blocks at once. A script that starts more workers than that
+while it blocks waits for one that is not loaded, and fails with the
+script timeout. Node's threads start without the parent's event loop.
 
 For tests that step a SWF's frames, `settled()` counts a worker blocked
 in a lock or a wait as settled, as nothing but another worker ends that.
@@ -551,7 +569,12 @@ Where swf2es differs from the oracle's avmshell:
   threads node stops with its thread; in avmshell they run on.
 - A worker terminated by one that did not start it, and so does not hold
   its thread, is `terminated` at once but runs on until its next shared
-  property access or its end.
+  property access, sleep, lock or wait, or its end.
+- A terminated worker's code stops at its next `System.sleep`, lock or
+  wait, as it would at avmshell's interrupt checks; the Mutexes it holds
+  are let go then, or once its thread has stopped. A worker that
+  terminates itself stops at once, as avmshell's does: no catch around
+  the call runs (the `worker-self-terminate` conformance case).
 - A worker's lines reach the runners only when their event loop runs,
   so after the primordial's own in the tests, where avmshell interleaves
   them as they come; the CLI writes them as they come.
