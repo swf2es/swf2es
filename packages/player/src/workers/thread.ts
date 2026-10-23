@@ -5,6 +5,7 @@
 // runs this in a Web Worker or a node worker_threads Worker; nothing here
 // knows which.
 import { createCodegen } from "@swf2es/codegen";
+import { avm2 } from "@swf2es/runtime";
 import { Player } from "../player.js";
 import { Scripting } from "../scripting.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./protocol.js";
@@ -54,6 +55,8 @@ export function runWorkerThread(port: ThreadPort): void {
       print: (line) => port.post({ type: "trace", line }),
       onUncaught: (error) => port.post({ type: "uncaught", text: describe(error) }),
       workerParent: { id: init.id, post: (message) => port.post(message), shared: init.shared },
+      // Its Mutexes, Conditions and channels' queues are among the primordial's.
+      sync: { memory: init.sync, thread: init.id },
       audio: null,
       navigate: null,
       fileHost: null,
@@ -79,6 +82,8 @@ export function runWorkerThread(port: ThreadPort): void {
       applied++;
     }
 
+    // Running, which the worker that made it sees at once.
+    avm2.syncOf(s.rt).start(init.id);
     port.post({ type: "running" });
     await player.start();
 

@@ -15,7 +15,7 @@
 export interface SyncMemory {
   /** The heap: its header, then blocks, each a power of two words. */
   heap: SharedArrayBuffer | ArrayBuffer;
-  /** Two words a thread, by its worker's number: its record's address, and whether it has ended. */
+  /** Two words a thread, by its worker's number: whether it is blocked in a wait, and whether it runs or has ended. */
   threads: SharedArrayBuffer | ArrayBuffer;
 }
 
@@ -42,11 +42,26 @@ const HEAP_LOCK = 0;
 const HEAP_NEXT = 1;
 const BINS = 2;
 const MAX_CLASS = 28;
-const HEADER = BINS + MAX_CLASS + 1;
+/** The next worker's number, for workers any thread makes. */
+const NEXT_THREAD = BINS + MAX_CLASS + 1;
+/** The address of the queue of requests for the primordial, which it takes even while it waits. */
+const REQUESTS = NEXT_THREAD + 1;
+// A table every thread reads, the player's workers' shared properties: its
+// lock, the block that holds its bytes (their length, then them), its
+// version, and the last token given out.
+const TABLE_LOCK = REQUESTS + 1;
+const TABLE = TABLE_LOCK + 1;
+const TABLE_VERSION = TABLE + 1;
+const TABLE_TOKEN = TABLE_VERSION + 1;
+const HEADER = TABLE_TOKEN + 1;
 /** A block's own words before what it holds: its size class. */
 const BLOCK_HEAD = 2;
 const HEAP_MAX = 1 << 30;
 const THREADS_MAX = 1 << 20;
+
+/** A thread's state in its table: 0 before it runs, then RUNNING, then ENDED. */
+const RUNNING = 2;
+const ENDED = 1;
 
 /** How long a blocked thread sleeps before it looks again whether a lock's holder has ended. */
 const CHUNK = 50;
@@ -140,7 +155,9 @@ function canShare(): boolean {
 export function newSyncMemory(): SyncMemory {
   const shared = canShare();
   const heap = growable(1 << 16, HEAP_MAX, shared);
-  new Int32Array(heap)[HEAP_NEXT] = HEADER;
+  const words = new Int32Array(heap);
+  words[HEAP_NEXT] = HEADER;
+  words[NEXT_THREAD] = 1;
   return { heap, threads: growable(64, THREADS_MAX, shared) };
 }
 
@@ -180,6 +197,12 @@ export class Sync {
   private record = 0;
   /** See spinningSince. */
   private spinning: number | null = null;
+  /**
+   * What this thread does whenever it waits, between waits of no more
+   * than a few milliseconds: the primordial takes its requests then, as
+   * a background worker that asks for a worker may be what it waits for.
+   */
+  poll: (() => void) | null = null;
 
   constructor(
     readonly memory: SyncMemory,
@@ -196,6 +219,70 @@ export class Sync {
     this.addThread(thread);
   }
 
+  /** A number for a new worker, unique among the primordial's whichever thread makes it, with room in the threads' table. */
+  newThread(): number {
+    const id = Atomics.add(this.words, NEXT_THREAD, 1);
+    this.addThread(id);
+    return id;
+  }
+
+  /** The shared table's version, which every change moves on. */
+  tableVersion(): number {
+    return Atomics.load(this.words, TABLE_VERSION);
+  }
+
+  /** The shared table's bytes, and their version. */
+  readTable(): { version: number; bytes: Uint8Array } {
+    this.acquire(TABLE_LOCK, Date.now());
+    try {
+      return { version: this.tableVersion(), bytes: this.tableBytes() };
+    } finally {
+      this.release(TABLE_LOCK);
+    }
+  }
+
+  /** Replace the shared table's bytes with what `f` makes of them, in one step every thread sees. */
+  updateTable(f: (bytes: Uint8Array) => Uint8Array): void {
+    this.acquire(TABLE_LOCK, Date.now());
+    try {
+      const bytes = f(this.tableBytes());
+      const block = this.alloc(1 + Math.ceil(bytes.length / 4));
+      this.words[block] = bytes.length;
+      this.bytes.set(bytes, (block + 1) * 4);
+      const old = Atomics.exchange(this.words, TABLE, block);
+      Atomics.add(this.words, TABLE_VERSION, 1);
+      if (old !== 0) {
+        this.free(old);
+      }
+    } finally {
+      this.release(TABLE_LOCK);
+    }
+  }
+
+  /** A number never given out before, for an entry of the table. */
+  nextToken(): number {
+    return Atomics.add(this.words, TABLE_TOKEN, 1) + 1;
+  }
+
+  private tableBytes(): Uint8Array {
+    const block = Atomics.load(this.words, TABLE);
+    if (block === 0) {
+      return new Uint8Array(0);
+    }
+
+    const at = (block + 1) * 4;
+    return this.bytes.slice(at, at + this.words[block]);
+  }
+
+  /** The primordial's queue of requests, once it has made it; 0 before. */
+  get requests(): number {
+    return Atomics.load(this.words, REQUESTS);
+  }
+
+  set requests(q: number) {
+    Atomics.store(this.words, REQUESTS, q);
+  }
+
   /** Make room for worker `id` in the threads' table, before it starts. */
   addThread(id: number): void {
     grow(this.memory.threads, (id + 1) * 8);
@@ -207,13 +294,24 @@ export class Sync {
       return false;
     }
 
-    return 2 * id + 1 >= this.threads.length || Atomics.load(this.threads, 2 * id + 1) === 0;
+    return 2 * id + 1 >= this.threads.length || Atomics.load(this.threads, 2 * id + 1) !== ENDED;
+  }
+
+  /** Whether worker `id` has started and not ended, as its own thread says. */
+  running(id: number): boolean {
+    return 2 * id + 1 < this.threads.length && Atomics.load(this.threads, 2 * id + 1) === RUNNING;
+  }
+
+  /** Worker `id`, this thread's, runs; unless it has ended already. */
+  start(id: number): void {
+    this.addThread(id);
+    Atomics.compareExchange(this.threads, 2 * id + 1, 0, RUNNING);
   }
 
   /** Worker `id` has ended: the locks it held are free to take, and no notify picks it. */
   end(id: number): void {
     this.addThread(id);
-    Atomics.store(this.threads, 2 * id + 1, 1);
+    Atomics.store(this.threads, 2 * id + 1, ENDED);
   }
 
   /** A block of at least `n` words, zeroed: the address of its first. */
@@ -312,6 +410,21 @@ export class Sync {
    * loop to tell, from `start`, when the operation began.
    */
   park(index: number, value: number, ms: number, start: number): void {
+    this.poll?.();
+    Atomics.store(this.threads, 2 * this.thread, 1);
+    try {
+      this.spinOrWait(index, value, ms, start);
+    } finally {
+      Atomics.store(this.threads, 2 * this.thread, 0);
+    }
+  }
+
+  /** Whether worker `id` is blocked in a lock or a wait now. */
+  blocked(id: number): boolean {
+    return 2 * id < this.threads.length && Atomics.load(this.threads, 2 * id) !== 0;
+  }
+
+  private spinOrWait(index: number, value: number, ms: number, start: number): void {
     if (this.waits) {
       Atomics.wait(this.words, index, value, ms);
       return;
@@ -615,7 +728,6 @@ export class Sync {
     if (this.record === 0) {
       this.record = this.alloc(4);
       Atomics.store(this.words, this.record + OWNER, this.thread);
-      Atomics.store(this.threads, 2 * this.thread, this.record);
     }
 
     return this.record;

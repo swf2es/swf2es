@@ -4,8 +4,14 @@
 // the primordial. Shared properties and channels' messages cross as copies,
 // made as avmplus' ChannelItem makes them, so a host's channel carries
 // plain data, but for a shareable ByteArray's memory, which every worker
-// shares. Each side keeps its own copy of a worker's shared properties,
-// and what one side sets reaches the other between its frames.
+// shares, and a Mutex or a Condition, an address in the memory every
+// worker is given (avm2.Sync). Where memory is shared, the shared
+// properties are a table in it and a channel's queue is in it, so that
+// every worker sees them at once and a receiver can block on a queue, and
+// a background worker starts a worker through a queue the primordial takes
+// even while it waits. Elsewhere each side keeps its own copy of a worker's
+// shared properties and of a channel's queue, and what one side sets or
+// sends reaches the other between its frames.
 import { avm2 } from "@swf2es/runtime";
 import type { WorkerHost, WorkerThread } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
@@ -18,6 +24,16 @@ import type {
   ToWorker,
   WireValue,
 } from "../workers/protocol.js";
+import {
+  type PackedValue,
+  pack,
+  packJob,
+  packTable,
+  type TableEntry,
+  unpack,
+  unpackJob,
+  unpackTable,
+} from "../workers/wire.js";
 import { dispatchEvent } from "./events.js";
 
 type AsObject = avm2.AsObject;
@@ -35,9 +51,19 @@ export interface ParentLink {
   shared: SharedMessage[];
 }
 
-/** A background worker the primordial made. */
+/** Error 1502, which a primordial that blocks for longer than Flash's script timeout gets. */
+function scriptTimeout(s: Scripting): Value {
+  return s.rt.error("flash.errors::ScriptTimeoutError", 1502);
+}
+
+/**
+ * A background worker the primordial runs; in a background worker's VM,
+ * one it made, whose thread the primordial runs for it.
+ */
 interface Background {
   id: number;
+  /** The background worker that made it, or null for the primordial. */
+  creator: number | null;
   /** Empty once it has started: the thread was given its copy. */
   swf: Uint8Array<ArrayBuffer>;
   /** "starting" from start() until the thread runs, which scripts see as "new". */
@@ -50,15 +76,15 @@ interface Background {
   waits: { upTo: number; done: () => void }[];
 }
 
-/** A MessageChannel as this VM knows it: its queue is the receiver's. */
+/** A MessageChannel as this VM knows it: its queue is the receiver's, or in shared memory. */
 interface Channel {
   ref: ChannelRef;
   state: "open" | "closing" | "closed";
   queue: WireValue[];
   /**
    * Sent from the primordial to a background worker that has not yet run
-   * a frame since: what messageAvailable sees on the sending side, which
-   * cannot see the receiver's queue without shared memory.
+   * a frame since: what messageAvailable sees on the sending side where
+   * the queue is not in shared memory.
    */
   undelivered: number;
   /** Its AS3 object in this VM, made when a script first has it. */
@@ -69,7 +95,13 @@ interface Channel {
 interface Shared {
   wire: WireValue;
   local: Value;
+  /** Its entry's in the shared table, where this VM set it. */
+  token?: number;
 }
+
+/** A shared property's key in the shared table. */
+const tableKey = (worker: number, key: string | null) =>
+  `${worker}${key === null ? "" : `:${key}`}`;
 
 const STATES = { new: "new", starting: "new", running: "running", terminated: "terminated" };
 
@@ -86,8 +118,13 @@ export class Workers {
   private readonly objects = new Map<number, AsObject>();
   private readonly shared = new Map<number, Map<string | null, Shared>>();
   private readonly channels = new Map<number, Channel>();
-  private nextWorker = 1;
+  /** Each shareable ByteArray's memory this VM has seen, by its id, for a message in a shared queue that names it. */
+  private readonly memories = new Map<number, avm2.SharedBytesMemory>();
   private nextChannel = 1;
+  /** The shared table as last read, by tableKey, and its version. */
+  private table: { version: number; entries: Map<string, TableEntry> } | null = null;
+  /** Whether the primordial is starting the workers background workers asked for. */
+  private servicing = false;
   /** The libraries the SWFs link against, as loaded, which a worker's thread loads too. */
   libraries: Uint8Array[] = [];
 
@@ -130,18 +167,22 @@ export class Workers {
       throw rt.error("TypeError", 2007, "swf");
     }
 
-    if (this.parent || !this.host) {
-      throw rt.unsupported(
-        this.parent
-          ? "creating a Worker from a background worker"
-          : "creating a Worker without a worker host",
-      );
+    if (!this.parent && !this.host) {
+      throw rt.unsupported("creating a Worker without a worker host");
+    }
+
+    // Numbered in the memory every worker shares, so that one a background
+    // worker makes has a number of its own.
+    const sync = avm2.syncOf(rt);
+    if (this.parent && !sync.shared) {
+      throw avm2.notIsolated("a Worker a background worker makes");
     }
 
     const bytes = avm2.bytesOf(rt, swf as AsObject);
-    const id = this.nextWorker++;
+    const id = sync.newThread();
     this.backgrounds.set(id, {
       id,
+      creator: this.parent ? this.id : null,
       swf: bytes.buffer.slice(0, bytes.length),
       state: "new",
       thread: null,
@@ -166,6 +207,31 @@ export class Workers {
       throw rt.error("flash.errors::IllegalOperationError", 1511);
     }
 
+    if (this.parent) {
+      // The primordial starts it on its host, and tells this VM its state.
+      // The request goes in its queue in shared memory, which it takes
+      // even while it waits, as Crossbridge's primordial may wait for
+      // what this worker is starting the new one for.
+      const sync = avm2.syncOf(rt);
+      if (sync.requests === 0) {
+        throw rt.unsupported(
+          "starting a Worker from a background worker the primordial did not start",
+        );
+      }
+
+      background.state = "starting";
+      const shared = [...this.propertiesOf(id)].map(([key, p]) => ({
+        worker: id,
+        key,
+        value: p.wire,
+      }));
+      sync.push(sync.requests, packJob(id, this.id, background.swf, shared));
+      background.swf = new Uint8Array(0);
+      this.parent.post({ type: "create" });
+      return;
+    }
+
+    this.takeRequests();
     const host = this.host as WorkerHost;
     background.state = "starting";
     const shared = [id, PRIMORDIAL].flatMap((worker) =>
@@ -187,6 +253,7 @@ export class Workers {
           sandboxType: this.s.sandboxType,
           libraries: this.libraries,
           shared,
+          sync: avm2.syncOf(rt).memory,
         },
         (message) => this.fromBackground(background, message),
         (error) => {
@@ -215,12 +282,8 @@ export class Workers {
       throw this.s.rt.error("flash.errors::IllegalOperationError", 3732);
     }
 
-    if (this.parent) {
-      // A worker may end itself; the primordial stops its thread.
-      if (id !== this.id) {
-        return false;
-      }
-
+    // A worker may end itself; the primordial stops its thread.
+    if (this.parent && id === this.id) {
       this.parent.post({ type: "terminate" });
       return true;
     }
@@ -230,6 +293,8 @@ export class Workers {
       return false;
     }
 
+    // One this background worker made: the primordial stops its thread.
+    this.parent?.post({ type: "end", worker: id });
     this.end(background);
     return true;
   }
@@ -239,7 +304,13 @@ export class Workers {
       return "running";
     }
 
-    return STATES[this.backgrounds.get(id)?.state ?? "terminated"];
+    // One this background worker made runs as soon as its own thread says so.
+    const background = this.backgrounds.get(id);
+    if (background?.state === "starting" && avm2.syncOf(this.s.rt).running(id)) {
+      return "running";
+    }
+
+    return STATES[background?.state ?? "terminated"];
   }
 
   /** WorkerDomain.listWorkers: the running workers, the primordial first, as Flash lists them. */
@@ -266,6 +337,24 @@ export class Workers {
       own.set(key, { wire, local: wire.kind === "bytes" ? value : undefined });
     }
 
+    // Where memory is shared, in the table every worker reads at once.
+    const sync = avm2.syncOf(this.s.rt);
+    if (sync.shared) {
+      const p = own.get(key);
+      if (p) {
+        p.token = sync.nextToken();
+      }
+
+      sync.updateTable((bytes) => {
+        const entries = unpackTable(bytes).filter((e) => e.worker !== id || e.key !== key);
+        if (p?.token !== undefined) {
+          entries.push({ worker: id, key, token: p.token, value: pack(p.wire) });
+        }
+
+        return packTable(entries);
+      });
+    }
+
     const message: SharedMessage = {
       type: "shared",
       worker: id,
@@ -283,7 +372,8 @@ export class Workers {
   private share(message: SharedMessage, from: number): void {
     for (const background of this.backgrounds.values()) {
       const to = background.id;
-      if (to !== from && (message.worker === PRIMORDIAL || message.worker === to)) {
+      const ofCreator = this.backgrounds.get(message.worker)?.creator === to;
+      if (to !== from && (message.worker === PRIMORDIAL || message.worker === to || ofCreator)) {
         // One not started gets it with the rest when it starts.
         if (background.state !== "new") {
           this.post(background, message);
@@ -294,6 +384,18 @@ export class Workers {
 
   getShared(id: number, key: string | null): Value {
     const p = this.shared.get(id)?.get(key);
+    if (avm2.syncOf(this.s.rt).shared) {
+      // What any worker set last, at once; this VM's own value where it set it.
+      const entry = this.tableEntries().get(tableKey(id, key));
+      if (!entry) {
+        return undefined;
+      }
+
+      if (p?.token !== entry.token) {
+        return this.decode(this.unpacked(unpack(entry.value)));
+      }
+    }
+
     if (!p) {
       return undefined;
     }
@@ -301,11 +403,28 @@ export class Workers {
     return p.local !== undefined ? p.local : this.decode(p.wire);
   }
 
+  /** The shared table's entries, read again where another worker has changed it. */
+  private tableEntries(): Map<string, TableEntry> {
+    const sync = avm2.syncOf(this.s.rt);
+    if (this.table?.version !== sync.tableVersion()) {
+      const { version, bytes } = sync.readTable();
+      const entries = new Map<string, TableEntry>();
+      for (const e of unpackTable(bytes)) {
+        entries.set(tableKey(e.worker, e.key), e);
+      }
+
+      this.table = { version, entries };
+    }
+
+    return this.table.entries;
+  }
+
   /** Worker.createMessageChannel: a channel from `sender` to `receiver`. */
   createChannel(sender: number, receiver: number): AsObject {
     // Ids made by a background worker are its own, apart from the primordial's.
     const id = this.id * 0x100000 + this.nextChannel++;
-    return this.channelObject({ id, sender, receiver });
+    const sync = avm2.syncOf(this.s.rt);
+    return this.channelObject({ id, sender, receiver, queue: sync.shared ? sync.newQueue() : 0 });
   }
 
   send(o: AsObject, value: Value): void {
@@ -319,7 +438,17 @@ export class Workers {
       throw rt.error("flash.errors::IOError", 3738);
     }
 
-    this.route({ type: "message", channel: channel.ref, value: this.encode(value) }, this.id);
+    const wire = this.encode(value);
+    if (channel.ref.queue !== 0) {
+      // Queued at once where both ends see it; the notice brings the
+      // receiver its channelMessage, and a shareable ByteArray's memory.
+      avm2.syncOf(this.s.rt).push(channel.ref.queue, pack(wire));
+      const notice = wire.kind === "shared" ? wire : null;
+      this.route({ type: "message", channel: channel.ref, value: notice }, this.id);
+      return;
+    }
+
+    this.route({ type: "message", channel: channel.ref, value: wire }, this.id);
   }
 
   receive(o: AsObject, block: boolean): Value {
@@ -327,6 +456,10 @@ export class Workers {
     const channel = this.channelOf(o);
     if (channel.ref.receiver !== this.id) {
       throw rt.error("ArgumentError", 3737);
+    }
+
+    if (channel.ref.queue !== 0) {
+      return this.receiveShared(channel, block);
     }
 
     const wire = channel.queue.shift();
@@ -352,8 +485,66 @@ export class Workers {
     return this.decode(wire);
   }
 
+  /**
+   * The first message of a channel whose queue is in shared memory,
+   * waiting for one with `block`: in a worker with Atomics.wait, on the
+   * primordial of a page spinning, up to Flash's script timeout.
+   */
+  private receiveShared(channel: Channel, block: boolean): Value {
+    const rt = this.s.rt;
+    const sync = avm2.syncOf(rt);
+    const q = channel.ref.queue;
+    let bytes = sync.shift(q);
+    if (bytes === null && block && channel.state === "open") {
+      try {
+        sync.waitFor(q);
+      } catch (e) {
+        throw e instanceof avm2.SyncTimeout ? scriptTimeout(this.s) : e;
+      }
+
+      bytes = sync.shift(q);
+    }
+
+    if (bytes === null) {
+      if (channel.state === "closed" || (block && sync.closed(q))) {
+        throw rt.error("flash.errors::IOError", 3738);
+      }
+
+      return undefined;
+    }
+
+    if (channel.state === "closing" && sync.queued(q) === 0) {
+      channel.state = "closed";
+      this.drained(channel);
+    }
+
+    return this.decode(this.unpacked(unpack(bytes)));
+  }
+
+  /** A value from a shared queue, a shareable ByteArray's memory found by its id. */
+  private unpacked(value: PackedValue): WireValue {
+    if (value.kind !== "shared") {
+      return value;
+    }
+
+    const memory = this.memories.get(value.id);
+    if (!memory) {
+      // Its memory comes in a message, which a worker that has not been
+      // back in its event loop since another shared it has not taken.
+      throw this.s.rt.unsupported(
+        "reading a shareable ByteArray another worker shared before its memory reached this one",
+      );
+    }
+
+    return { kind: "shared", memory };
+  }
+
   messageAvailable(o: AsObject): boolean {
     const channel = this.channelOf(o);
+    if (channel.ref.queue !== 0) {
+      return avm2.syncOf(this.s.rt).queued(channel.ref.queue) > 0;
+    }
+
     return channel.ref.receiver === this.id ? channel.queue.length > 0 : channel.undelivered > 0;
   }
 
@@ -366,6 +557,11 @@ export class Workers {
     const channel = this.channelOf(o);
     if (channel.state !== "open") {
       return;
+    }
+
+    if (channel.ref.queue !== 0) {
+      // Wakes a receiver blocked on it.
+      avm2.syncOf(this.s.rt).close(channel.ref.queue);
     }
 
     this.route({ type: "close", channel: channel.ref, drained: false }, this.id);
@@ -391,6 +587,17 @@ export class Workers {
       case "close":
         this.arrive(message);
         break;
+      case "state": {
+        const child = this.backgrounds.get(message.worker);
+        if (child && message.state === "running" && child.state === "starting") {
+          child.state = "running";
+          this.stateChanged(child.id);
+        } else if (child && message.state === "terminated") {
+          this.end(child);
+        }
+
+        break;
+      }
       case "init":
         break;
     }
@@ -405,7 +612,19 @@ export class Workers {
       case "running":
         background.state = "running";
         this.stateChanged(background.id);
+        this.toCreator(background, "running");
         break;
+      case "create":
+        this.serviceRequests();
+        break;
+      case "end": {
+        const child = this.backgrounds.get(message.worker);
+        if (child?.creator === background.id) {
+          this.end(child);
+        }
+
+        break;
+      }
       case "idle":
         for (const w of background.waits.filter((w) => w.upTo <= message.received)) {
           w.done();
@@ -478,7 +697,7 @@ export class Workers {
       } else {
         const background = this.backgrounds.get(to);
         if (background) {
-          if (message.type === "message") {
+          if (message.type === "message" && ref.queue === 0) {
             this.channel(ref).undelivered++;
           }
 
@@ -504,7 +723,14 @@ export class Workers {
       return;
     }
 
-    channel.queue.push(message.value);
+    if (message.value?.kind === "shared") {
+      this.memories.set(message.value.memory.id, message.value.memory);
+    }
+
+    if (message.channel.queue === 0 && message.value) {
+      channel.queue.push(message.value);
+    }
+
     this.s.loads.deferHostEvent(() => this.dispatch(channel, "channelMessage"));
   }
 
@@ -515,7 +741,7 @@ export class Workers {
    */
   private closed(channel: Channel): void {
     const receiving = channel.ref.receiver === this.id;
-    channel.state = receiving && channel.queue.length === 0 ? "closed" : "closing";
+    channel.state = receiving && this.queued(channel) === 0 ? "closed" : "closing";
     this.stateEvent(channel);
     if (receiving) {
       this.drained(channel);
@@ -527,6 +753,13 @@ export class Workers {
     if (channel.state === "closed" && channel.ref.sender !== this.id) {
       this.route({ type: "close", channel: channel.ref, drained: true }, this.id);
     }
+  }
+
+  /** How many messages wait at the receiver. */
+  private queued(channel: Channel): number {
+    return channel.ref.queue !== 0
+      ? avm2.syncOf(this.s.rt).queued(channel.ref.queue)
+      : channel.queue.length;
   }
 
   private stateEvent(channel: Channel): void {
@@ -554,9 +787,96 @@ export class Workers {
     });
   }
 
+  /**
+   * Make the queue of requests background workers start their workers
+   * through, once the primordial starts one, where memory is shared; it
+   * takes them whenever it waits as well as when it is told of one.
+   */
+  private takeRequests(): void {
+    const sync = avm2.syncOf(this.s.rt);
+    if (!sync.shared || sync.requests !== 0) {
+      return;
+    }
+
+    sync.requests = sync.newQueue();
+    sync.poll = () => {
+      if (sync.queued(sync.requests) > 0) {
+        this.serviceRequests();
+      }
+    };
+  }
+
+  /** Start each worker a background worker has asked for. */
+  private serviceRequests(): void {
+    const sync = avm2.syncOf(this.s.rt);
+    // Starting one may wait for the shared heap, which polls again.
+    if (this.servicing || sync.requests === 0) {
+      return;
+    }
+
+    this.servicing = true;
+    try {
+      for (let bytes = sync.shift(sync.requests); bytes; bytes = sync.shift(sync.requests)) {
+        const job = unpackJob(bytes);
+        const creator = this.backgrounds.get(job.creator);
+        if (!creator) {
+          // Its maker has ended.
+          continue;
+        }
+
+        for (const p of job.shared) {
+          try {
+            const value = this.unpacked(p.value);
+            this.applyShared({ type: "shared", worker: p.worker, key: p.key, value });
+          } catch (error) {
+            this.s.reportUncaught(error);
+          }
+        }
+
+        this.createFor(creator, job.id, job.swf);
+      }
+    } finally {
+      this.servicing = false;
+    }
+  }
+
+  /** Start worker `id`, which background worker `creator` made to run `swf`. */
+  private createFor(creator: Background, id: number, swf: Uint8Array<ArrayBuffer>): void {
+    avm2.syncOf(this.s.rt).addThread(id);
+    const child: Background = {
+      id,
+      creator: creator.id,
+      swf,
+      state: "new",
+      thread: null,
+      pending: [],
+      sent: 0,
+      waits: [],
+    };
+    this.backgrounds.set(id, child);
+    try {
+      this.start(id);
+    } catch (error) {
+      this.s.reportUncaught(error);
+    }
+  }
+
+  /** Tell the background worker that made `background` its state. */
+  private toCreator(background: Background, state: "running" | "terminated"): void {
+    const creator = background.creator === null ? null : this.backgrounds.get(background.creator);
+    if (creator && !this.parent) {
+      this.post(creator, { type: "state", worker: background.id, state });
+    }
+  }
+
   /** Stop its thread, and let go of what it held: its SWF, its shared properties, its channels. */
   private end(background: Background): void {
     const id = background.id;
+    if (background.state === "terminated") {
+      return;
+    }
+
+    this.toCreator(background, "terminated");
     background.state = "terminated";
     background.thread?.terminate();
     background.thread = null;
@@ -568,11 +888,26 @@ export class Workers {
 
     this.backgrounds.delete(id);
     this.ended.add(id);
+    const sync = avm2.syncOf(this.s.rt);
+    if (sync.shared && !this.parent) {
+      sync.updateTable((bytes) => packTable(unpackTable(bytes).filter((e) => e.worker !== id)));
+    }
+
+    // The Mutexes it held are free to take, and no notify picks it.
+    sync.end(id);
     this.shared.delete(id);
     // A channel's AS3 objects keep theirs; nothing more is routed to it.
     for (const [key, channel] of this.channels) {
       if (channel.ref.sender === id || channel.ref.receiver === id) {
         channel.undelivered = 0;
+        if (channel.ref.queue !== 0) {
+          // What it had not taken, or would have, goes with it.
+          sync.close(channel.ref.queue);
+          while (sync.shift(channel.ref.queue) !== null) {
+            // Each entry freed.
+          }
+        }
+
         this.channels.delete(key);
       }
     }
@@ -595,12 +930,41 @@ export class Workers {
     this.wait(background, background.sent);
   }
 
-  /** Have settled() wait until the thread has run its first `upTo` messages. */
+  /**
+   * Have settled() wait until the thread has run its first `upTo` messages,
+   * or is blocked in a lock or a wait, which only another worker ends: it
+   * runs no frame meanwhile to say it has run them.
+   */
   private wait(background: Background, upTo: number): void {
-    this.s.loads.trackRequest(new Promise<void>((done) => background.waits.push({ upTo, done })));
+    const sync = avm2.syncOf(this.s.rt);
+    this.s.loads.trackRequest(
+      new Promise<void>((resolve) => {
+        let timer: ReturnType<typeof setInterval> | null = null;
+        const done = () => {
+          if (timer !== null) {
+            clearInterval(timer);
+          }
+
+          resolve();
+        };
+        if (sync.shared) {
+          timer = setInterval(() => {
+            if (sync.blocked(background.id)) {
+              done();
+            }
+          }, 5);
+        }
+
+        background.waits.push({ upTo, done });
+      }),
+    );
   }
 
   private applyShared(message: SharedMessage): void {
+    if (message.value?.kind === "shared") {
+      this.memories.set(message.value.memory.id, message.value.memory);
+    }
+
     const own = this.propertiesOf(message.worker);
     if (message.value === null) {
       own.delete(message.key);
@@ -661,16 +1025,23 @@ export class Workers {
       // Its memory, shared from now on; on a page that is not cross-origin
       // isolated, the error that says so rather than a copy nobody writes.
       if (bytes.shareable) {
-        return { kind: "shared", memory: bytes.share() };
+        const memory = bytes.share();
+        this.memories.set(memory.id, memory);
+        return { kind: "shared", memory };
       }
 
       return { kind: "bytes", bytes: bytes.buffer.slice(0, bytes.length) };
     }
 
-    for (const name of ["flash.concurrent::Mutex", "flash.concurrent::Condition"]) {
-      if (rt.isInstance(value, rt.classNamed(name))) {
-        throw rt.unsupported(`passing a ${name.slice(name.indexOf("::") + 2)} to another worker`);
+    // By reference, as an address in the memory every worker has; on a page
+    // that is not cross-origin isolated, the error that says it needs it.
+    const ref = avm2.syncRef(value);
+    if (ref) {
+      if (!avm2.syncOf(rt).shared) {
+        throw avm2.notIsolated(ref.kind === "mutex" ? "a Mutex" : "a Condition");
       }
+
+      return { kind: "sync", ref };
     }
 
     const holder = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
@@ -686,7 +1057,10 @@ export class Workers {
         return wire.value;
       case "channel":
         return this.channelObject(wire.channel);
+      case "sync":
+        return avm2.syncObject(rt, wire.ref);
       case "shared":
+        this.memories.set(wire.memory.id, wire.memory);
         return avm2.sharedByteArray(rt, wire.memory);
       case "bytes":
       case "amf": {

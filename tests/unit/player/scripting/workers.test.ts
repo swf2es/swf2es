@@ -36,6 +36,11 @@ for (const [name, script, what] of [
     "WorkerSharedBytes",
     "two workers on threads of their own share a ByteArray",
   ],
+  [
+    "worker-mutex",
+    "WorkerMutex",
+    "two workers on threads of their own share a Mutex and a Condition",
+  ],
 ]) {
   test(`${what} as Flash's do`, { skip }, async () => {
     const lines: string[] = [];
@@ -108,14 +113,16 @@ test("without a worker host no worker is supported, and none is created", { skip
  * Plays a document class whose primordial runs `primordial` and whose
  * background workers run `background`, both bodies of methods of a Sprite
  * that has `n`, `w` and `ch` to keep things in, for `frames` frames stepped
- * as the player's tests step them. Its traces, those of its workers mixed
- * in, and its uncaught errors' messages.
+ * as the player's tests step them, or, with `blocking`, a few milliseconds
+ * apart, for workers that block in a frame, which settled() would wait for
+ * for ever. Its traces, those of its workers mixed in, and its uncaught
+ * errors' messages.
  */
 async function play(
   name: string,
   primordial: string,
   background: string,
-  options: { frames?: number; workerHost?: WorkerHost } = {},
+  options: { frames?: number; workerHost?: WorkerHost; blocking?: boolean } = {},
 ): Promise<{ lines: string[]; uncaught: string[]; scripting: Scripting }> {
   const lines: string[] = [];
   const uncaught: string[] = [];
@@ -134,11 +141,13 @@ async function play(
   import flash.events.*;
   import flash.system.*;
   import flash.utils.*;
+  import flash.concurrent.*;
 
   public class ${name} extends Sprite {
     private var n:int = 0;
     private var w:Worker;
     private var ch:MessageChannel;
+    private var back:MessageChannel;
 
     public function ${name}() {
       if (Worker.current.isPrimordial) {
@@ -167,7 +176,12 @@ ${background}
     const player = new Player(swf, scripting);
     await player.start();
     for (let frame = 2; frame <= (options.frames ?? 40); frame++) {
-      await scripting.settled();
+      if (options.blocking) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } else {
+        await scripting.settled();
+      }
+
       player.tick();
     }
 
@@ -342,4 +356,211 @@ test("a background worker that terminates itself is terminated on the primordial
   assert.deepEqual(uncaught, []);
   assert.deepEqual(lines, ["primordial terminated 1"]);
   assert.equal(held(scripting), 0);
+});
+
+test("a channel's queue is seen at once at both ends, and receive(true) blocks for a message", {
+  skip,
+}, async () => {
+  const { lines, uncaught } = await play(
+    "Blocking",
+    `      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      ch = Worker.current.createMessageChannel(w);
+      back = w.createMessageChannel(Worker.current);
+      w.setSharedProperty("ch", ch);
+      w.setSharedProperty("back", back);
+      ch.send("a");
+      ch.send("b");
+      trace("queued " + ch.messageAvailable);
+      w.start();
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        if (++n == 3) {
+          trace("received " + back.receive(true));
+          trace("the sender sees " + ch.messageAvailable);
+          ch.send("c");
+          trace("then " + back.receive(true));
+          ch.close();
+          trace("closed " + back.receive(true));
+        }
+      });`,
+    `      ch = Worker.current.getSharedProperty("ch");
+      back = Worker.current.getSharedProperty("back");
+      back.send(ch.receive() + ch.receive() + " " + ch.messageAvailable);
+      back.send(ch.receive(true));
+      try {
+        ch.receive(true);
+      } catch (e:Error) {
+        back.send(describe(e));
+      }`,
+    { frames: 6, blocking: true },
+  );
+
+  assert.deepEqual(uncaught, []);
+  assert.deepEqual(lines, [
+    "queued true",
+    "received ab false",
+    "the sender sees false",
+    "then c",
+    "closed flash.errors::IOError 3738",
+  ]);
+});
+
+test("a Mutex and a Condition cross to a worker by reference, and block across threads", {
+  skip,
+}, async () => {
+  const { lines, uncaught } = await play(
+    "Locks",
+    `      var m:Mutex = new Mutex();
+      var c:Condition = new Condition(m);
+      var ws:Array = [];
+      for (var i:int = 0; i < 2; i++) {
+        ws[i] = WorkerDomain.current.createWorker(loaderInfo.bytes);
+        ws[i].setSharedProperty("m", m);
+        ws[i].setSharedProperty("c", c);
+        ws[i].setSharedProperty("role", i);
+        ws[i].setSharedProperty("back", ws[i].createMessageChannel(Worker.current));
+      }
+
+      trace("same " + (ws[0].getSharedProperty("m") === m) + " " + (ws[0].getSharedProperty("c") === c));
+      ws[0].start();
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        if (++n == 3) {
+          back = ws[0].getSharedProperty("back");
+          trace(back.receive(true));
+          // Taken only once the worker waits, which lets go of it.
+          m.lock();
+          c.notify();
+          trace("notified");
+          m.unlock();
+          trace(back.receive(true));
+
+          ws[1].start();
+          back = ws[1].getSharedProperty("back");
+          trace(back.receive(true));
+          trace("held by a worker " + m.tryLock());
+          ws[1].terminate();
+          trace("after terminate " + m.tryLock());
+          trace("waited " + c.wait(5));
+          m.unlock();
+        }
+      });`,
+    `      var m:Mutex = Worker.current.getSharedProperty("m");
+      var c:Condition = Worker.current.getSharedProperty("c");
+      back = Worker.current.getSharedProperty("back");
+      m.lock();
+      if (Worker.current.getSharedProperty("role") == 0) {
+        back.send("locked " + (c.mutex === m) + " " + (Worker.current.getSharedProperty("m") === m));
+        var r:Boolean = c.wait();
+        back.send("woke " + r + " " + m.tryLock());
+        m.unlock();
+        m.unlock();
+      } else {
+        back.send("holding");
+        new Condition(new Mutex()).mutex.lock();
+        Worker.current.createMessageChannel(Worker.current).receive(true);
+      }`,
+    { frames: 6, blocking: true },
+  );
+
+  assert.deepEqual(uncaught, []);
+  assert.deepEqual(lines, [
+    "same true true",
+    "locked true true",
+    "notified",
+    "woke false true",
+    "holding",
+    "held by a worker false",
+    "after terminate true",
+    "waited true",
+  ]);
+});
+
+test("a shared property set by a worker is seen at once by a primordial that waits for it", {
+  skip,
+}, async () => {
+  const { lines, uncaught } = await play(
+    "SeenAtOnce",
+    `      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      w.start();
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        if (++n == 3) {
+          // Never back in its event loop until it sees it.
+          var nap:Condition = new Condition(new Mutex());
+          nap.mutex.lock();
+          var start:int = getTimer();
+          while (w.getSharedProperty("answer") === undefined && getTimer() - start < 10000) {
+            nap.wait(1);
+          }
+
+          trace("answer " + w.getSharedProperty("answer"));
+          Worker.current.setSharedProperty("question", "asked");
+          start = getTimer();
+          while (w.getSharedProperty("echo") === undefined && getTimer() - start < 10000) {
+            nap.wait(1);
+          }
+
+          trace("echo " + w.getSharedProperty("echo"));
+        }
+      });`,
+    `      Worker.current.setSharedProperty("answer", 42);
+      var nap:Condition = new Condition(new Mutex());
+      nap.mutex.lock();
+      var primordial:Worker = WorkerDomain.current.listWorkers()[0];
+      while (primordial.getSharedProperty("question") === undefined) {
+        nap.wait(1);
+      }
+
+      Worker.current.setSharedProperty("echo", primordial.getSharedProperty("question"));`,
+    { frames: 6, blocking: true },
+  );
+
+  assert.deepEqual(uncaught, []);
+  assert.deepEqual(lines, ["answer 42", "echo asked"]);
+});
+
+test("a background worker makes and starts a worker, even while the primordial waits for it", {
+  skip,
+}, async () => {
+  const { lines, uncaught } = await play(
+    "Nested",
+    `      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      w.setSharedProperty("role", "maker");
+      w.start();
+      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+        if (++n == 3) {
+          var nap:Condition = new Condition(new Mutex());
+          nap.mutex.lock();
+          var start:int = getTimer();
+          while (w.getSharedProperty("made") === undefined && getTimer() - start < 10000) {
+            nap.wait(1);
+          }
+
+          trace("made " + w.getSharedProperty("made"));
+        }
+      });`,
+    `      if (Worker.current.getSharedProperty("role") == "maker") {
+        var child:Worker = WorkerDomain.current.createWorker(loaderInfo.bytes);
+        trace("child " + child.state + " " + child.isPrimordial);
+        child.setSharedProperty("role", "child");
+        var m:Mutex = new Mutex();
+        var c:Condition = new Condition(m);
+        child.setSharedProperty("c", c);
+        m.lock();
+        child.start();
+        // The child notifies once it runs, holding the mutex.
+        var notified:Boolean = !c.wait(10000);
+        m.unlock();
+        Worker.current.setSharedProperty("made", notified + " " + child.getSharedProperty("hello") + " " + child.state);
+      } else {
+        var cc:Condition = Worker.current.getSharedProperty("c");
+        Worker.current.setSharedProperty("hello", "hi");
+        cc.mutex.lock();
+        cc.notify();
+        cc.mutex.unlock();
+      }`,
+    { frames: 6, blocking: true },
+  );
+
+  assert.deepEqual(uncaught, []);
+  // The child's trace comes once the primordial is back in its event loop.
+  assert.deepEqual(lines, ["made true hi running", "child new false"]);
 });
