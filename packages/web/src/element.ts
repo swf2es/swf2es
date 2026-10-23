@@ -1,7 +1,7 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
-import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { isAs3, readActions, readSwf, type Swf, tags } from "@swf2es/format";
 import {
   Avm1,
   type ExternalInterfaceHost,
@@ -9,13 +9,16 @@ import {
   type FetchResult,
   Player,
   Scripting,
+  type WorkerHost,
 } from "@swf2es/player";
+import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import {
   codegenForPlayer,
   configuration,
   libraries,
   moduleCacheOptions,
   socketHost,
+  workerHostForPlayer,
 } from "./config.js";
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
 import { scaleMode } from "./layout.js";
@@ -64,6 +67,8 @@ interface Session {
   callbacks: Set<string>;
   /** Aborts the fetch of the SWF itself, as a destroy comes before it arrives. */
   abort: AbortController;
+  /** The Web Workers its SWF starts, let go of with it. */
+  workers: WebWorkerHost | null;
 }
 
 interface Deferred {
@@ -142,6 +147,40 @@ export function scriptAccess(value: string | null, swfUrl: string, pageUrl: stri
         return false;
       }
   }
+}
+
+/** The bytes of "WorkerDomain", the class a SWF's ActionScript names to start a worker. */
+const WORKER_DOMAIN = new TextEncoder().encode("WorkerDomain");
+
+/**
+ * Whether a SWF's ActionScript names WorkerDomain, in its ABCs' strings:
+ * one that does may start a worker and wait for it in the same script,
+ * which only a Web Worker started ahead can answer.
+ */
+export function namesWorkers(swf: Swf): boolean {
+  const bytes = swf.bytes;
+  const first = WORKER_DOMAIN[0];
+  for (const tag of swf.tags) {
+    if (tag.code !== tags.DoABC && tag.code !== tags.DoABC2) {
+      continue;
+    }
+
+    const end = tag.offset + tag.length - WORKER_DOMAIN.length;
+    for (let at = bytes.indexOf(first, tag.offset); at !== -1 && at <= end; ) {
+      let k = 1;
+      while (k < WORKER_DOMAIN.length && bytes[at + k] === WORKER_DOMAIN[k]) {
+        k++;
+      }
+
+      if (k === WORKER_DOMAIN.length) {
+        return true;
+      }
+
+      at = bytes.indexOf(first, at + 1);
+    }
+  }
+
+  return false;
 }
 
 /** Flash's quality names; the auto ones as what they start at. */
@@ -338,6 +377,7 @@ export class Swf2esPlayerElement extends ElementBase {
       player: null,
       playback: null,
       callbacks: new Set(),
+      workers: null,
       abort: new AbortController(),
     };
     this.#session = session;
@@ -374,12 +414,18 @@ export class Swf2esPlayerElement extends ElementBase {
       const scripted =
         isAs3(swf) && swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
       if (scripted) {
-        const [codegen, abcs] = await Promise.all([codegenForPlayer(), libraries()]);
+        const [codegen, abcs, host] = await Promise.all([
+          codegenForPlayer(),
+          libraries(),
+          this.#workers() ? workerHostForPlayer(namesWorkers(swf)) : null,
+        ]);
         if (!current()) {
+          host?.release?.();
           return;
         }
 
-        session.scripting = this.#scripting(session, codegen, url, pageUrl);
+        session.workers = host;
+        session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
         await session.scripting.loadLibraries(abcs);
         if (!current()) {
           return;
@@ -438,6 +484,12 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.playback = playback;
+      // The workers started ahead, loaded before a script may wait for one.
+      await session.workers?.ready;
+      if (!current()) {
+        return;
+      }
+
       await session.player.start();
       if (!current()) {
         return;
@@ -463,6 +515,7 @@ export class Swf2esPlayerElement extends ElementBase {
     codegen: Awaited<ReturnType<typeof codegenForPlayer>>,
     url: string,
     pageUrl: string,
+    workerHost: WorkerHost | null,
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const base = attribute(this, "base");
@@ -488,9 +541,22 @@ export class Swf2esPlayerElement extends ElementBase {
       },
       onUncaught: (error) => this.#report(session, error),
       lazyCompilation: configuration().lazyCompilation,
+      workerHost,
       ...moduleCacheOptions(),
     });
     return scripting;
+  }
+
+  /** Whether the SWFs the element plays next have workers: its `workers` attribute, else the page's configuration. */
+  #workers(): boolean {
+    switch (attribute(this, "workers")?.trim().toLowerCase()) {
+      case "false":
+        return false;
+      case "true":
+        return true;
+      default:
+        return configuration().workers !== false;
+    }
   }
 
   /** What the element's attributes let a SWF reach of its page and the network. */
@@ -634,6 +700,8 @@ export class Swf2esPlayerElement extends ElementBase {
     session.playback?.destroy();
     session.player?.destroy();
     session.scripting?.destroy();
+    // Its scripting let it go already, if it had any: a release counts once.
+    session.workers?.release?.();
     this.#box.style.background = "";
   }
 }
