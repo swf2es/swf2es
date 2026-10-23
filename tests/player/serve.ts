@@ -106,7 +106,7 @@ export const ISOLATION_HEADERS = {
 /**
  * Start serving on a free port of the loopback interface; `extra` mounts
  * more directories, as the corpus runner's SWFs, `csp` is the page's
- * Content-Security-Policy, if it has one, and `isolated` false serves a
+ * Content-Security-Policy, if it has one, and its workers' scripts', and `isolated` false serves a
  * page that is not cross-origin isolated.
  */
 export async function serve(
@@ -171,6 +171,8 @@ export async function serve(
           ...isolation,
           // The worker script with CORS, as a CDN serves it, for a page of another origin.
           ...(prefix === "/player-hosts/" ? { "access-control-allow-origin": "*" } : {}),
+          // A worker keeps the policy its script came with, not the page's.
+          ...(csp && inWorker ? { "content-security-policy": csp } : {}),
         });
         response.end(body);
         return;

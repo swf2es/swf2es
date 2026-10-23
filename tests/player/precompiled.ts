@@ -105,6 +105,47 @@ assert.deepEqual(
     .split("\n"),
 );
 
+// A background worker on the same SWF, under that policy, its script
+// served with it too: it imports the modules the primordial imported, and
+// would fail to compile any of its own.
+const workerSource = `package { import flash.display.Sprite; import flash.system.*;
+public class AotWorker extends Sprite {
+  public function AotWorker() {
+    if (Worker.current.isPrimordial) {
+      trace("primordial", m(2));
+      WorkerDomain.current.createWorker(loaderInfo.bytes).start();
+    } else {
+      trace("background", m(4));
+    }
+  }
+  public function m(x:int):int { return x * 5; }
+} }`;
+const workerAbc = compileScripts([{ name: "AotWorker", source: workerSource }]).get(
+  "AotWorker",
+) as Uint8Array;
+const workerSwf = bare(workerAbc, 3, "AotWorker");
+writeFileSync(`${out}AotWorker.swf`, workerSwf);
+const workerDir = `${out}AotWorker/`;
+const workerCompiled = spawnSync(
+  process.execPath,
+  [
+    cli,
+    `${out}AotWorker.swf`,
+    "-o",
+    workerDir,
+    "--emit-libraries",
+    "-q",
+    ...libraryFiles(libraries).flatMap((file) => ["--lib", file]),
+  ],
+  { encoding: "utf8" },
+);
+assert.equal(workerCompiled.status, 0, workerCompiled.stderr);
+const workerRun = await playPrecompiled(workerSwf, workerDir, true, 3, csp);
+assert.equal(workerRun.error, null);
+assert.equal(workerRun.evalRefused, true);
+assert.equal(workerRun.compiled, 0);
+assert.deepEqual(workerRun.trace, ["primordial 10", "background 20"]);
+
 // Evaluated under that policy, a module is refused, and so is its compile.
 const refused = await playPrecompiled(swf, dir, false, 3, csp);
 assert.match(refused.error ?? "", /EvalError/);
