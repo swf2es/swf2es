@@ -2091,9 +2091,17 @@ export class Runtime {
   }
 
   isInstanceOf(v: Value, traits: Traits): boolean {
+    if (!traits.testsValues) {
+      if (v === null || v === undefined) {
+        return false;
+      }
+
+      // An object's own traits, mostly: traitsOf's instanceof checks walk its prototypes.
+      const own: Traits | undefined = v.$traits;
+      return own === traits || (own ?? this.traitsOf(v)).isSubtypeOf(traits);
+    }
+
     switch (traits.name) {
-      case "Object":
-        return v !== null && v !== undefined;
       case "float":
         return v instanceof FloatValue;
       case "Number":
@@ -2106,15 +2114,9 @@ export class Runtime {
         return typeof v === "string";
       case "Boolean":
         return typeof v === "boolean";
-      default: {
-        if (v === null || v === undefined) {
-          return false;
-        }
-
-        // An object's own traits, mostly: traitsOf's instanceof checks walk its prototypes.
-        const own: Traits | undefined = v.$traits;
-        return (own ?? this.traitsOf(v)).isSubtypeOf(traits);
-      }
+      default:
+        // Object, whose instances are any value but null and undefined.
+        return v !== null && v !== undefined;
     }
   }
 
@@ -2206,17 +2208,21 @@ export class Runtime {
   }
 
   isTypeLate(v: Value, cls: Value): boolean {
+    // A class, which only class objects have instance traits for.
+    if (cls !== null && typeof cls === "object") {
+      const traits: Traits | undefined = cls.$it;
+      if (traits) {
+        return this.isInstanceOf(v, traits);
+      }
+    }
+
     // As Toplevel::toClassITraits: what is not an object, a Namespace
     // among them, as a null or undefined one is; an object not a class 1041.
     if (cls === null || typeof cls !== "object" || cls instanceof Namespace) {
       throw this.error("TypeError", cls === undefined ? 1010 : 1009);
     }
 
-    if (!cls.$it) {
-      throw this.error("TypeError", 1041);
-    }
-
-    return this.isInstance(v, cls);
+    throw this.error("TypeError", 1041);
   }
 
   asTypeLate(v: Value, cls: Value): Value {
