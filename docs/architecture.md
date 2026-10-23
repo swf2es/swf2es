@@ -102,7 +102,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `mp3`     | synchronous MP3 frame decoder, minimp3 compiled to WebAssembly with a Zig adapter | — |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time | player |
+| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
 `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
@@ -1226,7 +1226,10 @@ and updated where the display object marks itself changed.
 `packages/player/src` is grouped by what each part of the player does,
 and the player's paths in this document are relative to it:
 
-- `index.ts` is the package's one entry point; `player.ts` runs a SWF,
+- `index.ts` is the package's entry point, and `workers/thread.ts` the
+  one a background worker's thread imports (`@swf2es/player/worker`,
+  with the messages it and the primordial post, `workers/protocol.ts`);
+  `player.ts` runs a SWF,
   `scripting.ts` connects it to the runtime and the compiler, with its
   parts in `scripting/`: `code.ts` compiles and links the SWFs' code
   into their application domains and tells whose code runs, `sha256.ts`
@@ -1237,12 +1240,14 @@ and the player's paths in this document are relative to it:
   `symbols.ts` keeps what SymbolClass
   bound classes to, the fonts registered and the sounds' shared decodes,
   `timers.ts` keeps the clock and the timers that fire by it,
-  `clipboard.ts` what the clipboard holds and when scripts may touch it.
+  `clipboard.ts` what the clipboard holds and when scripts may touch it,
+  `workers.ts` the workers as one VM sees them (see [Workers](#workers)).
   `hosts.ts`
   holds what a host may supply in place of the browser (navigation,
   shared objects' storage, the platform Capabilities reports, the
   clipboard's writes) with the browser's defaults, and the interfaces of what only a host supplies
-  (ExternalInterface's page, a renderer's draws, fetches, sockets).
+  (ExternalInterface's page, a renderer's draws, fetches, sockets, the
+  threads workers run on).
 - `display/`: the display list and the timeline, and what they are made
   of: shapes, morphs, drawings and what they read back as, bounds and hit
   tests, 9-slice scaling, geometry, 3D matrices, colour transforms,
@@ -1288,7 +1293,7 @@ the display object its `create` hook takes, and the frame: its events,
 frame scripts, gotos' cycles and the construction of what timelines
 placed. What else scripts need that keeps state of its own is a part it
 holds, a class in `scripting/` given the `Scripting` for what they
-share: `code`, `symbols`, `lifecycle`, `loads` and `timers`. The natives
+share: `code`, `symbols`, `lifecycle`, `loads`, `timers` and `workers`. The natives
 and the player reach a part through it, as `s.loads.requestLoad`; the
 host's own calls, `loadLibraries` and `settled`, stay on `Scripting`.
 
@@ -2907,13 +2912,30 @@ attributes as an object, and playerglobal builds the tree and throws its
 errors from the status (the `legacy-xml` case). `XMLNode`'s escaping
 replaces the five XML characters.
 
+### Workers
+
+`flash.system.Worker` runs each background worker as a VM of its own on a
+thread the host starts (`WorkerHost`, hosts.ts): its own codegen, runtime
+and playerglobal playing the SWF `createWorker` was given, headless, its
+frames on a timer at the SWF's rate (`workers/thread.ts`, the entry of
+`@swf2es/player/worker`). `player-hosts` has the threads: `webWorkerHost`
+starts module Web Workers, `nodeWorkerHost` node's `worker_threads`, each
+given codegen's compiled module. Without a host, `Worker.isSupported` is
+false. `scripting/workers.ts` is what one VM sees: the primordial routes
+every message between workers, and shared properties and channels' messages
+cross as copies, made as avmplus' `ChannelItem` makes them, so that the
+threads share no memory yet. What content needs, shared memory and
+blocking, and the order the rest comes in are in
+[docs/workers.md](workers.md).
+
 ### Shutting down
 
 A page that takes its player away calls `Player.destroy`. No frame plays
 after it: `advance` and `tick` do nothing. With scripts, `Scripting.destroy`
 then stops every sound and closes the audio host (`AudioHost.close`, which
 closes the browser's AudioContext, whose thread a page otherwise keeps),
-closes the Sockets' and WebSockets' connections still open, and aborts
+terminates the background workers' threads, closes the Sockets' and
+WebSockets' connections still open, and aborts
 the fetches under way of the host's `fetch`. First it writes the
 SharedObjects scripts opened and changed since they were read or last
 written, as Flash wrote them as a SWF unloaded, so data a SWF set without

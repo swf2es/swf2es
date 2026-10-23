@@ -49,6 +49,7 @@ import {
   type SharedObjectStorage,
   type SocketHost,
   type WebSocketHost,
+  type WorkerHost,
 } from "./hosts.js";
 import type { LoadedAvm1Input } from "./input/avm1.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
@@ -68,6 +69,7 @@ import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
+import { type ParentLink, Workers } from "./scripting/workers.js";
 
 // For index.ts, which reaches playerglobal only through here.
 export { airLibrary, playerglobalLibrary };
@@ -106,6 +108,8 @@ export class Scripting {
   readonly timers: Timers;
   /** The system's clipboard as scripts see it, and when they may read or write it. */
   readonly clipboard: Clipboard;
+  /** flash.system's workers: this VM's own, and those it started on the host's threads. */
+  readonly workers: Workers;
   readonly screenCapabilities: Readonly<ScreenCapabilities>;
   readonly externalInterface: ExternalInterfaceHost | null;
   /** How many calls the page has made into the SWF's ExternalInterface callbacks, which run outside a frame. */
@@ -324,6 +328,13 @@ export class Scripting {
       lazyCompilation?: boolean;
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
+      /**
+       * Starts the threads background Workers run on (docs/workers.md);
+       * none by default, which leaves Worker.isSupported false.
+       */
+      workerHost?: WorkerHost | null;
+      /** Where this VM is a background worker's: how it reaches the primordial (scripting/workers.ts). */
+      workerParent?: ParentLink | null;
       /** Drop the final newline produced by an HTML paragraph or BR. */
       trimTrailingHtmlBreak?: boolean;
       /**
@@ -385,6 +396,7 @@ export class Scripting {
       options.clipboard === undefined ? browserClipboard() : options.clipboard,
     );
     this.fsCommand = options.fsCommand ?? null;
+    this.workers = new Workers(this, options);
     this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
     this.lazyCompilation = options.lazyCompilation ?? false;
@@ -412,6 +424,8 @@ export class Scripting {
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
   loadLibraries(abcs: Uint8Array[]): Promise<void> {
+    // A background worker's thread loads them too.
+    this.workers.libraries.push(...abcs);
     return this.code.loadLibraries(abcs);
   }
 
@@ -447,6 +461,7 @@ export class Scripting {
 
     this.destroyed = true;
     this.loads.destroyAvm1();
+    this.workers.stopAll();
     this.localConnections.destroy(this);
     this.flushSharedObjects?.();
     stopAllSounds(this);

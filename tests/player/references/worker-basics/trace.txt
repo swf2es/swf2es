@@ -1,0 +1,34 @@
+supported true true
+current true running
+created false new false
+channel open false open
+receive on sender ArgumentError 3737
+send on receiver ArgumentError 3736
+receive nothing undefined false
+shared copy false 1 three false
+shared channel true
+shared bytes true 5 5 bytes
+missing undefined
+undefined undefined
+null null
+primitives 7 0.5 text
+primordial shared undefined
+listed 1
+before start new true
+started twice flash.errors::IllegalOperationError 1511
+terminate primordial flash.errors::IllegalOperationError 3732
+message background false running 1 three bytes true
+message echo hello
+message echo n=42
+set by worker worker's
+terminate true
+terminate again false
+states running terminated, now terminated
+listed 1
+self true 1 [object MessageChannel]
+closing closing true
+send after close flash.errors::IOError 3738
+receive after close 2 closed
+receive again flash.errors::IOError 3738
+closed again closed
+self events message false, message false, state closed

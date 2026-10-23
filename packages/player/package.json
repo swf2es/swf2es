@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/workers/thread.d.ts",
+      "default": "./dist/workers/thread.js"
     }
   },
   "files": [

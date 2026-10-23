@@ -8570,6 +8570,20 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Worker needs SWF 17; frames enough for Flash to start the worker and answer.
+    name: "worker-basics",
+    swf: (abc) => {
+      const bytes = bare(abc, 1, "WorkerBasics");
+      bytes[3] = 26;
+      return bytes;
+    },
+    script: "WorkerBasics",
+    frames: 120,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "accessibility-natives",
     swf: (abc) => bare(abc, 1, "AccessibilityNatives"),
     script: "AccessibilityNatives",

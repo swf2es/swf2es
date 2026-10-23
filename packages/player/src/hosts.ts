@@ -2,10 +2,11 @@
 // navigateToURL goes, where its SharedObjects are kept, and the system
 // Capabilities reports; with the browser's defaults for each. Then what
 // only a host can give, with no default here: ExternalInterface's page, a
-// renderer's draws, fetches and sockets.
+// renderer's draws, fetches, sockets and the threads workers run on.
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
 import type { DisplayObject } from "./display/display.js";
+import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
 
 type Value = avm2.Value;
 
@@ -470,4 +471,30 @@ export function browserClipboard(): ClipboardHost | null {
       written.catch(() => {});
     },
   };
+}
+
+/** A thread a background flash.system.Worker runs on, as a WorkerHost started it. */
+export interface WorkerThread {
+  post(message: ToWorker): void;
+  /** Stops it at once, wherever its scripts are. */
+  terminate(): void;
+}
+
+/**
+ * Starts the threads background Workers run on (docs/workers.md): a
+ * Web Worker or a node worker_threads Worker running `@swf2es/player/worker`'s
+ * runWorkerThread, which the host gives codegen's compiled module along with
+ * `init` (@swf2es/player-hosts' webWorkerHost and nodeWorkerHost). Without
+ * one, Worker.isSupported is false and no worker starts.
+ */
+export interface WorkerHost {
+  /**
+   * Starts a thread for `init`: what it posts goes to `receive`, and an
+   * error that ends it to `failed`, from which nothing more comes.
+   */
+  start(
+    init: WorkerInit,
+    receive: (message: FromWorker) => void,
+    failed: (error: unknown) => void,
+  ): WorkerThread;
 }
