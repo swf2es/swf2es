@@ -27,6 +27,7 @@ export {
   actionsEmitEach,
   actionsEmitEachBytes,
   actionsHeldCount,
+  actionsHeldEmitEachBytes,
   actionsHeldUnitBytes,
   actionsHold,
   actionsModuleBytes,
