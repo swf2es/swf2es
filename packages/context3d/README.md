@@ -65,8 +65,8 @@ uncovered pixels without scaling. A 2D mip upload can reuse a larger bitmap;
 the backend keeps its source row stride and reuses the texture's staging array.
 Cube bitmap uploads still require the exact face/mip dimensions, unlike AIR,
 which also accepts other source sizes for cubes. The Flash adapter currently
-rejects these with a plain JavaScript unsupported-operation Error instead of an
-AS3 error; reusing a full-sized bitmap for a smaller cube mip therefore fails.
+rejects these with AS3 Error #3708; reusing a full-sized bitmap for a smaller
+cube mip therefore fails.
 Cube crop/pad support and its AIR-backed coverage remain a separate follow-up.
 An optional `Stage3DSurface.destroy` hook runs once when the surface is removed,
 after backend disposal and listener removal; it also runs after failed attachment.
