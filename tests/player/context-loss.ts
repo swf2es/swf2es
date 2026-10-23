@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { deflateSync } from "node:zlib";
 import * as w from "../swf-writer.ts";
-import { playLosingContext, playLosingContextPlan } from "./chrome.ts";
+import { playLosingContext, playLosingContextPlan, withPage } from "./chrome.ts";
 
 /** A closed ring of `n` curves round (cx, cy), `r` twips out: hundreds of vertices once flattened. */
 function ring(cx: number, cy: number, r: number, n: number): w.PathCommand[] {
@@ -142,6 +142,30 @@ tags.push(
   w.end(),
 );
 const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
+
+// Force slow first builds across the settling deadline, without losing either context.
+assert.deepEqual(
+  await withPage("contextLossPlanSwf", async (evaluate) => {
+    const setup = await evaluate(`(async () => {
+      const { PixiView } = await import("@swf2es/player");
+      const render = PixiView.prototype.render;
+      let clock = 0, frames = 0;
+      performance.now = () => clock;
+      PixiView.prototype.render = function(...args) {
+        const result = render.apply(this, args);
+        clock = ++frames === 1 ? 500 : 2200;
+        return result;
+      };
+      return true;
+    })()`);
+    assert.equal(setup.exception, null);
+    return evaluate<string | null>(
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "tt", false)`,
+    );
+  }),
+  { value: null, exception: null },
+  "both renderers settle in the same frame despite slow draws",
+);
 
 // Through the table's atlas, and drawn alone from what Pixi packed of each, as without the table.
 assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");
