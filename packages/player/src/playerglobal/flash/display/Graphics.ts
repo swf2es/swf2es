@@ -383,12 +383,19 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const numbers = (v: Value) => ((v as AsObject).$a as Value[]).map(Number);
-      const coordinates = numbers(vertices);
+      // The vectors' own storage, read, not copied: a Vector.<Number>'s and a Vector.<int>'s hold
+      // numbers alone, and a 3D engine passes thousands of them every frame.
+      const numbers = (v: Value) => (v as AsObject).$a as number[];
+      const given = numbers(vertices);
+      let coordinates = given;
       // Flash keeps a point in twips as an int: NaN, or one past an int's range, is its least.
       for (let i = 0; i < coordinates.length; i++) {
         const x = coordinates[i] * TWIPS;
         if (!(x >= -2147483648 && x <= 2147483647)) {
+          if (coordinates === given) {
+            coordinates = given.slice();
+          }
+
           coordinates[i] = -2147483648 / TWIPS;
         }
       }
