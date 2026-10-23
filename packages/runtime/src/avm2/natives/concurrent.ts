@@ -6,6 +6,7 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { Runtime } from "../runtime.js";
+import { bytesOf } from "./bytearray.js";
 import { type Natives, plain, registerNativeClass } from "./define.js";
 
 /** A mutex's state: how many times this one thread holds it. */
@@ -97,12 +98,24 @@ export function concurrentNatives(rt: Runtime): Natives {
 
   // As ConcurrentMemory::casi32: the domain memory's int at a word-aligned
   // address replaced by `next` if it is `expected`; the int there before.
+  // Atomic where another worker shares the memory.
   natives["avm2.intrinsics.memory::casi32"] = plain(
     (address: Value, expected: Value, next: Value) => {
       const at = rt.toInt(address);
-      const size = rt.memoryLength;
-      if (at % 4 !== 0 || size < 4 || at >>> 0 > size - 4) {
-        throw rt.error("RangeError", 1506);
+      const outside = () => at % 4 !== 0 || rt.memoryLength < 4 || at >>> 0 > rt.memoryLength - 4;
+      if (outside()) {
+        rt.refreshMemory?.();
+        if (outside()) {
+          throw rt.error("RangeError", 1506);
+        }
+      }
+
+      if (rt.refreshMemory && rt.memoryProvider) {
+        return bytesOf(rt, rt.memoryProvider).compareAndSwapInt(
+          at,
+          rt.toInt(expected),
+          rt.toInt(next),
+        );
       }
 
       const previous = rt.memory.getInt32(at, true);

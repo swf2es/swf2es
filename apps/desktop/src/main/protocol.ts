@@ -127,6 +127,18 @@ function contentSecurityPolicy(page: string): string {
 const notFound = () => new Response(null, { status: 404 });
 
 /**
+ * What makes the app's pages cross-origin isolated, as a shareable
+ * ByteArray's shared memory needs (docs/workers.md), on the app's own
+ * responses, its workers' scripts among them. The page loads only the
+ * app's files and the SWF's, which the file host serves with CORS, and a
+ * SWF's network loads go through the main process, so it costs nothing.
+ */
+const ISOLATION = {
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-embedder-policy": "credentialless",
+};
+
+/**
  * Serve swf2es:// in `session`: the app, its modules, the libraries `libraries` finds, and what
  * `sandbox` lets the SWF read.
  */
@@ -156,6 +168,7 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
         headers: {
           "content-type": TYPES[".html"],
           "content-security-policy": contentSecurityPolicy(page),
+          ...ISOLATION,
         },
       });
     }
@@ -180,7 +193,7 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
         file = under(staticDir, path.slice(1));
     }
 
-    return file ? fileResponse(file, {}) : notFound();
+    return file ? fileResponse(file, ISOLATION) : notFound();
   };
 
   session.protocol.handle(SCHEME, async (request) => {

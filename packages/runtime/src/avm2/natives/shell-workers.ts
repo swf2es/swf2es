@@ -51,12 +51,14 @@ const TABLE_MAX = 256 << 20;
 
 /**
  * How a shared property is kept: AMF3, a ByteArray's bytes, an object only
- * its setter's VM has, or a Number's float64.
+ * its setter's VM has, a Number's float64, or a shareable ByteArray's
+ * memory by its id, as a float64.
  */
 export const ITEM_AMF = 0;
 export const ITEM_BYTES = 1;
 export const ITEM_LOCAL = 2;
 export const ITEM_NUMBER = 3;
+export const ITEM_SHARED = 4;
 
 export interface SharedEntry {
   id: number;

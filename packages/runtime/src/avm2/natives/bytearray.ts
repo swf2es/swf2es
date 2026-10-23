@@ -39,6 +39,68 @@ export const GLOBAL_MEMORY_MIN_SIZE = 1024;
 const kAMF0 = 0;
 const kAMF3 = 3;
 
+/**
+ * A shareable ByteArray's memory once it has crossed to another worker,
+ * which every worker's ByteArray for it uses, as avmplus' ByteArrays share
+ * one Buffer: its bytes grow in place, and its length is one for all.
+ * Plain data, which a structured clone carries to another thread.
+ */
+export interface SharedBytesMemory {
+  /** The same in every worker, by which each VM keeps one ByteArray for it, as avmplus interns it. */
+  id: number;
+  /** Its words: the length, as a uint32. */
+  meta: SharedArrayBuffer;
+  /** Its bytes, as long as its capacity: growable, up to the most a ByteArray holds where it can. */
+  data: SharedArrayBuffer;
+}
+
+/** The growable SharedArrayBuffer of ES2024, which the runtime's ES2022 library does not type. */
+interface GrowableShared {
+  readonly byteLength: number;
+  readonly maxByteLength: number;
+  grow(length: number): void;
+}
+
+type GrowableSharedConstructor = new (
+  length: number,
+  options: { maxByteLength: number },
+) => SharedArrayBuffer;
+
+/** The ways a browser serves a page cross-origin isolated, for the error a page that is not gets. */
+const ISOLATION =
+  "a cross-origin isolated page (served with Cross-Origin-Opener-Policy: same-origin and " +
+  "Cross-Origin-Embedder-Policy: credentialless or require-corp)";
+
+/**
+ * Whether this thread can share memory with others: SharedArrayBuffer is
+ * there, as node always has it, and a browser only for a page that is
+ * cross-origin isolated.
+ */
+export function canShareMemory(): boolean {
+  const g = globalThis as { crossOriginIsolated?: boolean };
+  return typeof SharedArrayBuffer === "function" && g.crossOriginIsolated !== false;
+}
+
+/** What a page that is not cross-origin isolated gets for sharing `what` with another worker. */
+export function notIsolated(what: string): Error {
+  return new Error(
+    `swf2es: sharing ${what} with another worker needs shared memory, which a browser gives only ${ISOLATION}`,
+  );
+}
+
+/** Each runtime's ByteArray for each shared memory, by its id. */
+const sharedObjects = new WeakMap<Runtime, Map<number, WeakRef<AsObject>>>();
+
+function sharedObjectsOf(rt: Runtime): Map<number, WeakRef<AsObject>> {
+  let objects = sharedObjects.get(rt);
+  if (!objects) {
+    objects = new Map();
+    sharedObjects.set(rt, objects);
+  }
+
+  return objects;
+}
+
 /** A count of bytes, which a ByteArray and its runtime share. */
 interface Count {
   bytes: number;
@@ -71,7 +133,7 @@ export function byteArrayCapacity(rt: Runtime): number {
  * small integers of them itself.
  */
 export class Bytes {
-  buffer = new Uint8Array(0);
+  buffer: Uint8Array = new Uint8Array(0);
   view = new DataView(this.buffer.buffer);
   length = 0;
   position = 0;
@@ -81,10 +143,19 @@ export class Bytes {
   /** Whether it is the domain memory, which it then tells when its buffer or length changes. */
   subscribed = false;
   /**
-   * Whether `shareable` was set true, which no memory shares yet: a worker
-   * refuses to pass it to another rather than copy it.
+   * Whether `shareable` was set true, which cannot be undone: the
+   * ByteArray then crosses to another worker as its memory, not a copy.
    */
-  shareRequested = false;
+  shareable = false;
+  /**
+   * Its memory once it has crossed to another worker (share), which its
+   * buffer and view are then over, tracking its length as it grows; null
+   * until then, when it is a ByteArray like any other.
+   */
+  shared: SharedBytesMemory | null = null;
+  /** The shared memory's words, the length first, and its bytes as words for the atomics. */
+  private sharedWords: Int32Array | null = null;
+  private sharedInts: Int32Array | null = null;
   /** Its runtime's capacity count, and its own part of it. */
   private readonly capacity: { runtime: Count; own: Count };
 
@@ -136,6 +207,11 @@ export class Bytes {
       return;
     }
 
+    if (this.shared !== null) {
+      this.reshare(capacity);
+      return;
+    }
+
     let next: Uint8Array<ArrayBuffer>;
     try {
       next = new Uint8Array(capacity);
@@ -165,6 +241,44 @@ export class Bytes {
       throw this.rt.error("RangeError", 1506);
     }
 
+    this.reserve(length, fromSetter);
+    this.length = length >>> 0;
+    if (this.position > length) {
+      this.position = length >>> 0;
+    }
+
+    this.notify();
+  }
+
+  /**
+   * The length made at least `length`, as a write past the end makes it:
+   * shared, by a compare and swap that only ever raises it, so that
+   * workers appending at once never lower what another made it.
+   */
+  extend(length: number): void {
+    if (this.shared === null) {
+      this.setLength(length);
+      return;
+    }
+
+    this.reserve(length, false);
+    this.raise(length);
+    this.notify();
+  }
+
+  /** A shared length raised to `length` unless another worker made it as long. */
+  private raise(length: number): void {
+    const words = this.sharedWords as Int32Array;
+    for (;;) {
+      const now = Atomics.load(words, 0) >>> 0;
+      if (now >= length || Atomics.compareExchange(words, 0, now | 0, length | 0) >>> 0 === now) {
+        return;
+      }
+    }
+  }
+
+  /** As Grower::SetLengthCommon, before the length is set: the capacity for `length`. */
+  private reserve(length: number, fromSetter: boolean): void {
     if (!fromSetter || (length < kHugeGrowthThreshold && this.length < kHugeGrowthThreshold)) {
       if (length > this.buffer.length) {
         this.ensure(length, fromSetter);
@@ -176,13 +290,6 @@ export class Bytes {
         this.realloc(capacity, length, true);
       }
     }
-
-    this.length = length >>> 0;
-    if (this.position > length) {
-      this.position = this.length;
-    }
-
-    this.notify();
   }
 
   /** Tell the domain memory, if this is it, where the bytes are now: a new view only if they moved or their length changed. */
@@ -196,15 +303,175 @@ export class Bytes {
     }
   }
 
-  /** As ByteArray::Clear: no buffer at all. */
+  /** As ByteArray::Clear: no buffer at all; shared, every worker's ByteArray for it empty. */
   clear(): void {
     if (this.subscribed) {
       throw this.rt.error("RangeError", 1506);
     }
 
+    this.position = 0;
+    if (this.shared !== null) {
+      // The memory cannot shrink: what it held is zeroed, as a new buffer
+      // would be once it grows again, before the length is told, so that a
+      // worker that grows it once it is empty writes into zeroes already.
+      this.buffer.fill(0);
+      this.length = 0;
+      return;
+    }
+
     this.setBuffer(new Uint8Array(0));
     this.length = 0;
-    this.position = 0;
+  }
+
+  /**
+   * Its memory, shared from now on: a growable SharedArrayBuffer its bytes
+   * move to once, and that this ByteArray, and every worker's ByteArray for
+   * it, uses from then on. Where memory cannot be shared, the error that
+   * names cross-origin isolation.
+   */
+  share(): SharedBytesMemory {
+    if (this.shared !== null) {
+      return this.shared;
+    }
+
+    if (!canShareMemory()) {
+      throw notIsolated("a shareable ByteArray");
+    }
+
+    const capacity = Math.max(this.buffer.length, this.length);
+    const Shared = SharedArrayBuffer as unknown as GrowableSharedConstructor;
+    let data: SharedArrayBuffer | null = null;
+    // As much room to grow as a ByteArray has, or as much as the host reserves.
+    for (let max = kMaxCapacity; data === null; max /= 2) {
+      try {
+        data = new Shared(capacity, { maxByteLength: Math.max(max, capacity) });
+      } catch {
+        if (max <= capacity) {
+          throw this.rt.error("flash.errors::MemoryError", 1000);
+        }
+      }
+    }
+
+    new Uint8Array(data).set(this.buffer);
+    const memory: SharedBytesMemory = {
+      id: Math.floor(Math.random() * 2 ** 52),
+      meta: new SharedArrayBuffer(8),
+      data,
+    };
+    new Int32Array(memory.meta)[0] = this.length | 0;
+    this.adopt(memory);
+    sharedObjectsOf(this.rt).set(memory.id, new WeakRef(this.owner));
+    return memory;
+  }
+
+  /**
+   * Use `memory`, shared, as its bytes and length from now on. Its length
+   * becomes an accessor of the memory's word on this object alone, so that
+   * every read sees another worker's change and every write is seen, and
+   * a ByteArray that shares nothing reads a plain field as before.
+   */
+  adopt(memory: SharedBytesMemory): void {
+    this.shared = memory;
+    this.shareable = true;
+    const words = new Int32Array(memory.meta);
+    this.sharedWords = words;
+    Object.defineProperty(this, "length", {
+      get: () => Atomics.load(words, 0) >>> 0,
+      set: (length: number) => Atomics.store(words, 0, length | 0),
+      configurable: true,
+    });
+    // Views that track the memory's length as any worker grows it.
+    this.buffer = new Uint8Array(memory.data);
+    this.view = new DataView(memory.data);
+    this.sharedInts = new Int32Array(memory.data);
+    const { runtime, own } = this.capacity;
+    runtime.bytes += memory.data.byteLength - own.bytes;
+    own.bytes = memory.data.byteLength;
+    if (this.subscribed) {
+      this.rt.refreshMemory = () => this.notify();
+    }
+
+    this.notify();
+  }
+
+  /**
+   * A shared memory's capacity made at least `capacity`: it grows in place,
+   * which every worker sees, and never shrinks, as another worker may have
+   * grown it past what this one asks for since. Nor is what a smaller
+   * buffer would drop zeroed: without avmplus' safepoint, another worker
+   * may have grown the length again and written there meanwhile, so bytes
+   * past a lowered length may come back when it grows again.
+   */
+  private reshare(capacity: number): void {
+    const data = (this.shared as SharedBytesMemory).data as unknown as GrowableShared;
+    if (capacity <= data.byteLength) {
+      return;
+    }
+
+    if (capacity > data.maxByteLength) {
+      throw this.rt.error("flash.errors::MemoryError", 1000);
+    }
+
+    try {
+      data.grow(capacity);
+    } catch {
+      // Another worker grew it meanwhile, to as much or more, or the host refused.
+      if (data.byteLength < capacity) {
+        throw this.rt.error("flash.errors::MemoryError", 1000);
+      }
+    }
+
+    const { runtime, own } = this.capacity;
+    runtime.bytes += data.byteLength - own.bytes;
+    own.bytes = data.byteLength;
+  }
+
+  /** As ByteArray::CAS, once the index is checked: atomic where the memory is shared. */
+  compareAndSwapInt(at: number, expected: number, next: number): number {
+    if (this.sharedInts !== null) {
+      return Atomics.compareExchange(this.sharedInts, at >> 2, expected, next);
+    }
+
+    const previous = this.view.getInt32(at, true);
+    if (previous === expected) {
+      this.view.setInt32(at, next, true);
+    }
+
+    return previous;
+  }
+
+  /**
+   * As UnprotectedAtomicCompareAndSwapLength: the length set to `next`, as
+   * its setter sets it, if it is `expected`; the length before. Shared,
+   * the capacity is made first and the length swapped atomically, so that
+   * of workers growing it at once one wins.
+   */
+  compareAndSwapLength(expected: number, next: number): number {
+    if (this.shared === null) {
+      const previous = this.length;
+      if (previous === expected) {
+        this.setLength(next, true);
+      }
+
+      return previous;
+    }
+
+    // Read once: another worker may change it between two reads.
+    const now = this.length;
+    if (now !== expected) {
+      return now;
+    }
+
+    // Only grows the memory, so it does nothing another worker would undo if the swap fails.
+    this.reserve(next, true);
+    const previous =
+      Atomics.compareExchange(this.sharedWords as Int32Array, 0, expected | 0, next | 0) >>> 0;
+    if (previous === expected && this.position > next) {
+      this.position = next;
+    }
+
+    this.notify();
+    return previous;
   }
 
   /** As requestBytesForShortRead: the offset of `n` bytes to read, or EOFError. */
@@ -226,7 +493,7 @@ export class Bytes {
         throw this.rt.error("flash.errors::MemoryError", 1000);
       }
 
-      this.setLength(at + n);
+      this.extend(at + n);
     }
 
     this.position = (at + n) >>> 0;
@@ -272,8 +539,12 @@ export class Bytes {
 
     copyBytes(this.buffer, this.position, source, offset, count);
     this.position = end;
-    if (this.length < this.position) {
-      this.length = this.position;
+    if (this.length < end) {
+      if (this.shared === null) {
+        this.length = end;
+      } else {
+        this.raise(end);
+      }
     }
 
     this.notify();
@@ -286,7 +557,7 @@ export class Bytes {
         throw this.rt.error("flash.errors::MemoryError", 1000);
       }
 
-      this.setLength(index + 1);
+      this.extend(index + 1);
     }
 
     this.buffer[index] = value;
@@ -352,6 +623,34 @@ export function bytesOf(rt: Runtime, o: AsObject): Bytes {
   }
 
   return o.$bytes;
+}
+
+/**
+ * A shareable ByteArray's memory, shared from now on, as it crosses to
+ * another worker; where memory cannot be shared, the error that names
+ * cross-origin isolation.
+ */
+export function shareBytes(rt: Runtime, o: AsObject): SharedBytesMemory {
+  return bytesOf(rt, o).share();
+}
+
+/** This VM's one ByteArray for a shared memory, as avmplus interns one for its Buffer: shareable, at position 0. */
+export function sharedByteArray(rt: Runtime, memory: SharedBytesMemory): AsObject {
+  const objects = sharedObjectsOf(rt);
+  const known = objects.get(memory.id)?.deref();
+  if (known) {
+    return known;
+  }
+
+  const o = rt.construct(rt.classNamed("flash.utils::ByteArray")) as AsObject;
+  bytesOf(rt, o).adopt(memory);
+  objects.set(memory.id, new WeakRef(o));
+  return o;
+}
+
+/** This VM's ByteArray for the shared memory `id`, if it has one. */
+export function knownSharedByteArray(rt: Runtime, id: number): AsObject | undefined {
+  return sharedObjectsOf(rt).get(id)?.deref();
 }
 
 // TextEncoder is the web's and node's alike, though not ECMAScript's,
@@ -566,6 +865,21 @@ function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma"
 
 /** A ByteArray's bytes, all of them, replaced by a copy of `bytes`, its position `position`; the domain memory told, if it is. */
 function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
+  if (b.shared !== null) {
+    // In place, for every worker, as avmplus swaps the shared Buffer's array.
+    const previous = b.length;
+    b.position = 0;
+    b.write(bytes);
+    if (previous > bytes.length) {
+      b.buffer.fill(0, bytes.length, previous);
+    }
+
+    b.length = bytes.length;
+    b.position = position >>> 0;
+    b.notify();
+    return;
+  }
+
   b.setBuffer(new Uint8Array(bytes));
   b.length = bytes.length;
   b.position = position >>> 0;
@@ -676,12 +990,15 @@ export function byteArrayNatives(rt: Runtime): Natives {
     }
 
     get shareable() {
-      return false;
+      return bytesOf(rt, this).shareable;
     }
 
-    // Shareable byte arrays are not shared here; workers refuse to pass one.
+    // As ByteArray::setShareable: once shareable, always; its memory is
+    // shared when it first crosses to another worker.
     set shareable(v: Value) {
-      bytesOf(rt, this).shareRequested = rt.toBoolean(v);
+      if (rt.toBoolean(v)) {
+        bytesOf(rt, this).shareable = true;
+      }
     }
 
     clear() {
@@ -698,12 +1015,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 1506);
       }
 
-      const previous = b.view.getInt32(at, true);
-      if (previous === rt.toInt(expected)) {
-        b.view.setInt32(at, rt.toInt(next), true);
-      }
-
-      return previous;
+      return b.compareAndSwapInt(at, rt.toInt(expected), rt.toInt(next));
     }
 
     // As ByteArrayObject::atomicCompareAndSwapLength: the length set to
@@ -717,12 +1029,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
         throw rt.error("RangeError", 1506);
       }
 
-      const previous = b.length;
-      if (previous === rt.toInt(expected)) {
-        b.setLength(length >>> 0, true);
-      }
-
-      return previous;
+      return b.compareAndSwapLength(rt.toInt(expected), length >>> 0);
     }
 
     // Reads.
@@ -826,7 +1133,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
       const source = b.buffer;
       const from = b.position;
       if (offset + count >= to.length) {
-        to.setLength(offset + count);
+        to.extend(offset + count);
       }
 
       b.position = (from + count) >>> 0;
@@ -1145,6 +1452,7 @@ export function setDomainMemory(rt: Runtime, v: Value): void {
     }
 
     rt.memoryProvider = null;
+    rt.refreshMemory = null;
     rt.memory = rt.scratchMemory;
     return;
   }
@@ -1161,4 +1469,6 @@ export function setDomainMemory(rt: Runtime, v: Value): void {
   }
 
   rt.memoryProvider = v;
+  // Shared, its length as the other workers left it, its view made again if it changed.
+  rt.refreshMemory = b.shared !== null ? () => b.notify() : null;
 }

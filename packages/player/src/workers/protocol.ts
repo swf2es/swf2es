@@ -2,16 +2,20 @@
 // each other (docs/workers.md): plain data a structured clone copies, so
 // that any host's channel carries it, a Web Worker's or node's
 // worker_threads'. The primordial routes every message between workers.
+// A shareable ByteArray's memory is SharedArrayBuffers, which a structured
+// clone shares rather than copies.
+import type { avm2 } from "@swf2es/runtime";
 
 /**
  * A value crossing between workers, as avmplus' ChannelItem makes one: a
- * primitive as itself, a ByteArray as a copy of its bytes, a MessageChannel
- * by reference, anything else as AMF3.
+ * primitive as itself, a ByteArray as a copy of its bytes, a shareable one
+ * as its memory, a MessageChannel by reference, anything else as AMF3.
  */
 export type WireValue =
   | { kind: "value"; value: number | boolean | string | null }
   | { kind: "amf"; bytes: Uint8Array<ArrayBuffer> }
   | { kind: "bytes"; bytes: Uint8Array<ArrayBuffer> }
+  | { kind: "shared"; memory: avm2.SharedBytesMemory }
   | { kind: "channel"; channel: ChannelRef };
 
 /** A MessageChannel, from its sending worker to its receiving one, by the workers' ids. */

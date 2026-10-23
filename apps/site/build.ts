@@ -154,7 +154,17 @@ copyFileSync(
 copyTree(join(root, "vendor/pixijs/dist"), join(out, "modules/pixi"), (file) =>
   /\.(m?js)$/.test(file),
 );
-copyTree(join(here, "dist/js"), join(out, "app"), (file) => file.endsWith(".js"));
+copyTree(
+  join(here, "dist/js"),
+  join(out, "app"),
+  (file) => file.endsWith(".js") && file !== "service-worker.js",
+);
+// At the root, the scope it serves: Pages sends no Service-Worker-Allowed for a wider one. A
+// classic script, which every browser registers, without the export that makes tsc's a module.
+writeFileSync(
+  join(out, "service-worker.js"),
+  readFileSync(join(here, "dist/js/service-worker.js"), "utf8").replace(/^export \{\};\n/m, ""),
+);
 
 mkdirSync(join(out, "libraries"), { recursive: true });
 copyFileSync(

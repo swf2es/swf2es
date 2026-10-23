@@ -5,6 +5,7 @@
 // errors reach the page's console, which the panel shows.
 import { isAs3, readSwf, readSwfHeader } from "@swf2es/format";
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
+import { isolate } from "./isolation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
 import { Stats } from "./stats.js";
 
@@ -14,6 +15,11 @@ interface DemoEntry {
   description: string;
   source: string;
   bytes: number;
+}
+
+// On the first visit the page loads again, cross-origin isolated, rather than play twice.
+if (!(await isolate())) {
+  await new Promise<never>(() => {});
 }
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;

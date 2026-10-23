@@ -160,6 +160,11 @@ export class Runtime {
   view: DataView = this.scratchMemory;
   memoryLength: number = this.scratchMemory.byteLength;
   memoryProvider: AsObject | null = null;
+  /**
+   * For domain memory another worker shares: its length read again, which
+   * that worker may have changed, before an address past it is rejected.
+   */
+  refreshMemory: (() => void) | null = null;
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
@@ -2867,7 +2872,10 @@ export class Runtime {
   private mops(address: Value, size: number): number {
     const a = this.toInt(address);
     if (a < 0 || a + size > this.memoryLength) {
-      throw this.error("RangeError", 1506);
+      this.refreshMemory?.();
+      if (a < 0 || a + size > this.memoryLength) {
+        throw this.error("RangeError", 1506);
+      }
     }
 
     return a;

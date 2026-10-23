@@ -14,13 +14,20 @@ import {
 import { runShell } from "./shell.js";
 import { nodeShellThreads, type ShellThreadData } from "./threads.js";
 
-const { codegen, libraries, abcs, init, post } = workerData as ShellThreadData;
+const { codegen, libraries, abcs, init, post, group, memories } = workerData as ShellThreadData;
 const print = post
   ? (line: string) => parentPort?.postMessage(line)
   : (line: string) => writeSync(1, `${line}\n`);
 
 if (startShellWorker(init)) {
-  const threads = nodeShellThreads({ codegen, libraries, abcs, ...(post ? { print } : {}) });
+  const threads = nodeShellThreads({
+    codegen,
+    libraries,
+    abcs,
+    group,
+    memories,
+    ...(post ? { print } : {}),
+  });
   let exception = true;
   try {
     const code = init.code ? [{ name: `worker-${init.id}`, abc: init.code }] : abcs;

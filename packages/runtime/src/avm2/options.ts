@@ -1,6 +1,7 @@
 // What a host gives a runtime when it makes one, and what it does without.
 
 import type { Abc, CompileUnit } from "./descriptors.js";
+import type { SharedBytesMemory } from "./natives/bytearray.js";
 import type { Runtime } from "./runtime.js";
 
 export interface RuntimeOptions {
@@ -49,6 +50,14 @@ export interface ShellWorkerHost {
    * primordial's does.
    */
   start(init: ShellWorkerInit): ShellThread;
+  /**
+   * Make a shareable ByteArray's memory known to every thread of the
+   * primordial's, those started later too, before a shared property names
+   * it; without it, one is shared only with this thread.
+   */
+  share?(memory: SharedBytesMemory): void;
+  /** The memory another thread shared by `id`, or undefined if it has not come. */
+  shared?(id: number): SharedBytesMemory | undefined;
 }
 
 export interface ShellThread {

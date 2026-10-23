@@ -4,7 +4,7 @@ What ActionScript 3's workers (`flash.system.Worker`, `WorkerDomain`,
 `MessageChannel`, shared properties, a shareable `ByteArray` and
 `flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, how they map
 onto a browser's and node's threads, and the order to build them in. The
-first two slices are built (see [Slices](#slices)); the rest is the plan.
+first three slices are built (see [Slices](#slices)); the rest is the plan.
 
 ## What content needs
 
@@ -25,9 +25,9 @@ the test stops):
 |------|-------|------------|
 | `Worker`, `WorkerDomain`, `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | create, start, terminate, state, `listWorkers`, errors 1511 | as avmshell (8, 9, 2, 2, 1 and 1 passed); before slice 2 they stopped at the first creation, 4 assertions passed of 23 |
 | `ConditionAndMutexAPI` | Mutex and Condition on one thread | passes (12/12) |
-| `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` | 14/17: the three `shareable` assertions |
-| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | the six assertions on one thread pass; it stops where it passes the shareable ByteArray to the worker |
-| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | stop where they pass the shareable ByteArray to the first worker |
+| `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` | passes (17/17) since slice 3; 14/17 before |
+| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | as avmshell (12 passed) since slice 3; before, it stopped after the six on one thread, where it passed the shareable ByteArray to the worker |
+| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | stop where they pass the Mutex to the first worker (slice 4); before slice 3, at the shareable ByteArray |
 
 The last three are what real threads need: the primordial spins reading
 the shared bytes while five workers write them, and takes the shared Mutex
@@ -86,7 +86,8 @@ is only whether `flash.system.Worker` resolves. It never reads
 With slice 1's workers, Hello World and `mandel.swf` get one step
 further: `createWorker` succeeds, and `newThread` stops at setting
 `flascc.threadArbMutex`, "passing a Mutex to another worker is not
-supported yet".
+supported yet". Slice 3 shares `flascc.ram` and its domain memory, but
+the Mutex comes first, so they stop there still.
 
 Crossbridge therefore needs, all at once: workers, a shareable ByteArray
 whose memory every thread sees (as domain memory), Mutex and Condition
@@ -173,7 +174,7 @@ As Flash and avmplus:
 | undefined | (deletes a shared property) |
 | any other object, Vector, Array, XML | AMF3 bytes, by the runtime's writer, read by the other VM's, its aliases its own |
 | ByteArray, not shareable | its bytes, copied at the set or send |
-| ByteArray, shareable | its memory, shared (slice 3) |
+| ByteArray, shareable | its memory, shared: one ByteArray a worker for it, as avmplus interns its Buffer |
 | MessageChannel | a reference: one object a worker, by id |
 | Mutex, Condition | a reference: shared state (slice 4) |
 
@@ -250,35 +251,103 @@ Mutex and Condition across threads all need a `SharedArrayBuffer`, which a
 browser gives only to a cross-origin isolated page
 (`globalThis.crossOriginIsolated`): its document served with
 `Cross-Origin-Opener-Policy: same-origin` and
-`Cross-Origin-Embedder-Policy: require-corp` or `credentialless`. Where:
+`Cross-Origin-Embedder-Policy: require-corp` or `credentialless`. node
+(unit tests, the CLI's avmshell) always has it. A web page must have its
+server send them, which an embedder decides: `require-corp` blocks every
+cross-origin subresource that does not opt in with CORP or CORS, the
+SWF's own loads included; `credentialless` lets no-cors ones through
+without cookies, the gentler choice for a page that plays Flash content
+(Chrome and Firefox; Safari has only `require-corp`). COOP
+`same-origin` cuts the page off from cross-origin popups it opened, which
+`navigateToURL` to `_blank` and ExternalInterface pages may rely on. Where swf2es's own pages get
+them is below.
 
-- **node** (unit tests, the CLI's avmshell) always has it.
-- **The desktop app** serves its page through its own scheme
-  (`apps/desktop/src/main/protocol.ts`), so it can add both headers to
-  the page's responses itself; Electron's `enable-features=SharedArrayBuffer`
-  switch is the fallback. Its SWFs' loads go through the main process's
-  network, so COEP costs it nothing.
-- **The player tests' server** can send both headers on the page.
-- **A web page** must have its server send them, which an embedder
-  decides. `require-corp` blocks every cross-origin subresource that does
-  not opt in with CORP or CORS, the SWF's own loads included;
-  `credentialless` lets no-cors ones through without cookies, which is
-  the gentler choice for a page that plays Flash content (Chrome and
-  Firefox; Safari has only `require-corp`). Both cut the page off from
-  cross-origin popups it opened, which `navigateToURL` to `_blank` and
-  ExternalInterface pages may rely on.
-- **The demo site** on GitHub Pages cannot set headers. A service worker
-  that adds them to every response (the coi-serviceworker technique) is
-  the known way round, at the cost of a reload on the first visit.
+A shareable ByteArray (`natives/bytearray.ts`) keeps memory of its own
+until it first crosses to another worker: its bytes then move, once, to
+a growable `SharedArrayBuffer` (`new SharedArrayBuffer(capacity, {
+maxByteLength })`, up to the 2 GB a ByteArray holds, or as much as the
+host reserves), and its length to a word of a second, small one
+(`SharedBytesMemory`, with an id). Every worker's ByteArray for it uses
+those, as avmplus' ByteArrays share one `Buffer`, and each VM keeps one
+ByteArray for an id, as avmplus interns one for a Buffer:
 
-A shareable ByteArray's memory is a growable `SharedArrayBuffer`
-(`new SharedArrayBuffer(length, { maxByteLength })`), which every thread
-sees grow in place, as Flash's does: Crossbridge grows its heap from any
-thread with `atomicCompareAndSwapLength`. Its maximum reserves address
-space only; the runtime's domain memory `DataView` is made over it, and
-the atomics are `Atomics.compareExchange` on an `Int32Array` view.
+- Its buffer and DataView track the memory's length, so growth by any
+  worker, which is `grow` in place, is seen by all; the memory cannot
+  shrink, so a smaller capacity zeroes what it would have dropped.
+- Its length is an accessor of the shared word on that object alone: every
+  read sees another worker's change and every write is seen. A ByteArray
+  that shares nothing keeps its plain field, and its natives are as fast
+  as before (`as3pb`, interleaved against the slice before).
+- `shareable` cannot be set back to false, as in avmplus. `clear()` empties
+  it for every worker, zeroing the memory before it makes the length 0,
+  so that a worker growing it then writes into zeroes; `compress()` and the others
+  rewrite the bytes in place for all.
+- `atomicCompareAndSwapIntAt` and `casi32` are `Atomics.compareExchange` on
+  an `Int32Array` over the bytes; `atomicCompareAndSwapLength` reads the
+  length once, grows the capacity, then swaps the length word, so that of
+  workers growing it at once one wins. The memory only ever grows, so a
+  swap that fails undoes nothing another worker did. Nor is what a
+  smaller buffer would drop zeroed when the length is lowered: avmplus
+  zeroes it under a safepoint, and without one the zeroing would race
+  with a worker growing the length again and writing there, so on a
+  shared ByteArray bytes past a lowered length may come back when it
+  grows again.
+  Writes past the end raise the length by a compare and swap, never
+  lowering what another worker made it.
+- Domain memory over it keeps the loads and stores generated code makes in
+  place, against `rt.memoryLength`, the length this thread last saw: only
+  an address past it reads the length again (`Runtime.refreshMemory`)
+  before it is rejected, so another worker's growth is seen, and memory
+  that is not shared costs nothing more (as3pb's memory path and
+  Crossbridge's LZ4 measure the same as before). A worker that shrinks it
+  is seen at the next access past the old length, not at once.
 
-What to do where a page is not isolated is a choice (see [Decisions](#decisions-for-the-user)).
+The player's workers (`scripting/workers.ts`) pass the memory in their
+messages, a shared property or a channel's, which a structured clone
+shares. avmshell's (`natives/shell.ts`) keep it in a shared property by
+its id; the host makes the memory known to the other threads
+(`ShellWorkerHost.share` and `shared`): the CLI posts it on a
+BroadcastChannel of the primordial's threads, and a thread reads that
+channel synchronously (`receiveMessageOnPort`) when a property names
+memory it has not seen, as its code never returns to its event loop. A
+thread started later is given what its parent has seen; one that was
+still starting when a memory was shared, and missed it on the channel,
+asks the primordial's memory thread (`shell-memories.ts`), which
+subscribed before any other thread started, and waits for its answer. The CLI's threads
+keep what was shared until the primordial ends.
+
+Where memory cannot be shared, a page that is not cross-origin isolated,
+workers that only pass messages run as anywhere, `Worker.isSupported` is
+true as Flash reports it, and passing a shareable ByteArray to another
+worker throws "sharing a shareable ByteArray with another worker needs
+shared memory, which a browser gives only a cross-origin isolated page
+(...)", rather than copy it and leave a program waiting on memory nobody
+writes. `flash.system.Worker` is not hidden (see [Decisions](#decisions-for-the-user)).
+
+Where swf2es's own pages are isolated:
+
+- **The player tests' server** (`tests/player/serve.ts`) sends COOP
+  `same-origin` and COEP `credentialless` with every response, its
+  workers' scripts too; a test can ask for a page that is not
+  (`tests/player/isolation.ts` plays there).
+- **The desktop app** (`apps/desktop/src/main/protocol.ts`) sends both
+  with its own pages and modules; the smoke test checks the page is
+  isolated. It gives workers no host yet (slice 6).
+- **The demo site** registers a service worker at its root
+  (`apps/site/src/service-worker.ts`, `isolation.ts`) that adds both to the
+  site's own responses; the first visit loads the page again once it
+  serves it, or at once after a reload that bypassed it (Shift-reload),
+  and other origins' responses pass as they are. A browser
+  that is still not isolated with it, Safari without `credentialless`, is
+  not reloaded again. `tests/site/run.ts` serves the site without the
+  headers, as Pages does, and checks it becomes isolated. It gives
+  workers no host yet either (slice 6).
+- **Another page** that embeds the player with a worker host serves its
+  document, and its workers' scripts, with
+  `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: credentialless` (or `require-corp`, which
+  needs every cross-origin subresource to opt in) for a shareable
+  ByteArray to cross; without them, workers pass messages only.
 
 ### Blocking
 
@@ -338,9 +407,10 @@ the next get on any other, so a primordial that waits in `System.sleep`
 are kept as avmplus' ChannelItem keeps them: a Number as itself, a
 ByteArray's bytes copied at the set (the VM that set it gets its own
 object back, another one object of its own for the item), anything else
-as AMF3. A shareable ByteArray, a Mutex or a Condition stays with the VM
-that set it: setting one on another worker, or reading one another worker
-set, throws "not supported" until slices 3 and 4 share them.
+as AMF3, and a shareable ByteArray's memory by its id (see [Shared
+memory](#shared-memory)). A Mutex or a Condition stays with the VM that
+set it: setting one on another worker, or reading one another worker
+set, throws "not supported" until slice 4 shares them.
 
 A thread may be stopped anywhere, so none is stopped holding the lock:
 `terminate` marks the worker, and the workers it started, theirs and so
@@ -409,13 +479,20 @@ Each a PR, in this order:
    threads, `System.sleep`. Tests: the six lifecycle Tamarin tests, and
    the `worker-threads` conformance case against avmshell. Unlocks:
    avmshell-checked semantics for what the rest builds on.
-3. **Shared memory**: a shareable ByteArray over a growable
+3. **Shared memory** (built, see [Shared memory](#shared-memory)): a
+   shareable ByteArray over a growable
    SharedArrayBuffer, passed by reference (one object a worker, as
    avmplus interns it), real `atomicCompareAndSwapIntAt` and `Length`,
    domain memory over a shared ByteArray; cross-origin isolation for the
    test server, the desktop app and the demo site, and the documented
-   headers for other hosts. Tests: Tamarin's `ByteArrayAPI` (17/17), a
-   player case with two workers writing one ByteArray.
+   headers for other hosts. Tests: Tamarin's `ByteArrayAPI` (17/17) and
+   `ByteArrayWorkersLzma`, the `worker-shareable` conformance case against
+   avmshell (both ways across threads, growth, the atomics, domain memory
+   on both sides, compress and clear), the `worker-shared-bytes` player
+   case (two workers counting in one ByteArray and growing it) against
+   adl's trace in Chrome and on node's threads, `tests/player/isolation.ts`
+   on a page that is not isolated, and the site's and desktop app's
+   isolation in their tests.
 4. **Blocking across threads**: Mutex and Condition in shared memory,
    `Atomics.wait` in workers, the spinning primordial with the 15 s limit,
    shared properties and channel queues in shared memory (seen at once,
@@ -450,9 +527,9 @@ Each a PR, in this order:
      isolation, as before slice 1;
   3. copies in place of shared memory, silently.
 
-  Recommended: 1. It is honest (it fails loudly, where 3 hangs), keeps
-  `isSupported` as Flash reports it for the content that only passes
-  messages, and 2 does not help Crossbridge, which never reads
+  Decided: 1 (built in slice 3). It is honest (it fails loudly, where 3
+  hangs), keeps `isSupported` as Flash reports it for the content that
+  only passes messages, and 2 does not help Crossbridge, which never reads
   `isSupported`. Flash Player 32 itself could refuse `Worker.start` when
   a user disabled shared memory after Spectre (error 3807, "Worker.start
   has been disabled by the user"); that could be the error instead, if its
@@ -463,12 +540,11 @@ Each a PR, in this order:
 - **Which embedder policy the embeddings ask for.** `credentialless`
   keeps a SWF's cross-origin no-cors loads working but is not in Safari;
   `require-corp` works everywhere but blocks what does not opt in.
-  Recommended: `credentialless` for `@swf2es/web`'s documented headers,
-  the desktop app's own page either way, and the demo site behind a
-  service worker that adds the headers.
+  Decided: `credentialless` for the documented headers, the player
+  tests' server, the desktop app's own pages, and the demo site behind a
+  service worker that adds the headers (built in slice 3).
 - **Hiding workers from Crossbridge without isolation.** Crossbridge would
   fall back to running `main()` on the UI thread (`startAsync`) if
   `flash.system.Worker` did not resolve. Making it not resolve on a page
   that is not isolated would let the samples without pthreads play there,
-  but changes what a SWF sees of playerglobal; not recommended without a
-  setting.
+  but changes what a SWF sees of playerglobal. Decided: not hidden.

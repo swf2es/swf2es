@@ -14,7 +14,9 @@ import {
   bytesOf,
   fromUtf8,
   GLOBAL_MEMORY_MIN_SIZE,
+  knownSharedByteArray,
   setDomainMemory,
+  sharedByteArray,
   utf8,
 } from "./bytearray.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
@@ -26,6 +28,7 @@ import {
   ITEM_BYTES,
   ITEM_LOCAL,
   ITEM_NUMBER,
+  ITEM_SHARED,
   NEW,
   newWorkersMemory,
   RUNNING,
@@ -353,10 +356,10 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     // As avmplus' ChannelItem: undefined deletes; a number is kept as itself,
-    // a ByteArray's bytes copied, and anything else as AMF3, read back as a
-    // new copy. A shareable ByteArray, a Mutex or a Condition is kept as the
-    // object, which only this VM has: one set on another worker, or read
-    // there, fails, as no memory is shared yet.
+    // a ByteArray's bytes copied, a shareable one's memory shared, and
+    // anything else as AMF3, read back as a new copy. A Mutex or a
+    // Condition is kept as the object, which only this VM has: one set on
+    // another worker, or read there, fails until slice 4 shares them.
     setSharedProperty(this: WorkerObject, key: Value, value: Value): void {
       const { workers } = workersOf(rt);
       const k = sharedKey(rt, key);
@@ -372,7 +375,7 @@ export function shellNatives(rt: Runtime): Natives {
       }
 
       const token = workers.set(this.$id, k, item);
-      if (item.kind === ITEM_BYTES || item.kind === ITEM_LOCAL) {
+      if (item.kind !== ITEM_AMF && item.kind !== ITEM_NUMBER) {
         workers.objects.set(entryKey(this.$id, k), { token, value });
       }
     }
@@ -399,9 +402,23 @@ export function shellNatives(rt: Runtime): Natives {
       }
 
       if (entry.kind === ITEM_LOCAL) {
-        throw rt.unsupported(
-          "passing a shareable ByteArray, a Mutex or a Condition to another worker",
-        );
+        throw rt.unsupported("passing a Mutex or a Condition to another worker");
+      }
+
+      if (entry.kind === ITEM_SHARED) {
+        // The VM's one ByteArray for the memory, by its id.
+        const id = new DataView(entry.bytes.buffer).getFloat64(0, true);
+        const known = knownSharedByteArray(rt, id);
+        if (known) {
+          return known;
+        }
+
+        const memory = rt.workerHost?.shared?.(id);
+        if (!memory) {
+          throw rt.unsupported("a shareable ByteArray from a worker whose host does not share it");
+        }
+
+        return sharedByteArray(rt, memory);
       }
 
       const value = newByteArray(rt, entry.bytes);
@@ -569,15 +586,11 @@ const sharedKey = (rt: Runtime, key: Value): string | null =>
 
 /** What an object only its own VM has is, in an error. */
 const localName = (rt: Runtime, value: Value): string =>
-  rt.isInstance(value, rt.classNamed("flash.utils::ByteArray"))
-    ? "a shareable ByteArray"
-    : rt.isInstance(value, rt.classNamed("flash.concurrent::Mutex"))
-      ? "a Mutex"
-      : "a Condition";
+  rt.isInstance(value, rt.classNamed("flash.concurrent::Mutex")) ? "a Mutex" : "a Condition";
 
 /**
- * What a shared property keeps of `value`, as makeChannelItem; a shareable
- * ByteArray as itself, until memory is shared.
+ * What a shared property keeps of `value`, as makeChannelItem; a Mutex or
+ * a Condition as itself, until slice 4 shares them.
  */
 function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Array } {
   if (typeof value === "number") {
@@ -588,9 +601,17 @@ function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Arra
 
   if (value !== null && typeof value === "object") {
     if (rt.isInstance(value, rt.classNamed("flash.utils::ByteArray"))) {
-      return bytesOf(rt, value).shareRequested
-        ? { kind: ITEM_LOCAL, bytes: new Uint8Array(0) }
-        : { kind: ITEM_BYTES, bytes: copyOf(rt, value) };
+      const b = bytesOf(rt, value);
+      if (!b.shareable) {
+        return { kind: ITEM_BYTES, bytes: copyOf(rt, value) };
+      }
+
+      // Its memory, known to every thread before the property names it.
+      const memory = b.share();
+      rt.workerHost?.share?.(memory);
+      const bytes = new Uint8Array(8);
+      new DataView(bytes.buffer).setFloat64(0, memory.id, true);
+      return { kind: ITEM_SHARED, bytes };
     }
 
     for (const name of ["flash.concurrent::Mutex", "flash.concurrent::Condition"]) {
