@@ -27,18 +27,33 @@ Create the WebGL2 context with `alpha: false`, `antialias: false`, `depth: false
 back-buffer attachments and copies to the canvas only at `present()`.
 
 An optional second constructor argument sets resource budgets, for example
-`new WebGLContext3D(gl, { maxBuffers: 4096 })` for models with many animation
-frames. Defaults are 128 buffers, programs and textures each, with separate
-64 MiB budgets for buffer storage, texture mip chains, texture-target
+`new WebGLContext3D(gl, { maxTextureBytes: 32 * 1024 * 1024 })`.
+Default counts match AIR's 4,096 resources independently for vertex buffers,
+index buffers, programs, 2D textures, rectangle textures and cube textures.
+`maxVertexBuffers`, `maxIndexBuffers`, `maxPrograms`, `max2DTextures`,
+`maxRectangleTextures` and `maxCubeTextures` change those limits. `maxBuffers`
+and `maxTextures` retain aggregate caps, defaulting to 8,192 and 12,288; an
+explicit lower cap still limits the combined types.
+
+The separate 64 MiB budgets for buffer storage, texture mip chains, texture-target
 depth/stencil storage and multisample target color storage (`maxBufferBytes`,
-`maxTextureBytes`, `maxTargetDepthBytes`, `maxTargetColorBytes`).
-Multisample storage counts actual samples; cube targets also count a cached
-single-sample color surface used during resolution.
-`maxBuffers`, `maxPrograms` and `maxTextures` change the count limits. Raising a
-count leaves the byte budgets intact. Values must be nonnegative safe integers;
-zero denies new allocations in that category. Options are copied at creation,
-and disposal returns each resource's budget. These counts cover tracked storage,
-not the driver's physical VRAM, back-buffer attachments or all CPU staging memory.
+`maxTextureBytes`, `maxTargetDepthBytes`, `maxTargetColorBytes`) remain experimental
+host policies, below AIR's larger storage allowances. Raising a count leaves
+these byte budgets intact and allocates nothing eagerly. Multisample storage
+counts actual samples; cube targets also count a cached single-sample resolve
+surface. Options must be nonnegative safe integers; zero denies allocations in
+that category. They are copied at creation and disposal returns each resource's
+budget. Accounting covers tracked storage, not physical driver VRAM,
+back-buffer attachments or all CPU staging memory.
+
+Core failures carry typed reasons. The Flash adapter maps them to catchable AS3
+errors, including resource limits (#3691), disposed objects (#3694), draw bounds
+and AGAL validation/linkage. Known unavailable modes or profiles report an
+asynchronous ErrorEvent #3702 so content can retry baseline. Concurrent requests
+coalesce; requesting again after creation retires the preceding context and
+creates a new one. Broader unchecked-error precedence remains experimental.
+The constructor rejects antialiased host contexts before allocating GPU handles:
+its explicit resolve/present path requires `antialias: false`.
 
 The adapter disposes GPU resources before the host removes the surface. After
 browser context loss, the old surface stays attached so restoration can trigger
@@ -129,3 +144,15 @@ separate execution design: `Context3D.read()` returns synchronously to Flash,
 while WebGPU's [`GPUBuffer.mapAsync`](https://gpuweb.github.io/types/interfaces/GPUBuffer.html#mapAsync)
 provides CPU access asynchronously. A worker bridge or another way to suspend
 Flash execution would need validation before full compatibility could be claimed.
+
+The display list and Stage3D use separate canvases. Display-list blend effects
+sample the transparent 2D back buffer rather than Stage3D color, so blending
+across those layers is an experimental limitation. `Playback.destroy()` disposes
+the display-list scene before the renderer on ordinary loads as well as Stage3D
+loads; this intentional shared cleanup releases cached text-style listeners.
+
+Draw validation caches index-range summaries by upload version. Fully uploaded
+vertex prefixes need no per-attribute index scan; sparse validation caches also
+include the vertex version. Uploads, changed ranges/bindings and disposal
+invalidate the relevant records. Warm draws add no validation arrays or GPU
+handles.
