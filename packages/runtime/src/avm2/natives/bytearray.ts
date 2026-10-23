@@ -241,13 +241,67 @@ export class Bytes {
       throw this.rt.error("RangeError", 1506);
     }
 
+    const old = this.length;
     this.reserve(length, fromSetter);
     this.length = length >>> 0;
     if (this.position > length) {
-      this.position = this.length;
+      this.position = length >>> 0;
+    }
+
+    if (this.shared !== null) {
+      this.dropped(length, old, fromSetter);
     }
 
     this.notify();
+  }
+
+  /**
+   * The length made at least `length`, as a write past the end makes it:
+   * shared, by a compare and swap that only ever raises it, so that
+   * workers appending at once never lower what another made it.
+   */
+  extend(length: number): void {
+    if (this.shared === null) {
+      this.setLength(length);
+      return;
+    }
+
+    this.reserve(length, false);
+    this.raise(length);
+    this.notify();
+  }
+
+  /** A shared length raised to `length` unless another worker made it as long. */
+  private raise(length: number): void {
+    const words = this.sharedWords as Int32Array;
+    for (;;) {
+      const now = Atomics.load(words, 0) >>> 0;
+      if (now >= length || Atomics.compareExchange(words, 0, now | 0, length | 0) >>> 0 === now) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Shared memory, its length lowered from `old` to `length`, which the
+   * memory cannot shrink to: what the setter's reallocation to a smaller
+   * buffer would have dropped is zeroed instead, as a later growth would
+   * find it, once the length is lowered and never before.
+   */
+  private dropped(length: number, old: number, fromSetter: boolean): void {
+    if (
+      length >= old ||
+      !fromSetter ||
+      (length < kHugeGrowthThreshold && old < kHugeGrowthThreshold)
+    ) {
+      return;
+    }
+
+    const rounded = Math.ceil(length / kHugeGrowthIncr) * kHugeGrowthIncr;
+    const kept = rounded <= 0xffffffff - 2 * 4096 ? rounded : length;
+    if (kept < old) {
+      this.buffer.fill(0, kept, old);
+    }
   }
 
   /** As Grower::SetLengthCommon, before the length is set: the capacity for `length`. */
@@ -367,19 +421,18 @@ export class Bytes {
   }
 
   /**
-   * A shared memory's capacity made `capacity`: it grows in place, which
-   * every worker sees; it cannot shrink, so what a smaller buffer would
-   * have dropped is zeroed instead, as a later growth would find it.
+   * A shared memory's capacity made at least `capacity`: it grows in place,
+   * which every worker sees, and never shrinks, as another worker may have
+   * grown it past what this one asks for since (dropped zeroes instead).
    */
   private reshare(capacity: number): void {
     const data = (this.shared as SharedBytesMemory).data as unknown as GrowableShared;
-    if (capacity > data.maxByteLength) {
-      throw this.rt.error("flash.errors::MemoryError", 1000);
+    if (capacity <= data.byteLength) {
+      return;
     }
 
-    if (capacity < data.byteLength) {
-      this.buffer.fill(0, capacity);
-      return;
+    if (capacity > data.maxByteLength) {
+      throw this.rt.error("flash.errors::MemoryError", 1000);
     }
 
     try {
@@ -426,15 +479,22 @@ export class Bytes {
       return previous;
     }
 
-    if (this.length !== expected) {
-      return this.length;
+    // Read once: another worker may change it between two reads.
+    const now = this.length;
+    if (now !== expected) {
+      return now;
     }
 
+    // Only grows the memory, so it does nothing another worker would undo if the swap fails.
     this.reserve(next, true);
     const previous =
       Atomics.compareExchange(this.sharedWords as Int32Array, 0, expected | 0, next | 0) >>> 0;
-    if (previous === expected && this.position > next) {
-      this.position = next;
+    if (previous === expected) {
+      if (this.position > next) {
+        this.position = next;
+      }
+
+      this.dropped(next, expected, true);
     }
 
     this.notify();
@@ -460,7 +520,7 @@ export class Bytes {
         throw this.rt.error("flash.errors::MemoryError", 1000);
       }
 
-      this.setLength(at + n);
+      this.extend(at + n);
     }
 
     this.position = (at + n) >>> 0;
@@ -506,8 +566,12 @@ export class Bytes {
 
     copyBytes(this.buffer, this.position, source, offset, count);
     this.position = end;
-    if (this.length < this.position) {
-      this.length = this.position;
+    if (this.length < end) {
+      if (this.shared === null) {
+        this.length = end;
+      } else {
+        this.raise(end);
+      }
     }
 
     this.notify();
@@ -520,7 +584,7 @@ export class Bytes {
         throw this.rt.error("flash.errors::MemoryError", 1000);
       }
 
-      this.setLength(index + 1);
+      this.extend(index + 1);
     }
 
     this.buffer[index] = value;
@@ -1096,7 +1160,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
       const source = b.buffer;
       const from = b.position;
       if (offset + count >= to.length) {
-        to.setLength(offset + count);
+        to.extend(offset + count);
       }
 
       b.position = (from + count) >>> 0;
