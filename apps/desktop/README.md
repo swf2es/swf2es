@@ -28,7 +28,9 @@ own installer. A relative path is taken from the directory pnpm was run in.
   It starts off, remembers the choice in `settings.json`, and restarts the
   current movie when changed. The desktop loads the optional WebGL2 backend
   only when enabled and uses the web element's composition, live AS3 Stage
-  layout and context recovery. Each slot owns a separate WebGL2 context;
+  layout and context recovery. If that module cannot load, playback continues
+  with the usual unavailable-context fallback and logs the cause. The saved
+  choice remains enabled. Each slot owns a separate WebGL2 context;
   closing or reloading the movie releases its resources and browser contexts.
   Animated models and sprite effects can retain up to 4,096 buffers and 1,024
   textures per context. The separate 64 MiB buffer and texture budgets, including

@@ -25,6 +25,10 @@ const scripts = compileScripts(
       name: "StageLayout",
       source: readFileSync(new URL("../context3d/StageLayout.as", import.meta.url), "utf8"),
     },
+    {
+      name: "StageWorker",
+      source: readFileSync(new URL("../context3d/StageWorker.as", import.meta.url), "utf8"),
+    },
   ],
   out,
 );
@@ -32,6 +36,11 @@ const movie = `${out}layout.swf`;
 writeFileSync(movie, bare(scripts.get("StageLayout") as Uint8Array, 1, "StageLayout", 120, 100));
 const replacement = `${out}replacement.swf`;
 copyFileSync(movie, replacement);
+const workerMovie = `${out}worker.swf`;
+writeFileSync(
+  workerMovie,
+  bare(scripts.get("StageWorker") as Uint8Array, 1, "StageWorker", 96, 96),
+);
 const desktopPackage = fileURLToPath(new URL("../../apps/desktop/package.json", import.meta.url));
 const player = 'document.getElementById("player")';
 const canvases = `${player}.shadowRoot.querySelectorAll("canvas")`;
@@ -73,7 +82,11 @@ async function menu(app: App, id: string, checked?: boolean): Promise<void> {
 
 const ready = `(() => {
   const p = ${player}?.player;
-  return !!p?.scripting?.rt.getProperty(p.root.object, p.scripting.rt.publicName("ready"));
+  if (!p?.scripting || !p.root?.object) {
+    return false;
+  }
+
+  return !!p.scripting.rt.getProperty(p.root.object, p.scripting.rt.publicName("ready"));
 })()`;
 
 async function layout(app: App, mode: string, align: string): Promise<string> {
@@ -146,6 +159,18 @@ try {
     });
     await menu(app, "stage3d", true);
     await app.until("the delayed optional backend", () => paused !== "");
+    await app.devtools.send("Fetch.failRequest", { requestId: paused, errorReason: "Failed" });
+    await app.until(
+      "the fallback after the backend import fails",
+      () => app.stdout.filter((s) => s.startsWith("stagelayout error 3702")).length === 4,
+    );
+    assert.equal(await app.evaluate(`${player}.hidden`), false);
+    assert.equal(await app.evaluate(`${canvases}.length`), 1);
+    assert.equal(await app.evaluate('document.getElementById("failure").hidden'), true);
+    assert.equal(JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3D, true);
+    paused = "";
+    await app.devtools.send("Page.reload", { ignoreCache: true });
+    await app.until("the backend import retry on page reload", () => paused !== "");
     assert.equal(await app.again([replacement]), 0);
     await app.devtools.send("Fetch.continueRequest", { requestId: paused });
     await app.until("the delayed Stage3D session", () => sessionPaused !== "");
@@ -249,6 +274,31 @@ try {
       true,
     );
     await textureLimits(app);
+    await app.devtools.send("Emulation.setDeviceMetricsOverride", {
+      width: 96,
+      height: 96,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    assert.equal(await app.again([workerMovie]), 0);
+    await waitFor(app, `${ready} && ${canvases}.length === 2`);
+    assert.equal(await app.evaluate("crossOriginIsolated"), true);
+    await frame(app);
+    const { data } = await app.devtools.send<{ data: string }>("Page.captureScreenshot", {
+      format: "png",
+    });
+    const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
+    const offset = (8 * image.width + 8) * 4;
+    assert.deepEqual([...image.data.subarray(offset, offset + 4)], [0, 255, 0, 255]);
+    await app.evaluate(`globalThis.previousWorkerStage3D = ${canvases}[0]`);
+    await menu(app, "close-movie");
+    await waitFor(app, `${canvases}.length === 0 && ${player}.hidden`);
+    assert.equal(
+      await app.evaluate(
+        '!previousWorkerStage3D.isConnected && previousWorkerStage3D.getContext("webgl2").isContextLost()',
+      ),
+      true,
+    );
     const previousPage = await app.evaluate<number>("performance.timeOrigin");
     await menu(app, "stage3d", false);
     await waitFor(
@@ -259,7 +309,7 @@ try {
     await app.again([movie]);
     await app.until(
       "the fallback after disabling Stage3D",
-      () => app.stdout.filter((s) => s.startsWith("stagelayout error 3702")).length === 4,
+      () => app.stdout.filter((s) => s.startsWith("stagelayout error 3702")).length === 6,
     );
     assert.equal(await app.evaluate(`${canvases}.length`), 1);
     assert.doesNotMatch(app.stderr(), /uncaught|unhandled|WebGL: INVALID|CONTEXT_LOST_WEBGL/i);

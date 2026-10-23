@@ -133,8 +133,12 @@ desktop.onClose(() => {
 });
 const state = await desktop.start();
 if (state.stage3D) {
-  const { createStage3D } = await import("./stage3d.js");
-  configure({ stage3D: createStage3D });
+  try {
+    const { createStage3D } = await import("./stage3d.js");
+    configure({ stage3D: createStage3D });
+  } catch (error) {
+    console.warn("swf2es: Stage3D backend could not be loaded; using default playback.", error);
+  }
 }
 
 showLibraries(state.libraries);

@@ -851,3 +851,7 @@ a green Stage3D surface while a real background Worker sends a channel reply.
 The host waits for both before checking pixels, then destroys the player and
 checks collection through the existing lifetime harness. This exercises the
 worker-host readiness path together with opt-in Context3D bindings.
+The desktop integration test runs the same fixture through normal SWF opening,
+checks cross-origin isolation and the green presentation after the worker reply.
+It also aborts the optional backend import: the movie must keep playing with
+ErrorEvent #3702, and a page reload must allow the backend to load successfully.
