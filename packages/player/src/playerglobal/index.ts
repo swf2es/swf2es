@@ -204,7 +204,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...byteArrayHooks(s),
     ...httpStatusHooks,
     ...bitmapFilterHooks,
-    ...workerHooks(),
+    ...workerHooks(s),
     ...clipboardHooks(),
     ...soundHooks(s),
     ...fontHooks(s),

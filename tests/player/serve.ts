@@ -1,7 +1,10 @@
 // Serves the player to a browser for the tests: the built packages, the
 // libraries they import, and page.ts with its types stripped, under an
 // import map that gives the page's bare specifiers their files. Nothing is
-// bundled; the browser loads the modules as tsc wrote them.
+// bundled; the browser loads the modules as tsc wrote them. A worker sees
+// no import map, so under /worker/ the same files are served with their
+// bare specifiers resolved by it, for the Web Workers flash.system.Worker
+// runs on.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -36,9 +39,11 @@ export const importMap = {
     "@swf2es/codegen": "/codegen/index.js",
     "@swf2es/runtime": "/runtime/index.js",
     "@swf2es/player": "/player/index.js",
+    "@swf2es/player/worker": "/player/workers/thread.js",
     "@swf2es/player-hosts/indexeddb": "/player-hosts/indexeddb.js",
     "@swf2es/player-hosts/precompiled": "/player-hosts/precompiled.js",
     "@swf2es/player-hosts/websocket": "/player-hosts/websocket.js",
+    "@swf2es/player-hosts/workers": "/player-hosts/workers.js",
     "@swf2es/web": "/web/index.js",
     "@swf2es/codegen/codegen.wasm": "/codegen/codegen.wasm",
     "pixi.js": "/pixi/pixi.mjs",
@@ -58,6 +63,20 @@ const types: Record<string, string> = {
 };
 
 const importMapText = JSON.stringify(importMap);
+
+/** Where a worker finds what the import map names: under /worker/, as its files' imports are. */
+const WORKER = "/worker";
+
+/** A module's bare specifiers resolved by the import map, to their files under /worker/. */
+function resolveBare(source: string): string {
+  return source.replace(
+    /(\bfrom\s*|\bimport\s*\(?\s*)"([^"./][^"]*)"/g,
+    (all, before: string, specifier: string) => {
+      const file = (importMap.imports as Record<string, string>)[specifier];
+      return file ? `${before}"${WORKER}${file}"` : all;
+    },
+  );
+}
 
 /** The page's inline import map as a Content-Security-Policy source, for a policy that allows no other inline script. */
 export const importMapSource = `'sha256-${createHash("sha256").update(importMapText).digest("base64")}'`;
@@ -103,6 +122,11 @@ export async function serve(
       return;
     }
 
+    const inWorker = path.startsWith(`${WORKER}/`);
+    if (inWorker) {
+      path = path.slice(WORKER.length);
+    }
+
     for (const [prefix, dir] of served) {
       if (!path.startsWith(prefix)) {
         continue;
@@ -121,6 +145,10 @@ export async function serve(
         let body: string | Buffer = readFileSync(file);
         if (file.endsWith(".ts")) {
           body = stripTypeScriptTypes(body.toString("utf8"));
+        }
+
+        if (inWorker && /\.(js|mjs|ts)$/.test(file)) {
+          body = resolveBare(body.toString());
         }
 
         response.writeHead(200, {

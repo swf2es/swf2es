@@ -1,83 +1,146 @@
-// flash.system.Worker and WorkerDomain: the one worker that runs, the
-// primordial, and no others to start. Crossbridge finds Worker on startup
-// and keeps its state in the primordial's shared properties.
+// flash.system.Worker, WorkerDomain and MessageChannel: the AS3 faces of
+// the workers scripting/workers.ts runs. A Worker object stands for a
+// worker by its id, a MessageChannel for a channel by its own; with no
+// worker host, the primordial is the one worker, and none other starts.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import { eventDispatcherNatives } from "../events/EventDispatcher.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+
+/** A shared property's key: null is one of its own, apart from "null", as in avmplus. */
+const keyOf = (s: Scripting, key: Value): string | null =>
+  key === null || key === undefined ? null : s.rt.toString(key);
 
 export function workerNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
   class WorkerNatives {
-    declare $shared: Map<string, Value>;
+    declare $worker: number;
 
-    // No other worker can be started.
     static get isSupported(): boolean {
-      return false;
+      return s.workers.supported;
     }
 
     get isPrimordial(): boolean {
-      return true;
+      return this.$worker === 0;
     }
 
     "flash.system:Worker::internalGetState"(): string {
-      return "running";
+      return s.workers.state(this.$worker);
     }
 
+    getSharedProperty(key: Value): Value {
+      return s.workers.getShared(this.$worker, keyOf(s, key));
+    }
+
+    setSharedProperty(key: Value, value: Value): void {
+      s.workers.setShared(this.$worker, keyOf(s, key), value);
+    }
+
+    // Flash's own setSharedProperty and getSharedProperty call these.
     "flash.system:Worker::internalGetSharedProperty"(key: Value): Value {
-      return this.$shared?.get(s.rt.toString(key));
+      return s.workers.getShared(this.$worker, keyOf(s, key));
     }
 
     "flash.system:Worker::internalSetSharedProperty"(key: Value, value: Value): void {
-      this.$shared ??= new Map();
-      this.$shared.set(s.rt.toString(key), value);
+      s.workers.setShared(this.$worker, keyOf(s, key), value);
     }
 
-    // Its state never changes, so nothing listens for a change.
+    // workerState is dispatched to the Worker object whoever listens.
     "flash.system:Worker::internalAddEventListener"(): void {}
 
     "flash.system:Worker::internalRemoveEventListener"(): void {}
 
     start(): void {
-      throw s.rt.unsupported("starting a Worker");
+      s.workers.start(this.$worker);
     }
 
     terminate(): boolean {
-      return false;
+      return s.workers.terminate(this.$worker);
     }
 
-    createMessageChannel(): Value {
-      throw s.rt.unsupported("Worker.createMessageChannel");
+    createMessageChannel(receiver: Value): Value {
+      if (receiver === null || receiver === undefined) {
+        throw s.rt.error("TypeError", 2007, "receiver");
+      }
+
+      return s.workers.createChannel(this.$worker, (receiver as AsObject).$worker);
     }
   }
 
   class WorkerDomainNatives {
     static get isSupported(): boolean {
-      return false;
+      return s.workers.supported;
     }
 
-    createWorker(): Value {
-      throw s.rt.unsupported("creating a Worker");
+    createWorker(swf: Value): Value {
+      return s.workers.create(swf);
     }
 
     listWorkers(): Value {
-      throw s.rt.unsupported("WorkerDomain.listWorkers");
+      const rt = s.rt;
+      const cls = rt.applyType(rt.classNamed("__AS3__.vec::Vector"), [
+        rt.classNamed("flash.system::Worker"),
+      ]);
+      const o = cls.$it.instance();
+      o.$a = s.workers.list();
+      o.$fixed = false;
+      return o;
+    }
+  }
+
+  // Its addEventListener and removeEventListener are natives in Flash's
+  // playerglobal, which only add to EventDispatcher's.
+  const dispatcher = eventDispatcherNatives(s);
+  const inherited = (name: string) => dispatcher[`flash.events::EventDispatcher#${name}`](s.rt);
+  class MessageChannelNatives {
+    send(value: Value): void {
+      s.workers.send(this as unknown as AsObject, value);
+    }
+
+    get messageAvailable(): boolean {
+      return s.workers.messageAvailable(this as unknown as AsObject);
+    }
+
+    receive(block: Value): Value {
+      return s.workers.receive(this as unknown as AsObject, !!block);
+    }
+
+    addEventListener(...args: Value[]): Value {
+      return inherited("addEventListener").apply(this, args);
+    }
+
+    removeEventListener(...args: Value[]): Value {
+      return inherited("removeEventListener").apply(this, args);
+    }
+
+    close(): void {
+      s.workers.close(this as unknown as AsObject);
+    }
+
+    get state(): string {
+      return s.workers.channelState(this as unknown as AsObject);
+    }
+
+    toString(): string {
+      return "[object MessageChannel]";
     }
   }
 
   avm2.registerNativeClass(natives, "flash.system::Worker", WorkerNatives);
   avm2.registerNativeClass(natives, "flash.system::WorkerDomain", WorkerDomainNatives);
+  avm2.registerNativeClass(natives, "flash.system::MessageChannel", MessageChannelNatives);
   return natives;
 }
 
-/** Worker.current is the primordial worker, which the VM keeps in Worker's private static _current. */
-export function workerHooks(): Record<string, avm2.ClassHook> {
+/** Worker.current, which the VM keeps in Worker's private static _current: this VM's own worker. */
+export function workerHooks(s: Scripting): Record<string, avm2.ClassHook> {
   return {
     "flash.system::Worker": {
-      created(rt: avm2.Runtime, cls: AsObject): void {
-        avm2.setStaticVar(cls, "_current", rt.constructClass(cls, []));
+      created(_rt: avm2.Runtime, cls: AsObject): void {
+        avm2.setStaticVar(cls, "_current", s.workers.objectOf(s.workers.id, cls));
       },
     },
   };
