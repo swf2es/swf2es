@@ -50,10 +50,14 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
 
     get scaleMode(): string {
-      return s.stageScaleMode;
+      return s.liveStageLayout ? s.stageScaleMode : "showAll";
     }
 
     set scaleMode(v: Value) {
+      if (!s.liveStageLayout) {
+        return;
+      }
+
       if (v == null) {
         throw s.rt.error("TypeError", 2007, "scaleMode");
       }
@@ -77,10 +81,14 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
 
     get align(): string {
-      return s.stageAlign;
+      return s.liveStageLayout ? s.stageAlign : "";
     }
 
     set align(v: Value) {
+      if (!s.liveStageLayout) {
+        return;
+      }
+
       if (v == null) {
         throw s.rt.error("TypeError", 2007, "align");
       }

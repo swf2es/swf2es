@@ -840,3 +840,10 @@ a green Stage3D surface while a real background Worker sends a channel reply.
 The host waits for both before checking pixels, then destroys the player and
 checks collection through the existing lifetime harness. This exercises the
 worker-host readiness path together with opt-in Context3D bindings.
+
+Live Stage getters, setter validation, resize events and leading-edge alignment
+are gated by the Context3D opt-in. Default playback keeps dev's ignored Stage
+setters, fixed getters and authored dimensions. The host regression loads the
+same StageLayout fixture without a surface factory and checks the 96×96 Stage
+in a 192×144 embed, no RESIZE and no artwork in the margin. Shared embedding
+alignment retains the old LR/TB centering for ordinary AS3 and AVM1 loads.

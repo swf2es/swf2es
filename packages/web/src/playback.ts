@@ -61,7 +61,9 @@ export class Playback {
     this.view = new PixiView(renderer);
     if (scripting) {
       scripting.drawer = this.view;
-      scripting.onStageLayout = this.stageLayout;
+      if (stage3D) {
+        scripting.onStageLayout = this.stageLayout;
+      }
     }
 
     // An AVM1 movie's BitmapData draws display objects by it too.
@@ -224,7 +226,7 @@ export class Playback {
     }
 
     const look = this.look();
-    const scripting = this.scripting;
+    const scripting = this.stage3D ? this.scripting : null;
     scripting?.setStageDefaults(look.scale, look.salign ?? "");
     const mode = scripting?.stageScaleMode ?? look.scale;
     const align = scripting?.stageAlign ?? look.salign;
@@ -240,6 +242,7 @@ export class Playback {
       mode,
       align,
       this.dpr,
+      !!scripting,
     );
     const canvas = this.renderer.canvas as HTMLCanvasElement;
     canvas.style.left = `${noScale ? 0 : placed.x}px`;

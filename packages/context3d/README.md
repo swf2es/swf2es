@@ -110,8 +110,10 @@ Stage3D positions follow the embedding's `scale`/`salign` placement. Configured
 buffer sizes remain in pixels; resizing or changing device pixel ratio never
 implicitly reallocates them. The host clips the viewports, makes the display
 list transparent while contexts exist, and keeps overlapping players' canvases
-in separate stacks. The web host honors ActionScript changes to
-`Stage.scaleMode` and `Stage.align`. In `noScale`, Stage dimensions follow the
+in separate stacks. With Stage3D opted in, the web host honors ActionScript
+changes to `Stage.scaleMode` and `Stage.align`. Ordinary playback retains dev's
+fixed Stage getters, ignored setters and authored dimensions, including its
+existing embedding alignment when both opposite edges are named. In `noScale`, Stage dimensions follow the
 embedding's CSS size and resize events are synchronous after placement updates;
 other modes report the authored dimensions. Display-list pixels and input use
 the same viewport, including coordinates outside the authored rectangle.

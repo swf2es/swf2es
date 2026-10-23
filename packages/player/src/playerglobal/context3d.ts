@@ -9,6 +9,7 @@ import { registerResources } from "./context3d/resources.js";
 
 /** Returns the host teardown; it also cancels creation queued before teardown. */
 export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
+  s.liveStageLayout = true;
   const natives: avm2.Natives = {};
   const bindings = createBindings(s, host);
   const { slots, pending, lost, place, request } = bindings;

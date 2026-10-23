@@ -276,7 +276,9 @@ await withPage(
     try {
       await call("layout", "noScale", "TL", 192, 144);
       assert.equal((await call<Status>("status")).canvases, 1);
-      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
+      assert.equal(await call("scriptState"), "showAll||96|96|");
+      assert.equal((await call<Status>("status")).overlayWidth, 96);
+      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["112233ff"]);
     } finally {
       await call("close");
     }

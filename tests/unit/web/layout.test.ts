@@ -33,10 +33,9 @@ test("salign holds the edges it names, in any order and case", () => {
   assert.deepEqual(at("rb"), [200, 100]);
   assert.deepEqual(at("T"), [100, 0]);
   assert.deepEqual(at("R"), [200, 50]);
-  // AIR gives the top/left edge precedence when both ends are named.
-  assert.deepEqual(at("LR"), [0, 50]);
-  assert.deepEqual(at("TB"), [100, 0]);
-  assert.deepEqual(at("TBLR"), [0, 0]);
+  assert.deepEqual(at("LR"), [100, 50]);
+  assert.deepEqual(at("TB"), [100, 50]);
+  assert.deepEqual(at("TBLR"), [100, 50]);
 });
 
 test("noBorder fills the box and crops; exactFit stretches at its finer axis's resolution", () => {
@@ -60,4 +59,12 @@ test("the canvas stays within MAX_SIDE device pixels, and has a size when the bo
   const big = place(1000, 500, 100_000, 50_000, "showAll", null, 2);
   assert.equal(1000 * big.resolution, MAX_SIDE);
   assert.ok(place(100, 100, 0, 0, "showAll", null, 1).resolution > 0);
+});
+
+test("opt-in Stage3D layout gives AIR's top and left edges precedence", () => {
+  for (const salign of ["LR", "TB", "TBLR"]) {
+    const at = place(100, 100, 300, 200, "noScale", salign, 1, true);
+    assert.equal(at.x, salign.includes("L") ? 0 : 100);
+    assert.equal(at.y, salign.includes("T") ? 0 : 50);
+  }
 });
