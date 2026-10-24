@@ -36,7 +36,7 @@ and `maxTextures` retain aggregate caps, defaulting to 8,192 and 12,288; an
 explicit lower cap still limits the combined types.
 
 Byte limits are independent by resource type and follow the observed AIR baseline
-allowances:
+allowances for buffers and BGRA textures:
 
 | Resource | Default | Constructor option |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ allowances:
 | Rectangle textures | 512 MiB | `maxRectangleTextureBytes` |
 | Cube textures | 256 MiB | `maxCubeTextureBytes` |
 
-AIR probes at multiple sizes show a mip reservation of half the BGRA base size
+AIR probes with BGRA textures at multiple sizes show a mip reservation of half the base size
 for ordinary and cube textures. Their per-type quota charge uses that reservation;
 rectangles charge only their base level. The aggregate `maxTextureBytes` budget
 still tracks the complete mip chains actually allocated, defaulting to 1,280 MiB.
@@ -60,6 +60,9 @@ targets include their cached single-sample resolve surface. All options must be
 nonnegative safe integers, are copied at creation and allocate nothing eagerly.
 Disposal returns both quota and storage capacity. These are logical allocation
 accounts, not physical driver VRAM, and exclude back-buffer attachments.
+Compressed and `rgbaHalfFloat` textures are currently unsupported and return
+Error #3708 before backend allocation. Their AIR quotas have not been measured;
+the BGRA charge must not be reused for those formats when they are implemented.
 
 Core failures carry typed reasons. The Flash adapter maps them to catchable AS3
 errors, including resource limits (#3691), disposed objects (#3694), draw bounds
@@ -131,7 +134,12 @@ configure({
 
     return {
       canvas,
-      context: new WebGLContext3D(gl),
+      context: new WebGLContext3D(gl, {
+        maxBufferBytes: 64 * 1024 * 1024,
+        maxTextureBytes: 128 * 1024 * 1024,
+        maxTargetDepthBytes: 16 * 1024 * 1024,
+        maxTargetColorBytes: 16 * 1024 * 1024,
+      }),
       destroy: () => gl.getExtension("WEBGL_lose_context")?.loseContext(),
     };
   },
@@ -143,6 +151,15 @@ the experiment for subsequent loads. The web element owns native installation,
 composition, cancellation, restoration and teardown for each load. GPU backend
 selection stays with the host; the default web entry does not eagerly import
 the optional bindings or a backend. No new dependencies are required by `web`.
+
+The web package sets no backend budgets: a factory using `new WebGLContext3D(gl)`
+inherits the larger AIR-sized defaults, as the desktop factory does. This browser
+example explicitly selects lower aggregate and attachment budgets per context;
+they are host policy, not AIR limits or a guarantee against context loss. Tune
+them for the workload and account for concurrent slots and players. The limits
+exclude driver overhead and back-buffer attachments, so the browser can still
+lose a context before a logical allocation limit is reached. The public demo
+currently leaves Stage3D disabled.
 
 Stage3D positions follow the embedding's `scale`/`salign` placement. Configured
 buffer sizes remain in pixels; resizing or changing device pixel ratio never

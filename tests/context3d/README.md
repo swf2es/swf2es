@@ -928,6 +928,8 @@ capacity recovery and complete cleanup without large CI allocations.
 Separate AIR 51.3.1 / DirectX11 probes held all types simultaneously: 32 vertex
 buffers of 8 MiB, 256 index buffers of 512 KiB, 21 ordinary 2048-square textures,
 32 rectangle 2048-square textures and seven 1024-square cubes each reach #3691.
+All texture quota probes use BGRA; compressed and `rgbaHalfFloat` quota behavior
+is unmeasured, and those formats remain unsupported by the adapter (#3708).
 Ordinary 1024-square textures reach 85 and 512-square cubes reach 28. These
 observations ground 256/128 MiB buffer allowances, 512/512/256 MiB texture
 allowances and a half-base-size mip reservation for ordinary/cube textures.
