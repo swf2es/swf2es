@@ -45,6 +45,22 @@ export const IDLE_MS = 5000;
 export const LINES_IDLE_MS = 30_000;
 export const LINES_IDLE_MOST = 4096;
 /**
+ * How long a shape's fills no instance uses are kept (render/tessellate.ts's
+ * SharedFills), how many at most, and how many of their vertices to begin
+ * with, a budget that grows as the lines' does (IdleBudget), to the same
+ * ceiling: as long as its lines, for the same loops. Kept IDLE_MS, a busy
+ * real-world scene's pulsing morphs came back to blends they had let go
+ * 5 to 10 s before, and tessellated them again, how many swinging with the
+ * machine's speed. That scene comes back to some 0.7 million vertices of
+ * fills in 30 s: kept to a fixed 0.5 million, the oldest going first, it
+ * found almost none of them again. Its budget is not put back to the floor
+ * as content unloads, as the lines' is: that scene unloads a SWF every few
+ * seconds, and the budget never grew.
+ */
+export const FILLS_IDLE_MS = LINES_IDLE_MS;
+export const FILLS_IDLE_MOST = 4096;
+export const FILLS_IDLE_VERTICES = 500_000;
+/**
  * The vertices of idle lines kept to begin with, and at the least: enough
  * for most content, which never grows it (IdleBudget). A crowded room in a
  * busy SWF came back to 1.6 million within LINES_IDLE_MS; kept to this,
