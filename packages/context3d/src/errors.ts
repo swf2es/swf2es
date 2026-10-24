@@ -1,0 +1,67 @@
+/** Backend failures stay independent of the API that exposes them to content. */
+export type Context3DErrorReason =
+  | "disposed"
+  | "backBuffer"
+  | "limit"
+  | "bufferAllocation"
+  | "textureAllocation"
+  | "nativeShader"
+  | "program"
+  | "indexBuffer"
+  | "indexData"
+  | "vertexBinding"
+  | "vertexStream"
+  | "vertexData"
+  | "drawRange"
+  | "triangleCount"
+  | "textureSize"
+  | "textureShape"
+  | "texturePowerOfTwo"
+  | "textureUpload"
+  | "range"
+  | "operation"
+  | "unsupported"
+  | "agalLength"
+  | "agalMagic"
+  | "agalVersion"
+  | "agalStageMarker"
+  | "agalVertexStage"
+  | "agalFragmentStage"
+  | "agalStage"
+  | "agalTokens"
+  | "agalOpcode"
+  | "agalUnusedSource"
+  | "agalAttributeStage"
+  | "agalAttributeWrite"
+  | "agalAttributeIndex"
+  | "agalConstantWrite"
+  | "agalConstantIndex"
+  | "agalTemporaryIndex"
+  | "agalTemporaryRead"
+  | "agalTemporaryComponent"
+  | "agalOutputRead"
+  | "agalOutputIndex"
+  | "agalVertexOutput"
+  | "agalFragmentOutput"
+  | "agalColorMask"
+  | "agalVaryingIndex"
+  | "agalVaryingRead"
+  | "agalVaryingWrite"
+  | "agalVaryingMissing"
+  | "agalVaryingPartial"
+  | "agalRegister"
+  | "agalIndirect"
+  | "agalSourceEncoding"
+  | "agalDiscard"
+  | "agalMask"
+  | "agalReserved"
+  | "agalSampler";
+
+export class Context3DError extends Error {
+  readonly reason: Context3DErrorReason;
+
+  constructor(reason: Context3DErrorReason, message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}

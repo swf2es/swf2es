@@ -1,0 +1,23 @@
+[
+  "rendertargets back-preserved ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff",
+  "rendertargets orientation ffff0000 ff00ff00 ff00ff00 ff00ff00 ff00ff00",
+  "rendertargets mipmaps ffff0000 ff00ff00 ff00ff00 ff00ff00 ff00ff00",
+  "rendertargets retained ffff0000 ff00ff00 ff00ff00 ff0000ff ff0000ff",
+  "rendertargets target-read ffff0000 ff00ff00 ff00ff00 ff0000ff ff0000ff",
+  "rendertargets depth-retained ffff0000 ffff0000 ffff0000 ffff0000 ffff0000",
+  "rendertargets depth-disabled ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00",
+  "rendertargets alpha 807f0000 807f0000 807f0000 807f0000 807f0000",
+  "rendertargets present-reset ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff",
+  "rendertargets present-retains-texture ffffff00 ffffff00 ffffff00 ffffff00 ffffff00",
+  "rendertargets null-reset ffff00ff ffff00ff ffff00ff ffff00ff ffff00ff",
+  "rendertargets cull-front ffff0000 ffff0000 ffff0000 ffff0000 ffff0000",
+  "rendertargets cull-back ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff",
+  "rendertargets scissor-switch ffff0000 ff00ff00 ff00ff00 ff00ff00 ff00ff00",
+  "rendertargets small-solid ffffff00 ffffff00 ffffff00 ffffff00 ffffff00",
+  "rendertargets small-sampled ffffff00 ffffff00 ffffff00 ffffff00 ffffff00",
+  "rendertargets minified-mips ffffff00 ffffff00 ffffff00 ffffff00 ffffff00",
+  "rendertargets unoptimized-mips ffffff00 ffffff00 ffffff00 ffffff00 ffffff00",
+  "rendertargets upload-then-render ffff0000 ff0000ff ff0000ff ff0000ff ff0000ff",
+  "rendertargets feedback 3604",
+  "rendertargets complete"
+]

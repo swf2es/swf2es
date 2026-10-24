@@ -100,9 +100,10 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `mp3`     | synchronous MP3 frame decoder, minimp3 compiled to WebAssembly with a Zig adapter | — |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, mp3, runtime |
+| `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Web Worker and node threads for `flash.system.Worker` | player |
+| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
 `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
@@ -145,6 +146,53 @@ its inputs' digest. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
+
+`@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL v1
+translation. Its core is built without DOM or node types; the separate
+`@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
+Neither entry depends on player AS objects or Pixi. The two TypeScript projects
+keep browser types out of the core while the normal package build checks both.
+Flash bindings and validation are an explicit experimental entry,
+`@swf2es/player/context3d`. `installContext3D` must run before loading
+playerglobal, and its returned teardown must run before destroying Scripting.
+It does not install itself or change default playback.
+
+`@swf2es/player-hosts/stage3d` supplies canvas placement and browser loss/restoration
+listeners. Its host takes a surface factory, so it need not import a GPU backend.
+The caller supplies the clipped stage container and puts the display-list canvas
+above Stage3D slots 0..3. A lost surface stays attached until restoration or
+teardown; removing it detaches its listeners. `tests/context3d` exercises these
+package entries against AIR references and repeated-load resource checks.
+`@swf2es/web` accepts an experimental `configure({ stage3D: surfaceFactory })`
+for subsequent loads. It lazily installs the optional bindings before libraries,
+owns each load's layers and closes them before destroying Scripting. Its display
+canvas supports transparency from creation and clears to transparent black while
+Stage3D contexts exist; the stage background sits below the opaque viewports.
+An isolated stack keeps different players' layers from interleaving. Viewport
+positions follow embedding scale/alignment, while configured buffer dimensions
+stay in pixels, as AIR's window capture verifies. Resize/DPR changes never
+silently reconfigure AS buffers. An optional surface `destroy` hook releases the
+browser context after resources and listeners are gone, also on attachment failure.
+Web teardown disposes the display-list scene before the renderer so cached font
+measurements cannot retain the scene through text style listeners.
+Default playback still reports unavailable Context3D. The desktop View menu
+offers an experimental opt-in, saved as a strict boolean in settings.json.
+Changing it reloads the page and current movie; startup lazily imports the
+backend only when enabled. The desktop's surface factory gives animated meshes
+4,096 buffer handles per context while retaining the default byte budgets.
+Composition, AS3 Stage layout, loss/recovery and teardown use the web host.
+Best-resolution buffers and production enablement remain separate work.
+
+The opt-in Context3D installation enables live Stage scale/alignment settings.
+The web host then shares them with player natives through Scripting's synchronous
+`onStageLayout` callback. Ordinary loads retain fixed Stage getters, ignored
+setters and authored dimensions; AVM1 and default embedding alignment keep their
+existing behavior when both opposite edges are named. It resizes the display
+viewport before `resizeStage` dispatches a Stage-only RESIZE event in noScale;
+other scale modes retain the SWF's authored dimensions. PixiView's viewport
+keeps display-list translation, its hit area and pointer coordinates aligned.
+Context3D canvases retain their explicit back-buffer sizes across embedding and
+DPR changes. These host hooks do not depend on ActionScript workers.
 
 `format`'s `readActions` lists a SWF's AVM1 action blocks ([avm1.md](avm1.md)):
 DoAction, DoInitAction, a PlaceObject2 or 3's clip actions record by record
@@ -1243,9 +1291,10 @@ and updated where the display object marks itself changed.
 `packages/player/src` is grouped by what each part of the player does,
 and the player's paths in this document are relative to it:
 
-- `index.ts` is the package's entry point, and `workers/thread.ts` the
-  one a background worker's thread imports (`@swf2es/player/worker`,
-  with the messages it and the primordial post, `workers/protocol.ts`);
+- `index.ts` is the package's default entry point; the separate experimental
+  `@swf2es/player/context3d` entry installs Stage3D natives only when requested.
+  `workers/thread.ts` is the entry a background worker imports
+  (`@swf2es/player/worker`, with the primordial's messages in `workers/protocol.ts`);
   `player.ts` runs a SWF,
   `scripting.ts` connects it to the runtime and the compiler, with its
   parts in `scripting/`: `code.ts` compiles and links the SWFs' code
@@ -2893,7 +2942,7 @@ hosts; the web tests exercise Chrome's actual file input and File reads.
 Some of playerglobal stands for what the player does not have, and acts
 as Flash does without it (the `system-natives` case). `Stage.stage3Ds` are Flash's four Stage3Ds, whose
 positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
-each request for a Context3D gets ErrorEvent #3702 in the next frame, as
+by default each request for a Context3D gets ErrorEvent #3702 in the next frame, as
 Flash without a GPU gives, so content can fall back to the display list.
 `stageVideos` is empty, and a `Video` is a box of the size it was made
 at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
@@ -5495,7 +5544,13 @@ meta-policies and named policy files, redirects, this machine reached by
 address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
-limits. CI's `desktop` workflow fetches Electron and runs them.
+limits. `tests/desktop/stage3d.ts` drives the native View menu through the main
+process's test-only inspector: disabled fallback without fetching the backend,
+remembered opt-in, two composed slots, live layout/DPR changes, browser context
+loss/restoration, repeated movie reloads and close. It shares the isolated
+display and process harness in `tests/desktop/app.ts` with the ordinary smoke
+test. `settings.test.ts` covers explicit opt-in and persistence. CI's `desktop`
+workflow fetches Electron and runs them.
 
 Not done yet: packaging and installers, `SecureSocket`, Flash's Settings
 Manager for trusting a SWF or directory (localTrusted), each loaded SWF

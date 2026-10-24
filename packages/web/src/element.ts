@@ -23,6 +23,7 @@ import {
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
 import { scaleMode } from "./layout.js";
 import { type Look, Playback } from "./playback.js";
+import type { Stage3DSession } from "./stage3d.js";
 
 export const TAG = "swf2es-player";
 
@@ -63,6 +64,7 @@ interface Session {
   scripting: Scripting | null;
   player: Player | null;
   playback: Playback | null;
+  stage3D: Stage3DSession | null;
   /** The ExternalInterface callbacks the SWF put on the element. */
   callbacks: Set<string>;
   /** Aborts the fetch of the SWF itself, as a destroy comes before it arrives. */
@@ -393,6 +395,7 @@ export class Swf2esPlayerElement extends ElementBase {
       scripting: null,
       player: null,
       playback: null,
+      stage3D: null,
       callbacks: new Set(),
       workers: null,
       abort: new AbortController(),
@@ -444,6 +447,17 @@ export class Swf2esPlayerElement extends ElementBase {
 
         session.workers = host;
         session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
+        const stage3D = configuration().stage3D;
+        if (stage3D) {
+          const { Stage3DSession } = await import("./stage3d.js");
+          if (!current()) {
+            return;
+          }
+
+          session.stage3D = new Stage3DSession(this.#box, session.scripting, stage3D, () =>
+            session.playback?.invalidate(),
+          );
+        }
         await session.scripting.loadLibraries(abcs);
         if (!current()) {
           return;
@@ -495,6 +509,7 @@ export class Swf2esPlayerElement extends ElementBase {
         session.scripting,
         () => this.#look(),
         (error) => this.#report(session, error),
+        session.stage3D,
       );
       if (!current()) {
         playback.destroy();
@@ -722,6 +737,7 @@ export class Swf2esPlayerElement extends ElementBase {
     session.callbacks.clear();
     session.abort.abort();
     session.playback?.destroy();
+    session.stage3D?.destroy();
     session.player?.destroy();
     session.scripting?.destroy();
     // Its scripting let it go already, if it had any: a release counts once.

@@ -1,0 +1,23 @@
+[
+  "agalvalidation valid accepted",
+  "agalvalidation temp-unwritten Error 3647",
+  "agalvalidation temp-partial Error 3648",
+  "agalvalidation temp-replicate accepted",
+  "agalvalidation temp-self Error 3647",
+  "agalvalidation vertex-partial Error 3635",
+  "agalvalidation vertex-split accepted",
+  "agalvalidation fragment-partial Error 3701",
+  "agalvalidation fragment-split Error 3701",
+  "agalvalidation varying-unwritten Error 3632",
+  "agalvalidation varying-partial Error 3632",
+  "agalvalidation varying-scalar Error 3633",
+  "agalvalidation varying-unused Error 3633",
+  "agalvalidation dot3-partial Error 3648",
+  "agalvalidation dot4-partial Error 3648",
+  "agalvalidation masked-temp-read Error 3648",
+  "agalvalidation dot3-replicated accepted",
+  "agalvalidation dot3-masked Error 3648",
+  "agalvalidation dot3-only-x Error 3648",
+  "agalvalidation masked-fragment-temp Error 3648",
+  "agalvalidation complete"
+]

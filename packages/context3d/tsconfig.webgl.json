@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src/webgl",
+    "outDir": "dist/webgl",
+    "tsBuildInfoFile": "dist/webgl/.tsbuildinfo",
+    "types": [],
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/webgl"],
+  "references": [{ "path": "./tsconfig.core.json" }]
+}

@@ -1,0 +1,18 @@
+[
+  "texturing corners ffff0000 ff00ff00 ff0000ff ffffff00",
+  "texturing linear-center ff808040 ff808040 ff808040 ff808040",
+  "texturing clamp ff00ff00 ff00ff00 ffffff00 ffffff00",
+  "texturing repeat ffff0000 ff00ff00 ff0000ff ffffff00",
+  "texturing independent-samplers ff808000 ff00ff00 ff808080 ffffff00",
+  "texturing unused-sampler Error 3697",
+  "texturing conflicting-samplers Error 3695",
+  "texturing alpha 80407fbf 0 ff0000ff ffffff00",
+  "texturing alpha-rgb ff204060 ff000000 ff0000ff ffffff00",
+  "texturing rebound 80407fbf 0 ff0000ff ffffff00",
+  "texturing clear-alpha c055aaff",
+  "texturing disposed-upload accepted",
+  "texturing disposed-bind accepted",
+  "texturing disposed-draw Error 3663",
+  "texturing retired-upload Error 3694",
+  "texturing complete"
+]

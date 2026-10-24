@@ -31,6 +31,11 @@
     "tests/programs/as3pb",
     "tests/player/page.ts",
     "tests/player/hidden-groups-page.ts",
-    "tests/web/page.ts"
+    "tests/web/page.ts",
+    "tests/context3d/page.ts",
+    "tests/context3d/checks",
+    "tests/context3d/stress-page.ts",
+    "tests/context3d/reclamation-page.ts",
+    "tests/context3d/host-page.ts"
   ]
 }

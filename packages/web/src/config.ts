@@ -13,6 +13,7 @@ import {
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
+import type { Stage3DSurfaceFactory } from "./stage3d.js";
 
 /** A flash.net.Socket's host and port, and the WebSocket relay that reaches it, as Ruffle's socketProxy lists them. */
 export interface SocketProxy {
@@ -62,6 +63,8 @@ export interface Configuration {
   cache?: boolean;
   /** Experimental AVM2 compilation on first method-factory use; off by default. */
   lazyCompilation?: boolean;
+  /** Experimental Stage3D surface factory; absent/null keeps ErrorEvent #3702. */
+  stage3D?: Stage3DSurfaceFactory | null;
   /**
    * Whether flash.system.Worker runs a SWF's background workers, each on
    * a Web Worker: on by default, as in Flash; an element's `workers`

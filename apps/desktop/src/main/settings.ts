@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { LibraryName, LibraryState } from "../shared/api.js";
 
 export interface Settings {
+  stage3D: boolean;
   playerglobal?: string;
   builtin?: string;
   /** Most recent first. */
@@ -61,6 +62,10 @@ export class SettingsFile {
     return this.update({ [name]: path });
   }
 
+  setStage3D(enabled: boolean): boolean {
+    return this.update({ stage3D: enabled });
+  }
+
   /** `path` opened: first in the recent list. */
   opened(path: string): void {
     this.update({
@@ -92,6 +97,7 @@ export class SettingsFile {
       const read = JSON.parse(readFileSync(this.path, "utf8"));
       const text = (value: unknown) => (typeof value === "string" ? value : undefined);
       return {
+        stage3D: read.stage3D === true,
         playerglobal: text(read.playerglobal),
         builtin: text(read.builtin),
         recent: strings(read.recent),
@@ -103,7 +109,7 @@ export class SettingsFile {
       };
     } catch {
       // None yet, or unreadable: start again rather than refuse to start.
-      return { recent: [], sockets: {} };
+      return { stage3D: false, recent: [], sockets: {} };
     }
   }
 
