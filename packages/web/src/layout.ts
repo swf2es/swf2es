@@ -100,7 +100,6 @@ export function viewport(
   boxHeight: number,
   mode: ScaleMode,
   placed: Placement,
-  dpr: number,
 ): Viewport {
   const scale = placed.width / stageWidth;
   if (mode === "exactFit" || !(scale > 0) || !(boxWidth > 0) || !(boxHeight > 0)) {
@@ -121,8 +120,8 @@ export function viewport(
     y: placed.y ? -placed.y / scale : 0,
     width,
     height,
-    // The margins are drawn as fine as the stage, within the same MAX_SIDE.
-    resolution: Math.max(Math.min(scale * dpr, MAX_SIDE / Math.max(width, height)), 1 / 64),
+    // As fine as the stage, whose MAX_SIDE bounds it: the canvas then has at most the box's device pixels.
+    resolution: placed.resolution,
     css: { x: 0, y: 0, width: boxWidth, height: boxHeight },
   };
 }

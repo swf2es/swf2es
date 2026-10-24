@@ -252,7 +252,6 @@ export class Playback {
       this.box.clientHeight,
       mode,
       placed,
-      this.dpr,
     );
     const canvas = this.renderer.canvas as HTMLCanvasElement;
     canvas.style.left = `${view.css.x}px`;
@@ -261,10 +260,12 @@ export class Playback {
     canvas.style.height = `${view.css.height}px`;
     const screenWidth = Math.max(1, view.width);
     const screenHeight = Math.max(1, view.height);
+    // Compared in the canvas's pixels, which Pixi rounds the screen to: a fractional
+    // screen would otherwise never compare equal and resize on every layout.
     if (
       view.resolution !== this.renderer.resolution ||
-      this.renderer.screen.width !== screenWidth ||
-      this.renderer.screen.height !== screenHeight
+      canvas.width !== Math.round(screenWidth * view.resolution) ||
+      canvas.height !== Math.round(screenHeight * view.resolution)
     ) {
       this.renderer.resize(screenWidth, screenHeight, view.resolution);
       this.resample();
