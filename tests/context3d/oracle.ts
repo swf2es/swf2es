@@ -19,6 +19,7 @@ const fixture =
     "Comparisons",
     "RenderTargets",
     "CubeTargets",
+    "CubeBitmapUploads",
     "CubeTextures",
     "TemporaryMatrices",
     "IndirectConstants",

@@ -197,6 +197,7 @@ export async function shaderFixture(
     | "TemporaryMatrices"
     | "IndirectConstants"
     | "CubeTargets"
+    | "CubeBitmapUploads"
     | "CubeTextures"
     | "RenderTargets",
 ) {
