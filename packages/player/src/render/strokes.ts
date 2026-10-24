@@ -3,7 +3,7 @@
 // instances that see a layer through the same linear transform.
 import type { Line } from "@swf2es/format";
 import { type GraphicsContext, Matrix } from "pixi.js";
-import { blendLayers, droppedLayers } from "../display/morph.js";
+import { blendLayers, droppedBlends, droppedLayers } from "../display/morph.js";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
 import {
   type DeviceMemory,
@@ -138,6 +138,8 @@ export class StrokeContexts {
   private layerCount = 0;
   /** The idle ones of blends, which go as soon as their morph drops the blend. */
   private readonly idleBlends = new Set<GraphicsContext>();
+  /** droppedBlends() when the idle blends were last looked at. */
+  private blendsDropped = droppedBlends();
 
   constructor(
     private readonly counts: { strokeContexts: number; strokeReuses: number },
@@ -225,9 +227,13 @@ export class StrokeContexts {
 
   /** A frame prepared: the contexts idle too long go, and those of blends their morph dropped. */
   tick(): void {
-    for (const context of this.idleBlends) {
-      if (droppedLayers.has((this.keys.get(context) as [ShapeLayer, string])[0])) {
-        this.drop(context);
+    const dropped = droppedBlends();
+    if (dropped !== this.blendsDropped) {
+      this.blendsDropped = dropped;
+      for (const context of this.idleBlends) {
+        if (droppedLayers.has((this.keys.get(context) as [ShapeLayer, string])[0])) {
+          this.drop(context);
+        }
       }
     }
 
