@@ -275,6 +275,7 @@ export class Workers {
           libraries: this.libraries,
           shared,
           sync: avm2.syncOf(rt).memory,
+          modules: this.s.code.handedModules(),
         },
         (message) => this.fromBackground(background, message),
         (error) => {

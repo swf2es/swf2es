@@ -6,6 +6,7 @@
 // clone shares rather than copies; a Mutex, a Condition and a channel's
 // queue live in the memory every worker is given at its start.
 import type { avm2 } from "@swf2es/runtime";
+import type { HandedModules } from "../scripting/handover.js";
 
 /**
  * A value crossing between workers, as avmplus' ChannelItem makes one: a
@@ -51,6 +52,12 @@ export interface WorkerInit {
   shared: SharedMessage[];
   /** The memory the primordial's Mutexes, Conditions and channels' queues live in. */
   sync: avm2.SyncMemory;
+  /**
+   * The primordial's compiled modules, its libraries' and its main SWF's,
+   * which the worker loads in place of compiling the same ABCs; null
+   * where it has none to hand.
+   */
+  modules: HandedModules | null;
 }
 
 /** A shared property of worker `worker` set, or deleted where `value` is null. */

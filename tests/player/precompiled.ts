@@ -105,6 +105,74 @@ assert.deepEqual(
     .split("\n"),
 );
 
+/** `name`'s source compiled, its SWF of `frames` frames, and the swf2es command's modules of it. */
+function precompile(name: string, body: string, frames: number): { swf: Uint8Array; dir: string } {
+  const abc = compileScripts([{ name, source: body }]).get(name) as Uint8Array;
+  const bytes = bare(abc, frames, name);
+  writeFileSync(`${out}${name}.swf`, bytes);
+  const into = `${out}${name}/`;
+  const command = spawnSync(
+    process.execPath,
+    [
+      cli,
+      `${out}${name}.swf`,
+      "-o",
+      into,
+      "--emit-libraries",
+      "-q",
+      ...libraryFiles(libraries).flatMap((file) => ["--lib", file]),
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(command.status, 0, command.stderr);
+  return { swf: bytes, dir: into };
+}
+
+/**
+ * A SWF whose primordial starts a worker on `bytes`, an expression of its
+ * own SWF's bytes, `loaderInfo.bytes` or another ByteArray.
+ */
+const workerSource = (name: string, bytes: string) => `package {
+import flash.display.Sprite; import flash.system.*; import flash.utils.ByteArray;
+public class ${name} extends Sprite {
+  public function ${name}() {
+    if (Worker.current.isPrimordial) {
+      trace("primordial", m(2));
+      WorkerDomain.current.createWorker(${bytes}).start();
+    } else {
+      trace("background", m(4), "zzmark");
+    }
+  }
+  public function m(x:int):int { return x * 5; }
+  public function patched():ByteArray {
+    var b:ByteArray = new ByteArray();
+    b.writeBytes(loaderInfo.bytes);
+    for (var i:int = 0; i < b.length - 6; i++) {
+      if (b[i] == 0x7a && b[i + 1] == 0x7a && b[i + 2] == 0x6d && b[i + 5] == 0x6b) {
+        b[i + 5] = 0x4b;
+      }
+    }
+    return b;
+  }
+} }`;
+
+// A background worker on the same SWF, under that policy, its script
+// served with it too: it imports the modules the primordial imported, and
+// would fail to compile any of its own.
+const same = precompile("AotWorker", workerSource("AotWorker", "loaderInfo.bytes"), 3);
+const workerRun = await playPrecompiled(same.swf, same.dir, true, 3, csp);
+assert.equal(workerRun.error, null);
+assert.equal(workerRun.evalRefused, true);
+assert.equal(workerRun.compiled, 0);
+assert.deepEqual(workerRun.trace, ["primordial 10", "background 20 zzmark"]);
+
+// One on an ABC the primordial did not compile, a string of its changed,
+// compiles it, which the policy refuses in the worker.
+const other = precompile("AotWorkerOther", workerSource("AotWorkerOther", "patched()"), 3);
+const otherRun = await playPrecompiled(other.swf, other.dir, true, 3, csp);
+assert.match(otherRun.error ?? "", /a background worker: EvalError/);
+assert.deepEqual(otherRun.trace, ["primordial 10"]);
+
 // Evaluated under that policy, a module is refused, and so is its compile.
 const refused = await playPrecompiled(swf, dir, false, 3, csp);
 assert.match(refused.error ?? "", /EvalError/);
