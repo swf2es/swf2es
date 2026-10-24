@@ -285,3 +285,150 @@ test("fills let go for room and built again within FILLS_IDLE_MS grow the budget
   assert.equal(fills.budget.size, FILLS_IDLE_VERTICES);
   assert.ok(shapes.every((s) => fills.peek(s) === null));
 });
+
+type BatchContext = {
+  batchMode: string;
+  rect(x: number, y: number, width: number, height: number): BatchContext;
+  fill(style: unknown): BatchContext;
+  stroke(style: unknown): BatchContext;
+  texture(
+    texture: unknown,
+    tint: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): BatchContext;
+  moveTo(x: number, y: number): BatchContext;
+  lineTo(x: number, y: number): BatchContext;
+  destroy(): void;
+};
+type Batch = {
+  indexOffset: number;
+  indexSize: number;
+  attributeOffset: number;
+  attributeSize: number;
+  baseColor: number;
+  alpha: number;
+  topology: string;
+  texture: unknown;
+};
+type BatchedGeometry = {
+  batches: Batch[];
+  geometryData: { vertices: ArrayLike<number>; indices: ArrayLike<number>; uvs: ArrayLike<number> };
+};
+const {
+  GraphicsContext: BatchGraphicsContext,
+  GraphicsContextSystem: BatchContextSystem,
+  Texture: BatchTexture,
+} = (await import(pixi)) as {
+  GraphicsContext: new () => BatchContext;
+  GraphicsContextSystem: new (
+    renderer: unknown,
+  ) => { updateGpuContext(context: BatchContext): BatchedGeometry };
+  Texture: { EMPTY: unknown };
+};
+
+function buildBatches(context: BatchContext): BatchedGeometry {
+  context.batchMode = "batch";
+  const contexts = new BatchContextSystem({
+    uid: 1,
+    gc: { now: 0, addResourceHash() {} },
+    limits: { maxBatchableTextures: 16 },
+  });
+  return contexts.updateGpuContext(context);
+}
+
+test("dense identical fills keep one batch beyond 16-bit vertex indices", () => {
+  const context = new BatchGraphicsContext();
+  const count = 17_000;
+  for (let i = 0; i < count; i++) {
+    context.rect(i * 3, 0, 2, 2);
+  }
+
+  context.fill({ color: 0x336699, alpha: 0.5 });
+  const { batches, geometryData: data } = buildBatches(context);
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0].attributeOffset, 0);
+  assert.equal(batches[0].indexOffset, 0);
+  assert.equal(batches[0].attributeSize, count * 4);
+  assert.equal(batches[0].indexSize, count * 6);
+  assert.ok(data.indices instanceof Uint32Array);
+  const first = Array.from(data.indices).slice(0, 6);
+  for (let i = 0; i < count; i++) {
+    for (let j = 0; j < 4; j++) {
+      assert.equal(data.vertices[i * 8 + j * 2], i * 3 + data.vertices[j * 2]);
+      assert.equal(data.vertices[i * 8 + j * 2 + 1], data.vertices[j * 2 + 1]);
+    }
+
+    for (let j = 0; j < 6; j++) {
+      assert.equal(data.indices[i * 6 + j], i * 4 + first[j]);
+    }
+  }
+
+  context.destroy();
+});
+
+test("paint and topology changes preserve contiguous batch order", () => {
+  const context = new BatchGraphicsContext();
+  context.rect(0, 0, 2, 2).fill({ color: 0xff0000 });
+  context.rect(4, 0, 2, 2).fill({ color: 0xff0000 });
+  context.rect(8, 0, 2, 2).fill({ color: 0x0000ff });
+  context.rect(12, 0, 2, 2).fill({ color: 0x0000ff, alpha: 0.5 });
+  context.rect(16, 0, 2, 2).fill({ texture: BatchTexture.EMPTY, color: 0x0000ff, alpha: 0.5 });
+  context.moveTo(20, 0).lineTo(20, 2).stroke({ color: 0x0000ff, alpha: 0.5, pixelLine: true });
+  context.rect(24, 0, 2, 2).fill({ color: 0xff0000 });
+  const { batches, geometryData: data } = buildBatches(context);
+  assert.equal(batches.length, 6);
+  assert.deepEqual(
+    batches.map((batch) => batch.baseColor),
+    [0xff0000, 0x0000ff, 0x0000ff, 0x0000ff, 0x0000ff, 0xff0000],
+  );
+  assert.deepEqual(
+    batches.map((batch) => batch.alpha),
+    [1, 1, 0.5, 0.5, 0.5, 1],
+  );
+  assert.equal(batches[3].texture, BatchTexture.EMPTY);
+  assert.equal(batches[4].topology, "line-list");
+  assert.equal(batches[5].topology, "triangle-list");
+  let vertices = 0;
+  let indices = 0;
+  for (const batch of batches) {
+    assert.equal(batch.attributeOffset, vertices);
+    assert.equal(batch.indexOffset, indices);
+    vertices += batch.attributeSize;
+    indices += batch.indexSize;
+  }
+
+  assert.equal(vertices * 2, data.vertices.length);
+  assert.equal(indices, data.indices.length);
+  context.destroy();
+});
+
+test("adjacent texture quads keep the same UVs and indices when coalesced", () => {
+  const context = new BatchGraphicsContext();
+  context.texture(BatchTexture.EMPTY, 0xffffff, 3, 4, 2, 3);
+  context.texture(BatchTexture.EMPTY, 0xffffff, 8, 9, 4, 5);
+  const actual = buildBatches(context);
+  const vertices: number[] = [];
+  const indices: number[] = [];
+  const uvs: number[] = [];
+  for (const [x, y, w, h] of [
+    [3, 4, 2, 3],
+    [8, 9, 4, 5],
+  ]) {
+    const single = new BatchGraphicsContext();
+    single.texture(BatchTexture.EMPTY, 0xffffff, x, y, w, h);
+    const data = buildBatches(single).geometryData;
+    const offset = vertices.length / 2;
+    vertices.push(...Array.from(data.vertices));
+    uvs.push(...Array.from(data.uvs));
+    indices.push(...Array.from(data.indices, (n) => n + offset));
+    single.destroy();
+  }
+  assert.equal(actual.batches.length, 1);
+  assert.deepEqual(Array.from(actual.geometryData.vertices), vertices);
+  assert.deepEqual(Array.from(actual.geometryData.indices), indices);
+  assert.deepEqual(Array.from(actual.geometryData.uvs), uvs);
+  context.destroy();
+});
