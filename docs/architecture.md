@@ -4994,10 +4994,14 @@ override. A SWF with no ActionScript 3 plays with no Scripting.
 ### Showing a player
 
 `playback.ts` shows a player in the element: a Pixi renderer whose
-screen is the stage, at the stage's size, and whose resolution is the
-device's pixels to a stage pixel, so the canvas is placed and sized by
-CSS and the view's pointer mapping, which reads the canvas's box, holds
-for every placement. `layout.ts` places it as Flash's plug-in did:
+screen is the element's box taken into stage coordinates, and whose
+resolution is the device's pixels to a stage pixel, so the canvas covers
+the box and the view's pointer mapping, which reads the canvas's box, holds
+for every placement. As in Flash, what lies past the stage's edges shows
+in showAll's and noScale's margins, and a press there reaches the stage at
+coordinates past its edges (negative to the left and above); the stage
+keeps the SWF's size. exactFit, which leaves no margin, keeps a canvas of
+the stage's size stretched by CSS. `layout.ts` places it as Flash's plug-in did:
 showAll fits the stage whole, noBorder fills the element and crops,
 exactFit stretches it, noScale leaves it its size, and `salign`'s T, B,
 L and R hold the edges they name, the stage centred along an axis that
@@ -5187,9 +5191,8 @@ open, and the heap within 256 KB of each.
 
 Not done yet: the SWF's scripts see Flash Player's showAll, the stage
 the SWF's size, whatever the element's `scale`, and noScale does not
-resize the stage or dispatch Event.RESIZE; the letterbox around a
-showAll stage shows the background, not what lies outside the stage;
-AVM1 custom context menus are not implemented; a
+resize the stage or dispatch Event.RESIZE (but under the Stage3D
+opt-in's live Stage layout); AVM1 custom context menus are not implemented; a
 `javascript:` URL from navigateToURL never runs, allowed or not; and
 `document[name]`, which found an `<embed>` by its name, does not find
 the element. Nor can a page give the element modules compiled ahead of

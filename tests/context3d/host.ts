@@ -289,7 +289,8 @@ await withPage(
       await call("resizeToShowAll");
       await call("resize", 240, 180);
       assert.equal(await call("scriptState"), "showAll|TL|96|96|240,180,false,false,2,true;");
-      assert.equal((await call<Status>("status")).overlayWidth, 180);
+      // The canvas covers the box: what lies past the stage shows in showAll's margins.
+      assert.equal((await call<Status>("status")).overlayWidth, 240);
       assert.deepEqual((await call<Status>("status")).errors, []);
     } finally {
       await call("close");
@@ -300,8 +301,10 @@ await withPage(
       await call("layout", "noScale", "TL", 192, 144);
       assert.equal((await call<Status>("status")).canvases, 1);
       assert.equal(await call("scriptState"), "showAll||96|96|");
-      assert.equal((await call<Status>("status")).overlayWidth, 96);
-      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["112233ff"]);
+      assert.equal((await call<Status>("status")).overlayWidth, 192);
+      // Without the opt-in the script sees showAll, but noScale's margins still show the
+      // artwork past the stage, as the opt-in's noScale TL state does.
+      await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
     } finally {
       await call("close");
     }

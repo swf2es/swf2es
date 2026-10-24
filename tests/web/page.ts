@@ -661,6 +661,28 @@ async function touchLog() {
   return element("touch").takeLog();
 }
 
+/**
+ * A player of the margins SWF in a box three times as wide as its stage
+ * and twice its size, by `salign`; where the box is, and the stage's size.
+ */
+async function marginsPlayer(salign: string) {
+  document.getElementById("margins")?.remove();
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "margins";
+  p.setAttribute("src", "/web-test/margins.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  p.setAttribute("width", "600");
+  p.setAttribute("height", "200");
+  p.setAttribute("salign", salign);
+  // Over the page's other elements, in view, without moving them.
+  p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  document.body.append(p);
+  await p.ready;
+  await frames(3);
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top, ...(element("margins").stageSize() as number[])];
+}
+
 /** A player of the activation SWF, focused, and a textarea of the page's beside it. */
 async function activationPlayer() {
   const p = document.createElement("swf2es-player") as Player;
@@ -691,6 +713,13 @@ Object.assign(globalThis, {
     element("activation").destroy();
     element("activation").remove();
     document.getElementById("seed")?.remove();
+    return true;
+  },
+  marginsPlayer,
+  marginsLog: () => element("margins").takeLog(),
+  marginsDestroy: () => {
+    element("margins").destroy();
+    element("margins").remove();
     return true;
   },
   touchPlayer,

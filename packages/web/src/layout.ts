@@ -73,3 +73,55 @@ export function place(
     resolution: Math.max(Math.min(finest, largest), 1 / 64),
   };
 }
+
+/**
+ * What the canvas shows, in stage coordinates, and the renderer's resolution
+ * for it. Flash draws what lies past the stage's edges where the box shows
+ * it, in showAll's and noScale's margins as on its stage, so the canvas
+ * covers the whole box and the viewport is the box taken into the stage's
+ * coordinates; `css` is where the canvas goes in the box, in CSS pixels.
+ * exactFit stretches the stage to the box, one axis more than the other,
+ * which leaves no margin: the canvas is the stage, stretched by CSS.
+ */
+export interface Viewport {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  resolution: number;
+  css: { x: number; y: number; width: number; height: number };
+}
+
+/** The viewport for `placed`, the stage of `stageWidth` by `stageHeight` placed in a box of `boxWidth` by `boxHeight`. */
+export function viewport(
+  stageWidth: number,
+  stageHeight: number,
+  boxWidth: number,
+  boxHeight: number,
+  mode: ScaleMode,
+  placed: Placement,
+): Viewport {
+  const scale = placed.width / stageWidth;
+  if (mode === "exactFit" || !(scale > 0) || !(boxWidth > 0) || !(boxHeight > 0)) {
+    return {
+      x: 0,
+      y: 0,
+      width: stageWidth,
+      height: stageHeight,
+      resolution: placed.resolution,
+      css: { x: placed.x, y: placed.y, width: placed.width, height: placed.height },
+    };
+  }
+
+  const width = boxWidth / scale;
+  const height = boxHeight / scale;
+  return {
+    x: placed.x ? -placed.x / scale : 0,
+    y: placed.y ? -placed.y / scale : 0,
+    width,
+    height,
+    // As fine as the stage, whose MAX_SIDE bounds it: the canvas then has at most the box's device pixels.
+    resolution: placed.resolution,
+    css: { x: 0, y: 0, width: boxWidth, height: boxHeight },
+  };
+}

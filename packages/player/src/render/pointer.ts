@@ -115,15 +115,20 @@ export function bindPointer(
       ? getComputedStyle(canvas)
       : null;
   const unbindMenu = canvas?.ownerDocument
-    ? bindContextMenu(canvas, player, (e) => {
-        const at = {
-          clientX: e.clientX,
-          clientY: e.clientY,
-          global: { x: e.offsetX, y: e.offsetY },
-        };
-        const [x, y] = stagePoint(renderer, player, at, style, viewport);
-        return [x, y];
-      })
+    ? bindContextMenu(
+        canvas,
+        player,
+        (e) => {
+          const at = {
+            clientX: e.clientX,
+            clientY: e.clientY,
+            global: { x: e.offsetX, y: e.offsetY },
+          };
+          const [x, y] = stagePoint(renderer, player, at, style, viewport);
+          return [x, y];
+        },
+        () => viewport?.bounds ?? null,
+      )
     : null;
   const flushSoon = () => {
     frame ||= requestAnimationFrame(() => {

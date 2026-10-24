@@ -3,11 +3,17 @@ import type { Player } from "../player.js";
 
 const openMenus = new WeakMap<Document, () => void>();
 
-/** DOM menus stay outside Pixi's scene graph and exist only while open. */
+/**
+ * DOM menus stay outside Pixi's scene graph and exist only while open.
+ * `shown` is what the canvas shows in stage coordinates, which may reach
+ * past the stage into the margins, as Flash takes the pointer there too;
+ * the stage where it is not given.
+ */
 export function bindContextMenu(
   canvas: HTMLCanvasElement,
   player: Player,
   point: (event: MouseEvent) => [number, number],
+  shown: () => { x: number; y: number; width: number; height: number } | null = () => null,
 ): () => void {
   const document = canvas.ownerDocument;
   const window = document.defaultView;
@@ -28,7 +34,8 @@ export function bindContextMenu(
           player.scripting?.mouseStageY ?? player.height / 2,
         ]
       : point(event);
-    if (x < 0 || y < 0 || x >= player.width || y >= player.height) {
+    const area = shown() ?? { x: 0, y: 0, width: player.width, height: player.height };
+    if (x < area.x || y < area.y || x >= area.x + area.width || y >= area.y + area.height) {
       return;
     }
 
