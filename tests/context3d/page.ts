@@ -1,5 +1,6 @@
 // Stable entry for the browser runners and external diagnostics.
 
+export { bitmapUploads } from "./checks/bitmap-uploads.ts";
 export { bufferBytes, vertexFormats } from "./checks/buffers.ts";
 export { closeComposition, composition, compositionStep } from "./checks/composition.ts";
 export { create } from "./checks/context.ts";

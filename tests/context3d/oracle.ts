@@ -23,6 +23,7 @@ const fixture =
     "Multisampling",
     "TargetMultisampling",
     "Mipmaps",
+    "BitmapUploads",
     "SamplerStates",
     "LodBias",
     "RectangleTextures",

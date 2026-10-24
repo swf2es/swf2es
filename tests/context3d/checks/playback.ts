@@ -186,6 +186,7 @@ export async function shaderFixture(
     | "Reconfigure"
     | "Scissor"
     | "Mipmaps"
+    | "BitmapUploads"
     | "SamplerStates"
     | "LodBias"
     | "RectangleTextures"

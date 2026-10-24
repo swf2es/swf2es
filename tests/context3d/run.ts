@@ -39,6 +39,7 @@ const scripts = compileScripts(
     "Reconfigure",
     "Scissor",
     "Mipmaps",
+    "BitmapUploads",
     "SamplerStates",
     "LodBias",
     "RectangleTextures",
@@ -80,6 +81,7 @@ for (const name of [
   "Reconfigure",
   "Scissor",
   "Mipmaps",
+  "BitmapUploads",
   "SamplerStates",
   "LodBias",
   "RectangleTextures",
@@ -131,6 +133,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(host.exception, null, JSON.stringify(host));
       assert.equal(host.value?.passed, true);
       console.log("context3d: canvas host placement, failure rollback and listener cleanup ok");
+      const uploads = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.bitmapUploads())',
+      );
+      assert.equal(uploads.exception, null, JSON.stringify(uploads));
+      assert.equal(uploads.value?.passed, true);
+      console.log("context3d: clipped/padded bitmap uploads reuse bounded staging storage");
       const attributes = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.contextAttributes())',
       );
@@ -294,6 +302,7 @@ if (!process.argv.includes("--build-only")) {
         "Reconfigure",
         "Scissor",
         "Mipmaps",
+        "BitmapUploads",
         "SamplerStates",
         "LodBias",
         "RectangleTextures",

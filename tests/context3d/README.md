@@ -43,6 +43,7 @@ node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scalarmath
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
+node tests/context3d/oracle.ts --bitmapuploads
 node tests/context3d/oracle.ts --samplerstates
 node tests/context3d/oracle.ts --lodbias
 node tests/context3d/oracle.ts --rectangletextures
@@ -428,14 +429,31 @@ This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 `bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
 bias. Compressed textures remain unsupported.
-Ordinary 2D/cube upload dimensions must match the selected mip level. Each context
-has independent 4,096-resource caps for 2D, rectangle and cube textures and a
-shared 64 MiB texel budget (including mip chains). Byte budgets remain an
-experimental host policy rather than AIR's larger storage allowances.
+2D bitmap uploads clip from the top-left and clear uncovered pixels without
+scaling, including non-power-of-two sources and sources reused across mip levels.
+Cube bitmap uploads still require exact face/mip dimensions. This differs from
+AIR, which accepts other source sizes for cube faces and mips. A full-sized
+bitmap reused for a smaller cube mip is rejected with AS3 Error #3708 here.
+Cube crop/pad behavior and AIR-backed cases remain a follow-up rather than part
+of this 2D slice. Each context has independent 4,096-resource caps for 2D,
+rectangle and cube textures and a shared 64 MiB texel budget including mip chains.
+Byte budgets remain an experimental host policy rather than AIR's larger storage
+allowances.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
 between backends; the fixture uses representable byte values.
+
+`BitmapUploads.as` checks 2D source-size handling against AIR: matching, larger,
+smaller, mixed-axis and non-power-of-two bitmaps at the base level and smaller
+mips. Odd source sizes include levels 1, 2 and 4. Its 42 sampled pixels distinguish
+cropping from scaling, padding from retaining previous contents, and verify
+copying before source disposal. The
+browser checks also exercise 81 uploads through one bounded staging array,
+preserve even and odd source row strides at every mip, clear only the active
+mip's bytes, and allocate no GPU handles during warmed uploads. Invalid dimensions/lengths never reach
+WebGL; cube size validation remains unchanged. This covers engines that reuse
+a full-size bitmap while drawing each mip's content into its top-left corner.
 
 `RenderTargets.as` checks level-zero 2D render targets against AIR: switching
 between differently sized targets and the back buffer, retained color and

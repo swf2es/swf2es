@@ -55,7 +55,7 @@ export function uploadTexture(
   sourceWidth?: number,
   sourceHeight?: number,
 ): void {
-  const { width, height, levels, cube, rectangle } = texture;
+  const { width, height, levels, cube } = texture;
   const faces = cube ? 6 : 1;
   range(level, 1, levels);
   range(face, 1, faces);
@@ -69,7 +69,7 @@ export function uploadTexture(
     !Number.isSafeInteger(sh) ||
     sh <= 0 ||
     pixels.length !== sw * sh ||
-    (!rectangle && (sw !== w || sh !== h))
+    (cube && (sw !== w || sh !== h))
   ) {
     throw new Context3DError("textureUpload", "Context3D experiment: texture upload size mismatch");
   }
@@ -86,7 +86,7 @@ export function uploadTexture(
   } else {
     // AIR clips at the top-left and clears uncovered pixels, without scaling.
     if (sw < w || sh < h) {
-      state.bytes.fill(0);
+      state.bytes.fill(0, 0, w * h * 4);
     }
     const columns = Math.min(w, sw);
     const rows = Math.min(h, sh);
