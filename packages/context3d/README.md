@@ -35,16 +35,31 @@ index buffers, programs, 2D textures, rectangle textures and cube textures.
 and `maxTextures` retain aggregate caps, defaulting to 8,192 and 12,288; an
 explicit lower cap still limits the combined types.
 
-The separate 64 MiB budgets for buffer storage, texture mip chains, texture-target
-depth/stencil storage and multisample target color storage (`maxBufferBytes`,
-`maxTextureBytes`, `maxTargetDepthBytes`, `maxTargetColorBytes`) remain experimental
-host policies, below AIR's larger storage allowances. Raising a count leaves
-these byte budgets intact and allocates nothing eagerly. Multisample storage
-counts actual samples; cube targets also count a cached single-sample resolve
-surface. Options must be nonnegative safe integers; zero denies allocations in
-that category. They are copied at creation and disposal returns each resource's
-budget. Accounting covers tracked storage, not physical driver VRAM,
-back-buffer attachments or all CPU staging memory.
+Byte limits are independent by resource type and follow the observed AIR baseline
+allowances:
+
+| Resource | Default | Constructor option |
+| --- | --- | --- |
+| Vertex buffers | 256 MiB | `maxVertexBufferBytes` |
+| Index buffers | 128 MiB | `maxIndexBufferBytes` |
+| 2D textures | 512 MiB | `max2DTextureBytes` |
+| Rectangle textures | 512 MiB | `maxRectangleTextureBytes` |
+| Cube textures | 256 MiB | `maxCubeTextureBytes` |
+
+AIR probes at multiple sizes show a mip reservation of half the BGRA base size
+for ordinary and cube textures. Their per-type quota charge uses that reservation;
+rectangles charge only their base level. The aggregate `maxTextureBytes` budget
+still tracks the complete mip chains actually allocated, defaulting to 1,280 MiB.
+`maxBufferBytes` defaults to 384 MiB. Explicit lower aggregate overrides continue
+to bound combined storage independently of these allowances.
+
+Target depth/stencil and multisample color storage retain separate 64 MiB host
+policies (`maxTargetDepthBytes`, `maxTargetColorBytes`); equivalent AIR attachment
+accounting remains unverified. Multisample storage counts actual samples and cube
+targets include their cached single-sample resolve surface. All options must be
+nonnegative safe integers, are copied at creation and allocate nothing eagerly.
+Disposal returns both quota and storage capacity. These are logical allocation
+accounts, not physical driver VRAM, and exclude back-buffer attachments.
 
 Core failures carry typed reasons. The Flash adapter maps them to catchable AS3
 errors, including resource limits (#3691), disposed objects (#3694), draw bounds
