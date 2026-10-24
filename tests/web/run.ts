@@ -732,6 +732,24 @@ check(
       "yellow 50,50 50,50",
     ]);
 
+    // A right-click in a margin opens the player's menu, not the browser's.
+    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      await send("Input.dispatchMouseEvent", {
+        type,
+        x: left + 50,
+        y: top + 100,
+        button: type === "mouseMoved" ? "none" : "right",
+        clickCount: 1,
+      });
+    }
+    const menu =
+      'document.getElementById("margins").shadowRoot.querySelector("[data-swf2es-context-menu]")';
+    assert.equal(await call(evaluate, `!!${menu}`), true, "no player menu in the margin");
+    for (const type of ["keyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", { type, key: "Escape", windowsVirtualKeyCode: 27 });
+    }
+    assert.equal(await call(evaluate, `!!${menu}`), false, "the menu stayed open");
+
     // Held to the left edge, the stage's right margin is the whole rest of the box.
     const [l, t] = await call<number[]>(evaluate, 'marginsPlayer("L")');
     image = await shot();
