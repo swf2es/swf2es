@@ -27,6 +27,7 @@ import {
   Shader,
   Sprite,
   Texture,
+  TextureSource,
   UniformGroup,
 } from "pixi.js";
 import { isProjective } from "../display/geometry.js";
@@ -136,6 +137,7 @@ let averageProgram: GlProgram | null = null;
 
 /** A quad over a target, drawing a texture averaged down to it (`average`); one a renderer, kept. */
 class Averager {
+  private readonly unbound = new TextureSource();
   private readonly positions = new Float32Array(8);
   private readonly uvs = new Float32Array(8);
   private readonly geometry = new MeshGeometry({
@@ -155,7 +157,7 @@ class Averager {
     this.shader = new Shader({
       glProgram: averageProgram,
       resources: {
-        uTexture: Texture.EMPTY.source,
+        uTexture: this.unbound,
         averageUniforms: new UniformGroup({
           uReach: { value: new Float32Array(2), type: "vec2<f32>" },
         }),
@@ -196,7 +198,13 @@ class Averager {
     const reach = this.shader.resources.averageUniforms.uniforms.uReach as Float32Array;
     reach[0] = (samples - 2) / 2 / source.width;
     reach[1] = (samples - 2) / 2 / source.height;
-    renderer.render({ container: this.mesh, target, clear: true });
+    try {
+      renderer.render({ container: this.mesh, target, clear: true });
+    } finally {
+      // A sampled target can be evicted as soon as it returns to the pool.
+      this.shader.resources.uTexture = this.unbound;
+      this.mesh.texture = Texture.EMPTY;
+    }
   }
 }
 
@@ -566,10 +574,10 @@ export class Plane {
       texture.height < height ||
       texture.width * texture.height > 4 * keptW * keptH
     ) {
-      texture?.destroy(true);
       this.texture = RenderTexture.create({ width: keptW, height: keptH, scaleMode: "linear" });
       this.shader.resources.uTexture = this.texture.source;
       this.quad.texture = this.texture;
+      texture?.destroy(true);
     }
 
     const bitmap = this.texture as RenderTexture;
