@@ -9,6 +9,14 @@
 // thread pool is, and a worker that starts takes one that has loaded,
 // which runs what it is posted whatever the page's thread does; another
 // is started in its place for the next.
+//
+// Nor does a worker that has run its script take the page's messages at
+// once: Chrome holds what the page posts to a Web Worker until the page's
+// thread has run its own task for the script's end, which may come after
+// the worker's first message. A page that blocked first would hold the
+// worker's start until it stopped blocking, past the script timeout. So a
+// worker counts as loaded only once it answers a message the page posted
+// it when it was made.
 import type { WorkerHost } from "@swf2es/player";
 import type { ThreadStart } from "@swf2es/player/worker";
 
@@ -108,6 +116,13 @@ function release(url: string | URL): void {
 const importers = new Map<string, string>();
 
 function spawn(url: string | URL): Worker {
+  const worker = construct(url);
+  // Answered with "ready" once the page's messages reach the worker.
+  worker.postMessage({ type: "ping" });
+  return worker;
+}
+
+function construct(url: string | URL): Worker {
   try {
     return new Worker(url, { type: "module" });
   } catch (error) {

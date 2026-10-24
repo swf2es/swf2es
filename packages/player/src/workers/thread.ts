@@ -81,6 +81,7 @@ export function runWorkerThread(port: ThreadPort): void {
     // the defaults that would reach past the primordial's (docs/workers.md).
     const storage = new Map<string, Uint8Array>();
     const s = new Scripting(await createCodegen(codegen), {
+      handedModules: init.modules,
       url: init.url,
       sandboxType: init.sandboxType,
       print: (line) => port.post({ type: "trace", line }),

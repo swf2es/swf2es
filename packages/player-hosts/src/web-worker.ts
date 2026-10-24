@@ -9,8 +9,16 @@ const scope = globalThis as unknown as {
 runWorkerThread({
   post: (message) => scope.postMessage(message),
   listen: (receive) => {
-    scope.onmessage = (event) => receive(event.data);
+    scope.onmessage = (event) => {
+      // The host's first message: answered, it tells the host that what it
+      // posts reaches this worker, which it then counts on while the page's
+      // thread is blocked (workers.ts).
+      if (event.data?.type === "ping") {
+        scope.postMessage({ type: "ready" });
+        return;
+      }
+
+      receive(event.data);
+    };
   },
 });
-// Started: what the host waits for before it counts on this worker while the page's thread is blocked.
-scope.postMessage({ type: "ready" });
