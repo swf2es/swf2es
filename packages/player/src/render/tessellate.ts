@@ -4,7 +4,7 @@
 import type { Fill } from "@swf2es/format";
 import { type FillInput, GraphicsContext } from "pixi.js";
 import type { Region as Area } from "../display/gradients.js";
-import { blendLayers, droppedLayers } from "../display/morph.js";
+import { blendLayers, droppedBlends, droppedLayers } from "../display/morph.js";
 import {
   CUBIC,
   flatten,
@@ -441,6 +441,8 @@ export class SharedFills {
   private readonly idle = new Map<ShapeCharacter, number>();
   /** The idle ones that are blends, which go as soon as their morph drops them. */
   private readonly idleBlends = new Set<ShapeCharacter>();
+  /** droppedBlends() when the idle blends were last looked at. */
+  private blendsDropped = droppedBlends();
 
   /** The shape's fills if they are kept, not taken: for a view drawn once to borrow. */
   peek(shape: ShapeCharacter): GraphicsContext[] | null {
@@ -489,9 +491,13 @@ export class SharedFills {
 
   /** A frame prepared: the idle blends their morph dropped go, and those idle too long, oldest first. */
   tick(): void {
-    for (const shape of this.idleBlends) {
-      if (shape.layers.some((layer) => droppedLayers.has(layer))) {
-        this.drop(shape);
+    const dropped = droppedBlends();
+    if (dropped !== this.blendsDropped) {
+      this.blendsDropped = dropped;
+      for (const shape of this.idleBlends) {
+        if (shape.layers.some((layer) => droppedLayers.has(layer))) {
+          this.drop(shape);
+        }
       }
     }
 
