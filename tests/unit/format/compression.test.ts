@@ -203,6 +203,24 @@ test("a SWF whose body is not the length its header says is refused", () => {
   assert.throws(() => decompressSwf(swf), CompressedDataError);
 });
 
+test("CWS accepts a missing checksum only after a complete deflate stream", () => {
+  const plain = fws(body);
+  const whole = cws(plain);
+  for (let missing = 1; missing <= 4; missing++) {
+    const short = whole.slice(0, whole.length - missing);
+    assert.deepEqual(decompressSwf(short), plain);
+    assert.throws(() => zlibUncompress(short.subarray(8)), /truncated/);
+
+    new DataView(short.buffer).setUint32(4, plain.length + 1, true);
+    assert.throws(() => decompressSwf(short), /body of/);
+  }
+
+  assert.throws(() => decompressSwf(whole.subarray(0, whole.length - 5)), /truncated/);
+  const corrupt = whole.slice();
+  corrupt[corrupt.length - 1] ^= 1;
+  assert.throws(() => decompressSwf(corrupt), /incorrect data check/);
+});
+
 test("zlib stops at its stream's end, as zlib does, and refuses what is corrupt", () => {
   const z = zlibCompress(body);
   assert.deepEqual([z[0], z[1]], [0x78, 0xda]);

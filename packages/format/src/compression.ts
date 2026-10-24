@@ -194,6 +194,14 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
   if (signature === "CWS") {
     // A byte past the header's length tells a longer body from one that fits.
     result = inflate(swf.subarray(8), false, fileLength - 8 + 1, { offset: 8 });
+    if (result.status === TRUNCATED) {
+      // Some SWFs omit the Adler-32 trailer despite holding a complete deflate stream.
+      const raw = inflate(swf.subarray(10), true, fileLength - 8 + 1, { offset: 8 });
+      if (raw.status === DONE && 10 + raw.used + 4 > swf.length) {
+        result = raw;
+      }
+    }
+
     if (result.status === FULL) {
       throw new CompressedDataError(
         `a body of more than ${fileLength - 8} bytes where the header says ${fileLength - 8}`,
