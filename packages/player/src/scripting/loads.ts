@@ -78,7 +78,7 @@ export class Loads {
   private dynamic = 0;
   /** The main SWF's flashvars, as the host gave them. */
   private readonly flashvars: Readonly<Record<string, string>>;
-  /** What the next frame does after EXIT_FRAME, before the loads' ends: the main SWF's INIT and COMPLETE. */
+  /** What the next frame does after EXIT_FRAME, before the loads' ends: the main SWF's load events. */
   readonly frameEnds: (() => void)[] = [];
 
   constructor(
@@ -786,9 +786,9 @@ export class Loads {
   }
 
   /**
-   * The main SWF, all of it loaded, as its LoaderInfo tells it: INIT, then
-   * COMPLETE, at the end of its first frame, after EXIT_FRAME, as Flash
-   * (the corpus's loaderinfo_events and delayed_symbolclass). Where its
+   * The main SWF, all of it loaded: INIT, final PROGRESS, then COMPLETE, after its first
+   * frame's scripts and EXIT_FRAME. Preloaders may subscribe in that frame's script and
+   * advance only from final progress, as AIR does for a streamed URL. Where its
    * document class's constructor threw (`constructed` false), Flash sends
    * COMPLETE alone (measured in adl).
    */
@@ -796,6 +796,7 @@ export class Loads {
     this.frameEnds.push(() => {
       if (constructed) {
         dispatchEvent(this.s, info, this.s.event("init"));
+        this.progress(info, info.$total);
       }
 
       dispatchEvent(this.s, info, this.s.event("complete"));

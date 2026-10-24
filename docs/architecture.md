@@ -1834,9 +1834,13 @@ loaded SWF's root is its own root from its constructor on). Its values
 are the loaded SWF's: `bytesLoaded` and `bytesTotal`, `content`, `url`
 and `loaderURL`, `contentType`, the header's version, frame rate, width
 and height, `loader`, `applicationDomain`, `bytes`. The main SWF's
-dispatches `init` and then `complete` at the end of its first frame,
-after `exitFrame` and before the second (Ruffle's `loaderinfo_events` and
-`delayed_symbolclass` traces), as a loaded SWF's does.
+dispatches `init`, final `progress`, and then `complete` at the end of its
+first frame, after its scripts and `exitFrame`. A preloader that subscribes
+in frame 1 can advance from that final progress before `complete`, as AIR
+does when a SWF is streamed over HTTP. `MainLoadProgress` checks that order
+in eager and lazy compilation. Content loaded by `loadBytes` keeps its
+different sequence: progress precedes its construction, so a listener it
+installs in frame 1 sees only `init` and `complete`.
 
 PNG, JPEG and GIF files use the same Loader queue, sniffed from their bytes
 and decoded through the host's image decoder. The content is a `Bitmap` with

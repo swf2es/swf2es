@@ -36,6 +36,78 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
+for (const lazyCompilation of [false, true]) {
+  const mode = lazyCompilation ? "lazy" : "eager";
+  test(`the main SWF delivers final progress after its first frame subscribes (${mode})`, {
+    skip,
+  }, async (t) => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      url: "http://example.test/main.swf",
+      lazyCompilation,
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const swf = bare(compiler(out)("MainLoadProgress"), 2, "MainLoadProgress");
+    const player = new Player(swf, scripting);
+    t.after(() => player.destroy());
+    await player.start();
+
+    // AIR with this fixture streamed over HTTP, with trailing binary data keeping the load
+    // open after frame 1: its final progress follows INIT and may run a goto before COMPLETE.
+    assert.deepEqual(lines, [
+      "frame 1",
+      "init 1",
+      "progress 1 true true true true",
+      "frame 2",
+      "complete 2",
+    ]);
+    assert.equal(player.root.currentFrame, 2);
+    assert.equal(player.root.playing, false);
+
+    lines.length = 0;
+    player.tick();
+    player.tick();
+    assert.deepEqual(lines, [], "the completed load reports progress only once");
+  });
+
+  test(`loadBytes preserves progress before the loaded SWF subscribes (${mode})`, {
+    skip,
+  }, async (t) => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      lazyCompilation,
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const compile = compiler(out);
+    const host = compile(
+      "MainProgressHost",
+      `package {
+      import flash.display.Sprite;
+      public class MainProgressHost extends Sprite {}
+    }`,
+    );
+    const player = new Player(bare(host, 1, "MainProgressHost"), scripting);
+    t.after(() => player.destroy());
+    await player.start();
+
+    const loader = scripting.rt.construct(scripting.rt.classNamed("flash.display::Loader"));
+    player.root.addChildAt(loader.$display, 0);
+    scripting.loads.requestLoad(loader, bare(compile("MainLoadProgress"), 2, "MainLoadProgress"));
+    await scripting.settled();
+    player.tick();
+    player.tick();
+
+    // The same fixture in AIR's loadBytes harness sees no late progress and stays stopped.
+    assert.deepEqual(lines, ["frame 1", "init 1", "complete 1"]);
+    const info = scripting.rt.getProperty(loader, scripting.rt.publicName("contentLoaderInfo"));
+    const child = scripting.rt.getProperty(info, scripting.rt.publicName("content"));
+    assert.equal((child.$display as MovieClip).currentFrame, 1);
+    assert.equal((child.$display as MovieClip).playing, false);
+  });
+}
+
 test("an unloaded LoaderInfo reports its owner's URL before any load", { skip }, async () => {
   const scripting = new Scripting(await createCodegen(wasm), {
     print: () => {},
