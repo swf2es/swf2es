@@ -84,8 +84,8 @@ The optional WebGL constructor budgets cover buffer/program/texture counts and
 separate byte limits for buffers, all texture mips/faces and target depth/stencil.
 Browser checks cover invalid values before GPU allocation, exact boundaries,
 immutable option snapshots, zero limits, raised counts, failed allocation
-rollback, cached depth reuse and budget recovery after disposal. Default budgets
-are unchanged; higher count limits do not raise the byte limits.
+rollback, cached depth reuse and budget recovery after disposal. Raising count
+limits does not raise byte limits.
 
 A local integration check of the public Away3D Perelith Knight SWF runs with
 `maxBuffers: 4096` while retaining the default byte budgets. Across 3,600 ticks
@@ -104,7 +104,7 @@ three wireframe spheres and particles after adding `seq`. The downloaded SWF
 replaces its terrain vertex buffer every frame without calling `dispose()`.
 Before automatic reclamation, only six of its 64 vertex-buffer wrappers survived
 collection at tick 60, while the backend retained 69 buffers (about 41 MiB);
-a longer run reached the default 64 MiB buffer budget. The Flash adapter now
+a longer run reached the then-default 64 MiB buffer budget. The Flash adapter now
 registers resource wrappers for cleanup and strongly retains active bindings.
 An allocation failure first releases already collected wrappers whose finalizers
 have not run, then retries once. There is no resource scan on draws or presents.
@@ -436,9 +436,8 @@ AIR, which accepts other source sizes for cube faces and mips. A full-sized
 bitmap reused for a smaller cube mip is rejected with AS3 Error #3708 here.
 Cube crop/pad behavior and AIR-backed cases remain a follow-up rather than part
 of this 2D slice. Each context has independent 4,096-resource caps for 2D,
-rectangle and cube textures and a shared 64 MiB texel budget including mip chains.
-Byte budgets remain an experimental host policy rather than AIR's larger storage
-allowances.
+rectangle and cube textures, independent AIR-backed byte allowances and an
+additional aggregate texel-storage budget including complete mip chains.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
@@ -856,11 +855,10 @@ remain later work. These hooks are independent of the unfinished ActionScript
 Worker API. Broader formats, profiles and validation gaps remain listed above.
 
 The desktop's opt-in surface factory uses the backend's independent 4,096-resource
-count limits and separate 64 MiB byte budgets. `tests/desktop/stage3d-limits.ts`
-runs that actual factory inside the desktop integration test: 12,288 mixed
-2D/rectangle/cube allocations, per-type count rejection before GL allocation,
-capacity recovery after disposal, and the exact 64 MiB boundary including full
-mip chains. It tracks texture handles through explicit disposal and context
+count and byte limits. `tests/desktop/stage3d-limits.ts` runs that actual factory
+inside the desktop integration test: 12,288 mixed 2D/rectangle/cube allocations,
+per-type count rejection before GL allocation, capacity recovery after disposal,
+and four full 2048-square texture mip chains above the old 64 MiB ceiling. It tracks texture handles through explicit disposal and context
 teardown, checks GL errors and releases the browser context.
 
 `StageWorker.as` covers the combined web startup path: the primordial presents
@@ -918,3 +916,22 @@ list sample transparency rather than Stage3D pixels; cross-layer blend parity is
 an experimental limitation. Default `Playback.destroy()` also disposes its Pixi
 scene before its renderer, intentionally releasing cached text-style listeners;
 ordinary web collection checks cover this shared change.
+
+
+`ByteBudgets.as` keeps enough real resources to exceed the old 64 MiB ceiling in
+each buffer/texture category, checks AIR's acceptance and disposes them between
+categories. Its reference is captured and independently repeated in AIR. Small
+constructor overrides check exact per-type and aggregate boundaries in WebGL,
+independence across simultaneous types, rejection before handle allocation,
+capacity recovery and complete cleanup without large CI allocations.
+
+Separate AIR 51.3.1 / DirectX11 probes held all types simultaneously: 32 vertex
+buffers of 8 MiB, 256 index buffers of 512 KiB, 21 ordinary 2048-square textures,
+32 rectangle 2048-square textures and seven 1024-square cubes each reach #3691.
+All texture quota probes use BGRA; compressed and `rgbaHalfFloat` quota behavior
+is unmeasured, and those formats remain unsupported by the adapter (#3708).
+Ordinary 1024-square textures reach 85 and 512-square cubes reach 28. These
+observations ground 256/128 MiB buffer allowances, 512/512/256 MiB texture
+allowances and a half-base-size mip reservation for ordinary/cube textures.
+The backend keeps actual mip-storage accounting separate from that quota charge.
+Attachment budgets remain explicit 64 MiB host policies, not AIR parity claims.

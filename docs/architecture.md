@@ -178,8 +178,8 @@ measurements cannot retain the scene through text style listeners.
 Default playback still reports unavailable Context3D. The desktop View menu
 offers an experimental opt-in, saved as a strict boolean in settings.json.
 Changing it reloads the page and current movie; startup lazily imports the
-backend only when enabled. The desktop's surface factory gives animated meshes
-4,096 buffer handles per context while retaining the default byte budgets.
+backend only when enabled. The desktop's surface factory inherits the backend's
+independent per-type resource counts and AIR-backed buffer/texture byte limits.
 Composition, AS3 Stage layout, loss/recovery and teardown use the web host.
 Best-resolution buffers and production enablement remain separate work.
 

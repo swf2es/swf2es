@@ -23,7 +23,12 @@ export function resourceLimits(): { passed: boolean } {
       "maxRectangleTextures",
       "maxCubeTextures",
       "maxBufferBytes",
+      "maxVertexBufferBytes",
+      "maxIndexBufferBytes",
       "maxTextureBytes",
+      "max2DTextureBytes",
+      "maxRectangleTextureBytes",
+      "maxCubeTextureBytes",
       "maxTargetDepthBytes",
       "maxTargetColorBytes",
     ] as const;

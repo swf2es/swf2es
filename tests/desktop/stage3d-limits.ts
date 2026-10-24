@@ -49,16 +49,11 @@ export async function textureLimits(app: App): Promise<void> {
       replacement.dispose();
       check(live.size === 0, "explicit disposal retained GPU textures");
 
-      // Twelve full 1024-square mip chains leave exactly 16 bytes of the 64 MiB budget.
-      for (let i = 0; i < 12; i++) {
-        c.createTexture(1024, 1024);
-      }
-      rejected(() => c.createTexture(2, 2));
+      // Ordinary desktop playback must permit the AIR-accepted case above the old 64 MiB cap.
       for (let i = 0; i < 4; i++) {
-        c.createTexture(1, 1);
+        c.createTexture(2048, 2048);
       }
-      rejected(() => c.createTexture(1, 1));
-      check(live.size === 16, "byte-limit rejection changed existing textures");
+      check(live.size === 4, "ordinary texture storage was capped at 64 MiB");
       error = gl.getError();
     } finally {
       c.dispose();

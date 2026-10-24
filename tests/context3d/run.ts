@@ -33,6 +33,7 @@ const scripts = compileScripts(
     "Comparisons",
     "ContextRequests",
     "AGALValidation",
+    "ByteBudgets",
     "ResourceObjects",
     "ResourceLimits",
     "FrameValidation",
@@ -76,6 +77,7 @@ for (const name of [
   "Comparisons",
   "ContextRequests",
   "AGALValidation",
+  "ByteBudgets",
   "ResourceObjects",
   "ResourceLimits",
   "FrameValidation",
@@ -153,6 +155,14 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(validation.exception, null, JSON.stringify(validation));
       assert.equal(validation.value?.passed, true);
       console.log("context3d: draw validation reuses cached ranges and invalidates uploaded data");
+      const budgets = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.byteBudgets())',
+      );
+      assert.equal(budgets.exception, null, JSON.stringify(budgets));
+      assert.equal(budgets.value?.passed, true);
+      console.log(
+        "context3d: independent per-type byte budgets, mip reserve and disposal recovery ok",
+      );
       const limits = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.resourceLimits())',
       );
@@ -298,6 +308,7 @@ if (!process.argv.includes("--build-only")) {
         "ScalarMath",
         "ContextRequests",
         "AGALValidation",
+        "ByteBudgets",
         "ResourceObjects",
         "ResourceLimits",
         "FrameValidation",
