@@ -62,9 +62,11 @@ export class WebGLContext3D implements Context3D {
   private readonly buffers = new Map<Buffer3D, BufferState>();
   private vertexBuffers = 0;
   private bufferBytes = 0;
+  private vertexBufferBytes = 0;
   private readonly programs = new Map<Program3D, ProgramState>();
   private readonly textures = new Map<Texture3D, TextureState>();
   private readonly textureCounts = new Float64Array(3);
+  private readonly textureQuotaBytes = new Float64Array(3);
   private readonly textureOwners = new WeakSet<Texture3D>();
   private textureBytes = 0;
   private targetDepthBytes = 0;
@@ -561,7 +563,11 @@ export class WebGLContext3D implements Context3D {
     }
 
     const bytes = count * (stride === 0 ? 2 : stride * 4);
-    if (this.bufferBytes + bytes > this.limits.maxBufferBytes) {
+    const usedBytes =
+      stride === 0 ? this.bufferBytes - this.vertexBufferBytes : this.vertexBufferBytes;
+    const byteLimit =
+      stride === 0 ? this.limits.maxIndexBufferBytes : this.limits.maxVertexBufferBytes;
+    if (this.bufferBytes + bytes > this.limits.maxBufferBytes || usedBytes + bytes > byteLimit) {
       throw new Context3DError("limit", "Context3D experiment: buffer memory limit");
     }
 
@@ -608,6 +614,7 @@ export class WebGLContext3D implements Context3D {
         this.bufferBytes -= bytes;
         if (stride !== 0) {
           this.vertexBuffers--;
+          this.vertexBufferBytes -= bytes;
         }
         state.indices = null;
         state.uploaded = new Uint8Array(0);
@@ -624,6 +631,7 @@ export class WebGLContext3D implements Context3D {
     this.buffers.set(buffer, state);
     if (stride !== 0) {
       this.vertexBuffers++;
+      this.vertexBufferBytes += bytes;
     }
     this.bufferBytes += bytes;
     return buffer;
@@ -750,9 +758,17 @@ export class WebGLContext3D implements Context3D {
       : rectangle
         ? this.limits.maxRectangleTextures
         : this.limits.max2DTextures;
+    const byteLimit = cube
+      ? this.limits.maxCubeTextureBytes
+      : rectangle
+        ? this.limits.maxRectangleTextureBytes
+        : this.limits.max2DTextureBytes;
+    // AIR reserves half the base size for mips, independently of the exact chain storage.
+    const quotaBytes = width * height * faces * (rectangle ? 4 : 6);
     if (
       this.textures.size >= this.limits.maxTextures ||
       this.textureCounts[kind] >= countLimit ||
+      this.textureQuotaBytes[kind] + quotaBytes > byteLimit ||
       this.textureBytes + size > this.limits.maxTextureBytes
     ) {
       throw new Context3DError("limit", "Context3D experiment: texture count or memory limit");
@@ -805,6 +821,7 @@ export class WebGLContext3D implements Context3D {
         }
 
         this.textureCounts[kind]--;
+        this.textureQuotaBytes[kind] -= quotaBytes;
 
         if (this.renderTexture === texture) {
           this.renderTexture = null;
@@ -844,6 +861,7 @@ export class WebGLContext3D implements Context3D {
     };
     this.textures.set(texture, state);
     this.textureCounts[kind]++;
+    this.textureQuotaBytes[kind] += quotaBytes;
     this.textureOwners.add(texture);
     this.textureBytes += size;
 

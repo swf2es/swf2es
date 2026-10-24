@@ -3,7 +3,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
-import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
+import type { AsObject, Bindings } from "./lifecycle.js";
 
 export function registerResources(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
   const { buffers, programs, textures, disposeResource, context, buffer, program, texture, bytes } =
@@ -17,7 +17,7 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
 
       const entry = buffers.get(this as unknown as AsObject);
       if (!entry) {
-        throw new Error("Context3D experiment: invalid buffer");
+        throw s.rt.error("Error", 3694);
       }
 
       // Unlike vector uploads, AIR ignores byte uploads after explicit disposal.
@@ -92,13 +92,6 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
     }
 
     const bitmap = storeOf(s, source);
-    if (
-      value.cube &&
-      (bitmap.width !== Math.max(1, value.width >> level) ||
-        bitmap.height !== Math.max(1, value.height >> level))
-    ) {
-      unsupported();
-    }
 
     value.upload(bitmap.readable, level, face, bitmap.width, bitmap.height);
     const entry = textures.get(object);

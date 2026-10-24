@@ -9,6 +9,7 @@ package flash.display3D
 	{
 		public function IndexBuffer3D()
 		{
+			Error.throwError(ArgumentError, 2012, "IndexBuffer3D");
 		}
 
 		public native function uploadFromVector(data:Vector.<uint>, startOffset:int, count:int):void;

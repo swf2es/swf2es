@@ -1,0 +1,17 @@
+[
+  "resourceobjects context-create ArgumentError 2012",
+  "resourceobjects texture-base-create accepted",
+  "resourceobjects vertex-create ArgumentError 2012",
+  "resourceobjects index-create ArgumentError 2012",
+  "resourceobjects program-create ArgumentError 2012",
+  "resourceobjects texture-create ArgumentError 2012",
+  "resourceobjects rectangle-create ArgumentError 2012",
+  "resourceobjects cube-create ArgumentError 2012",
+  "resourceobjects base-bind accepted",
+  "resourceobjects base-target ArgumentError 0",
+  "resourceobjects base-dispose accepted",
+  "resourceobjects real-texture-event accepted",
+  "resourceobjects base-bind-pixel ff00ff00",
+  "resourceobjects base-bind-draw accepted",
+  "resourceobjects complete"
+]

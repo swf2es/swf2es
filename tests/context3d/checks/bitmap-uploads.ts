@@ -74,8 +74,41 @@ export function bitmapUploads() {
     rejects(() => texture.upload(large, 0, 1, 32, 16));
     check(uploadCount === before && before === 81, "invalid bitmap upload reached WebGL");
 
+    staging = null;
     const cube = c.createTexture(8, 8, true);
-    rejects(() => cube.upload(large, 1, 0, 32, 16));
+    cube.upload(large, 1, 0, 32, 16);
+    check(staging, "missing cube upload staging");
+    const cubeBytes: Uint8Array = staging;
+    const cubeAllocated = owned.created;
+    for (let face = 0; face < 6; face++) {
+      for (let level = 0; level < cube.levels; level++) {
+        const size = Math.max(1, 8 >> level);
+        const length = size * size * 4;
+        cube.upload(odd, level, face, 19, 11);
+        const source = odd[(size - 1) * 19 + size - 1];
+        check(
+          cubeBytes[length - 4] === ((source >>> 16) & 255) &&
+            cubeBytes[length - 3] === ((source >>> 8) & 255) &&
+            cubeBytes[length - 2] === (source & 255),
+          "cube crop ignored source row stride",
+        );
+        cubeBytes.fill(109, length);
+        cube.upload(small, level, face, 1, 1);
+        check(cubeBytes[3] === 128, "cube upload changed alpha");
+        for (let i = 4; i < length; i++) {
+          check(cubeBytes[i] === 0, "cube padding retained old pixels");
+        }
+        for (let i = length; i < cubeBytes.length; i++) {
+          check(cubeBytes[i] === 109, "cube mip cleared inactive staging storage");
+        }
+        check(owned.created === cubeAllocated, "cube uploads allocated GPU handles");
+      }
+    }
+    const cubeUploads = uploadCount;
+    rejects(() => cube.upload(small, 0, 0, 2, 1));
+    rejects(() => cube.upload(small, 0, 6, 1, 1));
+    rejects(() => cube.upload(small, cube.levels, 0, 1, 1));
+    check(uploadCount === cubeUploads, "invalid cube upload reached WebGL");
     check(gl.getError() === gl.NO_ERROR, "GL error after bitmap uploads");
 
     return { passed: true };

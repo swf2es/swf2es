@@ -10,7 +10,12 @@ export interface WebGLContext3DLimits {
   maxRectangleTextures: number;
   maxCubeTextures: number;
   maxBufferBytes: number;
+  maxVertexBufferBytes: number;
+  maxIndexBufferBytes: number;
   maxTextureBytes: number;
+  max2DTextureBytes: number;
+  maxRectangleTextureBytes: number;
+  maxCubeTextureBytes: number;
   maxTargetDepthBytes: number;
   maxTargetColorBytes: number;
 }
@@ -24,8 +29,13 @@ const DEFAULT_LIMITS: WebGLContext3DLimits = {
   max2DTextures: 4096,
   maxRectangleTextures: 4096,
   maxCubeTextures: 4096,
-  maxBufferBytes: 64 * 1024 * 1024,
-  maxTextureBytes: 64 * 1024 * 1024,
+  maxBufferBytes: 384 * 1024 * 1024,
+  maxVertexBufferBytes: 256 * 1024 * 1024,
+  maxIndexBufferBytes: 128 * 1024 * 1024,
+  maxTextureBytes: 1280 * 1024 * 1024,
+  max2DTextureBytes: 512 * 1024 * 1024,
+  maxRectangleTextureBytes: 512 * 1024 * 1024,
+  maxCubeTextureBytes: 256 * 1024 * 1024,
   maxTargetDepthBytes: 64 * 1024 * 1024,
   maxTargetColorBytes: 64 * 1024 * 1024,
 };

@@ -10,6 +10,8 @@ const fixture =
   [
     "ContextRequests",
     "AGALValidation",
+    "ByteBudgets",
+    "ResourceObjects",
     "ResourceLimits",
     "FrameValidation",
     "FrameValidationFlat",
@@ -17,6 +19,7 @@ const fixture =
     "Comparisons",
     "RenderTargets",
     "CubeTargets",
+    "CubeBitmapUploads",
     "CubeTextures",
     "TemporaryMatrices",
     "IndirectConstants",

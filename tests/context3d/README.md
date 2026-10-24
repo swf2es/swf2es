@@ -84,8 +84,8 @@ The optional WebGL constructor budgets cover buffer/program/texture counts and
 separate byte limits for buffers, all texture mips/faces and target depth/stencil.
 Browser checks cover invalid values before GPU allocation, exact boundaries,
 immutable option snapshots, zero limits, raised counts, failed allocation
-rollback, cached depth reuse and budget recovery after disposal. Default budgets
-are unchanged; higher count limits do not raise the byte limits.
+rollback, cached depth reuse and budget recovery after disposal. Raising count
+limits does not raise byte limits.
 
 A local integration check of the public Away3D Perelith Knight SWF runs with
 `maxBuffers: 4096` while retaining the default byte budgets. Across 3,600 ticks
@@ -104,7 +104,7 @@ three wireframe spheres and particles after adding `seq`. The downloaded SWF
 replaces its terrain vertex buffer every frame without calling `dispose()`.
 Before automatic reclamation, only six of its 64 vertex-buffer wrappers survived
 collection at tick 60, while the backend retained 69 buffers (about 41 MiB);
-a longer run reached the default 64 MiB buffer budget. The Flash adapter now
+a longer run reached the then-default 64 MiB buffer budget. The Flash adapter now
 registers resource wrappers for cleanup and strongly retains active bindings.
 An allocation failure first releases already collected wrappers whose finalizers
 have not run, then retries once. There is no resource scan on draws or presents.
@@ -429,16 +429,11 @@ This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 `bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
 bias. Compressed textures remain unsupported.
-2D bitmap uploads clip from the top-left and clear uncovered pixels without
-scaling, including non-power-of-two sources and sources reused across mip levels.
-Cube bitmap uploads still require exact face/mip dimensions. This differs from
-AIR, which accepts other source sizes for cube faces and mips. A full-sized
-bitmap reused for a smaller cube mip is rejected with AS3 Error #3708 here.
-Cube crop/pad behavior and AIR-backed cases remain a follow-up rather than part
-of this 2D slice. Each context has independent 4,096-resource caps for 2D,
-rectangle and cube textures and a shared 64 MiB texel budget including mip chains.
-Byte budgets remain an experimental host policy rather than AIR's larger storage
-allowances.
+Bitmap uploads for 2D, rectangle and cube textures clip from the top-left and
+clear uncovered pixels without scaling, including non-power-of-two sources and
+sources reused across mip levels. A cube upload affects only the selected face
+and mip. Each texture type has an independent 4,096-resource count cap and an
+AIR-backed byte allowance, with another aggregate budget for complete mip chains.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
@@ -452,7 +447,7 @@ copying before source disposal. The
 browser checks also exercise 81 uploads through one bounded staging array,
 preserve even and odd source row strides at every mip, clear only the active
 mip's bytes, and allocate no GPU handles during warmed uploads. Invalid dimensions/lengths never reach
-WebGL; cube size validation remains unchanged. This covers engines that reuse
+WebGL. Cube source-size handling uses the same bounded copy path. This covers engines that reuse
 a full-size bitmap while drawing each mip's content into its top-left corner.
 
 `RenderTargets.as` checks level-zero 2D render targets against AIR: switching
@@ -856,11 +851,10 @@ remain later work. These hooks are independent of the unfinished ActionScript
 Worker API. Broader formats, profiles and validation gaps remain listed above.
 
 The desktop's opt-in surface factory uses the backend's independent 4,096-resource
-count limits and separate 64 MiB byte budgets. `tests/desktop/stage3d-limits.ts`
-runs that actual factory inside the desktop integration test: 12,288 mixed
-2D/rectangle/cube allocations, per-type count rejection before GL allocation,
-capacity recovery after disposal, and the exact 64 MiB boundary including full
-mip chains. It tracks texture handles through explicit disposal and context
+count and byte limits. `tests/desktop/stage3d-limits.ts` runs that actual factory
+inside the desktop integration test: 12,288 mixed 2D/rectangle/cube allocations,
+per-type count rejection before GL allocation, capacity recovery after disposal,
+and four full 2048-square texture mip chains above the old 64 MiB ceiling. It tracks texture handles through explicit disposal and context
 teardown, checks GL errors and releases the browser context.
 
 `StageWorker.as` covers the combined web startup path: the primordial presents
@@ -896,6 +890,15 @@ registers/components, masked reads, complete outputs and varying linkage against
 AIR. Every encoded source-swizzle lane is validated, including masked MOV and
 dp3 operands. These references are captured and independently repeated in adl.
 
+`ResourceObjects.as` checks direct construction of Context3D and its concrete
+resource classes against AIR: they throw ArgumentError #2012. Native factories
+allocate their wrappers directly and initialize inherited EventDispatcher state;
+the construction-failure test still checks GPU rollback at that allocation.
+TextureBase itself is constructible: binding it leaves the previous sampler
+unchanged, using it as a target throws ArgumentError #0, and disposal is accepted.
+An event and a sampled pixel check those paths. Invalid native resource guards
+also report catchable AS3 errors instead of plain JavaScript exceptions.
+
 Backend checks reject antialiased host contexts before GPU allocation and count
 index reads with eight attributes over 6,000 indices: one cold scan and none on
 warm draws. Partial uploads, sparse vertex streams, range changes and disposal
@@ -909,3 +912,34 @@ list sample transparency rather than Stage3D pixels; cross-layer blend parity is
 an experimental limitation. Default `Playback.destroy()` also disposes its Pixi
 scene before its renderer, intentionally releasing cached text-style listeners;
 ordinary web collection checks cover this shared change.
+
+
+`ByteBudgets.as` keeps enough real resources to exceed the old 64 MiB ceiling in
+each buffer/texture category, checks AIR's acceptance and disposes them between
+categories. Its reference is captured and independently repeated in AIR. Small
+constructor overrides check exact per-type and aggregate boundaries in WebGL,
+independence across simultaneous types, rejection before handle allocation,
+capacity recovery and complete cleanup without large CI allocations.
+
+Separate AIR 51.3.1 / DirectX11 probes held all types simultaneously: 32 vertex
+buffers of 8 MiB, 256 index buffers of 512 KiB, 21 ordinary 2048-square textures,
+32 rectangle 2048-square textures and seven 1024-square cubes each reach #3691.
+All texture quota probes use BGRA; compressed and `rgbaHalfFloat` quota behavior
+is unmeasured, and those formats remain unsupported by the adapter (#3708).
+Ordinary 1024-square textures reach 85 and 512-square cubes reach 28. These
+observations ground 256/128 MiB buffer allowances, 512/512/256 MiB texture
+allowances and a half-base-size mip reservation for ordinary/cube textures.
+The backend keeps actual mip-storage accounting separate from that quota charge.
+Attachment budgets remain explicit 64 MiB host policies, not AIR parity claims.
+
+
+`CubeBitmapUploads.as` covers 48 source-size cases across all six faces and mips
+0/1/2/4, with matching, larger, smaller, mixed-axis and odd bitmap sizes. Explicit
+sampler bias selects the uploaded mip while keeping five sample positions across
+the face. The same positions on a neighboring face check isolation, producing
+480 sampled pixels. Sources are disposed before drawing; old contents are seeded
+before each case so padding cannot retain stale data. The genuine AIR capture
+passes an independent repeat, the exact-size guards fail it, and the shared
+crop/pad path matches it. Backend checks reuse one staging array across faces and
+mips, preserve source stride/premultiplied channels, clear only the active prefix,
+allocate no warm GPU handles and reject malformed dimensions/face/mip inputs.

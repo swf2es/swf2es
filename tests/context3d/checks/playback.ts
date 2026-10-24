@@ -167,6 +167,8 @@ export async function lifecycle(cancel: boolean) {
 export async function shaderFixture(
   fixture:
     | "ContextRequests"
+    | "ByteBudgets"
+    | "ResourceObjects"
     | "ResourceLimits"
     | "AGALValidation"
     | "Arithmetic"
@@ -195,6 +197,7 @@ export async function shaderFixture(
     | "TemporaryMatrices"
     | "IndirectConstants"
     | "CubeTargets"
+    | "CubeBitmapUploads"
     | "CubeTextures"
     | "RenderTargets",
 ) {

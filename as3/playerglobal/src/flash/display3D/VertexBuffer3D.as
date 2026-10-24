@@ -9,6 +9,7 @@ package flash.display3D
 	{
 		public function VertexBuffer3D()
 		{
+			Error.throwError(ArgumentError, 2012, "VertexBuffer3D");
 		}
 
 		public native function uploadFromVector(data:Vector.<Number>, startVertex:int, numVertices:int):void;
