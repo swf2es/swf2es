@@ -156,7 +156,7 @@ they are host policy, not AIR limits or a guarantee against context loss. Tune
 them for the workload and account for concurrent slots and players. The limits
 exclude driver overhead and back-buffer attachments, so the browser can still
 lose a context before a logical allocation limit is reached. The public demo
-currently leaves Stage3D disabled.
+keeps Stage3D off by default; its experimental checkbox opts in with these lower budgets.
 
 Stage3D positions follow the embedding's `scale`/`salign` placement. Configured
 buffer sizes remain in pixels; resizing or changing device pixel ratio never
@@ -174,8 +174,10 @@ or reallocating Stage3D buffers. Script settings override embedding defaults
 independently. The desktop app offers the same host through View › Stage3D
 (Experimental), off by default, with a remembered choice that restarts the
 movie when changed. It uses the backend's per-type resource count limits and
-byte budgets. Best-resolution buffers and enabling
-the public demo remain later changes. None of this uses the unfinished Worker API.
+byte budgets. The public demo lazily loads the backend when Stage3D is selected
+and restarts the current SWF when the option changes. Its Restart and Close
+controls release the preceding contexts. Best-resolution buffers remain later
+work. None of this changes the ActionScript Worker API.
 
 A future WebGPU backend can reuse the Flash adapter, resource contracts and AIR
 fixtures. It still needs AGAL-to-WGSL translation, GPU resource/binding handling,

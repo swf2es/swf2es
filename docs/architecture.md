@@ -181,7 +181,13 @@ Changing it reloads the page and current movie; startup lazily imports the
 backend only when enabled. The desktop's surface factory inherits the backend's
 independent per-type resource counts and AIR-backed buffer/texture byte limits.
 Composition, AS3 Stage layout, loss/recovery and teardown use the web host.
-Best-resolution buffers and production enablement remain separate work.
+The demo site also offers Stage3D as an unchecked experimental option. It loads
+the backend only when selected and uses lower per-context host budgets than the
+desktop: 64 MiB buffers, 128 MiB textures and 16 MiB each for target depth/stencil
+and multisample color. Changing the option restarts the current SWF; closing
+during the backend import invalidates that load. The site's build includes the
+optional modules and their import-map entries under the GitHub Pages subpath.
+Best-resolution buffers and default enablement remain separate work.
 
 The opt-in Context3D installation enables live Stage scale/alignment settings.
 The web host then shares them with player natives through Scripting's synchronous
