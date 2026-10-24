@@ -71,6 +71,7 @@
         <option value="noScale">No scale</option>
       </select>
     </label>
+    <label><input id="stage3d" type="checkbox"> Stage3D (experimental)</label>
     <button id="reload" type="button" disabled>Restart</button>
     <button id="close" type="button" disabled>Close</button>
     <button id="fullscreen" type="button">Full screen</button>
@@ -108,7 +109,8 @@
   <section class="panel about" aria-labelledby="about-title">
     <h2 id="about-title">What to expect</h2>
     <ul>
-      <li><strong>ActionScript 3</strong> (AVM2) runs, compiled to JavaScript as the SWF loads. Video and Stage3D are not there yet.</li>
+      <li><strong>ActionScript 3</strong> (AVM2) runs, compiled to JavaScript as the SWF loads. Video is not implemented.</li>
+      <li><strong>Stage3D is experimental.</strong> Enable it in the player controls before opening a Stage3D SWF. Changing the option restarts the current SWF. It requires WebGL 2; compatibility is still incomplete.</li>
       <li><strong>ActionScript 1 and 2</strong> (AVM1) run too, compiled to JavaScript, including clips and their events, buttons, mouse and keyboard input, drawing, editable text fields and CSS, sound, filters and blend modes, <code>BitmapData</code>, <code>SharedObject</code>, and loading with <code>loadMovie</code>, <code>MovieClipLoader</code>, <code>LoadVars</code> and <code>XML</code>. File dialogs and transfers through <code>FileReference</code>, browser scripting through <code>ExternalInterface</code>, HTTP remoting through <code>NetConnection</code>, and <code>LocalConnection</code> messaging between SWFs within one player (including AVM1 and AVM2) are supported. Compatibility is still incomplete: video and printing are not implemented, and some SWFs have rendering or interaction differences.</li>
       <li><strong>No sockets.</strong> A browser cannot open TCP connections and this static site runs no relay, so <code>Socket</code> and <code>XMLSocket</code> fail as refused.</li>
       <li><strong>Cross-origin loads.</strong> A SWF by URL, and whatever it loads from another site, arrive only where that server allows it (CORS headers).</li>

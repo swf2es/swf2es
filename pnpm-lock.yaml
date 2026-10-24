@@ -55,6 +55,9 @@ importers:
 
   apps/site:
     dependencies:
+      '@swf2es/context3d':
+        specifier: workspace:*
+        version: link:../../packages/context3d
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format

@@ -9,6 +9,7 @@
     "build": "node build.ts"
   },
   "dependencies": {
+    "@swf2es/context3d": "workspace:*",
     "@swf2es/format": "workspace:*",
     "@swf2es/web": "workspace:*"
   }

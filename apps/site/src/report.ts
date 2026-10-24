@@ -26,6 +26,7 @@ export interface ReportFacts {
   renderer: string;
   quality: string;
   scale: string;
+  stage3D?: boolean;
   swf: SwfFacts | null;
   /** The last errors, oldest first. */
   errors: string[];
@@ -76,6 +77,7 @@ function body(facts: ReportFacts, errors: string[]): string {
     `- Browser: ${facts.userAgent}`,
     `- Renderer: ${facts.renderer}`,
     `- Quality: ${facts.quality}, scale: ${facts.scale}`,
+    `- Stage3D: ${facts.stage3D ? "enabled (experimental)" : "disabled"}`,
   );
   if (errors.length > 0) {
     // A fence longer than any run of backticks in them, which would end a shorter one.

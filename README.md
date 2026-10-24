@@ -13,13 +13,15 @@ Tamarin's acceptance tests match it ([coverage](docs/coverage.md)). The
 player covers the display list and timeline, shapes, morphs, text, bitmaps,
 filters, blend modes, sound, input, loading, sockets and ExternalInterface,
 each checked against Flash under AIR's `adl`. AVM1 (ActionScript 1 and 2)
-does not run yet: an AVM1 SWF plays its timeline with no actions. Video,
-Stage3D and the clipboard are not there either.
+also runs, compiled to JavaScript. Stage3D is available as an experimental
+opt-in on the demo site and in the desktop app. Compatibility is incomplete;
+video and printing are not implemented.
 [docs/architecture.md](docs/architecture.md) describes how it all works.
 
 **Try it** at https://swf2es.github.io/swf2es/: open or drop a SWF (it is
 read in your browser, never uploaded), or play a demo. The site is
 `apps/site`, built from `main`.
+For Stage3D SWFs, select **Stage3D (experimental)** in the player controls.
 
 ## Libraries
 
