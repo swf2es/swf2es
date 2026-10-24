@@ -17,6 +17,7 @@ package flash.display3D
 	{
 		public function Context3D()
 		{
+			Error.throwError(ArgumentError, 2012, "Context3D");
 		}
 
 		public native function get driverInfo():String;

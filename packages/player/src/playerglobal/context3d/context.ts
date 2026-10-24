@@ -198,12 +198,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         unsupported();
       }
 
-      const object = s.rt.construct(
-        s.rt.classNamed("flash.display3D.textures::Texture"),
-      ) as AsObject;
       const value = allocate(this as unknown as AsObject, () =>
         backend.createTexture(width, height),
       );
+      const object = construct("Texture", value, "flash.display3D.textures");
       textures.set(
         object,
         own(object, {
@@ -273,12 +271,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         unsupported();
       }
 
-      const object = s.rt.construct(
-        s.rt.classNamed("flash.display3D.textures::CubeTexture"),
-      ) as AsObject;
       const value = allocate(this as unknown as AsObject, () =>
         backend.createTexture(size, size, true),
       );
+      const object = construct("CubeTexture", value, "flash.display3D.textures");
       textures.set(
         object,
         own(object, {
@@ -329,6 +325,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     setTextureAt(index: number, object: AsObject | null): void {
       const entry = state(this as unknown as AsObject);
+      if (object && !textures.has(object)) {
+        // An AS3-created TextureBase has no native resource and leaves this slot intact.
+        const previous = entry.textures[index];
+        entry.backend.setTexture(index, previous ? texture(previous) : null);
+        return;
+      }
+
       entry.backend.setTexture(index, object && texture(object));
       entry.textures[index] = object;
     }
@@ -345,6 +348,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       const entry = state(this as unknown as AsObject);
+      if (object && !textures.has(object)) {
+        throw s.rt.error("ArgumentError", 0);
+      }
+
       let value = object && texture(object);
       if (value && (surface < 0 || surface >= (value.cube ? 6 : 1))) {
         throw s.rt.error("ArgumentError", value.cube ? 3772 : 3771);

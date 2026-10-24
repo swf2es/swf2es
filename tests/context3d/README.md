@@ -896,6 +896,15 @@ registers/components, masked reads, complete outputs and varying linkage against
 AIR. Every encoded source-swizzle lane is validated, including masked MOV and
 dp3 operands. These references are captured and independently repeated in adl.
 
+`ResourceObjects.as` checks direct construction of Context3D and its concrete
+resource classes against AIR: they throw ArgumentError #2012. Native factories
+allocate their wrappers directly and initialize inherited EventDispatcher state;
+the construction-failure test still checks GPU rollback at that allocation.
+TextureBase itself is constructible: binding it leaves the previous sampler
+unchanged, using it as a target throws ArgumentError #0, and disposal is accepted.
+An event and a sampled pixel check those paths. Invalid native resource guards
+also report catchable AS3 errors instead of plain JavaScript exceptions.
+
 Backend checks reject antialiased host contexts before GPU allocation and count
 index reads with eight attributes over 6,000 indices: one cold scan and none on
 warm draws. Partial uploads, sparse vertex streams, range changes and disposal
