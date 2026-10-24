@@ -10,6 +10,7 @@ package flash.display3D.textures
 	{
 		public function CubeTexture()
 		{
+			Error.throwError(ArgumentError, 2012, "CubeTexture");
 		}
 
 		public native function uploadFromBitmapData(source:BitmapData, side:uint, miplevel:uint = 0):void;

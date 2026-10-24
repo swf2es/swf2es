@@ -167,6 +167,7 @@ export async function lifecycle(cancel: boolean) {
 export async function shaderFixture(
   fixture:
     | "ContextRequests"
+    | "ResourceObjects"
     | "ResourceLimits"
     | "AGALValidation"
     | "Arithmetic"

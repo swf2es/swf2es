@@ -178,7 +178,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   const buffer = (o: AsObject): Buffer3D => {
     const value = buffers.get(o);
     if (!value) {
-      throw new Error("Context3D experiment: invalid buffer");
+      throw s.rt.error("Error", 3694);
     }
 
     if (value.disposed || !contexts.has(value.owner)) {
@@ -190,7 +190,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   const program = (o: AsObject): Program3D => {
     const value = programs.get(o);
     if (!value) {
-      throw new Error("Context3D experiment: invalid program");
+      throw s.rt.error("Error", 3694);
     }
 
     if (value.disposed || !contexts.has(value.owner)) {
@@ -205,7 +205,13 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     namespace = "flash.display3D",
   ): AsObject => {
     try {
-      return s.rt.construct(s.rt.classNamed(`${namespace}::${name}`)) as AsObject;
+      // Flash reserves these constructors for its native factories.
+      const object = s.rt.classNamed(`${namespace}::${name}`).$it.instance();
+      if (name === "Context3D" || namespace === "flash.display3D.textures") {
+        s.rt.constructSuper(s.rt.classNamed("flash.events::EventDispatcher"), object);
+      }
+
+      return object;
     } catch (error) {
       resource?.dispose();
       throw error;
@@ -214,7 +220,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   const texture = (o: AsObject): Texture3D => {
     const entry = textures.get(o);
     if (!entry) {
-      throw new Error("Context3D experiment: invalid texture");
+      throw s.rt.error("Error", 3694);
     }
     if (!contexts.has(entry.owner)) {
       throw s.rt.error("Error", 3694);

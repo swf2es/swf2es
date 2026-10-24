@@ -17,7 +17,7 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
 
       const entry = buffers.get(this as unknown as AsObject);
       if (!entry) {
-        throw new Error("Context3D experiment: invalid buffer");
+        throw s.rt.error("Error", 3694);
       }
 
       // Unlike vector uploads, AIR ignores byte uploads after explicit disposal.

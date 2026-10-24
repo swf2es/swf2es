@@ -224,14 +224,11 @@ export function constructionFailure(): void {
     check(owner, "no active context");
     const before = storage(owner);
     const type = rt.classNamed(name);
-    const construct = rt.construct;
+    const instance = type.$it.instance;
     let injected = false;
-    rt.construct = (...args) => {
-      if (args[0] === type) {
-        injected = true;
-        throw new Error("injected wrapper construction failure");
-      }
-      return construct.apply(rt, args);
+    type.$it.instance = () => {
+      injected = true;
+      throw new Error("injected wrapper construction failure");
     };
     let failed = false;
     try {
@@ -239,7 +236,7 @@ export function constructionFailure(): void {
     } catch {
       failed = true;
     } finally {
-      rt.construct = construct;
+      type.$it.instance = instance;
     }
     check(failed && injected, "wrapper construction should fail");
     const after = storage(owner);

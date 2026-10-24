@@ -10,6 +10,7 @@ package flash.display3D.textures
 	{
 		public function RectangleTexture()
 		{
+			Error.throwError(ArgumentError, 2012, "RectangleTexture");
 		}
 
 		public native function uploadFromBitmapData(source:BitmapData):void;

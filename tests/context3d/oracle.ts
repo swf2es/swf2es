@@ -10,6 +10,7 @@ const fixture =
   [
     "ContextRequests",
     "AGALValidation",
+    "ResourceObjects",
     "ResourceLimits",
     "FrameValidation",
     "FrameValidationFlat",
