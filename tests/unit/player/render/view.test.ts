@@ -13,6 +13,7 @@ import {
   CHILDREN,
   CONTENT,
   Container,
+  TextObject,
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import type { Player } from "../../../../packages/player/dist/player.js";
@@ -58,6 +59,66 @@ function standIn(pixels: number[]) {
     uploads,
   };
 }
+
+test("device text follows parent and screen scale while moves keep its rasterized runs", () => {
+  const view = new PixiView(standIn([]).renderer);
+  const root = new Container();
+  const field = new TextObject(null);
+  field.model.setText("FPS: 60");
+  root.placeAtDepth(field, 1);
+  view.prepare(root);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  const node = nodes.get(field);
+  assert.ok(node);
+  const first = node.art.children[0];
+  assert.equal(node.textResolution, 1);
+
+  root.setScaleX(3);
+  root.setScaleY(3);
+  view.prepare(root);
+  assert.equal(node.textResolution, 3);
+  assert.notEqual(node.art.children[0], first);
+  const enlarged = node.art.children[0];
+  const text = enlarged.children[0] as unknown as {
+    resolution: number;
+    style: { fontSize: number };
+  };
+  assert.equal(text.resolution, 3);
+  assert.equal(text.style.fontSize, 12);
+
+  root.setMatrix({ ...root.matrix, tx: 20, ty: 10 });
+  view.prepare(root);
+  assert.equal(node.art.children[0], enlarged);
+  view.prepare(root);
+  assert.equal(node.art.children[0], enlarged);
+
+  view.stage.scale.set(2);
+  view.prepare(root);
+  assert.equal(node.textResolution, 6);
+  root.setScaleX(1);
+  root.setScaleY(1);
+  view.prepare(root);
+  assert.equal(node.textResolution, 2);
+  view.dispose(view.stage);
+});
+
+test("BitmapData text uses the draw matrix and samples independently of the stage", () => {
+  const view = new PixiView(standIn([]).renderer);
+  view.stage.scale.set(3);
+  const field = new TextObject(null);
+  field.model.setText("FPS: 60");
+  view.prepare(field);
+  const nodes = (view as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  assert.equal(nodes.get(field)?.textResolution, 3);
+
+  const fresh = view.forDraw(field, 4);
+  fresh.drawAlone(field, { a: 2, b: 0, c: 0, d: 2, tx: 0, ty: 0 }, fresh.stage);
+  const freshNodes = (fresh as unknown as { nodes: WeakMap<object, Node> }).nodes;
+  assert.equal(freshNodes.get(field)?.textResolution, 8);
+  assert.equal(nodes.get(field)?.textResolution, 3);
+  fresh.dispose(fresh.stage);
+  view.dispose(view.stage);
+});
 
 test("a store shown by two renderers has a copy in each, and what one drew reaches the other", () => {
   // Two pixels, premultiplied RGBA as a texture holds them.

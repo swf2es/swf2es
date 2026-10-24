@@ -32,6 +32,7 @@ import {
   type DisplayObject,
   PIXELS,
   ShapeObject,
+  TextObject,
   TRANSFORM,
   unloads,
 } from "../display/display.js";
@@ -56,6 +57,7 @@ import { SharedGraphics } from "./shared.js";
 import { drawInto, snapshot } from "./snapshot.js";
 import { SpareNodes } from "./spares.js";
 import { type Linear, sameLinear, UNIT } from "./strokes.js";
+import { deviceTextResolution } from "./text.js";
 import { SAMPLES } from "./three.js";
 import { TriangleView } from "./triangles.js";
 
@@ -698,6 +700,19 @@ export class PixiView {
     if (o.drawing?.culled && !(dirty & CONTENT)) {
       const w = node.world;
       if (w[0] * w[3] - w[1] * w[2] < 0 !== node.mirrored) {
+        dirty |= CONTENT;
+      }
+    }
+
+    if (o instanceof TextObject && !o.embedFonts && (moved || this.rescaled || dirty & CONTENT)) {
+      const pixels =
+        this.planeUnits ||
+        (this.fresh
+          ? this.samples
+          : (this.renderer.resolution ?? 1) * Math.abs(this.stage.scale.x));
+      const resolution = deviceTextResolution(node.world, pixels);
+      if (resolution !== node.textResolution) {
+        node.textResolution = resolution;
         dirty |= CONTENT;
       }
     }

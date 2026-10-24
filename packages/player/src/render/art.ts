@@ -430,7 +430,7 @@ export class Art {
     }
 
     if (o instanceof TextObject) {
-      drawText(o, node.art, this.advanced(o, node));
+      drawText(o, node.art, this.advanced(o, node), node.textResolution);
       return;
     }
 
