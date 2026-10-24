@@ -25,6 +25,18 @@ export const droppedLayers = new WeakSet<ShapeLayer>();
 /** The layers of every blend made, whose lines the renderer watches for their dropping. */
 export const blendLayers = new WeakSet<ShapeLayer>();
 
+let blendsDropped = 0;
+
+/**
+ * How many blends morphs have dropped so far. A blend is only ever dropped
+ * here, so whoever watches idle blends for their dropping need look at them
+ * again only when this has moved: a busy scene keeps hundreds idle, and
+ * most frames drop none.
+ */
+export function droppedBlends(): number {
+  return blendsDropped;
+}
+
 /**
  * How many blends a morph keeps: its latest ratios, enough for instances in
  * step to share them, and for a looping tween to find each of its frames'
@@ -65,6 +77,7 @@ export function morphAt(character: MorphCharacter, ratio: number): ShapeCharacte
       droppedLayers.add(layer);
     }
 
+    blendsDropped++;
     blends.delete(oldest);
   }
 
