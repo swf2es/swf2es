@@ -429,15 +429,11 @@ This slice supports power-of-two 2D `bgra` textures, 1×1 through 2048×2048,
 cube `bgra` textures up to 1024×1024 per face, and single-level rectangle
 `bgra` textures with arbitrary dimensions from 1 through 2048, with signed LOD
 bias. Compressed textures remain unsupported.
-2D bitmap uploads clip from the top-left and clear uncovered pixels without
-scaling, including non-power-of-two sources and sources reused across mip levels.
-Cube bitmap uploads still require exact face/mip dimensions. This differs from
-AIR, which accepts other source sizes for cube faces and mips. A full-sized
-bitmap reused for a smaller cube mip is rejected with AS3 Error #3708 here.
-Cube crop/pad behavior and AIR-backed cases remain a follow-up rather than part
-of this 2D slice. Each context has independent 4,096-resource caps for 2D,
-rectangle and cube textures, independent AIR-backed byte allowances and an
-additional aggregate texel-storage budget including complete mip chains.
+Bitmap uploads for 2D, rectangle and cube textures clip from the top-left and
+clear uncovered pixels without scaling, including non-power-of-two sources and
+sources reused across mip levels. A cube upload affects only the selected face
+and mip. Each texture type has an independent 4,096-resource count cap and an
+AIR-backed byte allowance, with another aggregate budget for complete mip chains.
 Readback into opaque BitmapData is explicitly unsupported: AIR can preserve
 non-opaque alpha there, which requires broader work on BitmapData's current
 opaque-pixel invariant. Fractional clear-color quantization also differs
@@ -451,7 +447,7 @@ copying before source disposal. The
 browser checks also exercise 81 uploads through one bounded staging array,
 preserve even and odd source row strides at every mip, clear only the active
 mip's bytes, and allocate no GPU handles during warmed uploads. Invalid dimensions/lengths never reach
-WebGL; cube size validation remains unchanged. This covers engines that reuse
+WebGL. Cube source-size handling uses the same bounded copy path. This covers engines that reuse
 a full-size bitmap while drawing each mip's content into its top-left corner.
 
 `RenderTargets.as` checks level-zero 2D render targets against AIR: switching
@@ -935,3 +931,15 @@ observations ground 256/128 MiB buffer allowances, 512/512/256 MiB texture
 allowances and a half-base-size mip reservation for ordinary/cube textures.
 The backend keeps actual mip-storage accounting separate from that quota charge.
 Attachment budgets remain explicit 64 MiB host policies, not AIR parity claims.
+
+
+`CubeBitmapUploads.as` covers 48 source-size cases across all six faces and mips
+0/1/2/4, with matching, larger, smaller, mixed-axis and odd bitmap sizes. Explicit
+sampler bias selects the uploaded mip while keeping five sample positions across
+the face. The same positions on a neighboring face check isolation, producing
+480 sampled pixels. Sources are disposed before drawing; old contents are seeded
+before each case so padding cannot retain stale data. The genuine AIR capture
+passes an independent repeat, the exact-size guards fail it, and the shared
+crop/pad path matches it. Backend checks reuse one staging array across faces and
+mips, preserve source stride/premultiplied channels, clear only the active prefix,
+allocate no warm GPU handles and reject malformed dimensions/face/mip inputs.

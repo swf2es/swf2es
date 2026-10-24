@@ -68,8 +68,7 @@ export function uploadTexture(
     sw <= 0 ||
     !Number.isSafeInteger(sh) ||
     sh <= 0 ||
-    pixels.length !== sw * sh ||
-    (cube && (sw !== w || sh !== h))
+    pixels.length !== sw * sh
   ) {
     throw new Context3DError("textureUpload", "Context3D experiment: texture upload size mismatch");
   }
