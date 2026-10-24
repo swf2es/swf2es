@@ -38,6 +38,7 @@ const urlInput = byId<HTMLInputElement>("url");
 const demoList = byId<HTMLElement>("demos");
 const quality = byId<HTMLSelectElement>("quality");
 const scale = byId<HTMLSelectElement>("scale");
+const stage3D = byId<HTMLInputElement>("stage3d");
 const reload = byId<HTMLButtonElement>("reload");
 const close = byId<HTMLButtonElement>("close");
 const fullscreen = byId<HTMLButtonElement>("fullscreen");
@@ -145,8 +146,14 @@ const LOCAL = "a local file";
 const localNames = new Set<string>();
 
 /** What plays, to play again or report on. */
-let current: { bytes: Uint8Array; name: string; facts: SwfFacts; base: string | null } | null =
-  null;
+let current: {
+  bytes: Uint8Array;
+  name: string;
+  facts: SwfFacts;
+  base: string | null;
+  stage3D: boolean;
+} | null = null;
+let loadGeneration = 0;
 const stats = new Stats(byId("fps"), byId("frame-time"), byId("heap"));
 
 function showStatus(message: string, isError = false): void {
@@ -203,7 +210,11 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
     return;
   }
 
-  current = { bytes, name, facts: f, base };
+  const generation = ++loadGeneration;
+  const enabled = stage3D.checked;
+  current = { bytes, name, facts: f, base, stage3D: enabled };
+  close.disabled = false;
+  stats.watch(null, 0);
   ask.hidden = true;
   showFacts(name, f);
   stage.style.setProperty("--w", String(f.width || 550));
@@ -219,11 +230,25 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
   write("info", `Loading ${name} (${f.avm}, SWF ${f.version})`);
   showStatus(`Loading ${name}…`);
   try {
+    const factory = enabled ? (await import("./stage3d.js")).createStage3D : null;
+    if (generation !== loadGeneration) {
+      return;
+    }
+
+    configure({ stage3D: factory });
     await player.load(bytes);
+    if (generation !== loadGeneration) {
+      return;
+    }
+
     stats.watch(player.player, f.frameRate);
     showStatus(`Playing ${name}.`);
     player.focus();
   } catch (error) {
+    if (generation !== loadGeneration) {
+      return;
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     // The errors go into the report, which never names a local file.
     write("error", `${origin === LOCAL ? "The SWF" : name} did not play: ${message}`);
@@ -360,6 +385,11 @@ document.addEventListener("drop", (e) => {
 
 quality.addEventListener("change", () => player.setAttribute("quality", quality.value));
 scale.addEventListener("change", () => player.setAttribute("scale", scale.value));
+stage3D.addEventListener("change", () => {
+  if (current && !player.hidden) {
+    void play(current.bytes, current.name, current.facts.origin, current.base);
+  }
+});
 
 reload.addEventListener("click", () => {
   if (current) {
@@ -368,6 +398,7 @@ reload.addEventListener("click", () => {
 });
 
 close.addEventListener("click", () => {
+  loadGeneration++;
   player.destroy();
   stats.watch(null, 0);
   player.hidden = true;
@@ -416,6 +447,7 @@ function updateReport(): void {
     renderer: current ? renderer() : "none yet",
     quality: quality.value,
     scale: scale.value,
+    stage3D: current?.stage3D ?? stage3D.checked,
     swf: current?.facts ?? null,
     errors: errors.map(scrub),
   });

@@ -18,6 +18,7 @@ import { withPage } from "../player/chrome.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { serve } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
+import { stage3DChecks } from "./stage3d.ts";
 
 /** A SWF's URL, sandbox and the shared object it saves its file name in, by what was there before. */
 const PROBE = `package {
@@ -484,6 +485,7 @@ async function check(): Promise<void> {
             assert.ok(await value<boolean>("document.getElementById('ask').hidden"));
           },
         ],
+        ...stage3DChecks({ value, send, until, navigate, out, site }),
         [
           "the licences are there",
           async () => {
