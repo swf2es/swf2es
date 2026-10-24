@@ -2086,12 +2086,14 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
     root.removeChild(shapes[1]);
     view.prepare(root);
     assert.equal(last.destroyed, false);
-    // Kept 5 s with them, then idle 5 s.
-    for (let k = 0; k < 2; k++) {
-      clock.at += 6000;
-      view.prepare(root);
-    }
-
+    // Kept 5 s with them, then idle 30 s.
+    clock.at += 6000;
+    view.prepare(root);
+    clock.at += 29_000;
+    view.prepare(root);
+    assert.equal(last.destroyed, false);
+    clock.at += 2000;
+    view.prepare(root);
     assert.equal(last.destroyed, true);
   });
 });
@@ -2300,13 +2302,16 @@ test("instances of a shape share its fills, which go once none has drawn them fo
     assert.equal(first.destroyed, false);
     assert.equal(fill(0), first);
 
-    // Both gone: kept while parked and a while idle, then destroyed.
+    // Both gone: kept while parked and 30 s idle, then destroyed.
     root.removeChild(shapes[1]);
     view.prepare(root);
     clock.at += 6000;
     view.prepare(root);
     assert.equal(first.destroyed, false);
-    clock.at += 6000;
+    clock.at += 29_000;
+    view.prepare(root);
+    assert.equal(first.destroyed, false);
+    clock.at += 2000;
     view.prepare(root);
     assert.equal(first.destroyed, true);
 

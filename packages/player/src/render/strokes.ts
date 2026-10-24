@@ -14,7 +14,7 @@ import {
   LINES_IDLE_VERTICES,
   linesCeiling,
 } from "./pools.js";
-import { destroyContext, remakeable, shapeContext, trace } from "./tessellate.js";
+import { destroyContext, remakeable, shapeContext, trace, verticesOf } from "./tessellate.js";
 
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */
 export type Linear = [number, number, number, number];
@@ -292,20 +292,6 @@ export class StrokeContexts {
     this.byLayer.get(layer)?.delete(key);
     destroyContext(context);
   }
-}
-
-/**
- * The vertices Pixi tessellated a context into, for each renderer that drew
- * it: what keeping it costs.
- */
-function verticesOf(context: GraphicsContext): number {
-  const data = context._gpuData;
-  let vertices = 0;
-  for (const uid in data) {
-    vertices += (data[uid]?.geometryData?.vertices.length ?? 0) / 2;
-  }
-
-  return vertices;
 }
 
 /** The key a layer's lines seen through `m`, at least `least` wide, are kept by. */
