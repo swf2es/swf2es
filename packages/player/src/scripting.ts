@@ -65,6 +65,7 @@ import {
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo, type EventFields, heard, WeakTargets } from "./scripting/events.js";
+import { type HandedModules, ModuleHandover, ModuleRecorder } from "./scripting/handover.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
@@ -348,6 +349,11 @@ export class Scripting {
       workerHost?: WorkerHost | null;
       /** Where this VM is a background worker's: how it reaches the primordial (scripting/workers.ts). */
       workerParent?: ParentLink | null;
+      /**
+       * A background worker's: the primordial's modules, which it loads in
+       * place of compiling the same ABCs (scripting/handover.ts).
+       */
+      handedModules?: HandedModules | null;
       /** Drop the final newline produced by an HTML paragraph or BR. */
       trimTrailingHtmlBreak?: boolean;
       /**
@@ -410,6 +416,13 @@ export class Scripting {
     );
     this.fsCommand = options.fsCommand ?? null;
     this.workers = new Workers(this, options);
+    if (options.handedModules) {
+      const handover = new ModuleHandover(options.handedModules);
+      this.code.handover = handover;
+      this.codegen = handover.guard(codegen);
+    } else if (options.workerHost && !options.workerParent) {
+      this.code.recorder = new ModuleRecorder();
+    }
     this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
     this.lazyCompilation = options.lazyCompilation ?? false;
@@ -476,6 +489,7 @@ export class Scripting {
     this.destroyed = true;
     this.loads.destroyAvm1();
     this.workers.stopAll();
+    this.code.recorder?.drop();
     this.localConnections.destroy(this);
     this.flushSharedObjects?.();
     stopAllSounds(this);
