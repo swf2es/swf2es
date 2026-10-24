@@ -261,9 +261,15 @@ export class Scripting {
   onStageLayout: (() => void) | null = null;
   /** Stage.color's 0xRRGGBB, the SWF's background until a script sets it; null before the stage is made. */
   stageColor: number | null = null;
-  /** The viewport origin in stage coordinates; noScale margins can be negative. */
+  /**
+   * What the host shows, in stage coordinates: margins past the stage's
+   * edges take the pointer too, at negative coordinates or past its size.
+   * A size of 0 is the stage's.
+   */
   stageViewportX = 0;
   stageViewportY = 0;
+  stageViewportWidth = 0;
+  stageViewportHeight = 0;
   /** The latest pointer position in stage coordinates. */
   mouseStageX = 0;
   mouseStageY = 0;

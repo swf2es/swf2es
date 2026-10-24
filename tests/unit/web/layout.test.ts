@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_SIDE, place, scaleMode } from "../../../packages/web/dist/layout.js";
+import { MAX_SIDE, place, scaleMode, viewport } from "../../../packages/web/dist/layout.js";
 
 test("a scale attribute names a mode in any case, showAll otherwise", () => {
   assert.equal(scaleMode("NoBorder"), "noBorder");
@@ -67,4 +67,73 @@ test("opt-in Stage3D layout gives AIR's top and left edges precedence", () => {
     assert.equal(at.x, salign.includes("L") ? 0 : 100);
     assert.equal(at.y, salign.includes("T") ? 0 : 50);
   }
+});
+
+test("the canvas covers the box: showAll's margins are the stage's coordinates past its edges", () => {
+  // 100 by 100 in 600 by 200, twice its size: 100 stage pixels of margin each side.
+  const placed = place(100, 100, 600, 200, "showAll", null, 1);
+  assert.deepEqual(viewport(100, 100, 600, 200, "showAll", placed, 1), {
+    x: -100,
+    y: 0,
+    width: 300,
+    height: 100,
+    resolution: 2,
+    css: { x: 0, y: 0, width: 600, height: 200 },
+  });
+  const left = viewport(
+    100,
+    100,
+    600,
+    200,
+    "showAll",
+    place(100, 100, 600, 200, "showAll", "L", 1),
+    1,
+  );
+  assert.deepEqual([left.x, left.width], [0, 300]);
+  // noBorder's canvas is only the part of the stage the box shows.
+  const cropped = viewport(
+    200,
+    100,
+    400,
+    400,
+    "noBorder",
+    place(200, 100, 400, 400, "noBorder", null, 1),
+    1,
+  );
+  assert.deepEqual([cropped.x, cropped.y, cropped.width, cropped.height], [50, 0, 100, 100]);
+  // noScale's margins are the box's pixels.
+  const unscaled = viewport(
+    100,
+    100,
+    300,
+    200,
+    "noScale",
+    place(100, 100, 300, 200, "noScale", "TL", 2),
+    2,
+  );
+  assert.deepEqual(
+    [unscaled.x, unscaled.y, unscaled.width, unscaled.height, unscaled.resolution],
+    [0, 0, 300, 200, 2],
+  );
+});
+
+test("exactFit, which leaves no margin, and an empty box keep the stage's own canvas", () => {
+  const placed = place(200, 100, 400, 400, "exactFit", null, 1);
+  assert.deepEqual(viewport(200, 100, 400, 400, "exactFit", placed, 1), {
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 100,
+    resolution: placed.resolution,
+    css: { x: 0, y: 0, width: 400, height: 400 },
+  });
+  const empty = viewport(100, 100, 0, 0, "showAll", place(100, 100, 0, 0, "showAll", null, 1), 1);
+  assert.deepEqual([empty.width, empty.height], [100, 100]);
+  assert.ok(empty.resolution > 0);
+});
+
+test("a canvas over a large box stays within MAX_SIDE device pixels", () => {
+  const placed = place(100, 100, 20_000, 1000, "showAll", null, 2);
+  const view = viewport(100, 100, 20_000, 1000, "showAll", placed, 2);
+  assert.ok(Math.abs(view.width * view.resolution - MAX_SIDE) < 1e-6);
 });

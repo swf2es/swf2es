@@ -45,6 +45,7 @@ const abcs = compileScripts(
     { name: "TextLifecycle", source: readFileSync(`${here}scripts/TextLifecycle.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
+    { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
     {
       name: "ActivationTest",
@@ -109,6 +110,10 @@ writeFileSync(
 writeFileSync(
   `${site}touch.swf`,
   bare(abcs.get("TouchTest") as Uint8Array, 1, "TouchTest", 200, 100),
+);
+writeFileSync(
+  `${site}margins.swf`,
+  bare(abcs.get("MarginsTest") as Uint8Array, 1, "MarginsTest", 100, 100),
 );
 writeFileSync(
   `${site}activation.swf`,
@@ -683,6 +688,58 @@ check(
       "activate orphan",
     ]);
     await call(evaluate, "activationDestroy()");
+  },
+);
+
+check(
+  "showAll draws past the stage's edges in its margins, and takes the mouse there",
+  async (evaluate, send) => {
+    const shot = async () => {
+      const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+      return decodePng(new Uint8Array(Buffer.from(data, "base64")));
+    };
+    const only = (image: Image, rect: number[]) => [...colours(image, rect, 2).keys()];
+
+    // Twice its size in a box three times as wide: 200 CSS pixels of margin each side, centred.
+    const [left, top, width, height] = await call<number[]>(evaluate, 'marginsPlayer("")');
+    // As in Flash, the stage keeps the SWF's size however large the box is.
+    assert.deepEqual([width, height], [100, 100]);
+    let image = await shot();
+    assert.deepEqual(only(image, [left + 110, top + 10, 80, 180]), [0xff0000], "left margin");
+    assert.deepEqual(only(image, [left + 210, top + 10, 180, 180]), [0xffff00], "stage");
+    assert.deepEqual(only(image, [left + 410, top + 10, 80, 180]), [0x00ff00], "right margin");
+    assert.deepEqual(only(image, [left + 510, top + 10, 80, 180]), [0xffffff], "past the art");
+
+    const press = async (x: number, y: number) => {
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount: 1,
+        });
+      }
+    };
+    // Flash (adl, 2026-10-24) hears a press in the margins at stage coordinates past its edges.
+    await press(150, 100);
+    await press(550, 40);
+    await press(300, 100);
+    assert.deepEqual(await call<string[]>(evaluate, "marginsLog()"), [
+      "red -25,50 -25,50",
+      "stage 175,20 175,20",
+      "yellow 50,50 50,50",
+    ]);
+
+    // Held to the left edge, the stage's right margin is the whole rest of the box.
+    const [l, t] = await call<number[]>(evaluate, 'marginsPlayer("L")');
+    image = await shot();
+    assert.deepEqual(only(image, [l + 10, t + 10, 180, 180]), [0xffff00], "stage at the left");
+    assert.deepEqual(only(image, [l + 210, t + 10, 80, 180]), [0x00ff00], "right margin");
+    await press(250, 100);
+    assert.deepEqual(await call<string[]>(evaluate, "marginsLog()"), ["green 125,50 125,50"]);
+    await call(evaluate, "marginsDestroy()");
   },
 );
 

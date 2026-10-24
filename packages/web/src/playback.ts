@@ -9,7 +9,7 @@ import {
   type Scripting,
 } from "@swf2es/player";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
-import { MAX_SIDE, place, type ScaleMode } from "./layout.js";
+import { place, type ScaleMode, viewport } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
 
 /** How the element shows its player, read again as the page changes them. */
@@ -230,9 +230,10 @@ export class Playback {
     scripting?.setStageDefaults(look.scale, look.salign ?? "");
     const mode = scripting?.stageScaleMode ?? look.scale;
     const align = scripting?.stageAlign ?? look.salign;
+    // Live noScale makes the stage the box's size; every other mode keeps the SWF's.
     const noScale = !!scripting && mode === "noScale";
-    const width = noScale ? this.box.clientWidth : this.player.width;
-    const height = noScale ? this.box.clientHeight : this.player.height;
+    const stageWidth = noScale ? this.box.clientWidth : this.player.width;
+    const stageHeight = noScale ? this.box.clientHeight : this.player.height;
     this.dpr = devicePixelRatio || 1;
     const placed = place(
       this.player.width || 1,
@@ -244,22 +245,28 @@ export class Playback {
       this.dpr,
       !!scripting,
     );
+    const view = viewport(
+      this.player.width || 1,
+      this.player.height || 1,
+      this.box.clientWidth,
+      this.box.clientHeight,
+      mode,
+      placed,
+      this.dpr,
+    );
     const canvas = this.renderer.canvas as HTMLCanvasElement;
-    canvas.style.left = `${noScale ? 0 : placed.x}px`;
-    canvas.style.top = `${noScale ? 0 : placed.y}px`;
-    canvas.style.width = `${noScale ? width : placed.width}px`;
-    canvas.style.height = `${noScale ? height : placed.height}px`;
-    // noScale can show artwork beyond the SWF's authored rectangle. Keep its
-    // origin aligned while drawing the whole viewport, including negative coordinates.
-    const resolution = noScale
-      ? Math.max(1 / 64, Math.min(this.dpr, MAX_SIDE / Math.max(width, height, 1)))
-      : placed.resolution;
+    canvas.style.left = `${view.css.x}px`;
+    canvas.style.top = `${view.css.y}px`;
+    canvas.style.width = `${view.css.width}px`;
+    canvas.style.height = `${view.css.height}px`;
+    const screenWidth = Math.max(1, view.width);
+    const screenHeight = Math.max(1, view.height);
     if (
-      resolution !== this.renderer.resolution ||
-      this.renderer.screen.width !== Math.max(1, width) ||
-      this.renderer.screen.height !== Math.max(1, height)
+      view.resolution !== this.renderer.resolution ||
+      this.renderer.screen.width !== screenWidth ||
+      this.renderer.screen.height !== screenHeight
     ) {
-      this.renderer.resize(Math.max(1, width), Math.max(1, height), resolution);
+      this.renderer.resize(screenWidth, screenHeight, view.resolution);
       this.resample();
     }
 
@@ -268,22 +275,20 @@ export class Playback {
       this.player.avm1.pixelRatio = placed.resolution;
     }
 
-    if (scripting) {
-      scripting.stageViewportX = noScale ? -placed.x : 0;
-      scripting.stageViewportY = noScale ? -placed.y : 0;
+    // Flash takes the pointer in the margins too, at stage coordinates past its edges.
+    if (this.scripting) {
+      this.scripting.stageViewportX = view.x;
+      this.scripting.stageViewportY = view.y;
+      this.scripting.stageViewportWidth = screenWidth;
+      this.scripting.stageViewportHeight = screenHeight;
     }
 
-    this.view.setViewport(
-      noScale ? -placed.x : 0,
-      noScale ? -placed.y : 0,
-      Math.max(1, width),
-      Math.max(1, height),
-    );
+    this.view.setViewport(view.x, view.y, screenWidth, screenHeight);
     this.stage3D?.layout(placed, this.player.width, this.player.height);
     this.dirty = true;
     // Dispatch only after placement is current: a resize listener may set
     // another layout or reconfigure its Stage3D back buffer synchronously.
-    scripting?.resizeStage(width, height);
+    scripting?.resizeStage(stageWidth, stageHeight);
   }
 
   /** Stop the loop and let go of the renderer, its GL context, the canvas and the input. */
