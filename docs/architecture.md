@@ -175,8 +175,13 @@ silently reconfigure AS buffers. An optional surface `destroy` hook releases the
 browser context after resources and listeners are gone, also on attachment failure.
 Web teardown disposes the display-list scene before the renderer so cached font
 measurements cannot retain the scene through text style listeners.
-Default playback still reports unavailable Context3D. Desktop layout controls,
-best-resolution buffers and production enablement remain separate work.
+Default playback still reports unavailable Context3D. The desktop View menu
+offers an experimental opt-in, saved as a strict boolean in settings.json.
+Changing it reloads the page and current movie; startup lazily imports the
+backend only when enabled. The desktop's surface factory gives animated meshes
+4,096 buffer handles per context while retaining the default byte budgets.
+Composition, AS3 Stage layout, loss/recovery and teardown use the web host.
+Best-resolution buffers and production enablement remain separate work.
 
 The opt-in Context3D installation enables live Stage scale/alignment settings.
 The web host then shares them with player natives through Scripting's synchronous
@@ -5536,7 +5541,13 @@ meta-policies and named policy files, redirects, this machine reached by
 address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
-limits. CI's `desktop` workflow fetches Electron and runs them.
+limits. `tests/desktop/stage3d.ts` drives the native View menu through the main
+process's test-only inspector: disabled fallback without fetching the backend,
+remembered opt-in, two composed slots, live layout/DPR changes, browser context
+loss/restoration, repeated movie reloads and close. It shares the isolated
+display and process harness in `tests/desktop/app.ts` with the ordinary smoke
+test. `settings.test.ts` covers explicit opt-in and persistence. CI's `desktop`
+workflow fetches Electron and runs them.
 
 Not done yet: packaging and installers, `SecureSocket`, Flash's Settings
 Manager for trusting a SWF or directory (localTrusted), each loaded SWF

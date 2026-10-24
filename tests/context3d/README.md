@@ -11,6 +11,7 @@ node tests/context3d/run.ts
 node tests/context3d/stress.ts
 node tests/context3d/reclamation.ts
 node tests/context3d/host.ts
+node tests/desktop/stage3d.ts    # normal Electron View-menu opt-in (needs its binary)
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
 ```
@@ -836,11 +837,23 @@ Desktop layout controls, best-resolution buffers and production enablement
 remain later work. These hooks are independent of the unfinished ActionScript
 Worker API. Broader formats, profiles and validation gaps remain listed above.
 
+The desktop's opt-in surface factory uses the backend's independent 4,096-resource
+count limits and separate 64 MiB byte budgets. `tests/desktop/stage3d-limits.ts`
+runs that actual factory inside the desktop integration test: 12,288 mixed
+2D/rectangle/cube allocations, per-type count rejection before GL allocation,
+capacity recovery after disposal, and the exact 64 MiB boundary including full
+mip chains. It tracks texture handles through explicit disposal and context
+teardown, checks GL errors and releases the browser context.
+
 `StageWorker.as` covers the combined web startup path: the primordial presents
 a green Stage3D surface while a real background Worker sends a channel reply.
 The host waits for both before checking pixels, then destroys the player and
 checks collection through the existing lifetime harness. This exercises the
 worker-host readiness path together with opt-in Context3D bindings.
+The desktop integration test runs the same fixture through normal SWF opening,
+checks cross-origin isolation and the green presentation after the worker reply.
+It also aborts the optional backend import: the movie must keep playing with
+ErrorEvent #3702, and a page reload must allow the backend to load successfully.
 
 Live Stage getters, setter validation, resize events and leading-edge alignment
 are gated by the Context3D opt-in. Default playback keeps dev's ignored Stage
