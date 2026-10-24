@@ -206,9 +206,11 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   ): AsObject => {
     try {
       // Flash reserves these constructors for its native factories.
-      const object = s.rt.classNamed(`${namespace}::${name}`).$it.instance();
-      if (name === "Context3D" || namespace === "flash.display3D.textures") {
-        s.rt.constructSuper(s.rt.classNamed("flash.events::EventDispatcher"), object);
+      const traits = s.rt.classNamed(`${namespace}::${name}`).$it;
+      const object = traits.instance();
+      const dispatcher = s.rt.classNamed("flash.events::EventDispatcher");
+      if (traits.isSubtypeOf(dispatcher.$it)) {
+        s.rt.constructSuper(dispatcher, object);
       }
 
       return object;
