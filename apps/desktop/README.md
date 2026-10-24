@@ -24,6 +24,18 @@ own installer. A relative path is taken from the directory pnpm was run in.
   again, View › Toggle Full Screen (F11) fills the screen, and File ›
   Close Movie (Ctrl+W) stops it. Opening another SWF destroys the
   player before the next starts.
+- **Stage3D.** View › Stage3D (Experimental) opts in to Context3D playback.
+  It starts off, remembers the choice in `settings.json`, and restarts the
+  current movie when changed. The desktop loads the optional WebGL2 backend
+  only when enabled and uses the web element's composition, live AS3 Stage
+  layout and context recovery. If that module cannot load, playback continues
+  with the usual unavailable-context fallback and logs the cause. The saved
+  choice remains enabled. Each slot owns a separate WebGL2 context;
+  closing or reloading the movie releases its resources and browser contexts.
+  Each resource type has its own 4,096-resource count limit.
+  The separate 64 MiB buffer and texture budgets, including
+  all texture mips and cube faces, and other default budgets still apply. Supported
+  formats and remaining gaps are in [Context3D](../../packages/context3d/README.md).
 - **Libraries.** ActionScript 3 needs `builtin.abc` (avmplus', MPL-2.0)
   and a playerglobal, which the app has of its own (`playerglobalLibrary`).
   builtin.abc is taken from beside a chosen playerglobal.abc, else from the

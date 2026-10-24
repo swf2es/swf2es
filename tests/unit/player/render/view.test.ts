@@ -3992,3 +3992,45 @@ test("textured triangles drawn anew keep their meshes, buffers and shaders, and 
 
   assert.ok([...seen].every((v) => v.destroyed));
 });
+
+test("a live viewport maps pointer coordinates beyond the authored stage and follows alignment changes", () => {
+  const screen = { width: 192, height: 144 };
+  const renderer = { screen } as unknown as ConstructorParameters<typeof PixiView>[0];
+  const view = new PixiView(renderer);
+  const calls: [number, number][] = [];
+  const player = {
+    width: 96,
+    height: 96,
+    pointer: {
+      handle: (_type: string, p: { x: number; y: number }) => calls.push([p.x, p.y]),
+      flush: () => {},
+      cursor: () => "default",
+      onCursor: null,
+    },
+  } as unknown as Player;
+  view.setViewport(-48, -24, 192, 144);
+  const unbind = view.bindPointer(player);
+  assert.equal(view.stage.hitArea?.contains(-40, -20), true);
+  try {
+    const hitArea = view.stage.hitArea;
+    view.setViewport(0, 0, 192, 144);
+    view.stage.emit("pointerdown", { global: { x: 124, y: 104 } } as never);
+    assert.deepEqual(calls.at(-1), [124, 104]);
+    assert.equal(view.stage.hitArea, hitArea);
+    view.setViewport(-48, -24, 192, 144);
+    assert.equal(view.stage.x, 48);
+    assert.equal(view.stage.y, 24);
+    view.stage.emit("pointerdown", { global: { x: 0, y: 0 } } as never);
+    assert.deepEqual(calls.at(-1), [-48, -24]);
+    view.stage.emit("pointerdown", { global: { x: 124, y: 104 } } as never);
+    assert.deepEqual(calls.at(-1), [76, 80]);
+    screen.width = 220;
+    screen.height = 160;
+    view.setViewport(0, 0, 220, 160);
+    view.stage.emit("pointerdown", { global: { x: 210, y: 150 } } as never);
+    assert.deepEqual(calls.at(-1), [210, 150]);
+    assert.equal(view.stage.hitArea, hitArea);
+  } finally {
+    unbind();
+  }
+});

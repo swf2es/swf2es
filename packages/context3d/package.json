@@ -1,0 +1,20 @@
+{
+  "name": "@swf2es/context3d",
+  "version": "0.0.0",
+  "description": "Experimental Context3D resource contracts, AGAL translation and an optional WebGL2 backend",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./webgl": {
+      "types": "./dist/webgl/index.d.ts",
+      "default": "./dist/webgl/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ]
+}

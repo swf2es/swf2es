@@ -53,14 +53,25 @@ function showFailure(message: string | null): void {
   failure.textContent = message ?? "";
 }
 
+let loadGeneration = 0;
+
 function play(movie: OpenedMovie): void {
+  const generation = ++loadGeneration;
   configure({ sandboxType: movie.sandbox });
   showFailure(null);
   welcome.hidden = true;
   player.hidden = false;
   player.load(movie.url).then(
-    () => player.focus(),
+    () => {
+      if (generation === loadGeneration) {
+        player.focus();
+      }
+    },
     (error: unknown) => {
+      if (generation !== loadGeneration) {
+        return;
+      }
+
       player.hidden = true;
       welcome.hidden = false;
       // An ActionScript 3 SWF fails for want of the libraries: say so, not the 404.
@@ -76,6 +87,7 @@ function play(movie: OpenedMovie): void {
 }
 
 function close(): void {
+  loadGeneration++;
   player.destroy();
   player.hidden = true;
   welcome.hidden = false;
@@ -102,10 +114,36 @@ document.addEventListener("drop", (event) => {
   }
 });
 
-desktop.onOpen(play);
-desktop.onClose(close);
+// An open or close during optional backend loading takes precedence over the startup snapshot.
+let started = false;
+let pending: OpenedMovie | null | undefined;
+desktop.onOpen((movie) => {
+  if (started) {
+    play(movie);
+  } else {
+    pending = movie;
+  }
+});
+desktop.onClose(() => {
+  if (started) {
+    close();
+  } else {
+    pending = null;
+  }
+});
 const state = await desktop.start();
+if (state.stage3D) {
+  try {
+    const { createStage3D } = await import("./stage3d.js");
+    configure({ stage3D: createStage3D });
+  } catch (error) {
+    console.warn("swf2es: Stage3D backend could not be loaded; using default playback.", error);
+  }
+}
+
 showLibraries(state.libraries);
-if (state.movie) {
-  play(state.movie);
+started = true;
+const movie = pending === undefined ? state.movie : pending;
+if (movie) {
+  play(movie);
 }

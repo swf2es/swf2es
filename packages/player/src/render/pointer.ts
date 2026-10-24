@@ -27,15 +27,19 @@ function stagePoint(
   player: Player,
   e: { clientX: number; clientY: number; global: { x: number; y: number } },
   style: CSSStyleDeclaration | null,
+  viewport: { bounds: Rectangle | null } | undefined,
   size: { width: number; height: number } = { width: 0, height: 0 },
 ): [x: number, y: number, width: number, height: number] {
   const screen = renderer.screen;
+  const bounds = viewport?.bounds;
+  const stageWidth = bounds?.width ?? player.width;
+  const stageHeight = bounds?.height ?? player.height;
   const toStage = (x: number, y: number, w: number, h: number) =>
     [
-      (x * player.width) / screen.width,
-      (y * player.height) / screen.height,
-      (w * player.width) / screen.width,
-      (h * player.height) / screen.height,
+      (x * stageWidth) / screen.width + (bounds?.x ?? 0),
+      (y * stageHeight) / screen.height + (bounds?.y ?? 0),
+      (w * stageWidth) / screen.width,
+      (h * stageHeight) / screen.height,
     ] as [number, number, number, number];
   const canvas = renderer.canvas as HTMLCanvasElement | undefined;
   if (!canvas?.getBoundingClientRect || !style) {
@@ -85,9 +89,16 @@ function stagePoint(
 }
 
 /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
-export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Player): () => void {
+export function bindPointer(
+  renderer: Renderer,
+  stage: PixiContainer,
+  player: Player,
+  viewport?: { bounds: Rectangle | null },
+): () => void {
   stage.eventMode = "static";
-  stage.hitArea = new Rectangle(0, 0, renderer.screen.width, renderer.screen.height);
+  stage.hitArea = viewport?.bounds
+    ? viewport.bounds.clone()
+    : new Rectangle(0, 0, renderer.screen.width, renderer.screen.height);
   // The stage is Pixi's only target: its hit test would otherwise search
   // every child on each move, which on a crowded display list made each
   // frame a third longer while the mouse moved.
@@ -110,7 +121,7 @@ export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Pl
           clientY: e.clientY,
           global: { x: e.offsetX, y: e.offsetY },
         };
-        const [x, y] = stagePoint(renderer, player, at, style);
+        const [x, y] = stagePoint(renderer, player, at, style, viewport);
         return [x, y];
       })
     : null;
@@ -131,7 +142,7 @@ export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Pl
       return;
     }
 
-    const [x, y, width, height] = stagePoint(renderer, player, e, style, e);
+    const [x, y, width, height] = stagePoint(renderer, player, e, style, viewport, e);
     const t: TouchState = {
       x,
       y,
@@ -165,7 +176,7 @@ export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Pl
       return;
     }
 
-    const [x, y] = stagePoint(renderer, player, e, style);
+    const [x, y] = stagePoint(renderer, player, e, style, viewport);
     const p: PointerState = {
       x,
       y,
@@ -252,7 +263,7 @@ export function bindPointer(renderer: Renderer, stage: PixiContainer, player: Pl
     const delta = Math.trunc(lines);
     lines -= delta;
     const at = { clientX: e.clientX, clientY: e.clientY, global: { x: e.offsetX, y: e.offsetY } };
-    const [x, y] = stagePoint(renderer, player, at, style);
+    const [x, y] = stagePoint(renderer, player, at, style, viewport);
     const p: PointerState = {
       x,
       y,

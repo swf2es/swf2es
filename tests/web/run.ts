@@ -42,6 +42,7 @@ const abcs = compileScripts(
   [
     "Main",
     { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
+    { name: "TextLifecycle", source: readFileSync(`${here}scripts/TextLifecycle.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
@@ -92,6 +93,10 @@ writeFileSync(
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
+);
+writeFileSync(
+  `${site}text.swf`,
+  bare(abcs.get("TextLifecycle") as Uint8Array, 1, "TextLifecycle", 160, 120),
 );
 writeFileSync(
   `${site}clipboard.swf`,
@@ -523,6 +528,19 @@ check(`${CHURN} elements made and destroyed leave nothing behind`, async (evalua
   // The scripted and locked players' instances alone.
   assert.equal(left.codegens, 2);
   assert.ok(after - warm < BOUND * CHURN, `the heap grew by ${after - warm} bytes`);
+});
+
+check("device font measurement caches let go of destroyed players", async (evaluate, send) => {
+  await call(evaluate, 'churn(5, "text.swf")');
+  await send("HeapProfiler.collectGarbage");
+  await send("HeapProfiler.collectGarbage");
+  const left = await call<{ players: number; codegens: number; textScenes: number }>(
+    evaluate,
+    "survivors()",
+  );
+  assert.equal(left.textScenes, 0, "a text measurement retained its player's scene");
+  assert.equal(left.players, 0, "a text measurement retained its player's scene");
+  assert.equal(left.codegens, 2);
 });
 
 check("an AVM1 SWF's ExternalInterface calls the page and takes its calls", async (evaluate) => {

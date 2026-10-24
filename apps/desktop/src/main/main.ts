@@ -478,6 +478,7 @@ function buildMenu(): void {
           ],
         },
         {
+          id: "close-movie",
           label: "&Close Movie",
           accelerator: "CmdOrCtrl+W",
           enabled: !!current,
@@ -494,12 +495,30 @@ function buildMenu(): void {
       label: "&View",
       submenu: [
         {
+          id: "reload-movie",
           label: "&Reload Movie",
           accelerator: "CmdOrCtrl+R",
           enabled: !!current,
           click: () => current && void openEntry(current.path),
         },
         { role: "togglefullscreen", accelerator: "F11" },
+        { type: "separator" },
+        {
+          id: "stage3d",
+          label: "Stage3D (Experimental)",
+          type: "checkbox",
+          checked: settings.settings.stage3D,
+          click: (item) => {
+            if (!settings.setStage3D(item.checked)) {
+              refuse(
+                "The settings could not be saved.",
+                "The Stage3D choice holds until you quit.",
+              );
+            }
+
+            window?.webContents.reload();
+          },
+        },
         { type: "separator" },
         { role: "toggleDevTools" },
       ],
@@ -646,7 +665,11 @@ function listen(): void {
     }
 
     listening = true;
-    return { libraries: settings.libraries(), movie: current?.movie ?? null };
+    return {
+      stage3D: settings.settings.stage3D,
+      libraries: settings.libraries(),
+      movie: current?.movie ?? null,
+    };
   });
   ipcMain.on("desktop:open-dialog", (event) => {
     if (trusted(event)) {

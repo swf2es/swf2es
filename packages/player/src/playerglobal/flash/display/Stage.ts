@@ -5,6 +5,7 @@
 import { avm2 } from "@swf2es/runtime";
 import { setFocus } from "../../../input/keyboard.js";
 import type { Scripting } from "../../../scripting.js";
+import { stageAlignment } from "../../../stage.js";
 import { displayOf } from "./DisplayObject.js";
 import { containerNatives } from "./DisplayObjectContainer.js";
 
@@ -49,19 +50,55 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
 
     get scaleMode(): string {
-      return "showAll";
+      return s.liveStageLayout ? s.stageScaleMode : "showAll";
     }
 
-    set scaleMode(_v: Value) {
-      // The stage is the SWF's size; nothing to scale yet.
+    set scaleMode(v: Value) {
+      if (!s.liveStageLayout) {
+        return;
+      }
+
+      if (v == null) {
+        throw s.rt.error("TypeError", 2007, "scaleMode");
+      }
+
+      const value = s.rt.toString(v);
+      switch (value) {
+        case "showAll":
+        case "noScale":
+        case "noBorder":
+        case "exactFit":
+          break;
+        default:
+          throw s.rt.error("ArgumentError", 2008, "scaleMode");
+      }
+
+      s.stageScaleModeSet = true;
+      if (value !== s.stageScaleMode) {
+        s.stageScaleMode = value;
+        s.onStageLayout?.();
+      }
     }
 
     get align(): string {
-      return "";
+      return s.liveStageLayout ? s.stageAlign : "";
     }
 
-    set align(_v: Value) {
-      // As scaleMode.
+    set align(v: Value) {
+      if (!s.liveStageLayout) {
+        return;
+      }
+
+      if (v == null) {
+        throw s.rt.error("TypeError", 2007, "align");
+      }
+
+      const value = stageAlignment(s.rt.toString(v));
+      s.stageAlignSet = true;
+      if (value !== s.stageAlign) {
+        s.stageAlign = value;
+        s.onStageLayout?.();
+      }
     }
 
     get quality(): string {

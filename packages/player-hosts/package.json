@@ -5,6 +5,10 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
+    "./stage3d": {
+      "types": "./dist/stage3d.d.ts",
+      "default": "./dist/stage3d.js"
+    },
     "./indexeddb": {
       "types": "./dist/indexeddb.d.ts",
       "default": "./dist/indexeddb.js"

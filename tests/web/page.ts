@@ -1,4 +1,5 @@
 import type { Swf2esPlayerElement } from "@swf2es/web";
+import type { PixiView } from "../../packages/player/dist/index.js";
 
 // The web test's page (run.ts writes its HTML): <swf2es-player>s and Flash
 // tags for replaceFlash, the page's functions the SWF calls, and what
@@ -385,17 +386,27 @@ async function watched() {
 
 /** Kept weakly: the players of the elements made and destroyed, which a collection must take. */
 const gone: WeakRef<object>[] = [];
+const textScenes: WeakRef<object>[] = [];
 
 /** Make an element for the scripted SWF, play it a few frames, and take it away, `n` times. */
-async function churn(n: number) {
+async function churn(n: number, source = "embed.swf") {
   for (let i = 0; i < n; i++) {
     const p = document.createElement("swf2es-player") as Player;
-    p.setAttribute("src", "/web-test/embed.swf");
+    p.setAttribute("src", `/web-test/${source}`);
     p.setAttribute("allowscriptaccess", "always");
     p.id = `churn${i}`;
     document.body.append(p);
     await p.ready;
     await frames(2);
+    if (source === "text.swf") {
+      const drawer = p.player?.scripting?.drawer as PixiView | null | undefined;
+      if (!drawer?.stage?.children.length) {
+        throw new Error("text scene did not draw");
+      }
+
+      textScenes.push(new WeakRef(drawer.stage));
+    }
+
     if (p.player) {
       gone.push(new WeakRef(p.player));
     }
@@ -541,6 +552,7 @@ async function avm1External() {
 function survivors() {
   return {
     players: gone.filter((ref) => ref.deref()).length,
+    textScenes: textScenes.filter((ref) => ref.deref()).length,
     codegens: memories.filter((ref) => ref.deref()).length,
     counts: { ...counts },
   };
