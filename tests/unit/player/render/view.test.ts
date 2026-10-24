@@ -1063,6 +1063,20 @@ test("Pixi pointer positions are taken within the box CSS object-fit shows the c
     fit = "fill";
     assert.deepEqual(press(15 + 39, 25 + 9), [10, 5]);
 
+    // A resized canvas still maps correctly if the renderer retains its old screen frame.
+    renderer.screen.width = 50;
+    renderer.screen.height = 25;
+    assert.deepEqual(press(15 + 39, 25 + 9), [10, 5]);
+    const moved = calls.length;
+    view.stage.emit("globalpointermove", {
+      global: { x: 75, y: 10 },
+      clientX: 15 + 39,
+      clientY: 25 + 9,
+      buttons: 0,
+    } as never);
+    assert.equal(calls.length, moved + 1);
+    assert.deepEqual(calls.at(-1), [10, 5]);
+
     // The player's cursor shows from the bind, as it changes, and goes with unbind.
     assert.equal(canvas.style.cursor, "default");
     const pointer = player.pointer as unknown as { onCursor: (c: string) => void };
