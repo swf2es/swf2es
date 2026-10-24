@@ -9,7 +9,14 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { readMorphShape, readSwf } from "../../../../packages/format/dist/index.js";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
-import type { MorphCharacter } from "../../../../packages/player/dist/display/timeline.js";
+import type {
+  MorphCharacter,
+  ShapeCharacter,
+} from "../../../../packages/player/dist/display/timeline.js";
+import {
+  FILLS_IDLE_MS,
+  FILLS_IDLE_VERTICES,
+} from "../../../../packages/player/dist/render/pools.js";
 import {
   copyContext,
   forgetCommands,
@@ -178,4 +185,103 @@ test("an idle blend's fills are kept while its morph keeps it, and go on the fra
   assert.notEqual(fills.peek(held), null);
   fills.give(held);
   assert.equal(fills.peek(held), null);
+});
+
+/** A shape of no layers, and a build of one fill Pixi tessellated into `vertices` vertices. */
+function shape(id: number): ShapeCharacter {
+  return { type: "shape", id, shape: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 }, layers: [] } as never;
+}
+
+function tessellated(vertices: number) {
+  return () => {
+    const context = new GraphicsContext() as unknown as { _gpuData: unknown };
+    context._gpuData = {
+      1: { geometryData: { vertices: new Float32Array(vertices * 2) }, destroy() {} },
+    };
+    return [context] as never;
+  };
+}
+
+test("an idle shape's fills are kept for FILLS_IDLE_MS, and found again in that time, not built", () => {
+  let now = 0;
+  const fills = new SharedFills(() => now);
+  const s = shape(1);
+  let builds = 0;
+  const build = () => {
+    builds++;
+    return tessellated(10)();
+  };
+  const first = fills.take(s, null, build);
+  fills.give(s);
+
+  // A loop that comes back after some seconds finds them.
+  now = FILLS_IDLE_MS - 1;
+  fills.tick();
+  assert.equal(fills.take(s, null, build), first);
+  assert.equal(builds, 1);
+
+  fills.give(s);
+  now += FILLS_IDLE_MS - 1;
+  fills.tick();
+  assert.equal(fills.peek(s), first);
+  now += 1;
+  fills.tick();
+  assert.equal(fills.peek(s), null);
+});
+
+test("idle fills past FILLS_IDLE_VERTICES go, the oldest first, and one taken again is not counted", () => {
+  let now = 0;
+  const fills = new SharedFills(() => now);
+  const third = Math.floor(FILLS_IDLE_VERTICES / 3);
+  const shapes = [1, 2, 3, 4].map(shape);
+  for (const s of shapes) {
+    fills.take(s, null, tessellated(third));
+  }
+
+  for (const s of shapes.slice(0, 3)) {
+    now++;
+    fills.give(s);
+  }
+  assert.ok(shapes.every((s) => fills.peek(s) !== null));
+
+  // Taken again, the first is no longer idle: the fourth fits beside the other two.
+  fills.take(shapes[0], null, tessellated(third));
+  fills.give(shapes[3]);
+  assert.ok(shapes.every((s) => fills.peek(s) !== null));
+
+  // Given back last, it is the newest: the second, the oldest idle, goes for it.
+  fills.give(shapes[0]);
+  assert.equal(fills.peek(shapes[1]), null);
+  assert.notEqual(fills.peek(shapes[0]), null);
+  assert.notEqual(fills.peek(shapes[2]), null);
+  assert.notEqual(fills.peek(shapes[3]), null);
+});
+
+test("fills let go for room and built again within FILLS_IDLE_MS grow the budget, which shrinks back", () => {
+  let now = 0;
+  const fills = new SharedFills(() => now, {});
+  const half = FILLS_IDLE_VERTICES / 2;
+  const shapes = [1, 2, 3].map(shape);
+  for (const s of shapes) {
+    fills.take(s, null, tessellated(half));
+  }
+
+  for (const s of shapes) {
+    now++;
+    fills.give(s);
+  }
+  assert.equal(fills.peek(shapes[0]), null);
+  assert.equal(fills.budget.size, FILLS_IDLE_VERTICES);
+
+  // The first comes back: kept for age, it went for room alone, and the budget grows by it.
+  fills.take(shapes[0], null, tessellated(half));
+  assert.equal(fills.budget.size, FILLS_IDLE_VERTICES + half);
+  fills.give(shapes[0]);
+  assert.ok(shapes.every((s) => fills.peek(s) !== null));
+
+  // Nothing comes back for long: back to the floor, the oldest idle going as it does.
+  now += 30 * FILLS_IDLE_MS;
+  fills.tick();
+  assert.equal(fills.budget.size, FILLS_IDLE_VERTICES);
+  assert.ok(shapes.every((s) => fills.peek(s) === null));
 });

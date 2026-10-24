@@ -22,6 +22,8 @@ video and printing are not implemented.
 read in your browser, never uploaded), or play a demo. The site is
 `apps/site`, built from `main`.
 For Stage3D SWFs, select **Stage3D (experimental)** in the player controls.
+The demo's **Full screen** button enlarges the composed 2D and Stage3D image
+together, keeping the SWF's existing viewport and Stage3D back-buffer resolution.
 
 ## Libraries
 

@@ -9,6 +9,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const fixture =
   [
     "ContextRequests",
+    "ContextStartup",
     "AGALValidation",
     "ByteBudgets",
     "ResourceObjects",

@@ -5,6 +5,7 @@
 // errors reach the page's console, which the panel shows.
 import { isAs3, readSwf, readSwfHeader } from "@swf2es/format";
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
+import { bindFullscreen } from "./fullscreen.js";
 import { isolate } from "./isolation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
 import { Stats } from "./stats.js";
@@ -408,13 +409,13 @@ close.addEventListener("click", () => {
   showStatus("Closed.");
 });
 
-fullscreen.addEventListener("click", () => {
-  void stage
-    .requestFullscreen?.()
-    // The button had the focus: keys go to the SWF again, as they did before.
-    .then(() => !player.hidden && player.focus())
-    .catch(() => showStatus("Full screen was refused.", true));
-});
+bindFullscreen(
+  stage,
+  player,
+  fullscreen,
+  () => current?.stage3D === true && !player.hidden,
+  () => showStatus("Full screen was refused.", true),
+);
 
 /** What WebGL the player's canvas draws with, for the report. */
 function renderer(): string {

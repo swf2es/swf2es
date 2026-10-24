@@ -183,6 +183,14 @@ swf2es-player[hidden] {
   display: none;
 }
 
+.stage:fullscreen.composed-fullscreen swf2es-player {
+  width: var(--fullscreen-width);
+  height: var(--fullscreen-height);
+  inset: 50% auto auto 50%;
+  transform-origin: center;
+  transform: translate(-50%, -50%) scale(var(--fullscreen-scale, 1));
+}
+
 .empty {
   position: absolute;
   inset: 0;

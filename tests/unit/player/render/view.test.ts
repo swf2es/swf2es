@@ -1063,6 +1063,20 @@ test("Pixi pointer positions are taken within the box CSS object-fit shows the c
     fit = "fill";
     assert.deepEqual(press(15 + 39, 25 + 9), [10, 5]);
 
+    // A resized canvas still maps correctly if the renderer retains its old screen frame.
+    renderer.screen.width = 50;
+    renderer.screen.height = 25;
+    assert.deepEqual(press(15 + 39, 25 + 9), [10, 5]);
+    const moved = calls.length;
+    view.stage.emit("globalpointermove", {
+      global: { x: 75, y: 10 },
+      clientX: 15 + 39,
+      clientY: 25 + 9,
+      buttons: 0,
+    } as never);
+    assert.equal(calls.length, moved + 1);
+    assert.deepEqual(calls.at(-1), [10, 5]);
+
     // The player's cursor shows from the bind, as it changes, and goes with unbind.
     assert.equal(canvas.style.cursor, "default");
     const pointer = player.pointer as unknown as { onCursor: (c: string) => void };
@@ -2086,12 +2100,14 @@ test("instances of a morph at one ratio share its blend's fills, which go once t
     root.removeChild(shapes[1]);
     view.prepare(root);
     assert.equal(last.destroyed, false);
-    // Kept 5 s with them, then idle 5 s.
-    for (let k = 0; k < 2; k++) {
-      clock.at += 6000;
-      view.prepare(root);
-    }
-
+    // Kept 5 s with them, then idle 30 s.
+    clock.at += 6000;
+    view.prepare(root);
+    clock.at += 29_000;
+    view.prepare(root);
+    assert.equal(last.destroyed, false);
+    clock.at += 2000;
+    view.prepare(root);
     assert.equal(last.destroyed, true);
   });
 });
@@ -2300,13 +2316,16 @@ test("instances of a shape share its fills, which go once none has drawn them fo
     assert.equal(first.destroyed, false);
     assert.equal(fill(0), first);
 
-    // Both gone: kept while parked and a while idle, then destroyed.
+    // Both gone: kept while parked and 30 s idle, then destroyed.
     root.removeChild(shapes[1]);
     view.prepare(root);
     clock.at += 6000;
     view.prepare(root);
     assert.equal(first.destroyed, false);
-    clock.at += 6000;
+    clock.at += 29_000;
+    view.prepare(root);
+    assert.equal(first.destroyed, false);
+    clock.at += 2000;
     view.prepare(root);
     assert.equal(first.destroyed, true);
 
