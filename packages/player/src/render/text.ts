@@ -17,7 +17,24 @@ import { deviceMetrics, fontFamily } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
 import { SaffronBuilder, type SaffronView } from "./saffron.js";
 import { SharedGraphics } from "./shared.js";
+import type { Linear } from "./strokes.js";
 import { fillContext, paint } from "./tessellate.js";
+
+/** Device text rasterized at its largest stretch, with bounded extra texture resolution. */
+export function deviceTextResolution(world: Linear, pixels: number): number {
+  const [a, b, c, d] = world;
+  const x = a * a + b * b;
+  const y = c * c + d * d;
+  const cross = a * c + b * d;
+  const stretch = Math.sqrt((x + y + Math.hypot(x - y, 2 * cross)) / 2);
+  const base = Number.isFinite(pixels) && pixels > 0 ? pixels : 1;
+  if (!Number.isFinite(stretch)) {
+    return base;
+  }
+
+  // A turn alone must not cross a resolution boundary through rounding error.
+  return Math.max(base, Math.min(8 * base, Math.ceil(stretch * base - 1e-6)));
+}
 
 /**
  * Whether text laid out at (x, y), `width` by `height`, reaches outside its
@@ -123,7 +140,12 @@ function glyphFill(glyph: Glyph): GraphicsContext | null {
  * field where the text runs over it. An advanced field's embedded glyphs
  * are drawn as Saffron draws them (render/saffron.ts), all in one mesh.
  */
-export function drawText(o: TextObject, art: PixiContainer, saffron: Advanced | null): void {
+export function drawText(
+  o: TextObject,
+  art: PixiContainer,
+  saffron: Advanced | null,
+  resolution: number,
+): void {
   if (o.background || o.border) {
     const box = new Graphics();
     if (o.background) {
@@ -191,7 +213,7 @@ export function drawText(o: TextObject, art: PixiContainer, saffron: Advanced | 
     let run: LaidChar[] = [];
     const flush = () => {
       if (run.length > 0) {
-        text.addChild(deviceRun(o, run, dx, baseline));
+        text.addChild(deviceRun(o, run, dx, baseline, resolution));
         run = [];
       }
     };
@@ -417,7 +439,13 @@ function drawCaret(o: TextObject, art: PixiContainer): void {
 }
 
 /** A run of a device font's characters in one format, as Pixi Text from where the layout put its first, on the baseline. */
-function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number): Text {
+function deviceRun(
+  o: TextObject,
+  run: LaidChar[],
+  dx: number,
+  baseline: number,
+  resolution: number,
+): Text {
   const f = run[0].format;
   const chars = run.map((c) => (o.displayAsPassword ? "*" : o.model.text[c.index])).join("");
   const style = {
@@ -428,7 +456,7 @@ function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number)
     fontStyle: f.italic ? ("italic" as const) : ("normal" as const),
     letterSpacing: Number.isFinite(f.letterSpacing) ? f.letterSpacing : 0,
   };
-  const t = new Text({ text: chars, style });
+  const t = new Text({ text: chars, style, resolution });
   // Pixi's Text puts its top at its font's ascent above the baseline; without a DOM (node) there is no font to measure.
   const ascent =
     typeof document === "undefined"

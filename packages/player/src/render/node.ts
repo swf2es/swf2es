@@ -70,6 +70,8 @@ export interface Node {
   widest: number;
   /** A Bitmap's sprite, over its store's texture, which Bitmaps share; null for any other object. */
   bitmap: Sprite | null;
+  /** The resolution at which a device TextField's runs were rasterized. */
+  textResolution: number;
   /** Every line drawn, its own or borrowed: hidden while the object is a mask or in one. */
   lines: SharedGraphics[];
   /**
@@ -159,6 +161,7 @@ export function makeNode(o: DisplayObject): Node {
     stretched: null,
     widest: 0,
     bitmap: null,
+    textResolution: 1,
     lines: [],
     spare: null,
     spared: false,
