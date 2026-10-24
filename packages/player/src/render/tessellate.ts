@@ -19,7 +19,15 @@ import {
 import type { ShapeCharacter } from "../display/timeline.js";
 import { takeBatchedCopy, weigh } from "./color.js";
 import { crossingFill } from "./fill-polygons.js";
-import { IDLE_MS } from "./pools.js";
+import {
+  type DeviceMemory,
+  deviceMemory,
+  FILLS_IDLE_MOST,
+  FILLS_IDLE_MS,
+  FILLS_IDLE_VERTICES,
+  IdleBudget,
+  linesCeiling,
+} from "./pools.js";
 
 /** A contour flattened to a polygon, for telling which contours hold which. */
 interface Region {
@@ -427,22 +435,57 @@ export function fillContext(layer: ShapeLayer, painter: Painter, masking = false
 }
 
 /**
+ * The vertices Pixi tessellated a context into, for each renderer that drew
+ * it: what keeping it costs.
+ */
+export function verticesOf(context: GraphicsContext): number {
+  const data = context._gpuData;
+  let vertices = 0;
+  for (const uid in data) {
+    vertices += (data[uid]?.geometryData?.vertices.length ?? 0) / 2;
+  }
+
+  return vertices;
+}
+
+/**
  * A shape's fills, or a morph's blend's, shared by every instance drawn
  * alike: a crowd in step, a pool's objects, and a timeline that places a
  * shape or a morph at a ratio again tessellate each once. Counted as nodes
- * take and give them back; one no one holds goes after IDLE_MS, or a
- * blend as its morph drops it, which is then never drawn from again. Kept
- * for as long as a shape lived, every shape a long session had shown held
- * its fills, their geometry and their coloured copies: hundreds of MB.
+ * take and give them back; one no one holds goes after FILLS_IDLE_MS, or
+ * sooner, oldest first, past the idle's budget of vertices (IdleBudget),
+ * or a blend as its morph drops it, which is then never drawn from again.
+ * Kept for as long as a shape lived, every shape a long session had shown
+ * held its fills, their geometry and their coloured copies: hundreds of MB.
  */
 export class SharedFills {
   private readonly held = new Map<ShapeCharacter, { fills: GraphicsContext[]; uses: number }>();
   /** The shapes no one holds, in the order they went idle, with the time each did. */
   private readonly idle = new Map<ShapeCharacter, number>();
+  /** The idle ones' vertices as they went idle, and their sum. */
+  private readonly idleSizes = new Map<ShapeCharacter, number>();
+  private idleVertices = 0;
   /** The idle ones that are blends, which go as soon as their morph drops them. */
   private readonly idleBlends = new Set<ShapeCharacter>();
   /** droppedBlends() when the idle blends were last looked at. */
   private blendsDropped = droppedBlends();
+  /** How many vertices the idle may hold, grown as content comes back to what went for room. */
+  readonly budget: IdleBudget;
+  /** Each shape's number, for the budget's keys, which must hold no shape. */
+  private readonly shapeIds = new WeakMap<ShapeCharacter, number>();
+  private shapeCount = 0;
+
+  constructor(
+    private readonly now: () => number = () => performance.now(),
+    device: DeviceMemory = deviceMemory(),
+  ) {
+    this.budget = new IdleBudget(
+      FILLS_IDLE_VERTICES,
+      linesCeiling(device),
+      FILLS_IDLE_MS,
+      4 * FILLS_IDLE_MOST,
+    );
+  }
 
   /** The shape's fills if they are kept, not taken: for a view drawn once to borrow. */
   peek(shape: ShapeCharacter): GraphicsContext[] | null {
@@ -458,12 +501,15 @@ export class SharedFills {
     let entry = this.held.get(shape);
     if (!entry) {
       entry = { fills: build(layers), uses: 0 };
+      if (this.budget.remembered > 0) {
+        this.budget.missed(this.ghostKey(shape), this.now());
+      }
+
       this.held.set(shape, entry);
     }
 
     entry.uses++;
-    this.idle.delete(shape);
-    this.idleBlends.delete(shape);
+    this.wake(shape);
     return entry.fills;
   }
 
@@ -483,10 +529,19 @@ export class SharedFills {
       return;
     }
 
-    this.idle.set(shape, performance.now());
+    let vertices = 0;
+    for (let i = 0; i < entry.fills.length; i++) {
+      vertices += verticesOf(entry.fills[i]);
+    }
+
+    this.idle.set(shape, this.now());
+    this.idleSizes.set(shape, vertices);
+    this.idleVertices += vertices;
     if (shape.layers.some((layer) => blendLayers.has(layer))) {
       this.idleBlends.add(shape);
     }
+
+    this.trim();
   }
 
   /** A frame prepared: the idle blends their morph dropped go, and those idle too long, oldest first. */
@@ -501,19 +556,52 @@ export class SharedFills {
       }
     }
 
-    const now = performance.now();
+    const now = this.now();
     for (const [shape, since] of this.idle) {
-      if (now - since < IDLE_MS) {
+      if (now - since < FILLS_IDLE_MS) {
         break;
       }
 
       this.drop(shape);
     }
+
+    this.budget.tick(now);
+    this.trim();
+  }
+
+  /** The oldest idle let go, their keys remembered, till the rest are within the budget. */
+  private trim(): void {
+    const budget = this.budget.size;
+    const most = (FILLS_IDLE_MOST * budget) / FILLS_IDLE_VERTICES;
+    while (this.idle.size > most || this.idleVertices > budget) {
+      const [shape, since] = this.idle.entries().next().value as [ShapeCharacter, number];
+      // At least a shape's share of the least budget: one let go for their count grows it too.
+      const size = Math.max(this.idleSizes.get(shape) ?? 0, FILLS_IDLE_VERTICES / FILLS_IDLE_MOST);
+      this.budget.evicted(this.ghostKey(shape), since, size);
+      this.drop(shape);
+    }
+  }
+
+  private ghostKey(shape: ShapeCharacter): string {
+    let id = this.shapeIds.get(shape);
+    if (id === undefined) {
+      id = this.shapeCount++;
+      this.shapeIds.set(shape, id);
+    }
+
+    return String(id);
+  }
+
+  /** No longer idle, if it was. */
+  private wake(shape: ShapeCharacter): void {
+    this.idleVertices -= this.idleSizes.get(shape) ?? 0;
+    this.idleSizes.delete(shape);
+    this.idle.delete(shape);
+    this.idleBlends.delete(shape);
   }
 
   private drop(shape: ShapeCharacter): void {
-    this.idle.delete(shape);
-    this.idleBlends.delete(shape);
+    this.wake(shape);
     for (const context of this.held.get(shape)?.fills ?? []) {
       destroyContext(context);
     }

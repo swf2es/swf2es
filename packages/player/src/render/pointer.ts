@@ -18,7 +18,7 @@ import { bindContextMenu } from "./context-menu.js";
  * by `contain`, cropped by `cover`: Pixi maps a point over the whole element
  * as `fill` would, so the point is taken within that box instead, centred
  * as the default `object-position` puts it, and then from the canvas's
- * pixels to Pixi's screen and the stage. `style` is the canvas's live
+ * pixels to the visible stage rectangle. `style` is the canvas's live
  * computed style, null where there is no DOM. A `size`, a touch's
  * contact, comes back in stage units after the point.
  */
@@ -34,12 +34,19 @@ function stagePoint(
   const bounds = viewport?.bounds;
   const stageWidth = bounds?.width ?? player.width;
   const stageHeight = bounds?.height ?? player.height;
-  const toStage = (x: number, y: number, w: number, h: number) =>
+  const toStage = (
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    width = screen.width,
+    height = screen.height,
+  ) =>
     [
-      (x * stageWidth) / screen.width + (bounds?.x ?? 0),
-      (y * stageHeight) / screen.height + (bounds?.y ?? 0),
-      (w * stageWidth) / screen.width,
-      (h * stageHeight) / screen.height,
+      (x * stageWidth) / width + (bounds?.x ?? 0),
+      (y * stageHeight) / height + (bounds?.y ?? 0),
+      (w * stageWidth) / width,
+      (h * stageHeight) / height,
     ] as [number, number, number, number];
   const canvas = renderer.canvas as HTMLCanvasElement | undefined;
   if (!canvas?.getBoundingClientRect || !style) {
@@ -79,12 +86,15 @@ function stagePoint(
     sy = scale;
   }
 
-  const resolution = renderer.resolution || 1;
+  // The canvas can already have resized while the renderer's screen still
+  // describes its previous texture frame. Normalize against the pixels shown.
   return toStage(
-    (e.clientX - left) / sx / resolution,
-    (e.clientY - top) / sy / resolution,
-    size.width / sx / resolution,
-    size.height / sy / resolution,
+    (e.clientX - left) / sx,
+    (e.clientY - top) / sy,
+    size.width / sx,
+    size.height / sy,
+    canvas.width,
+    canvas.height,
   );
 }
 
@@ -213,7 +223,10 @@ export function bindPointer(
   let leaveNext = false;
   const move = (e: FederatedPointerEvent) => {
     const { x, y } = e.global;
-    const inside = x >= 0 && y >= 0 && x < screen.width && y < screen.height;
+    const resolution = renderer.resolution || 1;
+    const width = canvas?.width ? canvas.width / resolution : screen.width;
+    const height = canvas?.height ? canvas.height / resolution : screen.height;
+    const inside = x >= 0 && y >= 0 && x < width && y < height;
     if (inside || (e.pointerType !== "touch" && player.pointer?.captured)) {
       leaveNext = false;
       moved(e);

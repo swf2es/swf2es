@@ -187,6 +187,10 @@ desktop: 64 MiB buffers, 128 MiB textures and 16 MiB each for target depth/stenc
 and multisample color. Changing the option restarts the current SWF; closing
 during the backend import invalidates that load. The site's build includes the
 optional modules and their import-map entries under the GitHub Pages subpath.
+Its fullscreen button fits the composed Stage3D player to the screen with a
+CSS transform, preserving the SWF viewport and back-buffer sizes. The 2D overlay
+and input use the same presentation scale. Leaving fullscreen restores responsive
+layout; ordinary playback retains its existing fullscreen resizing.
 Best-resolution buffers and default enablement remain separate work.
 
 The opt-in Context3D installation enables live Stage scale/alignment settings.
