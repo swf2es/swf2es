@@ -235,6 +235,11 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     return storage.buffer.subarray(0, storage.length);
   };
 
+  const deferEvent = (deliver: () => void): void => {
+    // A constructor's request must leave the current script turn, including
+    // its first-frame scripts, before the frame queue can deliver the result.
+    queueMicrotask(() => s.loads.deferHostEvent(deliver));
+  };
   const created = (slot: AsObject): void => {
     dispatchEvent(
       s,
@@ -243,7 +248,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     );
   };
   const unavailable = (slot: AsObject): void => {
-    s.loads.deferHostEvent(() => {
+    deferEvent(() => {
       if (!closed && !s.destroyed) {
         dispatchEvent(
           s,
@@ -266,7 +271,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     }
 
     pending.add(slot);
-    s.loads.deferHostEvent(() => {
+    deferEvent(() => {
       pending.delete(slot);
       if (closed || s.destroyed || lost.has(slot)) {
         return;

@@ -306,6 +306,13 @@ buffers and programs (3694). Disposed context getters and repeated resource
 disposal are checked too. Other validation remains experimental; this is
 not complete Flash error parity.
 
+`ContextStartup.as` requests a context in its document-class constructor and
+sets its back-buffer dimensions in the first-frame script. Its AIR reference
+checks that the first-frame script finishes before `CONTEXT3D_CREATE` arrives.
+The browser runner also verifies that closing this context releases its GPU
+handles. Context request results cross the current script turn before entering
+the player's frame event queue; they do not interrupt first-frame initialization.
+
 `Arithmetic.as` compares finite arithmetic and matrix results with AIR:
 `add`, `sub`, `mul`, `div`, `min`, `max`, `dp3`, `dp4`, `abs`, `neg`, `sat`,
 `m33`, `m44` and `m43`. The fixture checks swizzles, masked writes, temporary
