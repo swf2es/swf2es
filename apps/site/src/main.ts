@@ -5,8 +5,8 @@
 // errors reach the page's console, which the panel shows.
 import { isAs3, readSwf, readSwfHeader } from "@swf2es/format";
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
-import { bindFullscreen } from "./fullscreen.js";
 import { isolate } from "./isolation.js";
+import { bindFullscreen } from "./presentation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
 import { Stats } from "./stats.js";
 
