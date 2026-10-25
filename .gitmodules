@@ -27,3 +27,7 @@
 	path = vendor/lzma-sdk
 	url = https://github.com/swf2es/lzma-sdk.git
 	shallow = true
+[submodule "vendor/libtess2"]
+	path = vendor/libtess2
+	url = https://github.com/swf2es/libtess2.git
+	branch = swf2es

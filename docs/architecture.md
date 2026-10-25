@@ -100,13 +100,14 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `mp3`     | synchronous MP3 frame decoder, minimp3 compiled to WebAssembly with a Zig adapter | — |
+| `tessellate` | optional double-precision libtess2 fill tessellation in WebAssembly, owned output buffers | — |
 | `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 
-`compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
+`tessellate`, `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
 (`compress`, below): ByteArray's `compress` and a SWF's body are the

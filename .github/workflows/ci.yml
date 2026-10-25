@@ -24,6 +24,7 @@ jobs:
           key: zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/zig.ts') }}
       - run: pnpm --filter @swf2es/mp3 build:wasm && git diff --exit-code -- packages/mp3/src/binary.ts packages/mp3/LICENSE.minimp3
       - run: pnpm --filter @swf2es/compress build:wasm && git diff --exit-code -- packages/compress/src/binary.ts packages/compress/LICENSE.zlib
+      - run: pnpm --filter @swf2es/tessellate build:wasm && git diff --exit-code -- packages/tessellate/src/binary.ts packages/tessellate/LICENSE.libtess2
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm oracle:pull
