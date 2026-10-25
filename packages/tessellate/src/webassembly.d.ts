@@ -1,6 +1,5 @@
-// The ES2022 lib has no WebAssembly types or atob, and this package loads
-// neither DOM nor node types, as format, which uses it, does not. These are
-// the parts the wrapper uses; browsers and node both have them.
+// ES2022 has no WebAssembly types or atob. This portable wrapper uses only
+// the parts shared by browsers and node, without DOM or node types.
 declare namespace WebAssembly {
   // biome-ignore lint/suspicious/noEmptyInterface: an opaque handle, like the real Module type
   interface Module {}

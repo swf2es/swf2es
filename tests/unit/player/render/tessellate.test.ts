@@ -438,6 +438,7 @@ test("adjacent texture quads keep the same UVs and indices when coalesced", () =
 });
 
 const {
+  CanvasGraphicsAdaptor,
   GraphicsContext: FinishedContext,
   GraphicsContextSystem: FinishedSystem,
   Matrix,
@@ -556,4 +557,37 @@ test("finished geometry captures transforms, builds paint UVs and hit tests tria
     [0, 0, 10, 0, 10, 10, 0, 10],
   );
   context.destroy();
+});
+
+test("finished Canvas geometry paints once across internal triangle edges", () => {
+  const source = new FinishedContext().fillGeometry(geometry, { color: 0x336699, alpha: 0.5 });
+  let fills = 0;
+  const canvas = {
+    globalAlpha: 1,
+    fillStyle: "",
+    save() {},
+    restore() {},
+    transform() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    fill() {
+      fills++;
+    },
+  };
+  const renderer = {
+    globalUniforms: {},
+    canvasContext: { activeContext: canvas, setContextTransform() {}, setBlendMode() {} },
+  };
+  const renderable = {
+    context: source,
+    groupTransform: new Matrix(),
+    groupColorAlpha: 0xffffffff,
+    groupBlendMode: "normal",
+  };
+  new CanvasGraphicsAdaptor().execute({ renderer } as never, renderable as never);
+  assert.equal(fills, 1);
+  assert.equal(canvas.globalAlpha, 0.5);
+  source.destroy();
 });
