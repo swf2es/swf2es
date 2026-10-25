@@ -535,8 +535,8 @@ class GradientFilter extends BlurredFilter {
   /** Its box's pass and its gradient too. */
   destroy(): void {
     this.pass.destroy();
-    this.gradient.destroy(true);
     super.destroy();
+    this.gradient.destroy(true);
   }
 
   constructor(private readonly f: FilterRecord) {
