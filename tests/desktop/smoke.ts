@@ -433,12 +433,29 @@ try {
     assert.equal(await evaluate<boolean>("crossOriginIsolated"), true);
 
     // Played again, the last player let go of: one canvas, and the SWF starts anew.
-    const canvases = await evaluate<number>(`(async () => {
+    const reloaded = await evaluate<{ canvases: number; nativeInstances: number }>(`(async () => {
       const player = document.getElementById("player");
-      await player.load(${JSON.stringify(url)});
-      return player.shadowRoot.querySelectorAll("canvas").length;
+      const Instance = WebAssembly.Instance;
+      let nativeInstances = 0;
+      WebAssembly.Instance = new Proxy(Instance, {
+        construct(target, args) {
+          const instance = Reflect.construct(target, args);
+          if (typeof instance.exports.vertexCount === "function") {
+            nativeInstances++;
+          }
+          return instance;
+        }
+      });
+      try {
+        await player.load(${JSON.stringify(url)});
+        await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+        return { canvases: player.shadowRoot.querySelectorAll("canvas").length, nativeInstances };
+      } finally {
+        WebAssembly.Instance = Instance;
+      }
     })()`);
-    assert.equal(canvases, 1);
+    assert.equal(reloaded.canvases, 1);
+    assert.ok(reloaded.nativeInstances > 0, "playback did not use the native tessellator");
     await until("the SWF played again", settled(2));
 
     // Dropped on the window, the SWF goes to the shell, which opens it: it plays a third time.

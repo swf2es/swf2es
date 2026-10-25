@@ -11,6 +11,7 @@
     { "path": "../format" },
     { "path": "../codegen" },
     { "path": "../player" },
-    { "path": "../player-hosts" }
+    { "path": "../player-hosts" },
+    { "path": "../tessellate" }
   ]
 }

@@ -699,7 +699,83 @@ async function activationPlayer() {
   return true;
 }
 
+const fillMemories: WeakRef<WebAssembly.Memory>[] = [];
+let fillPlayer: Player | null = null;
+
+/** Exercise native selection and teardown without compiling scripts or decoding compressed data. */
+async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
+  const { web } = await loading;
+  web.configure({ nativeFills: mode === "js" ? false : undefined });
+  const Module = WebAssembly.Module;
+  const Instance = WebAssembly.Instance;
+  let compiles = 0;
+  let instances = 0;
+  WebAssembly.Module = new Proxy(Module, {
+    construct(target, args) {
+      compiles++;
+      if (mode === "blocked") {
+        throw new WebAssembly.CompileError("native compilation unavailable for this test");
+      }
+
+      return Reflect.construct(target, args);
+    },
+  });
+  WebAssembly.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      const instance = Reflect.construct(target, args) as WebAssembly.Instance;
+      instances++;
+      fillMemories.push(new WeakRef(instance.exports.memory as WebAssembly.Memory));
+      return instance;
+    },
+  });
+  let rect: [number, number, number, number] = [0, 0, 0, 0];
+  try {
+    for (let i = 0; i < 3; i++) {
+      const p = document.createElement("swf2es-player") as Player;
+      p.setAttribute("quality", "low");
+      p.setAttribute("src", "/web-test/fills.swf");
+      document.body.append(p);
+      try {
+        await p.ready;
+        await frames(3);
+        const canvas = p.shadowRoot?.querySelector("canvas");
+        if (!canvas) {
+          throw new Error("fill playback has no canvas");
+        }
+
+        const bounds = p.getBoundingClientRect();
+        rect = [bounds.x, bounds.y, bounds.width, bounds.height];
+        if (i === 2) {
+          fillPlayer = p;
+        }
+      } finally {
+        if (fillPlayer !== p) {
+          p.destroy();
+          p.remove();
+        }
+      }
+    }
+  } finally {
+    WebAssembly.Module = Module;
+    WebAssembly.Instance = Instance;
+  }
+
+  return {
+    rect,
+    compiles,
+    instances,
+  };
+}
+
 Object.assign(globalThis, {
+  fillRun,
+  fillDestroy: () => {
+    fillPlayer?.destroy();
+    fillPlayer?.remove();
+    fillPlayer = null;
+    return true;
+  },
+  fillSurvivors: () => fillMemories.filter((m) => m.deref()).length,
   activationPlayer,
   /** The window's own focus or blur, which a headless page is never sent. */
   activationWindow: (type: string) => window.dispatchEvent(new Event(type)),

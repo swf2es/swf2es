@@ -31,6 +31,7 @@ let module: WebAssembly.Module | null = null;
 /** Optional synchronous double-precision tessellator. Rejection returns null for the caller's fallback. */
 export class Tessellator {
   private instance: NativeExports | null = null;
+  private unavailable = false;
   private readonly limit: number;
   private readonly keep: number;
 
@@ -63,6 +64,10 @@ export class Tessellator {
     contours: readonly (readonly number[])[],
     nonZero: boolean,
   ): FillGeometry | null => {
+    if (this.unavailable) {
+      return null;
+    }
+
     let count = 0;
     if (contours.length > 100000) {
       return null;
@@ -127,6 +132,8 @@ export class Tessellator {
 
       return { vertices, indices };
     } catch {
+      // Compilation can be blocked by CSP or unavailable on the host: try only once per owner.
+      this.unavailable = module === null;
       // In particular, longjmp unwinds through a throwing import: never resume that C instance.
       this.dispose();
       return null;

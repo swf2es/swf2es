@@ -1,4 +1,4 @@
-# Optional native fill tessellation
+# Native fill tessellation
 
 `@swf2es/tessellate` compiles the small double-precision patch in
 `vendor/libtess2` to Wasm with the pinned Zig compiler. `build.zig` compiles
@@ -9,7 +9,12 @@ under SGI Free Software License B; its notice ships as `LICENSE.libtess2`.
 `pnpm --filter @swf2es/tessellate build:wasm` regenerates the checked-in
 binary. Normal builds verify the source digest; CI checks byte reproducibility.
 
-Opt in when constructing a view:
+`@swf2es/web` uses native fills by default. Each playback lazily loads and
+owns a tessellator, then releases its scratch on teardown.
+`configure({ nativeFills: false })` keeps new playbacks on the JS path and
+skips native loading. Missing modules or unavailable Wasm also use JS.
+
+When constructing a `PixiView` directly, opt in through its generic hook:
 
 ```ts
 import { PixiView } from "@swf2es/player";
@@ -45,11 +50,14 @@ that instance is always discarded before another call. Arena reset alone
 does not shrink Wasm memory. `dispose()` drops retained scratch without
 affecting previous output.
 
-This integration is experimental and does not change the default.
+Different triangle layouts can change subpixel edge coverage and interior
+gradient or bitmap interpolation. At low quality this can switch a whole
+boundary pixel. AIR comparisons do not show either backend consistently
+closer to Flash; enabling native fills accepts these differences.
+
 Run the player references and context-loss checks with
-`SWF2ES_NATIVE_FILLS=1` to exercise it. Alternate triangulations can change
-edge samples; pixel differences must be resolved against Flash before
-considering a default change. `node tests/fuzz/tessellate.ts [cases] [seed]`
+`SWF2ES_NATIVE_FILLS=1` to exercise the native hook in those tests.
+`node tests/fuzz/tessellate.ts [cases] [seed]`
 checks both fill rules against independent ray crossings; the default test
 suite includes 2,000 fills and 24,000 coverage samples. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
