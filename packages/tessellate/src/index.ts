@@ -3,7 +3,7 @@ import { binary } from "./binary.js";
 /** Buffers are owned by the caller; subsequent calls and disposal cannot change them. */
 export interface FillGeometry {
   vertices: Float64Array;
-  indices: Uint32Array;
+  indices: Uint16Array | Uint32Array;
 }
 
 interface NativeExports {
@@ -86,7 +86,7 @@ export class Tessellator {
     }
 
     if (count === 0) {
-      return { vertices: new Float64Array(), indices: new Uint32Array() };
+      return { vertices: new Float64Array(), indices: new Uint16Array() };
     }
 
     try {
@@ -122,7 +122,8 @@ export class Tessellator {
 
       // Growth can detach the input views. Cached geometry owns fresh copies of the final views.
       const vertices = new Float64Array(x.memory.buffer, x.vertices(), x.vertexCount() * 2).slice();
-      const indices = new Uint32Array(x.memory.buffer, x.indices(), x.triangleCount() * 3).slice();
+      const source = new Uint32Array(x.memory.buffer, x.indices(), x.triangleCount() * 3);
+      const indices = vertices.length / 2 <= 0x10000 ? new Uint16Array(source) : source.slice();
 
       return { vertices, indices };
     } catch {

@@ -301,12 +301,13 @@ export class ColorBatcher extends Batcher {
     const texture = (textureId << 16) | (element.roundPixels & 0xffff);
     const { a, b, c, d, tx, ty } = element.transform;
     const { positions, uvs } = element;
+    const round = element.roundToFloat32;
     const color = straight(extra);
     const ct = extra.renderable?.flashColor ?? NONE;
     const end = element.attributeOffset + element.attributeSize;
     for (let i = element.attributeOffset; i < end; i++) {
-      const x = positions[i * 2];
-      const y = positions[i * 2 + 1];
+      const x = round ? Math.fround(positions[i * 2]) : positions[i * 2];
+      const y = round ? Math.fround(positions[i * 2 + 1]) : positions[i * 2 + 1];
       f32[index] = a * x + c * y + tx;
       f32[index + 1] = d * y + b * x + ty;
       f32[index + 2] = uvs[i * 2];

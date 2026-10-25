@@ -27,6 +27,9 @@ context factory so copies do not retry the tessellator. Dynamic drawings
 and morph ratios construct new results when their contents change.
 
 Each native call copies positions and indices into JS-owned typed arrays.
+Positions remain doubles; indices use 16 bits through 65,536 vertices and
+32 bits above that. A native layer's position views share a contiguous owned
+buffer, which Pixi can retain directly when the draw transforms are identities.
 No cached geometry aliases Wasm scratch. Pixi consumes these through
 `GraphicsContext.fillGeometry`, generating the usual paint UVs and batches;
 the immutable source buffers survive path retirement and context restoration.

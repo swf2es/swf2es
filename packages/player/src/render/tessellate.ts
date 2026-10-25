@@ -361,7 +361,7 @@ export function resolveFills(
   masking: boolean,
   tessellate: FillTessellator,
 ): ResolvedFill[] {
-  return layer.fills.map(({ contours, winding }) => {
+  const resolved = layer.fills.map(({ contours, winding }) => {
     const polygons = contours.map(polygon).filter((points) => points.length >= 6);
     const nonZero = masking || winding === "nonZero";
     let geometry: FillGeometry | null = null;
@@ -381,6 +381,30 @@ export function resolveFills(
     const crossing = crossingFill(polygons, nonZero);
     return { geometry: null, crossing, roots: crossing ? [] : containment(polygons) };
   });
+
+  // Contiguous views let Pixi retain these positions instead of making another layer-sized copy.
+  const first = resolved[0]?.geometry?.vertices;
+  if (
+    resolved.length > 1 &&
+    first &&
+    resolved.every(({ geometry }) => geometry?.vertices.constructor === first.constructor)
+  ) {
+    const size = resolved.reduce((sum, { geometry }) => sum + (geometry?.vertices.length ?? 0), 0);
+    const vertices =
+      first instanceof Float64Array ? new Float64Array(size) : new Float32Array(size);
+    let at = 0;
+    for (const plan of resolved) {
+      const geometry = plan.geometry as FillGeometry;
+      vertices.set(geometry.vertices, at);
+      plan.geometry = {
+        vertices: vertices.subarray(at, at + geometry.vertices.length),
+        indices: geometry.indices,
+      };
+      at += geometry.vertices.length;
+    }
+  }
+
+  return resolved;
 }
 
 function validGeometry({ vertices, indices }: FillGeometry): boolean {

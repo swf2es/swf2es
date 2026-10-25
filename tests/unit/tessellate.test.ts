@@ -96,3 +96,27 @@ test("malformed inputs and allocation failure leave the next fill usable", () =>
   assert.equal(tess.capacity, 0);
   assert.equal(area(tess.tessellate([square], false)), 100);
 });
+
+test("native owned indices fit 16 bits through vertex 65535 and retain wider indices above it", () => {
+  const tess = new Tessellator();
+  for (const count of [65536, 65537]) {
+    const ring: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const angle = (i * 2 * Math.PI) / count;
+      ring.push(100 * Math.cos(angle), 100 * Math.sin(angle));
+    }
+
+    const result = tess.tessellate([ring], false);
+    assert.ok(result);
+    assert.equal(result.vertices.length / 2, count);
+    assert.equal(result.indices instanceof Uint16Array, count === 65536);
+    assert.equal(result.indices instanceof Uint32Array, count === 65537);
+    let largest = 0;
+    for (const index of result.indices) {
+      largest = Math.max(largest, index);
+    }
+
+    assert.equal(largest, count - 1);
+    assert.ok(Math.abs(area(result) - Math.PI * 10000) < 0.001);
+  }
+});

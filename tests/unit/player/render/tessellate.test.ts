@@ -15,6 +15,7 @@ import type {
   MorphCharacter,
   ShapeCharacter,
 } from "../../../../packages/player/dist/display/timeline.js";
+import { ColorBatcher } from "../../../../packages/player/dist/render/color.js";
 import {
   FILLS_IDLE_MS,
   FILLS_IDLE_VERTICES,
@@ -439,6 +440,7 @@ test("adjacent texture quads keep the same UVs and indices when coalesced", () =
 
 const {
   CanvasGraphicsAdaptor,
+  DefaultBatcher,
   GraphicsContext: FinishedContext,
   GraphicsContextSystem: FinishedSystem,
   Matrix,
@@ -590,4 +592,169 @@ test("finished Canvas geometry paints once across internal triangle edges", () =
   assert.equal(fills, 1);
   assert.equal(canvas.globalAlpha, 0.5);
   source.destroy();
+});
+
+test("native layers share contiguous positions and preserve each fill's paint and local indices", () => {
+  const doubled = structuredClone(layer);
+  doubled.fills.push(structuredClone(doubled.fills[0]));
+  const tess = new Tessellator();
+  const resolved = resolveFills(doubled, false, tess.tessellate);
+  const first = resolved[0].geometry;
+  const second = resolved[1].geometry;
+  assert.ok(first && second);
+  assert.equal(first.vertices.buffer, second.vertices.buffer);
+  assert.equal(second.vertices.byteOffset, first.vertices.byteOffset + first.vertices.byteLength);
+  assert.deepEqual(first.indices, second.indices);
+
+  let paint = 0;
+  const context = fillContext(doubled, () => ({ color: ++paint }), false, resolved);
+  const built = nativeSystem().updateGpuContext(context);
+  assert.ok(ArrayBuffer.isView(built.geometryData.vertices));
+  assert.equal(built.geometryData.vertices.buffer, first.vertices.buffer);
+  assert.deepEqual(Array.from(built.geometryData.indices), [
+    ...first.indices,
+    ...Array.from(second.indices, (index) => index + first.vertices.length / 2),
+  ]);
+  assert.equal(built.batches.length, 2);
+  assert.equal(built.batches[0].baseColor, 1);
+  assert.equal(built.batches[1].baseColor, 2);
+  assert.equal(built.batches[0].attributeSize, first.vertices.length / 2);
+  assert.equal(built.batches[1].attributeOffset, first.vertices.length / 2);
+});
+
+test("finished positions share across copies and resets while packing the original float precision", () => {
+  const contexts = nativeSystem();
+  for (const count of [4, 40]) {
+    const vertices = new Float64Array(count * 2);
+    for (let i = 0; i < count; i++) {
+      vertices[i * 2] = i + 0.123456789;
+      vertices[i * 2 + 1] = i % 2;
+    }
+
+    const source = new FinishedContext().fillGeometry({
+      vertices,
+      indices: new Uint16Array([0, 1, 2]),
+    });
+    source.batchMode = "no-batch";
+    const original = contexts.updateGpuContext(source);
+    assert.ok(ArrayBuffer.isView(original.geometryData.vertices));
+    assert.equal(original.geometryData.vertices.buffer, vertices.buffer);
+    const buildCopy = () => {
+      const copy = source.clone();
+      copy.batchMode = "batch";
+      copy.tessellationOf = source;
+      const gpu = contexts.updateGpuContext(copy);
+      return { copy, data: gpu.geometryData.vertices, gpu };
+    };
+    const a = buildCopy();
+    const b = buildCopy();
+    assert.equal(a.data, b.data);
+    assert.deepEqual(Array.from(a.data), Array.from(vertices));
+    const transform = new Matrix(1.234567, 0.5, -0.75, 1.09876, 0.125, 7.987);
+    const batch = a.gpu.batches[0];
+    batch.renderable = { groupTransform: transform, groupColor: 0xffffff, groupAlpha: 1 } as never;
+    const packed = new Float32Array(count * 6);
+    DefaultBatcher.prototype.packAttributes.call(
+      {} as never,
+      batch,
+      packed,
+      new Uint32Array(packed.buffer),
+      0,
+      0,
+    );
+    const colored = new Float32Array(count * 14);
+    ColorBatcher.prototype.packAttributes.call(
+      ColorBatcher.prototype,
+      batch,
+      colored,
+      new Uint32Array(colored.buffer),
+      0,
+      0,
+    );
+    for (let i = 0; i < count; i++) {
+      const x = count === 4 ? vertices[i * 2] : Math.fround(vertices[i * 2]);
+      const y = count === 4 ? vertices[i * 2 + 1] : Math.fround(vertices[i * 2 + 1]);
+      assert.equal(packed[i * 6], Math.fround(transform.a * x + transform.c * y + transform.tx));
+      assert.equal(
+        packed[i * 6 + 1],
+        Math.fround(transform.b * x + transform.d * y + transform.ty),
+      );
+      assert.equal(colored[i * 14], packed[i * 6]);
+      assert.equal(colored[i * 14 + 1], packed[i * 6 + 1]);
+    }
+    const saved = Array.from(a.data);
+    source.unload();
+    contexts.updateGpuContext(source);
+    const c = buildCopy();
+    assert.deepEqual(Array.from(a.data), saved);
+    assert.deepEqual(Array.from(c.data), saved);
+    assert.ok(ArrayBuffer.isView(a.data) && ArrayBuffer.isView(c.data));
+    assert.equal(a.data.buffer, c.data.buffer);
+
+    source.destroy();
+    a.copy.destroy();
+    b.copy.destroy();
+    c.copy.destroy();
+  }
+});
+
+test("shared finished positions retain per-fill local and global paint UVs", () => {
+  const vertices = new Float64Array([...geometry.vertices, 20, 0, 30, 0, 30, 10, 20, 10]);
+  const context = new FinishedContext()
+    .fillGeometry(
+      { vertices: vertices.subarray(0, 8), indices: geometry.indices },
+      {
+        texture: Texture.EMPTY,
+        textureSpace: "local",
+      },
+    )
+    .fillGeometry(
+      { vertices: vertices.subarray(8), indices: geometry.indices },
+      {
+        texture: Texture.EMPTY,
+        matrix: new Matrix(),
+        textureSpace: "global",
+      },
+    );
+  const built = nativeSystem().updateGpuContext(context);
+  assert.deepEqual(
+    Array.from(built.geometryData.uvs),
+    [0, 0, 1, 0, 1, 1, 0, 1, 20, 0, 30, 0, 30, 10, 20, 10],
+  );
+  assert.equal(built.batches.length, 1);
+  assert.equal(built.batches[0].attributeSize, 8);
+  context.destroy();
+});
+
+test("shared finished layers widen rebased GPU indices without changing local owned indices", () => {
+  const vertices = new Float64Array(80000 * 2);
+  const indices = new Uint16Array([0, 1, 39999]);
+  const context = new FinishedContext()
+    .fillGeometry({ vertices: vertices.subarray(0, 80000), indices }, 1)
+    .fillGeometry({ vertices: vertices.subarray(80000), indices }, 2);
+  const built = nativeSystem().updateGpuContext(context);
+  assert.ok(built.geometryData.indices instanceof Uint32Array);
+  assert.deepEqual(Array.from(built.geometryData.indices), [0, 1, 39999, 40000, 40001, 79999]);
+  assert.deepEqual(Array.from(indices), [0, 1, 39999]);
+  assert.equal(built.batches[0].attributeSize, 40000);
+  assert.equal(built.batches[1].attributeSize, 40000);
+  context.destroy();
+});
+
+test("a mixed native and JS layer keeps fallback results and unmodified native ownership", () => {
+  const doubled = structuredClone(layer);
+  doubled.fills.push(structuredClone(doubled.fills[0]));
+  let calls = 0;
+  const resolved = resolveFills(doubled, false, () => (++calls === 1 ? geometry : null));
+  assert.equal(resolved[0].geometry, geometry);
+  assert.equal(resolved[1].geometry, null);
+  const make = () => fillContext(doubled, () => ({ color: 1 }), false, resolved);
+  const source = remakeable(make(), make);
+  const contexts = nativeSystem();
+  const built = plain(contexts.updateGpuContext(source).geometryData);
+  const copy = copyContext(source);
+  assert.deepEqual(plain(contexts.updateGpuContext(copy).geometryData), built);
+  assert.equal(calls, 2);
+  source.destroy();
+  copy.destroy();
 });
