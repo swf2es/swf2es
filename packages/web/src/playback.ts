@@ -8,7 +8,9 @@ import {
   type Player,
   type Scripting,
 } from "@swf2es/player";
+import type { Tessellator } from "@swf2es/tessellate";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
+import { configuration } from "./config.js";
 import { place, type ScaleMode, viewport } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
 
@@ -50,6 +52,7 @@ export class Playback {
     private readonly look: () => Look,
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
+    private readonly tessellator: Tessellator | null,
   ) {
     const canvas = renderer.canvas as HTMLCanvasElement;
     canvas.style.position = "absolute";
@@ -58,7 +61,7 @@ export class Playback {
       canvas.style.zIndex = "1";
     }
     box.append(canvas);
-    this.view = new PixiView(renderer);
+    this.view = new PixiView(renderer, { fillTessellator: tessellator?.tessellate });
     if (scripting) {
       scripting.drawer = this.view;
       if (stage3D) {
@@ -95,6 +98,16 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
+    let tessellator: Tessellator | null = null;
+    if (configuration().nativeFills !== false) {
+      try {
+        const { Tessellator } = await import("@swf2es/tessellate");
+        tessellator = new Tessellator();
+      } catch {
+        // An embedder without the optional module can still play through JS.
+      }
+    }
+
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -106,7 +119,7 @@ export class Playback {
       // Filter-backed blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
-    return new Playback(box, player, scripting, renderer, look, report, stage3D);
+    return new Playback(box, player, scripting, renderer, look, report, stage3D, tessellator);
   }
 
   /** Play and draw on every animation frame, from now. */
@@ -317,6 +330,8 @@ export class Playback {
     }
 
     this.view.dropSpares();
+    // Cached geometry owns its buffers; the native scratch can go before the scene does.
+    this.tessellator?.dispose();
     // Cached text measurements hold styles; destroying the scene detaches their text listeners.
     this.view.dispose(this.view.stage);
 

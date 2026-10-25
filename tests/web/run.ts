@@ -23,10 +23,10 @@ import { fileURLToPath } from "node:url";
 import { flashAssembler, script } from "../avm1-script.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
-import { decodePng, type Image } from "../player/image.ts";
+import { compareImages, decodePng, type Image } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
-import { importMap } from "../player/serve.ts";
+import { importMap, importMapSource } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -67,6 +67,45 @@ writeFileSync(
 );
 const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
+writeFileSync(
+  `${site}fills.swf`,
+  w.swf({
+    width: 90,
+    height: 50,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0xffffff),
+      ...[0xff0000, 0x00ff00, 0x0000ff].map((color, i) =>
+        w.shape({
+          id: i + 1,
+          bounds: [0, 400, 0, 400],
+          fills: [color],
+          paths: [
+            {
+              fill1: 1,
+              commands: [
+                { move: [0, 0] },
+                { line: [400, 0] },
+                { line: [400, 400] },
+                { line: [0, 400] },
+                { line: [0, 0] },
+              ],
+            },
+          ],
+        }),
+      ),
+      ...[1, 2, 3].map((character) =>
+        w.place({
+          character,
+          depth: character,
+          matrix: { tx: ((character - 1) * 30 + 5) * 20, ty: 200 },
+        }),
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 // An AS2 SWF that calls the page, tells it what came back, and takes its calls.
@@ -150,6 +189,13 @@ writeFileSync(
 </head>
 <body><script type="module" src="/web-src/page.ts"></script></body>
 </html>`,
+);
+writeFileSync(
+  `${site}fills-csp.html`,
+  readFileSync(`${site}workers.html`, "utf8").replace(
+    "<head>",
+    `<head><meta http-equiv="Content-Security-Policy" content="script-src 'self' ${importMapSource}; style-src 'unsafe-inline'; img-src 'self' data:">`,
+  ),
 );
 writeFileSync(
   `${site}index.html`,
@@ -1418,7 +1464,91 @@ const unisolated = await withPage(
   },
 );
 
-if (failures + unisolated > 0) {
-  console.log(`${failures + unisolated} of ${checks.length + 1} checks failed`);
+let fillFailures = 0;
+let fillReference: Image | null = null;
+for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
+  try {
+    await withPage(
+      "fillRun",
+      async (evaluate, send, _fresh, listen) => {
+        const nativeRequests: string[] = [];
+        await send("Network.enable");
+        listen("Network.requestWillBeSent", (params) => {
+          const request = params.request as { url: string };
+          if (request.url.includes("/tessellate/")) {
+            nativeRequests.push(request.url);
+          }
+        });
+        if (mode === "missing") {
+          await send("Network.setBlockedURLs", { urls: ["*/tessellate/*"] });
+        }
+        if (mode === "csp") {
+          await call(evaluate, 'import("/pixi/packages/unsafe-eval.mjs").then(() => true)');
+        }
+
+        const r = await call<{
+          rect: [number, number, number, number];
+          compiles: number;
+          instances: number;
+        }>(evaluate, `fillRun(${JSON.stringify(mode)})`);
+        const [x, y, width, height] = r.rect;
+        const shot = await send<{ data: string }>("Page.captureScreenshot", {
+          format: "png",
+          clip: { x, y, width, height, scale: 1 },
+        });
+        const image = decodePng(Buffer.from(shot.data, "base64"));
+        for (const [index, color] of [
+          [15, [255, 0, 0, 255]],
+          [45, [0, 255, 0, 255]],
+          [75, [0, 0, 255, 255]],
+        ] as const) {
+          const at = (20 * image.width + index) * 4;
+          assert.deepEqual(Array.from(image.data.subarray(at, at + 4)), color);
+        }
+        if (fillReference) {
+          assert.equal(compareImages(image, fillReference, 0).outliers, 0);
+        } else {
+          fillReference = image;
+        }
+
+        assert.equal(
+          r.compiles,
+          mode === "default" ? 1 : mode === "blocked" || mode === "csp" ? 3 : 0,
+        );
+        assert.equal(r.instances, mode === "default" ? 3 : 0);
+        if (mode === "js") {
+          assert.equal(nativeRequests.length, 0, "the JS opt-out loaded the native package");
+        }
+
+        await call(evaluate, "fillDestroy()");
+        await send("HeapProfiler.collectGarbage");
+        await send("HeapProfiler.collectGarbage");
+        assert.equal(
+          await call(evaluate, "fillSurvivors()"),
+          0,
+          "native memory outlived the playbacks",
+        );
+      },
+      false,
+      {
+        page: mode === "csp" ? "web-test/fills-csp.html" : "web-test/workers.html",
+        mounts: [
+          ["/web-test/", site],
+          ["/web-src/", here],
+          ["/libraries/", `${out}libraries/`],
+        ],
+      },
+    );
+    console.log(`ok native fills: ${mode}`);
+  } catch (error) {
+    fillFailures++;
+    console.log(
+      `not ok native fills: ${mode}\n  ${error instanceof Error ? error.stack : String(error)}`,
+    );
+  }
+}
+
+if (failures + unisolated + fillFailures > 0) {
+  console.log(`${failures + unisolated + fillFailures} of ${checks.length + 6} checks failed`);
   process.exitCode = 1;
 }

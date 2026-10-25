@@ -148,6 +148,9 @@ importers:
       '@swf2es/player-hosts':
         specifier: workspace:*
         version: link:../player-hosts
+      '@swf2es/tessellate':
+        specifier: workspace:*
+        version: link:../tessellate
       pixi.js:
         specifier: workspace:*
         version: link:../../vendor/pixijs
