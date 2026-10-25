@@ -154,6 +154,34 @@ test("dense bands combine coincident edges under both winding rules", () => {
   );
 });
 
+test("dense fractional bands preserve crossings and coincident edge winding", () => {
+  const contours: number[][] = [];
+  for (let i = 0; i < 48; i++) {
+    const x = (i % 3) * 0.125;
+    const width = 80 + i * 2.25;
+    const points = [x, 0, x + width, 96.5, x, 96.5, x + width, 0];
+    contours.push(i % 2 ? [x + width, 0, x, 96.5, x + width, 96.5, x, 0] : points);
+  }
+
+  for (const order of [contours, contours.slice().reverse()]) {
+    for (const nonZero of [false, true]) {
+      const polygons = crossingFill(order, nonZero);
+      assert.ok(polygons);
+      for (let y = 0.389012; y < 96.5; y += 3) {
+        for (let x = -0.381724; x < 192; x += 3) {
+          const sum = order.reduce((n, points) => n + winding(points, x, y), 0);
+          const expected = nonZero ? sum !== 0 : sum % 2 !== 0;
+          assert.equal(
+            polygons.filter((points) => winding(points, x, y) !== 0).length,
+            Number(expected),
+            `${nonZero}, (${x},${y})`,
+          );
+        }
+      }
+    }
+  }
+});
+
 test("unrelated contour levels do not fragment unchanged filled spans", () => {
   const contours = [[0, 0, 10, 10, 0, 10, 10, 0]];
   for (let i = 0; i < 300; i++) {

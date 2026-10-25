@@ -15,6 +15,9 @@ interface Edge {
   index: number;
   count: number;
   at: number;
+  span: number;
+  band: number;
+  right: Edge | null;
 }
 
 interface Contour {
@@ -202,6 +205,9 @@ function loadEdges(contours: number[][], all: boolean): void {
           index: 0,
           count: 0,
           at: 0,
+          span: -1,
+          band: -1,
+          right: null,
         };
         pool[count] = e;
       }
@@ -218,6 +224,8 @@ function loadEdges(contours: number[][], all: boolean): void {
       e.contour = c;
       e.index = i / 2;
       e.count = points.length / 2;
+      e.span = e.band = -1;
+      e.right = null;
       edges[count++] = e;
     }
   }
@@ -226,10 +234,11 @@ function loadEdges(contours: number[][], all: boolean): void {
   edges.sort(byX);
 }
 
-const byX = (a: Edge, b: Edge) => a.minX - b.minX;
-const byY = (a: Edge, b: Edge) => a.minY - b.minY;
-const byAt = (a: Edge, b: Edge) => a.at - b.at;
-const ascending = (a: number, b: number) => a - b;
+// Integer comparator results avoid boxing a fractional difference on every sort comparison.
+const byX = (a: Edge, b: Edge) => (a.minX < b.minX ? -1 : Number(a.minX > b.minX));
+const byY = (a: Edge, b: Edge) => (a.minY < b.minY ? -1 : Number(a.minY > b.minY));
+const byAt = (a: Edge, b: Edge) => (a.at < b.at ? -1 : Number(a.at > b.at));
+const ascending = (a: number, b: number) => (a < b ? -1 : Number(a > b));
 
 /** The parameter of a crossing, Infinity for collinear overlap, or -1. */
 function intersection(edge: Edge, other: Edge): number {
@@ -322,7 +331,6 @@ function tessellate(nonZero: boolean): number[][] {
 
   edges.sort(byY);
   const polygons: number[][] = [];
-  const spans = new Map<Edge, { right: Edge; band: number; points: number[] }>();
   let activeCount = 0;
   let next = 0;
   for (let i = 1; i < bands; i++) {
@@ -345,26 +353,27 @@ function tessellate(nonZero: boolean): number[][] {
       }
     }
 
-    // Small bands need no sort workspace; dense bands keep O(n log n)
-    // sorting. Both compute each interpolated x only once.
-    if (activeCount > 32) {
-      for (let j = 0; j < activeCount; j++) {
-        active[j].at = xAt(active[j], middle);
+    for (let j = 0; j < activeCount; j++) {
+      active[j].at = xAt(active[j], middle);
+    }
+
+    // The last band's order usually needs only a few repairs. Bound the shifts before
+    // falling back to O(n log n), so a band with many new edges cannot turn quadratic.
+    let shifts = 0;
+    for (let j = 1; j < activeCount; j++) {
+      const edge = active[j];
+      let k = j;
+      while (k > 0 && active[k - 1].at > edge.at) {
+        active[k] = active[k - 1];
+        k--;
+        shifts++;
       }
 
-      active.length = activeCount;
-      active.sort(byAt);
-    } else {
-      for (let j = 0; j < activeCount; j++) {
-        const edge = active[j];
-        edge.at = xAt(edge, middle);
-        let k = j;
-        while (k > 0 && active[k - 1].at > edge.at) {
-          active[k] = active[k - 1];
-          k--;
-        }
-
-        active[k] = edge;
+      active[k] = edge;
+      if (activeCount > 32 && shifts > activeCount * 4) {
+        active.length = activeCount;
+        active.sort(byAt);
+        break;
       }
     }
 
@@ -383,14 +392,14 @@ function tessellate(nonZero: boolean): number[][] {
       if (!before && after) {
         left = edge;
       } else if (before && !after && left) {
-        const prior = spans.get(left);
-        if (prior?.right === edge && prior.band === i - 1) {
+        if (left.right === edge && left.band === i - 1) {
           // Unrelated vertices need not split a span with the same straight sides.
-          prior.points[4] = xAt(edge, bottom);
-          prior.points[5] = bottom;
-          prior.points[6] = xAt(left, bottom);
-          prior.points[7] = bottom;
-          prior.band = i;
+          const prior = polygons[left.span];
+          prior[4] = xAt(edge, bottom);
+          prior[5] = bottom;
+          prior[6] = xAt(left, bottom);
+          prior[7] = bottom;
+          left.band = i;
           continue;
         }
 
@@ -404,8 +413,11 @@ function tessellate(nonZero: boolean): number[][] {
           xAt(left, bottom),
           bottom,
         ];
+        // Span metadata stays on the pooled edge, without retaining a returned polygon.
+        left.span = polygons.length;
+        left.band = i;
+        left.right = edge;
         polygons.push(points);
-        spans.set(left, { right: edge, band: i, points });
       }
     }
   }
