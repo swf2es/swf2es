@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Tessellator } from "@swf2es/tessellate";
 import { binary } from "../../packages/tessellate/dist/binary.js";
+import { tessellationFixtures } from "./tessellate-fixtures.ts";
 
 const square = [0, 0, 10, 0, 10, 10, 0, 10];
 
@@ -18,6 +19,17 @@ function area(result: ReturnType<Tessellator["tessellate"]>): number {
   }
 
   return area;
+}
+
+for (const fixture of tessellationFixtures) {
+  test(`native fill fixture: ${fixture.name}`, () => {
+    const tessellator = new Tessellator();
+    for (const nonZero of [false, true]) {
+      const expected = fixture.area[Number(nonZero)];
+      const actual = area(tessellator.tessellate(fixture.contours, nonZero));
+      assert.ok(Math.abs(actual - expected) <= Math.max(1, expected) * 1e-9);
+    }
+  });
 }
 
 test("native tessellation resolves intersections and global winding rules", () => {

@@ -57,6 +57,8 @@ node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks
 node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib and LZMA: the
                               # decoders never trap, refuse with CompressedDataError, and a
                               # SWF that decodes has its prefix
+node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match independent point
+                              # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
 SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts

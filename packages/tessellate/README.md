@@ -49,5 +49,7 @@ This integration is experimental and does not change the default.
 Run the player references and context-loss checks with
 `SWF2ES_NATIVE_FILLS=1` to exercise it. Alternate triangulations can change
 edge samples; pixel differences must be resolved against Flash before
-considering a default change. Standalone measurements and their limits
-are described in `tools/native-tessellation/README.md`.
+considering a default change. `node tests/fuzz/tessellate.ts [cases] [seed]`
+checks both fill rules against independent ray crossings; the default test
+suite includes 2,000 fills and 24,000 coverage samples. Synthetic fixtures
+also check coincident edges, holes and detail at large coordinates.
