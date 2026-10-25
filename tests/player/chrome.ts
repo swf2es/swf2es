@@ -236,6 +236,7 @@ export async function withPage<T>(
       const flags = [
         ...(process.env.SWF2ES_CHECKED ? ["checked"] : []),
         ...(process.env.SWF2ES_NATIVE_FILLS ? ["nativeFills"] : []),
+        ...(process.env.SWF2ES_NATIVE_CONTOURS ? ["nativeContours"] : []),
         ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? ["adobe"] : []),
       ];
       await devtools.send("Page.navigate", {

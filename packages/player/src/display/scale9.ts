@@ -13,7 +13,7 @@ import {
   TextObject,
 } from "./display.js";
 import { apply, invert, type Rect, union } from "./geometry.js";
-import { MOVE, pointsOf, type ShapeLayer } from "./shapes.js";
+import { type Contour, MOVE, pointsOf, type ShapeLayer } from "./shapes.js";
 
 /**
  * One axis of a slice, in the owner's space: the bounds' and the grid's
@@ -260,8 +260,8 @@ function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): Shape
     return layers;
   }
 
-  const move = (path: number[]): number[] => {
-    const out = path.slice();
+  const move = (path: Contour): number[] => {
+    const out = Array.isArray(path) ? path.slice() : Array.from(path);
     for (let i = 0; i < out.length; ) {
       const points = pointsOf(out[i]);
       for (let k = 0; k < points; k++) {

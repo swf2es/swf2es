@@ -3,7 +3,7 @@
 // when the text is shown, as Flash finds it: a SWF may define it after the
 // text that uses it (the corpus's statictext_text).
 import type { Font, Glyph } from "@swf2es/format";
-import { flatten, inside, type Path, shapeLayers } from "../display/shapes.js";
+import { type Contour, flatten, inside, shapeLayers } from "../display/shapes.js";
 import type { Character, StaticTextCharacter } from "../display/timeline.js";
 
 /** A glyph of static text: its font and glyph, its baseline origin and height in twips, its colour 0xAARRGGBB. */
@@ -77,9 +77,9 @@ export function placeGlyphs(
 }
 
 /** A glyph's outline as contours, in the font's units over 20, as shapeLayers reads twips; cached. */
-const outlines = new WeakMap<Glyph, Path[]>();
+const outlines = new WeakMap<Glyph, Contour[]>();
 
-function outlineOf(glyph: Glyph): Path[] {
+function outlineOf(glyph: Glyph): Contour[] {
   let contours = outlines.get(glyph);
   if (!contours) {
     const shape = {

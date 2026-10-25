@@ -6,6 +6,7 @@ import { type FillGeometry, type FillInput, GraphicsContext } from "pixi.js";
 import type { Region as Area } from "../display/gradients.js";
 import { blendLayers, droppedBlends, droppedLayers } from "../display/morph.js";
 import {
+  type Contour,
   CUBIC,
   flatten,
   inside,
@@ -13,7 +14,6 @@ import {
   MOVE,
   orientation,
   type Paint,
-  type Path,
   type ShapeLayer,
 } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
@@ -121,7 +121,7 @@ const FLATNESS = 0.02;
 
 export function trace(
   context: { moveTo(x: number, y: number): unknown; lineTo(x: number, y: number): unknown },
-  path: Path,
+  path: Contour,
 ): void {
   let x = 0;
   let y = 0;
@@ -142,7 +142,12 @@ export function trace(
 
     if (command === CUBIC) {
       // A cubic's chords stray at most 3|Δ²| / 4n² for the larger of its two second differences.
-      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      const c1x = path[i + 1];
+      const c1y = path[i + 2];
+      const c2x = path[i + 3];
+      const c2y = path[i + 4];
+      const ax = path[i + 5];
+      const ay = path[i + 6];
       const bend = Math.max(
         Math.hypot(x - 2 * c1x + c2x, y - 2 * c1y + c2y),
         Math.hypot(c1x - 2 * c2x + ax, c1y - 2 * c2y + ay),
@@ -188,7 +193,7 @@ export function trace(
 }
 
 /** The same chords used for rendering, so a crossing of curves cannot hide between samples. */
-function polygon(path: Path): number[] {
+function polygon(path: Contour): number[] {
   const points: number[] = [];
   const append = (x: number, y: number) => {
     if (points.length === 0 || points[points.length - 2] !== x || points[points.length - 1] !== y) {
@@ -248,7 +253,7 @@ export function destroyContext(context: GraphicsContext): void {
 }
 
 /** The bounds of a fill's contours, whole pixels out. */
-function regionOf(contours: Path[]): Area {
+function regionOf(contours: Contour[]): Area {
   let x0 = Number.POSITIVE_INFINITY;
   let y0 = Number.POSITIVE_INFINITY;
   let x1 = Number.NEGATIVE_INFINITY;

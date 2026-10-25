@@ -5,6 +5,7 @@ import {
   bindActivation,
   bindKeyboard,
   PixiView,
+  type PixiViewOptions,
   type Player,
   type Scripting,
 } from "@swf2es/player";
@@ -53,6 +54,7 @@ export class Playback {
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
     private readonly tessellator: Tessellator | null,
+    geometry: PixiViewOptions,
   ) {
     const canvas = renderer.canvas as HTMLCanvasElement;
     canvas.style.position = "absolute";
@@ -61,7 +63,7 @@ export class Playback {
       canvas.style.zIndex = "1";
     }
     box.append(canvas);
-    this.view = new PixiView(renderer, { fillTessellator: tessellator?.tessellate });
+    this.view = new PixiView(renderer, geometry);
     if (scripting) {
       scripting.drawer = this.view;
       if (stage3D) {
@@ -99,7 +101,9 @@ export class Playback {
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
     let tessellator: Tessellator | null = null;
-    if (configuration().nativeFills !== false) {
+    const nativeFills = configuration().nativeFills !== false;
+    const nativeContours = configuration().nativeContours === true;
+    if (nativeFills || nativeContours) {
       try {
         const { Tessellator } = await import("@swf2es/tessellate");
         tessellator = new Tessellator();
@@ -119,7 +123,10 @@ export class Playback {
       // Filter-backed blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
-    return new Playback(box, player, scripting, renderer, look, report, stage3D, tessellator);
+    return new Playback(box, player, scripting, renderer, look, report, stage3D, tessellator, {
+      fillTessellator: nativeFills ? tessellator?.tessellate : undefined,
+      contourJoiner: nativeContours ? tessellator?.joinContours : undefined,
+    });
   }
 
   /** Play and draw on every animation frame, from now. */

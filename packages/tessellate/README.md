@@ -61,3 +61,40 @@ Run the player references and context-loss checks with
 checks both fill rules against independent ray crossings; the default test
 suite includes 2,000 fills and 24,000 coverage samples. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
+
+## Experimental contour preparation
+
+`configure({ nativeContours: true })` opts new web playbacks into native
+edge joining for SWF shapes whose layers have not already been prepared.
+It is independent of `nativeFills`, and off by default. Direct hosts can use
+`new PixiView(renderer, { contourJoiner: tessellator.joinContours })`.
+The native package is loaded when either option needs it; the playback
+owns the same bounded scratch instance for joining and tessellation.
+
+`joinContours(edges)` takes directed edges in twips, with NaN `cx` marking
+a straight edge. It preserves first-unused-edge priority, contour order,
+curve commands and double precision. Safe-integer endpoints use struct
+keys. Fractional/nonfinite/unsafe endpoints, more than 262,144 edges,
+allocation failure or unavailable Wasm return `null` for JS fallback.
+The remaining shape preparation and curve flattening stay in the player.
+
+Each successful fill copies its flat commands once into a JS-owned
+`Float64Array`; its returned paths are views of that owned buffer. They
+survive later native calls, memory growth, disposal and context restoration.
+One retained path keeps that fill's command buffer; unrelated fills do not
+share it. No cached path views Wasm memory. The existing memory ceiling
+and retained-capacity policy apply to contour calls too.
+
+The renderer passes the optional joiner when it first prepares a static
+SWF shape. Shared lazy characters keep only the resulting paths, never
+the joiner or its Wasm owner. The first preparation result, including JS
+fallback, is cached. Earlier bounds/hit-test access may already have
+prepared a shape through JS. Morph blends, glyph outlines and dynamic
+Graphics retain their existing construction paths in this integration.
+Fill readers accept owned typed contours; editable Graphics commands and
+stroke paths remain number arrays.
+
+Set `SWF2ES_NATIVE_CONTOURS=1` for the player references, context-loss and
+resize tests. It can be combined with `SWF2ES_NATIVE_FILLS=1` to exercise
+both stages. The option remains experimental: fixed-input allocation and
+CPU gains do not establish a repeatable whole-game or GC-time improvement.

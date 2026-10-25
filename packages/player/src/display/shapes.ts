@@ -15,6 +15,21 @@ import type { BitmapCharacter } from "./timeline.js";
  * draws), in pixels.
  */
 export type Path = number[];
+/** A cached fill outline may view an owned double-precision command buffer. */
+export type Contour = Path | Float64Array;
+
+/** Directed fill edges in twips; NaN cx marks a straight edge. */
+export interface ContourEdge {
+  x0: number;
+  y0: number;
+  cx: number;
+  cy: number;
+  x1: number;
+  y1: number;
+}
+
+/** Optional construction hook. Returned paths must own their buffers independently of scratch. */
+export type ContourJoiner = (edges: readonly ContourEdge[]) => Float64Array[] | null;
 
 export const MOVE = 1;
 export const LINE = 2;
@@ -30,14 +45,19 @@ export function pointsOf(command: number): number {
 export type Winding = "evenOdd" | "nonZero";
 
 /** The path as a polygon's points, x y x y..., its curves as eight chords each. */
-export function flatten(path: Path): number[] {
+export function flatten(path: Contour): number[] {
   const points: number[] = [];
   let x = 0;
   let y = 0;
   for (let i = 0; i < path.length; ) {
     const command = path[i];
     if (command === CUBIC) {
-      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      const c1x = path[i + 1];
+      const c1y = path[i + 2];
+      const c2x = path[i + 3];
+      const c2y = path[i + 4];
+      const ax = path[i + 5];
+      const ay = path[i + 6];
       for (let k = 1; k <= 8; k++) {
         const t = k / 8;
         const u = 1 - t;
@@ -51,7 +71,10 @@ export function flatten(path: Path): number[] {
       y = ay;
       i += 7;
     } else if (command === CURVE) {
-      const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
+      const cx = path[i + 1];
+      const cy = path[i + 2];
+      const ax = path[i + 3];
+      const ay = path[i + 4];
       for (let k = 1; k <= 8; k++) {
         const t = k / 8;
         const u = 1 - t;
@@ -95,7 +118,7 @@ export function inside(points: number[], px: number, py: number): boolean {
  * The path's extent, each curve at its true extremes, as [xMin, yMin,
  * xMax, yMax]; null for a path with no points.
  */
-export function extent(path: Path): [number, number, number, number] | null {
+export function extent(path: Contour): [number, number, number, number] | null {
   let xMin = Number.POSITIVE_INFINITY;
   let yMin = Number.POSITIVE_INFINITY;
   let xMax = Number.NEGATIVE_INFINITY;
@@ -120,7 +143,10 @@ export function extent(path: Path): [number, number, number, number] | null {
 
     take(x, y);
     if (command === CURVE) {
-      const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
+      const cx = path[i + 1];
+      const cy = path[i + 2];
+      const ax = path[i + 3];
+      const ay = path[i + 4];
       take(ax, ay);
       // Where the derivative is zero on either axis, if within the curve.
       const at = (t: number) => {
@@ -142,7 +168,12 @@ export function extent(path: Path): [number, number, number, number] | null {
       y = ay;
       i += 5;
     } else if (command === CUBIC) {
-      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      const c1x = path[i + 1];
+      const c1y = path[i + 2];
+      const c2x = path[i + 3];
+      const c2y = path[i + 4];
+      const ax = path[i + 5];
+      const ay = path[i + 6];
       take(ax, ay);
       const at = (t: number) => {
         const u = 1 - t;
@@ -224,7 +255,7 @@ export interface GradientFill {
 export type Paint = Fill | ImageFill | GradientFill;
 
 export interface ShapeLayer {
-  fills: { fill: Paint; contours: Path[]; winding: Winding }[];
+  fills: { fill: Paint; contours: Contour[]; winding: Winding }[];
   /**
    * `triangles` marks drawTriangles' outlines: each path closed, joined at
    * its start, and all read back as one path, as Flash keeps them.
@@ -324,24 +355,25 @@ export function orientation(points: number[]): number {
   return Math.sign(area);
 }
 
-interface Edge {
-  x0: number;
-  y0: number;
-  /** A curve's control point, or NaN for a straight edge. */
-  cx: number;
-  cy: number;
-  x1: number;
-  y1: number;
-}
-
 const TWIPS = 20;
 
-function reversed(e: Edge): Edge {
+function reversed(e: ContourEdge): ContourEdge {
   return { x0: e.x1, y0: e.y1, cx: e.cx, cy: e.cy, x1: e.x0, y1: e.y0 };
 }
 
 /** Each fill's edges joined into contours: from an edge, the next one that starts where it ends. */
-function contours(edges: Edge[]): Path[] {
+function contours(edges: ContourEdge[], joiner?: ContourJoiner): Contour[] {
+  if (joiner) {
+    try {
+      const joined = joiner(edges);
+      if (joined) {
+        return joined;
+      }
+    } catch {
+      // Optional backends can reject a fill without changing its cached fallback.
+    }
+  }
+
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -428,6 +460,7 @@ function contours(edges: Edge[]): Path[] {
 export function shapeLayers(
   shape: Shape,
   bitmap: (id: number) => BitmapCharacter | null = () => null,
+  joiner?: ContourJoiner,
 ): ShapeLayer[] {
   const layers: ShapeLayer[] = [];
   // A bitmap fill's bitmap, its matrix from twips to pixels; one the SWF lacks stays the SWF's fill.
@@ -463,7 +496,7 @@ export function shapeLayers(
   };
   let fills = shape.fills.map(paint);
   let lines = shape.lines;
-  let fillEdges: Edge[][] = fills.map(() => []);
+  let fillEdges: ContourEdge[][] = fills.map(() => []);
   let strokes: Path[][] = lines.map(() => []);
   let fill0 = 0;
   let fill1 = 0;
@@ -479,7 +512,7 @@ export function shapeLayers(
     const layer: ShapeLayer = { fills: [], strokes: [] };
     for (const [i, fill] of fills.entries()) {
       if (fillEdges[i].length) {
-        layer.fills.push({ fill, contours: contours(fillEdges[i]), winding: "evenOdd" });
+        layer.fills.push({ fill, contours: contours(fillEdges[i], joiner), winding: "evenOdd" });
       }
     }
 
@@ -494,7 +527,7 @@ export function shapeLayers(
     }
   };
 
-  const edge = (e: Edge) => {
+  const edge = (e: ContourEdge) => {
     // An edge with one fill on both sides is inside it and bounds nothing.
     // Given to it both ways, it would join its fill's contours across that
     // fill, into contours that cross and that the containment tree misfills.

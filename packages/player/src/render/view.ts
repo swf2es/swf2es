@@ -38,6 +38,7 @@ import {
 } from "../display/display.js";
 import { shifted } from "../display/geometry.js";
 import { sliceDrawn } from "../display/scale9.js";
+import type { ContourJoiner } from "../display/shapes.js";
 import type { Player } from "../player.js";
 import { Art } from "./art.js";
 import { retireBatchers, trimBatchers, viewGroups } from "./batchers.js";
@@ -112,6 +113,8 @@ function maskLink(
 export interface PixiViewOptions {
   /** Experimental: construct fills from owned triangles, falling back to JS on rejection. */
   fillTessellator?: FillTessellator;
+  /** Experimental: join unprepared SWF shape fills into owned typed paths; off by default. */
+  contourJoiner?: ContourJoiner;
 }
 
 export class PixiView {
@@ -204,6 +207,7 @@ export class PixiView {
 
   private readonly fresh: boolean;
   private readonly fillTessellator?: FillTessellator;
+  private readonly contourJoiner?: ContourJoiner;
 
   constructor(
     readonly renderer: Renderer,
@@ -215,6 +219,8 @@ export class PixiView {
     this.fresh = fresh;
     this.fillTessellator =
       typeof options === "boolean" ? source?.fillTessellator : options.fillTessellator;
+    this.contourJoiner =
+      typeof options === "boolean" ? source?.contourJoiner : options.contourJoiner;
     hookRenderer(renderer);
     this.art = new Art(
       renderer,
@@ -224,6 +230,7 @@ export class PixiView {
       source?.art ?? null,
       this.counts,
       this.fillTessellator,
+      this.contourJoiner,
     );
     this.spares = new SpareNodes(fresh, this.nodes, this.containerNodes);
     this.planes = new Planes(renderer, this.nodes, this.containerNodes, (o, node) => {

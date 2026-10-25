@@ -40,7 +40,7 @@ function joined(edges: [number, number, number, number, number?, number?][]): nu
     truncated: false,
   };
 
-  return shapeLayers(shape)[0]?.fills[0]?.contours ?? [];
+  return (shapeLayers(shape)[0]?.fills[0]?.contours ?? []).map((path) => Array.from(path));
 }
 
 test("contours choose the first unused edge at a shared junction, preserving curves", () => {

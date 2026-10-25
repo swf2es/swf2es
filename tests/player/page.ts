@@ -41,8 +41,15 @@ import { autoDetectRenderer } from "pixi.js";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
 // Exercise the optional package across the same references and context-loss tests as the default.
-const fillOptions = new URLSearchParams(location.search).has("nativeFills")
-  ? { fillTessellator: new (await import("@swf2es/tessellate")).Tessellator().tessellate }
+const nativeFills = new URLSearchParams(location.search).has("nativeFills");
+const nativeContours = new URLSearchParams(location.search).has("nativeContours");
+const tessellator =
+  nativeFills || nativeContours ? new (await import("@swf2es/tessellate")).Tessellator() : null;
+const fillOptions = tessellator
+  ? {
+      fillTessellator: nativeFills ? tessellator.tessellate : undefined,
+      contourJoiner: nativeContours ? tessellator.joinContours : undefined,
+    }
   : {};
 
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe

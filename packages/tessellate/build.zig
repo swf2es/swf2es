@@ -5,8 +5,8 @@ const sources = [_][]const u8{
     "bucketalloc.c", "dict.c", "geom.c", "mesh.c", "priorityq.c", "sweep.c", "tess.c",
 };
 const exports = [_][]const u8{
-    "reset",     "alloc",     "run",      "vertices", "indices", "vertexCount", "triangleCount",
-    "highWater", "allocated", "setLimit",
+    "reset",     "alloc",     "run",      "vertices",     "indices", "vertexCount", "triangleCount",
+    "highWater", "allocated", "setLimit", "joinContours",
 };
 
 pub fn build(b: *std.Build) void {

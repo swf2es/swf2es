@@ -55,7 +55,13 @@ import type { BitmapStore } from "../bitmap/bitmap.js";
 import { FontSet } from "../text/fonts.js";
 import type { DisplayObject, MovieClip } from "./display.js";
 import type { Rect } from "./geometry.js";
-import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
+import {
+  boundsOf,
+  type ContourJoiner,
+  type ShapeBounds,
+  type ShapeLayer,
+  shapeLayers,
+} from "./shapes.js";
 
 /**
  * What a frame does, in tag order: places, removals and, in an AVM1
@@ -161,6 +167,8 @@ export interface ShapeCharacter {
   /** The DefineShape's bounds: its records, read once into `layers`, are not kept. */
   shape: ShapeBounds;
   layers: ShapeLayer[];
+  /** First construction may use a renderer's optional backend; only the owned result is kept. */
+  prepareLayers?(joiner: ContourJoiner): void;
 }
 
 /** DefineMorphShape or DefineMorphShape2, and its latest blends by ratio, least recent first (morph.ts). */
@@ -473,6 +481,14 @@ function shapeOf(
   }
 
   let layers: ShapeLayer[] | null = null;
+  const prepare = (joiner?: ContourJoiner) => {
+    layers ??= shapeLayers(
+      readShape(bytes, t.code, t.offset, t.length),
+      (id) => bitmaps.get(id) ?? null,
+      joiner,
+    );
+    return layers;
+  };
   const character: ShapeCharacter = {
     type: "shape",
     id: shape.id,
@@ -480,11 +496,10 @@ function shapeOf(
     // Drawn into layers when first asked for, from the tag: most of the shapes a large
     // application's SWFs define are never shown, and their layers were most of its memory.
     get layers() {
-      layers ??= shapeLayers(
-        readShape(bytes, t.code, t.offset, t.length),
-        (id) => bitmaps.get(id) ?? null,
-      );
-      return layers;
+      return prepare();
+    },
+    prepareLayers(joiner) {
+      prepare(joiner);
     },
   };
   if (bitmaps.size === 0) {

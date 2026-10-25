@@ -14,6 +14,7 @@ import { BitmapStore } from "../bitmap/bitmap.js";
 import { type Rect, union } from "./geometry.js";
 import {
   type Close,
+  type Contour,
   CUBIC,
   CURVE,
   extent,
@@ -516,7 +517,7 @@ export class Drawing {
     }
 
     let r: Rect | null = null;
-    const take = (path: Path, pad: number) => {
+    const take = (path: Contour, pad: number) => {
       const e = extent(path);
       if (e) {
         r = union(r, { xMin: e[0] - pad, yMin: e[1] - pad, xMax: e[2] + pad, yMax: e[3] + pad });

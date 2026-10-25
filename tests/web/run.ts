@@ -1466,7 +1466,17 @@ const unisolated = await withPage(
 
 let fillFailures = 0;
 let fillReference: Image | null = null;
-for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
+for (const mode of [
+  "js",
+  "default",
+  "blocked",
+  "missing",
+  "csp",
+  "contours",
+  "contours-blocked",
+  "contours-missing",
+  "contours-csp",
+] as const) {
   try {
     await withPage(
       "fillRun",
@@ -1479,10 +1489,10 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
             nativeRequests.push(request.url);
           }
         });
-        if (mode === "missing") {
+        if (mode.endsWith("missing")) {
           await send("Network.setBlockedURLs", { urls: ["*/tessellate/*"] });
         }
-        if (mode === "csp") {
+        if (mode.endsWith("csp")) {
           await call(evaluate, 'import("/pixi/packages/unsafe-eval.mjs").then(() => true)');
         }
 
@@ -1511,11 +1521,20 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
           fillReference = image;
         }
 
-        assert.equal(
-          r.compiles,
-          mode === "default" ? 1 : mode === "blocked" || mode === "csp" ? 3 : 0,
-        );
-        assert.equal(r.instances, mode === "default" ? 3 : 0);
+        if (mode.startsWith("contours") && !mode.endsWith("missing")) {
+          assert.ok(r.compiles >= 1 && r.compiles <= 3);
+          if (mode === "contours") {
+            assert.ok(r.instances >= 1 && r.instances <= 3);
+          } else {
+            assert.equal(r.instances, 0);
+          }
+        } else {
+          assert.equal(
+            r.compiles,
+            mode === "default" ? 1 : mode === "blocked" || mode === "csp" ? 3 : 0,
+          );
+          assert.equal(r.instances, mode === "default" ? 3 : 0);
+        }
         if (mode === "js") {
           assert.equal(nativeRequests.length, 0, "the JS opt-out loaded the native package");
         }
@@ -1531,7 +1550,7 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
       },
       false,
       {
-        page: mode === "csp" ? "web-test/fills-csp.html" : "web-test/workers.html",
+        page: mode.endsWith("csp") ? "web-test/fills-csp.html" : "web-test/workers.html",
         mounts: [
           ["/web-test/", site],
           ["/web-src/", here],

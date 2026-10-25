@@ -703,9 +703,24 @@ const fillMemories: WeakRef<WebAssembly.Memory>[] = [];
 let fillPlayer: Player | null = null;
 
 /** Exercise native selection and teardown without compiling scripts or decoding compressed data. */
-async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
+async function fillRun(
+  mode:
+    | "js"
+    | "default"
+    | "blocked"
+    | "missing"
+    | "csp"
+    | "contours"
+    | "contours-blocked"
+    | "contours-missing"
+    | "contours-csp",
+) {
   const { web } = await loading;
-  web.configure({ nativeFills: mode === "js" ? false : undefined });
+  const contours = mode.startsWith("contours");
+  web.configure({
+    nativeFills: mode === "js" || contours ? false : undefined,
+    nativeContours: contours,
+  });
   const Module = WebAssembly.Module;
   const Instance = WebAssembly.Instance;
   let compiles = 0;
@@ -713,7 +728,7 @@ async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
   WebAssembly.Module = new Proxy(Module, {
     construct(target, args) {
       compiles++;
-      if (mode === "blocked") {
+      if (mode.endsWith("blocked")) {
         throw new WebAssembly.CompileError("native compilation unavailable for this test");
       }
 

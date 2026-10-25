@@ -25,6 +25,7 @@ const inputs = [
   join(here, "build.zig"),
   join(here, "build.zig.zon"),
   join(here, "src/root.zig"),
+  join(here, "src/contours.zig"),
   ...cFiles(join(here, "include")),
   ...cFiles(join(vendor, "Include")),
   ...cFiles(join(vendor, "Source")),

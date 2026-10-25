@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readShape, readSwf } from "@swf2es/format";
+import { Tessellator } from "@swf2es/tessellate";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
 import { placeGlyphs } from "../../../../packages/player/dist/text/static.js";
@@ -130,4 +131,42 @@ test("a shape is drawn into layers when first asked for, as it was at once", () 
   const eager = shapeLayers(readShape(swf.bytes, tag.code, tag.offset, tag.length));
   assert.deepEqual(shape.layers, eager);
   assert.equal(shape.layers, shape.layers);
+});
+
+test("shared lazy shapes cache owned typed contours across backend disposal and later renderers", () => {
+  const bytes = movie(0xc56f84);
+  const first = readLibrary(readSwf(bytes)).characters.get(1);
+  const second = readLibrary(readSwf(bytes)).characters.get(1);
+  assert.ok(first?.type === "shape");
+  assert.equal(first, second);
+  const tessellator = new Tessellator();
+  let calls = 0;
+  first.prepareLayers?.((edges) => {
+    calls++;
+    return tessellator.joinContours(edges);
+  });
+  assert.equal(calls, 1);
+  const contours = first.layers[0].fills[0].contours;
+  assert.ok(contours.every((path) => path instanceof Float64Array));
+  const copies = contours.map((path) => Array.from(path));
+  tessellator.dispose();
+  first.prepareLayers?.(() => assert.fail("cached contours retried the backend"));
+  assert.deepEqual(
+    contours.map((path) => Array.from(path)),
+    copies,
+  );
+  assert.equal(tessellator.capacity, 0);
+});
+
+test("a lazy shape keeps its JS fallback after the first backend rejects", () => {
+  const character = readLibrary(readSwf(movie(0x5e2907))).characters.get(1);
+  assert.ok(character?.type === "shape");
+  let calls = 0;
+  character.prepareLayers?.(() => {
+    calls++;
+    return null;
+  });
+  character.prepareLayers?.(() => assert.fail("cached fallback retried the backend"));
+  assert.equal(calls, 1);
+  assert.ok(character.layers[0].fills[0].contours.every((path) => Array.isArray(path)));
 });

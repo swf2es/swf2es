@@ -17,6 +17,7 @@ import type { Line, Matrix } from "@swf2es/format";
 import type { BitmapStore } from "../bitmap/bitmap.js";
 import { apply, concat } from "./geometry.js";
 import {
+  type Contour,
   CUBIC,
   CURVE,
   LINE,
@@ -230,7 +231,7 @@ function cubicSegments(
 }
 
 /** A path's segments through `m`, in whole twips. */
-function segmentsOf(path: Path, m: Matrix): Segment[] {
+function segmentsOf(path: Contour, m: Matrix): Segment[] {
   const out: Segment[] = [];
   const point = (i: number): [number, number] => {
     const [x, y] = apply(m, path[i], path[i + 1]);
@@ -282,7 +283,7 @@ function writeSegment(w: Writer, s: Segment): void {
  * A fill's contours in the order Flash links its edges back up: one that
  * starts where the last ended follows it, before the rest in their order.
  */
-function writeContours(w: Writer, contours: readonly Path[], m: Matrix): void {
+function writeContours(w: Writer, contours: readonly Contour[], m: Matrix): void {
   const left = contours.map((c) => segmentsOf(c, m)).filter((c) => c.length);
   while (left.length) {
     let next = left.findIndex((c) => c[0].x0 === w.x && c[0].y0 === w.y);
