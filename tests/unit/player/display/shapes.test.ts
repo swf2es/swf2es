@@ -2,10 +2,102 @@
 // its edges joined into each fill's contours.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readShape, readSwf } from "../../../../packages/format/dist/index.js";
+import {
+  readShape,
+  readSwf,
+  type Shape,
+  type ShapeRecord,
+} from "../../../../packages/format/dist/index.js";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
 import type { BitmapCharacter } from "../../../../packages/player/dist/display/timeline.js";
 import * as w from "../../../swf-writer.ts";
+
+function joined(edges: [number, number, number, number, number?, number?][]): number[][] {
+  const records: ShapeRecord[] = [];
+  for (const [x0, y0, x1, y1, cx, cy = 0] of edges) {
+    records.push({
+      type: "style",
+      moveTo: { x: x0, y: y0 },
+      fill0: 0,
+      fill1: 1,
+      line: 0,
+      styles: null,
+    });
+    records.push(
+      cx === undefined
+        ? { type: "line", dx: x1 - x0, dy: y1 - y0 }
+        : { type: "curve", cx: cx - x0, cy: cy - y0, ax: x1 - cx, ay: y1 - cy },
+    );
+  }
+
+  const shape: Shape = {
+    id: 1,
+    bounds: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
+    edgeBounds: null,
+    fills: [{ type: "solid", color: 0xff336699 }],
+    lines: [],
+    records,
+    truncated: false,
+  };
+
+  return shapeLayers(shape)[0]?.fills[0]?.contours ?? [];
+}
+
+test("contours choose the first unused edge at a shared junction, preserving curves", () => {
+  assert.deepEqual(
+    joined([
+      [-20, 0, 0, 0],
+      [0, 0, 20, 0],
+      [0, 0, 0, 20, 20, 20],
+      [20, 0, 0, 0],
+      [0, 20, -20, 0],
+    ]),
+    [[1, -1, 0, 2, 0, 0, 2, 1, 0, 2, 0, 0, 3, 1, 1, 0, 1, 2, -1, 0]],
+  );
+});
+
+test("an open endpoint never joins an edge that starts at a different coordinate", () => {
+  assert.deepEqual(
+    joined([
+      [0, 0, 0, 20],
+      [20, 0, 40, 0],
+    ]),
+    [
+      [1, 0, 0, 2, 0, 1],
+      [1, 1, 0, 2, 2, 0],
+    ],
+  );
+});
+
+test("contour joining retains fractional coordinates and very large coordinate spans", () => {
+  for (const size of [0.25, 20, 1e9, Number.MAX_SAFE_INTEGER]) {
+    assert.deepEqual(
+      joined([
+        [0, 0, size, 0],
+        [size, 0, size, size],
+        [size, size, 0, 0],
+      ]),
+      [[1, 0, 0, 2, size / 20, 0, 2, size / 20, size / 20, 2, 0, 0]],
+    );
+  }
+});
+
+test("completed zero-length contours are not reused by later open contours", () => {
+  assert.deepEqual(
+    joined([
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [20, 0, 0, 0],
+      [40, 0, 0, 0],
+    ]),
+    [
+      [1, 0, 0, 2, 0, 0],
+      [1, 0, 0, 2, 0, 0],
+      [1, 1, 0, 2, 0, 0],
+      [1, 2, 0, 2, 0, 0],
+    ],
+  );
+});
 
 test("a bitmap fill takes its bitmap, its matrix from twips to pixels; one the SWF lacks stays its own", () => {
   const square = (fill: w.BitmapFill) =>
