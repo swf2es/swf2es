@@ -342,15 +342,41 @@ function reversed(e: Edge): Edge {
 
 /** Each fill's edges joined into contours: from an edge, the next one that starts where it ends. */
 function contours(edges: Edge[]): Path[] {
-  const from = new Map<string, number[]>();
-  for (const [i, e] of edges.entries()) {
-    const key = `${e.x0},${e.y0}`;
-    const list = from.get(key);
-    if (list) {
-      list.push(i);
-    } else {
-      from.set(key, [i]);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let numeric = true;
+  for (const e of edges) {
+    if (
+      !Number.isSafeInteger(e.x0) ||
+      !Number.isSafeInteger(e.y0) ||
+      !Number.isSafeInteger(e.x1) ||
+      !Number.isSafeInteger(e.y1)
+    ) {
+      numeric = false;
+      break;
     }
+
+    minX = Math.min(minX, e.x0, e.x1);
+    minY = Math.min(minY, e.y0, e.y1);
+    maxX = Math.max(maxX, e.x0, e.x1);
+    maxY = Math.max(maxY, e.y0, e.y1);
+  }
+
+  const height = maxY - minY + 1;
+  // Integer coordinates fit one exact numeric key only while the whole grid fits a safe integer.
+  numeric &&= Number.isSafeInteger((maxX - minX + 1) * height);
+  const key = (x: number, y: number): number | string =>
+    numeric ? (x - minX) * height + (y - minY) : `${x},${y}`;
+  const from = new Map<number | string, number>();
+  // Links are index + 1, leaving zero for the end; reverse insertion preserves record order.
+  const next = new Uint32Array(edges.length);
+  for (let i = edges.length - 1; i >= 0; i--) {
+    const e = edges[i];
+    const at = key(e.x0, e.y0);
+    next[i] = from.get(at) ?? 0;
+    from.set(at, i + 1);
   }
 
   const used = new Uint8Array(edges.length);
@@ -376,12 +402,19 @@ function contours(edges: Edge[]): Path[] {
         break;
       }
 
-      const next = from.get(`${e.x1},${e.y1}`)?.find((k) => !used[k]);
-      if (next === undefined) {
+      const at = key(e.x1, e.y1);
+      let candidate = from.get(at) ?? 0;
+      while (candidate !== 0 && used[candidate - 1]) {
+        candidate = next[candidate - 1];
+      }
+
+      if (candidate === 0) {
+        from.delete(at);
         break;
       }
 
-      i = next;
+      from.set(at, next[candidate - 1]);
+      i = candidate - 1;
       e = edges[i];
     }
 
