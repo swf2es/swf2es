@@ -5052,7 +5052,8 @@ quality smooths no bitmap either.
 The web host uses native fill tessellation by default. Each playback owns a
 `Tessellator` from `@swf2es/tessellate`, loaded when playback is created, and
 disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
-false })` keeps new playbacks on JS and skips loading the native package.
+false })` keeps new playbacks on JS fill tessellation. The native package
+is skipped when contour preparation is also disabled.
 A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation
 is tried only once per tessellator. A rejected fill resolves its JS fallback
 at construction, and the successful result is cached. Cached geometry owns
@@ -5060,6 +5061,22 @@ its CPU buffers independently of Wasm scratch, including for context restoration
 `@swf2es/player` retains its generic `PixiView` fill hook without importing the
 native package. Different triangle layouts can change subpixel edge coverage
 and paint interpolation, so native and JS need not draw identical pixels.
+
+`configure({ nativeContours: true })` separately opts into experimental
+native edge joining for unprepared static SWF shapes; it is off by default.
+`PixiView` passes its generic `contourJoiner` hook when first preparing a
+lazy character. Shared characters cache only owned paths, not the hook or
+its playback-owned Wasm instance. An earlier JS preparation or a rejected
+native attempt is kept; bounds and hit tests do not retry construction.
+Morph blends, glyphs and dynamic Graphics keep their existing builders.
+Each accepted fill copies flat double commands once into a JS-owned
+buffer, with typed views for its individual contours. Those views survive
+native arena reuse, disposal and context restoration. They share storage
+within a fill only; strokes and editable Graphics paths remain arrays.
+Curve readers index these commands directly to avoid allocating a new
+typed backing buffer for every curve. Contour calls share the tessellator's
+memory ceiling and retained-capacity policy and reject unsupported
+coordinates or more than 262,144 edges to JS fallback.
 
 `configure` (`config.ts`) sets what every player on the page shares:
 `libraries`, the URLs of builtin.abc and playerglobal.abc, which the page

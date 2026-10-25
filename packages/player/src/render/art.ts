@@ -21,7 +21,12 @@ import {
   TextObject,
 } from "../display/display.js";
 import { type Slice, sliceLayers } from "../display/scale9.js";
-import { facing, type ShapeLayer, type TriangleMesh } from "../display/shapes.js";
+import {
+  type ContourJoiner,
+  facing,
+  type ShapeLayer,
+  type TriangleMesh,
+} from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import { characterStore, gpuBitmaps } from "./bitmaps.js";
 import type { Node } from "./node.js";
@@ -218,6 +223,7 @@ export class Art {
     /** The view's counts of lines' contexts made and reused. */
     private readonly counts: { strokeContexts: number; strokeReuses: number },
     private readonly tessellator?: FillTessellator,
+    private readonly contourJoiner?: ContourJoiner,
   ) {
     this.lines = new StrokeContexts(counts);
     this.saffron = new SaffronView(renderer, !fresh);
@@ -443,6 +449,10 @@ export class Art {
     }
 
     const shape = o instanceof ShapeObject ? this.shapeOf(o, node) : null;
+    if (this.contourJoiner) {
+      shape?.prepareLayers?.(this.contourJoiner);
+    }
+
     // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
     const w = node.world;
     node.mirrored = w[0] * w[3] - w[1] * w[2] < 0;

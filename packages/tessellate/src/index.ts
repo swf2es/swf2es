@@ -6,6 +6,16 @@ export interface FillGeometry {
   indices: Uint16Array | Uint32Array;
 }
 
+/** Directed twip coordinates. NaN cx marks a straight edge. */
+export interface ContourEdge {
+  x0: number;
+  y0: number;
+  cx: number;
+  cy: number;
+  x1: number;
+  y1: number;
+}
+
 interface NativeExports {
   memory: WebAssembly.Memory;
   reset(): void;
@@ -17,6 +27,7 @@ interface NativeExports {
   triangleCount(): number;
   highWater(): number;
   setLimit(n: number): void;
+  joinContours(edges: number, count: number): number;
 }
 
 export interface TessellatorOptions {
@@ -59,6 +70,82 @@ export class Tessellator {
     this.instance = null;
   }
 
+  private native(): NativeExports {
+    module ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
+    this.instance ??= new WebAssembly.Instance(module, {
+      env: {
+        failure: () => {
+          throw new Error("tessellation allocation failed");
+        },
+      },
+    }).exports as unknown as NativeExports;
+    this.instance.reset();
+    this.instance.setLimit(this.limit);
+    return this.instance;
+  }
+
+  /** Experimental edge joining. Every path views one owned command buffer for this fill. */
+  readonly joinContours = (edges: readonly ContourEdge[]): Float64Array[] | null => {
+    if (this.unavailable || edges.length > 262144) {
+      return null;
+    }
+
+    if (edges.length === 0) {
+      return [];
+    }
+
+    try {
+      const x = this.native();
+      const at = x.alloc(edges.length * 48);
+      if (!at) {
+        throw new Error("contour input allocation failed");
+      }
+
+      const input = new Float64Array(x.memory.buffer, at, edges.length * 6);
+      let i = 0;
+      for (const e of edges) {
+        if (
+          !Number.isSafeInteger(e.x0) ||
+          !Number.isSafeInteger(e.y0) ||
+          !Number.isSafeInteger(e.x1) ||
+          !Number.isSafeInteger(e.y1)
+        ) {
+          return null;
+        }
+
+        input[i++] = e.x0;
+        input[i++] = e.y0;
+        input[i++] = e.cx;
+        input[i++] = e.cy;
+        input[i++] = e.x1;
+        input[i++] = e.y1;
+      }
+
+      const result = x.joinContours(at, edges.length);
+      if (!result) {
+        throw new Error("contour joining rejected");
+      }
+
+      const info = new Uint32Array(x.memory.buffer, result, 4);
+      const commands = new Float64Array(x.memory.buffer, info[0], info[1]).slice();
+      const offsets = new Uint32Array(x.memory.buffer, info[2], info[3] + 1);
+      const paths: Float64Array[] = [];
+      for (let path = 0; path < info[3]; path++) {
+        paths.push(commands.subarray(offsets[path], offsets[path + 1]));
+      }
+
+      return paths;
+    } catch {
+      this.unavailable = module === null;
+      this.dispose();
+      return null;
+    } finally {
+      if (this.capacity > this.keep) {
+        this.dispose();
+      }
+    }
+  };
+
   /** Use as PixiView's fillTessellator. Contours must already have their curves flattened. */
   readonly tessellate = (
     contours: readonly (readonly number[])[],
@@ -95,17 +182,7 @@ export class Tessellator {
     }
 
     try {
-      module ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
-      this.instance ??= new WebAssembly.Instance(module, {
-        env: {
-          failure: () => {
-            throw new Error("tessellation allocation failed");
-          },
-        },
-      }).exports as unknown as NativeExports;
-      const x = this.instance;
-      x.reset();
-      x.setLimit(this.limit);
+      const x = this.native();
       const coordAt = x.alloc(count * 16);
       const endsAt = x.alloc(contours.length * 4);
       if (!coordAt || !endsAt) {

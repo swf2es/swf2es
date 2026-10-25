@@ -65,6 +65,8 @@ export interface Configuration {
   lazyCompilation?: boolean;
   /** Use native Wasm fill tessellation, with JS fallback; on by default. Applies to new playbacks. */
   nativeFills?: boolean;
+  /** Experimental owned typed contours for unprepared SWF shapes; off by default. */
+  nativeContours?: boolean;
   /** Experimental Stage3D surface factory; absent/null keeps ErrorEvent #3702. */
   stage3D?: Stage3DSurfaceFactory | null;
   /**

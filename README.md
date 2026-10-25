@@ -73,7 +73,9 @@ back its GL context, audio and sockets. It fires `load`, `error` and
 Fill tessellation uses `@swf2es/tessellate`'s Wasm module by default, with
 JS fallback if it is unavailable or rejects a fill. Include that package in
 the import map. `configure({ nativeFills: false })` keeps new playbacks on
-JS and skips loading the native package.
+JS fill tessellation and skips loading the native package unless experimental
+contour preparation is enabled. `configure({ nativeContours: true })` opts into
+owned typed contours for unprepared static SWF shapes; it is off by default.
 
 ActionScript's workers (`flash.system.Worker`) run on Web Workers by
 default, as in Flash. `configure({ workers: false })` turns them off for

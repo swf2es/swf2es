@@ -4,6 +4,7 @@
 // are provided here so no C wrapper or libc is needed.
 const std = @import("std");
 const c = @import("c");
+const joining = @import("contours.zig");
 
 pub const panic = std.debug.no_panic;
 
@@ -17,6 +18,7 @@ var spent: usize = 0;
 // Absolute address ceiling, including static data and the C stack.
 var ceiling: usize = 128 << 20;
 var tess: ?*c.TESStesselator = null;
+var joined = [_]u32{ 0, 0, 0, 0 };
 
 export fn reset() void {
     if (base == 0) {
@@ -26,6 +28,7 @@ export fn reset() void {
     top = base;
     spent = 0;
     tess = null;
+    joined = .{ 0, 0, 0, 0 };
 }
 
 export fn setLimit(n: usize) void {
@@ -128,6 +131,25 @@ export fn highWater() usize {
 export fn allocated() usize {
     // Diagnostic payload bytes reserved since reset, excluding headers and alignment.
     return spent;
+}
+
+// A descriptor keeps output access to one call; all views are copied before arena reuse.
+export fn joinContours(edges: [*]const joining.Edge, count: usize) usize {
+    tess = null;
+    joined = .{ 0, 0, 0, 0 };
+    if (count == 0 or count > 262144) return 0;
+    const at = alloc(count * 160 + 65536);
+    if (at == 0) return 0;
+    const buffer: [*]u8 = @ptrFromInt(at);
+    var arena = std.heap.FixedBufferAllocator.init(buffer[0 .. count * 160 + 65536]);
+    const result = joining.join(edges[0..count], arena.allocator()) catch return 0;
+    joined = .{
+        @intFromPtr(result.commands.ptr),
+        @intCast(result.commands.len),
+        @intFromPtr(result.offsets.ptr),
+        @intCast(result.offsets.len - 1),
+    };
+    return @intFromPtr(&joined);
 }
 
 export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: usize, nonzero: i32) i32 {

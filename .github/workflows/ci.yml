@@ -42,6 +42,7 @@ jobs:
       - run: node tests/player/run.ts && node tests/player/context-loss.ts && node tests/player/leak.ts
         env:
           SWF2ES_NATIVE_FILLS: "1"
+          SWF2ES_NATIVE_CONTOURS: "1"
       - run: pnpm test:checked
       - run: pnpm determinism
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
@@ -87,3 +88,4 @@ jobs:
       - run: pnpm corpus
         env:
           SWF2ES_NATIVE_FILLS: "1"
+          SWF2ES_NATIVE_CONTOURS: "1"

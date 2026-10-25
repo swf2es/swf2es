@@ -27,7 +27,7 @@ import {
   union,
 } from "./geometry.js";
 import { sliceFor, sliceLayers, withinMask } from "./scale9.js";
-import { facing, flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
+import { type Contour, facing, flatten, inside, orientation, type ShapeLayer } from "./shapes.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -541,9 +541,9 @@ interface Flat {
  * move, of every shape under the point's ancestors, and a curve's chords
  * cost more than a box test that rules most of them out.
  */
-const flats = new WeakMap<Path, Flat>();
+const flats = new WeakMap<Contour, Flat>();
 
-function flattened(path: Path): Flat {
+function flattened(path: Contour): Flat {
   const cached = flats.get(path);
   if (cached && cached.length === path.length) {
     return cached;
