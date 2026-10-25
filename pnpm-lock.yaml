@@ -132,6 +132,8 @@ importers:
         specifier: workspace:*
         version: link:../format
 
+  packages/tessellate: {}
+
   packages/web:
     dependencies:
       '@swf2es/codegen':
@@ -193,6 +195,9 @@ importers:
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@swf2es/tessellate':
+        specifier: workspace:*
+        version: link:../../packages/tessellate
       pixi.js:
         specifier: workspace:*
         version: link:../../vendor/pixijs
@@ -217,6 +222,9 @@ importers:
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@swf2es/tessellate':
+        specifier: workspace:*
+        version: link:../../packages/tessellate
 
   tests/web:
     dependencies:

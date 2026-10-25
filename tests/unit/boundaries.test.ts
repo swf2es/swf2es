@@ -11,6 +11,7 @@ const allowed: Record<string, string[]> = {
   compress: [],
   format: ["compress"],
   mp3: [],
+  tessellate: [],
   context3d: [],
   codegen: ["format"],
   runtime: ["format"],
@@ -28,11 +29,11 @@ const vendored: Record<string, { dir: string; users: string[] }> = {
 };
 
 // C-only libraries are compiled by their wrapper packages, rather than linked by pnpm.
-const nativeVendor = ["lzma-sdk", "minimp3", "zlib"];
+const nativeVendor = ["libtess2", "lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
-const portable = ["compress", "format", "codegen", "runtime"];
+const portable = ["tessellate", "compress", "format", "codegen", "runtime"];
 
 const root = new URL("../../packages/", import.meta.url);
 const appsRoot = new URL("../../apps/", import.meta.url);

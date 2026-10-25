@@ -18,6 +18,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 
 /** URL prefixes and the directories they serve. */
 const mounts: [string, string][] = [
+  ["/tessellate/", join(root, "packages/tessellate/dist/")],
   ["/compress/", join(root, "packages/compress/dist/")],
   ["/format/", join(root, "packages/format/dist/")],
   ["/mp3/", join(root, "packages/mp3/dist/")],
@@ -35,6 +36,7 @@ const mounts: [string, string][] = [
 
 export const importMap = {
   imports: {
+    "@swf2es/tessellate": "/tessellate/index.js",
     "@swf2es/compress": "/compress/index.js",
     "@swf2es/format": "/format/index.js",
     "@swf2es/mp3": "/mp3/index.js",

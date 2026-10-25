@@ -24,6 +24,7 @@ jobs:
           key: zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/zig.ts') }}
       - run: pnpm --filter @swf2es/mp3 build:wasm && git diff --exit-code -- packages/mp3/src/binary.ts packages/mp3/LICENSE.minimp3
       - run: pnpm --filter @swf2es/compress build:wasm && git diff --exit-code -- packages/compress/src/binary.ts packages/compress/LICENSE.zlib
+      - run: pnpm --filter @swf2es/tessellate build:wasm && git diff --exit-code -- packages/tessellate/src/binary.ts packages/tessellate/LICENSE.libtess2
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm oracle:pull
@@ -38,6 +39,9 @@ jobs:
           key: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-${{ github.sha }}
           restore-keys: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-
       - run: pnpm test
+      - run: node tests/player/run.ts && node tests/player/context-loss.ts && node tests/player/leak.ts
+        env:
+          SWF2ES_NATIVE_FILLS: "1"
       - run: pnpm test:checked
       - run: pnpm determinism
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
@@ -80,3 +84,6 @@ jobs:
           path: tests/player/corpus/ruffle
           key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
       - run: pnpm corpus
+      - run: pnpm corpus
+        env:
+          SWF2ES_NATIVE_FILLS: "1"
