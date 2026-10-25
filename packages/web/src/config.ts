@@ -63,6 +63,8 @@ export interface Configuration {
   cache?: boolean;
   /** Experimental AVM2 compilation on first method-factory use; off by default. */
   lazyCompilation?: boolean;
+  /** Use native Wasm fill tessellation, with JS fallback; on by default. Applies to new playbacks. */
+  nativeFills?: boolean;
   /** Experimental Stage3D surface factory; absent/null keeps ErrorEvent #3702. */
   stage3D?: Stage3DSurfaceFactory | null;
   /**

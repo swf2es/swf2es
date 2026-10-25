@@ -70,6 +70,11 @@ element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality` and
 back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
 
+Fill tessellation uses `@swf2es/tessellate`'s Wasm module by default, with
+JS fallback if it is unavailable or rejects a fill. Include that package in
+the import map. `configure({ nativeFills: false })` keeps new playbacks on
+JS and skips loading the native package.
+
 ActionScript's workers (`flash.system.Worker`) run on Web Workers by
 default, as in Flash. `configure({ workers: false })` turns them off for
 the page, and `workers="false"` or `"true"` on an element for its own

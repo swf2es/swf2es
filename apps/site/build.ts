@@ -35,6 +35,7 @@ const PACKAGES = [
   "compress",
   "format",
   "mp3",
+  "tessellate",
   "codegen",
   "context3d",
   "runtime",
@@ -48,6 +49,7 @@ const importMap = {
     "@swf2es/compress": "./modules/compress/index.js",
     "@swf2es/format": "./modules/format/index.js",
     "@swf2es/mp3": "./modules/mp3/index.js",
+    "@swf2es/tessellate": "./modules/tessellate/index.js",
     "@swf2es/codegen": "./modules/codegen/index.js",
     "@swf2es/context3d": "./modules/context3d/index.js",
     "@swf2es/context3d/webgl": "./modules/context3d/webgl/index.js",
@@ -209,6 +211,10 @@ copyFileSync(join(root, "oracle/avmplus/LICENSE"), join(licenses, "MPL-2.0.txt")
 copyFileSync(join(root, "vendor/pixijs/LICENSE"), join(licenses, "pixijs-MIT.txt"));
 copyFileSync(join(root, "vendor/minimp3/LICENSE"), join(licenses, "minimp3-CC0.txt"));
 copyFileSync(join(root, "vendor/zlib/LICENSE"), join(licenses, "zlib.txt"));
+copyFileSync(
+  join(root, "packages/tessellate/LICENSE.libtess2"),
+  join(licenses, "libtess2-SGI.txt"),
+);
 copyFileSync(
   join(root, "packages/compress/LICENSE.lzma-sdk"),
   join(licenses, "lzma-sdk-public-domain.txt"),

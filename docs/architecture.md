@@ -105,7 +105,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
-| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
+| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts, tessellate |
 
 `tessellate`, `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
@@ -5048,6 +5048,18 @@ canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
 quality smooths no bitmap either.
 
 ### The page's configuration
+
+The web host uses native fill tessellation by default. Each playback owns a
+`Tessellator` from `@swf2es/tessellate`, loaded when playback is created, and
+disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
+false })` keeps new playbacks on JS and skips loading the native package.
+A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation
+is tried only once per tessellator. A rejected fill resolves its JS fallback
+at construction, and the successful result is cached. Cached geometry owns
+its CPU buffers independently of Wasm scratch, including for context restoration.
+`@swf2es/player` retains its generic `PixiView` fill hook without importing the
+native package. Different triangle layouts can change subpixel edge coverage
+and paint interpolation, so native and JS need not draw identical pixels.
 
 `configure` (`config.ts`) sets what every player on the page shares:
 `libraries`, the URLs of builtin.abc and playerglobal.abc, which the page

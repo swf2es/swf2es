@@ -129,8 +129,8 @@ of its own.
 - **Package boundaries.** `compress` depends on nothing, `format` on `compress`,
   `codegen` and `runtime` on `format`, `mp3`, `tessellate` and `context3d` on nothing,
   `cli` on `format`, `codegen` and `runtime`, `player` on those plus `context3d`
-  and `mp3`, `player-hosts` on `player`, `web` on `codegen`, `format`, `player`
-  and `player-hosts`. `codegen` never imports the runtime implementation.
+  and `mp3`, `player-hosts` on `player`, `web` on `codegen`, `format`, `player`,
+  `player-hosts` and `tessellate`. `codegen` never imports the runtime implementation.
   `tessellate`, `compress`, `format`, `codegen`, `runtime` and `context3d`'s core load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
