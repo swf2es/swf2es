@@ -456,6 +456,11 @@ export function weigh(context: GraphicsContext): boolean {
         continue;
       }
 
+      if (instruction.action === "geometry") {
+        vertices += instruction.data.geometry.vertices.length / 2;
+        continue;
+      }
+
       const data = instruction.data as {
         path?: GraphicsPath;
         hole?: GraphicsPath;

@@ -42,10 +42,12 @@ import {
 } from "./strokes.js";
 import {
   destroyContext,
+  type FillTessellator,
   fillContext,
   type Painter,
   paint,
   remakeable,
+  resolveFills,
   SharedFills,
 } from "./tessellate.js";
 import { type Advanced, drawStaticText, drawText } from "./text.js";
@@ -215,6 +217,7 @@ export class Art {
     private readonly source: Art | null,
     /** The view's counts of lines' contexts made and reused. */
     private readonly counts: { strokeContexts: number; strokeReuses: number },
+    private readonly tessellator?: FillTessellator,
   ) {
     this.lines = new StrokeContexts(counts);
     this.saffron = new SaffronView(renderer, !fresh);
@@ -617,7 +620,10 @@ export class Art {
         continue;
       }
 
-      const make = () => fillContext(layer, this.painter, masking);
+      const resolved = this.tessellator
+        ? resolveFills(layer, masking, this.tessellator)
+        : undefined;
+      const make = () => fillContext(layer, this.painter, masking, resolved);
       const context = remakeable(make(), make);
       if (this.fresh) {
         this.built.add(context);

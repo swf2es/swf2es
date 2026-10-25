@@ -2,7 +2,7 @@
 // flattened finely enough for Flash's, and filled even-odd or non-zero from
 // their containment tree or crossing spans; and the cache sharing instances.
 import type { Fill } from "@swf2es/format";
-import { type FillInput, GraphicsContext } from "pixi.js";
+import { type FillGeometry, type FillInput, GraphicsContext } from "pixi.js";
 import type { Region as Area } from "../display/gradients.js";
 import { blendLayers, droppedBlends, droppedLayers } from "../display/morph.js";
 import {
@@ -336,11 +336,76 @@ export function forgetCommands(context: GraphicsContext): void {
   }
 
   for (const instruction of context.instructions) {
-    if (instruction.action !== "texture") {
+    if (instruction.action !== "texture" && instruction.action !== "geometry") {
       instruction.data.path.releaseInstructions();
       instruction.data.hole?.releaseInstructions();
     }
   }
+}
+
+/** An optional tessellator returns immutable caller-owned buffers, or null to use JS for this fill. */
+export type FillTessellator = (
+  contours: readonly (readonly number[])[],
+  nonZero: boolean,
+) => FillGeometry | null;
+
+export interface ResolvedFill {
+  geometry: FillGeometry | null;
+  crossing: number[][] | null;
+  roots: Region[];
+}
+
+/** Resolve once at construction, including fallback, so colour copies do not retry native work. */
+export function resolveFills(
+  layer: ShapeLayer,
+  masking: boolean,
+  tessellate: FillTessellator,
+): ResolvedFill[] {
+  return layer.fills.map(({ contours, winding }) => {
+    const polygons = contours.map(polygon).filter((points) => points.length >= 6);
+    const nonZero = masking || winding === "nonZero";
+    let geometry: FillGeometry | null = null;
+    try {
+      const result = tessellate(polygons, nonZero);
+      if (result && validGeometry(result)) {
+        geometry = result;
+      }
+    } catch {
+      // A rejected native instance or custom tessellator must leave the ordinary fill usable.
+    }
+
+    if (geometry) {
+      return { geometry, crossing: null, roots: [] };
+    }
+
+    const crossing = crossingFill(polygons, nonZero);
+    return { geometry: null, crossing, roots: crossing ? [] : containment(polygons) };
+  });
+}
+
+function validGeometry({ vertices, indices }: FillGeometry): boolean {
+  if (
+    !(vertices instanceof Float32Array || vertices instanceof Float64Array) ||
+    !(indices instanceof Uint16Array || indices instanceof Uint32Array) ||
+    vertices.length % 2 !== 0 ||
+    indices.length % 3 !== 0
+  ) {
+    return false;
+  }
+
+  for (const value of vertices) {
+    if (!Number.isFinite(value)) {
+      return false;
+    }
+  }
+
+  for (const index of indices) {
+    if (index >= vertices.length / 2) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -350,21 +415,33 @@ export function forgetCommands(context: GraphicsContext): void {
  * for non-zero: a region inside where its parent is not is filled, with
  * the first regions below it that are not cut out as holes, and so on in.
  */
-export function fillContext(layer: ShapeLayer, painter: Painter, masking = false): GraphicsContext {
+export function fillContext(
+  layer: ShapeLayer,
+  painter: Painter,
+  masking = false,
+  resolved?: readonly ResolvedFill[],
+): GraphicsContext {
   const context = shapeContext();
   const held: (() => void)[] = [];
   holds.set(context, held);
-  for (const { fill, contours, winding } of layer.fills) {
+  for (let i = 0; i < layer.fills.length; i++) {
+    const { fill, contours, winding } = layer.fills[i];
+    const plan = resolved?.[i];
     // The region is a radial gradient's alone to need: flattening the contours is not free.
     const style = painter(
       fill,
       () => regionOf(contours),
       (release) => held.push(release),
     );
-    const polygons = contours.map(polygon).filter((points) => points.length >= 6);
+    if (plan?.geometry) {
+      context.fillGeometry(plan.geometry, style);
+      continue;
+    }
+
+    const polygons = plan ? [] : contours.map(polygon).filter((points) => points.length >= 6);
     // A Graphics drawing used as a mask uses non-zero even when drawPath asked for even-odd.
     const nonZero = masking || winding === "nonZero";
-    const crossing = crossingFill(polygons, nonZero);
+    const crossing = plan ? plan.crossing : crossingFill(polygons, nonZero);
     if (crossing) {
       context.beginPath();
       for (const points of crossing) {
@@ -421,7 +498,7 @@ export function fillContext(layer: ShapeLayer, painter: Painter, masking = false
         }
       }
     };
-    for (const root of containment(polygons)) {
+    for (const root of plan ? plan.roots : containment(polygons)) {
       const s = orientation(root.points);
       if (inside(0, s)) {
         fillRegion(root, 0, s);

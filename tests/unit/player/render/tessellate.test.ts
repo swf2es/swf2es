@@ -7,8 +7,10 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { Tessellator } from "@swf2es/tessellate";
 import { readMorphShape, readSwf } from "../../../../packages/format/dist/index.js";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
+import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import type {
   MorphCharacter,
   ShapeCharacter,
@@ -19,8 +21,10 @@ import {
 } from "../../../../packages/player/dist/render/pools.js";
 import {
   copyContext,
+  fillContext,
   forgetCommands,
   remakeable,
+  resolveFills,
   SharedFills,
 } from "../../../../packages/player/dist/render/tessellate.js";
 import * as w from "../../../swf-writer.ts";
@@ -430,5 +434,126 @@ test("adjacent texture quads keep the same UVs and indices when coalesced", () =
   assert.deepEqual(Array.from(actual.geometryData.vertices), vertices);
   assert.deepEqual(Array.from(actual.geometryData.indices), indices);
   assert.deepEqual(Array.from(actual.geometryData.uvs), uvs);
+  context.destroy();
+});
+
+const {
+  GraphicsContext: FinishedContext,
+  GraphicsContextSystem: FinishedSystem,
+  Matrix,
+  Texture,
+} = (await import(
+  pathToFileURL(new URL("../../../../vendor/pixijs/lib/index.mjs", import.meta.url).pathname).href
+)) as typeof import("../../../../vendor/pixijs/lib/index.js");
+
+const geometry = {
+  vertices: new Float64Array([0, 0, 10, 0, 10, 10, 0, 10]),
+  indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+};
+const layer: ShapeLayer = {
+  fills: [
+    {
+      fill: { type: "solid", color: 0xffff0000 },
+      contours: [[1, 0, 0, 2, 10, 0, 2, 10, 10, 2, 0, 10, 2, 0, 0]],
+      winding: "evenOdd",
+    },
+  ],
+  strokes: [],
+};
+
+function nativeSystem() {
+  const contexts = new FinishedSystem({
+    uid: 91,
+    gc: { now: 0, addResourceHash() {} },
+    limits: { maxBatchableTextures: 16 },
+  } as never);
+  contexts.onContextBuilt = forgetCommands;
+  return contexts;
+}
+
+test("native geometry survives path retirement, copies and renderer reload", () => {
+  let calls = 0;
+  const native = new Tessellator();
+  const resolved = resolveFills(layer, false, (contours, nonZero) => {
+    calls++;
+    return native.tessellate(contours, nonZero);
+  });
+  const make = () => fillContext(layer, () => ({ color: 0xff0000 }), false, resolved);
+  const context = remakeable(make(), make);
+  const contexts = nativeSystem();
+  const first = contexts.updateGpuContext(context);
+  const before = Array.from(first.geometryData.vertices);
+  const copy = copyContext(context);
+  assert.equal(calls, 1);
+  assert.equal(context.instructions[0].action, "geometry");
+  assert.equal(context.containsPoint({ x: 5, y: 5 }), true);
+  assert.deepEqual(Array.from(contexts.updateGpuContext(copy).geometryData.vertices), before);
+  context.unload();
+  assert.deepEqual(Array.from(contexts.updateGpuContext(context).geometryData.vertices), before);
+  assert.equal(calls, 1);
+  native.dispose();
+  context.destroy();
+  copy.destroy();
+});
+
+test("rejected and invalid native results resolve JS fallback once per fill", () => {
+  for (const reject of [
+    () => null,
+    () => {
+      throw new Error("rejected");
+    },
+    () => ({ ...geometry, indices: new Uint32Array([0, 1, 999]) }),
+  ]) {
+    let calls = 0;
+    const resolved = resolveFills(layer, false, () => {
+      calls++;
+      return reject();
+    });
+    const make = () => fillContext(layer, () => ({ color: 1 }), false, resolved);
+    const context = remakeable(make(), make);
+    const contexts = nativeSystem();
+    const first = Array.from(contexts.updateGpuContext(context).geometryData.vertices);
+    const copy = copyContext(context);
+    assert.deepEqual(Array.from(contexts.updateGpuContext(copy).geometryData.vertices), first);
+    assert.equal(calls, 1);
+    context.destroy();
+    copy.destroy();
+  }
+});
+
+test("mask construction overrides even-odd with non-zero", () => {
+  const rules: boolean[] = [];
+  resolveFills(layer, false, (_, nonZero) => {
+    rules.push(nonZero);
+    return geometry;
+  });
+  resolveFills(layer, true, (_, nonZero) => {
+    rules.push(nonZero);
+    return geometry;
+  });
+  assert.deepEqual(rules, [false, true]);
+});
+
+test("finished geometry captures transforms, builds paint UVs and hit tests triangles", () => {
+  const context = new FinishedContext();
+  context.translate(20, 30).fillGeometry(geometry, {
+    texture: Texture.EMPTY,
+    matrix: new Matrix(),
+    textureSpace: "global",
+  });
+  context.resetTransform();
+  assert.equal(context.bounds.minX, 20);
+  assert.equal(context.bounds.maxY, 40);
+  assert.equal(context.containsPoint({ x: 25, y: 35 }), true);
+  assert.equal(context.containsPoint({ x: 5, y: 5 }), false);
+  const contexts = nativeSystem();
+  assert.deepEqual(
+    Array.from(contexts.updateGpuContext(context).geometryData.vertices),
+    [20, 30, 30, 30, 30, 40, 20, 40],
+  );
+  assert.deepEqual(
+    Array.from(contexts.updateGpuContext(context).geometryData.uvs),
+    [0, 0, 10, 0, 10, 10, 0, 10],
+  );
   context.destroy();
 });

@@ -40,6 +40,11 @@ import { webWorkerHost } from "@swf2es/player-hosts/workers";
 import { autoDetectRenderer } from "pixi.js";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
+// Exercise the optional package across the same references and context-loss tests as the default.
+const fillOptions = new URLSearchParams(location.search).has("nativeFills")
+  ? { fillTessellator: new (await import("@swf2es/tessellate")).Tessellator().tessellate }
+  : {};
+
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
 // (chrome.ts, libraries.ts).
 const LIBRARIES = [
@@ -456,7 +461,7 @@ async function runSwf(
     output.height = Math.round(player.height * shownAt);
     document.body.replaceChildren(output);
     player.quality = ["LOW", "MEDIUM", "HIGH", "BEST"][quality] ?? "HIGH";
-    const view = new PixiView(renderer);
+    const view = new PixiView(renderer, fillOptions);
     view.quality = player.quality;
     // Drawn n times finer to be averaged down: the screen is the output canvas.
     view.screenScale = shownAt;
@@ -771,7 +776,7 @@ async function benchSwf(
       useBackBuffer: backBuffer,
     });
     document.body.replaceChildren(renderer.canvas);
-    const view = new PixiView(renderer);
+    const view = new PixiView(renderer, fillOptions);
     if (scripting) {
       scripting.drawer = view;
     }
@@ -998,7 +1003,7 @@ async function resizeSwf(
     useBackBuffer: true,
   });
   try {
-    const view = new PixiView(renderer);
+    const view = new PixiView(renderer, fillOptions);
     await player.start();
     for (const [width, height, resolution] of sizes) {
       renderer.resize(width, height, resolution);
@@ -1055,7 +1060,7 @@ async function contextLossSwf(
   let tableDraws = 0;
   try {
     const multi = gl.getExtension("WEBGL_multi_draw");
-    const view = new PixiView(renderer);
+    const view = new PixiView(renderer, fillOptions);
     await player.start();
     for (let i = 0; i < frames; i++) {
       player.tick();
@@ -1152,7 +1157,7 @@ async function contextLossPlanSwf(
       preserveDrawingBuffer: true,
       useBackBuffer: true,
     });
-    const view = new PixiView(renderer);
+    const view = new PixiView(renderer, fillOptions);
     await player.start();
     return { player, renderer, view };
   };
@@ -1566,7 +1571,7 @@ async function precompiledSwf(
       background: player.background,
       preserveDrawingBuffer: true,
     });
-    const view = new PixiView(renderer);
+    const view = new PixiView(renderer, fillOptions);
     view.render(player.stage);
     image = renderer.canvas.toDataURL("image/png");
     renderer.destroy();
