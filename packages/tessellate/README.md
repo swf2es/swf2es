@@ -35,8 +35,9 @@ No cached geometry aliases Wasm scratch. Pixi consumes these through
 the immutable source buffers survive path retirement and context restoration.
 The hook also accepts another tessellator with the same structural result.
 
-The arena has a 128 MiB ceiling and instances above 8 MiB are discarded
-after the call. Options can lower the limit or retained capacity. Invalid
+The absolute memory ceiling is 128 MiB, including static data, the C stack
+and the arena. Instances above 8 MiB are discarded after the call. Options
+can lower the limit or retained capacity. Invalid
 coordinates (including values outside ±2^23), malformed contours, more
 than one million input vertices, allocation failure and native failure
 return `null`. A throwing failure import replaces libtess2's longjmp;

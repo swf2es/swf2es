@@ -38,6 +38,44 @@ test("the native module imports only its aborting allocation failure callback", 
   ]);
 });
 
+test("raw native getters expose only the current successful run", async () => {
+  const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
+  const instance = await WebAssembly.instantiate(module, {
+    env: { failure: () => assert.fail("unexpected native allocation failure") },
+  });
+  const x = instance.exports as unknown as {
+    memory: WebAssembly.Memory;
+    reset(): void;
+    alloc(size: number): number;
+    setLimit(size: number): void;
+    run(coords: number, count: number, ends: number, contours: number, nonzero: number): number;
+    vertices(): number;
+    indices(): number;
+    vertexCount(): number;
+    triangleCount(): number;
+  };
+  const result = () => [x.vertices(), x.indices(), x.vertexCount(), x.triangleCount()];
+  assert.deepEqual(result(), [0, 0, 0, 0]);
+  x.reset();
+  const coords = x.alloc(square.length * 8);
+  const ends = x.alloc(4);
+  new Float64Array(x.memory.buffer, coords, square.length).set(square);
+  new Uint32Array(x.memory.buffer, ends, 1)[0] = 4;
+  assert.equal(x.run(coords, 4, ends, 1, 0), 0);
+  assert.ok(x.vertices() > 0 && x.indices() > 0);
+  assert.equal(x.vertexCount(), 4);
+  assert.equal(x.triangleCount(), 2);
+
+  assert.equal(x.run(coords, 4, ends, 1, 2), -2);
+  assert.deepEqual(result(), [0, 0, 0, 0]);
+  assert.equal(x.run(coords, 4, ends, 1, 0), 0);
+  x.setLimit(0);
+  assert.equal(x.run(coords, 4, ends, 1, 0), -1);
+  assert.deepEqual(result(), [0, 0, 0, 0]);
+  x.reset();
+  assert.deepEqual(result(), [0, 0, 0, 0]);
+});
+
 test("owned buffers survive arena reuse, growth and disposal", () => {
   for (const retainMemory of [0, 8 << 20]) {
     const tess = new Tessellator({ retainMemory });

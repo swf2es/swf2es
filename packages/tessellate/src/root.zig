@@ -14,7 +14,8 @@ const page = 65536;
 var base: usize = 0;
 var top: usize = 0;
 var spent: usize = 0;
-var limit: usize = 128 << 20;
+// Absolute address ceiling, including static data and the C stack.
+var ceiling: usize = 128 << 20;
 var tess: ?*c.TESStesselator = null;
 
 export fn reset() void {
@@ -28,18 +29,26 @@ export fn reset() void {
 }
 
 export fn setLimit(n: usize) void {
-    limit = n;
+    ceiling = n;
+}
+
+fn reserve(end: u64) bool {
+    if (end > ceiling) {
+        return false;
+    }
+
+    const have = @as(u64, @wasmMemorySize(0)) * page;
+    if (end > have and @wasmMemoryGrow(0, @intCast((end - have + page - 1) / page)) < 0) {
+        return false;
+    }
+
+    return true;
 }
 
 export fn alloc(n: usize) usize {
     const start = std.mem.alignForward(u64, top, 16);
     const end = start + 16 + n;
-    if (end > limit) {
-        return 0;
-    }
-
-    const have = @as(u64, @wasmMemorySize(0)) * page;
-    if (end > have and @wasmMemoryGrow(0, @intCast((end - have + page - 1) / page)) < 0) {
+    if (!reserve(end)) {
         return 0;
     }
 
@@ -58,6 +67,28 @@ export fn malloc(n: usize) ?*anyopaque {
 export fn free(_: ?*anyopaque) void {}
 
 export fn realloc(p: ?*anyopaque, n: usize) ?*anyopaque {
+    if (p) |old| {
+        const address = @intFromPtr(old);
+        const header: *usize = @ptrFromInt(address - 16);
+        const previous = header.*;
+        if (n <= previous) {
+            header.* = n;
+            return old;
+        }
+
+        if (@as(u64, address) + previous == top) {
+            const end = @as(u64, address) + n;
+            if (!reserve(end)) {
+                return null;
+            }
+
+            header.* = n;
+            top = @intCast(end);
+            spent += n - previous;
+            return old;
+        }
+    }
+
     const at = alloc(n);
     if (at == 0) {
         return null;
@@ -95,10 +126,12 @@ export fn highWater() usize {
 }
 
 export fn allocated() usize {
+    // Diagnostic payload bytes reserved since reset, excluding headers and alignment.
     return spent;
 }
 
 export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: usize, nonzero: i32) i32 {
+    tess = null;
     if (contours > 100000 or count > 1000000 or nonzero < 0 or nonzero > 1) {
         return -2;
     }
@@ -126,6 +159,7 @@ export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: 
     allocator.memalloc = get;
     allocator.memrealloc = grow;
     allocator.memfree = drop;
+    // A small intersection reserve; denser crossings can still grow the queue.
     allocator.extraVertices = @intCast(count / 4 + 16);
     tess = c.tessNewTess(&allocator);
     if (tess == null) {
@@ -140,21 +174,26 @@ export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: 
 
     const normal = [_]f64{ 0, 0, 1 };
     const rule = if (nonzero == 1) c.TESS_WINDING_NONZERO else c.TESS_WINDING_ODD;
-    return if (c.tessTesselate(tess, rule, c.TESS_POLYGONS, 3, 2, &normal) != 0) 0 else -1;
+    if (c.tessTesselate(tess, rule, c.TESS_POLYGONS, 3, 2, &normal) == 0) {
+        tess = null;
+        return -1;
+    }
+
+    return 0;
 }
 
 export fn vertices() usize {
-    return @intFromPtr(c.tessGetVertices(tess));
+    return if (tess) |value| @intFromPtr(c.tessGetVertices(value)) else 0;
 }
 
 export fn indices() usize {
-    return @intFromPtr(c.tessGetElements(tess));
+    return if (tess) |value| @intFromPtr(c.tessGetElements(value)) else 0;
 }
 
 export fn vertexCount() u32 {
-    return @intCast(c.tessGetVertexCount(tess));
+    return if (tess) |value| @intCast(c.tessGetVertexCount(value)) else 0;
 }
 
 export fn triangleCount() u32 {
-    return @intCast(c.tessGetElementCount(tess));
+    return if (tess) |value| @intCast(c.tessGetElementCount(value)) else 0;
 }

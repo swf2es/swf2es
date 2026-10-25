@@ -417,14 +417,14 @@ function validGeometry({ vertices, indices }: FillGeometry): boolean {
     return false;
   }
 
-  for (const value of vertices) {
-    if (!Number.isFinite(value)) {
+  for (let i = 0; i < vertices.length; i++) {
+    if (!Number.isFinite(vertices[i])) {
       return false;
     }
   }
 
-  for (const index of indices) {
-    if (index >= vertices.length / 2) {
+  for (let i = 0; i < indices.length; i++) {
+    if (indices[i] >= vertices.length / 2) {
       return false;
     }
   }
