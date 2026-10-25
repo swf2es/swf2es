@@ -22,7 +22,9 @@ const cFiles = (dir: string) =>
     .map((name) => join(dir, name));
 const inputs = [
   fileURLToPath(import.meta.url),
-  join(here, "src/wrapper.c"),
+  join(here, "build.zig"),
+  join(here, "build.zig.zon"),
+  join(here, "src/root.zig"),
   ...cFiles(join(here, "include")),
   ...cFiles(join(vendor, "Include")),
   ...cFiles(join(vendor, "Source")),
@@ -42,51 +44,16 @@ if (process.argv.includes("--check")) {
 } else {
   const work = mkdtempSync(join(tmpdir(), "swf2es-tessellate-"));
   try {
-    const symbols = [
-      "reset",
-      "alloc",
-      "run",
-      "vertices",
-      "indices",
-      "vertexCount",
-      "triangleCount",
-      "highWater",
-      "allocated",
-      "setLimit",
-    ];
-    execFileSync(
-      findZig(),
-      [
-        "cc",
-        "-target",
-        "wasm32-freestanding",
-        "-O2",
-        "-DNDEBUG",
-        "-nostdlib",
-        "-mbulk-memory",
-        `-I${join(here, "include")}`,
-        `-I${join(vendor, "Include")}`,
-        "-Wl,--no-entry",
-        "-Wl,-z,stack-size=262144",
-        "-Wl,--export-memory",
-        "-Wl,--strip-all",
-        "-Wl,--max-memory=134217728",
-        ...symbols.map((name) => `-Wl,--export=${name}`),
-        join(here, "src/wrapper.c"),
-        ...cFiles(join(vendor, "Source")).filter((file) => file.endsWith(".c")),
-        "-o",
-        join(work, "tessellate.wasm"),
-      ],
-      {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          ZIG_LOCAL_CACHE_DIR: join(work, "cache"),
-          ZIG_GLOBAL_CACHE_DIR: join(work, "global"),
-        },
+    execFileSync(findZig(), ["build", "--prefix", work], {
+      cwd: here,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        ZIG_LOCAL_CACHE_DIR: join(work, "cache"),
+        ZIG_GLOBAL_CACHE_DIR: join(work, "global"),
       },
-    );
-    const bytes = readFileSync(join(work, "tessellate.wasm"));
+    });
+    const bytes = readFileSync(join(work, "bin/tessellate.wasm"));
     const imports = WebAssembly.Module.imports(await WebAssembly.compile(bytes));
     if (
       JSON.stringify(imports) !==

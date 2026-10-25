@@ -1,7 +1,10 @@
 # Optional native fill tessellation
 
 `@swf2es/tessellate` compiles the small double-precision patch in
-`vendor/libtess2` to Wasm with the pinned Zig compiler. libtess2 remains
+`vendor/libtess2` to Wasm with the pinned Zig compiler. `build.zig` compiles
+the vendored C and the arena/API adapter in `src/root.zig` together, translating
+the C header with `b.addTranslateC`, as the MP3 and compression packages do.
+libtess2 remains
 under SGI Free Software License B; its notice ships as `LICENSE.libtess2`.
 `pnpm --filter @swf2es/tessellate build:wasm` regenerates the checked-in
 binary. Normal builds verify the source digest; CI checks byte reproducibility.
