@@ -39,6 +39,9 @@ jobs:
           key: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-${{ github.sha }}
           restore-keys: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-
       - run: pnpm test
+      - run: node tests/player/run.ts && node tests/player/context-loss.ts && node tests/player/leak.ts
+        env:
+          SWF2ES_NATIVE_FILLS: "1"
       - run: pnpm test:checked
       - run: pnpm determinism
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
@@ -81,3 +84,6 @@ jobs:
           path: tests/player/corpus/ruffle
           key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
       - run: pnpm corpus
+      - run: pnpm corpus
+        env:
+          SWF2ES_NATIVE_FILLS: "1"
