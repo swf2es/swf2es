@@ -25,6 +25,7 @@
     "packages/codegen/stamp.ts",
     "packages/mp3/build.ts",
     "packages/compress/build.ts",
+    "packages/tessellate/build.ts",
     "packages/player-hosts/build-thread.ts"
   ],
   "exclude": [

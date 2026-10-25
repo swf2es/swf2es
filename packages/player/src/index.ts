@@ -53,6 +53,7 @@ export type { Pointer, PointerState } from "./input/pointer.js";
 export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
 export { setTransformTable } from "./render/table.js";
-export { PixiView } from "./render/view.js";
+export type { FillTessellator } from "./render/tessellate.js";
+export { PixiView, type PixiViewOptions } from "./render/view.js";
 export { airLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
 export type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";

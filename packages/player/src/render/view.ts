@@ -57,6 +57,7 @@ import { SharedGraphics } from "./shared.js";
 import { drawInto, snapshot } from "./snapshot.js";
 import { SpareNodes } from "./spares.js";
 import { type Linear, sameLinear, UNIT } from "./strokes.js";
+import type { FillTessellator } from "./tessellate.js";
 import { deviceTextResolution } from "./text.js";
 import { SAMPLES } from "./three.js";
 import { TriangleView } from "./triangles.js";
@@ -106,6 +107,11 @@ function maskLink(
   if (partner && !o.encloses(partner)) {
     links.push(partner.ref);
   }
+}
+
+export interface PixiViewOptions {
+  /** Experimental: construct fills from owned triangles, falling back to JS on rejection. */
+  fillTessellator?: FillTessellator;
 }
 
 export class PixiView {
@@ -196,14 +202,29 @@ export class PixiView {
   /** A fresh view's units to a pixel of the BitmapData it draws, rendered that many times larger. */
   private samples = 1;
 
+  private readonly fresh: boolean;
+  private readonly fillTessellator?: FillTessellator;
+
   constructor(
     readonly renderer: Renderer,
-    private readonly fresh = false,
+    options: PixiViewOptions | boolean = false,
     /** The stage's view, whose geometry and textures a fresh view borrows where they are current. */
     source: PixiView | null = null,
   ) {
+    const fresh = typeof options === "boolean" ? options : false;
+    this.fresh = fresh;
+    this.fillTessellator =
+      typeof options === "boolean" ? source?.fillTessellator : options.fillTessellator;
     hookRenderer(renderer);
-    this.art = new Art(renderer, fresh, this, this.nodes, source?.art ?? null, this.counts);
+    this.art = new Art(
+      renderer,
+      fresh,
+      this,
+      this.nodes,
+      source?.art ?? null,
+      this.counts,
+      this.fillTessellator,
+    );
     this.spares = new SpareNodes(fresh, this.nodes, this.containerNodes);
     this.planes = new Planes(renderer, this.nodes, this.containerNodes, (o, node) => {
       this.rescaled = true;
