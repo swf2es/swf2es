@@ -208,7 +208,7 @@ test("native bitmap modules import nothing and expose only the kernel ABI", asyn
       WebAssembly.Module.exports(module)
         .map((e) => e.name)
         .sort(),
-      ["capacity", "convolve", "input", "memory"],
+      ["capacity", "convolve", "memory", "resetArena"],
     );
   }
 });

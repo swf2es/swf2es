@@ -29,7 +29,7 @@ export interface ConvolutionFilter {
 
 interface NativeExports {
   memory: WebAssembly.Memory;
-  input(bytes: number): number;
+  resetArena(bytes: number): number;
   convolve(params: number): number;
 }
 
@@ -159,7 +159,7 @@ export class Convolver {
       }
 
       const wasm = this.instance;
-      const pointer = wasm.input(inputBytes);
+      const pointer = wasm.resetArena(inputBytes);
       if (!pointer) {
         return null;
       }

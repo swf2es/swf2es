@@ -22,28 +22,47 @@ const Flags = packed struct(u32) {
     unused: u28,
 };
 
+/// One call's inputs, written by bitmap.ts at the start of the input region.
+/// Coordinates are the source bitmap's pixels.
 const Params = extern struct {
+    /// The source bitmap's width and height.
     sw: u32,
     sh: u32,
+    /// The rect to convolve, which may reach past the bitmap; the result is
+    /// w × h pixels in row order.
     x: i32,
     y: i32,
     w: u32,
     h: u32,
+    /// The block of the source copied to `pixels`: the rect grown by the
+    /// kernel's reach and clamped to the bitmap, nw × nh pixels from x0, y0.
     x0: u32,
     y0: u32,
     nw: u32,
     nh: u32,
+    /// The kernel's columns and rows (ConvolutionFilter's matrixX, matrixY).
     cols: u32,
     rows: u32,
     flags: Flags,
+    /// Addresses in the input region: the block's premultiplied ARGB, and
+    /// the kernel's cols × rows f64 weights in row order.
     pixels: u32,
     matrix: u32,
     reserved: u32,
+    /// Never 0: bitmap.ts passes 0 or NaN as 1, as Flash takes it.
     divisor: f64,
     bias: f64,
+    /// The colour taps past an unclamped edge read: alpha as 0–255, and RGB.
     outside_alpha: i32,
     color: u32,
 };
+
+comptime {
+    // The offsets bitmap.ts writes the fields at.
+    std.debug.assert(@offsetOf(Params, "divisor") == 64);
+    std.debug.assert(@offsetOf(Params, "outside_alpha") == 80);
+    std.debug.assert(@sizeOf(Params) <= 96);
+}
 
 fn reserve(end: usize) bool {
     if (end > limit) return false;
@@ -61,7 +80,9 @@ fn alloc(comptime T: type, n: usize) ?[]T {
     return ptr[0..n];
 }
 
-export fn input(bytes: usize) usize {
+/// Frees everything the last call allocated and reserves `bytes` of input
+/// for the next, returning its address or 0 where memory cannot grow.
+export fn resetArena(bytes: usize) usize {
     top = std.mem.alignForward(usize, @intFromPtr(&__heap_base), 16);
     input_start = top;
     input_end = top;
@@ -167,7 +188,7 @@ fn integerKernel(matrix: []const f64, divisor: f64) ?i32 {
 fn addRow(sum: []f64, plane: []const i32, start: usize, lo: usize, hi: usize, weight: f64) void {
     @setFloatMode(.strict);
     var x = lo;
-    if (options.manual) {
+    if (options.simd) {
         const Vec = @Vector(2, f64);
         const w: Vec = @splat(weight);
         while (x + 2 <= hi) : (x += 2) {
