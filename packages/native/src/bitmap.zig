@@ -9,6 +9,19 @@ var top: usize = 0;
 var input_start: usize = 0;
 var input_end: usize = 0;
 
+/// Params.flags, written by bitmap.ts from the same bit positions.
+const Flags = packed struct(u32) {
+    /// Taps past the bitmap read its nearest edge, not the filter's colour.
+    clamp: bool,
+    /// The source has an alpha channel; an opaque one reads as alpha 255.
+    source_transparent: bool,
+    /// The result keeps the source's alpha instead of convolving it.
+    preserve_alpha: bool,
+    /// The destination is transparent: premultiply the colour by the alpha.
+    premultiply: bool,
+    unused: u28,
+};
+
 const Params = extern struct {
     sw: u32,
     sh: u32,
@@ -22,7 +35,7 @@ const Params = extern struct {
     nh: u32,
     cols: u32,
     rows: u32,
-    flags: u32,
+    flags: Flags,
     pixels: u32,
     matrix: u32,
     reserved: u32,
@@ -70,7 +83,7 @@ fn clamp(v: i32, n: u32) i32 {
 }
 
 fn index(p: *const Params, x: i32, y: i32) usize {
-    if (p.flags & 1 == 0 and (x < 0 or y < 0 or x >= p.sw or y >= p.sh)) return p.nw * p.nh;
+    if (!p.flags.clamp and (x < 0 or y < 0 or x >= p.sw or y >= p.sh)) return p.nw * p.nh;
     return @as(usize, @intCast(clamp(y, p.sh) - @as(i32, @intCast(p.y0)))) * p.nw + @as(usize, @intCast(clamp(x, p.sw) - @as(i32, @intCast(p.x0))));
 }
 
@@ -116,7 +129,7 @@ export fn convolve(address: usize) usize {
     if (!inputRange(address, @sizeOf(Params), @alignOf(Params))) return 0;
     const p: *const Params = @ptrFromInt(address);
     if (p.sw == 0 or p.sh == 0 or p.sw > 0x3fffffff or p.sh > 0x3fffffff or p.cols == 0 or p.rows == 0 or p.cols > 15 or p.rows > 15 or p.w == 0 or p.h == 0 or p.w > 0x100000 or p.h > 0x100000) return 0;
-    if (p.x < -0x3fffffff or p.x > 0x3fffffff or p.y < -0x3fffffff or p.y > 0x3fffffff or p.flags > 15) return 0;
+    if (p.x < -0x3fffffff or p.x > 0x3fffffff or p.y < -0x3fffffff or p.y > 0x3fffffff or p.flags.unused != 0) return 0;
     const cx0 = clamp(p.x - @as(i32, @intCast(p.cols / 2)), p.sw);
     const cy0 = clamp(p.y - @as(i32, @intCast(p.rows / 2)), p.sh);
     const cx1 = clamp(p.x + @as(i32, @intCast(p.w + p.cols - p.cols / 2)) - 2, p.sw);
@@ -146,7 +159,7 @@ export fn convolve(address: usize) usize {
             const value = (pixel >> @as(u5, @intCast(16 - ch * 8))) & 255;
             planes[ch][i] = @intCast(if (alpha == 255) value else if (alpha == 0) 0 else @min(255, (value * (65280 / alpha) + 127) >> 8));
         }
-        planes[3][i] = if (p.flags & 2 != 0) @intCast(alpha) else 255;
+        planes[3][i] = if (p.flags.source_transparent) @intCast(alpha) else 255;
     }
     inline for (0..3) |ch| planes[ch][count] = @intCast((p.color >> @as(u5, @intCast(16 - ch * 8))) & 255);
     planes[3][count] = p.outside_alpha;
@@ -186,8 +199,8 @@ export fn convolve(address: usize) usize {
             }
             var values: [4]f64 = undefined;
             inline for (0..4) |ch| values[ch] = if (fixed) @floor(sums[ch][x] * scale) else sums[ch][x];
-            const alpha = if (p.flags & 4 != 0) planes[3][index(p, sx, sy)] else straight(values[3], p.bias);
-            const by: f64 = if (p.flags & 8 != 0) @floatFromInt(alpha) else 255;
+            const alpha = if (p.flags.preserve_alpha) planes[3][index(p, sx, sy)] else straight(values[3], p.bias);
+            const by: f64 = if (p.flags.premultiply) @floatFromInt(alpha) else 255;
             var pixel = @as(u32, @bitCast(alpha)) << 24;
             inline for (0..3) |ch| {
                 const value = @as(f64, @floatFromInt(straight(values[ch], p.bias))) * by;

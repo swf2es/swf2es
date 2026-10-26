@@ -40,6 +40,12 @@ export interface ConvolverOptions {
   simd?: boolean;
 }
 
+// Params.flags in bitmap.zig.
+const FLAG_CLAMP = 1;
+const FLAG_SOURCE_TRANSPARENT = 2;
+const FLAG_PRESERVE_ALPHA = 4;
+const FLAG_PREMULTIPLY = 8;
+
 let scalarModule: WebAssembly.Module | null = null;
 let simdModule: WebAssembly.Module | null = null;
 
@@ -173,10 +179,10 @@ export class Convolver {
         nh,
         cols,
         rows,
-        Number(Boolean(filter.clamp)) |
-          (Number(source.transparent) << 1) |
-          (Number(Boolean(filter.preserveAlpha)) << 2) |
-          (Number(transparent) << 3),
+        (filter.clamp ? FLAG_CLAMP : 0) |
+          (source.transparent ? FLAG_SOURCE_TRANSPARENT : 0) |
+          (filter.preserveAlpha ? FLAG_PRESERVE_ALPHA : 0) |
+          (transparent ? FLAG_PREMULTIPLY : 0),
         pixelPointer,
         matrixPointer,
         0,
