@@ -73,7 +73,9 @@ back its GL context, audio and sockets. It fires `load`, `error` and
 Fill tessellation uses `@swf2es/native/tessellate`'s Wasm module by default, with
 JS fallback if it is unavailable or rejects a fill. Include that entry in
 the import map. `configure({ nativeFills: false })` keeps new playbacks on
-JS and skips loading the native package.
+JS and skips loading the native package. BitmapData convolution likewise
+uses `@swf2es/native/bitmap` by default, with the same pixels as its JS
+fallback; `configure({ nativeBitmaps: false })` opts out.
 
 ActionScript's workers (`flash.system.Worker`) run on Web Workers by
 default, as in Flash. `configure({ workers: false })` turns them off for

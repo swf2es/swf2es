@@ -772,7 +772,11 @@ let bitmapPlayer: Player | null = null;
 
 async function bitmapRun(mode: string, vm: string) {
   const { web } = await loading;
-  web.configure({ nativeFills: false, nativeBitmaps: mode !== "default", cache: false });
+  web.configure({
+    nativeFills: false,
+    nativeBitmaps: mode === "js" ? false : undefined,
+    cache: false,
+  });
   const Module = WebAssembly.Module;
   const Instance = WebAssembly.Instance;
   const log = console.log;

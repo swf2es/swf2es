@@ -4735,11 +4735,12 @@ nor `bench.ts --rig 32 --blurred --gpu` by more than the runs vary, on
 the discrete GPU or the integrated one: the textures are small, some
 0.4 megapixels of inputs a frame.
 
-#### Optional native CPU convolution
+#### Native CPU convolution
 
-`configure({ nativeBitmaps: true })` opts new web playbacks into CPU
-BitmapData convolution through `@swf2es/native/bitmap`; it is off by default
-and no native bitmap module is loaded then. Each playback supplies one
+New web playbacks convolve BitmapData on the CPU through
+`@swf2es/native/bitmap` by default, loaded alongside the fill tessellator;
+`configure({ nativeBitmaps: false })` keeps them on JS and loads no native
+bitmap module. Both paths give the same pixels. Each playback supplies one
 `Convolver.convolve` to its Scripting or Avm1 `bitmapConvolver` hook before
 the movie starts and clears the hook and disposes scratch at teardown.
 Direct player hosts can supply the same hook and own its lifetime. Workers

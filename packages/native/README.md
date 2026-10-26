@@ -50,8 +50,10 @@ libtess2 is under SGI Free Software License B.
 
 ## bitmap
 
-The web host opts in with `configure({ nativeBitmaps: true })`. The default
-does not load this package. Each playback owns its convolution scratch and
+The web host uses these kernels by default, with the JS path as fallback;
+`configure({ nativeBitmaps: false })` keeps new playbacks on JS and loads
+no native bitmap code. The output is the same pixels either way. Each
+playback owns its convolution scratch, instantiated on first use, and
 releases it at teardown. AS3 and AVM1 BitmapData.applyFilter use the same hook;
 GPU filters and other CPU filters are unchanged. Worker instances without a
 hook keep using JS.
@@ -86,8 +88,8 @@ any `std.mem.Allocator`; `src/bitmap/bitmap.zig` wraps it in the Wasm
 module's bump arena. No external dependency is needed.
 
 `node --test tests/unit/native-bitmap.test.ts` checks exact pixels, ownership,
-rejection and trap fallback. `node tests/web/run.ts` checks both VMs, default
-opt-out, missing modules, blocked compilation, traps, CSP and teardown.
+rejection and trap fallback. `node tests/web/run.ts` checks both VMs, the default,
+the opt-out, missing modules, blocked compilation, traps, CSP and teardown.
 
 After `pnpm build`, run `node tests/player/bitmap-bench.ts [processes, 2]`
 under the machine lock for synthetic full applyFilter timings in Chrome.

@@ -103,25 +103,21 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
-    let tessellator: Tessellator | null = null;
-    if (configuration().nativeFills !== false) {
-      try {
-        const { Tessellator } = await import("@swf2es/native/tessellate");
-        tessellator = new Tessellator();
-      } catch {
-        // An embedder without the optional module can still play through JS.
-      }
-    }
-
-    let convolver: Convolver | null = null;
-    if (configuration().nativeBitmaps === true) {
-      try {
-        const { Convolver } = await import("@swf2es/native/bitmap");
-        convolver = new Convolver();
-      } catch {
-        // The optional CPU backend must not prevent ordinary playback.
-      }
-    }
+    // Both load together, so the second costs playback no extra round trip. An
+    // embedder without a module, or a page that cannot load it, plays through JS.
+    const { nativeFills, nativeBitmaps } = configuration();
+    const [tessellator, convolver] = await Promise.all([
+      nativeFills === false
+        ? null
+        : import("@swf2es/native/tessellate")
+            .then(({ Tessellator }): Tessellator => new Tessellator())
+            .catch(() => null),
+      nativeBitmaps === false
+        ? null
+        : import("@swf2es/native/bitmap")
+            .then(({ Convolver }): Convolver => new Convolver())
+            .catch(() => null),
+    ]);
 
     const renderer = await autoDetectRenderer({
       preference: "webgl",

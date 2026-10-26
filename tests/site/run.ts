@@ -176,6 +176,15 @@ async function check(): Promise<void> {
               true,
               "playback did not use the native tessellator",
             );
+            // Native bitmap kernels are on by default too. The page loads more modules
+            // than resource timing keeps, so the frame's resources tell.
+            const { frameTree } = await send<{ frameTree: { resources: { url: string }[] } }>(
+              "Page.getResourceTree",
+            );
+            assert.ok(
+              frameTree.resources.some((r) => r.url.endsWith("/modules/native/bitmap/index.js")),
+              "playback did not load the native bitmap kernels",
+            );
             const facts = await value<string>("document.getElementById('facts').innerText");
             assert.match(facts, /3 \(AVM2\)/);
             assert.match(facts, /480 × 320/);
