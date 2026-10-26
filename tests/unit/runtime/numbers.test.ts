@@ -77,6 +77,46 @@ test("numberToString writes every number as avmplus' D2A does", () => {
   }
 });
 
+test("numberToString preserves exact text across repeated and interleaved conversions", () => {
+  const coordinate = Number("209.14077758789063");
+  const values = [
+    coordinate,
+    below(coordinate),
+    0.1 + 0.2,
+    1 / 3,
+    1e-7,
+    -1e-7,
+    1e15,
+    below(1e15),
+    Number.MIN_VALUE,
+    -Number.MIN_VALUE,
+    Number.MAX_VALUE,
+    -Number.MAX_VALUE,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    0,
+    -0,
+  ];
+  for (let i = 0; i < 1000; i++) {
+    values.push(anyDouble());
+  }
+
+  for (const n of values) {
+    const expected = convertDoubleToString(n);
+    for (let repeat = 0; repeat < 3; repeat++) {
+      assert.equal(numberToString(n), expected);
+    }
+
+    numberToString(42);
+    numberToString(1.25);
+    assert.equal(numberToString(n), expected);
+
+    numberToString(-coordinate);
+    assert.equal(numberToString(n), expected);
+  }
+});
+
 /** `n` moved by `ulps` doubles, toward +Infinity for a positive count. */
 const nudge = (n: number, ulps: number) => {
   bits.setFloat64(0, n);

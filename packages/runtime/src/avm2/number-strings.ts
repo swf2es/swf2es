@@ -63,6 +63,10 @@ function unreadNumber(s: string): number {
   return bare ? Number(bare[1]) : Number.NaN;
 }
 
+// Repeated coordinate coercions can reuse D2A's last result without retaining a growing cache.
+let lastNumber = Number.NaN;
+let lastString = "";
+
 /**
  * A number as AS3 writes it: avmplus' own formatting, not JavaScript's,
  * though the two agree, and JavaScript's is some ten times faster, for an
@@ -78,6 +82,10 @@ export function numberToString(n: number): string {
     return String(n);
   }
 
+  if (n === lastNumber) {
+    return lastString;
+  }
+
   const magnitude = n < 0 ? -n : n;
   if (magnitude >= 1e-6 && magnitude < 1e15) {
     const text = String(n);
@@ -86,7 +94,11 @@ export function numberToString(n: number): string {
     }
   }
 
-  return convertDoubleToString(n);
+  const text = convertDoubleToString(n);
+  lastNumber = n;
+  lastString = text;
+
+  return text;
 }
 
 /** The significant digits in a number JavaScript wrote in plain decimals: all but its leading zeros. */
