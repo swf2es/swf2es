@@ -25,6 +25,7 @@ jobs:
       - run: pnpm --filter @swf2es/mp3 build:wasm && git diff --exit-code -- packages/mp3/src/binary.ts packages/mp3/LICENSE.minimp3
       - run: pnpm --filter @swf2es/compress build:wasm && git diff --exit-code -- packages/compress/src/binary.ts packages/compress/LICENSE.zlib
       - run: pnpm --filter @swf2es/tessellate build:wasm && git diff --exit-code -- packages/tessellate/src/binary.ts packages/tessellate/LICENSE.libtess2
+      - run: pnpm --filter @swf2es/native build:wasm && git diff --exit-code -- packages/native/src/binary.ts
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm oracle:pull
@@ -39,6 +40,9 @@ jobs:
           key: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-${{ github.sha }}
           restore-keys: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-
       - run: pnpm test
+      - run: node tests/player/run.ts apply-filter apply-filter-inner convolution convolution-draw
+        env:
+          SWF2ES_NATIVE_BITMAPS: "1"
       - run: node tests/player/run.ts && node tests/player/context-loss.ts && node tests/player/leak.ts
         env:
           SWF2ES_NATIVE_FILLS: "1"

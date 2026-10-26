@@ -75,6 +75,7 @@ function moduleMounts(): Map<string, string> {
     ["format", dist("@swf2es/format")],
     ["mp3", dist("@swf2es/mp3", player)],
     ["tessellate", dist("@swf2es/tessellate", web)],
+    ["native", dist("@swf2es/native/bitmap", web)],
     ["context3d", dist("@swf2es/context3d/webgl")],
     ["codegen", dist("@swf2es/codegen")],
     ["runtime", dist("@swf2es/runtime", player)],

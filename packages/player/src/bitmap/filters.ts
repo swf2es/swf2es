@@ -18,6 +18,14 @@ import {
   unmultiply,
 } from "./bitmap.js";
 
+/** An optional CPU kernel returns owned pixels, or null to use the existing JS operation. */
+export type BitmapConvolver = (
+  source: BitmapStore,
+  area: PixelRect,
+  filter: Filter,
+  transparent: boolean,
+) => Uint32Array | null;
+
 /** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
 export const GLOWS: ReadonlySet<string> = new Set([
   "glow",
@@ -374,6 +382,7 @@ export function applyFilter(
   dy: number,
   f: Filter,
   map: BitmapStore | null = null,
+  convolution: BitmapConvolver | null = null,
 ): boolean {
   if (!filtersDrawn.has(f.kind)) {
     return false;
@@ -418,7 +427,17 @@ export function applyFilter(
   }
 
   if (f.kind === "convolution") {
-    write(dest, convolve(source, shown, f, dest.transparent), shown, shown, mx, my);
+    let pixels: Uint32Array | null = null;
+    try {
+      pixels = convolution?.(source, shown, f, dest.transparent) ?? null;
+      if (pixels && pixels.length !== shown.width * shown.height) {
+        pixels = null;
+      }
+    } catch {
+      // A failing optional kernel leaves both source and destination usable by JS.
+    }
+
+    write(dest, pixels ?? convolve(source, shown, f, dest.transparent), shown, shown, mx, my);
     return true;
   }
 
