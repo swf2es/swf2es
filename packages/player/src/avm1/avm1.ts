@@ -23,10 +23,12 @@
 // the keys and pointer (input.ts), the focus (focus.ts), Sound
 // (sound.ts) and calls out to the page (external.ts); a SWF's own record
 // is swf.ts's.
+
 import type { Codegen } from "@swf2es/codegen";
 import { type ActionList, ClipEvent, isAs3, type Place, type Swf } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
+import type { BitmapConvolver } from "../bitmap/filters.js";
 import { decodeInBrowser, type ImageDecode } from "../bitmap/images.js";
 import {
   BitmapObject,
@@ -1354,6 +1356,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** The host's renderer, which BitmapData's draw of a display object draws by; null where there is none. */
   drawer: Drawer | null = null;
+  /** Optional CPU convolution supplied and released by the host. */
+  bitmapConvolver: BitmapConvolver | null = null;
 
   /** The library's bitmap exported as `name`, as a new transparent store, as loadBitmap makes one. */
   libraryBitmap(name: string): BitmapStore | null {

@@ -57,10 +57,49 @@ const abcs = compileScripts(
     },
     "WorkerBasics",
     "WorkerMutex",
+    {
+      name: "NativeBitmapTest",
+      source: readFileSync(`${here}scripts/NativeBitmapTest.as`, "utf8"),
+    },
   ],
   out,
 );
 mkdirSync(site, { recursive: true });
+writeFileSync(
+  `${site}native-bitmap-as3.swf`,
+  bare(abcs.get("NativeBitmapTest") as Uint8Array, 1, "NativeBitmapTest", 16, 16),
+);
+writeFileSync(
+  `${site}native-bitmap-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 16,
+    height: 16,
+    frameCount: 1,
+    tags: [
+      w.doAction([
+        ...script(
+          `
+    var source = new flash.display.BitmapData(16, 16, true, 0x80305070);
+    source.setPixel32(8, 8, 0xffff4020);
+    var dest = new flash.display.BitmapData(16, 16, true, 0);
+    var f = new flash.filters.ConvolutionFilter(3, 3, [1,1,1,1,1,1,1,1,1], 9);
+    dest.applyFilter(source, source.rectangle, new flash.geom.Point(0, 0), f);
+    dest.applyFilter(dest, dest.rectangle, new flash.geom.Point(0, 0), f);
+    trace(dest.getPixel32(8, 8) + " " + dest.getPixel32(0, 0));
+    this.attachBitmap(dest, 1);
+    stop();
+  `,
+          8,
+        )(flashAssembler())
+          .end()
+          .bytes(),
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(
   `${site}context-menu.swf`,
   bare(abcs.get("ContextMenuTest") as Uint8Array, 1, "ContextMenuTest", 200, 120),
@@ -1548,7 +1587,114 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
   }
 }
 
-if (failures + unisolated + fillFailures > 0) {
-  console.log(`${failures + unisolated + fillFailures} of ${checks.length + 6} checks failed`);
+let bitmapFailures = 0;
+for (const vm of ["as3", "avm1"]) {
+  let reference: string[] | null = null;
+  let imageReference: Image | null = null;
+  for (const mode of ["default", "native", "blocked", "missing", "trap"]) {
+    try {
+      await withPage(
+        "bitmapRun",
+        async (evaluate, send) => {
+          if (mode === "missing") {
+            await send("Network.enable");
+            await send("Network.setBlockedURLs", { urls: ["*/native/*"] });
+          }
+
+          const result = await call<{
+            traces: string[];
+            errors: string[];
+            calls: number;
+            instances: number;
+            requests: number;
+            rect: [number, number, number, number];
+          }>(evaluate, `bitmapRun(${JSON.stringify(mode)}, ${JSON.stringify(vm)})`);
+          assert.deepEqual(result.errors, []);
+          assert.equal(result.traces.length, 1);
+          if (reference) {
+            assert.deepEqual(result.traces, reference);
+          } else {
+            reference = result.traces;
+          }
+
+          const [x, y, width, height] = result.rect;
+          const shot = await send<{ data: string }>("Page.captureScreenshot", {
+            format: "png",
+            clip: { x, y, width, height, scale: 1 },
+          });
+          const image = decodePng(Buffer.from(shot.data, "base64"));
+          if (imageReference) {
+            assert.equal(compareImages(image, imageReference, 0).outliers, 0);
+          } else {
+            imageReference = image;
+          }
+
+          assert.equal(result.calls, mode === "native" || mode === "trap" ? 6 : 0);
+          assert.equal(result.instances, mode === "native" ? 3 : mode === "trap" ? 6 : 0);
+          if (mode === "default") {
+            assert.equal(result.requests, 0, "default playback loaded native bitmap code");
+          }
+
+          await call(evaluate, "bitmapDestroy()");
+          await send("HeapProfiler.collectGarbage");
+          await send("HeapProfiler.collectGarbage");
+          assert.equal(await call(evaluate, "bitmapSurvivors()"), 0);
+        },
+        false,
+        {
+          page: "web-test/workers.html",
+          mounts: [
+            ["/web-test/", site],
+            ["/web-src/", here],
+            ["/libraries/", `${out}libraries/`],
+          ],
+        },
+      );
+      console.log(`ok native bitmaps: ${vm} ${mode}`);
+    } catch (error) {
+      bitmapFailures++;
+      console.log(
+        `not ok native bitmaps: ${vm} ${mode}\n  ${error instanceof Error ? error.stack : String(error)}`,
+      );
+    }
+  }
+}
+
+try {
+  await withPage(
+    "fillRun",
+    async (evaluate) => {
+      const result = await call(
+        evaluate,
+        `import("@swf2es/native/bitmap").then(({Convolver}) => {
+      const owner = new Convolver();
+      const source = {width:1,height:1,transparent:true,pixels:new Uint32Array([0xff123456])};
+      const rect = {x:0,y:0,width:1,height:1};
+      const filter = {matrixX:1,matrixY:1,matrix:[1],divisor:1,bias:0,color:0,alpha:0,clamp:true,preserveAlpha:true};
+      return owner.convolve(source,rect,filter,true) === null && owner.capacity === 0;
+    })`,
+      );
+      assert.equal(result, true, "CSP refusal must return the JS fallback signal");
+    },
+    false,
+    {
+      page: "web-test/fills-csp.html",
+      mounts: [
+        ["/web-test/", site],
+        ["/web-src/", here],
+        ["/libraries/", `${out}libraries/`],
+      ],
+    },
+  );
+  console.log("ok native bitmaps: CSP fallback");
+} catch (error) {
+  bitmapFailures++;
+  console.log(
+    `not ok native bitmaps: CSP fallback\n  ${error instanceof Error ? error.stack : String(error)}`,
+  );
+}
+
+if (failures + unisolated + fillFailures + bitmapFailures > 0) {
+  console.log(`${failures + unisolated + fillFailures + bitmapFailures} checks failed`);
   process.exitCode = 1;
 }

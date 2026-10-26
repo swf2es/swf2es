@@ -767,7 +767,97 @@ async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
   };
 }
 
+const bitmapMemories: WeakRef<WebAssembly.Memory>[] = [];
+let bitmapPlayer: Player | null = null;
+
+async function bitmapRun(mode: string, vm: string) {
+  const { web } = await loading;
+  web.configure({ nativeFills: false, nativeBitmaps: mode !== "default", cache: false });
+  const Module = WebAssembly.Module;
+  const Instance = WebAssembly.Instance;
+  const log = console.log;
+  const error = console.error;
+  const traces: string[] = [];
+  const errors: string[] = [];
+  let calls = 0;
+  let instances = 0;
+  let requests = 0;
+  console.log = (...values) => traces.push(values.join(" "));
+  console.error = (...values) => errors.push(values.join(" "));
+  WebAssembly.Module = new Proxy(Module, {
+    construct(target, args) {
+      if (mode === "blocked") {
+        throw new WebAssembly.CompileError("test bitmap compilation refusal");
+      }
+      return Reflect.construct(target, args);
+    },
+  });
+  WebAssembly.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      const instance = Reflect.construct(target, args) as WebAssembly.Instance;
+      if (typeof instance.exports.convolve !== "function") {
+        return instance;
+      }
+
+      instances++;
+      bitmapMemories.push(new WeakRef(instance.exports.memory as WebAssembly.Memory));
+      return {
+        exports: {
+          ...instance.exports,
+          convolve: (...params: number[]) => {
+            calls++;
+            if (mode === "trap") {
+              throw new WebAssembly.RuntimeError("test bitmap trap");
+            }
+            return (instance.exports.convolve as (...args: number[]) => number)(...params);
+          },
+        },
+      };
+    },
+  });
+  let rect: [number, number, number, number] = [0, 0, 0, 0];
+  try {
+    for (let i = 0; i < 3; i++) {
+      const p = document.createElement("swf2es-player") as Player;
+      p.setAttribute("quality", "low");
+      document.body.append(p);
+      try {
+        await p.load(`/web-test/native-bitmap-${vm}.swf`);
+        await frames(3);
+        const bounds = p.getBoundingClientRect();
+        rect = [bounds.x, bounds.y, bounds.width, bounds.height];
+        if (i === 2) {
+          bitmapPlayer = p;
+        }
+      } finally {
+        if (p !== bitmapPlayer) {
+          p.destroy();
+          p.remove();
+        }
+      }
+    }
+    requests = performance
+      .getEntriesByType("resource")
+      .filter((r) => r.name.includes("/native/")).length;
+  } finally {
+    console.log = log;
+    console.error = error;
+    WebAssembly.Module = Module;
+    WebAssembly.Instance = Instance;
+  }
+
+  return { traces: traces.slice(-1), errors, calls, instances, requests, rect };
+}
+
 Object.assign(globalThis, {
+  bitmapRun,
+  bitmapDestroy: () => {
+    bitmapPlayer?.destroy();
+    bitmapPlayer?.remove();
+    bitmapPlayer = null;
+    return true;
+  },
+  bitmapSurvivors: () => bitmapMemories.filter((m) => m.deref()).length,
   fillRun,
   fillDestroy: () => {
     fillPlayer?.destroy();

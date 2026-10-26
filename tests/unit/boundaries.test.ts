@@ -12,12 +12,13 @@ const allowed: Record<string, string[]> = {
   format: ["compress"],
   mp3: [],
   tessellate: [],
+  native: [],
   context3d: [],
   codegen: ["format"],
   runtime: ["format"],
   player: ["codegen", "context3d", "format", "mp3", "runtime"],
   "player-hosts": ["player"],
-  web: ["codegen", "format", "player", "player-hosts", "tessellate"],
+  web: ["codegen", "format", "native", "player", "player-hosts", "tessellate"],
   cli: ["codegen", "format", "runtime"],
 };
 
@@ -33,7 +34,7 @@ const nativeVendor = ["libtess2", "lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
-const portable = ["tessellate", "compress", "format", "codegen", "runtime"];
+const portable = ["native", "tessellate", "compress", "format", "codegen", "runtime"];
 
 const root = new URL("../../packages/", import.meta.url);
 const appsRoot = new URL("../../apps/", import.meta.url);

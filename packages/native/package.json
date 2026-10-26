@@ -1,0 +1,20 @@
+{
+  "name": "@swf2es/native",
+  "version": "0.0.0",
+  "description": "Optional CPU bitmap kernels compiled to WebAssembly with Zig",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./bitmap": {
+      "types": "./dist/bitmap.d.ts",
+      "default": "./dist/bitmap.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build:wasm": "node build.ts",
+    "check:wasm": "node build.ts --check"
+  }
+}

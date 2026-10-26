@@ -100,14 +100,15 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `mp3`     | synchronous MP3 frame decoder, minimp3 compiled to WebAssembly with a Zig adapter | — |
+| `native` | optional CPU bitmap kernels in Zig/Wasm, with owned output buffers | — |
 | `tessellate` | optional double-precision libtess2 fill tessellation in WebAssembly with a Zig adapter and owned output buffers | — |
 | `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
 | `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
-| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts, tessellate |
+| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts, tessellate, native |
 
-`tessellate`, `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
+`native`, `tessellate`, `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
 (`compress`, below): ByteArray's `compress` and a SWF's body are the
@@ -4729,6 +4730,32 @@ clear but the screen's, which draws wrongly, moves neither a frame there
 nor `bench.ts --rig 32 --blurred --gpu` by more than the runs vary, on
 the discrete GPU or the integrated one: the textures are small, some
 0.4 megapixels of inputs a frame.
+
+#### Optional native CPU convolution
+
+`configure({ nativeBitmaps: true })` opts new web playbacks into CPU
+BitmapData convolution through `@swf2es/native/bitmap`; it is off by default
+and no native bitmap module is loaded then. Each playback supplies one
+`Convolver.convolve` to its Scripting or Avm1 `bitmapConvolver` hook before
+the movie starts and clears the hook and disposes scratch at teardown.
+Direct player hosts can supply the same hook and own its lifetime. Workers
+without a hook keep using JS. GPU filters and other BitmapData operations
+are unchanged.
+
+The native package depends on no other package and loads no DOM or node
+types. The kernel receives numeric records and premultiplied ARGB pixels.
+Only the required rectangle and convolution halo cross into Wasm; the
+result is copied into an owned Uint32Array before existing clipping and
+destination writing. This preserves self-filtering and notifications, and
+allows later calls, memory growth or disposal without invalidating results.
+Strict double arithmetic preserves coefficient order and Flash's fixed-point
+3×3 convolution quirks. Explicit SIMD is preferred, with a scalar module
+for hosts that cannot compile SIMD. Both modules import nothing. Compilation
+refusal, missing optional modules, allocation rejection and traps fall back
+to JS before destination pixels are written. Trapped instances are dropped;
+ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
+instances above the default 8 MiB retention threshold are dropped after a
+call. The other Wasm packages keep independent modules and lifetimes.
 
 ### Masks and scroll rectangles
 

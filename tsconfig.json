@@ -26,11 +26,13 @@
     "packages/mp3/build.ts",
     "packages/compress/build.ts",
     "packages/tessellate/build.ts",
+    "packages/native/build.ts",
     "packages/player-hosts/build-thread.ts"
   ],
   "exclude": [
     "tests/programs/as3pb",
     "tests/player/page.ts",
+    "tests/player/bitmap-bench-page.ts",
     "tests/player/hidden-groups-page.ts",
     "tests/web/page.ts",
     "tests/context3d/page.ts",
