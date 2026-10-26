@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -93,8 +93,9 @@ const apps = readdirSync(appsRoot, { withFileTypes: true })
   .map((entry) => entry.name);
 
 test("every package is in the table", () => {
+  // A package is a directory with a package.json: a moved package's ignored build output stays behind.
   const packages = readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && existsSync(new URL(`${entry.name}/package.json`, root)))
     .map((entry) => entry.name)
     .sort();
   assert.deepEqual(packages, Object.keys(allowed).sort());
