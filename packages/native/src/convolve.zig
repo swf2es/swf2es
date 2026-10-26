@@ -201,7 +201,7 @@ pub fn validate(p: *const Params) bool {
     if (p.y0 != y0 or p.nh != y1 - y0 + 1) return false;
 
     // The block and the output must each fit the 128 MiB memory with room
-    // to spare; the planes hold at most 15 of the block's rows.
+    // to spare; the planes hold at most 16 of the block's rows.
     const count = std.math.mul(u32, p.nw, p.nh) catch return false;
     const length = std.math.mul(u32, p.w, p.h) catch return false;
     return count <= memory_limit / 16 and length <= memory_limit / 4;
@@ -230,7 +230,9 @@ pub fn convolve(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, m
     // An output row reads at most `rows` consecutive block rows, and the
     // next reads the same or later ones, so that many lines of planes
     // suffice however tall the block is; a power of two masks rather than
-    // divides when a tap finds its line.
+    // divides when a tap finds its line. Validated first: no rows to round up
+    // is invalid params, not a failed assertion.
+    if (!validate(p)) return error.InvalidParams;
     return convolveLines(gpa, p, pixels, matrix, std.math.ceilPowerOfTwoAssert(usize, @min(p.rows, p.nh)));
 }
 
@@ -416,6 +418,12 @@ test "inconsistent params are rejected" {
     try std.testing.expectError(error.InvalidParams, convolve(std.testing.allocator, &p, &pixels, &.{1}));
     p = testParams(1, 1, 1, 1, opaque_flags);
     try std.testing.expectError(error.InvalidParams, convolve(std.testing.allocator, &p, &pixels, &.{ 1, 2 }));
+    p = testParams(1, 1, 1, 1, opaque_flags);
+    p.rows = 0;
+    try std.testing.expectError(error.InvalidParams, convolve(std.testing.allocator, &p, &pixels, &.{}));
+    p = testParams(1, 1, 1, 1, opaque_flags);
+    p.nh = 0;
+    try std.testing.expectError(error.InvalidParams, convolve(std.testing.allocator, &p, &.{}, &.{1}));
 }
 
 fn convolveAndFree(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, matrix: []const f64) !void {
