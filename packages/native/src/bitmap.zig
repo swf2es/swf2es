@@ -179,23 +179,48 @@ fn addRow(sum: []f64, plane: []const i32, start: usize, lo: usize, hi: usize, we
     while (x < hi) : (x += 1) sum[x] += @as(f64, @floatFromInt(plane[start + x - lo])) * weight;
 }
 
+/// Whether p describes a convolution the kernel can run. The limits are
+/// bitmap.ts's own, so the two reject the same calls.
+fn validate(p: *const Params) bool {
+    // Under 2^30, so that a coordinate plus a size or a kernel stays an i32.
+    if (p.sw == 0 or p.sw > 0x3fffffff) return false;
+    if (p.sh == 0 or p.sh > 0x3fffffff) return false;
+    if (p.x < -0x3fffffff or p.x > 0x3fffffff) return false;
+    if (p.y < -0x3fffffff or p.y > 0x3fffffff) return false;
+    // ConvolutionFilter's matrix is at most 15 × 15.
+    if (p.cols == 0 or p.cols > 15) return false;
+    if (p.rows == 0 or p.rows > 15) return false;
+    if (p.w == 0 or p.w > 0x100000) return false;
+    if (p.h == 0 or p.h > 0x100000) return false;
+    if (p.flags.unused != 0) return false;
+
+    // The copied block must be the rect grown by the kernel's reach and
+    // clamped to the bitmap, as bitmap.ts computes it; the taps index it so.
+    const sw: i32 = @intCast(p.sw);
+    const sh: i32 = @intCast(p.sh);
+    const hx: i32 = @intCast(p.cols / 2);
+    const hy: i32 = @intCast(p.rows / 2);
+    const x0 = clamp(p.x - hx, sw);
+    const y0 = clamp(p.y - hy, sh);
+    const x1 = clamp(p.x + @as(i32, @intCast(p.w + p.cols)) - hx - 2, sw);
+    const y1 = clamp(p.y + @as(i32, @intCast(p.h + p.rows)) - hy - 2, sh);
+    if (p.x0 != x0 or p.nw != x1 - x0 + 1) return false;
+    if (p.y0 != y0 or p.nh != y1 - y0 + 1) return false;
+
+    // Four i32 planes and the output must fit the 128 MiB memory with room to spare.
+    const count = std.math.mul(u32, p.nw, p.nh) catch return false;
+    const length = std.math.mul(u32, p.w, p.h) catch return false;
+    return count <= limit / 16 and length <= limit / 4;
+}
+
 export fn convolve(address: usize) usize {
     @setFloatMode(.strict);
     if (!inputRange(address, @sizeOf(Params), @alignOf(Params))) return 0;
     const p: *const Params = @ptrFromInt(address);
-    if (p.sw == 0 or p.sh == 0 or p.sw > 0x3fffffff or p.sh > 0x3fffffff or p.cols == 0 or p.rows == 0 or p.cols > 15 or p.rows > 15 or p.w == 0 or p.h == 0 or p.w > 0x100000 or p.h > 0x100000) return 0;
-    if (p.x < -0x3fffffff or p.x > 0x3fffffff or p.y < -0x3fffffff or p.y > 0x3fffffff or p.flags.unused != 0) return 0;
-    const sw: i32 = @intCast(p.sw);
-    const sh: i32 = @intCast(p.sh);
-    const cx0 = clamp(p.x - @as(i32, @intCast(p.cols / 2)), sw);
-    const cy0 = clamp(p.y - @as(i32, @intCast(p.rows / 2)), sh);
-    const cx1 = clamp(p.x + @as(i32, @intCast(p.w + p.cols - p.cols / 2)) - 2, sw);
-    const cy1 = clamp(p.y + @as(i32, @intCast(p.h + p.rows - p.rows / 2)) - 2, sh);
-    if (p.x0 != cx0 or p.y0 != cy0 or p.nw != cx1 - cx0 + 1 or p.nh != cy1 - cy0 + 1) return 0;
+    if (!validate(p)) return 0;
     const g: Geometry = .init(p);
-    const count = std.math.mul(usize, p.nw, p.nh) catch return 0;
-    const length = std.math.mul(usize, p.w, p.h) catch return 0;
-    if (count > limit / 16 or length > limit / 4) return 0;
+    const count: usize = p.nw * p.nh;
+    const length: usize = p.w * p.h;
     if (!inputRange(p.pixels, count * 4, 4) or !inputRange(p.matrix, p.cols * p.rows * 8, 8)) return 0;
     const width: usize = p.w;
     const source = @as([*]const u32, @ptrFromInt(p.pixels))[0..count];
