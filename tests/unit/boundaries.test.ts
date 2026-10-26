@@ -95,7 +95,9 @@ const apps = readdirSync(appsRoot, { withFileTypes: true })
 test("every package is in the table", () => {
   // A package is a directory with a package.json: a moved package's ignored build output stays behind.
   const packages = readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(new URL(`${entry.name}/package.json`, root)))
+    .filter(
+      (entry) => entry.isDirectory() && existsSync(new URL(`${entry.name}/package.json`, root)),
+    )
     .map((entry) => entry.name)
     .sort();
   assert.deepEqual(packages, Object.keys(allowed).sort());
