@@ -120,6 +120,54 @@ test("native convolution exactly matches JS through clipping, writing and self-f
   }
 });
 
+test("a rect convolved in bands of rows matches JS across the bands' seams", () => {
+  // Wide enough that the rect takes several calls; the rows a band's kernel
+  // reaches above and below come from its neighbours.
+  const sw = 700,
+    sh = 600;
+  const source = new BitmapStore(sw, sh, true, 0);
+  let seed = 4127;
+  for (let i = 0; i < source.pixels.length; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const alpha = i % 5 ? 255 : seed >>> 24;
+    source.pixels[i] =
+      ((alpha << 24) | (((((seed >>> 16) & 255) * alpha) / 255) << 16) | (seed & alpha)) >>> 0;
+  }
+
+  const owners = [new Convolver({ simd: false }), new Convolver()];
+  for (const clamp of [true, false]) {
+    const f = {
+      ...filter(),
+      matrixX: 5,
+      matrixY: 7,
+      matrix: Array.from({ length: 35 }, (_, k) => ((k % 6) - 2) / 3),
+      divisor: 1.5,
+      bias: 3,
+      clamp,
+      preserveAlpha: false,
+    };
+    const rect = { x: -3, y: -5, width: sw + 4, height: sh + 9 };
+    const expected = new BitmapStore(sw + 4, sh + 9, true, 0);
+    applyFilter(expected, source, rect, 0, 0, f);
+    for (const owner of owners) {
+      const dest = new BitmapStore(sw + 4, sh + 9, true, 0);
+      let calls = 0;
+      applyFilter(dest, source, rect, 0, 0, f, null, (...args) => {
+        calls++;
+        const out = owner.convolve(...args);
+        assert.ok(out, "unexpected rejection");
+        return out;
+      });
+      assert.equal(calls, 1);
+      assert.deepEqual(dest.pixels, expected.pixels, `clamp ${clamp}`);
+    }
+  }
+
+  for (const owner of owners) {
+    owner.dispose();
+  }
+});
+
 test("published convolution pixels survive growth, rejection, scratch reuse and disposal", () => {
   const native = new Convolver();
   const source = new BitmapStore(16, 16, true, 0x80305070);
@@ -129,9 +177,12 @@ test("published convolution pixels survive growth, rejection, scratch reuse and 
   const capacity = native.capacity;
   assert.equal(native.convolve(source, { ...area, width: 0x100001 }, filter(), true), null);
   assert.equal(native.capacity, capacity, "preflight rejection must retain valid scratch");
-  const large = new BitmapStore(1024, 1024, true, 0xff884422);
-  assert.ok(native.convolve(large, { ...area, width: 1024, height: 1024 }, filter(), true));
-  assert.equal(native.capacity, 0, "oversized scratch must be discarded");
+  const large = new BitmapStore(2048, 2048, true, 0xff884422);
+  assert.ok(native.convolve(large, { ...area, width: 2048, height: 2048 }, filter(), true));
+  assert.ok(native.capacity > 0 && native.capacity <= 4 << 20, "large rects run in small bands");
+  const small = new Convolver({ retainMemory: 1 << 16 });
+  assert.ok(small.convolve(large, { ...area, width: 64, height: 64 }, filter(), true));
+  assert.equal(small.capacity, 0, "scratch over retainMemory must be discarded");
   assert.ok(native.convolve(source, area, filter(), true));
   native.dispose();
   assert.equal(native.capacity, 0);
