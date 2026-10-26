@@ -1,5 +1,5 @@
 // Every binary of the package, each its own wasm32-freestanding module in
-// zig-out/bin/: bitmap's scalar and SIMD kernels, mp3 (minimp3), compress
+// zig-out/bin/: bitmap's SIMD kernels, mp3 (minimp3), compress
 // (zlib and the LZMA SDK) and tessellate (libtess2). build.ts runs this with
 // the pinned Zig and checks the results in as base64; `zig build test` runs
 // the bitmap kernel's tests on the host.
@@ -29,35 +29,29 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
     });
 }
 
+/// The bitmap kernels, with wasm SIMD: every current browser has it, and an
+/// engine without it refuses the module, which leaves the filters to JS.
 fn bitmap(b: *std.Build, optimize: std.builtin.Optimize) void {
-    const test_step = b.step("test", "Run the bitmap kernel's tests on the host, scalar and SIMD");
-    for ([_][]const u8{ "scalar", "simd" }) |name| {
-        const simd = !std.mem.eql(u8, name, "scalar");
-        const target = if (simd) wasm(b, &.{ .bulk_memory, .simd128 }) else wasm(b, &.{.bulk_memory});
-        const options = b.addOptions();
-        options.addOption(bool, "simd", simd);
-        const root = b.createModule(.{
-            .root_source_file = b.path("src/bitmap/bitmap.zig"),
-            .target = target,
-            .optimize = optimize,
-            .single_threaded = true,
-            .strip = true,
-        });
-        root.addOptions("options", options);
-        root.export_symbol_names = &.{ "resetArena", "convolve", "capacity" };
-        const module = b.addExecutable(.{ .name = name, .root_module = root });
-        module.entry = .disabled;
-        module.stack_size = 64 * 1024;
-        module.max_memory = 128 * 1024 * 1024;
-        b.installArtifact(module);
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/bitmap/bitmap.zig"),
+        .target = wasm(b, &.{ .bulk_memory, .simd128 }),
+        .optimize = optimize,
+        .single_threaded = true,
+        .strip = true,
+    });
+    root.export_symbol_names = &.{ "resetArena", "convolve", "capacity" };
+    const module = b.addExecutable(.{ .name = "bitmap", .root_module = root });
+    module.entry = .disabled;
+    module.stack_size = 64 * 1024;
+    module.max_memory = 128 * 1024 * 1024;
+    b.installArtifact(module);
 
-        const tests = b.createModule(.{
-            .root_source_file = b.path("src/bitmap/convolve.zig"),
-            .target = b.graph.host,
-        });
-        tests.addOptions("options", options);
-        test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = name, .root_module = tests })).step);
-    }
+    const tests = b.createModule(.{
+        .root_source_file = b.path("src/bitmap/convolve.zig"),
+        .target = b.graph.host,
+    });
+    const test_step = b.step("test", "Run the bitmap kernel's tests on the host");
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = "bitmap", .root_module = tests })).step);
 }
 
 /// The MP3 decoder: src/mp3/root.zig and minimp3, unchanged.

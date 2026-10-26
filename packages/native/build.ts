@@ -39,7 +39,7 @@ interface Binary {
 const BINARIES: Binary[] = [
   {
     path: "bitmap",
-    modules: { scalar: "scalar", simd: "simd" },
+    modules: { binary: "bitmap" },
     imports: [],
     vendored: [],
     note: "",

@@ -3,8 +3,8 @@ import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
 import { filterDefaults } from "../../packages/player/dist/display/filters.js";
 
-const engines = { scalar: new Convolver({ simd: false }), simd: new Convolver() };
-const modes = ["js", "scalar", "simd"] as const;
+const engines = { native: new Convolver() };
+const modes = ["js", "native"] as const;
 type Mode = (typeof modes)[number];
 const cases = [
   { size: 1, cols: 3, reps: 600 },
@@ -71,7 +71,7 @@ function bitmapBench(phase: string, round = 0) {
     for (const c of cases) {
       apply(c, "js");
       const expected = c.dest.pixels.slice();
-      for (const mode of ["scalar", "simd"] as const) {
+      for (const mode of ["native"] as const) {
         const output = engines[mode].convolve(c.source, c.rect, c.filter, true);
         if (!output) {
           throw Error(`native benchmark unavailable: ${mode}`);

@@ -1,4 +1,4 @@
-import { scalar, simd } from "./binary.js";
+import { binary } from "./binary.js";
 
 export interface BitmapSource {
   width: number;
@@ -36,8 +36,6 @@ interface NativeExports {
 export interface ConvolverOptions {
   /** Drop instances larger than this after a call; defaults to 8 MiB, at most 128 MiB. */
   retainMemory?: number;
-  /** Prefer SIMD when available; false selects the scalar module. */
-  simd?: boolean;
 }
 
 // Params.flags in bitmap.zig.
@@ -51,17 +49,13 @@ const FLAG_PREMULTIPLY = 8;
 // retainMemory's default and the instance is kept rather than regrown.
 const BAND_BYTES = 1 << 20;
 
-let scalarModule: WebAssembly.Module | null = null;
-let simdModule: WebAssembly.Module | null = null;
+let compiledModule: WebAssembly.Module | null = null;
 
-function compiled(vector: boolean): WebAssembly.Module {
-  if (vector) {
-    simdModule ??= new WebAssembly.Module(Uint8Array.from(atob(simd), (c) => c.charCodeAt(0)));
-    return simdModule;
-  }
-
-  scalarModule ??= new WebAssembly.Module(Uint8Array.from(atob(scalar), (c) => c.charCodeAt(0)));
-  return scalarModule;
+// The module uses wasm SIMD; an engine without it refuses the module as it
+// would a missing Wasm engine, and the caller keeps JS.
+function compiled(): WebAssembly.Module {
+  compiledModule ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
+  return compiledModule;
 }
 
 /** One playback's bounded scratch. Results own their buffers; rejection leaves the source untouched. */
@@ -69,11 +63,9 @@ export class Convolver {
   private instance: NativeExports | null = null;
   private unavailable = false;
   private readonly keep: number;
-  private readonly vector: boolean;
 
   constructor(options: ConvolverOptions = {}) {
     this.keep = options.retainMemory ?? 8 << 20;
-    this.vector = options.simd !== false;
     if (!Number.isInteger(this.keep) || this.keep < 0 || this.keep > 128 << 20) {
       throw new RangeError("invalid convolution memory limit");
     }
@@ -153,15 +145,11 @@ export class Convolver {
       if (!this.instance) {
         let module: WebAssembly.Module;
         try {
-          module = compiled(this.vector);
+          module = compiled();
         } catch {
-          try {
-            module = compiled(false);
-          } catch {
-            // A missing Wasm engine or CSP refusal is tried only once per owner.
-            this.unavailable = true;
-            return null;
-          }
+          // A missing Wasm engine or SIMD, or a CSP refusal, is tried only once per owner.
+          this.unavailable = true;
+          return null;
         }
 
         try {

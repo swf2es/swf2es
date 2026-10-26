@@ -72,14 +72,17 @@ so a call's scratch stays near 2 MiB even 4096 pixels wide, and a playback
 filtering large bitmaps every frame keeps its instance. Existing player
 code handles clipping, destination writing and notifications. Strict double
 arithmetic and Flash's fixed-point 3×3 quirks match the existing JS path.
-Explicit f64x2 SIMD is preferred; compilation refusal falls back to scalar.
-Both binaries import nothing. Missing Wasm/CSP refusal is tried once per
-owner, traps discard the instance, and normal rejection can reuse its arena.
+The kernel uses explicit f64x2 wasm SIMD, and there is no scalar build:
+every current browser ships wasm SIMD (Chrome 91, Firefox 89, Safari 16.4
+on), and an engine without it refuses the module just as one without Wasm
+or under a CSP refusal does, which leaves the filter to the JS path. The
+binary imports nothing. A refusal is tried once per owner, traps discard
+the instance, and normal rejection can reuse its arena.
 
 Wasm memory has a 128 MiB maximum. Instances above 8 MiB are dropped after a
-call; `new Convolver({ retainMemory: bytes })` adjusts that threshold, and
-`{ simd: false }` selects scalar. Arena reset reuses capacity; only dropping
-the instance permits its memory to be collected.
+call; `new Convolver({ retainMemory: bytes })` adjusts that threshold.
+Arena reset reuses capacity; only dropping the instance permits its memory
+to be collected.
 
 The package's build first runs the kernel's Zig tests on the host (`zig
 build test` in this folder): exact pixels for small cases, and every
@@ -94,7 +97,7 @@ the opt-out, missing modules, blocked compilation, traps, CSP and teardown.
 After `pnpm build`, run `node tests/player/bitmap-bench.ts [processes, 2]`
 under the machine lock for synthetic full applyFilter timings in Chrome.
 It includes input/output copying, destination writes and oversized-instance
-recreation. The benchmark compares JS, scalar and SIMD with exact output
+recreation. The benchmark compares JS and native with exact output
 checks and nine balanced rounds per fresh browser process. It measures CPU
 filter calls; whole-game performance depends on their share of the workload.
 

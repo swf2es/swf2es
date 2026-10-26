@@ -4754,9 +4754,10 @@ result is copied into an owned Uint32Array before existing clipping and
 destination writing. This preserves self-filtering and notifications, and
 allows later calls, memory growth or disposal without invalidating results.
 Strict double arithmetic preserves coefficient order and Flash's fixed-point
-3×3 convolution quirks. Explicit SIMD is preferred, with a scalar module
-for hosts that cannot compile SIMD. Both modules import nothing. Compilation
-refusal, missing optional modules, allocation rejection and traps fall back
+3×3 convolution quirks. The module uses wasm SIMD and has no scalar
+build: every current browser ships SIMD, and an engine without it refuses
+the module as one without Wasm does, so it keeps the JS path. The module
+imports nothing. Compilation refusal, missing optional modules, allocation rejection and traps fall back
 to JS before destination pixels are written. Trapped instances are dropped;
 ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
 instances above the default 8 MiB retention threshold are dropped after a
