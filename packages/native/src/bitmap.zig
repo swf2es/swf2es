@@ -109,6 +109,23 @@ fn integerKernel(matrix: []const f64, divisor: f64) ?i32 {
     return @as(i16, @bitCast(reciprocal));
 }
 
+const Tap = struct { weight: f64, dx: i32, dy: i32 };
+
+/// Kernel entry k as a tap: its weight and where it reads from the pixel, or
+/// null where it weighs nothing. The fixed-point way divides only after
+/// summing, and reads its last tap at the centre (integerKernel's quirk).
+inline fn tap(p: *const Params, matrix: []const f64, k: usize, fixed: bool) ?Tap {
+    @setFloatMode(.strict);
+    const weight = if (fixed) matrix[k] else matrix[k] / p.divisor;
+    if (weight == 0) return null;
+    if (fixed and k == matrix.len - 1) return .{ .weight = weight, .dx = 0, .dy = 0 };
+    return .{
+        .weight = weight,
+        .dx = @as(i32, @intCast(k % p.cols)) - @as(i32, @intCast(p.cols / 2)),
+        .dy = @as(i32, @intCast(k / p.cols)) - @as(i32, @intCast(p.rows / 2)),
+    };
+}
+
 fn addRow(sum: []f64, plane: []const i32, start: usize, lo: usize, hi: usize, weight: f64) void {
     @setFloatMode(.strict);
     var x = lo;
@@ -173,28 +190,20 @@ export fn convolve(address: usize) usize {
         const x2: usize = if (row_inside) @intCast(@max(@as(i32, @intCast(x1)), @min(@as(i32, @intCast(p.w)), @as(i32, @intCast(p.sw)) - cols + hx + 1 - p.x))) else 0;
         const fixed_row = fixed_scale != null and sy >= 1 and sy < @as(i32, @intCast(p.sh)) - 1;
         if (x2 > x1) {
-            for (matrix, 0..) |m, k| {
-                const weight = if (fixed_row) m else m / p.divisor;
-                if (weight == 0) continue;
-                const last = fixed_row and k == matrix.len - 1;
-                const dx: i32 = if (last) 0 else @as(i32, @intCast(k % p.cols)) - hx;
-                const dy: i32 = if (last) 0 else @as(i32, @intCast(k / p.cols)) - hy;
-                const start = index(p, p.x + @as(i32, @intCast(x1)) + dx, sy + dy);
-                inline for (0..4) |ch| addRow(sums[ch], planes[ch], start, x1, x2, weight);
+            for (0..matrix.len) |k| {
+                const t = tap(p, matrix, k, fixed_row) orelse continue;
+                const start = index(p, p.x + @as(i32, @intCast(x1)) + t.dx, sy + t.dy);
+                inline for (0..4) |ch| addRow(sums[ch], planes[ch], start, x1, x2, t.weight);
             }
         }
         for (0..p.w) |x| {
             const sx = p.x + @as(i32, @intCast(x));
             const fixed = fixed_row and sx >= 1 and sx < @as(i32, @intCast(p.sw)) - 1;
             if (x < x1 or x >= x2) {
-                for (matrix, 0..) |m, k| {
-                    const weight = if (fixed) m else m / p.divisor;
-                    if (weight == 0) continue;
-                    const last = fixed and k == matrix.len - 1;
-                    const dx: i32 = if (last) 0 else @as(i32, @intCast(k % p.cols)) - hx;
-                    const dy: i32 = if (last) 0 else @as(i32, @intCast(k / p.cols)) - hy;
-                    const at = index(p, sx + dx, sy + dy);
-                    inline for (0..4) |ch| sums[ch][x] += @as(f64, @floatFromInt(planes[ch][at])) * weight;
+                for (0..matrix.len) |k| {
+                    const t = tap(p, matrix, k, fixed) orelse continue;
+                    const at = index(p, sx + t.dx, sy + t.dy);
+                    inline for (0..4) |ch| sums[ch][x] += @as(f64, @floatFromInt(planes[ch][at])) * t.weight;
                 }
             }
             var values: [4]f64 = undefined;
