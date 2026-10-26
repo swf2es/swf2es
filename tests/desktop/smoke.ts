@@ -431,7 +431,6 @@ try {
 
     // Cross-origin isolated, as a shareable ByteArray's shared memory needs.
     assert.equal(await evaluate<boolean>("crossOriginIsolated"), true);
-    // Native bitmap kernels are on by default: playback loaded them.
     // Native bitmap kernels are on by default: playback loaded them. The page loads
     // more modules than resource timing keeps, so the frame's resources tell.
     const { frameTree } = await devtools.send<{ frameTree: { resources: { url: string }[] } }>(

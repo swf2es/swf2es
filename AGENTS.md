@@ -130,12 +130,12 @@ of its own.
 - **Codegen is pure.** No DOM or node APIs, no clock, no randomness, and a
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
-- **Package boundaries.** `compress` depends on nothing, `format` on `compress`,
-  `codegen` and `runtime` on `format`, `mp3`, `tessellate`, `native` and `context3d` on nothing,
-  `cli` on `format`, `codegen` and `runtime`, `player` on those plus `context3d`
-  and `mp3`, `player-hosts` on `player`, `web` on `codegen`, `format`, `player`,
-  `player-hosts`, `tessellate` and `native`. `codegen` never imports the runtime implementation.
-  `native`, `tessellate`, `compress`, `format`, `codegen`, `runtime` and `context3d`'s core load no DOM or node types. Apps
+- **Package boundaries.** `native` and `context3d` depend on nothing, `format` on `native`,
+  `codegen` and `runtime` on `format`, `cli` on `format`, `codegen` and `runtime`,
+  `player` on those plus `context3d` and `native`, `player-hosts` on `player`, `web` on
+  `codegen`, `format`, `native`, `player` and `player-hosts`. `codegen` never imports the
+  runtime implementation. `native`, `format`, `codegen`, `runtime` and `context3d`'s core
+  load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.

@@ -1,6 +1,6 @@
 /**
  * Compression as SWF files and ByteArray use it, synchronously and with no
- * platform API, through @swf2es/compress: zlib itself for zlib and raw
+ * platform API, through @swf2es/native/compress: zlib itself for zlib and raw
  * deflate, the LZMA SDK's encoder for LZMA, and an LZMA decoder after the
  * SDK's specification.
  */
