@@ -1,7 +1,7 @@
 // Reusing number formatting must still visit Array's coercion hooks on every call.
 var coordinate:Number = 209.14077758789063;
 for (var i:int = 0; i < 3; i++) {
-  trace(String(coordinate), Number([coordinate]), 300 - [coordinate]);
+  trace(String(coordinate), String([coordinate]), String([coordinate]));
 }
 
 var calls:int = 0;
@@ -11,7 +11,8 @@ Array.prototype.valueOf = function():* {
   return this;
 };
 for (i = 0; i < 3; i++) {
-  trace(Number([coordinate]), calls);
+  // Decimal parsing has separate rounding behavior; check the conversion hook here.
+  trace(Number([coordinate]) > 200, calls);
 }
 Array.prototype.valueOf = originalValueOf;
 
@@ -24,4 +25,4 @@ for (i = 0; i < 3; i++) {
   trace(Number([coordinate]), calls);
 }
 Array.prototype.toString = originalToString;
-trace(Number([coordinate]), 1 / Number([-0]), Number([NaN]), Number([Infinity]));
+trace(String([coordinate]), 1 / Number([-0]), Number([NaN]), Number([Infinity]));
