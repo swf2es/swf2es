@@ -1,4 +1,4 @@
-// The pinned Zig that packages/compress and packages/mp3 build their wasm
+// The pinned Zig that packages/native builds its wasm
 // with: from the PATH if it is that version, else the release downloaded
 // once into ~/.cache/swf2es and checked against its SHA-256. A download
 // goes to a directory of its own and is renamed into place only once

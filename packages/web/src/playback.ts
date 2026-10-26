@@ -3,6 +3,7 @@
 // focus, and the loop that plays and draws, all of which destroy lets go.
 
 import type { Convolver } from "@swf2es/native/bitmap";
+import type { Tessellator } from "@swf2es/native/tessellate";
 import {
   bindActivation,
   bindKeyboard,
@@ -10,7 +11,6 @@ import {
   type Player,
   type Scripting,
 } from "@swf2es/player";
-import type { Tessellator } from "@swf2es/tessellate";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
 import { configuration } from "./config.js";
 import { place, type ScaleMode, viewport } from "./layout.js";
@@ -103,25 +103,21 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
-    let tessellator: Tessellator | null = null;
-    if (configuration().nativeFills !== false) {
-      try {
-        const { Tessellator } = await import("@swf2es/tessellate");
-        tessellator = new Tessellator();
-      } catch {
-        // An embedder without the optional module can still play through JS.
-      }
-    }
-
-    let convolver: Convolver | null = null;
-    if (configuration().nativeBitmaps === true) {
-      try {
-        const { Convolver } = await import("@swf2es/native/bitmap");
-        convolver = new Convolver();
-      } catch {
-        // The optional CPU backend must not prevent ordinary playback.
-      }
-    }
+    // Both load together, so the second costs playback no extra round trip. An
+    // embedder without a module, or a page that cannot load it, plays through JS.
+    const { nativeFills, nativeBitmaps } = configuration();
+    const [tessellator, convolver] = await Promise.all([
+      nativeFills === false
+        ? null
+        : import("@swf2es/native/tessellate")
+            .then(({ Tessellator }): Tessellator => new Tessellator())
+            .catch(() => null),
+      nativeBitmaps === false
+        ? null
+        : import("@swf2es/native/bitmap")
+            .then(({ Convolver }): Convolver => new Convolver())
+            .catch(() => null),
+    ]);
 
     const renderer = await autoDetectRenderer({
       preference: "webgl",

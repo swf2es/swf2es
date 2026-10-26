@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { Tessellator } from "@swf2es/tessellate";
+import { Tessellator } from "@swf2es/native/tessellate";
 import { readMorphShape, readSwf } from "../../../../packages/format/dist/index.js";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";

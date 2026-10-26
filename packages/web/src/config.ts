@@ -65,7 +65,7 @@ export interface Configuration {
   lazyCompilation?: boolean;
   /** Use native Wasm fill tessellation, with JS fallback; on by default. Applies to new playbacks. */
   nativeFills?: boolean;
-  /** Experimental CPU convolution with Wasm and JS fallback; off by default. Applies to new playbacks. */
+  /** Use native Wasm BitmapData convolution, with JS fallback; on by default. Applies to new playbacks. */
   nativeBitmaps?: boolean;
   /** Experimental Stage3D surface factory; absent/null keeps ErrorEvent #3702. */
   stage3D?: Stage3DSurfaceFactory | null;

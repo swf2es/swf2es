@@ -1591,14 +1591,14 @@ let bitmapFailures = 0;
 for (const vm of ["as3", "avm1"]) {
   let reference: string[] | null = null;
   let imageReference: Image | null = null;
-  for (const mode of ["default", "native", "blocked", "missing", "trap"]) {
+  for (const mode of ["js", "default", "blocked", "missing", "trap"]) {
     try {
       await withPage(
         "bitmapRun",
         async (evaluate, send) => {
           if (mode === "missing") {
             await send("Network.enable");
-            await send("Network.setBlockedURLs", { urls: ["*/native/*"] });
+            await send("Network.setBlockedURLs", { urls: ["*/native/bitmap/*"] });
           }
 
           const result = await call<{
@@ -1629,10 +1629,10 @@ for (const vm of ["as3", "avm1"]) {
             imageReference = image;
           }
 
-          assert.equal(result.calls, mode === "native" || mode === "trap" ? 6 : 0);
-          assert.equal(result.instances, mode === "native" ? 3 : mode === "trap" ? 6 : 0);
-          if (mode === "default") {
-            assert.equal(result.requests, 0, "default playback loaded native bitmap code");
+          assert.equal(result.calls, mode === "default" || mode === "trap" ? 6 : 0);
+          assert.equal(result.instances, mode === "default" ? 3 : mode === "trap" ? 6 : 0);
+          if (mode === "js") {
+            assert.equal(result.requests, 0, "the JS opt-out loaded native bitmap code");
           }
 
           await call(evaluate, "bitmapDestroy()");

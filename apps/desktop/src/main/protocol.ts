@@ -68,14 +68,10 @@ function moduleMounts(): Map<string, string> {
   const here = join(appRoot, "package.json");
   const dist = (specifier: string, from = here) => join(packageRoot(specifier, from), "dist");
   const player = join(dist("@swf2es/player"), "index.js");
-  const web = join(dist("@swf2es/web"), "index.js");
   const format = join(dist("@swf2es/format"), "index.js");
   return new Map([
-    ["compress", dist("@swf2es/compress", format)],
+    ["native", dist("@swf2es/native/compress", format)],
     ["format", dist("@swf2es/format")],
-    ["mp3", dist("@swf2es/mp3", player)],
-    ["tessellate", dist("@swf2es/tessellate", web)],
-    ["native", dist("@swf2es/native/bitmap", web)],
     ["context3d", dist("@swf2es/context3d/webgl")],
     ["codegen", dist("@swf2es/codegen")],
     ["runtime", dist("@swf2es/runtime", player)],

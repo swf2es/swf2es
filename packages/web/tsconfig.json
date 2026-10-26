@@ -12,7 +12,6 @@
     { "path": "../codegen" },
     { "path": "../player" },
     { "path": "../player-hosts" },
-    { "path": "../tessellate" },
     { "path": "../native" }
   ]
 }

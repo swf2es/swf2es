@@ -42,7 +42,7 @@ import { type RecordedEvent, Replay } from "./replay.ts";
 
 // Exercise the optional package across the same references and context-loss tests as the default.
 const fillOptions = new URLSearchParams(location.search).has("nativeFills")
-  ? { fillTessellator: new (await import("@swf2es/tessellate")).Tessellator().tessellate }
+  ? { fillTessellator: new (await import("@swf2es/native/tessellate")).Tessellator().tessellate }
   : {};
 const bitmapKernel = new URLSearchParams(location.search).has("nativeBitmaps")
   ? new (await import("@swf2es/native/bitmap")).Convolver()
