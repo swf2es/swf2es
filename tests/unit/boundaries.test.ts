@@ -8,17 +8,14 @@ import { fileURLToPath } from "node:url";
 // package.json lists, so the build already rejects imports that are not
 // declared; this test guards the declarations themselves.
 const allowed: Record<string, string[]> = {
-  compress: [],
-  format: ["compress"],
-  mp3: [],
-  tessellate: [],
   native: [],
+  format: ["native"],
   context3d: [],
   codegen: ["format"],
   runtime: ["format"],
-  player: ["codegen", "context3d", "format", "mp3", "runtime"],
+  player: ["codegen", "context3d", "format", "native", "runtime"],
   "player-hosts": ["player"],
-  web: ["codegen", "format", "native", "player", "player-hosts", "tessellate"],
+  web: ["codegen", "format", "native", "player", "player-hosts"],
   cli: ["codegen", "format", "runtime"],
 };
 
@@ -29,12 +26,12 @@ const vendored: Record<string, { dir: string; users: string[] }> = {
   "pixi.js": { dir: "pixijs", users: ["player", "web"] },
 };
 
-// C-only libraries are compiled by their wrapper packages, rather than linked by pnpm.
+// C-only libraries are compiled into native's binaries, rather than linked by pnpm.
 const nativeVendor = ["libtess2", "lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.
-const portable = ["native", "tessellate", "compress", "format", "codegen", "runtime"];
+const portable = ["native", "format", "codegen", "runtime"];
 
 const root = new URL("../../packages/", import.meta.url);
 const appsRoot = new URL("../../apps/", import.meta.url);

@@ -1,4 +1,4 @@
-// Fuzzes @swf2es/compress through format's functions with malformed CWS and
+// Fuzzes @swf2es/native/compress through format's functions with malformed CWS and
 // ZWS SWFs, zlib and raw deflate streams, and ByteArray LZMA: cut short,
 // bits flipped, runs overwritten, LZMA properties and zlib headers changed,
 // declared lengths wrong in both directions, garbage after the stream, and

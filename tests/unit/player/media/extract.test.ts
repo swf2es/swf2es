@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { prepareMp3 } from "../../../../packages/mp3/dist/index.js";
+import { prepareMp3 } from "../../../../packages/native/dist/mp3/index.js";
 import { extractSamples, mp3Source } from "../../../../packages/player/dist/media/extract.js";
 
 const ramp = (n: number) => Float32Array.from({ length: n }, (_, i) => i);

@@ -4,7 +4,7 @@
 // stack frame is of, the domain, URL and SWF of the code that runs.
 import { libraryLog, moduleKey } from "@swf2es/codegen";
 import { readDoAbc, type Swf, tags } from "@swf2es/format";
-import { prepareMp3 } from "@swf2es/mp3";
+import { prepareMp3 } from "@swf2es/native/mp3";
 import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";

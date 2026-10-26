@@ -1598,7 +1598,7 @@ for (const vm of ["as3", "avm1"]) {
         async (evaluate, send) => {
           if (mode === "missing") {
             await send("Network.enable");
-            await send("Network.setBlockedURLs", { urls: ["*/native/*"] });
+            await send("Network.setBlockedURLs", { urls: ["*/native/bitmap/*"] });
           }
 
           const result = await call<{

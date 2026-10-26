@@ -70,8 +70,8 @@ element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality` and
 back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
 
-Fill tessellation uses `@swf2es/tessellate`'s Wasm module by default, with
-JS fallback if it is unavailable or rejects a fill. Include that package in
+Fill tessellation uses `@swf2es/native/tessellate`'s Wasm module by default, with
+JS fallback if it is unavailable or rejects a fill. Include that entry in
 the import map. `configure({ nativeFills: false })` keeps new playbacks on
 JS and skips loading the native package.
 
@@ -248,7 +248,7 @@ dialogs. Browser dialogs require a recent user click or keypress.
 
 ```
 packages/
-  compress/      zlib and LZMA, synchronous, in one WebAssembly module (zlib, the LZMA SDK)
+  native/        the WebAssembly modules: zlib and LZMA, MP3 decoding, fill tessellation, bitmap kernels
   format/        SWF container and tag parsers (a DoABC's bytes; codegen parses the ABC)
   codegen/       bytecode → ES modules, in AssemblyScript (codegen.wasm), for JIT and AOT
   runtime/       the AS3 language runtime
@@ -261,8 +261,10 @@ apps/
   site/          the demo site on GitHub Pages: <swf2es-player> on a static page
 vendor/
   pixijs/        the swf2es fork of PixiJS (MIT), a submodule built by pnpm build
-  zlib/          zlib 1.3.2 (swf2es's fork), a submodule compiled into packages/compress
-  lzma-sdk/      the LZMA SDK 26.05 (public domain), a submodule compiled into packages/compress
+  zlib/          zlib 1.3.2 (swf2es's fork), a submodule compiled into packages/native
+  lzma-sdk/      the LZMA SDK 26.05 (public domain), a submodule compiled into packages/native
+  minimp3/       minimp3 (CC0), a submodule compiled into packages/native
+  libtess2/      libtess2 (SGI Free Software License B), a submodule compiled into packages/native
 oracle/          avmshell and Flash (adl) references
 tests/           unit, conformance, player, web, desktop and fuzz tests
 docs/            architecture, references, coverage, benchmarks, roadmap

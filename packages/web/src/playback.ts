@@ -3,6 +3,7 @@
 // focus, and the loop that plays and draws, all of which destroy lets go.
 
 import type { Convolver } from "@swf2es/native/bitmap";
+import type { Tessellator } from "@swf2es/native/tessellate";
 import {
   bindActivation,
   bindKeyboard,
@@ -10,7 +11,6 @@ import {
   type Player,
   type Scripting,
 } from "@swf2es/player";
-import type { Tessellator } from "@swf2es/tessellate";
 import { autoDetectRenderer, type Renderer } from "pixi.js";
 import { configuration } from "./config.js";
 import { place, type ScaleMode, viewport } from "./layout.js";
@@ -106,7 +106,7 @@ export class Playback {
     let tessellator: Tessellator | null = null;
     if (configuration().nativeFills !== false) {
       try {
-        const { Tessellator } = await import("@swf2es/tessellate");
+        const { Tessellator } = await import("@swf2es/native/tessellate");
         tessellator = new Tessellator();
       } catch {
         // An embedder without the optional module can still play through JS.

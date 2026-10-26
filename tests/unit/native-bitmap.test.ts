@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Convolver } from "@swf2es/native/bitmap";
-import { scalar, simd } from "../../packages/native/dist/binary.js";
+import { scalar, simd } from "../../packages/native/dist/bitmap/binary.js";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
 import { filterDefaults } from "../../packages/player/dist/display/filters.js";
@@ -267,7 +267,7 @@ test("native bitmap modules import nothing and expose only the kernel ABI", asyn
 test("SIMD compilation refusal selects scalar, and full refusal is tried once per owner", async () => {
   const fresh = async (name: string) =>
     (await import(
-      new URL(`../../packages/native/dist/bitmap.js?${name}`, import.meta.url).href
+      new URL(`../../packages/native/dist/bitmap/index.js?${name}`, import.meta.url).href
     )) as typeof import("@swf2es/native/bitmap");
   const Module = wasm.Module;
   let attempts = 0;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Tessellator } from "@swf2es/tessellate";
-import { binary } from "../../packages/tessellate/dist/binary.js";
+import { Tessellator } from "@swf2es/native/tessellate";
+import { binary } from "../../packages/native/dist/tessellate/binary.js";
 import { tessellationFixtures } from "./tessellate-fixtures.ts";
 
 const square = [0, 0, 10, 0, 10, 10, 0, 10];

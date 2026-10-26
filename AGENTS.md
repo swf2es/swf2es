@@ -17,7 +17,8 @@ must give **identical output** in both modes.
 ```sh
 git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
                               # vendor/pixijs (the Pixi fork the player draws with), and
-                              # vendor/minimp3, vendor/zlib, vendor/lzma-sdk and vendor/libtess2 (C compiled to wasm)
+                              # vendor/minimp3, vendor/zlib, vendor/lzma-sdk and vendor/libtess2 (C compiled into
+                              # packages/native's wasm)
 pnpm install
 pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
@@ -110,6 +111,9 @@ SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash 
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
 node tools/pixijs.ts [--force]   # build vendor/pixijs's lib/ and the bundles swf2es loads (pnpm
                               # build's first step; skipped while the fork is unchanged)
+pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (bitmap, compress, mp3,
+                              # tessellate) with the pinned Zig, after the bitmap kernel's zig tests;
+                              # pnpm build only checks their inputs' digests
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved

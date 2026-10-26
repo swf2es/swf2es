@@ -15,7 +15,7 @@ import {
   lzmaDecode,
   lzmaEncode,
   TRUNCATED,
-} from "@swf2es/compress";
+} from "@swf2es/native/compress";
 
 /** Data a decompressor cannot read: corrupt, truncated, or not what it says. */
 export class CompressedDataError extends Error {}

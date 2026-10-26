@@ -95,29 +95,26 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `compress` | synchronous zlib and LZMA, zlib and the LZMA SDK compiled to WebAssembly with a Zig adapter | — |
-| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | compress |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary and lifetime: `compress` (zlib and LZMA), `mp3` (minimp3), `tessellate` (libtess2 fills) and `bitmap` (CPU kernels), C and Zig built by one Zig project | — |
+| `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
-| `mp3`     | synchronous MP3 frame decoder, minimp3 compiled to WebAssembly with a Zig adapter | — |
-| `native` | optional CPU bitmap kernels in Zig/Wasm, with owned output buffers | — |
-| `tessellate` | optional double-precision libtess2 fill tessellation in WebAssembly with a Zig adapter and owned output buffers | — |
 | `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, mp3, runtime |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, native, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
-| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts, tessellate, native |
+| `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, native, player, player-hosts |
 
-`native`, `tessellate`, `compress`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
+`native`, `format`, `codegen` and `runtime` load no DOM or node types, so they run in
 browsers, workers and node alike. `runtime` contains only the language, with
 no display list, so it runs in node next to avmshell. It uses `format` for what both need, such as compression
-(`compress`, below): ByteArray's `compress` and a SWF's body are the
+(`@swf2es/native/compress`, below): ByteArray's `compress` and a SWF's body are the
 same code. `decompressSwfPrefix` decodes a SWF's start alone, for its
 FileAttributes (`fileAttributes`), from the first kilobytes of the body,
 more only as it needs them, and keeps whatever decoded before a
 failure, so a SWF cut short still has its header.
 
-`compress` is one WebAssembly module that imports nothing, compiled
+`@swf2es/native/compress` is one WebAssembly module that imports nothing, compiled
 synchronously from base64 on first use. zlib 1.3.2 (`vendor/zlib`, swf2es/zlib)
 inflates and deflates, so ByteArray's `compress` and `deflate` write
 zlib's own bytes; the LZMA SDK 26.05's encoder (`vendor/lzma-sdk`,
@@ -139,12 +136,19 @@ What a failed decode wrote stays in the module and goes with its
 instance: a bomb cut short is never copied out only to be dropped. An
 output that does not fit is `CompressedDataTooLargeError`, which
 ByteArray turns into MemoryError 1000 as avmplus does, where corrupt
-data is IOError 2058. The package's own code is `src/root.zig`, which
+data is IOError 2058. Its own code is `src/compress/root.zig`, which
 gives the libraries the arena through their allocator callbacks, and the
-TypeScript wrapper. The package is also a Zig project (`build.zig`,
-`build.zig.zon`); `packages/compress/build.ts` runs its `zig build` with a
-pinned Zig 0.17.0 (whose clang compiles the C), and `pnpm build` checks
-its inputs' digest. `codegen` knows the runtime's function names and signatures
+TypeScript wrapper.
+
+`native` is one Zig project (`build.zig`) for every sub-path's binary:
+`packages/native/build.ts` runs the bitmap kernel's tests and then `zig
+build` with a pinned Zig 0.17.0 (whose clang compiles the vendored C,
+unchanged, against the libc stubs in `include/`), writes each module into
+its sub-path's `binary.ts` with a digest of its inputs, and the vendored
+C's notices, verbatim, into `LICENSE.third-party`. `pnpm build` checks the
+digests and the notices; CI rebuilds the binaries and requires them
+unchanged. Each sub-path still compiles and instantiates its own module,
+with its own memory and lifetime, and imports only its own. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
@@ -1271,7 +1275,7 @@ with CORS headers, as a module script from another origin is fetched
 with CORS. Codegen still runs:
 the player adds each ABC to it, keys each module by its context and
 replays each log there, so that the domain is as compiling would have
-left it, which no host can skip, and `codegen.wasm`, like `compress`'s
+left it, which no host can skip, and `codegen.wasm`, like `@swf2es/native/compress`'s
 module, which decompresses the SWF, needs
 `'wasm-unsafe-eval'` to be compiled. A policy for such a page is
 `script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
@@ -4755,7 +4759,7 @@ refusal, missing optional modules, allocation rejection and traps fall back
 to JS before destination pixels are written. Trapped instances are dropped;
 ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
 instances above the default 8 MiB retention threshold are dropped after a
-call. The other Wasm packages keep independent modules and lifetimes.
+call. The package's other sub-paths keep independent modules and lifetimes.
 
 ### Masks and scroll rectangles
 
@@ -4832,10 +4836,10 @@ Flash decodes it rather than trimmed by it as a browser would, and a
 DefineSound's seekSamples skipped. Playback keeps the browser's decode of
 the whole file at the device's rate, gapless trimming and all, which
 resamples better than a buffer played at another rate. Flash's decode is
-at once, so extraction uses `@swf2es/mp3`, separately from Web Audio.
+at once, so extraction uses `@swf2es/native/mp3`, separately from Web Audio.
 Its upstream source is the pinned `vendor/minimp3` submodule (swf2es/minimp3,
-a fork of lieff/minimp3); the Zig adapter (`src/root.zig`), TypeScript wrapper
-and reproducible WASM build are in `packages/mp3`, a Zig project like `compress`.
+a fork of lieff/minimp3); the Zig adapter (`src/mp3/root.zig`) and TypeScript
+wrapper are in `packages/native`, built with its other binaries.
 The module compiles once before ActionScript libraries run, and an extraction
 instantiates a decoder only on first use. Its fixed 128 KiB workspace holds
 one frame's encoded bytes and interleaved PCM, copied into the sound's cached
@@ -5077,7 +5081,7 @@ quality smooths no bitmap either.
 ### The page's configuration
 
 The web host uses native fill tessellation by default. Each playback owns a
-`Tessellator` from `@swf2es/tessellate`, loaded when playback is created, and
+`Tessellator` from `@swf2es/native/tessellate`, loaded when playback is created, and
 disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
 false })` keeps new playbacks on JS and skips loading the native package.
 A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation
@@ -5333,7 +5337,7 @@ elsewhere is best kept in a directory of its own.
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.
-The page decompresses the SWF whole, with what `compress`'s LZMA decoder
+The page decompresses the SWF whole, with what `@swf2es/native/compress`'s LZMA decoder
 bounds (see [Packages](#packages)).
 
 Only the SWF playing has a grant: opening another or closing it revokes
