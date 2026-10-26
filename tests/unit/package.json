@@ -10,6 +10,7 @@
     "@swf2es/format": "workspace:*",
     "@swf2es/player-hosts": "workspace:*",
     "@swf2es/runtime": "workspace:*",
-    "@swf2es/tessellate": "workspace:*"
+    "@swf2es/tessellate": "workspace:*",
+    "@swf2es/native": "workspace:*"
   }
 }

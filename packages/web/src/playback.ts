@@ -1,6 +1,8 @@
 // A player shown in its element: the renderer and its canvas, sized to
 // the element and the device's pixels, the pointer, the keys and the
 // focus, and the loop that plays and draws, all of which destroy lets go.
+
+import type { Convolver } from "@swf2es/native/bitmap";
 import {
   bindActivation,
   bindKeyboard,
@@ -53,6 +55,7 @@ export class Playback {
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
     private readonly tessellator: Tessellator | null,
+    private readonly convolver: Convolver | null,
   ) {
     const canvas = renderer.canvas as HTMLCanvasElement;
     canvas.style.position = "absolute";
@@ -64,6 +67,7 @@ export class Playback {
     this.view = new PixiView(renderer, { fillTessellator: tessellator?.tessellate });
     if (scripting) {
       scripting.drawer = this.view;
+      scripting.bitmapConvolver = convolver?.convolve ?? null;
       if (stage3D) {
         scripting.onStageLayout = this.stageLayout;
       }
@@ -72,6 +76,7 @@ export class Playback {
     // An AVM1 movie's BitmapData draws display objects by it too.
     if (player.avm1) {
       player.avm1.drawer = this.view;
+      player.avm1.bitmapConvolver = convolver?.convolve ?? null;
     }
 
     this.unbind.push(this.view.bindPointer(player));
@@ -108,6 +113,16 @@ export class Playback {
       }
     }
 
+    let convolver: Convolver | null = null;
+    if (configuration().nativeBitmaps === true) {
+      try {
+        const { Convolver } = await import("@swf2es/native/bitmap");
+        convolver = new Convolver();
+      } catch {
+        // The optional CPU backend must not prevent ordinary playback.
+      }
+    }
+
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -119,7 +134,17 @@ export class Playback {
       // Filter-backed blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
-    return new Playback(box, player, scripting, renderer, look, report, stage3D, tessellator);
+    return new Playback(
+      box,
+      player,
+      scripting,
+      renderer,
+      look,
+      report,
+      stage3D,
+      tessellator,
+      convolver,
+    );
   }
 
   /** Play and draw on every animation frame, from now. */
@@ -328,6 +353,14 @@ export class Playback {
     if (this.player.avm1?.drawer === this.view) {
       this.player.avm1.drawer = null;
     }
+
+    if (this.scripting && this.scripting.bitmapConvolver === this.convolver?.convolve) {
+      this.scripting.bitmapConvolver = null;
+    }
+    if (this.player.avm1 && this.player.avm1.bitmapConvolver === this.convolver?.convolve) {
+      this.player.avm1.bitmapConvolver = null;
+    }
+    this.convolver?.dispose();
 
     this.view.dropSpares();
     // Cached geometry owns its buffers; the native scratch can go before the scene does.

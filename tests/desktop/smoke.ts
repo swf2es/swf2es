@@ -431,6 +431,12 @@ try {
 
     // Cross-origin isolated, as a shareable ByteArray's shared memory needs.
     assert.equal(await evaluate<boolean>("crossOriginIsolated"), true);
+    assert.equal(
+      await evaluate<number>(
+        'fetch(new URL("/modules/native/bitmap.js", location.href)).then((r) => r.status)',
+      ),
+      200,
+    );
 
     // Played again, the last player let go of: one canvas, and the SWF starts anew.
     const reloaded = await evaluate<{ canvases: number; nativeInstances: number }>(`(async () => {

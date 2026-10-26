@@ -10,7 +10,13 @@
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore, pixelRect, spanRect } from "../../bitmap/bitmap.js";
 import { drawDisplayObject } from "../../bitmap/draw.js";
-import { applyFilter, filterRefusal, GLOWS, generatedRect } from "../../bitmap/filters.js";
+import {
+  applyFilter,
+  type BitmapConvolver,
+  filterRefusal,
+  GLOWS,
+  generatedRect,
+} from "../../bitmap/filters.js";
 import {
   alphaAt,
   type ColorTransformValues,
@@ -40,6 +46,7 @@ type Obj = avm1.Avm1Object;
 
 /** What BitmapData reads of the movie. */
 export interface BitmapHost extends GeomHost {
+  readonly bitmapConvolver?: BitmapConvolver | null;
   /** The host's renderer, which a display object is drawn by; null where there is none. */
   readonly drawer: Drawer | null;
   /** The stage's quality, which a display object is drawn at. */
@@ -427,7 +434,7 @@ export function bitmapDataClass(host: BitmapHost): Obj {
 
     const [dx, dy] = pointOf(args[2], v);
     const map = (f.mapBitmap as { $store?: BitmapStore } | null)?.$store ?? null;
-    applyFilter(store, source, r, dx, dy, f, map);
+    applyFilter(store, source, r, dx, dy, f, map, host.bitmapConvolver ?? null);
     return 0;
   });
   method("colorTransform", 2, (store, args, v) => {

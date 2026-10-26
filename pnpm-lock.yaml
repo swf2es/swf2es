@@ -99,6 +99,8 @@ importers:
 
   packages/mp3: {}
 
+  packages/native: {}
+
   packages/player:
     dependencies:
       '@swf2es/codegen':
@@ -142,6 +144,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
+      '@swf2es/native':
+        specifier: workspace:*
+        version: link:../native
       '@swf2es/player':
         specifier: workspace:*
         version: link:../player
@@ -189,6 +194,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@swf2es/native':
+        specifier: workspace:*
+        version: link:../../packages/native
       '@swf2es/player':
         specifier: workspace:*
         version: link:../../packages/player
@@ -219,6 +227,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@swf2es/native':
+        specifier: workspace:*
+        version: link:../../packages/native
       '@swf2es/player-hosts':
         specifier: workspace:*
         version: link:../../packages/player-hosts
