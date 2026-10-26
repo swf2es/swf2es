@@ -80,10 +80,13 @@ const Geometry = struct {
     hx: i32,
     hy: i32,
     clamp: bool,
-    /// The planes' entry after the block, which holds the filter's colour.
+    /// The block rows the planes hold at once, a power of two less one: a
+    /// ring that row r of the block fills at line r & line_mask.
+    line_mask: usize,
+    /// The planes' entry after the lines, which holds the filter's colour.
     outside: usize,
 
-    fn init(p: *const Params) Geometry {
+    fn init(p: *const Params, lines: usize) Geometry {
         return .{
             .sw = @intCast(p.sw),
             .sh = @intCast(p.sh),
@@ -98,15 +101,22 @@ const Geometry = struct {
             .hx = @intCast(p.cols / 2),
             .hy = @intCast(p.rows / 2),
             .clamp = p.flags.clamp,
-            .outside = p.nw * p.nh,
+            .line_mask = lines - 1,
+            .outside = lines * p.nw,
         };
+    }
+
+    /// The block row source row y reads: past the bitmap, its nearest edge's.
+    fn row(g: Geometry, y: i32) usize {
+        return @intCast(clamp(y, g.sh) - g.y0);
     }
 
     /// Where the planes hold source pixel (x, y): past the bitmap, its
     /// nearest edge's when clamping, else the filter's colour after the rest.
     fn index(g: Geometry, x: i32, y: i32) usize {
         if (!g.clamp and (x < 0 or y < 0 or x >= g.sw or y >= g.sh)) return g.outside;
-        return @intCast((clamp(y, g.sh) - g.y0) * g.nw + clamp(x, g.sw) - g.x0);
+        const column: usize = @intCast(clamp(x, g.sw) - g.x0);
+        return (g.row(y) & g.line_mask) * @as(usize, @intCast(g.nw)) + column;
     }
 
     /// Kernel entry k as a tap: its weight and where it reads from the pixel,
@@ -190,10 +200,26 @@ pub fn validate(p: *const Params) bool {
     if (p.x0 != x0 or p.nw != x1 - x0 + 1) return false;
     if (p.y0 != y0 or p.nh != y1 - y0 + 1) return false;
 
-    // Four i32 planes and the output must fit the 128 MiB memory with room to spare.
+    // The block and the output must each fit the 128 MiB memory with room
+    // to spare; the planes hold at most 15 of the block's rows.
     const count = std.math.mul(u32, p.nw, p.nh) catch return false;
     const length = std.math.mul(u32, p.w, p.h) catch return false;
     return count <= memory_limit / 16 and length <= memory_limit / 4;
+}
+
+/// Converts row `r` of the block, `source`, into its line of the planes:
+/// straight colour from premultiplied, and alpha 255 for an opaque source.
+fn fill(planes: [4][]i32, g: Geometry, source: []const u32, r: usize, transparent: bool) void {
+    const nw: usize = @intCast(g.nw);
+    const start = (r & g.line_mask) * nw;
+    for (source, start..) |pixel, i| {
+        const alpha = pixel >> 24;
+        inline for (planes[0..3], 0..) |plane, ch| {
+            const value = (pixel >> (16 - 8 * ch)) & 255;
+            plane[i] = @intCast(if (alpha == 255) value else if (alpha == 0) 0 else @min(255, (value * (65280 / alpha) + 127) >> 8));
+        }
+        planes[3][i] = if (transparent) @intCast(alpha) else 255;
+    }
 }
 
 pub const Error = error{ InvalidParams, OutOfMemory };
@@ -201,15 +227,27 @@ pub const Error = error{ InvalidParams, OutOfMemory };
 /// Convolves `pixels`, the nw × nh block p describes, by the cols × rows
 /// `matrix`: w × h premultiplied ARGB pixels the caller owns.
 pub fn convolve(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, matrix: []const f64) Error![]u32 {
+    // An output row reads at most `rows` consecutive block rows, and the
+    // next reads the same or later ones, so that many lines of planes
+    // suffice however tall the block is; a power of two masks rather than
+    // divides when a tap finds its line.
+    return convolveLines(gpa, p, pixels, matrix, std.math.ceilPowerOfTwoAssert(usize, @min(p.rows, p.nh)));
+}
+
+/// convolve with planes of `lines` block rows, a power of two at least the
+/// kernel's rows or the block's.
+fn convolveLines(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, matrix: []const f64, lines: usize) Error![]u32 {
     @setFloatMode(.strict);
     if (!validate(p)) return error.InvalidParams;
-    const count = pixels.len;
-    if (count != p.nw * p.nh or matrix.len != p.cols * p.rows) return error.InvalidParams;
-    const g: Geometry = .init(p);
+    if (pixels.len != p.nw * p.nh or matrix.len != p.cols * p.rows) return error.InvalidParams;
+    std.debug.assert(std.math.isPowerOfTwo(lines) and lines >= @min(p.rows, p.nh));
+    const g: Geometry = .init(p, lines);
+    const nw: usize = p.nw;
     const width: usize = p.w;
+    const count = g.outside;
 
-    // A plane a channel, each the block's straight colour and after it the
-    // filter's colour; and a row of sums a channel.
+    // A plane a channel, each a ring of the block's rows in straight colour
+    // and after it the filter's colour; and a row of sums a channel.
     const plane_memory = try gpa.alloc(i32, 4 * (count + 1));
     defer gpa.free(plane_memory);
     const sum_memory = try gpa.alloc(f64, 4 * width);
@@ -223,21 +261,20 @@ pub fn convolve(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, m
         sum.* = sum_memory[ch * width ..][0..width];
     }
 
-    for (pixels, 0..) |pixel, i| {
-        const alpha = pixel >> 24;
-        inline for (planes[0..3], 0..) |plane, ch| {
-            const value = (pixel >> (16 - 8 * ch)) & 255;
-            plane[i] = @intCast(if (alpha == 255) value else if (alpha == 0) 0 else @min(255, (value * (65280 / alpha) + 127) >> 8));
-        }
-        planes[3][i] = if (p.flags.source_transparent) @intCast(alpha) else 255;
-    }
     inline for (planes[0..3], 0..) |plane, ch| plane[count] = @intCast((p.color >> (16 - 8 * ch)) & 255);
     planes[3][count] = p.outside_alpha;
 
     const fixed_scale = integerKernel(matrix, p.divisor);
     const scale = @as(f64, @floatFromInt(fixed_scale orelse 0)) / 65536;
+    var filled: usize = 0;
     for (0..p.h) |y| {
         const sy = g.y + @as(i32, @intCast(y));
+        // Up to the block row of the row's lowest tap; the lines this
+        // overwrites belong to rows above its highest.
+        const last = g.row(sy + g.rows - 1 - g.hy);
+        while (filled <= last) : (filled += 1) {
+            fill(planes, g, pixels[filled * nw ..][0..nw], filled, p.flags.source_transparent);
+        }
         for (sums) |sum| @memset(sum, 0);
         // The pixels whose taps all lie in the bitmap, x from x1 to before x2,
         // sum a tap at a time along the row; the rest a pixel at a time.
@@ -283,21 +320,22 @@ pub fn convolve(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, m
     return out;
 }
 
-/// Params for the whole of a sw × sh bitmap, its block computed as bitmap.ts does.
-fn testParams(sw: u32, sh: u32, cols: u32, rows: u32, flags: Flags) Params {
+/// Params for the rect at x, y, w × h of a sw × sh bitmap, its block
+/// computed as bitmap.ts does.
+fn rectParams(sw: u32, sh: u32, x: i32, y: i32, w: u32, h: u32, cols: u32, rows: u32, flags: Flags) Params {
     const hx: i32 = @intCast(cols / 2);
     const hy: i32 = @intCast(rows / 2);
-    const x0 = clamp(-hx, @intCast(sw));
-    const y0 = clamp(-hy, @intCast(sh));
-    const x1 = clamp(@as(i32, @intCast(sw + cols)) - hx - 2, @intCast(sw));
-    const y1 = clamp(@as(i32, @intCast(sh + rows)) - hy - 2, @intCast(sh));
+    const x0 = clamp(x - hx, @intCast(sw));
+    const y0 = clamp(y - hy, @intCast(sh));
+    const x1 = clamp(x + @as(i32, @intCast(w + cols)) - hx - 2, @intCast(sw));
+    const y1 = clamp(y + @as(i32, @intCast(h + rows)) - hy - 2, @intCast(sh));
     return .{
         .sw = sw,
         .sh = sh,
-        .x = 0,
-        .y = 0,
-        .w = sw,
-        .h = sh,
+        .x = x,
+        .y = y,
+        .w = w,
+        .h = h,
         .x0 = @intCast(x0),
         .y0 = @intCast(y0),
         .nw = @intCast(x1 - x0 + 1),
@@ -313,6 +351,28 @@ fn testParams(sw: u32, sh: u32, cols: u32, rows: u32, flags: Flags) Params {
         .outside_alpha = 0,
         .color = 0,
     };
+}
+
+/// Params for the whole of a sw × sh bitmap.
+fn testParams(sw: u32, sh: u32, cols: u32, rows: u32, flags: Flags) Params {
+    return rectParams(sw, sh, 0, 0, sw, sh, cols, rows, flags);
+}
+
+/// The block of `bitmap` that p describes, which the caller frees.
+fn copyBlock(gpa: std.mem.Allocator, bitmap: []const u32, p: *const Params) ![]u32 {
+    const block = try gpa.alloc(u32, p.nw * p.nh);
+    for (0..p.nh) |r| @memcpy(block[r * p.nw ..][0..p.nw], bitmap[(p.y0 + r) * p.sw + p.x0 ..][0..p.nw]);
+    return block;
+}
+
+/// Premultiplied ARGB with alpha 0, 255 and in between, as bitmaps hold.
+fn randomBitmap(random: std.Random, pixels: []u32) void {
+    for (pixels) |*pixel| {
+        const alpha = random.uintLessThan(u32, 4) * 85;
+        var argb = alpha << 24;
+        for (0..3) |ch| argb |= random.uintAtMost(u32, alpha) << @intCast(8 * ch);
+        pixel.* = argb;
+    }
 }
 
 const opaque_flags: Flags = .{ .clamp = true, .source_transparent = true, .premultiply = true };
@@ -368,4 +428,76 @@ test "every failed allocation is reported and frees what came before" {
     const p = testParams(5, 4, 3, 3, .{ .source_transparent = true, .preserve_alpha = true, .premultiply = true });
     const matrix = [_]f64{ 1, 2, 1, 2, 4, 2, 1, 2, 1 };
     try std.testing.checkAllAllocationFailures(std.testing.allocator, convolveAndFree, .{ &p, &pixels, &matrix });
+}
+
+/// Kernels whose rows reach past a tall bitmap's top and bottom in turn,
+/// fixed-point and not, each with and without clamping or preserved alpha.
+const band_kernels = [_]struct { cols: u32, rows: u32, matrix: []const f64, divisor: f64 }{
+    .{ .cols = 3, .rows = 3, .matrix = &.{ 1, 2, 1, 2, 4, 2, 1, 2, 1 }, .divisor = 16 },
+    .{ .cols = 3, .rows = 3, .matrix = &.{ 0.5, -1, 0.25, 1, 0.125, -0.5, 2, 1, 0.75 }, .divisor = 3 },
+    .{ .cols = 1, .rows = 5, .matrix = &.{ 1, 0, -2, 0.5, 3 }, .divisor = 2.5 },
+    .{ .cols = 2, .rows = 4, .matrix = &.{ 1, 1, 1, 1, 1, 1, 1, 1 }, .divisor = 8 },
+    .{ .cols = 3, .rows = 15, .matrix = &@as([45]f64, @splat(0.1)), .divisor = 1 },
+};
+
+test "a ring of the kernel's rows gives the pixels planes of the whole block do" {
+    const gpa = std.testing.allocator;
+    var prng: std.Random.DefaultPrng = .init(5);
+    var bitmap: [7 * 40]u32 = undefined;
+    randomBitmap(prng.random(), &bitmap);
+    for (band_kernels) |kernel| {
+        for (0..8) |bits| {
+            var p = testParams(7, 40, kernel.cols, kernel.rows, .{
+                .clamp = bits & 1 != 0,
+                .source_transparent = true,
+                .preserve_alpha = bits & 2 != 0,
+                .premultiply = bits & 4 != 0,
+            });
+            p.divisor = kernel.divisor;
+            p.color = 0x405060;
+            p.outside_alpha = 200;
+            const whole = try convolveLines(gpa, &p, &bitmap, kernel.matrix, std.math.ceilPowerOfTwoAssert(usize, p.nh));
+            defer gpa.free(whole);
+            const ring = try convolve(gpa, &p, &bitmap, kernel.matrix);
+            defer gpa.free(ring);
+            try std.testing.expectEqualSlices(u32, whole, ring);
+        }
+    }
+}
+
+test "a rect convolved in bands of rows gives the pixels it does whole" {
+    const gpa = std.testing.allocator;
+    var prng: std.Random.DefaultPrng = .init(9);
+    const sw = 6;
+    const sh = 24;
+    var bitmap: [sw * sh]u32 = undefined;
+    randomBitmap(prng.random(), &bitmap);
+    for (band_kernels) |kernel| {
+        for ([_]bool{ false, true }) |clamping| {
+            // From above the bitmap to below it, so that bands begin and end
+            // on each row near its edges.
+            var whole_params = rectParams(sw, sh, -2, -9, sw + 3, sh + 18, kernel.cols, kernel.rows, .{ .clamp = clamping, .source_transparent = true });
+            whole_params.divisor = kernel.divisor;
+            whole_params.outside_alpha = 255;
+            const whole_block = try copyBlock(gpa, &bitmap, &whole_params);
+            defer gpa.free(whole_block);
+            const whole = try convolve(gpa, &whole_params, whole_block, kernel.matrix);
+            defer gpa.free(whole);
+
+            for (1..8) |band| {
+                var top: u32 = 0;
+                while (top < whole_params.h) : (top += @intCast(band)) {
+                    const h = @min(band, whole_params.h - top);
+                    var p = rectParams(sw, sh, whole_params.x, whole_params.y + @as(i32, @intCast(top)), whole_params.w, @intCast(h), kernel.cols, kernel.rows, whole_params.flags);
+                    p.divisor = kernel.divisor;
+                    p.outside_alpha = 255;
+                    const block = try copyBlock(gpa, &bitmap, &p);
+                    defer gpa.free(block);
+                    const out = try convolve(gpa, &p, block, kernel.matrix);
+                    defer gpa.free(out);
+                    try std.testing.expectEqualSlices(u32, whole[top * p.w ..][0..out.len], out);
+                }
+            }
+        }
+    }
 }
