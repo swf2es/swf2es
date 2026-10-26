@@ -29,7 +29,7 @@ export interface ConvolutionFilter {
 
 interface NativeExports {
   memory: WebAssembly.Memory;
-  input(bytes: number): number;
+  resetArena(bytes: number): number;
   convolve(params: number): number;
 }
 
@@ -39,6 +39,17 @@ export interface ConvolverOptions {
   /** Prefer SIMD when available; false selects the scalar module. */
   simd?: boolean;
 }
+
+// Params.flags in bitmap.zig.
+const FLAG_CLAMP = 1;
+const FLAG_SOURCE_TRANSPARENT = 2;
+const FLAG_PRESERVE_ALPHA = 4;
+const FLAG_PREMULTIPLY = 8;
+
+// About what one call's input block and output hold: a large rect is
+// convolved a band of rows at a time, so that its scratch stays far under
+// retainMemory's default and the instance is kept rather than regrown.
+const BAND_BYTES = 1 << 20;
 
 let scalarModule: WebAssembly.Module | null = null;
 let simdModule: WebAssembly.Module | null = null;
@@ -115,17 +126,26 @@ export class Convolver {
     const clampX = (v: number) => Math.max(0, Math.min(sw - 1, v));
     const clampY = (v: number) => Math.max(0, Math.min(sh - 1, v));
     const x0 = clampX(x - (cols >> 1));
-    const y0 = clampY(y - (rows >> 1));
     const nw = clampX(x + w + cols - (cols >> 1) - 2) - x0 + 1;
-    const nh = clampY(y + h + rows - (rows >> 1) - 2) - y0 + 1;
-    const pixels = nw * nh;
-    const matrixOffset = Math.ceil((96 + pixels * 4) / 8) * 8;
-    const inputBytes = matrixOffset + cols * rows * 8;
-    // Leave room for the stack and alignment before reserving any native input.
+    // Each band's output rows read its rows of the source and the kernel's
+    // reach above and below them, which the next band copies again.
+    const band = Math.max(1, Math.min(h, Math.floor(BAND_BYTES / ((nw + w) * 4))));
+    const nhMax = Math.min(band + rows - 1, sh);
+    const matrixOffset = Math.ceil((96 + nw * nhMax * 4) / 8) * 8;
+    const inputMax = matrixOffset + cols * rows * 8;
+    // Leave room for the stack and alignment before reserving any native input;
+    // the kernel's planes hold at most 16 lines.
     if (
-      !Number.isSafeInteger(inputBytes) ||
-      inputBytes + (pixels + 1) * 16 + w * 32 + w * h * 4 > 127 * 1024 * 1024
+      !Number.isSafeInteger(inputMax) ||
+      inputMax + (16 * nw + 1) * 16 + w * 32 + w * band * 4 > 127 * 1024 * 1024
     ) {
+      return null;
+    }
+
+    let result: Uint32Array;
+    try {
+      result = new Uint32Array(w * h);
+    } catch {
       return null;
     }
 
@@ -153,58 +173,75 @@ export class Convolver {
       }
 
       const wasm = this.instance;
-      const pointer = wasm.input(inputBytes);
-      if (!pointer) {
-        return null;
+      const flags =
+        (filter.clamp ? FLAG_CLAMP : 0) |
+        (source.transparent ? FLAG_SOURCE_TRANSPARENT : 0) |
+        (filter.preserveAlpha ? FLAG_PRESERVE_ALPHA : 0) |
+        (transparent ? FLAG_PREMULTIPLY : 0);
+      for (let top = 0; top < h; top += band) {
+        const bandY = y + top;
+        const bandH = Math.min(band, h - top);
+        const y0 = clampY(bandY - (rows >> 1));
+        const nh = clampY(bandY + bandH + rows - (rows >> 1) - 2) - y0 + 1;
+        const offset = Math.ceil((96 + nw * nh * 4) / 8) * 8;
+        const pointer = wasm.resetArena(offset + cols * rows * 8);
+        if (!pointer) {
+          return null;
+        }
+
+        const pixelPointer = pointer + 96;
+        const matrixPointer = pointer + offset;
+        new Int32Array(wasm.memory.buffer, pointer, 16).set([
+          sw,
+          sh,
+          x,
+          bandY,
+          w,
+          bandH,
+          x0,
+          y0,
+          nw,
+          nh,
+          cols,
+          rows,
+          flags,
+          pixelPointer,
+          matrixPointer,
+          0,
+        ]);
+        new Float64Array(wasm.memory.buffer, pointer + 64, 2).set([
+          filter.divisor || 1,
+          filter.bias,
+        ]);
+        new Int32Array(wasm.memory.buffer, pointer + 80, 2).set([
+          Math.floor(filter.alpha * 255) | 0,
+          filter.color | 0,
+        ]);
+
+        const into = new Uint32Array(wasm.memory.buffer, pixelPointer, nw * nh);
+        for (let row = 0; row < nh; row++) {
+          into.set(
+            source.pixels.subarray((y0 + row) * sw + x0, (y0 + row) * sw + x0 + nw),
+            row * nw,
+          );
+        }
+
+        const matrix = new Float64Array(wasm.memory.buffer, matrixPointer, cols * rows);
+        for (let k = 0; k < matrix.length; k++) {
+          matrix[k] = filter.matrix[k] || 0;
+        }
+
+        const out = wasm.convolve(pointer);
+        if (!out) {
+          // An ordinary allocation rejection can reuse its arena on a later call.
+          return null;
+        }
+
+        // The kernel can grow memory; construct this view afterwards and copy before scratch reuse.
+        result.set(new Uint32Array(wasm.memory.buffer, out, w * bandH), top * w);
       }
 
-      const pixelPointer = pointer + 96;
-      const matrixPointer = pointer + matrixOffset;
-      new Int32Array(wasm.memory.buffer, pointer, 16).set([
-        sw,
-        sh,
-        x,
-        y,
-        w,
-        h,
-        x0,
-        y0,
-        nw,
-        nh,
-        cols,
-        rows,
-        Number(Boolean(filter.clamp)) |
-          (Number(source.transparent) << 1) |
-          (Number(Boolean(filter.preserveAlpha)) << 2) |
-          (Number(transparent) << 3),
-        pixelPointer,
-        matrixPointer,
-        0,
-      ]);
-      new Float64Array(wasm.memory.buffer, pointer + 64, 2).set([filter.divisor || 1, filter.bias]);
-      new Int32Array(wasm.memory.buffer, pointer + 80, 2).set([
-        Math.floor(filter.alpha * 255) | 0,
-        filter.color | 0,
-      ]);
-
-      const into = new Uint32Array(wasm.memory.buffer, pixelPointer, pixels);
-      for (let row = 0; row < nh; row++) {
-        into.set(source.pixels.subarray((y0 + row) * sw + x0, (y0 + row) * sw + x0 + nw), row * nw);
-      }
-
-      const matrix = new Float64Array(wasm.memory.buffer, matrixPointer, cols * rows);
-      for (let k = 0; k < matrix.length; k++) {
-        matrix[k] = filter.matrix[k] || 0;
-      }
-
-      const out = wasm.convolve(pointer);
-      if (!out) {
-        // An ordinary allocation rejection can reuse its arena on a later call.
-        return null;
-      }
-
-      // The kernel can grow memory; construct this view afterwards and copy before scratch reuse.
-      return new Uint32Array(wasm.memory.buffer, out, w * h).slice();
+      return result;
     } catch {
       this.dispose();
       return null;

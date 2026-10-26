@@ -8,7 +8,7 @@ import { findZig, ZIG_VERSION } from "../../tools/zig.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const digest = createHash("sha256").update(ZIG_VERSION);
-for (const file of ["build.ts", "build.zig", "src/bitmap.zig"]) {
+for (const file of ["build.ts", "build.zig", "src/bitmap.zig", "src/convolve.zig"]) {
   digest.update(readFileSync(join(here, file)));
 }
 
@@ -20,8 +20,8 @@ if (process.argv.includes("--check")) {
   }
 } else {
   const work = mkdtempSync(join(tmpdir(), "swf2es-native-"));
-  try {
-    execFileSync(findZig(), ["build", "--prefix", work], {
+  const zig = (args: string[]) =>
+    execFileSync(findZig(), args, {
       cwd: here,
       stdio: "inherit",
       env: {
@@ -30,6 +30,10 @@ if (process.argv.includes("--check")) {
         ZIG_GLOBAL_CACHE_DIR: join(work, "global"),
       },
     });
+  try {
+    // The kernel's own tests, on the host, before the binaries they vouch for.
+    zig(["build", "test"]);
+    zig(["build", "--prefix", work]);
     const binaries: string[] = [];
     for (const name of ["scalar", "simd"]) {
       const bytes = readFileSync(join(work, `bin/${name}.wasm`));
