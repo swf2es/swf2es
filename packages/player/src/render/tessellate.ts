@@ -355,6 +355,64 @@ export interface ResolvedFill {
   roots: Region[];
 }
 
+/** A single straight triangle needs neither curve flattening nor general polygon tessellation. */
+function triangleGeometry(contours: Path[]): FillGeometry | null {
+  let path: Path | undefined;
+  for (const contour of contours) {
+    // beginFill keeps the old pen position before moveTo starts the drawn contour.
+    if (contour.length === 3 && contour[0] === MOVE) {
+      continue;
+    }
+
+    if (path) {
+      return null;
+    }
+
+    path = contour;
+  }
+
+  if (
+    !path ||
+    (path.length !== 9 && path.length !== 12) ||
+    path[0] !== MOVE ||
+    path[3] !== LINE ||
+    path[6] !== LINE ||
+    (path.length === 12 && (path[9] !== LINE || path[10] !== path[1] || path[11] !== path[2]))
+  ) {
+    return null;
+  }
+
+  // Keep the native tessellator's coordinate domain, including for the JS opt-out.
+  for (let i = 1; i < 9; i += 3) {
+    if (!(Math.abs(path[i]) <= 2 ** 23 && Math.abs(path[i + 1]) <= 2 ** 23)) {
+      return null;
+    }
+  }
+
+  const left = (path[4] - path[1]) * (path[8] - path[2]);
+  const right = (path[5] - path[2]) * (path[7] - path[1]);
+  const area = left - right;
+  // Preserve the general tessellator's behavior where roundoff can decide the orientation.
+  if (
+    Math.abs(area) <=
+    Math.max((Math.abs(left) + Math.abs(right)) * Number.EPSILON * 4, Number.MIN_VALUE * 4)
+  ) {
+    return null;
+  }
+
+  const vertices = new Float64Array(6);
+  for (let i = 0; i < 3; i++) {
+    vertices[i * 2] = path[i * 3 + 1];
+    vertices[i * 2 + 1] = path[i * 3 + 2];
+  }
+
+  const indices = new Uint16Array(3);
+  indices[1] = area > 0 ? 1 : 2;
+  indices[2] = area > 0 ? 2 : 1;
+
+  return { vertices, indices };
+}
+
 /** Resolve once at construction, including fallback, so colour copies do not retry native work. */
 export function resolveFills(
   layer: ShapeLayer,
@@ -362,6 +420,11 @@ export function resolveFills(
   tessellate: FillTessellator,
 ): ResolvedFill[] {
   const resolved = layer.fills.map(({ contours, winding }) => {
+    const triangle = triangleGeometry(contours);
+    if (triangle) {
+      return { geometry: triangle, crossing: null, roots: [] };
+    }
+
     const polygons = contours.map(polygon).filter((points) => points.length >= 6);
     const nonZero = masking || winding === "nonZero";
     let geometry: FillGeometry | null = null;
@@ -457,8 +520,9 @@ export function fillContext(
       () => regionOf(contours),
       (release) => held.push(release),
     );
-    if (plan?.geometry) {
-      context.fillGeometry(plan.geometry, style);
+    const geometry = plan ? plan.geometry : triangleGeometry(contours);
+    if (geometry) {
+      context.fillGeometry(geometry, style);
       continue;
     }
 

@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { Tessellator } from "@swf2es/tessellate";
 import { readMorphShape, readSwf } from "../../../../packages/format/dist/index.js";
+import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import type {
@@ -22,6 +23,7 @@ import {
 } from "../../../../packages/player/dist/render/pools.js";
 import {
   copyContext,
+  destroyContext,
   fillContext,
   forgetCommands,
   remakeable,
@@ -757,4 +759,225 @@ test("a mixed native and JS layer keeps fallback results and unmodified native o
   assert.equal(calls, 2);
   source.destroy();
   copy.destroy();
+});
+
+function triangleLayer(points = [0.25, 0.5, 10.75, 1.25, 2.5, 9.5]): ShapeLayer {
+  return {
+    fills: [
+      {
+        fill: { type: "solid", color: 0xff00ff00 },
+        contours: [[1, points[0], points[1], 2, points[2], points[3], 2, points[4], points[5]]],
+        winding: "evenOdd",
+      },
+    ],
+    strokes: [],
+  };
+}
+
+test("recorded Graphics triangles skip the backend despite move-only pen contours", () => {
+  const drawing = new Drawing();
+  for (let i = 0; i < 3; i++) {
+    drawing.beginFill({ type: "solid", color: 0xff00ff00 });
+    drawing.moveTo(i * 20 + 1, 1);
+    drawing.lineTo(i * 20 + 11, 1);
+    drawing.lineTo(i * 20 + 1, 11);
+    drawing.endFill();
+  }
+
+  let calls = 0;
+  for (const layer of drawing.layers) {
+    assert.equal(layer.fills[0].contours.length, 2);
+    const resolved = resolveFills(layer, false, () => {
+      calls++;
+      return null;
+    });
+    assert.ok(resolved[0].geometry);
+    const context = fillContext(layer, () => ({ color: 1 }));
+    assert.equal(context.instructions[0].action, "geometry");
+    context.destroy();
+  }
+
+  assert.equal(calls, 0);
+});
+
+test("direct triangles match native corner precision across numeric inputs", () => {
+  let seed = 1;
+  const next = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed / 2 ** 32 - 0.5) * 2000;
+  };
+  const corners = (vertices: ArrayLike<number>) =>
+    [0, 2, 4].map((i) => [vertices[i], vertices[i + 1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const native = new Tessellator();
+  for (let i = 0; i < 256; i++) {
+    const points = Array.from({ length: 6 }, next);
+    const direct = resolveFills(triangleLayer(points), false, () => null)[0].geometry;
+    const reference = native.tessellate([points], false);
+    assert.ok(direct && reference);
+    assert.equal(direct.indices.length, reference.indices.length);
+    assert.deepEqual(corners(direct.vertices), corners(reference.vertices));
+  }
+
+  native.dispose();
+});
+
+test("straight triangle fills bypass the backend for either winding, masks and closure form", () => {
+  for (const points of [
+    [0.25, 0.5, 10.75, 1.25, 2.5, 9.5],
+    [0.25, 0.5, 2.5, 9.5, 10.75, 1.25],
+  ]) {
+    for (const closed of [false, true]) {
+      for (const masking of [false, true]) {
+        for (const winding of ["evenOdd", "nonZero"] as const) {
+          const shape = triangleLayer(points);
+          shape.fills[0].winding = winding;
+          if (closed) {
+            shape.fills[0].contours[0].push(2, points[0], points[1]);
+          }
+
+          let calls = 0;
+          const resolved = resolveFills(shape, masking, () => {
+            calls++;
+            return null;
+          });
+          const geometry = resolved[0].geometry;
+          assert.ok(geometry);
+          assert.equal(calls, 0);
+          assert.deepEqual(Array.from(geometry.vertices), points);
+          const [a, b, c] = Array.from(geometry.indices, (i) => i * 2);
+          const v = geometry.vertices;
+          assert.ok(
+            (v[b] - v[a]) * (v[c + 1] - v[a + 1]) - (v[b + 1] - v[a + 1]) * (v[c] - v[a]) > 0,
+          );
+        }
+      }
+    }
+  }
+});
+
+test("ambiguous triangles and other contours keep the ordinary backend", () => {
+  const rejected = [
+    [[1, 0, 0, 2, 1, 1, 2, 2, 2]],
+    [[1, 0, 0, 2, 0, 0, 2, 1, 1]],
+    [[1, 0, 0, 2, 1, 1, 2, 2, 2 + Number.EPSILON * 2]],
+    [[1, 0, 0, 2, 1, 0, 2, 0, 1, 2, 1, 1]],
+    [[1, 0, 0, 2, 1, 0, 2, 0, 1, 1, 0, 0]],
+    [[1, 0, 0, 3, 0.5, 0.5, 1, 0, 2, 0, 1]],
+    [[1, 0, 0, 4, 0.25, 0.25, 0.5, 0.5, 1, 0, 2, 0, 1]],
+    [
+      [1, 0, 0, 2, 1, 0, 2, 0, 1],
+      [1, 2, 2, 2, 3, 2, 2, 2, 3],
+    ],
+    [[1, 0, 0, 2, 2 ** 24, 0, 2, 0, 1]],
+    [[1, 0, 0, 2, Number.NaN, 0, 2, 0, 1]],
+    [[1, 0, 0, 2, Number.POSITIVE_INFINITY, 0, 2, 0, 1]],
+  ];
+  for (const contours of rejected) {
+    const shape = triangleLayer();
+    shape.fills[0].contours = contours;
+    let calls = 0;
+    const empty = { vertices: new Float64Array(), indices: new Uint16Array() };
+    const resolved = resolveFills(shape, false, () => {
+      calls++;
+      return empty;
+    });
+    assert.equal(calls, 1);
+    assert.equal(resolved[0].geometry, empty);
+  }
+});
+
+test("triangle positions remain owned after path edits and later fills", () => {
+  const shape = triangleLayer();
+  const first = resolveFills(shape, false, () => null)[0].geometry;
+  assert.ok(first);
+  const before = Array.from(first.vertices);
+  shape.fills[0].contours[0][4] += 3;
+  const second = resolveFills(shape, false, () => null)[0].geometry;
+  assert.ok(second);
+  assert.notEqual(second.vertices.buffer, first.vertices.buffer);
+  assert.deepEqual(Array.from(first.vertices), before);
+  assert.notDeepEqual(Array.from(second.vertices), before);
+});
+
+test("triangles and general fills keep contiguous positions and paint order", () => {
+  const shape = triangleLayer();
+  shape.fills.push(structuredClone(layer.fills[0]), triangleLayer([20, 0, 30, 0, 20, 10]).fills[0]);
+  let calls = 0;
+  const native = new Tessellator();
+  const resolved = resolveFills(shape, false, (contours, nonZero) => {
+    calls++;
+    return native.tessellate(contours, nonZero);
+  });
+  assert.equal(calls, 1);
+  const first = resolved[0].geometry;
+  assert.ok(first);
+  for (const plan of resolved) {
+    assert.equal(plan.geometry?.vertices.buffer, first.vertices.buffer);
+  }
+
+  let color = 0;
+  const context = fillContext(shape, () => ({ color: ++color }), false, resolved);
+  const built = nativeSystem().updateGpuContext(context);
+  assert.deepEqual(
+    built.batches.map((batch) => batch.baseColor),
+    [1, 2, 3],
+  );
+  assert.ok(ArrayBuffer.isView(built.geometryData.vertices));
+  assert.equal(built.geometryData.vertices.buffer, first.vertices.buffer);
+  context.destroy();
+  native.dispose();
+});
+
+test("triangle geometry with JS opt-out preserves bitmap UVs, bounds, copies and reload", () => {
+  const shape = triangleLayer();
+  const painter = () => ({
+    texture: Texture.EMPTY,
+    matrix: new Matrix(-2, 0.25, 0.5, 3, 4, -5),
+    textureSpace: "global" as const,
+  });
+  const make = () => fillContext(shape, painter);
+  const context = remakeable(make(), make);
+  assert.equal(context.instructions[0].action, "geometry");
+  assert.deepEqual(
+    [context.bounds.minX, context.bounds.minY, context.bounds.maxX, context.bounds.maxY],
+    [0.25, 0.5, 10.75, 9.5],
+  );
+  assert.equal(context.containsPoint({ x: 3, y: 3 }), true);
+  assert.equal(context.containsPoint({ x: 12, y: 12 }), false);
+
+  const native = new Tessellator();
+  const geometry = native.tessellate([[0.25, 0.5, 10.75, 1.25, 2.5, 9.5]], false);
+  assert.ok(geometry);
+  const reference = fillContext(shape, painter, false, [{ geometry, crossing: null, roots: [] }]);
+  const contexts = nativeSystem();
+  const rows = (data: Tessellated) =>
+    Array.from(data.indices, (i) => [
+      data.vertices[i * 2],
+      data.vertices[i * 2 + 1],
+      data.uvs[i * 2],
+      data.uvs[i * 2 + 1],
+    ]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const built = contexts.updateGpuContext(context).geometryData;
+  assert.deepEqual(rows(built), rows(contexts.updateGpuContext(reference).geometryData));
+  const before = plain(built);
+  const copy = copyContext(context);
+  assert.deepEqual(plain(contexts.updateGpuContext(copy).geometryData), before);
+  context.unload();
+  assert.deepEqual(plain(contexts.updateGpuContext(context).geometryData), before);
+  context.destroy();
+  copy.destroy();
+  reference.destroy();
+  native.dispose();
+});
+
+test("triangle painters retain lazy gradient regions and release their resources", () => {
+  let releases = 0;
+  const context = fillContext(triangleLayer(), (_, region, hold) => {
+    assert.deepEqual(region(), { x: 0, y: 0, width: 11, height: 10 });
+    hold(() => releases++);
+    return { color: 1 };
+  });
+  assert.equal(context.instructions[0].action, "geometry");
+  destroyContext(context);
+  assert.equal(releases, 1);
 });
