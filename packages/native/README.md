@@ -30,8 +30,11 @@ call; `new Convolver({ retainMemory: bytes })` adjusts that threshold, and
 `{ simd: false }` selects scalar. Arena reset reuses capacity; only dropping
 the instance permits its memory to be collected.
 
-Build with `pnpm --filter @swf2es/native build:wasm`. The base64 binaries are
-committed; normal builds check the input digest, and CI rebuilds them with
+Build with `pnpm --filter @swf2es/native build:wasm`, which first runs the
+kernel's Zig tests on the host (`zig build test` in this folder): exact
+pixels for small cases, and every allocation failing in turn. The kernel is
+`src/convolve.zig`, taking any `std.mem.Allocator`; `src/bitmap.zig` wraps it
+in the Wasm module's bump arena. The base64 binaries are committed; normal builds check the input digest, and CI rebuilds them with
 the pinned compiler. No external dependency is needed.
 
 `node --test tests/unit/native-bitmap.test.ts` checks exact pixels, ownership,

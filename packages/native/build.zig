@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const test_step = b.step("test", "Run the kernel's tests on the host, scalar and SIMD");
     for ([_][]const u8{ "scalar", "simd" }) |name| {
         const simd = !std.mem.eql(u8, name, "scalar");
         const target = b.resolveTargetQuery(.{
@@ -25,5 +26,12 @@ pub fn build(b: *std.Build) void {
         wasm.stack_size = 64 * 1024;
         wasm.max_memory = 128 * 1024 * 1024;
         b.installArtifact(wasm);
+
+        const tests = b.createModule(.{
+            .root_source_file = b.path("src/convolve.zig"),
+            .target = b.graph.host,
+        });
+        tests.addOptions("options", options);
+        test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = name, .root_module = tests })).step);
     }
 }
