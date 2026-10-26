@@ -121,6 +121,10 @@ import {
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 
+// Object coercions use the same two lookup orders without allocating per call.
+const STRING_PRIMITIVE_ORDER = ["toString", "valueOf"] as const;
+const NUMBER_PRIMITIVE_ORDER = ["valueOf", "toString"] as const;
+
 /** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
 export class AsError extends Error {}
 
@@ -2421,7 +2425,7 @@ export class Runtime {
 
     // As ScriptObject::defaultValue: each called as a property, so one
     // that is not a function is TypeError 1006; a Namespace is a primitive.
-    const order = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
+    const order = hint === "string" ? STRING_PRIMITIVE_ORDER : NUMBER_PRIMITIVE_ORDER;
     for (const name of order) {
       const v = this.callProperty(o, publicQname(name));
       if (
