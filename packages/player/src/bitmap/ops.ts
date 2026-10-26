@@ -148,8 +148,7 @@ export function colorTransform(
   const fixed = (m: number) => Math.trunc(m * 256);
   const [rm, gm, bm, am] = [ct.rMul, ct.gMul, ct.bMul, ct.aMul].map(fixed);
   const [ro, go, bo, ao] = [ct.rAdd, ct.gAdd, ct.bAdd, ct.aAdd].map(Math.trunc);
-  const ch = (v: number, m: number, o: number) =>
-    Math.max(0, Math.min(255, Math.floor((v * m) / 256) + o));
+
   for (let y = c.y; y < c.y + c.height; y++) {
     for (let x = c.x; x < c.x + c.width; x++) {
       const i = y * store.width + x;
@@ -160,15 +159,17 @@ export function colorTransform(
         continue;
       }
 
-      const straight = (shift: number) =>
-        a0 === 0 ? 0 : Math.min(255, Math.floor((((p >>> shift) & 0xff) * 255) / a0));
       // An opaque bitmap's alpha is transformed too: down to 0, the pixel reads 0.
-      const a = ch(a0, am, ao);
-      const r = ch(straight(16), rm, ro);
-      const g = ch(straight(8), gm, go);
-      const b = ch(straight(0), bm, bo);
-      const out = (v: number) => (a === 255 ? v : (v * (a + 1)) >> 8);
-      store.pixels[i] = ((a << 24) | (out(r) << 16) | (out(g) << 8) | out(b)) >>> 0;
+      const a = colorChannel(a0, am, ao);
+      const r = colorChannel(straightChannel(p, a0, 16), rm, ro);
+      const g = colorChannel(straightChannel(p, a0, 8), gm, go);
+      const b = colorChannel(straightChannel(p, a0, 0), bm, bo);
+      store.pixels[i] =
+        ((a << 24) |
+          (premultipliedChannel(r, a) << 16) |
+          (premultipliedChannel(g, a) << 8) |
+          premultipliedChannel(b, a)) >>>
+        0;
     }
   }
 
@@ -754,6 +755,10 @@ export interface ColorTransformValues {
   aAdd: number;
 }
 
+interface PreparedColorTransform extends ColorTransformValues {
+  skipZeroAlpha: boolean;
+}
+
 /** The blend modes draw composites with; alpha and erase need a layer, which a bitmap drawn has not, and do nothing. */
 const BLENDS = new Set([
   "normal",
@@ -830,6 +835,8 @@ export function drawBitmap(
     return;
   }
 
+  const transform = ct ? prepareColorTransform(ct) : null;
+
   // Unscaled at a whole pixel, as every snapshot of a display object is
   // composited: each covered pixel is covered whole and is the source's
   // own, so it is copied straight, as the general path below would.
@@ -842,7 +849,7 @@ export function drawBitmap(
     Number.isInteger(m.ty) &&
     source !== store
   ) {
-    composite(store, source, area, m.tx, m.ty, ct, mode);
+    composite(store, source, area, m.tx, m.ty, transform, mode);
     store.changed();
     return;
   }
@@ -888,8 +895,8 @@ export function drawBitmap(
       const sx = ia * cx + ic * cy + itx;
       const sy = ib * cx + id * cy + ity;
       let p = smooth ? bilinear(source, sx - 0.5, sy - 0.5) : nearest(source, sx, sy);
-      if (ct) {
-        p = transformed(p, ct);
+      if (transform) {
+        p = transformed(p, transform);
       }
 
       if (hits < 16) {
@@ -924,7 +931,7 @@ function composite(
   area: PixelRect,
   tx: number,
   ty: number,
-  ct: ColorTransformValues | null,
+  ct: PreparedColorTransform | null,
   mode: string,
 ): void {
   const into = store.pixels;
@@ -996,26 +1003,61 @@ function bilinear(source: BitmapStore, x: number, y: number): number {
 }
 
 /** A premultiplied pixel through a colour transform, as colorTransform computes it. */
-function transformed(p: number, ct: ColorTransformValues): number {
+function transformed(p: number, ct: PreparedColorTransform): number {
   const a0 = p >>> 24;
-  if (a0 === 0 && ct.aAdd <= 0) {
+  if (a0 === 0 && ct.skipZeroAlpha) {
     return 0;
   }
 
-  const fixed = (v: number) => Math.trunc(v * 256);
-  const ch = (v: number, mul: number, add: number) =>
-    Math.max(0, Math.min(255, Math.floor((v * fixed(mul)) / 256) + Math.trunc(add)));
-  const straight = (shift: number) =>
-    a0 === 0 ? 0 : Math.min(255, Math.floor((((p >>> shift) & 0xff) * 255) / a0));
-  const a = ch(a0, ct.aMul, ct.aAdd);
-  const out = (v: number) => (a === 255 ? v : (v * (a + 1)) >> 8);
+  const a = colorChannel(a0, ct.aMul, ct.aAdd);
   return (
     ((a << 24) |
-      (out(ch(straight(16), ct.rMul, ct.rAdd)) << 16) |
-      (out(ch(straight(8), ct.gMul, ct.gAdd)) << 8) |
-      out(ch(straight(0), ct.bMul, ct.bAdd))) >>>
+      (drawColorChannel(p, a0, 16, ct.rMul, ct.rAdd, a) << 16) |
+      (drawColorChannel(p, a0, 8, ct.gMul, ct.gAdd, a) << 8) |
+      drawColorChannel(p, a0, 0, ct.bMul, ct.bAdd, a)) >>>
     0
   );
+}
+
+function prepareColorTransform(ct: ColorTransformValues): PreparedColorTransform {
+  return {
+    rMul: Math.trunc(ct.rMul * 256),
+    gMul: Math.trunc(ct.gMul * 256),
+    bMul: Math.trunc(ct.bMul * 256),
+    aMul: Math.trunc(ct.aMul * 256),
+    rAdd: Math.trunc(ct.rAdd),
+    gAdd: Math.trunc(ct.gAdd),
+    bAdd: Math.trunc(ct.bAdd),
+    aAdd: Math.trunc(ct.aAdd),
+    // The alpha-zero guard tests the original offset before truncation.
+    skipZeroAlpha: ct.aAdd <= 0,
+  };
+}
+
+// These stay outside the pixel loops so a transform creates no per-pixel closures.
+function colorChannel(v: number, mul: number, add: number): number {
+  return Math.max(0, Math.min(255, Math.floor((v * mul) / 256) + add));
+}
+
+function straightChannel(p: number, alpha: number, shift: number): number {
+  return alpha === 0 ? 0 : Math.min(255, Math.floor((((p >>> shift) & 0xff) * 255) / alpha));
+}
+
+function premultipliedChannel(v: number, alpha: number): number {
+  return alpha === 255 ? v : (v * (alpha + 1)) >> 8;
+}
+
+function drawColorChannel(
+  p: number,
+  alpha: number,
+  shift: number,
+  mul: number,
+  add: number,
+  outAlpha: number,
+): number {
+  const v = colorChannel(straightChannel(p, alpha, shift), mul, add);
+
+  return premultipliedChannel(v, outAlpha);
 }
 
 /** A premultiplied pixel with all four channels scaled by a coverage. */
