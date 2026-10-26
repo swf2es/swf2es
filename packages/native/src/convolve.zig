@@ -72,16 +72,16 @@ const Geometry = struct {
     x: i32,
     y: i32,
     w: i32,
-    h: i32,
     x0: i32,
     y0: i32,
     nw: i32,
-    nh: i32,
     cols: i32,
     rows: i32,
     hx: i32,
     hy: i32,
     clamp: bool,
+    /// The planes' entry after the block, which holds the filter's colour.
+    outside: usize,
 
     fn init(p: *const Params) Geometry {
         return .{
@@ -90,23 +90,22 @@ const Geometry = struct {
             .x = p.x,
             .y = p.y,
             .w = @intCast(p.w),
-            .h = @intCast(p.h),
             .x0 = @intCast(p.x0),
             .y0 = @intCast(p.y0),
             .nw = @intCast(p.nw),
-            .nh = @intCast(p.nh),
             .cols = @intCast(p.cols),
             .rows = @intCast(p.rows),
             .hx = @intCast(p.cols / 2),
             .hy = @intCast(p.rows / 2),
             .clamp = p.flags.clamp,
+            .outside = p.nw * p.nh,
         };
     }
 
     /// Where the planes hold source pixel (x, y): past the bitmap, its
     /// nearest edge's when clamping, else the filter's colour after the rest.
     fn index(g: Geometry, x: i32, y: i32) usize {
-        if (!g.clamp and (x < 0 or y < 0 or x >= g.sw or y >= g.sh)) return @intCast(g.nw * g.nh);
+        if (!g.clamp and (x < 0 or y < 0 or x >= g.sw or y >= g.sh)) return g.outside;
         return @intCast((clamp(y, g.sh) - g.y0) * g.nw + clamp(x, g.sw) - g.x0);
     }
 
@@ -147,6 +146,7 @@ fn integerKernel(matrix: []const f64, divisor: f64) ?i32 {
     return @as(i16, @bitCast(reciprocal));
 }
 
+/// Adds plane values from `start` on times weight to sums lo to before hi.
 fn addRow(sum: []f64, plane: []const i32, start: usize, lo: usize, hi: usize, weight: f64) void {
     @setFloatMode(.strict);
     var x = lo;
@@ -154,9 +154,9 @@ fn addRow(sum: []f64, plane: []const i32, start: usize, lo: usize, hi: usize, we
         const Vec = @Vector(2, f64);
         const w: Vec = @splat(weight);
         while (x + 2 <= hi) : (x += 2) {
-            const values: *align(1) const @Vector(2, i32) = @ptrCast(&plane[start + x - lo]);
-            const into: *align(1) Vec = @ptrCast(&sum[x]);
-            into.* = into.* + @as(Vec, @floatFromInt(values.*)) * w;
+            const values: @Vector(2, i32) = plane[start + x - lo ..][0..2].*;
+            const into: Vec = sum[x..][0..2].*;
+            sum[x..][0..2].* = into + @as(Vec, @floatFromInt(values)) * w;
         }
     }
     while (x < hi) : (x += 1) sum[x] += @as(f64, @floatFromInt(plane[start + x - lo])) * weight;
@@ -242,8 +242,12 @@ pub fn convolve(gpa: std.mem.Allocator, p: *const Params, pixels: []const u32, m
         // The pixels whose taps all lie in the bitmap, x from x1 to before x2,
         // sum a tap at a time along the row; the rest a pixel at a time.
         const row_inside = sy >= g.hy and sy <= g.sh - g.rows + g.hy;
-        const x1: usize = if (row_inside) @intCast(@min(g.w, @max(0, g.hx - g.x))) else 0;
-        const x2: usize = if (row_inside) @intCast(@max(@as(i32, @intCast(x1)), @min(g.w, g.sw - g.cols + g.hx + 1 - g.x))) else 0;
+        const x1: usize, const x2: usize = span: {
+            if (!row_inside) break :span .{ 0, 0 };
+            const lo = @min(g.w, @max(0, g.hx - g.x));
+            const hi = @max(lo, @min(g.w, g.sw - g.cols + g.hx + 1 - g.x));
+            break :span .{ @intCast(lo), @intCast(hi) };
+        };
         const fixed_row = fixed_scale != null and sy >= 1 and sy < g.sh - 1;
         if (x2 > x1) {
             for (0..matrix.len) |k| {
