@@ -430,12 +430,14 @@ export interface PlaceSpec {
   /** PlaceObject3's fields; any of them makes the tag one. */
   className?: string;
   hasImage?: boolean;
-  /** Blur filters, each blurring as much both ways, in one pass; [] clears. */
+  /** Blur filters, each blurring as much both ways, in `quality` passes; [] clears. */
   blurs?: number[];
-  /** Glow filters after the blurs, in one pass: 0xRRGGBB, blur both ways and strength. */
-  glows?: { color: number; blur: number; strength: number }[];
-  /** Drop shadows after the glows, in one pass, black: blur both ways, `distance` at `angle` degrees. */
+  /** Glow filters after the blurs, in `quality` passes: 0xRRGGBB, blur both ways (or `blurY` down) and strength. */
+  glows?: { color: number; blur: number; blurY?: number; strength: number }[];
+  /** Drop shadows after the glows, in `quality` passes, black: blur both ways, `distance` at `angle` degrees. */
   shadows?: { blur: number; distance: number; angle: number }[];
+  /** The passes of each of its filters, 1 to 31; 1 by default. */
+  quality?: number;
   /** A blend mode by its number, 1 normal to 14 hard light. */
   blendMode?: number;
   cacheAsBitmap?: boolean;
@@ -573,13 +575,14 @@ export function place(spec: PlaceSpec): Uint8Array {
   }
 
   if (flags2 & 0x01) {
+    const passes = spec.quality ?? 1;
     w.u8(filters);
     for (const blur of spec.blurs ?? []) {
       // BLURFILTER: its id, blurX and blurY in 16.16, then passes in five bits.
       w.u8(1)
         .u32(fixed(blur))
         .u32(fixed(blur))
-        .u8(1 << 3);
+        .u8(passes << 3);
     }
 
     // GLOWFILTER and DROPSHADOWFILTER: RGBA, blurs, the shadow's angle in radians and distance,
@@ -591,9 +594,9 @@ export function place(spec: PlaceSpec): Uint8Array {
         .u8(glow.color)
         .u8(255)
         .u32(fixed(glow.blur))
-        .u32(fixed(glow.blur))
+        .u32(fixed(glow.blurY ?? glow.blur))
         .u16(Math.round(glow.strength * 256))
-        .u8(0x21);
+        .u8(0x20 | passes);
     }
 
     for (const shadow of spec.shadows ?? []) {
@@ -607,7 +610,7 @@ export function place(spec: PlaceSpec): Uint8Array {
         .u32(fixed((shadow.angle * Math.PI) / 180))
         .u32(fixed(shadow.distance))
         .u16(256)
-        .u8(0x21);
+        .u8(0x20 | passes);
     }
   }
 

@@ -4697,10 +4697,23 @@ as a tween writes them on each frame or a script sets them from their
 own, keep the chain and its output; a displacement's map is the same only
 as the same object, which setting it again takes anew. A wide blur's
 passes read blur × texels to a screen pixel a pixel, over an area grown
-by its reach, so their cost
-rises with the square of the resolution, and with the cube of the
-samples a host draws finer to average down; kept, a still object costs
-one copy a frame. A kept output moved is drawn at the new place to the
+by its reach, so their cost rises with the cube of the texels to a stage
+pixel; kept, a still object costs one copy a frame. Where there are more
+texels than one to a stage pixel, a blur's and a glow's or shadow's runs
+go coarser (`blurShrink`), each way on its own, so that a streak 68
+across and 5 down goes coarser across alone: whole times, to a texel a
+stage pixel at most, the input averaged down first and the result drawn
+back between texels. What bends sharply is then off by a part of a coarse texel, which a
+glow's strength multiplies: a single box bends at its ends, so it
+shrinks only when wide for its strength, while two boxes or more bend
+smoothly, so a glow 27 wide at quality 2 runs at a texel a stage pixel
+on a screen of three. Against the full runs, on a stage shown 1.5 to 3
+times its size, no channel moved more than 5, and the `wide-filters`
+case holds it to adl at three times; at a texel a stage pixel nothing
+changes. Bevels and the gradient filters, whose difference of two reads
+strength multiplies, keep every texel. A blur of none, which an
+animation's placements carry by the hundred, takes no pass in its chain,
+though it pads as before. A kept output moved is drawn at the new place to the
 whole texel, its content where it fell within a texel when it was
 filtered. adl moves its bitmap by whole pixels where swf2es moves by
 whole texels, which differ only where a pixel is drawn as several samples,
