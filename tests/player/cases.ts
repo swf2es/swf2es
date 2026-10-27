@@ -6079,6 +6079,75 @@ function blurredShadow(): Uint8Array {
   });
 }
 
+// Wide filters on a stage a host shows `zoom` times its size, as an
+// animation's light effects draw them: glows 27 and 68 wide in two passes,
+// a streak glow 68 across and 5 down, a blur 30 wide and a shadow 24 wide
+// in three. Their runs go coarser than
+// the screen (render/filters.ts, blurShrink), which must not show against
+// adl's frame of the SWF built `zoom` times larger.
+function wideFilters(zoom: number): Uint8Array {
+  const at = (x: number, y: number) => ({ a: zoom, d: zoom, tx: x * 20 * zoom, ty: y * 20 * zoom });
+  const z = (blur: number) => blur * zoom;
+  return w.swf({
+    width: 300 * zoom,
+    height: 160 * zoom,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0x102030),
+      w.shape({
+        id: 1,
+        bounds: [0, 800, 0, 400],
+        fills: [0xffffff],
+        paths: [{ fill1: 1, commands: rectPath(0, 0, 40, 20) }],
+      }),
+      w.shape({
+        id: 2,
+        bounds: [-300, 300, -300, 300],
+        fills: [0xffcc00],
+        paths: [{ fill1: 1, commands: rectPath(-15, -15, 30, 30) }],
+      }),
+      w.shape({
+        id: 3,
+        bounds: [0, 600, 0, 600],
+        fills: [0xcc2200],
+        paths: [{ fill1: 1, commands: rectPath(0, 0, 30, 30) }],
+      }),
+      w.place({
+        depth: 1,
+        character: 1,
+        matrix: at(30, 30),
+        glows: [{ color: 0x33ccff, blur: z(27), strength: 2 }],
+        quality: 2,
+      }),
+      w.place({
+        depth: 2,
+        character: 2,
+        matrix: at(150, 50),
+        glows: [{ color: 0xff6600, blur: z(68), strength: 1.5 }],
+        quality: 2,
+      }),
+      w.place({ depth: 3, character: 3, matrix: at(220, 25), blurs: [z(30)], quality: 3 }),
+      w.place({
+        depth: 5,
+        character: 1,
+        matrix: at(190, 125),
+        glows: [{ color: 0xffffff, blur: z(68), blurY: z(5), strength: 2.27 }],
+        quality: 2,
+      }),
+      w.place({
+        depth: 4,
+        character: 1,
+        matrix: at(40, 110),
+        shadows: [{ blur: z(24), distance: z(10), angle: 45 }],
+        quality: 3,
+      }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Filters on a stage a host shows `zoom` times its size: the soft shadow,
 // a glow as a chat's outline, and a drop shadow, each at its size and in a
 // clip scaled twice, which leaves them as they are. Flash Player draws a
@@ -9542,6 +9611,17 @@ export const cases: PlayerCase[] = [
     zoom: 2.8,
     // The page's samples against adl's whole pixels, within 5 a channel.
     tolerance: 5,
+    maxOutliers: 0,
+  },
+  {
+    name: "wide-filters",
+    swf: wideFilters(1),
+    frames: 1,
+    capture: [1],
+    zoom: 3,
+    shown: true,
+    flash: wideFilters(3),
+    tolerance: 8,
     maxOutliers: 0,
   },
   {
