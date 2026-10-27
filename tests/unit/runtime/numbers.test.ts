@@ -11,6 +11,7 @@ import {
   numberToPrecision,
 } from "../../../packages/runtime/dist/avm2/natives/number.js";
 import {
+  numberReadBack,
   numberToString,
   stringToNumber,
 } from "../../../packages/runtime/dist/avm2/number-strings.js";
@@ -218,5 +219,44 @@ test("stringToNumber reads every string as avmplus' rules do", () => {
     if (!Object.is(fast, before)) {
       assert.fail(`${JSON.stringify(s)}: ${fast} where the rules give ${before}`);
     }
+  }
+});
+
+test("numberReadBack is the number numberToString's text reads back as", () => {
+  const values = [
+    0,
+    -0,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.MIN_VALUE,
+    Number("2.2250738585072009e-308"),
+    2.2250738585072014e-308,
+    Number.MAX_VALUE,
+    Number("209.14077758789063"),
+    0.1 + 0.2,
+    -2147483648,
+    4294967295,
+    2 ** 53 + 2,
+  ];
+  // Either side of 1e21, where D2A starts to write an exponent of 15 digits.
+  for (const edge of [1e15, 1e20, 1e21, 1e22, Number.MAX_VALUE]) {
+    for (let ulps = -2000; ulps <= 2000; ulps++) {
+      if (edge !== Number.MAX_VALUE || ulps <= 0) {
+        values.push(nudge(edge, ulps));
+      }
+    }
+  }
+
+  for (let i = 0; i < 20000; i++) {
+    values.push(anyDouble());
+    for (const sample of samples) {
+      values.push(sample());
+    }
+  }
+
+  for (const n of [...values, ...values.map((v) => -v)]) {
+    const expected = stringToNumber(numberToString(n));
+    assert.ok(Object.is(numberReadBack(n), expected), `${n}: ${numberReadBack(n)} for ${expected}`);
   }
 });

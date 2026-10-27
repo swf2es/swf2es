@@ -103,3 +103,25 @@ function significantDigits(text: string): number {
 
   return digits;
 }
+
+/**
+ * The number AS3 reads back from the string it writes for `n`, as
+ * stringToNumber(numberToString(n)), without writing it. Below 1e21 D2A
+ * writes every digit Burger and Dybvig's shortest form needs, so the string
+ * reads back as the number itself, but -0 writes "0"; from 1e21 up it writes
+ * an exponent with 15 digits at most, which can read back as another number
+ * (1.79769313486231e+308 for Number.MAX_VALUE, past which it is Infinity).
+ */
+export function numberReadBack(n: number): number {
+  const magnitude = n < 0 ? -n : n;
+  if (magnitude < 1e21) {
+    return n === 0 ? 0 : n;
+  }
+
+  // NaN and the infinities write as names that read back as themselves.
+  if (Number.isNaN(n) || magnitude === Number.POSITIVE_INFINITY) {
+    return n;
+  }
+
+  return stringToNumber(convertDoubleToString(n));
+}
