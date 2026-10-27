@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { binary } from "../../packages/compress/dist/binary.js";
+import { binary } from "../../packages/native/dist/compress/binary.js";
 import {
   CORRUPT,
   DONE,
@@ -12,7 +12,7 @@ import {
   MEMORY_KEPT,
   memoryInUse,
   TRUNCATED,
-} from "../../packages/compress/dist/index.js";
+} from "../../packages/native/dist/compress/index.js";
 
 /** Bytes that compress, but not to nothing: a seeded walk over a small alphabet. */
 function sample(length: number, seed = 1): Uint8Array {

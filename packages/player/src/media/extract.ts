@@ -5,7 +5,7 @@
 // those it writes. Ruffle's extract writes zeros (sound.rs's extract is a
 // stub).
 import type { Sound } from "@swf2es/format";
-import { Mp3Decoder, mp3Available } from "@swf2es/mp3";
+import { Mp3Decoder, mp3Available } from "@swf2es/native/mp3";
 import { decodeAdpcm } from "./audio.js";
 import { mp3Frames } from "./mp3.js";
 

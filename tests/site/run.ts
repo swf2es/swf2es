@@ -176,6 +176,15 @@ async function check(): Promise<void> {
               true,
               "playback did not use the native tessellator",
             );
+            // Native bitmap kernels are on by default too. The page loads more modules
+            // than resource timing keeps, so the frame's resources tell.
+            const { frameTree } = await send<{ frameTree: { resources: { url: string }[] } }>(
+              "Page.getResourceTree",
+            );
+            assert.ok(
+              frameTree.resources.some((r) => r.url.endsWith("/modules/native/bitmap/index.js")),
+              "playback did not load the native bitmap kernels",
+            );
             const facts = await value<string>("document.getElementById('facts').innerText");
             assert.match(facts, /3 \(AVM2\)/);
             assert.match(facts, /480 × 320/);
@@ -509,7 +518,7 @@ async function check(): Promise<void> {
           "the licences are there",
           async () => {
             const found = await value<number[]>(
-              "Promise.all(['notices.html', 'licenses/MPL-2.0.txt', 'licenses/pixijs-MIT.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/tessellate/index.js', 'modules/native/bitmap.js', 'libraries/builtin.abc'].map((u) => fetch(u).then((r) => r.status)))",
+              "Promise.all(['notices.html', 'licenses/MPL-2.0.txt', 'licenses/pixijs-MIT.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/native/tessellate/index.js', 'modules/native/bitmap/index.js', 'libraries/builtin.abc'].map((u) => fetch(u).then((r) => r.status)))",
             );
             assert.deepEqual(found, [200, 200, 200, 200, 200, 200, 200, 200]);
             const notices = await value<string>("fetch('notices.html').then((r) => r.text())");

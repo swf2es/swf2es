@@ -19,10 +19,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 /** URL prefixes and the directories they serve. */
 const mounts: [string, string][] = [
   ["/native/", join(root, "packages/native/dist/")],
-  ["/tessellate/", join(root, "packages/tessellate/dist/")],
-  ["/compress/", join(root, "packages/compress/dist/")],
   ["/format/", join(root, "packages/format/dist/")],
-  ["/mp3/", join(root, "packages/mp3/dist/")],
   ["/codegen/", join(root, "packages/codegen/dist/")],
   ["/context3d-backend/", join(root, "packages/context3d/dist/")],
   ["/runtime/", join(root, "packages/runtime/dist/")],
@@ -37,11 +34,11 @@ const mounts: [string, string][] = [
 
 export const importMap = {
   imports: {
-    "@swf2es/tessellate": "/tessellate/index.js",
-    "@swf2es/native/bitmap": "/native/bitmap.js",
-    "@swf2es/compress": "/compress/index.js",
+    "@swf2es/native/tessellate": "/native/tessellate/index.js",
+    "@swf2es/native/bitmap": "/native/bitmap/index.js",
+    "@swf2es/native/compress": "/native/compress/index.js",
     "@swf2es/format": "/format/index.js",
-    "@swf2es/mp3": "/mp3/index.js",
+    "@swf2es/native/mp3": "/native/mp3/index.js",
     "@swf2es/codegen": "/codegen/index.js",
     "@swf2es/context3d": "/context3d-backend/index.js",
     "@swf2es/context3d/webgl": "/context3d-backend/webgl/index.js",

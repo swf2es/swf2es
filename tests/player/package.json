@@ -12,7 +12,6 @@
     "@swf2es/player-hosts": "workspace:*",
     "@swf2es/runtime": "workspace:*",
     "pixi.js": "workspace:*",
-    "@swf2es/tessellate": "workspace:*",
     "@swf2es/native": "workspace:*"
   }
 }

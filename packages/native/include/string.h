@@ -1,8 +1,9 @@
-// The libc functions zlib and the LZMA SDK call, for wasm32-freestanding,
-// which has no libc headers. Zig compiles C there with -ffreestanding, which
-// leaves a plain memcpy a call to compiler-rt's loop; as clang's builtins,
-// memcpy, memmove and memset become bulk memory's memory.copy and
-// memory.fill. memcmp and strlen have no instruction and stay compiler-rt's.
+// The libc functions zlib, the LZMA SDK and minimp3 call, for
+// wasm32-freestanding, which has no libc headers. Zig compiles C there with
+// -ffreestanding, which leaves a plain memcpy a call to compiler-rt's loop;
+// as clang's builtins, memcpy, memmove and memset become bulk memory's
+// memory.copy and memory.fill. memcmp and strlen have no instruction and
+// stay compiler-rt's.
 #ifndef SWF2ES_STRING_H
 #define SWF2ES_STRING_H
 

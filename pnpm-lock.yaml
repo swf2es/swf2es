@@ -87,17 +87,13 @@ importers:
         specifier: ^0.28.20
         version: 0.28.20(patch_hash=54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f)
 
-  packages/compress: {}
-
   packages/context3d: {}
 
   packages/format:
     dependencies:
-      '@swf2es/compress':
+      '@swf2es/native':
         specifier: workspace:*
-        version: link:../compress
-
-  packages/mp3: {}
+        version: link:../native
 
   packages/native: {}
 
@@ -112,9 +108,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
-      '@swf2es/mp3':
+      '@swf2es/native':
         specifier: workspace:*
-        version: link:../mp3
+        version: link:../native
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -134,8 +130,6 @@ importers:
         specifier: workspace:*
         version: link:../format
 
-  packages/tessellate: {}
-
   packages/web:
     dependencies:
       '@swf2es/codegen':
@@ -153,9 +147,6 @@ importers:
       '@swf2es/player-hosts':
         specifier: workspace:*
         version: link:../player-hosts
-      '@swf2es/tessellate':
-        specifier: workspace:*
-        version: link:../tessellate
       pixi.js:
         specifier: workspace:*
         version: link:../../vendor/pixijs
@@ -206,9 +197,6 @@ importers:
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-      '@swf2es/tessellate':
-        specifier: workspace:*
-        version: link:../../packages/tessellate
       pixi.js:
         specifier: workspace:*
         version: link:../../vendor/pixijs
@@ -236,9 +224,6 @@ importers:
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-      '@swf2es/tessellate':
-        specifier: workspace:*
-        version: link:../../packages/tessellate
 
   tests/web:
     dependencies:

@@ -1,7 +1,6 @@
 //! BitmapData convolution, as packages/player/src/bitmap/filters.ts's
 //! convolve computes it, pixel for pixel. bitmap.zig wraps it for Wasm.
 const std = @import("std");
-const options = @import("options");
 
 /// The Wasm memory's maximum, which bounds a call's scratch.
 pub const memory_limit = 128 * 1024 * 1024;
@@ -160,14 +159,12 @@ fn integerKernel(matrix: []const f64, divisor: f64) ?i32 {
 fn addRow(sum: []f64, plane: []const i32, start: usize, lo: usize, hi: usize, weight: f64) void {
     @setFloatMode(.strict);
     var x = lo;
-    if (options.simd) {
-        const Vec = @Vector(2, f64);
-        const w: Vec = @splat(weight);
-        while (x + 2 <= hi) : (x += 2) {
-            const values: @Vector(2, i32) = plane[start + x - lo ..][0..2].*;
-            const into: Vec = sum[x..][0..2].*;
-            sum[x..][0..2].* = into + @as(Vec, @floatFromInt(values)) * w;
-        }
+    const Vec = @Vector(2, f64);
+    const w: Vec = @splat(weight);
+    while (x + 2 <= hi) : (x += 2) {
+        const values: @Vector(2, i32) = plane[start + x - lo ..][0..2].*;
+        const into: Vec = sum[x..][0..2].*;
+        sum[x..][0..2].* = into + @as(Vec, @floatFromInt(values)) * w;
     }
     while (x < hi) : (x += 1) sum[x] += @as(f64, @floatFromInt(plane[start + x - lo])) * weight;
 }

@@ -1,7 +1,7 @@
 // Independent ray crossings check both fill rules, including self-intersecting contours.
 // Run with: node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]
 import assert from "node:assert/strict";
-import { Tessellator } from "../../packages/tessellate/dist/index.js";
+import { Tessellator } from "../../packages/native/dist/tessellate/index.js";
 
 const cases = Number(process.argv[2] ?? 2000);
 const seed = Number(process.argv[3] ?? 1);

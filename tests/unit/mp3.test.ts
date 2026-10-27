@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { binary } from "../../packages/mp3/dist/binary.js";
-import { Mp3Decoder, prepareMp3 } from "../../packages/mp3/dist/index.js";
+import { binary } from "../../packages/native/dist/mp3/binary.js";
+import { Mp3Decoder, prepareMp3 } from "../../packages/native/dist/mp3/index.js";
 import { mp3Frames } from "../../packages/player/dist/media/mp3.js";
 
 await prepareMp3();

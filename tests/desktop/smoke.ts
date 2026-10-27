@@ -431,11 +431,14 @@ try {
 
     // Cross-origin isolated, as a shareable ByteArray's shared memory needs.
     assert.equal(await evaluate<boolean>("crossOriginIsolated"), true);
-    assert.equal(
-      await evaluate<number>(
-        'fetch(new URL("/modules/native/bitmap.js", location.href)).then((r) => r.status)',
-      ),
-      200,
+    // Native bitmap kernels are on by default: playback loaded them. The page loads
+    // more modules than resource timing keeps, so the frame's resources tell.
+    const { frameTree } = await devtools.send<{ frameTree: { resources: { url: string }[] } }>(
+      "Page.getResourceTree",
+    );
+    assert.ok(
+      frameTree.resources.some((r) => r.url.endsWith("/modules/native/bitmap/index.js")),
+      "playback did not load the native bitmap kernels",
     );
 
     // Played again, the last player let go of: one canvas, and the SWF starts anew.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Convolver } from "@swf2es/native/bitmap";
-import { scalar, simd } from "../../packages/native/dist/binary.js";
+import { binary } from "../../packages/native/dist/bitmap/binary.js";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
 import { filterDefaults } from "../../packages/player/dist/display/filters.js";
@@ -40,7 +40,7 @@ test("native convolution exactly matches JS through clipping, writing and self-f
   const pick = <T>(values: T[]) => values[Math.floor(random() * values.length)];
   const special = [NaN, Infinity, -Infinity, -0, 0, 1e-300, 1e300, -1e300, 1 / 3, -1 / 3];
   const number = (n: number) => (random() < 0.1 ? pick(special) : (random() * 2 - 1) * n);
-  const owners = [new Convolver({ simd: false }), new Convolver()];
+  const owners = [new Convolver()];
   let calls = 0;
   for (let i = 0; i < 5000; i++) {
     const sw = 1 + ((random() * 17) | 0),
@@ -113,7 +113,7 @@ test("native convolution exactly matches JS through clipping, writing and self-f
     }
   }
 
-  assert.ok(calls > 6000, "differential cases must actually invoke the native kernels");
+  assert.ok(calls > 3000, "differential cases must actually invoke the native kernels");
   for (const owner of owners) {
     owner.dispose();
     assert.equal(owner.capacity, 0);
@@ -134,7 +134,7 @@ test("a rect convolved in bands of rows matches JS across the bands' seams", () 
       ((alpha << 24) | (((((seed >>> 16) & 255) * alpha) / 255) << 16) | (seed & alpha)) >>> 0;
   }
 
-  const owners = [new Convolver({ simd: false }), new Convolver()];
+  const owners = [new Convolver()];
   for (const clamp of [true, false]) {
     const f = {
       ...filter(),
@@ -251,52 +251,42 @@ test("invalid custom output or a throwing custom kernel falls back before writin
   }
 });
 
-test("native bitmap modules import nothing and expose only the kernel ABI", async () => {
-  for (const binary of [scalar, simd]) {
-    const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
-    assert.deepEqual(WebAssembly.Module.imports(module), []);
-    assert.deepEqual(
-      WebAssembly.Module.exports(module)
-        .map((e) => e.name)
-        .sort(),
-      ["capacity", "convolve", "memory", "resetArena"],
-    );
-  }
+test("the native bitmap module imports nothing and exposes only the kernel ABI", async () => {
+  const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
+  assert.deepEqual(WebAssembly.Module.imports(module), []);
+  assert.deepEqual(
+    WebAssembly.Module.exports(module)
+      .map((e) => e.name)
+      .sort(),
+    ["capacity", "convolve", "memory", "resetArena"],
+  );
 });
 
-test("SIMD compilation refusal selects scalar, and full refusal is tried once per owner", async () => {
+test("a compilation refusal, as without wasm SIMD, leaves JS and is tried once per owner", async () => {
   const fresh = async (name: string) =>
     (await import(
-      new URL(`../../packages/native/dist/bitmap.js?${name}`, import.meta.url).href
+      new URL(`../../packages/native/dist/bitmap/index.js?${name}`, import.meta.url).href
     )) as typeof import("@swf2es/native/bitmap");
   const Module = wasm.Module;
   let attempts = 0;
-  let blocked = false;
   wasm.Module = new Proxy(Module, {
-    construct(target, args) {
+    construct() {
       attempts++;
-      if (blocked || attempts === 1) {
-        throw Error("test compilation refusal");
-      }
-
-      return Reflect.construct(target, args);
+      throw Error("test compilation refusal");
     },
   });
   try {
     const source = new BitmapStore(16, 16, true, 0x80305070);
-    const { Convolver: ScalarFallback } = await fresh("scalar-fallback");
-    const scalar = new ScalarFallback();
-    assert.ok(scalar.convolve(source, area, filter(), true));
-    assert.equal(attempts, 2);
-    scalar.dispose();
-
-    blocked = true;
+    const expected = new BitmapStore(16, 16, true, 0);
+    applyFilter(expected, source, area, 0, 0, filter());
     const { Convolver: Blocked } = await fresh("blocked");
     const unavailable = new Blocked();
+    const dest = new BitmapStore(16, 16, true, 0);
+    applyFilter(dest, source, area, 0, 0, filter(), null, unavailable.convolve);
+    assert.deepEqual(dest.pixels, expected.pixels);
+    assert.equal(attempts, 1);
     assert.equal(unavailable.convolve(source, area, filter(), true), null);
-    const tried = attempts;
-    assert.equal(unavailable.convolve(source, area, filter(), true), null);
-    assert.equal(attempts, tried);
+    assert.equal(attempts, 1, "a refused module is not compiled again for the same owner");
     assert.equal(unavailable.capacity, 0);
   } finally {
     wasm.Module = Module;
