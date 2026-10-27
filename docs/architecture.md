@@ -5087,7 +5087,9 @@ The web host uses native fill tessellation by default. Each playback owns a
 disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
 false })` keeps new playbacks on JS and skips loading the native package.
 A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation
-is tried only once per tessellator. A rejected fill resolves its JS fallback
+is tried only once per tessellator. A shape layer's fills are tessellated in
+one call into one position and one index buffer, which Pixi draws from as they
+are (`packages/native/README.md`). A rejected fill resolves its JS fallback
 at construction, and the successful result is cached. Cached geometry owns
 its CPU buffers independently of Wasm scratch, including for context restoration.
 `@swf2es/player` retains its generic `PixiView` fill hook without importing the

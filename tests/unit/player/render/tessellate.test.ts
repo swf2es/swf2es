@@ -594,27 +594,57 @@ test("finished Canvas geometry paints once across internal triangle edges", () =
   source.destroy();
 });
 
-test("native layers share contiguous positions and preserve each fill's paint and local indices", () => {
+test("native layers share contiguous positions and indices, and preserve each fill's paint", () => {
   const doubled = structuredClone(layer);
   doubled.fills.push(structuredClone(doubled.fills[0]));
   const tess = new Tessellator();
-  const resolved = resolveFills(doubled, false, tess.tessellate);
+  let layers = 0;
+  const resolved = resolveFills(
+    doubled,
+    false,
+    Object.assign(tess.tessellate.bind(null), {
+      layer: (fills: number[][][], nonZero: boolean[]) => {
+        layers++;
+        return tess.tessellate.layer(fills, nonZero);
+      },
+    }),
+  );
+  assert.equal(layers, 1);
   const first = resolved[0].geometry;
   const second = resolved[1].geometry;
   assert.ok(first && second);
   assert.equal(first.vertices.buffer, second.vertices.buffer);
   assert.equal(second.vertices.byteOffset, first.vertices.byteOffset + first.vertices.byteLength);
-  assert.deepEqual(first.indices, second.indices);
+  assert.equal(first.indices.buffer, second.indices.buffer);
+  assert.equal(second.indexOffset, first.vertices.length / 2);
+  assert.deepEqual(
+    Array.from(first.indices),
+    Array.from(second.indices, (index) => index - first.vertices.length / 2),
+  );
+  // Each fill as a call of its own makes it.
+  const alone = resolveFills(doubled, false, (contours, nonZero) =>
+    tess.tessellate(contours, nonZero),
+  );
+  for (let i = 0; i < 2; i++) {
+    const own = alone[i].geometry;
+    const together = resolved[i].geometry;
+    assert.ok(own && together);
+    assert.deepEqual(Array.from(together.vertices), Array.from(own.vertices));
+    assert.deepEqual(
+      Array.from(together.indices, (index) => index - (together.indexOffset ?? 0)),
+      Array.from(own.indices),
+    );
+  }
 
   let paint = 0;
   const context = fillContext(doubled, () => ({ color: ++paint }), false, resolved);
   const built = nativeSystem().updateGpuContext(context);
   assert.ok(ArrayBuffer.isView(built.geometryData.vertices));
   assert.equal(built.geometryData.vertices.buffer, first.vertices.buffer);
-  assert.deepEqual(Array.from(built.geometryData.indices), [
-    ...first.indices,
-    ...Array.from(second.indices, (index) => index + first.vertices.length / 2),
-  ]);
+  // Drawn from the layer's own indices, as they are.
+  assert.ok(ArrayBuffer.isView(built.geometryData.indices));
+  assert.equal(built.geometryData.indices.buffer, first.indices.buffer);
+  assert.deepEqual(Array.from(built.geometryData.indices), [...first.indices, ...second.indices]);
   assert.equal(built.batches.length, 2);
   assert.equal(built.batches[0].baseColor, 1);
   assert.equal(built.batches[1].baseColor, 2);
