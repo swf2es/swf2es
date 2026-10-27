@@ -15,10 +15,12 @@ export interface FillGeometry {
 export interface FillTessellate {
   (contours: readonly (readonly number[])[], nonZero: boolean): FillGeometry | null;
   /**
-   * Every fill of a layer in one native call: each fill's geometry, or null
-   * for JS to fill it, all fills' positions and indices in one buffer each;
-   * null where the module is unavailable. Its output needs no checking: the
-   * module has checked every coordinate finite and every index in range.
+   * Every fill of a layer in one native call, its contours as path
+   * commands (PATH_MOVE, PATH_LINE, PATH_CURVE, PATH_CUBIC) that the module
+   * flattens itself: each fill's geometry, or null for JS to fill it, all
+   * fills' positions and indices in one buffer each; null where the module
+   * is unavailable. Its output needs no checking: the module has checked
+   * every coordinate finite and every index in range.
    */
   layer(
     fills: readonly (readonly (readonly number[])[])[],
@@ -26,14 +28,26 @@ export interface FillTessellate {
   ): (FillGeometry | null)[] | null;
 }
 
+/**
+ * The commands of a contour layer() takes, each followed by its
+ * coordinates: MOVE x y and LINE x y; CURVE cx cy x y, a quadratic from
+ * the pen; CUBIC c1x c1y c2x c2y x y. The pen starts each contour at 0, 0.
+ * Curves are flattened to within 0.02 of the curve, in at most 256 chords;
+ * repeated points are dropped, and contours of fewer than three points left out.
+ */
+export const PATH_MOVE = 1;
+export const PATH_LINE = 2;
+export const PATH_CURVE = 3;
+export const PATH_CUBIC = 4;
+
 interface NativeExports {
   memory: WebAssembly.Memory;
   reset(): void;
   alloc(n: number): number;
   run(coords: number, count: number, ends: number, contours: number, nonzero: number): number;
   layer(
-    coords: number,
-    points: number,
+    commands: number,
+    length: number,
     ends: number,
     contours: number,
     fills: number,
@@ -156,11 +170,13 @@ export class Tessellator {
 
     try {
       const x = this.arena();
-      const coordAt = x.alloc(count * 16);
-      const endsAt = x.alloc(contours.length * 4);
-      if (!coordAt || !endsAt) {
+      // One allocation: coordinates, then contours' ends.
+      const coordAt = x.alloc(count * 16 + contours.length * 4);
+      if (!coordAt) {
         throw new Error("tessellation input allocation failed");
       }
+
+      const endsAt = coordAt + count * 16;
 
       const coords = new Float64Array(x.memory.buffer, coordAt, count * 2);
       const ends = new Uint32Array(x.memory.buffer, endsAt, contours.length);
@@ -189,7 +205,7 @@ export class Tessellator {
     }
   };
 
-  /** Each fill as `fill` would make it, but in one call and one copy out. */
+  /** Each fill flattened and tessellated, as `fill` would make its polygons, in one call and one copy out. */
   private readonly layer = (
     fills: readonly (readonly (readonly number[])[])[],
     nonZero: readonly boolean[],
@@ -198,25 +214,21 @@ export class Tessellator {
       return null;
     }
 
-    let points = 0;
+    let length = 0;
     let contours = 0;
     const rules = new Uint8Array(fills.length);
     for (let i = 0; i < fills.length; i++) {
       const fill = fills[i];
-      let count = 0;
-      let even = true;
-      for (let j = 0; j < fill.length; j++) {
-        count += fill[j].length / 2;
-        even &&= fill[j].length % 2 === 0;
-      }
-
-      if (!even || fill.length > MOST_CONTOURS || count > MOST_POINTS) {
+      if (fill.length > MOST_CONTOURS) {
         rules[i] = REJECTED;
         continue;
       }
 
+      for (let j = 0; j < fill.length; j++) {
+        length += fill[j].length;
+      }
+
       rules[i] = Number(nonZero[i]);
-      points += count;
       contours += fill.length;
     }
 
@@ -224,18 +236,18 @@ export class Tessellator {
     let vertices: Float64Array;
     let indices: Uint16Array | Uint32Array;
     try {
-      // One allocation: coordinates, contours' ends, each fill's last contour, then rules.
+      // One allocation: commands, contours' ends, each fill's last contour, then rules.
       const x = this.arena();
-      const coordAt = x.alloc(points * 16 + contours * 4 + fills.length * 5);
-      if (!coordAt) {
+      const commandAt = x.alloc(length * 8 + contours * 4 + fills.length * 5);
+      if (!commandAt) {
         throw new Error("tessellation input allocation failed");
       }
 
-      const endsAt = coordAt + points * 16;
+      const endsAt = commandAt + length * 8;
       const fillsAt = endsAt + contours * 4;
       const rulesAt = fillsAt + fills.length * 4;
 
-      const coords = new Float64Array(x.memory.buffer, coordAt, points * 2);
+      const commands = new Float64Array(x.memory.buffer, commandAt, length);
       const ends = new Uint32Array(x.memory.buffer, endsAt, contours);
       const lasts = new Uint32Array(x.memory.buffer, fillsAt, fills.length);
       new Uint8Array(x.memory.buffer, rulesAt, fills.length).set(rules);
@@ -243,22 +255,21 @@ export class Tessellator {
       let contour = 0;
       for (let i = 0; i < fills.length; i++) {
         if (rules[i] !== REJECTED) {
-          const start = at;
           const fill = fills[i];
           for (let j = 0; j < fill.length; j++) {
-            coords.set(fill[j], at);
+            commands.set(fill[j], at);
             at += fill[j].length;
-            ends[contour++] = (at - start) / 2;
+            ends[contour++] = at;
           }
         }
 
         lasts[i] = contour;
       }
 
-      const head = x.layer(coordAt, points, endsAt, contours, fillsAt, rulesAt, fills.length);
+      const head = x.layer(commandAt, length, endsAt, contours, fillsAt, rulesAt, fills.length);
       if (head === 0) {
-        // The layer's own output did not fit: a call a fill, as before there was a layer call.
-        return fills.map((fill, i) => this.fill(fill, nonZero[i]));
+        // The layer's own output did not fit: a call a fill.
+        return fills.length === 1 ? [null] : fills.map((fill, i) => this.alone(fill, nonZero[i]));
       }
 
       // The one copy out, its ranges read before a retry resets the arena.
@@ -271,8 +282,12 @@ export class Tessellator {
           : new Uint32Array(buffer, ranges[1], ranges[3]).slice();
     } catch {
       this.failed();
-      // A trapped layer leaves each fill to a fresh instance, as before there was a layer call.
-      return this.unavailable ? null : fills.map((fill, i) => this.fill(fill, nonZero[i]));
+      // A trapped layer leaves each fill to a fresh instance.
+      if (this.unavailable || fills.length === 1) {
+        return this.unavailable ? null : [null];
+      }
+
+      return fills.map((fill, i) => this.alone(fill, nonZero[i]));
     } finally {
       this.trim();
     }
@@ -290,14 +305,23 @@ export class Tessellator {
           indexOffset: vertexStart,
         };
       } else {
-        // libtess2 failing may be the layer's memory, where the fill alone fits as it did before.
-        out[i] = status === -1 ? this.fill(fills[i], nonZero[i]) : null;
+        // libtess2 failing may be the layer's memory, where the fill alone fits.
+        out[i] = status === -1 && fills.length > 1 ? this.alone(fills[i], nonZero[i]) : null;
       }
     }
 
     return out;
   };
 
-  /** Use as PixiView's fillTessellator. Contours must already have their curves flattened. */
+  /** One fill's commands as a layer of its own, in a fresh arena. */
+  private alone(contours: readonly (readonly number[])[], nonZero: boolean): FillGeometry | null {
+    const geometry = this.layer([contours], [nonZero])?.[0] ?? null;
+    return geometry && { vertices: geometry.vertices, indices: geometry.indices };
+  }
+
+  /**
+   * Use as PixiView's fillTessellator. A fill alone takes its contours
+   * flattened already; a layer takes them as path commands.
+   */
   readonly tessellate: FillTessellate = Object.assign(this.fill, { layer: this.layer });
 }
