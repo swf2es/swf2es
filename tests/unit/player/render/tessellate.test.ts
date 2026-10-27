@@ -652,6 +652,41 @@ test("native layers share contiguous positions and indices, and preserve each fi
   assert.equal(built.batches[1].attributeOffset, first.vertices.length / 2);
 });
 
+test("a layer call takes the fills' path commands, and a fill it leaves goes to JS", () => {
+  const curved: ShapeLayer = {
+    fills: [
+      layer.fills[0],
+      {
+        fill: { type: "solid", color: 0xff00ff00 },
+        contours: [[1, 0, 0, 3, 5, 10, 10, 0, 2, 0, 0]],
+        winding: "nonZero",
+      },
+    ],
+    strokes: [],
+  };
+  const tess = new Tessellator();
+  let given: readonly (readonly number[][])[] = [];
+  const resolved = resolveFills(
+    curved,
+    false,
+    Object.assign(() => assert.fail("no fill alone"), {
+      layer: (fills: readonly (readonly number[][])[], nonZero: readonly boolean[]) => {
+        given = fills;
+        const out = tess.tessellate.layer(fills, nonZero);
+        return out && [out[0], null];
+      },
+    }),
+  );
+  // The contours as the shape holds them, curves and all: no points are built for the call.
+  assert.equal(given[0], curved.fills[0].contours);
+  assert.equal(given[1], curved.fills[1].contours);
+  assert.ok(resolved[0].geometry);
+  assert.equal(resolved[1].geometry, null);
+  assert.equal(resolved[1].roots.length, 1);
+  // The curve's 16 chords, flattened in JS.
+  assert.equal(resolved[1].roots[0].points.length, 17 * 2);
+});
+
 test("finished positions share across copies and resets while packing the original float precision", () => {
   const contexts = nativeSystem();
   for (const count of [4, 40]) {

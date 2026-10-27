@@ -187,6 +187,11 @@ export function trace(
   }
 }
 
+/** A fill's contours as polygons, those of fewer than three points left out. */
+function polygonsOf(contours: readonly Path[]): number[][] {
+  return contours.map(polygon).filter((points) => points.length >= 6);
+}
+
 /** The same chords used for rendering, so a crossing of curves cannot hide between samples. */
 function polygon(path: Path): number[] {
   const points: number[] = [];
@@ -347,14 +352,15 @@ export function forgetCommands(context: GraphicsContext): void {
 export interface FillTessellator {
   (contours: readonly (readonly number[])[], nonZero: boolean): FillGeometry | null;
   /**
-   * Every fill of a layer at once, as the call would make each: its
-   * geometry or null, or null for each fill to be tessellated alone. Its
-   * output is drawn as it is, unchecked, as @swf2es/native's checks its own:
-   * finite positions, and indices within the fill's vertices from its
-   * `indexOffset`.
+   * Every fill of a layer at once, its contours as the shape's path
+   * commands (display/shapes.ts), which the call flattens as trace does,
+   * then tessellates as the call alone would: each fill's geometry or null,
+   * or null for each fill to be tessellated alone. Its output is drawn as it
+   * is, unchecked, as @swf2es/native's checks its own: finite positions, and
+   * indices within the fill's vertices from its `indexOffset`.
    */
   layer?(
-    fills: readonly (readonly (readonly number[])[])[],
+    fills: readonly (readonly Path[])[],
     nonZero: readonly boolean[],
   ): (FillGeometry | null)[] | null;
 }
@@ -390,23 +396,33 @@ export function resolveFills(
   masking: boolean,
   tessellate: FillTessellator,
 ): ResolvedFill[] {
-  const polygons = layer.fills.map(({ contours }) =>
-    contours.map(polygon).filter((points) => points.length >= 6),
-  );
   // A Graphics drawing used as a mask uses non-zero even when drawPath asked for even-odd.
   const rules = layer.fills.map(({ winding }) => masking || winding === "nonZero");
   let together: (FillGeometry | null)[] | null = null;
-  try {
-    together = tessellate.layer?.(polygons, rules) ?? null;
-  } catch {
-    // A custom tessellator's layer call failing leaves each fill to be tried alone.
+  if (tessellate.layer) {
+    // The contours go as they are, their curves flattened in the call: no points are built here.
+    const contours = new Array<Path[]>(layer.fills.length);
+    for (let i = 0; i < layer.fills.length; i++) {
+      contours[i] = layer.fills[i].contours;
+    }
+
+    try {
+      together = tessellate.layer(contours, rules);
+    } catch {
+      // A custom tessellator's layer call failing leaves each fill to be tried alone.
+    }
   }
 
   if (together) {
     const layerGeometry = together;
-    return polygons.map((points, i) => resolved(points, rules[i], layerGeometry[i]));
+    return layer.fills.map(({ contours }, i) =>
+      layerGeometry[i]
+        ? resolved([], rules[i], layerGeometry[i])
+        : resolved(polygonsOf(contours), rules[i], null),
+    );
   }
 
+  const polygons = layer.fills.map(({ contours }) => polygonsOf(contours));
   const plans = polygons.map((points, i) => {
     let geometry: FillGeometry | null = null;
     try {
@@ -506,7 +522,7 @@ export function fillContext(
       continue;
     }
 
-    const polygons = plan ? [] : contours.map(polygon).filter((points) => points.length >= 6);
+    const polygons = plan ? [] : polygonsOf(contours);
     // A Graphics drawing used as a mask uses non-zero even when drawPath asked for even-odd.
     const nonZero = masking || winding === "nonZero";
     const crossing = plan ? plan.crossing : crossingFill(polygons, nonZero);
