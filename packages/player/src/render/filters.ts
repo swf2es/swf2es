@@ -99,7 +99,9 @@ class BoxPass extends Filter {
 /**
  * The mean of the uFactor.x by uFactor.y texels of the input that a texel
  * of the output covers, the output that many times narrower and lower: its
- * whole frame, which spans uSpan of the input's.
+ * whole frame, which spans uSpan of the input's. A block at the frame's far
+ * edges reaches past the input's frame, into pool space the input's pass
+ * cleared or onto the texture's clamped edge, as the box's runs read there.
  */
 const SHRINK_VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -113,6 +115,9 @@ void main(void) {
   vTextureCoord = aPosition * uSpan * uInputSize.zw;
 }`;
 
+// Two texels each way a read: a linear read midway between texel centres is their mean, so a
+// block takes a quarter of the reads. An odd factor's last column or row is read alone, weighted
+// by the texels each read stands for. A pool texture has no levels but its base.
 const SHRINK = `in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
@@ -121,11 +126,16 @@ uniform vec2 uFactor;
 void main(void) {
   vec4 sum = vec4(0.0);
   vec2 centre = (uFactor - 1.0) * 0.5;
-  for (int j = 0; j < 16; j++) {
-    if (float(j) >= uFactor.y) { break; }
-    for (int i = 0; i < 16; i++) {
-      if (float(i) >= uFactor.x) { break; }
-      sum += texture(uTexture, vTextureCoord + (vec2(float(i), float(j)) - centre) * uInputPixel.zw);
+  for (int j = 0; j < 16; j += 2) {
+    float y = float(j);
+    if (y >= uFactor.y) { break; }
+    float ny = min(2.0, uFactor.y - y);
+    for (int i = 0; i < 16; i += 2) {
+      float x = float(i);
+      if (x >= uFactor.x) { break; }
+      float nx = min(2.0, uFactor.x - x);
+      vec2 at = vec2(x, y) + (vec2(nx, ny) - 1.0) * 0.5 - centre;
+      sum += texture(uTexture, vTextureCoord + at * uInputPixel.zw) * (nx * ny);
     }
   }
   finalColor = sum / (uFactor.x * uFactor.y);
@@ -232,6 +242,11 @@ function blurred(
     const width = Math.ceil(Math.round(input.frame.width * resolution) / across) / resolution;
     const height = Math.ceil(Math.round(input.frame.height * resolution) / down) / resolution;
     source = TexturePool.getOptimalTexture({ width, height, resolution });
+    // The shrink's paired reads average only where read linearly, as the pool's textures are made.
+    if (input.source.scaleMode !== "linear") {
+      input.source.scaleMode = "linear";
+    }
+
     system.applyFilter(
       shrinkPass(across, down, width * across, height * down),
       input,
