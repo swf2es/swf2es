@@ -1495,12 +1495,17 @@ function textureLimit(renderer: FilterSystem["renderer"]): number {
 }
 
 /**
- * The box, in a layer's texels, from which an object's edges drawn without
- * multisampling are off by SHRUNK_ERROR at most once blurred: an edge drawn
- * half a texel out moves the blurred ramp by half a texel, a rise of half
- * the box's width's inverse at its steepest, times a glow's strength.
+ * How many times coarser than the screen a layer may be drawn whose
+ * edges are off by `step` of a texel, before a blur `box` screen pixels
+ * wide is off by more than twice SHRUNK_ERROR, times `strength`: an edge
+ * moved by d moves the blurred ramp by d, a rise of d over the box's width
+ * at its steepest. Multisampled, an edge is off by about one sample's step,
+ * 1/samples of a texel; drawn without, by half a texel. `pixel` texels averaged into a screen pixel
+ * make a texel that much smaller on the screen.
  */
-const ALIASED_BOX = (0.5 * 255) / SHRUNK_ERROR;
+function coarsest(box: number, strength: number, step: number, pixel: number): number {
+  return (2 * SHRUNK_ERROR * box * pixel) / (255 * Math.max(1, strength) * step);
+}
 
 /** How a chain's layer is drawn (layerFor). */
 interface Layer {
@@ -1514,17 +1519,19 @@ interface Layer {
 
 /**
  * How coarse the object a blur blurs whole may be drawn, at `screen` pixels
- * of the screen to a pixel of the stage: as coarse as the blur may run
- * (blurShrink). On a target drawn `aliased`, without multisampling nor
- * texels averaged down, the object's edges are aliased in the layer: no
- * coarser than leaves the box ALIASED_BOX wide there.
+ * of the screen to a pixel of the stage, in a layer of `samples` (1 for
+ * none) and `pixel` texels to a screen pixel: as coarse as the blur may run
+ * (blurShrink), while its edges stay as near as coarsest() asks; and
+ * without multisampling where the blur leaves even aliased edges that near:
+ * what the samples would smooth, the blur smooths as well.
  */
 function blurredLayer(
   layer: Layer,
   f: FilterRecord,
   strength: number,
   screen: number,
-  aliased: boolean,
+  samples: number,
+  pixel: number,
 ): void {
   const blurX = f.blurX || 0;
   const blurY = f.blurY || 0;
@@ -1532,17 +1539,18 @@ function blurredLayer(
     return;
   }
 
-  // The most times coarser than the screen the layer may be, its box still ALIASED_BOX wide.
-  const wide = (Math.min(blurX, blurY) * screen) / (ALIASED_BOX * Math.max(1, strength));
-  let coarser = Math.min(
-    blurShrink(blurX, f.quality, strength, screen),
-    blurShrink(blurY, f.quality, strength, screen),
+  const box = Math.min(blurX, blurY) * screen;
+  const aliased = coarsest(box, strength, 0.5, pixel);
+  const sampled = samples > 1 ? coarsest(box, strength, 1 / samples, pixel) : aliased;
+  layer.coarser = Math.max(
+    1,
+    Math.min(
+      blurShrink(blurX, f.quality, strength, screen),
+      blurShrink(blurY, f.quality, strength, screen),
+      Math.floor(sampled),
+    ),
   );
-  if (aliased) {
-    coarser = Math.min(coarser, Math.max(1, Math.floor(wide)));
-  }
-
-  layer.coarser = coarser;
+  layer.antialias = samples <= 1 || aliased < layer.coarser;
 }
 
 /**
@@ -1554,8 +1562,9 @@ function blurredLayer(
  *   that hides it), and the rest blur, glow or colour what that left:
  *   coarser (blurredLayer);
  * - a lone glow or shadow behind its object, where its object may be drawn
- *   twice (`apart`): its glow from a layer as coarse, the object drawn again
- *   over it straight onto the target, as sharp as without the glow.
+ *   twice (`apart`): its glow from a layer drawn as for such a blur, the
+ *   object drawn again over it straight onto the target, as sharp and as
+ *   multisampled as without the glow.
  *
  * Otherwise the target's, as each filter reads the object's own texels.
  */
@@ -1563,7 +1572,8 @@ export function layerFor(
   filters: readonly Filter[],
   screen: number,
   apart: boolean,
-  aliased: boolean,
+  samples: number,
+  pixel: number,
 ): Layer {
   const layer = { coarser: 1, antialias: true, apart: false };
   if (!(screen > 1) || filters.length === 0) {
@@ -1573,8 +1583,8 @@ export function layerFor(
   const first = filters[0];
   if (filters.length === 1 && first instanceof GlowFilter && first.behind) {
     if (apart) {
-      blurredLayer(layer, first.record, first.record.strength, screen, aliased);
-      layer.apart = layer.coarser > 1;
+      blurredLayer(layer, first.record, first.record.strength, screen, samples, pixel);
+      layer.apart = layer.coarser > 1 || !layer.antialias;
     }
 
     return layer;
@@ -1595,7 +1605,7 @@ export function layerFor(
 
   if (whole) {
     const strength = first instanceof BlurFilter ? 1 : first.record.strength;
-    blurredLayer(layer, first.record, strength, screen, aliased);
+    blurredLayer(layer, first.record, strength, screen, samples, pixel);
   }
 
   return layer;
@@ -1838,8 +1848,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
       this.blendMode === "normal" &&
       !this.colored;
     const screen = (resolution * this.drawnAt) / this.texelsAPixel;
-    const aliased = !target.antialias && this.texelsAPixel < 2;
-    const layer = layerFor(this.running, screen, apart, aliased);
+    // The samples a layer takes, as many as the target's (render/view.ts sets them per quality).
+    const adaptor = (
+      system.renderer as unknown as { renderTarget: { adaptor: { msaaSamples?: number } } }
+    ).renderTarget.adaptor;
+    const samples = target.antialias ? (adaptor.msaaSamples ?? 4) : 1;
+    const layer = layerFor(this.running, screen, apart, samples, this.texelsAPixel);
     this.resolution = layer.coarser > 1 ? resolution / layer.coarser : "inherit";
     this.antialias = layer.antialias ? "inherit" : "off";
     this.apart = layer.apart;
