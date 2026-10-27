@@ -87,7 +87,7 @@ to be collected.
 The package's build first runs the kernel's Zig tests on the host (`zig
 build test` in this folder): exact pixels for small cases, and every
 allocation failing in turn. The kernel is `src/bitmap/convolve.zig`, taking
-any `std.mem.Allocator`; `src/bitmap/bitmap.zig` wraps it in the Wasm
+any `std.mem.Allocator`; `src/bitmap/root.zig` wraps it in the Wasm
 module's bump arena. No external dependency is needed.
 
 `node --test tests/unit/native-bitmap.test.ts` checks exact pixels, ownership,

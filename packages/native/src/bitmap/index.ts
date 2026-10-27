@@ -38,7 +38,7 @@ export interface ConvolverOptions {
   retainMemory?: number;
 }
 
-// Params.flags in bitmap.zig.
+// Params.flags in root.zig.
 const FLAG_CLAMP = 1;
 const FLAG_SOURCE_TRANSPARENT = 2;
 const FLAG_PRESERVE_ALPHA = 4;
