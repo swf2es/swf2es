@@ -1,7 +1,8 @@
-// Independent ray crossings check both fill rules, including self-intersecting contours.
+// Independent ray crossings check both fill rules, including self-intersecting contours, and
+// every eight fills tessellated as a layer must give each what it gave alone.
 // Run with: node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]
 import assert from "node:assert/strict";
-import { Tessellator } from "../../packages/native/dist/tessellate/index.js";
+import { type FillGeometry, Tessellator } from "../../packages/native/dist/tessellate/index.js";
 
 const cases = Number(process.argv[2] ?? 2000);
 const seed = Number(process.argv[3] ?? 1);
@@ -57,6 +58,33 @@ function boundary(contours: number[][], x: number, y: number): boolean {
 
 const tessellator = new Tessellator();
 let checked = 0;
+let layered = 0;
+const pending: { contours: number[][]; nonZero: boolean; alone: FillGeometry }[] = [];
+
+/** The pending fills as a layer, each as it was alone, bit for bit. */
+function checkLayer(): void {
+  const layer = tessellator.tessellate.layer(
+    pending.map(({ contours }) => contours),
+    pending.map(({ nonZero }) => nonZero),
+  );
+  assert.ok(layer, "layer unavailable");
+  for (let i = 0; i < pending.length; i++) {
+    const { contours, nonZero, alone } = pending[i];
+    const together: FillGeometry | null = layer[i];
+    const context = JSON.stringify({ seed, nonZero, contours });
+    assert.ok(together, `layer rejected ${context}`);
+    const offset: number = together.indexOffset ?? 0;
+    assert.deepEqual(together.vertices, alone.vertices, `layer positions: ${context}`);
+    assert.deepEqual(
+      Array.from(together.indices, (index: number): number => index - offset),
+      Array.from(alone.indices),
+      `layer indices: ${context}`,
+    );
+    layered++;
+  }
+
+  pending.length = 0;
+}
 for (let i = 0; i < cases; i++) {
   const contours: number[][] = [];
   for (let j = 0; j < 1 + Math.floor(random() * 3); j++) {
@@ -119,8 +147,15 @@ for (let i = 0; i < cases; i++) {
     assert.equal(covered, expected, `coverage at ${x},${y}: ${context}`);
     checked++;
   }
+
+  pending.push({ contours, nonZero, alone: result });
+  if (pending.length === 8) {
+    checkLayer();
+  }
 }
 
+checkLayer();
+
 console.log(
-  `fuzz tessellate: ${cases} fills, ${checked} winding samples from seed ${seed}, all well`,
+  `fuzz tessellate: ${cases} fills, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
 );

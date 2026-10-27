@@ -476,5 +476,6 @@ export const arrayHooks: Record<string, ClassHook> = {
     // Array.prototype is an Array, empty.
     prototype: (_rt, cls) => cls.$it.instance(),
     call: (rt, cls, args) => rt.constructClass(cls, args),
+    created: (rt, cls) => rt.noteArrayClass(cls),
   },
 };

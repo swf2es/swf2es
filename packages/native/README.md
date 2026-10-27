@@ -87,7 +87,7 @@ to be collected.
 The package's build first runs the kernel's Zig tests on the host (`zig
 build test` in this folder): exact pixels for small cases, and every
 allocation failing in turn. The kernel is `src/bitmap/convolve.zig`, taking
-any `std.mem.Allocator`; `src/bitmap/bitmap.zig` wraps it in the Wasm
+any `std.mem.Allocator`; `src/bitmap/root.zig` wraps it in the Wasm
 module's bump arena. No external dependency is needed.
 
 `node --test tests/unit/native-bitmap.test.ts` checks exact pixels, ownership,
@@ -231,11 +231,23 @@ existing JS fill construction. The chosen result is retained by the
 context factory so copies do not retry the tessellator. Dynamic drawings
 and morph ratios construct new results when their contents change.
 
-Each native call copies positions and indices into JS-owned typed arrays.
-Positions remain doubles; indices use 16 bits through 65,536 vertices and
-32 bits above that. A native layer's position views share a contiguous owned
-buffer, which Pixi can retain directly when the draw transforms are identities.
-No cached geometry aliases Wasm scratch. Pixi consumes these through
+The player tessellates a shape layer's fills in one call,
+`tessellator.tessellate.layer(fills, nonZero)`: `root.zig`'s `layer` runs
+libtess2 on each fill as `run` would alone, keeps each fill's output past its
+scratch, which then goes, and gathers every fill's positions into one buffer
+and its indices into another, counted from the layer's first vertex. The
+wrapper copies those two out once into JS-owned typed arrays and gives each
+fill views of its part, with `indexOffset`, its first vertex in the layer.
+Positions remain doubles; indices use 16 bits through 65,536 vertices in the
+layer and 32 bits above that, as Pixi would type them. Pixi retains both
+buffers as they are when the draw transforms are identities. The module
+checks every input coordinate and every output position and index, so the
+player draws a layer's output unchecked; a fill alone (`tessellate(contours,
+nonZero)`) is checked by the player, as any custom tessellator's is. A fill
+rejected in a layer falls back to JS alone; one libtess2 failed, which may
+be the layer's memory, is tried alone, and a layer that unwinds or does not
+fit is tried a fill at a time, so a layer gives every fill what a call of its
+own would. No cached geometry aliases Wasm scratch. Pixi consumes these through
 `GraphicsContext.fillGeometry`, generating the usual paint UVs and batches;
 the immutable source buffers survive path retirement and context restoration.
 The hook also accepts another tessellator with the same structural result.

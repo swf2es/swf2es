@@ -33,7 +33,7 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
 /// engine without it refuses the module, which leaves the filters to JS.
 fn bitmap(b: *std.Build, optimize: std.builtin.Optimize) void {
     const root = b.createModule(.{
-        .root_source_file = b.path("src/bitmap/bitmap.zig"),
+        .root_source_file = b.path("src/bitmap/root.zig"),
         .target = wasm(b, &.{ .bulk_memory, .simd128 }),
         .optimize = optimize,
         .single_threaded = true,
@@ -207,7 +207,7 @@ fn tessellate(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
     };
     const exports = [_][]const u8{
         "reset",     "alloc",     "run",      "vertices", "indices", "vertexCount", "triangleCount",
-        "highWater", "allocated", "setLimit",
+        "highWater", "allocated", "setLimit", "layer",
     };
 
     const library = b.path(vendor ++ "libtess2");
