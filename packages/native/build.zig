@@ -2,7 +2,7 @@
 // zig-out/bin/: bitmap's SIMD kernels, mp3 (minimp3), compress
 // (zlib and the LZMA SDK) and tessellate (libtess2). build.ts runs this with
 // the pinned Zig and checks the results in as base64; `zig build test` runs
-// the bitmap kernel's tests on the host.
+// the bitmap kernel's and the fill flattener's tests on the host.
 const std = @import("std");
 
 /// The C libraries are pinned git submodules of the repository, under
@@ -50,8 +50,13 @@ fn bitmap(b: *std.Build, optimize: std.builtin.Optimize) void {
         .root_source_file = b.path("src/bitmap/convolve.zig"),
         .target = b.graph.host,
     });
-    const test_step = b.step("test", "Run the bitmap kernel's tests on the host");
+    const test_step = b.step("test", "Run the bitmap kernel's and the fill flattener's tests on the host");
     test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = "bitmap", .root_module = tests })).step);
+    const flatten = b.createModule(.{
+        .root_source_file = b.path("src/tessellate/flatten.zig"),
+        .target = b.graph.host,
+    });
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = "flatten", .root_module = flatten })).step);
 }
 
 /// The MP3 decoder: src/mp3/root.zig and minimp3, unchanged.

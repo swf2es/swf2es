@@ -1,10 +1,12 @@
-// libtess2 for wasm32-freestanding. The host resets this bounded bump arena
+// libtess2 for wasm32-freestanding, with the curves of a layer's fills
+// flattened first (flatten.zig). The host resets this bounded bump arena
 // before each call, a fill (run) or a layer's fills (layer), and copies the
 // resulting geometry into owned buffers.
 // The vendored C uses its allocator callbacks; libc allocation and longjmp
 // are provided here so no C wrapper or libc is needed.
 const std = @import("std");
 const c = @import("c");
+const flatten = @import("flatten.zig");
 
 pub const panic = std.debug.no_panic;
 
@@ -263,14 +265,69 @@ const Range = extern struct {
     index_count: u32,
 };
 
-/// Tessellates every fill of a layer in one call, as run would each alone:
-/// `count` fills, the points of fill i in `coords` after fill i - 1's, its
-/// contours ending at `ends[fills[i - 1]..fills[i]]`, each counted from the
-/// fill's first point, and its rule in `rules[i]`. Each fill's scratch goes
-/// once its output is kept. Returns the Layer's address, or 0 where the
-/// arguments disagree or the layer's own output does not fit, for the host
-/// to try each fill alone.
-export fn layer(coords: [*]const f64, points: usize, ends: [*]const u32, contours: usize, fills: [*]const u32, rules: [*]const u8, count: usize) usize {
+/// A fill's contours, `commands[from..]` up to each of `ends`, flattened
+/// (flatten.zig) into the arena and tessellated into `tess`: run's status,
+/// with `tess` left null for a fill of no polygon. Its scratch is the
+/// caller's to let go.
+fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i32 {
+    if (ends.len > most_contours) {
+        return -2;
+    }
+
+    var most: usize = 0;
+    var start = from;
+    for (ends) |end| {
+        most += flatten.bound(commands[start..end]) orelse return -2;
+        if (most > most_points) {
+            return -2;
+        }
+
+        start = end;
+    }
+
+    const points_at = alloc(most * 2 * @sizeOf(f64));
+    const kept_at = alloc(ends.len * @sizeOf(u32));
+    if (points_at == 0 or kept_at == 0) {
+        return -1;
+    }
+
+    const points = @as([*]f64, @ptrFromInt(points_at))[0 .. most * 2];
+    const kept = @as([*]u32, @ptrFromInt(kept_at))[0..ends.len];
+    var written: usize = 0;
+    var contours: usize = 0;
+    start = from;
+    for (ends) |end| {
+        const added = flatten.polygon(commands[start..end], points[written * 2 ..]);
+        start = end;
+        // Fewer than three points enclose nothing, and the JS fill leaves them out too.
+        if (added >= 3) {
+            written += added;
+            kept[contours] = @intCast(written);
+            contours += 1;
+        }
+    }
+
+    const coords = points[0 .. written * 2];
+    if (!valid(coords, kept[0..contours], rule)) {
+        return -2;
+    }
+
+    if (contours == 0) {
+        return 0;
+    }
+
+    return tessellate(coords, kept[0..contours], rule == 1);
+}
+
+/// Tessellates every fill of a layer in one call, as run would each
+/// alone once flatten.zig has flattened its contours: `count` fills, the
+/// contours of fill i ending at `ends[fills[i - 1]..fills[i]]`, each end
+/// counted in f64s from the start of `commands`, where each contour's path
+/// commands follow the last's, and its rule in `rules[i]`. Each fill's
+/// scratch goes once its output is kept. Returns the Layer's address, or 0
+/// where the arguments disagree or the layer's own output does not fit, for
+/// the host to try each fill alone.
+export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, contours: usize, fills: [*]const u32, rules: [*]const u8, count: usize) usize {
     tess = null;
     const head = alloc(@sizeOf(Layer) + count * @sizeOf(Range));
     const kept = alloc(count * @sizeOf(usize));
@@ -280,7 +337,7 @@ export fn layer(coords: [*]const f64, points: usize, ends: [*]const u32, contour
 
     const ranges = @as([*]Range, @ptrFromInt(head + @sizeOf(Layer)))[0..count];
     const chunks = @as([*]usize, @ptrFromInt(kept))[0..count];
-    var point: usize = 0;
+    var command: usize = 0;
     var contour: usize = 0;
     var vertex_total: u64 = 0;
     var index_total: u64 = 0;
@@ -292,28 +349,22 @@ export fn layer(coords: [*]const f64, points: usize, ends: [*]const u32, contour
 
         const own = ends[contour..last];
         contour = last;
-        const size: usize = if (own.len == 0) 0 else own[own.len - 1];
-        if (size > points - point) {
-            return 0;
+        const from = command;
+        for (own) |end| {
+            if (end < command or end > length) {
+                return 0;
+            }
+
+            command = end;
         }
 
-        const input = coords[point * 2 .. (point + size) * 2];
-        point += size;
         range.* = .{ .status = 0, .vertex_start = 0, .vertex_count = 0, .index_start = 0, .index_count = 0 };
         chunk.* = 0;
-        if (!valid(input, own, rules[i])) {
-            range.status = -2;
-            continue;
-        }
-
-        if (own.len == 0) {
-            continue;
-        }
-
         const mark = top;
-        range.status = tessellate(input, own, rules[i] == 1);
-        if (range.status != 0) {
+        range.status = flattened(commands[0..length], from, own, rules[i]);
+        if (range.status != 0 or tess == null) {
             top = mark;
+            tess = null;
             continue;
         }
 
@@ -325,6 +376,7 @@ export fn layer(coords: [*]const f64, points: usize, ends: [*]const u32, contour
         if (staged == 0) {
             range.status = -1;
             top = mark;
+            tess = null;
             continue;
         }
 
@@ -345,7 +397,7 @@ export fn layer(coords: [*]const f64, points: usize, ends: [*]const u32, contour
         index_total += range.index_count;
     }
 
-    if (point != points or contour != contours or vertex_total > std.math.maxInt(u32)) {
+    if (command != length or contour != contours or vertex_total > std.math.maxInt(u32)) {
         return 0;
     }
 

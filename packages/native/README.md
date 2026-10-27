@@ -224,16 +224,31 @@ const tessellator = new Tessellator();
 const view = new PixiView(renderer, { fillTessellator: tessellator.tessellate });
 ```
 
-The player retains its existing curve flattening, paint and draw order.
-It passes every contour of one fill together, using even-odd or non-zero
+The player retains its paint and draw order. A fill alone
+(`tessellate(contours, nonZero)`) takes the player's flattened polygons. It
+passes every contour of one fill together, using even-odd or non-zero
 winding, with non-zero for masks. Rejection or an exception selects the
 existing JS fill construction. The chosen result is retained by the
 context factory so copies do not retry the tessellator. Dynamic drawings
 and morph ratios construct new results when their contents change.
 
 The player tessellates a shape layer's fills in one call,
-`tessellator.tessellate.layer(fills, nonZero)`: `root.zig`'s `layer` runs
-libtess2 on each fill as `run` would alone, keeps each fill's output past its
+`tessellator.tessellate.layer(fills, nonZero)`, which takes each contour as
+the shape's own path commands (`PATH_MOVE`, `PATH_LINE`, `PATH_CURVE`,
+`PATH_CUBIC`, each followed by its coordinates), not as points: the wrapper
+copies every fill's commands, the contours' ends, each fill's last contour
+and its rule into one allocation, and `src/tessellate/flatten.zig` flattens
+each contour as the player's JS does (`render/tessellate.ts`'s `trace`):
+chords within 0.02 px of the curve, at most 256 a curve, at the same
+parametric points, repeated points dropped, a closing point that repeats the
+first dropped, and contours of fewer than three points left out, all in
+strict f64 arithmetic. So the player builds no point arrays for a layer it
+hands over; it flattens in JS only the fills the call leaves to it. The one
+difference is the chords' length: a plain square root where JS uses
+`Math.hypot`, which may differ in the last bit, so a curve whose bend falls
+within that bit of a whole number of chords takes one chord more or fewer.
+Either is within the flatness. Then `layer` runs libtess2 on each fill as
+`run` would alone on those polygons, keeps each fill's output past its
 scratch, which then goes, and gathers every fill's positions into one buffer
 and its indices into another, counted from the layer's first vertex. The
 wrapper copies those two out once into JS-owned typed arrays and gives each
@@ -244,10 +259,11 @@ buffers as they are when the draw transforms are identities. The module
 checks every input coordinate and every output position and index, so the
 player draws a layer's output unchecked; a fill alone (`tessellate(contours,
 nonZero)`) is checked by the player, as any custom tessellator's is. A fill
-rejected in a layer falls back to JS alone; one libtess2 failed, which may
-be the layer's memory, is tried alone, and a layer that unwinds or does not
-fit is tried a fill at a time, so a layer gives every fill what a call of its
-own would. No cached geometry aliases Wasm scratch. Pixi consumes these through
+rejected in a layer falls back to JS alone, as do malformed commands and a
+fill whose curves would flatten to more than a million points; one libtess2
+failed, which may be the layer's memory, is tried as a layer of its own, and
+a layer that unwinds or does not fit is tried a fill at a time, so a layer
+gives every fill what a layer of its own would. No cached geometry aliases Wasm scratch. Pixi consumes these through
 `GraphicsContext.fillGeometry`, generating the usual paint UVs and batches;
 the immutable source buffers survive path retirement and context restoration.
 The hook also accepts another tessellator with the same structural result.
@@ -271,5 +287,10 @@ Run the player references and context-loss checks with
 `SWF2ES_NATIVE_FILLS=1` to exercise the native hook in those tests.
 `node tests/fuzz/tessellate.ts [cases] [seed]`
 checks both fill rules against independent ray crossings; the default test
-suite includes 2,000 fills and 24,000 coverage samples. Synthetic fixtures
+suite includes 2,000 fills and 24,000 coverage samples. It then flattens
+curved layers, quadratics, cubics, curves of no length and NaN coordinates,
+and checks each fill against the JS flattening tessellated alone: drawn or
+left to JS alike, the same geometry bit for bit as JS with plain square
+roots gives, and within the flatness of what `Math.hypot` gives. `zig build
+test` in this folder runs `flatten.zig`'s own tests. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
