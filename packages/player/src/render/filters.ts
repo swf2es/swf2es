@@ -162,6 +162,13 @@ const SHRUNK_TEXELS = 8;
 const SHRUNK_ERROR = 2;
 
 /**
+ * The strongest glow or shadow a shrunk blur serves. Each run truncates to
+ * a 255th, and drawn back between coarser texels a level's step moves by up
+ * to a texel: off by a level the strength multiplies, however wide the blur.
+ */
+const SHRUNK_STRENGTH = 3;
+
+/**
  * How many times coarser than its input a blur's runs one way may go:
  * none at a texel a stage pixel or under, nor where it does not blur that
  * way; otherwise whole times, to a texel a stage pixel at most, the run
@@ -171,7 +178,7 @@ const SHRUNK_ERROR = 2;
  * for each of the stage's. Drawn back between the coarser texels, what it
  * blurred is off where it bends: at the ends of a single box's ramp by a
  * quarter of a coarse texel's rise, and where two boxes or more bend
- * smoothly by an eighth of the coarse texel squared over the box's width
+ * smoothly by a sixth of the coarse texel squared over the box's width
  * squared; times the strength a glow multiplies its alpha by, that stays
  * within SHRUNK_ERROR. Each way is its own: a streak 68 wide and 5 high
  * goes coarser across alone.
@@ -182,7 +189,7 @@ export function blurShrink(
   strength: number,
   texels: number,
 ): number {
-  if (!(blur > 1 && quality > 0)) {
+  if (!(blur > 1 && quality > 0) || strength > SHRUNK_STRENGTH) {
     return 1;
   }
 
@@ -191,7 +198,7 @@ export function blurShrink(
   const error =
     quality === 1
       ? (4 * SHRUNK_ERROR * box) / amplified
-      : box * Math.sqrt((8 * SHRUNK_ERROR) / amplified);
+      : box * Math.sqrt((6 * SHRUNK_ERROR) / amplified);
   const most = Math.min(16, Math.floor(texels + 1e-6), Math.floor(box / SHRUNK_TEXELS));
   return Math.max(1, Math.min(most, Math.floor(error)));
 }

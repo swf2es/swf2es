@@ -51,6 +51,10 @@ test("blurs run coarser only where the screen has texels to spare and the error 
   assert.equal(blurShrink(7, 3, 1.9, 3), 2);
   assert.equal(blurShrink(68, 2, 1, 2.5), 2);
   assert.equal(blurShrink(255, 3, 1, 40), 16);
-  // A strong glow multiplies the error: it stays finer.
+  // A strong glow multiplies the error, truncation's included: it stays finer however wide.
   assert.equal(blurShrink(27, 2, 255, 3), 1);
+  assert.equal(blurShrink(45, 2, 255, 3), 1);
+  assert.equal(blurShrink(70, 2, 255, 3), 1);
+  assert.equal(blurShrink(68, 2, 4, 3), 1);
+  assert.equal(blurShrink(64, 3, 50, 3), 1);
 });
