@@ -161,3 +161,17 @@ test("a name deleted and then back is in one slot, not its old one too", () => {
   o.$a[0] = 20;
   assert.deepEqual(names(), ["0"]);
 });
+
+test("an enumerated own undefined masks the prototype, but a deleted value falls through", () => {
+  const rt = avm2.createRuntime();
+  const object = rt.objectTraits.instance();
+  const prototype = rt.objectTraits.instance();
+  object.$p = prototype;
+  object.$d.set("value", undefined);
+  prototype.$d.set("value", 42);
+  const index = rt.hasNext(object, 0);
+  assert.equal(rt.nextValue(object, index), undefined);
+
+  object.$d.delete("value");
+  assert.equal(rt.nextValue(object, index), 42);
+});

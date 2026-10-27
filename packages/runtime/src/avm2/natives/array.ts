@@ -10,6 +10,7 @@ import {
   elements,
   getElement,
   isObject,
+  LENGTH,
   lengthOf,
   type Natives,
   plain,
@@ -70,11 +71,11 @@ class Generic {
   ) {}
 
   get length(): number {
-    return this.rt.toUint(this.rt.getProperty(this.o, this.rt.publicName("length")));
+    return this.rt.toUint(this.rt.getProperty(this.o, LENGTH));
   }
 
   set length(n: number) {
-    this.rt.setProperty(this.o, this.rt.publicName("length"), n);
+    this.rt.setProperty(this.o, LENGTH, n);
   }
 
   get(i: number): Value {

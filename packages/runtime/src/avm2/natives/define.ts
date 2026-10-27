@@ -4,7 +4,7 @@
 import type { AsObject, Method, Value } from "../descriptors.js";
 import { FloatValue } from "../float.js";
 import type { ClassHook } from "../hooks.js";
-import { Namespace } from "../names.js";
+import { Namespace, publicNs, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import type { Traits } from "../traits.js";
 
@@ -12,6 +12,8 @@ import type { Traits } from "../traits.js";
 export type Natives = Record<string, (rt: Runtime) => Method>;
 
 export const AS3 = "http://adobe.com/AS3/2006/builtin";
+/** Host lookups see every API version; this name keeps no property cache. */
+export const LENGTH = qname(publicNs, "length");
 
 /** `f` as a native, whatever the runtime. */
 export const plain =
@@ -120,7 +122,7 @@ export function lengthOf(rt: Runtime, o: AsObject): number {
     return n;
   }
 
-  return rt.toUint(rt.getProperty(o, rt.publicName("length")));
+  return rt.toUint(rt.getProperty(o, LENGTH));
 }
 
 /**
