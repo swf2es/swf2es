@@ -6131,7 +6131,7 @@ function wideFilters(zoom: number): Uint8Array {
       w.place({
         depth: 5,
         character: 1,
-        matrix: at(190, 125, 1, 0.3),
+        matrix: at(190, 125),
         glows: [{ color: 0xffffff, blur: z(68), blurY: z(5), strength: 2.27 }],
         quality: 2,
       }),
