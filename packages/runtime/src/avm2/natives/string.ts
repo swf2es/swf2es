@@ -6,6 +6,18 @@ import { lowerCase, upperCase } from "./case.js";
 import { AS3, conversion, type Natives, plain } from "./define.js";
 import { compile, matchArray, replacement as replacementOf } from "./regexp.js";
 
+/** Flash resolves a negative end (start + length) from the string's end. */
+function substr(s: string, start: number, length: number): string {
+  if (!(length < 0)) {
+    return s.substr(start, length);
+  }
+
+  const offset = Math.trunc(start) || 0;
+  const at = offset < 0 ? Math.max(0, s.length + offset) : Math.min(offset, s.length);
+  const end = at + Math.trunc(length);
+  return end < 0 ? s.slice(at, end) : "";
+}
+
 export const stringNatives: Natives = {
   "String#get:length": plain(function (this: string) {
     return this.length;
@@ -58,7 +70,7 @@ export const stringNatives: Natives = {
     },
   [`String#${AS3}::substr`]: (rt) =>
     function (this: string, start: Value = 0, length: Value = 0x7fffffff) {
-      return this.substr(rt.toNumber(start), rt.toNumber(length));
+      return substr(this, rt.toNumber(start), rt.toNumber(length));
     },
   [`String#${AS3}::toLowerCase`]: plain(function (this: string) {
     return lowerCase(this);
@@ -79,7 +91,7 @@ export const stringNatives: Natives = {
     return this.substring(start, end);
   }),
   "String#String::_substr": plain(function (this: string, start = 0, length = 0x7fffffff) {
-    return this.substr(start, length);
+    return substr(this, start, length);
   }),
   "String.String::_replace": (rt) => (s: string, pattern: Value, replacement: Value) => {
     const p = pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern);
