@@ -166,7 +166,13 @@ function shrinkPass(across: number, down: number, spanX: number, spanY: number):
   return shrinkFilter;
 }
 
-/** The fewest texels a shrunk run spans. */
+/**
+ * The fewest texels a shrunk run spans, for each time a glow's strength
+ * multiplies its alpha. Under it the bound below fails: an edge's ramp a
+ * few coarse texels long bends sharply where a box ends, and drawn back
+ * linearly between them a glow 8 wide at strength 2.37 shrunk three times
+ * was off by 10 levels; a glow's strength multiplies that too.
+ */
 const SHRUNK_TEXELS = 8;
 
 /** The most, in 255ths of alpha times strength, that drawing a shrunk blur back may be off by. */
@@ -183,7 +189,7 @@ const SHRUNK_STRENGTH = 3;
  * How many times coarser than its input a blur's runs one way may go:
  * none at a texel a stage pixel or under, nor where it does not blur that
  * way; otherwise whole times, to a texel a stage pixel at most, the run
- * still SHRUNK_TEXELS wide. A run reads a texel for each of its width, so
+ * still SHRUNK_TEXELS wide for each time strength multiplies it. A run reads a texel for each of its width, so
  * at three texels a stage pixel a glow 68 wide read 204 for each texel of
  * an area nine times the stage's; shrunk three times each way, it reads 68
  * for each of the stage's. Drawn back between the coarser texels, what it
@@ -210,7 +216,11 @@ export function blurShrink(
     quality === 1
       ? (4 * SHRUNK_ERROR * box) / amplified
       : box * Math.sqrt((6 * SHRUNK_ERROR) / amplified);
-  const most = Math.min(16, Math.floor(texels + 1e-6), Math.floor(box / SHRUNK_TEXELS));
+  const most = Math.min(
+    16,
+    Math.floor(texels + 1e-6),
+    Math.floor(box / (SHRUNK_TEXELS * Math.max(1, strength))),
+  );
   return Math.max(1, Math.min(most, Math.floor(error)));
 }
 

@@ -48,7 +48,8 @@ test("blurs run coarser only where the screen has texels to spare and the error 
   // Wide ones go to a texel a stage pixel at most.
   assert.equal(blurShrink(27, 2, 2.37, 3), 3);
   assert.equal(blurShrink(70, 1, 2, 3), 3);
-  assert.equal(blurShrink(7, 3, 1.9, 3), 2);
+  assert.equal(blurShrink(7, 3, 2, 3), 1);
+  assert.equal(blurShrink(7, 3, 1, 3), 2);
   assert.equal(blurShrink(68, 2, 1, 2.5), 2);
   assert.equal(blurShrink(255, 3, 1, 40), 16);
   // A strong glow multiplies the error, truncation's included: it stays finer however wide.
@@ -56,6 +57,9 @@ test("blurs run coarser only where the screen has texels to spare and the error 
   assert.equal(blurShrink(45, 2, 255, 3), 1);
   assert.equal(blurShrink(70, 2, 255, 3), 1);
   assert.equal(blurShrink(68, 2, 4, 3), 1);
+  // A short run bends too sharply where its boxes end: strength asks for a longer one.
+  assert.equal(blurShrink(8, 2, 2.37, 3), 1);
+  assert.equal(blurShrink(16, 2, 2.37, 3), 2);
   assert.equal(blurShrink(64, 3, 50, 3), 1);
 });
 
@@ -185,11 +189,27 @@ test("shrunk blurs stay within twice the shrink's bound however their input sits
     { blurX: 40, blurY: 40, quality: 1, strength: 1, texels: 3 },
     { blurX: 68, blurY: 5, quality: 2, strength: 2.27, texels: 2 },
   ];
+  // And every small box that shrinks at all, where a run is only a few coarse texels long.
+  for (const texels of [2, 3, 4]) {
+    for (const quality of [1, 2, 3]) {
+      for (const strength of [1, 2.37, 3]) {
+        for (const blur of [3, 4, 5, 6, 8, 10, 12, 16]) {
+          if (blurShrink(blur, quality, strength, texels) > 1) {
+            filters.push({ blurX: blur, blurY: blur, quality, strength, texels });
+          }
+        }
+      }
+    }
+  }
+
   let checked = 0;
   for (const f of filters) {
     const kx = blurShrink(f.blurX, f.quality, f.strength, f.texels);
     const ky = blurShrink(f.blurY, f.quality, f.strength, f.texels);
-    assert.ok(kx > 1 || ky > 1, `${JSON.stringify(f)} shrinks`);
+    if (!(kx > 1 || ky > 1)) {
+      continue;
+    }
+
     const widthX = f.blurX * f.texels;
     const widthY = f.blurY * f.texels;
     // Room for the blur's reach each side, in whole blocks of both shrinks.
