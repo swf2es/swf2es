@@ -56,6 +56,8 @@ export function namespace(kind: number, uri: string | null): Namespace {
 }
 
 export const publicNs = namespace(NS_Public, "");
+const PUBLIC_NAMESPACES: readonly Namespace[] = [publicNs];
+const ALL_VERSIONS: readonly number[] = [255];
 
 /**
  * A public Namespace value of `uri` with `prefix`, as E4X makes one: with
@@ -127,8 +129,8 @@ export class Multiname {
   constructor(
     readonly kind: number,
     /** Its namespaces; one of null, as a Qname's, is any namespace. */
-    readonly namespaces: (Namespace | null)[],
-    readonly versions: number[],
+    readonly namespaces: readonly (Namespace | null)[],
+    readonly versions: readonly number[],
     name: string | null,
     readonly attribute: boolean,
   ) {
@@ -144,8 +146,8 @@ export class Multiname {
    */
   static keyed(
     kind: number,
-    namespaces: (Namespace | null)[],
-    versions: number[],
+    namespaces: readonly (Namespace | null)[],
+    versions: readonly number[],
     key: object,
     attribute: boolean,
     nameOf: (key: unknown) => string,
@@ -239,7 +241,13 @@ export class TypeName {
 
 /** A Qname in one namespace, seen at every version. */
 export function qname(ns: Namespace, name: string): Multiname {
-  return new Multiname(CONSTANT_Qname, [ns], [255], name, false);
+  return new Multiname(
+    CONSTANT_Qname,
+    ns === publicNs ? PUBLIC_NAMESPACES : [ns],
+    ALL_VERSIONS,
+    name,
+    false,
+  );
 }
 
 /**
@@ -247,6 +255,7 @@ export function qname(ns: Namespace, name: string): Multiname {
  * host resets codegen's domains with (its API_VERSION).
  */
 export const API_USER = 50;
+const USER_VERSIONS: readonly number[] = [API_USER];
 
 /**
  * A public name the runtime makes from a string, as `in`, hasOwnProperty,
@@ -255,7 +264,7 @@ export const API_USER = 50;
  * VM-internal binding is not there, as it is not to the code itself.
  */
 export function publicQname(name: string): Multiname {
-  return new Multiname(CONSTANT_Qname, [publicNs], [API_USER], name, false);
+  return new Multiname(CONSTANT_Qname, PUBLIC_NAMESPACES, USER_VERSIONS, name, false);
 }
 
 /** The builtin Vector classes, which avmplus names as the types they are vectors of. */

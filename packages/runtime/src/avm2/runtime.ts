@@ -308,7 +308,7 @@ export class Runtime {
 
   /** A multiname with its runtime namespace and name, from the stack. */
   runtimeName(mn: Multiname, ...parts: Value[]): Multiname {
-    let namespaces: (Namespace | null)[] = mn.namespaces;
+    let namespaces: readonly (Namespace | null)[] = mn.namespaces;
     let versions = mn.versions;
     let k = 0;
     if (mn.runtimeNs) {
@@ -2787,7 +2787,8 @@ export class Runtime {
   }
 
   nextValue(o: Value, index: number): Value {
-    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
+    const traits: Traits | undefined = o?.$traits;
+    const properties = traits?.properties;
     if (properties) {
       return properties.nextValue(this, o, index);
     }
@@ -2807,6 +2808,15 @@ export class Runtime {
     const name = enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return o.$keys.get(name);
+    }
+
+    // These builtins have no bindings over their enumerated own properties.
+    // A missing value still needs the full lookup, including the prototype.
+    if (traits === this.arrayTraits || traits === this.objectTraits) {
+      const own = this.getOwn(o, name);
+      if (own !== NOT_FOUND) {
+        return own;
+      }
     }
 
     return this.getProperty(o, this.publicName(name));
