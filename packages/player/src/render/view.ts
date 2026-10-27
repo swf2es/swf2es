@@ -566,7 +566,15 @@ export class PixiView {
         // A view drawn once keeps no output either.
         node.filters =
           chain.length > 0 || blend === "layer"
-            ? [new FilterChain(chain, container, chain.length > 0 && !this.fresh, this.filterUnits)]
+            ? [
+                new FilterChain(
+                  chain,
+                  container,
+                  chain.length > 0 && !this.fresh,
+                  this.filterUnits,
+                  this.flashPixel,
+                ),
+              ]
             : [];
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
@@ -787,8 +795,11 @@ export class PixiView {
     const chain = node.filters[0];
     // Kept on the chain, as lines' strokedAt: one off the list while the screen's scale changed
     // comes back at the old units.
-    if (chain instanceof FilterChain && chain.units !== this.filterUnits) {
-      chain.rescale(this.filterUnits);
+    if (
+      chain instanceof FilterChain &&
+      (chain.units !== this.filterUnits || chain.pixel !== this.flashPixel)
+    ) {
+      chain.rescale(this.filterUnits, this.flashPixel);
     }
 
     if (

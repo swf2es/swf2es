@@ -18,6 +18,7 @@ import {
   type Container,
   Filter,
   type FilterData,
+  type FilterInstruction,
   type FilterSystem,
   type FilterWithShader,
   GlProgram,
@@ -462,6 +463,11 @@ class BlurFilter extends FlashFilter {
   /** Whether it leaves its input as it is, a box a texel wide or none: its chain skips it. */
   readonly idle: boolean;
 
+  /** Its blur, which softens the whole object where it blurs both ways (FilterChain's layer). */
+  get record(): FilterRecord {
+    return this.f;
+  }
+
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
     const blurX = f.blurX || 0;
@@ -557,10 +563,30 @@ class GlowFilter extends BlurredFilter {
   /** A drop shadow's distance; a glow's is none. */
   private readonly distance: number;
 
+  /** Drawn without its object this run, which is drawn over it apart (FilterChain's layer). */
+  alone = false;
+
+  get record(): FilterRecord {
+    return this.f;
+  }
+
+  /** Whether it draws its blur alone, a shadow that hides its object. */
+  get hides(): boolean {
+    return this.f.kind === "dropShadow" && !!this.f.hideObject && !this.f.inner && !this.f.knockout;
+  }
+
+  /** Whether its object is drawn whole over it, and so may be drawn apart (layerFor). */
+  get behind(): boolean {
+    return (
+      !this.f.inner && !this.f.knockout && !(this.f.kind === "dropShadow" && this.f.hideObject)
+    );
+  }
+
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
     const uniforms = this.resources.glowUniforms.uniforms;
     placeOffset(uniforms.uOffset as Float32Array, f, this.distance, this.units);
+    uniforms.uHide = this.alone || (f.kind === "dropShadow" && f.hideObject) ? 1 : 0;
     const blurX = f.blurX || 0;
     const blurY = f.blurY || 0;
     const texels = this.texels(input);
@@ -1393,6 +1419,8 @@ interface Input {
   dx: number;
   dy: number;
   colorAlpha: number;
+  /** Whether its object was drawn apart, over the output (layerFor). */
+  apart: boolean;
 }
 
 /** Whether `a` and `b` give the same output: a move may shift the corner a texel either way. */
@@ -1403,7 +1431,8 @@ function sameInput(a: Input, b: Input): boolean {
     a.resolution === b.resolution &&
     Math.abs(a.dx - b.dx) <= 1 &&
     Math.abs(a.dy - b.dy) <= 1 &&
-    a.colorAlpha === b.colorAlpha
+    a.colorAlpha === b.colorAlpha &&
+    a.apart === b.apart
   );
 }
 
@@ -1455,11 +1484,126 @@ function textureLimit(renderer: FilterSystem["renderer"]): number {
   return limit;
 }
 
+/**
+ * The box, in a layer's texels, from which an object's edges drawn without
+ * multisampling are off by SHRUNK_ERROR at most once blurred: an edge drawn
+ * half a texel out moves the blurred ramp by half a texel, a rise of half
+ * the box's width's inverse at its steepest, times a glow's strength.
+ */
+const ALIASED_BOX = (0.5 * 255) / SHRUNK_ERROR;
+
+/** How a chain's layer is drawn (layerFor). */
+interface Layer {
+  /** How many times coarser than its target. */
+  coarser: number;
+  /** Whether multisampled as the target is. */
+  antialias: boolean;
+  /** Whether its object is drawn again over the chain's output, straight onto the target. */
+  apart: boolean;
+}
+
+/**
+ * How coarse the object a blur blurs whole may be drawn, at `screen` pixels
+ * of the screen to a pixel of the stage: as coarse as the blur may run
+ * (blurShrink). On a target drawn `aliased`, without multisampling nor
+ * texels averaged down, the object's edges are aliased in the layer: no
+ * coarser than leaves the box ALIASED_BOX wide there.
+ */
+function blurredLayer(
+  layer: Layer,
+  f: FilterRecord,
+  strength: number,
+  screen: number,
+  aliased: boolean,
+): void {
+  const blurX = f.blurX || 0;
+  const blurY = f.blurY || 0;
+  if (!(blurX > 1 && blurY > 1)) {
+    return;
+  }
+
+  // The most times coarser than the screen the layer may be, its box still ALIASED_BOX wide.
+  const wide = (Math.min(blurX, blurY) * screen) / (ALIASED_BOX * Math.max(1, strength));
+  let coarser = Math.min(
+    blurShrink(blurX, f.quality, strength, screen),
+    blurShrink(blurY, f.quality, strength, screen),
+  );
+  if (aliased) {
+    coarser = Math.min(coarser, Math.max(1, Math.floor(wide)));
+  }
+
+  layer.coarser = coarser;
+}
+
+/**
+ * The layer a chain of `filters` draws its object in, at `screen` pixels of
+ * the screen to a pixel of the stage, where it shows its object no sharper
+ * than a blur leaves it:
+ *
+ * - its first filter blurs the whole object both ways (a blur, or a shadow
+ *   that hides it), and the rest blur, glow or colour what that left:
+ *   coarser (blurredLayer);
+ * - a lone glow or shadow behind its object, where its object may be drawn
+ *   twice (`apart`): its glow from a layer as coarse, the object drawn again
+ *   over it straight onto the target, as sharp as without the glow.
+ *
+ * Otherwise the target's, as each filter reads the object's own texels.
+ */
+export function layerFor(
+  filters: readonly Filter[],
+  screen: number,
+  apart: boolean,
+  aliased: boolean,
+): Layer {
+  const layer = { coarser: 1, antialias: true, apart: false };
+  if (!(screen > 1) || filters.length === 0) {
+    return layer;
+  }
+
+  const first = filters[0];
+  if (filters.length === 1 && first instanceof GlowFilter && first.behind) {
+    if (apart) {
+      blurredLayer(layer, first.record, first.record.strength, screen, aliased);
+      layer.apart = layer.coarser > 1;
+    }
+
+    return layer;
+  }
+
+  const whole = first instanceof BlurFilter || (first instanceof GlowFilter && first.hides);
+  for (const filter of filters) {
+    if (
+      !(
+        filter instanceof BlurFilter ||
+        filter instanceof GlowFilter ||
+        filter instanceof ColorMatrixFilter
+      )
+    ) {
+      return layer;
+    }
+  }
+
+  if (whole) {
+    const strength = first instanceof BlurFilter ? 1 : first.record.strength;
+    blurredLayer(layer, first.record, strength, screen, aliased);
+  }
+
+  return layer;
+}
+
 export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
   /** The input to be compared with it, which then becomes it. */
-  private next: Input = { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
+  private next: Input = {
+    width: 0,
+    height: 0,
+    resolution: 0,
+    dx: 0,
+    dy: 0,
+    colorAlpha: 0,
+    apart: false,
+  };
   /**
    * The area its object was last measured at on the stage, and the
    * object's transform on the stage then; null till measured again.
@@ -1489,6 +1633,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     private readonly owner: Container,
     private readonly keeps = true,
     units = 1,
+    pixel = 1,
   ) {
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: COPY, name: "flash-filter-copy" }),
@@ -1502,7 +1647,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
       },
     });
     this.running = filters.filter((f) => !(f instanceof BlurFilter && f.idle));
-    this.rescale(units);
+    this.rescale(units, pixel);
     this.resolution = "inherit";
     // The object is drawn into the chain's input as the target draws, with
     // its multisampling: Pixi's filters default to none, which left a
@@ -1577,9 +1722,20 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     return this.drawnAt;
   }
 
-  /** Its filters drawn at `units` of the target to a pixel of the stage from now on. */
-  rescale(units: number): void {
+  /** The target's texels to a screen pixel (PixiView.flashPixel): more where a host averages. */
+  get pixel(): number {
+    return this.texelsAPixel;
+  }
+
+  private texelsAPixel = 1;
+
+  /**
+   * Its filters drawn at `units` of the target to a pixel of the stage, `pixel` texels to a pixel
+   * of the screen, from now on.
+   */
+  rescale(units: number, pixel = 1): void {
     this.drawnAt = units;
+    this.texelsAPixel = pixel;
     scaleFilters(this.filters, units);
     this.wanted = this.filters.map((f) => f.padding);
     this.padding = this.wanted.reduce((sum, p) => sum + p, 0);
@@ -1598,7 +1754,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
    * 1e9 away, or Infinity, asks. What is cut lies past the screen, but for
    * an object off it whose shadow is not.
    */
-  fitPadding(bounds: Bounds, system: FilterSystem): void {
+  fitPadding(bounds: Bounds, system: FilterSystem, instruction?: FilterInstruction): void {
     const renderer = system.renderer;
     const target = renderer.renderTarget;
     const resolution = target.rootRenderTarget.colorTexture.source.resolution;
@@ -1641,6 +1797,47 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     }
 
     this.padding = total;
+    this.fitLayer(system, instruction);
+  }
+
+  /** Whether its object is drawn apart, over its output, on this push (layerFor). */
+  private apart = false;
+
+  /**
+   * The layer its object is drawn in on this push (layerFor), by the
+   * screen's pixels to a stage pixel there: the target's texels to one,
+   * over the texels to a screen pixel. Its object is drawn apart only where
+   * the filter system draws it again: it is the lone filter, blended normally
+   * and all its object draws may be drawn twice. And uncoloured: a colour
+   * root's object is drawn uncoloured and its output coloured (recolor),
+   * which drawn again over the output it would not be; with no colour from
+   * the stage down, the object drawn straight onto the target is as drawn in
+   * the layer. A view drawn once draws it as it is.
+   */
+  private fitLayer(system: FilterSystem, instruction?: FilterInstruction): void {
+    if (!this.keeps) {
+      return;
+    }
+
+    const target = system.renderer.renderTarget.renderTarget.colorTexture.source;
+    const resolution = target.resolution;
+    const filters = instruction?.filterEffect.filters;
+    const apart =
+      !!(instruction as { plain?: boolean } | undefined)?.plain &&
+      filters?.length === 1 &&
+      this.blendMode === "normal" &&
+      !this.colored;
+    const screen = (resolution * this.drawnAt) / this.texelsAPixel;
+    const aliased = !target.antialias && this.texelsAPixel < 2;
+    const layer = layerFor(this.running, screen, apart, aliased);
+    this.resolution = layer.coarser > 1 ? resolution / layer.coarser : "inherit";
+    this.antialias = layer.antialias ? "inherit" : "off";
+    this.apart = layer.apart;
+    this.objectApart = layer.apart;
+    const glow = this.running[0];
+    if (glow instanceof GlowFilter) {
+      glow.alone = layer.apart;
+    }
   }
 
   /**
@@ -1716,6 +1913,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
+    now.apart = this.apart;
     if (!sameInput(this.ran, now)) {
       return null;
     }
@@ -1742,6 +1940,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
+    now.apart = this.apart;
     const same = this.ran !== null && sameInput(this.ran, now);
     if (same && !this.stale && this.kept) {
       this.changing = 0;
@@ -1752,7 +1951,15 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     // Unchanged but not kept, as after being filtered straight: kept now.
     this.changing = this.stale || !same ? this.changing + 1 : 0;
     this.stale = false;
-    this.next = this.ran ?? { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
+    this.next = this.ran ?? {
+      width: 0,
+      height: 0,
+      resolution: 0,
+      dx: 0,
+      dy: 0,
+      colorAlpha: 0,
+      apart: false,
+    };
     this.ran = now;
     this.release();
     if (this.changing > 1) {
