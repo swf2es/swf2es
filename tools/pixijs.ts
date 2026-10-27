@@ -127,6 +127,9 @@ const BROWSER_INITS = [
   "rendering/renderers/gl/WebGLRenderer",
 ];
 
+/** The syntax the bundle is written in: what swf2es's browsers and Electron run natively. */
+const BUNDLE_TARGET = "es2022";
+
 const ENTRY = "\0swf2es:pixi";
 const LIBRARY = "\0swf2es:pixi-library";
 
@@ -425,12 +428,40 @@ async function forkConfig(path: string, copy: string): Promise<{ build: Options;
   for (const build of builds) {
     for (const o of build.output) {
       if (o !== false && outputPath(o) === path) {
-        return { build, o };
+        return { build: path === "dist/pixi.mjs" ? await bundleTarget(build) : build, o };
       }
     }
   }
 
   fail(`the fork's rollup configuration has no build of ${path}`);
+}
+
+/**
+ * The fork's bundle plugins with esbuild targeting BUNDLE_TARGET in place
+ * of the fork's ES2017. ES2017 lowers object spread and rest to esbuild's
+ * helpers (__spreadValues, __defNormalProp, ...), which a profile of
+ * dynamic drawing showed taking some 4% of the frame; every browser and
+ * Electron swf2es runs in has ES2022. Class fields keep the semantics they
+ * had: the fork's tsconfig targets ES2020 and leaves useDefineForClassFields
+ * unset, so esbuild still assigns them in the constructor.
+ */
+async function bundleTarget(build: Options): Promise<Options> {
+  const url = pathToFileURL(join(pixi, "node_modules/rollup-plugin-esbuild/dist/index.mjs")).href;
+  const esbuild: (options: object) => Plugin = (await import(url)).default;
+  let found = false;
+  const plugins = (build.plugins ?? []).map((plugin) => {
+    if ((plugin as Plugin | undefined)?.name !== "esbuild") {
+      return plugin;
+    }
+
+    found = true;
+    return esbuild({ target: BUNDLE_TARGET });
+  });
+  if (!found) {
+    fail("the fork's bundle build has no esbuild plugin");
+  }
+
+  return { ...build, plugins };
 }
 
 /** The fork's rollup build of lib/, and swf2es's bundle. */
