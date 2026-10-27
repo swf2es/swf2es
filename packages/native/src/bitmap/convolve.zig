@@ -1,5 +1,5 @@
 //! BitmapData convolution, as packages/player/src/bitmap/filters.ts's
-//! convolve computes it, pixel for pixel. bitmap.zig wraps it for Wasm.
+//! convolve computes it, pixel for pixel. root.zig wraps it for Wasm.
 const std = @import("std");
 
 /// The Wasm memory's maximum, which bounds a call's scratch.

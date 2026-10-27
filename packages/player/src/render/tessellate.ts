@@ -344,10 +344,20 @@ export function forgetCommands(context: GraphicsContext): void {
 }
 
 /** An optional tessellator returns immutable caller-owned buffers, or null to use JS for this fill. */
-export type FillTessellator = (
-  contours: readonly (readonly number[])[],
-  nonZero: boolean,
-) => FillGeometry | null;
+export interface FillTessellator {
+  (contours: readonly (readonly number[])[], nonZero: boolean): FillGeometry | null;
+  /**
+   * Every fill of a layer at once, as the call would make each: its
+   * geometry or null, or null for each fill to be tessellated alone. Its
+   * output is drawn as it is, unchecked, as @swf2es/native's checks its own:
+   * finite positions, and indices within the fill's vertices from its
+   * `indexOffset`.
+   */
+  layer?(
+    fills: readonly (readonly (readonly number[])[])[],
+    nonZero: readonly boolean[],
+  ): (FillGeometry | null)[] | null;
+}
 
 export interface ResolvedFill {
   geometry: FillGeometry | null;
@@ -355,18 +365,52 @@ export interface ResolvedFill {
   roots: Region[];
 }
 
-/** Resolve once at construction, including fallback, so colour copies do not retry native work. */
+/** A fill's plan: its tessellation, else what JS fills it with. */
+function resolved(
+  polygons: number[][],
+  nonZero: boolean,
+  geometry: FillGeometry | null,
+): ResolvedFill {
+  if (geometry) {
+    return { geometry, crossing: null, roots: [] };
+  }
+
+  const crossing = crossingFill(polygons, nonZero);
+  return { geometry: null, crossing, roots: crossing ? [] : containment(polygons) };
+}
+
+/**
+ * Resolve once at construction, including fallback, so colour copies do
+ * not retry native work: a layer's fills in one call where the tessellator
+ * takes layers, their positions in one buffer and their indices in another
+ * that Pixi draws as they are (FillGeometry.indexOffset), else a call a fill.
+ */
 export function resolveFills(
   layer: ShapeLayer,
   masking: boolean,
   tessellate: FillTessellator,
 ): ResolvedFill[] {
-  const resolved = layer.fills.map(({ contours, winding }) => {
-    const polygons = contours.map(polygon).filter((points) => points.length >= 6);
-    const nonZero = masking || winding === "nonZero";
+  const polygons = layer.fills.map(({ contours }) =>
+    contours.map(polygon).filter((points) => points.length >= 6),
+  );
+  // A Graphics drawing used as a mask uses non-zero even when drawPath asked for even-odd.
+  const rules = layer.fills.map(({ winding }) => masking || winding === "nonZero");
+  let together: (FillGeometry | null)[] | null = null;
+  try {
+    together = tessellate.layer?.(polygons, rules) ?? null;
+  } catch {
+    // A custom tessellator's layer call failing leaves each fill to be tried alone.
+  }
+
+  if (together) {
+    const layerGeometry = together;
+    return polygons.map((points, i) => resolved(points, rules[i], layerGeometry[i]));
+  }
+
+  const plans = polygons.map((points, i) => {
     let geometry: FillGeometry | null = null;
     try {
-      const result = tessellate(polygons, nonZero);
+      const result = tessellate(points, rules[i]);
       if (result && validGeometry(result)) {
         geometry = result;
       }
@@ -374,41 +418,40 @@ export function resolveFills(
       // A rejected native instance or custom tessellator must leave the ordinary fill usable.
     }
 
-    if (geometry) {
-      return { geometry, crossing: null, roots: [] };
-    }
-
-    const crossing = crossingFill(polygons, nonZero);
-    return { geometry: null, crossing, roots: crossing ? [] : containment(polygons) };
+    return resolved(points, rules[i], geometry);
   });
 
   // Contiguous views let Pixi retain these positions instead of making another layer-sized copy.
-  const first = resolved[0]?.geometry?.vertices;
+  const first = plans[0]?.geometry?.vertices;
   if (
-    resolved.length > 1 &&
+    plans.length > 1 &&
     first &&
-    resolved.every(({ geometry }) => geometry?.vertices.constructor === first.constructor)
+    plans.every(({ geometry }) => geometry?.vertices.constructor === first.constructor)
   ) {
-    const size = resolved.reduce((sum, { geometry }) => sum + (geometry?.vertices.length ?? 0), 0);
+    const size = plans.reduce((sum, { geometry }) => sum + (geometry?.vertices.length ?? 0), 0);
     const vertices =
       first instanceof Float64Array ? new Float64Array(size) : new Float32Array(size);
     let at = 0;
-    for (const plan of resolved) {
+    for (const plan of plans) {
       const geometry = plan.geometry as FillGeometry;
       vertices.set(geometry.vertices, at);
       plan.geometry = {
         vertices: vertices.subarray(at, at + geometry.vertices.length),
         indices: geometry.indices,
+        indexOffset: geometry.indexOffset,
       };
       at += geometry.vertices.length;
     }
   }
 
-  return resolved;
+  return plans;
 }
 
-function validGeometry({ vertices, indices }: FillGeometry): boolean {
+/** Whether a fill tessellated alone can be drawn: a custom tessellator's output is checked. */
+function validGeometry({ vertices, indices, indexOffset = 0 }: FillGeometry): boolean {
   if (
+    !Number.isInteger(indexOffset) ||
+    indexOffset < 0 ||
     !(vertices instanceof Float32Array || vertices instanceof Float64Array) ||
     !(indices instanceof Uint16Array || indices instanceof Uint32Array) ||
     vertices.length % 2 !== 0 ||
@@ -424,7 +467,8 @@ function validGeometry({ vertices, indices }: FillGeometry): boolean {
   }
 
   for (let i = 0; i < indices.length; i++) {
-    if (indices[i] >= vertices.length / 2) {
+    const index = indices[i] - indexOffset;
+    if (index < 0 || index >= vertices.length / 2) {
       return false;
     }
   }
