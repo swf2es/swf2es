@@ -97,9 +97,183 @@ class BoxPass extends Filter {
 }
 
 /**
+ * The mean of the uFactor.x by uFactor.y texels of the input that a texel
+ * of the output covers, the output that many times narrower and lower: its
+ * whole frame, which spans uSpan of the input's.
+ */
+const SHRINK_VERTEX = `in vec2 aPosition;
+out vec2 vTextureCoord;
+uniform vec4 uInputSize;
+uniform vec4 uOutputTexture;
+uniform vec2 uSpan;
+void main(void) {
+  vec2 position = aPosition * 2.0 - 1.0;
+  position.y *= uOutputTexture.z;
+  gl_Position = vec4(position, 0.0, 1.0);
+  vTextureCoord = aPosition * uSpan * uInputSize.zw;
+}`;
+
+const SHRINK = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform highp vec4 uInputPixel;
+uniform vec2 uFactor;
+void main(void) {
+  vec4 sum = vec4(0.0);
+  vec2 centre = (uFactor - 1.0) * 0.5;
+  for (int j = 0; j < 16; j++) {
+    if (float(j) >= uFactor.y) { break; }
+    for (int i = 0; i < 16; i++) {
+      if (float(i) >= uFactor.x) { break; }
+      sum += texture(uTexture, vTextureCoord + (vec2(float(i), float(j)) - centre) * uInputPixel.zw);
+    }
+  }
+  finalColor = sum / (uFactor.x * uFactor.y);
+}`;
+
+let shrinkFilter: Filter | null = null;
+
+function shrinkPass(across: number, down: number, spanX: number, spanY: number): Filter {
+  shrinkFilter ??= new Filter({
+    glProgram: GlProgram.from({
+      vertex: SHRINK_VERTEX,
+      fragment: SHRINK,
+      name: "flash-blur-shrink",
+    }),
+    resources: {
+      shrinkUniforms: {
+        uFactor: { value: new Float32Array(2), type: "vec2<f32>" },
+        uSpan: { value: new Float32Array(2), type: "vec2<f32>" },
+      },
+    },
+  });
+  const u = shrinkFilter.resources.shrinkUniforms.uniforms;
+  u.uFactor[0] = across;
+  u.uFactor[1] = down;
+  u.uSpan[0] = spanX;
+  u.uSpan[1] = spanY;
+  return shrinkFilter;
+}
+
+/** The fewest texels a shrunk run spans. */
+const SHRUNK_TEXELS = 8;
+
+/** The most, in 255ths of alpha times strength, that drawing a shrunk blur back may be off by. */
+const SHRUNK_ERROR = 2;
+
+/**
+ * The strongest glow or shadow a shrunk blur serves. Each run truncates to
+ * a 255th, and drawn back between coarser texels a level's step moves by up
+ * to a texel: off by a level the strength multiplies, however wide the blur.
+ */
+const SHRUNK_STRENGTH = 3;
+
+/**
+ * How many times coarser than its input a blur's runs one way may go:
+ * none at a texel a stage pixel or under, nor where it does not blur that
+ * way; otherwise whole times, to a texel a stage pixel at most, the run
+ * still SHRUNK_TEXELS wide. A run reads a texel for each of its width, so
+ * at three texels a stage pixel a glow 68 wide read 204 for each texel of
+ * an area nine times the stage's; shrunk three times each way, it reads 68
+ * for each of the stage's. Drawn back between the coarser texels, what it
+ * blurred is off where it bends: at the ends of a single box's ramp by a
+ * quarter of a coarse texel's rise, and where two boxes or more bend
+ * smoothly by a sixth of the coarse texel squared over the box's width
+ * squared; times the strength a glow multiplies its alpha by, that stays
+ * within SHRUNK_ERROR. Each way is its own: a streak 68 wide and 5 high
+ * goes coarser across alone.
+ */
+export function blurShrink(
+  blur: number,
+  quality: number,
+  strength: number,
+  texels: number,
+): number {
+  if (!(blur > 1 && quality > 0) || strength > SHRUNK_STRENGTH) {
+    return 1;
+  }
+
+  const box = blur * texels;
+  const amplified = 255 * Math.max(1, strength);
+  const error =
+    quality === 1
+      ? (4 * SHRUNK_ERROR * box) / amplified
+      : box * Math.sqrt((6 * SHRUNK_ERROR) / amplified);
+  const most = Math.min(16, Math.floor(texels + 1e-6), Math.floor(box / SHRUNK_TEXELS));
+  return Math.max(1, Math.min(most, Math.floor(error)));
+}
+
+/**
+ * The box's runs over `input`, into a texture of the pool the caller
+ * returns, `across` times narrower and `down` times lower than the input
+ * (blurShrink) at its resolution; `input` itself where no run would change
+ * it.
+ */
+function blurred(
+  system: FilterSystem,
+  pass: BoxPass,
+  input: Texture,
+  blurX: number,
+  blurY: number,
+  quality: number,
+  texels: number,
+  across: number,
+  down: number,
+): Texture {
+  if (!(quality > 0 && (blurX > 1 || blurY > 1))) {
+    return input;
+  }
+
+  let source = input;
+  if (across > 1 || down > 1) {
+    // Whole texels: the target's viewport is its frame in texels rounded, which would stretch a
+    // fractional count across it.
+    const resolution = input.source.resolution;
+    const width = Math.ceil(Math.round(input.frame.width * resolution) / across) / resolution;
+    const height = Math.ceil(Math.round(input.frame.height * resolution) / down) / resolution;
+    source = TexturePool.getOptimalTexture({ width, height, resolution });
+    system.applyFilter(
+      shrinkPass(across, down, width * across, height * down),
+      input,
+      source,
+      true,
+    );
+  }
+
+  const out = TexturePool.getSameSizeTexture(source);
+  blur(system, pass, source, out, blurX, blurY, quality, texels / across, texels / down, true);
+  if (source !== input) {
+    TexturePool.returnTexture(source);
+  }
+
+  return out;
+}
+
+/** What scales the input's texture coordinates to `blurred`'s, which may be narrower and lower. */
+function placeBlurred(
+  scale: Float32Array,
+  input: Texture,
+  blurred: Texture,
+  across: number,
+  down: number,
+): void {
+  scale[0] = input.source.width / (blurred.source.width * across);
+  scale[1] = input.source.height / (blurred.source.height * down);
+}
+
+/** A blur's runs, done coarser (blurred), drawn back between their texels over the input's frame. */
+const READ_BACK = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uBlurred;
+uniform vec2 uBlurredScale;
+void main(void) {
+  finalColor = texture(uBlurred, vTextureCoord * uBlurredScale);
+}`;
+
+/**
  * The box's runs over `input` into `output`, through a texture of the pool
- * between them: `texels` to a pixel of the stage wide, which the blur is
- * in, each step a texel of the input.
+ * between them: `texelsX` and `texelsY` to a pixel of the stage each way,
+ * which the blur is in, each step a texel of the input.
  */
 function blur(
   system: FilterSystem,
@@ -109,7 +283,8 @@ function blur(
   blurX: number,
   blurY: number,
   quality: number,
-  texels: number,
+  texelsX: number,
+  texelsY: number,
   clear: boolean,
 ): void {
   // Not a stage pixel's texels: on a stage shown larger than its size those strode over texels,
@@ -133,9 +308,9 @@ function blur(
   let from = input;
   for (let k = 0; k < runs; k++) {
     if (across && (!down || k % 2 === 0)) {
-      pass.set(step, 0, blurX * texels);
+      pass.set(step, 0, blurX * texelsX);
     } else {
-      pass.set(0, step, blurY * texels);
+      pass.set(0, step, blurY * texelsY);
     }
 
     const last = k === runs - 1;
@@ -218,12 +393,44 @@ abstract class BlurredFilter extends FlashFilter {
   }
 }
 
+/** A blur's coarser runs drawn back (READ_BACK), a pass of the blur's own. */
+class ReadBack extends BlurredFilter {
+  constructor() {
+    super({
+      glProgram: GlProgram.from({ vertex: VERTEX, fragment: READ_BACK, name: "flash-blur-back" }),
+      resources: {
+        readBackUniforms: {
+          uBlurredScale: { value: new Float32Array([1, 1]), type: "vec2<f32>" },
+        },
+      },
+    });
+  }
+
+  draw(
+    system: FilterSystem,
+    input: Texture,
+    blurred: Texture,
+    across: number,
+    down: number,
+    output: RenderSurface,
+    clear: boolean,
+  ): void {
+    const scale = this.resources.readBackUniforms.uniforms.uBlurredScale as Float32Array;
+    placeBlurred(scale, input, blurred, across, down);
+    this.resources.uBlurred = blurred.source;
+    system.applyFilter(this, input, output, clear);
+    this.unbind();
+  }
+}
+
 class BlurFilter extends FlashFilter {
   private readonly pass = new BoxPass();
+  private back: ReadBack | null = null;
 
-  /** Its box's pass too, a filter of its own. */
+  /** Its box's pass and read-back too, filters of their own. */
   destroy(): void {
     this.pass.destroy();
+    this.back?.destroy();
     super.destroy();
   }
 
@@ -234,21 +441,28 @@ class BlurFilter extends FlashFilter {
     });
     this.reach = (f.quality * Math.max(f.blurX, f.blurY)) / 2;
     this.padding = Math.ceil(this.reach);
+    this.idle = !(f.quality > 0 && ((f.blurX || 0) > 1 || (f.blurY || 0) > 1));
   }
+
+  /** Whether it leaves its input as it is, a box a texel wide or none: its chain skips it. */
+  readonly idle: boolean;
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
-    blur(
-      system,
-      this.pass,
-      input,
-      output,
-      f.blurX || 0,
-      f.blurY || 0,
-      f.quality,
-      this.texels(input),
-      clear,
-    );
+    const blurX = f.blurX || 0;
+    const blurY = f.blurY || 0;
+    const texels = this.texels(input);
+    const across = blurShrink(blurX, f.quality, 1, texels);
+    const down = blurShrink(blurY, f.quality, 1, texels);
+    if (across === 1 && down === 1) {
+      blur(system, this.pass, input, output, blurX, blurY, f.quality, texels, texels, clear);
+      return;
+    }
+
+    const out = blurred(system, this.pass, input, blurX, blurY, f.quality, texels, across, down);
+    this.back ??= new ReadBack();
+    this.back.draw(system, input, out, across, down, output, clear);
+    TexturePool.returnTexture(out);
   }
 }
 
@@ -266,12 +480,13 @@ uniform vec3 uColor;
 uniform float uAlpha;
 uniform float uStrength;
 uniform vec2 uOffset;
+uniform vec2 uBlurredScale;
 uniform float uInner;
 uniform float uKnockout;
 uniform float uHide;
 void main(void) {
   vec4 src = texture(uTexture, vTextureCoord);
-  float a = texture(uBlurred, vTextureCoord - uOffset * uInputSize.zw).a;
+  float a = texture(uBlurred, (vTextureCoord - uOffset * uInputSize.zw) * uBlurredScale).a;
   vec4 c;
   if (uInner > 0.5) {
     float g = clamp((1.0 - a) * uStrength, 0.0, 1.0) * uAlpha * src.a;
@@ -312,6 +527,7 @@ class GlowFilter extends BlurredFilter {
           uAlpha: { value: f.alpha, type: "f32" },
           uStrength: { value: f.strength, type: "f32" },
           uOffset: { value: new Float32Array(2), type: "vec2<f32>" },
+          uBlurredScale: { value: new Float32Array([1, 1]), type: "vec2<f32>" },
           uInner: { value: f.inner ? 1 : 0, type: "f32" },
           uKnockout: { value: f.knockout ? 1 : 0, type: "f32" },
           uHide: { value: shadow && f.hideObject ? 1 : 0, type: "f32" },
@@ -328,24 +544,21 @@ class GlowFilter extends BlurredFilter {
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
-    const offset = this.resources.glowUniforms.uniforms.uOffset as Float32Array;
-    placeOffset(offset, f, this.distance, this.units);
-    const blurred = TexturePool.getSameSizeTexture(input);
-    blur(
-      system,
-      this.pass,
-      input,
-      blurred,
-      f.blurX || 0,
-      f.blurY || 0,
-      f.quality,
-      this.texels(input),
-      true,
-    );
-    this.resources.uBlurred = blurred.source;
+    const uniforms = this.resources.glowUniforms.uniforms;
+    placeOffset(uniforms.uOffset as Float32Array, f, this.distance, this.units);
+    const blurX = f.blurX || 0;
+    const blurY = f.blurY || 0;
+    const texels = this.texels(input);
+    const across = blurShrink(blurX, f.quality, f.strength, texels);
+    const down = blurShrink(blurY, f.quality, f.strength, texels);
+    const alpha = blurred(system, this.pass, input, blurX, blurY, f.quality, texels, across, down);
+    placeBlurred(uniforms.uBlurredScale as Float32Array, input, alpha, across, down);
+    this.resources.uBlurred = alpha.source;
     system.applyFilter(this, input, output, clear);
     this.unbind();
-    TexturePool.returnTexture(blurred);
+    if (alpha !== input) {
+      TexturePool.returnTexture(alpha);
+    }
   }
 }
 
@@ -429,24 +642,25 @@ class BevelFilter extends BlurredFilter {
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
-    const blurred = TexturePool.getSameSizeTexture(input);
-    blur(
+    const alpha = blurred(
       system,
       this.pass,
       input,
-      blurred,
       f.blurX || 0,
       f.blurY || 0,
       f.quality,
       this.texels(input),
-      true,
+      1,
+      1,
     );
-    this.resources.uBlurred = blurred.source;
+    this.resources.uBlurred = alpha.source;
     const offset = this.resources.bevelUniforms.uniforms.uOffset as Float32Array;
     placeOffset(offset, f, f.distance || 0, this.units);
     system.applyFilter(this, input, output, clear);
     this.unbind();
-    TexturePool.returnTexture(blurred);
+    if (alpha !== input) {
+      TexturePool.returnTexture(alpha);
+    }
   }
 }
 
@@ -590,19 +804,18 @@ class GradientFilter extends BlurredFilter {
 
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
-    const blurred = TexturePool.getSameSizeTexture(input);
-    blur(
+    const alpha = blurred(
       system,
       this.pass,
       input,
-      blurred,
       f.blurX || 0,
       f.blurY || 0,
       f.quality,
       this.texels(input),
-      true,
+      1,
+      1,
     );
-    this.resources.uBlurred = blurred.source;
+    this.resources.uBlurred = alpha.source;
     const offset = this.resources.gradientUniforms.uniforms.uOffset as Float32Array;
     placeOffset(offset, f, f.distance || 0, this.units);
     // The object's pixels and one more right and down, as adl's bitmap of it, grown by the rect.
@@ -615,7 +828,9 @@ class GradientFilter extends BlurredFilter {
     region[3] = input.frame.height - this.inset + units + grows[3] * units;
     system.applyFilter(this, input, output, clear);
     this.unbind();
-    TexturePool.returnTexture(blurred);
+    if (alpha !== input) {
+      TexturePool.returnTexture(alpha);
+    }
   }
 }
 
@@ -1271,6 +1486,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
         },
       },
     });
+    this.running = filters.filter((f) => !(f instanceof BlurFilter && f.idle));
     this.rescale(units);
     this.resolution = "inherit";
     // The object is drawn into the chain's input as the target draws, with
@@ -1279,6 +1495,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     // Any filter of an object that says "off" turns it off for all of them.
     this.antialias = "inherit";
   }
+
+  /**
+   * The filters it runs: a blur of none, as hundreds of an animation's
+   * placements carry, takes no pass, though it still pads as Flash's does.
+   */
+  private readonly running: Filter[];
 
   /** What it was run on changed: run it again, and measure it again. */
   changed(): void {
@@ -1541,7 +1763,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     clear: boolean,
   ): void {
     // No inner filters: this copy can colour and blend the input directly, as AlphaFilter did.
-    if (this.filters.length === 0) {
+    if (this.running.length === 0) {
       system.applyFilter(this, input, output, clear);
       return;
     }
@@ -1559,7 +1781,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
 
   /** The filters in turn, as Pixi runs a chain, through a texture of the pool between them. */
   private run(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
-    const filters = this.filters;
+    const filters = this.running;
     // A layer kept for a blend (render/compositing.ts): what was drawn, as it was drawn.
     if (filters.length === 0) {
       plainCopy().apply(system, input, output, clear);

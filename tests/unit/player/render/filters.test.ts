@@ -31,3 +31,30 @@ test("gradient filters detach their owned textures before destroying them", asyn
 
   assert.deepEqual(warnings, []);
 });
+
+test("blurs run coarser only where the screen has texels to spare and the error stays small", async () => {
+  const { blurShrink } = await import("../../../../packages/player/dist/render/filters.js");
+  // A texel a stage pixel, no blur that way, or no passes, as ever.
+  assert.equal(blurShrink(68, 2, 1, 1), 1);
+  assert.equal(blurShrink(0, 2, 1, 3), 1);
+  assert.equal(blurShrink(1, 2, 1, 3), 1);
+  assert.equal(blurShrink(68, 0, 1, 3), 1);
+  assert.equal(blurShrink(Number.NaN, 2, 1, 3), 1);
+  // Narrow boxes keep every texel; a single box's sharp ends need a wider one.
+  assert.equal(blurShrink(2, 2, 1, 3), 1);
+  assert.equal(blurShrink(5, 2, 2, 3), 1);
+  assert.equal(blurShrink(20, 1, 1, 3), 1);
+  assert.equal(blurShrink(4, 1, 3, 11.2), 1);
+  // Wide ones go to a texel a stage pixel at most.
+  assert.equal(blurShrink(27, 2, 2.37, 3), 3);
+  assert.equal(blurShrink(70, 1, 2, 3), 3);
+  assert.equal(blurShrink(7, 3, 1.9, 3), 2);
+  assert.equal(blurShrink(68, 2, 1, 2.5), 2);
+  assert.equal(blurShrink(255, 3, 1, 40), 16);
+  // A strong glow multiplies the error, truncation's included: it stays finer however wide.
+  assert.equal(blurShrink(27, 2, 255, 3), 1);
+  assert.equal(blurShrink(45, 2, 255, 3), 1);
+  assert.equal(blurShrink(70, 2, 255, 3), 1);
+  assert.equal(blurShrink(68, 2, 4, 3), 1);
+  assert.equal(blurShrink(64, 3, 50, 3), 1);
+});
