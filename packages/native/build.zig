@@ -207,7 +207,7 @@ fn tessellate(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
     };
     const exports = [_][]const u8{
         "reset",     "alloc",     "run",      "vertices", "indices", "vertexCount", "triangleCount",
-        "highWater", "allocated", "setLimit",
+        "highWater", "allocated", "setLimit", "layer",
     };
 
     const library = b.path(vendor ++ "libtess2");
