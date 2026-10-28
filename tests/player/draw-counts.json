@@ -1,0 +1,42 @@
+{
+  "crowd": {
+    "calls": 2,
+    "subDraws": 577,
+    "useProgram": 2,
+    "bindVertexArray": 2,
+    "bindFramebuffer": 2,
+    "uniforms": 2
+  },
+  "bounce": {
+    "calls": 51.93,
+    "subDraws": 51.93,
+    "useProgram": 39.67,
+    "bindVertexArray": 21.83,
+    "bindFramebuffer": 48.17,
+    "uniforms": 124.7
+  },
+  "mixed-crowd": {
+    "calls": 105,
+    "subDraws": 105,
+    "useProgram": 65,
+    "bindVertexArray": 73,
+    "bindFramebuffer": 2,
+    "uniforms": 106
+  },
+  "blend-mask": {
+    "calls": 41,
+    "subDraws": 41,
+    "useProgram": 15,
+    "bindVertexArray": 13,
+    "bindFramebuffer": 20,
+    "uniforms": 64
+  },
+  "swap": {
+    "calls": 2,
+    "subDraws": 51.4,
+    "useProgram": 2,
+    "bindVertexArray": 2.1,
+    "bindFramebuffer": 2,
+    "uniforms": 2
+  }
+}
