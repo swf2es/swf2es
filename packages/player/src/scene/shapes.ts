@@ -14,12 +14,14 @@ import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
  * What the renderer cannot draw yet, counted as it is met, for a test or a
- * probe to read: drawTriangles' meshes and texts left out; masks and
+ * probe to read: drawTriangles' meshes, texts, and lines that could not be filled with no
+ * native tessellator, left out; masks and
  * clip layers, scrollRects' clips and 9-slices ignored, so what they would
  * cut or reshape is drawn whole; filters and blend modes ignored.
  */
 export const unsupported = {
   meshes: 0,
+  strokes: 0,
   texts: 0,
   masks: 0,
   scrollRects: 0,
@@ -43,7 +45,7 @@ const WHITE = 0xffffffff;
 const RAMP = 256;
 
 /** A straight ARGB colour as a vertex carries it: its bytes red, green, blue and alpha from the lowest. */
-function vertexColor(argb: number): number {
+export function vertexColor(argb: number): number {
   return (
     (((argb >>> 16) & 0xff) | (argb & 0xff00) | ((argb & 0xff) << 16) | (argb & 0xff000000)) >>> 0
   );

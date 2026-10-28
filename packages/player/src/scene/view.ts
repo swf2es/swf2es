@@ -59,6 +59,9 @@ export interface RenderViewOptions {
  */
 const GRADIENT_IDLE_FRAMES = 30;
 
+/** The most transforms a layer's lines are kept for: its instances in step, and a loop's turns. */
+const LINE_KEYS = 64;
+
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 interface Made {
   parts: { part: Part; handle: GeometryHandle }[];
@@ -236,7 +239,7 @@ export class RenderView implements Drawer {
     if (!hidden && layers) {
       const version = o.drawing ? o.drawing.version : 0;
       // A pixel of the screen, in the stage's pixels: the least a line is wide.
-      const least = 1 / (this.screenScale ?? this.scale);
+      const least = 1 / (this.screenScale ?? this.scale * this.resolution);
       for (let i = 0; i < layers.length; i++) {
         for (const { part, handle } of this.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
@@ -362,10 +365,22 @@ export class RenderView implements Drawer {
       this.geometries.remove(known.handle.id);
     }
 
-    // Those let go of are forgotten, so that a layer seen through many transforms keeps no keys for them.
+    // Those let go of are forgotten, and the oldest past LINE_KEYS, so that a layer seen through
+    // ever new transforms keeps no more keys than that.
     for (const [old, kept] of byKey) {
       if (kept.handle && !this.geometries.alive(kept.handle)) {
         byKey.delete(old);
+      }
+    }
+
+    for (const [old, kept] of byKey) {
+      if (byKey.size < LINE_KEYS) {
+        break;
+      }
+
+      byKey.delete(old);
+      if (kept.handle && this.geometries.alive(kept.handle)) {
+        this.geometries.remove(kept.handle.id);
       }
     }
 

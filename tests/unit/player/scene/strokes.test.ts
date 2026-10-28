@@ -61,3 +61,17 @@ test("a single point with round caps is a dot, with others nothing", () => {
   assert.ok(Math.abs(Math.abs(area(dot)) - 4 * Math.PI) < 0.25);
   assert.deepEqual(outline([5, 5], false, 2, 1, 0, 3), []);
 });
+
+test("a way turned right back is joined around its tip", () => {
+  // Out to 10 and back to 5, round joins: the outline reaches past 10 by the half width.
+  const [contour] = outline([0, 0, 10, 0, 5, 0], false, 1, 1, 0, 3);
+  const xs = contour.filter((_, i) => i % 2 === 0);
+  assert.ok(Math.abs(Math.max(...xs) - 11) < 1e-9);
+});
+
+test("a closed path there and back is its one side, joined at both ends", () => {
+  const loops = outline([0, 0, 10, 0, 0, 0], true, 1, 1, 0, 3);
+  assert.equal(loops.length, 1);
+  // A capsule: the rectangle and a disc's worth of round ends.
+  assert.ok(Math.abs(Math.abs(area(loops[0])) - (20 + Math.PI)) < 0.15);
+});

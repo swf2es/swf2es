@@ -9,7 +9,15 @@
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
-import { type FillTessellator, trace } from "./fills.js";
+import { convex, crossingFill } from "../render/fill-polygons.js";
+import {
+  containment,
+  type FillGeometry,
+  type FillTessellator,
+  trace,
+  validGeometry,
+} from "./fills.js";
+import { unsupported, vertexColor } from "./shapes.js";
 
 /** How far, in stage pixels, a round join or cap's chords may stray from its arc. */
 const ARC_FLATNESS = 0.02;
@@ -40,7 +48,7 @@ export function strokeWidth(
 }
 
 /** `path` through the linear transform (a b c d), its control points too. */
-function transformed(path: Path, a: number, b: number, c: number, d: number): Path {
+export function transformedPath(path: Path, a: number, b: number, c: number, d: number): Path {
   const out = path.slice();
   for (let i = 0; i < out.length; ) {
     const points = pointsOf(out[i]);
@@ -52,6 +60,27 @@ function transformed(path: Path, a: number, b: number, c: number, d: number): Pa
     }
 
     i += 1 + 2 * points;
+  }
+
+  return out;
+}
+
+/**
+ * A line's paths as they are stroked, each with whether it comes back to
+ * its start, closed and joined there as Flash joins it: a fill's closing
+ * line `closes` names is added to its path, and a triangle's outline is
+ * closed, its last point its first.
+ */
+export function strokePaths(
+  stroke: ShapeLayer["strokes"][number],
+): { path: Path; home: boolean }[] {
+  const { paths, closes, triangles } = stroke;
+  const out: { path: Path; home: boolean }[] = [];
+  let next = 0;
+  for (const [i, path] of paths.entries()) {
+    const close = closes?.[next]?.at === i ? closes[next++] : null;
+    const home = Boolean(triangles) || (close?.x === path[1] && close.y === path[2]);
+    out.push({ path: close && !home ? [...path, LINE, close.x, close.y] : path, home });
   }
 
   return out;
@@ -125,31 +154,28 @@ function side(
     const x = p[j * 2];
     const y = p[j * 2 + 1];
     const cross = tx * uy - ty * ux;
-    // Positive turns to the right on a y-down stage, where the left side is the outer one.
-    const outer = cross * s > 0;
+    const dot = tx * ux + ty * uy;
+    // Positive turns to the right on a y-down stage, where the left side is the outer one; a way
+    // that turns right back is joined on both sides, around its tip.
+    const outer = cross * s > 0 || (cross === 0 && dot < 0);
     if (!outer) {
       // The inner side goes through the turn's own point, so that the outline never winds back.
       out.push(x, y, x + mx, y + my);
       continue;
     }
 
-    const turn = Math.atan2(Math.abs(cross), tx * ux + ty * uy);
+    const turn = Math.atan2(Math.abs(cross), dot);
     if (join === 0) {
-      arc(
-        out,
-        x,
-        y,
-        h,
-        Math.atan2(ny, nx),
-        Math.sign(Math.atan2(nx * my - ny * mx, nx * mx + ny * my)) * turn,
-      );
+      // Around from this side's normal to the next's, by way of the tip where the way turns back.
+      const way = cross !== 0 ? Math.sign(nx * my - ny * mx) : Math.sign(nx * ty - ny * tx);
+      arc(out, x, y, h, Math.atan2(ny, nx), way * turn);
     } else if (join === 2) {
       const ratio = 1 / Math.cos(turn / 2);
       let bx = nx + mx;
       let by = ny + my;
       const l = Math.hypot(bx, by);
-      bx /= l || 1;
-      by /= l || 1;
+      // Turned right back, the bisector is the way out past the tip.
+      [bx, by] = l ? [bx / l, by / l] : [tx, ty];
       if (ratio <= limit) {
         out.push(x + bx * h * ratio, y + by * h * ratio);
       } else {
@@ -223,9 +249,14 @@ export function outline(
     return [dot];
   }
 
-  if (closed && n > 2) {
+  if (closed && n >= 2) {
     const left: number[] = [];
     side(left, p, n, true, h, 1, join, limit);
+    // There and back: its left side, joined at both ends, is the whole outline.
+    if (n === 2) {
+      return [left];
+    }
+
     const right: number[] = [];
     side(right, p, n, true, h, -1, join, limit);
     const back: number[] = [];
@@ -254,13 +285,6 @@ export function outline(
   return [contour];
 }
 
-/** A straight ARGB colour as a vertex carries it: its bytes red, green, blue and alpha from the lowest. */
-function vertexColor(argb: number): number {
-  return (
-    (((argb >>> 16) & 0xff) | (argb & 0xff00) | ((argb & 0xff) << 16) | (argb & 0xff000000)) >>> 0
-  );
-}
-
 /**
  * `layer`'s lines as seen through the linear transform (a b c d) on the
  * stage, in its axes, each at least `least` wide, as one geometry in their
@@ -275,29 +299,29 @@ export function layerStrokes(
   least: number,
   tessellator: FillTessellator,
 ): GeometryData | null {
+  // Seen through a transform that collapses the plane, lines cover nothing, as in the Pixi view.
+  if (a * d - b * c === 0) {
+    return null;
+  }
+
   const positions: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
-  for (const { line, paths, closes, triangles } of layer.strokes) {
+  for (const stroke of layer.strokes) {
+    const line = stroke.line;
     const h = strokeWidth(line, a, b, c, d, least) / 2;
+    // Codes a SWF reserves draw round, as the Pixi view draws them.
+    const caps = line.startCap <= 2 ? line.startCap : 0;
+    const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];
-    let next = 0;
-    for (const [i, path] of paths.entries()) {
-      const close = closes?.[next]?.at === i ? closes[next++] : null;
-      // Back to the path's start, a closed path, joined there as Flash joins it; a triangle's
-      // outline is, its last point its first.
-      const home = triangles || (close?.x === path[1] && close.y === path[2]);
-      const points = polyline(
-        transformed(close && !home ? [...path, LINE, close.x, close.y] : path, a, b, c, d),
-      );
+    for (const { path, home } of strokePaths(stroke)) {
+      const points = polyline(transformedPath(path, a, b, c, d));
       const closedPath =
         home ||
         (points.length > 4 &&
           points[0] === points[points.length - 2] &&
           points[1] === points[points.length - 1]);
-      contours.push(
-        ...outline(points, closedPath, h, line.startCap, line.join, Math.max(1, line.miterLimit)),
-      );
+      contours.push(...outline(points, closedPath, h, caps, join, Math.max(1, line.miterLimit)));
     }
 
     const usable = contours.filter((contour) => contour.length >= 6);
@@ -305,21 +329,8 @@ export function layerStrokes(
       continue;
     }
 
-    const geometry = tessellator(usable, true);
-    if (!geometry) {
-      continue;
-    }
-
-    const color = vertexColor(line.color);
-    const base = positions.length / 2;
-    const offset = geometry.indexOffset ?? 0;
-    for (let k = 0; k < geometry.vertices.length; k += 2) {
-      positions.push(geometry.vertices[k], geometry.vertices[k + 1]);
-      colors.push(color);
-    }
-
-    for (let k = 0; k < geometry.indices.length; k++) {
-      indices.push(geometry.indices[k] - offset + base);
+    if (!fillOutline(usable, tessellator, vertexColor(line.color), positions, colors, indices)) {
+      unsupported.strokes++;
     }
   }
 
@@ -332,4 +343,61 @@ export function layerStrokes(
     colors: Uint32Array.from(colors),
     indices: Uint32Array.from(indices),
   };
+}
+
+/**
+ * The outline `contours` filled non-zero onto the arrays, in `color`: by the
+ * tessellator, its output checked as a fill's is (fills.ts), else in JS where
+ * it can be, its crossing spans or a region convex alone each as a fan.
+ * False if none of it could be.
+ */
+function fillOutline(
+  contours: number[][],
+  tessellator: FillTessellator,
+  color: number,
+  positions: number[],
+  colors: number[],
+  indices: number[],
+): boolean {
+  let geometry: FillGeometry | null = null;
+  try {
+    const made = tessellator(contours, true);
+    geometry = made && validGeometry(made) ? made : null;
+  } catch {
+    // A refused native instance or a custom tessellator's failure leaves the JS fill.
+  }
+
+  if (geometry) {
+    const base = positions.length / 2;
+    const offset = geometry.indexOffset ?? 0;
+    for (let k = 0; k < geometry.vertices.length; k += 2) {
+      positions.push(geometry.vertices[k], geometry.vertices[k + 1]);
+      colors.push(color);
+    }
+
+    for (let k = 0; k < geometry.indices.length; k++) {
+      indices.push(geometry.indices[k] - offset + base);
+    }
+
+    return true;
+  }
+
+  const pieces =
+    crossingFill(contours, true) ??
+    containment(contours).flatMap((root) =>
+      root.children.length === 0 && convex(root.points) !== 0 ? [root.points] : [],
+    );
+  for (const piece of pieces) {
+    const first = positions.length / 2;
+    for (let k = 0; k < piece.length; k += 2) {
+      positions.push(piece[k], piece[k + 1]);
+      colors.push(color);
+    }
+
+    for (let k = 2; k < piece.length / 2; k++) {
+      indices.push(first, first + k - 1, first + k);
+    }
+  }
+
+  return pieces.length > 0;
 }

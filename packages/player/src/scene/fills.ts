@@ -321,7 +321,7 @@ export function resolveFills(
 }
 
 /** Whether a fill tessellated alone can be drawn: a custom tessellator's output is checked. */
-function validGeometry({ vertices, indices, indexOffset = 0 }: FillGeometry): boolean {
+export function validGeometry({ vertices, indices, indexOffset = 0 }: FillGeometry): boolean {
   if (
     !Number.isInteger(indexOffset) ||
     indexOffset < 0 ||

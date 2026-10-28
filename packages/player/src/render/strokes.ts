@@ -4,7 +4,8 @@
 import type { Line } from "@swf2es/format";
 import { type GraphicsContext, Matrix } from "pixi.js";
 import { blendLayers, droppedBlends, droppedLayers } from "../display/morph.js";
-import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
+import type { ShapeLayer } from "../display/shapes.js";
+import { strokePaths, strokeWidth, transformedPath } from "../scene/strokes.js";
 import {
   type DeviceMemory,
   deviceMemory,
@@ -25,31 +26,15 @@ export function sameLinear(p: Linear, q: Linear): boolean {
   return p[0] === q[0] && p[1] === q[1] && p[2] === q[2] && p[3] === q[3];
 }
 
-/**
- * A line's width on the stage. Flash strokes a transformed shape with one
- * width all along, not the local width stretched by the transform: the
- * width scaled by the transform's (a + c, b + d) as a line's scale mode
- * allows, never under `least`, a pixel of the screen it is shown on, which
- * is also how wide a hairline is.
- */
-function screenWidth(line: Line, m: Linear, least: number): number {
-  const sx = Math.abs(m[0] + m[2]);
-  const sy = Math.abs(m[1] + m[3]);
-  const scale = line.noHScale
-    ? line.noVScale
-      ? 1
-      : sy
-    : line.noVScale
-      ? sx
-      : Math.sqrt((sx * sx + sy * sy) / 2);
-  return Math.max(least, (line.width / 20) * scale);
-}
-
-function stroke(line: Line, m: Linear, least: number): Parameters<GraphicsContext["stroke"]>[0] {
+function strokeStyle(
+  line: Line,
+  m: Linear,
+  least: number,
+): Parameters<GraphicsContext["stroke"]>[0] {
   const caps = ["round", "butt", "square"] as const;
   const joins = ["round", "bevel", "miter"] as const;
   return {
-    width: screenWidth(line, m, least),
+    width: strokeWidth(line, m[0], m[1], m[2], m[3], least),
     color: line.color & 0xffffff,
     alpha: (line.color >>> 24) / 255,
     cap: caps[line.startCap] ?? "round",
@@ -57,23 +42,6 @@ function stroke(line: Line, m: Linear, least: number): Parameters<GraphicsContex
     miterLimit: line.miterLimit,
     alignment: 0.5,
   };
-}
-
-function transformPath(path: Path, m: Linear): Path {
-  const out = path.slice();
-  for (let i = 0; i < out.length; ) {
-    const points = pointsOf(out[i]);
-    for (let k = 0; k < points; k++) {
-      const x = out[i + 1 + 2 * k];
-      const y = out[i + 2 + 2 * k];
-      out[i + 1 + 2 * k] = m[0] * x + m[2] * y;
-      out[i + 2 + 2 * k] = m[1] * x + m[3] * y;
-    }
-
-    i += 1 + 2 * points;
-  }
-
-  return out;
 }
 
 /**
@@ -89,21 +57,17 @@ export const NO_LINES = shapeContext();
  */
 function strokeContext(layer: ShapeLayer, m: Linear, least: number, by = m): GraphicsContext {
   const context = shapeContext();
-  for (const { line, paths, closes, triangles } of layer.strokes) {
+  for (const stroke of layer.strokes) {
     context.beginPath();
-    let next = 0;
-    for (const [i, path] of paths.entries()) {
-      const close = closes?.[next]?.at === i ? closes[next++] : null;
-      // Back to the path's start, a closed path, joined there as Flash joins it; a triangle's
-      // outline is, its last point its first, which Pixi drops.
-      const home = triangles || (close?.x === path[1] && close.y === path[2]);
-      trace(context, transformPath(close && !home ? [...path, LINE, close.x, close.y] : path, m));
+    // A path back at its start is closed and joined there (scene/strokes.ts, strokePaths).
+    for (const { path, home } of strokePaths(stroke)) {
+      trace(context, transformedPath(path, m[0], m[1], m[2], m[3]));
       if (home) {
         context.closePath();
       }
     }
 
-    context.stroke(stroke(line, by, least));
+    context.stroke(strokeStyle(stroke.line, by, least));
   }
 
   return context;
