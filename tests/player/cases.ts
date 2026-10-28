@@ -9504,6 +9504,27 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Blends that read what is behind, kept as layers while they stand, blended again each frame.
+    name: "blend-kept",
+    swf: (abc) => bare(abc, 1, "BlendKept", 240, 120),
+    script: "BlendKept",
+    frames: 7,
+    capture: [1, 2, 3, 4, 5, 6, 7],
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
+    // The same multisampled: a kept layer resolved into a copy, what is behind resolved as copied.
+    name: "blend-kept-antialias",
+    swf: (abc) => bare(abc, 1, "BlendKept", 240, 120),
+    script: "BlendKept",
+    frames: 7,
+    capture: [1, 2, 3, 4, 5, 6, 7],
+    antialias: true,
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     name: "filter-objects",
     swf: (abc) => bare(abc, 1, "FilterObjects"),
     script: "FilterObjects",

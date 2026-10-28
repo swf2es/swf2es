@@ -24,12 +24,12 @@
     "uniforms": 4
   },
   "blend-mask": {
-    "calls": 41,
-    "subDraws": 41,
+    "calls": 36.07,
+    "subDraws": 36.07,
     "useProgram": 17,
     "bindVertexArray": 15,
-    "bindFramebuffer": 20,
-    "uniforms": 48
+    "bindFramebuffer": 10.13,
+    "uniforms": 18.23
   },
   "swap": {
     "calls": 2,

@@ -1740,6 +1740,62 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
       return;
     }
 
+    if (this.unchanged(system, input)) {
+      system.applyFilter(this, this.kept as Texture, output, clear);
+      return;
+    }
+
+    if (!this.rerun()) {
+      this.runOver(system, input, output, clear);
+      return;
+    }
+
+    if (this.running.length === 0) {
+      this.keep(system, input);
+    } else {
+      this.kept = TexturePool.getSameSizeTexture(input);
+      this.run(system, input, this.kept, true);
+    }
+
+    system.applyFilter(this, this.kept as Texture, output, clear);
+  }
+
+  /**
+   * A layer kept for a blend that reads what is behind (render/compositing.ts), uncoloured and
+   * blended normally, draws its input as it is: the blend after it reads the input, or the output
+   * kept, which the filter system gives as the input when it reuses it, with no pass of the chain's.
+   * The input is still kept while the object stands, as apply keeps it.
+   */
+  override passesInput(system: FilterSystem, input: Texture): boolean {
+    if (this.running.length > 0 || this.colored || this.blendMode !== "normal") {
+      return false;
+    }
+
+    if (!this.keeps || input === this.kept || this.unchanged(system, input) || !this.rerun()) {
+      return true;
+    }
+
+    this.keep(system, input);
+    return true;
+  }
+
+  /**
+   * Keep what the object was drawn into: the input itself, taken from the pool, where it holds
+   * one sample a pixel; a multisampled one is resolved into a copy, which holds no samples.
+   */
+  private keep(system: FilterSystem, input: Texture): void {
+    if (!input.source.antialias && system.takeInput(input)) {
+      this.kept = input;
+      return;
+    }
+
+    const kept = TexturePool.getSameSizeTexture(input);
+    plainCopy().apply(system, input, kept, true);
+    this.kept = kept;
+  }
+
+  /** Whether `input` is what the output kept was run on, nothing having changed since. */
+  private unchanged(system: FilterSystem, input: Texture): boolean {
     const resolution = input.source.resolution;
     // The input's corner on the screen.
     const bounds = system.activeBounds as Bounds;
@@ -1752,28 +1808,31 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
-    const same = this.ran !== null && sameInput(this.ran, now);
-    if (same && !this.stale && this.kept) {
+    this.same = this.ran !== null && sameInput(this.ran, now);
+    if (this.same && !this.stale && this.kept) {
       this.changing = 0;
-      system.applyFilter(this, this.kept, output, clear);
-      return;
+      return true;
     }
 
+    return false;
+  }
+
+  /** Whether the input last compared (unchanged) was the same as the one run before. */
+  private same = false;
+
+  /**
+   * The input last compared made the one run on, the output kept let go of: whether to keep the
+   * new one, which one changing frame after frame is not.
+   */
+  private rerun(): boolean {
     // Unchanged but not kept, as after being filtered straight: kept now.
-    this.changing = this.stale || !same ? this.changing + 1 : 0;
+    this.changing = this.stale || !this.same ? this.changing + 1 : 0;
     this.stale = false;
+    const now = this.next;
     this.next = this.ran ?? { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
     this.ran = now;
     this.release();
-    if (this.changing > 1) {
-      this.runOver(system, input, output, clear);
-      return;
-    }
-
-    const kept = TexturePool.getSameSizeTexture(input);
-    this.run(system, input, kept, true);
-    this.kept = kept;
-    system.applyFilter(this, kept, output, clear);
+    return this.changing <= 1;
   }
 
   /**
