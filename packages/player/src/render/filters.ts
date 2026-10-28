@@ -1465,6 +1465,12 @@ function textureLimit(renderer: FilterSystem["renderer"]): number {
   return limit;
 }
 
+/**
+ * The GPU contexts given to the renderers so far: what a chain kept in one is empty in the next, as
+ * a lost context's textures come back with no contents (render/hooks.ts counts them).
+ */
+export const gpuContexts = { generation: 0 };
+
 export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
@@ -1489,6 +1495,8 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     ty: 0,
   };
   private kept: Texture | null = null;
+  /** The context `kept` was drawn in (gpuContexts). */
+  private keptIn = 0;
   private stale = true;
   /** Runs in a row its object changed for. */
   private changing = 0;
@@ -1712,7 +1720,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
    */
   override reusedOutput(_system: FilterSystem, data: FilterData): Texture | null {
     const kept = this.kept;
-    if (!this.keeps || this.stale || !kept || !this.ran) {
+    if (!this.keeps || this.stale || !kept || !this.ran || this.keptIn !== gpuContexts.generation) {
       return null;
     }
 
@@ -1809,7 +1817,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
     this.same = this.ran !== null && sameInput(this.ran, now);
-    if (this.same && !this.stale && this.kept) {
+    if (this.same && !this.stale && this.kept && this.keptIn === gpuContexts.generation) {
       this.changing = 0;
       return true;
     }
@@ -1827,6 +1835,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   private rerun(): boolean {
     // Unchanged but not kept, as after being filtered straight: kept now.
     this.changing = this.stale || !this.same ? this.changing + 1 : 0;
+    this.keptIn = gpuContexts.generation;
     this.stale = false;
     const now = this.next;
     this.next = this.ran ?? { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };

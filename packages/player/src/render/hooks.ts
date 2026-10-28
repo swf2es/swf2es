@@ -14,6 +14,7 @@ import {
 import { spareBatchersFor, viewGroups } from "./batchers.js";
 import { measureFilterArea, noteMask } from "./blend.js";
 import { batcherNameFor, colorShaderFor } from "./color.js";
+import { gpuContexts } from "./filters.js";
 import { noteBuild, type Settling } from "./settle.js";
 import { releaseFromAtlases, TablePipe } from "./table.js";
 import { forgetCommands } from "./tessellate.js";
@@ -31,6 +32,14 @@ export function hookRenderer(renderer: Renderer): void {
   }
 
   hooked.add(renderer);
+  // A context given back holds none of what the chains kept: each draws its object again.
+  (
+    renderer.runners as { contextChange?: { add(item: object): void } } | undefined
+  )?.contextChange?.add({
+    contextChange: () => {
+      gpuContexts.generation++;
+    },
+  });
   const graphicsPipe = renderer.renderPipes?.graphics;
   const found = (renderer.renderPipes as object as { flashTable?: unknown } | undefined)
     ?.flashTable;
