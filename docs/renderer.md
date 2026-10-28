@@ -12,11 +12,28 @@ from an upload hook (`render/table.ts`), groups settle and unsettle
 around Pixi's rebuilds (`render/settle.ts`), and filters keep their areas
 and outputs through the fork's filter pipe.
 
-What limits a busy frame now is the commands it sends, not the CPU work
-that makes them: about 12,700 GL calls a frame in a crowded room, whose
-cost in Chrome's GPU process is about 0.6 µs each. Fewer commands means
-knowing the whole frame in one place, which Pixi's structure spreads over
-its systems, pipes and render groups.
+In a crowded room, the frame is limited by its GPU commands, not by the
+CPU work that builds them: about 12,700 GL calls a frame, executed by
+Chrome's GPU process, plus some 20 ms of GPU time on an Intel Iris Xe. To
+send fewer commands, the whole frame has to be known in one place, and
+Pixi spreads that knowledge over its systems, pipes and render groups.
+
+Fewer commands is a means, not the goal. Pulled draws took that scene from
+12,700 GL calls to 11,273 ([architecture.md](architecture.md#rendering)).
+Chrome's GPU process went from 17.3 to 16.5 ms a frame, the GPU's own
+time did not move, and the page spent 0.5 ms more planning. Each step
+here is judged by frame time:
+
+- median and p95 frame time;
+- planning and submission time on the page;
+- the GPU process's time and the GPU's own time;
+- upload bytes and memory.
+
+These are measured on the busy room replay, a mostly static scene with
+small edits, and a filter-heavy scene, on a GPU and on software GL.
+Command and draw counts are supporting evidence. `draw-counts.ts` keeps
+them from creeping up unnoticed, but a step that raises them and is
+measurably faster updates the baseline on purpose.
 
 This document plans a renderer of swf2es' own, which only draws what Flash
 draws: TypeScript for the GPU calls, data-oriented, in typed arrays,
@@ -62,11 +79,28 @@ structure of typed arrays, an entry a drawable or a boundary:
 
 Each node keeps the span of the list its subtree wrote. A frame where only
 transforms or colours changed, an animation's usual frame, writes rows
-and leaves the list alone. A structural change writes its subtree's span
-again, and the list is rebuilt by copying the spans that did not change
-(`TypedArray.set` on the ranges) around it. A subtree off the list keeps
-its span for as long as its nodes are kept (`render/spares.ts`), so it can
-come back without being walked.
+and leaves the list alone; the rows it wrote go up in coalesced ranges,
+not one by one.
+
+Some changes of a transform do invalidate entries, as they redraw today
+(`render/view.ts`):
+
+- a scale-nine object, whose slices depend on its scale;
+- device text, whose texture's resolution follows its scale on screen;
+- a stroke, whose lines are shared only by instances under the same
+  transform (`render/strokes.ts`).
+
+Each entry kind states what invalidates it: its geometry, its textures,
+its clip, its filter inputs.
+
+A structural change writes its subtree's span again. Rebuilding the list
+by copying the unchanged spans around it (`TypedArray.set` on the
+ranges) costs time in proportion to the whole scene, so it is measured
+before it is relied on. Stable chunks, linked in order, are the
+alternative if it is not cheap enough.
+
+A subtree off the list keeps its span for as long as its nodes are kept
+(`render/spares.ts`), so it can come back without being walked.
 
 This replaces Pixi's render groups and instruction sets: the group
 heuristics in [architecture.md](architecture.md#rendering) (64 art objects
@@ -85,12 +119,21 @@ browser case it is now.
 
 It decides:
 
-- **Runs.** Consecutive draws that one program can draw with the same
-  state become one draw: atlas geometry through the rows (the table's
-  pulled draws), bitmaps and glyphs by their textures. A span that stood
-  unchanged for a while may be drawn from a baked copy of its vertices
-  instead, as a settled group's Graphics are batched today; the planner
-  decides by the span's age and size, the measured rule the table uses now.
+- **Runs, and how each is drawn.** Consecutive draws that one program
+  can draw with the same state become one run. Its strategy is a choice
+  the planner makes per run:
+  - pulled draws from the expanded atlas;
+  - a multi-draw of the atlas's index ranges;
+  - a baked copy of the vertices, for a span that stood unchanged, as a
+    settled group's Graphics are batched today.
+
+  The choice depends on the backend's capabilities and on measured rules
+  the planner is given. Each wins somewhere: pulled draws more than
+  doubled SwiftShader's GL time on one workload, and small coloured
+  Graphics drawn by the table cost a GPU more than the CPU saved.
+- **Texture batching.** Fills, bitmaps, gradients and glyphs share
+  texture units in a run as far as Flash's drawing order allows. Which
+  textures a run binds, and where it must break, is part of the plan.
 - **Layers.** Which filter and blend layers to draw, at what size,
   resolution, padding and samples (the rules now in `render/filters.ts`
   and `render/compositing.ts`: `blurShrink`, dense samples, kept areas);
@@ -98,12 +141,23 @@ It decides:
   blend needs a copy of the backdrop or the GPU's blending matches Flash.
 - **Masks and clips.** Stencil push, mask drawing and pop; a scroll
   rectangle that is an axis-aligned rectangle on screen as a scissor.
-- **Render targets.** When each layer's target is taken and given back,
-  so the pool holds no more than the deepest nesting needs.
+- **Passes and targets.** A layer is a small graph of passes, each with
+  explicit inputs and outputs, sample counts and resolves. One layer can
+  hold several targets at once: its source, a filter's intermediates, the
+  original image a glow or bevel combines with, and the backdrop a blend
+  reads (`render/filters.ts`). A temporary target is given back after its
+  last use in the frame. A retained one, such as a kept filter output or
+  `cacheAsBitmap`, belongs to its object until the object changes or the
+  budget reclaims it. The pool is sized by those lifetimes, not by
+  nesting depth.
+- **Reuse.** A span whose entries and inputs did not change keeps its
+  plan from the last frame; only what changed is planned again.
 
 The command buffer is an `Int32Array` of operations (bind target, clear,
 draw run, set blend, stencil step, filter pass, composite) with a
-`Float32Array` of their parameters. Planning a frame allocates nothing.
+`Float32Array` of their parameters. Because passes are explicit, a WebGPU
+backend can map the buffer onto render passes, rather than translating
+GL calls. Planning a frame allocates nothing.
 
 ### Resources
 
@@ -134,10 +188,19 @@ WebGL. It is small by design:
 - **A state cache,** so no bind, blend or stencil state is set twice.
 - **Uploads** of rows and run chunks once a frame, as the table does.
 
-It is built on context3d's WebGL 2 pieces (`state`, `programs`,
-`buffers`, `limits`): what they lack is added there, not written twice,
-and Stage3D's surfaces and the display list share one context, so
-compositing them needs no copy.
+It reuses context3d's low-level WebGL 2 mechanisms (state tables,
+program linking, buffers, limits), extracted where needed so that both
+can use them. Context3D's own draw path stays Stage3D's: it validates and
+rebinds as Stage3D requires, which a 2D draw must not pay for.
+
+**One context, one owner of its state.** While Pixi, this backend and
+Stage3D share a context, each can change GL state behind the others'
+caches. A stale cache draws wrong, and resetting everything at each
+handoff spends the commands saved. The context's state therefore has a
+single cache, or a handoff protocol that says what each side may assume
+and must restore. This comes early, before the backend draws anything.
+Once it exists, Stage3D's surfaces and the display list compose in one
+context without copies.
 
 A WebGPU backend later implements the same interface: the command buffer
 maps onto a render pass, and a span that stands still onto a render
@@ -173,18 +236,22 @@ and [architecture.md](architecture.md#packages) change with the package.
 
 ## Steps
 
-Each step keeps the Flash references of `tests/player`, the draw counts,
-which may only go down, and the filter, context-loss, resize and leak
-checks passing, and is measured on the busy room replay before it
-merges.
+Each step keeps the Flash references of `tests/player` and the filter,
+context-loss, resize and leak checks passing, and is measured as above
+before it merges.
 
+0. **A prototype.** A throwaway scene list and planner that draw the
+   busy room's shape and bitmap runs, measured on the three scenes. It
+   shows which commands disappear and whether frame time improves,
+   before two representations of the scene are kept in step.
 1. **The scene list.** Sync writes the list and the row table alongside
    Pixi's containers, and the transform table plans its runs from the list
    in place of the batcher's upload hook. Pixi still draws.
 2. **The planner.** It plans runs, layers and filter reuse from the list,
    and the view and the fork's pipes follow its plan. Planner unit tests
    start here.
-3. **The backend for runs.** The row program draws the planner's runs of
+3. **The backend for runs.** The shared context's state ownership comes
+   first. Then the row program draws the planner's runs of
    fills, bitmaps and glyphs on context3d's pieces; Pixi draws only what
    the planner hands it (filters, masks, blends, 3D planes).
 4. **Masks, clips, filters and blends,** one at a time, onto the backend.
