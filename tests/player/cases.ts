@@ -6079,6 +6079,107 @@ function blurredShadow(): Uint8Array {
   });
 }
 
+// Thin repeated geometry under wide blurs and glows, as in wideFilters: stripes
+// half a stage pixel wide, hatching, a checkerboard of half pixels and
+// text-like strokes, whose coverage a coarser drawing of the object would
+// get wrong in bulk (a blur shrinks only what it reads, by averaging whole
+// texels); and a shadow of no passes that hides its object, drawn
+// antialiased as it is.
+function thinFilters(zoom: number): Uint8Array {
+  const at = (x: number, y: number) => ({ a: zoom, d: zoom, tx: x * 20 * zoom, ty: y * 20 * zoom });
+  const z = (blur: number) => blur * zoom;
+  const stripes: w.PathCommand[] = [];
+  for (let x = 0; x < 40; x++) {
+    stripes.push(...rectPath(x + 0.1, 0, 0.5, 40));
+  }
+
+  const hatching: w.PathCommand[] = [];
+  for (let x = 0; x < 30; x += 1.3) {
+    const [l, r] = [Math.round(x * 20), Math.round((x + 0.35) * 20)];
+    hatching.push(
+      { move: [l, 0] },
+      { line: [r, 0] },
+      { line: [r + 400, 800] },
+      { line: [l + 400, 800] },
+      { line: [l, 0] },
+    );
+  }
+
+  const checker: w.PathCommand[] = [];
+  for (let y = 0; y < 20; y += 0.5) {
+    for (let x = 0; x < 20; x += 0.5) {
+      if (((x + y) * 2) % 2 === 0) {
+        checker.push(...rectPath(x, y, 0.5, 0.5));
+      }
+    }
+  }
+
+  const text: w.PathCommand[] = [];
+  for (let row = 0; row < 3; row++) {
+    for (let column = 0; column < 8; column++) {
+      const [x, y] = [column * 5, row * 13];
+      text.push(
+        ...rectPath(x, y, 0.6, 9),
+        ...rectPath(x + 2, y, 0.6, 9),
+        ...rectPath(x, y + 4, 2.6, 0.6),
+      );
+    }
+  }
+
+  const shape = (id: number, commands: w.PathCommand[]) =>
+    w.shape({
+      id,
+      bounds: [0, 1100, 0, 800],
+      fills: [0xffffff],
+      paths: [{ fill1: 1, commands }],
+    });
+  return w.swf({
+    width: 300 * zoom,
+    height: 160 * zoom,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.backgroundColor(0x102030),
+      shape(1, stripes),
+      shape(2, hatching),
+      shape(3, checker),
+      shape(4, text),
+      w.place({ depth: 1, character: 1, matrix: at(10, 10), blurs: [z(64)], quality: 1 }),
+      w.place({
+        depth: 2,
+        character: 2,
+        matrix: at(70, 10),
+        blurs: [z(27)],
+        quality: 2,
+      }),
+      w.place({
+        depth: 3,
+        character: 3,
+        matrix: at(140, 15),
+        glows: [{ color: 0x33ccff, blur: z(27), strength: 2.37 }],
+        quality: 2,
+      }),
+      w.place({
+        depth: 4,
+        character: 4,
+        matrix: at(190, 10),
+        glows: [{ color: 0xff6600, blur: z(64), strength: 1 }],
+        quality: 1,
+      }),
+      w.place({
+        depth: 5,
+        character: 1,
+        matrix: at(30, 105),
+        shadows: [{ blur: z(64), distance: 0, angle: 0, hide: true }],
+        quality: 0,
+      }),
+      w.place({ depth: 6, character: 3, matrix: at(140, 110), blurs: [z(64)], quality: 1 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Wide filters on a stage a host shows `zoom` times its size, as an
 // animation's light effects draw them: glows 27 and 68 wide in two passes,
 // a streak glow 68 across and 5 down, a blur 30 wide and a shadow 24 wide
@@ -9621,6 +9722,17 @@ export const cases: PlayerCase[] = [
     zoom: 3,
     shown: true,
     flash: wideFilters(3),
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
+    name: "thin-filters",
+    swf: thinFilters(1),
+    frames: 1,
+    capture: [1],
+    zoom: 3,
+    shown: true,
+    flash: thinFilters(3),
     tolerance: 8,
     maxOutliers: 0,
   },
