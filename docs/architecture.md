@@ -4711,7 +4711,20 @@ on a screen of three. Against the full runs, on a stage shown 1.5 to 3
 times its size, no channel moved more than 5, and the `wide-filters`
 case holds it to adl at three times; at a texel a stage pixel nothing
 changes. Bevels and the gradient filters, whose difference of two reads
-strength multiplies, keep every texel. A blur of none, which an
+strength multiplies, keep every texel. The object a blur blurs whole, and
+a lone glow or shadow behind its object (whose object is then drawn again
+over it, sharp, through the Pixi fork's `Filter.objectApart`), may be drawn
+into a layer coarser than the target too (`layerFor`), and without
+multisampling where the blur hides the edges as well, at medium and low
+quality alone. At high, best and any other value the stage holds (Flash's
+"8X8" to "16X16LINEAR" among them), the layer is the target's: thin
+geometry repeated under a wide blur (stripes, hatching, a glyph's strokes)
+adds up its edges' errors into whole regions brighter or darker, which no
+cheap measure of the content rules out, as thin parts share a fill with
+thick ones. `tests/player/filter-coverage.ts` checks the coverage and the
+layer each quality takes. A blur of no passes, or of a texel or less,
+never coarsens its layer nor drops its
+samples. A blur of none, which an
 animation's placements carry by the hundred, takes no pass in its chain,
 though it pads as before. A kept output moved is drawn at the new place to the
 whole texel, its content where it fell within a texel when it was

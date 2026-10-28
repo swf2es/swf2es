@@ -184,7 +184,13 @@ export class PixiView {
    */
   set quality(quality: string) {
     gpuBitmaps(this.renderer).smoothing = quality !== "LOW";
+    this.stageQuality = quality;
   }
+
+  /** The stage's quality, which decides how coarse a filter's layer may be drawn (render/filters.ts). */
+  private stageQuality = "HIGH";
+  /** The quality it last drew the stage's filters at; a change visits them all again. */
+  private filteredQuality = "HIGH";
 
   /** The target's pixels a side of one of Flash's its textured triangles were last told, and their smoothing. */
   private meshPixel = 1;
@@ -566,10 +572,20 @@ export class PixiView {
         // A view drawn once keeps no output either.
         node.filters =
           chain.length > 0 || blend === "layer"
-            ? [new FilterChain(chain, container, chain.length > 0 && !this.fresh, this.filterUnits)]
+            ? [
+                new FilterChain(
+                  chain,
+                  container,
+                  chain.length > 0 && !this.fresh,
+                  this.filterUnits,
+                  this.flashPixel,
+                ),
+              ]
             : [];
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
+        } else if (chain.length > 0) {
+          (node.filters[0] as FilterChain).quality = this.stageQuality;
         }
 
         const blending = blendFilters(blend);
@@ -787,8 +803,16 @@ export class PixiView {
     const chain = node.filters[0];
     // Kept on the chain, as lines' strokedAt: one off the list while the screen's scale changed
     // comes back at the old units.
-    if (chain instanceof FilterChain && chain.units !== this.filterUnits) {
-      chain.rescale(this.filterUnits);
+    if (
+      chain instanceof FilterChain &&
+      (chain.units !== this.filterUnits || chain.pixel !== this.flashPixel)
+    ) {
+      chain.rescale(this.filterUnits, this.flashPixel);
+    }
+
+    if (chain instanceof FilterChain && chain.quality !== this.stageQuality) {
+      chain.quality = this.stageQuality;
+      chain.changed();
     }
 
     if (
@@ -1329,7 +1353,12 @@ export class PixiView {
     }
 
     const units = this.filterUnits;
-    this.rescaled = this.leastWidth !== this.strokedAt || units !== this.filteredAt || resmoothed;
+    this.rescaled =
+      this.leastWidth !== this.strokedAt ||
+      units !== this.filteredAt ||
+      resmoothed ||
+      this.stageQuality !== this.filteredQuality;
+    this.filteredQuality = this.stageQuality;
     this.strokedAt = this.leastWidth;
     this.filteredAt = units;
     if (!this.fresh) {
