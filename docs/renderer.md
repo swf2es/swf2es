@@ -47,8 +47,8 @@ This document plans a renderer of swf2es' own, which only draws what Flash
 draws: TypeScript for the GPU calls, data-oriented, in typed arrays,
 with WebAssembly for the kernels that pay for it. Crossing from wasm to
 WebGL costs a call per command, so the commands stay in JavaScript. It
-is reached a step at a time, each step a pull request that improves
-the player on its own, with Pixi doing less after each until it goes.
+is built beside Pixi, behind a switch, and replaces it once it draws
+everything Pixi draws and measures better (see [Steps](#steps)).
 
 ## Layers
 
@@ -75,7 +75,9 @@ structure of typed arrays, an entry a drawable or a boundary:
 
 - **Draw:** what is drawn (a range of the geometry atlas, a texture, a
   glyph run, a video frame, a 3D object's plane), its row, its blend mode,
-  and flags (smoothing, pixel snapping, hairline strokes).
+  and flags (smoothing, pixel snapping, hairline strokes). Textured fills
+  are atlas geometry too: in the busy room, bitmap and gradient fills
+  are as common as bitmaps.
 - **Rows:** a row is an object's concatenated transform and colour
   transform, the table's row today (five texels: the linear part, the
   translation, the tint, the colour transform's multipliers and offsets).
@@ -162,6 +164,10 @@ It decides:
   nesting depth.
 - **Reuse.** A span whose entries and inputs did not change keeps its
   plan from the last frame; only what changed is planned again. A plan
+  is kept only once its span has stood unchanged for a frame: keeping
+  the plans of spans that change every frame cost more than planning
+  them afresh. Its rows and chunks live on the GPU alone, not mirrored
+  on the CPU. A plan
   also depends on more than its entries: the atlas ranges and textures
   it names, which can move or be evicted, and the clip and target it
   inherits from its enclosing spans. Resources carry generations, and a
@@ -216,14 +222,15 @@ validates what a SWF sends and fails as Flash does; the renderer trusts
 its own plans. The device layer becomes a package of its own only if it
 outgrows context3d.
 
-**One context, one owner of its state.** While Pixi, this backend and
-Stage3D share a context, each can change GL state behind the others'
-caches. A stale cache draws wrong, and resetting everything at each
-handoff spends the commands saved. The context's state therefore has a
-single cache, or a handoff protocol that says what each side may assume
-and must restore. This comes early, before the backend draws anything.
-Once it exists, Stage3D's surfaces and the display list compose in one
-context without copies.
+**One context, one owner of its state.** The backend and Stage3D share
+a context, and each could change GL state behind the other's cache. A
+stale cache draws wrong, and resetting everything at each handoff spends
+the commands saved: in step 0, resetting Pixi's state after each run
+cost 1.3 ms a frame, more than the prototype saved. So the context's
+state has a single cache from the first draw, which Stage3D's surfaces
+use too, and they compose with the display list in one context without
+copies. With the switch on, Pixi does not draw at all, so it never
+shares the context with the backend.
 
 A WebGPU backend later implements the same interface: the command buffer
 maps onto a render pass, and a span that stands still onto a render
@@ -259,35 +266,45 @@ and [architecture.md](architecture.md#packages) change with the package.
 
 ## Steps
 
-Each step keeps the Flash references of `tests/player` and the filter,
-context-loss, resize and leak checks passing, and is measured as above
-before it merges.
+Step 0, a throwaway prototype (#616), drew Pixi's Graphics and sprites in
+runs of its own between Pixi's other instructions. On the busy room it
+took Chrome's GPU process from 4.8 to 4.0 ms a render on a discrete GPU,
+the GPU's cycles down 8.5%, draws from 1,414 to 1,020 and buffer uploads
+from 784 to 51 KB; on a mostly still scene with small edits, frames from
+4.1 to 1.0 ms. It lost where every short run changed every frame. Most of
+its work and all of its bugs were in interleaving with Pixi: runs bounded
+by Pixi's render groups, change signals borrowed from Pixi, a colour
+transform Pixi never hears of. Taking object kinds from Pixi a step at a
+time would build that interleaving and then take it apart. So the
+renderer is built beside Pixi instead:
 
-0. **A prototype.** A throwaway scene list and planner that draw the
-   busy room's shape and bitmap runs, measured on the three scenes. It
-   shows which commands disappear and whether frame time improves,
-   before two representations of the scene are kept in step. It counts
-   the whole cost: scene updates, planning, uploads, submission and the
-   handoffs between renderers. It is compared with the current renderer
-   on identical frames at the same resolution, in repeated alternating
-   runs. Its measurements settle what this document leaves open:
-   contiguous or chunked lists, batching thresholds, cache policies.
-1. **The scene list.** Sync writes the list and the row table alongside
-   Pixi's containers, and the transform table plans its runs from the list
-   in place of the batcher's upload hook. Pixi still draws.
-2. **The planner.** It plans runs, layers and filter reuse from the list,
-   and the view and the fork's pipes follow its plan. Planner unit tests
-   start here.
-3. **The backend for runs.** The shared context's state ownership comes
-   first. Then the row program draws the planner's runs of
-   fills, bitmaps and glyphs on context3d's pieces; Pixi draws only what
-   the planner hands it (filters, masks, blends, 3D planes).
-4. **Masks, clips, filters and blends,** one at a time, onto the backend.
-   `BitmapData.draw` with them.
-5. **Pixi removed:** its containers, groups, pools and fork. Render groups,
-   settling and spare batchers go with it.
-6. **WebGPU,** behind the same command buffer, when the WebGL backend is
-   complete.
+1. **A renderer behind a switch,** on `dev`, off by default. With the
+   switch on it owns the whole frame and the GL context: its own sync
+   from the display list, writing the scene list and rows from the
+   player's change signals (transforms and colours write rows, structure
+   writes spans), the planner, resources and backend. Pixi stays the
+   default, and takes only fixes the player meets, not upstream's
+   releases.
+2. **Grown to completeness,** in pull requests each small enough to
+   review, in about this order:
+   - shapes, bitmaps and text;
+   - masks and scroll clips;
+   - blend modes;
+   - filters;
+   - `BitmapData.draw`;
+   - 3D planes;
+   - context loss.
 
-Until step 5 the fork stays, but takes only fixes the player meets, not
-upstream's releases.
+   The player's Flash references, the corpus and the draw counts run
+   with the switch on as well as off. What passes with it on is how
+   complete it is, and a reference that passed may not fail again.
+3. **The default flipped** once every reference passes with the switch
+   on and it measures better on the three scenes, on an integrated GPU
+   and a discrete one.
+4. **Pixi removed:** its containers, render groups, settling, pools,
+   spare batchers and the fork.
+5. **WebGPU,** behind the same command buffer.
+
+Until the default flips, each pull request is judged by what it adds to
+the switch's completeness and by its measurements, not by improving the
+default renderer.
