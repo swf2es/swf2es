@@ -99,8 +99,9 @@ over the builtins, then each conformance case (also compiled with asc's
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
-| `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend | — |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer           | format, codegen, context3d, native, runtime |
+| `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
+| `render`  | the renderer of swf2es's own, beside Pixi behind a switch ([renderer.md](renderer.md)): scene list, planner and WebGL 2 backend | context3d |
+| `player`  | display list, timeline, playerglobal, PixiJS renderer, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, native, player, player-hosts |
@@ -158,6 +159,21 @@ translation. Its core is built without DOM or node types; the separate
 `@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
 Neither entry depends on player AS objects or Pixi. The two TypeScript projects
 keep browser types out of the core while the normal package build checks both.
+A third, `@swf2es/context3d/device`, is what a WebGL 2 context's one owner
+sets it through, shared with `@swf2es/render`'s backend: linking programs,
+and a cache of its state, so that nothing is set twice
+([renderer.md](renderer.md#the-backend)).
+
+`@swf2es/render` is the renderer of swf2es's own, growing beside Pixi
+([renderer.md](renderer.md)). Its core (scene list, rows, geometries, the
+planner and the command buffer it writes) loads no DOM or node types and
+is tested as data; `@swf2es/render/webgl` executes the commands. The
+player drives it through `RenderView` (`@swf2es/player/scene`, kept off the
+player's index so that hosts on Pixi load none of it), which owns its
+canvas and walks the display list into the scene list.
+`SWF2ES_RENDERER=own node tests/player/run.ts` draws the reference cases
+with it; `tests/player/own-renderer.json` lists those it draws as Flash
+does, and none of them may fail again.
 Flash bindings and validation are an explicit experimental entry,
 `@swf2es/player/context3d`. `installContext3D` must run before loading
 playerglobal, and its returned teardown must run before destroying Scripting.

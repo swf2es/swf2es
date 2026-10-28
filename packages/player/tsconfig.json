@@ -22,6 +22,12 @@
     },
     {
       "path": "../native"
+    },
+    {
+      "path": "../render/tsconfig.core.json"
+    },
+    {
+      "path": "../render/tsconfig.webgl.json"
     }
   ]
 }
