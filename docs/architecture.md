@@ -3292,8 +3292,48 @@ not the table texture, as an upload between draws cost a few µs more a
 run (0.5 ms a frame on 128 runs of 22); a longer one uploads its rows in
 one call, the whole lines they span if more than one. The rows are
 uploaded between draws that read the table, which a driver may make wait
-for the earlier draws (ANGLE on D3D11 or Metal, unmeasured). Small
-Graphics under a Flash colour transform, and a settled group's, stay
+for the earlier draws (ANGLE on D3D11 or Metal, unmeasured).
+
+That is the table where WebGL 2 lacks float framebuffers, on a renderer
+that draws on the CPU, or switched to it (`setTransformTable`'s `pull`,
+`bench.ts --multi-draw`; `--pull` the other way): Chrome's GPU
+process pays for each draw of a multi-draw as for a call of its own, so
+in a recorded crowded scene its 13 multi-draws a frame, of 383 draws,
+saved it nothing. Elsewhere a run of one blend mode is one pulled draw,
+a `drawArraysInstanced` with no attributes. The atlas keeps each index'
+vertex in a float texture instead, its position and its colour's bytes
+two to a float (the expanded atlas), and an instance is a chunk of up to
+96 of a batch's indices, whose texel in a third texture names its row,
+its first index and how many it has: the vertex shader fetches the
+chunk, the vertex and the row, and puts a vertex past the chunk's end
+outside the clip volume. One draw of the run's vertices, each finding
+its batch by halves among the run's rows, took GL's time on `bench.ts
+--rig 400 --gpu`'s 9,600 batches from 13 to 15–17 ms on an integrated
+GPU; chunks take 12.4. A run is planned as its render group's batches
+are uploaded, the group's transforms updated (`render/hooks.ts`), so
+that a frame's rows and chunks go up in a call each before anything is
+drawn, not between draws; one planned for an earlier render, or whose
+contexts have left the atlas since, is planned again as it is drawn.
+The three textures are bound to the last texture units, which nothing
+else takes: bound as Pixi binds a shader's, from unit 0, which every
+other draw takes too, they cost a thousand binds a frame more than the
+uniforms they saved. In the recorded scene, on an Intel Iris Xe at
+2131×1221, draws went from 2,010 to 1,413 a frame and the table's from
+1,020 to 422, uniform calls from 2,960 to 2,151 and GL calls from 12,700
+to 11,273; Chrome's GPU process spent 16.5 ms on its main thread a
+render, not 17.3 (four runs of each, alternated), and the GPU's time
+stayed at some 20 ms. The page's main thread spent some 0.5 ms more,
+on the plans, as on `--rig 400 --fresh` (0.3 ms; GL's time 2 ms, not
+3.2). Software GL draws them slower: SwiftShader's GL time on `--rig
+400 --fresh` doubled, from 130 to 286 ms, its vertex shader's texture
+fetches slow, and Chrome draws on it, or on Mesa's llvmpipe, without a
+GPU it may use (a blocklisted driver, a virtual machine, a remote
+desktop): a renderer whose name says SwiftShader, llvmpipe or software
+makes the multi-draws unless pulled draws are asked for. `table-runs.ts`
+and `draw-counts.ts` ask for them, so that software GL, as CI's, draws
+and counts them too.
+
+Small Graphics under a Flash colour transform, and a settled group's, stay
 batched copies with the colour batcher: drawn by the table, `--branches
 64`'s few batches became 12,000 draws, which saved the main thread a
 millisecond and cost GL two on a GPU, fifteen under software GL. A large

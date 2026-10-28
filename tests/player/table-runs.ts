@@ -1,10 +1,14 @@
-// The transform table's runs (render/table.ts) in one frame: a run long
-// enough for a multi-draw that takes its rows in uniforms, then short runs
-// drawn from the atlas a call a draw by the same program, each draw told
-// its row, with filters ending each run. Drawn with the table and without
-// it, under software GL and on the GPU, the frames must be the same pixels:
-// a draw reading another's row, as one would if gl_DrawID were left from
-// the multi-draw before it, puts a shape in another's place.
+// The transform table's runs (render/table.ts) in one frame, with filters
+// ending each run: drawn as pulled draws, each run one call; and as the
+// multi-draws before them, a run long enough for a multi-draw that takes
+// its rows in uniforms, then short runs drawn from the atlas a call a draw
+// by the same program, each draw told its row. Drawn either way and
+// without the table, under software GL and on the GPU, the frames must be
+// the same pixels: a draw reading another's row, as one would if
+// gl_DrawID were left from the multi-draw before it, or a pulled vertex
+// another draw's, puts a shape in another's place. Pulled draws are asked
+// for, as software GL makes multi-draws by default; and so in a scene that
+// grows the expanded atlas, which must draw as without the table.
 import assert from "node:assert/strict";
 import * as w from "../swf-writer.ts";
 import { runPlayer } from "./chrome.ts";
@@ -87,31 +91,93 @@ for (const run of [30, 5, 3, 24]) {
 tags.push(w.showFrame(), w.end());
 const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 
-for (const gpu of [false, true]) {
-  const job = { swf, frames: 1, capture: [1] };
-  const [table, pixi] = await runPlayer([job, { ...job, table: false }], { gpu });
-  assert.equal(table.error, null);
-  assert.equal(pixi.error, null);
-  // Without the extension, as some software GL has it, the table draws nothing: the frames must
-  // still match, but that is all the run shows.
-  const where = `${gpu ? "GPU" : "software GL"} (${table.gl})`;
-  console.log(`table-runs: ${where}, ${table.tableDraws} draws in multi-draws`);
-  if (table.multiDraw) {
-    assert.ok(table.tableDraws > 0, `${where}: the long runs were no multi-draws`);
-  } else {
-    console.log(`table-runs: ${where} has no WEBGL_multi_draw; the table drew nothing`);
-  }
+// 60 shapes of 300 to 359 curves each, more indices than the expanded atlas starts with room for:
+// it grows as they are placed, its texture blitted into a larger one, and must draw the same.
+const growing: Uint8Array[] = [w.fileAttributes(false)];
+for (let k = 0; k < 60; k++) {
+  growing.push(
+    w.shape({
+      id: k + 1,
+      bounds: [-1400, 1400, -1400, 1400],
+      fills: [(k * 0x2f5b13) & 0xffffff],
+      paths: [{ fill1: 1, commands: ring(1000, 300 + k) }],
+    }),
+  );
+}
 
-  const a = decodePng(table.images.get(1) as Uint8Array);
-  const b = decodePng(pixi.images.get(1) as Uint8Array);
+for (let k = 0; k < 60; k++) {
+  growing.push(
+    w.place({
+      depth: k + 1,
+      character: k + 1,
+      matrix: { a: 0.15, d: 0.15, tx: 300 + (k % 10) * 750, ty: 300 + Math.floor(k / 10) * 900 },
+    }),
+  );
+}
+
+growing.push(w.showFrame(), w.end());
+const grows = w.swf({ width: 400, height: 300, frameCount: 1, tags: growing });
+
+/** How many bytes of two runs' first frames differ. */
+function differing(a: { images: Map<number, Uint8Array> }, b: { images: Map<number, Uint8Array> }) {
+  const x = decodePng(a.images.get(1) as Uint8Array);
+  const y = decodePng(b.images.get(1) as Uint8Array);
   let differ = 0;
-  for (let i = 0; i < a.data.length; i++) {
-    if (a.data[i] !== b.data[i]) {
+  for (let i = 0; i < x.data.length; i++) {
+    if (x.data[i] !== y.data[i]) {
       differ++;
     }
   }
 
-  assert.equal(differ, 0, `${where}: ${differ} bytes differ`);
+  return differ;
+}
+
+for (const gpu of [false, true]) {
+  const job = { swf, frames: 1, capture: [1] };
+  const [pulled, multi, pixi] = await runPlayer(
+    // Pulled draws asked for, as software GL makes multi-draws by default.
+    [
+      { ...job, tablePull: true },
+      { ...job, tablePull: false },
+      { ...job, table: false },
+    ],
+    { gpu },
+  );
+  assert.equal(pulled.error, null);
+  assert.equal(multi.error, null);
+  assert.equal(pixi.error, null);
+  // Without WebGL 2 the table draws nothing, and without WEBGL_multi_draw, as some software GL
+  // has it, it makes no multi-draws: the frames must still match, but that is all the run shows.
+  const where = `${gpu ? "GPU" : "software GL"} (${pulled.gl})`;
+  console.log(
+    `table-runs: ${where}, ${pulled.tableDraws} draws pulled, ${multi.tableDraws} in multi-draws`,
+  );
+  if (pulled.webGL2) {
+    assert.ok(pulled.tableDraws > 0, `${where}: the table pulled no draws`);
+  } else {
+    console.log(`table-runs: ${where} is no WebGL 2; the table drew nothing`);
+  }
+
+  for (const [name, run] of [
+    ["pulled", pulled],
+    ["multi-draws", multi],
+  ] as const) {
+    const differ = differing(run, pixi);
+    assert.equal(differ, 0, `${where}, ${name}: ${differ} bytes differ`);
+  }
+
+  const grown = { swf: grows, frames: 1, capture: [1] };
+  const [pulledGrown, pixiGrown] = await runPlayer(
+    [
+      { ...grown, tablePull: true },
+      { ...grown, table: false },
+    ],
+    { gpu },
+  );
+  assert.equal(pulledGrown.error, null);
+  assert.equal(pixiGrown.error, null);
+  const differ = differing(pulledGrown, pixiGrown);
+  assert.equal(differ, 0, `${where}, the atlas grown: ${differ} bytes differ`);
 }
 
 console.log("table-runs: ok");

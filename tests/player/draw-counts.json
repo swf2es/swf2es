@@ -1,7 +1,7 @@
 {
   "crowd": {
     "calls": 2,
-    "subDraws": 538.67,
+    "subDraws": 2,
     "useProgram": 2,
     "bindVertexArray": 2.13,
     "bindFramebuffer": 2,
@@ -29,11 +29,11 @@
     "useProgram": 17,
     "bindVertexArray": 15,
     "bindFramebuffer": 20,
-    "uniforms": 50
+    "uniforms": 48
   },
   "swap": {
     "calls": 2,
-    "subDraws": 51.57,
+    "subDraws": 2,
     "useProgram": 2,
     "bindVertexArray": 2,
     "bindFramebuffer": 2,

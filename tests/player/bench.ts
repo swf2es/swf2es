@@ -74,6 +74,15 @@
 // timed apart. --min-run N has the table draw only runs of N draws or
 // more as one multi-draw, to time where that starts to gain; it draws the
 // shorter from its atlas a call a draw, or with --no-loop leaves them to Pixi.
+// --multi-draw has the table make those multi-draws, as it did before it
+// drew each run in one call that fetches its vertices (pulled draws), and
+// --pull has it pull them, to time the two apart; left to it, it pulls
+// them on a GPU and makes multi-draws under software GL. --min-run and
+// --no-loop are about the multi-draws alone.
+//
+// --counts counts what the frames ask of GL and of Pixi's pipes (perFrame
+// in --json's output), each call wrapped: left out, the frames are timed
+// unwrapped.
 //
 // --scripted N plays instead N rigs whose 12 parts are clips of a class
 // with a frame script, each frame taken off and new ones put in their
@@ -110,7 +119,8 @@
 // which a script draws a sprite of drifting dots each frame and then
 // scrolls it a pixel up, as a preloader's trail of rising sparks does: a
 // draw on the GPU followed by an operation on the store's pixels, which
-// must not bring them back from the GPU each frame (perFrame.readbacks).
+// must not bring them back from the GPU each frame (with --counts,
+// perFrame.readbacks).
 //
 // --triangles N plays instead a script that clears a Graphics and draws N
 // textured triangles again on every frame, their vertices turning, with
@@ -145,7 +155,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--no-loop] [--pace MS] [--hover]
+//     [--min-run N] [--no-loop] [--multi-draw | --pull] [--counts] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
@@ -1359,6 +1369,9 @@ const result = await benchPlayer(
   args.includes("--hover"),
   args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
   !args.includes("--no-loop"),
+  false,
+  args.includes("--counts"),
+  args.includes("--multi-draw") ? false : args.includes("--pull") ? true : undefined,
 );
 if (result.error) {
   console.error(result.error);
@@ -1431,7 +1444,7 @@ const summary = {
   frameMean: Math.round((total.reduce((a, b) => a + b, 0) / total.length) * 100) / 100,
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, rebuilds, tessellation, uploads.
-  perFrame: perFrame(result.meters.slice(WARMUP)),
+  ...(args.includes("--counts") ? { perFrame: perFrame(result.meters.slice(WARMUP)) } : {}),
   ...(args.includes("--allocs")
     ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
     : {}),

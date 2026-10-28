@@ -32,9 +32,11 @@ export function hookRenderer(renderer: Renderer): void {
 
   hooked.add(renderer);
   const graphicsPipe = renderer.renderPipes?.graphics;
+  const found = (renderer.renderPipes as object as { flashTable?: unknown } | undefined)
+    ?.flashTable;
+  const table = found instanceof TablePipe ? found : null;
   if (graphicsPipe instanceof GraphicsPipe) {
-    const table = (renderer.renderPipes as object as { flashTable?: unknown }).flashTable;
-    graphicsPipe.aloneDrawer = table instanceof TablePipe ? table : null;
+    graphicsPipe.aloneDrawer = table;
     graphicsPipe.shaderFor = (graphics) => colorShaderFor(graphics, renderer);
   }
 
@@ -44,6 +46,15 @@ export function hookRenderer(renderer: Renderer): void {
     batchPipe.batchersFor = (set) => spareBatchersFor(batchPipe, set);
     // Batches on the GPU alone, packed in buffers every group shares (WebGL 2; others keep their own).
     batchPipe.gpuResident = true;
+    if (table) {
+      // Pixi has a group's batches uploaded once its transforms are updated, before anything is
+      // drawn: the table plans the group's runs then, for their rows to go up at once.
+      const upload = batchPipe.upload;
+      batchPipe.upload = function (this: BatcherPipe, instructionSet) {
+        table.prepare(instructionSet);
+        upload.call(this, instructionSet);
+      };
+    }
   }
 
   const contexts = (renderer as { graphicsContext?: unknown }).graphicsContext;

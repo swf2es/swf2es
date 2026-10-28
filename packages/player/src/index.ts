@@ -53,7 +53,7 @@ export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js"
 export type { Pointer, PointerState } from "./input/pointer.js";
 export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
-export { setTransformTable } from "./render/table.js";
+export { setTransformTable, transformTableDrawn } from "./render/table.js";
 export type { FillTessellator } from "./render/tessellate.js";
 export { PixiView, type PixiViewOptions } from "./render/view.js";
 export { airLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
