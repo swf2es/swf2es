@@ -164,6 +164,7 @@
   "events",
   "field-position",
   "fill-holes",
+  "filter-cache",
   "filter-far",
   "filter-far-shadow",
   "filter-menu",

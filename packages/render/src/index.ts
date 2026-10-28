@@ -2,6 +2,7 @@
 // arrays, and the planner that turns it into commands. No GPU, no DOM.
 export {
   CLEAR,
+  COMPOSITE,
   Commands,
   FILTER,
   LAYER_POP,
@@ -28,7 +29,8 @@ export {
   type GeometryHandle,
   IDLE_FRAMES,
 } from "./geometry.js";
-export { drawnArea, type MeasureTarget, measureLayers } from "./measure.js";
+export { KEEP_IDLE_FRAMES, type KeepHandle, Keeps } from "./keeps.js";
+export { drawnArea, filteredRect, type MeasureTarget, measureLayers } from "./measure.js";
 export { plan } from "./plan.js";
 export { type ColorRow, ROW_FLOATS, ROWS_A_LINE, Rows } from "./rows.js";
 export {
@@ -42,6 +44,7 @@ export {
   ERASE,
   HARDLIGHT,
   INVERT,
+  KEPT,
   LAYER,
   LAYER_BEGIN,
   LAYER_END,

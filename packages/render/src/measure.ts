@@ -2,6 +2,7 @@ import type { Geometries } from "./geometry.js";
 import { ROW_FLOATS, type Rows } from "./rows.js";
 import {
   DRAW,
+  KEPT,
   LAYER_BEGIN,
   LAYER_END,
   MASK_BEGIN,
@@ -113,11 +114,27 @@ export function measureLayers(
           break;
         }
 
-        filteredRect(layer, pad, target, scene);
+        const kept = scene.areas;
+        for (let k = 0; k < 4; k++) {
+          kept[layer * 4 + k] = areas[n - 4 + k];
+        }
+
+        filteredRect(scene.areas, layer * 4, pad, target, scene.layers, layer * 4);
         areas.length = n - 4;
         const r = scene.layers;
         const at = layer * 4;
         if (r[at + 2] > 0) {
+          unionTop(r[at], r[at + 1], r[at] + r[at + 2], r[at + 1] + r[at + 3]);
+        }
+
+        break;
+      }
+
+      case KEPT: {
+        // A kept output covers its rectangle, which its owner placed.
+        const r = scene.layers;
+        const at = scene.geometry[i] * 4;
+        if (r[at + 2] > 0 && r[at + 3] > 0) {
           unionTop(r[at], r[at + 1], r[at] + r[at + 2], r[at + 1] + r[at + 3]);
         }
 
@@ -128,19 +145,31 @@ export function measureLayers(
 }
 
 /**
- * The rectangle of filtered layer `layer`, padded by `pad` units, from the
- * area on top, as Pixi's filter system has it (FilterSystem's
- * _calculateFilterArea): in units, the area cut to the target, out to
- * whole pixels at the resolution, padded; nothing where it has no size
- * then; its edges snapped to the pixels they lie on.
+ * The rectangle a filtered layer padded by `pad` units covers, from its
+ * area (least x and y, greatest x and y in target pixels, from `area[at]`)
+ * as Pixi's filter system had it (FilterSystem's _calculateFilterArea): in
+ * units, the area cut to the target, out to whole pixels at the
+ * resolution, padded; nothing where it has no size then; its edges
+ * snapped to the pixels they lie on. Into `out` from `to`: x, y, width,
+ * height, of no size for nothing.
  */
-function filteredRect(layer: number, pad: number, target: MeasureTarget, scene: SceneList): void {
-  const n = areas.length;
+export function filteredRect(
+  area: ArrayLike<number>,
+  at: number,
+  pad: number,
+  target: MeasureTarget,
+  out: Int32Array,
+  to: number,
+): void {
   const res = target.resolution;
-  let x0 = areas[n - 4] / res;
-  let y0 = areas[n - 3] / res;
-  let x1 = areas[n - 2] / res;
-  let y1 = areas[n - 1] / res;
+  let x0 = area[at] / res;
+  let y0 = area[at + 1] / res;
+  let x1 = area[at + 2] / res;
+  let y1 = area[at + 3] / res;
+  out[to] = 0;
+  out[to + 1] = 0;
+  out[to + 2] = 0;
+  out[to + 3] = 0;
   if (!(x1 > x0 && y1 > y0)) {
     return;
   }
@@ -161,9 +190,10 @@ function filteredRect(layer: number, pad: number, target: MeasureTarget, scene: 
 
   const left = Math.floor(x0 * res + TEXEL_SNAP);
   const top = Math.floor(y0 * res + TEXEL_SNAP);
-  const right = Math.ceil(x1 * res - TEXEL_SNAP);
-  const bottom = Math.ceil(y1 * res - TEXEL_SNAP);
-  scene.layerRect(layer, left, top, right - left, bottom - top);
+  out[to] = left;
+  out[to + 1] = top;
+  out[to + 2] = Math.ceil(x1 * res - TEXEL_SNAP) - left;
+  out[to + 3] = Math.ceil(y1 * res - TEXEL_SNAP) - top;
 }
 
 /**

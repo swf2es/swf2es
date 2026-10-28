@@ -13,12 +13,18 @@ export const STENCIL_POP = 4;
  * target whose x, y, width and height are params from `a`, `b` 1 where
  * filters will read it past that rectangle, which is then clear too; and
  * composited onto the one below in blend mode `a`, coloured by row `b`
- * (or -1).
+ * (or -1), its output kept as kept output `c` (Keeps), or not (-1).
  */
 export const LAYER_PUSH = 5;
 export const LAYER_POP = 6;
 /** The filters of chain `a` of the frame's filter list run over the layer drawn into, in turn. */
 export const FILTER = 7;
+/**
+ * A kept output (Keeps) composited again onto the target drawn into, in
+ * blend mode `b`, coloured by row `c` (or -1): its rectangle's x, y, width
+ * and height, then its id, are params from `a`.
+ */
+export const COMPOSITE = 8;
 
 /**
  * What a frame asks of the backend, in order: each operation an opcode and

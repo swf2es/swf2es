@@ -1,5 +1,6 @@
 import {
   CLEAR,
+  COMPOSITE,
   type Commands,
   FILTER,
   LAYER_POP,
@@ -10,6 +11,7 @@ import {
 } from "./commands.js";
 import {
   DRAW,
+  KEPT,
   LAYER_BEGIN,
   LAYER_END,
   MASK_BEGIN,
@@ -27,6 +29,7 @@ import {
  */
 export function plan(scene: SceneList, background: number, out: Commands): void {
   out.reset();
+  open.length = 0;
   const alpha = (background >>> 24) / 255;
   out.push(
     CLEAR,
@@ -84,6 +87,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
           break;
         }
 
+        open.push(scene.geometry[i]);
         out.push(
           LAYER_PUSH,
           out.param(r[at], r[at + 1], r[at + 2], r[at + 3]),
@@ -97,13 +101,31 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
           out.push(FILTER, scene.texture[i]);
         }
 
-        out.push(LAYER_POP, scene.geometry[i], scene.row[i]);
+        out.push(LAYER_POP, scene.geometry[i], scene.row[i], scene.keeps[open.pop() as number]);
         break;
+      case KEPT: {
+        close(i);
+        const r = scene.layers;
+        const at = scene.geometry[i] * 4;
+        if (r[at + 2] > 0 && r[at + 3] > 0) {
+          out.push(
+            COMPOSITE,
+            out.param(r[at], r[at + 1], r[at + 2], r[at + 3], scene.texture[i]),
+            scene.blend[i],
+            scene.row[i],
+          );
+        }
+
+        break;
+      }
     }
   }
 
   close(scene.length);
 }
+
+/** The layers pushed and not yet popped, by number, innermost last. */
+const open: number[] = [];
 
 /** The LAYER_END that closes the layer begun at entry `begin`. */
 function layerEnd(scene: SceneList, begin: number): number {

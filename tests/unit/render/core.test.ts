@@ -4,11 +4,14 @@ import {
   BLUR,
   CLEAR,
   COLOR_MATRIX,
+  COMPOSITE,
   Commands,
   FILTER,
   Filters,
   Geometries,
   IDLE_FRAMES,
+  KEEP_IDLE_FRAMES,
+  Keeps,
   LAYER_END,
   LAYER_POP,
   LAYER_PUSH,
@@ -216,7 +219,7 @@ test("a layer's draws run inside its push, and it composites in its mode and col
     [RUN, 0, 1, 0],
     [LAYER_PUSH, 4, 0, 0],
     [RUN, 2, 2, 0],
-    [LAYER_POP, MULTIPLY, 7, 0],
+    [LAYER_POP, MULTIPLY, 7, -1],
     [RUN, 5, 1, 0],
   ]);
   // The rectangle after the background's four, as the push names them.
@@ -330,7 +333,7 @@ test("a filtered layer clears past its rectangle, and runs its chain before it c
     [LAYER_PUSH, 4, 1, 0],
     [RUN, 1, 1, 0],
     [FILTER, 0, 0, 0],
-    [LAYER_POP, NORMAL, 2, 0],
+    [LAYER_POP, NORMAL, 2, -1],
   ]);
 });
 
@@ -363,4 +366,52 @@ test("a filtered layer is measured as Pixi's filter system measured it, padded p
   // At twice the pixels a unit, the padding is twice as many of them.
   measureLayers(scene, rows, geometries, { width: 400, height: 400, scale: 2, resolution: 2 });
   assert.deepEqual(Array.from(scene.layers.subarray(0, 4)), [15, 34, 51, 54]);
+});
+
+test("a layer keeps its output as its kept output, which a later frame composites again", () => {
+  const scene = new SceneList();
+  scene.layerBegin(0, 5);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(NORMAL, -1, -1);
+  scene.layerRect(0, 1, 2, 3, 4);
+  // Composited again in its mode and colour, unless its rectangle shows nothing.
+  scene.keptLayer(5, MULTIPLY, 3, 10, 20, 30, 40);
+  scene.keptLayer(6, NORMAL, -1, 10, 20, 0, 40);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [
+    [LAYER_PUSH, 4, 1, 0],
+    [RUN, 1, 1, 0],
+    [LAYER_POP, NORMAL, -1, 5],
+    [COMPOSITE, 8, MULTIPLY, 3],
+  ]);
+  assert.deepEqual(Array.from(commands.params.subarray(8, 13)), [10, 20, 30, 40, 5]);
+  // A kept output counts toward the layer it is in.
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const outer = new SceneList();
+  outer.layerBegin();
+  outer.keptLayer(0, NORMAL, -1, 10, 20, 30, 40);
+  outer.layerEnd(MULTIPLY, -1);
+  measureLayers(outer, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  assert.deepEqual(Array.from(outer.layers.subarray(0, 4)), [9, 19, 32, 42]);
+});
+
+test("a kept output goes once undrawn long enough, and a lost context takes them all", () => {
+  const keeps = new Keeps();
+  const used = keeps.add();
+  const idle = keeps.add();
+  for (let frame = 0; frame <= KEEP_IDLE_FRAMES + 1; frame++) {
+    keeps.use(used.id);
+    keeps.endFrame();
+  }
+
+  assert.ok(keeps.alive(used));
+  assert.ok(!keeps.alive(idle));
+  assert.deepEqual(keeps.removed, [idle.id]);
+  const again = keeps.add();
+  assert.equal(again.id, idle.id);
+  assert.ok(!keeps.alive(idle));
+  keeps.lost();
+  assert.ok(!keeps.alive(used) && !keeps.alive(again));
 });

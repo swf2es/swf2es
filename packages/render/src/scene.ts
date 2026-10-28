@@ -56,6 +56,12 @@ export const MASK_POP = 3;
  */
 export const LAYER_BEGIN = 4;
 export const LAYER_END = 5;
+/**
+ * A layer kept from a frame before (Keeps) composited again, over the
+ * rectangle of its layer number (its geometry), in its blend mode, its
+ * colour transform its row; its texture the kept one's id.
+ */
+export const KEPT = 6;
 
 /** How an entry samples its texture: smoothed, and clamped, repeated or mirrored past its edges. */
 export const SMOOTH = 1;
@@ -84,6 +90,13 @@ export class SceneList {
    * unfiltered layer, which covers what is drawn alone.
    */
   pads = new Int32Array(16);
+  /** Each layer's kept output, which its output becomes (Keeps), or -1. */
+  keeps = new Int32Array(16);
+  /**
+   * Each filtered layer's area as measured, before it was rounded and
+   * padded: least x and y, greatest x and y, in target pixels.
+   */
+  areas = new Float64Array(64);
   layerCount = 0;
 
   reset(): void {
@@ -99,15 +112,43 @@ export class SceneList {
    * A layer begun, padded for its filters (or -1), its rectangle none till
    * measured (layerRect): its number.
    */
-  layerBegin(padding = -1): number {
+  layerBegin(padding = -1, keep = -1): number {
+    const layer = this.newLayer(padding, keep);
+    this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
+    return layer;
+  }
+
+  /**
+   * Kept output `keep` composited again over the rectangle x y width height
+   * of the target, in blend mode `mode`, coloured by `row`.
+   */
+  keptLayer(
+    keep: number,
+    mode: number,
+    row: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
+    const layer = this.newLayer(-1, keep);
+    this.layerRect(layer, x, y, width, height);
+    this.push(KEPT, layer, row, mode, keep, 0);
+  }
+
+  private newLayer(padding: number, keep: number): number {
     const layer = this.layerCount++;
     if (layer >= this.pads.length) {
       this.layers = grow(this.layers);
       this.pads = grow(this.pads);
+      this.keeps = grow(this.keeps);
+      const areas = new Float64Array(this.areas.length * 2);
+      areas.set(this.areas);
+      this.areas = areas;
     }
 
     this.pads[layer] = padding;
-    this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
+    this.keeps[layer] = keep;
     this.layerRect(layer, 0, 0, 0, 0);
     return layer;
   }
