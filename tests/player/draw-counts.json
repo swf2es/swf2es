@@ -35,7 +35,7 @@
     "calls": 2,
     "subDraws": 51.4,
     "useProgram": 2,
-    "bindVertexArray": 2.1,
+    "bindVertexArray": 2.03,
     "bindFramebuffer": 2,
     "uniforms": 2
   }
