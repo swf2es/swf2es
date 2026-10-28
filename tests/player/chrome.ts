@@ -24,6 +24,8 @@ export interface PlayerJob {
   table?: boolean;
   /** The fewest draws a run makes through the table; its default where not given. */
   tableMinRun?: number;
+  /** Whether the table's runs are pulled draws where it can (render/table.ts), as by default, or multi-draws. */
+  tablePull?: boolean;
   /** The stage shown at the zoom, its frames that size, rather than drawn back to its size (page.ts). */
   shown?: boolean;
   /** Ruffle's recorded input, played after each frame (replay.ts). */
@@ -60,11 +62,11 @@ export interface PlayerResult {
   images: Map<number, Uint8Array>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
-  /** The draws the transform table made. */
+  /** The contexts' batches the transform table drew. */
   tableDraws: number;
-  /** What drew, and whether it had WEBGL_multi_draw, which the table needs. */
+  /** What drew, and whether it was WebGL 2, which the table needs. */
   gl: string;
-  multiDraw: boolean;
+  webGL2: boolean;
   /** What stopped the player, if anything. */
   error: string | null;
 }
@@ -342,7 +344,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               trace: string[];
               tableDraws: number;
               gl: string;
-              multiDraw: boolean;
+              webGL2: boolean;
               error: string | null;
             }
           | undefined;
@@ -350,7 +352,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           const answer = evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false}, ${job.tablePull ?? true})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
           ({ value, exception } = await (options.timeout
@@ -392,7 +394,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
           trace: value?.trace ?? [],
           tableDraws: value?.tableDraws ?? 0,
           gl: value?.gl ?? "unknown",
-          multiDraw: value?.multiDraw ?? false,
+          webGL2: value?.webGL2 ?? false,
           error,
         };
         results.push(result);
@@ -491,6 +493,7 @@ export function benchPlayer(
   tableLoop = true,
   clock = false,
   metered = false,
+  tablePull = true,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -513,7 +516,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop}, ${clock}, ${metered})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop}, ${clock}, ${metered}, ${tablePull})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };

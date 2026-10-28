@@ -2,14 +2,21 @@
 // (docs/architecture.md, "Rendering"). Each draws a shared context's
 // geometry under its own transform, a draw call apiece: in a crowded room,
 // thousands a frame, each binding the context's buffers and setting its
-// uniforms. Here the contexts' local vertices go once into one buffer, the
-// atlas, and a run of such Graphics is one multi-draw of their index
-// ranges, each draw reading its transform and tint from a row of a float
-// texture by gl_DrawID, or of a uniform array for a short run: a frame
-// writes the rows and uploads them, and no vertex moves. A run too short to
-// repay its multi-draw, as filters leave, is drawn from the atlas a call a
-// draw, each told its row: its buffers bound once for the run, where
-// Pixi's pipe binds each context's own and sets each Graphics' uniforms. What the
+// uniforms. Here the contexts' local vertices go once into an atlas, and a
+// run of such Graphics is one instanced draw call: each index' vertex kept
+// in a texture, the expanded atlas, which the vertex shader fetches, an
+// instance a chunk of a batch's indices, the chunk naming them and the
+// Graphics' row of a float texture, its transform and tint (TablePipe,
+// pulled draws). A frame writes the rows and chunks of every run and
+// uploads them at once, and no vertex moves. Where WebGL 2 lacks float
+// framebuffers, or switched off to time the two, the atlas is a vertex
+// and an index buffer, and a run is one multi-draw of their index ranges,
+// each draw reading its row by gl_DrawID, or from a uniform array for a
+// short run; a run too short to repay its multi-draw, as filters leave, is
+// drawn from the atlas a call a draw, each told its row: its buffers bound
+// once for the run, where Pixi's pipe binds each context's own and sets
+// each Graphics' uniforms. Chrome's GPU process pays for each draw of a
+// multi-draw as for a call, which a pulled draw is not. What the
 // table cannot draw, a context with a texture or a Graphics that rounds to
 // pixels, is drawn by Pixi's own pipe in its place in the run. A large
 // Graphics under a Flash colour transform, in a group that has not settled,
@@ -87,25 +94,57 @@ const ATLAS_LEAST = 4096;
  */
 const ATLAS_GROWTH = 2;
 
+/**
+ * Texels a line of the expanded atlas' texture, and of the pulled draws'
+ * chunks: WebGL 2's least MAX_TEXTURE_SIZE.
+ */
+const ATLAS_WIDTH = 2048;
+/**
+ * Past this a float no longer holds every integer: the most indices the
+ * expanded atlas holds, as the chunks name them in floats.
+ */
+const EXACT = 1 << 24;
+/**
+ * Vertices an instance of a pulled draw: a chunk of a batch's, a whole
+ * number of triangles, the last of a batch's chunks drawn short. Its
+ * vertices past the batch's end are dropped, which costs the GPU little
+ * against finding a vertex' batch among thousands (on `bench.ts --rig 400
+ * --gpu`, a search by halves took GL's time from 13 to 15-17 ms on an
+ * integrated GPU).
+ */
+const CHUNK = 96;
+
 let enabled = true;
 let minRun = MIN_RUN;
 let loopShort = true;
+let pullWanted = true;
+/** What the table has drawn: its draw calls, and the draws of contexts' batches they made. */
+const drawn = { calls: 0, draws: 0 };
 
 /**
  * Draw Graphics alone through the table, or not, from the next frame: a
  * switch to time the two apart. Runs already built draw through Pixi's
  * pipe while it is off; a group built while it was off draws alone until
- * it is built again. `shortest` is the fewest draws a run makes as one
- * multi-draw, MIN_RUN by default: the tests have the table draw every run
- * so with 1, and the bench times others. A shorter run is drawn from the
- * atlas a call a draw, its rows passed in uniforms, or with `loop` false
- * by Pixi's pipe; so is it with `shortest` past SHORT_RUN + 1, as the
- * uniforms hold no more rows.
+ * it is built again. With `pull`, as by default, a run is a draw call
+ * whose vertex shader fetches its vertices (TablePipe, pulled draws),
+ * where WebGL 2 has float framebuffers; without, the table makes the
+ * multi-draws it made before them, which the rest is about. `shortest`
+ * is the fewest draws a run makes as one multi-draw, MIN_RUN by default:
+ * the tests have the table draw every run so with 1, and the bench times
+ * others. A shorter run is drawn from the atlas a call a draw, its rows
+ * passed in uniforms, or with `loop` false by Pixi's pipe; so is it with
+ * `shortest` past SHORT_RUN + 1, as the uniforms hold no more rows.
  */
-export function setTransformTable(on: boolean, shortest = MIN_RUN, loop = true): void {
+export function setTransformTable(on: boolean, shortest = MIN_RUN, loop = true, pull = true): void {
   enabled = on;
   minRun = shortest;
   loopShort = loop;
+  pullWanted = pull;
+}
+
+/** What the table has drawn since the page loaded: draw calls, and the contexts' batches drawn in them. */
+export function transformTableDrawn(): Readonly<{ calls: number; draws: number }> {
+  return drawn;
 }
 
 /**
@@ -153,7 +192,11 @@ ${
   vec4 mul = texelFetch(uTable, at + ivec2(3, 0), 0);
   vec4 add = texelFetch(uTable, at + ivec2(4, 0), 0);`
 }
-  mat3 modelMatrix = mat3(m.x, m.y, 0.0, m.z, m.w, 0.0, t.x, t.y, 1.0);
+${placed}}
+`;
+
+/** A vertex placed by its row, m t tint mul add, and coloured: the same for every program. */
+const placed = `  mat3 modelMatrix = mat3(m.x, m.y, 0.0, m.z, m.w, 0.0, t.x, t.y, 1.0);
   mat3 modelViewProjectionMatrix = uProjectionMatrix * uWorldTransformMatrix * modelMatrix;
   gl_Position = vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
   vFlash = t.z;
@@ -172,7 +215,57 @@ ${
     vColor *= tint;
     vColor *= uWorldColorAlpha;
   }
-}
+`;
+
+/**
+ * The vertex shader of a pulled draw, which draws a run in one call with no
+ * attributes, an instance a chunk of a batch's vertices: the chunk's texel
+ * names its row, where its indices start in the expanded atlas and how many
+ * it has; a vertex past them is put outside the clip volume, its triangle
+ * with it. The index' vertex, as the expanded atlas keeps it, is placed and
+ * coloured as the other programs place and colour an attribute's, its
+ * colour's bytes normalized as GL normalizes unorm8x4.
+ */
+const pulledVertex = `#version 300 es
+uniform mat3 uProjectionMatrix;
+uniform mat3 uWorldTransformMatrix;
+uniform vec4 uWorldColorAlpha;
+uniform vec2 uResolution;
+uniform highp sampler2D uTable;
+uniform highp sampler2D uAtlas;
+uniform highp sampler2D uChunks;
+uniform float uFirst;
+out vec4 vColor;
+flat out float vFlash;
+flat out vec4 vMul;
+flat out vec4 vAdd;
+
+void main(void) {
+  int chunk = int(uFirst) + gl_InstanceID;
+  vec4 c = texelFetch(uChunks, ivec2(chunk & ${ATLAS_WIDTH - 1}, chunk >> ${Math.log2(ATLAS_WIDTH)}), 0);
+  vColor = vec4(0.0);
+  vFlash = 0.0;
+  vMul = vec4(0.0);
+  vAdd = vec4(0.0);
+  if (float(gl_VertexID) >= c.z) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+
+  int index = int(c.y) + gl_VertexID;
+  vec4 a = texelFetch(uAtlas, ivec2(index & ${ATLAS_WIDTH - 1}, index >> ${Math.log2(ATLAS_WIDTH)}), 0);
+  vec2 aPosition = a.xy;
+  // Each byte pair split exactly: a whole number below 65,536 over 256, floored.
+  vec2 upper = floor(a.zw / 256.0);
+  vec4 aColor = vec4(a.z - upper.x * 256.0, upper.x, a.w - upper.y * 256.0, upper.y) / 255.0;
+  int row = int(c.x);
+  ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
+  vec4 m = texelFetch(uTable, at, 0);
+  vec4 t = texelFetch(uTable, at + ivec2(1, 0), 0);
+  vec4 tint = texelFetch(uTable, at + ivec2(2, 0), 0);
+  vec4 mul = texelFetch(uTable, at + ivec2(3, 0), 0);
+  vec4 add = texelFetch(uTable, at + ivec2(4, 0), 0);
+${placed}}
 `;
 
 /** Under a colour transform, as the colour batcher's shader: applied to straight colour, clamped. */
@@ -234,14 +327,18 @@ export interface Placed {
 
 /**
  * Where an atlas' vertices and indices are kept: the GPU's buffers, which
- * the table writes into and grows there (TablePipe), with no copy on the CPU.
+ * the table writes into and grows there (TablePipe), with no copy on the
+ * CPU; or, for an expanded atlas, a texture of a texel an index.
  */
 export interface AtlasStore {
   /** Room for `vertices` and `indices`, the first `keptVertices` and `keptIndices` kept. */
   resize(vertices: number, indices: number, keptVertices: number, keptIndices: number): void;
   /** `floats` of `data`, from float `from`, written from vertex `at` on. */
   writeVertices(at: number, data: Float32Array, from: number, floats: number): void;
-  /** `count` of `data`, from `from`, written from index `at` on. */
+  /**
+   * `count` indices of `data`, from index `from`, written from index `at`
+   * on: for an expanded atlas, EXPANDED_WORDS words an index.
+   */
   writeIndices(at: number, data: Uint32Array, from: number, count: number): void;
 }
 
@@ -255,6 +352,14 @@ export interface AtlasStore {
 const STAGED_VERTICES = 1 << 16;
 const STAGED_FLOATS = STAGED_VERTICES * VERTEX_FLOATS;
 const STAGED_INDICES = STAGED_VERTICES * 3;
+/**
+ * Words an index of an expanded atlas, a float texel: its vertex' position,
+ * and its colour's bytes two to a float, red and green, blue and alpha,
+ * each pair a whole number a float holds exactly. A float texture, not an
+ * integer one, as Pixi binds an empty texture over an integer one on any
+ * unit a batch's shader might read (unbindIntegerTextures).
+ */
+export const EXPANDED_WORDS = 4;
 
 /**
  * The free stretches of a buffer that ranges are placed in and given back
@@ -418,10 +523,20 @@ export class Atlas {
   /** The id of a texture that is no texture, which alone the table draws. */
   private readonly white: number;
   private readonly store: AtlasStore;
+  /**
+   * Whether each index is kept as its vertex, EXPANDED_WORDS words, for a
+   * shader to fetch by where it lies (the table's pulled draws), with no
+   * vertices apart: the atlas then counts no vertices.
+   */
+  private readonly expanded: boolean;
+  /** The words an index takes in the stage and the store. */
+  private readonly words: number;
 
-  constructor(white: number, store: AtlasStore) {
+  constructor(white: number, store: AtlasStore, expanded = false) {
     this.white = white;
     this.store = store;
+    this.expanded = expanded;
+    this.words = expanded ? EXPANDED_WORDS : 1;
     atlases.add(this);
   }
 
@@ -477,7 +592,7 @@ export class Atlas {
       return null;
     }
 
-    const vertexCount = batcher.attributeSize / VERTEX_FLOATS;
+    const vertexCount = this.expanded ? 0 : batcher.attributeSize / VERTEX_FLOATS;
     const indexCount = batcher.indexSize;
     const placed: Placed = {
       vertices: vertexCount,
@@ -641,32 +756,44 @@ export class Atlas {
     }
 
     if (floats > STAGED_FLOATS || count > STAGED_INDICES) {
-      // Larger than the stage alone: written as it comes, its indices offset in an array of its own.
-      const offset = new Uint32Array(count);
-      for (let i = 0; i < count; i++) {
-        offset[i] = indices[i] + base;
+      // Larger than the stage alone: written as it comes, its indices in an array of their own.
+      const offset = new Uint32Array(count * this.words);
+      if (this.expanded) {
+        expand(offset, 0, vertices, indices, count);
+      } else {
+        for (let i = 0; i < count; i++) {
+          offset[i] = indices[i] + base;
+        }
+
+        this.store.writeVertices(base, vertices, 0, floats);
       }
 
-      this.store.writeVertices(base, vertices, 0, floats);
       this.store.writeIndices(placed.indexStart, offset, 0, count);
       return;
     }
 
     const from = this.stagedFloats;
     const at = this.stagedCount;
-    this.stage(from + floats, at + count);
-    this.staged.set(vertices.subarray(0, floats), from);
-    for (let i = 0; i < count; i++) {
-      this.stagedIndices[at + i] = indices[i] + base;
+    this.stage(from + floats, (at + count) * this.words);
+    if (this.expanded) {
+      expand(this.stagedIndices, at * EXPANDED_WORDS, vertices, indices, count);
+    } else {
+      this.staged.set(vertices.subarray(0, floats), from);
+      for (let i = 0; i < count; i++) {
+        this.stagedIndices[at + i] = indices[i] + base;
+      }
     }
 
     this.stagedFloats += floats;
     this.stagedCount += count;
-    addWrite(this.vertexWrites, base, from, floats, VERTEX_FLOATS);
+    if (!this.expanded) {
+      addWrite(this.vertexWrites, base, from, floats, VERTEX_FLOATS);
+    }
+
     addWrite(this.indexWrites, placed.indexStart, at, count, 1);
   }
 
-  /** Staging arrays of at least `floats` and `count`, doubled as need be, what they stage kept. */
+  /** Staging arrays of at least `floats` and `count` words, doubled as need be, what they stage kept. */
   private stage(floats: number, count: number): void {
     if (floats > this.staged.length) {
       const grown = new Float32Array(
@@ -677,10 +804,11 @@ export class Atlas {
     }
 
     if (count > this.stagedIndices.length) {
+      const most = STAGED_INDICES * this.words;
       const grown = new Uint32Array(
-        Math.min(STAGED_INDICES, Math.max(count, this.stagedIndices.length * 2, 4096 * 3)),
+        Math.min(most, Math.max(count, this.stagedIndices.length * 2, 4096 * 3 * this.words)),
       );
-      grown.set(this.stagedIndices.subarray(0, this.stagedCount));
+      grown.set(this.stagedIndices.subarray(0, this.stagedCount * this.words));
       this.stagedIndices = grown;
     }
   }
@@ -742,6 +870,31 @@ export class Atlas {
 }
 
 /**
+ * Each of `count` indices' vertex into `out` from word `at` on, as an
+ * expanded atlas keeps it (EXPANDED_WORDS): its position's two floats,
+ * and its colour's word as Pixi packed it, its four bytes from the lowest
+ * as red, green, blue and alpha (VERTEX_FLOATS a vertex).
+ */
+function expand(
+  out: Uint32Array,
+  at: number,
+  vertices: Float32Array,
+  indices: ArrayLike<number>,
+  count: number,
+): void {
+  const floats = new Float32Array(out.buffer, out.byteOffset, out.length);
+  const words = new Uint32Array(vertices.buffer, vertices.byteOffset, vertices.length);
+  for (let i = 0, o = at; i < count; i++, o += EXPANDED_WORDS) {
+    const v = indices[i] * VERTEX_FLOATS;
+    const color = words[v + 4];
+    out[o] = words[v];
+    out[o + 1] = words[v + 1];
+    floats[o + 2] = color & 0xffff;
+    floats[o + 3] = color >>> 16;
+  }
+}
+
+/**
  * A write of `length` staged from `from` to `at` in the atlas, in units of
  * `unit`, added to `writes`, or joined to the last if it goes on from it
  * there and in the stage.
@@ -774,6 +927,29 @@ export function releaseFromAtlases(gpu: GpuGraphicsContext): void {
 export interface TableInstruction extends Instruction {
   renderPipeId: typeof NAME;
   items: Graphics[];
+  /** How a pipe draws it in pulled draws, as planned for a render. */
+  plan?: Plan;
+}
+
+/**
+ * A run's steps as a render planned them before any was drawn (TablePipe,
+ * prepare): each a pulled draw of `chunks` chunks from `first`, of `rows`
+ * rows, under a blend mode, or a Graphics for Pixi's pipe to draw.
+ */
+interface Plan {
+  pipe: TablePipe;
+  /** The render it was planned for, and the atlas' releases by then. */
+  render: number;
+  releases: number;
+  steps: number;
+  alone: (Graphics | null)[];
+  first: number[];
+  chunks: number[];
+  rows: number[];
+  blends: string[];
+  /** The contexts its draws read, and where each lay in the atlas as planned. */
+  contexts: GpuGraphicsContext[];
+  places: Placed[];
 }
 
 /** Add `graphics` to the run `instructionSet` ends with, or start one: anything else ends a run. */
@@ -805,10 +981,10 @@ type Drawn = Graphics & { _roundPixels: number };
 /** A Graphics as render/color.ts marks one under a Flash colour transform. */
 type Colored = Graphics & { flashColor?: ColorTransform | null };
 
-const tableSource = (height: number) =>
+const tableSource = (height: number, width = TABLE_WIDTH) =>
   new BufferImageSource({
-    resource: new Float32Array(TABLE_WIDTH * height * 4),
-    width: TABLE_WIDTH,
+    resource: new Float32Array(width * height * 4),
+    width,
     height,
     format: "rgba32float",
     alphaMode: "no-premultiply-alpha",
@@ -816,6 +992,70 @@ const tableSource = (height: number) =>
     autoGenerateMipmaps: false,
   });
 
+/**
+ * The expanded atlas' texture, `height` lines of ATLAS_WIDTH texels made on
+ * the GPU alone, as the table writes into it with no copy on the CPU: Pixi
+ * allocates a source with no resource empty.
+ */
+function atlasSource(height: number): BufferImageSource {
+  const source = new BufferImageSource({
+    resource: new Float32Array(EXPANDED_WORDS),
+    width: ATLAS_WIDTH,
+    height,
+    format: "rgba32float",
+    alphaMode: "no-premultiply-alpha",
+    scaleMode: "nearest",
+    autoGenerateMipmaps: false,
+  });
+  (source as { resource: unknown }).resource = null;
+  return source;
+}
+
+/** `graphics`' transform and tint written as a row from float `at` of `out`. */
+function writeRow(out: Float32Array, at: number, graphics: Graphics): void {
+  const m = graphics.groupTransform;
+  out[at] = m.a;
+  out[at + 1] = m.b;
+  out[at + 2] = m.c;
+  out[at + 3] = m.d;
+  out[at + 4] = m.tx;
+  out[at + 5] = m.ty;
+  const ct = (graphics as Colored).flashColor;
+  if (ct) {
+    // Its own tint and alpha, straight, as the colour batcher's: a glyph's colour.
+    const bgr = graphics.localColor;
+    out[at + 6] = 1;
+    out[at + 8] = (bgr & 0xff) / 255;
+    out[at + 9] = ((bgr >> 8) & 0xff) / 255;
+    out[at + 10] = ((bgr >> 16) & 0xff) / 255;
+    out[at + 11] = graphics.localAlpha;
+    out[at + 12] = ct.rMul;
+    out[at + 13] = ct.gMul;
+    out[at + 14] = ct.bMul;
+    out[at + 15] = ct.aMul;
+    out[at + 16] = ct.rAdd / 255;
+    out[at + 17] = ct.gAdd / 255;
+    out[at + 18] = ct.bAdd / 255;
+    out[at + 19] = ct.aAdd / 255;
+  } else {
+    out[at + 6] = 0;
+    color32BitToUniform(graphics.groupColorAlpha, out, at + 8);
+  }
+}
+
+/**
+ * Draws runs of Graphics drawn alone. Where WebGL 2 has float
+ * framebuffers, a run is planned as each render group is made ready
+ * (prepare), before anything is drawn: its rows written, and its batches'
+ * chunks of CHUNK indices, each naming its row and where its indices lie
+ * in the expanded atlas, and the rows and chunks of every run uploaded at
+ * once as the first is drawn; then each stretch of a run of one blend mode
+ * is one drawArraysInstanced, an instance a chunk, whose vertex shader
+ * fetches its vertices (pulledVertex), one uniform set for it. Multi-draws
+ * cost Chrome's GPU process as much a draw as the draws would alone; this
+ * is one draw. Without, or switched off for a test or a bench
+ * (setTransformTable), the table makes the multi-draws of before.
+ */
 export class TablePipe {
   static extension = {
     type: [ExtensionType.WebGLPipes, ExtensionType.WebGPUPipes],
@@ -861,6 +1101,39 @@ export class TablePipe {
    * short for a multi-draw and the table leaves such runs to it (loops).
    */
   private segment: Graphics[] = [];
+  /** Whether the renderer has what pulled draws need: WebGL 2, with float framebuffers to blit. */
+  private pullable = false;
+  /** Whether the expanded atlas outgrew the most its texture may hold, which leaves pulled draws for good. */
+  private pullFailed = false;
+  /** Counts the renders, for a plan to tell whether it is this one's. */
+  private render = 0;
+  /** The pulled draws' expanded atlas, its texture, and the most lines that may be. */
+  private pulled!: Atlas;
+  private atlasTexture: BufferImageSource | null = null;
+  private atlasMostLines = 0;
+  /** The pulled draws' rows and chunks, the next free of each this render, and those uploaded so far. */
+  private pulledRows!: BufferImageSource;
+  private rowCursor = 0;
+  private uploaded = 0;
+  private chunks!: BufferImageSource;
+  private chunkCursor = 0;
+  private chunksUploaded = 0;
+  private pulledShader: Shader | null = null;
+  private readonly pulledUniforms = new UniformGroup({ uFirst: { value: 0, type: "f32" } });
+  /**
+   * The texture units the pulled draws' rows, atlas and chunks are bound
+   * to: the last three, which no batch or filter takes, so that they stay bound
+   * between the run's draws and the others; and the program, as last
+   * linked, its samplers were pointed at them in.
+   */
+  private rowsUnit = 0;
+  private atlasUnit = 0;
+  private chunksUnit = 0;
+  private pointed: WebGLProgram | null = null;
+  /** A geometry of no attributes, which pulled draws bind. */
+  private empty!: Geometry;
+  /** Framebuffers of the atlas' texture and a larger one, which it is blitted into. */
+  private copyFrames: (WebGLFramebuffer | null)[] | null = null;
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
@@ -909,31 +1182,70 @@ export class TablePipe {
       },
       indexBuffer: this.indexBuffer,
     });
+    this.pulledRows = tableSource(16);
+    this.chunks = tableSource(16, ATLAS_WIDTH);
+    this.pulled = new Atlas(
+      Texture.WHITE.source.uid,
+      {
+        resize: (_vertices, indices, _keptVertices, keptIndices) =>
+          this.resizeAtlasTexture(indices, keptIndices),
+        writeVertices: () => {},
+        writeIndices: (at, data, from, count) => this.writeAtlasTexture(at, data, from, count),
+      },
+      true,
+    );
+    this.empty = new Geometry({ attributes: {} });
     renderer.runners.contextChange.add(this);
     renderer.runners.prerender.add(this);
   }
 
   contextChange(): void {
     const gl = this.renderer.gl;
-    this.multi =
-      this.renderer.context.webGLVersion === 2
-        ? (gl.getExtension("WEBGL_multi_draw") as Multi | null)
-        : null;
-    this.maxRows = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) * ROWS_A_LINE;
+    const webGL2 = this.renderer.context.webGLVersion === 2;
+    this.multi = webGL2 ? (gl.getExtension("WEBGL_multi_draw") as Multi | null) : null;
+    const most = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    this.maxRows = most * ROWS_A_LINE;
+    // The atlas' float texture is blitted into a larger one: from a framebuffer, as the extension
+    // lets it be.
+    this.pullable = webGL2 && gl.getExtension("EXT_color_buffer_float") !== null;
+    this.atlasMostLines = Math.min(most, EXACT / ATLAS_WIDTH);
+    const units = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number;
+    this.rowsUnit = units - 1;
+    this.atlasUnit = units - 2;
+    this.chunksUnit = units - 3;
+    this.pointed = null;
+    // Pixi binds the empty texture to units 0 to 15 alone as a context comes, and would hold what
+    // was bound to these on a lost one bound still.
+    for (const unit of [this.rowsUnit, this.atlasUnit, this.chunksUnit]) {
+      this.renderer.texture.bind(Texture.EMPTY, unit);
+    }
     // A lost context took the atlas' buffers: every context is copied in again as it is drawn.
     this.vertexBytes = 0;
     this.indexBytes = 0;
     this.atlas.lost();
+    this.pulled.lost();
+    this.copyFrames = null;
   }
 
   prerender(): void {
     this.cursor = 0;
     this.atlas.compact();
+    this.render++;
+    this.rowCursor = 0;
+    this.uploaded = 0;
+    this.chunkCursor = 0;
+    this.chunksUploaded = 0;
+    this.pulled.compact();
   }
 
-  /** Whether the table draws for this renderer: switched on, and WebGL 2 with multi-draw. */
+  /** Whether the table draws for this renderer: switched on, and pulled draws or WebGL 2 with multi-draw. */
   get active(): boolean {
-    return enabled && this.multi !== null;
+    return enabled && (this.pulling || this.multi !== null);
+  }
+
+  /** Whether runs are pulled draws: wanted, and possible. */
+  private get pulling(): boolean {
+    return enabled && pullWanted && this.pullable && !this.pullFailed;
   }
 
   /** Whether a run too short for a multi-draw is drawn from the atlas, a call a draw. */
@@ -945,7 +1257,30 @@ export class TablePipe {
     addToRun(graphics, instructionSet);
   }
 
+  /**
+   * Plan the runs of a render group's instructions, its transforms
+   * updated, before any is drawn (render/hooks.ts): their rows go up
+   * together as the first run is drawn.
+   */
+  prepare(instructionSet: InstructionSet): void {
+    if (!this.pulling) {
+      return;
+    }
+
+    const instructions = instructionSet.instructions;
+    for (let i = 0; i < instructionSet.instructionSize; i++) {
+      const instruction = instructions[i] as TableInstruction;
+      if (instruction.renderPipeId === NAME) {
+        this.plan(instruction);
+      }
+    }
+  }
+
   execute(instruction: TableInstruction): void {
+    if (this.pulling && this.executePulled(instruction)) {
+      return;
+    }
+
     const renderer = this.renderer;
     const graphicsPipe = renderer.renderPipes.graphics;
     const contexts = renderer.graphicsContext;
@@ -1039,38 +1374,352 @@ export class TablePipe {
       this.offsets = offsets;
     }
 
-    const out = this.table.resource as Float32Array;
-    const at = this.cursor * ROW_TEXELS * 4;
-    const m = graphics.groupTransform;
-    out[at] = m.a;
-    out[at + 1] = m.b;
-    out[at + 2] = m.c;
-    out[at + 3] = m.d;
-    out[at + 4] = m.tx;
-    out[at + 5] = m.ty;
-    const ct = (graphics as Colored).flashColor;
-    if (ct) {
-      // Its own tint and alpha, straight, as the colour batcher's: a glyph's colour.
-      const bgr = graphics.localColor;
-      out[at + 6] = 1;
-      out[at + 8] = (bgr & 0xff) / 255;
-      out[at + 9] = ((bgr >> 8) & 0xff) / 255;
-      out[at + 10] = ((bgr >> 16) & 0xff) / 255;
-      out[at + 11] = graphics.localAlpha;
-      out[at + 12] = ct.rMul;
-      out[at + 13] = ct.gMul;
-      out[at + 14] = ct.bMul;
-      out[at + 15] = ct.aMul;
-      out[at + 16] = ct.rAdd / 255;
-      out[at + 17] = ct.gAdd / 255;
-      out[at + 18] = ct.bAdd / 255;
-      out[at + 19] = ct.aAdd / 255;
-    } else {
-      out[at + 6] = 0;
-      color32BitToUniform(graphics.groupColorAlpha, out, at + 8);
+    writeRow(this.table.resource as Float32Array, this.cursor * ROW_TEXELS * 4, graphics);
+    this.cursor++;
+  }
+
+  /**
+   * Plan `run` for this render: its Graphics' rows written from the next
+   * free, a pulled draw for each stretch of one blend mode, and a step of
+   * Pixi's pipe for each the table cannot draw, as execute drew them.
+   */
+  private plan(run: TableInstruction): Plan {
+    let plan = run.plan;
+    if (plan?.pipe !== this) {
+      plan = {
+        pipe: this,
+        render: 0,
+        releases: 0,
+        steps: 0,
+        alone: [],
+        first: [],
+        chunks: [],
+        rows: [],
+        blends: [],
+        contexts: [],
+        places: [],
+      };
+      run.plan = plan;
     }
 
-    this.cursor++;
+    plan.render = this.render;
+    plan.releases = this.pulled.stats.released;
+    plan.steps = 0;
+    plan.contexts.length = 0;
+    plan.places.length = 0;
+    const renderer = this.renderer;
+    const contexts = renderer.graphicsContext;
+    const roundAll = renderer._roundPixels;
+    let open = -1;
+    for (const item of run.items) {
+      const graphics = item as Drawn;
+      if (!graphics.isRenderable) {
+        continue;
+      }
+
+      const context = graphics.context;
+      const gpu = contexts.getGpuContext(context);
+      if (!gpu.batches.length) {
+        continue;
+      }
+
+      let place =
+        gpu.isBatchable || context.customShader || roundAll | graphics._roundPixels
+          ? null
+          : this.pulled.where(gpu);
+      if (place === undefined) {
+        place = this.pulled.place(gpu, contexts.getContextRenderDataOnCpu(context));
+      }
+
+      if (this.pullFailed) {
+        return plan;
+      }
+
+      const batches = place ? place.counts.length : 0;
+      let chunks = 0;
+      for (let i = 0; i < batches; i++) {
+        chunks += Math.ceil((place as Placed).counts[i] / CHUNK);
+      }
+
+      if (
+        !place ||
+        this.rowCursor + batches > this.maxRows ||
+        this.chunkCursor + chunks > this.atlasMostLines * ATLAS_WIDTH
+      ) {
+        open = -1;
+        this.step(plan, graphics, 0, "");
+        continue;
+      }
+
+      const blend = graphics.groupBlendMode;
+      if (open < 0 || plan.blends[open] !== blend) {
+        open = this.step(plan, null, this.chunkCursor, blend);
+      }
+
+      for (let i = 0; i < batches; i++) {
+        plan.chunks[open] += this.pulledRow(graphics, place.offsets[i] / 4, place.counts[i]);
+        plan.rows[open]++;
+      }
+
+      plan.contexts.push(gpu);
+      plan.places.push(place);
+    }
+
+    return plan;
+  }
+
+  /** A step added to `plan`: Pixi's pipe drawing `alone`, or a pulled draw from chunk `first`. */
+  private step(plan: Plan, alone: Graphics | null, first: number, blend: string): number {
+    const k = plan.steps++;
+    plan.alone[k] = alone;
+    plan.first[k] = first;
+    plan.chunks[k] = 0;
+    plan.rows[k] = 0;
+    plan.blends[k] = blend;
+    return k;
+  }
+
+  /**
+   * `graphics`' row written next, and the chunks of its batch of `count`
+   * indices from `index` in the atlas: how many.
+   */
+  private pulledRow(graphics: Graphics, index: number, count: number): number {
+    if (this.rowCursor >= this.pulledRows.height * ROWS_A_LINE) {
+      this.pulledRows = this.grown(this.pulledRows, this.maxRows / ROWS_A_LINE);
+      // Made anew, and uploaded whole as it is first bound.
+      this.uploaded = this.rowCursor;
+    }
+
+    const row = this.rowCursor++;
+    writeRow(this.pulledRows.resource as Float32Array, row * ROW_TEXELS * 4, graphics);
+    const chunks = Math.ceil(count / CHUNK);
+    while (this.chunkCursor + chunks > this.chunks.height * ATLAS_WIDTH) {
+      this.chunks = this.grown(this.chunks, this.atlasMostLines);
+      this.chunksUploaded = this.chunkCursor;
+    }
+
+    const out = this.chunks.resource as Float32Array;
+    for (let k = 0, at = this.chunkCursor * 4; k < count; k += CHUNK, at += 4) {
+      out[at] = row;
+      out[at + 1] = index + k;
+      out[at + 2] = Math.min(CHUNK, count - k);
+    }
+
+    this.chunkCursor += chunks;
+    return chunks;
+  }
+
+  /** `table` twice as tall, at most `most` lines, what it holds brought along. */
+  private grown(table: BufferImageSource, most: number): BufferImageSource {
+    const next = tableSource(Math.min(table.height * 2, most), table.width);
+    (next.resource as Float32Array).set(table.resource as Float32Array);
+    table.destroy();
+    return next;
+  }
+
+  /**
+   * Draw `run` as planned for this render, planned again if it was not, or
+   * a context it draws has left the atlas since; false if the expanded
+   * atlas outgrew its texture as it was planned, for the multi-draws to
+   * draw it.
+   */
+  private executePulled(run: TableInstruction): boolean {
+    let plan = run.plan;
+    if (plan?.pipe !== this || plan.render !== this.render || !this.stillPlaced(plan)) {
+      plan = this.plan(run);
+    }
+
+    if (!this.pulling) {
+      return false;
+    }
+
+    this.pulled.send();
+    if (this.rowCursor > this.uploaded) {
+      this.upload(this.uploaded, this.rowCursor, this.pulledRows, ROW_TEXELS, this.rowsUnit);
+      this.uploaded = this.rowCursor;
+    }
+
+    if (this.chunkCursor > this.chunksUploaded) {
+      this.upload(
+        this.chunksUploaded,
+        this.chunkCursor,
+        this.chunks,
+        1,
+        this.chunksUnit,
+        ATLAS_WIDTH,
+      );
+      this.chunksUploaded = this.chunkCursor;
+    }
+
+    const graphicsPipe = this.renderer.renderPipes.graphics;
+    for (let k = 0; k < plan.steps; k++) {
+      const alone = plan.alone[k];
+      if (alone) {
+        graphicsPipe.execute(alone);
+      } else if (plan.chunks[k] > 0) {
+        this.drawPulled(plan.first[k], plan.chunks[k], plan.rows[k], plan.blends[k]);
+      }
+    }
+
+    return true;
+  }
+
+  /** Whether every context `plan` draws lies where it was planned: none released, or each still placed. */
+  private stillPlaced(plan: Plan): boolean {
+    if (plan.releases === this.pulled.stats.released) {
+      return true;
+    }
+
+    for (let i = 0; i < plan.contexts.length; i++) {
+      if (this.pulled.where(plan.contexts[i]) !== plan.places[i]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /** One draw of `chunks` chunks from `first`, of `rows` rows. */
+  private drawPulled(first: number, chunks: number, rows: number, blend: string): void {
+    const renderer = this.renderer;
+    // The textures are bound here, not as Pixi binds a shader's, to units from 0 up, which every
+    // other draw takes too.
+    this.pulledShader ??= new Shader({
+      glProgram: new GlProgram({ name: `${NAME}-pulled`, vertex: pulledVertex, fragment }),
+      resources: { pulledUniforms: this.pulledUniforms },
+    });
+    const shader = this.pulledShader;
+    shader.groups[0] = renderer.globalUniforms.bindGroup;
+    this.pulledUniforms.uniforms.uFirst = first;
+    this.state.blendMode = blend as State["blendMode"];
+    renderer.state.set(this.state);
+    renderer.shader.bind(shader);
+    const gl = renderer.gl;
+    const program = renderer.shader._getProgramData(shader.glProgram).program;
+    if (this.pointed !== program) {
+      this.pointed = program;
+      gl.uniform1i(gl.getUniformLocation(program, "uTable"), this.rowsUnit);
+      gl.uniform1i(gl.getUniformLocation(program, "uAtlas"), this.atlasUnit);
+      gl.uniform1i(gl.getUniformLocation(program, "uChunks"), this.chunksUnit);
+    }
+
+    renderer.texture.bind(this.pulledRows, this.rowsUnit);
+    renderer.texture.bind(this.atlasTexture as BufferImageSource, this.atlasUnit);
+    renderer.texture.bind(this.chunks, this.chunksUnit);
+    renderer.geometry.bind(this.empty, shader.glProgram);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, CHUNK, chunks);
+    drawn.calls++;
+    drawn.draws += rows;
+  }
+
+  /**
+   * The expanded atlas' texture made `indices` texels, at least, its first
+   * `kept` copied over on the GPU; past the most it may hold, pulled draws
+   * are left for good.
+   */
+  private resizeAtlasTexture(indices: number, kept: number): void {
+    if (this.pullFailed) {
+      return;
+    }
+
+    const lines = Math.max(1, Math.ceil(indices / ATLAS_WIDTH));
+    if (lines > this.atlasMostLines) {
+      this.pullFailed = true;
+      this.atlasTexture?.destroy();
+      this.atlasTexture = null;
+      return;
+    }
+
+    const old = this.atlasTexture;
+    if (old && old.pixelHeight === lines) {
+      return;
+    }
+
+    const texture = atlasSource(lines);
+    const renderer = this.renderer;
+    if (old && kept > 0) {
+      // Blitted, as a float texture may not be copied with copyTexSubImage2D, from a framebuffer
+      // of each, the scissor test off as it would cut the blit, and GL's bindings put back.
+      const gl = renderer.gl;
+      this.copyFrames ??= [gl.createFramebuffer(), gl.createFramebuffer()];
+      const [read, draw] = this.copyFrames;
+      const readBefore = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+      const drawBefore = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+      const scissor = gl.isEnabled(gl.SCISSOR_TEST);
+      renderer.texture.bindForUpload(texture, this.atlasUnit);
+      const color = gl.COLOR_ATTACHMENT0;
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, read);
+      gl.framebufferTexture2D(
+        gl.READ_FRAMEBUFFER,
+        color,
+        gl.TEXTURE_2D,
+        renderer.texture.getGlSource(old).texture,
+        0,
+      );
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, draw);
+      gl.framebufferTexture2D(
+        gl.DRAW_FRAMEBUFFER,
+        color,
+        gl.TEXTURE_2D,
+        renderer.texture.getGlSource(texture).texture,
+        0,
+      );
+      if (scissor) {
+        gl.disable(gl.SCISSOR_TEST);
+      }
+
+      const lines = Math.min(Math.ceil(kept / ATLAS_WIDTH), old.pixelHeight);
+      gl.blitFramebuffer(
+        0,
+        0,
+        ATLAS_WIDTH,
+        lines,
+        0,
+        0,
+        ATLAS_WIDTH,
+        lines,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+      if (scissor) {
+        gl.enable(gl.SCISSOR_TEST);
+      }
+
+      gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, color, gl.TEXTURE_2D, null, 0);
+      gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, color, gl.TEXTURE_2D, null, 0);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readBefore);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, drawBefore);
+    }
+
+    old?.destroy();
+    this.atlasTexture = texture;
+  }
+
+  /** `count` expanded indices of `data`, from index `from`, written into the texture from `at` on, a line at a time. */
+  private writeAtlasTexture(at: number, data: Uint32Array, from: number, count: number): void {
+    const texture = this.atlasTexture;
+    if (this.pullFailed || !texture) {
+      return;
+    }
+
+    const renderer = this.renderer;
+    const gl = renderer.gl;
+    renderer.texture.bindForUpload(texture, this.atlasUnit);
+    const floats = new Float32Array(data.buffer, data.byteOffset, data.length);
+    let index = at;
+    let source = from * EXPANDED_WORDS;
+    const end = at + count;
+    while (index < end) {
+      const x = index % ATLAS_WIDTH;
+      const y = (index - x) / ATLAS_WIDTH;
+      // The rest of a line it starts inside, or the whole lines after, or what is left of the last.
+      const whole = x === 0 ? Math.floor((end - index) / ATLAS_WIDTH) : 0;
+      const width = whole > 0 ? ATLAS_WIDTH : Math.min(ATLAS_WIDTH - x, end - index);
+      const height = Math.max(whole, 1);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.FLOAT, floats, source);
+      index += width * height;
+      source += width * height * EXPANDED_WORDS;
+    }
   }
 
   /** The table twice as tall, at most maxRows, the rows this frame wrote so far brought along. */
@@ -1155,6 +1804,8 @@ export class TablePipe {
       );
     }
 
+    drawn.calls += loop && rows ? draws : 1;
+    drawn.draws += draws;
     this.draws = 0;
     // Rows passed in uniforms are free again for the next run's.
     if (short) {
@@ -1215,27 +1866,34 @@ export class TablePipe {
    * as the CPU holds them: rows a draw already read are as they were, and
    * no draw yet to come reads the rest before writing and uploading them.
    */
-  private upload(from: number, to: number): void {
+  private upload(
+    from: number,
+    to: number,
+    table = this.table,
+    texels = ROW_TEXELS,
+    unit = 0,
+    perLine = ROWS_A_LINE,
+  ): void {
     const renderer = this.renderer;
     const gl = renderer.gl;
     // Bound as Pixi binds, a new table allocated and uploaded whole then, and to the active unit,
-    // which a render pass may have moved to unbind a back texture: the upload must go to 0.
-    renderer.texture.bindForUpload(this.table, 0);
+    // which a render pass may have moved to unbind a back texture: the upload must go to `unit`.
+    renderer.texture.bindForUpload(table, unit);
 
-    const first = Math.floor(from / ROWS_A_LINE);
-    const lines = Math.floor((to - 1) / ROWS_A_LINE) - first + 1;
-    const start = lines > 1 ? first * ROWS_A_LINE : from;
+    const first = Math.floor(from / perLine);
+    const lines = Math.floor((to - 1) / perLine) - first + 1;
+    const start = lines > 1 ? first * perLine : from;
     gl.texSubImage2D(
       gl.TEXTURE_2D,
       0,
-      (start - first * ROWS_A_LINE) * ROW_TEXELS,
+      (start - first * perLine) * texels,
       first,
-      lines > 1 ? TABLE_WIDTH : (to - from) * ROW_TEXELS,
+      lines > 1 ? perLine * texels : (to - from) * texels,
       lines,
       gl.RGBA,
       gl.FLOAT,
-      this.table.resource as Float32Array,
-      start * ROW_TEXELS * 4,
+      table.resource as Float32Array,
+      start * texels * 4,
     );
   }
 
@@ -1246,9 +1904,19 @@ export class TablePipe {
 
     this.shader?.destroy(true);
     this.shortShader?.destroy(true);
+    this.pulledShader?.destroy(true);
     this.geometry.destroy(true);
+    this.empty.destroy();
     this.table.destroy();
+    this.pulledRows.destroy();
+    this.chunks.destroy();
+    this.atlasTexture?.destroy();
+    for (const frame of this.copyFrames ?? []) {
+      this.renderer.gl.deleteFramebuffer(frame);
+    }
+
     this.atlas.destroy();
+    this.pulled.destroy();
   }
 }
 

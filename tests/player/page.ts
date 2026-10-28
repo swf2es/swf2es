@@ -33,6 +33,7 @@ import {
   Scripting,
   type SocketHost,
   setTransformTable,
+  transformTableDrawn,
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
@@ -64,11 +65,11 @@ interface Run {
   images: Record<number, string>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
-  /** The draws the transform table made (render/table.ts), in its multi-draw calls. */
+  /** The contexts' batches the transform table drew (render/table.ts), in its draw calls. */
   tableDraws: number;
-  /** What drew: the renderer's GL, and whether it had WEBGL_multi_draw, which the table needs. */
+  /** What drew: the renderer's GL, and whether it was WebGL 2, which the table needs. */
   gl: string;
-  multiDraw: boolean;
+  webGL2: boolean;
   error: string | null;
 }
 
@@ -401,13 +402,15 @@ async function runSwf(
   logFetch = false,
   socket: SocketStep[] | null = null,
   lazyCompilation = false,
+  tablePull = true,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
   const trace: string[] = [];
-  let tableDraws = 0;
+  const drawnBefore = transformTableDrawn().draws;
+  const tableDraws = () => transformTableDrawn().draws - drawnBefore;
   let gl = "none";
-  let multiDraw = false;
+  let webGL2 = false;
   let scripting: Scripting | null = null;
   const uncaught: unknown[] = [];
   // A run ends at the first error nothing caught, after the frame it came in.
@@ -424,7 +427,7 @@ async function runSwf(
       await avm1For(bytes, trace, uncaught, url, logFetch, socket),
     );
     const n = GRID[quality] ?? 4;
-    setTransformTable(table, tableMinRun);
+    setTransformTable(table, tableMinRun, true, tablePull);
     const renderer = await autoDetectRenderer({
       preference: "webgl",
       width: player.width,
@@ -436,20 +439,9 @@ async function runSwf(
       // Blend modes read what is below them from it (render/blend.ts).
       useBackBuffer: true,
     });
-    const multi = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl?.getExtension(
-      "WEBGL_multi_draw",
-    );
-    if (multi) {
-      const draw = multi.multiDrawElementsWEBGL.bind(multi);
-      multi.multiDrawElementsWEBGL = (...args: Parameters<typeof draw>) => {
-        tableDraws += args[6];
-        draw(...args);
-      };
-    }
-
-    multiDraw = !!multi;
     const context = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
     const info = context?.getExtension("WEBGL_debug_renderer_info");
+    webGL2 = context instanceof WebGL2RenderingContext;
     gl = context
       ? `${context instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1"}, ${
           info ? context.getParameter(info.UNMASKED_RENDERER_WEBGL) : "?"
@@ -519,9 +511,9 @@ async function runSwf(
     }
 
     renderer.destroy();
-    return { images, trace, tableDraws, gl, multiDraw, error: null };
+    return { images, trace, tableDraws: tableDraws(), gl, webGL2, error: null };
   } catch (e) {
-    return { images, trace, tableDraws, gl, multiDraw, error: describe(e, scripting) };
+    return { images, trace, tableDraws: tableDraws(), gl, webGL2, error: describe(e, scripting) };
   }
 }
 
@@ -653,11 +645,9 @@ function meter(renderer: object): { read(): Record<string, number> } {
     });
   }
 
-  wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, "multiDrawElementsWEBGL", (args) => {
-    add("glDraws");
-    add("tableRuns");
-    add("tableDraws", args[6] as number);
-  });
+  wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, "multiDrawElementsWEBGL", () =>
+    add("glDraws"),
+  );
   // Every draw call, a multi-draw one, as one (calls) and as the draws it makes (subDraws), and
   // the state set between them: what draw-counts.ts holds to its baseline.
   for (const method of [
@@ -704,6 +694,8 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("copyBufferSubData");
     add("copyBufferSubDataBytes", args[4] as number);
   });
+  // A texture copied into a larger one, as the table's growing expanded atlas is.
+  wrap(gl, "copyTexSubImage2D", () => add("copyTexSubImage2D"));
   // A short run's draws, drawn from the atlas a call a draw (render/table.ts): the table's
   // own drawElements, not those of Pixi's pipe for what it leaves to it.
   let inTable = 0;
@@ -732,7 +724,6 @@ function meter(renderer: object): { read(): Record<string, number> } {
   });
   wrap(gl, "drawElements", () => {
     if (inTable > 0 && inGraphics === 0) {
-      add("tableDraws");
       add("tableLoopDraws");
     }
   });
@@ -774,9 +765,17 @@ function meter(renderer: object): { read(): Record<string, number> } {
 
     return out;
   };
+  // The table's draw calls and the contexts' batches they drew, whichever way it draws.
+  let tableCalls = transformTableDrawn().calls;
+  let tableDraws = transformTableDrawn().draws;
   return {
     read() {
       const out = counts;
+      const drawn = transformTableDrawn();
+      out.tableRuns = drawn.calls - tableCalls;
+      out.tableDraws = drawn.draws - tableDraws;
+      tableCalls = drawn.calls;
+      tableDraws = drawn.draws;
       counts = {};
       return out;
     },
@@ -808,8 +807,9 @@ async function benchSwf(
   tableLoop = true,
   clock = false,
   metered = false,
+  tablePull = true,
 ): Promise<Bench> {
-  setTransformTable(table, tableMinRun, tableLoop);
+  setTransformTable(table, tableMinRun, tableLoop, tablePull);
   // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the
   // player and Pixi keep or let go by age (render groups settling, idle contexts, pools) happens
   // on the same frames however fast the machine draws them (draw-counts.ts).
@@ -1132,9 +1132,7 @@ async function contextLossSwf(
     );
     return out;
   };
-  let tableDraws = 0;
   try {
-    const multi = gl.getExtension("WEBGL_multi_draw");
     const view = new PixiView(renderer, fillOptions);
     await player.start();
     for (let i = 0; i < frames; i++) {
@@ -1160,16 +1158,7 @@ async function contextLossSwf(
     );
     (renderer as unknown as { context: { forceContextLoss(): void } }).context.forceContextLoss();
     await restored;
-    // The restored context's extension is a new object: count the table's draws through it.
-    const again = gl.getExtension("WEBGL_multi_draw");
-    if (multi && again) {
-      const draw = again.multiDrawElementsWEBGL.bind(again);
-      again.multiDrawElementsWEBGL = (...args: Parameters<typeof draw>) => {
-        tableDraws += args[6];
-        draw(...args);
-      };
-    }
-
+    const drawnBefore = transformTableDrawn().draws;
     view.render(player.stage);
     const after = pixels();
     let differ = 0;
@@ -1189,7 +1178,11 @@ async function contextLossSwf(
       view.render(player.stage);
     }
 
-    if (table && multi && tableDraws === 0) {
+    if (
+      table &&
+      gl instanceof WebGL2RenderingContext &&
+      transformTableDrawn().draws === drawnBefore
+    ) {
       return "the table drew nothing after the context came back";
     }
 

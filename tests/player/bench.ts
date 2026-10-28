@@ -74,6 +74,9 @@
 // timed apart. --min-run N has the table draw only runs of N draws or
 // more as one multi-draw, to time where that starts to gain; it draws the
 // shorter from its atlas a call a draw, or with --no-loop leaves them to Pixi.
+// --multi-draw has the table make those multi-draws, as it did before it
+// drew each run in one call that fetches its vertices (pulled draws), to
+// time the two apart; --min-run and --no-loop are about them alone.
 //
 // --counts counts what the frames ask of GL and of Pixi's pipes (perFrame
 // in --json's output), each call wrapped: left out, the frames are timed
@@ -149,7 +152,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--no-loop] [--counts] [--pace MS] [--hover]
+//     [--min-run N] [--no-loop] [--multi-draw] [--counts] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
@@ -1365,6 +1368,7 @@ const result = await benchPlayer(
   !args.includes("--no-loop"),
   false,
   args.includes("--counts"),
+  !args.includes("--multi-draw"),
 );
 if (result.error) {
   console.error(result.error);
