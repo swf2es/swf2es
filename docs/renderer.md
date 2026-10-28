@@ -124,6 +124,8 @@ It decides:
   the planner makes per run:
   - pulled draws from the expanded atlas;
   - a multi-draw of the atlas's index ranges;
+  - plain indexed draws from the atlas, a call a draw with its buffers
+    bound once for the run, which beat a multi-draw on short runs;
   - a baked copy of the vertices, for a span that stood unchanged, as a
     settled group's Graphics are batched today.
 
@@ -151,7 +153,12 @@ It decides:
   budget reclaims it. The pool is sized by those lifetimes, not by
   nesting depth.
 - **Reuse.** A span whose entries and inputs did not change keeps its
-  plan from the last frame; only what changed is planned again.
+  plan from the last frame; only what changed is planned again. A plan
+  also depends on more than its entries: the atlas ranges and textures
+  it names, which can move or be evicted, and the clip and target it
+  inherits from its enclosing spans. Resources carry generations, and a
+  plan is reused only if those generations and the inherited state
+  are the ones it was made with.
 
 The command buffer is an `Int32Array` of operations (bind target, clear,
 draw run, set blend, stencil step, filter pass, composite) with a
@@ -192,6 +199,14 @@ It reuses context3d's low-level WebGL 2 mechanisms (state tables,
 program linking, buffers, limits), extracted where needed so that both
 can use them. Context3D's own draw path stays Stage3D's: it validates and
 rebinds as Stage3D requires, which a 2D draw must not pay for.
+
+Those mechanisms grow into a device layer in context3d (a sub-path of
+it), which both the renderer and the Context3D API draw through: the
+context and its state cache, resources, budgets and context loss, and
+later the WebGPU device. The two APIs on top stay apart. Context3D
+validates what a SWF sends and fails as Flash does; the renderer trusts
+its own plans. The device layer becomes a package of its own only if it
+outgrows context3d.
 
 **One context, one owner of its state.** While Pixi, this backend and
 Stage3D share a context, each can change GL state behind the others'
@@ -243,7 +258,12 @@ before it merges.
 0. **A prototype.** A throwaway scene list and planner that draw the
    busy room's shape and bitmap runs, measured on the three scenes. It
    shows which commands disappear and whether frame time improves,
-   before two representations of the scene are kept in step.
+   before two representations of the scene are kept in step. It counts
+   the whole cost: scene updates, planning, uploads, submission and the
+   handoffs between renderers. It is compared with the current renderer
+   on identical frames at the same resolution, in repeated alternating
+   runs. Its measurements settle what this document leaves open:
+   contiguous or chunked lists, batching thresholds, cache policies.
 1. **The scene list.** Sync writes the list and the row table alongside
    Pixi's containers, and the transform table plans its runs from the list
    in place of the batcher's upload hook. Pixi still draws.
