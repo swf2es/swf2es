@@ -132,6 +132,7 @@ desktop.onClose(() => {
   }
 });
 const state = await desktop.start();
+configure({ build: state.build ?? undefined });
 if (state.stage3D) {
   try {
     const { createStage3D } = await import("./stage3d.js");

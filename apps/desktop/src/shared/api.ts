@@ -26,6 +26,8 @@ export interface StartState {
   stage3D: boolean;
   libraries: LibraryState;
   movie: OpenedMovie | null;
+  /** The app's build, a short commit, for the context menu's About item; null where unknown. */
+  build: string | null;
 }
 
 export type LibraryName = keyof LibraryState;

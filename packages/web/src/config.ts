@@ -85,6 +85,8 @@ export interface Configuration {
    * starts through a `blob:` module that imports it.
    */
   workerUrl?: string | URL;
+  /** The page's build, a short commit or a version, which the context menu's About item names. */
+  build?: string;
 }
 
 let config: Configuration = {};
