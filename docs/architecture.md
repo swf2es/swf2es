@@ -3041,6 +3041,9 @@ renderer, input bindings and loop, the host lets go itself, as
 
 ### Rendering
 
+The player draws with PixiJS; a renderer of swf2es' own, which replaces it a
+step at a time, is planned in [renderer.md](renderer.md).
+
 A branch with at least 64 immediate art objects across its subtree owns
 a Pixi render group. Children already grouped do not count again, so
 wrappers do not all gain a group. Each group keeps its own instructions
