@@ -235,7 +235,8 @@ if (update) {
       console.log(`now drawn as Flash does: ${gained.join(", ")}`);
     }
 
-    if (updateBaseline && !names.length) {
+    // A run that lost a case keeps the list as it was: a regression is fixed, not written in.
+    if (updateBaseline && !names.length && !lost.length) {
       writeFileSync(ownBaseline, `${JSON.stringify([...now].sort(), null, 2)}\n`);
       console.log(`own-renderer.json: ${now.size} cases`);
     } else {
