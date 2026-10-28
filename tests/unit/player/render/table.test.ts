@@ -9,6 +9,7 @@ import {
   type AtlasStore,
   addToRun,
   type Packed,
+  Ranges,
   setTransformTable,
   type TableInstruction,
   TablePipe,
@@ -48,12 +49,12 @@ function store(): AtlasStore & { vertices: Float32Array; indices: Uint32Array; c
       out.indices = i;
       out.calls.push(`resize ${vertices} ${indices} keeping ${keptVertices} ${keptIndices}`);
     },
-    writeVertices(at: number, data: Float32Array, floats: number) {
-      out.vertices.set(data.subarray(0, floats), at * 6);
+    writeVertices(at: number, data: Float32Array, from: number, floats: number) {
+      out.vertices.set(data.subarray(from, from + floats), at * 6);
       out.calls.push(`vertices ${at} ${floats / 6}`);
     },
-    writeIndices(at: number, data: Uint32Array, count: number) {
-      out.indices.set(data.subarray(0, count), at);
+    writeIndices(at: number, data: Uint32Array, from: number, count: number) {
+      out.indices.set(data.subarray(from, from + count), at);
       out.calls.push(`indices ${at} ${count}`);
     },
   };
@@ -131,13 +132,13 @@ test("contexts go into the atlas once, their indices offset by the vertices befo
   assert.deepEqual(gpu.calls.slice(3), ["vertices 7 3", "indices 9 3"]);
   assert.deepEqual([...gpu.indices.subarray(9, 12)], [7, 8, 9]);
 
-  // One past the store's room: what was staged goes first, then the store grows keeping it.
+  // One past the store's room: what was staged goes first, then the store doubles keeping it.
   atlas.place({}, packed(3, [0, 1, 2], [{ start: 0, size: 3 }]));
   atlas.place({}, packed(5000, [0, 1, 2], [{ start: 0, size: 3 }]));
   assert.deepEqual(gpu.calls.slice(5), [
     "vertices 10 3",
     "indices 12 3",
-    "resize 6144 12288 keeping 13 15",
+    "resize 8192 12288 keeping 13 15",
   ]);
   atlas.send();
   assert.deepEqual([...gpu.indices.subarray(12, 18)], [10, 11, 12, 13, 14, 15]);
@@ -176,31 +177,102 @@ test("a context with a texture or another topology is not the table's", () => {
   atlas.destroy();
 });
 
-test("the atlas starts again only once released contexts leave more holes than live vertices", () => {
-  const atlas = new Atlas(WHITE, store());
-  const big = 40000;
-  const indices = [0, 1, 2];
-  const keys = [{}, {}, {}];
-  for (const key of keys) {
-    atlas.place(key, packed(big, indices, [{ start: 0, size: 3 }]));
-  }
+test("free ranges join their neighbours, and one that reaches the top lowers it", () => {
+  const ranges = new Ranges();
+  assert.equal(ranges.take(10, 100), 0);
+  assert.equal(ranges.take(20, 100), 10);
+  assert.equal(ranges.take(30, 100), 30);
+  assert.equal(ranges.take(41, 100), -1);
+  assert.equal(ranges.top, 60);
 
-  // One gone: a hole smaller than what is live stays.
-  atlas.release(keys[0]);
-  atlas.compact();
-  assert.equal(atlas.vertexCount, 3 * big);
+  ranges.give(10, 20);
+  assert.deepEqual([ranges.free, ranges.stretches], [20, 1]);
+  ranges.give(0, 10);
+  assert.deepEqual([ranges.free, ranges.stretches], [30, 1]);
+  // The closest fit, part of the joined stretch, the rest left free.
+  assert.equal(ranges.take(25, 100), 0);
+  assert.deepEqual([ranges.free, ranges.stretches], [5, 1]);
+  ranges.give(0, 25);
+  ranges.give(30, 30);
+  assert.deepEqual([ranges.top, ranges.free, ranges.stretches], [0, 0, 0]);
+});
 
-  // Two gone: the holes pass the live vertices; the one left is copied in again when next drawn.
-  atlas.release(keys[1]);
+test("released ranges are taken again from the next frame on, each by the closest fit", () => {
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
+  const place = (key: object, vertices: number) =>
+    atlas.place(key, packed(vertices, [0, 1, 2], [{ start: 0, size: 3 }]));
+  const [a, b, c, d] = [{}, {}, {}, {}];
+  place(a, 100);
+  place(b, 300);
+  place(c, 200);
+  place(d, 50);
+  atlas.release(a);
+  atlas.release(c);
+
+  // Still this frame: a run gathered may read where a and c lay, so nothing new goes there.
+  assert.deepEqual(place({}, 100)?.offsets, [12 * 4]);
+  assert.equal(atlas.vertexCount, 750);
+
   atlas.compact();
-  assert.equal(atlas.vertexCount, 0);
-  const again = atlas.place(keys[2], packed(big, indices, [{ start: 0, size: 3 }]));
-  assert.deepEqual(again?.offsets, [0]);
-  assert.equal(atlas.vertexCount, big);
+  const f = place({}, 150);
+  const g = place({}, 100);
+  const h = place({}, 50);
+  assert.deepEqual([f?.vertexStart, g?.vertexStart, h?.vertexStart], [400, 0, 550]);
+  // Their indices too, in the stretches a and c left, offset by where their vertices went.
+  assert.deepEqual([f?.indexStart, g?.indexStart, h?.indexStart], [0, 6, 15]);
+  assert.equal(atlas.vertexCount, 750);
+  atlas.send();
+  const triangle = (first: number) => [first, first + 1, first + 2];
+  assert.deepEqual(
+    [...gpu.indices.subarray(0, 18)],
+    [400, 100, 0, 600, 650, 550].flatMap(triangle),
+  );
+  assert.deepEqual(atlas.stats, { placed: 8, reused: 3, released: 2, grown: 0, compacted: 0 });
   atlas.destroy();
 });
 
-test("the atlas starts again in a store cut down to what was live, and grows by half", () => {
+test("contexts that come and go each frame grow the atlas only while the live ones grow", () => {
+  const gpu = store();
+  const atlas = new Atlas(WHITE, gpu);
+  const alive: object[] = [];
+  const resizes: number[] = [];
+  // Ten contexts a frame of 900 to 1,350 vertices, the oldest let go once 300 live.
+  for (let frame = 0; frame < 200; frame++) {
+    atlas.compact();
+    for (let i = 0; i < 10; i++) {
+      const key = {};
+      const vertices = 900 + ((frame * 10 + i) % 7) * 75;
+      atlas.place(key, packed(vertices, [0, 1, 2], [{ start: 0, size: 3 }]));
+      alive.push(key);
+      if (alive.length > 300) {
+        atlas.release(alive.shift() as object);
+      }
+    }
+
+    atlas.send();
+    const grown = gpu.calls.filter((call) => call.startsWith("resize")).length;
+    gpu.calls.length = 0;
+    if (grown) {
+      resizes.push(frame);
+    }
+  }
+
+  // Doubling up to some 340,000 vertices, in the first 30 frames, and never after.
+  assert.ok(resizes.length <= 8, `grown in frames ${resizes}`);
+  assert.ok(
+    resizes.every((frame) => frame < 31),
+    `grown in frames ${resizes}`,
+  );
+  assert.equal(atlas.stats.compacted, 0);
+  assert.equal(atlas.stats.placed, 2000);
+  assert.equal(atlas.stats.released, 1700);
+  assert.ok(atlas.stats.reused > 1500);
+  assert.ok(atlas.vertexCount <= atlas.capacity);
+  atlas.destroy();
+});
+
+test("the atlas packs again once holes no context fits pass twice the live vertices", () => {
   const gpu = store();
   const atlas = new Atlas(WHITE, gpu);
   const keys = Array.from({ length: 8 }, () => ({}));
@@ -209,69 +281,45 @@ test("the atlas starts again in a store cut down to what was live, and grows by 
     atlas.place(key, packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
   }
 
-  const peak = atlas.capacity;
-  assert.ok(peak >= 8 * big && peak < 8 * big * 1.5 + big);
-  for (const key of keys.slice(1)) {
+  assert.equal(atlas.capacity, 320000);
+  assert.deepEqual(
+    gpu.calls.filter((call) => call.startsWith("resize")),
+    [
+      "resize 4096 12288 keeping 0 0",
+      "resize 40000 12288 keeping 0 0",
+      "resize 80000 12288 keeping 40000 3",
+      "resize 160000 12288 keeping 80000 6",
+      "resize 320000 12288 keeping 160000 12",
+    ],
+  );
+
+  // Five gone, 200,000 vertices free beside 120,000 live: kept, to be filled.
+  for (const key of keys.slice(0, 5)) {
     atlas.release(key);
   }
 
   atlas.compact();
-  assert.equal(atlas.vertexCount, 0);
-  assert.equal(atlas.capacity, big * 1.5);
-  assert.equal(atlas.indexCapacity, 4096 * 3);
+  assert.equal(atlas.vertexCount, 8 * big);
+  assert.equal(atlas.stats.compacted, 0);
 
-  // Placed again, the one left fits, in a store made again at that size; more grows by half.
-  gpu.calls.length = 0;
-  atlas.place(keys[0], packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
-  assert.equal(atlas.capacity, big * 1.5);
-  assert.deepEqual(gpu.calls, [`resize ${big * 1.5} 12288 keeping 0 0`]);
-  atlas.place({}, packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
-  assert.equal(atlas.capacity, big * 1.5 * 1.5);
-  atlas.destroy();
-});
-
-test("repeated compaction reuses capacity until the live geometry becomes substantially smaller", () => {
-  const gpu = store();
-  const atlas = new Atlas(WHITE, gpu);
-  const keys = [{}, {}, {}];
-  const shape = packed(40000, [0, 1, 2], [{ start: 0, size: 3 }]);
-
-  for (let i = 0; i < keys.length; i++) {
-    atlas.place(keys[i], shape);
-  }
-
-  atlas.send();
-  const capacity = atlas.capacity;
-  assert.equal(capacity, 120000);
-
-  for (let cycle = 0; cycle < 3; cycle++) {
-    atlas.release(keys[1]);
-    atlas.release(keys[2]);
-    gpu.calls.length = 0;
-    atlas.compact();
-    assert.equal(atlas.vertexCount, 0);
-    assert.equal(atlas.capacity, capacity);
-
-    for (let i = 0; i < keys.length; i++) {
-      atlas.place(keys[i], shape);
-    }
-
-    atlas.send();
-    assert.ok(gpu.calls.every((call) => !call.startsWith("resize")));
-    assert.deepEqual(
-      [...gpu.indices.subarray(0, 9)],
-      [0, 1, 2, 40000, 40001, 40002, 80000, 80001, 80002],
-    );
-  }
-
-  for (let i = 0; i < keys.length; i++) {
-    atlas.release(keys[i]);
-  }
-
+  // Seven: 280,000 beside 40,000. Packed again, in a store cut down to twice what is live.
+  atlas.release(keys[5]);
+  atlas.release(keys[6]);
   atlas.compact();
-  atlas.send();
-  assert.equal(atlas.capacity, 4096);
-  assert.equal(gpu.vertices.length, 4096 * 6);
+  assert.equal(atlas.stats.compacted, 1);
+  assert.equal(atlas.vertexCount, 0);
+  assert.equal(atlas.capacity, 2 * big);
+  assert.equal(atlas.indexCapacity, 4096 * 3);
+  gpu.calls.length = 0;
+  const again = atlas.place(keys[7], packed(big, [0, 1, 2], [{ start: 0, size: 3 }]));
+  assert.deepEqual(again?.offsets, [0]);
+  assert.deepEqual(gpu.calls, [`resize ${2 * big} 12288 keeping 0 0`]);
+
+  // The last placed released: the top comes down to the hole below, and nothing is left to pack.
+  atlas.release(keys[7]);
+  atlas.compact();
+  assert.equal(atlas.vertexCount, 0);
+  assert.equal(atlas.stats.compacted, 1);
   atlas.destroy();
 });
 
