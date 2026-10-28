@@ -143,6 +143,49 @@ tags.push(
 );
 const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 
+// Layers kept while their objects stand: a glowing sprite's filtered output, and the drawing of
+// sprites blended over (overlay, run by a filter on the kept layer) and screened (blended by the
+// GPU), all of which a lost context empties: drawn again from their objects once it is back.
+const parts = w.sprite(8, 1, [
+  w.place({ depth: 1, character: 2 }),
+  w.place({ depth: 2, character: 2, matrix: { tx: 200, ty: 150 } }),
+  w.showFrame(),
+]);
+const layered = w.swf({
+  width: 400,
+  height: 300,
+  frameCount: 1,
+  tags: [
+    w.fileAttributes(false),
+    large,
+    small,
+    parts,
+    w.place({ depth: 1, character: 1, matrix: { a: 2, d: 2, tx: 4000, ty: 3000 } }),
+    w.place({
+      depth: 2,
+      character: 8,
+      matrix: { tx: 800, ty: 800 },
+      glows: [{ color: 0xffff00, blur: 8, strength: 2 }],
+    }),
+    w.place({ depth: 3, character: 8, matrix: { tx: 2400, ty: 800 }, blendMode: 13 }),
+    w.place({ depth: 4, character: 8, matrix: { tx: 4000, ty: 800 }, blendMode: 4 }),
+    w.place({
+      depth: 5,
+      character: 8,
+      matrix: { tx: 5600, ty: 800 },
+      blendMode: 13,
+      glows: [{ color: 0x00ffff, blur: 4, strength: 1 }],
+    }),
+    w.showFrame(),
+    w.end(),
+  ],
+});
+assert.equal(
+  await playLosingContext(layered, 4, false),
+  null,
+  "kept filter outputs and blend layers",
+);
+
 // Force slow first builds across the settling deadline, without losing either context.
 assert.deepEqual(
   await withPage("contextLossPlanSwf", async (evaluate) => {

@@ -921,10 +921,13 @@ export class PixiView {
     }
 
     node.draws = draws;
+    // A blend's empty chain is only a layer (render/compositing.ts), which a single fill the GPU
+    // blends as it is drawn goes without.
+    const chain = node.filters[0];
+    const unfiltered =
+      node.filters.length === 0 || (chain instanceof FilterChain && chain.filters.length === 0);
     node.singleDraw =
-      links.length === 0 && !node.masking && !node.clipped && node.filters.length === 0
-        ? singleDraw
-        : 2;
+      links.length === 0 && !node.masking && !node.clipped && unfiltered ? singleDraw : 2;
     // A stencil mask's geometry is collected into the masked object's instructions. Until both
     // belong to this branch, it must share its parent's group. A timeline mask itself also stays
     // with its siblings, though their common parent may form a group.

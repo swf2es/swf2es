@@ -74,17 +74,17 @@ export class Compositing {
   }
 
   /**
-   * Give a blend the GPU draws a layer of its own, kept while nothing in it changes: an empty
-   * chain, through which the object is drawn once into a texture and the texture blended by the
-   * GPU over what is behind (directBlend), and then only the texture while it stands, as a filtered
-   * object's output is. Without one, a blend filter drew the object into a layer of its own and
-   * copied what is behind it on every frame. Only a blend the GPU draws as Flash does, of an
-   * object of more than one draw (a single fill
-   * blends as it is drawn), with no filters of its own, outside any layer; the chain goes again
-   * once that no longer holds. Multiply and subtract are the GPU's only over an opaque stage
-   * (directBlend), which their layer is blended by while it is; else by a blend filter after its
-   * chain. Whether the object's chain was made or dropped: a new one is
-   * stale, so draws the object afresh.
+   * Give a blended object a layer of its own, kept while nothing in it changes: an empty chain,
+   * through which the object is drawn once into a texture, and then only the texture while it
+   * stands, as a filtered object's output is. Where the GPU blends the mode as Flash does
+   * (directBlend), the texture is blended by the GPU over what is behind; elsewhere the blend
+   * filter after the chain blends it with a copy of what is behind, both redone on every frame,
+   * as what is behind may change (the fork's FilterSystem runs the filters after a kept output).
+   * Without one, the object was drawn into a layer again on every frame. Not a single fill the GPU
+   * blends as it is drawn, nor an object with filters of its own, whose chain keeps its output
+   * already; the chain goes again once that no longer holds. Multiply and subtract are the GPU's
+   * only over an opaque stage, outside any layer (directBlend). Whether the object's chain was
+   * made or dropped: a new one is stale, so draws the object afresh.
    */
   private layer(node: Node, isolated: boolean): boolean {
     // An explicit layer is owned by the view, including inside another isolated object.
@@ -94,11 +94,11 @@ export class Compositing {
 
     const chain = node.filters[0];
     const empty = chain instanceof FilterChain && chain.filters.length === 0;
+    // A single fill the GPU blends needs no layer; any other blend is drawn into one.
+    const gpu = !isolated && this.gpuBlends(node.blend);
     const wanted =
-      !isolated &&
-      node.singleDraw !== 1 &&
       (chain === undefined || empty) &&
-      this.gpuBlends(node.blend);
+      (gpu ? node.singleDraw !== 1 : blendFilters(node.blend) !== null);
     if (wanted === empty) {
       return false;
     }
@@ -169,8 +169,10 @@ export class Compositing {
     }
 
     this.stageClear = clear;
+    // Outside any layer, each: a single fill the GPU now blends drops its layer, or now takes one.
     for (const node of this.overOpaque) {
-      this.blendDirectly(node, this.directBlend(node), false);
+      const layered = this.layer(node, false);
+      this.blendDirectly(node, this.directBlend(node), layered);
     }
   }
 

@@ -3041,6 +3041,9 @@ renderer, input bindings and loop, the host lets go itself, as
 
 ### Rendering
 
+The player draws with PixiJS; a renderer of swf2es' own, which replaces it a
+step at a time, is planned in [renderer.md](renderer.md).
+
 A branch with at least 64 immediate art objects across its subtree owns
 a Pixi render group. Children already grouped do not count again, so
 wrappers do not all gain a group. Each group keeps its own instructions
@@ -4519,6 +4522,50 @@ not reach is left as the pooled texture had it: it maps past what the
 target has, where the filter's output is cut off. The `blend-edges` case draws such
 objects against adl, and the player's test page fails a case whose
 drawing GL refused.
+
+A blended object is drawn into a layer of its own, an empty `FilterChain`
+(`render/compositing.ts`), which keeps what it drew while nothing in the
+object changes but where it is, as a filtered object's output is kept
+(below, "Filters"): its children, their colours, its own colour, its mask
+and its scale or turn on the stage all draw it afresh, a move does not.
+Flash keeps no bitmap of an object for a blend mode alone, though, so
+where a filtered object's output stands, a blend's layer does not: a mask
+from outside it on anything in it, which may move or change with nothing
+in it changing, has it drawn afresh on every frame (`blend-outside-mask`),
+and a move by part of a texel draws it afresh where it now is, as Flash
+draws it to the part of a pixel, where a kept filter output moves by whole
+texels (`blend-subpixel`).
+Where the GPU blends the mode, the kept layer is drawn blended; elsewhere
+the blend filter after the chain runs on it, with what is behind copied
+again on every frame, as that may change while the object stands. The
+fork's filter system lets a first filter's kept output stand for its
+object for the filters after it (`Filter.reusedOutput`), copying what is
+behind as the push would have, and lets a filter that would draw its input
+unchanged step aside in a list (`Filter.passesInput`), so the empty chain
+adds no pass; it keeps the input itself, taken from the pool
+(`FilterSystem.takeInput`), where that holds a sample a pixel, and a
+resolved copy of a multisampled one. A filtered object with such a blend
+reuses its chain's output alike. A single fill the GPU blends goes without
+a layer, as it is blended as it is drawn. Pixi copied what is behind into
+the texture on unit 0, or so it meant: binding a texture already there
+leaves the active unit where it was, and a back texture that was the last
+pass's input, as a reused layer's often is, took no copy, its blend
+reading black. The fork activates the unit for the copy. A context lost
+and given back holds none of what was kept: each chain then draws its
+object again (`render/hooks.ts` counts the contexts, and
+`tests/player/context-loss.ts` checks kept filter outputs and blend
+layers). The `blend-kept`
+case keeps blends still, moved, recoloured, with a child moving, over a
+ground changing under them, inside a filtered sprite and with a filter of
+their own, against adl, and `blend-kept-antialias` the same multisampled.
+On a busy real-world scene of some 100 such blends a render, mostly small
+overlays standing still, 99 are drawn from their kept layer: a render's
+multisampled layer clears and resolves fell from 124 to 24 and its
+render-target switches from 572 to 371; on an integrated GPU (Chrome,
+1606 × 1100 at 1.45) its GPU cycles a render fell by 9% drawing as fast
+as it can, and the GPU process's main thread from 16.5 ms to 15.0 ms a
+render at the scene's own rate. What is behind and the blend pass are
+still a copy and a pass a blend a frame.
 
 A renderer made with `antialias: true` draws into multisampled targets,
 which must be resolved before they are read, and Pixi resolves the whole
