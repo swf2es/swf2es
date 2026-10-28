@@ -1405,14 +1405,20 @@ interface Input {
   colorAlpha: number;
 }
 
-/** Whether `a` and `b` give the same output: a move may shift the corner a texel either way. */
-function sameInput(a: Input, b: Input): boolean {
+/**
+ * Whether `a` and `b` give the same output: a move may shift the corner a texel either way, as a
+ * filtered object's bitmap moves (Flash moves its cache by whole pixels); or, `exact`, by whole
+ * texels alone, as a layer kept for a blend is no bitmap of Flash's, which draws the object where
+ * it is to the part of a pixel (the `blend-subpixel` case).
+ */
+function sameInput(a: Input, b: Input, exact: boolean): boolean {
+  const reach = exact ? 1e-3 : 1;
   return (
     a.width === b.width &&
     a.height === b.height &&
     a.resolution === b.resolution &&
-    Math.abs(a.dx - b.dx) <= 1 &&
-    Math.abs(a.dy - b.dy) <= 1 &&
+    Math.abs(a.dx - b.dx) <= reach &&
+    Math.abs(a.dy - b.dy) <= reach &&
     a.colorAlpha === b.colorAlpha
   );
 }
@@ -1465,6 +1471,12 @@ function textureLimit(renderer: FilterSystem["renderer"]): number {
   return limit;
 }
 
+/**
+ * The GPU contexts given to the renderers so far: what a chain kept in one is empty in the next, as
+ * a lost context's textures come back with no contents (render/hooks.ts counts them).
+ */
+export const gpuContexts = { generation: 0 };
+
 export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   /** The input last run on, and the output kept of it, if any. */
   private ran: Input | null = null;
@@ -1489,6 +1501,8 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     ty: 0,
   };
   private kept: Texture | null = null;
+  /** The context `kept` was drawn in (gpuContexts). */
+  private keptIn = 0;
   private stale = true;
   /** Runs in a row its object changed for. */
   private changing = 0;
@@ -1531,6 +1545,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   changed(): void {
     this.stale = true;
     this.area = null;
+    this.masked = true;
   }
 
   /**
@@ -1580,6 +1595,20 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     area.tx = m.tx;
     area.ty = m.ty;
     this.area = area;
+  }
+
+  forgetArea(): void {
+    this.area = null;
+  }
+
+  /**
+   * Whether a mask from outside bounds something below its object, as last measured: until it is
+   * measured again, which it is on each frame while one does or once anything in it changes.
+   */
+  private masked = true;
+
+  maskedWithin(within: boolean): void {
+    this.masked = within;
   }
 
   /** The target's units to a pixel of the stage its filters are drawn at. */
@@ -1712,7 +1741,15 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
    */
   override reusedOutput(_system: FilterSystem, data: FilterData): Texture | null {
     const kept = this.kept;
-    if (!this.keeps || this.stale || !kept || !this.ran) {
+    if (!this.keeps || this.stale || !kept || !this.ran || this.keptIn !== gpuContexts.generation) {
+      return null;
+    }
+
+    // A layer kept only for a blend is no bitmap Flash caches: one with a mask from outside on
+    // something in it, which may move as nothing in it changes, is drawn again on every frame
+    // (its area is then measured, and not kept, each time: measureFilterArea). A mask on the
+    // object itself bounds the area measured, which changes as the mask moves.
+    if (this.filters.length === 0 && this.masked) {
       return null;
     }
 
@@ -1726,7 +1763,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
-    if (!sameInput(this.ran, now)) {
+    if (!sameInput(this.ran, now, this.filters.length === 0)) {
       return null;
     }
 
@@ -1740,6 +1777,62 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
       return;
     }
 
+    if (this.unchanged(system, input)) {
+      system.applyFilter(this, this.kept as Texture, output, clear);
+      return;
+    }
+
+    if (!this.rerun()) {
+      this.runOver(system, input, output, clear);
+      return;
+    }
+
+    if (this.running.length === 0) {
+      this.keep(system, input);
+    } else {
+      this.kept = TexturePool.getSameSizeTexture(input);
+      this.run(system, input, this.kept, true);
+    }
+
+    system.applyFilter(this, this.kept as Texture, output, clear);
+  }
+
+  /**
+   * A layer kept for a blend that reads what is behind (render/compositing.ts), uncoloured and
+   * blended normally, draws its input as it is: the blend after it reads the input, or the output
+   * kept, which the filter system gives as the input when it reuses it, with no pass of the chain's.
+   * The input is still kept while the object stands, as apply keeps it.
+   */
+  override passesInput(system: FilterSystem, input: Texture): boolean {
+    if (this.running.length > 0 || this.colored || this.blendMode !== "normal") {
+      return false;
+    }
+
+    if (!this.keeps || input === this.kept || this.unchanged(system, input) || !this.rerun()) {
+      return true;
+    }
+
+    this.keep(system, input);
+    return true;
+  }
+
+  /**
+   * Keep what the object was drawn into: the input itself, taken from the pool, where it holds
+   * one sample a pixel; a multisampled one is resolved into a copy, which holds no samples.
+   */
+  private keep(system: FilterSystem, input: Texture): void {
+    if (!input.source.antialias && system.takeInput(input)) {
+      this.kept = input;
+      return;
+    }
+
+    const kept = TexturePool.getSameSizeTexture(input);
+    plainCopy().apply(system, input, kept, true);
+    this.kept = kept;
+  }
+
+  /** Whether `input` is what the output kept was run on, nothing having changed since. */
+  private unchanged(system: FilterSystem, input: Texture): boolean {
     const resolution = input.source.resolution;
     // The input's corner on the screen.
     const bounds = system.activeBounds as Bounds;
@@ -1752,28 +1845,32 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
-    const same = this.ran !== null && sameInput(this.ran, now);
-    if (same && !this.stale && this.kept) {
+    this.same = this.ran !== null && sameInput(this.ran, now, this.filters.length === 0);
+    if (this.same && !this.stale && this.kept && this.keptIn === gpuContexts.generation) {
       this.changing = 0;
-      system.applyFilter(this, this.kept, output, clear);
-      return;
+      return true;
     }
 
+    return false;
+  }
+
+  /** Whether the input last compared (unchanged) was the same as the one run before. */
+  private same = false;
+
+  /**
+   * The input last compared made the one run on, the output kept let go of: whether to keep the
+   * new one, which one changing frame after frame is not.
+   */
+  private rerun(): boolean {
     // Unchanged but not kept, as after being filtered straight: kept now.
-    this.changing = this.stale || !same ? this.changing + 1 : 0;
+    this.changing = this.stale || !this.same ? this.changing + 1 : 0;
+    this.keptIn = gpuContexts.generation;
     this.stale = false;
+    const now = this.next;
     this.next = this.ran ?? { width: 0, height: 0, resolution: 0, dx: 0, dy: 0, colorAlpha: 0 };
     this.ran = now;
     this.release();
-    if (this.changing > 1) {
-      this.runOver(system, input, output, clear);
-      return;
-    }
-
-    const kept = TexturePool.getSameSizeTexture(input);
-    this.run(system, input, kept, true);
-    this.kept = kept;
-    system.applyFilter(this, kept, output, clear);
+    return this.changing <= 1;
   }
 
   /**
