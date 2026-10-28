@@ -806,8 +806,18 @@ async function benchSwf(
   hover = false,
   hold = false,
   tableLoop = true,
+  clock = false,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun, tableLoop);
+  // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the
+  // player and Pixi keep or let go by age (render groups settling, idle contexts, pools) happens
+  // on the same frames however fast the machine draws them (draw-counts.ts).
+  const now = performance.now;
+  let virtual = performance.now();
+  if (clock) {
+    performance.now = () => virtual;
+  }
+
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];
@@ -908,6 +918,10 @@ async function benchSwf(
         }
       }
 
+      if (clock) {
+        virtual += 1000 / player.frameRate;
+      }
+
       player.tick();
       const ticked = performance.now();
       if (uncaught.length > 0) {
@@ -941,8 +955,9 @@ async function benchSwf(
         idle.push(performance.now() - begun);
       }
 
-      // Frames apart in time, for what is kept by age to age between them.
-      if (pace > 0) {
+      // Frames apart in time, for what is kept by age to age between them; a task between frames
+      // on a still clock, for what the player waits on (a bitmap's decoding) to come in warm-up.
+      if (pace > 0 || clock) {
         await new Promise((resolve) => setTimeout(resolve, pace));
       }
     }
@@ -990,6 +1005,8 @@ async function benchSwf(
       renderer: name,
       error: describe(e, null),
     };
+  } finally {
+    performance.now = now;
   }
 }
 

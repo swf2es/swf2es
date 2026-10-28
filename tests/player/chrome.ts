@@ -465,7 +465,9 @@ function framesAllocated(head: SampledNode): number {
  * Play `swf` for `frames` frames in the player, timing each; see page.ts's
  * benchSwf. `gpu` lets Chrome use one. With `allocs`, `profilePath` keeps
  * the sampled heap profile, as a .heapprofile DevTools opens. `pace` waits
- * that many milliseconds after each frame.
+ * that many milliseconds after each frame. With `clock`, the page's clock
+ * moves only a frame's time a tick, for counts that must not depend on how
+ * fast the machine draws (draw-counts.ts).
  */
 export function benchPlayer(
   swf: Uint8Array,
@@ -487,6 +489,7 @@ export function benchPlayer(
   hover = false,
   snapshotPath?: string,
   tableLoop = true,
+  clock = false,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",
@@ -509,7 +512,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop}, ${clock})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };

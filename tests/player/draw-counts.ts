@@ -1,8 +1,13 @@
 // What the player asks of GL in a frame, held to a baseline that may only
 // go down: draw calls (a multi-draw one call), the draws they make (a
 // multi-draw as many as its count), program, vertex array and framebuffer
-// binds, and uniform calls, each a mean over 60 frames after 30 of
-// warm-up. The site's crowd and bounce demos play, and three SWFs made
+// binds, and uniform calls, each a mean over 60 frames after a warm-up.
+// The page's clock moves a frame's time a tick and no more (page.ts,
+// benchSwf's clock), so that what the player keeps or lets go by age, as
+// render groups settle after 2 s unchanged, comes on the same frames on a
+// slow CI runner as on a fast machine; the warm-up lasts at least 3 s of
+// that clock, and until the transform table's atlas has made no buffer for
+// 10 frames, so that the counted frames are a steady scene's. The site's crowd and bounce demos play, and three SWFs made
 // here: a crowd of filled, stroked, bitmap and gradient parts under colour
 // transforms, half of it still; blend modes, a mask, a glow left still and
 // a filtered sprite multiplied between shapes; and a timeline that
@@ -28,7 +33,11 @@ import { libraryAbcs } from "./libraries.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const baselinePath = `${here}draw-counts.json`;
 
-const WARM_UP = 30;
+/** The fewest frames of warm-up: past render/settle.ts's SETTLE_MS at 30 frames a second. */
+const WARM_UP = 90;
+/** Frames without a buffer made that end the warm-up, and the most it lasts. */
+const STEADY = 10;
+const WARM_UP_MOST = 240;
 const COUNTED = 60;
 /** The counts the baseline holds, each a mean a frame. */
 const KEYS = ["calls", "subDraws", "useProgram", "bindVertexArray", "bindFramebuffer", "uniforms"];
@@ -369,16 +378,51 @@ async function play(
   gpu: boolean,
 ): Promise<{
   counts: Counts;
+  warmUp: number;
   textures: number;
   renderer: string;
 }> {
-  // As a host that draws blend modes makes its renderer (useBackBuffer).
-  const result = await benchPlayer(swf, 1 + WARM_UP + COUNTED, gpu, true);
+  // As a host that draws blend modes makes its renderer (useBackBuffer), on the page's frame clock.
+  const frames = 1 + WARM_UP_MOST + COUNTED;
+  const result = await benchPlayer(
+    swf,
+    frames,
+    gpu,
+    true,
+    0,
+    -1,
+    false,
+    1,
+    false,
+    false,
+    true,
+    undefined,
+    undefined,
+    0,
+    undefined,
+    1,
+    false,
+    undefined,
+    true,
+    true,
+  );
   if (result.error) {
     throw new Error(result.error);
   }
 
-  const counted = result.meters.slice(WARM_UP);
+  // The first frame the warm-up may end on with STEADY frames before it free of new buffers.
+  const meters = result.meters;
+  let warmUp = WARM_UP_MOST;
+  let quiet = 0;
+  for (let i = 0; i < WARM_UP_MOST; i++) {
+    quiet = meters[i].bufferData ? 0 : quiet + 1;
+    if (i + 1 >= WARM_UP && quiet >= STEADY) {
+      warmUp = i + 1;
+      break;
+    }
+  }
+
+  const counted = meters.slice(warmUp, warmUp + COUNTED);
   assert.equal(counted.length, COUNTED);
   const textures = Math.max(0, ...result.meters.map((m) => m.batchTexturesMost ?? 0));
   if (textures >= MOST_TEXTURES) {
@@ -397,7 +441,7 @@ async function play(
     counts[key] = Math.round((sum / COUNTED) * 100) / 100;
   }
 
-  return { counts, textures, renderer: result.renderer };
+  return { counts, warmUp, textures, renderer: result.renderer };
 }
 
 const args = process.argv.slice(2);
@@ -433,11 +477,11 @@ for (const [name, swf] of cases()) {
 
   let first: Counts | null = null;
   for (let run = 0; run < runs; run++) {
-    const { counts, textures, renderer } = await play(swf, gpu);
+    const { counts, warmUp, textures, renderer } = await play(swf, gpu);
     const shown = KEYS.map((k) => `${k} ${counts[k]}`).join(", ");
     const buffers = `bufferData ${counts.bufferData} (${Math.round(counts.bufferDataBytes / 1024)} KB), copyBufferSubData ${counts.copyBufferSubData} (${Math.round(counts.copyBufferSubDataBytes / 1024)} KB)`;
     console.log(
-      `draw-counts: ${name}: ${shown}; ${buffers} a frame; batches of ${textures} textures at most (${renderer})`,
+      `draw-counts: ${name}: ${shown}; ${buffers} a frame after ${warmUp} of warm-up; batches of ${textures} textures at most (${renderer})`,
     );
     if (first) {
       for (const key of KEYS) {
