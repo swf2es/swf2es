@@ -30,9 +30,10 @@ import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { ShapeObject } from "../display/shapeobject.js";
 import type { GradientFill, ImageFill, ShapeLayer } from "../display/shapes.js";
+import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { Drawer } from "../hosts.js";
 import type { FillTessellator } from "./fills.js";
-import { bitmapQuad, layerParts, type Part, radialTexels } from "./shapes.js";
+import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
 
 export interface RenderViewOptions {
   /** The stage's size in pixels, and the canvas' pixels a stage pixel. */
@@ -83,6 +84,8 @@ export class RenderView implements Drawer {
   private stageQuality = "HIGH";
   private readonly backend: WebGLBackend;
   private readonly tessellator: FillTessellator;
+  /** The tessellator the view made, which it disposes of with itself; none if it was given one. */
+  private readonly ownTessellator: Tessellator | null = null;
   private readonly scene = new SceneList();
   private readonly rows = new Rows();
   private readonly geometries = new Geometries();
@@ -115,9 +118,28 @@ export class RenderView implements Drawer {
 
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
-    this.tessellator = options.fillTessellator ?? new Tessellator().tessellate;
+    if (options.fillTessellator) {
+      this.tessellator = options.fillTessellator;
+    } else {
+      this.ownTessellator = new Tessellator();
+      this.tessellator = this.ownTessellator.tessellate;
+    }
+
+    this.canvas.addEventListener("webglcontextlost", this.lost);
+    this.canvas.addEventListener("webglcontextrestored", this.restored);
     this.resize(this.width, this.height, this.resolution);
   }
+
+  /** A lost context is asked back, as Flash's player would have it, by preventing the default. */
+  private readonly lost = (event: Event) => {
+    event.preventDefault();
+  };
+
+  /** The context came back: the backend made again, and every texture added again as it is drawn. */
+  private readonly restored = () => {
+    this.backend.restore(this.geometries);
+    this.textures.lost();
+  };
 
   /** The stage's quality, "LOW" to "BEST", which will decide bitmaps' smoothing. */
   get quality(): string {
@@ -179,6 +201,10 @@ export class RenderView implements Drawer {
     const tx = pa * m.tx + pc * m.ty + ptx;
     const ty = pb * m.tx + pd * m.ty + pty;
     hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
+    if (!hidden) {
+      noteUnsupported(o);
+    }
+
     const own = o.colorTransform;
     const color = own ? (tint ? concatColor(tint, own) : own) : tint;
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
@@ -384,9 +410,13 @@ export class RenderView implements Drawer {
     return false;
   }
 
-  /** What the view made on its context, let go of. */
+  /** What the view made on its context let go of, the context with it, and its tessellator. */
   destroy(): void {
+    this.canvas.removeEventListener("webglcontextlost", this.lost);
+    this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
+    this.ownTessellator?.dispose();
+    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }
 
@@ -403,4 +433,31 @@ function rgba(argb: Uint32Array): Uint8Array {
   }
 
   return out;
+}
+
+/** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
+function noteUnsupported(o: DisplayObject): void {
+  if (o instanceof TextObject || o instanceof StaticTextObject) {
+    unsupported.texts++;
+  }
+
+  if (o.mask || o.clipDepth > 0) {
+    unsupported.masks++;
+  }
+
+  if (o.scroll) {
+    unsupported.scrollRects++;
+  }
+
+  if (o.scale9Grid) {
+    unsupported.scale9Grids++;
+  }
+
+  if (o.filters.length > 0) {
+    unsupported.filters++;
+  }
+
+  if (o.blendMode !== "normal") {
+    unsupported.blendModes++;
+  }
 }

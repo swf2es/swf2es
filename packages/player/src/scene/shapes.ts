@@ -8,11 +8,22 @@ import type { Region as Area } from "../display/gradients.js";
 import type { GradientFill, ImageFill, Path, ShapeLayer } from "../display/shapes.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
-/** What the renderer cannot draw yet, counted as it is met, for a test or a probe to read. */
+/**
+ * What the renderer cannot draw yet, counted as it is met, for a test or a
+ * probe to read: lines, drawTriangles' meshes and texts left out; masks and
+ * clip layers, scrollRects' clips and 9-slices ignored, so what they would
+ * cut or reshape is drawn whole; filters and blend modes ignored.
+ */
 export const unsupported = {
   strokes: 0,
   meshes: 0,
-  /** Fills the native tessellator refused, of contours that do not cross, which need a triangulator of holes. */
+  texts: 0,
+  masks: 0,
+  scrollRects: 0,
+  scale9Grids: 0,
+  filters: 0,
+  blendModes: 0,
+  /** Fills the native tessellator refused, of contours one inside another that are not convex alone. */
   containedFills: 0,
 };
 
@@ -207,8 +218,24 @@ export function layerParts(layer: ShapeLayer, tessellator: FillTessellator): Par
           out.triangle(first, first + k - 1, first + k);
         }
       }
-    } else if (plan.roots.length > 0) {
-      unsupported.containedFills++;
+    } else {
+      // Each region with nothing inside it, convex, as a fan; anything else needs a triangulator of holes.
+      for (const root of plan.roots) {
+        const points = root.points;
+        if (root.children.length > 0 || !convex(points)) {
+          unsupported.containedFills++;
+          continue;
+        }
+
+        const first = vertex(points[0], points[1]);
+        for (let k = 2; k < points.length; k += 2) {
+          vertex(points[k], points[k + 1]);
+        }
+
+        for (let k = 2; k < points.length / 2; k++) {
+          out.triangle(first, first + k - 1, first + k);
+        }
+      }
     }
   }
 
@@ -224,4 +251,26 @@ export function bitmapQuad(width: number, height: number): GeometryData {
     texels: Float32Array.of(0, 0, width, 0, width, height, 0, height),
     indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
   };
+}
+
+/** Whether the polygon `points` turns one way only. */
+function convex(points: number[]): boolean {
+  const n = points.length / 2;
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const k = (i + 2) % n;
+    const cross =
+      (points[j * 2] - points[i * 2]) * (points[k * 2 + 1] - points[j * 2 + 1]) -
+      (points[j * 2 + 1] - points[i * 2 + 1]) * (points[k * 2] - points[j * 2]);
+    if (cross !== 0) {
+      if (sign !== 0 && Math.sign(cross) !== sign) {
+        return false;
+      }
+
+      sign = Math.sign(cross);
+    }
+  }
+
+  return true;
 }

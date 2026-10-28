@@ -71,6 +71,18 @@ export class WebGLBackend {
     this.setUp();
   }
 
+  /**
+   * The context came back after it was lost: everything made again, every
+   * geometry copied in again from the registry's arrays. The textures were
+   * lost with it, which their owners add again (Textures.lost).
+   */
+  restore(geometries: Geometries): void {
+    this.setUp();
+    geometries.added.length = 0;
+    geometries.removed.length = 0;
+    this.repack(geometries);
+  }
+
   /** Programs, buffers and textures made, as the context comes or comes back. */
   private setUp(): void {
     const gl = this.gl;
