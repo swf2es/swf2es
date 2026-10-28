@@ -27,7 +27,6 @@ import {
   color32BitToUniform,
   ExtensionType,
   extensions,
-  FilterSystem,
   Geometry,
   GlProgram,
   type GpuGraphicsContext,
@@ -1036,6 +1035,3 @@ export class TablePipe {
 }
 
 extensions.add(TablePipe);
-// A run executed again draws the same again from rows of its own: a filtered object drawn by runs
-// may be drawn twice, over its glow (render/filters.ts, layerFor).
-FilterSystem.redrawablePipes.add(NAME);
