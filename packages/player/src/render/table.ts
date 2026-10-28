@@ -336,6 +336,8 @@ const protoDrawn = {
   textures: 0,
   planMs: 0,
   resets: 0,
+  /** Times the prototype's atlas outgrew its texture and started again. */
+  restarts: 0,
   /** Runs planned again, and drawn as kept from an earlier render (retain). */
   planned: 0,
   kept: 0,
@@ -1693,6 +1695,13 @@ export class TablePipe {
     this.spriteCursor = 0;
     this.spritesUploaded = 0;
     this.pulled.compact();
+    if (this.protoAtlasFailed) {
+      // Outgrown, holes and all, it starts again, cut to what is live as contexts are placed again.
+      this.protoAtlasFailed = false;
+      this.protoAtlas.lost();
+      protoDrawn.restarts++;
+    }
+
     this.protoAtlas.compact();
     // Kept ranges of runs not drawn for a while, as a group rebuilt leaves its old runs, given back.
     if (this.render % 60 === 0) {
@@ -2474,6 +2483,11 @@ export class TablePipe {
     }
 
     this.protoAtlas.send();
+    // An atlas that outgrew its texture this render draws nothing till it starts again.
+    if (!this.protoAtlasTexture) {
+      return;
+    }
+
     for (let kind = 0; kind < 3; kind++) {
       this.uploadKept(kind);
     }
