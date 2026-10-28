@@ -240,6 +240,10 @@ export async function withPage<T>(
         ...(process.env.SWF2ES_NATIVE_FILLS ? ["nativeFills"] : []),
         ...(process.env.SWF2ES_NATIVE_BITMAPS ? ["nativeBitmaps"] : []),
         ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? ["adobe"] : []),
+        // Step 0's prototype renderer (render/table.ts, setProto), throwaway.
+        ...(process.env.SWF2ES_PROTO
+          ? [process.env.SWF2ES_PROTO === "1" ? "proto" : `proto=${process.env.SWF2ES_PROTO}`]
+          : []),
       ];
       await devtools.send("Page.navigate", {
         url: `${url}${page}${flags.length ? `?${flags.join("&")}` : ""}`,
