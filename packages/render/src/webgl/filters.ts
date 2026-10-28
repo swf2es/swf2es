@@ -56,6 +56,14 @@ void main(void) {
 
 const HEADER = "#version 300 es\nprecision highp float;\n";
 
+/** The input as it is, read where the vertex shader says: halved, at the corner four texels share. */
+const COPY = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+void main(void) {
+  finalColor = texture(uTexture, vTextureCoord);
+}`;
+
 interface Pass {
   program: WebGLProgram;
   uniforms: Map<string, WebGLUniformLocation | null>;
@@ -130,6 +138,19 @@ export class FilterRunner<T extends FilterTarget> {
     }
 
     return current;
+  }
+
+  /**
+   * `input`'s first `width` by `height` texels at half the size each way,
+   * each texel the mean of the four it covers, read once linearly at the
+   * corner they share: a target the host lends, which the caller gives
+   * back. Not a filter's pass, so at a texel a unit.
+   */
+  halve(input: T, width: number, height: number): T {
+    this.resolution = 1;
+    const out = this.host.take(width, height);
+    this.draw(this.use("copy", COPY), input, width * 2, height * 2, out, width, height);
+    return out;
   }
 
   /** One filter, its values from `v[at]`, over `input`: the target it drew into, or `input`. */
