@@ -169,6 +169,8 @@ assert.deepEqual(
 
 // Through the table's atlas, and drawn alone from what Pixi packed of each, as without the table.
 assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");
+// Pulled draws asked for, as software GL makes the multi-draws by default (render/table.ts).
+assert.equal(await playLosingContext(swf, 4, true, false, true), null, "with pulled draws");
 assert.equal(await playLosingContext(swf, 4, false), null, "without the transform table");
 assert.equal(await playLosingContext(swf, 4, true, true), null, "with objects turned in 3D");
 // Lost for frames that draw into nothing, lost twice, and resized while lost and after: every
@@ -181,6 +183,14 @@ for (const table of [true, false]) {
   for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt", "tttwltrttt"]) {
     assert.equal(await playLosingContextPlan(swf, plan, table), null, `${plan}, table ${table}`);
   }
+}
+
+for (const plan of ["ttltrtltrtt", "tttwltrttt"]) {
+  assert.equal(
+    await playLosingContextPlan(swf, plan, true, 1, true),
+    null,
+    `${plan}, pulled draws`,
+  );
 }
 
 // At the table's own threshold, its short runs drawn from the atlas a call a draw.

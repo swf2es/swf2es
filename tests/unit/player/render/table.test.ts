@@ -567,3 +567,178 @@ test("with short runs left to Pixi, a short run's Graphics go through its pipe",
     setTransformTable(true);
   }
 });
+
+/** A float's bits, as an expanded atlas keeps a position. */
+const bits = (f: number) => new Uint32Array(Float32Array.of(f).buffer)[0];
+
+test("an expanded atlas keeps each index as its vertex, and counts no vertices", () => {
+  const calls: string[] = [];
+  const words: number[] = [];
+  const atlas = new Atlas(
+    WHITE,
+    {
+      resize(vertices, indices, keptVertices, keptIndices) {
+        calls.push(`resize ${vertices} ${indices} keeping ${keptVertices} ${keptIndices}`);
+      },
+      writeVertices() {
+        calls.push("vertices");
+      },
+      writeIndices(at, data, from, count) {
+        calls.push(`indices ${at} ${count}`);
+        words.push(...data.subarray(from * 4, (from + count) * 4));
+      },
+    },
+    true,
+  );
+  const batches = [
+    { start: 0, size: 3 },
+    { start: 3, size: 3 },
+  ];
+  const placed = atlas.place({}, packed(4, [0, 1, 2, 0, 2, 3], batches));
+  assert.equal(placed?.vertices, 0);
+  assert.deepEqual(placed?.offsets, [0, 3 * 4]);
+  assert.equal(atlas.vertexCount, 0);
+  assert.equal(atlas.indexCount, 6);
+  atlas.send();
+  assert.deepEqual(calls, ["resize 4096 12288 keeping 0 0", "indices 0 6"]);
+  // Each index' vertex: its position's two floats, and its colour's word, the packed floats'
+  // fifth, as two floats of two bytes each.
+  const expected: number[] = [];
+  for (const v of [0, 1, 2, 0, 2, 3]) {
+    const color = bits(v * 6 + 4);
+    expected.push(bits(v * 6), bits(v * 6 + 1), bits(color & 0xffff), bits(color >>> 16));
+  }
+
+  assert.deepEqual(words, expected);
+  atlas.destroy();
+});
+
+/** A table pipe over a GL that logs its texture writes, its pulled draws possible. */
+function pulling(
+  contexts: Map<object, { batches: unknown[]; isBatchable: boolean; packed: Packed }>,
+) {
+  const writes: number[][] = [];
+  const renderer = {
+    type: 1,
+    _roundPixels: 0,
+    gl: {
+      TEXTURE_2D: 1,
+      RGBA: 2,
+      FLOAT: 3,
+      texSubImage2D(...args: number[]) {
+        // x, y, width, height, and the first float.
+        writes.push([args[2], args[3], args[4], args[5], args[9]]);
+      },
+    },
+    texture: { bindForUpload() {} },
+    graphicsContext: {
+      getGpuContext: (context: object) => contexts.get(context),
+      getContextRenderDataOnCpu: (context: object) => contexts.get(context)?.packed,
+    },
+    runners: { contextChange: { add() {} }, prerender: { add() {} } },
+  };
+  const pipe = new TablePipe(renderer as unknown as ConstructorParameters<typeof TablePipe>[0]);
+  const inner = pipe as unknown as {
+    pullable: boolean;
+    atlasMostLines: number;
+    maxRows: number;
+    atlasTexture: object | null;
+    pulledRows: { resource: Float32Array };
+    chunks: { resource: Float32Array };
+    pulled: Atlas;
+    render: number;
+    plan(run: TableInstruction): {
+      steps: number;
+      alone: ({ name: string } | null)[];
+      first: number[];
+      chunks: number[];
+      rows: number[];
+      blends: string[];
+    };
+    stillPlaced(plan: object): boolean;
+    writeAtlasTexture(at: number, data: Uint32Array, from: number, count: number): void;
+  };
+  inner.pullable = true;
+  inner.atlasMostLines = 8192;
+  inner.maxRows = 16384 * 256;
+  return { pipe, inner, writes };
+}
+
+test("the expanded atlas goes into its texture a line at a time, whole lines at once", () => {
+  const { inner, writes } = pulling(new Map());
+  inner.atlasTexture = {};
+  // Lines of 2048 texels: the rest of the first, a whole line, and what is left, from index 1 on.
+  inner.writeAtlasTexture(2040, new Uint32Array(4101 * 4), 1, 4100);
+  assert.deepEqual(writes, [
+    [2040, 0, 8, 1, 4],
+    [0, 1, 2048, 1, 4 + 8 * 4],
+    [0, 2, 2044, 1, 4 + 2056 * 4],
+  ]);
+});
+
+test("a run is planned as a pulled draw for each blend mode, and Pixi's pipe between", () => {
+  const contexts = new Map<object, { batches: unknown[]; isBatchable: boolean; packed: Packed }>();
+  const graphics = (name: string, sizes: number[], blend = "normal", batchable = false) => {
+    const context = { customShader: null };
+    let start = 0;
+    const batches = sizes.map((size) => {
+      const batch = { start, size };
+      start += size;
+      return batch;
+    });
+    const indices = Array.from({ length: start }, (_, i) => i % 3);
+    contexts.set(context, {
+      batches,
+      isBatchable: batchable,
+      packed: packed(3, indices, batches),
+    });
+    return {
+      name,
+      isRenderable: true,
+      context,
+      groupBlendMode: blend,
+      _roundPixels: 0,
+      groupTransform: { a: 1, b: 0, c: 0, d: 1, tx: name.charCodeAt(0), ty: 0 },
+      groupColorAlpha: 0xffffffff,
+      localColor: 0xffffff,
+      localAlpha: 1,
+    };
+  };
+  const { inner } = pulling(contexts);
+  const a = graphics("a", [3]);
+  const b = graphics("b", [3, 99]);
+  const c = graphics("c", [3], "normal", true);
+  const d = graphics("d", [3], "add");
+  const run = { renderPipeId: "flashTable", canBundle: false, items: [a, b, c, d] };
+  const plan = inner.plan(run as unknown as TableInstruction);
+
+  assert.equal(plan.steps, 3);
+  assert.deepEqual(plan.alone.slice(0, 3), [null, c, null]);
+  assert.deepEqual(plan.first.slice(0, 3), [0, 0, 4]);
+  assert.deepEqual(plan.chunks.slice(0, 3), [4, 0, 1]);
+  assert.deepEqual(plan.rows.slice(0, 3), [3, 0, 1]);
+  assert.deepEqual(plan.blends.slice(0, 3), ["normal", "", "add"]);
+  // A row a batch, 5 texels of 4 floats, its translation the Graphics'; a chunk of up to 96
+  // indices a texel: its row, its first index in the atlas, and how many.
+  const rows = inner.pulledRows.resource;
+  assert.deepEqual(
+    [0, 1, 2, 3].map((r) => rows[r * 20 + 4]),
+    [97, 98, 98, 100],
+  );
+  const chunks = inner.chunks.resource;
+  const chunk = (k: number) => [...chunks.subarray(k * 4, k * 4 + 3)];
+  assert.deepEqual([0, 1, 2, 3, 4].map(chunk), [
+    [0, 0, 3],
+    [1, 3, 3],
+    [2, 6, 96],
+    [2, 102, 3],
+    [3, 105, 3],
+  ]);
+
+  // Planned for this render, it holds while its contexts stay where they were.
+  assert.ok(inner.stillPlaced(plan));
+  inner.pulled.release(contexts.get(c.context) as object);
+  assert.ok(inner.stillPlaced(plan));
+  inner.pulled.release(contexts.get(b.context) as object);
+  assert.ok(!inner.stillPlaced(plan));
+});
