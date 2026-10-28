@@ -405,6 +405,7 @@ async function play(
     undefined,
     true,
     true,
+    true,
   );
   if (result.error) {
     throw new Error(result.error);

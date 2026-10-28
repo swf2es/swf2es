@@ -75,6 +75,10 @@
 // more as one multi-draw, to time where that starts to gain; it draws the
 // shorter from its atlas a call a draw, or with --no-loop leaves them to Pixi.
 //
+// --counts counts what the frames ask of GL and of Pixi's pipes (perFrame
+// in --json's output), each call wrapped: left out, the frames are timed
+// unwrapped.
+//
 // --scripted N plays instead N rigs whose 12 parts are clips of a class
 // with a frame script, each frame taken off and new ones put in their
 // place, turning and swelling; each new part's script calls a method on
@@ -145,7 +149,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--no-loop] [--pace MS] [--hover]
+//     [--min-run N] [--no-loop] [--counts] [--pace MS] [--hover]
 //     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
@@ -1359,6 +1363,8 @@ const result = await benchPlayer(
   args.includes("--hover"),
   args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
   !args.includes("--no-loop"),
+  false,
+  args.includes("--counts"),
 );
 if (result.error) {
   console.error(result.error);
@@ -1431,7 +1437,7 @@ const summary = {
   frameMean: Math.round((total.reduce((a, b) => a + b, 0) / total.length) * 100) / 100,
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, rebuilds, tessellation, uploads.
-  perFrame: perFrame(result.meters.slice(WARMUP)),
+  ...(args.includes("--counts") ? { perFrame: perFrame(result.meters.slice(WARMUP)) } : {}),
   ...(args.includes("--allocs")
     ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
     : {}),

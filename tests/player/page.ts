@@ -807,6 +807,7 @@ async function benchSwf(
   hold = false,
   tableLoop = true,
   clock = false,
+  metered = false,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun, tableLoop);
   // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the
@@ -901,7 +902,8 @@ async function benchSwf(
     const first = performance.now() - start;
     const heapBefore = heapNow();
     const meters: Record<string, number>[] = [];
-    const counter = meter(renderer);
+    // Only when asked for: each call wrapped and timed would slow the frames timed.
+    const counter = metered ? meter(renderer) : { read: () => ({}) as Record<string, number> };
     let stroked = view.counts.strokeContexts;
     for (let frame = 2; frame <= frames; frame++) {
       // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
