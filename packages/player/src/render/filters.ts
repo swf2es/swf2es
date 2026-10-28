@@ -1734,6 +1734,14 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     return kept;
   }
 
+  /**
+   * Its kept output is drawn again as it is, blended by the GPU's blending (blendOver), where its
+   * object is drawn uncoloured: the filter system may then draw it through the batcher instead.
+   */
+  override drawsReusedAsIs(): boolean {
+    return !this.colored;
+  }
+
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     if (!this.keeps) {
       this.runOver(system, input, output, clear);

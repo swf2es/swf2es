@@ -4698,7 +4698,18 @@ own, keep the chain and its output; a displacement's map is the same only
 as the same object, which setting it again takes anew. A wide blur's
 passes read blur × texels to a screen pixel a pixel, over an area grown
 by its reach, so their cost rises with the cube of the texels to a stage
-pixel; kept, a still object costs one copy a frame. Where there are more
+pixel; kept, a still object costs one copy a frame. That copy, where it
+is the output as it is (no colour transform; a blend the GPU's blending
+does, `blendOver`, is kept), is drawn as a quad by Pixi's batch shader
+from vertices kept on the GPU, those drawn in a row one after another,
+rather than as a pass of its chain (`FilterSystem.batchesReused`, WebGL
+only), which saves the pass's uniforms. The quad lies on the pass's
+texels, in the render group's space where that has a transform; inside a
+faded or tinted render group, whose colour the batcher would multiply
+in, the pass draws it, as it does a coloured output. On a busy screen,
+with some 210 kept outputs a frame, this cut 250 of 12,700 GL calls but
+no GPU time: the scene drawn between them is the table's
+(`render/table.ts`), so the program still changes around each. Where there are more
 texels than one to a stage pixel, a blur's and a glow's or shadow's runs
 go coarser (`blurShrink`), each way on its own, so that a streak 68
 across and 5 down goes coarser across alone: whole times, to a texel a
