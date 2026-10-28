@@ -402,7 +402,7 @@ async function runSwf(
   logFetch = false,
   socket: SocketStep[] | null = null,
   lazyCompilation = false,
-  tablePull = true,
+  tablePull?: boolean,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -807,7 +807,7 @@ async function benchSwf(
   tableLoop = true,
   clock = false,
   metered = false,
-  tablePull = true,
+  tablePull?: boolean,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun, tableLoop, tablePull);
   // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the

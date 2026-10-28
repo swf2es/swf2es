@@ -92,7 +92,12 @@ const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 for (const gpu of [false, true]) {
   const job = { swf, frames: 1, capture: [1] };
   const [pulled, multi, pixi] = await runPlayer(
-    [job, { ...job, tablePull: false }, { ...job, table: false }],
+    // Pulled draws asked for, as software GL makes multi-draws by default.
+    [
+      { ...job, tablePull: true },
+      { ...job, tablePull: false },
+      { ...job, table: false },
+    ],
     { gpu },
   );
   assert.equal(pulled.error, null);

@@ -24,7 +24,7 @@ export interface PlayerJob {
   table?: boolean;
   /** The fewest draws a run makes through the table; its default where not given. */
   tableMinRun?: number;
-  /** Whether the table's runs are pulled draws where it can (render/table.ts), as by default, or multi-draws. */
+  /** Pulled draws (render/table.ts) or multi-draws; left out, the player's choice: multi-draws on software GL. */
   tablePull?: boolean;
   /** The stage shown at the zoom, its frames that size, rather than drawn back to its size (page.ts). */
   shown?: boolean;
@@ -352,7 +352,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           const answer = evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false}, ${job.tablePull ?? true})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false}, ${job.tablePull})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
           ({ value, exception } = await (options.timeout
@@ -493,7 +493,7 @@ export function benchPlayer(
   tableLoop = true,
   clock = false,
   metered = false,
-  tablePull = true,
+  tablePull?: boolean,
 ): Promise<BenchResult> {
   return withPage(
     "benchSwf",

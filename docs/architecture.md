@@ -3294,8 +3294,9 @@ one call, the whole lines they span if more than one. The rows are
 uploaded between draws that read the table, which a driver may make wait
 for the earlier draws (ANGLE on D3D11 or Metal, unmeasured).
 
-That is the table where WebGL 2 lacks float framebuffers, or switched to
-it (`setTransformTable`'s `pull`, `bench.ts --multi-draw`): Chrome's GPU
+That is the table where WebGL 2 lacks float framebuffers, on a renderer
+that draws on the CPU, or switched to it (`setTransformTable`'s `pull`,
+`bench.ts --multi-draw`; `--pull` the other way): Chrome's GPU
 process pays for each draw of a multi-draw as for a call of its own, so
 in a recorded crowded scene its 13 multi-draws a frame, of 383 draws,
 saved it nothing. Elsewhere a run of one blend mode is one pulled draw,
@@ -3324,7 +3325,13 @@ render, not 17.3 (four runs of each, alternated), and the GPU's time
 stayed at some 20 ms. The page's main thread spent some 0.5 ms more,
 on the plans, as on `--rig 400 --fresh` (0.3 ms; GL's time 2 ms, not
 3.2). Software GL draws them slower: SwiftShader's GL time on `--rig
-400 --fresh` doubled.
+400 --fresh` doubled, from 130 to 286 ms, its vertex shader's texture
+fetches slow, and Chrome draws on it, or on Mesa's llvmpipe, without a
+GPU it may use (a blocklisted driver, a virtual machine, a remote
+desktop): a renderer whose name says SwiftShader, llvmpipe or software
+makes the multi-draws unless pulled draws are asked for. `table-runs.ts`
+and `draw-counts.ts` ask for them, so that software GL, as CI's, draws
+and counts them too.
 
 Small Graphics under a Flash colour transform, and a settled group's, stay
 batched copies with the colour batcher: drawn by the table, `--branches

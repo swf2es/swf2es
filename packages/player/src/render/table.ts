@@ -9,7 +9,8 @@
 // Graphics' row of a float texture, its transform and tint (TablePipe,
 // pulled draws). A frame writes the rows and chunks of every run and
 // uploads them at once, and no vertex moves. Where WebGL 2 lacks float
-// framebuffers, or switched off to time the two, the atlas is a vertex
+// framebuffers, on a renderer that draws on the CPU (SOFTWARE), or
+// switched off to time the two, the atlas is a vertex
 // and an index buffer, and a run is one multi-draw of their index ranges,
 // each draw reading its row by gl_DrawID, or from a uniform array for a
 // short run; a run too short to repay its multi-draw, as filters leave, is
@@ -117,7 +118,13 @@ const CHUNK = 96;
 let enabled = true;
 let minRun = MIN_RUN;
 let loopShort = true;
-let pullWanted = true;
+/** Pulled draws asked for or refused (setTransformTable); undefined leaves it to the GPU. */
+let pullWanted: boolean | undefined;
+/**
+ * A renderer that draws on the CPU, by its name: pulled draws took
+ * SwiftShader twice the GL time of the multi-draws, so it makes those.
+ */
+const SOFTWARE = /swiftshader|llvmpipe|software/i;
 /** What the table has drawn: its draw calls, and the draws of contexts' batches they made. */
 const drawn = { calls: 0, draws: 0 };
 
@@ -125,17 +132,24 @@ const drawn = { calls: 0, draws: 0 };
  * Draw Graphics alone through the table, or not, from the next frame: a
  * switch to time the two apart. Runs already built draw through Pixi's
  * pipe while it is off; a group built while it was off draws alone until
- * it is built again. With `pull`, as by default, a run is a draw call
- * whose vertex shader fetches its vertices (TablePipe, pulled draws),
- * where WebGL 2 has float framebuffers; without, the table makes the
- * multi-draws it made before them, which the rest is about. `shortest`
- * is the fewest draws a run makes as one multi-draw, MIN_RUN by default:
- * the tests have the table draw every run so with 1, and the bench times
- * others. A shorter run is drawn from the atlas a call a draw, its rows
- * passed in uniforms, or with `loop` false by Pixi's pipe; so is it with
- * `shortest` past SHORT_RUN + 1, as the uniforms hold no more rows.
+ * it is built again. With `pull` true, a run is a draw call whose vertex
+ * shader fetches its vertices (TablePipe, pulled draws), where WebGL 2 has
+ * float framebuffers; with false, the table makes the multi-draws it made
+ * before them, which the rest is about; left out, pulled draws on a GPU
+ * and multi-draws on a renderer that draws on the CPU (SOFTWARE).
+ * `shortest` is the fewest draws a run makes as one multi-draw, MIN_RUN by
+ * default: the tests have the table draw every run so with 1, and the
+ * bench times others. A shorter run is drawn from the atlas a call a draw,
+ * its rows passed in uniforms, or with `loop` false by Pixi's pipe; so is
+ * it with `shortest` past SHORT_RUN + 1, as the uniforms hold no more
+ * rows.
  */
-export function setTransformTable(on: boolean, shortest = MIN_RUN, loop = true, pull = true): void {
+export function setTransformTable(
+  on: boolean,
+  shortest = MIN_RUN,
+  loop = true,
+  pull?: boolean,
+): void {
   enabled = on;
   minRun = shortest;
   loopShort = loop;
@@ -1053,8 +1067,9 @@ function writeRow(out: Float32Array, at: number, graphics: Graphics): void {
  * is one drawArraysInstanced, an instance a chunk, whose vertex shader
  * fetches its vertices (pulledVertex), one uniform set for it. Multi-draws
  * cost Chrome's GPU process as much a draw as the draws would alone; this
- * is one draw. Without, or switched off for a test or a bench
- * (setTransformTable), the table makes the multi-draws of before.
+ * is one draw. Without, on a renderer that draws on the CPU (SOFTWARE), or
+ * switched off for a test or a bench (setTransformTable), the table makes
+ * the multi-draws of before.
  */
 export class TablePipe {
   static extension = {
@@ -1103,6 +1118,8 @@ export class TablePipe {
   private segment: Graphics[] = [];
   /** Whether the renderer has what pulled draws need: WebGL 2, with float framebuffers to blit. */
   private pullable = false;
+  /** Whether the renderer draws on the CPU, which pulled draws are left to by default (SOFTWARE). */
+  private software = false;
   /** Whether the expanded atlas outgrew the most its texture may hold, which leaves pulled draws for good. */
   private pullFailed = false;
   /** Counts the renders, for a plan to tell whether it is this one's. */
@@ -1208,6 +1225,10 @@ export class TablePipe {
     // The atlas' float texture is blitted into a larger one: from a framebuffer, as the extension
     // lets it be.
     this.pullable = webGL2 && gl.getExtension("EXT_color_buffer_float") !== null;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    this.software = SOFTWARE.test(
+      String(gl.getParameter(info?.UNMASKED_RENDERER_WEBGL ?? gl.RENDERER)),
+    );
     this.atlasMostLines = Math.min(most, EXACT / ATLAS_WIDTH);
     const units = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number;
     this.rowsUnit = units - 1;
@@ -1245,7 +1266,7 @@ export class TablePipe {
 
   /** Whether runs are pulled draws: wanted, and possible. */
   private get pulling(): boolean {
-    return enabled && pullWanted && this.pullable && !this.pullFailed;
+    return enabled && (pullWanted ?? !this.software) && this.pullable && !this.pullFailed;
   }
 
   /** Whether a run too short for a multi-draw is drawn from the atlas, a call a draw. */
