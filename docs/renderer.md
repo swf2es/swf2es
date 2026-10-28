@@ -39,6 +39,18 @@ changes. Measured so, the busy room's GPU time is mostly fill: 8×
 multisampling of the back buffer, and blend layers drawn again every
 frame. Fewer commands save the GPU process's time, not the GPU's; both
 are reported.
+
+The replay is the acceptance test, but it takes minutes and a private
+recording. For each pull request, a synthetic scene in
+`tests/player/bench.ts`, perhaps grown from `--town`, is built to the
+busy room's measured mix and checked once against the replay's counts:
+- about 4,650 Graphics a frame, most of them still;
+- bitmap and gradient fills;
+- 240 filters, most with kept outputs;
+- 100 blend layers;
+- a few masks.
+
+It measures a change in seconds.
 Command and draw counts are supporting evidence. `draw-counts.ts` keeps
 them from creeping up unnoticed, but a step that raises them and is
 measurably faster updates the baseline on purpose.
@@ -142,7 +154,11 @@ It decides:
   The choice depends on the backend's capabilities and on measured rules
   the planner is given. Each wins somewhere: pulled draws more than
   doubled SwiftShader's GL time on one workload, and small coloured
-  Graphics drawn by the table cost a GPU more than the CPU saved.
+  Graphics drawn by the table cost a GPU more than the CPU saved. Runs of
+  a few draws that change every frame want a lighter program than the
+  textured pulled one, such as untextured pulled draws or plain indexed
+  draws. In step 0 such a scene took 16.1 ms a frame with the textured
+  program, against 13.0 ms with today's table.
 - **Texture batching.** Fills, bitmaps, gradients and glyphs share
   texture units in a run as far as Flash's drawing order allows. Which
   textures a run binds, and where it must break, is part of the plan.
@@ -186,7 +202,13 @@ Everything on the GPU, owned in one place:
 
 - **The geometry atlas:** fills and lines as native tessellation writes
   them, placed by `Ranges` and grown in place (`render/table.ts` today),
-  with the expanded atlas for pulled draws.
+  with the expanded atlas for pulled draws. Textured fills' coordinates
+  do not widen every index's record: step 0's two texels an index
+  halved what the atlas held. They live in a texture of their own, or
+  vertices are fetched by index rather than expanded per index. An
+  atlas that outgrows its largest texture, as a long session's contexts
+  and the holes they leave can make it, starts again with only what is
+  live, rather than failing.
 - **Textures:** bitmaps (`render/bitmaps.ts`), device text, video frames,
   gradients.
 - **Render targets:** pooled by size and samples, for layers, cached
