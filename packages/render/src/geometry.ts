@@ -36,6 +36,8 @@ export class Geometries {
   private readonly generations: number[] = [];
   private readonly usedAt: number[] = [];
   private readonly free: number[] = [];
+  /** Each geometry's box: its positions' least x and y, then their greatest. */
+  private boxes = new Float32Array(1024);
   /** Added and removed since the backend last took them. */
   added: number[] = [];
   removed: number[] = [];
@@ -47,7 +49,39 @@ export class Geometries {
     this.generations[id] = (this.generations[id] ?? 0) + 1;
     this.usedAt[id] = this.frame;
     this.added.push(id);
+    if (id * 4 >= this.boxes.length) {
+      const grown = new Float32Array(Math.max(this.boxes.length * 2, id * 4 + 4));
+      grown.set(this.boxes);
+      this.boxes = grown;
+    }
+
+    const p = data.positions;
+    let x0 = Number.POSITIVE_INFINITY;
+    let y0 = Number.POSITIVE_INFINITY;
+    let x1 = Number.NEGATIVE_INFINITY;
+    let y1 = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < p.length; i += 2) {
+      x0 = Math.min(x0, p[i]);
+      y0 = Math.min(y0, p[i + 1]);
+      x1 = Math.max(x1, p[i]);
+      y1 = Math.max(y1, p[i + 1]);
+    }
+
+    const box = this.boxes;
+    box[id * 4] = x0;
+    box[id * 4 + 1] = y0;
+    box[id * 4 + 2] = x1;
+    box[id * 4 + 3] = y1;
     return { id, generation: this.generations[id] };
+  }
+
+  /**
+   * The boxes of every geometry, four floats from `id * 4`: least x and y,
+   * greatest x and y; a geometry of no vertices has its least past its
+   * greatest.
+   */
+  get box(): Float32Array {
+    return this.boxes;
   }
 
   /** Whether `handle` still names what it was given for. */

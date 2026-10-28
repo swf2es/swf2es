@@ -18,6 +18,7 @@ import {
   MASK_POP,
   MASK_USE,
   MIRROR,
+  measureLayers,
   NORMAL,
   plan,
   REPEAT,
@@ -30,7 +31,6 @@ import {
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
-import { bounds } from "../display/bounds.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
@@ -150,6 +150,8 @@ export class RenderView implements Drawer {
   private readonly geometries = new Geometries();
   private readonly textures = new Textures();
   private readonly commands = new Commands();
+  /** Where a frame is drawn, filled in as it is. */
+  private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0 };
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
@@ -243,15 +245,21 @@ export class RenderView implements Drawer {
     this.scene.reset();
     this.rows.reset();
     this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
-    plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
-    this.backend.execute(this.commands, this.scene, this.rows, this.geometries, this.textures, {
-      width: this.gl.drawingBufferWidth,
-      height: this.gl.drawingBufferHeight,
-      scale: this.scale * this.resolution,
-      x: 0,
-      y: 0,
-    });
+    const target = this.target;
+    target.width = this.gl.drawingBufferWidth;
+    target.height = this.gl.drawingBufferHeight;
+    target.scale = this.scale * this.resolution;
+    measureLayers(this.scene, this.rows, this.geometries, target);
+    plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
+    this.backend.execute(
+      this.commands,
+      this.scene,
+      this.rows,
+      this.geometries,
+      this.textures,
+      target,
+    );
     this.geometries.endFrame();
     this.textures.endFrame();
   }
@@ -315,16 +323,14 @@ export class RenderView implements Drawer {
     const childful = o instanceof Container && o.children.length > 0;
     const mode = hidden || named < 0 || (named === LAYER && !childful) ? NORMAL : named;
     let layerRow = -1;
-    let layerAt = -1;
     if (mode !== NORMAL) {
       if (mode === LAYER) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
 
-      // Its rectangle measured once all in it is drawn: a morph, or a shape a script changed,
-      // takes its new form only then (ShapeObject.drawn), which its bounds follow.
-      layerAt = this.scene.layerBegin();
+      // Over the rectangle of what is drawn in it, which measureLayers finds.
+      this.scene.layerBegin();
     }
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -469,8 +475,6 @@ export class RenderView implements Drawer {
     }
 
     if (mode !== NORMAL) {
-      const rect = this.layerRect(o, a, b, c, d, tx, ty);
-      this.scene.layerRect(layerAt, ...(rect ?? ([0, 0, 0, 0] as const)));
       this.scene.marker(LAYER_END, mode, layerRow);
     }
 
@@ -479,53 +483,6 @@ export class RenderView implements Drawer {
     }
 
     o.dirty = CLEAN;
-  }
-
-  /**
-   * The rectangle of the target `o` draws over, under its transform (a b c
-   * d tx ty): its scroll's where it has one, else its bounds, lines and
-   * children's too (display/bounds.ts); in the target's pixels from its top
-   * left, out to whole pixels and a pixel more each way, cut to the target.
-   * Null where it draws nothing on it.
-   */
-  private layerRect(
-    o: DisplayObject,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
-  ): [number, number, number, number] | null {
-    const r = o.scroll ?? bounds(o, true);
-    if (!r) {
-      return null;
-    }
-
-    const k = this.scale * this.resolution;
-    let x0 = Number.POSITIVE_INFINITY;
-    let y0 = Number.POSITIVE_INFINITY;
-    let x1 = Number.NEGATIVE_INFINITY;
-    let y1 = Number.NEGATIVE_INFINITY;
-    for (const [x, y] of [
-      [r.xMin, r.yMin],
-      [r.xMax, r.yMin],
-      [r.xMax, r.yMax],
-      [r.xMin, r.yMax],
-    ]) {
-      const px = (a * x + c * y + tx) * k;
-      const py = (b * x + d * y + ty) * k;
-      x0 = Math.min(x0, px);
-      y0 = Math.min(y0, py);
-      x1 = Math.max(x1, px);
-      y1 = Math.max(y1, py);
-    }
-
-    const left = Math.max(0, Math.floor(x0) - 1);
-    const top = Math.max(0, Math.floor(y0) - 1);
-    const right = Math.min(this.gl.drawingBufferWidth, Math.ceil(x1) + 1);
-    const bottom = Math.min(this.gl.drawingBufferHeight, Math.ceil(y1) + 1);
-    return right > left && bottom > top ? [left, top, right - left, bottom - top] : null;
   }
 
   /** A mask's draws, which `emit` writes, between its markers, kept on the stack of masks open for its pop. */

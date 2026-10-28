@@ -48,9 +48,10 @@ export const MASK_USE = 2;
 export const MASK_POP = 3;
 /**
  * A layer: what lies between LAYER_BEGIN and LAYER_END is drawn into a
- * target of its own, the rectangle of the target the BEGIN covers
- * (layerBegin), then composited onto what is below in the END's blend mode
- * (its geometry), its colour transform the END's row, or none (-1).
+ * target of its own over a rectangle of the target, then composited onto
+ * what is below in the END's blend mode (its geometry), its colour
+ * transform the END's row, or none (-1). The BEGIN's geometry is the
+ * layer's number, whose rectangle measureLayers finds.
  */
 export const LAYER_BEGIN = 4;
 export const LAYER_END = 5;
@@ -73,36 +74,41 @@ export class SceneList {
   texture = new Int32Array(1024);
   sampler = new Uint8Array(1024);
   kind = new Uint8Array(1024);
-  /** A LAYER_BEGIN's rectangle of the target, in its pixels from the top left: x, y, width, height. */
-  rect = new Int32Array(4096);
   length = 0;
+  /** Each layer's rectangle of the target, in its pixels from the top left: x, y, width, height. */
+  layers = new Int32Array(64);
+  layerCount = 0;
 
   reset(): void {
     this.length = 0;
+    this.layerCount = 0;
   }
 
   draw(geometry: number, row: number, blend: number, texture = -1, sampler = 0): void {
     this.push(DRAW, geometry, row, blend, texture, sampler);
   }
 
-  /** A layer begun, its rectangle set once known (layerRect): the entry's index. */
-  layerBegin(): number {
-    const at = this.length;
-    this.push(LAYER_BEGIN, 0, 0, 0, -1, 0);
-    this.layerRect(at, 0, 0, 0, 0);
-    return at;
+  /** A layer begun, its rectangle none till measured (layerRect). */
+  layerBegin(): void {
+    const layer = this.layerCount++;
+    if (layer * 4 >= this.layers.length) {
+      this.layers = grow(this.layers);
+    }
+
+    this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
+    this.layerRect(layer, 0, 0, 0, 0);
   }
 
   /**
-   * The layer begun at entry `at` covers the rectangle x y width height of
-   * the target, in its pixels from the top left; none for nothing to show.
+   * Layer `layer` covers the rectangle x y width height of the target, in
+   * its pixels from the top left; one of no size shows nothing.
    */
-  layerRect(at: number, x: number, y: number, width: number, height: number): void {
-    const r = this.rect;
-    r[at * 4] = x;
-    r[at * 4 + 1] = y;
-    r[at * 4 + 2] = width;
-    r[at * 4 + 3] = height;
+  layerRect(layer: number, x: number, y: number, width: number, height: number): void {
+    const r = this.layers;
+    r[layer * 4] = x;
+    r[layer * 4 + 1] = y;
+    r[layer * 4 + 2] = width;
+    r[layer * 4 + 3] = height;
   }
 
   /**
@@ -129,7 +135,6 @@ export class SceneList {
       this.texture = grow(this.texture);
       this.sampler = grow(this.sampler);
       this.kind = grow(this.kind);
-      this.rect = grow(this.rect);
     }
 
     const at = this.length++;

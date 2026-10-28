@@ -15,6 +15,7 @@ export {
   type GeometryHandle,
   IDLE_FRAMES,
 } from "./geometry.js";
+export { type MeasureTarget, measureLayers } from "./measure.js";
 export { plan } from "./plan.js";
 export { type ColorRow, ROW_FLOATS, ROWS_A_LINE, Rows } from "./rows.js";
 export {

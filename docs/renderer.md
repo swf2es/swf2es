@@ -172,6 +172,10 @@ It decides:
   and `render/compositing.ts`: `blurShrink`, dense samples, kept areas);
   which kept outputs to reuse while their objects stand still; and where a
   blend needs a copy of the backdrop or the GPU's blending matches Flash.
+  A layer's size is what its draws cover, their geometries' boxes placed
+  by their rows and cut by the masks among them (`measure.ts`), not the
+  bounds Flash reports: those differ wherever drawing does (scroll
+  offsets, non-scaling strokes, 3D), and a layer cut to them clips.
 - **Masks and clips.** Stencil push, mask drawing and pop; a scroll
   rectangle that is an axis-aligned rectangle on screen as a scissor.
 - **Passes and targets.** A layer is a small graph of passes, each with

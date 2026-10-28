@@ -50,12 +50,14 @@ interface Layer {
   stencil: WebGLRenderbuffer;
   width: number;
   height: number;
+  /** The frame it was last drawn into. */
+  usedAt: number;
 }
 
 /** The sizes a layer's texture is made in: rounded up to a multiple, so that one serves many. */
 const LAYER_STEP = 128;
-/** The most layers kept free between frames; past them the largest go. */
-const FREE_LAYERS = 8;
+/** Frames a free layer is kept undrawn into before it is let go of. */
+const LAYER_IDLE_FRAMES = 60;
 
 /**
  * A target drawn into: its rectangle of the canvas, in pixels from the
@@ -67,8 +69,6 @@ interface Open {
   y: number;
   width: number;
   height: number;
-  /** Whether it covers nothing of the target: drawn into, off the stage, and not composited. */
-  empty?: boolean;
 }
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const LEAST = 1 << 16;
@@ -114,9 +114,11 @@ export class WebGLBackend {
   private modeLocation: WebGLUniformLocation | null = null;
   private compositeRowLocation: WebGLUniformLocation | null = null;
   private offsetLocation: WebGLUniformLocation | null = null;
-  /** Layers free to draw into, of the target's size, and those drawn into now, innermost last. */
+  /** Layers free to draw into, and those drawn into now, innermost last. */
   private freeLayers: Layer[] = [];
   private layers: Open[] = [];
+  /** Frames executed, which a layer's idleness is counted in. */
+  private frame = 0;
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
   /** A copy of what is below a layer whose mode reads it, the target's size. */
@@ -298,17 +300,14 @@ export class WebGLBackend {
           past = 0;
           const p = commands.params;
           const from = ops[at + 1];
-          // A layer that covers nothing is drawn into nowhere, and not composited.
-          const width = Math.max(1, p[from + 2]);
-          const height = Math.max(1, p[from + 3]);
-          const empty = p[from + 2] <= 0 || p[from + 3] <= 0;
+          const width = p[from + 2];
+          const height = p[from + 3];
           const open: Open = {
             layer: this.takeLayer(width, height),
-            x: empty ? -width : p[from],
-            y: empty ? -height : p[from + 1],
+            x: p[from],
+            y: p[from + 1],
             width,
             height,
-            empty,
           };
           this.layers.push(open);
           this.drawInto(open, target);
@@ -317,7 +316,10 @@ export class WebGLBackend {
           gl.clearColor(0, 0, 0, 0);
           gl.clearStencil(0);
           gl.stencilMask(0xff);
+          // Its rectangle alone: a layer taken may be larger, and nothing past it is read.
+          state.scissor([0, 0, width, height]);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+          state.scissor(null);
           break;
         }
 
@@ -329,10 +331,7 @@ export class WebGLBackend {
           this.drawInto(under, target);
           // Composited where the masks on the target below let it be.
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
-          if (!open.empty) {
-            this.compositeLayer(open, under, ops[at + 1], ops[at + 2]);
-          }
-
+          this.compositeLayer(open, under, ops[at + 1], ops[at + 2]);
           this.giveLayer(open.layer as Layer);
           break;
         }
@@ -340,6 +339,20 @@ export class WebGLBackend {
     }
 
     state.stencil(null);
+    this.dropIdleLayers();
+    this.frame++;
+  }
+
+  /** The free layers undrawn into for LAYER_IDLE_FRAMES let go of. */
+  private dropIdleLayers(): void {
+    const free = this.freeLayers;
+    for (let i = free.length - 1; i >= 0; i--) {
+      if (this.frame - free[i].usedAt > LAYER_IDLE_FRAMES) {
+        this.deleteLayer(free[i]);
+        free[i] = free[free.length - 1];
+        free.pop();
+      }
+    }
   }
 
   /**
@@ -389,6 +402,7 @@ export class WebGLBackend {
       const layer = free[best];
       free[best] = free[free.length - 1];
       free.pop();
+      layer.usedAt = this.frame;
       return layer;
     }
 
@@ -413,25 +427,12 @@ export class WebGLBackend {
       gl.RENDERBUFFER,
       stencil,
     );
-    return { framebuffer, texture, stencil, width, height };
+    return { framebuffer, texture, stencil, width, height, usedAt: this.frame };
   }
 
-  /** A layer free again, the largest of those free let go of past FREE_LAYERS. */
+  /** A layer free again, kept for the layers after it while it is drawn into often enough. */
   private giveLayer(layer: Layer): void {
-    const free = this.freeLayers;
-    free.push(layer);
-    if (free.length > FREE_LAYERS) {
-      let largest = 0;
-      for (let i = 1; i < free.length; i++) {
-        if (free[i].width * free[i].height > free[largest].width * free[largest].height) {
-          largest = i;
-        }
-      }
-
-      this.deleteLayer(free[largest]);
-      free[largest] = free[free.length - 1];
-      free.pop();
-    }
+    this.freeLayers.push(layer);
   }
 
   private deleteLayer(layer: Layer): void {
