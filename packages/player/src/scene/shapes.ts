@@ -10,12 +10,11 @@ import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
  * What the renderer cannot draw yet, counted as it is met, for a test or a
- * probe to read: lines, drawTriangles' meshes and texts left out; masks and
+ * probe to read: drawTriangles' meshes and texts left out; masks and
  * clip layers, scrollRects' clips and 9-slices ignored, so what they would
  * cut or reshape is drawn whole; filters and blend modes ignored.
  */
 export const unsupported = {
-  strokes: 0,
   meshes: 0,
   texts: 0,
   masks: 0,
@@ -158,10 +157,6 @@ export function radialTexels(pixels: number): number {
  * A fill of a bitmap the SWF lacks is red, as Flash draws it.
  */
 export function layerParts(layer: ShapeLayer, tessellator: FillTessellator): Part[] {
-  if (layer.strokes.length > 0) {
-    unsupported.strokes += layer.strokes.length;
-  }
-
   if (layer.meshes?.length) {
     unsupported.meshes += layer.meshes.length;
   }

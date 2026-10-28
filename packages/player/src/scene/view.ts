@@ -2,8 +2,8 @@
 // a view that owns a WebGL 2 canvas, walks the display list into a scene
 // list and its rows, and has @swf2es/render plan and draw it. It stands
 // beside PixiView behind a switch until it draws everything Pixi draws;
-// for now, the fills of shapes and drawings, solid, bitmap and gradient, and
-// bitmaps.
+// for now, the fills of shapes and drawings, solid, bitmap and gradient,
+// their lines, and bitmaps.
 import type { ColorTransform } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/tessellate";
 import {
@@ -34,6 +34,7 @@ import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { Drawer } from "../hosts.js";
 import type { FillTessellator } from "./fills.js";
 import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
+import { layerStrokes } from "./strokes.js";
 
 export interface RenderViewOptions {
   /** The stage's size in pixels, and the canvas' pixels a stage pixel. */
@@ -92,6 +93,15 @@ export class RenderView implements Drawer {
   private readonly textures = new Textures();
   private readonly commands = new Commands();
   private readonly made = new WeakMap<ShapeLayer, Made>();
+  /**
+   * Each layer's lines by what they were stroked for: the linear transform
+   * on the stage and the least width, a pixel of the screen, as a key; and
+   * the drawing's version.
+   */
+  private readonly lines = new WeakMap<
+    ShapeLayer,
+    Map<string, { handle: GeometryHandle | null; version: number }>
+  >();
   private readonly quads = new Map<string, GeometryHandle>();
   private readonly stores = new WeakMap<BitmapStore, Kept>();
   /** Each gradient's textures, by the region a radial one covers ("" for a linear one). */
@@ -211,8 +221,11 @@ export class RenderView implements Drawer {
     const shape = o instanceof ShapeObject ? o.drawn() : null;
     const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
     let row = -1;
+    let lineRow = -1;
     if (!hidden && layers) {
       const version = o.drawing ? o.drawing.version : 0;
+      // A pixel of the screen, in the stage's pixels: the least a line is wide.
+      const least = 1 / (this.screenScale ?? this.scale);
       for (let i = 0; i < layers.length; i++) {
         for (const { part, handle } of this.partsOf(layers[i], version)) {
           const texture = part.paint ? this.paintTexture(part) : null;
@@ -236,6 +249,18 @@ export class RenderView implements Drawer {
             texture?.id ?? -1,
             texture ? this.paintSampler(part.paint as ImageFill | GradientFill) : 0,
           );
+        }
+
+        // The layer's lines after its fills, stroked in the stage's axes: placed by the translation alone.
+        const lines =
+          layers[i].strokes.length > 0 ? this.linesOf(layers[i], version, a, b, c, d, least) : null;
+        if (lines) {
+          if (lineRow < 0) {
+            lineRow = this.rows.add(1, 0, 0, 1, tx, ty, color);
+          }
+
+          this.geometries.use(lines.id);
+          this.scene.draw(lines.id, lineRow, NORMAL);
         }
       }
     }
@@ -289,6 +314,53 @@ export class RenderView implements Drawer {
     }));
     this.made.set(layer, { parts, version });
     return parts;
+  }
+
+  /**
+   * `layer`'s lines through the linear transform (a b c d), at least `least`
+   * wide: stroked again for another transform, screen or version of its
+   * drawing, the old ones kept while drawn as the geometries keep them.
+   */
+  private linesOf(
+    layer: ShapeLayer,
+    version: number,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    least: number,
+  ): GeometryHandle | null {
+    let byKey = this.lines.get(layer);
+    if (!byKey) {
+      byKey = new Map();
+      this.lines.set(layer, byKey);
+    }
+
+    const key = `${a} ${b} ${c} ${d} ${least}`;
+    const known = byKey.get(key);
+    if (
+      known &&
+      known.version === version &&
+      (!known.handle || this.geometries.alive(known.handle))
+    ) {
+      return known.handle;
+    }
+
+    if (known?.handle && this.geometries.alive(known.handle)) {
+      this.geometries.remove(known.handle.id);
+    }
+
+    // Those let go of are forgotten, so that a layer seen through many transforms keeps no keys for them.
+    for (const [old, kept] of byKey) {
+      if (kept.handle && !this.geometries.alive(kept.handle)) {
+        byKey.delete(old);
+      }
+    }
+
+    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator);
+    const handle = data ? this.geometries.add(data) : null;
+    byKey.set(key, { handle, version });
+    return handle;
   }
 
   /** A bitmap's quad of its size, made once for every bitmap of that size. */
