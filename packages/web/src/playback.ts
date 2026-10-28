@@ -143,6 +143,15 @@ export class Playback {
     );
   }
 
+  /** The renderer's WebGL context, null on another API or once destroyed. */
+  get gl(): WebGLRenderingContext | WebGL2RenderingContext | null {
+    if (this.destroyed) {
+      return null;
+    }
+
+    return (this.renderer as { gl?: WebGLRenderingContext | WebGL2RenderingContext }).gl ?? null;
+  }
+
   /** Play and draw on every animation frame, from now. */
   run(): void {
     if (!this.destroyed && !this.frame) {

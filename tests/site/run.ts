@@ -208,6 +208,25 @@ async function check(): Promise<void> {
               format: "png",
             });
             writeFileSync(`${out}site.png`, Buffer.from(page.data, "base64"));
+
+            // The stats count the renderer's draw calls while they are on screen.
+            await until("Number(document.getElementById('draws').textContent) > 0");
+            // Off screen, and while the context is lost, the context has its own functions back.
+            const gl = "document.getElementById('player').gl";
+            const wrapped = `Object.hasOwn(${gl}, 'drawElements')`;
+            assert.equal(await value<boolean>(wrapped), true);
+            await value("(document.querySelector('.stats').style.display = 'none', true)");
+            await until(`!${wrapped}`);
+            await value("(document.querySelector('.stats').style.display = '', true)");
+            await until(wrapped);
+            await value(
+              `((globalThis.lose = ${gl}.getExtension('WEBGL_lose_context')).loseContext(), true)`,
+            );
+            await until(`!${wrapped}`);
+            await value("(lose.restoreContext(), true)");
+            await until(wrapped);
+            await value("(document.getElementById('draws').textContent = '', true)");
+            await until("Number(document.getElementById('draws').textContent) > 0");
           },
         ],
         [
