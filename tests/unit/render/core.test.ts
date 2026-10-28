@@ -5,9 +5,14 @@ import {
   Commands,
   Geometries,
   IDLE_FRAMES,
+  LAYER_BEGIN,
+  LAYER_END,
+  LAYER_POP,
+  LAYER_PUSH,
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
+  MULTIPLY,
   plan,
   ROW_FLOATS,
   Rows,
@@ -188,5 +193,24 @@ test("masks nest, each popped where its marker says", () => {
     [RUN, 6, 1, 0],
     [STENCIL_POP, 4, 1, 0],
     [STENCIL_POP, 1, 1, 0],
+  ]);
+});
+
+test("a layer's draws run inside its push, and it composites in its mode and colour at its pop", () => {
+  const scene = new SceneList();
+  scene.draw(0, 0, 0);
+  scene.marker(LAYER_BEGIN);
+  scene.draw(1, 1, 0);
+  scene.draw(2, 1, 0);
+  scene.marker(LAYER_END, MULTIPLY, 7);
+  scene.draw(3, 2, 0);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [
+    [RUN, 0, 1, 0],
+    [LAYER_PUSH, 0, 0, 0],
+    [RUN, 2, 2, 0],
+    [LAYER_POP, MULTIPLY, 7, 0],
+    [RUN, 5, 1, 0],
   ]);
 });

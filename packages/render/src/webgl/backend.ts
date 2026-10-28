@@ -1,10 +1,34 @@
 import { GlState, linkProgram } from "@swf2es/context3d/device";
-import { CLEAR, type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
+import {
+  CLEAR,
+  type Commands,
+  LAYER_POP,
+  LAYER_PUSH,
+  RUN,
+  STENCIL_POP,
+  STENCIL_PUSH,
+} from "../commands.js";
 import type { Geometries, GeometryData } from "../geometry.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
-import { DRAW, MIRROR, REPEAT, type SceneList, SMOOTH } from "../scene.js";
+import {
+  ADD,
+  DRAW,
+  LAYER,
+  MIRROR,
+  NORMAL,
+  REPEAT,
+  SCREEN,
+  type SceneList,
+  SMOOTH,
+} from "../scene.js";
 import type { Textures } from "../textures.js";
-import { fillFragment, fillVertex, ROW_TEXELS } from "./programs.js";
+import {
+  compositeFragment,
+  compositeVertex,
+  fillFragment,
+  fillVertex,
+  ROW_TEXELS,
+} from "./programs.js";
 
 /** Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four bytes. */
 const VERTEX_BYTES = 20;
@@ -12,6 +36,18 @@ const VERTEX_BYTES = 20;
 const STENCIL_MOST = 255;
 /** The texture unit an entry's texture is bound to; the rows are on 0. */
 const TEXTURE_UNIT = 1;
+/** The units a composite reads its layer and what is below from. */
+const LAYER_UNIT = 2;
+const BACK_UNIT = 3;
+
+/** A target a layer is drawn into: a texture the target's size, with a stencil of its own for masks within it. */
+interface Layer {
+  framebuffer: WebGLFramebuffer;
+  texture: WebGLTexture;
+  stencil: WebGLRenderbuffer;
+  width: number;
+  height: number;
+}
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const LEAST = 1 << 16;
 /** Holes past which, and past the live vertices, the atlas is packed again. */
@@ -51,6 +87,18 @@ export class WebGLBackend {
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
   private texturedLocation: WebGLUniformLocation | null = null;
+  /** The layers' composite program and where it takes its mode and row. */
+  private composite!: WebGLProgram;
+  private modeLocation: WebGLUniformLocation | null = null;
+  private compositeRowLocation: WebGLUniformLocation | null = null;
+  /** Layers free to draw into, and those drawn into now, innermost last, with what each covers. */
+  private freeLayers: Layer[] = [];
+  private layers: Layer[] = [];
+  /** A copy of what is below a layer whose mode reads it, the target's size. */
+  private back: WebGLTexture | null = null;
+  private backFramebuffer: WebGLFramebuffer | null = null;
+  private backWidth = 0;
+  private backHeight = 0;
   /** The row and texture the last draw was told, so neither is told again. */
   private lastRow = -1;
   private lastTexture = -2;
@@ -102,6 +150,19 @@ export class WebGLBackend {
     this.texturedLocation = gl.getUniformLocation(this.program, "uTextured");
     this.textures = [];
     this.samplers = [];
+    this.composite = linkProgram(gl, compositeVertex, compositeFragment);
+    this.state.useProgram(this.composite);
+    gl.uniform1i(gl.getUniformLocation(this.composite, "uLayer"), LAYER_UNIT);
+    gl.uniform1i(gl.getUniformLocation(this.composite, "uBack"), BACK_UNIT);
+    gl.uniform1i(gl.getUniformLocation(this.composite, "uRows"), 0);
+    this.modeLocation = gl.getUniformLocation(this.composite, "uMode");
+    this.compositeRowLocation = gl.getUniformLocation(this.composite, "uRow");
+    this.freeLayers = [];
+    this.layers = [];
+    this.back = null;
+    this.backFramebuffer = null;
+    this.backWidth = 0;
+    this.backHeight = 0;
     this.vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
     this.vertexBuffer = gl.createBuffer() as WebGLBuffer;
     this.indexBuffer = gl.createBuffer() as WebGLBuffer;
@@ -163,10 +224,12 @@ export class WebGLBackend {
     this.lastRow = -1;
     this.lastTexture = -2;
     gl.uniform1i(this.texturedLocation, 0);
-    // The masks pushed: what is drawn passes where the stencil holds as many. Its eight bits hold
-    // 255: those pushed past that are left out, and their pops with them.
+    // The masks pushed on the target drawn into: what is drawn passes where its stencil holds as
+    // many. Its eight bits hold 255: those pushed past that are left out, and their pops with
+    // them. A layer has a stencil of its own, and the target below keeps its count meanwhile.
     let depth = 0;
     let past = 0;
+    const below: number[] = [];
     state.stencil(null);
     const ops = commands.ops;
     for (let k = 0; k < commands.length; k++) {
@@ -184,6 +247,7 @@ export class WebGLBackend {
 
         case RUN:
           // Premultiplied, as every blend mode will be.
+          this.useFill();
           state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
           this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], false);
           break;
@@ -197,6 +261,7 @@ export class WebGLBackend {
             break;
           }
 
+          this.useFill();
           state.colorMask(0);
           state.stencil(gl.EQUAL, depth, push ? gl.INCR : gl.DECR);
           this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], true);
@@ -205,10 +270,172 @@ export class WebGLBackend {
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
           break;
         }
+
+        case LAYER_PUSH: {
+          below.push(depth, past);
+          depth = 0;
+          past = 0;
+          const layer = this.takeLayer(target.width, target.height);
+          this.layers.push(layer);
+          state.bindFramebuffer(layer.framebuffer);
+          state.stencil(null);
+          state.colorMask(15);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clearStencil(0);
+          gl.stencilMask(0xff);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+          break;
+        }
+
+        case LAYER_POP: {
+          const layer = this.layers.pop() as Layer;
+          past = below.pop() as number;
+          depth = below.pop() as number;
+          state.bindFramebuffer(this.layers.at(-1)?.framebuffer ?? null);
+          // Composited where the masks on the target below let it be.
+          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          this.compositeLayer(layer, ops[at + 1], ops[at + 2], target);
+          this.freeLayers.push(layer);
+          break;
+        }
       }
     }
 
     state.stencil(null);
+  }
+
+  /** The fill program, its vertex array and rows bound, as runs and masks draw with them. */
+  private useFill(): void {
+    this.state.useProgram(this.program);
+    this.state.bindVertexArray(this.vertexArray);
+    this.state.bindTexture(0, this.rowsTexture);
+  }
+
+  /** A layer the target's size, from those free, or made. */
+  private takeLayer(width: number, height: number): Layer {
+    const gl = this.gl;
+    const free = this.freeLayers.findIndex((l) => l.width === width && l.height === height);
+    if (free >= 0) {
+      return this.freeLayers.splice(free, 1)[0];
+    }
+
+    const texture = gl.createTexture() as WebGLTexture;
+    this.state.bindTexture(LAYER_UNIT, texture);
+    this.state.activeTexture(LAYER_UNIT);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    // Read texel by texel: with no mipmaps, the default filter would leave it incomplete, reading 0.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const stencil = gl.createRenderbuffer() as WebGLRenderbuffer;
+    gl.bindRenderbuffer(gl.RENDERBUFFER, stencil);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+    const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+    this.state.bindFramebuffer(framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.framebufferRenderbuffer(
+      gl.FRAMEBUFFER,
+      gl.DEPTH_STENCIL_ATTACHMENT,
+      gl.RENDERBUFFER,
+      stencil,
+    );
+    return { framebuffer, texture, stencil, width, height };
+  }
+
+  /**
+   * `layer` composited onto the target bound in blend mode `mode`, coloured
+   * by row `row` (or -1): through GL's blending where it computes Flash's
+   * blend, else from a copy of what is below, the result replacing it.
+   */
+  private compositeLayer(layer: Layer, mode: number, row: number, target: Target): void {
+    const gl = this.gl;
+    const state = this.state;
+    const direct = mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN;
+    if (!direct) {
+      if (!this.back || this.backWidth !== target.width || this.backHeight !== target.height) {
+        if (this.back) {
+          state.dropTexture(this.back);
+          gl.deleteTexture(this.back);
+          gl.deleteFramebuffer(this.backFramebuffer);
+          this.backFramebuffer = null;
+        }
+
+        this.back = gl.createTexture() as WebGLTexture;
+        this.backWidth = target.width;
+        this.backHeight = target.height;
+        state.bindTexture(BACK_UNIT, this.back);
+        state.activeTexture(BACK_UNIT);
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA8,
+          target.width,
+          target.height,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          null,
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      }
+
+      // Blitted, not copied: the canvas' colour may have no alpha, which copyTexSubImage2D into an
+      // RGBA texture refuses, where a blit fills it in.
+      const from = this.layers.at(-1)?.framebuffer ?? null;
+      if (!this.backFramebuffer) {
+        this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
+        gl.framebufferTexture2D(
+          gl.DRAW_FRAMEBUFFER,
+          gl.COLOR_ATTACHMENT0,
+          gl.TEXTURE_2D,
+          this.back,
+          0,
+        );
+      } else {
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
+      }
+
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
+      gl.blitFramebuffer(
+        0,
+        0,
+        target.width,
+        target.height,
+        0,
+        0,
+        target.width,
+        target.height,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+      // Both bindings back as the state cache has them.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, from);
+    }
+
+    state.bindTexture(LAYER_UNIT, layer.texture);
+    state.bindSampler(LAYER_UNIT, null);
+    state.bindSampler(BACK_UNIT, null);
+    state.useProgram(this.composite);
+    state.bindVertexArray(null);
+    gl.uniform1i(this.modeLocation, mode);
+    gl.uniform1i(this.compositeRowLocation, row);
+    switch (mode) {
+      case ADD:
+        state.setBlend(gl.ONE, gl.ONE);
+        break;
+      case SCREEN:
+        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
+        break;
+      case NORMAL:
+      case LAYER:
+        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        break;
+      default:
+        state.setBlend(null);
+    }
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   /** The draws at `scene`'s entries from `first` up to `end`; for the stencil alone, untextured. */
@@ -481,6 +708,17 @@ export class WebGLBackend {
     gl.deleteBuffer(this.vertexBuffer);
     gl.deleteBuffer(this.indexBuffer);
     gl.deleteTexture(this.rowsTexture);
+    gl.deleteProgram(this.composite);
+    for (const layer of [...this.freeLayers, ...this.layers]) {
+      gl.deleteFramebuffer(layer.framebuffer);
+      gl.deleteTexture(layer.texture);
+      gl.deleteRenderbuffer(layer.stencil);
+    }
+
+    if (this.back) {
+      gl.deleteTexture(this.back);
+      gl.deleteFramebuffer(this.backFramebuffer);
+    }
     for (const texture of this.textures) {
       if (texture) {
         gl.deleteTexture(texture);

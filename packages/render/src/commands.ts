@@ -8,6 +8,9 @@ export const RUN = 2;
  */
 export const STENCIL_PUSH = 3;
 export const STENCIL_POP = 4;
+/** A layer begun, drawn into a target of its own; and composited onto the one below in blend mode `a`, coloured by row `b` (or -1). */
+export const LAYER_PUSH = 5;
+export const LAYER_POP = 6;
 
 /**
  * What a frame asks of the backend, in order: each operation an opcode and

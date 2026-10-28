@@ -7,10 +7,14 @@
 import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/tessellate";
 import {
+  BLEND_NAMES,
   CLAMP,
   Commands,
   Geometries,
   type GeometryHandle,
+  LAYER,
+  LAYER_BEGIN,
+  LAYER_END,
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
@@ -282,7 +286,7 @@ export class RenderView implements Drawer {
     hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
 
     const own = o.colorTransform;
-    const color = own ? (tint ? concatColor(tint, own) : own) : tint;
+    let color = own ? (tint ? concatColor(tint, own) : own) : tint;
     // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
     // a 3D mask, or one inside what it masks, masks nothing in Flash.
     let clipped = 0;
@@ -297,13 +301,27 @@ export class RenderView implements Drawer {
       }
     }
 
+    // A blend mode draws it as a layer, composited onto what is below in its mode. An explicit
+    // layer with children colours their combined pixels, its own fills with them, which then take
+    // no colour of their own; without children, it colours each fill (render/view.ts, rooted).
+    const mode = hidden ? NORMAL : Math.max(0, BLEND_NAMES.indexOf(o.blendMode));
+    let layerRow = -1;
+    if (mode !== NORMAL) {
+      if (mode === LAYER && o instanceof Container && o.children.length > 0) {
+        layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
+        color = null;
+      }
+
+      this.scene.marker(LAYER_BEGIN);
+    }
+
+    // Its scroll's rectangle clips what it draws, inside its layer.
     const r = hidden ? null : o.scroll;
     if (r) {
       // A rectangle of no size clips everything, as an empty one does.
       const width = Math.max(0, r.xMax - r.xMin);
       const height = Math.max(0, r.yMax - r.yMin);
       this.pushMask(() => this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, width, height));
-      clipped++;
     }
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
@@ -434,7 +452,15 @@ export class RenderView implements Drawer {
       o.descendantsDirty = false;
     }
 
-    for (; clipped > 0; clipped--) {
+    if (r) {
+      this.popMask();
+    }
+
+    if (mode !== NORMAL) {
+      this.scene.marker(LAYER_END, mode, layerRow);
+    }
+
+    if (clipped > 0) {
       this.popMask();
     }
 
@@ -1029,10 +1055,6 @@ function noteUnsupported(o: DisplayObject): void {
 
   if (o.filters.length > 0) {
     unsupported.filters++;
-  }
-
-  if (o.blendMode !== "normal") {
-    unsupported.blendModes++;
   }
 }
 

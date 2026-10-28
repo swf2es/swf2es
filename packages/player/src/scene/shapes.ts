@@ -16,8 +16,8 @@ import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
  * What the renderer cannot draw yet, counted as it is met, for a test or a
  * probe to read: drawTriangles' meshes, and lines that could not be filled
  * with no native tessellator, left out; advanced text drawn as normal;
- * clips within masks left out; 9-slices ignored, so what they would reshape is drawn whole; filters and
- * blend modes ignored.
+ * clips within masks left out; 9-slices ignored, so what they would reshape is drawn whole; filters
+ * ignored.
  */
 export const unsupported = {
   meshes: 0,
@@ -32,7 +32,6 @@ export const unsupported = {
   masks: 0,
   scale9Grids: 0,
   filters: 0,
-  blendModes: 0,
   /** Fills the native tessellator refused, of contours one inside another that are not convex alone. */
   containedFills: 0,
 };

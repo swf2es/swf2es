@@ -66,3 +66,85 @@ void main(void) {
   finalColor = vec4(c.rgb * c.a, c.a);
 }
 `;
+
+/** A triangle that covers the target, for a layer's composite. */
+export const compositeVertex = `#version 300 es
+void main(void) {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+`;
+
+/**
+ * A layer composited onto what is below, pixel for pixel: coloured by its
+ * row's colour transform where it has one (uRow not -1), on its straight
+ * colour where it covers anything; then blended by its mode. Normal, layer,
+ * add and screen are left to GL's blending; the rest read what is below
+ * (uBack, a copy of it) and give the whole result, as the Pixi view's
+ * blend filters do (render/blend.ts): the separable modes blend straight
+ * colours and composite source over, the others have formulas of their own.
+ */
+export const compositeFragment = `#version 300 es
+precision highp float;
+uniform sampler2D uLayer;
+uniform sampler2D uBack;
+uniform highp sampler2D uRows;
+uniform int uRow;
+uniform int uMode;
+out vec4 finalColor;
+
+vec3 straight(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
+vec3 hardlight(vec3 cb, vec3 cf) {
+  vec3 multiply = 2.0 * cb * cf;
+  vec3 screen = 1.0 - 2.0 * (1.0 - cb) * (1.0 - cf);
+  return mix(multiply, screen, step(0.5, cf));
+}
+
+void main(void) {
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  vec4 front = texelFetch(uLayer, at, 0);
+  if (uRow >= 0 && front.a > 0.0) {
+    ivec2 row = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
+    vec4 mul = texelFetch(uRows, row + ivec2(2, 0), 0);
+    vec4 add = texelFetch(uRows, row + ivec2(3, 0), 0);
+    vec4 c = clamp(vec4(front.rgb / front.a, front.a) * mul + add, 0.0, 1.0);
+    front = vec4(c.rgb * c.a, c.a);
+  }
+
+  if (uMode <= 1 || uMode == 3 || uMode == 7) {
+    finalColor = front;
+    return;
+  }
+
+  vec4 back = texelFetch(uBack, at, 0);
+  vec3 cb = straight(back);
+  vec3 cf = straight(front);
+  vec3 b;
+  switch (uMode) {
+    case 2: b = cb * cf; break;
+    case 4: b = max(cb, cf); break;
+    case 5: b = min(cb, cf); break;
+    case 6: b = abs(cb - cf); break;
+    case 12: b = hardlight(cf, cb); break;
+    case 13: b = hardlight(cb, cf); break;
+    case 8:
+      finalColor = vec4(max(back.rgb - front.rgb, 0.0), front.a + back.a * (1.0 - front.a));
+      return;
+    case 9:
+      finalColor = vec4((back.a - back.rgb) * front.a + back.rgb * (1.0 - front.a), back.a);
+      return;
+    case 10:
+      finalColor = front.a > 0.0 ? back * front.a : back;
+      return;
+    case 11:
+      finalColor = back * (1.0 - front.a);
+      return;
+    default:
+      finalColor = front + back * (1.0 - front.a);
+      return;
+  }
+
+  vec3 co = front.rgb * (1.0 - back.a) + back.rgb * (1.0 - front.a) + front.a * back.a * b;
+  finalColor = vec4(co, front.a + back.a * (1.0 - front.a));
+}
+`;

@@ -1,10 +1,27 @@
-import { CLEAR, type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "./commands.js";
-import { DRAW, MASK_BEGIN, MASK_POP, MASK_USE, type SceneList } from "./scene.js";
+import {
+  CLEAR,
+  type Commands,
+  LAYER_POP,
+  LAYER_PUSH,
+  RUN,
+  STENCIL_POP,
+  STENCIL_PUSH,
+} from "./commands.js";
+import {
+  DRAW,
+  LAYER_BEGIN,
+  LAYER_END,
+  MASK_BEGIN,
+  MASK_POP,
+  MASK_USE,
+  type SceneList,
+} from "./scene.js";
 
 /**
  * Plan a frame: clear to `background` (0xAARRGGBB, straight), then a run
- * for each stretch of the list under one blend mode, and each mask pushed
- * into the stencil and popped out where its markers say. Pure: the same
+ * for each stretch of the list under one blend mode, each mask pushed into
+ * the stencil and popped out, and each layer pushed and composited, where
+ * their markers say. Pure: the same
  * list plans the same commands.
  */
 export function plan(scene: SceneList, background: number, out: Commands): void {
@@ -55,6 +72,14 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
       case MASK_POP:
         close(i);
         out.push(STENCIL_POP, scene.geometry[i], scene.row[i]);
+        break;
+      case LAYER_BEGIN:
+        close(i);
+        out.push(LAYER_PUSH);
+        break;
+      case LAYER_END:
+        close(i);
+        out.push(LAYER_POP, scene.geometry[i], scene.row[i]);
         break;
     }
   }
