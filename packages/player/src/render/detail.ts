@@ -5,8 +5,8 @@
 // repeated under one blur box (stripes, hatching, a glyph's strokes) adds up
 // those errors into a brighter or darker region. So the branch's parts are
 // told by how thick they are, twice their area over their outline, and
-// what is not a shape's fill or line (text, bitmaps, video, a mask, a nested
-// filter) counts as thin past any budget.
+// what is not a shape's fill or line (text, bitmaps, video, drawTriangles)
+// counts as thin past any budget.
 import { Container, type DisplayObject, ShapeObject } from "../display/display.js";
 import { flatten, inside, type Path, type ShapeLayer } from "../display/shapes.js";
 import type { Node } from "./node.js";
@@ -35,18 +35,31 @@ const THIN = 3;
 const MOST_CONTOURS = 512;
 
 /** The layers' own parts, by the layer set and the version of a drawing's, which change in place. */
-const kept = new WeakMap<ShapeLayer[], { version: number; parts: number[] }>();
+const kept = new WeakMap<ShapeLayer[], { version: number | null; parts: number[] }>();
 
-/** A fill's area by the even-odd rule, its contours not crossing: those inside an odd number of others are holes. */
-function fillArea(polygons: number[][]): number {
+/**
+ * A fill's area. A shape's contours run with their fill on one side
+ * (display/shapes.ts), so a hole runs against its outline and their signed
+ * areas sum to the fill's: contours that share edges, as a shape's regions
+ * do, need no telling which holds which. A drawing's may run either way:
+ * by the even-odd rule, its contours not crossing, those inside an odd
+ * number of others are holes.
+ */
+function fillArea(polygons: number[][], oriented: boolean): number {
+  let signed = 0;
   const areas = polygons.map((points) => {
     let area = 0;
     for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
       area += points[j] * points[i + 1] - points[i] * points[j + 1];
     }
 
+    signed += area / 2;
     return Math.abs(area) / 2;
   });
+  if (oriented) {
+    return Math.abs(signed);
+  }
+
   let total = 0;
   for (let i = 0; i < polygons.length; i++) {
     let depth = 0;
@@ -87,8 +100,11 @@ function pathsLength(paths: readonly Path[]): number {
   return length;
 }
 
-/** The parts of `layers` in their own space, kept for the layer set (and `version`). */
-export function layerParts(layers: ShapeLayer[], version = 0): number[] {
+/**
+ * The parts of `layers` in their own space, kept for the layer set: a
+ * shape's, or a drawing's at `version`, which changes in place.
+ */
+export function layerParts(layers: ShapeLayer[], version: number | null = null): number[] {
   const known = kept.get(layers);
   if (known && known.version === version) {
     return known.parts;
@@ -114,7 +130,7 @@ export function layerParts(layers: ShapeLayer[], version = 0): number[] {
       }
 
       if (length > 0) {
-        parts.push(FILL, fillArea(polygons), length);
+        parts.push(FILL, fillArea(polygons, version === null), length);
       }
     }
 
@@ -141,7 +157,7 @@ export function addParts(
   layers: ShapeLayer[],
   m: Linear,
   least: number,
-  version = 0,
+  version: number | null = null,
 ): void {
   const local = layerParts(layers, version);
   const det = Math.abs(m[0] * m[3] - m[1] * m[2]);
@@ -170,9 +186,11 @@ export function addParts(
 
 /**
  * The parts of `root`'s branch as drawn, by the nodes the view keeps
- * (`nodeOf`). Only shapes, drawings and containers of them are weighed: any
- * other object, an object masked, clipped, 3D, filtered or blended within
- * it, or one whose node has not drawn yet, is thin.
+ * (`nodeOf`), its masks' with them, whose edges cut as a fill's. Only
+ * shapes, drawings and containers of them are weighed: any other object, a
+ * scrolled or 3D one, or one whose node has not drawn yet, is thin. One
+ * filtered or blended within counts by its content: its own layer is drawn
+ * by its own chain, and resampled into this one as coarsely.
  */
 export function branchParts(
   root: DisplayObject,
@@ -180,8 +198,9 @@ export function branchParts(
   least: number,
 ): Parts {
   const out: Parts = [];
-  const visit = (o: DisplayObject): void => {
-    if (o !== root && (!o.visible || o.maskOf)) {
+  const masks = new Set<DisplayObject>();
+  const visit = (o: DisplayObject, mask = false): void => {
+    if (!mask && o !== root && (!o.visible || o.maskOf)) {
       return;
     }
 
@@ -189,20 +208,22 @@ export function branchParts(
     if (
       !node ||
       node.stale ||
-      node.clipped ||
-      node.groups.length > 0 ||
-      o.mask ||
       o.scroll ||
       o.space ||
-      (o !== root && (o.filters.length > 0 || o.blendMode !== "normal")) ||
       !(o instanceof ShapeObject || o instanceof Container)
     ) {
       out.push(0, Number.POSITIVE_INFINITY);
       return;
     }
 
+    // A mask's edges clip as a shape's draw; its own visibility does not count.
+    if (o.mask && !masks.has(o.mask)) {
+      masks.add(o.mask);
+      visit(o.mask, true);
+    }
+
     if (node.layers.length > 0) {
-      addParts(out, node.layers, node.world, least, o.drawing?.version ?? 0);
+      addParts(out, node.layers, node.world, least, o.drawing ? o.drawing.version : null);
     }
 
     if (o instanceof Container) {
@@ -225,8 +246,9 @@ export const THICK_TEXELS = 8;
  * Whether `parts` may be drawn into a layer whose texel is `texel` stage
  * pixels, under a blur `box` stage pixels wide whose alpha is multiplied by
  * `strength`: each part THICK_TEXELS texels thick or more, but for thin
- * ones whose outlines, each moved by half a texel, move no more coverage
- * than `levels` of 255 of a box's area.
+ * ones whose outlines, each moved by `step` of a texel (half of one drawn
+ * without multisampling, about a sample's share with it), move no more
+ * coverage than `levels` of 255 of a box's area.
  */
 export function thickEnough(
   parts: Parts,
@@ -234,12 +256,13 @@ export function thickEnough(
   box: number,
   strength: number,
   levels: number,
+  step = 0.5,
 ): boolean {
   let moved = 0;
   const budget = (levels * box * box) / (255 * Math.max(1, strength));
   for (let i = 0; i < parts.length; i += 2) {
     if (parts[i] < THICK_TEXELS * texel) {
-      moved += (parts[i + 1] * texel) / 2;
+      moved += parts[i + 1] * texel * step;
       if (!(moved <= budget)) {
         return false;
       }

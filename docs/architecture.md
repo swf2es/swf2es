@@ -4719,10 +4719,13 @@ multisampling where the blur hides the edges as well: by the stage's
 quality. At medium and low, for any object. At best, never. At high, only
 for thick content (render/detail.ts): each fill's thickness, twice its area
 over its outline, and each line's width, on the stage, must be eight coarse
-texels or more, but for thin parts whose outlines, each moved half a texel,
-move no more than two levels of a blur box's coverage; text, bitmaps,
-video, masks and objects filtered or blended within count as thin past any
-budget. Thin geometry repeated under a wide blur (stripes, hatching, a
+texels or more, but for thin parts whose outlines, each moved half a texel
+(drawn without samples) or a sample's share of one (with them), move no
+more than two levels of a blur box's coverage. A shape's fill is measured
+by the signed areas of its contours, which run with the fill on one side;
+a drawing's by the even-odd rule. Masks count by their shapes, and objects
+filtered or blended within by their content; text, bitmaps, bitmap fills,
+drawTriangles, video, scroll rects and 3D count as thin past any budget. Thin geometry repeated under a wide blur (stripes, hatching, a
 glyph's strokes) adds up its edges' errors into whole regions brighter or
 darker, which `tests/player/filter-coverage.ts` checks, with thick shapes
 drawn coarse at high within 6 levels of best's exact layer. A blur of no

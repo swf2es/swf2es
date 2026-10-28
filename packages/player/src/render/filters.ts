@@ -1520,10 +1520,11 @@ interface Layer {
 
 /**
  * Whether the object may be drawn into a layer whose texel is `texel`
- * stage pixels, under a blur `box` stage pixels wide whose alpha is
- * multiplied by `strength` (FilterChain.fits); null where any may.
+ * stage pixels, its edges off by `step` of one, under a blur `box` stage
+ * pixels wide whose alpha is multiplied by `strength` (FilterChain.fits);
+ * null where any may.
  */
-type Fits = ((texel: number, box: number, strength: number) => boolean) | null;
+type Fits = ((texel: number, box: number, strength: number, step: number) => boolean) | null;
 
 /**
  * How coarse the object a blur blurs whole may be drawn, at `screen` pixels
@@ -1534,8 +1535,8 @@ type Fits = ((texel: number, box: number, strength: number) => boolean) | null;
  * what the samples would smooth, the blur smooths as well. A blur of no
  * passes, or of a texel or less either way, leaves the object as it is,
  * edges and all: drawn as the target draws. Where `fits` judges the object,
- * no coarser than it allows, and multisampled where not even the target's
- * texel is.
+ * multisampled unless its edges may be off by half a texel, and no coarser
+ * than it allows.
  */
 function blurredLayer(
   layer: Layer,
@@ -1568,13 +1569,16 @@ function blurredLayer(
     return;
   }
 
+  // Drawn without samples, an edge is off by half a texel; with them, by about a sample's share.
   const stageBox = Math.min(blurX, blurY);
-  while (layer.coarser > 1 && !fits(layer.coarser / (screen * pixel), stageBox, strength)) {
-    layer.coarser--;
+  const texel = (coarser: number) => coarser / (screen * pixel);
+  if (!layer.antialias && !fits(texel(layer.coarser), stageBox, strength, 0.5)) {
+    layer.antialias = true;
   }
 
-  if (layer.coarser === 1 && !fits(1 / (screen * pixel), stageBox, strength)) {
-    layer.antialias = true;
+  const step = layer.antialias && samples > 1 ? 1 / samples : 0.5;
+  while (layer.coarser > 1 && !fits(texel(layer.coarser), stageBox, strength, step)) {
+    layer.coarser--;
   }
 }
 
@@ -1736,13 +1740,13 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   private parts: Parts | null = null;
 
   /** Whether its object's parts may be drawn into a layer of texels `texel` stage pixels wide (layerFor). */
-  private readonly fits = (texel: number, box: number, strength: number): boolean => {
+  private readonly fits = (texel: number, box: number, strength: number, step: number): boolean => {
     if (!this.detail) {
       return false;
     }
 
     this.parts ??= this.detail();
-    return thickEnough(this.parts, texel, box, strength, SHRUNK_ERROR);
+    return thickEnough(this.parts, texel, box, strength, SHRUNK_ERROR, step);
   };
 
   /**

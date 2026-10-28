@@ -27,11 +27,15 @@ function layers(contours: number[][], lines: { width: number; paths: number[][] 
 
 test("a fill's parts are its area and outline, holes taken out", () => {
   assert.deepEqual(layerParts(layers([rect(0, 0, 40, 20)])), [0, 800, 120]);
-  // A 2 px ring: a square with a square hole.
-  const [kind, area, outline] = layerParts(layers([rect(0, 0, 20, 20), rect(2, 2, 16, 16)]));
+  // A 2 px ring: a square with a square hole, which in a shape runs the other way.
+  const hole = [MOVE, 2, 2, LINE, 2, 18, LINE, 18, 18, LINE, 18, 2, LINE, 2, 2];
+  const [kind, area, outline] = layerParts(layers([rect(0, 0, 20, 20), hole]));
   assert.equal(kind, 0);
   assert.equal(area, 400 - 256);
   assert.equal(outline, 80 + 64);
+  // A drawing's may run either way: the hole is told by being inside.
+  const drawn = layerParts(layers([rect(0, 0, 20, 20), rect(2, 2, 16, 16)]), 0);
+  assert.equal(drawn[1], 400 - 256);
 });
 
 test("parts on the stage are thick by twice their area over their outline", () => {

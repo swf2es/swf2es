@@ -77,6 +77,12 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       bars: [rect(20.3, 30.6, 40.4, 60.3), rect(90.7, 20.1, 35.5, 22.2), rect(95.2, 70.4, 30.1, 30.9)],
       figure: [disc(80.1, 35.4, 16.2), turned(80.4, 75.3, 30.3, 44.1, 0.3), turned(55.6, 70.2, 12.2, 36.3, -0.6), turned(105.3, 72.4, 12.4, 36.1, 0.7)],
     };
+    // Thick shapes with a few thin details, and text-like strokes: coarse only where the details'
+    // edges move little of a blur box's coverage, near the exact layer either way.
+    const details = {
+      "disc and streaks": [disc(80.3, 60.2, 30.3), turned(40.2, 30.1, 40.3, 1.6, 0.4), turned(120.4, 90.3, 36.2, 2.1, -0.3), rect(70.3, 100.6, 30.2, 1.4)],
+      "text-like strokes": Array.from({ length: 24 }, (_, i) => rect(30.3 + (i % 8) * 12.1, 30.2 + Math.floor(i / 8) * 20.3, 1.1, 14.2)),
+    };
     const toPath = (points) => {
       const path = [MOVE, points[0], points[1]];
       for (let i = 2; i < points.length; i += 2) path.push(LINE, points[i], points[i + 1]);
@@ -165,7 +171,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
         }
 
         // Thick shapes at high go coarse, near what best's exact layer draws.
-        for (const [sn, polygons] of Object.entries(thick)) {
+        for (const [sn, polygons] of [...Object.entries(thick), ...Object.entries(details)]) {
           const parts = partsOf(polygons, least);
           for (const [fn, filter] of Object.entries(thickFilters)) {
             const high = draw(renderer, target, filter, polygons, 1, "HIGH", parts);
@@ -180,8 +186,10 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
             }
 
             deltas.push({ case: name + sn + ", " + fn, max, mean: sum / high.pixels.length, coarse: high.layer.resolution });
-            layers.push({ case: name + sn + ", " + fn + ", high (thick)", ...high.layer, target: resolution,
-              medium: typeof medium === "number" && medium < resolution });
+            if (sn in thick) {
+              layers.push({ case: name + sn + ", " + fn + ", high (thick)", ...high.layer, target: resolution,
+                medium: typeof medium === "number" && medium < resolution });
+            }
           }
         }
 
