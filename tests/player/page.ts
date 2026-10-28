@@ -694,8 +694,7 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("copyBufferSubData");
     add("copyBufferSubDataBytes", args[4] as number);
   });
-  // A texture copied into a larger one, as the table's growing expanded atlas is.
-  wrap(gl, "copyTexSubImage2D", () => add("copyTexSubImage2D"));
+
   // A short run's draws, drawn from the atlas a call a draw (render/table.ts): the table's
   // own drawElements, not those of Pixi's pipe for what it leaves to it.
   let inTable = 0;
@@ -768,14 +767,17 @@ function meter(renderer: object): { read(): Record<string, number> } {
   // The table's draw calls and the contexts' batches they drew, whichever way it draws.
   let tableCalls = transformTableDrawn().calls;
   let tableDraws = transformTableDrawn().draws;
+  let atlasGrown = transformTableDrawn().grown;
   return {
     read() {
       const out = counts;
       const drawn = transformTableDrawn();
       out.tableRuns = drawn.calls - tableCalls;
       out.tableDraws = drawn.draws - tableDraws;
+      out.tableAtlasGrown = drawn.grown - atlasGrown;
       tableCalls = drawn.calls;
       tableDraws = drawn.draws;
+      atlasGrown = drawn.grown;
       counts = {};
       return out;
     },
@@ -1105,10 +1107,11 @@ async function contextLossSwf(
   frames: number,
   table: boolean,
   turned = false,
+  tablePull?: boolean,
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const player = new Player(bytes, null);
-  setTransformTable(table, 1);
+  setTransformTable(table, 1, true, tablePull);
   const renderer = await autoDetectRenderer({
     preference: "webgl",
     width: player.width,
@@ -1211,9 +1214,10 @@ async function contextLossPlanSwf(
   plan: string,
   table: boolean,
   tableMinRun = 1,
+  tablePull?: boolean,
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  setTransformTable(table, tableMinRun);
+  setTransformTable(table, tableMinRun, true, tablePull);
   const make = async () => {
     const player = new Player(bytes, null);
     const renderer = await autoDetectRenderer({

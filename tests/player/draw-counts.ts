@@ -6,18 +6,18 @@
 // benchSwf's clock), so that what the player keeps or lets go by age, as
 // render groups settle after 2 s unchanged, comes on the same frames on a
 // slow CI runner as on a fast machine; the warm-up lasts at least 3 s of
-// that clock, and until the transform table's atlas has made no buffer,
-// nor copied its texture into a larger, for 10 frames, so that the counted
-// frames are a steady scene's. The site's crowd and bounce demos play, and
-// three SWFs made here: a crowd of filled, stroked, bitmap and gradient
-// parts under colour transforms, half of it still; blend modes, a mask, a
-// glow left still and a filtered sprite multiplied between shapes; and a
-// timeline that replaces, removes and adds shapes and morphs every frame.
-// Software GL and a GPU must count the same, so the scenes stay within the
-// texture units of any batch, and the table pulls its draws under both,
-// as the player has it do on a GPU alone (render/table.ts, SOFTWARE).
-// Buffers made anew and copied on the GPU, as a growing geometry atlas
-// makes them (render/table.ts), are printed too.
+// that clock, and until the transform table's atlases have made no buffer
+// nor grown for 10 frames, so that the counted frames are a steady
+// scene's. The site's crowd and bounce demos play, and three SWFs made
+// here: a crowd of filled, stroked, bitmap and gradient parts under colour
+// transforms, half of it still; blend modes, a mask, a glow left still and
+// a filtered sprite multiplied between shapes; and a timeline that
+// replaces, removes and adds shapes and morphs every frame. Software GL
+// and a GPU must count the same, so the scenes stay within the texture
+// units of any batch, and the table pulls its draws under both, as the
+// player has it do on a GPU alone (render/table.ts, SOFTWARE). Buffers
+// made anew and copied on the GPU, as a growing geometry atlas makes them
+// (render/table.ts), are printed too.
 //
 //   node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]
 //
@@ -50,7 +50,7 @@ const BUFFERS = [
   "bufferDataBytes",
   "copyBufferSubData",
   "copyBufferSubDataBytes",
-  "copyTexSubImage2D",
+  "tableAtlasGrown",
 ];
 
 /** WebGL 2's least MAX_TEXTURE_IMAGE_UNITS, SwiftShader's: a batch that fills them splits where a GPU's would not. */
@@ -427,7 +427,7 @@ async function play(
   let warmUp = WARM_UP_MOST;
   let quiet = 0;
   for (let i = 0; i < WARM_UP_MOST; i++) {
-    quiet = meters[i].bufferData || meters[i].copyTexSubImage2D ? 0 : quiet + 1;
+    quiet = meters[i].bufferData || meters[i].tableAtlasGrown ? 0 : quiet + 1;
     if (i + 1 >= WARM_UP && quiet >= STEADY) {
       warmUp = i + 1;
       break;

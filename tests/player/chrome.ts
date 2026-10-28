@@ -768,10 +768,11 @@ export function playLosingContextPlan(
   plan: string,
   table: boolean,
   tableMinRun = 1,
+  tablePull?: boolean,
 ): Promise<string | null> {
   return withPage("contextLossPlanSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table}, ${tableMinRun})`,
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table}, ${tableMinRun}, ${tablePull})`,
     );
     return exception ?? value ?? null;
   });
@@ -783,10 +784,11 @@ export function playLosingContext(
   frames: number,
   table: boolean,
   turned = false,
+  tablePull?: boolean,
 ): Promise<string | null> {
   return withPage("contextLossSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${table}, ${turned})`,
+      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${table}, ${turned}, ${tablePull})`,
     );
     return exception ?? value ?? null;
   });
