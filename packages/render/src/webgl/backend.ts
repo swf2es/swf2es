@@ -49,8 +49,9 @@ export class WebGLBackend {
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
   private texturedLocation: WebGLUniformLocation | null = null;
-  /** The textures uploaded, by the registry's ids, and the samplers made, by their bits. */
+  /** The textures uploaded, by the registry's ids, and their sizes; the samplers made, by their bits. */
   private textures: (WebGLTexture | null)[] = [];
+  private sizes: number[] = [];
   private samplers: (WebGLSampler | null)[] = [];
   private vertexArray!: WebGLVertexArrayObject;
   private vertexBuffer!: WebGLBuffer;
@@ -233,10 +234,30 @@ export class WebGLBackend {
       if (!texture) {
         texture = gl.createTexture() as WebGLTexture;
         this.textures[id] = texture;
+        this.sizes[id * 2] = -1;
       }
 
       this.state.bindTexture(TEXTURE_UNIT, texture);
       this.state.activeTexture(TEXTURE_UNIT);
+      // Pixels of the same size go into the texture there is; another size makes it again.
+      if (this.sizes[id * 2] === data.width && this.sizes[id * 2 + 1] === data.height) {
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          data.width,
+          data.height,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          data.pixels,
+        );
+        data.pixels = null;
+        continue;
+      }
+
+      this.sizes[id * 2] = data.width;
+      this.sizes[id * 2 + 1] = data.height;
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,

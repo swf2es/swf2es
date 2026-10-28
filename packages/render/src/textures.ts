@@ -17,23 +17,27 @@ export interface TextureData {
  * Every texture a scene list may name, by id. An owner adds a texture's
  * pixels, and sets them again as they change; the backend uploads what is
  * pending and lets the pixels go, so none are kept on the CPU. What goes
- * undrawn for IDLE_FRAMES is let go of, as geometries are.
+ * undrawn for its idle frames, IDLE_FRAMES unless it was given fewer, is
+ * let go of, as geometries are.
  */
 export class Textures {
   private readonly data: (TextureData | null)[] = [];
   private readonly generations: number[] = [];
   private readonly usedAt: number[] = [];
+  private readonly idleFrames: number[] = [];
   private readonly free: number[] = [];
   /** Added or set again, and removed, since the backend last took them. */
   pending: number[] = [];
   removed: number[] = [];
   frame = 0;
 
-  add(width: number, height: number, pixels: Uint8Array): TextureHandle {
+  /** A texture of `pixels`, let go of once undrawn for `idle` frames. */
+  add(width: number, height: number, pixels: Uint8Array, idle = IDLE_FRAMES): TextureHandle {
     const id = this.free.pop() ?? this.data.length;
     this.data[id] = { width, height, pixels };
     this.generations[id] = (this.generations[id] ?? 0) + 1;
     this.usedAt[id] = this.frame;
+    this.idleFrames[id] = idle;
     this.pending.push(id);
     return { id, generation: this.generations[id] };
   }
@@ -78,7 +82,7 @@ export class Textures {
 
   endFrame(): void {
     for (let id = 0; id < this.data.length; id++) {
-      if (this.data[id] && this.frame - this.usedAt[id] > IDLE_FRAMES) {
+      if (this.data[id] && this.frame - this.usedAt[id] > this.idleFrames[id]) {
         this.remove(id);
       }
     }

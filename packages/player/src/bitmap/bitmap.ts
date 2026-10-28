@@ -676,3 +676,18 @@ export function characterStore(character: BitmapCharacter): BitmapStore | null {
 
   return character.store;
 }
+
+/** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
+export function rgbaOf(pixels: Uint32Array): Uint8Array {
+  const out = new Uint8Array(pixels.length * 4);
+  for (let i = 0; i < pixels.length; i++) {
+    const p = pixels[i];
+    const j = i * 4;
+    out[j] = (p >>> 16) & 0xff;
+    out[j + 1] = (p >>> 8) & 0xff;
+    out[j + 2] = p & 0xff;
+    out[j + 3] = p >>> 24;
+  }
+
+  return out;
+}

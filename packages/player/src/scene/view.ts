@@ -22,7 +22,7 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { BitmapStore, characterStore } from "../bitmap/bitmap.js";
+import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
@@ -51,6 +51,13 @@ export interface RenderViewOptions {
   /** The fills' tessellator: @swf2es/native's, made here, if left out. */
   fillTessellator?: FillTessellator;
 }
+
+/**
+ * How many frames a gradient's texture may go undrawn: a morph tweening a
+ * gradient makes a new one for each ratio, up to a megabyte each, which
+ * the usual idle frames would hold hundreds of.
+ */
+const GRADIENT_IDLE_FRAMES = 30;
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 interface Made {
@@ -85,6 +92,8 @@ export class RenderView implements Drawer {
   private stageQuality = "HIGH";
   private readonly backend: WebGLBackend;
   private readonly tessellator: FillTessellator;
+  /** Whether the view made its canvas, whose context it then loses with itself. */
+  private readonly ownCanvas: boolean;
   /** The tessellator the view made, which it disposes of with itself; none if it was given one. */
   private readonly ownTessellator: Tessellator | null = null;
   private readonly scene = new SceneList();
@@ -113,6 +122,7 @@ export class RenderView implements Drawer {
     this.resolution = options.resolution ?? 1;
     this.background = options.background ?? 0xffffff;
     this.transparent = options.transparent ?? false;
+    this.ownCanvas = !options.canvas;
     this.canvas = options.canvas ?? document.createElement("canvas");
     const gl = this.canvas.getContext("webgl2", {
       alpha: this.transparent,
@@ -210,10 +220,11 @@ export class RenderView implements Drawer {
     const d = pb * m.c + pd * m.d;
     const tx = pa * m.tx + pc * m.ty + ptx;
     const ty = pb * m.tx + pd * m.ty + pty;
-    hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
-    if (!hidden) {
+    if (!hidden && o.visible) {
       noteUnsupported(o);
     }
+
+    hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
 
     const own = o.colorTransform;
     const color = own ? (tint ? concatColor(tint, own) : own) : tint;
@@ -228,6 +239,8 @@ export class RenderView implements Drawer {
       const least = 1 / (this.screenScale ?? this.scale);
       for (let i = 0; i < layers.length; i++) {
         for (const { part, handle } of this.partsOf(layers[i], version)) {
+          // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
+          this.geometries.use(handle.id);
           const texture = part.paint ? this.paintTexture(part) : null;
           if (part.paint && !texture) {
             continue;
@@ -237,7 +250,6 @@ export class RenderView implements Drawer {
             row = this.rows.add(a, b, c, d, tx, ty, color);
           }
 
-          this.geometries.use(handle.id);
           if (texture) {
             this.textures.use(texture.id);
           }
@@ -412,13 +424,13 @@ export class RenderView implements Drawer {
     if (kept && this.textures.alive(kept.handle)) {
       if (kept.version !== store.version) {
         kept.version = store.version;
-        this.textures.set(kept.handle.id, store.width, store.height, rgba(store.readable));
+        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.readable));
       }
 
       return kept.handle;
     }
 
-    const handle = this.textures.add(store.width, store.height, rgba(store.readable));
+    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable));
     this.stores.set(store, { handle, version: store.version });
     return handle;
   }
@@ -455,9 +467,9 @@ export class RenderView implements Drawer {
         columns,
         rows,
       );
-      handle = this.textures.add(columns, rows, rgba(pixels));
+      handle = this.textures.add(columns, rows, rgbaOf(pixels), GRADIENT_IDLE_FRAMES);
     } else {
-      handle = this.textures.add(colors.length, 1, rgba(colors));
+      handle = this.textures.add(colors.length, 1, rgbaOf(colors), GRADIENT_IDLE_FRAMES);
     }
 
     made.set(key, handle);
@@ -482,29 +494,16 @@ export class RenderView implements Drawer {
     return false;
   }
 
-  /** What the view made on its context let go of, the context with it, and its tessellator. */
+  /** What the view made on its context let go of, the context with it if the canvas is its own, and its tessellator. */
   destroy(): void {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
     this.ownTessellator?.dispose();
-    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    if (this.ownCanvas) {
+      this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
   }
-}
-
-/** Premultiplied ARGB, as stores and gradients hold it, as the RGBA bytes a texture takes. */
-function rgba(argb: Uint32Array): Uint8Array {
-  const out = new Uint8Array(argb.length * 4);
-  for (let i = 0; i < argb.length; i++) {
-    const p = argb[i];
-    const j = i * 4;
-    out[j] = (p >>> 16) & 0xff;
-    out[j + 1] = (p >>> 8) & 0xff;
-    out[j + 2] = p & 0xff;
-    out[j + 3] = p >>> 24;
-  }
-
-  return out;
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */

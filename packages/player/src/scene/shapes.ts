@@ -3,9 +3,13 @@
 // solid fills and one for each textured fill, a bitmap's or a gradient's,
 // its vertices carrying where they sample in texels, as Pixi's matrices
 // would map them. What is left out is counted.
+
+import type { Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
-import type { Region as Area } from "../display/gradients.js";
+import { invert } from "../display/geometry.js";
+import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
 import type { GradientFill, ImageFill, Path, ShapeLayer } from "../display/shapes.js";
+import { convex } from "../render/fill-polygons.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
@@ -114,13 +118,11 @@ function sampling(
   at: Sampling;
   region: Area | null;
 } {
-  const m = paint.matrix;
-  const det = m.a * m.d - m.b * m.c;
-  const inverse = (x: number, y: number): [number, number] => {
-    const dx = x - m.tx;
-    const dy = y - m.ty;
-    return [(m.d * dx - m.c * dy) / det, (m.a * dy - m.b * dx) / det];
-  };
+  const m = invert(paint.matrix) as Matrix;
+  const inverse = (x: number, y: number): [number, number] => [
+    m.a * x + m.c * y + m.tx,
+    m.b * x + m.d * y + m.ty,
+  ];
   if (paint.type === "image") {
     return { at: inverse, region: null };
   }
@@ -149,7 +151,7 @@ function sampling(
 
 /** The texels a radial gradient's texture has across `pixels` of its region, as the Pixi view computes it. */
 export function radialTexels(pixels: number): number {
-  return Math.min(512, pixels);
+  return Math.min(RADIAL_MAX, pixels);
 }
 
 /**
@@ -217,7 +219,7 @@ export function layerParts(layer: ShapeLayer, tessellator: FillTessellator): Par
       // Each region with nothing inside it, convex, as a fan; anything else needs a triangulator of holes.
       for (const root of plan.roots) {
         const points = root.points;
-        if (root.children.length > 0 || !convex(points)) {
+        if (root.children.length > 0 || convex(points) === 0) {
           unsupported.containedFills++;
           continue;
         }
@@ -246,26 +248,4 @@ export function bitmapQuad(width: number, height: number): GeometryData {
     texels: Float32Array.of(0, 0, width, 0, width, height, 0, height),
     indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
   };
-}
-
-/** Whether the polygon `points` turns one way only. */
-function convex(points: number[]): boolean {
-  const n = points.length / 2;
-  let sign = 0;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const k = (i + 2) % n;
-    const cross =
-      (points[j * 2] - points[i * 2]) * (points[k * 2 + 1] - points[j * 2 + 1]) -
-      (points[j * 2 + 1] - points[i * 2 + 1]) * (points[k * 2] - points[j * 2]);
-    if (cross !== 0) {
-      if (sign !== 0 && Math.sign(cross) !== sign) {
-        return false;
-      }
-
-      sign = Math.sign(cross);
-    }
-  }
-
-  return true;
 }
