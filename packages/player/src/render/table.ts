@@ -121,12 +121,16 @@ let loopShort = true;
 /** Pulled draws asked for or refused (setTransformTable); undefined leaves it to the GPU. */
 let pullWanted: boolean | undefined;
 /**
- * A renderer that draws on the CPU, by its name: pulled draws took
- * SwiftShader twice the GL time of the multi-draws, so it makes those.
+ * A renderer that draws on the CPU, by its name (WARP's is "Microsoft
+ * Basic Render Driver"): pulled draws took SwiftShader twice the GL time
+ * of the multi-draws, so it makes those.
  */
-const SOFTWARE = /swiftshader|llvmpipe|software/i;
-/** What the table has drawn: its draw calls, and the draws of contexts' batches they made. */
-const drawn = { calls: 0, draws: 0 };
+const SOFTWARE = /swiftshader|llvmpipe|software|basic render driver/i;
+/**
+ * What the table has drawn: its draw calls, and the draws of contexts'
+ * batches they made; and the times its atlases grew.
+ */
+const drawn = { calls: 0, draws: 0, grown: 0 };
 
 /**
  * Draw Graphics alone through the table, or not, from the next frame: a
@@ -156,8 +160,11 @@ export function setTransformTable(
   pullWanted = pull;
 }
 
-/** What the table has drawn since the page loaded: draw calls, and the contexts' batches drawn in them. */
-export function transformTableDrawn(): Readonly<{ calls: number; draws: number }> {
+/**
+ * What the table has drawn since the page loaded: draw calls, and the
+ * contexts' batches drawn in them; and the times its atlases grew.
+ */
+export function transformTableDrawn(): Readonly<{ calls: number; draws: number; grown: number }> {
   return drawn;
 }
 
@@ -510,6 +517,8 @@ export class Atlas {
   /** The vertices and indices the store has room for. */
   capacity = ATLAS_LEAST;
   indexCapacity = ATLAS_LEAST * 3;
+  /** The most indices the store may hold, which growth stops at. */
+  mostIndices = Number.POSITIVE_INFINITY;
   /** What the atlas has done, for a test or a probe to read. */
   readonly stats = { placed: 0, reused: 0, released: 0, grown: 0, compacted: 0 };
   /** Whether the store has room made for the capacity: not as it starts, shrinks or is lost. */
@@ -850,9 +859,10 @@ export class Atlas {
       }
 
       if (indexStart < 0) {
+        // Doubled no further than the store may hold: past it only if what is needed is.
         this.indexCapacity = Math.max(
           indices.top + placed.indices,
-          Math.ceil(this.indexCapacity * ATLAS_GROWTH),
+          Math.min(Math.ceil(this.indexCapacity * ATLAS_GROWTH), this.mostIndices),
         );
       }
 
@@ -865,6 +875,7 @@ export class Atlas {
         indexStart >= 0 && indexStart + placed.indices === indices.top ? indexStart : indices.top;
       this.store.resize(this.capacity, this.indexCapacity, keptVertices, keptIndices);
       this.stats.grown++;
+      drawn.grown++;
       if (vertexStart < 0) {
         vertexStart = vertices.take(placed.vertices, this.capacity);
       }
@@ -1120,7 +1131,7 @@ export class TablePipe {
   private pullable = false;
   /** Whether the renderer draws on the CPU, which pulled draws are left to by default (SOFTWARE). */
   private software = false;
-  /** Whether the expanded atlas outgrew the most its texture may hold, which leaves pulled draws for good. */
+  /** Whether the expanded atlas outgrew the most its texture may hold, which leaves pulled draws till a new context. */
   private pullFailed = false;
   /** Counts the renders, for a plan to tell whether it is this one's. */
   private render = 0;
@@ -1230,6 +1241,7 @@ export class TablePipe {
       String(gl.getParameter(info?.UNMASKED_RENDERER_WEBGL ?? gl.RENDERER)),
     );
     this.atlasMostLines = Math.min(most, EXACT / ATLAS_WIDTH);
+    this.pulled.mostIndices = this.atlasMostLines * ATLAS_WIDTH;
     const units = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number;
     this.rowsUnit = units - 1;
     this.atlasUnit = units - 2;
@@ -1245,6 +1257,8 @@ export class TablePipe {
     this.indexBytes = 0;
     this.atlas.lost();
     this.pulled.lost();
+    // An atlas that outgrew a lost context's texture starts again empty in the new one's.
+    this.pullFailed = false;
     this.copyFrames = null;
   }
 
@@ -1636,7 +1650,7 @@ export class TablePipe {
   /**
    * The expanded atlas' texture made `indices` texels, at least, its first
    * `kept` copied over on the GPU; past the most it may hold, pulled draws
-   * are left for good.
+   * are left till the context is lost or restored.
    */
   private resizeAtlasTexture(indices: number, kept: number): void {
     if (this.pullFailed) {
