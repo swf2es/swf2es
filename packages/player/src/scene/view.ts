@@ -131,6 +131,10 @@ interface KeptOutput {
   handle: KeepHandle | null;
   plan: FilterPlan;
   generation: number;
+  /** The stage's frame it was last drawn on, whether it scrolled then, and whether it was measured. */
+  seenAt: number;
+  scrolled: boolean;
+  measured: boolean;
   kept: boolean;
   reused: boolean;
   keeping: boolean;
@@ -213,6 +217,9 @@ export class RenderView implements Drawer {
   private keptGeneration = 0;
   private keptScale = 0;
   private keptQuality = "";
+  private keptScreen: number | null = null;
+  /** The stage's frames drawn. */
+  private frames = 0;
   private readonly movedArea = new Float64Array(4);
   private readonly keptRect = new Int32Array(4);
   /** Where a frame is drawn, filled in as it is. */
@@ -318,16 +325,23 @@ export class RenderView implements Drawer {
     target.height = this.gl.drawingBufferHeight;
     target.scale = this.scale * this.resolution;
     target.resolution = this.resolution;
-    // Outputs kept at another scale, or with bitmaps smoothed otherwise, are drawn again.
-    if (target.scale !== this.keptScale || this.stageQuality !== this.keptQuality) {
+    // Outputs kept at another scale, with bitmaps smoothed otherwise or hairlines at another
+    // width, are drawn again.
+    if (
+      target.scale !== this.keptScale ||
+      this.stageQuality !== this.keptQuality ||
+      this.screenScale !== this.keptScreen
+    ) {
       this.keptScale = target.scale;
       this.keptQuality = this.stageQuality;
+      this.keptScreen = this.screenScale;
       this.keptGeneration++;
     }
 
     this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
     measureLayers(this.scene, this.rows, this.geometries, target);
     this.noteKept();
+    this.frames++;
     plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
     this.backend.execute(
       this.commands,
@@ -622,6 +636,9 @@ export class RenderView implements Drawer {
         handle: null,
         plan,
         generation: this.keptGeneration,
+        seenAt: -1,
+        scrolled: false,
+        measured: false,
         kept: false,
         reused: false,
         keeping: false,
@@ -640,21 +657,23 @@ export class RenderView implements Drawer {
     const x = tx * target.scale;
     const y = ty * target.scale;
     const l = k.linear;
-    const stale =
-      !k.kept ||
-      !k.handle ||
-      !this.keeps.alive(k.handle) ||
+    // One not drawn on the frame before was hidden, or off the list, where a walk cleared its flags
+    // and its children's without it hearing of a change.
+    const changed =
+      k.seenAt !== this.frames - 1 ||
       k.plan !== plan ||
       k.generation !== this.keptGeneration ||
       (o.dirty & ~TRANSFORM) !== 0 ||
-      (o.dirty & TRANSFORM && o.scroll !== null) ||
+      (o.dirty & TRANSFORM && (o.scroll !== null || k.scrolled)) ||
       (o instanceof Container && o.descendantsDirty) ||
       l[0] !== a ||
       l[1] !== b ||
       l[2] !== c ||
       l[3] !== d;
+    k.seenAt = this.frames;
+    k.scrolled = o.scroll !== null;
     let same = false;
-    if (!stale) {
+    if (!changed && k.measured) {
       // Its area as measured, moved as it moved, measured into a rectangle again.
       const moved = this.movedArea;
       moved[0] = k.area[0] + x - k.x;
@@ -670,14 +689,14 @@ export class RenderView implements Drawer {
         Math.abs(rect[1] - y - (k.rect[1] - k.y)) <= 1;
     }
 
-    k.reused = !stale && same;
+    k.reused = !changed && same && k.kept && k.handle !== null && this.keeps.alive(k.handle);
     if (k.reused) {
       k.changing = 0;
       return k;
     }
 
     // Unchanged but not kept, as after it was filtered without keeping: kept now.
-    k.changing = stale || !same ? k.changing + 1 : 0;
+    k.changing = changed || !same ? k.changing + 1 : 0;
     k.keeping = k.changing <= 1;
     k.kept = false;
     k.plan = plan;
@@ -711,8 +730,10 @@ export class RenderView implements Drawer {
         k.rect[j] = scene.layers[layer * 4 + j];
       }
 
-      // Kept where its output was: a layer of no size draws nothing, and keeps nothing.
-      k.kept = k.keeping && k.rect[2] > 0 && k.rect[3] > 0;
+      // Kept where its output was: a layer of no size draws nothing, and keeps nothing, nor does one
+      // in a layer of no size, which the planner leaves out with all in it.
+      k.measured = k.rect[2] > 0 && k.rect[3] > 0;
+      k.kept = k.keeping && k.measured && drawnWithin(scene, layer);
     }
 
     ran.length = 0;
@@ -800,7 +821,9 @@ export class RenderView implements Drawer {
           continue;
         }
 
-        texture = this.storeTexture(pass.map).id;
+        // A map set anew is a copy anew, as a tween writing the filters takes one each frame:
+        // its texture goes soon once the next one takes its place.
+        texture = this.storeTexture(pass.map, GRADIENT_IDLE_FRAMES).id;
         this.textures.use(texture);
       }
 
@@ -1303,7 +1326,7 @@ export class RenderView implements Drawer {
   }
 
   /** `store`'s texture, its pixels uploaded again if they changed since. */
-  private storeTexture(store: BitmapStore): TextureHandle {
+  private storeTexture(store: BitmapStore, idle?: number): TextureHandle {
     const kept = this.stores.get(store);
     if (kept && this.textures.alive(kept.handle)) {
       if (kept.version !== store.version) {
@@ -1314,7 +1337,7 @@ export class RenderView implements Drawer {
       return kept.handle;
     }
 
-    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable));
+    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable), idle);
     this.stores.set(store, { handle, version: store.version });
     return handle;
   }
@@ -1388,6 +1411,18 @@ export class RenderView implements Drawer {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
+}
+
+/** Whether every layer `layer` is in has a size, as the planner draws only such. */
+function drawnWithin(scene: SceneList, layer: number): boolean {
+  const r = scene.layers;
+  for (let p = scene.parents[layer]; p >= 0; p = scene.parents[p]) {
+    if (r[p * 4 + 2] <= 0 || r[p * 4 + 3] <= 0) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */

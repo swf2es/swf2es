@@ -92,6 +92,10 @@ export class SceneList {
   pads = new Int32Array(16);
   /** Each layer's kept output, which its output becomes (Keeps), or -1. */
   keeps = new Int32Array(16);
+  /** The layer each layer is in, or -1. */
+  parents = new Int32Array(16);
+  /** The layers begun and not yet ended, innermost last. */
+  private readonly open: number[] = [];
   /**
    * Each filtered layer's area as measured, before it was rounded and
    * padded: least x and y, greatest x and y, in target pixels.
@@ -102,6 +106,7 @@ export class SceneList {
   reset(): void {
     this.length = 0;
     this.layerCount = 0;
+    this.open.length = 0;
   }
 
   draw(geometry: number, row: number, blend: number, texture = -1, sampler = 0): void {
@@ -115,6 +120,7 @@ export class SceneList {
   layerBegin(padding = -1, keep = -1): number {
     const layer = this.newLayer(padding, keep);
     this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
+    this.open.push(layer);
     return layer;
   }
 
@@ -142,6 +148,7 @@ export class SceneList {
       this.layers = grow(this.layers);
       this.pads = grow(this.pads);
       this.keeps = grow(this.keeps);
+      this.parents = grow(this.parents);
       const areas = new Float64Array(this.areas.length * 2);
       areas.set(this.areas);
       this.areas = areas;
@@ -149,6 +156,7 @@ export class SceneList {
 
     this.pads[layer] = padding;
     this.keeps[layer] = keep;
+    this.parents[layer] = this.open.at(-1) ?? -1;
     this.layerRect(layer, 0, 0, 0, 0);
     return layer;
   }
@@ -160,6 +168,7 @@ export class SceneList {
 
   /** The layer begun last ended: filtered by `chain` (or -1), composited in `mode`, coloured by `row`. */
   layerEnd(mode: number, row: number, chain = -1): void {
+    this.open.pop();
     this.push(LAYER_END, mode, row, 0, chain, 0);
   }
 
