@@ -17,6 +17,7 @@ export {
   blurShrink,
   COLOR_MATRIX,
   CONVOLUTION,
+  DISPLACEMENT,
   Filters,
   GLOW,
   GRADIENT,

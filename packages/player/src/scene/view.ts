@@ -604,6 +604,14 @@ export class RenderView implements Drawer {
 
         texture = pass.texture.id;
         this.textures.use(texture);
+      } else if (pass.map) {
+        // Its map as it is now, a texture of its pixels kept as a bitmap's is.
+        if (pass.map.disposed) {
+          continue;
+        }
+
+        texture = this.storeTexture(pass.map).id;
+        this.textures.use(texture);
       }
 
       this.filters.add(pass.kind, pass.values, texture);

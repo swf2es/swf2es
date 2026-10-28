@@ -50,6 +50,6 @@ test("a gradient filter planned again keeps its texture where its colours are th
   assert.equal(recoloured?.passes[0].texture, null);
 });
 
-test("a displacement map is not drawn yet, and plans nothing alone", () => {
+test("a displacement map with no map leaves the object be", () => {
   assert.equal(planFilters([filterDefaults("displacementMap")], 1), null);
 });

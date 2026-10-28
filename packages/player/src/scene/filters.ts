@@ -10,20 +10,26 @@ import {
   BLUR,
   COLOR_MATRIX,
   CONVOLUTION,
+  DISPLACEMENT,
   GLOW,
   GRADIENT,
   type TextureHandle,
 } from "@swf2es/render";
-import { rgbaOf } from "../bitmap/bitmap.js";
+import { type BitmapStore, rgbaOf } from "../bitmap/bitmap.js";
 import { filterGrowth, gradientTable, integerKernel, paddedDistance } from "../bitmap/filters.js";
 import { emptyKernel, type Filter as FilterRecord, filterOffset } from "../display/filters.js";
 
-/** A filter as the renderer runs it: its kind and values, and a gradient's colours with their texture. */
+/**
+ * A filter as the renderer runs it: its kind and values, a gradient's
+ * colours with their texture, and a displacement's map, whose texture the
+ * view keeps as it keeps a bitmap's.
+ */
 export interface Pass {
   kind: number;
   values: Float32Array;
   colors: Uint8Array | null;
   texture: TextureHandle | null;
+  map: BitmapStore | null;
 }
 
 /**
@@ -65,6 +71,11 @@ export function planFilters(
   const planned: Planned[] = [];
   for (const record of records) {
     const kind = kindOf(record);
+    // A displacement whose map is gone leaves the object be, as the Pixi view's does.
+    if (kind === DISPLACEMENT && !mapOf(record)) {
+      continue;
+    }
+
     if (kind > 0) {
       const wanted = paddingOf(kind, record, units);
       planned.push({ record, kind, wanted, padding: Math.min(wanted, cap), inset: 0 });
@@ -122,9 +133,21 @@ function kindOf(f: FilterRecord): number {
       return COLOR_MATRIX;
     case "convolution":
       return CONVOLUTION;
+    case "displacementMap":
+      return DISPLACEMENT;
     default:
       return 0;
   }
+}
+
+/**
+ * A displacement's map, the copy the object took when its filters were
+ * set, or the live one where none was taken; null where it is gone.
+ */
+function mapOf(f: FilterRecord): BitmapStore | null {
+  const map = (f.mapSnapshot ?? f.mapBitmap) as { $store?: BitmapStore } | null;
+  const store = map?.$store ?? null;
+  return store && !store.disposed && store.width > 0 && store.height > 0 ? store : null;
 }
 
 /** Whether `records` holds a filter the renderer does not draw yet. */
@@ -163,6 +186,9 @@ function paddingOf(kind: number, f: FilterRecord, units: number): number {
       break;
     case CONVOLUTION:
       return Math.max(f.matrixX >> 1, f.matrixY >> 1) + 1;
+    case DISPLACEMENT:
+      // Its colour mode's fill round the object, and the pixel right and down adl's bitmap has.
+      return Math.max(...displacementGrowth(f)) + 1;
     default:
       return 0;
   }
@@ -174,7 +200,13 @@ function paddingOf(kind: number, f: FilterRecord, units: number): number {
 /** A filter's values, in the order its kind lists them (@swf2es/render's filters.ts). */
 function passOf(p: Planned, units: number): Pass {
   const f = p.record;
-  const pass: Pass = { kind: p.kind, values: new Float32Array(0), colors: null, texture: null };
+  const pass: Pass = {
+    kind: p.kind,
+    values: new Float32Array(0),
+    colors: null,
+    texture: null,
+    map: null,
+  };
   const blur = [f.blurX || 0, f.blurY || 0, f.quality, units];
   switch (p.kind) {
     case BLUR:
@@ -269,9 +301,44 @@ function passOf(p: Planned, units: number): Pass {
       ]);
       break;
     }
+
+    case DISPLACEMENT: {
+      const map = mapOf(f) as BitmapStore;
+      const pick = (c: number) => [
+        c === 1 ? 1 : 0,
+        c === 2 ? 1 : 0,
+        c === 4 ? 1 : 0,
+        c === 8 ? 1 : 0,
+      ];
+      const alpha = Math.floor(f.alpha * 255) / 255;
+      pass.values = Float32Array.from([
+        ...pick(f.componentX),
+        ...pick(f.componentY),
+        f.scaleX || 0,
+        f.scaleY || 0,
+        ["wrap", "clamp", "ignore", "color"].indexOf(f.mode),
+        ...rgb(f.color).map((c) => c * alpha),
+        alpha,
+        ...displacementGrowth(f),
+        p.inset,
+        f.mapPoint[0],
+        f.mapPoint[1],
+        map.width,
+        map.height,
+      ]);
+      pass.map = map;
+      break;
+    }
   }
 
   return pass;
+}
+
+/** How far a displacement in colour mode fills round the object, as adl draws it: half its scale. */
+function displacementGrowth(f: FilterRecord): [number, number] {
+  return f.mode === "color"
+    ? [Math.floor(Math.abs(f.scaleX) / 2) || 0, Math.floor(Math.abs(f.scaleY) / 2) || 0]
+    : [0, 0];
 }
 
 function rgb(color: number): number[] {

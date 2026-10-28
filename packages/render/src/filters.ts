@@ -35,6 +35,15 @@ export const COLOR_MATRIX = 5;
  * start; then the matrix by rows.
  */
 export const CONVOLUTION = 6;
+/**
+ * A displacement map, its texture the map's pixels: the channel that
+ * moves x, picked by four weights for red, green, blue and alpha, and the
+ * one that moves y; scale x and y; its mode (0 wrap, 1 clamp, 2 ignore, 3
+ * colour), the colour's red, green, blue and alpha, premultiplied, and how
+ * far round the object it fills, x and y; how far in the object's pixels
+ * start; the map's point, and its width and height.
+ */
+export const DISPLACEMENT = 7;
 
 /**
  * A frame's filters in chains, one a filtered layer: each filter its kind,
