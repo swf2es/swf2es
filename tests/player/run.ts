@@ -15,8 +15,16 @@
 // and expected to fail, and one that passes is reported for its mark to
 // come off.
 //
+// With SWF2ES_RENDERER=own the cases are drawn by the renderer of swf2es's
+// own (docs/renderer.md), which grows beside Pixi: how many it draws as Flash
+// does is how complete it is. own-renderer.json lists those it does, and one
+// listed that fails again fails the run; one that passes and is not listed is
+// added by --update-baseline, from a run of every case. Its failures are
+// printed only for cases named.
+//
 //   node tests/player/run.ts [--table-ab] [case...]   check
 //   node tests/player/run.ts --update [case...]       draw the references again in Flash
+//   SWF2ES_RENDERER=own node tests/player/run.ts [--update-baseline] [case...]
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isAs3, readSwf } from "../../packages/format/dist/index.js";
@@ -31,7 +39,10 @@ const args = process.argv.slice(2);
 const update = args.includes("--update");
 const tableAb = args.includes("--table-ab");
 const lazyCompilation = args.includes("--lazy");
-const names = args.filter((a) => a !== "--update" && a !== "--table-ab" && a !== "--lazy");
+const own = process.env.SWF2ES_RENDERER === "own";
+const updateBaseline = args.includes("--update-baseline");
+const names = args.filter((a) => !a.startsWith("--"));
+const ownBaseline = `${here}own-renderer.json`;
 // A case marked as a known gap runs only when named; left out, its SWF is
 // still built, so that a gap case that no longer builds is noticed.
 const chosen = cases.filter((c) => (names.length ? names.includes(c.name) : !c.gap));
@@ -116,10 +127,11 @@ if (update) {
   }
 } else {
   // The cases to play again without the table, after the rest.
-  const again = chosen.flatMap((c, i) => (c.table || tableAb ? [i] : []));
+  const again = own ? [] : chosen.flatMap((c, i) => (c.table || tableAb ? [i] : []));
   const results = await runPlayer([...jobs, ...again.map((i) => ({ ...jobs[i], table: false }))]);
   const without = new Map(again.map((i, k) => [i, results[chosen.length + k]]));
   let failed = 0;
+  const passing: string[] = [];
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
     const problems: string[] = [];
@@ -171,7 +183,7 @@ if (update) {
       }
     }
 
-    if (c.table && r.tableDraws === 0) {
+    if (c.table && r.tableDraws === 0 && !own) {
       problems.push("the transform table drew none of it");
     }
 
@@ -197,14 +209,39 @@ if (update) {
 
     if (problems.length) {
       failed++;
-      console.log(`FAIL ${c.name}\n  ${problems.join("\n  ")}`);
+      if (!own || names.length) {
+        console.log(`FAIL ${c.name}\n  ${problems.join("\n  ")}`);
+      }
+    } else if (own) {
+      passing.push(c.name);
     } else if (c.gap) {
       console.log(`${c.name} draws as Flash does: its gap (${c.gap}) is closed, take the mark off`);
     }
   }
 
   console.log(`${chosen.length - failed} of ${chosen.length} cases as Flash drew them`);
-  if (failed) {
+  if (own) {
+    // The own renderer is held to what it drew before, not to every case.
+    const listed: string[] = JSON.parse(readFileSync(ownBaseline, "utf8"));
+    const ran = new Set(chosen.map((c) => c.name));
+    const now = new Set(passing);
+    const lost = listed.filter((name) => ran.has(name) && !now.has(name));
+    const gained = passing.filter((name) => !listed.includes(name));
+    for (const name of lost) {
+      console.log(`REGRESSED ${name}: the own renderer drew it as Flash did`);
+    }
+
+    if (gained.length) {
+      console.log(`now drawn as Flash does: ${gained.join(", ")}`);
+    }
+
+    if (updateBaseline && !names.length) {
+      writeFileSync(ownBaseline, `${JSON.stringify([...now].sort(), null, 2)}\n`);
+      console.log(`own-renderer.json: ${now.size} cases`);
+    } else {
+      process.exitCode = lost.length ? 1 : 0;
+    }
+  } else if (failed) {
     process.exitCode = 1;
   }
 }

@@ -25,6 +25,7 @@ import {
   Avm1,
   Container,
   type DisplayObject,
+  type Drawer,
   type FetchRequest,
   type FetchResult,
   type ModuleCache,
@@ -45,6 +46,8 @@ import { type RecordedEvent, Replay } from "./replay.ts";
 const fillOptions = new URLSearchParams(location.search).has("nativeFills")
   ? { fillTessellator: new (await import("@swf2es/native/tessellate")).Tessellator().tessellate }
   : {};
+// The renderer of swf2es's own in place of Pixi (SWF2ES_RENDERER=own, chrome.ts): reference cases only.
+const ownRenderer = new URLSearchParams(location.search).has("own");
 const bitmapKernel = new URLSearchParams(location.search).has("nativeBitmaps")
   ? new (await import("@swf2es/native/bitmap")).Convolver()
   : null;
@@ -428,47 +431,36 @@ async function runSwf(
     );
     const n = GRID[quality] ?? 4;
     setTransformTable(table, tableMinRun, true, tablePull);
-    const renderer = await autoDetectRenderer({
-      preference: "webgl",
-      width: player.width,
-      height: player.height,
-      background: player.background,
-      antialias,
-      preserveDrawingBuffer: true,
-      resolution: n * zoom,
-      // Blend modes read what is below them from it (render/blend.ts).
-      useBackBuffer: true,
-    });
-    const context = (renderer as unknown as { gl?: WebGL2RenderingContext }).gl;
+    const shownAt = shown ? zoom : 1;
+    player.quality = ["LOW", "MEDIUM", "HIGH", "BEST"][quality] ?? "HIGH";
+    // The renderer that draws: Pixi through PixiView, or with ?own the renderer of swf2es's own
+    // (docs/renderer.md), which owns its canvas.
+    const surface = ownRenderer
+      ? await ownSurface(player, n * zoom, shownAt / zoom)
+      : await pixiSurface(player, n * zoom, shownAt, zoom, antialias);
+    const context = surface.gl;
     const info = context?.getExtension("WEBGL_debug_renderer_info");
     webGL2 = context instanceof WebGL2RenderingContext;
     gl = context
       ? `${context instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1"}, ${
           info ? context.getParameter(info.UNMASKED_RENDERER_WEBGL) : "?"
         }`
-      : `not WebGL (${renderer.name})`;
+      : `not WebGL (${surface.name})`;
 
     const samples = document.createElement("canvas");
-    samples.width = renderer.canvas.width;
-    samples.height = renderer.canvas.height;
+    samples.width = surface.canvas.width;
+    samples.height = surface.canvas.height;
     const output = document.createElement("canvas");
-    const shownAt = shown ? zoom : 1;
     output.width = Math.round(player.width * shownAt);
     output.height = Math.round(player.height * shownAt);
     document.body.replaceChildren(output);
-    player.quality = ["LOW", "MEDIUM", "HIGH", "BEST"][quality] ?? "HIGH";
-    const view = new PixiView(renderer, fillOptions);
-    view.quality = player.quality;
-    // Drawn n times finer to be averaged down: the screen is the output canvas.
-    view.screenScale = shownAt;
-    view.stage.scale.set(shownAt / zoom);
     // BitmapData.draw of a display object renders with it, from the document class on.
     if (scripting) {
-      scripting.drawer = view;
+      scripting.drawer = surface.drawer;
     }
 
     if (player.avm1) {
-      player.avm1.drawer = view;
+      player.avm1.drawer = surface.drawer;
     }
 
     await player.start();
@@ -496,25 +488,91 @@ async function runSwf(
       }
 
       if (capture.includes(frame)) {
-        view.render(player.stage);
+        surface.render(player.stage);
         // A call GL refused drew nothing, which the picture may not show.
-        const gl = (renderer as unknown as { gl?: WebGLRenderingContext }).gl;
-        const glError = gl?.getError();
+        const glError = surface.gl?.getError();
         if (glError) {
           throw new Error(`GL error 0x${glError.toString(16)} drawing frame ${frame}`);
         }
 
-        samples.getContext("2d")?.drawImage(renderer.canvas, 0, 0);
+        samples.getContext("2d")?.drawImage(surface.canvas, 0, 0);
         downsample(samples, output, n);
         images[frame] = output.toDataURL("image/png");
       }
     }
 
-    renderer.destroy();
+    surface.destroy();
     return { images, trace, tableDraws: tableDraws(), gl, webGL2, error: null };
   } catch (e) {
     return { images, trace, tableDraws: tableDraws(), gl, webGL2, error: describe(e, scripting) };
   }
+}
+
+/** What a reference case draws with: its canvas and GL, its drawing of the stage and BitmapData's. */
+interface Surface {
+  name: string;
+  canvas: HTMLCanvasElement;
+  gl: WebGLRenderingContext | WebGL2RenderingContext | undefined;
+  drawer: Drawer;
+  render(root: Player["stage"]): void;
+  destroy(): void;
+}
+
+/** Pixi's renderer at `resolution` canvas pixels a stage pixel, through a PixiView. */
+async function pixiSurface(
+  player: Player,
+  resolution: number,
+  shownAt: number,
+  zoom: number,
+  antialias: boolean,
+): Promise<Surface> {
+  const renderer = await autoDetectRenderer({
+    preference: "webgl",
+    width: player.width,
+    height: player.height,
+    background: player.background,
+    antialias,
+    preserveDrawingBuffer: true,
+    resolution,
+    // Blend modes read what is below them from it (render/blend.ts).
+    useBackBuffer: true,
+  });
+  const view = new PixiView(renderer, fillOptions);
+  view.quality = player.quality;
+  // Drawn n times finer to be averaged down: the screen is the output canvas.
+  view.screenScale = shownAt;
+  view.stage.scale.set(shownAt / zoom);
+  return {
+    name: renderer.name,
+    canvas: renderer.canvas as HTMLCanvasElement,
+    gl: (renderer as unknown as { gl?: WebGLRenderingContext }).gl,
+    drawer: view,
+    render: (root) => view.render(root),
+    destroy: () => renderer.destroy(),
+  };
+}
+
+/** The renderer of swf2es's own (@swf2es/player/scene), at `resolution`, the stage drawn at `scale`. */
+async function ownSurface(player: Player, resolution: number, scale: number): Promise<Surface> {
+  const { RenderView } = await import("@swf2es/player/scene");
+  const view = new RenderView({
+    width: player.width,
+    height: player.height,
+    resolution,
+    background: player.background,
+    preserveDrawingBuffer: true,
+    fillTessellator: fillOptions.fillTessellator,
+  });
+  view.quality = player.quality;
+  view.scale = scale;
+  return {
+    name: "own",
+    canvas: view.canvas,
+    gl: view.gl,
+    drawer: view,
+    render: (root) => view.render(root),
+    destroy: () => view.destroy(),
+  };
 }
 
 /** An error's text: a JavaScript one's name and message, an AS3 one's as its runtime prints it. */
