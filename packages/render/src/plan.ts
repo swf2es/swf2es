@@ -73,10 +73,12 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
         close(i);
         out.push(STENCIL_POP, scene.geometry[i], scene.row[i]);
         break;
-      case LAYER_BEGIN:
+      case LAYER_BEGIN: {
         close(i);
-        out.push(LAYER_PUSH);
+        const r = scene.rect;
+        out.push(LAYER_PUSH, out.param(r[i * 4], r[i * 4 + 1], r[i * 4 + 2], r[i * 4 + 3]));
         break;
+      }
       case LAYER_END:
         close(i);
         out.push(LAYER_POP, scene.geometry[i], scene.row[i]);

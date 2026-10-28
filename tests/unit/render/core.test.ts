@@ -5,7 +5,6 @@ import {
   Commands,
   Geometries,
   IDLE_FRAMES,
-  LAYER_BEGIN,
   LAYER_END,
   LAYER_POP,
   LAYER_PUSH,
@@ -199,18 +198,21 @@ test("masks nest, each popped where its marker says", () => {
 test("a layer's draws run inside its push, and it composites in its mode and colour at its pop", () => {
   const scene = new SceneList();
   scene.draw(0, 0, 0);
-  scene.marker(LAYER_BEGIN);
+  const at = scene.layerBegin();
   scene.draw(1, 1, 0);
   scene.draw(2, 1, 0);
+  scene.layerRect(at, 10, 20, 30, 40);
   scene.marker(LAYER_END, MULTIPLY, 7);
   scene.draw(3, 2, 0);
   const commands = new Commands();
   plan(scene, 0xffffffff, commands);
   assert.deepEqual(ops(commands).slice(1), [
     [RUN, 0, 1, 0],
-    [LAYER_PUSH, 0, 0, 0],
+    [LAYER_PUSH, 4, 0, 0],
     [RUN, 2, 2, 0],
     [LAYER_POP, MULTIPLY, 7, 0],
     [RUN, 5, 1, 0],
   ]);
+  // The rectangle after the background's four, as the push names them.
+  assert.deepEqual(Array.from(commands.params.subarray(4, 8)), [10, 20, 30, 40]);
 });

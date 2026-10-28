@@ -48,8 +48,9 @@ export const MASK_USE = 2;
 export const MASK_POP = 3;
 /**
  * A layer: what lies between LAYER_BEGIN and LAYER_END is drawn into a
- * target of its own, then composited onto what is below in the END's blend
- * mode (its geometry), its colour transform the END's row, or none (-1).
+ * target of its own, the rectangle of the target the BEGIN covers
+ * (layerBegin), then composited onto what is below in the END's blend mode
+ * (its geometry), its colour transform the END's row, or none (-1).
  */
 export const LAYER_BEGIN = 4;
 export const LAYER_END = 5;
@@ -72,6 +73,8 @@ export class SceneList {
   texture = new Int32Array(1024);
   sampler = new Uint8Array(1024);
   kind = new Uint8Array(1024);
+  /** A LAYER_BEGIN's rectangle of the target, in its pixels from the top left: x, y, width, height. */
+  rect = new Int32Array(4096);
   length = 0;
 
   reset(): void {
@@ -80,6 +83,26 @@ export class SceneList {
 
   draw(geometry: number, row: number, blend: number, texture = -1, sampler = 0): void {
     this.push(DRAW, geometry, row, blend, texture, sampler);
+  }
+
+  /** A layer begun, its rectangle set once known (layerRect): the entry's index. */
+  layerBegin(): number {
+    const at = this.length;
+    this.push(LAYER_BEGIN, 0, 0, 0, -1, 0);
+    this.layerRect(at, 0, 0, 0, 0);
+    return at;
+  }
+
+  /**
+   * The layer begun at entry `at` covers the rectangle x y width height of
+   * the target, in its pixels from the top left; none for nothing to show.
+   */
+  layerRect(at: number, x: number, y: number, width: number, height: number): void {
+    const r = this.rect;
+    r[at * 4] = x;
+    r[at * 4 + 1] = y;
+    r[at * 4 + 2] = width;
+    r[at * 4 + 3] = height;
   }
 
   /**
@@ -106,6 +129,7 @@ export class SceneList {
       this.texture = grow(this.texture);
       this.sampler = grow(this.sampler);
       this.kind = grow(this.kind);
+      this.rect = grow(this.rect);
     }
 
     const at = this.length++;
