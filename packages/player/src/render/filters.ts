@@ -32,7 +32,6 @@ import {
 import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
 import type { AreaKeeper, PaddingFitter } from "./blend.js";
-import { type Parts, thickEnough } from "./detail.js";
 
 const VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -1519,14 +1518,6 @@ interface Layer {
 }
 
 /**
- * Whether the object may be drawn into a layer whose texel is `texel`
- * stage pixels, its edges off by `step` of one, under a blur `box` stage
- * pixels wide whose alpha is multiplied by `strength` (FilterChain.fits);
- * null where any may.
- */
-type Fits = ((texel: number, box: number, strength: number, step: number) => boolean) | null;
-
-/**
  * How coarse the object a blur blurs whole may be drawn, at `screen` pixels
  * of the screen to a pixel of the stage, in a layer of `samples` (1 for
  * none) and `pixel` texels to a screen pixel: as coarse as the blur may run
@@ -1534,9 +1525,7 @@ type Fits = ((texel: number, box: number, strength: number, step: number) => boo
  * without multisampling where the blur leaves even aliased edges that near:
  * what the samples would smooth, the blur smooths as well. A blur of no
  * passes, or of a texel or less either way, leaves the object as it is,
- * edges and all: drawn as the target draws. Where `fits` judges the object,
- * multisampled unless its edges may be off by half a texel, and no coarser
- * than it allows.
+ * edges and all: drawn as the target draws.
  */
 function blurredLayer(
   layer: Layer,
@@ -1545,7 +1534,6 @@ function blurredLayer(
   screen: number,
   samples: number,
   pixel: number,
-  fits: Fits,
 ): void {
   const blurX = f.blurX || 0;
   const blurY = f.blurY || 0;
@@ -1565,21 +1553,6 @@ function blurredLayer(
     ),
   );
   layer.antialias = samples <= 1 || aliased < layer.coarser;
-  if (!fits) {
-    return;
-  }
-
-  // Drawn without samples, an edge is off by half a texel; with them, by about a sample's share.
-  const stageBox = Math.min(blurX, blurY);
-  const texel = (coarser: number) => coarser / (screen * pixel);
-  if (!layer.antialias && !fits(texel(layer.coarser), stageBox, strength, 0.5)) {
-    layer.antialias = true;
-  }
-
-  const step = layer.antialias && samples > 1 ? 1 / samples : 0.5;
-  while (layer.coarser > 1 && !fits(texel(layer.coarser), stageBox, strength, step)) {
-    layer.coarser--;
-  }
 }
 
 /**
@@ -1597,9 +1570,10 @@ function blurredLayer(
  *
  * Otherwise the target's, as each filter reads the object's own texels.
  *
- * At medium and low, so for any object. At high, only as coarse as `fits`
- * allows: thin geometry repeated under the blur sums its edges' errors into
- * whole regions brighter or darker (render/detail.ts). At best, never.
+ * Only at medium and low quality. At any other (high, best, or a value
+ * the stage takes as one of them), the target's: drawn coarser, thin
+ * geometry repeated under the blur, such as stripes, hatching or a glyph's
+ * strokes, sums its edges' errors into whole regions brighter or darker.
  */
 export function layerFor(
   filters: readonly Filter[],
@@ -1608,19 +1582,16 @@ export function layerFor(
   samples: number,
   pixel: number,
   quality = "HIGH",
-  fits: Fits = null,
 ): Layer {
   const layer = { coarser: 1, antialias: true, apart: false };
-  if (!(screen > 1) || filters.length === 0 || quality === "BEST") {
+  if (!(screen > 1) || filters.length === 0 || !(quality === "MEDIUM" || quality === "LOW")) {
     return layer;
   }
-
-  const judge = quality === "HIGH" ? (fits ?? (() => false)) : null;
 
   const first = filters[0];
   if (filters.length === 1 && first instanceof GlowFilter && first.behind) {
     if (apart) {
-      blurredLayer(layer, first.record, first.record.strength, screen, samples, pixel, judge);
+      blurredLayer(layer, first.record, first.record.strength, screen, samples, pixel);
       layer.apart = layer.coarser > 1 || !layer.antialias;
     }
 
@@ -1642,7 +1613,7 @@ export function layerFor(
 
   if (whole) {
     const strength = first instanceof BlurFilter ? 1 : first.record.strength;
-    blurredLayer(layer, first.record, strength, screen, samples, pixel, judge);
+    blurredLayer(layer, first.record, strength, screen, samples, pixel);
   }
 
   return layer;
@@ -1723,31 +1694,10 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   changed(): void {
     this.stale = true;
     this.area = null;
-    this.parts = null;
   }
 
-  /** The stage's quality, Flash's "LOW" to "BEST", which decides how coarse its layer may be (layerFor). */
+  /** The stage's quality, which decides whether its layer may be drawn coarser (layerFor). */
   quality = "HIGH";
-
-  /**
-   * Its object's parts on the stage (render/detail.ts), which a layer drawn
-   * coarser at high quality must be thick enough for; null where unknown,
-   * which draws it as the target draws at high.
-   */
-  detail: (() => Parts) | null = null;
-
-  /** The parts last told, till its object changes. */
-  private parts: Parts | null = null;
-
-  /** Whether its object's parts may be drawn into a layer of texels `texel` stage pixels wide (layerFor). */
-  private readonly fits = (texel: number, box: number, strength: number, step: number): boolean => {
-    if (!this.detail) {
-      return false;
-    }
-
-    this.parts ??= this.detail();
-    return thickEnough(this.parts, texel, box, strength, SHRUNK_ERROR, step);
-  };
 
   /**
    * The area kept, moved as the object moved: while nothing in the object
@@ -1817,7 +1767,6 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   rescale(units: number, pixel = 1): void {
     this.drawnAt = units;
     this.texelsAPixel = pixel;
-    this.parts = null;
     scaleFilters(this.filters, units);
     this.wanted = this.filters.map((f) => f.padding);
     this.padding = this.wanted.reduce((sum, p) => sum + p, 0);
@@ -1915,15 +1864,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
       system.renderer as unknown as { renderTarget: { adaptor: { msaaSamples?: number } } }
     ).renderTarget.adaptor;
     const samples = target.antialias ? (adaptor.msaaSamples ?? 4) : 1;
-    const layer = layerFor(
-      this.running,
-      screen,
-      apart,
-      samples,
-      this.texelsAPixel,
-      this.quality,
-      this.fits,
-    );
+    const layer = layerFor(this.running, screen, apart, samples, this.texelsAPixel, this.quality);
     this.resolution = layer.coarser > 1 ? resolution / layer.coarser : "inherit";
     this.antialias = layer.antialias ? "inherit" : "off";
     this.apart = layer.apart;

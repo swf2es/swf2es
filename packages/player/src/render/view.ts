@@ -45,7 +45,6 @@ import { gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { Compositing } from "./compositing.js";
-import { branchParts, THIN_PARTS } from "./detail.js";
 import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
 import { hookRenderer } from "./hooks.js";
 import { makeNode, NO_RECORDS, type Node } from "./node.js";
@@ -132,7 +131,6 @@ export class PixiView {
   private readonly unsettling = new Set<Settling>();
   private readonly scanned: Settling[] = [];
   private readonly nodes = new WeakMap<DisplayObject, Node>();
-  private readonly nodeOf = (o: DisplayObject): Node | undefined => this.nodes.get(o);
   /** What each object itself draws: its fills, lines, bitmap, text and triangles (render/art.ts). */
   private readonly art: Art;
   /** The 3D objects, each drawn into its bitmap before the stage is drawn (render/planes.ts). */
@@ -587,13 +585,7 @@ export class PixiView {
         if (this.fresh) {
           this.builtFilters.push(...node.filters);
         } else if (chain.length > 0) {
-          const filterChain = node.filters[0] as FilterChain;
-          filterChain.quality = this.stageQuality;
-          // The node's owner when asked: a spare node goes to another object, its chain with it.
-          filterChain.detail = () => {
-            const owner = node.owner.deref();
-            return owner ? branchParts(owner, this.nodeOf, this.leastWidth) : THIN_PARTS;
-          };
+          (node.filters[0] as FilterChain).quality = this.stageQuality;
         }
 
         const blending = blendFilters(blend);
