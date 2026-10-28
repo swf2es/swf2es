@@ -9514,6 +9514,37 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Blends moved by parts of a pixel frame after frame, drawn where they are each frame.
+    name: "blend-subpixel",
+    swf: (abc) => bare(abc, 1, "BlendSubpixel", 240, 100),
+    script: "BlendSubpixel",
+    frames: 8,
+    capture: [1, 2, 3, 4, 5, 6, 7, 8],
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
+    // The same on a stage shown half as large again, its pixels parts of the target's.
+    name: "blend-subpixel-zoomed",
+    swf: (abc) => bare(abc, 1, "BlendSubpixel", 240, 100),
+    script: "BlendSubpixel",
+    frames: 8,
+    capture: [1, 2, 3, 4, 5, 6, 7, 8],
+    zoom: 1.5,
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
+    // Blends standing still while masks outside them, on their children or on them, move or change.
+    name: "blend-outside-mask",
+    swf: (abc) => bare(abc, 1, "BlendOutsideMask", 240, 120),
+    script: "BlendOutsideMask",
+    frames: 6,
+    capture: [1, 2, 3, 4, 5, 6],
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     // The same multisampled: a kept layer resolved into a copy, what is behind resolved as copied.
     name: "blend-kept-antialias",
     swf: (abc) => bare(abc, 1, "BlendKept", 240, 120),

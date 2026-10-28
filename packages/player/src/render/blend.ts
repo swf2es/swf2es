@@ -22,6 +22,13 @@ export interface AreaKeeper {
   keptArea(container: Container, bounds: Bounds): boolean;
   /** Keep `bounds`, the area just measured of `container`. */
   keepArea(container: Container, bounds: Bounds): void;
+  /** Keep no area: the one just measured is not to be given again, as a mask from outside bounds something in it. */
+  forgetArea(): void;
+  /**
+   * Whether, as just measured, a mask from outside bounds something below `container` in it, which
+   * may move as nothing in it changes; one on the container itself bounds its area instead.
+   */
+  maskedWithin(within: boolean): void;
 }
 
 /** The keeper of the instruction's area, where it is measured as Pixi measures a container. */
@@ -41,10 +48,14 @@ function keeperOf(instruction: FilterInstruction): AreaKeeper | null {
   return group?.cacheToLocalTransform ? null : (first as AreaKeeper);
 }
 
-/** What a filter's area is measured from, and whether a mask outside it bounds something in it. */
-const areaWatch: { root: Container | null; outside: boolean } = {
+/**
+ * What a filter's area is measured from, whether a mask outside it bounds it or something in it,
+ * and whether it bounds something in it below the root.
+ */
+const areaWatch: { root: Container | null; outside: boolean; within: boolean } = {
   root: null,
   outside: false,
+  within: false,
 };
 
 /** Whether `inner` is `outer` or under it. */
@@ -65,10 +76,11 @@ function within(outer: Container, inner: Container): boolean {
  */
 export function noteMask(container: Container): void {
   const watch = areaWatch.root;
-  if (watch && !areaWatch.outside) {
+  if (watch && !areaWatch.within) {
     const mask = container.mask;
     if (mask instanceof Container && !within(watch, mask)) {
       areaWatch.outside = true;
+      areaWatch.within ||= container !== watch;
     }
   }
 }
@@ -106,8 +118,10 @@ function measureArea(instruction: FilterInstruction, bounds: Bounds, system: Fil
 
   areaWatch.root = keeper ? container : null;
   areaWatch.outside = false;
+  areaWatch.within = false;
   try {
     system.measureFilterArea(instruction, bounds);
+    keeper?.maskedWithin(areaWatch.within);
     // An object that draws nothing is filtered into nothing, as adl draws a glow or a shadow of
     // it (the `filters-empty` case). Pixi measures it as a point at its group's origin, which its
     // padding made an area it ran every filter on: emptied, the push skips them.
@@ -117,11 +131,14 @@ function measureArea(instruction: FilterInstruction, bounds: Bounds, system: Fil
       !(bounds.maxX > bounds.minX && bounds.maxY > bounds.minY)
     ) {
       bounds.clear();
+      keeper?.forgetArea();
       return;
     }
 
     if (keeper && !areaWatch.outside) {
       keeper.keepArea(container, bounds);
+    } else {
+      keeper?.forgetArea();
     }
   } finally {
     areaWatch.root = null;

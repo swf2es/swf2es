@@ -1405,14 +1405,20 @@ interface Input {
   colorAlpha: number;
 }
 
-/** Whether `a` and `b` give the same output: a move may shift the corner a texel either way. */
-function sameInput(a: Input, b: Input): boolean {
+/**
+ * Whether `a` and `b` give the same output: a move may shift the corner a texel either way, as a
+ * filtered object's bitmap moves (Flash moves its cache by whole pixels); or, `exact`, by whole
+ * texels alone, as a layer kept for a blend is no bitmap of Flash's, which draws the object where
+ * it is to the part of a pixel (the `blend-subpixel` case).
+ */
+function sameInput(a: Input, b: Input, exact: boolean): boolean {
+  const reach = exact ? 1e-3 : 1;
   return (
     a.width === b.width &&
     a.height === b.height &&
     a.resolution === b.resolution &&
-    Math.abs(a.dx - b.dx) <= 1 &&
-    Math.abs(a.dy - b.dy) <= 1 &&
+    Math.abs(a.dx - b.dx) <= reach &&
+    Math.abs(a.dy - b.dy) <= reach &&
     a.colorAlpha === b.colorAlpha
   );
 }
@@ -1539,6 +1545,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
   changed(): void {
     this.stale = true;
     this.area = null;
+    this.masked = true;
   }
 
   /**
@@ -1588,6 +1595,20 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     area.tx = m.tx;
     area.ty = m.ty;
     this.area = area;
+  }
+
+  forgetArea(): void {
+    this.area = null;
+  }
+
+  /**
+   * Whether a mask from outside bounds something below its object, as last measured: until it is
+   * measured again, which it is on each frame while one does or once anything in it changes.
+   */
+  private masked = true;
+
+  maskedWithin(within: boolean): void {
+    this.masked = within;
   }
 
   /** The target's units to a pixel of the stage its filters are drawn at. */
@@ -1724,6 +1745,14 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
       return null;
     }
 
+    // A layer kept only for a blend is no bitmap Flash caches: one with a mask from outside on
+    // something in it, which may move as nothing in it changes, is drawn again on every frame
+    // (its area is then measured, and not kept, each time: measureFilterArea). A mask on the
+    // object itself bounds the area measured, which changes as the mask moves.
+    if (this.filters.length === 0 && this.masked) {
+      return null;
+    }
+
     const bounds = data.bounds;
     const resolution = data.resolution;
     const m = this.owner.worldTransform;
@@ -1734,7 +1763,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
-    if (!sameInput(this.ran, now)) {
+    if (!sameInput(this.ran, now, this.filters.length === 0)) {
       return null;
     }
 
@@ -1816,7 +1845,7 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     now.dx = (bounds.minX - m.tx) * resolution;
     now.dy = (bounds.minY - m.ty) * resolution;
     now.colorAlpha = this.owner.groupColorAlpha;
-    this.same = this.ran !== null && sameInput(this.ran, now);
+    this.same = this.ran !== null && sameInput(this.ran, now, this.filters.length === 0);
     if (this.same && !this.stale && this.kept && this.keptIn === gpuContexts.generation) {
       this.changing = 0;
       return true;

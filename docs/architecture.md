@@ -4525,6 +4525,13 @@ A blended object is drawn into a layer of its own, an empty `FilterChain`
 object changes but where it is, as a filtered object's output is kept
 (below, "Filters"): its children, their colours, its own colour, its mask
 and its scale or turn on the stage all draw it afresh, a move does not.
+Flash keeps no bitmap of an object for a blend mode alone, though, so
+where a filtered object's output stands, a blend's layer does not: a mask
+from outside it on anything in it, which may move or change with nothing
+in it changing, has it drawn afresh on every frame (`blend-outside-mask`),
+and a move by part of a texel draws it afresh where it now is, as Flash
+draws it to the part of a pixel, where a kept filter output moves by whole
+texels (`blend-subpixel`).
 Where the GPU blends the mode, the kept layer is drawn blended; elsewhere
 the blend filter after the chain runs on it, with what is behind copied
 again on every frame, as that may change while the object stands. The
@@ -4540,7 +4547,11 @@ a layer, as it is blended as it is drawn. Pixi copied what is behind into
 the texture on unit 0, or so it meant: binding a texture already there
 leaves the active unit where it was, and a back texture that was the last
 pass's input, as a reused layer's often is, took no copy, its blend
-reading black. The fork activates the unit for the copy. The `blend-kept`
+reading black. The fork activates the unit for the copy. A context lost
+and given back holds none of what was kept: each chain then draws its
+object again (`render/hooks.ts` counts the contexts, and
+`tests/player/context-loss.ts` checks kept filter outputs and blend
+layers). The `blend-kept`
 case keeps blends still, moved, recoloured, with a child moving, over a
 ground changing under them, inside a filtered sprite and with a filter of
 their own, against adl, and `blend-kept-antialias` the same multisampled.
