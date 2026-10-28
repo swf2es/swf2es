@@ -1,10 +1,11 @@
-import { CLEAR, type Commands, RUN } from "./commands.js";
-import type { SceneList } from "./scene.js";
+import { CLEAR, type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "./commands.js";
+import { DRAW, MASK_BEGIN, MASK_POP, MASK_USE, type SceneList } from "./scene.js";
 
 /**
  * Plan a frame: clear to `background` (0xAARRGGBB, straight), then a run
- * for each stretch of the list under one blend mode. Pure: the same list
- * plans the same commands.
+ * for each stretch of the list under one blend mode, and each mask pushed
+ * into the stencil and popped out where its markers say. Pure: the same
+ * list plans the same commands.
  */
 export function plan(scene: SceneList, background: number, out: Commands): void {
   out.reset();
@@ -19,14 +20,44 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
     ),
   );
 
-  let first = 0;
-  for (let i = 1; i <= scene.length; i++) {
-    if (i === scene.length || scene.blend[i] !== scene.blend[first]) {
-      if (i > first) {
-        out.push(RUN, first, i - first, scene.blend[first]);
-      }
+  // A run is a stretch of draws under one blend mode, outside a mask's own draws, which its
+  // markers name for the stencil.
+  let first = -1;
+  let masking = false;
+  const close = (end: number) => {
+    if (first >= 0 && end > first) {
+      out.push(RUN, first, end - first, scene.blend[first]);
+    }
 
-      first = i;
+    first = -1;
+  };
+
+  for (let i = 0; i < scene.length; i++) {
+    switch (scene.kind[i]) {
+      case DRAW:
+        if (!masking && first >= 0 && scene.blend[i] !== scene.blend[first]) {
+          close(i);
+        }
+
+        if (!masking && first < 0) {
+          first = i;
+        }
+
+        break;
+      case MASK_BEGIN:
+        close(i);
+        masking = true;
+        break;
+      case MASK_USE:
+        masking = false;
+        out.push(STENCIL_PUSH, scene.geometry[i], scene.row[i]);
+        break;
+      case MASK_POP:
+        close(i);
+        out.push(STENCIL_POP, scene.geometry[i], scene.row[i]);
+        break;
     }
   }
+
+  close(scene.length);
 }

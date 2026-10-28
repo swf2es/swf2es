@@ -1,8 +1,8 @@
 import { GlState, linkProgram } from "@swf2es/context3d/device";
-import { CLEAR, type Commands, RUN } from "../commands.js";
+import { CLEAR, type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import type { Geometries, GeometryData } from "../geometry.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
-import { MIRROR, REPEAT, type SceneList, SMOOTH } from "../scene.js";
+import { DRAW, MIRROR, REPEAT, type SceneList, SMOOTH } from "../scene.js";
 import type { Textures } from "../textures.js";
 import { fillFragment, fillVertex, ROW_TEXELS } from "./programs.js";
 
@@ -49,6 +49,9 @@ export class WebGLBackend {
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
   private texturedLocation: WebGLUniformLocation | null = null;
+  /** The row and texture the last draw was told, so neither is told again. */
+  private lastRow = -1;
+  private lastTexture = -2;
   /** The textures uploaded, by the registry's ids, and their sizes; the samplers made, by their bits. */
   private textures: (WebGLTexture | null)[] = [];
   private sizes: number[] = [];
@@ -155,9 +158,12 @@ export class WebGLBackend {
       1 - (2 * target.y) / target.height,
     );
 
-    let lastRow = -1;
-    let lastTexture = -2;
+    this.lastRow = -1;
+    this.lastTexture = -2;
     gl.uniform1i(this.texturedLocation, 0);
+    // The masks pushed: what is drawn passes where the stencil holds as many.
+    let depth = 0;
+    state.stencil(null);
     const ops = commands.ops;
     for (let k = 0; k < commands.length; k++) {
       const at = k * 4;
@@ -166,48 +172,73 @@ export class WebGLBackend {
           const p = commands.params;
           const from = ops[at + 1];
           gl.clearColor(p[from], p[from + 1], p[from + 2], p[from + 3]);
-          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.clearStencil(0);
+          gl.stencilMask(0xff);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
           break;
         }
 
-        case RUN: {
+        case RUN:
           // Premultiplied, as every blend mode will be.
           state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          const end = ops[at + 1] + ops[at + 2];
-          for (let i = ops[at + 1]; i < end; i++) {
-            const place = this.places[scene.geometry[i]];
-            if (!place) {
-              continue;
-            }
-
-            const row = scene.row[i];
-            if (row !== lastRow) {
-              lastRow = row;
-              gl.uniform1i(this.rowLocation, row);
-            }
-
-            const id = scene.texture[i];
-            const texture = id >= 0 ? (this.textures[id] ?? null) : null;
-            if (id >= 0 && !texture) {
-              continue;
-            }
-
-            if (id >= 0 !== lastTexture >= 0) {
-              gl.uniform1i(this.texturedLocation, id >= 0 ? 1 : 0);
-            }
-
-            lastTexture = id;
-            if (texture) {
-              state.bindTexture(TEXTURE_UNIT, texture);
-              state.bindSampler(TEXTURE_UNIT, this.sampler(scene.sampler[i]));
-            }
-
-            gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
-          }
-
+          this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], false);
+          break;
+        case STENCIL_PUSH:
+        case STENCIL_POP: {
+          // The mask's coverage, once a pixel however its fills overlap: counted up into the
+          // stencil where the masks pushed before it pass, and back down where it and they did.
+          const push = ops[at] === STENCIL_PUSH;
+          state.colorMask(0);
+          state.stencil(gl.EQUAL, depth, push ? gl.INCR : gl.DECR);
+          this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], true);
+          depth += push ? 1 : -1;
+          state.colorMask(15);
+          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
           break;
         }
       }
+    }
+
+    state.stencil(null);
+  }
+
+  /** The draws at `scene`'s entries from `first` up to `end`; for the stencil alone, untextured. */
+  private drawEntries(scene: SceneList, first: number, end: number, stencil: boolean): void {
+    const gl = this.gl;
+    const state = this.state;
+    for (let i = first; i < end; i++) {
+      if (scene.kind[i] !== DRAW) {
+        continue;
+      }
+
+      const place = this.places[scene.geometry[i]];
+      if (!place) {
+        continue;
+      }
+
+      const row = scene.row[i];
+      if (row !== this.lastRow) {
+        this.lastRow = row;
+        gl.uniform1i(this.rowLocation, row);
+      }
+
+      const id = stencil ? -1 : scene.texture[i];
+      const texture = id >= 0 ? (this.textures[id] ?? null) : null;
+      if (id >= 0 && !texture) {
+        continue;
+      }
+
+      if (id >= 0 !== this.lastTexture >= 0) {
+        gl.uniform1i(this.texturedLocation, id >= 0 ? 1 : 0);
+      }
+
+      this.lastTexture = id;
+      if (texture) {
+        state.bindTexture(TEXTURE_UNIT, texture);
+        state.bindSampler(TEXTURE_UNIT, this.sampler(scene.sampler[i]));
+      }
+
+      gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
     }
   }
 

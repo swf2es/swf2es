@@ -5,11 +5,16 @@ import {
   Commands,
   Geometries,
   IDLE_FRAMES,
+  MASK_BEGIN,
+  MASK_POP,
+  MASK_USE,
   plan,
   ROW_FLOATS,
   Rows,
   RUN,
   SceneList,
+  STENCIL_POP,
+  STENCIL_PUSH,
   Textures,
 } from "../../../packages/render/dist/index.js";
 
@@ -140,4 +145,48 @@ test("an entry names its texture and sampler, none by default", () => {
   scene.draw(1, 0, 0, 7, 3);
   assert.deepEqual([scene.texture[0], scene.sampler[0]], [-1, 0]);
   assert.deepEqual([scene.texture[1], scene.sampler[1]], [7, 3]);
+});
+
+test("a mask's own draws go to the stencil, and what it masks runs between its push and pop", () => {
+  const scene = new SceneList();
+  scene.draw(0, 0, 0);
+  scene.marker(MASK_BEGIN);
+  scene.draw(1, 1, 0);
+  scene.draw(2, 1, 0);
+  scene.marker(MASK_USE, 2, 2);
+  scene.draw(3, 2, 0);
+  scene.draw(4, 2, 0);
+  scene.marker(MASK_POP, 2, 2);
+  scene.draw(5, 3, 0);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [
+    [RUN, 0, 1, 0],
+    [STENCIL_PUSH, 2, 2, 0],
+    [RUN, 5, 2, 0],
+    [STENCIL_POP, 2, 2, 0],
+    [RUN, 8, 1, 0],
+  ]);
+});
+
+test("masks nest, each popped where its marker says", () => {
+  const scene = new SceneList();
+  scene.marker(MASK_BEGIN);
+  scene.draw(0, 0, 0);
+  scene.marker(MASK_USE, 1, 1);
+  scene.marker(MASK_BEGIN);
+  scene.draw(1, 1, 0);
+  scene.marker(MASK_USE, 4, 1);
+  scene.draw(2, 2, 0);
+  scene.marker(MASK_POP, 4, 1);
+  scene.marker(MASK_POP, 1, 1);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [
+    [STENCIL_PUSH, 1, 1, 0],
+    [STENCIL_PUSH, 4, 1, 0],
+    [RUN, 6, 1, 0],
+    [STENCIL_POP, 4, 1, 0],
+    [STENCIL_POP, 1, 1, 0],
+  ]);
 });
