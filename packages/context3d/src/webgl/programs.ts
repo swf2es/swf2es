@@ -1,4 +1,5 @@
 import { type SamplerSource, translate } from "../agal.js";
+import { linkProgram as link, ShaderError } from "../device/programs.js";
 import { Context3DError } from "../errors.js";
 
 export interface ProgramState {
@@ -78,56 +79,26 @@ export function uploadProgram(
   }
 }
 
+/** A program linked as the device links one, its failures Context3D's errors as before. */
 export function linkProgram(
   gl: WebGL2RenderingContext,
   vertex: string,
   fragment: string,
 ): WebGLProgram {
-  const v = gl.createShader(gl.VERTEX_SHADER);
-  const f = gl.createShader(gl.FRAGMENT_SHADER);
-  const p = gl.createProgram();
-  let linked = false;
-  let attached = false;
   try {
-    if (!v || !f || !p) {
-      throw new Context3DError("operation", "Context3D experiment: cannot allocate shader");
+    return link(gl, vertex, fragment);
+  } catch (e) {
+    if (!(e instanceof ShaderError)) {
+      throw e;
     }
 
-    gl.shaderSource(v, vertex);
-    gl.shaderSource(f, fragment);
-    gl.compileShader(v);
-    gl.compileShader(f);
-    if (
-      !gl.getShaderParameter(v, gl.COMPILE_STATUS) ||
-      !gl.getShaderParameter(f, gl.COMPILE_STATUS)
-    ) {
-      throw new Context3DError(
-        "nativeShader",
-        `Context3D shader: ${gl.getShaderInfoLog(v)} ${gl.getShaderInfoLog(f)}`,
-      );
-    }
-
-    gl.attachShader(p, v);
-    gl.attachShader(p, f);
-    attached = true;
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new Context3DError("nativeShader", `Context3D link: ${gl.getProgramInfoLog(p)}`);
-    }
-
-    linked = true;
-    return p;
-  } finally {
-    if (attached && p && v) {
-      gl.detachShader(p, v);
-    }
-    if (attached && p && f) {
-      gl.detachShader(p, f);
-    }
-    gl.deleteShader(v);
-    gl.deleteShader(f);
-    if (!linked) {
-      gl.deleteProgram(p);
+    switch (e.stage) {
+      case "allocate":
+        throw new Context3DError("operation", "Context3D experiment: cannot allocate shader");
+      case "compile":
+        throw new Context3DError("nativeShader", `Context3D shader: ${e.log}`);
+      default:
+        throw new Context3DError("nativeShader", `Context3D link: ${e.log}`);
     }
   }
 }
