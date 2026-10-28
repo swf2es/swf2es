@@ -119,7 +119,8 @@
 // which a script draws a sprite of drifting dots each frame and then
 // scrolls it a pixel up, as a preloader's trail of rising sparks does: a
 // draw on the GPU followed by an operation on the store's pixels, which
-// must not bring them back from the GPU each frame (perFrame.readbacks).
+// must not bring them back from the GPU each frame (with --counts,
+// perFrame.readbacks).
 //
 // --triangles N plays instead a script that clears a Graphics and draws N
 // textured triangles again on every frame, their vertices turning, with
