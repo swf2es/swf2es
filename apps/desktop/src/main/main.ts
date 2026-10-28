@@ -42,6 +42,11 @@ if (userData) {
   app.setPath("userData", userData);
 }
 
+// launch.ts's commit; a test or another launcher gives none.
+const build = /^[\w.+-]{1,40}$/.test(process.env.SWF2ES_DESKTOP_BUILD ?? "")
+  ? (process.env.SWF2ES_DESKTOP_BUILD as string)
+  : null;
+
 registerScheme();
 app.enableSandbox();
 
@@ -669,6 +674,7 @@ function listen(): void {
       stage3D: settings.settings.stage3D,
       libraries: settings.libraries(),
       movie: current?.movie ?? null,
+      build,
     };
   });
   ipcMain.on("desktop:open-dialog", (event) => {

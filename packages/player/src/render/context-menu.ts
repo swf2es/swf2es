@@ -3,6 +3,11 @@ import type { Player } from "../player.js";
 
 const openMenus = new WeakMap<Document, () => void>();
 
+/** The last item's caption, naming the host's build where it gives one. */
+export function aboutCaption(build: string | null): string {
+  return build ? `About swf2es (${build})` : "About swf2es";
+}
+
 /**
  * DOM menus stay outside Pixi's scene graph and exist only while open.
  * `shown` is what the canvas shows in stage coordinates, which may reach
@@ -54,7 +59,7 @@ export function bindContextMenu(
     }
 
     items.push({
-      caption: "About swf2es",
+      caption: aboutCaption(player.build),
       enabled: true,
       separatorBefore: items.length > 0,
       select: () => window?.open("https://swf2es.github.io/swf2es/", "_blank", "noopener"),

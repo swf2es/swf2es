@@ -208,6 +208,51 @@ async function check(): Promise<void> {
               format: "png",
             });
             writeFileSync(`${out}site.png`, Buffer.from(page.data, "base64"));
+
+            // The stats count the renderer's draw calls while they are on screen.
+            await until("Number(document.getElementById('draws').textContent) > 0");
+            // Off screen, and while the context is lost, the context has its own functions back.
+            const gl = "document.getElementById('player').gl";
+            const wrapped = `Object.hasOwn(${gl}, 'drawElements')`;
+            assert.equal(await value<boolean>(wrapped), true);
+            await value("(document.querySelector('.stats').style.display = 'none', true)");
+            await until(`!${wrapped}`);
+            await value("(document.querySelector('.stats').style.display = '', true)");
+            await until(wrapped);
+            await value(
+              `((globalThis.lose = ${gl}.getExtension('WEBGL_lose_context')).loseContext(), true)`,
+            );
+            await until(`!${wrapped}`);
+            await value("(lose.restoreContext(), true)");
+            await until(wrapped);
+            await value("(document.getElementById('draws').textContent = '', true)");
+            await until("Number(document.getElementById('draws').textContent) > 0");
+
+            // The context menu's About item names the build the page was made from.
+            for (const type of ["mousePressed", "mouseReleased"]) {
+              await send("Input.dispatchMouseEvent", {
+                type,
+                x: box[0] + box[2] / 2,
+                y: box[1] + box[3] / 2,
+                button: "right",
+                clickCount: 1,
+              });
+            }
+            const menu =
+              "document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')";
+            await until(`!!${menu}`);
+            const about = await value<string>(
+              `[...${menu}.shadowRoot.querySelectorAll('button')].at(-1).textContent`,
+            );
+            const build = await value<string>("document.documentElement.dataset.build");
+            assert.equal(about, build === "unknown" ? "About swf2es" : `About swf2es (${build})`);
+            await send("Input.dispatchKeyEvent", {
+              type: "keyDown",
+              key: "Escape",
+              code: "Escape",
+              windowsVirtualKeyCode: 27,
+            });
+            await until(`!${menu}`);
           },
         ],
         [

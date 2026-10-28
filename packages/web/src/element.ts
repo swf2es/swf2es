@@ -317,6 +317,16 @@ export class Swf2esPlayerElement extends ElementBase {
     return this.#session?.player ?? null;
   }
 
+  /**
+   * The WebGL context the player draws with, for a host that measures it
+   * (the demo site counts its draw calls); null before a load, after
+   * destroy, and on a renderer of another API. A lost context comes back
+   * as the same object, its extensions anew.
+   */
+  get gl(): WebGLRenderingContext | WebGL2RenderingContext | null {
+    return this.#session?.playback?.gl ?? null;
+  }
+
   get src(): string {
     return attribute(this, "src") ?? "";
   }
@@ -503,6 +513,7 @@ export class Swf2esPlayerElement extends ElementBase {
       session.player = new Player(bytes, session.scripting, avm1);
       session.player.quality = quality(attribute(this, "quality"));
       session.player.showDefaultContextMenu = attribute(this, "menu")?.toLowerCase() !== "false";
+      session.player.build = configuration().build ?? null;
       const playback = await Playback.create(
         this.#box,
         session.player,

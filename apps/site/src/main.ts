@@ -54,6 +54,7 @@ const build = document.documentElement.dataset.build ?? "unknown";
 configure({
   libraries: { builtin: new URL("libraries/builtin.abc", document.baseURI).href },
   cache: true,
+  build: build === "unknown" ? undefined : build,
 });
 
 // --- The console panel --------------------------------------------------
@@ -155,7 +156,7 @@ let current: {
   stage3D: boolean;
 } | null = null;
 let loadGeneration = 0;
-const stats = new Stats(byId("fps"), byId("frame-time"), byId("heap"));
+const stats = new Stats(byId("fps"), byId("frame-time"), byId("draws"), byId("heap"));
 
 function showStatus(message: string, isError = false): void {
   status.textContent = message;
@@ -242,7 +243,7 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
       return;
     }
 
-    stats.watch(player.player, f.frameRate);
+    stats.watch(player.player, f.frameRate, player.gl);
     showStatus(`Playing ${name}.`);
     player.focus();
   } catch (error) {
