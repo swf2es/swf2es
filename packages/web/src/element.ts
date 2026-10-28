@@ -513,6 +513,7 @@ export class Swf2esPlayerElement extends ElementBase {
       session.player = new Player(bytes, session.scripting, avm1);
       session.player.quality = quality(attribute(this, "quality"));
       session.player.showDefaultContextMenu = attribute(this, "menu")?.toLowerCase() !== "false";
+      session.player.build = configuration().build ?? null;
       const playback = await Playback.create(
         this.#box,
         session.player,

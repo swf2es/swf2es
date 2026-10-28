@@ -54,6 +54,7 @@ const build = document.documentElement.dataset.build ?? "unknown";
 configure({
   libraries: { builtin: new URL("libraries/builtin.abc", document.baseURI).href },
   cache: true,
+  build: build === "unknown" ? undefined : build,
 });
 
 // --- The console panel --------------------------------------------------

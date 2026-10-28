@@ -90,6 +90,9 @@ export class Player {
     }
   }
 
+  /** The host's build, a short commit or a version, which the context menu's About item names. */
+  build: string | null = null;
+
   private defaultContextMenu = true;
 
   get showDefaultContextMenu(): boolean {
