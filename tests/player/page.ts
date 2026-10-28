@@ -44,10 +44,14 @@ import { type RecordedEvent, Replay } from "./replay.ts";
 
 // Exercise the optional package across the same references and context-loss tests as the default.
 {
-  // proto, proto=graphics or proto=sprites (SWF2ES_PROTO): what the prototype takes.
+  // proto, proto=graphics, proto=sprites or proto={...setProto's options} (SWF2ES_PROTO).
   const taken = new URLSearchParams(location.search).get("proto");
   if (taken !== null) {
-    setProto({ on: true, graphics: taken !== "sprites", sprites: taken !== "graphics" });
+    setProto(
+      taken.startsWith("{")
+        ? { on: true, ...JSON.parse(taken) }
+        : { on: true, graphics: taken !== "sprites", sprites: taken !== "graphics" },
+    );
   }
 }
 
