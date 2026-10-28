@@ -54,8 +54,6 @@ export function overruns(
 /** A glyph of an embedded font: its outline in the font's units over 20, placed by a matrix in the text's pixels. */
 export interface GlyphItem {
   kind: "glyph";
-  /** Whether the field's gutter clips it, its text running over. */
-  clipped?: boolean;
   glyph: Glyph;
   em: number;
   m: Affine;
@@ -79,7 +77,6 @@ export interface RectItem {
  */
 export interface DeviceItem {
   kind: "device";
-  clipped?: boolean;
   text: string;
   /** The device font's name, size, weight and style, as deviceMetrics measures it. */
   family: string;
@@ -100,12 +97,15 @@ type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: numb
 
 /**
  * What a text's drawing leaves out for now, Saffron's anti-aliasing, drawn
- * as normal; and the rectangle its clipped items are clipped to, the
- * field's inside its gutter, where its text runs over.
+ * as normal; and, where its text runs over, the rectangle inside the
+ * field's gutter that clips it, and the items that are its text, from
+ * `clipFrom` up to `clipTo`.
  */
 export interface TextOmissions {
   advanced: boolean;
   clip: { x: number; y: number; width: number; height: number } | null;
+  clipFrom: number;
+  clipTo: number;
 }
 
 /** A glyph's outline as a shape of one white fill, in the font's units over 20, as shapeLayers takes twips. */
@@ -219,12 +219,8 @@ export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
       width: Math.max(0, inner.width),
       height: Math.max(0, inner.height),
     };
-    for (let k = textFrom; k < items.length; k++) {
-      const item = items[k];
-      if (item.kind !== "rect") {
-        item.clipped = true;
-      }
-    }
+    omitted.clipFrom = textFrom;
+    omitted.clipTo = items.length;
   }
 
   caret(o, items);

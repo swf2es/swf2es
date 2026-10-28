@@ -4,7 +4,7 @@
 // beside PixiView behind a switch until it draws everything Pixi draws;
 // for now, the fills of shapes and drawings, solid, bitmap and gradient,
 // their lines, bitmaps, and text.
-import type { ColorTransform, Glyph } from "@swf2es/format";
+import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/tessellate";
 import {
   CLAMP,
@@ -30,6 +30,7 @@ import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
+import { concat } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { ShapeObject } from "../display/shapeobject.js";
 import {
@@ -147,6 +148,8 @@ export class RenderView implements Drawer {
   private readonly commands = new Commands();
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
+  /** The masks pushed and not yet popped, as each one's first draw and count. */
+  private readonly masks: number[] = [];
   /**
    * Each layer's lines by what they were stroked for: the linear transform
    * on the stage and the least width, a pixel of the screen, as a key; and
@@ -277,28 +280,30 @@ export class RenderView implements Drawer {
     }
 
     hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
+
     const own = o.colorTransform;
     const color = own ? (tint ? concatColor(tint, own) : own) : tint;
     // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
     // a 3D mask, or one inside what it masks, masks nothing in Flash.
-    const clipped: number[] = [];
-    if (!hidden) {
-      const mask = o.mask && !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
+    let clipped = 0;
+    if (!hidden && o.mask) {
+      const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
-        const w = worldOf(mask);
-        clipped.push(
-          ...this.pushMask(() => this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true)),
-        );
+        const w = toStageFlat(mask);
+        this.pushMask(() => this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true));
+        clipped++;
+      } else {
+        unsupported.masks++;
       }
+    }
 
-      const r = o.scroll;
-      if (r) {
-        clipped.push(
-          ...this.pushMask(() =>
-            this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, r.xMax - r.xMin, r.yMax - r.yMin),
-          ),
-        );
-      }
+    const r = hidden ? null : o.scroll;
+    if (r) {
+      // A rectangle of no size clips everything, as an empty one does.
+      const width = Math.max(0, r.xMax - r.xMin);
+      const height = Math.max(0, r.yMax - r.yMin);
+      this.pushMask(() => this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, width, height));
+      clipped++;
     }
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
@@ -351,7 +356,7 @@ export class RenderView implements Drawer {
     }
 
     if (!hidden && (o instanceof TextObject || o instanceof StaticTextObject)) {
-      const omitted: TextOmissions = { advanced: false, clip: null };
+      const omitted: TextOmissions = { advanced: false, clip: null, clipFrom: 0, clipTo: 0 };
       const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
       if (omitted.advanced) {
         unsupported.advancedTexts++;
@@ -364,23 +369,18 @@ export class RenderView implements Drawer {
           : 1;
       // Its text, where it runs over, clipped inside the gutter; its box and caret are not.
       const clip = omitted.clip;
-      let gutter: number[] | null = null;
-      for (const item of items) {
-        const inside = item.kind !== "rect" && item.clipped === true;
-        if (inside && clip && !gutter) {
-          gutter = this.pushMask(() =>
+
+      for (let k = 0; k < items.length; k++) {
+        if (clip && k === omitted.clipFrom) {
+          this.pushMask(() =>
             this.rectMask(a, b, c, d, tx, ty, clip.x, clip.y, clip.width, clip.height),
           );
-        } else if (!inside && gutter) {
-          this.scene.marker(MASK_POP, gutter[0], gutter[1]);
-          gutter = null;
         }
 
-        this.drawTextItem(item, a, b, c, d, tx, ty, color, resolution);
-      }
-
-      if (gutter) {
-        this.scene.marker(MASK_POP, gutter[0], gutter[1]);
+        this.drawTextItem(items[k], a, b, c, d, tx, ty, color, resolution);
+        if (clip && k === omitted.clipTo - 1) {
+          this.popMask();
+        }
       }
     }
 
@@ -399,52 +399,63 @@ export class RenderView implements Drawer {
     }
 
     if (o instanceof Container) {
-      // A timeline's clip layer clips the children after it, up to its clip depth.
-      const clips = new Clips();
-      const open: number[][] = [];
+      // A timeline's clip layer clips the children after it, up to its clip depth: kept track of
+      // only where a child is one, as most containers have none.
       const children = o.children;
+      let clips: Clips | null = null;
+      let open = 0;
+
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
-        const n = clips.enter(child);
-        while (open.length > n) {
-          const [first, count] = open.pop() as number[];
-          this.scene.marker(MASK_POP, first, count);
+        if (!clips && child.clipDepth > 0) {
+          clips = new Clips();
+        }
+
+        if (clips) {
+          const n = clips.enter(child);
+          for (; open > n; open--) {
+            this.popMask();
+          }
         }
 
         if (child.clipDepth > 0 && !hidden) {
-          open.push(this.pushMask(() => this.walkMask(child, a, b, c, d, tx, ty, false)));
+          this.pushMask(() => this.walkMask(child, a, b, c, d, tx, ty, false));
+          open++;
           continue;
         }
 
         this.walk(child, a, b, c, d, tx, ty, color, hidden);
       }
 
-      while (open.length > 0) {
-        const [first, count] = open.pop() as number[];
-        this.scene.marker(MASK_POP, first, count);
+      for (; open > 0; open--) {
+        this.popMask();
       }
 
       o.descendantsDirty = false;
     }
 
-    for (let k = clipped.length - 2; k >= 0; k -= 2) {
-      this.scene.marker(MASK_POP, clipped[k], clipped[k + 1]);
+    for (; clipped > 0; clipped--) {
+      this.popMask();
     }
 
     o.dirty = CLEAN;
   }
 
-  /**
-   * A mask's draws, which `emit` writes, between its markers: where they
-   * start and how many there are, for its pop to name them again.
-   */
-  private pushMask(emit: () => void): number[] {
+  /** A mask's draws, which `emit` writes, between its markers, kept on the stack of masks open for its pop. */
+  private pushMask(emit: () => void): void {
     this.scene.marker(MASK_BEGIN);
     const first = this.scene.length;
     emit();
     const count = this.scene.length - first;
     this.scene.marker(MASK_USE, first, count);
-    return [first, count];
+    this.masks.push(first, count);
+  }
+
+  /** The mask pushed last taken out: its draws named again. */
+  private popMask(): void {
+    const count = this.masks.pop() as number;
+    const first = this.masks.pop() as number;
+    this.scene.marker(MASK_POP, first, count);
   }
 
   /** A rectangle of `o`'s space, x y width height, under its transform (a b c d tx ty), as a mask's draw. */
@@ -461,13 +472,14 @@ export class RenderView implements Drawer {
     height: number,
   ): void {
     const quad = this.unitQuad();
-    const row = this.rows.add(
-      a * width,
-      b * width,
-      c * height,
-      d * height,
-      a * x + c * y + tx,
-      b * x + d * y + ty,
+    const row = this.placedRow(
+      a,
+      b,
+      c,
+      d,
+      tx,
+      ty,
+      { a: width, b: 0, c: 0, d: height, tx: x, ty: y },
       null,
     );
     this.geometries.use(quad.id);
@@ -491,7 +503,12 @@ export class RenderView implements Drawer {
     pty: number,
     own: boolean,
   ): void {
-    const m = own ? IDENTITY_MATRIX : o.flatPlaced;
+    const m = own ? IDENTITY : o.flatPlaced;
+    // What would clip a mask's own coverage needs a stencil within the stencil: drawn whole, and counted.
+    if (o.mask || o.scroll || o.clipDepth > 0) {
+      unsupported.masks++;
+    }
+
     const a = pa * m.a + pc * m.b;
     const b = pb * m.a + pd * m.b;
     const c = pa * m.c + pc * m.d;
@@ -520,7 +537,7 @@ export class RenderView implements Drawer {
     }
 
     if (o instanceof TextObject || o instanceof StaticTextObject) {
-      const omitted: TextOmissions = { advanced: false, clip: null };
+      const omitted: TextOmissions = { advanced: false, clip: null, clipFrom: 0, clipTo: 0 };
       for (const item of o instanceof TextObject
         ? fieldItems(o, omitted)
         : staticItems(o, omitted)) {
@@ -711,17 +728,30 @@ export class RenderView implements Drawer {
       item.kind === "glyph"
         ? item.m
         : { a: item.width, b: 0, c: 0, d: item.height, tx: item.x, ty: item.y };
-    const row = this.rows.add(
+    this.geometries.use(geometry.id);
+    this.scene.draw(geometry.id, this.placedRow(a, b, c, d, tx, ty, m, colored), NORMAL);
+  }
+
+  /** A row for what `m` places within an object under the transform (a b c d tx ty). */
+  private placedRow(
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    tx: number,
+    ty: number,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    color: ColorTransform | null,
+  ): number {
+    return this.rows.add(
       a * m.a + c * m.b,
       b * m.a + d * m.b,
       a * m.c + c * m.d,
       b * m.c + d * m.d,
       a * m.tx + c * m.ty + tx,
       b * m.tx + d * m.ty + ty,
-      colored,
+      color,
     );
-    this.geometries.use(geometry.id);
-    this.scene.draw(geometry.id, row, NORMAL);
   }
 
   /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */
@@ -1006,28 +1036,11 @@ function noteUnsupported(o: DisplayObject): void {
   }
 }
 
-const IDENTITY_MATRIX = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
-
-/** Where `o` stands on the stage: its matrix and every ancestor's, as the walk concatenates them. */
-function worldOf(o: DisplayObject): {
-  a: number;
-  b: number;
-  c: number;
-  d: number;
-  tx: number;
-  ty: number;
-} {
+/** Where `o` stands on the stage, its matrices as the walk takes them, after their scroll's shift. */
+function toStageFlat(o: DisplayObject): Matrix {
   let m = o.flatPlaced;
   for (let p = o.parent; p; p = p.parent) {
-    const q = p.flatPlaced;
-    m = {
-      a: m.a * q.a + m.b * q.c,
-      b: m.a * q.b + m.b * q.d,
-      c: m.c * q.a + m.d * q.c,
-      d: m.c * q.b + m.d * q.d,
-      tx: m.tx * q.a + m.ty * q.c + q.tx,
-      ty: m.tx * q.b + m.ty * q.d + q.ty,
-    };
+    m = concat(m, p.flatPlaced);
   }
 
   return m;

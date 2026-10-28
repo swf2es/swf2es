@@ -16,7 +16,7 @@ import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
  * What the renderer cannot draw yet, counted as it is met, for a test or a
  * probe to read: drawTriangles' meshes, and lines that could not be filled
  * with no native tessellator, left out; advanced text drawn as normal;
- * 9-slices ignored, so what they would reshape is drawn whole; filters and
+ * clips within masks left out; 9-slices ignored, so what they would reshape is drawn whole; filters and
  * blend modes ignored.
  */
 export const unsupported = {
@@ -24,6 +24,12 @@ export const unsupported = {
   strokes: 0,
   /** Texts with advanced anti-aliasing, drawn as normal. */
   advancedTexts: 0,
+  /**
+   * Masks that mask nothing, a 3D one or one inside what it masks; and what
+   * would clip a mask's own coverage (its mask, scrollRect, clip layer or
+   * gutter), which it is drawn without.
+   */
+  masks: 0,
   scale9Grids: 0,
   filters: 0,
   blendModes: 0,

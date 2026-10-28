@@ -8,6 +8,8 @@ import { fillFragment, fillVertex, ROW_TEXELS } from "./programs.js";
 
 /** Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four bytes. */
 const VERTEX_BYTES = 20;
+/** The most masks the stencil's eight bits count. */
+const STENCIL_MOST = 255;
 /** The texture unit an entry's texture is bound to; the rows are on 0. */
 const TEXTURE_UNIT = 1;
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
@@ -161,8 +163,10 @@ export class WebGLBackend {
     this.lastRow = -1;
     this.lastTexture = -2;
     gl.uniform1i(this.texturedLocation, 0);
-    // The masks pushed: what is drawn passes where the stencil holds as many.
+    // The masks pushed: what is drawn passes where the stencil holds as many. Its eight bits hold
+    // 255: those pushed past that are left out, and their pops with them.
     let depth = 0;
+    let past = 0;
     state.stencil(null);
     const ops = commands.ops;
     for (let k = 0; k < commands.length; k++) {
@@ -188,6 +192,11 @@ export class WebGLBackend {
           // The mask's coverage, once a pixel however its fills overlap: counted up into the
           // stencil where the masks pushed before it pass, and back down where it and they did.
           const push = ops[at] === STENCIL_PUSH;
+          if (push ? depth >= STENCIL_MOST || past > 0 : past > 0) {
+            past += push ? 1 : -1;
+            break;
+          }
+
           state.colorMask(0);
           state.stencil(gl.EQUAL, depth, push ? gl.INCR : gl.DECR);
           this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], true);
