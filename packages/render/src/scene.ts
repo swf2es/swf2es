@@ -50,7 +50,8 @@ export const MASK_POP = 3;
  * A layer: what lies between LAYER_BEGIN and LAYER_END is drawn into a
  * target of its own over a rectangle of the target, then composited onto
  * what is below in the END's blend mode (its geometry), its colour
- * transform the END's row, or none (-1). The BEGIN's geometry is the
+ * transform the END's row, or none (-1), after the END's chain of filters
+ * (its texture, or none, -1) runs over it. The BEGIN's geometry is the
  * layer's number, whose rectangle measureLayers finds.
  */
 export const LAYER_BEGIN = 4;
@@ -77,6 +78,12 @@ export class SceneList {
   length = 0;
   /** Each layer's rectangle of the target, in its pixels from the top left: x, y, width, height. */
   layers = new Int32Array(64);
+  /**
+   * Each layer's padding, as its filters reach past what is drawn: in the
+   * target's units (its pixels over the resolution), or -1 for an
+   * unfiltered layer, which covers what is drawn alone.
+   */
+  pads = new Int32Array(16);
   layerCount = 0;
 
   reset(): void {
@@ -88,15 +95,22 @@ export class SceneList {
     this.push(DRAW, geometry, row, blend, texture, sampler);
   }
 
-  /** A layer begun, its rectangle none till measured (layerRect). */
-  layerBegin(): void {
+  /** A layer begun, padded for its filters (or -1), its rectangle none till measured (layerRect). */
+  layerBegin(padding = -1): void {
     const layer = this.layerCount++;
-    if (layer * 4 >= this.layers.length) {
+    if (layer >= this.pads.length) {
       this.layers = grow(this.layers);
+      this.pads = grow(this.pads);
     }
 
+    this.pads[layer] = padding;
     this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
     this.layerRect(layer, 0, 0, 0, 0);
+  }
+
+  /** The layer begun last ended: filtered by `chain` (or -1), composited in `mode`, coloured by `row`. */
+  layerEnd(mode: number, row: number, chain = -1): void {
+    this.push(LAYER_END, mode, row, 0, chain, 0);
   }
 
   /**
@@ -112,9 +126,8 @@ export class SceneList {
   }
 
   /**
-   * A mask's or a layer's marker, with two numbers in its geometry and row:
-   * MASK_USE and MASK_POP name the mask's draws, from the first, so many of
-   * them; LAYER_END its blend mode and the row of its colour transform.
+   * A mask's marker, with two numbers in its geometry and row: MASK_USE
+   * and MASK_POP name the mask's draws, from the first, so many of them.
    */
   marker(kind: number, a = 0, b = 0): void {
     this.push(kind, a, b, 0, -1, 0);

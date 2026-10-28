@@ -10,12 +10,20 @@ import {
   type SceneList,
 } from "./scene.js";
 
-/** What measuring a frame's layers needs of its target: its size in pixels, and its pixels a stage pixel. */
+/**
+ * What measuring a frame's layers needs of its target: its size in pixels,
+ * its pixels a stage pixel, and its pixels a unit of its own (resolution),
+ * which a filtered layer is padded in.
+ */
 export interface MeasureTarget {
   width: number;
   height: number;
   scale: number;
+  resolution: number;
 }
+
+/** A hair, which keeps a padded edge on the pixel it lies on at any resolution. */
+const TEXEL_SNAP = 1e-6;
 
 // Scratch stacks, four numbers an open area: least x and y, greatest x and y, in target pixels.
 const areas: number[] = [];
@@ -28,7 +36,11 @@ const open: number[] = [];
  * draws apart, what a mask clips cut to that mask's draws as it pops, and
  * the rectangles of the layers in it; out to whole pixels and a pixel more
  * each way, cut to the target. What is drawn is what is measured, so a
- * layer covers its draws however they came to be where they are.
+ * layer covers its draws however they came to be where they are. A
+ * filtered layer is measured as Pixi's filter system measured it, which
+ * the filters' exactness rules were found with: cut to the target, out to
+ * whole pixels, then padded, not cut again; where nothing is drawn in it,
+ * it draws nothing.
  */
 export function measureLayers(
   scene: SceneList,
@@ -107,21 +119,73 @@ export function measureLayers(
 
       case LAYER_END: {
         const n = areas.length;
-        const left = Math.max(0, Math.floor(areas[n - 4]) - 1);
-        const top = Math.max(0, Math.floor(areas[n - 3]) - 1);
-        const right = Math.min(target.width, Math.ceil(areas[n - 2]) + 1);
-        const bottom = Math.min(target.height, Math.ceil(areas[n - 1]) + 1);
-        areas.length = n - 4;
         const layer = open.pop() as number;
-        if (right > left && bottom > top) {
-          scene.layerRect(layer, left, top, right - left, bottom - top);
-          unionTop(left, top, right, bottom);
+        const pad = scene.pads[layer];
+        if (pad < 0) {
+          const left = Math.max(0, Math.floor(areas[n - 4]) - 1);
+          const top = Math.max(0, Math.floor(areas[n - 3]) - 1);
+          const right = Math.min(target.width, Math.ceil(areas[n - 2]) + 1);
+          const bottom = Math.min(target.height, Math.ceil(areas[n - 1]) + 1);
+          areas.length = n - 4;
+          if (right > left && bottom > top) {
+            scene.layerRect(layer, left, top, right - left, bottom - top);
+            unionTop(left, top, right, bottom);
+          }
+
+          break;
+        }
+
+        filteredRect(layer, pad, target, scene);
+        areas.length = n - 4;
+        const r = scene.layers;
+        const at = layer * 4;
+        if (r[at + 2] > 0) {
+          unionTop(r[at], r[at + 1], r[at] + r[at + 2], r[at + 1] + r[at + 3]);
         }
 
         break;
       }
     }
   }
+}
+
+/**
+ * The rectangle of filtered layer `layer`, padded by `pad` units, from the
+ * area on top, as Pixi's filter system has it (FilterSystem's
+ * _calculateFilterArea): in units, the area cut to the target, out to
+ * whole pixels at the resolution, padded; nothing where it has no size
+ * then; its edges snapped to the pixels they lie on.
+ */
+function filteredRect(layer: number, pad: number, target: MeasureTarget, scene: SceneList): void {
+  const n = areas.length;
+  const res = target.resolution;
+  let x0 = areas[n - 4] / res;
+  let y0 = areas[n - 3] / res;
+  let x1 = areas[n - 2] / res;
+  let y1 = areas[n - 1] / res;
+  if (!(x1 > x0 && y1 > y0)) {
+    return;
+  }
+
+  // Each edge moved in alone, as Bounds.fitBounds does: an area off the target turns inside out,
+  // and its padding may yet give it a size.
+  x0 = Math.max(x0, 0);
+  y0 = Math.max(y0, 0);
+  x1 = Math.min(x1, target.width / res);
+  y1 = Math.min(y1, target.height / res);
+  x0 = Math.floor(x0 * res) / res - pad;
+  y0 = Math.floor(y0 * res) / res - pad;
+  x1 = Math.ceil(x1 * res) / res + pad;
+  y1 = Math.ceil(y1 * res) / res + pad;
+  if (!(x1 - x0 > 0 && y1 - y0 > 0)) {
+    return;
+  }
+
+  const left = Math.floor(x0 * res + TEXEL_SNAP);
+  const top = Math.floor(y0 * res + TEXEL_SNAP);
+  const right = Math.ceil(x1 * res - TEXEL_SNAP);
+  const bottom = Math.ceil(y1 * res - TEXEL_SNAP);
+  scene.layerRect(layer, left, top, right - left, bottom - top);
 }
 
 function pushEmpty(stack: number[]): void {

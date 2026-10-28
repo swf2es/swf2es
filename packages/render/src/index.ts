@@ -3,12 +3,24 @@
 export {
   CLEAR,
   Commands,
+  FILTER,
   LAYER_POP,
   LAYER_PUSH,
   RUN,
   STENCIL_POP,
   STENCIL_PUSH,
 } from "./commands.js";
+export * as filterShaders from "./filter-shaders.js";
+export {
+  BEVEL,
+  BLUR,
+  blurShrink,
+  COLOR_MATRIX,
+  CONVOLUTION,
+  Filters,
+  GLOW,
+  GRADIENT,
+} from "./filters.js";
 export {
   Geometries,
   type GeometryData,

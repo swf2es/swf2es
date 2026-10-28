@@ -4694,7 +4694,8 @@ an opaque destination's pixels; what lies past the source stays as it
 was.
 
 The renderer draws a display object's blur, glow, drop shadow, colour
-matrix, bevel and convolution as adl does (`render/filters.ts`), before its blend mode: a blur is
+matrix, bevel and convolution as adl does (`render/filters.ts`, its shaders in `@swf2es/render`'s
+`filter-shaders.ts`, which the renderer's own passes run too), before its blend mode: a blur is
 a box blurX by blurY pixels wide, the pixels at its ends weighted by how
 much of them it covers, run `quality` times each way and truncated to 8
 bits each time, so that blur 2.5 weighs 0.3, 0.4 and 0.3, and the filter

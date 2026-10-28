@@ -3,17 +3,18 @@
 // list and its rows, and has @swf2es/render plan and draw it. It stands
 // beside PixiView behind a switch until it draws everything Pixi draws;
 // for now, the fills of shapes and drawings, solid, bitmap and gradient,
-// their lines, bitmaps, and text.
+// their lines, bitmaps and text, under masks, scroll clips, blend modes and
+// filters.
 import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/tessellate";
 import {
   BLEND_NAMES,
   CLAMP,
   Commands,
+  Filters,
   Geometries,
   type GeometryHandle,
   LAYER,
-  LAYER_END,
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
@@ -34,6 +35,7 @@ import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
+import { type Filter as FilterRecord, sameFilterRecords } from "../display/filters.js";
 import { concat } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { ShapeObject } from "../display/shapeobject.js";
@@ -48,6 +50,7 @@ import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import { cssFont } from "../text/fonts.js";
 import type { FillTessellator } from "./fills.js";
+import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
 import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
 import { layerStrokes } from "./strokes.js";
 import {
@@ -109,6 +112,14 @@ interface DeviceRun {
 }
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
+/** A filtered object's filters worked out, and what for. */
+interface KeptPlan {
+  records: readonly FilterRecord[];
+  units: number;
+  room: number;
+  plan: FilterPlan | null;
+}
+
 interface Made {
   parts: { part: Part; handle: GeometryHandle }[];
   version: number;
@@ -150,8 +161,13 @@ export class RenderView implements Drawer {
   private readonly geometries = new Geometries();
   private readonly textures = new Textures();
   private readonly commands = new Commands();
+  private readonly filters = new Filters();
+  /** Each filtered object's filters worked out, for the records, units and room they were for. */
+  private readonly filterPlans = new WeakMap<DisplayObject, KeptPlan>();
+  /** The largest texture side the context makes, which a filtered layer's padding must fit. */
+  private textureLimit = 4096;
   /** Where a frame is drawn, filled in as it is. */
-  private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0 };
+  private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1 };
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
@@ -199,6 +215,7 @@ export class RenderView implements Drawer {
 
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
+    this.textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     if (options.fillTessellator) {
       this.tessellator = options.fillTessellator;
     } else {
@@ -244,12 +261,14 @@ export class RenderView implements Drawer {
   render(root: DisplayObject): void {
     this.scene.reset();
     this.rows.reset();
+    this.filters.reset();
     this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
     const target = this.target;
     target.width = this.gl.drawingBufferWidth;
     target.height = this.gl.drawingBufferHeight;
     target.scale = this.scale * this.resolution;
+    target.resolution = this.resolution;
     measureLayers(this.scene, this.rows, this.geometries, target);
     plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
     this.backend.execute(
@@ -258,6 +277,7 @@ export class RenderView implements Drawer {
       this.rows,
       this.geometries,
       this.textures,
+      this.filters,
       target,
     );
     this.geometries.endFrame();
@@ -322,15 +342,18 @@ export class RenderView implements Drawer {
 
     const childful = o instanceof Container && o.children.length > 0;
     const mode = hidden || named < 0 || (named === LAYER && !childful) ? NORMAL : named;
+    // Its filters draw it as a layer too, which they run over before its blend: adl filters the
+    // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
+    const filtering = hidden || o.filters.length === 0 ? null : this.filterPlan(o);
     let layerRow = -1;
-    if (mode !== NORMAL) {
-      if (mode === LAYER) {
+    if (mode !== NORMAL || filtering) {
+      if (mode === LAYER || filtering) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
 
       // Over the rectangle of what is drawn in it, which measureLayers finds.
-      this.scene.layerBegin();
+      this.scene.layerBegin(filtering ? filtering.padding : -1);
     }
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -474,8 +497,8 @@ export class RenderView implements Drawer {
       this.popMask();
     }
 
-    if (mode !== NORMAL) {
-      this.scene.marker(LAYER_END, mode, layerRow);
+    if (mode !== NORMAL || filtering) {
+      this.scene.layerEnd(mode, layerRow, filtering ? this.chainOf(filtering) : -1);
     }
 
     if (clipped) {
@@ -483,6 +506,56 @@ export class RenderView implements Drawer {
     }
 
     o.dirty = CLEAN;
+  }
+
+  /**
+   * `o`'s filters worked out for the units they are drawn at and the room a
+   * texture has, again only as one of those or their values change: null
+   * where it has none drawn.
+   */
+  private filterPlan(o: DisplayObject): FilterPlan | null {
+    const records = o.filters;
+    const units = this.scale;
+    // As far as a texture reaches past the stage either side, which the padding of an object on it
+    // must fit in.
+    const room =
+      Math.floor((this.textureLimit / this.resolution - Math.max(this.width, this.height)) / 2) - 2;
+    const kept = this.filterPlans.get(o);
+    if (kept && kept.units === units && kept.room === room) {
+      if (kept.records === records) {
+        return kept.plan;
+      }
+
+      // Set again with the same values, as a tween writes them on each frame.
+      if (sameFilterRecords(records, kept.records)) {
+        kept.records = records;
+        return kept.plan;
+      }
+    }
+
+    const plan = planFilters(records, units, room);
+    this.filterPlans.set(o, { records, units, room, plan });
+    return plan;
+  }
+
+  /** `plan`'s passes added to the frame's filters as a chain, their gradients' textures uploaded: its number. */
+  private chainOf(plan: FilterPlan): number {
+    for (const pass of plan.passes) {
+      let texture = -1;
+      if (pass.colors) {
+        if (!pass.texture || !this.textures.alive(pass.texture)) {
+          // A copy, as the backend lets the pixels it uploads go.
+          pass.texture = this.textures.add(256, 1, pass.colors.slice(), GRADIENT_IDLE_FRAMES);
+        }
+
+        texture = pass.texture.id;
+        this.textures.use(texture);
+      }
+
+      this.filters.add(pass.kind, pass.values, texture);
+    }
+
+    return this.filters.close();
   }
 
   /** A mask's draws, which `emit` writes, between its markers, kept on the stack of masks open for its pop. */
@@ -1071,7 +1144,7 @@ function noteUnsupported(o: DisplayObject): void {
     unsupported.scale9Grids++;
   }
 
-  if (o.filters.length > 0) {
+  if (undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
 }

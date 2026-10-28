@@ -75,6 +75,7 @@ function moduleMounts(): Map<string, string> {
     ["context3d", dist("@swf2es/context3d/webgl")],
     ["codegen", dist("@swf2es/codegen")],
     ["runtime", dist("@swf2es/runtime", player)],
+    ["render", dist("@swf2es/render", player)],
     ["player", dist("@swf2es/player")],
     ["player-hosts", dist("@swf2es/player-hosts/indexeddb")],
     ["web", dist("@swf2es/web")],

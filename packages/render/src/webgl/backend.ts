@@ -2,12 +2,14 @@ import { GlState, linkProgram } from "@swf2es/context3d/device";
 import {
   CLEAR,
   type Commands,
+  FILTER,
   LAYER_POP,
   LAYER_PUSH,
   RUN,
   STENCIL_POP,
   STENCIL_PUSH,
 } from "../commands.js";
+import type { Filters } from "../filters.js";
 import type { Geometries, GeometryData } from "../geometry.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
 import {
@@ -22,6 +24,7 @@ import {
   SMOOTH,
 } from "../scene.js";
 import type { Textures } from "../textures.js";
+import { FilterRunner } from "./filters.js";
 import {
   compositeFragment,
   compositeVertex,
@@ -42,7 +45,8 @@ const BACK_UNIT = 3;
 
 /**
  * A target a layer is drawn into: a texture at least its rectangle's size,
- * with a stencil of its own for masks within it.
+ * with a stencil of its own for masks within it. Its rows run down, the
+ * first the rectangle's top, as filters read them.
  */
 interface Layer {
   framebuffer: WebGLFramebuffer;
@@ -91,6 +95,8 @@ export interface Target {
   scale: number;
   x: number;
   y: number;
+  /** Target pixels a unit of the target's own, which filters read their input's size in. */
+  resolution: number;
 }
 
 /**
@@ -114,6 +120,10 @@ export class WebGLBackend {
   private modeLocation: WebGLUniformLocation | null = null;
   private compositeRowLocation: WebGLUniformLocation | null = null;
   private offsetLocation: WebGLUniformLocation | null = null;
+  private flipLocation: WebGLUniformLocation | null = null;
+  private backOffsetLocation: WebGLUniformLocation | null = null;
+  /** The filters' passes, their programs made as first run. */
+  private filters!: FilterRunner<Layer>;
   /** Layers free to draw into, and those drawn into now, innermost last. */
   private freeLayers: Layer[] = [];
   private layers: Open[] = [];
@@ -185,6 +195,14 @@ export class WebGLBackend {
     this.modeLocation = gl.getUniformLocation(this.composite, "uMode");
     this.compositeRowLocation = gl.getUniformLocation(this.composite, "uRow");
     this.offsetLocation = gl.getUniformLocation(this.composite, "uOffset");
+    this.flipLocation = gl.getUniformLocation(this.composite, "uFlip");
+    this.backOffsetLocation = gl.getUniformLocation(this.composite, "uBackOffset");
+    this.filters = new FilterRunner(gl, this.state, {
+      take: (width, height, exact) => this.takeLayer(width, height, exact),
+      give: (layer) => this.giveLayer(layer),
+      texture: (id) => this.textures[id] ?? null,
+      sampler: (bits) => this.sampler(bits),
+    });
     this.freeLayers = [];
     this.layers = [];
     this.back = null;
@@ -223,6 +241,7 @@ export class WebGLBackend {
     rows: Rows,
     geometries: Geometries,
     textures: Textures,
+    filters: Filters,
     target: Target,
   ): void {
     const gl = this.gl;
@@ -302,6 +321,7 @@ export class WebGLBackend {
           const from = ops[at + 1];
           const width = p[from + 2];
           const height = p[from + 3];
+          const filtered = ops[at + 2] === 1;
           const open: Open = {
             layer: this.takeLayer(width, height),
             x: p[from],
@@ -316,10 +336,27 @@ export class WebGLBackend {
           gl.clearColor(0, 0, 0, 0);
           gl.clearStencil(0);
           gl.stencilMask(0xff);
-          // Its rectangle alone: a layer taken may be larger, and nothing past it is read.
-          state.scissor([0, 0, width, height]);
+          // Its rectangle alone, as a layer taken may be larger, unless filters read past it.
+          state.scissor(filtered ? null : [0, 0, width, height]);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
           state.scissor(null);
+          break;
+        }
+
+        case FILTER: {
+          const open = this.layers.at(-1);
+          if (open?.layer) {
+            state.stencil(null);
+            open.layer = this.filters.run(
+              filters,
+              ops[at + 1],
+              open.layer,
+              open.width,
+              open.height,
+              target.resolution,
+            );
+          }
+
           break;
         }
 
@@ -358,7 +395,8 @@ export class WebGLBackend {
   /**
    * Draw into `open` from here on: its framebuffer bound, its viewport its
    * rectangle's size, and the stage placed on it as on the canvas, its
-   * rectangle's corner the origin. The fill program takes the view.
+   * rectangle's corner the origin, its rows running up on the canvas and
+   * down in a layer. The fill program takes the view.
    */
   private drawInto(open: Open, target: Target): void {
     const gl = this.gl;
@@ -366,12 +404,13 @@ export class WebGLBackend {
     state.bindFramebuffer(open.layer?.framebuffer ?? null);
     state.viewport(0, 0, open.width, open.height);
     state.useProgram(this.program);
+    const down = open.layer ? 1 : -1;
     gl.uniform4f(
       this.viewLocation,
       (2 * target.scale) / open.width,
-      (-2 * target.scale) / open.height,
+      (down * 2 * target.scale) / open.height,
       -1 + (2 * (target.x - open.x)) / open.width,
-      1 - (2 * (target.y - open.y)) / open.height,
+      -down * (1 - (2 * (target.y - open.y)) / open.height),
     );
   }
 
@@ -382,17 +421,23 @@ export class WebGLBackend {
     this.state.bindTexture(0, this.rowsTexture);
   }
 
-  /** A layer of at least `width` by `height`, the smallest of those free that is, or one made. */
-  private takeLayer(width: number, height: number): Layer {
+  /**
+   * A layer of at least `width` by `height`, the smallest of those free
+   * that is, or one made; `exact`, of just that size, as a filter that reads
+   * two layers at one coordinate needs.
+   */
+  private takeLayer(width: number, height: number, exact = false): Layer {
     const gl = this.gl;
     const free = this.freeLayers;
     let best = -1;
     for (let i = 0; i < free.length; i++) {
       const l = free[i];
       if (
-        l.width >= width &&
-        l.height >= height &&
-        (best < 0 || l.width * l.height < free[best].width * free[best].height)
+        exact
+          ? l.width === width && l.height === height
+          : l.width >= width &&
+            l.height >= height &&
+            (best < 0 || l.width * l.height < free[best].width * free[best].height)
       ) {
         best = i;
       }
@@ -406,8 +451,11 @@ export class WebGLBackend {
       return layer;
     }
 
-    width = Math.ceil(width / LAYER_STEP) * LAYER_STEP;
-    height = Math.ceil(height / LAYER_STEP) * LAYER_STEP;
+    if (!exact) {
+      width = Math.ceil(width / LAYER_STEP) * LAYER_STEP;
+      height = Math.ceil(height / LAYER_STEP) * LAYER_STEP;
+    }
+
     const texture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(LAYER_UNIT, texture);
     this.state.activeTexture(LAYER_UNIT);
@@ -446,15 +494,25 @@ export class WebGLBackend {
    * `open` composited onto `under`, bound, in blend mode `mode`, coloured by
    * row `row` (or -1), over its rectangle alone: through GL's blending where
    * it computes Flash's blend, else from a copy of what is below there, the
-   * result replacing it. The rectangle's corner in `under`'s framebuffer,
-   * whose rows run up, is where the composite reads the layer's first texel.
+   * result replacing it. Its rectangle is cut to `under`'s, as a filtered
+   * one may reach past the canvas; in `under`'s framebuffer its rows run
+   * up on the canvas and down in a layer.
    */
   private compositeLayer(open: Open, under: Open, mode: number, row: number): void {
     const gl = this.gl;
     const state = this.state;
-    const x = open.x - under.x;
-    const y = under.y + under.height - (open.y + open.height);
-    const { width, height } = open;
+    const dx = open.x - under.x;
+    const dy = open.y - under.y;
+    const flip = !under.layer;
+    const y = flip ? under.height - dy - open.height : dy;
+    const x0 = Math.max(0, dx);
+    const y0 = Math.max(0, y);
+    const width = Math.min(under.width, dx + open.width) - x0;
+    const height = Math.min(under.height, y + open.height) - y0;
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
     const direct = mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN;
     if (!direct) {
       if (!this.back || this.backWidth < width || this.backHeight < height) {
@@ -504,10 +562,10 @@ export class WebGLBackend {
 
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
       gl.blitFramebuffer(
-        x,
-        y,
-        x + width,
-        y + height,
+        x0,
+        y0,
+        x0 + width,
+        y0 + height,
         0,
         0,
         width,
@@ -526,7 +584,9 @@ export class WebGLBackend {
     state.bindVertexArray(null);
     gl.uniform1i(this.modeLocation, mode);
     gl.uniform1i(this.compositeRowLocation, row);
-    gl.uniform2i(this.offsetLocation, x, y);
+    gl.uniform2i(this.offsetLocation, dx, flip ? under.height - 1 - dy : dy);
+    gl.uniform1i(this.flipLocation, flip ? 1 : 0);
+    gl.uniform2i(this.backOffsetLocation, x0, y0);
     switch (mode) {
       case ADD:
         state.setBlend(gl.ONE, gl.ONE);
@@ -542,7 +602,7 @@ export class WebGLBackend {
         state.setBlend(null);
     }
 
-    state.scissor([x, y, width, height]);
+    state.scissor([x0, y0, width, height]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     state.scissor(null);
   }
@@ -818,6 +878,7 @@ export class WebGLBackend {
     gl.deleteBuffer(this.indexBuffer);
     gl.deleteTexture(this.rowsTexture);
     gl.deleteProgram(this.composite);
+    this.filters.destroy();
     for (const layer of this.freeLayers) {
       this.deleteLayer(layer);
     }
