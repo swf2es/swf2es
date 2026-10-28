@@ -54,6 +54,8 @@ export function overruns(
 /** A glyph of an embedded font: its outline in the font's units over 20, placed by a matrix in the text's pixels. */
 export interface GlyphItem {
   kind: "glyph";
+  /** Whether the field's gutter clips it, its text running over. */
+  clipped?: boolean;
   glyph: Glyph;
   em: number;
   m: Affine;
@@ -77,6 +79,7 @@ export interface RectItem {
  */
 export interface DeviceItem {
   kind: "device";
+  clipped?: boolean;
   text: string;
   /** The device font's name, size, weight and style, as deviceMetrics measures it. */
   family: string;
@@ -95,10 +98,14 @@ export type TextItem = GlyphItem | RectItem | DeviceItem;
 
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
-/** What a text's drawing leaves out for now: Saffron's anti-aliasing, drawn as normal, and an overrun's clip. */
+/**
+ * What a text's drawing leaves out for now, Saffron's anti-aliasing, drawn
+ * as normal; and the rectangle its clipped items are clipped to, the
+ * field's inside its gutter, where its text runs over.
+ */
 export interface TextOmissions {
   advanced: boolean;
-  clipped: boolean;
+  clip: { x: number; y: number; width: number; height: number } | null;
 }
 
 /** A glyph's outline as a shape of one white fill, in the font's units over 20, as shapeLayers takes twips. */
@@ -154,6 +161,7 @@ export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
   let bottom = 0;
   let right = 0;
   let left = Number.POSITIVE_INFINITY;
+  const textFrom = items.length;
 
   for (let l = first; l <= last; l++) {
     const line = layout.lines[l];
@@ -204,7 +212,21 @@ export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
     height: o.height - (2 * GUTTER) / 20,
   };
   const top = (dy + layout.lines[first].y) / 20;
-  omitted.clipped ||= overruns(inner, left / 20, top, (right - left) / 20, bottom / 20 - top);
+  if (overruns(inner, left / 20, top, (right - left) / 20, bottom / 20 - top)) {
+    omitted.clip = {
+      x: inner.left,
+      y: inner.top,
+      width: Math.max(0, inner.width),
+      height: Math.max(0, inner.height),
+    };
+    for (let k = textFrom; k < items.length; k++) {
+      const item = items[k];
+      if (item.kind !== "rect") {
+        item.clipped = true;
+      }
+    }
+  }
+
   caret(o, items);
   return items;
 }

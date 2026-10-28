@@ -11,6 +11,9 @@ import {
   Commands,
   Geometries,
   type GeometryHandle,
+  MASK_BEGIN,
+  MASK_POP,
+  MASK_USE,
   MIRROR,
   NORMAL,
   plan,
@@ -36,6 +39,7 @@ import {
   shapeLayers,
 } from "../display/shapes.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
+import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import { cssFont } from "../text/fonts.js";
 import type { FillTessellator } from "./fills.js";
@@ -142,6 +146,7 @@ export class RenderView implements Drawer {
   private readonly textures = new Textures();
   private readonly commands = new Commands();
   private readonly made = new WeakMap<ShapeLayer, Made>();
+  private readonly maskMade = new WeakMap<ShapeLayer, Made>();
   /**
    * Each layer's lines by what they were stroked for: the linear transform
    * on the stage and the least width, a pixel of the screen, as a key; and
@@ -272,9 +277,30 @@ export class RenderView implements Drawer {
     }
 
     hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
-
     const own = o.colorTransform;
     const color = own ? (tint ? concatColor(tint, own) : own) : tint;
+    // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
+    // a 3D mask, or one inside what it masks, masks nothing in Flash.
+    const clipped: number[] = [];
+    if (!hidden) {
+      const mask = o.mask && !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
+      if (mask) {
+        const w = worldOf(mask);
+        clipped.push(
+          ...this.pushMask(() => this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true)),
+        );
+      }
+
+      const r = o.scroll;
+      if (r) {
+        clipped.push(
+          ...this.pushMask(() =>
+            this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, r.xMax - r.xMin, r.yMax - r.yMin),
+          ),
+        );
+      }
+    }
+
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
     const shape = o instanceof ShapeObject ? o.drawn() : null;
     const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
@@ -325,14 +351,10 @@ export class RenderView implements Drawer {
     }
 
     if (!hidden && (o instanceof TextObject || o instanceof StaticTextObject)) {
-      const omitted: TextOmissions = { advanced: false, clipped: false };
+      const omitted: TextOmissions = { advanced: false, clip: null };
       const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
       if (omitted.advanced) {
         unsupported.advancedTexts++;
-      }
-
-      if (omitted.clipped) {
-        unsupported.textClips++;
       }
 
       // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch.
@@ -340,8 +362,25 @@ export class RenderView implements Drawer {
         o instanceof TextObject && !o.embedFonts
           ? deviceTextResolution([a, b, c, d], this.scale * this.resolution)
           : 1;
+      // Its text, where it runs over, clipped inside the gutter; its box and caret are not.
+      const clip = omitted.clip;
+      let gutter: number[] | null = null;
       for (const item of items) {
+        const inside = item.kind !== "rect" && item.clipped === true;
+        if (inside && clip && !gutter) {
+          gutter = this.pushMask(() =>
+            this.rectMask(a, b, c, d, tx, ty, clip.x, clip.y, clip.width, clip.height),
+          );
+        } else if (!inside && gutter) {
+          this.scene.marker(MASK_POP, gutter[0], gutter[1]);
+          gutter = null;
+        }
+
         this.drawTextItem(item, a, b, c, d, tx, ty, color, resolution);
+      }
+
+      if (gutter) {
+        this.scene.marker(MASK_POP, gutter[0], gutter[1]);
       }
     }
 
@@ -360,9 +399,159 @@ export class RenderView implements Drawer {
     }
 
     if (o instanceof Container) {
+      // A timeline's clip layer clips the children after it, up to its clip depth.
+      const clips = new Clips();
+      const open: number[][] = [];
       const children = o.children;
       for (let i = 0; i < children.length; i++) {
-        this.walk(children[i], a, b, c, d, tx, ty, color, hidden);
+        const child = children[i];
+        const n = clips.enter(child);
+        while (open.length > n) {
+          const [first, count] = open.pop() as number[];
+          this.scene.marker(MASK_POP, first, count);
+        }
+
+        if (child.clipDepth > 0 && !hidden) {
+          open.push(this.pushMask(() => this.walkMask(child, a, b, c, d, tx, ty, false)));
+          continue;
+        }
+
+        this.walk(child, a, b, c, d, tx, ty, color, hidden);
+      }
+
+      while (open.length > 0) {
+        const [first, count] = open.pop() as number[];
+        this.scene.marker(MASK_POP, first, count);
+      }
+
+      o.descendantsDirty = false;
+    }
+
+    for (let k = clipped.length - 2; k >= 0; k -= 2) {
+      this.scene.marker(MASK_POP, clipped[k], clipped[k + 1]);
+    }
+
+    o.dirty = CLEAN;
+  }
+
+  /**
+   * A mask's draws, which `emit` writes, between its markers: where they
+   * start and how many there are, for its pop to name them again.
+   */
+  private pushMask(emit: () => void): number[] {
+    this.scene.marker(MASK_BEGIN);
+    const first = this.scene.length;
+    emit();
+    const count = this.scene.length - first;
+    this.scene.marker(MASK_USE, first, count);
+    return [first, count];
+  }
+
+  /** A rectangle of `o`'s space, x y width height, under its transform (a b c d tx ty), as a mask's draw. */
+  private rectMask(
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    tx: number,
+    ty: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
+    const quad = this.unitQuad();
+    const row = this.rows.add(
+      a * width,
+      b * width,
+      c * height,
+      d * height,
+      a * x + c * y + tx,
+      b * x + d * y + ty,
+      null,
+    );
+    this.geometries.use(quad.id);
+    this.scene.draw(quad.id, row, NORMAL);
+  }
+
+  /**
+   * `o` and all in it drawn as a mask, under its parent's transform: fills
+   * alone, a drawing's non-zero, glyphs and bitmaps' rectangles, whatever
+   * their visibility, as Flash masks by them. `own` says (a b c d tx ty) is
+   * already `o`'s own place, as a mask elsewhere on the list is found; else
+   * its own matrix is applied. Flags are cleared as the walk clears them.
+   */
+  private walkMask(
+    o: DisplayObject,
+    pa: number,
+    pb: number,
+    pc: number,
+    pd: number,
+    ptx: number,
+    pty: number,
+    own: boolean,
+  ): void {
+    const m = own ? IDENTITY_MATRIX : o.flatPlaced;
+    const a = pa * m.a + pc * m.b;
+    const b = pb * m.a + pd * m.b;
+    const c = pa * m.c + pc * m.d;
+    const d = pb * m.c + pd * m.d;
+    const tx = pa * m.tx + pc * m.ty + ptx;
+    const ty = pb * m.tx + pd * m.ty + pty;
+    const shape = o instanceof ShapeObject ? o.drawn() : null;
+    const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    let row = -1;
+    const at = () => {
+      if (row < 0) {
+        row = this.rows.add(a, b, c, d, tx, ty, null);
+      }
+
+      return row;
+    };
+
+    if (layers) {
+      const version = o.drawing ? o.drawing.version : 0;
+      for (let i = 0; i < layers.length; i++) {
+        for (const { handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
+          this.geometries.use(handle.id);
+          this.scene.draw(handle.id, at(), NORMAL);
+        }
+      }
+    }
+
+    if (o instanceof TextObject || o instanceof StaticTextObject) {
+      const omitted: TextOmissions = { advanced: false, clip: null };
+      for (const item of o instanceof TextObject
+        ? fieldItems(o, omitted)
+        : staticItems(o, omitted)) {
+        const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : null;
+        if (item.kind === "glyph" && geometry) {
+          const g = item.m;
+          const glyphRow = this.rows.add(
+            a * g.a + c * g.b,
+            b * g.a + d * g.b,
+            a * g.c + c * g.d,
+            b * g.c + d * g.d,
+            a * g.tx + c * g.ty + tx,
+            b * g.tx + d * g.ty + ty,
+            null,
+          );
+          this.geometries.use(geometry.id);
+          this.scene.draw(geometry.id, glyphRow, NORMAL);
+        }
+      }
+    }
+
+    const store = o instanceof BitmapObject ? o.store : null;
+    if (store && !store.disposed && store.width > 0 && store.height > 0) {
+      const quad = this.quad(store.width, store.height);
+      this.geometries.use(quad.id);
+      this.scene.draw(quad.id, at(), NORMAL);
+    }
+
+    if (o instanceof Container) {
+      for (const child of o.children) {
+        this.walkMask(child, a, b, c, d, tx, ty, false);
       }
 
       o.descendantsDirty = false;
@@ -371,9 +560,13 @@ export class RenderView implements Drawer {
     o.dirty = CLEAN;
   }
 
-  /** `layer`'s parts, made if they were not, or one was let go of, or its drawing changed since. */
-  private partsOf(layer: ShapeLayer, version: number): Made["parts"] {
-    const made = this.made.get(layer);
+  /**
+   * `layer`'s parts, made if they were not, or one was let go of, or its
+   * drawing changed since; a drawing used as a mask's apart, filled non-zero.
+   */
+  private partsOf(layer: ShapeLayer, version: number, masking = false): Made["parts"] {
+    const cache = masking ? this.maskMade : this.made;
+    const made = cache.get(layer);
     if (
       made &&
       made.version === version &&
@@ -388,11 +581,11 @@ export class RenderView implements Drawer {
       }
     }
 
-    const parts = layerParts(layer, this.tessellator).map((part) => ({
+    const parts = layerParts(layer, this.tessellator, masking).map((part) => ({
       part,
       handle: this.geometries.add(part.geometry),
     }));
-    this.made.set(layer, { parts, version });
+    cache.set(layer, { parts, version });
     return parts;
   }
 
@@ -800,14 +993,6 @@ export class RenderView implements Drawer {
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 function noteUnsupported(o: DisplayObject): void {
-  if (o.mask || o.clipDepth > 0) {
-    unsupported.masks++;
-  }
-
-  if (o.scroll) {
-    unsupported.scrollRects++;
-  }
-
   if (o.scale9Grid) {
     unsupported.scale9Grids++;
   }
@@ -819,4 +1004,31 @@ function noteUnsupported(o: DisplayObject): void {
   if (o.blendMode !== "normal") {
     unsupported.blendModes++;
   }
+}
+
+const IDENTITY_MATRIX = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+
+/** Where `o` stands on the stage: its matrix and every ancestor's, as the walk concatenates them. */
+function worldOf(o: DisplayObject): {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tx: number;
+  ty: number;
+} {
+  let m = o.flatPlaced;
+  for (let p = o.parent; p; p = p.parent) {
+    const q = p.flatPlaced;
+    m = {
+      a: m.a * q.a + m.b * q.c,
+      b: m.a * q.b + m.b * q.d,
+      c: m.c * q.a + m.d * q.c,
+      d: m.c * q.b + m.d * q.d,
+      tx: m.tx * q.a + m.ty * q.c + q.tx,
+      ty: m.tx * q.b + m.ty * q.d + q.ty,
+    };
+  }
+
+  return m;
 }
