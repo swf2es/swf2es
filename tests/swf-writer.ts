@@ -434,8 +434,11 @@ export interface PlaceSpec {
   blurs?: number[];
   /** Glow filters after the blurs, in `quality` passes: 0xRRGGBB, blur both ways (or `blurY` down) and strength. */
   glows?: { color: number; blur: number; blurY?: number; strength: number }[];
-  /** Drop shadows after the glows, in `quality` passes, black: blur both ways, `distance` at `angle` degrees. */
-  shadows?: { blur: number; distance: number; angle: number }[];
+  /**
+   * Drop shadows after the glows, in `quality` passes, black: blur both ways, `distance` at
+   * `angle` degrees; `hide`, its object hidden (no composite source).
+   */
+  shadows?: { blur: number; distance: number; angle: number; hide?: boolean }[];
   /** The passes of each of its filters, 1 to 31; 1 by default. */
   quality?: number;
   /** A blend mode by its number, 1 normal to 14 hard light. */
@@ -610,7 +613,7 @@ export function place(spec: PlaceSpec): Uint8Array {
         .u32(fixed((shadow.angle * Math.PI) / 180))
         .u32(fixed(shadow.distance))
         .u16(256)
-        .u8(0x20 | passes);
+        .u8((shadow.hide ? 0 : 0x20) | passes);
     }
   }
 

@@ -99,7 +99,9 @@ class BoxPass extends Filter {
 /**
  * The mean of the uFactor.x by uFactor.y texels of the input that a texel
  * of the output covers, the output that many times narrower and lower: its
- * whole frame, which spans uSpan of the input's.
+ * whole frame, which spans uSpan of the input's. A block at the frame's far
+ * edges reaches past the input's frame, into pool space the input's pass
+ * cleared or onto the texture's clamped edge, as the box's runs read there.
  */
 const SHRINK_VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -113,6 +115,9 @@ void main(void) {
   vTextureCoord = aPosition * uSpan * uInputSize.zw;
 }`;
 
+// Two texels each way a read: a linear read midway between texel centres is their mean, so a
+// block takes a quarter of the reads. An odd factor's last column or row is read alone, weighted
+// by the texels each read stands for. A pool texture has no levels but its base.
 const SHRINK = `in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
@@ -121,11 +126,16 @@ uniform vec2 uFactor;
 void main(void) {
   vec4 sum = vec4(0.0);
   vec2 centre = (uFactor - 1.0) * 0.5;
-  for (int j = 0; j < 16; j++) {
-    if (float(j) >= uFactor.y) { break; }
-    for (int i = 0; i < 16; i++) {
-      if (float(i) >= uFactor.x) { break; }
-      sum += texture(uTexture, vTextureCoord + (vec2(float(i), float(j)) - centre) * uInputPixel.zw);
+  for (int j = 0; j < 16; j += 2) {
+    float y = float(j);
+    if (y >= uFactor.y) { break; }
+    float ny = min(2.0, uFactor.y - y);
+    for (int i = 0; i < 16; i += 2) {
+      float x = float(i);
+      if (x >= uFactor.x) { break; }
+      float nx = min(2.0, uFactor.x - x);
+      vec2 at = vec2(x, y) + (vec2(nx, ny) - 1.0) * 0.5 - centre;
+      sum += texture(uTexture, vTextureCoord + at * uInputPixel.zw) * (nx * ny);
     }
   }
   finalColor = sum / (uFactor.x * uFactor.y);
@@ -155,7 +165,13 @@ function shrinkPass(across: number, down: number, spanX: number, spanY: number):
   return shrinkFilter;
 }
 
-/** The fewest texels a shrunk run spans. */
+/**
+ * The fewest texels a shrunk run spans, for each time a glow's strength
+ * multiplies its alpha. Under it the bound below fails: an edge's ramp a
+ * few coarse texels long bends sharply where a box ends, and drawn back
+ * linearly between them a glow 8 wide at strength 2.37 shrunk three times
+ * was off by 10 levels; a glow's strength multiplies that too.
+ */
 const SHRUNK_TEXELS = 8;
 
 /** The most, in 255ths of alpha times strength, that drawing a shrunk blur back may be off by. */
@@ -169,19 +185,19 @@ const SHRUNK_ERROR = 2;
 const SHRUNK_STRENGTH = 3;
 
 /**
- * How many times coarser than its input a blur's runs one way may go:
- * none at a texel a stage pixel or under, nor where it does not blur that
- * way; otherwise whole times, to a texel a stage pixel at most, the run
- * still SHRUNK_TEXELS wide. A run reads a texel for each of its width, so
- * at three texels a stage pixel a glow 68 wide read 204 for each texel of
- * an area nine times the stage's; shrunk three times each way, it reads 68
- * for each of the stage's. Drawn back between the coarser texels, what it
- * blurred is off where it bends: at the ends of a single box's ramp by a
- * quarter of a coarse texel's rise, and where two boxes or more bend
- * smoothly by a sixth of the coarse texel squared over the box's width
- * squared; times the strength a glow multiplies its alpha by, that stays
- * within SHRUNK_ERROR. Each way is its own: a streak 68 wide and 5 high
- * goes coarser across alone.
+ * How many times coarser than its input a blur's runs one way may go: none
+ * at a texel a stage pixel or under, nor where it does not blur that way;
+ * otherwise whole times, to a texel a stage pixel at most, the run still
+ * SHRUNK_TEXELS wide for each time strength multiplies it. A run reads a
+ * texel for each of its width, so at three texels a stage pixel a glow 68
+ * wide read 204 for each texel of an area nine times the stage's; shrunk
+ * three times each way, it reads 68 for each of the stage's. Drawn back
+ * between the coarser texels, what it blurred is off where it bends: at the
+ * ends of a single box's ramp by a quarter of a coarse texel's rise, and
+ * where two boxes or more bend smoothly by a sixth of the coarse texel
+ * squared over the box's width squared; times the strength a glow multiplies
+ * its alpha by, that stays within SHRUNK_ERROR. Each way is its own: a
+ * streak 68 wide and 5 high goes coarser across alone.
  */
 export function blurShrink(
   blur: number,
@@ -199,7 +215,11 @@ export function blurShrink(
     quality === 1
       ? (4 * SHRUNK_ERROR * box) / amplified
       : box * Math.sqrt((6 * SHRUNK_ERROR) / amplified);
-  const most = Math.min(16, Math.floor(texels + 1e-6), Math.floor(box / SHRUNK_TEXELS));
+  const most = Math.min(
+    16,
+    Math.floor(texels + 1e-6),
+    Math.floor(box / (SHRUNK_TEXELS * Math.max(1, strength))),
+  );
   return Math.max(1, Math.min(most, Math.floor(error)));
 }
 
@@ -232,6 +252,11 @@ function blurred(
     const width = Math.ceil(Math.round(input.frame.width * resolution) / across) / resolution;
     const height = Math.ceil(Math.round(input.frame.height * resolution) / down) / resolution;
     source = TexturePool.getOptimalTexture({ width, height, resolution });
+    // The shrink's paired reads average only where read linearly, as the pool's textures are made.
+    if (input.source.scaleMode !== "linear") {
+      input.source.scaleMode = "linear";
+    }
+
     system.applyFilter(
       shrinkPass(across, down, width * across, height * down),
       input,

@@ -214,7 +214,9 @@ export class Playback {
    * edges, and cost half the memory; best takes Flash's 16. Every
    * sample costs its pixels' 4 bytes of colour and 4 of depth and stencil, so
    * a large canvas takes fewer: at most what fits STAGE_BYTES, and 4 at least,
-   * as before samples could be chosen.
+   * as before samples could be chosen. Those are a stage pixel's: a canvas
+   * finer than the stage, as at a device pixel ratio of 2 or 3, takes fewer
+   * for each of its pixels (denseSamples).
    */
   private resample(): void {
     const adaptor = (
@@ -230,8 +232,10 @@ export class Playback {
     const fits = fittingSamples(canvas.width * canvas.height);
     const quality = this.player.quality;
     const samples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
-    adaptor.backBufferSamples = samples;
-    adaptor.msaaSamples = samples;
+    // As fine as the stage's pixels on the canvas: fewer where each spans several.
+    const dense = denseSamples(samples, this.renderer.resolution);
+    adaptor.backBufferSamples = dense;
+    adaptor.msaaSamples = dense;
   }
 
   private draw(): void {
@@ -371,6 +375,25 @@ export class Playback {
 
 /** The most a canvas's multisampled buffers may take, colour and depth-stencil together. */
 const STAGE_BYTES = 256 * 1024 * 1024;
+
+/**
+ * The samples a pixel of the canvas takes for `samples` a stage pixel, at
+ * `resolution` of the canvas's pixels to a stage pixel: where a stage pixel
+ * spans several, as many as cover it with as many samples as at one, a
+ * power of two, 4 at least and `samples` at most. At three device pixels a
+ * stage pixel, 4 samples each are 36 a stage pixel, more than best's 16 at
+ * one; 8 would double the multisampled canvas's memory traffic for edges a
+ * third of a stage pixel wide.
+ */
+export function denseSamples(samples: number, resolution: number): number {
+  const wanted = samples / Math.max(1, resolution * resolution);
+  let dense = 4;
+  while (dense < wanted) {
+    dense *= 2;
+  }
+
+  return Math.min(samples, dense);
+}
 
 /** The most samples, a power of two and 4 at least, whose buffers for `pixels` fit STAGE_BYTES. */
 export function fittingSamples(pixels: number): number {
