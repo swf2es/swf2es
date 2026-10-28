@@ -415,3 +415,18 @@ test("a kept output goes once undrawn long enough, and a lost context takes them
   keeps.lost();
   assert.ok(!keeps.alive(used) && !keeps.alive(again));
 });
+
+test("each layer knows the layer it is in, a kept output too", () => {
+  const scene = new SceneList();
+  scene.layerBegin();
+  scene.layerBegin(0, 1);
+  scene.layerEnd(NORMAL, -1);
+  scene.keptLayer(2, NORMAL, -1, 0, 0, 1, 1);
+  scene.layerEnd(MULTIPLY, -1);
+  scene.layerBegin();
+  scene.layerEnd(MULTIPLY, -1);
+  assert.deepEqual(Array.from(scene.parents.subarray(0, 4)), [-1, 0, 0, -1]);
+  scene.reset();
+  scene.layerBegin();
+  assert.equal(scene.parents[0], -1);
+});

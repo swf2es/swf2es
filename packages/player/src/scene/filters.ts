@@ -16,7 +16,15 @@ import {
   type TextureHandle,
 } from "@swf2es/render";
 import { type BitmapStore, rgbaOf } from "../bitmap/bitmap.js";
-import { filterGrowth, gradientTable, integerKernel, paddedDistance } from "../bitmap/filters.js";
+import {
+  channelWeights,
+  displacementAlpha,
+  displacementGrowth,
+  filterGrowth,
+  gradientTable,
+  integerKernel,
+  paddedDistance,
+} from "../bitmap/filters.js";
 import { emptyKernel, type Filter as FilterRecord, filterOffset } from "../display/filters.js";
 
 /**
@@ -304,16 +312,10 @@ function passOf(p: Planned, units: number): Pass {
 
     case DISPLACEMENT: {
       const map = mapOf(f) as BitmapStore;
-      const pick = (c: number) => [
-        c === 1 ? 1 : 0,
-        c === 2 ? 1 : 0,
-        c === 4 ? 1 : 0,
-        c === 8 ? 1 : 0,
-      ];
-      const alpha = Math.floor(f.alpha * 255) / 255;
+      const alpha = displacementAlpha(f);
       pass.values = Float32Array.from([
-        ...pick(f.componentX),
-        ...pick(f.componentY),
+        ...channelWeights(f.componentX),
+        ...channelWeights(f.componentY),
         f.scaleX || 0,
         f.scaleY || 0,
         ["wrap", "clamp", "ignore", "color"].indexOf(f.mode),
@@ -332,13 +334,6 @@ function passOf(p: Planned, units: number): Pass {
   }
 
   return pass;
-}
-
-/** How far a displacement in colour mode fills round the object, as adl draws it: half its scale. */
-function displacementGrowth(f: FilterRecord): [number, number] {
-  return f.mode === "color"
-    ? [Math.floor(Math.abs(f.scaleX) / 2) || 0, Math.floor(Math.abs(f.scaleY) / 2) || 0]
-    : [0, 0];
 }
 
 function rgb(color: number): number[] {

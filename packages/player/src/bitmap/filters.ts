@@ -1436,3 +1436,25 @@ export function filterGrowth(f: Filter): number[] {
   );
   return [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
 }
+
+/** A displacement's channel (1 red, 2 green, 4 blue, 8 alpha) as weights of the four; none, all 0. */
+export function channelWeights(channel: number): number[] {
+  return [
+    channel === 1 ? 1 : 0,
+    channel === 2 ? 1 : 0,
+    channel === 4 ? 1 : 0,
+    channel === 8 ? 1 : 0,
+  ];
+}
+
+/** How far a displacement in colour mode fills round the object, as adl draws it: half its scale. */
+export function displacementGrowth(f: Filter): [number, number] {
+  return f.mode === "color"
+    ? [Math.floor(Math.abs(f.scaleX) / 2) || 0, Math.floor(Math.abs(f.scaleY) / 2) || 0]
+    : [0, 0];
+}
+
+/** A displacement's colour mode's alpha, in whole 255ths down, as adl takes it. */
+export function displacementAlpha(f: Filter): number {
+  return Math.floor(f.alpha * 255) / 255;
+}
