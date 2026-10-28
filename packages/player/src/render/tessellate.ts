@@ -6,7 +6,7 @@ import type { Fill } from "@swf2es/format";
 import { type FillInput, GraphicsContext } from "pixi.js";
 import type { Region as Area } from "../display/gradients.js";
 import { blendLayers, droppedBlends, droppedLayers } from "../display/morph.js";
-import { flatten, orientation, type Paint, type Path, type ShapeLayer } from "../display/shapes.js";
+import { orientation, type Paint, type ShapeLayer } from "../display/shapes.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import {
   containment,
@@ -14,6 +14,7 @@ import {
   polygonsOf,
   type Region,
   type ResolvedFill,
+  regionOf,
   resolveFills,
   trace,
 } from "../scene/fills.js";
@@ -69,31 +70,6 @@ export function destroyContext(context: GraphicsContext): void {
   }
 
   context.destroy();
-}
-
-/** The bounds of a fill's contours, whole pixels out. */
-function regionOf(contours: Path[]): Area {
-  let x0 = Number.POSITIVE_INFINITY;
-  let y0 = Number.POSITIVE_INFINITY;
-  let x1 = Number.NEGATIVE_INFINITY;
-  let y1 = Number.NEGATIVE_INFINITY;
-  for (const path of contours) {
-    const points = flatten(path);
-    for (let i = 0; i < points.length; i += 2) {
-      x0 = Math.min(x0, points[i]);
-      x1 = Math.max(x1, points[i]);
-      y0 = Math.min(y0, points[i + 1]);
-      y1 = Math.max(y1, points[i + 1]);
-    }
-  }
-
-  if (!(x1 >= x0 && y1 >= y0)) {
-    return { x: 0, y: 0, width: 1, height: 1 };
-  }
-
-  const x = Math.floor(x0);
-  const y = Math.floor(y0);
-  return { x, y, width: Math.max(1, Math.ceil(x1) - x), height: Math.max(1, Math.ceil(y1) - y) };
 }
 
 /**
