@@ -39,6 +39,7 @@ import {
 import { shifted } from "../display/geometry.js";
 import { sliceDrawn } from "../display/scale9.js";
 import type { Player } from "../player.js";
+import { deviceTextResolution } from "../scene/text.js";
 import { Art } from "./art.js";
 import { retireBatchers, trimBatchers, viewGroups } from "./batchers.js";
 import { gpuBitmaps } from "./bitmaps.js";
@@ -58,7 +59,6 @@ import { drawInto, snapshot } from "./snapshot.js";
 import { SpareNodes } from "./spares.js";
 import { type Linear, sameLinear, UNIT } from "./strokes.js";
 import type { FillTessellator } from "./tessellate.js";
-import { deviceTextResolution } from "./text.js";
 import { SAMPLES } from "./three.js";
 import { TriangleView } from "./triangles.js";
 

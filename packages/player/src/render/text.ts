@@ -12,52 +12,13 @@ import {
 } from "pixi.js";
 import type { StaticTextObject, TextObject } from "../display/display.js";
 import { shapeLayers } from "../display/shapes.js";
+import { overruns } from "../scene/text.js";
 import { csmTables } from "../text/csm.js";
 import { deviceMetrics, fontFamily } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
 import { SaffronBuilder, type SaffronView } from "./saffron.js";
 import { SharedGraphics } from "./shared.js";
-import type { Linear } from "./strokes.js";
 import { fillContext, paint } from "./tessellate.js";
-
-/** Device text rasterized at its largest stretch, with bounded extra texture resolution. */
-export function deviceTextResolution(world: Linear, pixels: number): number {
-  const [a, b, c, d] = world;
-  const x = a * a + b * b;
-  const y = c * c + d * d;
-  const cross = a * c + b * d;
-  const stretch = Math.sqrt((x + y + Math.hypot(x - y, 2 * cross)) / 2);
-  const base = Number.isFinite(pixels) && pixels > 0 ? pixels : 1;
-  if (!Number.isFinite(stretch)) {
-    return base;
-  }
-
-  // A turn alone must not cross a resolution boundary through rounding error.
-  return Math.max(base, Math.min(8 * base, Math.ceil(stretch * base - 1e-6)));
-}
-
-/**
- * Whether text laid out at (x, y), `width` by `height`, reaches outside its
- * field, which then clips it: where it lies, as a margin or an indent puts
- * it, not its size alone.
- */
-export function overruns(
-  field: { left: number; top: number; width: number; height: number },
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): boolean {
-  // Within a millionth of a pixel, the field's own size in pixels from its text's in twips
-  // rounds off: advanced text, thickened, would be clipped where it only meets the edge.
-  const e = 1e-6;
-  return (
-    x < field.left - e ||
-    y < field.top - e ||
-    x + width > field.left + field.width + e ||
-    y + height > field.top + field.height + e
-  );
-}
 
 /**
  * How a text's advanced glyphs are drawn (render/saffron.ts): by the view's

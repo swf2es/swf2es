@@ -1,7 +1,7 @@
 // How the renderer draws text: where a field clips what it lays out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deviceTextResolution, overruns } from "../../../../packages/player/dist/render/text.js";
+import { deviceTextResolution, overruns } from "../../../../packages/player/dist/scene/text.js";
 
 test("device text resolves its largest stretch, including skew, reflection and screen pixels", () => {
   assert.equal(deviceTextResolution([1, 0, 0, 1], 1), 1);
