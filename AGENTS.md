@@ -81,6 +81,9 @@ node tests/player/precompiled.ts    # AOT modules played in Chrome, imported und
                               # without 'unsafe-eval' too (part of pnpm test)
 node tests/player/resize.ts         # filters inside filters drawn while the renderer is resized
                               # in Chrome (part of pnpm test)
+node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]   # GL draw calls,
+                              # sub-draws, binds and uniform calls a frame in Chrome vs
+                              # draw-counts.json, which may only go down (part of pnpm test)
 node tests/player/context-loss.ts   # a WebGL context lost and given back mid-play draws the same
                               # in Chrome (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in

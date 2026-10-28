@@ -658,6 +658,52 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("tableRuns");
     add("tableDraws", args[6] as number);
   });
+  // Every draw call, a multi-draw one, as one (calls) and as the draws it makes (subDraws), and
+  // the state set between them: what draw-counts.ts holds to its baseline.
+  for (const method of [
+    "drawElements",
+    "drawArrays",
+    "drawElementsInstanced",
+    "drawArraysInstanced",
+  ]) {
+    wrap(gl, method, () => {
+      add("calls");
+      add("subDraws");
+    });
+  }
+
+  for (const method of [
+    "multiDrawArraysWEBGL",
+    "multiDrawElementsWEBGL",
+    "multiDrawArraysInstancedWEBGL",
+    "multiDrawElementsInstancedWEBGL",
+  ]) {
+    // Each takes the number of draws it makes last.
+    wrap(gl?.getExtension("WEBGL_multi_draw") ?? undefined, method, (args) => {
+      add("calls");
+      add("subDraws", args[args.length - 1] as number);
+    });
+  }
+
+  wrap(gl, "useProgram", () => add("useProgram"));
+  wrap(gl, "bindVertexArray", () => add("bindVertexArray"));
+  wrap(gl, "bindFramebuffer", () => add("bindFramebuffer"));
+  for (const method in gl) {
+    if (/^uniform(\d|Matrix)/.test(method)) {
+      wrap(gl, method, () => add("uniforms"));
+    }
+  }
+
+  // Buffers made anew, and copied on the GPU, as a growing atlas does (render/table.ts).
+  wrap(gl, "bufferData", (args) => {
+    add("bufferData");
+    const data = args[1] as number | ArrayBufferView | null;
+    add("bufferDataBytes", typeof data === "number" ? data : (data?.byteLength ?? 0));
+  });
+  wrap(gl, "copyBufferSubData", (args) => {
+    add("copyBufferSubData");
+    add("copyBufferSubDataBytes", args[4] as number);
+  });
   // A short run's draws, drawn from the atlas a call a draw (render/table.ts): the table's
   // own drawElements, not those of Pixi's pipe for what it leaves to it.
   let inTable = 0;
@@ -692,6 +738,12 @@ function meter(renderer: object): { read(): Record<string, number> } {
   });
   wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
   wrap(r.renderPipes.batch, "execute", () => add("batches"));
+  // The most textures a batch drew with: past WebGL 2's least 16 units, a GPU with more would
+  // batch what software GL splits.
+  wrap(r.renderPipes.batch, "execute", (args) => {
+    const textures = (args[0] as { textures?: { count: number } }).textures?.count ?? 0;
+    counts.batchTexturesMost = Math.max(counts.batchTexturesMost ?? 0, textures);
+  });
   // A filter's region: the bounds Pixi measures for it each time it draws.
   wrap(r.filter, "_calculateFilterArea", (_, took) => {
     add("filterAreas");
@@ -754,8 +806,18 @@ async function benchSwf(
   hover = false,
   hold = false,
   tableLoop = true,
+  clock = false,
 ): Promise<Bench> {
   setTransformTable(table, tableMinRun, tableLoop);
+  // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the
+  // player and Pixi keep or let go by age (render groups settling, idle contexts, pools) happens
+  // on the same frames however fast the machine draws them (draw-counts.ts).
+  const now = performance.now;
+  let virtual = performance.now();
+  if (clock) {
+    performance.now = () => virtual;
+  }
+
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const tick: number[] = [];
   const sync: number[] = [];
@@ -856,6 +918,10 @@ async function benchSwf(
         }
       }
 
+      if (clock) {
+        virtual += 1000 / player.frameRate;
+      }
+
       player.tick();
       const ticked = performance.now();
       if (uncaught.length > 0) {
@@ -889,8 +955,9 @@ async function benchSwf(
         idle.push(performance.now() - begun);
       }
 
-      // Frames apart in time, for what is kept by age to age between them.
-      if (pace > 0) {
+      // Frames apart in time, for what is kept by age to age between them; a task between frames
+      // on a still clock, for what the player waits on (a bitmap's decoding) to come in warm-up.
+      if (pace > 0 || clock) {
         await new Promise((resolve) => setTimeout(resolve, pace));
       }
     }
@@ -938,6 +1005,8 @@ async function benchSwf(
       renderer: name,
       error: describe(e, null),
     };
+  } finally {
+    performance.now = now;
   }
 }
 

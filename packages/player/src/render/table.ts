@@ -78,12 +78,14 @@ const ATLAS_SLACK = 1 << 16;
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const ATLAS_LEAST = 4096;
 /**
- * How much the atlas grows by when full, and how much room it is given
- * over its live vertices as it starts again: doubled, and kept at its
- * peak, a crowded room's held 96 MB of vertices and 48 MB of indices with
- * a third and a fifth of them in use.
+ * How much the atlas grows by when no free stretch fits a context, and how
+ * much room it is given over its live vertices as it starts again: doubled,
+ * as what is freed is taken again, so that a scene still adding contexts
+ * grows it a few times, not every few frames. When the atlas only ever
+ * added at the end, a crowded room's held 96 MB of vertices and 48 MB of
+ * indices with a third and a fifth of them in use, and grew by half.
  */
-const ATLAS_GROWTH = 1.5;
+const ATLAS_GROWTH = 2;
 
 let enabled = true;
 let minRun = MIN_RUN;
@@ -223,6 +225,9 @@ export interface Packed {
 export interface Placed {
   vertices: number;
   indices: number;
+  /** Its first vertex and first index in the atlas. */
+  vertexStart: number;
+  indexStart: number;
   counts: number[];
   offsets: number[];
 }
@@ -234,52 +239,182 @@ export interface Placed {
 export interface AtlasStore {
   /** Room for `vertices` and `indices`, the first `keptVertices` and `keptIndices` kept. */
   resize(vertices: number, indices: number, keptVertices: number, keptIndices: number): void;
-  /** The first `floats` of `data` written from vertex `at` on. */
-  writeVertices(at: number, data: Float32Array, floats: number): void;
-  /** The first `count` of `data` written from index `at` on. */
-  writeIndices(at: number, data: Uint32Array, count: number): void;
+  /** `floats` of `data`, from float `from`, written from vertex `at` on. */
+  writeVertices(at: number, data: Float32Array, from: number, floats: number): void;
+  /** `count` of `data`, from `from`, written from index `at` on. */
+  writeIndices(at: number, data: Uint32Array, from: number, count: number): void;
 }
 
 /**
  * Vertices placed and not yet written are gathered in arrays of up to this
- * many, and their indices in up to thrice as many, written in one call
- * each: so a frame that places hundreds of contexts makes a few writes,
- * not hundreds, and keeps no more than these on the CPU, some 2 MB at most.
+ * many, and their indices in up to thrice as many, written in a call for
+ * each stretch of the atlas they fill: so a frame that places hundreds of
+ * contexts makes a few writes, not hundreds, and keeps no more than these
+ * on the CPU, some 2 MB at most.
  */
 const STAGED_VERTICES = 1 << 16;
 const STAGED_FLOATS = STAGED_VERTICES * VERTEX_FLOATS;
 const STAGED_INDICES = STAGED_VERTICES * 3;
+
+/**
+ * The free stretches of a buffer that ranges are placed in and given back
+ * to: each place taken from the free stretch that fits it most closely,
+ * else from the top, past which all is free. A stretch given back joins
+ * its free neighbours, and one that reaches the top lowers it.
+ */
+export class Ranges {
+  /** Where ranges end at most: past it all is free. */
+  top = 0;
+  /** The free units below the top. */
+  free = 0;
+  /** The free stretches below the top, by where they start. */
+  private readonly starts: number[] = [];
+  private readonly sizes: number[] = [];
+
+  /** Where `size` units start, taken from the closest fit or the top; -1 if the top would pass `capacity`. */
+  take(size: number, capacity: number): number {
+    let best = -1;
+    let bestSize = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < this.sizes.length; i++) {
+      const free = this.sizes[i];
+      if (free >= size && free < bestSize) {
+        best = i;
+        bestSize = free;
+        if (free === size) {
+          break;
+        }
+      }
+    }
+
+    if (best >= 0) {
+      const start = this.starts[best];
+      if (bestSize === size) {
+        this.starts.splice(best, 1);
+        this.sizes.splice(best, 1);
+      } else {
+        this.starts[best] += size;
+        this.sizes[best] -= size;
+      }
+
+      this.free -= size;
+      return start;
+    }
+
+    if (this.top + size > capacity) {
+      return -1;
+    }
+
+    const start = this.top;
+    this.top += size;
+    return start;
+  }
+
+  /** `size` units from `start` free again. */
+  give(start: number, size: number): void {
+    if (size <= 0) {
+      return;
+    }
+
+    // The first stretch after it, found by halves.
+    let lo = 0;
+    let hi = this.starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.starts[mid] < start) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+
+    let end = start + size;
+    this.free += size;
+    const before = lo - 1;
+    if (before >= 0 && this.starts[before] + this.sizes[before] === start) {
+      start = this.starts[before];
+      size += this.sizes[before];
+      this.starts.splice(before, 1);
+      this.sizes.splice(before, 1);
+      lo--;
+    }
+
+    if (lo < this.starts.length && this.starts[lo] === end) {
+      size += this.sizes[lo];
+      end += this.sizes[lo];
+      this.starts.splice(lo, 1);
+      this.sizes.splice(lo, 1);
+    }
+
+    if (end === this.top) {
+      // Free up to the top: no longer a stretch, the top comes down to it.
+      this.top = start;
+      this.free -= size;
+      return;
+    }
+
+    this.starts.splice(lo, 0, start);
+    this.sizes.splice(lo, 0, size);
+  }
+
+  /** Every range given back at once. */
+  clear(): void {
+    this.top = 0;
+    this.free = 0;
+    this.starts.length = 0;
+    this.sizes.length = 0;
+  }
+
+  /** The free stretches below the top. */
+  get stretches(): number {
+    return this.starts.length;
+  }
+}
 
 const atlases = new Set<Atlas>();
 
 /**
  * The local vertices of every context the table has drawn, in one buffer
  * with one index buffer, absolute: each context's are copied in once, as
- * Pixi packed them for it, and stay until it is rebuilt or destroyed. The
- * holes those leave are reclaimed by packing again (compact). They are
- * kept on the GPU alone: a crowded room's atlas held some 130 MB on the CPU
- * as well, which only a lost context, after which it starts again anyway,
- * could have used.
+ * Pixi packed them for it, and stay until it is rebuilt or destroyed. What
+ * those leave free is taken again by the contexts placed after, each in
+ * the free stretch that fits it best (Ranges), so that a scene whose
+ * contexts come and go, as morphs, rescaled lines and redrawn Graphics do
+ * every frame, stays within its buffers: when it only ever added at the
+ * end, a busy scene grew them by half every few frames, each growth a new
+ * buffer and a copy of the old on the GPU. Only holes no context fits
+ * that outweigh the live vertices twice over are reclaimed by packing
+ * again (compact). They are kept on the GPU alone: a crowded room's atlas
+ * held some 130 MB on the CPU as well, which only a lost context, after
+ * which it starts again anyway, could have used.
  */
 export class Atlas {
-  /** The vertices and indices placed, which the store holds or which are staged for it. */
-  vertexCount = 0;
-  indexCount = 0;
   /** The vertices and indices the store has room for. */
   capacity = ATLAS_LEAST;
   indexCapacity = ATLAS_LEAST * 3;
-  /** The vertices and indices the store holds; those placed since are staged. */
-  private sentVertices = 0;
-  private sentIndices = 0;
+  /** What the atlas has done, for a test or a probe to read. */
+  readonly stats = { placed: 0, reused: 0, released: 0, grown: 0, compacted: 0 };
   /** Whether the store has room made for the capacity: not as it starts, shrinks or is lost. */
   private allocated = false;
+  private readonly vertexRanges = new Ranges();
+  private readonly indexRanges = new Ranges();
+  /**
+   * The ranges of contexts released this frame, given back between frames
+   * (compact): a run gathered may still read where its contexts lay until
+   * it is drawn, so nothing is written there before.
+   */
+  private releasedRanges: number[] = [];
   /** What is staged, in arrays grown as a frame places more, up to STAGED_VERTICES. */
   private staged = new Float32Array(0);
   private stagedIndices = new Uint32Array(0);
+  private stagedFloats = 0;
+  private stagedCount = 0;
+  /** Where what is staged goes: an atlas vertex, a staged float and floats, a stretch a write. */
+  private readonly vertexWrites: number[] = [];
+  /** An atlas index, a staged index and a count, a stretch a write. */
+  private readonly indexWrites: number[] = [];
   private readonly placed = new Map<object, Placed | null>();
   private live = 0;
   private liveIndices = 0;
-  private holes = 0;
   /** The id of a texture that is no texture, which alone the table draws. */
   private readonly white: number;
   private readonly store: AtlasStore;
@@ -288,6 +423,15 @@ export class Atlas {
     this.white = white;
     this.store = store;
     atlases.add(this);
+  }
+
+  /** The vertices and indices up to the last placed: what the store must keep as it grows. */
+  get vertexCount(): number {
+    return this.vertexRanges.top;
+  }
+
+  get indexCount(): number {
+    return this.indexRanges.top;
   }
 
   /** Where `key`'s batches lie: null if the table cannot draw them, undefined if not yet placed. */
@@ -307,6 +451,8 @@ export class Atlas {
     }
 
     const { batcher, instructions } = packed;
+    const counts: number[] = [];
+    const starts: number[] = [];
     for (let i = 0; i < instructions.instructionSize; i++) {
       const batch = instructions.instructions[i] as Batch;
       const textures = batch.textures;
@@ -319,48 +465,42 @@ export class Atlas {
         this.placed.set(key, null);
         return null;
       }
+
+      if (batch.size) {
+        counts.push(batch.size);
+        starts.push(batch.start);
+      }
+    }
+
+    if (counts.length === 0) {
+      this.placed.set(key, null);
+      return null;
     }
 
     const vertexCount = batcher.attributeSize / VERTEX_FLOATS;
     const indexCount = batcher.indexSize;
-    this.reserve(vertexCount, indexCount);
-    const first = this.indexCount;
-    this.copyIn(
-      batcher.attributeBuffer.float32View,
-      batcher.attributeSize,
-      batcher.indexBuffer,
-      indexCount,
-    );
-
-    this.live += vertexCount;
-    this.liveIndices += indexCount;
-
     const placed: Placed = {
       vertices: vertexCount,
       indices: indexCount,
-      counts: [],
-      offsets: [],
+      vertexStart: 0,
+      indexStart: 0,
+      counts,
+      offsets: starts,
     };
-    for (let i = 0; i < instructions.instructionSize; i++) {
-      const batch = instructions.instructions[i] as Batch;
-      if (batch.size) {
-        placed.counts.push(batch.size);
-        placed.offsets.push((first + batch.start) * 4);
-      }
+    this.reserve(placed);
+    for (let i = 0; i < starts.length; i++) {
+      starts[i] = (placed.indexStart + starts[i]) * 4;
     }
 
-    const shown = placed.counts.length ? placed : null;
-    this.placed.set(key, shown);
-    if (!shown) {
-      this.holes += vertexCount;
-      this.live -= vertexCount;
-      this.liveIndices -= indexCount;
-    }
-
-    return shown;
+    this.copyIn(placed, batcher.attributeBuffer.float32View, batcher.indexBuffer);
+    this.live += vertexCount;
+    this.liveIndices += indexCount;
+    this.stats.placed++;
+    this.placed.set(key, placed);
+    return placed;
   }
 
-  /** `key`'s context rebuilt or destroyed: its vertices become a hole. */
+  /** `key`'s context rebuilt or destroyed: its ranges are free again from the next frame. */
   release(key: object): void {
     const placed = this.placed.get(key);
     if (placed === undefined) {
@@ -371,17 +511,38 @@ export class Atlas {
     if (placed) {
       this.live -= placed.vertices;
       this.liveIndices -= placed.indices;
-      this.holes += placed.vertices;
+      this.releasedRanges.push(
+        placed.vertexStart,
+        placed.vertices,
+        placed.indexStart,
+        placed.indices,
+      );
+      this.stats.released++;
     }
   }
 
   /**
-   * Pack again from scratch if holes pass ATLAS_SLACK and the live
-   * vertices: between frames, as a run's draws read where their contexts
-   * lie until it is drawn.
+   * Between frames, as a run's draws read where their contexts lie until
+   * it is drawn: the ranges released since free for the next to take, and
+   * the atlas packed again from scratch if its holes pass ATLAS_SLACK and
+   * twice the live vertices or indices, which no context placed since
+   * could fill.
    */
   compact(): void {
-    if (this.holes > ATLAS_SLACK && this.holes > this.live) {
+    const released = this.releasedRanges;
+    for (let i = 0; i < released.length; i += 4) {
+      this.vertexRanges.give(released[i], released[i + 1]);
+      this.indexRanges.give(released[i + 2], released[i + 3]);
+    }
+
+    released.length = 0;
+    const vertexHoles = this.vertexRanges.free;
+    const indexHoles = this.indexRanges.free;
+    if (
+      (vertexHoles > ATLAS_SLACK && vertexHoles > 2 * this.live) ||
+      (indexHoles > 3 * ATLAS_SLACK && indexHoles > 2 * this.liveIndices)
+    ) {
+      this.stats.compacted++;
       this.clear();
     }
   }
@@ -406,13 +567,12 @@ export class Atlas {
     }
 
     this.placed.clear();
-    this.vertexCount = 0;
-    this.indexCount = 0;
-    this.sentVertices = 0;
-    this.sentIndices = 0;
+    this.vertexRanges.clear();
+    this.indexRanges.clear();
+    this.releasedRanges.length = 0;
+    this.unstage();
     this.live = 0;
     this.liveIndices = 0;
-    this.holes = 0;
   }
 
   /** The store's buffers were lost with their context: every context is copied in again as drawn. */
@@ -424,23 +584,39 @@ export class Atlas {
   /** Write what was staged into the store, room made for it first if the store has none yet. */
   send(): void {
     this.allocate();
-    const vertices = this.vertexCount - this.sentVertices;
-    if (vertices > 0) {
-      this.store.writeVertices(this.sentVertices, this.staged, vertices * VERTEX_FLOATS);
+    const vertexWrites = this.vertexWrites;
+    for (let i = 0; i < vertexWrites.length; i += 3) {
+      this.store.writeVertices(
+        vertexWrites[i],
+        this.staged,
+        vertexWrites[i + 1],
+        vertexWrites[i + 2],
+      );
     }
 
-    const indices = this.indexCount - this.sentIndices;
-    if (indices > 0) {
-      this.store.writeIndices(this.sentIndices, this.stagedIndices, indices);
+    const indexWrites = this.indexWrites;
+    for (let i = 0; i < indexWrites.length; i += 3) {
+      this.store.writeIndices(
+        indexWrites[i],
+        this.stagedIndices,
+        indexWrites[i + 1],
+        indexWrites[i + 2],
+      );
     }
 
-    this.sentVertices = this.vertexCount;
-    this.sentIndices = this.indexCount;
+    this.unstage();
   }
 
   destroy(): void {
     this.clear();
     atlases.delete(this);
+  }
+
+  private unstage(): void {
+    this.vertexWrites.length = 0;
+    this.indexWrites.length = 0;
+    this.stagedFloats = 0;
+    this.stagedCount = 0;
   }
 
   private allocate(): void {
@@ -452,21 +628,15 @@ export class Atlas {
   }
 
   /**
-   * Stage `floats` of `vertices` and `count` of `indices` after what is
-   * placed, the indices offset by the vertices before them; written
-   * straight into the store, after what was staged, if they would not fit.
+   * Stage `placed`'s vertices and indices, the indices offset by where its
+   * vertices start; written straight into the store if they would not fit
+   * the stage, what was staged sent first if they would not fit beside it.
    */
-  private copyIn(
-    vertices: Float32Array,
-    floats: number,
-    indices: ArrayLike<number>,
-    count: number,
-  ): void {
-    const base = this.vertexCount;
-    if (
-      (base - this.sentVertices) * VERTEX_FLOATS + floats > STAGED_FLOATS ||
-      this.indexCount - this.sentIndices + count > STAGED_INDICES
-    ) {
+  private copyIn(placed: Placed, vertices: Float32Array, indices: ArrayLike<number>): void {
+    const floats = placed.vertices * VERTEX_FLOATS;
+    const count = placed.indices;
+    const base = placed.vertexStart;
+    if (this.stagedFloats + floats > STAGED_FLOATS || this.stagedCount + count > STAGED_INDICES) {
       this.send();
     }
 
@@ -477,25 +647,23 @@ export class Atlas {
         offset[i] = indices[i] + base;
       }
 
-      this.store.writeVertices(base, vertices, floats);
-      this.store.writeIndices(this.indexCount, offset, count);
-      this.vertexCount += floats / VERTEX_FLOATS;
-      this.indexCount += count;
-      this.sentVertices = this.vertexCount;
-      this.sentIndices = this.indexCount;
+      this.store.writeVertices(base, vertices, 0, floats);
+      this.store.writeIndices(placed.indexStart, offset, 0, count);
       return;
     }
 
-    const stagedFloats = (base - this.sentVertices) * VERTEX_FLOATS;
-    const at = this.indexCount - this.sentIndices;
-    this.stage(stagedFloats + floats, at + count);
-    this.staged.set(vertices.subarray(0, floats), stagedFloats);
+    const from = this.stagedFloats;
+    const at = this.stagedCount;
+    this.stage(from + floats, at + count);
+    this.staged.set(vertices.subarray(0, floats), from);
     for (let i = 0; i < count; i++) {
       this.stagedIndices[at + i] = indices[i] + base;
     }
 
-    this.vertexCount += floats / VERTEX_FLOATS;
-    this.indexCount += count;
+    this.stagedFloats += floats;
+    this.stagedCount += count;
+    addWrite(this.vertexWrites, base, from, floats, VERTEX_FLOATS);
+    addWrite(this.indexWrites, placed.indexStart, at, count, 1);
   }
 
   /** Staging arrays of at least `floats` and `count`, doubled as need be, what they stage kept. */
@@ -504,7 +672,7 @@ export class Atlas {
       const grown = new Float32Array(
         Math.min(STAGED_FLOATS, Math.max(floats, this.staged.length * 2, 4096 * VERTEX_FLOATS)),
       );
-      grown.set(this.staged.subarray(0, (this.vertexCount - this.sentVertices) * VERTEX_FLOATS));
+      grown.set(this.staged.subarray(0, this.stagedFloats));
       this.staged = grown;
     }
 
@@ -512,34 +680,84 @@ export class Atlas {
       const grown = new Uint32Array(
         Math.min(STAGED_INDICES, Math.max(count, this.stagedIndices.length * 2, 4096 * 3)),
       );
-      grown.set(this.stagedIndices.subarray(0, this.indexCount - this.sentIndices));
+      grown.set(this.stagedIndices.subarray(0, this.stagedCount));
       this.stagedIndices = grown;
     }
   }
 
   /**
-   * Room in the store for `vertexCount` and `indexCount` more, grown by
-   * half if they do not fit, what it holds kept by the GPU's own copy.
+   * Ranges in the store for `placed`'s vertices and indices, taken where
+   * they fit best; the store doubled, or grown to what they need, if they
+   * fit nowhere, what it holds kept by the GPU's own copy.
    */
-  private reserve(vertexCount: number, indexCount: number): void {
+  private reserve(placed: Placed): void {
     this.allocate();
-    const vertices = this.vertexCount + vertexCount;
-    const indices = this.indexCount + indexCount;
-    if (vertices <= this.capacity && indices <= this.indexCapacity) {
-      return;
+    const vertices = this.vertexRanges;
+    const indices = this.indexRanges;
+    const freeBefore = vertices.free;
+    let vertexStart = vertices.take(placed.vertices, this.capacity);
+    let indexStart = indices.take(placed.indices, this.indexCapacity);
+    if (vertexStart < 0 || indexStart < 0) {
+      // What was staged goes first, to be kept as the store grows.
+      this.send();
+      if (vertexStart < 0) {
+        this.capacity = Math.max(
+          vertices.top + placed.vertices,
+          Math.ceil(this.capacity * ATLAS_GROWTH),
+        );
+      }
+
+      if (indexStart < 0) {
+        this.indexCapacity = Math.max(
+          indices.top + placed.indices,
+          Math.ceil(this.indexCapacity * ATLAS_GROWTH),
+        );
+      }
+
+      // What either took at the top for this context holds nothing yet, to be copied.
+      const keptVertices =
+        vertexStart >= 0 && vertexStart + placed.vertices === vertices.top
+          ? vertexStart
+          : vertices.top;
+      const keptIndices =
+        indexStart >= 0 && indexStart + placed.indices === indices.top ? indexStart : indices.top;
+      this.store.resize(this.capacity, this.indexCapacity, keptVertices, keptIndices);
+      this.stats.grown++;
+      if (vertexStart < 0) {
+        vertexStart = vertices.take(placed.vertices, this.capacity);
+      }
+
+      if (indexStart < 0) {
+        indexStart = indices.take(placed.indices, this.indexCapacity);
+      }
     }
 
-    this.send();
-    if (vertices > this.capacity) {
-      this.capacity = Math.max(vertices, Math.ceil(this.capacity * ATLAS_GROWTH));
+    if (vertices.free < freeBefore) {
+      this.stats.reused++;
     }
 
-    if (indices > this.indexCapacity) {
-      this.indexCapacity = Math.max(indices, Math.ceil(this.indexCapacity * ATLAS_GROWTH));
-    }
-
-    this.store.resize(this.capacity, this.indexCapacity, this.vertexCount, this.indexCount);
+    placed.vertexStart = vertexStart;
+    placed.indexStart = indexStart;
   }
+}
+
+/**
+ * A write of `length` staged from `from` to `at` in the atlas, in units of
+ * `unit`, added to `writes`, or joined to the last if it goes on from it
+ * there and in the stage.
+ */
+function addWrite(writes: number[], at: number, from: number, length: number, unit: number): void {
+  const last = writes.length - 3;
+  if (
+    last >= 0 &&
+    writes[last] + writes[last + 2] / unit === at &&
+    writes[last + 1] + writes[last + 2] === from
+  ) {
+    writes[last + 2] += length;
+    return;
+  }
+
+  writes.push(at, from, length);
 }
 
 /**
@@ -678,10 +896,10 @@ export class TablePipe {
           buffers.resizeOnGpu(this.indexBuffer, this.indexBytes, keptIndices * 4);
         }
       },
-      writeVertices: (at, data, floats) =>
-        this.renderer.buffer.writeOnGpu(this.attributes, at * VERTEX_BYTES, data, 0, floats),
-      writeIndices: (at, data, count) =>
-        this.renderer.buffer.writeOnGpu(this.indexBuffer, at * 4, data, 0, count),
+      writeVertices: (at, data, from, floats) =>
+        this.renderer.buffer.writeOnGpu(this.attributes, at * VERTEX_BYTES, data, from, floats),
+      writeIndices: (at, data, from, count) =>
+        this.renderer.buffer.writeOnGpu(this.indexBuffer, at * 4, data, from, count),
     });
     const stride = VERTEX_FLOATS * 4;
     this.geometry = new Geometry({
