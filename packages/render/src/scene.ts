@@ -95,8 +95,11 @@ export class SceneList {
     this.push(DRAW, geometry, row, blend, texture, sampler);
   }
 
-  /** A layer begun, padded for its filters (or -1), its rectangle none till measured (layerRect). */
-  layerBegin(padding = -1): void {
+  /**
+   * A layer begun, padded for its filters (or -1), its rectangle none till
+   * measured (layerRect): its number.
+   */
+  layerBegin(padding = -1): number {
     const layer = this.layerCount++;
     if (layer >= this.pads.length) {
       this.layers = grow(this.layers);
@@ -106,6 +109,12 @@ export class SceneList {
     this.pads[layer] = padding;
     this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
     this.layerRect(layer, 0, 0, 0, 0);
+    return layer;
+  }
+
+  /** Filtered layer `layer` padded by `padding` after all, as its filters were fitted once it was drawn. */
+  padLayer(layer: number, padding: number): void {
+    this.pads[layer] = padding;
   }
 
   /** The layer begun last ended: filtered by `chain` (or -1), composited in `mode`, coloured by `row`. */

@@ -3,7 +3,8 @@
 // (render/filters.ts), which match adl: each one's values in the target's
 // units, how far it pads past the object, cut where the padding would not
 // fit a texture, and how far in the object's pixels start for those that
-// read them.
+// read them. The rules they share with the Pixi view's are in display/filters.ts and
+// bitmap/filters.ts.
 import {
   BEVEL,
   BLUR,
@@ -14,8 +15,8 @@ import {
   type TextureHandle,
 } from "@swf2es/render";
 import { rgbaOf } from "../bitmap/bitmap.js";
-import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
-import { emptyKernel, type Filter as FilterRecord } from "../display/filters.js";
+import { filterGrowth, gradientTable, integerKernel, paddedDistance } from "../bitmap/filters.js";
+import { emptyKernel, type Filter as FilterRecord, filterOffset } from "../display/filters.js";
 
 /** A filter as the renderer runs it: its kind and values, and a gradient's colours with their texture. */
 export interface Pass {
@@ -25,10 +26,15 @@ export interface Pass {
   texture: TextureHandle | null;
 }
 
-/** A display object's filters worked out: their passes, and how far they pad the object altogether. */
+/**
+ * A display object's filters worked out: their passes, how far they pad
+ * the object altogether, and each one's padding as its reach asks, before
+ * a cap (paddingCap) cuts it.
+ */
 export interface FilterPlan {
   passes: Pass[];
   padding: number;
+  wanted: number[];
 }
 
 /**
@@ -45,21 +51,23 @@ interface Planned {
 }
 
 /**
- * The passes of `records` at `units` of the target to a stage pixel,
- * padded at most so far as fits `room` either side of the object: null
- * where none is drawn, as a displacement map is not yet.
+ * The passes of `records` at `units` of the target to a stage pixel, none
+ * padding past `cap`: null where none is drawn, as a displacement map is
+ * not yet. A gradient's texture is kept from `previous` where its colours
+ * are the same, as a tween of a gradient filter's blur writes them again.
  */
 export function planFilters(
   records: readonly FilterRecord[],
   units: number,
-  room: number,
+  cap = Number.POSITIVE_INFINITY,
+  previous: FilterPlan | null = null,
 ): FilterPlan | null {
   const planned: Planned[] = [];
   for (const record of records) {
     const kind = kindOf(record);
     if (kind > 0) {
       const wanted = paddingOf(kind, record, units);
-      planned.push({ record, kind, wanted, padding: wanted, inset: 0 });
+      planned.push({ record, kind, wanted, padding: Math.min(wanted, cap), inset: 0 });
     }
   }
 
@@ -67,19 +75,35 @@ export function planFilters(
     return null;
   }
 
-  fitPadding(planned, room);
   let inset = 0;
   for (let i = planned.length - 1; i >= 0; i--) {
     inset += planned[i].padding;
     planned[i].inset = inset;
   }
 
-  let padding = 0;
-  for (const p of planned) {
-    padding += p.padding;
+  const passes = planned.map((p) => passOf(p, units));
+  for (const pass of passes) {
+    pass.texture = pass.colors ? sameColors(pass.colors, previous) : null;
   }
 
-  return { passes: planned.map((p) => passOf(p, units)), padding };
+  return { passes, padding: inset, wanted: planned.map((p) => p.wanted) };
+}
+
+/** The texture of a gradient of `previous`'s with the same colours, if any. */
+function sameColors(colors: Uint8Array, previous: FilterPlan | null): TextureHandle | null {
+  for (const pass of previous?.passes ?? []) {
+    const known = pass.colors;
+    if (
+      known &&
+      pass.texture &&
+      known.length === colors.length &&
+      known.every((c, i) => c === colors[i])
+    ) {
+      return pass.texture;
+    }
+  }
+
+  return null;
 }
 
 function kindOf(f: FilterRecord): number {
@@ -135,7 +159,7 @@ function paddingOf(kind: number, f: FilterRecord, units: number): number {
       reach = blur + Math.abs(paddedDistance(f.distance || 0));
       break;
     case GRADIENT:
-      reach = Math.max(...grows(f)) + 1;
+      reach = Math.max(...filterGrowth(f)) + 1;
       break;
     case CONVOLUTION:
       return Math.max(f.matrixX >> 1, f.matrixY >> 1) + 1;
@@ -145,57 +169,6 @@ function paddingOf(kind: number, f: FilterRecord, units: number): number {
 
   const padding = Math.ceil(reach * units);
   return Number.isNaN(padding) ? 0 : padding;
-}
-
-/**
- * A distance as far as it pads: NaN none; Infinity, or the -8388866
- * generateFilterRect makes of NaN, as far as a GPU's texture could be,
- * which fitPadding cuts to what this one can draw.
- */
-function paddedDistance(distance: number): number {
-  return Number.isNaN(distance) ? 0 : Math.max(-(2 ** 24), Math.min(2 ** 24, distance));
-}
-
-/** How far a gradient filter's rect grows past the object in stage pixels: left, top, right, bottom. */
-function grows(f: FilterRecord): number[] {
-  const rect = filterRect(
-    { x: 0, y: 0, width: 1, height: 1 },
-    { ...f, distance: paddedDistance(f.distance) },
-  );
-  return [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
-}
-
-/**
- * The filters' padding as their reach asks, where it fits `room` either
- * side of the object; past that, cut alike from the furthest reaching
- * down to what fits, as a shadow cast 1e9 away, or Infinity, asks.
- */
-function fitPadding(planned: Planned[], room: number): void {
-  let total = 0;
-  for (const p of planned) {
-    total += p.wanted;
-  }
-
-  if (total <= room) {
-    return;
-  }
-
-  const sorted = planned.map((p) => p.wanted).sort((a, b) => a - b);
-  let below = 0;
-  let cap = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
-    if (level <= sorted[i]) {
-      cap = Math.max(0, level);
-      break;
-    }
-
-    below += sorted[i];
-  }
-
-  for (const p of planned) {
-    p.padding = Math.min(p.wanted, cap);
-  }
 }
 
 /** A filter's values, in the order its kind lists them (@swf2es/render's filters.ts). */
@@ -252,7 +225,7 @@ function passOf(p: Planned, units: number): Pass {
         f.knockout ? 1 : 0,
         f.kind === "gradientBevel" ? 1 : 0,
         p.inset,
-        ...grows(f),
+        ...filterGrowth(f),
       ]);
       pass.colors = rgbaOf(gradientTable(f));
       break;
@@ -319,6 +292,7 @@ function typeOf(f: FilterRecord): number {
 
 /** A filter's offset, `distance` stage pixels at its angle, in the target's units. */
 function offsetOf(f: FilterRecord, distance: number, units: number): [number, number] {
-  const radians = ((f.angle || 0) * Math.PI) / 180;
-  return [distance * Math.cos(radians) * units, distance * Math.sin(radians) * units];
+  const offset: [number, number] = [0, 0];
+  filterOffset(offset, f, distance, units);
+  return offset;
 }

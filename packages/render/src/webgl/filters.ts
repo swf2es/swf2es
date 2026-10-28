@@ -22,8 +22,12 @@ export interface FilterTarget {
 
 /** Where the runner takes its targets from and gives them back, and finds textures and samplers. */
 export interface FilterHost<T extends FilterTarget> {
-  /** A target of at least `width` by `height`; `exact`, of just that size. */
-  take(width: number, height: number, exact: boolean): T;
+  /**
+   * A target for a frame of `width` by `height`, of the one size the host
+   * gives every such frame: two targets for one frame are alike, and a
+   * filter that reads two at one coordinate reads them alike.
+   */
+  take(width: number, height: number): T;
   give(target: T): void;
   texture(id: number): WebGLTexture | null;
   sampler(bits: number): WebGLSampler;
@@ -167,7 +171,7 @@ export class FilterRunner<T extends FilterTarget> {
     const texels = this.resolution * v[at + 3];
     const across = blurShrink(blurX, quality, 1, texels);
     const down = blurShrink(blurY, quality, 1, texels);
-    const out = this.host.take(width, height, false);
+    const out = this.host.take(width, height);
     if (across === 1 && down === 1) {
       this.blur(input, width, height, out, blurX, blurY, quality, texels, texels);
       return out;
@@ -204,7 +208,7 @@ export class FilterRunner<T extends FilterTarget> {
     gl.uniform1f(this.at(pass, "uKnockout"), v[at + 12]);
     gl.uniform1f(this.at(pass, "uHide"), v[at + 13]);
     this.bindBlurred(pass, input, blurred);
-    const out = this.host.take(width, height, false);
+    const out = this.host.take(width, height);
     this.draw(pass, input, width, height, out, width, height);
     if (blurred) {
       this.host.give(blurred.target);
@@ -228,7 +232,7 @@ export class FilterRunner<T extends FilterTarget> {
     gl.uniform1f(this.at(pass, "uType"), v[at + 15]);
     gl.uniform1f(this.at(pass, "uKnockout"), v[at + 16]);
     this.bindBlurred(pass, input, blurred);
-    const out = this.host.take(width, height, false);
+    const out = this.host.take(width, height);
     this.draw(pass, input, width, height, out, width, height);
     if (blurred) {
       this.host.give(blurred.target);
@@ -273,7 +277,7 @@ export class FilterRunner<T extends FilterTarget> {
     this.state.bindTexture(EXTRA_UNIT, colors);
     this.state.bindSampler(EXTRA_UNIT, this.host.sampler(CLAMP));
     this.bindBlurred(pass, input, blurred);
-    const out = this.host.take(width, height, false);
+    const out = this.host.take(width, height);
     this.draw(pass, input, width, height, out, width, height);
     if (blurred) {
       this.host.give(blurred.target);
@@ -287,7 +291,7 @@ export class FilterRunner<T extends FilterTarget> {
     const pass = this.use("colorMatrix", shaders.MATRIX);
     gl.uniformMatrix4fv(this.at(pass, "uMatrix"), false, v, at, 16);
     gl.uniform4fv(this.at(pass, "uOffset"), v, at + 16, 4);
-    const out = this.host.take(width, height, false);
+    const out = this.host.take(width, height);
     this.draw(pass, input, width, height, out, width, height);
     return out;
   }
@@ -298,7 +302,9 @@ export class FilterRunner<T extends FilterTarget> {
     const rows = v[at + 1];
     const weights = this.weights;
     weights.fill(0);
-    weights.set(v.subarray(at + 12, at + 12 + columns * rows));
+    // As many as its shader takes: a SWF's matrix may be larger than 15 by 15, whose taps past
+    // those go unread, as the Pixi view's filter drops them.
+    weights.set(v.subarray(at + 12, at + 12 + Math.min(columns * rows, weights.length)));
     const pass = this.use("convolution", shaders.CONVOLUTION);
     gl.uniform4fv(this.at(pass, "uMatrix"), weights);
     gl.uniform2f(this.at(pass, "uSize"), columns, rows);
@@ -317,7 +323,7 @@ export class FilterRunner<T extends FilterTarget> {
       width / this.resolution - inset + 1,
       height / this.resolution - inset + 1,
     );
-    const out = this.host.take(width, height, false);
+    const out = this.host.take(width, height);
     this.draw(pass, input, width, height, out, width, height);
     return out;
   }
@@ -325,8 +331,7 @@ export class FilterRunner<T extends FilterTarget> {
   /**
    * The box's runs over `input`'s frame into a target, `across` times
    * narrower and `down` times lower (blurShrink); null where no run would
-   * change it. Unshrunk, the target is `input`'s size, as a filter that
-   * reads both at one coordinate needs.
+   * change it.
    */
   private blurred(
     input: T,
@@ -349,16 +354,14 @@ export class FilterRunner<T extends FilterTarget> {
     if (across > 1 || down > 1) {
       w = Math.ceil(width / across);
       h = Math.ceil(height / down);
-      source = this.host.take(w, h, false);
+      source = this.host.take(w, h);
       const pass = this.use("shrink", shaders.SHRINK);
       this.gl.uniform2f(this.at(pass, "uFactor"), across, down);
       this.draw(pass, input, w * across, h * down, source, w, h);
     }
 
     const shrunk = source !== input;
-    const out = shrunk
-      ? this.host.take(w, h, false)
-      : this.host.take(input.width, input.height, true);
+    const out = this.host.take(w, h);
     this.blur(source, w, h, out, blurX, blurY, quality, texels / across, texels / down);
     if (shrunk) {
       this.host.give(source);
@@ -399,8 +402,8 @@ export class FilterRunner<T extends FilterTarget> {
     }
 
     // Between the runs, two targets in turn, the second only where a third run needs one.
-    const first = runs > 1 ? this.host.take(width, height, false) : null;
-    const second = runs > 2 ? this.host.take(width, height, false) : null;
+    const first = runs > 1 ? this.host.take(width, height) : null;
+    const second = runs > 2 ? this.host.take(width, height) : null;
     let from = input;
     for (let k = 0; k < runs; k++) {
       this.state.useProgram(pass.program);

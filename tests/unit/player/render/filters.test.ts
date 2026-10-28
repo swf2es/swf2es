@@ -174,7 +174,7 @@ function shrunkRuns(
 
 test("shrunk blurs stay within twice the shrink's bound however their input sits in a block", async () => {
   const { blurShrink } = await import("../../../../packages/render/dist/index.js");
-  // SHRUNK_ERROR in render/filters.ts, a level each way: the two ways together.
+  // SHRUNK_ERROR in @swf2es/render's filters.ts, a level each way: the two ways together.
   const bound = 2 * 2;
   // Blurs and glows as animations carry them, at the texels a stage pixel a page at a device
   // pixel ratio of 2 or 3 gives.

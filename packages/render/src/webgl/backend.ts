@@ -198,7 +198,7 @@ export class WebGLBackend {
     this.flipLocation = gl.getUniformLocation(this.composite, "uFlip");
     this.backOffsetLocation = gl.getUniformLocation(this.composite, "uBackOffset");
     this.filters = new FilterRunner(gl, this.state, {
-      take: (width, height, exact) => this.takeLayer(width, height, exact),
+      take: (width, height) => this.takeLayer(width, height, true),
       give: (layer) => this.giveLayer(layer),
       texture: (id) => this.textures[id] ?? null,
       sampler: (bits) => this.sampler(bits),
@@ -323,7 +323,8 @@ export class WebGLBackend {
           const height = p[from + 3];
           const filtered = ops[at + 2] === 1;
           const open: Open = {
-            layer: this.takeLayer(width, height),
+            // A filtered one of the size its filters' targets take for it, which they read alike.
+            layer: this.takeLayer(width, height, filtered),
             x: p[from],
             y: p[from + 1],
             width,
@@ -423,13 +424,16 @@ export class WebGLBackend {
 
   /**
    * A layer of at least `width` by `height`, the smallest of those free
-   * that is, or one made; `exact`, of just that size, as a filter that reads
-   * two layers at one coordinate needs.
+   * that is, or one made, its sides rounded up to LAYER_STEP; `exact`, of
+   * just the rounded size, which filters take so that a frame's targets
+   * are alike, and no larger than it needs.
    */
   private takeLayer(width: number, height: number, exact = false): Layer {
     const gl = this.gl;
     const free = this.freeLayers;
     let best = -1;
+    width = Math.ceil(width / LAYER_STEP) * LAYER_STEP;
+    height = Math.ceil(height / LAYER_STEP) * LAYER_STEP;
     for (let i = 0; i < free.length; i++) {
       const l = free[i];
       if (
@@ -449,11 +453,6 @@ export class WebGLBackend {
       free.pop();
       layer.usedAt = this.frame;
       return layer;
-    }
-
-    if (!exact) {
-      width = Math.ceil(width / LAYER_STEP) * LAYER_STEP;
-      height = Math.ceil(height / LAYER_STEP) * LAYER_STEP;
     }
 
     const texture = gl.createTexture() as WebGLTexture;

@@ -11,6 +11,7 @@ import {
   BLEND_NAMES,
   CLAMP,
   Commands,
+  drawnArea,
   Filters,
   Geometries,
   type GeometryHandle,
@@ -35,7 +36,12 @@ import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
-import { type Filter as FilterRecord, sameFilterRecords } from "../display/filters.js";
+import {
+  type Filter as FilterRecord,
+  filterRoom,
+  paddingCap,
+  sameFilterRecords,
+} from "../display/filters.js";
 import { concat } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { ShapeObject } from "../display/shapeobject.js";
@@ -111,15 +117,19 @@ interface DeviceRun {
   resolution: number;
 }
 
-/** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
-/** A filtered object's filters worked out, and what for. */
+/**
+ * A filtered object's filters worked out for its records at its units,
+ * and cut to the last cap its padding needed, if any.
+ */
 interface KeptPlan {
   records: readonly FilterRecord[];
   units: number;
-  room: number;
   plan: FilterPlan | null;
+  cap: number;
+  capped: FilterPlan | null;
 }
 
+/** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 interface Made {
   parts: { part: Part; handle: GeometryHandle }[];
   version: number;
@@ -166,6 +176,8 @@ export class RenderView implements Drawer {
   private readonly filterPlans = new WeakMap<DisplayObject, KeptPlan>();
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
   private textureLimit = 4096;
+  /** A filtered object's drawn area, measured where its padding may not fit (fitFilters). */
+  private readonly drawn: number[] = [];
   /** Where a frame is drawn, filled in as it is. */
   private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1 };
   private readonly made = new WeakMap<ShapeLayer, Made>();
@@ -346,14 +358,18 @@ export class RenderView implements Drawer {
     // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
     const filtering = hidden || o.filters.length === 0 ? null : this.filterPlan(o);
     let layerRow = -1;
+    let layer = -1;
+    let drawnFrom = 0;
     if (mode !== NORMAL || filtering) {
       if (mode === LAYER || filtering) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
 
-      // Over the rectangle of what is drawn in it, which measureLayers finds.
-      this.scene.layerBegin(filtering ? filtering.padding : -1);
+      // Over the rectangle of what is drawn in it, which measureLayers finds; its padding is set once
+      // its filters are fitted to that.
+      drawnFrom = this.scene.length;
+      layer = this.scene.layerBegin(filtering ? 0 : -1);
     }
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -497,8 +513,12 @@ export class RenderView implements Drawer {
       this.popMask();
     }
 
-    if (mode !== NORMAL || filtering) {
-      this.scene.layerEnd(mode, layerRow, filtering ? this.chainOf(filtering) : -1);
+    if (filtering) {
+      const fitted = this.fitFilters(o, filtering, drawnFrom);
+      this.scene.padLayer(layer, fitted.padding);
+      this.scene.layerEnd(mode, layerRow, this.chainOf(fitted));
+    } else if (mode !== NORMAL) {
+      this.scene.layerEnd(mode, layerRow);
     }
 
     if (clipped) {
@@ -515,13 +535,10 @@ export class RenderView implements Drawer {
    */
   private filterPlan(o: DisplayObject): FilterPlan | null {
     const records = o.filters;
-    const units = this.scale;
-    // As far as a texture reaches past the stage either side, which the padding of an object on it
-    // must fit in.
-    const room =
-      Math.floor((this.textureLimit / this.resolution - Math.max(this.width, this.height)) / 2) - 2;
+    // A stage scaled to nothing filters at a unit a pixel rather than not at all.
+    const units = Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1;
     const kept = this.filterPlans.get(o);
-    if (kept && kept.units === units && kept.room === room) {
+    if (kept && kept.units === units) {
       if (kept.records === records) {
         return kept.plan;
       }
@@ -533,9 +550,46 @@ export class RenderView implements Drawer {
       }
     }
 
-    const plan = planFilters(records, units, room);
-    this.filterPlans.set(o, { records, units, room, plan });
+    const plan = planFilters(records, units, Number.POSITIVE_INFINITY, kept?.plan ?? null);
+    this.filterPlans.set(o, { records, units, plan, cap: Number.POSITIVE_INFINITY, capped: null });
     return plan;
+  }
+
+  /**
+   * `plan`, `o`'s, with its padding cut where it would not fit a texture
+   * round what `o` drew, the scene's entries from `from` on: its area cut
+   * to the target, as Pixi's filter system measured it (render/filters.ts,
+   * fitPadding). Only a padding past what fits round the whole target asks
+   * for the area.
+   */
+  private fitFilters(o: DisplayObject, plan: FilterPlan, from: number): FilterPlan {
+    const res = this.resolution;
+    const width = this.gl.drawingBufferWidth / res;
+    const height = this.gl.drawingBufferHeight / res;
+    if (plan.padding <= filterRoom(this.textureLimit, res, width, height)) {
+      return plan;
+    }
+
+    const area = this.drawn;
+    drawnArea(this.scene, this.rows, this.geometries, from, this.scale * res, area);
+    const room = filterRoom(
+      this.textureLimit,
+      res,
+      Math.min(area[2] / res, width) - Math.max(area[0] / res, 0),
+      Math.min(area[3] / res, height) - Math.max(area[1] / res, 0),
+    );
+    const cap = paddingCap(plan.wanted, room);
+    const kept = this.filterPlans.get(o);
+    if (cap === Number.POSITIVE_INFINITY || !kept) {
+      return plan;
+    }
+
+    if (kept.cap !== cap || !kept.capped) {
+      kept.cap = cap;
+      kept.capped = planFilters(kept.records, kept.units, cap, kept.capped ?? plan) ?? plan;
+    }
+
+    return kept.capped;
   }
 
   /** `plan`'s passes added to the frame's filters as a chain, their gradients' textures uploaded: its number. */

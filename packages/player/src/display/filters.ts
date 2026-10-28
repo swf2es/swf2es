@@ -320,3 +320,61 @@ export function emptyKernel(f: Filter): Filter {
     preserveAlpha: false,
   };
 }
+
+/** A filter's offset into `out`, `distance` stage pixels at its angle, in `units` a stage pixel. */
+export function filterOffset(
+  out: { [i: number]: number },
+  f: Filter,
+  distance: number,
+  units: number,
+): void {
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  out[0] = distance * Math.cos(radians) * units;
+  out[1] = distance * Math.sin(radians) * units;
+}
+
+/**
+ * How far either side of a display object its filters may pad, in the
+ * target's units: what a texture `limit` texels a side holds at
+ * `resolution` texels a unit, past the object's area on the target
+ * (`width` by `height` units, cut to it) and a little.
+ */
+export function filterRoom(
+  limit: number,
+  resolution: number,
+  width: number,
+  height: number,
+): number {
+  return Math.floor((limit / resolution - Math.max(width, height, 0)) / 2) - 2;
+}
+
+/**
+ * The most any one filter pads, where their paddings as their reach asks
+ * (`wanted`) together pass `room`: cut alike from the furthest reaching
+ * down to what fits, as a shadow cast 1e9 away, or Infinity, asks;
+ * Infinity where they fit. What is cut lies past the screen, but for an
+ * object off it whose shadow is not.
+ */
+export function paddingCap(wanted: readonly number[], room: number): number {
+  let total = 0;
+  for (const p of wanted) {
+    total += p;
+  }
+
+  if (total <= room) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const sorted = [...wanted].sort((a, b) => a - b);
+  let below = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
+    if (level <= sorted[i]) {
+      return Math.max(0, level);
+    }
+
+    below += sorted[i];
+  }
+
+  return 0;
+}

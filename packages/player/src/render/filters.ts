@@ -30,8 +30,14 @@ import {
   TextureSource,
 } from "pixi.js";
 import { rgbaOf } from "../bitmap/bitmap.js";
-import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
-import { emptyKernel, type Filter as FilterRecord } from "../display/filters.js";
+import { filterGrowth, gradientTable, integerKernel, paddedDistance } from "../bitmap/filters.js";
+import {
+  emptyKernel,
+  type Filter as FilterRecord,
+  filterOffset,
+  filterRoom,
+  paddingCap,
+} from "../display/filters.js";
 import type { AreaKeeper, PaddingFitter } from "./blend.js";
 
 const { BEVEL, BOX, CONVOLUTION, DISPLACE, GLOW, GRADIENT, MATRIX, READ_BACK, SHRINK } =
@@ -235,22 +241,6 @@ function blur(
   }
 }
 
-/** A filter's offset, `distance` stage pixels at its angle, in the input's units. */
-function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, units: number): void {
-  const radians = ((f.angle || 0) * Math.PI) / 180;
-  offset[0] = distance * Math.cos(radians) * units;
-  offset[1] = distance * Math.sin(radians) * units;
-}
-
-/**
- * A distance as far as it pads: NaN none; Infinity, or the -8388866
- * generateFilterRect makes of NaN, as far as a GPU's texture could be,
- * which the chain fits to what this one can draw (FilterChain.fitPadding).
- */
-function paddedDistance(distance: number): number {
-  return Number.isNaN(distance) ? 0 : Math.max(-(2 ** 24), Math.min(2 ** 24, distance));
-}
-
 /**
  * A filter run at the target's resolution, its blurs and distances in
  * pixels of the stage: an object scaled up has its glow reach no further,
@@ -418,7 +408,7 @@ class GlowFilter extends BlurredFilter {
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
     const uniforms = this.resources.glowUniforms.uniforms;
-    placeOffset(uniforms.uOffset as Float32Array, f, this.distance, this.units);
+    filterOffset(uniforms.uOffset as Float32Array, f, this.distance, this.units);
     const blurX = f.blurX || 0;
     const blurY = f.blurY || 0;
     const texels = this.texels(input);
@@ -482,7 +472,7 @@ class BevelFilter extends BlurredFilter {
     );
     this.resources.uBlurred = alpha.source;
     const offset = this.resources.bevelUniforms.uniforms.uOffset as Float32Array;
-    placeOffset(offset, f, f.distance || 0, this.units);
+    filterOffset(offset, f, f.distance || 0, this.units);
     system.applyFilter(this, input, output, clear);
     this.unbind();
     if (alpha !== input) {
@@ -533,14 +523,7 @@ class GradientFilter extends BlurredFilter {
     });
     this.gradient = gradient;
     // The rect's growth each way, as applyFilter's: left, top, right, bottom.
-    const rect = filterRect(
-      { x: 0, y: 0, width: 1, height: 1 },
-      {
-        ...f,
-        distance: paddedDistance(f.distance),
-      },
-    );
-    this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
+    this.grows = filterGrowth(f);
     this.reach = Math.max(...this.grows) + 1;
     this.padding = this.reach;
   }
@@ -566,7 +549,7 @@ class GradientFilter extends BlurredFilter {
     );
     this.resources.uBlurred = alpha.source;
     const offset = this.resources.gradientUniforms.uniforms.uOffset as Float32Array;
-    placeOffset(offset, f, f.distance || 0, this.units);
+    filterOffset(offset, f, f.distance || 0, this.units);
     // The object's pixels and one more right and down, as adl's bitmap of it, grown by the rect.
     const region = this.resources.gradientUniforms.uniforms.uRegion as Float32Array;
     const grows = this.grows;
@@ -1115,29 +1098,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     // As the filter system clips the area before it pads it.
     const width = Math.min(bounds.maxX, viewport.width / resolution) - Math.max(bounds.minX, 0);
     const height = Math.min(bounds.maxY, viewport.height / resolution) - Math.max(bounds.minY, 0);
-    const room =
-      Math.floor((textureLimit(renderer) / resolution - Math.max(width, height, 0)) / 2) - 2;
+    const room = filterRoom(textureLimit(renderer), resolution, width, height);
     const wanted = this.wanted;
-    let total = wanted.reduce((sum, p) => sum + p, 0);
     // The most any one filter pads: all they want where it fits, else the level that fits.
-    let cap = Infinity;
-    if (total > room) {
-      const sorted = [...wanted].sort((a, b) => a - b);
-      let below = 0;
-      cap = 0;
-      for (let i = 0; i < sorted.length; i++) {
-        const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
-        if (level <= sorted[i]) {
-          cap = Math.max(0, level);
-          break;
-        }
-
-        below += sorted[i];
-      }
-    }
-
+    const cap = paddingCap(wanted, room);
     let changed = false;
-    total = 0;
+    let total = 0;
     for (let i = 0; i < this.filters.length; i++) {
       const padding = Math.min(wanted[i], cap);
       changed ||= this.filters[i].padding !== padding;

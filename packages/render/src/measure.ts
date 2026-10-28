@@ -62,31 +62,9 @@ export function measureLayers(
 
   for (let i = 0; i < scene.length; i++) {
     switch (scene.kind[i]) {
-      case DRAW: {
-        const g = scene.geometry[i] * 4;
-        const x0 = box[g];
-        const y0 = box[g + 1];
-        const x1 = box[g + 2];
-        const y1 = box[g + 3];
-        if (!(x1 >= x0 && y1 >= y0)) {
-          break;
-        }
-
-        const r = scene.row[i] * ROW_FLOATS;
-        const a = m[r] * k;
-        const b = m[r + 1] * k;
-        const c = m[r + 2] * k;
-        const d = m[r + 3] * k;
-        const tx = m[r + 4] * k;
-        const ty = m[r + 5] * k;
-        // The box's corners placed: each of the least and greatest a coordinate takes, by sign.
-        const left = tx + Math.min(a * x0, a * x1) + Math.min(c * y0, c * y1);
-        const right = tx + Math.max(a * x0, a * x1) + Math.max(c * y0, c * y1);
-        const top = ty + Math.min(b * x0, b * x1) + Math.min(d * y0, d * y1);
-        const bottom = ty + Math.max(b * x0, b * x1) + Math.max(d * y0, d * y1);
-        unionTop(left, top, right, bottom);
+      case DRAW:
+        placeDraw(scene, i, box, m, k, areas);
         break;
-      }
 
       case MASK_BEGIN:
         // The mask's own draws, measured apart.
@@ -186,6 +164,74 @@ function filteredRect(layer: number, pad: number, target: MeasureTarget, scene: 
   const right = Math.ceil(x1 * res - TEXEL_SNAP);
   const bottom = Math.ceil(y1 * res - TEXEL_SNAP);
   scene.layerRect(layer, left, top, right - left, bottom - top);
+}
+
+/**
+ * The area of the target the draws from entry `from` on cover, at `scale`
+ * target pixels a stage pixel, masks' own draws apart and nothing cut by
+ * the masks: into `out`, its least x and y, then its greatest, in target
+ * pixels; nothing drawn leaves the least past the greatest.
+ */
+export function drawnArea(
+  scene: SceneList,
+  rows: Rows,
+  geometries: Geometries,
+  from: number,
+  scale: number,
+  out: number[],
+): void {
+  out.length = 0;
+  pushEmpty(out);
+  let defining = 0;
+  for (let i = from; i < scene.length; i++) {
+    switch (scene.kind[i]) {
+      case DRAW:
+        if (defining === 0) {
+          placeDraw(scene, i, geometries.box, rows.data, scale, out);
+        }
+
+        break;
+      case MASK_BEGIN:
+        defining++;
+        break;
+      case MASK_USE:
+        defining--;
+        break;
+    }
+  }
+}
+
+/** Entry `i`'s geometry box placed by its row at `k` target pixels a stage pixel, taken into the area atop `stack`. */
+function placeDraw(
+  scene: SceneList,
+  i: number,
+  box: Float32Array,
+  m: Float32Array,
+  k: number,
+  stack: number[],
+): void {
+  const g = scene.geometry[i] * 4;
+  const x0 = box[g];
+  const y0 = box[g + 1];
+  const x1 = box[g + 2];
+  const y1 = box[g + 3];
+  if (!(x1 >= x0 && y1 >= y0)) {
+    return;
+  }
+
+  const r = scene.row[i] * ROW_FLOATS;
+  const a = m[r] * k;
+  const b = m[r + 1] * k;
+  const c = m[r + 2] * k;
+  const d = m[r + 3] * k;
+  const tx = m[r + 4] * k;
+  const ty = m[r + 5] * k;
+  // The box's corners placed: each of the least and greatest a coordinate takes, by sign.
+  const n = stack.length;
+  stack[n - 4] = Math.min(stack[n - 4], tx + Math.min(a * x0, a * x1) + Math.min(c * y0, c * y1));
+  stack[n - 3] = Math.min(stack[n - 3], ty + Math.min(b * x0, b * x1) + Math.min(d * y0, d * y1));
+  stack[n - 2] = Math.max(stack[n - 2], tx + Math.max(a * x0, a * x1) + Math.max(c * y0, c * y1));
+  stack[n - 1] = Math.max(stack[n - 1], ty + Math.max(b * x0, b * x1) + Math.max(d * y0, d * y1));
 }
 
 function pushEmpty(stack: number[]): void {
