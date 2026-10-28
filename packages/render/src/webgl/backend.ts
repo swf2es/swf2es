@@ -91,9 +91,11 @@ export class WebGLBackend {
   private composite!: WebGLProgram;
   private modeLocation: WebGLUniformLocation | null = null;
   private compositeRowLocation: WebGLUniformLocation | null = null;
-  /** Layers free to draw into, and those drawn into now, innermost last, with what each covers. */
+  /** Layers free to draw into, of the target's size, and those drawn into now, innermost last. */
   private freeLayers: Layer[] = [];
   private layers: Layer[] = [];
+  /** The mask counts of the targets below the layers drawn into now, two numbers each. */
+  private readonly below: number[] = [];
   /** A copy of what is below a layer whose mode reads it, the target's size. */
   private back: WebGLTexture | null = null;
   private backFramebuffer: WebGLFramebuffer | null = null;
@@ -229,7 +231,8 @@ export class WebGLBackend {
     // them. A layer has a stencil of its own, and the target below keeps its count meanwhile.
     let depth = 0;
     let past = 0;
-    const below: number[] = [];
+    const below = this.below;
+    below.length = 0;
     state.stencil(null);
     const ops = commands.ops;
     for (let k = 0; k < commands.length; k++) {
@@ -311,12 +314,24 @@ export class WebGLBackend {
     this.state.bindTexture(0, this.rowsTexture);
   }
 
-  /** A layer the target's size, from those free, or made. */
+  /**
+   * A layer the target's size, from those free, or made; those free of
+   * another size, left from before the target was resized, are deleted.
+   */
   private takeLayer(width: number, height: number): Layer {
     const gl = this.gl;
-    const free = this.freeLayers.findIndex((l) => l.width === width && l.height === height);
-    if (free >= 0) {
-      return this.freeLayers.splice(free, 1)[0];
+    const free = this.freeLayers;
+    if (free.length > 0 && (free[0].width !== width || free[0].height !== height)) {
+      for (const layer of free) {
+        this.deleteLayer(layer);
+      }
+
+      free.length = 0;
+    }
+
+    const kept = free.pop();
+    if (kept) {
+      return kept;
     }
 
     const texture = gl.createTexture() as WebGLTexture;
@@ -339,6 +354,13 @@ export class WebGLBackend {
       stencil,
     );
     return { framebuffer, texture, stencil, width, height };
+  }
+
+  private deleteLayer(layer: Layer): void {
+    this.state.dropTexture(layer.texture);
+    this.gl.deleteFramebuffer(layer.framebuffer);
+    this.gl.deleteTexture(layer.texture);
+    this.gl.deleteRenderbuffer(layer.stencil);
   }
 
   /**
@@ -710,15 +732,14 @@ export class WebGLBackend {
     gl.deleteTexture(this.rowsTexture);
     gl.deleteProgram(this.composite);
     for (const layer of [...this.freeLayers, ...this.layers]) {
-      gl.deleteFramebuffer(layer.framebuffer);
-      gl.deleteTexture(layer.texture);
-      gl.deleteRenderbuffer(layer.stencil);
+      this.deleteLayer(layer);
     }
 
     if (this.back) {
       gl.deleteTexture(this.back);
       gl.deleteFramebuffer(this.backFramebuffer);
     }
+
     for (const texture of this.textures) {
       if (texture) {
         gl.deleteTexture(texture);

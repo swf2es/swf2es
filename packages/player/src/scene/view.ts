@@ -244,9 +244,10 @@ export class RenderView implements Drawer {
     this.rows.reset();
     this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
     plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
+    // The drawing buffer, which a browser may hold smaller than the canvas asks for.
     this.backend.execute(this.commands, this.scene, this.rows, this.geometries, this.textures, {
-      width: this.canvas.width,
-      height: this.canvas.height,
+      width: this.gl.drawingBufferWidth,
+      height: this.gl.drawingBufferHeight,
       scale: this.scale * this.resolution,
       x: 0,
       y: 0,
@@ -289,13 +290,13 @@ export class RenderView implements Drawer {
     let color = own ? (tint ? concatColor(tint, own) : own) : tint;
     // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
     // a 3D mask, or one inside what it masks, masks nothing in Flash.
-    let clipped = 0;
+    let clipped = false;
     if (!hidden && o.mask) {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
         const w = toStageFlat(mask);
         this.pushMask(() => this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true));
-        clipped++;
+        clipped = true;
       } else {
         unsupported.masks++;
       }
@@ -304,10 +305,18 @@ export class RenderView implements Drawer {
     // A blend mode draws it as a layer, composited onto what is below in its mode. An explicit
     // layer with children colours their combined pixels, its own fills with them, which then take
     // no colour of their own; without children, it colours each fill (render/view.ts, rooted).
-    const mode = hidden ? NORMAL : Math.max(0, BLEND_NAMES.indexOf(o.blendMode));
+    // A layer of no children is its fills, drawn as normal; a mode it has no blend for (a Pixel
+    // Bender shader's) is drawn as normal, and counted.
+    const named = BLEND_NAMES.indexOf(o.blendMode);
+    if (named < 0 && !hidden) {
+      unsupported.blendModes++;
+    }
+
+    const childful = o instanceof Container && o.children.length > 0;
+    const mode = hidden || named < 0 || (named === LAYER && !childful) ? NORMAL : named;
     let layerRow = -1;
     if (mode !== NORMAL) {
-      if (mode === LAYER && o instanceof Container && o.children.length > 0) {
+      if (mode === LAYER) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
@@ -460,7 +469,7 @@ export class RenderView implements Drawer {
       this.scene.marker(LAYER_END, mode, layerRow);
     }
 
-    if (clipped > 0) {
+    if (clipped) {
       this.popMask();
     }
 

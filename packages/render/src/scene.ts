@@ -82,9 +82,13 @@ export class SceneList {
     this.push(DRAW, geometry, row, blend, texture, sampler);
   }
 
-  /** A mask's marker; MASK_USE and MASK_POP name its draws, from `first`, `count` of them. */
-  marker(kind: number, first = 0, count = 0): void {
-    this.push(kind, first, count, 0, -1, 0);
+  /**
+   * A mask's or a layer's marker, with two numbers in its geometry and row:
+   * MASK_USE and MASK_POP name the mask's draws, from the first, so many of
+   * them; LAYER_END its blend mode and the row of its colour transform.
+   */
+  marker(kind: number, a = 0, b = 0): void {
+    this.push(kind, a, b, 0, -1, 0);
   }
 
   private push(

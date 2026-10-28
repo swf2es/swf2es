@@ -1,4 +1,20 @@
 import { ROWS_A_LINE } from "../rows.js";
+import {
+  ADD,
+  ALPHA,
+  DARKEN,
+  DIFFERENCE,
+  ERASE,
+  HARDLIGHT,
+  INVERT,
+  LAYER,
+  LIGHTEN,
+  MULTIPLY,
+  NORMAL,
+  OVERLAY,
+  SCREEN,
+  SUBTRACT,
+} from "../scene.js";
 
 /** Texels a row (ROW_FLOATS over four). */
 export const ROW_TEXELS = 4;
@@ -111,7 +127,7 @@ void main(void) {
     front = vec4(c.rgb * c.a, c.a);
   }
 
-  if (uMode <= 1 || uMode == 3 || uMode == 7) {
+  if (uMode == ${NORMAL} || uMode == ${LAYER} || uMode == ${SCREEN} || uMode == ${ADD}) {
     finalColor = front;
     return;
   }
@@ -121,22 +137,22 @@ void main(void) {
   vec3 cf = straight(front);
   vec3 b;
   switch (uMode) {
-    case 2: b = cb * cf; break;
-    case 4: b = max(cb, cf); break;
-    case 5: b = min(cb, cf); break;
-    case 6: b = abs(cb - cf); break;
-    case 12: b = hardlight(cf, cb); break;
-    case 13: b = hardlight(cb, cf); break;
-    case 8:
+    case ${MULTIPLY}: b = cb * cf; break;
+    case ${LIGHTEN}: b = max(cb, cf); break;
+    case ${DARKEN}: b = min(cb, cf); break;
+    case ${DIFFERENCE}: b = abs(cb - cf); break;
+    case ${OVERLAY}: b = hardlight(cf, cb); break;
+    case ${HARDLIGHT}: b = hardlight(cb, cf); break;
+    case ${SUBTRACT}:
       finalColor = vec4(max(back.rgb - front.rgb, 0.0), front.a + back.a * (1.0 - front.a));
       return;
-    case 9:
+    case ${INVERT}:
       finalColor = vec4((back.a - back.rgb) * front.a + back.rgb * (1.0 - front.a), back.a);
       return;
-    case 10:
+    case ${ALPHA}:
       finalColor = front.a > 0.0 ? back * front.a : back;
       return;
-    case 11:
+    case ${ERASE}:
       finalColor = back * (1.0 - front.a);
       return;
     default:

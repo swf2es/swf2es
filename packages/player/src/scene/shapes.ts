@@ -30,6 +30,8 @@ export const unsupported = {
    * gutter), which it is drawn without.
    */
   masks: 0,
+  /** Blend modes no blend is drawn for, a Pixel Bender shader's, drawn as normal. */
+  blendModes: 0,
   scale9Grids: 0,
   filters: 0,
   /** Fills the native tessellator refused, of contours one inside another that are not convex alone. */
