@@ -11,11 +11,13 @@ export const ROW_TEXELS = 4;
 export const fillVertex = `#version 300 es
 precision highp float;
 in vec2 aPosition;
+in vec2 aTexel;
 in vec4 aColor;
 uniform highp sampler2D uRows;
 uniform int uRow;
 uniform vec4 uView;
 out vec4 vColor;
+out vec2 vTexel;
 flat out vec4 vMul;
 flat out vec4 vAdd;
 
@@ -28,19 +30,39 @@ void main(void) {
   vec2 p = vec2(m.x * aPosition.x + m.z * aPosition.y + t.x, m.y * aPosition.x + m.w * aPosition.y + t.y);
   gl_Position = vec4(p * uView.xy + uView.zw, 0.0, 1.0);
   vColor = aColor;
+  vTexel = aTexel;
 }
 `;
 
-/** Flash's colour transform on the straight colour, clamped, then premultiplied for blending. */
+/**
+ * Flash's colour transform on the straight colour, clamped, then
+ * premultiplied for blending: the vertex' colour, or with a texture the
+ * texel's (premultiplied in the texture) times it, as the colour batcher
+ * did, a clear texel staying clear.
+ */
 export const fillFragment = `#version 300 es
 precision highp float;
 in vec4 vColor;
+in vec2 vTexel;
 flat in vec4 vMul;
 flat in vec4 vAdd;
+uniform sampler2D uTexture;
+uniform bool uTextured;
 out vec4 finalColor;
 
 void main(void) {
-  vec4 c = clamp(vColor * vMul + vAdd, 0.0, 1.0);
+  vec4 straight = vColor;
+  if (uTextured) {
+    vec4 t = texture(uTexture, vTexel / vec2(textureSize(uTexture, 0)));
+    if (t.a == 0.0) {
+      finalColor = vec4(0.0);
+      return;
+    }
+
+    straight = vec4(t.rgb / t.a * vColor.rgb, t.a * vColor.a);
+  }
+
+  vec4 c = clamp(straight * vMul + vAdd, 0.0, 1.0);
   finalColor = vec4(c.rgb * c.a, c.a);
 }
 `;

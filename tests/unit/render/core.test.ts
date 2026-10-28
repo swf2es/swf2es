@@ -10,6 +10,7 @@ import {
   Rows,
   RUN,
   SceneList,
+  Textures,
 } from "../../../packages/render/dist/index.js";
 
 /** The commands as [op, a, b, c] tuples. */
@@ -117,4 +118,26 @@ test("a reused id is a new generation, which an old handle does not name", () =>
   assert.equal(second.id, first.id);
   assert.ok(!geometries.alive(first));
   assert.ok(geometries.alive(second));
+});
+
+test("a texture's pixels wait for the backend once set, and a lost context lets every texture go", () => {
+  const textures = new Textures();
+  const a = textures.add(1, 1, Uint8Array.of(255, 0, 0, 255));
+  const b = textures.add(2, 1, new Uint8Array(8));
+  assert.deepEqual(textures.pending, [a.id, b.id]);
+  textures.pending.length = 0;
+  textures.set(a.id, 2, 2, new Uint8Array(16));
+  assert.deepEqual(textures.pending, [a.id]);
+  assert.equal(textures.get(a.id)?.width, 2);
+  textures.lost();
+  assert.ok(!textures.alive(a) && !textures.alive(b));
+  assert.deepEqual(textures.removed, [a.id, b.id]);
+});
+
+test("an entry names its texture and sampler, none by default", () => {
+  const scene = new SceneList();
+  scene.draw(0, 0, 0);
+  scene.draw(1, 0, 0, 7, 3);
+  assert.deepEqual([scene.texture[0], scene.sampler[0]], [-1, 0]);
+  assert.deepEqual([scene.texture[1], scene.sampler[1]], [7, 3]);
 });

@@ -13,12 +13,15 @@ export interface GeometryHandle {
 /**
  * Triangles to draw under a row's transform: positions on the stage in
  * pixels, two floats a vertex; each vertex' straight colour, its bytes red,
- * green, blue and alpha from the lowest; and indices into the vertices,
- * three a triangle. The backend copies them into its atlas once.
+ * green, blue and alpha from the lowest; where it samples a texture, where
+ * in texels, two floats a vertex, which a draw divides by the texture's
+ * size; and indices into the vertices, three a triangle. The backend copies
+ * them into its atlas once.
  */
 export interface GeometryData {
   positions: Float32Array;
   colors: Uint32Array;
+  texels?: Float32Array;
   indices: Uint32Array;
 }
 

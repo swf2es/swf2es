@@ -9,4 +9,5 @@ export {
 } from "./geometry.js";
 export { plan } from "./plan.js";
 export { type ColorRow, ROW_FLOATS, ROWS_A_LINE, Rows } from "./rows.js";
-export { NORMAL, SceneList } from "./scene.js";
+export { CLAMP, MIRROR, NORMAL, REPEAT, SceneList, SMOOTH } from "./scene.js";
+export { type TextureData, type TextureHandle, Textures } from "./textures.js";
