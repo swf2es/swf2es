@@ -31,6 +31,14 @@ here is judged by frame time:
 
 These are measured on the busy room replay, a mostly static scene with
 small edits, and a filter-heavy scene, on a GPU and on software GL.
+
+GPU time is measured with the GPU saturated, frames drawn as fast as it
+goes, in clock cycles a render: an integrated GPU lowers its clock when
+it has less to do, so at a scene's own frame rate its timer hides most
+changes. Measured so, the busy room's GPU time is mostly fill: 8×
+multisampling of the back buffer, and blend layers drawn again every
+frame. Fewer commands save the GPU process's time, not the GPU's; both
+are reported.
 Command and draw counts are supporting evidence. `draw-counts.ts` keeps
 them from creeping up unnoticed, but a step that raises them and is
 measurably faster updates the baseline on purpose.
