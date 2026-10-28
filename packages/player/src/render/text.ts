@@ -12,7 +12,7 @@ import {
 } from "pixi.js";
 import type { StaticTextObject, TextObject } from "../display/display.js";
 import { shapeLayers } from "../display/shapes.js";
-import { overruns } from "../scene/text.js";
+import { glyphShape, overruns } from "../scene/text.js";
 import { csmTables } from "../text/csm.js";
 import { deviceMetrics, fontFamily } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
@@ -76,15 +76,7 @@ const glyphFills = new WeakMap<Glyph, GraphicsContext | null>();
 function glyphFill(glyph: Glyph): GraphicsContext | null {
   let context = glyphFills.get(glyph);
   if (context === undefined) {
-    const shape = {
-      id: 0,
-      bounds: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
-      edgeBounds: null,
-      fills: [{ type: "solid" as const, color: 0xffffffff }],
-      lines: [],
-      records: glyph.records,
-      truncated: false,
-    };
+    const shape = glyphShape(glyph);
     const layers = shapeLayers(shape);
     context = layers.length > 0 ? fillContext(layers[0], (fill) => paint(fill as Fill)) : null;
     glyphFills.set(glyph, context);

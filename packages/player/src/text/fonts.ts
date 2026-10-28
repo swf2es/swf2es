@@ -75,6 +75,14 @@ function context(): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
 const measured = new Map<string, DeviceMetrics>();
 
+/** The CSS font a device format is measured and drawn in. */
+export function cssFont(font: string, size: number, bold: boolean, italic: boolean): string {
+  const families = fontFamily(font)
+    .map((f) => (/^[a-z-]+$/.test(f) ? f : `"${f}"`))
+    .join(", ");
+  return `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${families}`;
+}
+
 /**
  * A device font's metrics: the browser's, from its canvas, where there is
  * one; else (node) a stand-in, half the size a character, ascent 0.9 and
@@ -94,10 +102,7 @@ export function deviceMetrics(
 
   const c = context();
   if (c) {
-    const families = fontFamily(font)
-      .map((f) => (/^[a-z-]+$/.test(f) ? f : `"${f}"`))
-      .join(", ");
-    const css = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${families}`;
+    const css = cssFont(font, size, bold, italic);
     const widths = new Map<string, number>();
     c.font = css;
     const box = c.measureText("Mg");

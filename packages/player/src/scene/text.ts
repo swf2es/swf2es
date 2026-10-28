@@ -5,7 +5,8 @@
 // rasterize; and the rules both views share.
 import type { Glyph } from "@swf2es/format";
 import type { StaticTextObject, TextObject } from "../display/display.js";
-import { deviceMetrics, fontFamily } from "../text/fonts.js";
+import type { shapeLayers } from "../display/shapes.js";
+import { deviceMetrics } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
 
 /** Device text rasterized at its largest stretch, with bounded extra texture resolution. */
@@ -70,13 +71,18 @@ export interface RectItem {
   color: number;
 }
 
-/** A run of a device font's characters in one format, for a canvas to draw, its top at `x`, `top`. */
+/**
+ * A run of a device font's characters in one format, for a canvas to draw
+ * white and its row to colour, as a glyph is: its top at `x`, `top`.
+ */
 export interface DeviceItem {
   kind: "device";
   text: string;
-  /** The CSS font, at `size` pixels, as deviceMetrics measures it. */
-  font: string;
+  /** The device font's name, size, weight and style, as deviceMetrics measures it. */
+  family: string;
   size: number;
+  bold: boolean;
+  italic: boolean;
   color: number;
   letterSpacing: number;
   ascent: number;
@@ -95,12 +101,17 @@ export interface TextOmissions {
   clipped: boolean;
 }
 
-/** The CSS font of a device format, as deviceMetrics builds it. */
-export function cssFont(font: string, size: number, bold: boolean, italic: boolean): string {
-  const families = fontFamily(font)
-    .map((f) => (/^[a-z-]+$/.test(f) ? f : `"${f}"`))
-    .join(", ");
-  return `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${families}`;
+/** A glyph's outline as a shape of one white fill, in the font's units over 20, as shapeLayers takes twips. */
+export function glyphShape(glyph: Glyph): Parameters<typeof shapeLayers>[0] {
+  return {
+    id: 0,
+    bounds: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
+    edgeBounds: null,
+    fills: [{ type: "solid", color: 0xffffffff }],
+    lines: [],
+    records: glyph.records,
+    truncated: false,
+  };
 }
 
 /**
@@ -143,6 +154,7 @@ export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
   let bottom = 0;
   let right = 0;
   let left = Number.POSITIVE_INFINITY;
+
   for (let l = first; l <= last; l++) {
     const line = layout.lines[l];
     const baseline = (dy + line.y + line.ascent) / 20;
@@ -206,6 +218,7 @@ export function staticItems(o: StaticTextObject, omitted: TextOmissions): TextIt
   const m = o.definition.definition.matrix;
   omitted.advanced ||= Boolean(o.definition.csm?.useFlashType);
   const items: TextItem[] = [];
+
   for (const placed of o.glyphs.glyphs) {
     // The fill is in the font's units over 20: a height in twips over the em puts it in pixels.
     const s = placed.height / placed.font.em;
@@ -309,12 +322,16 @@ function caret(o: TextObject, items: TextItem[]): void {
 function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number): DeviceItem {
   const f = run[0].format;
   const text = run.map((c) => (o.displayAsPassword ? "*" : o.model.text[c.index])).join("");
-  const metrics = deviceMetrics(f.font, f.size, f.bold, f.italic);
+  // As layout sizes it: a size below nothing is none.
+  const size = Math.max(0, f.size);
+  const metrics = deviceMetrics(f.font, size, f.bold, f.italic);
   return {
     kind: "device",
     text,
-    font: cssFont(f.font, f.size, f.bold, f.italic),
-    size: f.size,
+    family: f.font,
+    size,
+    bold: f.bold,
+    italic: f.italic,
     color: (0xff000000 | f.color) >>> 0,
     letterSpacing: Number.isFinite(f.letterSpacing) ? f.letterSpacing : 0,
     ascent: metrics.ascent,
