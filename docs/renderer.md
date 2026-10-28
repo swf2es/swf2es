@@ -12,11 +12,14 @@ from an upload hook (`render/table.ts`), groups settle and unsettle
 around Pixi's rebuilds (`render/settle.ts`), and filters keep their areas
 and outputs through the fork's filter pipe.
 
-In a crowded room, the frame is limited by its GPU commands, not by the
-CPU work that builds them: about 12,700 GL calls a frame, executed by
-Chrome's GPU process, plus some 20 ms of GPU time on an Intel Iris Xe. To
-send fewer commands, the whole frame has to be known in one place, and
-Pixi spreads that knowledge over its systems, pipes and render groups.
+A crowded room's frame costs in two places. Its commands, about 12,700
+GL calls a frame, are executed on the main thread of Chrome's GPU
+process, which spends some 17 ms a frame on them. Its fill, some
+20 ms of GPU time on an Intel Iris Xe, is mostly multisampling and blend
+layers drawn again every frame. Sending fewer commands needs the whole
+frame known in one place; drawing fewer pixels needs the layers planned
+from it. Pixi spreads that knowledge over its systems, pipes and render
+groups.
 
 Fewer commands is a means, not the goal. Pulled draws took that scene from
 12,700 GL calls to 11,273 ([architecture.md](architecture.md#rendering)).
@@ -44,6 +47,7 @@ The replay is the acceptance test, but it takes minutes and a private
 recording. For each pull request, a synthetic scene in
 `tests/player/bench.ts`, perhaps grown from `--town`, is built to the
 busy room's measured mix and checked once against the replay's counts:
+
 - about 4,650 Graphics a frame, most of them still;
 - bitmap and gradient fills;
 - 240 filters, most with kept outputs;
@@ -51,6 +55,7 @@ busy room's measured mix and checked once against the replay's counts:
 - a few masks.
 
 It measures a change in seconds.
+
 Command and draw counts are supporting evidence. `draw-counts.ts` keeps
 them from creeping up unnoticed, but a step that raises them and is
 measurably faster updates the baseline on purpose.
@@ -183,10 +188,9 @@ It decides:
   is kept only once its span has stood unchanged for a frame: keeping
   the plans of spans that change every frame cost more than planning
   them afresh. Its rows and chunks live on the GPU alone, not mirrored
-  on the CPU. A plan
-  also depends on more than its entries: the atlas ranges and textures
-  it names, which can move or be evicted, and the clip and target it
-  inherits from its enclosing spans. Resources carry generations, and a
+  on the CPU. A plan also depends on more than its entries: the atlas
+  ranges and textures it names, which can move or be evicted, and the
+  clip and target it inherits from its enclosing spans. Resources carry generations, and a
   plan is reused only if those generations and the inherited state
   are the ones it was made with.
 
@@ -322,7 +326,9 @@ renderer is built beside Pixi instead:
    complete it is, and a reference that passed may not fail again.
 3. **The default flipped** once every reference passes with the switch
    on and it measures better on the three scenes, on an integrated GPU
-   and a discrete one.
+   and a discrete one, and no worse under software GL, which CI draws
+   with and a player without a usable GPU falls back to: there the
+   planner chooses strategies that suit it, as pulled draws did not.
 4. **Pixi removed:** its containers, render groups, settling, pools,
    spare batchers and the fork.
 5. **WebGPU,** behind the same command buffer.
