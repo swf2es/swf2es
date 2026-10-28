@@ -32,6 +32,7 @@ import {
   Buffer,
   BufferImageSource,
   BufferUsage,
+  type Container,
   color32BitToUniform,
   ExtensionType,
   extensions,
@@ -44,8 +45,10 @@ import {
   type InstructionSet,
   RendererType,
   Shader,
+  Sprite,
   State,
   Texture,
+  type TextureSource,
   UniformGroup,
   type WebGLRenderer,
 } from "pixi.js";
@@ -307,6 +310,262 @@ void main(void) {
 }
 `;
 
+/**
+ * Step 0 of docs/renderer.md, a throwaway prototype: with it on, every
+ * Graphics whose fills the atlas can hold, batched copies included, and
+ * every plain Sprite go into runs of their own (proto runs) in place of
+ * Pixi's batches and the table's runs, and a run of one blend mode is
+ * one pulled draw of up to `units` textures. `reset` resets Pixi's GL
+ * state after each run, the blunt handoff, to time it.
+ */
+const proto = {
+  on: false,
+  units: 8,
+  reset: false,
+  sprites: true,
+  graphics: true,
+  retain: true,
+};
+/** What proto runs drew, and what planning them cost, since the page loaded. */
+const protoDrawn = {
+  runs: 0,
+  calls: 0,
+  chunks: 0,
+  sprites: 0,
+  graphics: 0,
+  textures: 0,
+  planMs: 0,
+  resets: 0,
+  /** Runs planned again, and drawn as kept from an earlier render (retain). */
+  planned: 0,
+  kept: 0,
+  /** Items it could not draw: a context the atlas would not take, or rows past the most. */
+  missed: 0,
+};
+const PROTO_UNITS = 16;
+/** Texels a sprite's record: its rectangle, then its texture's uvs, two corners a texel. */
+const SPRITE_TEXELS = 3;
+const SPRITES_A_LINE = 256;
+
+/** Switch the prototype, from the next build of each render group (rebuildGroups). */
+export function setProto(options: Partial<typeof proto>): void {
+  Object.assign(proto, options);
+  proto.units = Math.max(1, Math.min(PROTO_UNITS, proto.units));
+}
+
+export function protoOptions(): Readonly<typeof proto> {
+  return proto;
+}
+
+export function protoStats(): Readonly<typeof protoDrawn> {
+  return protoDrawn;
+}
+
+/** Every render group under `root` built again, as a switch of the prototype needs. */
+export function rebuildGroups(root: Container): void {
+  const group = (root as { renderGroup?: { structureDidChange: boolean } | null }).renderGroup;
+  if (group) {
+    group.structureDidChange = true;
+  }
+
+  for (const child of root.children) {
+    rebuildGroups(child);
+  }
+}
+
+/** A container the prototype draws: a Graphics or a Sprite, marked as it was last added. */
+type ProtoItem = Container & {
+  $proto?: boolean;
+  $protoRun?: TableInstruction;
+  isRenderable: boolean;
+};
+
+export function isProtoItem(item: Container): boolean {
+  return (item as ProtoItem).$proto === true;
+}
+
+/** `item`, the prototype's, changed: its run is planned again (retain). */
+export function protoChanged(item: Container): void {
+  const run = (item as ProtoItem).$protoRun;
+  if (run) {
+    run.protoDirty = true;
+  }
+}
+
+/**
+ * Whether the prototype takes `graphics`: switched on, no custom shader or
+ * rounding, and its context's batches flat triangles, as the atlas takes.
+ */
+export function protoTakesGraphics(graphics: Graphics, renderer: WebGLRenderer): boolean {
+  if (!proto.on || !proto.graphics || renderer._roundPixels | (graphics as Drawn)._roundPixels) {
+    return false;
+  }
+
+  // The context it shows, built as Pixi's pipe would build it.
+  const context = graphics.context;
+  if (context.customShader) {
+    return false;
+  }
+
+  const white = Texture.WHITE.source.uid;
+  for (const batch of renderer.graphicsContext.updateGpuContext(context).batches) {
+    if (batch.topology !== "triangle-list" || batch.texture.source.uid !== white) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function protoTakesSprite(sprite: Sprite, renderer: WebGLRenderer): boolean {
+  return (
+    proto.on &&
+    proto.sprites &&
+    sprite.renderPipeId === "sprite" &&
+    !(renderer._roundPixels | (sprite as Sprite & { _roundPixels: number })._roundPixels)
+  );
+}
+
+/** Mark `item` as the prototype's, or not, as it is added to an instruction set. */
+export function markProto(item: Container, taken: boolean): void {
+  (item as ProtoItem).$proto = taken;
+}
+
+/** Add `item` to the proto run `instructionSet` ends with, or start one. */
+export function addToProtoRun(item: Container, instructionSet: InstructionSet): void {
+  const size = instructionSet.instructionSize;
+  const last = instructionSet.instructions[size - 1] as TableInstruction | undefined;
+  if (size > 0 && last?.renderPipeId === NAME && last.protoItems) {
+    last.protoItems.push(item as ProtoItem);
+    (item as ProtoItem).$protoRun = last;
+    return;
+  }
+
+  const run: TableInstruction = {
+    renderPipeId: NAME,
+    canBundle: false,
+    items: [],
+    protoItems: [item as ProtoItem],
+  };
+  (item as ProtoItem).$protoRun = run;
+  instructionSet.add(run);
+}
+
+/**
+ * The prototype's vertex shader: the pulled one, where a chunk whose
+ * fourth word is a texture's slot plus one is a sprite, its six vertices
+ * made from its record (rectangle and uvs) as Pixi's batcher makes a
+ * quad's, and its colour the white a sprite's vertices carry.
+ */
+const protoVertex = `#version 300 es
+uniform mat3 uProjectionMatrix;
+uniform mat3 uWorldTransformMatrix;
+uniform vec4 uWorldColorAlpha;
+uniform vec2 uResolution;
+uniform highp sampler2D uTable;
+uniform highp sampler2D uAtlas;
+uniform highp sampler2D uChunks;
+uniform highp sampler2D uSprites;
+uniform float uFirst;
+out vec4 vColor;
+out vec2 vUV;
+flat out float vTex;
+flat out float vFlash;
+flat out vec4 vMul;
+flat out vec4 vAdd;
+
+void main(void) {
+  int chunk = int(uFirst) + gl_InstanceID;
+  vec4 c = texelFetch(uChunks, ivec2(chunk & ${ATLAS_WIDTH - 1}, chunk >> ${Math.log2(ATLAS_WIDTH)}), 0);
+  vColor = vec4(0.0);
+  vUV = vec2(0.0);
+  vTex = -1.0;
+  vFlash = 0.0;
+  vMul = vec4(0.0);
+  vAdd = vec4(0.0);
+  if (float(gl_VertexID) >= c.z) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+
+  vec2 aPosition;
+  vec4 aColor;
+  if (c.w > 0.5) {
+    int record = int(c.y);
+    ivec2 s = ivec2((record & ${SPRITES_A_LINE - 1}) * ${SPRITE_TEXELS}, record >> ${Math.log2(SPRITES_A_LINE)});
+    vec4 rect = texelFetch(uSprites, s, 0);
+    vec4 uv01 = texelFetch(uSprites, s + ivec2(1, 0), 0);
+    vec4 uv23 = texelFetch(uSprites, s + ivec2(2, 0), 0);
+    // Pixi's quad, corners 0 1 2 and 0 2 3.
+    int corner = gl_VertexID < 3 ? gl_VertexID : (gl_VertexID == 3 ? 0 : gl_VertexID - 2);
+    aPosition = vec2(corner == 1 || corner == 2 ? rect.z : rect.x, corner >= 2 ? rect.w : rect.y);
+    vUV = corner == 0 ? uv01.xy : (corner == 1 ? uv01.zw : (corner == 2 ? uv23.xy : uv23.zw));
+    aColor = vec4(1.0);
+    vTex = c.w - 1.0;
+  } else {
+    int index = int(c.y) + gl_VertexID;
+    vec4 a = texelFetch(uAtlas, ivec2(index & ${ATLAS_WIDTH - 1}, index >> ${Math.log2(ATLAS_WIDTH)}), 0);
+    aPosition = a.xy;
+    vec2 upper = floor(a.zw / 256.0);
+    aColor = vec4(a.z - upper.x * 256.0, upper.x, a.w - upper.y * 256.0, upper.y) / 255.0;
+  }
+
+  int row = int(c.x);
+  ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
+  vec4 m = texelFetch(uTable, at, 0);
+  vec4 t = texelFetch(uTable, at + ivec2(1, 0), 0);
+  vec4 tint = texelFetch(uTable, at + ivec2(2, 0), 0);
+  vec4 mul = texelFetch(uTable, at + ivec2(3, 0), 0);
+  vec4 add = texelFetch(uTable, at + ivec2(4, 0), 0);
+${placed}}
+`;
+
+/**
+ * A fill as the table's fragment shader colours it; a sprite's texel
+ * times its colour as Pixi's batcher does, or under a Flash colour
+ * transform as the colour batcher does, unpremultiplied first.
+ */
+const protoFragment = (units: number) => `#version 300 es
+in vec4 vColor;
+in vec2 vUV;
+flat in float vTex;
+flat in float vFlash;
+flat in vec4 vMul;
+flat in vec4 vAdd;
+uniform sampler2D uTextures[${units}];
+out vec4 finalColor;
+
+vec4 texel(int slot, vec2 uv) {
+${Array.from({ length: units }, (_, i) => `  if (slot == ${i}) return texture(uTextures[${i}], uv);`).join("\n")}
+  return vec4(0.0);
+}
+
+void main(void) {
+  if (vTex < -0.5) {
+    if (vFlash > 0.5) {
+      vec4 c = clamp(vColor * vMul + vAdd, 0.0, 1.0);
+      finalColor = vec4(c.rgb * c.a, c.a);
+    } else {
+      finalColor = vColor;
+    }
+    return;
+  }
+
+  vec4 t = texel(int(vTex + 0.5), vUV);
+  if (vFlash > 0.5) {
+    if (t.a == 0.0) {
+      finalColor = vec4(0.0);
+    } else {
+      vec4 straight = vec4(t.rgb / t.a * vColor.rgb, t.a * vColor.a);
+      vec4 c = clamp(straight * vMul + vAdd, 0.0, 1.0);
+      finalColor = vec4(c.rgb * c.a, c.a);
+    }
+  } else {
+    finalColor = t * vColor;
+  }
+}
+`;
+
 /** Pixi puts its precision and name first, where an extension may no longer be asked for. */
 function tableProgram(short: boolean): GlProgram {
   const program = new GlProgram({
@@ -520,7 +779,7 @@ export class Atlas {
   /** The most indices the store may hold, which growth stops at. */
   mostIndices = Number.POSITIVE_INFINITY;
   /** What the atlas has done, for a test or a probe to read. */
-  readonly stats = { placed: 0, reused: 0, released: 0, grown: 0, compacted: 0 };
+  readonly stats = { placed: 0, reused: 0, released: 0, grown: 0, compacted: 0, cleared: 0 };
   /** Whether the store has room made for the capacity: not as it starts, shrinks or is lost. */
   private allocated = false;
   private readonly vertexRanges = new Ranges();
@@ -704,6 +963,7 @@ export class Atlas {
       this.allocated = false;
     }
 
+    this.stats.cleared++;
     this.placed.clear();
     this.vertexRanges.clear();
     this.indexRanges.clear();
@@ -954,6 +1214,31 @@ export interface TableInstruction extends Instruction {
   items: Graphics[];
   /** How a pipe draws it in pulled draws, as planned for a render. */
   plan?: Plan;
+  /** A proto run's Graphics and Sprites (setProto), and its plan. */
+  protoItems?: ProtoItem[];
+  protoPlan?: ProtoPlan;
+  /** Whether an item of the run changed since it was planned (render/hooks.ts, updateRenderable). */
+  protoDirty?: boolean;
+}
+
+/** A proto run's steps: Plan's, and the textures each binds, from `texStart`, `texCount` of them. */
+interface ProtoPlan extends Plan {
+  texStart: number[];
+  texCount: number[];
+  textures: TextureSource[];
+  /** The atlas' clearings it was planned after, and the texture units it was planned for. */
+  cleared: number;
+  units: number;
+  /** Kept (retain): where its rows, chunks and sprite records lie in the kept textures, and how many. */
+  kept: boolean;
+  rowStart: number;
+  rowCount: number;
+  chunkStart: number;
+  chunkCount: number;
+  spriteStart: number;
+  spriteCount: number;
+  /** The render it was last drawn in, for kept ranges to be given back once unused. */
+  used: number;
 }
 
 /**
@@ -981,7 +1266,8 @@ interface Plan {
 export function addToRun(graphics: Graphics, instructionSet: InstructionSet): void {
   const size = instructionSet.instructionSize;
   const last = instructionSet.instructions[size - 1] as TableInstruction | undefined;
-  if (size > 0 && last?.renderPipeId === NAME) {
+  // A proto run is the table's too, but not one to join.
+  if (size > 0 && last?.renderPipeId === NAME && !last.protoItems) {
     last.items.push(graphics);
     return;
   }
@@ -1162,6 +1448,29 @@ export class TablePipe {
   private empty!: Geometry;
   /** Framebuffers of the atlas' texture and a larger one, which it is blitted into. */
   private copyFrames: (WebGLFramebuffer | null)[] | null = null;
+  /** The prototype's sprite records, the next free this render and those uploaded; its unit. */
+  private sprites!: BufferImageSource;
+  private spriteCursor = 0;
+  private spritesUploaded = 0;
+  private spritesUnit = 0;
+  /**
+   * The prototype's kept rows, chunks and sprite records (retain): each run's
+   * stay from render to render until an item of it changes, its ranges
+   * taken and given back as Ranges; the stretch of each written this
+   * render, uploaded in one call; and the plans holding ranges.
+   */
+  private keptRows!: BufferImageSource;
+  private keptChunks!: BufferImageSource;
+  private keptSprites!: BufferImageSource;
+  private readonly keptRowRanges = new Ranges();
+  private readonly keptChunkRanges = new Ranges();
+  private readonly keptSpriteRanges = new Ranges();
+  /** Each kind's stretches written this render, start and end, merged and uploaded as drawn. */
+  private readonly keptWrites: number[][] = [[], [], []];
+  private readonly keptPlans = new Set<ProtoPlan>();
+  /** The prototype's shader by texture units, and the programs whose samplers were pointed. */
+  private readonly protoShaders = new Map<number, Shader>();
+  private protoPointed = new WeakSet<WebGLProgram>();
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
@@ -1212,6 +1521,10 @@ export class TablePipe {
     });
     this.pulledRows = tableSource(16);
     this.chunks = tableSource(16, ATLAS_WIDTH);
+    this.sprites = tableSource(16, SPRITES_A_LINE * SPRITE_TEXELS);
+    this.keptRows = tableSource(16);
+    this.keptChunks = tableSource(16, ATLAS_WIDTH);
+    this.keptSprites = tableSource(16, SPRITES_A_LINE * SPRITE_TEXELS);
     this.pulled = new Atlas(
       Texture.WHITE.source.uid,
       {
@@ -1246,10 +1559,12 @@ export class TablePipe {
     this.rowsUnit = units - 1;
     this.atlasUnit = units - 2;
     this.chunksUnit = units - 3;
+    this.spritesUnit = units - 4;
     this.pointed = null;
+    this.protoPointed = new WeakSet();
     // Pixi binds the empty texture to units 0 to 15 alone as a context comes, and would hold what
     // was bound to these on a lost one bound still.
-    for (const unit of [this.rowsUnit, this.atlasUnit, this.chunksUnit]) {
+    for (const unit of [this.rowsUnit, this.atlasUnit, this.chunksUnit, this.spritesUnit]) {
       this.renderer.texture.bind(Texture.EMPTY, unit);
     }
     // A lost context took the atlas' buffers: every context is copied in again as it is drawn.
@@ -1270,7 +1585,17 @@ export class TablePipe {
     this.uploaded = 0;
     this.chunkCursor = 0;
     this.chunksUploaded = 0;
+    this.spriteCursor = 0;
+    this.spritesUploaded = 0;
     this.pulled.compact();
+    // Kept ranges of runs not drawn for a while, as a group rebuilt leaves its old runs, given back.
+    if (this.render % 60 === 0) {
+      for (const plan of this.keptPlans) {
+        if (this.render - plan.used > 120) {
+          this.giveBack(plan);
+        }
+      }
+    }
   }
 
   /** Whether the table draws for this renderer: switched on, and pulled draws or WebGL 2 with multi-draw. */
@@ -1280,7 +1605,10 @@ export class TablePipe {
 
   /** Whether runs are pulled draws: wanted, and possible. */
   private get pulling(): boolean {
-    return enabled && (pullWanted ?? !this.software) && this.pullable && !this.pullFailed;
+    // The prototype draws only pulled draws, on software GL too.
+    return (
+      enabled && (pullWanted ?? (proto.on || !this.software)) && this.pullable && !this.pullFailed
+    );
   }
 
   /** Whether a run too short for a multi-draw is drawn from the atlas, a call a draw. */
@@ -1305,13 +1633,26 @@ export class TablePipe {
     const instructions = instructionSet.instructions;
     for (let i = 0; i < instructionSet.instructionSize; i++) {
       const instruction = instructions[i] as TableInstruction;
-      if (instruction.renderPipeId === NAME) {
+      if (instruction.renderPipeId !== NAME) {
+        continue;
+      }
+
+      if (instruction.protoItems) {
+        if (!this.protoValid(instruction)) {
+          this.planProto(instruction);
+        }
+      } else {
         this.plan(instruction);
       }
     }
   }
 
   execute(instruction: TableInstruction): void {
+    if (instruction.protoItems) {
+      this.executeProto(instruction);
+      return;
+    }
+
     if (this.pulling && this.executePulled(instruction)) {
       return;
     }
@@ -1538,6 +1879,7 @@ export class TablePipe {
       out[at] = row;
       out[at + 1] = index + k;
       out[at + 2] = Math.min(CHUNK, count - k);
+      out[at + 3] = 0;
     }
 
     this.chunkCursor += chunks;
@@ -1612,6 +1954,493 @@ export class TablePipe {
     }
 
     return true;
+  }
+
+  /**
+   * Plan proto run `run` for this render: each Graphics as plan does, a
+   * batched copy it shows too, and each Sprite a
+   * row, a record and a chunk of its own; a step for each stretch of one
+   * blend mode whose textures fit the units.
+   */
+  private planProto(run: TableInstruction): ProtoPlan {
+    const start = performance.now();
+    let plan = run.protoPlan;
+    if (plan?.pipe !== this) {
+      plan = {
+        pipe: this,
+        render: 0,
+        releases: 0,
+        steps: 0,
+        alone: [],
+        first: [],
+        chunks: [],
+        rows: [],
+        blends: [],
+        contexts: [],
+        places: [],
+        texStart: [],
+        texCount: [],
+        textures: [],
+        cleared: 0,
+        units: 0,
+        kept: false,
+        rowStart: 0,
+        rowCount: 0,
+        chunkStart: 0,
+        chunkCount: 0,
+        spriteStart: 0,
+        spriteCount: 0,
+        used: 0,
+      };
+      run.protoPlan = plan;
+    }
+
+    run.protoDirty = false;
+    plan.cleared = this.pulled.stats.cleared;
+    plan.units = proto.units;
+    plan.used = this.render;
+    protoDrawn.planned++;
+    const rowFrom = this.rowCursor;
+    const chunkFrom = this.chunkCursor;
+    const spriteFrom = this.spriteCursor;
+    plan.render = this.render;
+    plan.releases = this.pulled.stats.released;
+    plan.steps = 0;
+    plan.contexts.length = 0;
+    plan.places.length = 0;
+    plan.textures.length = 0;
+
+    const contexts = this.renderer.graphicsContext;
+    const units = proto.units;
+    let open = -1;
+    for (const item of run.protoItems as ProtoItem[]) {
+      if (!item.isRenderable) {
+        continue;
+      }
+
+      const blend = item.groupBlendMode;
+      if (item instanceof Sprite) {
+        const source = item.texture?.source;
+        if (!source) {
+          continue;
+        }
+
+        let slot = -1;
+        if (open >= 0 && plan.blends[open] === blend) {
+          const found = plan.textures.indexOf(source, plan.texStart[open]);
+          if (found >= 0) {
+            slot = found - plan.texStart[open];
+          } else if (plan.texCount[open] < units) {
+            slot = plan.texCount[open]++;
+            plan.textures.push(source);
+          }
+        }
+
+        if (slot < 0) {
+          open = this.protoStep(plan, blend);
+          slot = plan.texCount[open]++;
+          plan.textures.push(source);
+        }
+
+        plan.chunks[open] += this.spriteRow(item, slot);
+        plan.rows[open]++;
+        protoDrawn.sprites++;
+        continue;
+      }
+
+      const graphics = item as unknown as Graphics;
+      const context = graphics.context;
+      const gpu = contexts.updateGpuContext(context);
+      if (!gpu.batches.length) {
+        continue;
+      }
+
+      let place = this.pulled.where(gpu);
+      if (place === undefined) {
+        place = this.pulled.place(gpu, contexts.getContextRenderDataOnCpu(context));
+      }
+
+      if (this.pullFailed) {
+        return plan;
+      }
+
+      const batches = place ? place.counts.length : 0;
+      let chunks = 0;
+      for (let i = 0; i < batches; i++) {
+        chunks += Math.ceil((place as Placed).counts[i] / CHUNK);
+      }
+
+      if (
+        !place ||
+        this.rowCursor + batches > this.maxRows ||
+        this.chunkCursor + chunks > this.atlasMostLines * ATLAS_WIDTH
+      ) {
+        protoDrawn.missed++;
+        continue;
+      }
+
+      if (open < 0 || plan.blends[open] !== blend) {
+        open = this.protoStep(plan, blend);
+      }
+
+      for (let i = 0; i < batches; i++) {
+        plan.chunks[open] += this.pulledRow(graphics, place.offsets[i] / 4, place.counts[i]);
+        plan.rows[open]++;
+      }
+
+      plan.contexts.push(gpu);
+      plan.places.push(place);
+      protoDrawn.graphics++;
+    }
+
+    if (proto.retain) {
+      this.keep(plan, rowFrom, chunkFrom, spriteFrom);
+    } else if (plan.kept) {
+      this.giveBack(plan);
+    }
+
+    protoDrawn.planMs += performance.now() - start;
+    return plan;
+  }
+
+  /** Whether `run`'s plan may be drawn as it is: kept and unchanged, or made this render. */
+  private protoValid(run: TableInstruction): boolean {
+    const plan = run.protoPlan;
+    return (
+      plan !== undefined &&
+      plan.pipe === this &&
+      plan.units === proto.units &&
+      plan.cleared === this.pulled.stats.cleared &&
+      (plan.kept ? proto.retain && !run.protoDirty : plan.render === this.render) &&
+      this.stillPlaced(plan)
+    );
+  }
+
+  /**
+   * Move what `plan` wrote this render, from `rowFrom`, `chunkFrom` and
+   * `spriteFrom` on, into kept ranges, its chunks pointed at its rows and
+   * records there, and free the render's again.
+   */
+  private keep(plan: ProtoPlan, rowFrom: number, chunkFrom: number, spriteFrom: number): void {
+    const rows = this.rowCursor - rowFrom;
+    const chunks = this.chunkCursor - chunkFrom;
+    const sprites = this.spriteCursor - spriteFrom;
+    if (
+      plan.kept &&
+      (plan.rowCount !== rows || plan.chunkCount !== chunks || plan.spriteCount !== sprites)
+    ) {
+      this.giveBack(plan);
+    }
+
+    if (!plan.kept) {
+      plan.rowStart = this.takeKept(0, rows);
+      plan.chunkStart = this.takeKept(1, chunks);
+      plan.spriteStart = this.takeKept(2, sprites);
+      plan.rowCount = rows;
+      plan.chunkCount = chunks;
+      plan.spriteCount = sprites;
+      plan.kept = true;
+      this.keptPlans.add(plan);
+    }
+
+    const rowFloats = ROW_TEXELS * 4;
+    (this.keptRows.resource as Float32Array).set(
+      (this.pulledRows.resource as Float32Array).subarray(
+        rowFrom * rowFloats,
+        (rowFrom + rows) * rowFloats,
+      ),
+      plan.rowStart * rowFloats,
+    );
+    const spriteFloats = SPRITE_TEXELS * 4;
+    (this.keptSprites.resource as Float32Array).set(
+      (this.sprites.resource as Float32Array).subarray(
+        spriteFrom * spriteFloats,
+        (spriteFrom + sprites) * spriteFloats,
+      ),
+      plan.spriteStart * spriteFloats,
+    );
+    const from = this.chunks.resource as Float32Array;
+    const to = this.keptChunks.resource as Float32Array;
+    for (let i = 0; i < chunks; i++) {
+      const a = (chunkFrom + i) * 4;
+      const b = (plan.chunkStart + i) * 4;
+      const sprite = from[a + 3] > 0.5;
+      to[b] = from[a] - rowFrom + plan.rowStart;
+      to[b + 1] = sprite ? from[a + 1] - spriteFrom + plan.spriteStart : from[a + 1];
+      to[b + 2] = from[a + 2];
+      to[b + 3] = from[a + 3];
+    }
+
+    for (let k = 0; k < plan.steps; k++) {
+      plan.first[k] += plan.chunkStart - chunkFrom;
+    }
+
+    this.written(0, plan.rowStart, rows);
+    this.written(1, plan.chunkStart, chunks);
+    this.written(2, plan.spriteStart, sprites);
+    this.rowCursor = rowFrom;
+    this.chunkCursor = chunkFrom;
+    this.spriteCursor = spriteFrom;
+  }
+
+  /** Kept range of `size` of rows (0), chunks (1) or sprite records (2), the texture grown till it fits. */
+  private takeKept(kind: number, size: number): number {
+    if (size === 0) {
+      return 0;
+    }
+
+    const ranges = [this.keptRowRanges, this.keptChunkRanges, this.keptSpriteRanges][kind];
+    const perLine = [ROWS_A_LINE, ATLAS_WIDTH, SPRITES_A_LINE][kind];
+    for (;;) {
+      const texture = [this.keptRows, this.keptChunks, this.keptSprites][kind];
+      const start = ranges.take(size, texture.height * perLine);
+      if (start >= 0) {
+        return start;
+      }
+
+      // Made anew, and uploaded whole as it is first bound.
+      const most = kind === 0 ? this.maxRows / ROWS_A_LINE : this.atlasMostLines;
+      const next = this.grown(texture, most);
+      if (kind === 0) {
+        this.keptRows = next;
+      } else if (kind === 1) {
+        this.keptChunks = next;
+      } else {
+        this.keptSprites = next;
+      }
+    }
+  }
+
+  private giveBack(plan: ProtoPlan): void {
+    if (!plan.kept) {
+      return;
+    }
+
+    this.keptRowRanges.give(plan.rowStart, plan.rowCount);
+    this.keptChunkRanges.give(plan.chunkStart, plan.chunkCount);
+    this.keptSpriteRanges.give(plan.spriteStart, plan.spriteCount);
+    plan.kept = false;
+    this.keptPlans.delete(plan);
+  }
+
+  /** Note `count` of kind `kind` written from `start`, for this render's upload of each kind. */
+  private written(kind: number, start: number, count: number): void {
+    if (count > 0) {
+      this.keptWrites[kind].push(start, start + count);
+    }
+  }
+
+  /**
+   * Upload the stretches of kept kind `kind` written since the last: sorted,
+   * and those within a line of each other merged, a call each.
+   */
+  private uploadKept(kind: number): void {
+    const writes = this.keptWrites[kind];
+    if (writes.length === 0) {
+      return;
+    }
+
+    const texture = [this.keptRows, this.keptChunks, this.keptSprites][kind];
+    const texels = [ROW_TEXELS, 1, SPRITE_TEXELS][kind];
+    const unit = [this.rowsUnit, this.chunksUnit, this.spritesUnit][kind];
+    const perLine = [ROWS_A_LINE, ATLAS_WIDTH, SPRITES_A_LINE][kind];
+    const order: number[] = [];
+    for (let i = 0; i < writes.length; i += 2) {
+      order.push(i);
+    }
+
+    order.sort((a, b) => writes[a] - writes[b]);
+    let from = writes[order[0]];
+    let to = writes[order[0] + 1];
+    for (let k = 1; k <= order.length; k++) {
+      const start = k < order.length ? writes[order[k]] : Infinity;
+      if (start <= to + perLine) {
+        to = Math.max(to, writes[order[k] + 1]);
+        continue;
+      }
+
+      this.upload(from, to, texture, texels, unit, perLine);
+      if (k < order.length) {
+        from = start;
+        to = writes[order[k] + 1];
+      }
+    }
+
+    writes.length = 0;
+  }
+
+  /** A pulled draw from the next chunk added to `plan`, under `blend`, binding no texture yet. */
+  private protoStep(plan: ProtoPlan, blend: string): number {
+    const k = this.step(plan, null, this.chunkCursor, blend);
+    plan.texStart[k] = plan.textures.length;
+    plan.texCount[k] = 0;
+    return k;
+  }
+
+  /** `sprite`'s row, record and chunk written next, its texture in `slot`: one chunk. */
+  private spriteRow(sprite: Sprite, slot: number): number {
+    if (this.rowCursor >= this.pulledRows.height * ROWS_A_LINE) {
+      this.pulledRows = this.grown(this.pulledRows, this.maxRows / ROWS_A_LINE);
+      this.uploaded = this.rowCursor;
+    }
+
+    const row = this.rowCursor++;
+    writeRow(this.pulledRows.resource as Float32Array, row * ROW_TEXELS * 4, sprite as never);
+    if (this.spriteCursor >= this.sprites.height * SPRITES_A_LINE) {
+      this.sprites = this.grown(this.sprites, this.atlasMostLines);
+      this.spritesUploaded = this.spriteCursor;
+    }
+
+    const record = this.spriteCursor++;
+    const out = this.sprites.resource as Float32Array;
+    const at = record * SPRITE_TEXELS * 4;
+    const bounds = sprite.visualBounds;
+    const uvs = sprite.texture.uvs;
+    out[at] = bounds.minX;
+    out[at + 1] = bounds.minY;
+    out[at + 2] = bounds.maxX;
+    out[at + 3] = bounds.maxY;
+    out[at + 4] = uvs.x0;
+    out[at + 5] = uvs.y0;
+    out[at + 6] = uvs.x1;
+    out[at + 7] = uvs.y1;
+    out[at + 8] = uvs.x2;
+    out[at + 9] = uvs.y2;
+    out[at + 10] = uvs.x3;
+    out[at + 11] = uvs.y3;
+    while (this.chunkCursor + 1 > this.chunks.height * ATLAS_WIDTH) {
+      this.chunks = this.grown(this.chunks, this.atlasMostLines);
+      this.chunksUploaded = this.chunkCursor;
+    }
+
+    const chunks = this.chunks.resource as Float32Array;
+    const c = this.chunkCursor * 4;
+    chunks[c] = row;
+    chunks[c + 1] = record;
+    chunks[c + 2] = 6;
+    chunks[c + 3] = slot + 1;
+    this.chunkCursor++;
+    return 1;
+  }
+
+  /** Draw proto run `run` as planned for this render, planned again if not; nothing without pulled draws. */
+  private executeProto(run: TableInstruction): void {
+    if (!this.pulling) {
+      return;
+    }
+
+    let plan = run.protoPlan as ProtoPlan;
+    if (this.protoValid(run)) {
+      if (plan.kept && plan.used !== this.render) {
+        protoDrawn.kept++;
+      }
+    } else {
+      plan = this.planProto(run);
+    }
+
+    plan.used = this.render;
+    if (!this.pulling) {
+      return;
+    }
+
+    this.pulled.send();
+    for (let kind = 0; kind < 3; kind++) {
+      this.uploadKept(kind);
+    }
+
+    if (this.rowCursor > this.uploaded) {
+      this.upload(this.uploaded, this.rowCursor, this.pulledRows, ROW_TEXELS, this.rowsUnit);
+      this.uploaded = this.rowCursor;
+    }
+
+    if (this.chunkCursor > this.chunksUploaded) {
+      this.upload(
+        this.chunksUploaded,
+        this.chunkCursor,
+        this.chunks,
+        1,
+        this.chunksUnit,
+        ATLAS_WIDTH,
+      );
+      this.chunksUploaded = this.chunkCursor;
+    }
+
+    if (this.spriteCursor > this.spritesUploaded) {
+      this.upload(
+        this.spritesUploaded,
+        this.spriteCursor,
+        this.sprites,
+        SPRITE_TEXELS,
+        this.spritesUnit,
+        SPRITES_A_LINE,
+      );
+      this.spritesUploaded = this.spriteCursor;
+    }
+
+    for (let k = 0; k < plan.steps; k++) {
+      if (plan.chunks[k] > 0) {
+        this.drawProto(plan, k);
+      }
+    }
+
+    protoDrawn.runs++;
+    if (proto.reset) {
+      (this.renderer as unknown as { resetState(): void }).resetState();
+      protoDrawn.resets++;
+    }
+  }
+
+  /** Step `k` of `plan`: one pulled draw, its textures bound from unit 0. */
+  private drawProto(plan: ProtoPlan, k: number): void {
+    const renderer = this.renderer;
+    const units = proto.units;
+    let shader = this.protoShaders.get(units);
+    if (!shader) {
+      shader = new Shader({
+        glProgram: new GlProgram({
+          name: `${NAME}-proto-${units}`,
+          vertex: protoVertex,
+          fragment: protoFragment(units),
+        }),
+        resources: { pulledUniforms: this.pulledUniforms },
+      });
+      this.protoShaders.set(units, shader);
+    }
+
+    shader.groups[0] = renderer.globalUniforms.bindGroup;
+    this.pulledUniforms.uniforms.uFirst = plan.first[k];
+    this.state.blendMode = plan.blends[k] as State["blendMode"];
+    renderer.state.set(this.state);
+    renderer.shader.bind(shader);
+    const gl = renderer.gl;
+    const program = renderer.shader._getProgramData(shader.glProgram).program;
+    if (!this.protoPointed.has(program)) {
+      this.protoPointed.add(program);
+      gl.uniform1i(gl.getUniformLocation(program, "uTable"), this.rowsUnit);
+      gl.uniform1i(gl.getUniformLocation(program, "uAtlas"), this.atlasUnit);
+      gl.uniform1i(gl.getUniformLocation(program, "uChunks"), this.chunksUnit);
+      gl.uniform1i(gl.getUniformLocation(program, "uSprites"), this.spritesUnit);
+      gl.uniform1iv(
+        gl.getUniformLocation(program, "uTextures"),
+        Int32Array.from({ length: units }, (_, i) => i),
+      );
+    }
+
+    renderer.texture.bind(plan.kept ? this.keptRows : this.pulledRows, this.rowsUnit);
+    renderer.texture.bind(this.atlasTexture as BufferImageSource, this.atlasUnit);
+    renderer.texture.bind(plan.kept ? this.keptChunks : this.chunks, this.chunksUnit);
+    renderer.texture.bind(plan.kept ? this.keptSprites : this.sprites, this.spritesUnit);
+    for (let i = 0; i < plan.texCount[k]; i++) {
+      renderer.texture.bind(plan.textures[plan.texStart[k] + i], i);
+    }
+
+    renderer.geometry.bind(this.empty, shader.glProgram);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, CHUNK, plan.chunks[k]);
+    protoDrawn.calls++;
+    drawn.calls++;
+    drawn.draws += plan.rows[k];
+    protoDrawn.chunks += plan.chunks[k];
+    protoDrawn.textures += plan.texCount[k];
   }
 
   /** One draw of `chunks` chunks from `first`, of `rows` rows. */
@@ -1940,6 +2769,14 @@ export class TablePipe {
     this.shader?.destroy(true);
     this.shortShader?.destroy(true);
     this.pulledShader?.destroy(true);
+    for (const shader of this.protoShaders.values()) {
+      shader.destroy(true);
+    }
+
+    this.sprites.destroy();
+    this.keptRows.destroy();
+    this.keptChunks.destroy();
+    this.keptSprites.destroy();
     this.geometry.destroy(true);
     this.empty.destroy();
     this.table.destroy();
