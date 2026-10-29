@@ -757,10 +757,16 @@ plugs in to allocate, index, resolve names or be called; `traits.ts`, the
 layout model (`Traits`, the binding kinds, the class and Vector references);
 `domain.ts`, application domains and the lookup of a name along a domain's
 chain; `modules.ts`, the modules loaded into them and which module's code
-a stack is in; `method-factories.ts`, the natives and the methods with no
-generated body as a module binds them; `classes.ts`, OP_newclass, which makes a class from its descriptor;
-`enumeration.ts`, the names a for-in goes through; `property-cache.ts`, the
-inline caches; `names.ts`, namespaces and multinames; `number-strings.ts`,
+a stack is in; `definitions.ts`, definitions by qualified name, as a host
+and `ApplicationDomain.getDefinition` look them up; `method-factories.ts`,
+the natives and the methods with no generated body as a module binds them;
+`classes.ts`, OP_newclass, which makes a class from its descriptor, and the
+Vector.<T> classes; `enumeration.ts`, the names a for-in goes through;
+`property-cache.ts`, the inline caches, and `cache-fill.ts`, what a full
+lookup leaves in one; `array-conversion.ts`, Number(array) while Array's
+conversion is the builtins'; `errors.ts`, error messages and the stack a
+host shows for an AS3 error; `amf-classes.ts`, class aliases and the
+classes AMF makes; `names.ts`, namespaces and multinames; `number-strings.ts`,
 numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.

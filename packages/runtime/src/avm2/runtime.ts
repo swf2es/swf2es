@@ -11,19 +11,24 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
-import { newClass, withId } from "./classes.js";
-import type {
-  Abc,
-  AbcDesc,
-  AsObject,
-  ClassDesc,
-  CompileUnit,
-  Factory,
-  Method,
-  Scope,
-  TraitsDesc,
-  TypeRef,
-  Value,
+import { AmfClasses } from "./amf-classes.js";
+import { ArrayConversion } from "./array-conversion.js";
+import { fillCache } from "./cache-fill.js";
+import { newClass, specializeVector, withId } from "./classes.js";
+import { classNamed, definingAbc, definitionNamed } from "./definitions.js";
+import {
+  type Abc,
+  type AbcDesc,
+  type AsObject,
+  type ClassDesc,
+  type CompileUnit,
+  type Factory,
+  type Method,
+  NOT_FOUND,
+  type Scope,
+  type TraitsDesc,
+  type TypeRef,
+  type Value,
 } from "./descriptors.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
@@ -35,8 +40,9 @@ import {
   pairIndex,
   pairOf,
 } from "./enumeration.js";
+import { AsError, describe, errorMessage, stackOf } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
-import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
+import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
   type CountedMethod,
   nativeFactory,
@@ -56,7 +62,6 @@ import {
   CONSTANT_RTQnameA,
   CONSTANT_RTQnameL,
   CONSTANT_RTQnameLA,
-  formatClassName,
   Multiname,
   Namespace,
   NS_Private,
@@ -72,7 +77,7 @@ import {
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import type { SyncInit } from "./natives/sync.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
-import { numberReadBack, numberToString, stringToNumber } from "./number-strings.js";
+import { numberToString, stringToNumber } from "./number-strings.js";
 import {
   defaultPrint,
   memoryFiles,
@@ -81,10 +86,8 @@ import {
   type ShellWorkerHost,
   type ShellWorkerInit,
 } from "./options.js";
-import { errorMessages } from "./player-messages.js";
 import {
   cached,
-  entryFor,
   epoch,
   IC_Call,
   IC_Const,
@@ -96,7 +99,6 @@ import {
   IC_Slot,
   invalidate,
   NO_CACHE,
-  PropertyCache,
   REPLACEMENTS,
   UNFILLED,
 } from "./property-cache.js";
@@ -114,6 +116,9 @@ import {
   VectorRef,
 } from "./traits.js";
 
+export { NOT_FOUND } from "./descriptors.js";
+export { AsError } from "./errors.js";
+
 /**
  * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject
  * keeps none for one: never any. Shared and frozen; what writes elements
@@ -124,9 +129,6 @@ export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 // Object coercions use the same two lookup orders without allocating per call.
 const STRING_PRIMITIVE_ORDER = ["toString", "valueOf"] as const;
 const NUMBER_PRIMITIVE_ORDER = ["valueOf", "toString"] as const;
-
-/** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
-export class AsError extends Error {}
 
 export class Runtime {
   readonly print: (line: string) => void;
@@ -176,9 +178,8 @@ export class Runtime {
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
   dynamicPropertyWriter: AsObject | null = null;
-  /** Class aliases, as registerClassAlias sets them, both ways. */
-  private readonly aliases = new Map<string, AsObject>();
-  private readonly aliasByTraits = new Map<Traits, string>();
+  /** Class aliases and the classes AMF makes. */
+  private readonly amfClasses = new AmfClasses(this);
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
@@ -477,7 +478,7 @@ export class Runtime {
 
       script.state = 2;
       if (script === this.toplevel) {
-        this.noteConversions();
+        this.arrayConversion.noteConversions();
       }
     }
 
@@ -689,40 +690,16 @@ export class Runtime {
 
   private readonly builtinClasses = new Map<string, AsObject>();
 
-  // What Number(array) runs unless a script replaced it: Array's traits,
-  // Array.prototype, its toString and Object.prototype.valueOf, as the
-  // script defining Object leaves them, before any other script runs.
-  private arrayClass: AsObject | null = null;
+  /** What Number(array) runs unless a script replaced it. */
+  private readonly arrayConversion = new ArrayConversion();
+
+  /** The builtin Array class's instance traits, once its static initializer has run. */
   private arrayTraits: Traits | null = null;
-  private arrayPrototype: AsObject | null = null;
-  private arrayToString: Value = NOT_FOUND;
-  private objectValueOf: Value = NOT_FOUND;
 
   /** Notes the builtin Array class, once its static initializer has run. */
   noteArrayClass(cls: AsObject): void {
-    this.arrayClass = cls;
-  }
-
-  /**
-   * Notes Array's builtin conversion functions, once the script defining
-   * Object, and Array beside it, has set its prototypes' functions.
-   */
-  private noteConversions(): void {
-    const cls = this.arrayClass;
-    if (cls === null) {
-      return;
-    }
-
-    const prototype: AsObject = cls.$prototype;
-    const objectPrototype: AsObject | null = prototype.$p;
-    const toStringFn = prototype.$d.get("toString");
-    const valueOfFn = objectPrototype?.$d.get("valueOf");
-    if (toStringFn?.$f && valueOfFn?.$f) {
-      this.arrayTraits = cls.$it;
-      this.arrayPrototype = prototype;
-      this.arrayToString = toStringFn;
-      this.objectValueOf = valueOfFn;
-    }
+    this.arrayTraits = cls.$it;
+    this.arrayConversion.noteArrayClass(cls);
   }
 
   prototypeOf(ref: TypeRef): AsObject {
@@ -1078,16 +1055,9 @@ export class Runtime {
     }
   }
 
-  /**
-   * Keep what `mn` found on `traits`, `o`'s, for the next lookup on an
-   * object with them: a binding, as getProperty, setProperty and
-   * callProperty use it, or a dynamic property's name. Not where the name
-   * resolves otherwise: through a property hook (a Proxy's, XML's), an
-   * index (a Vector's, an Array's element), or a Dictionary's key; nor on
-   * a primitive's dynamic property, which its prototypes have.
-   */
+  /** fillCache (cache-fill.ts), for a name that caches on traits a cache knows `o` by. */
   private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
-    let head = mn.cache;
+    const head = mn.cache;
     if (
       head === NO_CACHE ||
       (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
@@ -1096,82 +1066,7 @@ export class Runtime {
       return;
     }
 
-    const hook = traits.properties;
-    const id = b >> 3;
-    let kind: number;
-    let key = "";
-    let get: Method | null = null;
-    let set: Method | null = null;
-    let type: TypeRef = null;
-    if (b === 0) {
-      const name = mn.dynamicName();
-      if (
-        name === null ||
-        (typeof o !== "object" && typeof o !== "function") ||
-        hook !== null ||
-        !traits.dynamic ||
-        traits.refusesNames ||
-        traits.getIndex !== undefined ||
-        traits.index !== undefined ||
-        arrayIndex(name) >= 0
-      ) {
-        return;
-      }
-
-      kind = IC_Dynamic;
-      key = name;
-    } else {
-      const hooked = hook !== null && hookedBinding(b, mn, hook);
-      switch (b & 7) {
-        case BIND_Method:
-          kind = hooked ? IC_Call : IC_Method;
-          get = traits.proto[methodKey(id)];
-          break;
-        case BIND_Var:
-        case BIND_Const:
-          kind = (b & 7) === BIND_Var ? IC_Slot : IC_Const;
-          key = slotKey(id);
-          type = traits.slotType(id);
-          break;
-        case BIND_Get:
-          kind = IC_Get;
-          get = traits.proto[methodKey(id)];
-          break;
-        case BIND_Set:
-          kind = IC_Set;
-          set = traits.proto[methodKey(id + 1)];
-          break;
-        case BIND_GetSet:
-          kind = IC_GetSet;
-          get = traits.proto[methodKey(id)];
-          set = traits.proto[methodKey(id + 1)];
-          break;
-        default:
-          return;
-      }
-
-      if (hooked && kind !== IC_Call) {
-        return;
-      }
-    }
-
-    if (head === UNFILLED) {
-      head = new PropertyCache();
-      mn.cache = head;
-    }
-
-    const e = entryFor(head, traits);
-    if (e === null) {
-      return;
-    }
-
-    e.traits = traits;
-    e.kind = kind;
-    e.key = key;
-    e.get = get;
-    e.set = set;
-    e.type = type;
-    e.id = id;
+    fillCache(head, o, traits, b, mn);
   }
 
   /** Method `id` of `o` bound to it, the same function each time. */
@@ -1835,28 +1730,9 @@ export class Runtime {
     return hook;
   }
 
-  /**
-   * Vector.<T> for a T other than int, uint and Number: Vector$object's
-   * class, typed, whose name names T as avmplus does, a builtin Vector as
-   * Vector.<int>, and whose superclass is Vector.<*>, Vector$object.
-   */
+  /** See specializeVector in classes.ts. */
   specializeVector(base: AsObject, param: AsObject): AsObject {
-    const itraits = new Traits(
-      `__AS3__.vec::Vector.<${formatClassName(param.$it.name)}>`,
-      base.$it,
-    );
-    itraits.dynamic = base.$it.dynamic;
-    itraits.refusesNames = base.$it.refusesNames;
-    itraits.hooks = base.$it.hooks;
-    const cls = Object.create(Object.getPrototypeOf(base));
-    cls.$d = null;
-    cls.$it = itraits;
-    cls.$desc = base.$desc;
-    cls.$base = base;
-    cls.$prototype = base.$prototype;
-    cls.$param = this.refOf(param);
-    itraits.cls = cls;
-    return cls;
+    return specializeVector(this, base, param);
   }
 
   // Objects, functions and classes.
@@ -2026,26 +1902,9 @@ export class Runtime {
     return cls;
   }
 
-  /**
-   * The class `qualified` names, "pkg::Name" or "Name", its defining script
-   * run; a ReferenceError if no script defines it. What a SWF's SymbolClass
-   * and a player's lookups by name go through.
-   */
+  /** See classNamed in definitions.ts. */
   classNamed(qualified: string, domain: Domain | null = null): AsObject {
-    const named = (domain ?? this.root).named;
-    const known = named.get(qualified);
-    if (known) {
-      return known;
-    }
-
-    const mn = this.qualifiedNameIn(qualified, domain);
-    const cls = this.resolveName(mn);
-    // A script still running its initializer may not have made the class yet.
-    if (cls) {
-      named.set(qualified, cls);
-    }
-
-    return cls;
+    return classNamed(this, qualified, domain);
   }
 
   /**
@@ -2057,35 +1916,14 @@ export class Runtime {
     return definitionNames(domain);
   }
 
-  /**
-   * What `qualified` names in `domain`, as Flash's
-   * ApplicationDomain.getDefinition finds it: a name no script defines is
-   * refused by its local name, and a script whose initializer threw runs
-   * again, its error coming through each time, where a name's lookup by
-   * code keeps it as run, as avmplus does.
-   */
+  /** See definitionNamed in definitions.ts. */
   definitionNamed(qualified: string, domain: Domain): Value {
-    const mn = this.qualifiedNameIn(qualified, domain);
-    const script = this.findScript(mn);
-    if (!script) {
-      throw this.error("ReferenceError", 1065, mn.name);
-    }
-
-    return this.getProperty(this.initScript(script, true), mn);
+    return definitionNamed(this, qualified, domain);
   }
 
-  /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
+  /** See definingAbc in definitions.ts. */
   definingAbc(qualified: string, domain: Domain): Abc | null {
-    return this.findScript(this.qualifiedNameIn(qualified, domain))?.abc ?? null;
-  }
-
-  /** The public name "pkg::Name" or "Name" stands for, looked up in `domain`. */
-  private qualifiedNameIn(qualified: string, domain: Domain | null): Multiname {
-    const i = qualified.lastIndexOf("::");
-    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
-    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
-    mn.domain = domain === this.root ? null : domain;
-    return mn;
+    return definingAbc(this, qualified, domain);
   }
 
   /** The class a multiname or TypeName names. */
@@ -2350,7 +2188,7 @@ export class Runtime {
 
   toNumeric(v: Value): number | FloatValue {
     if (v !== null && typeof v === "object" && !(v instanceof FloatValue)) {
-      const n = this.arrayToNumber(v);
+      const n = this.arrayConversion.arrayToNumber(v);
       if (n !== undefined) {
         return n;
       }
@@ -2430,80 +2268,8 @@ export class Runtime {
   }
 
   private objectToNumber(o: AsObject): number {
-    const n = this.arrayToNumber(o);
+    const n = this.arrayConversion.arrayToNumber(o);
     return n !== undefined ? n : this.toNumber(this.toPrimitive(o, "number"));
-  }
-
-  /**
-   * Number(a) for an Array whose conversion is still the builtins': its
-   * valueOf returns it, and its toString joins its elements with commas,
-   * which then read back as a number. Without formatting and parsing, for
-   * the Arrays whose result is plain: none or one primitive element, or
-   * only primitives, whose join holds a comma and so is NaN, unless a NUL
-   * ends the number before it. Undefined for any other, which takes the
-   * general path, as does one with a hole, whose element the prototypes
-   * give.
-   */
-  private arrayToNumber(o: AsObject): number | undefined {
-    const traits = this.arrayTraits;
-    if (traits === null || o.$traits !== traits) {
-      return undefined;
-    }
-
-    const prototype = this.arrayPrototype as AsObject;
-    const d: Map<string, Value> | null = o.$d;
-    const pd: Map<string, Value> = prototype.$d;
-    if (
-      (d !== null && (d.has("valueOf") || d.has("toString"))) ||
-      pd.has("valueOf") ||
-      pd.get("toString") !== this.arrayToString ||
-      (prototype.$p as AsObject).$d.get("valueOf") !== this.objectValueOf
-    ) {
-      return undefined;
-    }
-
-    const a: Value[] = o.$a;
-    const length = a.length;
-    if (length === 0) {
-      return 0;
-    }
-
-    if (length === 1) {
-      if (!(0 in a)) {
-        return undefined;
-      }
-
-      const v = a[0];
-      switch (typeof v) {
-        case "number":
-          return numberReadBack(v);
-        case "string":
-          return stringToNumber(v);
-        case "boolean":
-          return Number.NaN;
-        case "undefined":
-          return 0;
-        default:
-          return v === null ? 0 : undefined;
-      }
-    }
-
-    for (let i = 0; i < length; i++) {
-      if (!(i in a)) {
-        return undefined;
-      }
-
-      const v = a[i];
-      if (v !== null && typeof v === "object") {
-        return undefined;
-      }
-
-      if (typeof v === "string" && v.includes("\0")) {
-        return undefined;
-      }
-    }
-
-    return Number.NaN;
   }
 
   toInt(v: Value): number {
@@ -2842,36 +2608,14 @@ export class Runtime {
     return this.constructClass(cls, [message, id]);
   }
 
-  /**
-   * Where an AS3 error was made, as JavaScript stack lines from the first
-   * compiled method's (their names begin with `$`), the runtime's and the
-   * player's frames before it left out, those between kept; every line if
-   * no compiled method made it, and null for anything but an AS3 error.
-   */
+  /** See stackOf in errors.ts. */
   stackOf(error: Value): string | null {
-    const made = (error as { $jsError?: Error } | null)?.$jsError;
-    if (!(made instanceof Error) || !made.stack) {
-      return null;
-    }
-
-    // V8 heads its stack with the error's own line; other engines give frames alone, `name@url`.
-    const frames = made.stack.split("\n").filter((line) => !/^Error\b/.test(line));
-    const first = frames.findIndex((line) => /^(?:\s*at (?:[\w$]+\.)?)?\$[\w$]/.test(line));
-    return frames.slice(Math.max(0, first)).join("\n");
+    return stackOf(error);
   }
 
-  /**
-   * Error `id`'s message as AS3 sees it: its number, as the release player
-   * and avmshell give it, or with its text and arguments in debugger mode.
-   */
+  /** See errorMessage in errors.ts. */
   errorMessage(id: number, args: Value[] = []): string {
-    if (!this.debugger) {
-      return `Error #${id}`;
-    }
-
-    const template = errorMessages[id] ?? "";
-    const text = template.replace(/%(\d)/g, (_, n) => String(args[Number(n) - 1] ?? ""));
-    return `Error #${id}: ${text}`;
+    return errorMessage(this.debugger, id, args);
   }
 
   /** As MethodEnv::argcError: ArgumentError 1063, with the count required and the count given. */
@@ -2883,14 +2627,9 @@ export class Runtime {
     return this.error("TypeError", v === undefined ? 1010 : 1009);
   }
 
-  /** A value as avmplus names it in an error message. */
+  /** See describe in errors.ts. */
   describe(v: Value): string {
-    if (v === null || typeof v !== "object" || v instanceof FloatValue || v instanceof Namespace) {
-      return this.toString(v);
-    }
-
-    const name: string = v.$traits.name;
-    return `${name.slice(name.lastIndexOf("::") + (name.includes("::") ? 2 : 0))}@0`;
+    return describe(this, v);
   }
 
   /** An exception as AS3 catches it: a stack overflow is an AS3 Error; the runtime's own errors are not caught. */
@@ -2918,64 +2657,30 @@ export class Runtime {
     return new Error(`swf2es: ${what} is not supported yet`);
   }
 
-  // Class aliases, for AMF.
+  // Class aliases and the classes AMF makes (amf-classes.ts).
 
-  /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
   registerClassAlias(name: string, cls: AsObject): void {
-    const previous = this.aliases.get(name);
-    if (previous) {
-      this.aliasByTraits.delete(previous.$it);
-    }
-
-    this.aliases.set(name, cls);
-    this.aliasByTraits.set(cls.$it, name);
+    this.amfClasses.registerClassAlias(name, cls);
   }
 
-  /** The alias of a class's instances' traits, or "". */
   aliasOf(traits: Traits): string {
-    return this.aliasByTraits.get(traits) ?? "";
+    return this.amfClasses.aliasOf(traits);
   }
 
-  /** The class of an alias: as getClassByAlias, ReferenceError 1014 if none, or Object if `orObject`. */
   classByAlias(name: string, orObject = false): AsObject {
-    const cls = this.aliases.get(name);
-    if (cls) {
-      return cls;
-    }
-
-    if (orObject) {
-      return this.builtinClass("Object");
-    }
-
-    throw this.error("ReferenceError", 1014, name);
+    return this.amfClasses.classByAlias(name, orObject);
   }
-
-  // ByteArray, Dictionary and Vector, as AMF makes them for each value it reads: resolved once.
-  private byteArrayCls: AsObject | null = null;
-  private dictionaryCls: AsObject | null = null;
-  private vectorCls: AsObject | null = null;
 
   byteArrayClass(): AsObject {
-    this.byteArrayCls ??= this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
-    return this.byteArrayCls;
+    return this.amfClasses.byteArrayClass();
   }
 
   dictionaryClass(): AsObject {
-    this.dictionaryCls ??= this.resolve(
-      this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"),
-    );
-    return this.dictionaryCls;
+    return this.amfClasses.dictionaryClass();
   }
 
-  /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
-    const specialized = this.vectorClasses.get(param);
-    if (specialized) {
-      return specialized;
-    }
-
-    this.vectorCls ??= this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector"));
-    return this.applyType(this.vectorCls, [param]);
+    return this.amfClasses.vectorClass(param);
   }
 
   /** Each Vector class made, by its element class (null for *), kept by Vector's apply. */
@@ -3181,25 +2886,4 @@ export class Runtime {
   }
 }
 
-/**
- * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
- * traits do not bind, an attribute's, or a public name of a method, as a
- * child or attribute of XML hides the methods of its names (as avmplus'
- * getproperty does for XML and XMLList).
- */
-function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
-  if (b === 0 || mn.attribute) {
-    return true;
-  }
-
-  return (
-    hook.hidesMethods &&
-    (b & 7) === BIND_Method &&
-    mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
-  );
-}
-
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "float", "String", "Boolean", "Object"]);
-
-/** Not a property: distinct from undefined, which a property can hold. */
-export const NOT_FOUND = Symbol("not found");

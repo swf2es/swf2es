@@ -1,10 +1,11 @@
 // Classes as OP_newclass makes them: a class object and its instances'
 // traits from the module's descriptor, with its hooks, its prototype
-// object and its methods bound to the scope chain it is made in.
+// object and its methods bound to the scope chain it is made in; and the
+// Vector.<T> classes applying Vector to a type makes.
 
 import type { Abc, AsObject, ClassDesc, Method, Scope, Value } from "./descriptors.js";
 import { firstDefinition } from "./domain.js";
-import { type Multiname, NS_Public, qualifiedName } from "./names.js";
+import { formatClassName, type Multiname, NS_Public, qualifiedName } from "./names.js";
 import { invalidate } from "./property-cache.js";
 import type { Runtime } from "./runtime.js";
 import { BIND_Set, methodKey, Traits, VALUE_TESTS } from "./traits.js";
@@ -182,6 +183,27 @@ export function newClass(
   }
 
   hooks?.created?.(rt, cls);
+  return cls;
+}
+
+/**
+ * Vector.<T> for a T other than int, uint and Number: Vector$object's
+ * class, typed, whose name names T as avmplus does, a builtin Vector as
+ * Vector.<int>, and whose superclass is Vector.<*>, Vector$object.
+ */
+export function specializeVector(rt: Runtime, base: AsObject, param: AsObject): AsObject {
+  const itraits = new Traits(`__AS3__.vec::Vector.<${formatClassName(param.$it.name)}>`, base.$it);
+  itraits.dynamic = base.$it.dynamic;
+  itraits.refusesNames = base.$it.refusesNames;
+  itraits.hooks = base.$it.hooks;
+  const cls = Object.create(Object.getPrototypeOf(base));
+  cls.$d = null;
+  cls.$it = itraits;
+  cls.$desc = base.$desc;
+  cls.$base = base;
+  cls.$prototype = base.$prototype;
+  cls.$param = rt.refOf(param);
+  itraits.cls = cls;
   return cls;
 }
 
