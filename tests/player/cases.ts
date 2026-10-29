@@ -9889,6 +9889,15 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "native-strings",
+    swf: (abc) => bare(abc, 1, "NativeStrings"),
+    script: "NativeStrings",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     // Draws followed by scrolls, fills and copies on every frame (scripts/DrawScroll.as).
     name: "draw-scroll",
     swf: (abc) => bare(abc, 1, "DrawScroll", 512, 104),

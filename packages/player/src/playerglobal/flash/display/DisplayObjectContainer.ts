@@ -209,8 +209,11 @@ export function containerNatives(s: Scripting): avm2.Natives {
     }
 
     getChildByName(name: Value): Value {
-      const key = String(name);
-      return this.$display.children.find((d) => d.name === key)?.object ?? null;
+      if (name === null || name === undefined) {
+        throw s.rt.error("TypeError", 2007, "name");
+      }
+
+      return this.$display.children.find((d) => d.name === name)?.object ?? null;
     }
 
     contains(child: Value): boolean {

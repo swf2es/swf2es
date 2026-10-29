@@ -1765,7 +1765,7 @@
   "avm2/string_relational_compare": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/string_replace": {"matched":16,"lines":51,"traced":51,"error":null},
   "avm2/string_search": {"matched":41,"lines":41,"traced":41,"error":null},
-  "avm2/string_slice_substr_substring": {"matched":34,"lines":170,"traced":169,"error":null},
+  "avm2/string_slice_substr_substring": {"matched":169,"lines":170,"traced":169,"error":null},
   "avm2/string_split": {"matched":22,"lines":29,"traced":29,"error":null},
   "avm2/string_substr_negative": {"matched":22,"lines":22,"traced":22,"error":null},
   "avm2/string_substr_weird": {"matched":182,"lines":182,"traced":182,"error":null},
