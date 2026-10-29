@@ -11,10 +11,6 @@ const say = (label: string, color: "red" | "yellow", message: string) => {
   process.stderr.write(`swf2es: ${head} ${message}\n`);
 };
 
-export function warn(message: string): void {
-  say("warning", "yellow", message);
-}
-
 /** Say what went wrong, and a hint on another line if there is one, and exit. */
 export function fail(message: string, status = 1, hint?: string): never {
   say("error", "red", message);

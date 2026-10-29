@@ -16,12 +16,6 @@ export function isProjective(m: Matrix): m is Projective {
   return (m as Projective).w !== undefined;
 }
 
-/**
- * What a 3D object behind the eye, or crossing its plane, is placed by:
- * Flash draws none of it, hits none of it, and counts it in no bounds.
- */
-export const CULLED: Projective = { a: 0, b: 0, c: 0, d: 0, tx: 0, ty: 0, u: 0, v: 0, w: 0 };
-
 /** `m` then `p`, either projective. */
 function concatProjective(m: Matrix, p: Matrix): Projective {
   const [mu, mv, mw] = isProjective(m) ? [m.u, m.v, m.w] : [0, 0, 1];
@@ -196,7 +190,7 @@ export function boxThrough(r: Rect, m: Matrix): Rect {
   return { xMin, yMin, xMax, yMax };
 }
 
-/** Whether a corner of `r` goes behind the eye through `m`, or `m` is CULLED: Flash then draws none of it. */
+/** Whether a corner of `r` goes behind the eye through `m`, or onto its plane: Flash then draws none of it. */
 export function behindEye(r: Rect, m: Matrix): boolean {
   if (!isProjective(m)) {
     return false;

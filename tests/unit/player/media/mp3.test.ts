@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { mp3Bytes, mp3Frames } from "../../../../packages/player/dist/media/mp3.js";
+import { type Mp3Frames, mp3Frames } from "../../../../packages/player/dist/media/mp3.js";
 
 const sound = (name: string) =>
   new Uint8Array(readFileSync(new URL(`../../../player/sounds/${name}`, import.meta.url)));
@@ -16,6 +16,16 @@ const concat = (...parts: Uint8Array[]) => {
   }
 
   return out;
+};
+
+/** The whole frames back to back, a Xing, Info or VBRI header left out. */
+const wholeFrames = (bytes: Uint8Array, mp3: Mp3Frames) => {
+  const parts: Uint8Array[] = [];
+  for (let i = mp3.header ? 2 : 0; i < mp3.whole.length; i += 2) {
+    parts.push(bytes.subarray(mp3.whole[i], mp3.whole[i + 1]));
+  }
+
+  return concat(...parts);
 };
 
 /** About three seconds: the tone's frames ten times over. */
@@ -60,7 +70,7 @@ test("frames run on past bytes between them, and past a tag with a header in it"
   const tagged = concat(long.subarray(0, middle), fake, long.subarray(middle));
   const frames = mp3Frames(tagged);
   assert.equal(frames?.frames, 110);
-  assert.deepEqual(frames && mp3Bytes(tagged, frames), long);
+  assert.deepEqual(frames && wholeFrames(tagged, frames), long);
 });
 
 test("bytes of another format, a header-like run in them or not, have no frames", () => {

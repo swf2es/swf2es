@@ -218,21 +218,3 @@ export function mp3HeaderFrame(bytes: Uint8Array): [number, number] | null {
 
   return [first[0], Math.min(bytes.length, first[0] + first[1].length)];
 }
-
-/** The whole frames of MP3 bytes back to back, all else left out, a Xing, Info or VBRI header too. */
-export function mp3Bytes(bytes: Uint8Array, mp3: Mp3Frames): Uint8Array<ArrayBuffer> {
-  const from = mp3.header ? 2 : 0;
-  let size = 0;
-  for (let i = from; i < mp3.whole.length; i += 2) {
-    size += mp3.whole[i + 1] - mp3.whole[i];
-  }
-
-  const out = new Uint8Array(size);
-  let at = 0;
-  for (let i = from; i < mp3.whole.length; i += 2) {
-    out.set(bytes.subarray(mp3.whole[i], mp3.whole[i + 1]), at);
-    at += mp3.whole[i + 1] - mp3.whole[i];
-  }
-
-  return out;
-}
