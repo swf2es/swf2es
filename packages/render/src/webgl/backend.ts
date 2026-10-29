@@ -1547,9 +1547,9 @@ export class WebGLBackend {
   }
 
   /**
-   * The stage's multisampled pixels onto the canvas: resolved straight onto
-   * one with alpha; into a texture first for an opaque one, as a resolve
-   * must keep its format.
+   * The stage's multisampled pixels onto the canvas, resolved into a texture
+   * first: a resolve must keep its format, which the canvas's need not be,
+   * with alpha or without (SwiftShader refuses a resolve onto one with).
    */
   private present(msaa: Multisampled): void {
     const gl = this.gl;
@@ -1630,10 +1630,6 @@ export class WebGLBackend {
     }
 
     this.stageMsaa = msaa;
-    if (this.canvasAlpha) {
-      return msaa;
-    }
-
     const texture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(LAYER_UNIT, texture);
     this.state.activeTexture(LAYER_UNIT);
