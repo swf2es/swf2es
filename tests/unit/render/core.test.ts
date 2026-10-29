@@ -391,6 +391,20 @@ test("a filtered layer of draws alone is held: drawn before the stage, composite
   assert.deepEqual(Array.from(commands.params.subarray(0, 4)), [1, 2, 3, 4]);
 });
 
+test("a filtered layer in a layer of no size is left out with it, not held", () => {
+  const scene = new SceneList();
+  scene.layerBegin();
+  scene.layerBegin(3);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(NORMAL, -1, 0);
+  scene.layerEnd(NORMAL, -1);
+  scene.layerRect(0, 1, 2, 0, 0);
+  scene.layerRect(1, 1, 2, 3, 4);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands), [[CLEAR, 0, 0, 0]]);
+});
+
 test("a filtered layer with a layer in it, or kept, is drawn in its place; one in it may be held", () => {
   const scene = new SceneList();
   scene.layerBegin(3);

@@ -86,6 +86,11 @@ function withinRects(fragment: string): string {
   const reads = fragment
     .replaceAll("texture(uTexture,", "within(uTexture, uTextureRect,")
     .replaceAll("texture(uBlurred,", "within(uBlurred, uBlurredRect,");
+  // A read left as it was would read past its rectangle, into another's on a page: refused.
+  if (/\b(texture\w*|texelFetch\w*)\s*\(\s*u(Texture|Blurred)\b/.test(reads)) {
+    throw new Error("a filter shader reads its input other than as texture(uTexture, at)");
+  }
+
   // After the samplers' declarations, which READS's function takes.
   const at = reads.lastIndexOf("uniform sampler2D");
   const end = reads.indexOf("\n", at) + 1;
