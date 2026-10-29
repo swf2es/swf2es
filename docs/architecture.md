@@ -141,15 +141,16 @@ data is IOError 2058. Its own code is `src/compress/root.zig`, which
 gives the libraries the arena through their allocator callbacks, and the
 TypeScript wrapper.
 
-`native` is one Zig project (`build.zig`) for every sub-path's binary:
+`native` is one Zig project (`build.zig`) for every binary:
 `packages/native/build.ts` runs the bitmap kernel's tests and then `zig
 build` with a pinned Zig 0.17.0 (whose clang compiles the vendored C,
 unchanged, against the libc stubs in `include/`), writes each module into
-its sub-path's `binary.ts` with a digest of its inputs, and the vendored
+its `binary.ts` with a digest of its inputs, and the vendored
 C's notices, verbatim, into `LICENSE.third-party`. `pnpm build` checks the
 digests and the notices; CI rebuilds the binaries and requires them
-unchanged. Each sub-path still compiles and instantiates its own module,
-with its own memory and lifetime, and imports only its own. `codegen` knows the runtime's function names and signatures
+unchanged. `compress` and `mp3` each compile their own module; `bitmap`,
+`tessellate` and the own renderer's lines share one, `render`, which each
+instantiates apart, with its own memory and lifetime. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
@@ -4827,14 +4828,16 @@ result is copied into an owned Uint32Array before existing clipping and
 destination writing. This preserves self-filtering and notifications, and
 allows later calls, memory growth or disposal without invalidating results.
 Strict double arithmetic preserves coefficient order and Flash's fixed-point
-3×3 convolution quirks. The module uses wasm SIMD and has no scalar
-build: every current browser ships SIMD, and an engine without it refuses
-the module as one without Wasm does, so it keeps the JS path. The module
-imports nothing. Compilation refusal, missing optional modules, allocation rejection and traps fall back
+3×3 convolution quirks. The module, `render`, which it shares with the
+tessellator and the own renderer's lines, uses wasm SIMD and has no
+scalar build: every current browser ships SIMD, and an engine without it
+refuses the module as one without Wasm does, so filters, fills and lines
+keep their JS paths. Compilation refusal, missing optional modules, allocation rejection and traps fall back
 to JS before destination pixels are written. Trapped instances are dropped;
 ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
 instances above the default 8 MiB retention threshold are dropped after a
-call. The package's other sub-paths keep independent modules and lifetimes.
+call. Each user of `render` instantiates it apart, with its own memory and
+lifetime.
 
 ### Masks and scroll rectangles
 

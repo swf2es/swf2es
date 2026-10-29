@@ -28,7 +28,10 @@ interface Binary {
   path: string;
   /** zig-out/bin/<file>.wasm for each export of binary.ts. */
   modules: Record<string, string>;
-  /** What each module may import; only tessellate's C reports failure through one. */
+  /**
+   * What each module may import: render's C reports failure through one, and its lines take
+   * the host's sine and cosine.
+   */
   imports: WebAssembly.ModuleImportDescriptor[];
   /** The vendored files compiled in, beside the package's own. */
   vendored: string[];
@@ -37,13 +40,6 @@ interface Binary {
 }
 
 const BINARIES: Binary[] = [
-  {
-    path: "bitmap",
-    modules: { binary: "bitmap" },
-    imports: [],
-    vendored: [],
-    note: "",
-  },
   {
     path: "mp3",
     modules: { binary: "mp3" },
@@ -63,9 +59,13 @@ const BINARIES: Binary[] = [
     note: "; zlib is under the zlib license, the LZMA SDK in the public domain",
   },
   {
-    path: "tessellate",
-    modules: { binary: "tessellate" },
-    imports: [{ module: "env", name: "failure", kind: "function" }],
+    path: "render",
+    modules: { binary: "render" },
+    imports: [
+      { module: "env", name: "cosine", kind: "function" },
+      { module: "env", name: "sine", kind: "function" },
+      { module: "env", name: "failure", kind: "function" },
+    ],
     vendored: [
       ...files(join(vendor, "libtess2/Include"), /\.[ch]$/),
       ...files(join(vendor, "libtess2/Source"), /\.[ch]$/),
