@@ -252,10 +252,16 @@ interface Made {
   version: number;
 }
 
-/** The layers an object's drawing was last drawn as, of its version (dropUndrawn). */
+/**
+ * The layers an object's drawing was last drawn as, of its version
+ * (dropUndrawn): a set, as a drawing refills its own list as it is cleared
+ * and drawn again, and the list they came in, which a frame's walk passes
+ * again unchanged.
+ */
 interface DrawnLayers {
   version: number;
-  layers: ShapeLayer[];
+  source: ShapeLayer[];
+  layers: Set<ShapeLayer>;
 }
 
 /** A texture made of pixels that change: a store's, kept as of its version. */
@@ -1864,6 +1870,11 @@ export class RenderView implements Drawer {
     const layers = o.drawing
       ? facing(o.drawing.layers, a * d - b * c < 0, version)
       : (shape?.layers ?? null);
+    // A mask's drawing drawn again lets go of its old layers too.
+    if (o.drawing && layers) {
+      this.dropUndrawn(o, layers, version);
+    }
+
     // Its row made as its first draw needs it, in place: a closure here kept every number it took
     // in a context made on each call, boxed, as the walk's did.
     let row = -1;
@@ -1936,27 +1947,44 @@ export class RenderView implements Drawer {
   private dropUndrawn(o: DisplayObject, layers: ShapeLayer[], version: number): void {
     const last = this.drawnLayers.get(o);
     if (last?.version === version) {
+      // Another set of the same version, mirrored (facing) or sliced, kept beside the first.
+      if (layers !== last.source) {
+        for (const layer of layers) {
+          last.layers.add(layer);
+        }
+      }
+
       return;
     }
 
-    for (const layer of last?.layers ?? []) {
-      if (layers.includes(layer)) {
-        continue;
-      }
-
-      for (const cache of [this.made, this.maskMade]) {
-        for (const { handle } of cache.get(layer)?.parts ?? []) {
-          if (this.geometries.alive(handle)) {
-            this.geometries.remove(handle.id);
-          }
+    if (last) {
+      const now = new Set(layers);
+      for (const layer of last.layers) {
+        if (!now.has(layer)) {
+          this.dropParts(this.made, layer);
+          this.dropParts(this.maskMade, layer);
+          this.lineCache.drop(layer);
         }
-
-        cache.delete(layer);
       }
     }
 
-    // A copy: a drawing refills its own list as it is cleared and drawn again.
-    this.drawnLayers.set(o, { version, layers: layers.slice() });
+    this.drawnLayers.set(o, { version, source: layers, layers: new Set(layers) });
+  }
+
+  /** `layer`'s parts in `cache` let go of. */
+  private dropParts(cache: WeakMap<ShapeLayer, Made>, layer: ShapeLayer): void {
+    const made = cache.get(layer);
+    if (!made) {
+      return;
+    }
+
+    for (const { handle } of made.parts) {
+      if (this.geometries.alive(handle)) {
+        this.geometries.remove(handle.id);
+      }
+    }
+
+    cache.delete(layer);
   }
 
   /**

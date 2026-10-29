@@ -988,6 +988,7 @@ async function redrawSwf(base64: string, frames: number): Promise<number> {
   const view = await surfaceFor(player, 1, 1, 1, false, false);
   try {
     await player.start();
+
     for (let i = 0; i < frames; i++) {
       player.tick();
       view.render(player.stage);

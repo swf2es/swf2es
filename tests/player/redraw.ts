@@ -1,8 +1,9 @@
 // A drawing cleared and drawn again on every turn of its timeline, as a
 // software 3D engine draws its triangles anew each frame: the view keeps
 // the geometries of what it shows, letting a drawing's old layers go as
-// it draws the next. It once kept each frame's for the idle frames, some
-// 400,000 geometries and 300 MB in such a game.
+// it draws the next, their fills' and their lines'. It once kept each
+// frame's for the idle frames, some 400,000 geometries and 300 MB in such
+// a game.
 //
 //   node tests/player/redraw.ts
 import assert from "node:assert/strict";
@@ -20,6 +21,8 @@ const call = (method: string, ...args: number[]) =>
     .op("CallMethod")
     .op("Pop");
 call("clear");
+// Outlined, so that each layer has its lines too, which the line cache keeps.
+call("lineStyle", 1, 0x0000ff);
 for (let i = 0; i < 20; i++) {
   call("beginFill", 0xff0000 + i * 8);
   call("moveTo", i * 5, 0);
@@ -37,8 +40,8 @@ const swf = w.swf({
   tags: [w.doAction([...actions.end().bytes()]), w.showFrame(), w.showFrame(), w.end()],
 });
 
-// 400 frames, past the idle frames: one drawing's geometries, a fill each, not those of each time
-// it was drawn.
+// 400 frames, past the idle frames: one drawing's geometries, a fill and its lines each, not
+// those of each time it was drawn.
 const kept = await playRedrawn(swf, 400);
-assert.ok(kept > 0 && kept <= 40, `${kept} geometries kept`);
+assert.ok(kept > 0 && kept <= 80, `${kept} geometries kept`);
 console.log(`redraw: ok, ${kept} geometries kept`);
