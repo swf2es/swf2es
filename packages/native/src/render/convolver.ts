@@ -1,4 +1,4 @@
-import { renderInstance } from "./module.js";
+import { renderInstance, renderModule } from "./module.js";
 
 export interface BitmapSource {
   width: number;
@@ -49,10 +49,13 @@ const FLAG_PREMULTIPLY = 8;
 // retainMemory's default and the instance is kept rather than regrown.
 const BAND_BYTES = 1 << 20;
 
-/** One playback's bounded scratch. Results own their buffers; rejection leaves the source untouched. */
+/**
+ * BitmapData's convolution, its scratch bounded. It compiles the render
+ * module as it is made, and throws where the host refuses it. Results own
+ * their buffers; rejection leaves the source untouched.
+ */
 export class Convolver {
   private instance: NativeExports | null = null;
-  private unavailable = false;
   private readonly keep: number;
 
   constructor(options: ConvolverOptions = {}) {
@@ -60,6 +63,8 @@ export class Convolver {
     if (!Number.isInteger(this.keep) || this.keep < 0 || this.keep > 128 << 20) {
       throw new RangeError("invalid convolution memory limit");
     }
+
+    renderModule();
   }
 
   get capacity(): number {
@@ -70,17 +75,26 @@ export class Convolver {
     this.instance = null;
   }
 
-  /** Caller writes the owned output, or uses JS if this returns null. Never writes to the source. */
+  /**
+   * The convolved pixels, owned by the caller, or null where they would not
+   * fit; where the instance traps, the call is made again in a new one
+   * once. Never writes to the source.
+   */
   readonly convolve = (
     source: BitmapSource,
     area: BitmapRect,
     filter: ConvolutionFilter,
     transparent: boolean,
-  ): Uint32Array | null => {
-    if (this.unavailable) {
-      return null;
-    }
+  ): Uint32Array | null => this.run(source, area, filter, transparent, true);
 
+  /** convolve, made again in a new instance where this one traps if `again`. */
+  private run(
+    source: BitmapSource,
+    area: BitmapRect,
+    filter: ConvolutionFilter,
+    transparent: boolean,
+    again: boolean,
+  ): Uint32Array | null {
     const { width: sw, height: sh } = source;
     const { x, y, width: w, height: h } = area;
     const cols = filter.matrixX;
@@ -140,8 +154,6 @@ export class Convolver {
             throw new Error("the bitmap kernel takes no tessellator");
           }) as unknown as NativeExports;
         } catch {
-          // A missing Wasm engine or a CSP refusal is tried only once per owner.
-          this.unavailable = true;
           return null;
         }
       }
@@ -217,12 +229,13 @@ export class Convolver {
 
       return result;
     } catch {
+      // A trap: never resume that instance; the call once more in a new one.
       this.dispose();
-      return null;
+      return again ? this.run(source, area, filter, transparent, false) : null;
     } finally {
       if (this.capacity > this.keep) {
         this.dispose();
       }
     }
-  };
+  }
 }

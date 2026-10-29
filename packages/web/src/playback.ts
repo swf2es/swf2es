@@ -2,10 +2,8 @@
 // the element and the device's pixels, the pointer, the keys and the
 // focus, and the loop that plays and draws, all of which destroy lets go.
 
-import type { Convolver } from "@swf2es/native/render";
 import { bindActivation, bindKeyboard, type Player, type Scripting } from "@swf2es/player";
 import type { RenderView } from "@swf2es/player/scene";
-import { configuration } from "./config.js";
 import { place, type ScaleMode, viewport } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
 
@@ -46,7 +44,6 @@ export class Playback {
     private readonly look: () => Look,
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
-    private readonly convolver: Convolver | null,
   ) {
     const canvas = view.canvas;
     canvas.style.position = "absolute";
@@ -57,7 +54,6 @@ export class Playback {
     box.append(canvas);
     if (scripting) {
       scripting.drawer = view;
-      scripting.bitmapConvolver = convolver?.convolve ?? null;
       if (stage3D) {
         scripting.onStageLayout = this.stageLayout;
       }
@@ -66,7 +62,6 @@ export class Playback {
     // An AVM1 movie's BitmapData draws display objects by it too.
     if (player.avm1) {
       player.avm1.drawer = view;
-      player.avm1.bitmapConvolver = convolver?.convolve ?? null;
     }
 
     this.unbind.push(this.view.bindPointer(player));
@@ -95,42 +90,17 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
-    // Both load together, so neither costs playback another round trip. The view makes its own
-    // tessellator, and throws where the page cannot run the render module.
-    const { nativeBitmaps } = configuration();
-    const [convolver, scene] = await Promise.all([
-      nativeBitmaps === false
-        ? null
-        : import("@swf2es/native/render")
-            .then(({ Convolver }): Convolver => new Convolver())
-            .catch(() => null),
-      // Settled, not rejected, so that the native instance made beside it goes if it fails to load.
-      import("@swf2es/player/scene").then(
-        (module) => module,
-        (error: unknown) => ({ error }),
-      ),
-    ]);
+    // The view makes its own tessellator, and throws where the page cannot run the render module.
+    const { RenderView } = await import("@swf2es/player/scene");
+    const view = new RenderView({
+      width: player.width,
+      height: player.height,
+      resolution: 1,
+      background: player.background,
+      transparent: !!stage3D || look().wmode === "transparent",
+    });
 
-    let view: RenderView;
-    try {
-      if ("error" in scene) {
-        throw scene.error;
-      }
-
-      view = new scene.RenderView({
-        width: player.width,
-        height: player.height,
-        resolution: 1,
-        background: player.background,
-        transparent: !!stage3D || look().wmode === "transparent",
-      });
-    } catch (error) {
-      // The renderer did not load or start, and no playback lets go of it: it goes here.
-      convolver?.dispose();
-      throw error;
-    }
-
-    return new Playback(box, player, scripting, view, look, report, stage3D, convolver);
+    return new Playback(box, player, scripting, view, look, report, stage3D);
   }
 
   /** The renderer's WebGL context, null once destroyed. */
@@ -336,14 +306,6 @@ export class Playback {
     if (this.player.avm1?.drawer === this.view) {
       this.player.avm1.drawer = null;
     }
-
-    if (this.scripting && this.scripting.bitmapConvolver === this.convolver?.convolve) {
-      this.scripting.bitmapConvolver = null;
-    }
-    if (this.player.avm1 && this.player.avm1.bitmapConvolver === this.convolver?.convolve) {
-      this.player.avm1.bitmapConvolver = null;
-    }
-    this.convolver?.dispose();
 
     this.view.destroy();
     this.view.canvas.remove();

@@ -5,6 +5,7 @@ import { binary } from "../../packages/native/dist/render/binary.js";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
 import { filterDefaults } from "../../packages/player/dist/display/filters.js";
+import { convolveReference } from "./player/bitmap/convolution-reference.ts";
 
 const filter = () => ({
   ...filterDefaults("convolution"),
@@ -31,7 +32,7 @@ const wasm = (
   }
 ).WebAssembly;
 
-test("native convolution exactly matches JS through clipping, writing and self-filtering", () => {
+test("the kernel convolves as the JS reference does, to the bit, whatever the filter", () => {
   let seed = 89371;
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -45,8 +46,6 @@ test("native convolution exactly matches JS through clipping, writing and self-f
   for (let i = 0; i < 5000; i++) {
     const sw = 1 + ((random() * 17) | 0),
       sh = 1 + ((random() * 13) | 0);
-    const dw = 1 + ((random() * 21) | 0),
-      dh = 1 + ((random() * 18) | 0);
     const cols = pick([0, 1, 2, 3, 3, 3, 5, 7, 15]);
     const rows = random() < 0.8 ? cols : pick([0, 1, 2, 3, 5, 15]);
     const f = {
@@ -67,10 +66,8 @@ test("native convolution exactly matches JS through clipping, writing and self-f
     const pixels = Uint32Array.from({ length: sw * sh }, () =>
       pick([0, 0xffffffff, 0x80302010, (random() * 2 ** 32) >>> 0]),
     );
-    const destination = Uint32Array.from({ length: dw * dh }, () => (random() * 2 ** 32) >>> 0);
     const transparent = random() < 0.5,
-      destTransparent = random() < 0.5,
-      alias = random() < 0.2;
+      destTransparent = random() < 0.5;
     const far = i % 53 === 0 ? pick([-1e9, 1e9]) : 0;
     const rect = {
       x: far + ((random() * (sw + 8)) | 0) - 4,
@@ -78,38 +75,26 @@ test("native convolution exactly matches JS through clipping, writing and self-f
       width: ((random() * (sw + 6)) | 0) - 1,
       height: ((random() * (sh + 6)) | 0) - 1,
     };
-    const dx = ((random() * 8) | 0) - 3,
-      dy = ((random() * 8) | 0) - 3;
-    const run = (owner: Convolver | null) => {
-      const source = new BitmapStore(sw, sh, transparent, 0);
-      source.pixels.set(pixels);
-      const dest = alias ? source : new BitmapStore(dw, dh, destTransparent, 0);
-      if (!alias) {
-        dest.pixels.set(destination);
-      }
+    // A kernel of no taps never reaches the kernel: applyFilter copies the source (copyEmpty).
+    if (cols === 0 || rows === 0) {
+      continue;
+    }
 
-      const result = applyFilter(
-        dest,
-        source,
-        rect,
-        dx,
-        dy,
-        f,
-        null,
-        owner
-          ? (...args) => {
-              calls++;
-              const out = owner.convolve(...args);
-              assert.ok(out, `unexpected rejection in case ${i}`);
-              return out;
-            }
-          : null,
-      );
-      return { result, version: dest.version, pixels: dest.pixels, source: source.pixels };
+    const source = new BitmapStore(sw, sh, transparent, 0);
+    source.pixels.set(pixels);
+    // A rect the kernel is asked for, as applyFilter clips it: within reach of the bitmap.
+    const shown = {
+      x: rect.x,
+      y: rect.y,
+      width: Math.max(1, rect.width),
+      height: Math.max(1, rect.height),
     };
-    const expected = run(null);
+    const expected = convolveReference(source, shown, f, destTransparent);
     for (const owner of owners) {
-      assert.deepEqual(run(owner), expected, `case ${i}, seed 89371`);
+      calls++;
+      const out = owner.convolve(source, shown, f, destTransparent);
+      assert.ok(out, `unexpected rejection in case ${i}`);
+      assert.deepEqual(out, expected, `case ${i}, seed 89371`);
     }
   }
 
@@ -120,8 +105,8 @@ test("native convolution exactly matches JS through clipping, writing and self-f
   }
 });
 
-test("a rect convolved in bands of rows matches JS across the bands' seams", () => {
-  // Wide enough that the rect takes several calls; the rows a band's kernel
+test("a rect convolved in bands of rows matches the reference across the bands' seams", () => {
+  // Wide enough that the rect takes several bands; the rows a band's kernel
   // reaches above and below come from its neighbours.
   const sw = 700,
     sh = 600;
@@ -134,7 +119,7 @@ test("a rect convolved in bands of rows matches JS across the bands' seams", () 
       ((alpha << 24) | (((((seed >>> 16) & 255) * alpha) / 255) << 16) | (seed & alpha)) >>> 0;
   }
 
-  const owners = [new Convolver()];
+  const native = new Convolver();
   for (const clamp of [true, false]) {
     const f = {
       ...filter(),
@@ -147,25 +132,14 @@ test("a rect convolved in bands of rows matches JS across the bands' seams", () 
       preserveAlpha: false,
     };
     const rect = { x: -3, y: -5, width: sw + 4, height: sh + 9 };
-    const expected = new BitmapStore(sw + 4, sh + 9, true, 0);
-    applyFilter(expected, source, rect, 0, 0, f);
-    for (const owner of owners) {
-      const dest = new BitmapStore(sw + 4, sh + 9, true, 0);
-      let calls = 0;
-      applyFilter(dest, source, rect, 0, 0, f, null, (...args) => {
-        calls++;
-        const out = owner.convolve(...args);
-        assert.ok(out, "unexpected rejection");
-        return out;
-      });
-      assert.equal(calls, 1);
-      assert.deepEqual(dest.pixels, expected.pixels, `clamp ${clamp}`);
-    }
+    assert.deepEqual(
+      native.convolve(source, rect, f, true),
+      convolveReference(source, rect, f, true),
+      `clamp ${clamp}`,
+    );
   }
 
-  for (const owner of owners) {
-    owner.dispose();
-  }
+  native.dispose();
 });
 
 test("published convolution pixels survive growth, rejection, scratch reuse and disposal", () => {
@@ -189,7 +163,51 @@ test("published convolution pixels survive growth, rejection, scratch reuse and 
   assert.deepEqual(out, previous);
 });
 
-test("native rejection and traps preserve JS fallback and distinguish scratch recovery", () => {
+test("applyFilter convolves again in a new instance after a trap, and writes nothing if it traps again", async () => {
+  const Instance = wasm.Instance;
+  let instances = 0;
+  let traps = 0;
+  wasm.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      const instance = Reflect.construct(target, args) as WebAssembly.Instance;
+      instances++;
+      return {
+        exports: {
+          ...instance.exports,
+          convolve: (...values: number[]) => {
+            if (traps > 0) {
+              traps--;
+              throw new wasm.RuntimeError("test trap");
+            }
+            return (instance.exports.convolve as (...args: number[]) => number)(...values);
+          },
+        },
+      };
+    },
+  });
+  try {
+    // A module of its own, whose realm kernel is made here, under the proxy, whatever ran before.
+    const copy = `${new URL("../../packages/player/dist/bitmap/filters.js", import.meta.url)}?trap`;
+    const { applyFilter: fresh } = (await import(copy)) as { applyFilter: typeof applyFilter };
+    const source = new BitmapStore(16, 16, true, 0x80305070);
+    const expected = convolveReference(source, area, filter(), true);
+    traps = 1;
+    const dest = new BitmapStore(16, 16, true, 0);
+    fresh(dest, source, area, 0, 0, filter());
+    assert.deepEqual(dest.pixels, expected);
+    assert.equal(instances, 2, "the trapped call made again in a new instance");
+
+    traps = 2;
+    const untouched = new BitmapStore(16, 16, true, 0x11223344);
+    const before = untouched.pixels.slice();
+    fresh(untouched, source, area, 0, 0, filter());
+    assert.deepEqual(untouched.pixels, before);
+  } finally {
+    wasm.Instance = Instance;
+  }
+});
+
+test("a trapped kernel instance is replaced, a rejected call keeps it", () => {
   const Instance = wasm.Instance;
   let instances = 0;
   let fail: "reject" | "trap" | null = "reject";
@@ -216,38 +234,39 @@ test("native rejection and traps preserve JS fallback and distinguish scratch re
   try {
     const native = new Convolver();
     const source = new BitmapStore(16, 16, true, 0x80305070);
-    const expected = new BitmapStore(16, 16, true, 0);
-    applyFilter(expected, source, area, 0, 0, filter());
     for (const state of ["reject", "trap", null] as const) {
       fail = state;
-      const dest = new BitmapStore(16, 16, true, 0);
-      applyFilter(dest, source, area, 0, 0, filter(), null, native.convolve);
-      assert.deepEqual(dest.pixels, expected.pixels);
+      const out = native.convolve(source, area, filter(), true);
+      assert.equal(out === null, state !== null);
       assert.equal(native.capacity === 0, state === "trap");
     }
 
-    assert.equal(instances, 2, "rejection reuses scratch, a trap requires a fresh instance");
+    // The trap made again in a new instance, which traps too; then a third, which convolves.
+    assert.equal(instances, 3, "rejection reuses scratch, a trap requires a fresh instance");
     native.dispose();
   } finally {
     wasm.Instance = Instance;
   }
 });
 
-test("invalid custom output or a throwing custom kernel falls back before writing", () => {
-  const source = new BitmapStore(16, 16, true, 0x80305070);
-  const expected = new BitmapStore(16, 16, true, 0);
-  applyFilter(expected, source, area, 0, 0, filter());
-  for (const hook of [
-    () => null,
-    () => new Uint32Array(1),
-    () => {
-      throw Error("test");
-    },
-  ]) {
-    const dest = new BitmapStore(16, 16, true, 0);
-    applyFilter(dest, source, area, 0, 0, filter(), null, hook);
-    assert.deepEqual(dest.pixels, expected.pixels);
-    assert.equal(dest.version, expected.version);
+test("a rect far past the bitmap convolves as the reference does there, beyond the kernel's bounds", () => {
+  const source = new BitmapStore(4, 4, true, 0);
+  for (let i = 0; i < 16; i++) {
+    source.pixels[i] = (0xff000000 | (i * 0x0f0b07)) >>> 0;
+  }
+
+  for (const clamp of [true, false]) {
+    const f = { ...filter(), clamp };
+    for (const x of [-0x3fffffff - 5, 0x3fffffff + 5]) {
+      const rect = { x, y: 0, width: 4, height: 4 };
+      const dest = new BitmapStore(4, 4, true, 0x12345678);
+      applyFilter(dest, source, rect, 0, 0, f);
+      assert.deepEqual(
+        dest.pixels,
+        convolveReference(source, rect, f, true),
+        `${x}, clamp ${clamp}`,
+      );
+    }
   }
 });
 
@@ -259,7 +278,7 @@ test("the render module exposes the bitmap kernel's ABI", async () => {
   }
 });
 
-test("an instance refused leaves JS and is tried once per owner", () => {
+test("an instance that cannot be made gives no pixels, and is tried again on the next call", () => {
   const Instance = wasm.Instance;
   let attempts = 0;
   wasm.Instance = new Proxy(Instance, {
@@ -270,15 +289,10 @@ test("an instance refused leaves JS and is tried once per owner", () => {
   });
   try {
     const source = new BitmapStore(16, 16, true, 0x80305070);
-    const expected = new BitmapStore(16, 16, true, 0);
-    applyFilter(expected, source, area, 0, 0, filter());
     const unavailable = new Convolver();
-    const dest = new BitmapStore(16, 16, true, 0);
-    applyFilter(dest, source, area, 0, 0, filter(), null, unavailable.convolve);
-    assert.deepEqual(dest.pixels, expected.pixels);
-    assert.equal(attempts, 1);
     assert.equal(unavailable.convolve(source, area, filter(), true), null);
-    assert.equal(attempts, 1, "a refused instance is not made again for the same owner");
+    assert.equal(unavailable.convolve(source, area, filter(), true), null);
+    assert.equal(attempts, 2);
     assert.equal(unavailable.capacity, 0);
   } finally {
     wasm.Instance = Instance;

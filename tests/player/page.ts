@@ -50,10 +50,6 @@ async function fillTessellator(): Promise<
   return nativeFills.tessellate;
 }
 
-const bitmapKernel = new URLSearchParams(location.search).has("nativeBitmaps")
-  ? new (await import("@swf2es/native/render")).Convolver()
-  : null;
-
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
 // (chrome.ts, libraries.ts).
 const LIBRARIES = [
@@ -130,7 +126,6 @@ async function scriptingFor(
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
   });
-  scripting.bitmapConvolver = bitmapKernel?.convolve ?? null;
   const libraries = await Promise.all(
     LIBRARIES.map(async (n) => {
       // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.

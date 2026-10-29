@@ -382,7 +382,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       // A displacement map's map as it is now, not as it was when set.
       const map =
         f.kind === "displacementMap" && f.mapBitmap ? storeOf(s, f.mapBitmap as AsObject) : null;
-      if (!applyFilter(store, from, r, dx, dy, f, map, s.bitmapConvolver)) {
+      if (!applyFilter(store, from, r, dx, dy, f, map)) {
         throw s.rt.unsupported(`BitmapData.applyFilter with a ${f.kind} filter`);
       }
     }

@@ -22,8 +22,7 @@ arena (`src/render/arena.zig`), which each call resets.
 Firefox 89, Safari 16.4 on): it is built with SIMD throughout and has no
 scalar build. An engine without it refuses the module, as one without Wasm
 or under a CSP without `'wasm-unsafe-eval'` does: the player then plays
-nothing, as its fills and lines need the module. Only the bitmap filters
-have a JS path, for `nativeBitmaps: false` and the kernel's own refusals.
+nothing, as its fills, lines and bitmap convolution need the module.
 
 ## Building
 
@@ -63,32 +62,28 @@ libtess2 is under SGI Free Software License B.
 
 ## bitmap
 
-The web host uses these kernels by default, with the JS path as fallback;
-`configure({ nativeBitmaps: false })` keeps new playbacks' filters on JS. The output is the same pixels either way. Each
-playback owns its convolution scratch, instantiated on first use, and
-releases it at teardown. AS3 and AVM1 BitmapData.applyFilter use the same hook;
-GPU filters and other CPU filters are unchanged. Worker instances without a
-hook keep using JS.
-
-Direct hosts can create a `Convolver` and assign its `convolve` method to a
-Scripting or Avm1 `bitmapConvolver`, then clear the hook and call `dispose()`
-when that owner retires. The operation returns owned premultiplied ARGB
-`Uint32Array` pixels or `null` for JS fallback. No source pixels are changed.
-Results survive later calls, memory growth, rejection and disposal.
+`Convolver` is BitmapData's convolution. The player convolves through it
+alone: AS3's and AVM1's `BitmapData.applyFilter` with a convolution filter
+call the one `Convolver` of their realm (`packages/player/src/bitmap/
+filters.ts`), made at the first convolution, which compiles the module;
+where it traps, the call is made again in a new instance, and where that
+fails too, nothing is written. Other CPU filters and GPU filters are
+unchanged. `convolve()` returns owned premultiplied ARGB `Uint32Array`
+pixels, or `null` where they would not fit or the instance trapped. No
+source pixels are changed. Results survive later calls, memory growth,
+rejection and disposal.
 
 The wrapper convolves a rect a band of rows at a time, about 1 MiB of
 input and output a call: it copies each band's rows plus the kernel's halo
 and the coefficients in, and the band's output out before scratch is
 reused. The kernel keeps straight-colour planes for only the kernel's rows,
-so a call's scratch stays near 2 MiB even 4096 pixels wide, and a playback
-filtering large bitmaps every frame keeps its instance. Existing player
-code handles clipping, destination writing and notifications. Strict double
-arithmetic and Flash's fixed-point 3×3 quirks match the existing JS path.
-The kernel uses explicit f64x2 wasm SIMD, as all of `render` may: an
-engine without SIMD refuses the module (above), and an instance refused,
-as without Wasm or under a CSP refusal, leaves the filter to the JS path.
-A refusal is tried once per owner, traps discard the instance, and normal
-rejection can reuse its arena.
+so a call's scratch stays near 2 MiB even 4096 pixels wide, and a player
+filtering large bitmaps every frame keeps its instance. The player handles
+clipping, destination writing and notifications. Strict double arithmetic
+and Flash's fixed-point 3×3 quirks are adl's, as the JS the player had
+computed them. The kernel uses explicit f64x2 wasm SIMD, as all of
+`render` may. Traps discard the instance, and normal rejection can reuse
+its arena.
 
 Wasm memory has a 128 MiB maximum. Instances above 8 MiB are dropped after a
 call; `new Convolver({ retainMemory: bytes })` adjusts that threshold.
@@ -101,16 +96,11 @@ allocation failing in turn. The kernel is `src/render/convolve.zig`, taking
 any `std.mem.Allocator`; `src/render/bitmap.zig` wraps it in the Wasm
 module's bump arena. No external dependency is needed.
 
-`node --test tests/unit/native-bitmap.test.ts` checks exact pixels, ownership,
-rejection and trap fallback. `node tests/web/run.ts` checks both VMs, the default,
-the opt-out, missing modules, blocked compilation, traps, CSP and teardown.
-
-After `pnpm build`, run `node tests/player/bitmap-bench.ts [processes, 2]`
-under the machine lock for synthetic full applyFilter timings in Chrome.
-It includes input/output copying, destination writes and oversized-instance
-recreation. The benchmark compares JS and native with exact output
-checks and nine balanced rounds per fresh browser process. It measures CPU
-filter calls; whole-game performance depends on their share of the workload.
+`node --test tests/unit/native-bitmap.test.ts` holds the kernel to the JS
+the player had (`tests/unit/player/bitmap/convolution-reference.ts`), bit
+for bit on thousands of random filters, special numbers among them, and
+checks ownership, rejection and traps. The player's references
+(`apply-filter`, `convolution`) hold it to Flash's own pixels.
 
 ## compress
 

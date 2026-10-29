@@ -3042,8 +3042,8 @@ cannot change the winding, `shared-fill-edges`) and tessellated by
 flattens their curves too. What libtess2 refuses or fails at, the module
 fills itself by bands: each horizontal band between vertices and
 crossings filled as disjoint trapezoids under its winding rule
-(`bands.zig`). The module is required: there is no JS path for fills or
-lines. No overlapping paint is needed, including for translucent fills,
+(`bands.zig`). The module is required: there is no JS path for fills,
+lines or BitmapData's convolution. No overlapping paint is needed, including for translucent fills,
 gradients, bitmaps and masks (`crossing-fills`, `crossing-cones`). A
 Graphics drawing used as a stencil mask fills non-zero regardless of
 `drawPath`'s winding, while static shapes keep their authored winding
@@ -4406,15 +4406,15 @@ layers).
 
 #### Native CPU convolution
 
-New web playbacks convolve BitmapData on the CPU through
-`@swf2es/native/render` by default, loaded alongside the fill tessellator;
-`configure({ nativeBitmaps: false })` keeps them on JS and loads no native
-bitmap module. Both paths give the same pixels. Each playback supplies one
-`Convolver.convolve` to its Scripting or Avm1 `bitmapConvolver` hook before
-the movie starts and clears the hook and disposes scratch at teardown.
-Direct player hosts can supply the same hook and own its lifetime. Workers
-without a hook keep using JS. GPU filters and other BitmapData operations
-are unchanged.
+BitmapData's convolution is computed on the CPU by
+`@swf2es/native/render` alone: AS3's and AVM1's `applyFilter` call the one
+`Convolver` of their realm (`bitmap/filters.ts`), made at the first
+convolution, a worker's in its own. A trap is tried again in a new
+instance, and where that fails too, nothing is written. GPU filters and
+other BitmapData operations are unchanged. The JS the player had is kept
+as the kernel's reference in the unit tests
+(`tests/unit/player/bitmap/convolution-reference.ts`), which hold the
+kernel to it bit for bit.
 
 The native package depends on no other package and loads no DOM or node
 types. The kernel receives numeric records and premultiplied ARGB pixels.
@@ -4427,9 +4427,7 @@ Strict double arithmetic preserves coefficient order and Flash's fixed-point
 tessellator and the own renderer's lines, uses wasm SIMD and has no
 scalar build: every current browser ships SIMD, and an engine without it
 refuses the module as one without Wasm does, where nothing plays, as
-fills and lines need it. Under `nativeBitmaps: false`, and where the
-convolver rejects a call or traps, convolution falls back to JS before
-destination pixels are written. Trapped instances are dropped;
+fills and lines need it. Trapped instances are dropped;
 ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
 instances above the default 8 MiB retention threshold are dropped after a
 call. Each user of `render` instantiates it apart, with its own memory and
