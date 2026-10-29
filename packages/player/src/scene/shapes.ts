@@ -1,6 +1,7 @@
 // A shape layer's fills as geometries of the renderer's (@swf2es/render): each fill tessellated
-// (fills.ts), in order, a geometry for each stretch of solid fills and one for each textured fill,
-// a bitmap's or a gradient's, its vertices carrying where they sample in texels; then
+// (fills.ts), in order, a geometry for each stretch of solid fills, each stretch of fills of one
+// bitmap sampled alike, and each gradient fill, its vertices carrying where they sample in texels;
+// then
 // drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
 
 import type { Matrix } from "@swf2es/format";
@@ -31,8 +32,9 @@ export const unsupported = {
 
 /**
  * A layer's geometry for one paint: a stretch of solid fills (null), a
- * bitmap or gradient fill, or drawTriangles' mesh, whose texels are its u
- * and v and which carries its t (MESH).
+ * stretch of fills of one bitmap (the first's paint), a gradient fill, or
+ * drawTriangles' mesh, whose texels are its u and v and which carries its
+ * t (MESH).
  */
 export interface Part {
   geometry: GeometryData;
@@ -63,9 +65,26 @@ class Gathered {
   private paint: ImageFill | GradientFill | null = null;
   private region: Area | null = null;
 
-  /** Open a part for `paint`, the one open first closed, unless both are solid. */
+  /**
+   * Open a part for `paint`, the one open first closed, unless both are
+   * solid, or both sample one bitmap alike: a fill's texels, a vertex's
+   * each, hold its own matrix, and the view reads a bitmap part's paint for
+   * its bitmap, smoothing and repeat alone (paintTexture, paintSampler).
+   * A drawing of a bitmap fill a triangle so draws in one part.
+   */
   open(paint: ImageFill | GradientFill | null, region: Area | null): void {
     if (paint === null && this.paint === null) {
+      return;
+    }
+
+    const open = this.paint;
+    if (
+      paint?.type === "image" &&
+      open?.type === "image" &&
+      paint.image === open.image &&
+      paint.smooth === open.smooth &&
+      paint.repeat === open.repeat
+    ) {
       return;
     }
 
