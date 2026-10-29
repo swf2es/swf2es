@@ -251,11 +251,16 @@ export class WebGLBackend {
   private readonly runCounts = new Int32Array(RUN_MOST);
   private readonly runOffsets = new Int32Array(RUN_MOST);
   private readonly runRows = new Int32Array(RUN_MOST);
-  /** Draws gathered by gatherRun, and the textures they sample and how. */
+  /** Draws gathered by gatherRun, and the fill units they sample, a bit each. */
   private runCount = 0;
-  private runTextures = 0;
-  private readonly runIds = new Int32Array(FILL_TEXTURES);
-  private readonly runSampling = new Int32Array(FILL_TEXTURES);
+  private runUnits = 0;
+  /**
+   * The texture and sampling each fill unit was last given (runSlot), -1 for
+   * none, and the unit to take next when every one holds a texture.
+   */
+  private readonly unitIds = new Int32Array(FILL_TEXTURES).fill(-1);
+  private readonly unitSampling = new Int32Array(FILL_TEXTURES);
+  private unitNext = 0;
   /** The meshes' program (MESH), and where it takes its row, view, fragments' place and mode. */
   private mesh!: WebGLProgram;
   private meshRowLocation: WebGLUniformLocation | null = null;
@@ -396,7 +401,19 @@ export class WebGLBackend {
     const gl = this.gl;
     this.state.forget();
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
-    this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
+    try {
+      this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
+    } catch (e) {
+      if (!this.multi) {
+        throw e;
+      }
+
+      // An extension offered whose shader directive the compiler refuses: a call a draw.
+      this.multi = null;
+      this.program = linkProgram(gl, fillVertex(false), fillFragment);
+    }
+
+    this.unitIds.fill(-1);
     this.rowLocation = gl.getUniformLocation(this.program, "uRow");
     this.runsLocation = gl.getUniformLocation(this.program, "uRuns");
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
@@ -1380,23 +1397,25 @@ export class WebGLBackend {
         continue;
       }
 
-      for (let k = 0; k < this.runTextures; k++) {
-        state.bindTexture(FILL_UNIT + k, this.textures[this.runIds[k]] as WebGLTexture);
-        state.bindSampler(FILL_UNIT + k, this.sampler(this.runSampling[k]));
+      for (let k = 0; k < FILL_TEXTURES; k++) {
+        if (this.runUnits & (1 << k)) {
+          state.bindTexture(FILL_UNIT + k, this.textures[this.unitIds[k]] as WebGLTexture);
+          state.bindSampler(FILL_UNIT + k, this.sampler(this.unitSampling[k]));
+        }
       }
 
-      if (this.runRows[0] !== this.lastRow) {
-        this.lastRow = this.runRows[0];
-        gl.uniform1i(this.rowLocation, this.lastRow);
-      }
+      if (!this.multi) {
+        if (this.runRows[0] !== this.lastRow) {
+          this.lastRow = this.runRows[0];
+          gl.uniform1i(this.rowLocation, this.lastRow);
+        }
 
-      if (draws === 1) {
         gl.drawElements(gl.TRIANGLES, this.runCounts[0], gl.UNSIGNED_INT, this.runOffsets[0]);
         continue;
       }
 
       gl.uniform4iv(this.runsLocation, this.runRows, 0, Math.ceil(draws / 4) * 4);
-      (this.multi as MultiDraw).multiDrawElementsWEBGL(
+      this.multi.multiDrawElementsWEBGL(
         gl.TRIANGLES,
         this.runCounts,
         0,
@@ -1416,14 +1435,14 @@ export class WebGLBackend {
    * The fills from entry `i` on that one call draws, as many as fit its
    * textures (FILL_TEXTURES, each with its sampling) and, without
    * WEBGL_multi_draw, one: their runCounts, runOffsets and runRows (FILL_SLOT),
-   * and the textures in runIds and runSampling. The last entry gathered,
+   * and the units their textures take in runUnits. The last entry gathered,
    * past those whose texture is gone, which draw nothing.
    */
   private gatherRun(scene: SceneList, i: number, end: number, stencil: boolean): number {
     const most = this.multi ? RUN_MOST : 1;
     let draws = 0;
     let last = i;
-    this.runTextures = 0;
+    this.runUnits = 0;
 
     for (let j = i; j < end && draws < most; j++) {
       if (scene.kind[j] !== DRAW) {
@@ -1463,24 +1482,44 @@ export class WebGLBackend {
     }
 
     this.runCount = draws;
+
     return last;
   }
 
-  /** The slot of the run's textures (FILL_SLOT) texture `id` is sampled from so, taken if new; 0 if full. */
+  /**
+   * The slot (FILL_SLOT) of the unit texture `id` is sampled from so in the
+   * run: the one it was left on, else one the run has not taken, an empty
+   * one first, so that a texture stays where it is from run to run; 0 when
+   * the run has taken all.
+   */
   private runSlot(id: number, sampling: number): number {
-    for (let k = 0; k < this.runTextures; k++) {
-      if (this.runIds[k] === id && this.runSampling[k] === sampling) {
+    for (let k = 0; k < FILL_TEXTURES; k++) {
+      if (this.unitIds[k] === id && this.unitSampling[k] === sampling) {
+        this.runUnits |= 1 << k;
         return k + 1;
       }
     }
 
-    if (this.runTextures === FILL_TEXTURES) {
+    let free = -1;
+    for (let n = 0; n < FILL_TEXTURES; n++) {
+      const k = (this.unitNext + n) % FILL_TEXTURES;
+      if (!(this.runUnits & (1 << k)) && (free < 0 || this.unitIds[k] < 0)) {
+        free = k;
+        if (this.unitIds[k] < 0) {
+          break;
+        }
+      }
+    }
+
+    if (free < 0) {
       return 0;
     }
 
-    this.runIds[this.runTextures] = id;
-    this.runSampling[this.runTextures] = sampling;
-    return ++this.runTextures;
+    this.unitIds[free] = id;
+    this.unitSampling[free] = sampling;
+    this.unitNext = (free + 1) % FILL_TEXTURES;
+    this.runUnits |= 1 << free;
+    return free + 1;
   }
 
   /**

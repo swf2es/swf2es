@@ -5,7 +5,7 @@
     "useProgram": 0,
     "bindVertexArray": 0,
     "bindFramebuffer": 0,
-    "uniforms": 8
+    "uniforms": 5
   },
   "bounce": {
     "calls": 52.33,
@@ -21,7 +21,7 @@
     "useProgram": 0,
     "bindVertexArray": 0,
     "bindFramebuffer": 0,
-    "uniforms": 4
+    "uniforms": 3
   },
   "blend-mask": {
     "calls": 58,
@@ -37,6 +37,6 @@
     "useProgram": 0,
     "bindVertexArray": 0,
     "bindFramebuffer": 0,
-    "uniforms": 4
+    "uniforms": 3
   }
 }

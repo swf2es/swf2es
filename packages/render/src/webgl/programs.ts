@@ -47,7 +47,8 @@ export const FILL_TEXTURES = 8;
 /**
  * A fill draw's row and how it is drawn, in one int: the row in the bits
  * below FILL_SLOT, then which of the fill program's textures it samples, one
- * past its index or 0 for none, then SNAP_BIT where it snaps (SNAP).
+ * past its index or 0 for none, then SNAP_BIT where it snaps (SNAP). Rows
+ * are fewer: ROWS_A_LINE to a line of a texture of at most 16384 lines.
  */
 export const FILL_SLOT = 24;
 export const SNAP_BIT = 1 << 28;
@@ -58,8 +59,8 @@ export const SNAP_BIT = 1 << 28;
  * snaps (SNAP), then on the target by uView (scale and offset into clip
  * space), and passes on its straight colour, the row's colour transform
  * and the texture it samples. uRow names the draw's row (FILL_SLOT); with
- * `multi` (WEBGL_multi_draw), a multi-draw's draws past its first read
- * theirs from uRuns by gl_DrawID, which is 0 in a draw of its own.
+ * `multi` (WEBGL_multi_draw), uRuns names each draw's of a multi-draw by
+ * gl_DrawID, which is 0 in a draw of its own.
  */
 export const fillVertex = (multi: boolean) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
@@ -68,8 +69,7 @@ layout(location = ${POSITION_AT}) in vec2 aPosition;
 layout(location = ${TEXEL_AT}) in vec2 aTexel;
 layout(location = ${COLOR_AT}) in vec4 aColor;
 uniform highp sampler2D uRows;
-uniform int uRow;
-${multi ? `uniform ivec4 uRuns[${RUN_MOST / 4}];` : ""}
+${multi ? `uniform ivec4 uRuns[${RUN_MOST / 4}];` : "uniform int uRow;"}
 uniform vec4 uView;
 uniform float uUnit;
 out vec4 vColor;
@@ -79,7 +79,7 @@ flat out vec4 vAdd;
 flat out int vSlot;
 
 void main(void) {
-  int draw = ${multi ? "gl_DrawID == 0 ? uRow : uRuns[gl_DrawID >> 2][gl_DrawID & 3]" : "uRow"};
+  int draw = ${multi ? "uRuns[gl_DrawID >> 2][gl_DrawID & 3]" : "uRow"};
   int row = draw & ${(1 << FILL_SLOT) - 1};
   vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
@@ -98,11 +98,15 @@ void main(void) {
 }
 `;
 
-/** Texel `at` of the fill program's texture `slot` names, which only a constant may index. */
+/**
+ * Texel `at` of the texture vSlot names, as only a constant may index the
+ * samplers. At level 0: the textures have no mipmaps and sample alike up
+ * close and far off, and so no derivatives are taken in the switch.
+ */
 const slotTexel = Array.from(
   { length: FILL_TEXTURES },
   (_, k) => `    case ${k + 1}:
-      return texture(uTextures[${k}], at / vec2(textureSize(uTextures[${k}], 0)));`,
+      return textureLod(uTextures[${k}], at / vec2(textureSize(uTextures[${k}], 0)), 0.0);`,
 ).join("\n");
 
 /**
