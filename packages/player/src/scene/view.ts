@@ -3,8 +3,8 @@
 // list and its rows, and has @swf2es/render plan and draw it. It stands
 // beside PixiView behind a switch until it draws everything Pixi draws;
 // for now, the fills of shapes and drawings, solid, bitmap and gradient,
-// their lines, and bitmaps.
-import type { ColorTransform } from "@swf2es/format";
+// their lines, bitmaps, and text.
+import type { ColorTransform, Glyph } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/tessellate";
 import {
   CLAMP,
@@ -29,12 +29,27 @@ import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { ShapeObject } from "../display/shapeobject.js";
-import type { GradientFill, ImageFill, ShapeLayer } from "../display/shapes.js";
+import {
+  type GradientFill,
+  type ImageFill,
+  type ShapeLayer,
+  shapeLayers,
+} from "../display/shapes.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { Drawer } from "../hosts.js";
+import { cssFont } from "../text/fonts.js";
 import type { FillTessellator } from "./fills.js";
 import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
 import { layerStrokes } from "./strokes.js";
+import {
+  type DeviceItem,
+  deviceTextResolution,
+  fieldItems,
+  glyphShape,
+  staticItems,
+  type TextItem,
+  type TextOmissions,
+} from "./text.js";
 
 export interface RenderViewOptions {
   /** The stage's size in pixels, and the canvas' pixels a stage pixel. */
@@ -61,6 +76,28 @@ const GRADIENT_IDLE_FRAMES = 30;
 
 /** The most transforms a layer's lines are kept for: its instances in step, and a loop's turns. */
 const LINE_KEYS = 64;
+
+/** Device text runs kept by key past which those let go of are forgotten. */
+const RUN_KEYS = 512;
+
+/**
+ * How many frames a run of device text may go undrawn: a counter or a field
+ * typed into makes a new one each frame, which the usual idle frames would
+ * hold hundreds of.
+ */
+const TEXT_IDLE_FRAMES = 30;
+
+/** The most texels a run of device text has a side, under every WebGL 2's least texture size. */
+const TEXT_MOST = 4096;
+
+/** A run of device text rasterized: its texture and size, its origin `left` texels in, and its canvas pixels a stage pixel. */
+interface DeviceRun {
+  handle: TextureHandle;
+  width: number;
+  height: number;
+  left: number;
+  resolution: number;
+}
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 interface Made {
@@ -115,6 +152,13 @@ export class RenderView implements Drawer {
     Map<string, { handle: GeometryHandle | null; version: number }>
   >();
   private readonly quads = new Map<string, GeometryHandle>();
+  /** Each glyph's fill, made once for every text drawn in it; null for an empty glyph. */
+  private readonly glyphs = new WeakMap<Glyph, GeometryHandle | null>();
+  /** Device text rasterized, by its text, font, spacing and resolution. */
+  private readonly runs = new Map<string, DeviceRun>();
+  /** The canvas device text is rasterized on, made as first needed. */
+  private textCanvas: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null =
+    null;
   private readonly stores = new WeakMap<BitmapStore, Kept>();
   /** Each gradient's textures, by the region a radial one covers ("" for a linear one). */
   private readonly gradients = new WeakMap<GradientFill, Map<string, TextureHandle>>();
@@ -280,6 +324,27 @@ export class RenderView implements Drawer {
       }
     }
 
+    if (!hidden && (o instanceof TextObject || o instanceof StaticTextObject)) {
+      const omitted: TextOmissions = { advanced: false, clipped: false };
+      const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
+      if (omitted.advanced) {
+        unsupported.advancedTexts++;
+      }
+
+      if (omitted.clipped) {
+        unsupported.textClips++;
+      }
+
+      // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch.
+      const resolution =
+        o instanceof TextObject && !o.embedFonts
+          ? deviceTextResolution([a, b, c, d], this.scale * this.resolution)
+          : 1;
+      for (const item of items) {
+        this.drawTextItem(item, a, b, c, d, tx, ty, color, resolution);
+      }
+    }
+
     const store = o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
       const quad = this.quad(store.width, store.height);
@@ -390,12 +455,224 @@ export class RenderView implements Drawer {
     return handle;
   }
 
+  /**
+   * A text's item under the object's transform (a b c d tx ty) and colour
+   * transform: a glyph its fill, a rectangle the unit quad, each placed by
+   * its row and coloured by its colour as a multiplier before the object's;
+   * a device run its rasterized texture, a texel a canvas pixel.
+   */
+  private drawTextItem(
+    item: TextItem,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    tx: number,
+    ty: number,
+    color: ColorTransform | null,
+    resolution: number,
+  ): void {
+    const tint = item.color;
+    const own: ColorTransform = {
+      rMul: ((tint >>> 16) & 0xff) / 255,
+      gMul: ((tint >>> 8) & 0xff) / 255,
+      bMul: (tint & 0xff) / 255,
+      aMul: (tint >>> 24) / 255,
+      rAdd: 0,
+      gAdd: 0,
+      bAdd: 0,
+      aAdd: 0,
+    };
+    const colored = color ? concatColor(color, own) : own;
+    if (item.kind === "device") {
+      const run = this.deviceRun(item, resolution);
+      if (!run) {
+        return;
+      }
+
+      // A texel a canvas pixel, the run's origin `left` texels in, past its overhang.
+      const k = 1 / run.resolution;
+      const x = item.x - run.left * k;
+      const row = this.rows.add(
+        a * k,
+        b * k,
+        c * k,
+        d * k,
+        a * x + c * item.top + tx,
+        b * x + d * item.top + ty,
+        colored,
+      );
+      const quad = this.quad(run.width, run.height);
+      this.geometries.use(quad.id);
+      this.textures.use(run.handle.id);
+      this.scene.draw(quad.id, row, NORMAL, run.handle.id, SMOOTH | CLAMP);
+      return;
+    }
+
+    const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : this.unitQuad();
+    if (!geometry) {
+      return;
+    }
+
+    const m =
+      item.kind === "glyph"
+        ? item.m
+        : { a: item.width, b: 0, c: 0, d: item.height, tx: item.x, ty: item.y };
+    const row = this.rows.add(
+      a * m.a + c * m.b,
+      b * m.a + d * m.b,
+      a * m.c + c * m.d,
+      b * m.c + d * m.d,
+      a * m.tx + c * m.ty + tx,
+      b * m.tx + d * m.ty + ty,
+      colored,
+    );
+    this.geometries.use(geometry.id);
+    this.scene.draw(geometry.id, row, NORMAL);
+  }
+
+  /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */
+  private glyphGeometry(glyph: Glyph): GeometryHandle | null {
+    const known = this.glyphs.get(glyph);
+    if (known === null || (known && this.geometries.alive(known))) {
+      return known;
+    }
+
+    const layers = shapeLayers(glyphShape(glyph));
+    const part = layers.length > 0 ? layerParts(layers[0], this.tessellator)[0] : undefined;
+    const handle = part ? this.geometries.add(part.geometry) : null;
+    this.glyphs.set(glyph, handle);
+    return handle;
+  }
+
+  /** A white square of a pixel, for a row to scale to a rectangle. */
+  private unitQuad(): GeometryHandle {
+    const known = this.quads.get("unit");
+    if (known && this.geometries.alive(known)) {
+      return known;
+    }
+
+    const handle = this.geometries.add(bitmapQuad(1, 1));
+    this.quads.set("unit", handle);
+    return handle;
+  }
+
+  /**
+   * A run of device text rasterized white at `resolution` canvas pixels a
+   * stage pixel, or less where that would pass TEXT_MOST texels a side: its
+   * ink whole, the overhang left of its origin and past its advance too, its
+   * top at the ascent above the baseline; premultiplied, and kept while
+   * drawn, for every colour it is drawn in. Null for nothing to draw.
+   */
+  private deviceRun(item: DeviceItem, resolution: number): DeviceRun | null {
+    const key = `${item.family}|${item.size}|${item.bold}|${item.italic}|${item.letterSpacing}|${resolution}|${item.text}`;
+    const known = this.runs.get(key);
+    if (known && this.textures.alive(known.handle)) {
+      return known;
+    }
+
+    if (!this.textCanvas) {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        return null;
+      }
+
+      this.textCanvas = { canvas, context };
+    }
+
+    const { canvas, context } = this.textCanvas;
+    let scale = resolution;
+    let size = { left: 0, width: 0, height: 0 };
+    for (let tries = 0; tries < 2; tries++) {
+      size = this.measureRun(context, item, scale);
+      const most = Math.max(size.width, size.height);
+      if (most <= TEXT_MOST) {
+        break;
+      }
+
+      scale *= TEXT_MOST / most;
+    }
+
+    const { left, width, height } = size;
+    if (item.size <= 0 || width <= 2 || height <= 2 || width > TEXT_MOST || height > TEXT_MOST) {
+      return null;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    this.fontAt(context, item, scale);
+    context.fillStyle = "#ffffff";
+    context.textBaseline = "alphabetic";
+    context.fillText(item.text, left, item.ascent * scale + 1);
+    const pixels = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
+
+    // The canvas gives straight colour; textures hold it premultiplied.
+    for (let i = 0; i < pixels.length; i += 4) {
+      const alpha = pixels[i + 3];
+      pixels[i] = Math.round((pixels[i] * alpha) / 255);
+      pixels[i + 1] = Math.round((pixels[i + 1] * alpha) / 255);
+      pixels[i + 2] = Math.round((pixels[i + 2] * alpha) / 255);
+    }
+
+    // Those let go of are forgotten, so that text typed and scrolled keeps no keys for them.
+    if (this.runs.size > RUN_KEYS) {
+      for (const [old, run] of this.runs) {
+        if (!this.textures.alive(run.handle)) {
+          this.runs.delete(old);
+        }
+      }
+    }
+
+    const run: DeviceRun = {
+      handle: this.textures.add(width, height, pixels, TEXT_IDLE_FRAMES),
+      width,
+      height,
+      left,
+      resolution: scale,
+    };
+    this.runs.set(key, run);
+    return run;
+  }
+
+  /** The run's font and spacing set on the canvas at `scale` canvas pixels a stage pixel. */
+  private fontAt(context: CanvasRenderingContext2D, item: DeviceItem, scale: number): void {
+    context.font = cssFont(item.family, item.size * scale, item.bold, item.italic);
+    context.letterSpacing = `${item.letterSpacing * scale}px`;
+  }
+
+  /** The texels a run takes at `scale`: its ink left of its origin, and its whole width and height, a texel spare round. */
+  private measureRun(
+    context: CanvasRenderingContext2D,
+    item: DeviceItem,
+    scale: number,
+  ): { left: number; width: number; height: number } {
+    this.fontAt(context, item, scale);
+    const m = context.measureText(item.text);
+    const left = Math.max(0, Math.ceil(m.actualBoundingBoxLeft)) + 1;
+    const right = Math.max(m.width, Math.ceil(m.actualBoundingBoxRight));
+    return {
+      left,
+      width: Math.ceil(left + right) + 1,
+      height: Math.ceil((item.ascent + item.descent) * scale) + 2,
+    };
+  }
+
   /** A bitmap's quad of its size, made once for every bitmap of that size. */
   private quad(width: number, height: number): GeometryHandle {
     const key = `${width}x${height}`;
     const known = this.quads.get(key);
     if (known && this.geometries.alive(known)) {
       return known;
+    }
+
+    // Device text makes quads of many sizes: those let go of are forgotten.
+    if (this.quads.size > RUN_KEYS) {
+      for (const [old, handle] of this.quads) {
+        if (!this.geometries.alive(handle)) {
+          this.quads.delete(old);
+        }
+      }
     }
 
     const handle = this.geometries.add(bitmapQuad(width, height));
@@ -523,10 +800,6 @@ export class RenderView implements Drawer {
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 function noteUnsupported(o: DisplayObject): void {
-  if (o instanceof TextObject || o instanceof StaticTextObject) {
-    unsupported.texts++;
-  }
-
   if (o.mask || o.clipDepth > 0) {
     unsupported.masks++;
   }

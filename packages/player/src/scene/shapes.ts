@@ -14,15 +14,18 @@ import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
  * What the renderer cannot draw yet, counted as it is met, for a test or a
- * probe to read: drawTriangles' meshes, texts, and lines that could not be filled with no
- * native tessellator, left out; masks and
+ * probe to read: drawTriangles' meshes, and lines that could not be filled with no native
+ * tessellator, left out; advanced text drawn as normal and overrunning text
+ * unclipped; masks and
  * clip layers, scrollRects' clips and 9-slices ignored, so what they would
  * cut or reshape is drawn whole; filters and blend modes ignored.
  */
 export const unsupported = {
   meshes: 0,
   strokes: 0,
-  texts: 0,
+  /** Texts with advanced anti-aliasing, drawn as normal; and fields whose text runs over, unclipped. */
+  advancedTexts: 0,
+  textClips: 0,
   masks: 0,
   scrollRects: 0,
   scale9Grids: 0,
