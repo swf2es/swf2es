@@ -131,14 +131,15 @@ export class Tessellator {
   private failed(): void {
     // Compilation can be blocked by CSP or unavailable on the host.
     this.unavailable = !renderCompiled();
-    // In particular, longjmp unwinds through a throwing import: never resume that C instance.
-    this.dispose();
+    // In particular, longjmp unwinds through a throwing import: never resume that C instance. The
+    // line builder's instance is its own.
+    this.instance = null;
   }
 
   /** An instance grown past what is kept, let go. */
   private trim(): void {
     if (this.capacity > this.keep) {
-      this.dispose();
+      this.instance = null;
     }
   }
 
