@@ -4415,8 +4415,11 @@ in its own. A trap is tried again in a new instance, and where that fails
 too, nothing is written. The player works out what a destination shows
 and a shadow's or a bevel's offset; the kernel's wrapper, the blocks each
 reads, in tiles over a large rect, so that its scratch stays small for any
-bitmap Flash allows. It takes values only as the player's filters hold
-them, and refuses others. The colour matrix and the displacement map stay in JS. The JS the
+bitmap Flash allows. It takes values only within the ranges the player's
+filter objects keep, and refuses others; the player brings a filter from
+a SWF's tags (filterOfSwf), whose passes, blurs and strength may lie past
+them, within them first: passes to 15, blurs to 0 through 255, a negative
+strength none. The colour matrix and the displacement map stay in JS. The JS the
 player had is kept as the kernels' reference in the unit tests
 (`tests/unit/player/bitmap/convolution-reference.ts`,
 `blur-reference.ts`), which hold the kernels to it bit for bit

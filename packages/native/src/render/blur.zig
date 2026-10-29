@@ -35,11 +35,15 @@ pub const Flags = packed struct(u32) {
     unused: u26 = 0,
 };
 
-/// A block of the source whose alpha is blurred: rw × rh bytes at `alpha`, blurred in place.
+/// A block of the source whose alpha is blurred: rw × rh bytes at `alpha`,
+/// blurred in place, cut at (x, y) from the block its moves read, past
+/// which it read nothing.
 pub const Read = extern struct {
     alpha: u32,
     rw: u32,
     rh: u32,
+    x: i32,
+    y: i32,
     unused: u32,
 };
 
@@ -81,10 +85,10 @@ comptime {
     // The offsets the TS writes the fields at.
     std.debug.assert(@sizeOf(BlurParams) == 32);
     std.debug.assert(@offsetOf(LayerParams, "read") == 32);
-    std.debug.assert(@offsetOf(LayerParams, "move") == 64);
-    std.debug.assert(@offsetOf(LayerParams, "blur_x") == 112);
-    std.debug.assert(@offsetOf(LayerParams, "color") == 160);
-    std.debug.assert(@sizeOf(LayerParams) == 176);
+    std.debug.assert(@offsetOf(LayerParams, "move") == 80);
+    std.debug.assert(@offsetOf(LayerParams, "blur_x") == 128);
+    std.debug.assert(@offsetOf(LayerParams, "color") == 176);
+    std.debug.assert(@sizeOf(LayerParams) == 192);
 }
 
 /// What the kernels take of a plane's sides: as the player's rects are, and
@@ -285,6 +289,7 @@ pub fn blur(gpa: std.mem.Allocator, plane: []u8, temp: []u8, w: usize, h: usize,
     const bx = Box.of(blur_x);
     const by = Box.of(blur_y);
     if (quality == 0 or w == 0 or h == 0 or (bx == null and by == null)) return;
+
     const line = try gpa.alloc(i32, if (bx) |b| w + 2 * (b.full + 1) + 1 else 0);
     defer gpa.free(line);
     const sums = try gpa.alloc(i32, if (by != null) w else 0);
@@ -315,8 +320,10 @@ pub fn blurPixels(gpa: std.mem.Allocator, pixels: []u32, p: *const BlurParams) E
 
 /// `plane` (w × h) read at each pixel of its first ow × oh moved by (ox,
 /// oy), between pixels linearly with weights in 256ths, truncated; `outside`
-/// past it.
-fn shifted(gpa: std.mem.Allocator, plane: []const u8, w: usize, h: usize, ox: f64, oy: f64, outside: u8, out: []u8, ow: usize, oh: usize) Error!void {
+/// past it. The plane is cut from a block at (cx, cy) in it, which the
+/// moves are of: a pixel's place and weights are the block's, so a cut
+/// leaves them as they were.
+fn shifted(gpa: std.mem.Allocator, plane: []const u8, w: usize, h: usize, cx: i64, cy: i64, ox: f64, oy: f64, outside: u8, out: []u8, ow: usize, oh: usize) Error!void {
     const xs = try gpa.alloc(i64, ow);
     defer gpa.free(xs);
     const fxs = try gpa.alloc(f64, ow);
@@ -325,7 +332,7 @@ fn shifted(gpa: std.mem.Allocator, plane: []const u8, w: usize, h: usize, ox: f6
         const at = float(x) + ox;
         // As an Int32Array kept it.
         const whole: f64 = float(toInt32(@floor(at)));
-        x0.* = @intFromFloat(whole);
+        x0.* = @as(i64, @intFromFloat(whole)) - cx;
         fx.* = @floor((at - whole) * 256) / 256;
     }
 
@@ -333,7 +340,7 @@ fn shifted(gpa: std.mem.Allocator, plane: []const u8, w: usize, h: usize, ox: f6
     const H: i64 = @intCast(h);
     // Moved by whole pixels, as a glow reads: rows copied, `outside` past the plane.
     if (oy == @floor(oy) and @abs(oy) < 1e15 and std.mem.allEqual(f64, fxs, 0)) {
-        const y0: i64 = @intFromFloat(oy);
+        const y0: i64 = @as(i64, @intFromFloat(oy)) - cy;
         for (0..oh) |y| {
             const row = out[y * ow ..][0..ow];
             const sy = @as(i64, @intCast(y)) + y0;
@@ -362,7 +369,7 @@ fn shifted(gpa: std.mem.Allocator, plane: []const u8, w: usize, h: usize, ox: f6
         const at = float(y) + oy;
         const y0f = @floor(at);
         const fy = @floor((at - y0f) * 256) / 256;
-        const y0: i64 = if (std.math.isFinite(y0f) and @abs(y0f) < 1e15) @intFromFloat(y0f) else std.math.minInt(i32);
+        const y0: i64 = (if (std.math.isFinite(y0f) and @abs(y0f) < 1e15) @as(i64, @intFromFloat(y0f)) else std.math.minInt(i32)) - cy;
         const row = out[y * ow ..][0..ow];
         // Both rows within the plane: a read whose columns are too needs no bounds.
         const inside = y0 >= 0 and y0 + 1 < H;
@@ -611,7 +618,7 @@ pub fn layer(gpa: std.mem.Allocator, pixels: []u32, reads: []const []u8, p: *con
         const mv = p.move[k];
         const r = p.read[mv.read];
         moved[k] = try gpa.alloc(u8, n);
-        try shifted(gpa, reads[mv.read], r.rw, r.rh, mv.x, mv.y, if (p.flags.invert) 255 else 0, moved[k], p.w, p.h);
+        try shifted(gpa, reads[mv.read], r.rw, r.rh, r.x, r.y, mv.x, mv.y, if (p.flags.invert) 255 else 0, moved[k], p.w, p.h);
     }
 
     switch (p.kind) {
@@ -647,7 +654,7 @@ test "runs along y give what runs along x give the plane turned" {
 test "a pixel moved by whole pixels is read as it is, past the plane its outside" {
     const plane = [_]u8{ 1, 2, 3, 4 };
     var out: [4]u8 = undefined;
-    try shifted(std.testing.allocator, &plane, 2, 2, 1, 0, 9, &out, 2, 2);
+    try shifted(std.testing.allocator, &plane, 2, 2, 0, 0, 1, 0, 9, &out, 2, 2);
     try std.testing.expectEqualSlices(u8, &.{ 2, 9, 4, 9 }, &out);
 }
 
@@ -670,7 +677,7 @@ test "params the player never gives are refused" {
         .{ .w = 0x100000, .h = 0x100000, .quality = 2, .pixels = 0, .blur_x = 3, .blur_y = 3 },
     }) |p| try std.testing.expect(!validBlur(&p));
 
-    const read: Read = .{ .alpha = 0, .rw = 8, .rh = 8, .unused = 0 };
+    const read: Read = .{ .alpha = 0, .rw = 8, .rh = 8, .x = 0, .y = 0, .unused = 0 };
     const move: Move = .{ .read = 0, .unused = 0, .x = 2, .y = 2 };
     const layer_ok: LayerParams = .{ .kind = .glow, .flags = .{}, .w = 4, .h = 4, .pixels = 0, .quality = 1, .reads = 1, .moves = 1, .read = .{ read, read }, .move = .{ move, move }, .blur_x = 4, .blur_y = 4, .strength = 2, .alpha = 1, .highlight_alpha = 1, .shadow_alpha = 1, .color = 0xff0000, .highlight_color = 0, .shadow_color = 0, .table = 0 };
     try std.testing.expect(validLayer(&layer_ok));
@@ -705,4 +712,19 @@ test "every failed allocation is reported" {
             try blurPixels(gpa, px, params);
         }
     }.run, .{ &pixels, &p });
+}
+
+test "a plane cut from its block reads as the block where the cut holds it" {
+    var block: [6 * 6]u8 = undefined;
+    for (&block, 0..) |*v, i| v.* = @truncate(i * 37);
+    // The block's middle 4 by 4, cut at (1, 1).
+    var cut: [4 * 4]u8 = undefined;
+    for (0..4) |y| for (0..4) |x| {
+        cut[y * 4 + x] = block[(y + 1) * 6 + x + 1];
+    };
+    var whole: [2 * 2]u8 = undefined;
+    var part: [2 * 2]u8 = undefined;
+    try shifted(std.testing.allocator, &block, 6, 6, 0, 0, 1.75, 2.3, 0, &whole, 2, 2);
+    try shifted(std.testing.allocator, &cut, 4, 4, 1, 1, 1.75, 2.3, 0, &part, 2, 2);
+    try std.testing.expectEqualSlices(u8, &whole, &part);
 }

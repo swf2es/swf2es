@@ -60,7 +60,9 @@ export fn convolve(address: usize) usize {
 /// address, or 0 where the params are invalid or memory runs out.
 export fn blurFilter(address: usize) usize {
     if (!holds(address, @sizeOf(filters.BlurParams), @alignOf(filters.BlurParams))) return 0;
-    const p: *const filters.BlurParams = @ptrFromInt(address);
+    // A copy, which the blocks the call writes into, wherever they lie in the input, leave be.
+    const params = @as(*const filters.BlurParams, @ptrFromInt(address)).*;
+    const p = &params;
     if (!filters.validBlur(p)) return 0;
     const count = @as(usize, p.w) * p.h;
     if (!holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;
@@ -74,7 +76,9 @@ export fn blurFilter(address: usize) usize {
 /// runs out.
 export fn layerFilter(address: usize) usize {
     if (!holds(address, @sizeOf(filters.LayerParams), @alignOf(filters.LayerParams))) return 0;
-    const p: *const filters.LayerParams = @ptrFromInt(address);
+    // A copy, which the blocks the call writes into, wherever they lie in the input, leave be.
+    const params = @as(*const filters.LayerParams, @ptrFromInt(address)).*;
+    const p = &params;
     if (!filters.validLayer(p)) return 0;
     const count = @as(usize, p.w) * p.h;
     if (!holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;

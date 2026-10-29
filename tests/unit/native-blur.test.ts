@@ -224,3 +224,64 @@ test("a glow over a million pixels every frame keeps its instance", () => {
     wasm.Instance = Instance;
   }
 });
+
+test("values a SWF's filter tags hold past the player's ranges filter as their nearest within them", () => {
+  const r = random(7);
+  const pick = <T>(values: readonly T[]) => values[Math.floor(r() * values.length)];
+  // As the player brings them within its ranges: a blur within 0 to 255, passes to 15, a strength from 0.
+  const kept = <T extends { blurX: number; blurY: number; quality: number; strength: number }>(
+    f: T,
+  ) => ({
+    ...f,
+    blurX: Math.min(255, Math.max(0, f.blurX)),
+    blurY: Math.min(255, Math.max(0, f.blurY)),
+    quality: Math.min(15, f.quality),
+    strength: Math.max(0, f.strength),
+  });
+  for (let k = 0; k < 300; k++) {
+    const kind = KINDS[k % KINDS.length];
+    const source = new BitmapStore(12, 10, true, 0);
+    source.fillRect({ x: 2, y: 3, width: 6, height: 4 }, 0xff40a0c0);
+    source.fillRect({ x: 5, y: 1, width: 4, height: 7 }, 0x80402010);
+    // Big blurs at few passes, small ones at many: the reference's work grows with both.
+    const big = r() < 0.5;
+    const f = {
+      ...filterDefaults(kind),
+      // A 16.16 blur, signed; a pass count of 5 bits; an 8.8 strength, signed.
+      blurX: big ? pick([300, 600, 32767.99]) : pick([-3, -0.5, 0, 0.75, 4]),
+      blurY: big ? pick([-200, 256, 1000]) : pick([-200, 0, 2, 5.5]),
+      quality: big ? pick([0, 1]) : pick([0, 2, 16, 31]),
+      strength: pick([-128, -1, 0, 0.5, 3, 127.99]),
+      distance: pick([0, 2, 5]),
+      angle: pick([0, 45, 200]),
+      type: pick(["inner", "outer", "full"]),
+    };
+    const run = (by: typeof applyFilter, given: typeof f) => {
+      const dest = new BitmapStore(20, 18, true, 0x11223344);
+      by(dest, source, { x: 0, y: 0, width: 12, height: 10 }, 4, 4, given);
+      return Array.from(dest.pixels);
+    };
+    assert.deepEqual(
+      run(applyFilter, f),
+      run(applyBlurFamily, kept(f)),
+      `case ${k}: ${JSON.stringify(f)}`,
+    );
+  }
+});
+
+test("a blur reaching far past a small bitmap is filtered in about the time of one block", () => {
+  // 15 passes of a box 255 wide truncate a shape this size to nothing; what is timed is the work.
+  const source = new BitmapStore(200, 200, true, 0);
+  source.fillRect({ x: 40, y: 60, width: 100, height: 80 }, 0xff336699);
+  for (const f of [
+    { ...filterDefaults("blur"), blurX: 255, blurY: 255, quality: 15 },
+    { ...filterDefaults("glow"), blurX: 255, blurY: 255, quality: 15, strength: 2 },
+  ]) {
+    const dest = new BitmapStore(200, 200, true, 0);
+    const started = performance.now();
+    applyFilter(dest, source, { x: 0, y: 0, width: 200, height: 200 }, 0, 0, f);
+    const took = performance.now() - started;
+    // Tiles of 13 pixels, each blurring all its reach again, took minutes.
+    assert.ok(took < 10_000, `${f.kind} took ${took} ms`);
+  }
+});

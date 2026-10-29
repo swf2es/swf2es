@@ -282,6 +282,24 @@ export function filterRefusal(rect: PixelRect, f: Filter, source: PixelRect): nu
 }
 
 /**
+ * `f` with what a filter from a SWF's tags may hold past the ranges the
+ * player's filter objects keep (passes to 31, blurs signed 16.16, strength
+ * signed 8.8, copied as they are: filterOfSwf) brought within them, as the
+ * render module's kernels take them: a blur under 0 none and past 255 255,
+ * NaN kept; quality to 15; a strength under 0 none.
+ */
+function kept(f: Filter): Filter {
+  const blur = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v);
+  return {
+    ...f,
+    blurX: blur(f.blurX),
+    blurY: blur(f.blurY),
+    quality: Math.max(0, Math.min(15, Math.trunc(f.quality) || 0)),
+    strength: Math.max(0, Math.min(255, f.strength || 0)),
+  };
+}
+
+/**
  * Filter `rect` of `source` into `dest` at (dx, dy), as applyFilter does:
  * the filter's rect, moved there and clipped, written whole. True where the
  * filter is one this draws; the others leave `dest` as it was.
@@ -292,12 +310,14 @@ export function applyFilter(
   rect: PixelRect,
   dx: number,
   dy: number,
-  f: Filter,
+  given: Filter,
   map: BitmapStore | null = null,
 ): boolean {
-  if (!filtersDrawn.has(f.kind)) {
+  if (!filtersDrawn.has(given.kind)) {
     return false;
   }
+
+  const f = given.kind === "blur" || GLOWS.has(given.kind) ? kept(given) : given;
 
   const out = filterRect(rect, f);
   // What the destination shows of the filter's rect, in the filter's

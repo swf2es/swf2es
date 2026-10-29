@@ -73,17 +73,16 @@ const LAYER_TYPE_INNER = 8;
 const LAYER_TYPE_OUTER = 16;
 const LAYER_INVERT = 32;
 /** blur.zig's LayerParams, and a gradient's table after it. */
-const LAYER_PARAMS = 176;
+const LAYER_PARAMS = 192;
 const TABLE_BYTES = 1024;
 
 /**
  * What a tile's input and scratch take at most, so that a filter over a
  * large bitmap keeps its instance under retainMemory's default; a tile
- * whose filter reaches far may take up to MOST_TILE_BYTES rather than be
- * mostly reach.
+ * whose filter reaches far is four times its reach a side, whatever that
+ * takes, its blocks cut to the bitmap and the reach round it.
  */
 const TILE_BYTES = 4 << 20;
-const MOST_TILE_BYTES = 64 << 20;
 /** The arena's header an allocation, its alignment and the stack's room, with some to spare. */
 const SLACK = 64 << 10;
 
@@ -125,40 +124,44 @@ function runBytes(w: number, blurX: number, blurY: number): number {
 }
 
 /**
- * How far `rects` move alike so that, where all lie wholly past the bitmap
- * on one side, they lie just past it: [x, y]. As far out as the player lets
- * a rect lie, past the kernels' bounds, they read there what they read
- * there, the bitmap's edge or nothing.
+ * `rect`, where it lies wholly past the bitmap on one side, moved to lie just
+ * past it: as far out as the player lets a rect lie, past the convolution's
+ * bounds, every tap reads there what it reads here, the nearest edge or the
+ * filter's colour.
  */
-function inward(source: BitmapSource, rects: readonly BitmapRect[]): [number, number] {
-  const along = (lo: number, hi: number, length: number) =>
-    hi <= 0 ? -hi : lo >= length ? length - lo : 0;
-  return [
-    along(
-      Math.min(...rects.map((r) => r.x)),
-      Math.max(...rects.map((r) => r.x + r.width)),
-      source.width,
-    ),
-    along(
-      Math.min(...rects.map((r) => r.y)),
-      Math.max(...rects.map((r) => r.y + r.height)),
-      source.height,
-    ),
-  ];
+function inward(source: BitmapSource, rect: BitmapRect): BitmapRect {
+  const along = (at: number, size: number, length: number) =>
+    at + size <= 0 ? -size : at >= length ? length : at;
+  return {
+    ...rect,
+    x: along(rect.x, rect.width, source.width),
+    y: along(rect.y, rect.height, source.height),
+  };
 }
 
-/** `rect` moved by (dx, dy). */
-const moved = (rect: BitmapRect, [dx, dy]: readonly number[]): BitmapRect => ({
-  ...rect,
-  x: rect.x + dx,
-  y: rect.y + dy,
-});
+/**
+ * `block` within the bitmap grown by a blur's reach (hx, hy), past which
+ * every pass of it holds nothing: null where it lies wholly past. A block
+ * whose reads past the bitmap are not nothing (an inner glow's, of 255 less
+ * the alpha) is not to be cut.
+ */
+function within(
+  block: BitmapRect,
+  source: BitmapSource,
+  hx: number,
+  hy: number,
+): BitmapRect | null {
+  const x0 = Math.max(block.x, -hx);
+  const y0 = Math.max(block.y, -hy);
+  const x1 = Math.min(block.x + block.width, source.width + hx);
+  const y1 = Math.min(block.y + block.height, source.height + hy);
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
+}
 
 /**
- * `area` in tiles of up to `side` pixels a side, `bytes` of a tile `w` by
- * `h` within TILE_BYTES where its reach lets it: tiles four times the reach
- * wide at least, up to MOST_TILE_BYTES. Null where even the least does not
- * fit the module.
+ * `area` in tiles, `bytes` of a tile `w` by `h` within TILE_BYTES where its
+ * reach (`far`) lets it: tiles four times the reach a side at least. Null
+ * where they do not fit the module.
  */
 function tiles(
   area: BitmapRect,
@@ -167,7 +170,8 @@ function tiles(
 ): BitmapRect[] | null {
   const of = (side: number) => bytes(Math.min(side, area.width), Math.min(side, area.height));
   let side = Math.max(area.width, area.height);
-  while (side > 16 && of(side) > TILE_BYTES && (side > 4 * far || of(side) > MOST_TILE_BYTES)) {
+  // Smaller, a tile would be mostly the reach round it, read again for each.
+  while (side > 16 && of(side) > TILE_BYTES && side > 4 * far) {
     side = Math.ceil(side / 2);
   }
 
@@ -336,30 +340,21 @@ export class BitmapKernel {
     area: BitmapRect,
     filter: ConvolutionFilter,
     transparent: boolean,
-  ): Uint32Array | null => this.run(source, area, filter, transparent, true);
-
-  /** convolve, made again in a new instance where this one traps if `again`. */
-  private run(
-    source: BitmapSource,
-    area: BitmapRect,
-    filter: ConvolutionFilter,
-    transparent: boolean,
-    again: boolean,
-  ): Uint32Array | null {
+  ): Uint32Array | null => {
     const { width: sw, height: sh } = source;
     const cols = filter.matrixX;
     const rows = filter.matrixY;
     // Wholly past the kernel's reach of the bitmap, every tap reads alike, the nearest edge's or
     // the filter's colour, wherever the rect is.
-    const [dx, dy] = inward(source, [
-      {
-        x: area.x - cols,
-        y: area.y - rows,
-        width: area.width + 2 * cols,
-        height: area.height + 2 * rows,
-      },
-    ]);
-    const { x, y, width: w, height: h } = moved(area, [dx, dy]);
+    const grown = inward(source, {
+      x: area.x - cols,
+      y: area.y - rows,
+      width: area.width + 2 * cols,
+      height: area.height + 2 * rows,
+    });
+    const x = grown.x + cols;
+    const y = grown.y + rows;
+    const { width: w, height: h } = area;
     if (
       ![sw, sh, x, y, w, h, cols, rows].every(Number.isInteger) ||
       sw <= 0 ||
@@ -407,19 +402,7 @@ export class BitmapKernel {
       return null;
     }
 
-    try {
-      if (!this.instance) {
-        try {
-          // An instance of the render module of its own, whose memory no fill or line shares.
-          this.instance = renderInstance(() => {
-            throw new Error("the bitmap kernel takes no tessellator");
-          }) as unknown as NativeExports;
-        } catch {
-          return null;
-        }
-      }
-
-      const wasm = this.instance;
+    return this.call((wasm) => {
       const flags =
         (filter.clamp ? FLAG_CLAMP : 0) |
         (source.transparent ? FLAG_SOURCE_TRANSPARENT : 0) |
@@ -489,16 +472,8 @@ export class BitmapKernel {
       }
 
       return result;
-    } catch {
-      // A trap: never resume that instance; the call once more in a new one.
-      this.dispose();
-      return again ? this.run(source, area, filter, transparent, false) : null;
-    } finally {
-      if (this.capacity > this.keep) {
-        this.dispose();
-      }
-    }
-  }
+    }, true);
+  };
 
   /**
    * The blur filter over `area` of the source, 0 past the bitmap: its
@@ -526,9 +501,10 @@ export class BitmapKernel {
 
     const hx = reach(blurX, quality);
     const hy = reach(blurY, quality);
+    // A block is cut to the bitmap and the reach round it.
     const blockBytes = (w: number, h: number) => {
-      const bw = w + 2 * hx;
-      const n = bw * (h + 2 * hy);
+      const bw = Math.min(w, source.width) + 2 * hx;
+      const n = bw * (Math.min(h, source.height) + 2 * hy);
       return 32 + n * 6 + runBytes(bw, blurX, blurY);
     };
     const parts = tiles(area, Math.max(hx, hy), blockBytes);
@@ -539,12 +515,17 @@ export class BitmapKernel {
     const result = new Uint32Array(area.width * area.height);
     return this.call((wasm) => {
       for (const t of parts) {
-        const block = {
-          x: t.x - hx,
-          y: t.y - hy,
-          width: t.width + 2 * hx,
-          height: t.height + 2 * hy,
-        };
+        const block = within(
+          { x: t.x - hx, y: t.y - hy, width: t.width + 2 * hx, height: t.height + 2 * hy },
+          source,
+          hx,
+          hy,
+        );
+        // Past the blur's reach of the bitmap: nothing.
+        if (!block) {
+          continue;
+        }
+
         const n = block.width * block.height;
         const pointer = wasm.resetArena(32 + n * 4);
         if (!pointer) {
@@ -564,13 +545,17 @@ export class BitmapKernel {
           return null;
         }
 
-        // The tile's rows of its block, past the reach round it.
+        // What the block holds of the tile, past the reach round it; nothing past the block.
         const blurred = new Uint32Array(wasm.memory.buffer, out, n);
-        for (let row = 0; row < t.height; row++) {
-          const from = (row + hy) * block.width + hx;
+        const x0 = Math.max(t.x, block.x);
+        const x1 = Math.min(t.x + t.width, block.x + block.width);
+        const y0 = Math.max(t.y, block.y);
+        const y1 = Math.min(t.y + t.height, block.y + block.height);
+        for (let y = y0; y < y1 && x1 > x0; y++) {
+          const from = (y - block.y) * block.width + x0 - block.x;
           result.set(
-            blurred.subarray(from, from + t.width),
-            (t.y - area.y + row) * area.width + t.x - area.x,
+            blurred.subarray(from, from + x1 - x0),
+            (y - area.y) * area.width + x0 - area.x,
           );
         }
       }
@@ -618,13 +603,21 @@ export class BitmapKernel {
 
     const hx = reach(f.blurX, f.quality);
     const hy = reach(f.blurY, f.quality);
-    // A tile's pixels, its blocks' alpha and their scratch, and its reads' planes and columns.
+    // A tile's pixels, its blocks' alpha and their scratch, and its reads' planes and columns;
+    // a block cut to the bitmap and the reach round it, unless it reads 255 past it.
+    const cut = (r: BitmapRect) =>
+      f.invert
+        ? r
+        : {
+            ...r,
+            width: Math.min(r.width, source.width + 2 * hx),
+            height: Math.min(r.height, source.height + 2 * hy),
+          };
     const tileBytes = (w: number, h: number) => {
       const { reads } = alphaReads({ x: 0, y: 0, width: w, height: h }, hx, hy, offsets);
-      const read = reads.reduce(
-        (sum, r) => sum + r.width * r.height * 2 + runBytes(r.width, f.blurX, f.blurY),
-        0,
-      );
+      const read = reads
+        .map(cut)
+        .reduce((sum, r) => sum + r.width * r.height * 2 + runBytes(r.width, f.blurX, f.blurY), 0);
       return LAYER_PARAMS + TABLE_BYTES + w * h * 4 + read + offsets.length * (w * h + w * 16);
     };
     const parts = tiles(area, Math.max(hx, hy), tileBytes);
@@ -642,7 +635,15 @@ export class BitmapKernel {
     const result = new Uint32Array(area.width * area.height);
     return this.call((wasm) => {
       for (const t of parts) {
-        const { reads, moves } = alphaReads(t, hx, hy, offsets);
+        const whole = alphaReads(t, hx, hy, offsets);
+        // Past the bitmap and the blur's reach round it, the alpha blurred is nothing, as the
+        // block's reads past it are: a block cut there, a pixel past it kept of one wholly so,
+        // its moves still the whole block's, which blur.zig reads the cut by.
+        const reads = f.invert
+          ? whole.reads
+          : whole.reads.map((r) => within(r, source, hx, hy) ?? { ...r, width: 1, height: 1 });
+        const moves = whole.moves;
+
         const n = t.width * t.height;
         const alpha = reads.reduce((sum, r) => sum + r.width * r.height, 0);
         const pointer = wasm.resetArena(LAYER_PARAMS + TABLE_BYTES + n * 4 + alpha);
@@ -656,22 +657,24 @@ export class BitmapKernel {
         const ints = new Int32Array(buffer, pointer, LAYER_PARAMS / 4);
         ints.fill(0);
         ints.set([kind, flags, t.width, t.height, pixels, f.quality, reads.length, moves.length]);
+
         let at = pixels + n * 4;
         for (const [k, r] of reads.entries()) {
-          ints.set([at, r.width, r.height], 8 + k * 4);
+          const from = whole.reads[k];
+          ints.set([at, r.width, r.height, r.x - from.x, r.y - from.y], 8 + k * 6);
           copyAlpha(source, r, new Uint8Array(buffer, at, r.width * r.height));
           at += r.width * r.height;
         }
 
         const floats = new Float64Array(buffer, pointer, LAYER_PARAMS / 8);
         for (const [k, m] of moves.entries()) {
-          ints[16 + k * 6] = m.read;
-          floats[9 + k * 3] = m.x;
-          floats[10 + k * 3] = m.y;
+          ints[20 + k * 6] = m.read;
+          floats[11 + k * 3] = m.x;
+          floats[12 + k * 3] = m.y;
         }
 
-        floats.set([f.blurX, f.blurY, f.strength, f.alpha, f.highlightAlpha, f.shadowAlpha], 14);
-        ints.set([f.color, f.highlightColor, f.shadowColor, table], 40);
+        floats.set([f.blurX, f.blurY, f.strength, f.alpha, f.highlightAlpha, f.shadowAlpha], 16);
+        ints.set([f.color, f.highlightColor, f.shadowColor, table], 44);
         if (f.table) {
           new Uint32Array(buffer, table, 256).set(f.table);
         }
