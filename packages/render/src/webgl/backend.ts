@@ -16,8 +16,10 @@ import type { Keeps } from "../keeps.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
 import {
   ADD,
+  CLAMP,
   DRAW,
   LAYER,
+  MESH,
   MIRROR,
   NORMAL,
   REPEAT,
@@ -29,14 +31,23 @@ import type { Textures } from "../textures.js";
 import { FilterRunner } from "./filters.js";
 import { SizedPool } from "./pool.js";
 import {
+  COLOR_AT,
   compositeFragment,
   compositeVertex,
+  DEPTH_AT,
   fillFragment,
   fillVertex,
+  meshFragment,
+  meshVertex,
+  POSITION_AT,
   ROW_TEXELS,
+  TEXEL_AT,
 } from "./programs.js";
 
-/** Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four bytes. */
+/**
+ * Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four
+ * bytes, or a mesh's depth's float.
+ */
 const VERTEX_BYTES = 20;
 /** The most masks the stencil's eight bits count. */
 const STENCIL_MOST = 255;
@@ -175,6 +186,11 @@ export interface Target {
   y: number;
   /** Target pixels a unit of the target's own, which filters read their input's size in. */
   resolution: number;
+  /**
+   * Target pixels a side of a pixel of Flash's, which a mesh's texture is
+   * read once in: a pixel of the screen, or a BitmapData's draw's sample.
+   */
+  pixel: number;
 }
 
 /**
@@ -193,6 +209,20 @@ export class WebGLBackend {
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
   private texturedLocation: WebGLUniformLocation | null = null;
+  /** The meshes' program (MESH), and where it takes its row, view, fragments' place and mode. */
+  private mesh!: WebGLProgram;
+  private meshRowLocation: WebGLUniformLocation | null = null;
+  private meshViewLocation: WebGLUniformLocation | null = null;
+  private meshFragLocation: WebGLUniformLocation | null = null;
+  private meshModeLocation: WebGLUniformLocation | null = null;
+  /**
+   * The view the target drawn into gives the fill program, and where its
+   * fragments lie from the stage's origin (meshFragment's uFrag): told the
+   * mesh program as it next draws a mesh, once they change (meshStale).
+   */
+  private readonly view = new Float32Array(4);
+  private readonly frag = new Float32Array(4);
+  private meshStale = true;
   /** The layers' composite program and where it takes its mode and row. */
   private composite!: WebGLProgram;
   private modeLocation: WebGLUniformLocation | null = null;
@@ -290,6 +320,15 @@ export class WebGLBackend {
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.program, "uTexture"), TEXTURE_UNIT);
     this.texturedLocation = gl.getUniformLocation(this.program, "uTextured");
+    this.mesh = linkProgram(gl, meshVertex, meshFragment);
+    this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
+    this.meshViewLocation = gl.getUniformLocation(this.mesh, "uView");
+    this.meshFragLocation = gl.getUniformLocation(this.mesh, "uFrag");
+    this.meshModeLocation = gl.getUniformLocation(this.mesh, "uMode");
+    this.state.useProgram(this.mesh);
+    gl.uniform1i(gl.getUniformLocation(this.mesh, "uRows"), 0);
+    gl.uniform1i(gl.getUniformLocation(this.mesh, "uTexture"), TEXTURE_UNIT);
+    this.meshStale = true;
     this.textures = [];
     this.samplers = [];
     this.composite = linkProgram(gl, compositeVertex, compositeFragment);
@@ -328,15 +367,15 @@ export class WebGLBackend {
     this.state.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    const position = gl.getAttribLocation(this.program, "aPosition");
-    const texel = gl.getAttribLocation(this.program, "aTexel");
-    const color = gl.getAttribLocation(this.program, "aColor");
-    gl.enableVertexAttribArray(position);
-    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, VERTEX_BYTES, 0);
-    gl.enableVertexAttribArray(texel);
-    gl.vertexAttribPointer(texel, 2, gl.FLOAT, false, VERTEX_BYTES, 8);
-    gl.enableVertexAttribArray(color);
-    gl.vertexAttribPointer(color, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 16);
+    gl.enableVertexAttribArray(POSITION_AT);
+    gl.vertexAttribPointer(POSITION_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 0);
+    gl.enableVertexAttribArray(TEXEL_AT);
+    gl.vertexAttribPointer(TEXEL_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 8);
+    gl.enableVertexAttribArray(COLOR_AT);
+    gl.vertexAttribPointer(COLOR_AT, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 16);
+    // The same bytes as a mesh's depth, which the mesh program reads in place of the colour.
+    gl.enableVertexAttribArray(DEPTH_AT);
+    gl.vertexAttribPointer(DEPTH_AT, 1, gl.FLOAT, false, VERTEX_BYTES, 16);
     this.rowsTexture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(0, this.rowsTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -652,13 +691,19 @@ export class WebGLBackend {
     state.viewport(0, 0, open.width, open.height);
     state.useProgram(this.program);
     const down = open.layer ? 1 : -1;
-    gl.uniform4f(
-      this.viewLocation,
-      (2 * target.scale) / open.width,
-      (down * 2 * target.scale) / open.height,
-      -1 + (2 * (target.x - open.x)) / open.width,
-      -down * (1 - (2 * (target.y - open.y)) / open.height),
-    );
+    const view = this.view;
+    view[0] = (2 * target.scale) / open.width;
+    view[1] = (down * 2 * target.scale) / open.height;
+    view[2] = -1 + (2 * (target.x - open.x)) / open.width;
+    view[3] = -down * (1 - (2 * (target.y - open.y)) / open.height);
+    gl.uniform4fv(this.viewLocation, view);
+    // A layer's rows run down from its corner; the canvas' up from its bottom.
+    const frag = this.frag;
+    frag[0] = open.x - target.x;
+    frag[1] = open.layer ? open.y - target.y : open.height - target.y;
+    frag[2] = down;
+    frag[3] = target.pixel;
+    this.meshStale = true;
   }
 
   /** The framebuffer `open` is drawn into: its multisampled one while it has one, else its own. */
@@ -1081,6 +1126,12 @@ export class WebGLBackend {
         continue;
       }
 
+      // A mesh by the mesh program; in a mask, its triangles' coverage as a fill's.
+      if (!stencil && scene.sampler[i] & MESH) {
+        this.drawMesh(scene, i, place);
+        continue;
+      }
+
       const row = scene.row[i];
       if (row !== this.lastRow) {
         this.lastRow = row;
@@ -1105,6 +1156,36 @@ export class WebGLBackend {
 
       gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
     }
+  }
+
+  /**
+   * Entry `i`, a mesh (MESH), drawn by the mesh program, which is told the
+   * view as it changed; the fill program used again after.
+   */
+  private drawMesh(scene: SceneList, i: number, place: Place): void {
+    const id = scene.texture[i];
+    const texture = id >= 0 ? (this.textures[id] ?? null) : null;
+    if (!texture) {
+      return;
+    }
+
+    const gl = this.gl;
+    const state = this.state;
+    state.useProgram(this.mesh);
+    if (this.meshStale) {
+      gl.uniform4fv(this.meshViewLocation, this.view);
+      gl.uniform4fv(this.meshFragLocation, this.frag);
+      this.meshStale = false;
+    }
+
+    const bits = scene.sampler[i];
+    gl.uniform1i(this.meshRowLocation, scene.row[i]);
+    gl.uniform2i(this.meshModeLocation, bits & REPEAT ? 1 : 0, bits & SMOOTH ? 1 : 0);
+    state.bindTexture(TEXTURE_UNIT, texture);
+    // Read texel by texel, but through a sampler without mipmaps, as a texture with none needs.
+    state.bindSampler(TEXTURE_UNIT, this.sampler(CLAMP));
+    gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
+    state.useProgram(this.program);
   }
 
   /** The textures removed since the last frame deleted, and those added or changed uploaded, their pixels let go. */
@@ -1300,12 +1381,17 @@ export class WebGLBackend {
     const floats = new Float32Array(bytes);
     const words = new Uint32Array(bytes);
     const texels = data.texels;
+    const depths = data.depths;
     for (let i = 0; i < count; i++) {
       floats[i * 5] = data.positions[i * 2];
       floats[i * 5 + 1] = data.positions[i * 2 + 1];
       floats[i * 5 + 2] = texels ? texels[i * 2] : 0;
       floats[i * 5 + 3] = texels ? texels[i * 2 + 1] : 0;
-      words[i * 5 + 4] = data.colors[i];
+      if (depths) {
+        floats[i * 5 + 4] = depths[i];
+      } else {
+        words[i * 5 + 4] = data.colors[i];
+      }
     }
 
     const base = this.vertexTop;
@@ -1338,6 +1424,7 @@ export class WebGLBackend {
     gl.deleteBuffer(this.indexBuffer);
     gl.deleteTexture(this.rowsTexture);
     gl.deleteProgram(this.composite);
+    gl.deleteProgram(this.mesh);
     this.filters.destroy();
     this.freeLayers.clear((l) => this.deleteLayer(l));
 

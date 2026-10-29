@@ -21,6 +21,8 @@ export interface GeometryData {
   positions: Float32Array;
   colors: Uint32Array;
   texels?: Float32Array;
+  /** A mesh's (MESH) depth at each vertex, its t, in place of its colour. */
+  depths?: Float32Array;
   indices: Uint32Array;
 }
 

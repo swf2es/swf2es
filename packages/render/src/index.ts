@@ -52,6 +52,7 @@ export {
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
+  MESH,
   MIRROR,
   MULTIPLY,
   NORMAL,
