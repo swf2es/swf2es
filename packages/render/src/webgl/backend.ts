@@ -27,6 +27,7 @@ import {
 } from "../scene.js";
 import type { Textures } from "../textures.js";
 import { FilterRunner } from "./filters.js";
+import { SizedPool } from "./pool.js";
 import {
   compositeFragment,
   compositeVertex,
@@ -112,16 +113,23 @@ const LAYER_STEP = 128;
  * thousands of them as their filters' outputs.
  */
 const SMALL_STEP = 16;
-/** The most the free layers may take, past which the least lately freed go. */
-const FREE_LAYER_BYTES = 128 * 1024 * 1024;
-/** What a free layer's size is keyed by: its width times this, and its height. */
-const SIZE_KEY = 65536;
+/**
+ * The most the free layers and multisampled buffers may take between
+ * frames, past which the least lately freed go as a frame ends; within a
+ * frame its own working set may pass it.
+ */
+const FREE_BYTES = 128 * 1024 * 1024;
 
 /** A side of a layer made for `n` pixels: rounded up to SMALL_STEP, past LAYER_STEP to that. */
 function layerSide(n: number): number {
   return n <= LAYER_STEP
     ? Math.max(SMALL_STEP, Math.ceil(n / SMALL_STEP) * SMALL_STEP)
     : Math.ceil(n / LAYER_STEP) * LAYER_STEP;
+}
+
+/** The bytes multisampled buffers take: colour and depth-stencil, 8 a sample. */
+function msaaBytes(msaa: { width: number; height: number; samples: number }): number {
+  return msaa.width * msaa.height * msaa.samples * 8;
 }
 
 /** The bytes a layer takes: its colour, and its stencil where it has one. */
@@ -196,9 +204,8 @@ export class WebGLBackend {
   /** The filters' passes, their programs made as first run. */
   private filters!: FilterRunner<Layer>;
   /** Layers free to draw into, and those drawn into now, innermost last. */
-  /** By their size (SIZE_KEY), the latest freed last; and the bytes they take together. */
-  private freeLayers = new Map<number, Layer[]>();
-  private freeBytes = 0;
+  /** Layers free to draw into, by their size. */
+  private freeLayers = new SizedPool<Layer>(layerBytes);
   private layers: Open[] = [];
   /** Frames executed, which a layer's idleness is counted in. */
   private frame = 0;
@@ -218,7 +225,7 @@ export class WebGLBackend {
   private maxSamples = 1;
   private canvasAlpha = false;
   /** Multisampled buffers free to draw a layer into, kept while drawn into often enough. */
-  private freeMsaa: Multisampled[] = [];
+  private freeMsaa = new SizedPool<Multisampled>(msaaBytes);
   /**
    * The stage's multisampled buffers, and the texture they resolve into
    * before an opaque canvas.
@@ -300,13 +307,12 @@ export class WebGLBackend {
       texture: (id) => this.textures[id] ?? null,
       sampler: (bits) => this.sampler(bits),
     });
-    this.freeLayers = new Map();
-    this.freeBytes = 0;
+    this.freeLayers = new SizedPool<Layer>(layerBytes);
     this.layers = [];
     this.kept = [];
     this.stageMsaa = null;
     this.stageResolved = null;
-    this.freeMsaa = [];
+    this.freeMsaa = new SizedPool<Multisampled>(msaaBytes);
     this.maxSamples = gl.getParameter(gl.MAX_SAMPLES) as number;
     this.canvasAlpha = gl.getContextAttributes()?.alpha ?? false;
     this.back = null;
@@ -603,30 +609,12 @@ export class WebGLBackend {
 
   /** The free layers undrawn into for LAYER_IDLE_FRAMES let go of. */
   private dropIdleLayers(): void {
-    // Each size's least lately freed first: those idle are at its start.
-    for (const [key, free] of this.freeLayers) {
-      let idle = 0;
-      while (idle < free.length && this.frame - free[idle].usedAt > LAYER_IDLE_FRAMES) {
-        this.freeBytes -= layerBytes(free[idle]);
-        this.deleteLayer(free[idle]);
-        idle++;
-      }
-
-      if (idle === free.length) {
-        this.freeLayers.delete(key);
-      } else if (idle > 0) {
-        free.splice(0, idle);
-      }
-    }
-
-    const msaa = this.freeMsaa;
-    for (let i = msaa.length - 1; i >= 0; i--) {
-      if (this.frame - msaa[i].usedAt > LAYER_IDLE_FRAMES) {
-        this.deleteMultisampled(msaa[i]);
-        msaa[i] = msaa[msaa.length - 1];
-        msaa.pop();
-      }
-    }
+    this.freeLayers.trim(this.frame, LAYER_IDLE_FRAMES, FREE_BYTES - this.freeMsaa.bytes, (l) =>
+      this.deleteLayer(l),
+    );
+    this.freeMsaa.trim(this.frame, LAYER_IDLE_FRAMES, FREE_BYTES - this.freeLayers.bytes, (m) =>
+      this.deleteMultisampled(m),
+    );
   }
 
   /**
@@ -675,8 +663,7 @@ export class WebGLBackend {
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
     open.msaa = null;
     // Free for the next layer: only those drawn into now hold multisampled buffers.
-    msaa.usedAt = this.frame;
-    this.freeMsaa.push(msaa);
+    this.freeMsaa.give(msaa, this.frame, msaa.samples);
   }
 
   /**
@@ -759,14 +746,9 @@ export class WebGLBackend {
    */
   private layerMsaa(layer: Layer, wanted: number): Multisampled | null {
     const samples = fittingSamples(layer.width, layer.height, wanted);
-    const free = this.freeMsaa;
-    for (let i = 0; samples > 1 && i < free.length; i++) {
-      const m = free[i];
-      if (m.width === layer.width && m.height === layer.height && m.samples === samples) {
-        free[i] = free[free.length - 1];
-        free.pop();
-        return m;
-      }
+    const kept = samples > 1 ? this.freeMsaa.take(layer.width, layer.height, samples) : null;
+    if (kept) {
+      return kept;
     }
 
     const msaa = samples > 1 ? this.multisampled(layer.width, layer.height, samples) : null;
@@ -830,34 +812,19 @@ export class WebGLBackend {
 
   /**
    * A layer of at least `width` by `height`, the smallest of those free
-   * that is, or one made, its sides rounded up to LAYER_STEP; `exact`, of
-   * just the rounded size, which filters take so that a frame's targets
-   * are alike, and no larger than it needs.
+   * that is, or one made, its sides rounded as layerSide rounds them;
+   * `exact`, of just the rounded size, which filters take so that a frame's
+   * targets are alike, and no larger than it needs.
    */
   private takeLayer(width: number, height: number, exact = false): Layer {
     const gl = this.gl;
     width = layerSide(width);
     height = layerSide(height);
-    // Found by its size, or the smallest size that holds it: a few sizes looked at, not every
-    // layer free, of which a crowd's churning outputs left thousands.
-    let key = width * SIZE_KEY + height;
-    let list = this.freeLayers.get(key);
-    if (!exact && !list?.length) {
-      let least = Number.POSITIVE_INFINITY;
-      for (const [k, l] of this.freeLayers) {
-        const w = Math.floor(k / SIZE_KEY);
-        const h = k % SIZE_KEY;
-        if (l.length > 0 && w >= width && h >= height && w * h < least) {
-          least = w * h;
-          key = k;
-          list = l;
-        }
-      }
-    }
-
-    const found = list?.pop();
+    // Found by its size, or the smallest size held that holds it.
+    const found =
+      this.freeLayers.take(width, height) ??
+      (exact ? null : this.freeLayers.takeFitting(width, height));
     if (found) {
-      this.freeBytes -= layerBytes(found);
       found.usedAt = this.frame;
       return found;
     }
@@ -875,49 +842,9 @@ export class WebGLBackend {
     return { framebuffer, texture, stencil: null, width, height, usedAt: this.frame };
   }
 
-  /**
-   * A layer free again, kept for the layers after it while it is drawn into
-   * often enough; past FREE_LAYER_BYTES, the least lately freed go, down to
-   * three quarters of it.
-   */
+  /** A layer free again, kept for the layers after it while it is drawn into often enough. */
   private giveLayer(layer: Layer): void {
-    layer.usedAt = this.frame;
-    const key = layer.width * SIZE_KEY + layer.height;
-    let list = this.freeLayers.get(key);
-    if (!list) {
-      list = [];
-      this.freeLayers.set(key, list);
-    }
-
-    list.push(layer);
-    this.freeBytes += layerBytes(layer);
-    if (this.freeBytes > FREE_LAYER_BYTES) {
-      const all: Layer[] = [];
-      for (const l of this.freeLayers.values()) {
-        all.push(...l);
-      }
-
-      all.sort((x, y) => x.usedAt - y.usedAt);
-      const going = new Set<Layer>();
-      for (const l of all) {
-        if (this.freeBytes <= FREE_LAYER_BYTES * 0.75) {
-          break;
-        }
-
-        going.add(l);
-        this.freeBytes -= layerBytes(l);
-        this.deleteLayer(l);
-      }
-
-      for (const [k, l] of this.freeLayers) {
-        const kept = l.filter((x) => !going.has(x));
-        if (kept.length > 0) {
-          this.freeLayers.set(k, kept);
-        } else {
-          this.freeLayers.delete(k);
-        }
-      }
-    }
+    this.freeLayers.give(layer, this.frame);
   }
 
   private deleteLayer(layer: Layer): void {
@@ -1341,9 +1268,7 @@ export class WebGLBackend {
     gl.deleteTexture(this.rowsTexture);
     gl.deleteProgram(this.composite);
     this.filters.destroy();
-    for (const layer of [...this.freeLayers.values()].flat()) {
-      this.deleteLayer(layer);
-    }
+    this.freeLayers.clear((l) => this.deleteLayer(l));
 
     for (const open of this.layers) {
       if (open.layer) {
@@ -1363,9 +1288,7 @@ export class WebGLBackend {
     }
 
     this.dropStageBuffers();
-    for (const msaa of this.freeMsaa) {
-      this.deleteMultisampled(msaa);
-    }
+    this.freeMsaa.clear((m) => this.deleteMultisampled(m));
 
     for (const texture of this.textures) {
       if (texture) {

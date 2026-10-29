@@ -17,16 +17,24 @@ export const IDENTITY_COLOR: ColorTransform = {
 
 /** What a child draws, seen through its parent: `child` first, then `parent`. */
 export function concatColor(parent: ColorTransform, child: ColorTransform): ColorTransform {
-  return {
-    rMul: child.rMul * parent.rMul,
-    gMul: child.gMul * parent.gMul,
-    bMul: child.bMul * parent.bMul,
-    aMul: child.aMul * parent.aMul,
-    rAdd: child.rAdd * parent.rMul + parent.rAdd,
-    gAdd: child.gAdd * parent.gMul + parent.gAdd,
-    bAdd: child.bAdd * parent.bMul + parent.bAdd,
-    aAdd: child.aAdd * parent.aMul + parent.aAdd,
-  };
+  return concatColorInto({ ...IDENTITY_COLOR }, parent, child);
+}
+
+/** `parent` and `child` concatenated, as concatColor does, into `out`, which is given back. */
+export function concatColorInto(
+  out: ColorTransform,
+  parent: ColorTransform,
+  child: ColorTransform,
+): ColorTransform {
+  out.rMul = child.rMul * parent.rMul;
+  out.gMul = child.gMul * parent.gMul;
+  out.bMul = child.bMul * parent.bMul;
+  out.aMul = child.aMul * parent.aMul;
+  out.rAdd = child.rAdd * parent.rMul + parent.rAdd;
+  out.gAdd = child.gAdd * parent.gMul + parent.gAdd;
+  out.bAdd = child.bAdd * parent.bMul + parent.bAdd;
+  out.aAdd = child.aAdd * parent.aMul + parent.aAdd;
+  return out;
 }
 
 /** Whether `ct` only multiplies, each channel by 0 to 1, which Pixi's tint and alpha draw. */

@@ -36,7 +36,7 @@ import {
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
-import { IDENTITY_COLOR } from "../display/color.js";
+import { concatColorInto, IDENTITY_COLOR } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject, TRANSFORM } from "../display/displayobject.js";
 import {
@@ -890,8 +890,11 @@ export class RenderView implements Drawer {
     l[3] = d;
     k.x = x;
     k.y = y;
+    // Let go of at the end of the first frame it is not drawn: one whose object was not drawn on
+    // the frame before is drawn anew (`changed`), and a timeline makes filtered objects anew as it
+    // plays, whose outputs, kept for a second, held hundreds of MB.
     if (k.keeping && (!k.handle || !this.keeps.alive(k.handle))) {
-      k.handle = this.keeps.add();
+      k.handle = this.keeps.add(0);
     }
 
     if (k.keeping) {
@@ -1058,24 +1061,7 @@ export class RenderView implements Drawer {
       this.colorSlots[depth] = slot;
     }
 
-    return this.concatInto(slot, parent, child);
-  }
-
-  /** `parent` and `child` concatenated into `slot`, as display/color.ts's concatColor makes them. */
-  private concatInto(
-    slot: ColorTransform,
-    parent: ColorTransform,
-    child: ColorTransform,
-  ): ColorTransform {
-    slot.rMul = child.rMul * parent.rMul;
-    slot.gMul = child.gMul * parent.gMul;
-    slot.bMul = child.bMul * parent.bMul;
-    slot.aMul = child.aMul * parent.aMul;
-    slot.rAdd = child.rAdd * parent.rMul + parent.rAdd;
-    slot.gAdd = child.gAdd * parent.gMul + parent.gAdd;
-    slot.bAdd = child.bAdd * parent.bMul + parent.bAdd;
-    slot.aAdd = child.aAdd * parent.aMul + parent.aAdd;
-    return slot;
+    return concatColorInto(slot, parent, child);
   }
 
   /** A mask begun: its draws follow, till it is used (maskUse); its first entry's index. */
@@ -1162,21 +1148,19 @@ export class RenderView implements Drawer {
     const ty = pb * m.tx + pd * m.ty + pty;
     const shape = o instanceof ShapeObject ? o.drawn() : null;
     const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    // Its row made as its first draw needs it, in place: a closure here kept every number it took
+    // in a context made on each call, boxed, as the walk's did.
     let row = -1;
-    const at = () => {
-      if (row < 0) {
-        row = this.rows.add(a, b, c, d, tx, ty, null);
-      }
-
-      return row;
-    };
-
     if (layers) {
       const version = o.drawing ? o.drawing.version : 0;
       for (let i = 0; i < layers.length; i++) {
         for (const { handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
           this.geometries.use(handle.id);
-          this.scene.draw(handle.id, at(), NORMAL);
+          if (row < 0) {
+            row = this.rows.add(a, b, c, d, tx, ty, null);
+          }
+
+          this.scene.draw(handle.id, row, NORMAL);
         }
       }
     }
@@ -1208,7 +1192,11 @@ export class RenderView implements Drawer {
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
       const quad = this.quad(store.width, store.height);
       this.geometries.use(quad.id);
-      this.scene.draw(quad.id, at(), NORMAL);
+      if (row < 0) {
+        row = this.rows.add(a, b, c, d, tx, ty, null);
+      }
+
+      this.scene.draw(quad.id, row, NORMAL);
     }
 
     if (o instanceof Container) {
@@ -1237,6 +1225,7 @@ export class RenderView implements Drawer {
     // A loop, not every with a closure: each shape layer drawn asks on every frame.
     if (made && made.version === version) {
       let alive = true;
+
       for (let i = 0; alive && i < made.parts.length; i++) {
         alive = this.geometries.alive(made.parts[i].handle);
       }
@@ -1378,7 +1367,7 @@ export class RenderView implements Drawer {
     own.gMul = ((tint >>> 8) & 0xff) / 255;
     own.bMul = (tint & 0xff) / 255;
     own.aMul = (tint >>> 24) / 255;
-    const colored = color ? this.concatInto(this.itemColored, color, own) : own;
+    const colored = color ? concatColorInto(this.itemColored, color, own) : own;
     if (item.kind === "device") {
       const run = this.deviceRun(item, resolution);
       if (!run) {
