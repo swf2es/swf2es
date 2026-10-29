@@ -24,10 +24,10 @@ export const BEVEL_PASS = 5;
 export const GRADIENT_PASS = 6;
 export const MATRIX_PASS = 7;
 export const CONVOLUTION_PASS = 8;
-const DISPLACE_PASS = 9;
+export const DISPLACE_PASS = 9;
 
 /** How a uniform's values are set: one to four floats, an array of vec4s, or a 4 by 4 matrix. */
-const FLOATS = 1;
+export const FLOATS = 1;
 export const VEC4S = 2;
 export const MATRIX4 = 3;
 

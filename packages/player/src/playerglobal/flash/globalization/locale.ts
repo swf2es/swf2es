@@ -11,7 +11,7 @@ type Value = avm2.Value;
 // LastOperationStatus's values.
 export const NO_ERROR = "noError";
 export const USING_FALLBACK_WARNING = "usingFallbackWarning";
-const USING_DEFAULT_WARNING = "usingDefaultWarning";
+export const USING_DEFAULT_WARNING = "usingDefaultWarning";
 export const PARSE_ERROR = "parseError";
 export const UNSUPPORTED_ERROR = "unsupportedError";
 export const PATTERN_SYNTAX_ERROR = "patternSyntaxError";

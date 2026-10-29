@@ -12,8 +12,8 @@ export const TAG_TEXT = 3;
 export const TAG_CDATA = 4;
 export const TAG_PROCESSING_INSTRUCTION = 7;
 export const TAG_COMMENT = 8;
-const TAG_DOCTYPE = 10;
-const TAG_XML_DECLARATION = 13;
+export const TAG_DOCTYPE = 10;
+export const TAG_XML_DECLARATION = 13;
 
 // What getNext gives, as XMLParser's status codes: a tag, the end, or the
 // error E4X throws for each (see PARSE_ERRORS in values.ts).

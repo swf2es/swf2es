@@ -8,7 +8,7 @@
 // Translated from avmplus' core/MathUtils.cpp and core/d2a.cpp, this file is
 // subject to the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
-const DTOSTR_NORMAL = 0;
+export const DTOSTR_NORMAL = 0;
 export const DTOSTR_FIXED = 1;
 export const DTOSTR_PRECISION = 2;
 export const DTOSTR_EXPONENTIAL = 3;

@@ -3,7 +3,9 @@ import {
   BEVEL_PASS,
   BOX_PASS,
   CONVOLUTION_PASS,
+  DISPLACE_PASS,
   FilterPlan,
+  FLOATS,
   GLOW_PASS,
   GRADIENT_PASS,
   MATRIX_PASS,
@@ -323,7 +325,7 @@ export class FilterRunner<T extends FilterTarget> {
       case VEC4S:
         gl.uniform4fv(location, values, at, count);
         break;
-      default:
+      case FLOATS:
         this.set(
           pass,
           plan.uniformName[u],
@@ -355,9 +357,11 @@ export class FilterRunner<T extends FilterTarget> {
         return this.use("colorMatrix", shaders.MATRIX);
       case CONVOLUTION_PASS:
         return this.use("convolution", shaders.CONVOLUTION);
-      default:
+      case DISPLACE_PASS:
         return this.use("displacement", shaders.DISPLACE);
     }
+
+    throw new Error(`no filter pass ${id}`);
   }
 
   /**
