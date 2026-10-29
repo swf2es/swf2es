@@ -693,8 +693,12 @@ export class Runtime {
   /** What Number(array) runs unless a script replaced it. */
   private readonly arrayConversion = new ArrayConversion();
 
+  /** The builtin Array class's instance traits, once its static initializer has run. */
+  private arrayTraits: Traits | null = null;
+
   /** Notes the builtin Array class, once its static initializer has run. */
   noteArrayClass(cls: AsObject): void {
+    this.arrayTraits = cls.$it;
     this.arrayConversion.noteArrayClass(cls);
   }
 
@@ -2574,7 +2578,7 @@ export class Runtime {
 
     // These builtins have no bindings over their enumerated own properties.
     // A missing value still needs the full lookup, including the prototype.
-    if (traits === this.arrayConversion.arrayTraits || traits === this.objectTraits) {
+    if (traits === this.arrayTraits || traits === this.objectTraits) {
       const own = this.getOwn(o, name);
       if (own !== NOT_FOUND) {
         return own;

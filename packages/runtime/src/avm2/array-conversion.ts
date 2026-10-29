@@ -12,12 +12,11 @@ import type { Traits } from "./traits.js";
  */
 export class ArrayConversion {
   private arrayClass: AsObject | null = null;
-  arrayTraits: Traits | null = null;
+  private arrayTraits: Traits | null = null;
   private arrayPrototype: AsObject | null = null;
   private arrayToString: Value = NOT_FOUND;
   private objectValueOf: Value = NOT_FOUND;
 
-  /** Notes the builtin Array class, once its static initializer has run. */
   noteArrayClass(cls: AsObject): void {
     this.arrayClass = cls;
   }
