@@ -21,12 +21,13 @@ import { unsupported, vertexColor } from "./shapes.js";
 
 /**
  * How far, in pixels of the screen, a line's flattened curves and its
- * round joins' and caps' chords may stray from the curve: a tenth of one,
- * where the fills' finer flatness made strokes several times the
+ * round joins' and caps' chords may stray from the curve: a twentieth of
+ * one, where the fills' finer flatness made strokes several times the
  * triangles the Pixi view's are, which a software rasteriser pays for; a
- * quarter shows on the references' curved lines.
+ * quarter shows on the references' curved lines, and a tenth on a 9-slice
+ * panel's small rounded corners, which Flash draws as exact curves.
  */
-const STROKE_FLATNESS = 0.1;
+const STROKE_FLATNESS = 0.05;
 
 /**
  * A line's width on the stage through the linear transform (a b c d): its
