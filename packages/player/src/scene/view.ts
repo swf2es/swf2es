@@ -38,7 +38,7 @@ import {
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
-import { concatColorInto, IDENTITY_COLOR } from "../display/color.js";
+import { concatColorInto, IDENTITY_COLOR, sameColor } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject, TRANSFORM } from "../display/displayobject.js";
 import {
@@ -343,6 +343,23 @@ export class RenderView implements Drawer {
         depths: Float32Array;
         indices: Uint32Array;
       };
+    }
+  >();
+  /** What each 3D object's bitmap was drawn of, which it is kept while unchanged (samePlane). */
+  private readonly planeStates = new WeakMap<
+    DisplayObject,
+    {
+      seenAt: number;
+      generation: number;
+      left: number;
+      top: number;
+      texels: number;
+      samples: number;
+      width: number;
+      height: number;
+      mask: DisplayObject | null;
+      color: ColorTransform;
+      colored: boolean;
     }
   >();
   /** Where drawPlane works out a quad. */
@@ -1397,9 +1414,11 @@ export class RenderView implements Drawer {
     const { samples, texels } = bitmapScale(quad.width, quad.height, this.textureLimit);
     const width = Math.max(1, Math.ceil(quad.width * texels));
     const height = Math.max(1, Math.ceil(quad.height * texels));
+    // Let go of on the first frame it is not drawn: one not drawn on the frame before is drawn
+    // anew, and a timeline makes 3D objects anew as it plays.
     let keep = this.planeKeeps.get(o);
-    // Drawn again on each frame it is drawn, so let go of on the first it is not.
-    if (!keep || !this.keeps.alive(keep)) {
+    const kept0 = keep && this.keeps.alive(keep);
+    if (!keep || !kept0) {
       keep = this.keeps.add(0);
       this.planeKeeps.set(o, keep);
     }
@@ -1429,9 +1448,84 @@ export class RenderView implements Drawer {
     const row = this.rows.add(a, b, c, d, tx, ty, null);
     const corner = quad.x;
     const top = quad.y;
-    this.drawPlaneContent(o, full, corner, top, texels, samples, width, height, keep.id);
+    // Its bitmap kept where nothing it holds changed: then nothing in it has a flag to clear.
+    const same = kept0 && this.samePlane(o, full, corner, top, texels, samples, width, height);
+    if (!same) {
+      this.drawPlaneContent(o, full, corner, top, texels, samples, width, height, keep.id);
+    }
+
     this.scene.draw(handle.id, row, NORMAL, keep.id, PLANE);
     return true;
+  }
+
+  /**
+   * Whether a 3D object's bitmap, kept from the frame before, holds what it
+   * would draw now: nothing in it changed but its own transform, which
+   * moves its quad alone, nor its bitmap's corner, size or samples, its
+   * colour, or the stage's quality, or the mask it was drawn with (setting
+   * one flags no change); and no mask from outside it, which may have moved. BitmapData.draw draws it anew. Noted for the next frame.
+   */
+  private samePlane(
+    o: DisplayObject,
+    full: ColorTransform | null,
+    left: number,
+    top: number,
+    texels: number,
+    samples: number,
+    width: number,
+    height: number,
+  ): boolean {
+    let k = this.planeStates.get(o);
+    if (!k) {
+      k = {
+        seenAt: -1,
+        generation: -1,
+        left: 0,
+        top: 0,
+        texels: 0,
+        samples: 0,
+        width: 0,
+        height: 0,
+        mask: null,
+        color: { ...IDENTITY_COLOR },
+        colored: false,
+      };
+      this.planeStates.set(o, k);
+    }
+
+    const same =
+      !this.snapshotting &&
+      k.seenAt === this.frames - 1 &&
+      k.generation === this.keptGeneration &&
+      (o.dirty & ~TRANSFORM) === 0 &&
+      !(o.dirty & TRANSFORM && o.scroll !== null) &&
+      !(o instanceof Container && o.descendantsDirty) &&
+      k.mask === o.mask &&
+      (!o.mask || o.encloses(o.mask)) &&
+      k.left === left &&
+      k.top === top &&
+      k.texels === texels &&
+      k.samples === samples &&
+      k.width === width &&
+      k.height === height &&
+      (full ? k.colored && sameColor(k.color, full) : !k.colored);
+    if (!this.snapshotting) {
+      k.seenAt = this.frames;
+      k.generation = this.keptGeneration;
+      k.left = left;
+      k.top = top;
+      k.texels = texels;
+      k.samples = samples;
+      k.width = width;
+      k.height = height;
+      k.mask = o.mask;
+      k.colored = full !== null;
+      if (full) {
+        Object.assign(k.color, full);
+      }
+    }
+
+    return same;
   }
 
   /**
