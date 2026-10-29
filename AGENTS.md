@@ -111,8 +111,8 @@ pnpm as3:format               # format them with Apache Royale's asformat, in it
                               # (ASFORMAT names its script if it is not on the PATH)
 SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
-pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (bitmap, compress, mp3,
-                              # tessellate) with the pinned Zig, after the bitmap kernel's zig tests;
+pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
+                              # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests
 pnpm bench [file.abc...]      # time the ABC parser and decoder
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the

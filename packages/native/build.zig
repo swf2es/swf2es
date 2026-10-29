@@ -1,8 +1,8 @@
 // Every binary of the package, each its own wasm32-freestanding module in
-// zig-out/bin/: bitmap's SIMD kernels, mp3 (minimp3), compress
-// (zlib and the LZMA SDK) and tessellate (libtess2). build.ts runs this with
-// the pinned Zig and checks the results in as base64; `zig build test` runs
-// the bitmap kernel's and the fill flattener's tests on the host.
+// zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK) and render
+// (bitmap's SIMD kernels, libtess2's fills and the lines). build.ts runs
+// this with the pinned Zig and checks the results in as base64; `zig build
+// test` runs the bitmap kernel's and the fill flattener's tests on the host.
 const std = @import("std");
 
 /// The C libraries are pinned git submodules of the repository, under
@@ -14,10 +14,11 @@ pub fn build(b: *std.Build) void {
     // The libc headers the C includes, which wasm32-freestanding lacks.
     const include = b.path("include");
 
-    bitmap(b, optimize);
+    tests(b);
     mp3(b, wasm(b, &.{.bulk_memory}), optimize, include);
     compress(b, wasm(b, &.{.bulk_memory}), optimize, include);
-    tessellate(b, wasm(b, &.{.bulk_memory}), optimize, include);
+    // Wasm SIMD, which every engine the player runs on has, for the bitmap kernels.
+    render(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
 }
 
 fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.ResolvedTarget {
@@ -29,34 +30,13 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
     });
 }
 
-/// The bitmap kernels, with wasm SIMD: every current browser has it, and an
-/// engine without it refuses the module, which leaves the filters to JS.
-fn bitmap(b: *std.Build, optimize: std.builtin.Optimize) void {
-    const root = b.createModule(.{
-        .root_source_file = b.path("src/bitmap/root.zig"),
-        .target = wasm(b, &.{ .bulk_memory, .simd128 }),
-        .optimize = optimize,
-        .single_threaded = true,
-        .strip = true,
-    });
-    root.export_symbol_names = &.{ "resetArena", "convolve", "capacity" };
-    const module = b.addExecutable(.{ .name = "bitmap", .root_module = root });
-    module.entry = .disabled;
-    module.stack_size = 64 * 1024;
-    module.max_memory = 128 * 1024 * 1024;
-    b.installArtifact(module);
-
-    const tests = b.createModule(.{
-        .root_source_file = b.path("src/bitmap/convolve.zig"),
-        .target = b.graph.host,
-    });
+/// The kernels' and the fill flattener's tests, on the host.
+fn tests(b: *std.Build) void {
     const test_step = b.step("test", "Run the bitmap kernel's and the fill flattener's tests on the host");
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = "bitmap", .root_module = tests })).step);
-    const flatten = b.createModule(.{
-        .root_source_file = b.path("src/tessellate/flatten.zig"),
-        .target = b.graph.host,
-    });
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = "flatten", .root_module = flatten })).step);
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" } }) |unit| {
+        const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
+        test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
+    }
 }
 
 /// The MP3 decoder: src/mp3/root.zig and minimp3, unchanged.
@@ -205,14 +185,19 @@ fn compress(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
     b.installArtifact(module);
 }
 
-/// Fill tessellation: src/tessellate/root.zig's arena and libtess2.
-fn tessellate(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize, include: std.Build.LazyPath) void {
+/// What the renderer computes natively, in one module, src/render/: the
+/// bitmap kernels (bitmap.zig, convolve.zig), fill tessellation
+/// (tessellate.zig's arena and libtess2, flatten.zig's curves) and a
+/// layer's lines (strokes.zig), their outlines filled by the same libtess2
+/// in the same memory. Each user instantiates it apart, its memory its own.
+fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize, include: std.Build.LazyPath) void {
     const sources = [_][]const u8{
         "bucketalloc.c", "dict.c", "geom.c", "mesh.c", "priorityq.c", "sweep.c", "tess.c",
     };
     const exports = [_][]const u8{
-        "reset",     "alloc",     "run",      "vertices", "indices", "vertexCount", "triangleCount",
-        "highWater", "allocated", "setLimit", "layer",
+        "reset",      "alloc",     "run",      "vertices", "indices",   "vertexCount", "triangleCount",
+        "highWater",  "allocated", "setLimit", "layer",    "lineInput", "lineHeader",  "lineBuild",
+        "resetArena", "convolve",  "capacity",
     };
 
     const library = b.path(vendor ++ "libtess2");
@@ -227,7 +212,7 @@ fn tessellate(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
     translate.addIncludePath(api);
 
     const root = b.createModule(.{
-        .root_source_file = b.path("src/tessellate/root.zig"),
+        .root_source_file = b.path("src/render/root.zig"),
         .target = target,
         .optimize = optimize,
         .single_threaded = true,
@@ -243,7 +228,7 @@ fn tessellate(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
         .flags = &.{ "-O2", "-DNDEBUG", "-mbulk-memory", "-fno-stack-protector" },
     });
 
-    const module = b.addExecutable(.{ .name = "tessellate", .root_module = root });
+    const module = b.addExecutable(.{ .name = "render", .root_module = root });
     module.entry = .disabled;
     module.stack_size = 256 * 1024;
     module.max_memory = 128 * 1024 * 1024;

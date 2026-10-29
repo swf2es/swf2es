@@ -2,6 +2,7 @@
 // Flash's curves need and tessellated by the native tessellator, else
 // planned for JS as crossing spans or a containment tree
 // (fill-polygons.ts). Nothing here draws.
+import type { GeometryData } from "@swf2es/render";
 import type { Region as Area } from "../display/gradients.js";
 import {
   CUBIC,
@@ -221,6 +222,22 @@ export interface FillTessellator {
     fills: readonly (readonly Path[])[],
     nonZero: readonly boolean[],
   ): (FillGeometry | null)[] | null;
+  /**
+   * A layer's lines built in one call as layerStrokes builds them, their
+   * outlines filled by this tessellator (@swf2es/native's LineBuilder):
+   * the own renderer's, through layerStrokesNative.
+   */
+  lines?: LineBuilder;
+}
+
+/**
+ * Builds a layer's lines as scene/strokes-native.ts packs them into
+ * input(): build() gives their geometry, null for none, or undefined for
+ * layerStrokes to build them; input() gives null where it is unavailable.
+ */
+export interface LineBuilder {
+  input(n: number): Float64Array | null;
+  build(length: number): GeometryData | null | undefined;
 }
 
 export interface ResolvedFill {
