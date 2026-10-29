@@ -37,6 +37,8 @@ import {
   compositeFragment,
   compositeVertex,
   DEPTH_AT,
+  FILL_SLOT,
+  FILL_TEXTURES,
   fillFragment,
   fillVertex,
   GLYPH_AT,
@@ -49,9 +51,24 @@ import {
   POSITION_AT,
   ROW_TEXELS,
   RUN_AT,
+  RUN_MOST,
+  SNAP_BIT,
   TEXEL_AT,
   TINT_AT,
 } from "./programs.js";
+
+/** What the backend calls of WEBGL_multi_draw. */
+interface MultiDraw {
+  multiDrawElementsWEBGL(
+    mode: number,
+    counts: Int32Array,
+    countsOffset: number,
+    type: number,
+    offsets: Int32Array,
+    offsetsOffset: number,
+    drawCount: number,
+  ): void;
+}
 
 /**
  * Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four
@@ -60,13 +77,15 @@ import {
 const VERTEX_BYTES = 20;
 /** The most masks the stencil's eight bits count. */
 const STENCIL_MOST = 255;
-/** The texture unit an entry's texture is bound to; the rows are on 0. */
+/** The texture unit a mesh's texture is bound to, and textures are uploaded on; the rows are on 0. */
 const TEXTURE_UNIT = 1;
 /** The units a composite reads its layer and what is below from. */
 const LAYER_UNIT = 2;
 const BACK_UNIT = 3;
 /** The unit advanced text's outlines are on (uploadOutlines); the filters take 4 to 6. */
 const OUTLINE_UNIT = 7;
+/** The first of the units the fill program's textures are bound to (FILL_TEXTURES). */
+const FILL_UNIT = 8;
 /** Bytes a vertex of advanced text's glyph quads, in an atlas of their own. */
 const GLYPH_BYTES = GLYPH_FLOATS * 4;
 /** The fewest glyph vertices the glyph atlas holds once a text needs it. */
@@ -224,11 +243,24 @@ export class WebGLBackend {
   private program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
-  private texturedLocation: WebGLUniformLocation | null = null;
-  private snapLocation: WebGLUniformLocation | null = null;
   private fillUnitLocation: WebGLUniformLocation | null = null;
-  /** Whether the fill program snaps (SNAP) as the last draw told it. */
-  private lastSnap = false;
+  /** WEBGL_multi_draw, which draws a run of fills alike a call (drawEntries), where there is. */
+  private multi: MultiDraw | null = null;
+  private runsLocation: WebGLUniformLocation | null = null;
+  /** A run's draws: their index counts, their offsets in bytes, and their rows (FILL_SLOT). */
+  private readonly runCounts = new Int32Array(RUN_MOST);
+  private readonly runOffsets = new Int32Array(RUN_MOST);
+  private readonly runRows = new Int32Array(RUN_MOST);
+  /** Draws gathered by gatherRun, and the fill units they sample, a bit each. */
+  private runCount = 0;
+  private runUnits = 0;
+  /**
+   * The texture and sampling each fill unit was last given (runSlot), -1 for
+   * none, and the unit to take next when every one holds a texture.
+   */
+  private readonly unitIds = new Int32Array(FILL_TEXTURES).fill(-1);
+  private readonly unitSampling = new Int32Array(FILL_TEXTURES);
+  private unitNext = 0;
   /** The meshes' program (MESH), and where it takes its row, view, fragments' place and mode. */
   private mesh!: WebGLProgram;
   private meshRowLocation: WebGLUniformLocation | null = null;
@@ -327,7 +359,6 @@ export class WebGLBackend {
   private backHeight = 0;
   /** The row and texture the last draw was told, so neither is told again. */
   private lastRow = -1;
-  private lastTexture = -2;
   /** The textures uploaded, by the registry's ids, and their sizes; the samplers made, by their bits. */
   private textures: (WebGLTexture | null)[] = [];
   private sizes: number[] = [];
@@ -369,16 +400,30 @@ export class WebGLBackend {
   private setUp(): void {
     const gl = this.gl;
     this.state.forget();
-    this.program = linkProgram(gl, fillVertex, fillFragment);
+    this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
+    try {
+      this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
+    } catch (e) {
+      if (!this.multi) {
+        throw e;
+      }
+
+      // An extension offered whose shader directive the compiler refuses: a call a draw.
+      this.multi = null;
+      this.program = linkProgram(gl, fillVertex(false), fillFragment);
+    }
+
+    this.unitIds.fill(-1);
     this.rowLocation = gl.getUniformLocation(this.program, "uRow");
+    this.runsLocation = gl.getUniformLocation(this.program, "uRuns");
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
     this.state.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
-    gl.uniform1i(gl.getUniformLocation(this.program, "uTexture"), TEXTURE_UNIT);
-    this.texturedLocation = gl.getUniformLocation(this.program, "uTextured");
-    this.snapLocation = gl.getUniformLocation(this.program, "uSnap");
+    gl.uniform1iv(
+      gl.getUniformLocation(this.program, "uTextures"),
+      Array.from({ length: FILL_TEXTURES }, (_, k) => FILL_UNIT + k),
+    );
     this.fillUnitLocation = gl.getUniformLocation(this.program, "uUnit");
-    this.lastSnap = false;
     this.mesh = linkProgram(gl, meshVertex, meshFragment);
     this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
     this.meshViewLocation = gl.getUniformLocation(this.mesh, "uView");
@@ -558,8 +603,6 @@ export class WebGLBackend {
     this.drawInto(canvas, target);
 
     this.lastRow = -1;
-    this.lastTexture = -2;
-    gl.uniform1i(this.texturedLocation, 0);
     // The masks pushed on the target drawn into: what is drawn passes where its stencil holds as
     // many. Its eight bits hold 255: those pushed past that are left out, and their pops with
     // them. A layer has a stencil of its own, and the target below keeps its count meanwhile.
@@ -1348,43 +1391,135 @@ export class WebGLBackend {
         other = false;
       }
 
-      const row = scene.row[i];
-      if (row !== this.lastRow) {
-        this.lastRow = row;
-        gl.uniform1i(this.rowLocation, row);
-      }
-
-      const id = stencil ? -1 : scene.texture[i];
-      const texture = id >= 0 ? (this.textures[id] ?? null) : null;
-      if (id >= 0 && !texture) {
+      i = this.gatherRun(scene, i, end, stencil);
+      const draws = this.runCount;
+      if (draws === 0) {
         continue;
       }
 
-      if (id >= 0 !== this.lastTexture >= 0) {
-        gl.uniform1i(this.texturedLocation, id >= 0 ? 1 : 0);
+      for (let k = 0; k < FILL_TEXTURES; k++) {
+        if (this.runUnits & (1 << k)) {
+          state.bindTexture(FILL_UNIT + k, this.textures[this.unitIds[k]] as WebGLTexture);
+          state.bindSampler(FILL_UNIT + k, this.sampler(this.unitSampling[k]));
+        }
       }
 
-      this.lastTexture = id;
-      const snap = (scene.sampler[i] & SNAP) !== 0;
-      if (snap !== this.lastSnap) {
-        this.lastSnap = snap;
-        gl.uniform1i(this.snapLocation, snap ? 1 : 0);
+      if (!this.multi) {
+        if (this.runRows[0] !== this.lastRow) {
+          this.lastRow = this.runRows[0];
+          gl.uniform1i(this.rowLocation, this.lastRow);
+        }
+
+        gl.drawElements(gl.TRIANGLES, this.runCounts[0], gl.UNSIGNED_INT, this.runOffsets[0]);
+        continue;
       }
 
-      if (texture) {
-        state.bindTexture(TEXTURE_UNIT, texture);
-        state.bindSampler(
-          TEXTURE_UNIT,
-          this.sampler(scene.sampler[i] & (SMOOTH | REPEAT | MIRROR)),
-        );
-      }
-
-      gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
+      gl.uniform4iv(this.runsLocation, this.runRows, 0, Math.ceil(draws / 4) * 4);
+      this.multi.multiDrawElementsWEBGL(
+        gl.TRIANGLES,
+        this.runCounts,
+        0,
+        gl.UNSIGNED_INT,
+        this.runOffsets,
+        0,
+        draws,
+      );
     }
 
     if (other) {
       this.useFill();
     }
+  }
+
+  /**
+   * The fills from entry `i` on that one call draws, as many as fit its
+   * textures (FILL_TEXTURES, each with its sampling) and, without
+   * WEBGL_multi_draw, one: their runCounts, runOffsets and runRows (FILL_SLOT),
+   * and the units their textures take in runUnits. The last entry gathered,
+   * past those whose texture is gone, which draw nothing.
+   */
+  private gatherRun(scene: SceneList, i: number, end: number, stencil: boolean): number {
+    const most = this.multi ? RUN_MOST : 1;
+    let draws = 0;
+    let last = i;
+    this.runUnits = 0;
+
+    for (let j = i; j < end && draws < most; j++) {
+      if (scene.kind[j] !== DRAW) {
+        continue;
+      }
+
+      const place = this.places[scene.geometry[j]];
+      if (!place) {
+        continue;
+      }
+
+      if (place.glyphs || (!stencil && scene.sampler[j] & (MESH | PLANE))) {
+        break;
+      }
+
+      const id = stencil ? -1 : scene.texture[j];
+      let slot = 0;
+      if (id >= 0) {
+        if (!this.textures[id]) {
+          last = j;
+          continue;
+        }
+
+        const sampling = scene.sampler[j] & (SMOOTH | REPEAT | MIRROR);
+        slot = this.runSlot(id, sampling);
+        if (slot === 0) {
+          break;
+        }
+      }
+
+      this.runCounts[draws] = place.indices;
+      this.runOffsets[draws] = place.indexStart * 4;
+      this.runRows[draws] =
+        scene.row[j] | (slot << FILL_SLOT) | (scene.sampler[j] & SNAP ? SNAP_BIT : 0);
+      draws++;
+      last = j;
+    }
+
+    this.runCount = draws;
+
+    return last;
+  }
+
+  /**
+   * The slot (FILL_SLOT) of the unit texture `id` is sampled from so in the
+   * run: the one it was left on, else one the run has not taken, an empty
+   * one first, so that a texture stays where it is from run to run; 0 when
+   * the run has taken all.
+   */
+  private runSlot(id: number, sampling: number): number {
+    for (let k = 0; k < FILL_TEXTURES; k++) {
+      if (this.unitIds[k] === id && this.unitSampling[k] === sampling) {
+        this.runUnits |= 1 << k;
+        return k + 1;
+      }
+    }
+
+    let free = -1;
+    for (let n = 0; n < FILL_TEXTURES; n++) {
+      const k = (this.unitNext + n) % FILL_TEXTURES;
+      if (!(this.runUnits & (1 << k)) && (free < 0 || this.unitIds[k] < 0)) {
+        free = k;
+        if (this.unitIds[k] < 0) {
+          break;
+        }
+      }
+    }
+
+    if (free < 0) {
+      return 0;
+    }
+
+    this.unitIds[free] = id;
+    this.unitSampling[free] = sampling;
+    this.unitNext = (free + 1) % FILL_TEXTURES;
+    this.runUnits |= 1 << free;
+    return free + 1;
   }
 
   /**
