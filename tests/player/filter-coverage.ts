@@ -47,7 +47,8 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       "hiding shadow 40": { ...filterDefaults("dropShadow"), blurX: 40, blurY: 40, quality: 2, distance: 0, hideObject: true, color: 0xffffff },
     };
     const results = [];
-    // The alpha of each pixel of \`paint\` filled white at \`fill\`, under \`filter\`, rows from the top.
+    // The alpha of each pixel of \`paint\` filled white at \`fill\`, under \`filter\`, rows from
+    // the top.
     const draw = (view, filter, paint, fill) => {
       const root = new Container();
       const object = new Container();
@@ -78,7 +79,8 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
           try {
             for (const [pn, [paint, coverage]] of Object.entries(patterns)) {
               for (const [fn, filter] of Object.entries(filters)) {
-                // A glow keeps its object, sharp: it is read where it glows alone, left of the object.
+                // A glow keeps its object, sharp: it is read where it glows alone, left of the
+                // object.
                 const glow = filter.kind === "glow";
                 if (glow && pn === "hatching") {
                   continue;

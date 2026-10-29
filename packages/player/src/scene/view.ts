@@ -732,12 +732,12 @@ export class RenderView implements Drawer {
     // A 3D object's layer is its bitmap already.
     const mode = hidden || named < 0 || (named === LAYER && (!childful || plane)) ? NORMAL : named;
     // Its filters draw it as a layer too, which they run over before its blend: adl filters the
-    // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
-    // The 9-slice grid that reshapes what it draws itself (display/scale9.ts): its own, sliced as
-    // its morphs take their new ratios, so that its bounds are this frame's; or, for a Shape, its owner's, kept as the owner's children are walked, unless it
-    // is filtered, which adl draws as a bitmap of it, stretched whole (sliceFor). Masks are
-    // hidden, and draw unsliced; so does what BitmapData.draw takes, its Shapes by its grid too,
-    // which draws with no transform of its own.
+    // object, then blends what they make, in its colour from the stage down, as a bitmap of it. The
+    // 9-slice grid that reshapes what it draws itself (display/scale9.ts): its own, sliced as its
+    // morphs take their new ratios, so that its bounds are this frame's; or, for a Shape, its
+    // owner's, kept as the owner's children are walked, unless it is filtered, which adl draws as a
+    // bitmap of it, stretched whole (sliceFor). Masks are hidden, and draw unsliced; so does what
+    // BitmapData.draw takes, its Shapes by its grid too, which draws with no transform of its own.
     const ownSlice = !hidden && o.scale9Grid && !root ? sliceDrawn(o) : null;
     const slice =
       ownSlice ??
@@ -1069,14 +1069,12 @@ export class RenderView implements Drawer {
   }
 
   /**
-   * Whether `o`'s filters' output kept last can be drawn again, its rectangle
-   * then in keptRect; else whether to keep what they make now. Kept while
-   * nothing they ran on changed but where it is on the stage: not past a change in `o` but a move, in
-   * what is in it, in its scale or turn on the stage (a b c d), a move of
-   * what it scrolls, its filters, or the screen's scale; and drawn again
-   * only while its rectangle moved with it, its size the same and its
-   * corner within a pixel. One that changes frame after frame is not kept,
-   * as keeping it would cost a target for nothing.
+   * Whether `o`'s filters' output kept last can be drawn again, its rectangle then in keptRect;
+   * else whether to keep what they make now. Kept while nothing they ran on changed but where it is
+   * on the stage: not past a change in `o` but a move, in what is in it, in its scale or turn on
+   * the stage (a b c d), a move of what it scrolls, its filters, or the screen's scale; and drawn
+   * again only while its rectangle moved with it, its size the same and its corner within a pixel.
+   * One that changes frame after frame is not kept, as keeping it would cost a target for nothing.
    */
   private keptOutput(
     o: DisplayObject,

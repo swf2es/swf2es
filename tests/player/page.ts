@@ -37,7 +37,10 @@ import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { webWorkerHost } from "@swf2es/player-hosts/workers";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
-/** The native tessellator the renderer draws fills with, as an element's does by default, made as it first needs it. */
+/**
+ * The native tessellator the renderer draws fills with, as an element's does by default, made as it
+ * first needs it.
+ */
 let nativeFills: import("@swf2es/native/tessellate").Tessellator | null = null;
 
 async function fillTessellator(): Promise<
@@ -1091,7 +1094,8 @@ async function contextLossPlanSwf(base64: string, plan: string): Promise<string 
     for (let step = 0; step < plan.length; step++) {
       switch (plan[step]) {
         case "t": {
-          // Both scenes represent one frame: GPU work must not age what one keeps and not the other.
+          // Both scenes represent one frame: GPU work must not age what one keeps and not the
+          // other.
           const now = performance.now;
           const time = performance.now();
           performance.now = () => time;

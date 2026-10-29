@@ -54,14 +54,11 @@ for (const [name, deps] of Object.entries(allowed)) {
   });
 }
 
-const vendorRoot = new URL("../../vendor/", import.meta.url);
-
 test("vendor/ holds the native libraries alone", () => {
-  const dirs = readdirSync(vendorRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  assert.deepEqual(dirs, nativeVendor);
+  // The submodules, not the directory: a checkout keeps a removed submodule's built files there.
+  const modules = readFileSync(new URL("../../.gitmodules", import.meta.url), "utf8");
+  const vendored = [...modules.matchAll(/^\s*path = vendor\/(\S+)$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(vendored, nativeVendor);
 });
 
 // Apps (apps/*) may use any package, and no package may use an app.

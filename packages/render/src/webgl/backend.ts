@@ -408,11 +408,16 @@ export class WebGLBackend {
   /** Multisampled buffers free to draw a layer into, kept while drawn into often enough. */
   private freeMsaa = new SizedPool<Multisampled>(msaaBytes);
   /**
-   * The stage's multisampled buffers, and the texture they resolve into
-   * before an opaque canvas.
+   * The stage's multisampled buffers, and the texture they resolve into before a canvas they may
+   * not be resolved onto (present), made as first needed.
    */
   private stageMsaa: Multisampled | null = null;
   private stageResolved: { framebuffer: WebGLFramebuffer; texture: WebGLTexture } | null = null;
+  /**
+   * Whether the driver resolves the stage straight onto a canvas with alpha, found as it first does
+   * (present): null till then. SwiftShader refuses it.
+   */
+  private directResolve: boolean | null = null;
   /** The layer a frame that clears the stage is drawn into before an opaque canvas (stageAlpha). */
   private stageLayer: Layer | null = null;
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
@@ -539,6 +544,7 @@ export class WebGLBackend {
     this.kept = [];
     this.stageMsaa = null;
     this.stageResolved = null;
+    this.directResolve = null;
     this.stageLayer = null;
     this.freeMsaa = new SizedPool<Multisampled>(msaaBytes);
     this.maxSamples = gl.getParameter(gl.MAX_SAMPLES) as number;
@@ -1547,21 +1553,57 @@ export class WebGLBackend {
   }
 
   /**
-   * The stage's multisampled pixels onto the canvas, resolved into a texture
-   * first: a resolve must keep its format, which the canvas's need not be,
-   * with alpha or without (SwiftShader refuses a resolve onto one with).
+   * The stage's multisampled pixels onto the canvas: resolved straight onto one with alpha where
+   * the driver lets a resolve go there, else into a texture first, as an opaque canvas's must be, a
+   * resolve keeping its format. Whether the driver lets it is found once, by the error it raises.
    */
   private present(msaa: Multisampled): void {
     const gl = this.gl;
     const { width, height } = msaa;
-    const resolved = this.stageResolved;
-    if (resolved) {
-      this.state.bindFramebuffer(msaa.framebuffer);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolved.framebuffer);
-      gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    if (this.canvasAlpha && this.directResolve !== false) {
+      const finding = this.directResolve === null;
+      if (finding) {
+        gl.getError();
+      }
+
+      this.toCanvas(msaa.framebuffer, width, height, false);
+      if (finding) {
+        this.directResolve = gl.getError() !== gl.INVALID_OPERATION;
+      }
+
+      if (this.directResolve) {
+        return;
+      }
     }
 
-    this.toCanvas(resolved?.framebuffer ?? msaa.framebuffer, width, height, false);
+    const resolved = this.resolveTarget(width, height);
+    this.state.bindFramebuffer(msaa.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolved.framebuffer);
+    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    this.toCanvas(resolved.framebuffer, width, height, false);
+  }
+
+  /** The texture the stage resolves into before the canvas (present), made as first needed. */
+  private resolveTarget(
+    width: number,
+    height: number,
+  ): { framebuffer: WebGLFramebuffer; texture: WebGLTexture } {
+    if (this.stageResolved) {
+      return this.stageResolved;
+    }
+
+    const gl = this.gl;
+    const texture = gl.createTexture() as WebGLTexture;
+    this.state.bindTexture(LAYER_UNIT, texture);
+    this.state.activeTexture(LAYER_UNIT);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+    this.state.bindFramebuffer(framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    this.stageResolved = { framebuffer, texture };
+    return this.stageResolved;
   }
 
   /**
@@ -1612,11 +1654,10 @@ export class WebGLBackend {
   }
 
   /**
-   * The stage's multisampled buffers and their resolve, made again for
-   * another size or samples; none where it takes no samples.
+   * The stage's multisampled buffers, made again for another size or samples, their resolve's
+   * texture let go of; none where it takes no samples.
    */
   private stageBuffers(width: number, height: number, wanted: number): Multisampled | null {
-    const gl = this.gl;
     const samples = fittingSamples(width, height, Math.min(wanted, this.maxSamples), 4);
     const known = this.stageMsaa;
     if (known && known.width === width && known.height === height && known.samples === samples) {
@@ -1630,16 +1671,6 @@ export class WebGLBackend {
     }
 
     this.stageMsaa = msaa;
-    const texture = gl.createTexture() as WebGLTexture;
-    this.state.bindTexture(LAYER_UNIT, texture);
-    this.state.activeTexture(LAYER_UNIT);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
-    this.state.bindFramebuffer(framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    this.stageResolved = { framebuffer, texture };
     return msaa;
   }
 

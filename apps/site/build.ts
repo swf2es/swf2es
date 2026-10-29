@@ -1,8 +1,7 @@
-// Assembles the demo site into apps/site/dist/site/, a static directory
-// GitHub Pages serves as it is: the page, the built packages as tsc wrote
-// them under an import map, codegen.wasm, builtin.abc, the demo SWFs and the licences. Every URL in it is
-// relative, so it plays at https://swf2es.github.io/swf2es/ as at a local
-// server's root. Run after `pnpm build`:
+// Assembles the demo site into apps/site/dist/site/, a static directory GitHub Pages serves as it
+// is: the page, the built packages as tsc wrote them under an import map, codegen.wasm,
+// builtin.abc, the demo SWFs and the licences. Every URL in it is relative, so it plays at
+// https://swf2es.github.io/swf2es/ as at a local server's root. Run after `pnpm build`:
 //
 //   pnpm --filter @swf2es/site build      (or node apps/site/build.ts)
 //

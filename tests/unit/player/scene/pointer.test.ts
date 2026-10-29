@@ -51,7 +51,9 @@ function page(
     getRootNode: () => document,
     getBoundingClientRect: () => rect,
   };
-  /** An event of `type` at the client point (x, y), on the canvas unless `over` is another element. */
+  /**
+   * An event of `type` at the client point (x, y), on the canvas unless `over` is another element.
+   */
   const fire = (type: string, x: number, y: number, init: object = {}, over: unknown = canvas) => {
     const on = ["pointermove", "pointerup", "pointercancel"].includes(type) ? window : canvas;
     const f = on.listeners.get(type);

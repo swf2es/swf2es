@@ -111,11 +111,19 @@ export class Playback {
         : import("@swf2es/native/bitmap")
             .then(({ Convolver }): Convolver => new Convolver())
             .catch(() => null),
-      import("@swf2es/player/scene"),
+      // Settled, not rejected, so that the native instances made beside it go if it fails to load.
+      import("@swf2es/player/scene").then(
+        (module) => module,
+        (error: unknown) => ({ error }),
+      ),
     ]);
 
     let view: RenderView;
     try {
+      if ("error" in scene) {
+        throw scene.error;
+      }
+
       view = new scene.RenderView({
         width: player.width,
         height: player.height,
@@ -125,7 +133,7 @@ export class Playback {
         fillTessellator: tessellator?.tessellate,
       });
     } catch (error) {
-      // No playback to let go of them: the native instances go here.
+      // The renderer did not load or start, and no playback lets go of them: they go here.
       tessellator?.dispose();
       convolver?.dispose();
       throw error;

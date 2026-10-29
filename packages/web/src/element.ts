@@ -318,12 +318,11 @@ export class Swf2esPlayerElement extends ElementBase {
   }
 
   /**
-   * The WebGL context the player draws with, for a host that measures it
-   * (the demo site counts its draw calls); null before a load, after
-   * destroy, and on a renderer of another API. A lost context comes back
-   * as the same object, its extensions anew.
+   * The WebGL context the player draws with, for a host that measures it (the demo site counts its
+   * draw calls); null before a load and after destroy. A lost context comes back as the same
+   * object, its extensions anew.
    */
-  get gl(): WebGLRenderingContext | WebGL2RenderingContext | null {
+  get gl(): WebGL2RenderingContext | null {
     return this.#session?.playback?.gl ?? null;
   }
 

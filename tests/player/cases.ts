@@ -7595,14 +7595,13 @@ function blendDrift(): Uint8Array {
 }
 
 /**
- * Shapes drawn in runs, and what ends a run or draws in the middle of one:
- * added and multiplied shapes, drawn as layers; a layer, a run, then a layer
- * whose first content is a layer of a shape; squares filled alone under
- * multiply and screen, which split a run by its blend mode; a gradient, a blurred shape, a mask over two shapes, a
- * shape whose lines are stroked anew each frame as it turns stretched, a
- * depth whose character is replaced each frame, a row of small shapes,
- * moving down, whose run is too long to pass its rows in uniforms, and
- * after a layer a short run whose rows follow the long one's.
+ * Shapes drawn in runs, and what ends a run or draws in the middle of one: added and multiplied
+ * shapes, drawn as layers; a layer, a run, then a layer whose first content is a layer of a shape;
+ * squares filled alone under multiply and screen, which split a run by its blend mode; a gradient,
+ * a blurred shape, a mask over two shapes, a shape whose lines are stroked anew each frame as it
+ * turns stretched, a depth whose character is replaced each frame, a row of small shapes, moving
+ * down, whose run is too long to pass its rows in uniforms, and after a layer a short run whose
+ * rows follow the long one's.
  */
 function tableRuns(): Uint8Array {
   const outlined = (id: number, color: number, sides: number) => {

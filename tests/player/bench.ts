@@ -1,11 +1,10 @@
-// Times the player on a synthetic SWF in headless Chrome: a few shape
-// characters placed many times over, some moving each frame, some turning
-// (which draws their lines again), a few replaced; what a busy timeline
-// does. Prints the median and p90 of a frame's tick (the timeline), draw
-// (the walk of the display list, the plan and its GL calls) and gl (the
-// wait for GL to finish them) after the first frames warm up. Chrome's software GL draws by default, so the draw is CPU
-// time that compares run to run on one machine; --gpu lets Chrome use the
-// machine's GPU, for what a user would see, and the output names which drew.
+// Times the player on a synthetic SWF in headless Chrome: a few shape characters placed many times
+// over, some moving each frame, some turning (which draws their lines again), a few replaced; what
+// a busy timeline does. Prints the median and p90 of a frame's tick (the timeline), draw (the walk
+// of the display list, the plan and its GL calls) and gl (the wait for GL to finish them) after the
+// first frames warm up. Chrome's software GL draws by default, so the draw is CPU time that
+// compares run to run on one machine; --gpu lets Chrome use the machine's GPU, for what a user
+// would see, and the output names which drew.
 //
 // --antialias makes the renderer multisampled, as a host made with
 // `antialias: true`: what blends and filters resolve of it counts in the
@@ -122,15 +121,13 @@
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
 //
-// With --counts, each run also gives per-frame means of what the renderer
-// asked of GL: draw calls and the draws they make, program, vertex array and
-// framebuffer binds, uniform calls, stencil state and clears, buffer and
-// texture uploads and their bytes, readbacks, and lines stroked anew. --allocs samples the heap and gives the KB the frames
-// allocated, the player's start left out; --profile FILE also writes the
-// sampled profile there, for DevTools' Memory panel to open. After the
-// frames, with the renderer still alive, it gives what the page holds after
-// a full collection, the JS heap and array buffers' data apart; --snapshot
-// FILE also writes a heap snapshot then.
+// With --counts, each run also gives per-frame means of what the renderer asked of GL: draw calls
+// and the draws they make, program, vertex array and framebuffer binds, uniform calls, stencil
+// state and clears, buffer and texture uploads and their bytes, readbacks, and lines stroked anew.
+// --allocs samples the heap and gives the KB the frames allocated, the player's start left out;
+// --profile FILE also writes the sampled profile there, for DevTools' Memory panel to open. After
+// the frames, with the renderer still alive, it gives what the page holds after a full collection,
+// the JS heap and array buffers' data apart; --snapshot FILE also writes a heap snapshot then.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
 //     [--colored [--fade]]

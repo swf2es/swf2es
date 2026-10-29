@@ -1,8 +1,7 @@
-// A shape layer's fills as geometries of the renderer's (@swf2es/render):
-// each fill tessellated (fills.ts), in order, a geometry for each stretch of
-// solid fills and one for each textured fill, a bitmap's or a gradient's,
-// its vertices carrying where they sample in texels; then drawTriangles' textured triangles, a geometry each
-// mesh. What is left out is counted.
+// A shape layer's fills as geometries of the renderer's (@swf2es/render): each fill tessellated
+// (fills.ts), in order, a geometry for each stretch of solid fills and one for each textured fill,
+// a bitmap's or a gradient's, its vertices carrying where they sample in texels; then
+// drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
 
 import type { Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
