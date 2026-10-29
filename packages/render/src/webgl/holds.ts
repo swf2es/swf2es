@@ -13,7 +13,7 @@ import type { Filters } from "../filters.js";
 import type { SceneList } from "../scene.js";
 import { Shelves } from "../shelves.js";
 import type { Compositor } from "./composite.js";
-import { type Draws, STENCIL_MOST } from "./draws.js";
+import type { Draws, Masks } from "./draws.js";
 import type { FilterRunner, FilterTarget } from "./filters.js";
 import type { GpuTextures } from "./gpu-textures.js";
 import {
@@ -96,6 +96,8 @@ export class HeldLayers {
   private readonly holdOpen: Open = { layer: null, msaa: null, x: 0, y: 0, width: 0, height: 0 };
   private readonly heldOpen: Open = { layer: null, msaa: null, x: 0, y: 0, width: 0, height: 0 };
   private readonly shelves = new Shelves();
+  /** The masks pushed on the held layer whose content is drawn (drawHoldContent). */
+  private readonly masks: Masks = { depth: 0, past: 0 };
   /** The largest side a texture may have. */
   private textureMost = 4096;
 
@@ -498,41 +500,31 @@ export class HeldLayers {
    * `open`, bound, its stencil starting clear.
    */
   private drawHoldContent(commands: Commands, hold: Hold, scene: SceneList, open: Open): void {
-    const gl = this.gl;
     const state = this.state;
     const ops = commands.ops;
-    let depth = 0;
-    let past = 0;
+    const masks = this.masks;
+    masks.depth = 0;
+    masks.past = 0;
     state.stencil(null);
     state.colorMask(15);
     for (let k = hold.first; k < hold.end; k++) {
       const at = k * 4;
       switch (ops[at]) {
         case RUN:
-          this.draws.useFill();
-          state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          this.draws.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], false);
+          this.draws.drawRun(scene, ops[at + 1], ops[at + 1] + ops[at + 2]);
           break;
         case STENCIL_PUSH:
-        case STENCIL_POP: {
-          const push = ops[at] === STENCIL_PUSH;
-          if (push ? depth >= STENCIL_MOST || past > 0 : past > 0) {
-            past += push ? 1 : -1;
-            break;
-          }
-
-          this.draws.useFill();
-          state.colorMask(0);
-          state.stencil(gl.EQUAL, depth, push ? gl.INCR : gl.DECR);
-          this.draws.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], true);
-          depth += push ? 1 : -1;
-          state.colorMask(15);
-          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+        case STENCIL_POP:
+          this.draws.drawMask(
+            scene,
+            ops[at + 1],
+            ops[at + 1] + ops[at + 2],
+            ops[at] === STENCIL_PUSH,
+            masks,
+          );
           break;
-        }
-
         case HELD:
-          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          this.draws.maskBy(masks);
           this.compositeHeld(ops[at + 1], open, ops[at + 2], ops[at + 3]);
           break;
       }

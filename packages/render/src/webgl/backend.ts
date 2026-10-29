@@ -21,7 +21,7 @@ import type { SceneList } from "../scene.js";
 import type { Textures } from "../textures.js";
 import { GeometryAtlas } from "./atlas.js";
 import { Compositor } from "./composite.js";
-import { Draws, STENCIL_MOST } from "./draws.js";
+import { Draws, type Masks } from "./draws.js";
 import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
@@ -62,6 +62,8 @@ export class WebGLBackend {
    * Flash's anti-aliasing by the quality, as the host sets it.
    */
   samples = 1;
+  /** The masks pushed on the target drawn into now (execute). */
+  private readonly masks: Masks = { depth: 0, past: 0 };
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
 
@@ -181,11 +183,11 @@ export class WebGLBackend {
     this.draws.drawInto(canvas, target);
 
     this.draws.forgetRow();
-    // The masks pushed on the target drawn into: what is drawn passes where its stencil holds as
-    // many. Its eight bits hold 255: those pushed past that are left out, and their pops with
-    // them. A layer has a stencil of its own, and the target below keeps its count meanwhile.
-    let depth = 0;
-    let past = 0;
+    // The masks pushed on the target drawn into. A layer has a stencil of its own, and the
+    // target below keeps its count meanwhile.
+    const masks = this.masks;
+    masks.depth = 0;
+    masks.past = 0;
     const below = this.below;
     below.length = 0;
     state.stencil(null);
@@ -204,30 +206,18 @@ export class WebGLBackend {
         }
 
         case RUN:
-          // Premultiplied, as every blend mode will be.
-          this.draws.useFill();
-          state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          this.draws.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], false);
+          this.draws.drawRun(scene, ops[at + 1], ops[at + 1] + ops[at + 2]);
           break;
         case STENCIL_PUSH:
-        case STENCIL_POP: {
-          // The mask's coverage, once a pixel however its fills overlap: counted up into the
-          // stencil where the masks pushed before it pass, and back down where it and they did.
-          const push = ops[at] === STENCIL_PUSH;
-          if (push ? depth >= STENCIL_MOST || past > 0 : past > 0) {
-            past += push ? 1 : -1;
-            break;
-          }
-
-          this.draws.useFill();
-          state.colorMask(0);
-          state.stencil(gl.EQUAL, depth, push ? gl.INCR : gl.DECR);
-          this.draws.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], true);
-          depth += push ? 1 : -1;
-          state.colorMask(15);
-          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+        case STENCIL_POP:
+          this.draws.drawMask(
+            scene,
+            ops[at + 1],
+            ops[at + 1] + ops[at + 2],
+            ops[at] === STENCIL_PUSH,
+            masks,
+          );
           break;
-        }
 
         case HOLD_PUSH:
           // Drawn ahead of the stage (drawHolds).
@@ -237,7 +227,7 @@ export class WebGLBackend {
 
           break;
         case HELD:
-          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          this.draws.maskBy(masks);
           this.holds.compositeHeld(
             ops[at + 1],
             this.layers.at(-1) ?? canvas,
@@ -247,9 +237,9 @@ export class WebGLBackend {
           break;
 
         case LAYER_PUSH: {
-          below.push(depth, past);
-          depth = 0;
-          past = 0;
+          below.push(masks.depth, masks.past);
+          masks.depth = 0;
+          masks.past = 0;
           const p = commands.params;
           const from = ops[at + 1];
           const width = p[from + 2];
@@ -300,13 +290,13 @@ export class WebGLBackend {
 
         case LAYER_POP: {
           const open = this.layers.pop() as Open;
-          past = below.pop() as number;
-          depth = below.pop() as number;
+          masks.past = below.pop() as number;
+          masks.depth = below.pop() as number;
           this.pool.resolve(open, open.width, open.height);
           const under = this.layers.at(-1) ?? canvas;
           this.draws.drawInto(under, target);
           // Composited where the masks on the target below let it be.
-          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          this.draws.maskBy(masks);
           this.compositor.compositeLayer(open, under, ops[at + 1], ops[at + 2]);
           const keep = ops[at + 3];
           if (keep >= 0) {
@@ -332,7 +322,7 @@ export class WebGLBackend {
               width: p[from + 2],
               height: p[from + 3],
             };
-            state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+            this.draws.maskBy(masks);
             this.compositor.compositeLayer(
               kept,
               this.layers.at(-1) ?? canvas,

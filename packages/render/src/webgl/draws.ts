@@ -43,7 +43,17 @@ interface MultiDraw {
 }
 
 /** The most masks the stencil's eight bits count. */
-export const STENCIL_MOST = 255;
+const STENCIL_MOST = 255;
+
+/**
+ * The masks pushed on a target drawn into: what is drawn passes where its
+ * stencil holds `depth` of them. Its eight bits hold STENCIL_MOST: those
+ * pushed past that are left out, `past` of them, and their pops with them.
+ */
+export interface Masks {
+  depth: number;
+  past: number;
+}
 
 /**
  * The draws of a scene list's entries into the target bound: fills in runs,
@@ -224,6 +234,45 @@ export class Draws {
     this.state.useProgram(this.program);
     this.state.bindVertexArray(this.atlas.vertexArray);
     this.state.bindTexture(0, this.gpu.rowsTexture);
+  }
+
+  /** Entries `first` up to `end` drawn as fills, where the masks pushed pass. */
+  drawRun(scene: SceneList, first: number, end: number): void {
+    const gl = this.gl;
+    // Premultiplied, as every blend mode will be.
+    this.useFill();
+    this.state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    this.drawEntries(scene, first, end, false);
+  }
+
+  /**
+   * Entries `first` up to `end`, a mask, pushed onto `masks` (STENCIL_PUSH)
+   * or popped off them (STENCIL_POP), left out past STENCIL_MOST: its
+   * coverage, once a pixel however its fills overlap, counted up into the
+   * stencil where the masks pushed before it pass, and back down where it
+   * and they did.
+   */
+  drawMask(scene: SceneList, first: number, end: number, push: boolean, masks: Masks): void {
+    if (push ? masks.depth >= STENCIL_MOST || masks.past > 0 : masks.past > 0) {
+      masks.past += push ? 1 : -1;
+      return;
+    }
+
+    const gl = this.gl;
+    const state = this.state;
+    this.useFill();
+    state.colorMask(0);
+    state.stencil(gl.EQUAL, masks.depth, push ? gl.INCR : gl.DECR);
+    this.drawEntries(scene, first, end, true);
+    masks.depth += push ? 1 : -1;
+    state.colorMask(15);
+    this.maskBy(masks);
+  }
+
+  /** What is drawn from here on kept to where `masks` pass, by the stencil. */
+  maskBy(masks: Masks): void {
+    const gl = this.gl;
+    this.state.stencil(masks.depth > 0 ? gl.EQUAL : null, masks.depth, gl.KEEP);
   }
 
   /** The draws at `scene`'s entries from `first` up to `end`; for the stencil alone, untextured. */
