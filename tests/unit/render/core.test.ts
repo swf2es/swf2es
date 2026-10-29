@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  BLUR,
   CLEAR,
+  COLOR_MATRIX,
   Commands,
+  FILTER,
+  Filters,
   Geometries,
   IDLE_FRAMES,
   LAYER_END,
@@ -13,6 +17,7 @@ import {
   MASK_USE,
   MULTIPLY,
   measureLayers,
+  NORMAL,
   plan,
   ROW_FLOATS,
   Rows,
@@ -261,10 +266,10 @@ test("a layer covers its draws as their rows place them, out to whole pixels and
   scene.layerBegin();
   scene.draw(small, turned, 0);
   scene.marker(LAYER_END, MULTIPLY, -1);
-  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1 });
+  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
   assert.deepEqual(Array.from(scene.layers.subarray(0, 8)), [19, 29, 23, 22, 89, 99, 12, 12]);
   // At twice the pixels a stage pixel, cut to the target.
-  measureLayers(scene, rows, geometries, { width: 100, height: 100, scale: 2 });
+  measureLayers(scene, rows, geometries, { width: 100, height: 100, scale: 2, resolution: 1 });
   assert.deepEqual(Array.from(scene.layers.subarray(0, 4)), [40, 59, 42, 41]);
 });
 
@@ -285,6 +290,77 @@ test("a mask cuts what it clips in a layer to its own draws, which the layer doe
   scene.marker(LAYER_END, MULTIPLY, -1);
   scene.marker(MASK_POP, 2, 1);
   scene.marker(LAYER_END, MULTIPLY, -1);
-  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1 });
+  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
   assert.deepEqual(Array.from(scene.layers.subarray(0, 8)), [39, 39, 12, 12, 0, 0, 101, 101]);
+});
+
+test("a filter list closes its filters into chains, each one's values after the last's", () => {
+  const filters = new Filters();
+  filters.add(BLUR, [4, 4, 1, 1]);
+  filters.add(COLOR_MATRIX, new Float32Array(20).fill(0.5), 3);
+  assert.equal(filters.close(), 0);
+  filters.add(BLUR, [2, 2, 3, 1]);
+  assert.equal(filters.close(), 1);
+  assert.deepEqual(Array.from(filters.chains.subarray(0, 3)), [0, 2, 3]);
+  assert.deepEqual(Array.from(filters.start.subarray(0, 4)), [0, 4, 24, 28]);
+  assert.deepEqual(Array.from(filters.texture.subarray(0, 3)), [-1, 3, -1]);
+  assert.deepEqual(Array.from(filters.values.subarray(24, 28)), [2, 2, 3, 1]);
+  // Past its first arrays, and from the first again once reset.
+  for (let i = 0; i < 100; i++) {
+    filters.add(BLUR, new Float32Array(20).fill(i));
+    filters.close();
+  }
+
+  assert.equal(filters.values[filters.start[102]], 99);
+  filters.reset();
+  filters.add(BLUR, [1, 1, 1, 1]);
+  assert.equal(filters.close(), 0);
+  assert.deepEqual(Array.from(filters.start.subarray(0, 2)), [0, 4]);
+});
+
+test("a filtered layer clears past its rectangle, and runs its chain before it composites", () => {
+  const scene = new SceneList();
+  scene.layerBegin(3);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(NORMAL, 2, 0);
+  scene.layerRect(0, 1, 2, 3, 4);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [
+    [LAYER_PUSH, 4, 1, 0],
+    [RUN, 1, 1, 0],
+    [FILTER, 0, 0, 0],
+    [LAYER_POP, NORMAL, 2, 0],
+  ]);
+});
+
+test("a filtered layer is measured as Pixi's filter system measured it, padded past the target", () => {
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const scene = new SceneList();
+  const row = rows.add(1, 0, 0, 1, 0, 0, null);
+  const inside = spanning(geometries, 10.5, 20.2, 30, 40.7);
+  const off = spanning(geometries, 210, 0, 220, 10);
+  scene.layerBegin(3);
+  scene.draw(inside, row, 0);
+  scene.layerEnd(NORMAL, -1, -1);
+  // Off the target to its right: cut to its edge it turns inside out, which a padding of 3 does
+  // not mend, and one of 10 does.
+  scene.layerBegin(3);
+  scene.draw(off, row, 0);
+  scene.layerEnd(NORMAL, -1, -1);
+  scene.layerBegin(10);
+  scene.draw(off, row, 0);
+  scene.layerEnd(NORMAL, -1, -1);
+  // Nothing drawn, nothing filtered.
+  scene.layerBegin(5);
+  scene.layerEnd(NORMAL, -1, -1);
+  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  assert.deepEqual(
+    Array.from(scene.layers.subarray(0, 16)),
+    [7, 17, 26, 27, 0, 0, 0, 0, 200, -10, 10, 30, 0, 0, 0, 0],
+  );
+  // At twice the pixels a unit, the padding is twice as many of them.
+  measureLayers(scene, rows, geometries, { width: 400, height: 400, scale: 2, resolution: 2 });
+  assert.deepEqual(Array.from(scene.layers.subarray(0, 4)), [15, 34, 51, 54]);
 });

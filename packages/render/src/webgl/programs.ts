@@ -92,8 +92,10 @@ void main(void) {
 `;
 
 /**
- * A layer composited onto what is below over its rectangle (uOffset its
- * corner in the target's framebuffer), pixel for pixel: coloured by its
+ * A layer composited onto what is below over its rectangle, pixel for
+ * pixel: its rows run down, as the filters read them, and the target's up
+ * where it is the canvas (uFlip), from uOffset in its framebuffer; what is
+ * below copied from uBackOffset. Coloured by its
  * row's colour transform where it has one (uRow not -1), on its straight
  * colour where it covers anything; then blended by its mode. Normal, layer,
  * add and screen are left to GL's blending; the rest read what is below
@@ -109,6 +111,8 @@ uniform highp sampler2D uRows;
 uniform int uRow;
 uniform int uMode;
 uniform ivec2 uOffset;
+uniform bool uFlip;
+uniform ivec2 uBackOffset;
 out vec4 finalColor;
 
 vec3 straight(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
@@ -119,8 +123,8 @@ vec3 hardlight(vec3 cb, vec3 cf) {
 }
 
 void main(void) {
-  // The layer's texel, and the copy of what is below, from the rectangle's corner.
-  ivec2 at = ivec2(gl_FragCoord.xy) - uOffset;
+  ivec2 frag = ivec2(gl_FragCoord.xy);
+  ivec2 at = ivec2(frag.x - uOffset.x, uFlip ? uOffset.y - frag.y : frag.y - uOffset.y);
   vec4 front = texelFetch(uLayer, at, 0);
   if (uRow >= 0 && front.a > 0.0) {
     ivec2 row = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
@@ -135,7 +139,7 @@ void main(void) {
     return;
   }
 
-  vec4 back = texelFetch(uBack, at, 0);
+  vec4 back = texelFetch(uBack, frag - uBackOffset, 0);
   vec3 cb = straight(back);
   vec3 cf = straight(front);
   vec3 b;

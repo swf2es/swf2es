@@ -242,3 +242,139 @@ export function filterOfSwf(f: SwfFilter): Filter {
       return { ...filterDefaults("colorMatrix"), matrix: [...f.matrix] };
   }
 }
+
+/**
+ * Whether two lists of filter records hold the same values, which draw the
+ * same: a timeline's tween writes its filters again on each frame, and a
+ * script may set them from their own. A map is the same only as the same
+ * object, so that a displacement's map taken anew is drawn anew.
+ */
+export function sameFilterRecords(a: readonly Filter[], b: readonly Filter[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  // Compared each frame for every object a tween filters, so without allocating.
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] as unknown as Record<string, unknown>;
+    const y = b[i] as unknown as Record<string, unknown>;
+    let keys = 0;
+    for (const key in x) {
+      keys++;
+      if (!(key in y) || !sameValue(x[key], y[key])) {
+        return false;
+      }
+    }
+
+    for (const _ in y) {
+      keys--;
+    }
+
+    if (keys !== 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function sameValue(u: unknown, v: unknown): boolean {
+  if (!Array.isArray(u) || !Array.isArray(v)) {
+    return Object.is(u, v);
+  }
+
+  if (u.length !== v.length) {
+    return false;
+  }
+
+  for (let k = 0; k < u.length; k++) {
+    if (!Object.is(u[k], v[k])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * A convolution with no taps as adl draws it, a copy moved up and left by
+ * the half of the other size: one tap there, of 1, the edges transparent.
+ */
+export function emptyKernel(f: Filter): Filter {
+  const hx = f.matrixX >> 1;
+  const hy = f.matrixY >> 1;
+  const matrixX = 2 * hx + 1;
+  const matrixY = 2 * hy + 1;
+  const matrix = new Array(matrixX * matrixY).fill(0);
+  matrix[matrix.length - 1] = 1;
+  return {
+    ...f,
+    matrixX,
+    matrixY,
+    matrix,
+    divisor: 1,
+    bias: 0,
+    clamp: false,
+    color: 0,
+    alpha: 0,
+    preserveAlpha: false,
+  };
+}
+
+/** A filter's offset into `out`, `distance` stage pixels at its angle, in `units` a stage pixel. */
+export function filterOffset(
+  out: { [i: number]: number },
+  f: Filter,
+  distance: number,
+  units: number,
+): void {
+  const radians = ((f.angle || 0) * Math.PI) / 180;
+  out[0] = distance * Math.cos(radians) * units;
+  out[1] = distance * Math.sin(radians) * units;
+}
+
+/**
+ * How far either side of a display object its filters may pad, in the
+ * target's units: what a texture `limit` texels a side holds at
+ * `resolution` texels a unit, past the object's area on the target
+ * (`width` by `height` units, cut to it) and a little.
+ */
+export function filterRoom(
+  limit: number,
+  resolution: number,
+  width: number,
+  height: number,
+): number {
+  return Math.floor((limit / resolution - Math.max(width, height, 0)) / 2) - 2;
+}
+
+/**
+ * The most any one filter pads, where their paddings as their reach asks
+ * (`wanted`) together pass `room`: cut alike from the furthest reaching
+ * down to what fits, as a shadow cast 1e9 away, or Infinity, asks;
+ * Infinity where they fit. What is cut lies past the screen, but for an
+ * object off it whose shadow is not.
+ */
+export function paddingCap(wanted: readonly number[], room: number): number {
+  let total = 0;
+  for (const p of wanted) {
+    total += p;
+  }
+
+  if (total <= room) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const sorted = [...wanted].sort((a, b) => a - b);
+  let below = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
+    if (level <= sorted[i]) {
+      return Math.max(0, level);
+    }
+
+    below += sorted[i];
+  }
+
+  return 0;
+}

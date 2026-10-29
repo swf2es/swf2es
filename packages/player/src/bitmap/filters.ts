@@ -1414,3 +1414,25 @@ function write(
 
   dest.changed();
 }
+
+/**
+ * A distance as far as a display object's filter pads: NaN none; Infinity,
+ * or the -8388866 generateFilterRect makes of NaN, as far as a GPU's
+ * texture could be, which the renderer cuts to what it can draw
+ * (paddingCap).
+ */
+export function paddedDistance(distance: number): number {
+  return Number.isNaN(distance) ? 0 : Math.max(-(2 ** 24), Math.min(2 ** 24, distance));
+}
+
+/**
+ * How far a gradient filter's rect grows past a display object in stage
+ * pixels, as applyFilter's does: left, top, right, bottom.
+ */
+export function filterGrowth(f: Filter): number[] {
+  const rect = filterRect(
+    { x: 0, y: 0, width: 1, height: 1 },
+    { ...f, distance: paddedDistance(f.distance) },
+  );
+  return [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
+}

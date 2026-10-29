@@ -36,6 +36,7 @@ import {
   TRANSFORM,
   unloads,
 } from "../display/display.js";
+import { sameFilterRecords } from "../display/filters.js";
 import { shifted } from "../display/geometry.js";
 import { sliceDrawn } from "../display/scale9.js";
 import type { Player } from "../player.js";
@@ -46,7 +47,7 @@ import { gpuBitmaps } from "./bitmaps.js";
 import { blendFilters } from "./blend.js";
 import { setFlashColor } from "./color.js";
 import { Compositing } from "./compositing.js";
-import { displayFilters, FilterChain, sameFilterRecords } from "./filters.js";
+import { displayFilters, FilterChain } from "./filters.js";
 import { hookRenderer } from "./hooks.js";
 import { makeNode, NO_RECORDS, type Node } from "./node.js";
 import { Planes } from "./planes.js";

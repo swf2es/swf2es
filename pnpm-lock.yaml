@@ -61,6 +61,9 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../../packages/format
+      '@swf2es/render':
+        specifier: workspace:*
+        version: link:../../packages/render
       '@swf2es/web':
         specifier: workspace:*
         version: link:../../packages/web

@@ -33,7 +33,7 @@ test("gradient filters detach their owned textures before destroying them", asyn
 });
 
 test("blurs run coarser only where the screen has texels to spare and the error stays small", async () => {
-  const { blurShrink } = await import("../../../../packages/player/dist/render/filters.js");
+  const { blurShrink } = await import("../../../../packages/render/dist/index.js");
   // A texel a stage pixel, no blur that way, or no passes, as ever.
   assert.equal(blurShrink(68, 2, 1, 1), 1);
   assert.equal(blurShrink(0, 2, 1, 3), 1);
@@ -173,8 +173,8 @@ function shrunkRuns(
 }
 
 test("shrunk blurs stay within twice the shrink's bound however their input sits in a block", async () => {
-  const { blurShrink } = await import("../../../../packages/player/dist/render/filters.js");
-  // SHRUNK_ERROR in render/filters.ts, a level each way: the two ways together.
+  const { blurShrink } = await import("../../../../packages/render/dist/index.js");
+  // SHRUNK_ERROR in @swf2es/render's filters.ts, a level each way: the two ways together.
   const bound = 2 * 2;
   // Blurs and glows as animations carry them, at the texels a stage pixel a page at a device
   // pixel ratio of 2 or 3 gives.

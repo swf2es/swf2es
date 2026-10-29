@@ -11,6 +11,7 @@
 // alone: each pass is a filter of its own.
 
 import type { ColorTransform } from "@swf2es/format";
+import { blurShrink, filterShaders } from "@swf2es/render";
 import {
   type BLEND_MODES,
   type Bounds,
@@ -29,9 +30,18 @@ import {
   TextureSource,
 } from "pixi.js";
 import { rgbaOf } from "../bitmap/bitmap.js";
-import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
-import type { Filter as FilterRecord } from "../display/filters.js";
+import { filterGrowth, gradientTable, integerKernel, paddedDistance } from "../bitmap/filters.js";
+import {
+  emptyKernel,
+  type Filter as FilterRecord,
+  filterOffset,
+  filterRoom,
+  paddingCap,
+} from "../display/filters.js";
 import type { AreaKeeper, PaddingFitter } from "./blend.js";
+
+const { BEVEL, BOX, CONVOLUTION, DISPLACE, GLOW, GRADIENT, MATRIX, READ_BACK, SHRINK } =
+  filterShaders;
 
 const VERTEX = `in vec2 aPosition;
 out vec2 vTextureCoord;
@@ -44,36 +54,6 @@ void main(void) {
   position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
   gl_Position = vec4(position, 0.0, 1.0);
   vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
-}`;
-
-/** Truncated to 8 bits, as adl's each pass is: a hair over, so that an exact value stays. */
-const TRUNCATE = "floor(c * 255.0 + 0.001) / 255.0";
-
-/**
- * One run of the box one way: `uWidth` texels wide, its end texels weighted
- * by their part; `uDirection` a texel's step in the input's pixels, which
- * uInputSize gives the coordinates in.
- */
-const BOX = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-// As the vertex shader has it, which is highp: a program's uniforms agree.
-uniform highp vec4 uInputSize;
-uniform vec2 uDirection;
-uniform float uWidth;
-void main(void) {
-  float half_ = uWidth * 0.5;
-  int reach = int(ceil(half_));
-  vec4 sum = vec4(0.0);
-  // As far as 255 pixels at 4 texels a pixel, each way.
-  for (int i = 0; i <= 2040; i++) {
-    if (i > 2 * reach) { break; }
-    float f = float(i - reach);
-    float weight = max(0.0, min(f + 0.5, half_) - max(f - 0.5, -half_));
-    sum += texture(uTexture, vTextureCoord + uDirection * uInputSize.zw * f) * weight;
-  }
-  vec4 c = sum / uWidth;
-  finalColor = ${TRUNCATE};
 }`;
 
 class BoxPass extends Filter {
@@ -116,32 +96,6 @@ void main(void) {
   vTextureCoord = aPosition * uSpan * uInputSize.zw;
 }`;
 
-// Two texels each way a read: a linear read midway between texel centres is their mean, so a
-// block takes a quarter of the reads. An odd factor's last column or row is read alone, weighted
-// by the texels each read stands for. A pool texture has no levels but its base.
-const SHRINK = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform highp vec4 uInputPixel;
-uniform vec2 uFactor;
-void main(void) {
-  vec4 sum = vec4(0.0);
-  vec2 centre = (uFactor - 1.0) * 0.5;
-  for (int j = 0; j < 16; j += 2) {
-    float y = float(j);
-    if (y >= uFactor.y) { break; }
-    float ny = min(2.0, uFactor.y - y);
-    for (int i = 0; i < 16; i += 2) {
-      float x = float(i);
-      if (x >= uFactor.x) { break; }
-      float nx = min(2.0, uFactor.x - x);
-      vec2 at = vec2(x, y) + (vec2(nx, ny) - 1.0) * 0.5 - centre;
-      sum += texture(uTexture, vTextureCoord + at * uInputPixel.zw) * (nx * ny);
-    }
-  }
-  finalColor = sum / (uFactor.x * uFactor.y);
-}`;
-
 let shrinkFilter: Filter | null = null;
 
 function shrinkPass(across: number, down: number, spanX: number, spanY: number): Filter {
@@ -164,64 +118,6 @@ function shrinkPass(across: number, down: number, spanX: number, spanY: number):
   u.uSpan[0] = spanX;
   u.uSpan[1] = spanY;
   return shrinkFilter;
-}
-
-/**
- * The fewest texels a shrunk run spans, for each time a glow's strength
- * multiplies its alpha. Under it the bound below fails: an edge's ramp a
- * few coarse texels long bends sharply where a box ends, and drawn back
- * linearly between them a glow 8 wide at strength 2.37 shrunk three times
- * was off by 10 levels; a glow's strength multiplies that too.
- */
-const SHRUNK_TEXELS = 8;
-
-/** The most, in 255ths of alpha times strength, that drawing a shrunk blur back may be off by. */
-const SHRUNK_ERROR = 2;
-
-/**
- * The strongest glow or shadow a shrunk blur serves. Each run truncates to
- * a 255th, and drawn back between coarser texels a level's step moves by up
- * to a texel: off by a level the strength multiplies, however wide the blur.
- */
-const SHRUNK_STRENGTH = 3;
-
-/**
- * How many times coarser than its input a blur's runs one way may go: none
- * at a texel a stage pixel or under, nor where it does not blur that way;
- * otherwise whole times, to a texel a stage pixel at most, the run still
- * SHRUNK_TEXELS wide for each time strength multiplies it. A run reads a
- * texel for each of its width, so at three texels a stage pixel a glow 68
- * wide read 204 for each texel of an area nine times the stage's; shrunk
- * three times each way, it reads 68 for each of the stage's. Drawn back
- * between the coarser texels, what it blurred is off where it bends: at the
- * ends of a single box's ramp by a quarter of a coarse texel's rise, and
- * where two boxes or more bend smoothly by a sixth of the coarse texel
- * squared over the box's width squared; times the strength a glow multiplies
- * its alpha by, that stays within SHRUNK_ERROR. Each way is its own: a
- * streak 68 wide and 5 high goes coarser across alone.
- */
-export function blurShrink(
-  blur: number,
-  quality: number,
-  strength: number,
-  texels: number,
-): number {
-  if (!(blur > 1 && quality > 0) || strength > SHRUNK_STRENGTH) {
-    return 1;
-  }
-
-  const box = blur * texels;
-  const amplified = 255 * Math.max(1, strength);
-  const error =
-    quality === 1
-      ? (4 * SHRUNK_ERROR * box) / amplified
-      : box * Math.sqrt((6 * SHRUNK_ERROR) / amplified);
-  const most = Math.min(
-    16,
-    Math.floor(texels + 1e-6),
-    Math.floor(box / (SHRUNK_TEXELS * Math.max(1, strength))),
-  );
-  return Math.max(1, Math.min(most, Math.floor(error)));
 }
 
 /**
@@ -287,15 +183,6 @@ function placeBlurred(
   scale[1] = input.source.height / (blurred.source.height * down);
 }
 
-/** A blur's runs, done coarser (blurred), drawn back between their texels over the input's frame. */
-const READ_BACK = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uBlurred;
-uniform vec2 uBlurredScale;
-void main(void) {
-  finalColor = texture(uBlurred, vTextureCoord * uBlurredScale);
-}`;
-
 /**
  * The box's runs over `input` into `output`, through a texture of the pool
  * between them: `texelsX` and `texelsY` to a pixel of the stage each way,
@@ -352,22 +239,6 @@ function blur(
   if (second) {
     TexturePool.returnTexture(second);
   }
-}
-
-/** A filter's offset, `distance` stage pixels at its angle, in the input's units. */
-function placeOffset(offset: Float32Array, f: FilterRecord, distance: number, units: number): void {
-  const radians = ((f.angle || 0) * Math.PI) / 180;
-  offset[0] = distance * Math.cos(radians) * units;
-  offset[1] = distance * Math.sin(radians) * units;
-}
-
-/**
- * A distance as far as it pads: NaN none; Infinity, or the -8388866
- * generateFilterRect makes of NaN, as far as a GPU's texture could be,
- * which the chain fits to what this one can draw (FilterChain.fitPadding).
- */
-function paddedDistance(distance: number): number {
-  return Number.isNaN(distance) ? 0 : Math.max(-(2 ** 24), Math.min(2 ** 24, distance));
 }
 
 /**
@@ -492,40 +363,6 @@ class BlurFilter extends FlashFilter {
   }
 }
 
-/**
- * A glow or a shadow: the input's blurred alpha (uBlurred), from `uOffset`
- * texels back for a shadow, times strength and alpha, in its colour; behind
- * the object, or inside it for an inner one; the object kept, or not.
- */
-const GLOW = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform sampler2D uBlurred;
-uniform highp vec4 uInputSize;
-uniform vec3 uColor;
-uniform float uAlpha;
-uniform float uStrength;
-uniform vec2 uOffset;
-uniform vec2 uBlurredScale;
-uniform float uInner;
-uniform float uKnockout;
-uniform float uHide;
-void main(void) {
-  vec4 src = texture(uTexture, vTextureCoord);
-  float a = texture(uBlurred, (vTextureCoord - uOffset * uInputSize.zw) * uBlurredScale).a;
-  vec4 c;
-  if (uInner > 0.5) {
-    float g = clamp((1.0 - a) * uStrength, 0.0, 1.0) * uAlpha * src.a;
-    vec4 glow = vec4(uColor * g, g);
-    c = uKnockout > 0.5 ? glow : glow + src * (1.0 - g);
-  } else {
-    float g = clamp(a * uStrength, 0.0, 1.0) * uAlpha;
-    vec4 glow = vec4(uColor * g, g);
-    c = uKnockout > 0.5 ? glow * (1.0 - src.a) : uHide > 0.5 ? glow : src + glow * (1.0 - src.a);
-  }
-  finalColor = ${TRUNCATE};
-}`;
-
 class GlowFilter extends BlurredFilter {
   private readonly pass = new BoxPass();
 
@@ -571,7 +408,7 @@ class GlowFilter extends BlurredFilter {
   apply(system: FilterSystem, input: Texture, output: RenderSurface, clear: boolean): void {
     const f = this.f;
     const uniforms = this.resources.glowUniforms.uniforms;
-    placeOffset(uniforms.uOffset as Float32Array, f, this.distance, this.units);
+    filterOffset(uniforms.uOffset as Float32Array, f, this.distance, this.units);
     const blurX = f.blurX || 0;
     const blurY = f.blurY || 0;
     const texels = this.texels(input);
@@ -587,52 +424,6 @@ class GlowFilter extends BlurredFilter {
     }
   }
 }
-
-/**
- * A bevel: the input's blurred alpha (uBlurred) from uOffset texels on and
- * back; their difference times strength, clamped, times the colour's alpha,
- * the highlight where on is more and the shadow where it is less. Inner
- * (uType 0) atop the object, outer (1) behind it, full (2) over it;
- * knocked out, alone, masked to where the object is (inner) or is not
- * (outer).
- */
-const BEVEL = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform sampler2D uBlurred;
-uniform highp vec4 uInputSize;
-uniform vec3 uHighlight;
-uniform vec3 uShadow;
-uniform float uHighlightAlpha;
-uniform float uShadowAlpha;
-uniform float uStrength;
-uniform vec2 uOffset;
-uniform float uType;
-uniform float uKnockout;
-void main(void) {
-  // Keep source samples sharp; the bevel reads alpha at a stage pixel's centre.
-  vec2 at = (floor(vTextureCoord * uInputSize.xy) + 0.5) * uInputSize.zw;
-  vec4 src = texture(uTexture, vTextureCoord);
-  vec2 step_ = uOffset * uInputSize.zw;
-  // In 255ths, each read truncated, as adl's are.
-  float on = floor(texture(uBlurred, at + step_).a * 255.0 + 0.001);
-  float back = floor(texture(uBlurred, at - step_).a * 255.0 + 0.001);
-  float d = on - back;
-  bool lit = d > 0.0;
-  float strong = min(255.0, floor(abs(d) * uStrength + 0.001));
-  float la = floor(strong * (lit ? uHighlightAlpha : uShadowAlpha) + 0.5) / 255.0;
-  float m = uType < 0.5 ? src.a : (uType < 1.5 && uKnockout > 0.5 ? 1.0 - src.a : 1.0);
-  vec4 layer = vec4((lit ? uHighlight : uShadow) * la, la) * m;
-  vec4 c;
-  if (uKnockout > 0.5) {
-    c = layer;
-  } else if (uType > 0.5 && uType < 1.5) {
-    c = src + layer * (1.0 - src.a);
-  } else {
-    c = layer + src * (1.0 - (uType < 0.5 ? la : layer.a));
-  }
-  finalColor = ${TRUNCATE};
-}`;
 
 class BevelFilter extends BlurredFilter {
   private readonly pass = new BoxPass();
@@ -681,7 +472,7 @@ class BevelFilter extends BlurredFilter {
     );
     this.resources.uBlurred = alpha.source;
     const offset = this.resources.bevelUniforms.uniforms.uOffset as Float32Array;
-    placeOffset(offset, f, f.distance || 0, this.units);
+    filterOffset(offset, f, f.distance || 0, this.units);
     system.applyFilter(this, input, output, clear);
     this.unbind();
     if (alpha !== input) {
@@ -689,69 +480,6 @@ class BevelFilter extends BlurredFilter {
     }
   }
 }
-
-/**
- * How a bevel or a gradient filter places its layer (premultiplied) on the
- * object's pixel, as bitmap/filters' placer does: masked to where the
- * object is (uType 0, inner) or, knocked out, is not (1, outer); inner
- * atop it, outer behind it, full (2) over it, knocked out alone.
- */
-const PLACE = `vec4 place(vec4 src, vec4 layer) {
-  float m = uType < 0.5 ? src.a : (uType < 1.5 && uKnockout > 0.5 ? 1.0 - src.a : 1.0);
-  vec4 masked = layer * m;
-  if (uKnockout > 0.5) {
-    return masked;
-  }
-  if (uType > 0.5 && uType < 1.5) {
-    return src + masked * (1.0 - src.a);
-  }
-  return masked + src * (1.0 - (uType < 0.5 ? layer.a : masked.a));
-}`;
-
-/**
- * A gradient glow: the input's blurred alpha (uBlurred) from uOffset back,
- * as a shadow reads it, times strength, picking a texel of the gradient
- * (uGradient, 256 wide); a gradient bevel (uBevel 1): the difference of
- * that alpha on and back, the middle of the gradient where they agree.
- * Each pixel is evaluated once, at its centre, in 255ths truncated.
- */
-const GRADIENT = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform sampler2D uBlurred;
-uniform sampler2D uGradient;
-uniform highp vec4 uInputSize;
-uniform float uStrength;
-uniform vec2 uOffset;
-uniform float uType;
-uniform float uKnockout;
-uniform float uBevel;
-uniform vec4 uRegion;
-${PLACE}
-float alphaAt(vec2 at) {
-  return floor(texture(uBlurred, at).a * 255.0 + 0.001);
-}
-void main(void) {
-  vec2 p = floor(vTextureCoord * uInputSize.xy) + 0.5;
-  // Past the filter's rect it draws nothing, though its gradient may have colour at 0.
-  if (any(lessThan(p, uRegion.xy)) || any(greaterThanEqual(p, uRegion.zw))) {
-    finalColor = vec4(0.0);
-    return;
-  }
-  vec2 at = p * uInputSize.zw;
-  vec4 src = texture(uTexture, at);
-  vec2 step_ = uOffset * uInputSize.zw;
-  float index;
-  if (uBevel > 0.5) {
-    float d = clamp(floor((alphaAt(at + step_) - alphaAt(at - step_)) * uStrength), -255.0, 255.0);
-    index = floor((d + 256.0) / 2.0);
-  } else {
-    index = min(255.0, floor(alphaAt(at - step_) * uStrength + 0.001));
-  }
-  vec4 layer = texture(uGradient, vec2((index + 0.5) / 256.0, 0.5));
-  vec4 c = place(src, layer);
-  finalColor = ${TRUNCATE};
-}`;
 
 class GradientFilter extends BlurredFilter {
   private readonly pass = new BoxPass();
@@ -795,14 +523,7 @@ class GradientFilter extends BlurredFilter {
     });
     this.gradient = gradient;
     // The rect's growth each way, as applyFilter's: left, top, right, bottom.
-    const rect = filterRect(
-      { x: 0, y: 0, width: 1, height: 1 },
-      {
-        ...f,
-        distance: paddedDistance(f.distance),
-      },
-    );
-    this.grows = [-rect.x, -rect.y, rect.x + rect.width - 1, rect.y + rect.height - 1];
+    this.grows = filterGrowth(f);
     this.reach = Math.max(...this.grows) + 1;
     this.padding = this.reach;
   }
@@ -828,7 +549,7 @@ class GradientFilter extends BlurredFilter {
     );
     this.resources.uBlurred = alpha.source;
     const offset = this.resources.gradientUniforms.uniforms.uOffset as Float32Array;
-    placeOffset(offset, f, f.distance || 0, this.units);
+    filterOffset(offset, f, f.distance || 0, this.units);
     // The object's pixels and one more right and down, as adl's bitmap of it, grown by the rect.
     const region = this.resources.gradientUniforms.uniforms.uRegion as Float32Array;
     const grows = this.grows;
@@ -844,81 +565,6 @@ class GradientFilter extends BlurredFilter {
     }
   }
 }
-
-/**
- * A displacement map, in the input's pixels from its frame's corner: each
- * pixel of the object's (uBox) where the map lies (uMapAt, uMapSize) takes
- * the input at itself moved by the map's channel (uComponents picks one
- * for x, one for y) less 128, times scale, in 256ths toward 0, between
- * pixels with weights in 256ths; past the object's pixels as uMode says:
- * 0 wrap, 1 clamp, 2 its own place, 3 uColor, which also fills uGrow pixels
- * round the object, as adl's drawing of it does. Each pixel once, at its
- * centre.
- */
-const DISPLACE = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform sampler2D uMap;
-uniform highp vec4 uInputSize;
-uniform vec4 uBox;
-uniform vec4 uMapAt;
-uniform vec4 uComponentX;
-uniform vec4 uComponentY;
-uniform vec2 uScale;
-uniform float uMode;
-uniform vec4 uColor;
-uniform vec2 uGrow;
-vec4 read(vec2 at, vec2 own) {
-  vec2 size = uBox.zw - uBox.xy;
-  vec2 i = at - uBox.xy;
-  if (any(lessThan(i, vec2(0.0))) || any(greaterThanEqual(i, size))) {
-    if (uMode < 0.5) {
-      i = mod(i, size);
-    } else if (uMode < 2.5) {
-      i = clamp(i, vec2(0.0), size - 1.0);
-    } else {
-      return uColor;
-    }
-  }
-  return texture(uTexture, (uBox.xy + i + 0.5) * uInputSize.zw);
-}
-void main(void) {
-  vec2 p = floor(vTextureCoord * uInputSize.xy);
-  vec4 own = texture(uTexture, (p + 0.5) * uInputSize.zw);
-  vec2 m = p - uMapAt.xy;
-  if (any(lessThan(p, uBox.xy)) || any(greaterThanEqual(p, uBox.zw))) {
-    bool near = all(greaterThanEqual(p, uBox.xy - uGrow)) && all(lessThan(p, uBox.zw + uGrow));
-    finalColor = uMode > 2.5 && near ? uColor : vec4(0.0);
-    return;
-  }
-  if (any(lessThan(m, vec2(0.0))) || any(greaterThanEqual(m, uMapAt.zw))) {
-    finalColor = own;
-    return;
-  }
-  vec4 map = texture(uMap, (m + 0.5) / uMapAt.zw);
-  vec4 straight = map.a > 0.0 ? vec4(map.rgb / map.a, map.a) : vec4(0.0);
-  vec2 c = floor(vec2(dot(straight, uComponentX), dot(straight, uComponentY)) * 255.0 + 0.5);
-  // None picked: no move.
-  c = vec2(uComponentX == vec4(0.0) ? 128.0 : c.x, uComponentY == vec4(0.0) ? 128.0 : c.y);
-  // Toward 0, without trunc, which GLSL ES 1 has not.
-  vec2 moved = (c - 128.0) * uScale;
-  vec2 q = p * 256.0 + sign(moved) * floor(abs(moved));
-  vec2 whole = floor(q / 256.0);
-  vec2 f = q - whole * 256.0;
-  if (uMode > 1.5 && uMode < 2.5) {
-    vec2 i = whole - uBox.xy;
-    vec2 size = uBox.zw - uBox.xy;
-    whole = vec2(i.x < 0.0 || i.x >= size.x ? p.x : whole.x, i.y < 0.0 || i.y >= size.y ? p.y : whole.y);
-  }
-  float w00 = floor((256.0 - f.x) * (256.0 - f.y) / 256.0);
-  float w10 = floor(f.x * (256.0 - f.y) / 256.0);
-  float w01 = floor((256.0 - f.x) * f.y / 256.0);
-  float w11 = floor(f.x * f.y / 256.0);
-  vec4 v = read(whole, p) * w00 + read(whole + vec2(1.0, 0.0), p) * w10 +
-    read(whole + vec2(0.0, 1.0), p) * w01 + read(whole + vec2(1.0, 1.0), p) * w11;
-  vec4 c8 = floor(v * 255.0 / 256.0 + 0.001) / 255.0;
-  finalColor = c8;
-}`;
 
 class DisplacementFilter extends FlashFilter {
   /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
@@ -985,20 +631,6 @@ class DisplacementFilter extends FlashFilter {
   }
 }
 
-/** A colour matrix of a pixel's straight colour, its offsets in 255ths, transparent pixels too. */
-const MATRIX = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform mat4 uMatrix;
-uniform vec4 uOffset;
-void main(void) {
-  vec4 src = texture(uTexture, vTextureCoord);
-  vec4 straight = src.a > 0.0 ? vec4(src.rgb / src.a, src.a) : vec4(0.0);
-  vec4 s = clamp(uMatrix * straight + uOffset, 0.0, 1.0);
-  vec4 c = vec4(s.rgb * s.a, s.a);
-  finalColor = ${TRUNCATE};
-}`;
-
 class ColorMatrixFilter extends FlashFilter {
   constructor(f: FilterRecord) {
     const m = f.matrix;
@@ -1024,64 +656,6 @@ class ColorMatrixFilter extends FlashFilter {
     });
   }
 }
-
-/**
- * A convolution, in 255ths: the taps' straight colour over uBox, the
- * object's pixels as adl filters them, in the input's pixels from its
- * frame's corner; past it the nearest edge's or uEdge; summed, divided,
- * biased, clamped and premultiplied as bitmap/filters' convolve does, the
- * fixed-point way too (uReciprocal not 0) where every tap lies in the box.
- */
-const CONVOLUTION = `in vec2 vTextureCoord;
-out vec4 finalColor;
-uniform sampler2D uTexture;
-uniform highp vec4 uInputSize;
-uniform vec4 uMatrix[57];
-uniform vec2 uSize;
-uniform vec4 uBox;
-uniform vec4 uEdge;
-uniform float uDivisor;
-uniform float uReciprocal;
-uniform float uBias;
-uniform float uClamp;
-uniform float uPreserve;
-vec4 straight(vec2 p) {
-  if (any(lessThan(p, uBox.xy)) || any(greaterThanEqual(p, uBox.zw))) {
-    if (uClamp < 0.5) { return uEdge; }
-    p = clamp(p, floor(uBox.xy) + 0.5, floor(uBox.zw) - 0.5);
-  }
-  vec4 c = texture(uTexture, p * uInputSize.zw);
-  return c.a > 0.0 ? floor(vec4(c.rgb / c.a, c.a) * 255.0 + 0.5) : vec4(0.0);
-}
-void main(void) {
-  // The pixel's centre, which all its texels read alike, as adl's one pixel.
-  vec2 p = floor(vTextureCoord * uInputSize.xy) + 0.5;
-  vec2 reach = floor(uSize * 0.5);
-  if (any(lessThan(p, uBox.xy - reach)) || any(greaterThanEqual(p, uBox.zw + reach))) {
-    finalColor = vec4(0.0);
-    return;
-  }
-  bool fixed_ = uReciprocal != 0.0 && all(greaterThanEqual(p - 1.0, uBox.xy)) &&
-    all(lessThan(p + 1.0, uBox.zw));
-  int cols = int(uSize.x);
-  int count = cols * int(uSize.y);
-  vec4 sum = vec4(0.0);
-  // One loop, its index alone indexing the weights, as GLSL ES 1 allows.
-  for (int k = 0; k < 225; k++) {
-    if (k >= count) { break; }
-    float w = dot(uMatrix[k / 4], vec4(equal(vec4(float(k - k / 4 * 4)), vec4(0.0, 1.0, 2.0, 3.0))));
-    if (w != 0.0) {
-      int j = k / cols;
-      vec2 at = vec2(float(k - j * cols), float(j)) - reach;
-      sum += straight(fixed_ && k == 8 ? p : p + at) * w;
-    }
-  }
-  sum = fixed_ ? floor(sum * uReciprocal) : sum / uDivisor;
-  vec4 v = floor(clamp(sum + uBias, 0.0, 255.0) + 0.0001);
-  float a = uPreserve > 0.5 ? straight(p).a : v.a;
-  vec3 c = fixed_ ? floor(v.rgb * a / 255.0) : floor((v.rgb * a + 127.0) / 255.0);
-  finalColor = vec4(c, a) / 255.0;
-}`;
 
 class ConvolutionFilter extends FlashFilter {
   /** How far in from the input's frame the object's pixels start: this and the later filters' padding. */
@@ -1138,86 +712,8 @@ class ConvolutionFilter extends FlashFilter {
   }
 }
 
-/**
- * A convolution with no taps as adl draws it, a copy moved up and left by
- * the half of the other size: one tap there, of 1, the edges transparent.
- */
-function emptyKernel(f: FilterRecord): FilterRecord {
-  const hx = f.matrixX >> 1;
-  const hy = f.matrixY >> 1;
-  const matrixX = 2 * hx + 1;
-  const matrixY = 2 * hy + 1;
-  const matrix = new Array(matrixX * matrixY).fill(0);
-  matrix[matrix.length - 1] = 1;
-  return {
-    ...f,
-    matrixX,
-    matrixY,
-    matrix,
-    divisor: 1,
-    bias: 0,
-    clamp: false,
-    color: 0,
-    alpha: 0,
-    preserveAlpha: false,
-  };
-}
-
 /** The texture of a displacement map's map, as its renderer holds it; null for none. */
 export type MapTexture = (map: object) => Texture | null;
-
-/**
- * Whether two lists of filter records hold the same values, which draw the
- * same: a timeline's tween writes its filters again on each frame, and a
- * script may set them from their own. A map is the same only as the same
- * object, so that a displacement's map taken anew is drawn anew.
- */
-export function sameFilterRecords(a: readonly FilterRecord[], b: readonly FilterRecord[]): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-
-  // Compared each frame for every object a tween filters, so without allocating.
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i] as unknown as Record<string, unknown>;
-    const y = b[i] as unknown as Record<string, unknown>;
-    let keys = 0;
-    for (const key in x) {
-      keys++;
-      if (!(key in y) || !sameValue(x[key], y[key])) {
-        return false;
-      }
-    }
-
-    for (const _ in y) {
-      keys--;
-    }
-
-    if (keys !== 0) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function sameValue(u: unknown, v: unknown): boolean {
-  if (!Array.isArray(u) || !Array.isArray(v)) {
-    return Object.is(u, v);
-  }
-
-  if (u.length !== v.length) {
-    return false;
-  }
-
-  for (let k = 0; k < u.length; k++) {
-    if (!Object.is(u[k], v[k])) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 /** The Pixi filters a display object's filter records draw as: those swf2es draws yet, in their order. */
 export function displayFilters(
@@ -1631,29 +1127,12 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     // As the filter system clips the area before it pads it.
     const width = Math.min(bounds.maxX, viewport.width / resolution) - Math.max(bounds.minX, 0);
     const height = Math.min(bounds.maxY, viewport.height / resolution) - Math.max(bounds.minY, 0);
-    const room =
-      Math.floor((textureLimit(renderer) / resolution - Math.max(width, height, 0)) / 2) - 2;
+    const room = filterRoom(textureLimit(renderer), resolution, width, height);
     const wanted = this.wanted;
-    let total = wanted.reduce((sum, p) => sum + p, 0);
     // The most any one filter pads: all they want where it fits, else the level that fits.
-    let cap = Infinity;
-    if (total > room) {
-      const sorted = [...wanted].sort((a, b) => a - b);
-      let below = 0;
-      cap = 0;
-      for (let i = 0; i < sorted.length; i++) {
-        const level = Math.floor((Math.max(0, room) - below) / (sorted.length - i));
-        if (level <= sorted[i]) {
-          cap = Math.max(0, level);
-          break;
-        }
-
-        below += sorted[i];
-      }
-    }
-
+    const cap = paddingCap(wanted, room);
     let changed = false;
-    total = 0;
+    let total = 0;
     for (let i = 0; i < this.filters.length; i++) {
       const padding = Math.min(wanted[i], cap);
       changed ||= this.filters[i].padding !== padding;

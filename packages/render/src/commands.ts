@@ -10,11 +10,15 @@ export const STENCIL_PUSH = 3;
 export const STENCIL_POP = 4;
 /**
  * A layer begun, drawn into a target of its own over the rectangle of the
- * target whose x, y, width and height are params from `a`; and composited
- * onto the one below in blend mode `a`, coloured by row `b` (or -1).
+ * target whose x, y, width and height are params from `a`, `b` 1 where
+ * filters will read it past that rectangle, which is then clear too; and
+ * composited onto the one below in blend mode `a`, coloured by row `b`
+ * (or -1).
  */
 export const LAYER_PUSH = 5;
 export const LAYER_POP = 6;
+/** The filters of chain `a` of the frame's filter list run over the layer drawn into, in turn. */
+export const FILTER = 7;
 
 /**
  * What a frame asks of the backend, in order: each operation an opcode and

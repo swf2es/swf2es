@@ -270,9 +270,12 @@ bundle. An experimental backend, such as Vello's, could implement it too.
 
 - **Filters and blend modes** become the passes the planner emits: blur,
   glow, shadow, bevel, gradient glow and bevel, colour matrix, convolution
-  and displacement map, as they are drawn now to match adl. Their shaders
-  and the rules for exactness move from `render/filters.ts` and
-  `render/blend.ts` unchanged.
+  and displacement map, as they are drawn now to match adl. The filters'
+  shaders and `blurShrink` moved unchanged to `filter-shaders.ts` and
+  `filters.ts`, where the Pixi view reads them too; the player works out
+  each filter's values, padding and insets (`scene/filters.ts`), and a
+  filtered layer is measured as Pixi's filter system measured it. The
+  blend formulas moved from `render/blend.ts` to the composite program.
 - **Text** stays laid out by the player. The renderer sees glyph runs:
   Saffron's quads, or a device text texture.
 - **`BitmapData.draw`** plans a scene list into a render target with the

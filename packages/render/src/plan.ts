@@ -1,6 +1,7 @@
 import {
   CLEAR,
   type Commands,
+  FILTER,
   LAYER_POP,
   LAYER_PUSH,
   RUN,
@@ -83,11 +84,19 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
           break;
         }
 
-        out.push(LAYER_PUSH, out.param(r[at], r[at + 1], r[at + 2], r[at + 3]));
+        out.push(
+          LAYER_PUSH,
+          out.param(r[at], r[at + 1], r[at + 2], r[at + 3]),
+          scene.pads[scene.geometry[i]] >= 0 ? 1 : 0,
+        );
         break;
       }
       case LAYER_END:
         close(i);
+        if (scene.texture[i] >= 0) {
+          out.push(FILTER, scene.texture[i]);
+        }
+
         out.push(LAYER_POP, scene.geometry[i], scene.row[i]);
         break;
     }
