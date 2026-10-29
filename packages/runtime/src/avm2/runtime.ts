@@ -16,18 +16,19 @@ import { ArrayConversion } from "./array-conversion.js";
 import { fillCache } from "./cache-fill.js";
 import { newClass, specializeVector, withId } from "./classes.js";
 import { classNamed, definingAbc, definitionNamed } from "./definitions.js";
-import type {
-  Abc,
-  AbcDesc,
-  AsObject,
-  ClassDesc,
-  CompileUnit,
-  Factory,
-  Method,
-  Scope,
-  TraitsDesc,
-  TypeRef,
-  Value,
+import {
+  type Abc,
+  type AbcDesc,
+  type AsObject,
+  type ClassDesc,
+  type CompileUnit,
+  type Factory,
+  type Method,
+  NOT_FOUND,
+  type Scope,
+  type TraitsDesc,
+  type TypeRef,
+  type Value,
 } from "./descriptors.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
@@ -74,8 +75,8 @@ import {
   TypeName,
 } from "./names.js";
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
-import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import type { SyncInit } from "./natives/sync.js";
+import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
   defaultPrint,
@@ -115,6 +116,7 @@ import {
   VectorRef,
 } from "./traits.js";
 
+export { NOT_FOUND } from "./descriptors.js";
 export { AsError } from "./errors.js";
 
 /**
@@ -2885,6 +2887,3 @@ export class Runtime {
 }
 
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "float", "String", "Boolean", "Object"]);
-
-/** Not a property: distinct from undefined, which a property can hold. */
-export const NOT_FOUND = Symbol("not found");

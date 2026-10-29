@@ -13,6 +13,9 @@ export type AsObject = any;
 // biome-ignore lint/complexity/noBannedTypes: methods take their receiver as this
 export type Method = Function;
 
+/** Not a property: distinct from undefined, which a property can hold. */
+export const NOT_FOUND = Symbol("not found");
+
 /** A scope chain: its objects, outermost first, and a bit per with scope in w. */
 export type Scope = Value[] & { w: number };
 

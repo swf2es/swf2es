@@ -1,9 +1,8 @@
 // Number(array) without formatting and parsing, for the Arrays whose
 // conversion is still the builtins'.
 
-import type { AsObject, Value } from "./descriptors.js";
+import { type AsObject, NOT_FOUND, type Value } from "./descriptors.js";
 import { numberReadBack, stringToNumber } from "./number-strings.js";
-import { NOT_FOUND } from "./runtime.js";
 import type { Traits } from "./traits.js";
 
 /**
