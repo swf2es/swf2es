@@ -295,4 +295,10 @@ test("an AVM1 SWF compiles to one module of its action blocks, without libraries
     key: sha(actionsKey(codegen, sha(read.bytes), 6)),
     length: module.length,
   });
+
+  // AVM1 has no API versions: --air is a mistake in the command line.
+  const air = swf2es(path, "-o", `${out}avm1-air/`, "-q", "--air");
+  assert.equal(air.status, 2);
+  assert.match(air.stderr, /AVM1 SWF, which --air does not apply to/);
+  assert.ok(!existsSync(`${out}avm1-air/manifest.json`));
 });

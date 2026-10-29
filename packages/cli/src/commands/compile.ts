@@ -43,7 +43,8 @@ options:
   --emit-libraries     write the libraries' modules too
   --air                compile for a player that plays the SWF as AIR does
                        (its \`air\` option), AIR's API defined; a player
-                       in the other mode looks none of the modules up
+                       in the other mode looks none of the modules up.
+                       Refused for an AVM1 SWF, which has no API versions
   -q, --quiet          print nothing but errors
 ${COMMON_USAGE}
 
@@ -119,6 +120,11 @@ export const compile: Command = {
 
     const out = values.out ?? `${basename(file, extname(file))}.swf2es`;
     if (input.avm1) {
+      // AVM1 has no API versions: its module is the same for every player.
+      if (values.air) {
+        usageError(`${file} is an AVM1 SWF, which --air does not apply to`, "compile");
+      }
+
       await compileAvm1(file, bytes, input.avm1, out, values.quiet ?? false);
       return;
     }
