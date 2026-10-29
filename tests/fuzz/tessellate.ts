@@ -194,7 +194,7 @@ console.log(
   `fuzz tessellate: ${cases} fills, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
 );
 
-/** A contour flattened as the player's render/tessellate.ts does, with its length function. */
+/** A contour flattened as the player's scene/fills.ts does, with its length function. */
 function flatten(commands: readonly number[], length: (x: number, y: number) => number): number[] {
   const points: number[] = [];
   const append = (x: number, y: number) => {

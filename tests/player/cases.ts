@@ -54,11 +54,6 @@ export interface PlayerCase {
   /** An AVM1 SWF whose trace must match Flash's. */
   traced?: boolean;
   /**
-   * The transform table (render/table.ts) must draw some of it, and played
-   * again without the table it must draw the same pixels.
-   */
-  table?: boolean;
-  /**
    * A known gap: what Flash does that the player does not yet. The case is
    * left out of the default run and runs, expected to fail, when named.
    */
@@ -247,7 +242,7 @@ function sharedLines(): Uint8Array {
 
 // Outlined parts turning inside parents squashed to 0.9 and 0.6 of their
 // height, as a game's limbs inside a squashed body: through a stretch that
-// turns with each, or, nearly even, through one even stretch (strokes.ts,
+// turns with each, or, nearly even, through one even stretch (display/stretch.ts,
 // settledStretch), lines of 1, 2 and 4 pixels as wide as Flash draws them.
 function squashedTurns(): Uint8Array {
   const part = (id: number, width: number) =>
@@ -5944,7 +5939,7 @@ function sharedFillEdges(): Uint8Array {
 }
 
 /**
- * One fill's regions and holes, as Pixi cuts them: a square, then one with
+ * One fill's regions and holes: a square, then one with
  * two holes, then one with a hole holding an island and a second hole.
  * Each hole is its own region's, not the region drawn before it.
  */
@@ -6184,7 +6179,7 @@ function thinFilters(zoom: number): Uint8Array {
 // animation's light effects draw them: glows 27 and 68 wide in two passes,
 // a streak glow 68 across and 5 down, a blur 30 wide and a shadow 24 wide
 // in three. Their runs go coarser than
-// the screen (render/filters.ts, blurShrink), which must not show against
+// the screen (@swf2es/render's blurShrink), which must not show against
 // adl's frame of the SWF built `zoom` times larger.
 function wideFilters(zoom: number): Uint8Array {
   const at = (x: number, y: number) => ({ a: zoom, d: zoom, tx: x * 20 * zoom, ty: y * 20 * zoom });
@@ -7600,12 +7595,10 @@ function blendDrift(): Uint8Array {
 }
 
 /**
- * Shapes the transform table draws in runs (render/table.ts), and what ends
- * a run or draws in the middle of one: added and multiplied shapes, drawn
- * as layers; a layer, a run, then a layer whose first content is a layer of
- * a shape, as a host's render passes may leave another texture unit active
- * as the table uploads; squares filled alone under multiply and screen, which split a run
- * by its blend mode; a gradient, a blurred shape, a mask over two shapes, a
+ * Shapes drawn in runs, and what ends a run or draws in the middle of one:
+ * added and multiplied shapes, drawn as layers; a layer, a run, then a layer
+ * whose first content is a layer of a shape; squares filled alone under
+ * multiply and screen, which split a run by its blend mode; a gradient, a blurred shape, a mask over two shapes, a
  * shape whose lines are stroked anew each frame as it turns stretched, a
  * depth whose character is replaced each frame, a row of small shapes,
  * moving down, whose run is too long to pass its rows in uniforms, and
@@ -7734,12 +7727,9 @@ function tableRuns(): Uint8Array {
 
 /**
  * Large timeline shapes under colour transforms that change each frame, as
- * a tween fades a creature out to white, in a render group that has not
- * settled: batched copies on the first frame, before their shapes are
- * built, and drawn alone after (render/color.ts, showFor). Flat discs,
- * which the transform table draws with the transform in their rows
- * (render/table.ts), and a gradient and a bitmap with transparent pixels,
- * which Pixi's pipe draws with the colour shader; an offset, a fade, an
+ * a tween fades a creature out to white: flat discs, which draw with the
+ * transform in their rows, and a gradient and a bitmap with transparent
+ * pixels; an offset, a fade, an
  * alpha multiplier and a negative one, a shape taking a transform and
  * another giving its up. No gradient stop is clamped, which Flash does
  * before the ramp and swf2es after.
@@ -7861,13 +7851,11 @@ function colorAlone(): Uint8Array {
 }
 
 /**
- * Two rows of 48 small discs under offsets that change each frame, in a
- * render group that has not settled: one run of the transform table longer
- * than a run that takes its rows in uniforms, which uploads them, the
- * transform's flag among them, to the table's texture (render/table.ts).
+ * Two rows of 48 small discs under offsets that change each frame: one
+ * long run, whose rows, the transform's flag among them, go up together.
  */
 function colorAloneRuns(): Uint8Array {
-  // A disc of 240 sides, large enough to be drawn alone under a transform (render/color.ts).
+  // A disc of 240 sides.
   const round: w.PathCommand[] = [{ move: [300, 0] }];
   for (let k = 1; k <= 240; k++) {
     const a = (2 * Math.PI * k) / 240;
@@ -8355,7 +8343,6 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     tolerance: 32,
     maxOutliers: 60,
-    table: true,
   },
   {
     name: "table-runs",
@@ -8366,7 +8353,6 @@ export const cases: PlayerCase[] = [
     // and around the small shapes.
     tolerance: 32,
     maxOutliers: 1000,
-    table: true,
   },
   {
     name: "color-alone",
@@ -8378,7 +8364,6 @@ export const cases: PlayerCase[] = [
     // channels a frame. A shape in a wrong colour adds some 1,700.
     tolerance: 3,
     maxOutliers: 1100,
-    table: true,
   },
   {
     name: "color-alone-runs",
@@ -8387,11 +8372,9 @@ export const cases: PlayerCase[] = [
     capture: [1, 2, 3],
     // Within 3 a channel, Flash's 8.8 multipliers against floats, but for
     // the discs' edges, anti-aliased each rasteriser's way: up to 768
-    // channels a frame. Played without the table, they must draw the same
-    // pixels, which guards the rows read from the texture closer still.
+    // channels a frame.
     tolerance: 3,
     maxOutliers: 800,
-    table: true,
   },
   {
     name: "scale9",
@@ -9233,7 +9216,6 @@ export const cases: PlayerCase[] = [
     // line's round caps, anti-aliased each rasteriser's way: 48 channels a frame.
     tolerance: 2,
     maxOutliers: 60,
-    table: true,
   },
   {
     name: "text-layout",
@@ -9388,7 +9370,7 @@ export const cases: PlayerCase[] = [
     swf: blendDrift(),
     frames: 8,
     capture: [1, 2, 3, 4, 5, 6, 7, 8],
-    // A resolution of 6, where Pixi's arithmetic lands a hair off whole pixels.
+    // A resolution of 6, where a renderer's arithmetic may land a hair off whole pixels.
     zoom: 1.5,
     // Within 3 a channel, the layer's 8-bit round trip, as for `blend-modes`.
     tolerance: 3,
@@ -9469,9 +9451,6 @@ export const cases: PlayerCase[] = [
     // on them and the page does not (as in draw-triangles); a part blended twice is 64 off.
     tolerance: 32,
     maxOutliers: 400,
-    // The Pixi view strokes each path, and each of drawTriangles' triangles, as strips blended
-    // over each other where they overlap; the renderer of swf2es's own draws it as adl does.
-    gap: "the Pixi view blends overlapping parts of a path over each other",
   },
   {
     name: "three-d-layer",
@@ -9482,9 +9461,6 @@ export const cases: PlayerCase[] = [
     // Within 8 a channel: adl's rounding of the alpha and of its bitmap's edges.
     tolerance: 8,
     maxOutliers: 0,
-    // The Pixi view composites a 3D object's layer blend with its colour as one, where Flash
-    // draws each child's colour into the bitmap; the renderer of swf2es's own draws it as Flash.
-    gap: "the Pixi view colours a 3D object's layer as one",
   },
   {
     name: "filtered-colors",
@@ -9513,8 +9489,8 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     // Multisampled, as most hosts draw: blends and filters then read their
-    // backdrops through the Pixi fork's bounded resolves, which no
-    // other case runs. Within 3 a channel, as drawn without multisampling:
+    // backdrops resolved out of multisampled targets, which no other case
+    // runs. Within 3 a channel, as drawn without multisampling:
     // the blends' 8-bit round trips and adl's rounding of the blurs.
     antialias: true,
     tolerance: 3,
@@ -9721,7 +9697,7 @@ export const cases: PlayerCase[] = [
     maxOutliers: 20,
   },
   {
-    // Filtered objects in filtered objects: the own renderer draws the inner ones a level before
+    // Filtered objects in filtered objects: the renderer draws the inner ones a level before
     // the outer, side by side, and composites them into the outer's content.
     name: "filters-nested",
     swf: (abc) => bare(abc, 1, "FiltersNested", 300, 200),
@@ -9888,7 +9864,6 @@ export const cases: PlayerCase[] = [
     script: "DrawObjects",
     frames: 1,
     capture: [1],
-    table: true,
     // Edges are each rasteriser's own: anti-aliased at high quality, a dozen drawn pixels
     // within 64 a channel; at low quality, aliased, where a curve passes near a pixel's
     // centre the two decide differently, some 30 more. Each drawn pixel is 16 here.
@@ -10446,7 +10421,7 @@ export const cases: PlayerCase[] = [
     frames: 1,
     capture: [1],
     // The two boxes it draws as 3D objects, both drawn from a bitmap, smoothed: their edges'
-    // levels differ by a little (render/three.ts).
+    // levels differ by a little.
     tolerance: 24,
     maxOutliers: 250,
   },
@@ -10459,7 +10434,7 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
-  // Drawn in perspective from a bitmap of each 3D object (render/three.ts). The stages are 500
+  // Drawn in perspective from a bitmap of each 3D object (display/plane.ts). The stages are 500
   // wide: adl draws with the focal length of a stage that wide, whatever the SWF's, where Flash
   // Player draws with its stage's, as its bounds and local3DToGlobal are in both.
   {

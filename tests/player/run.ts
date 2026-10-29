@@ -2,29 +2,13 @@
 // their frames against Flash's in references/. Where a frame differs, its
 // image, Flash's and their difference go to out/<case>/.
 //
-// A case marked `table`, or every case with --table-ab, is played again
-// without the transform table (render/table.ts), and must draw the same
-// pixels; a marked one, played with the table drawing even its shortest
-// runs as multi-draws, must have the table draw some of it. An unmarked
-// one keeps the table's threshold of 16 draws a run, so with --table-ab
-// most of its runs are drawn from the table's atlas a call a draw on one
-// side and by Pixi's pipe on the other.
-//
 // A case marked `gap`, a known gap, is neither checked nor drawn unless
 // named, though the default run still builds its SWF: named, it is checked
 // and expected to fail, and one that passes is reported for its mark to
 // come off.
 //
-// With SWF2ES_RENDERER=own the cases are drawn by the renderer of swf2es's
-// own (docs/renderer.md), which grows beside Pixi: how many it draws as Flash
-// does is how complete it is. own-renderer.json lists those it does, and one
-// listed that fails again fails the run; one that passes and is not listed is
-// added by --update-baseline, from a run of every case. Its failures are
-// printed only for cases named.
-//
-//   node tests/player/run.ts [--table-ab] [case...]   check
-//   node tests/player/run.ts --update [case...]       draw the references again in Flash
-//   SWF2ES_RENDERER=own node tests/player/run.ts [--update-baseline] [case...]
+//   node tests/player/run.ts [--lazy] [case...]   check
+//   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isAs3, readSwf } from "../../packages/format/dist/index.js";
@@ -37,12 +21,8 @@ import { compiler, compileScripts } from "./scripts.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
 const update = args.includes("--update");
-const tableAb = args.includes("--table-ab");
 const lazyCompilation = args.includes("--lazy");
-const own = process.env.SWF2ES_RENDERER === "own";
-const updateBaseline = args.includes("--update-baseline");
 const names = args.filter((a) => !a.startsWith("--"));
-const ownBaseline = `${here}own-renderer.json`;
 // A case marked as a known gap runs only when named; left out, its SWF is
 // still built, so that a gap case that no longer builds is noticed.
 const chosen = cases.filter((c) => (names.length ? names.includes(c.name) : !c.gap));
@@ -77,12 +57,7 @@ const isAvm1 = (swf: Uint8Array): boolean => {
   }
 };
 const traced = (c: PlayerCase) => Boolean(c.script || c.build || c.traced);
-const jobs = chosen.map((c) => ({
-  ...c,
-  swf: swfOf(c),
-  tableMinRun: c.table ? 1 : undefined,
-  lazyCompilation,
-}));
+const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), lazyCompilation }));
 for (const c of gaps) {
   swfOf(c);
 }
@@ -126,12 +101,8 @@ if (update) {
     );
   }
 } else {
-  // The cases to play again without the table, after the rest.
-  const again = own ? [] : chosen.flatMap((c, i) => (c.table || tableAb ? [i] : []));
-  const results = await runPlayer([...jobs, ...again.map((i) => ({ ...jobs[i], table: false }))]);
-  const without = new Map(again.map((i, k) => [i, results[chosen.length + k]]));
+  const results = await runPlayer(jobs);
   let failed = 0;
-  const passing: string[] = [];
   for (const [i, c] of chosen.entries()) {
     const r = results[i];
     const problems: string[] = [];
@@ -183,66 +154,16 @@ if (update) {
       }
     }
 
-    if (c.table && r.tableDraws === 0 && !own) {
-      problems.push("the transform table drew none of it");
-    }
-
-    const plain = without.get(i);
-    for (const frame of plain ? c.capture : []) {
-      const a = r.images.get(frame);
-      const b = plain?.images.get(frame);
-      if (!a || !b) {
-        problems.push(`frame ${frame}: not drawn ${a ? "without" : "with"} the table`);
-        continue;
-      }
-
-      const d = compareImages(decodePng(a), decodePng(b), 0);
-      if (d.outliers > 0) {
-        problems.push(
-          `frame ${frame}: ${d.outliers} pixels differ without the table, by up to ${d.maxDifference}`,
-        );
-        const out = `${here}out/${c.name}`;
-        mkdirSync(out, { recursive: true });
-        writeFileSync(`${out}/frame-${frame}.no-table.png`, b);
-      }
-    }
-
     if (problems.length) {
       failed++;
-      if (!own || names.length) {
-        console.log(`FAIL ${c.name}\n  ${problems.join("\n  ")}`);
-      }
-    } else if (own) {
-      passing.push(c.name);
+      console.log(`FAIL ${c.name}\n  ${problems.join("\n  ")}`);
     } else if (c.gap) {
       console.log(`${c.name} draws as Flash does: its gap (${c.gap}) is closed, take the mark off`);
     }
   }
 
   console.log(`${chosen.length - failed} of ${chosen.length} cases as Flash drew them`);
-  if (own) {
-    // The own renderer is held to what it drew before, not to every case.
-    const listed: string[] = JSON.parse(readFileSync(ownBaseline, "utf8"));
-    const ran = new Set(chosen.map((c) => c.name));
-    const now = new Set(passing);
-    const lost = listed.filter((name) => ran.has(name) && !now.has(name));
-    const gained = passing.filter((name) => !listed.includes(name));
-    for (const name of lost) {
-      console.log(`REGRESSED ${name}: the own renderer drew it as Flash did`);
-    }
-
-    if (gained.length) {
-      console.log(`now drawn as Flash does: ${gained.join(", ")}`);
-    }
-
-    // A run that lost a case keeps the list as it was: a regression is fixed, not written in.
-    if (updateBaseline && !names.length && !lost.length) {
-      writeFileSync(ownBaseline, `${JSON.stringify([...now].sort(), null, 2)}\n`);
-      console.log(`own-renderer.json: ${now.size} cases`);
-    } else {
-      process.exitCode = lost.length ? 1 : 0;
-    }
-  } else if (failed) {
+  if (failed) {
     process.exitCode = 1;
   }
 }

@@ -1521,10 +1521,6 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
         if (mode === "missing") {
           await send("Network.setBlockedURLs", { urls: ["*/tessellate/*"] });
         }
-        if (mode === "csp") {
-          await call(evaluate, 'import("/pixi/packages/unsafe-eval.mjs").then(() => true)');
-        }
-
         const r = await call<{
           rect: [number, number, number, number];
           compiles: number;

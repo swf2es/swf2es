@@ -147,7 +147,7 @@ export function measureLayers(
 /**
  * The rectangle a filtered layer padded by `pad` units covers, from its
  * area (least x and y, greatest x and y in target pixels, from `area[at]`)
- * as Pixi's filter system had it (FilterSystem's _calculateFilterArea): in
+ * as PixiJS's filter system has it (FilterSystem's _calculateFilterArea): in
  * units, the area cut to the target, out to whole pixels at the
  * resolution, padded; nothing where it has no size then; its edges
  * snapped to the pixels they lie on. Into `out` from `to`: x, y, width,

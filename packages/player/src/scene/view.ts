@@ -719,7 +719,7 @@ export class RenderView implements Drawer {
 
     // A blend mode draws it as a layer, composited onto what is below in its mode. An explicit
     // layer with children colours their combined pixels, its own fills with them, which then take
-    // no colour of their own; without children, it colours each fill (render/view.ts, rooted).
+    // no colour of their own; without children, it colours each fill.
     // A layer of no children is its fills, drawn as normal; a mode it has no blend for (a Pixel
     // Bender shader's) is drawn as normal, and counted.
     // BitmapData.draw takes its object with no blend mode, as with no transform or colour.
@@ -815,7 +815,7 @@ export class RenderView implements Drawer {
           ? sliceLayers(drawn, slice, ownSlice ? null : o.placed, version)
           : drawn;
     // A sliced line keeps the width it has in its owner's parent's space, as adl's does, times a
-    // Shape child's own scale (render/view.ts, lineSpace); made as a stroked layer first needs it.
+    // Shape child's own scale; made as a stroked layer first needs it.
     let lineBy: number[] | null = null;
     let row = -1;
     let lineRow = -1;

@@ -1,14 +1,14 @@
 // A WebGL context lost and given back while a SWF plays: what the view
 // and its renderer keep on the CPU of what they uploaded must draw the same
-// again, with Pixi or, under SWF2ES_RENDERER=own, the renderer of swf2es's own.
-// Large shapes, drawn alone through the transform table's atlas, small
-// ones batched, a colour transform, a gradient and a line; a bitmap that
-// never changes, placed and as a smoothed fill, which uploads again from
-// its store, as Pixi keeps no bytes of it.
+// again. Large shapes and small ones in the geometry atlas, a colour
+// transform, a gradient and a line; a bitmap that never changes, placed and
+// as a smoothed fill, which uploads again from its store; glows, and a
+// blurred sprite holding a glowing one, filtered layers drawn ahead of the
+// stage, whose kept outputs go with the context.
 import assert from "node:assert/strict";
 import { deflateSync } from "node:zlib";
 import * as w from "../swf-writer.ts";
-import { playLosingContext, playLosingContextPlan, withPage } from "./chrome.ts";
+import { playLosingContext, playLosingContextPlan } from "./chrome.ts";
 
 /** A closed ring of `n` curves round (cx, cy), `r` twips out: hundreds of vertices once flattened. */
 function ring(cx: number, cy: number, r: number, n: number): w.PathCommand[] {
@@ -101,13 +101,6 @@ const filled = w.shape({
   ],
 });
 
-/**
- * Filters for the renderer of swf2es's own alone: the Pixi view draws a
- * filtered object differently after its context comes back, which, as it is
- * to go, is left be.
- */
-const own = process.env.SWF2ES_RENDERER === "own";
-
 // A blurred sprite holding a glowing one: filtered layers in a filtered layer.
 const nested = w.sprite(8, 1, [
   w.place({ depth: 1, character: 2, glows: [{ color: 0x00ccff, blur: 4, strength: 2 }] }),
@@ -135,8 +128,8 @@ for (let i = 0; i < 24; i++) {
       character: i % 3 === 2 ? 4 : 1,
       matrix: { a: 0.5, d: 0.5, tx, ty },
       colorTransform: i % 5 === 0 ? { mult: [0.5, 1, 1, 1], add: [60, 0, 0, 0] } : undefined,
-      // With the renderer of swf2es's own, glowing: filtered layers it draws ahead of the stage.
-      glows: own && i % 4 === 1 ? [{ color: 0xff3300, blur: 6, strength: 2 }] : undefined,
+      // Glowing: filtered layers drawn ahead of the stage.
+      glows: i % 4 === 1 ? [{ color: 0xff3300, blur: 6, strength: 2 }] : undefined,
     }),
     w.place({ depth: depth++, character: 2, matrix: { tx: tx + 200, ty: ty + 200 } }),
   );
@@ -155,72 +148,18 @@ tags.push(
     hasImage: true,
   }),
   w.place({ depth: depth++, character: 7, matrix: { tx: 1700, ty: 3800 } }),
-  ...(own
-    ? [w.place({ depth: depth++, character: 8, matrix: { tx: 4500, ty: 4300 }, blurs: [3] })]
-    : []),
+  w.place({ depth: depth++, character: 8, matrix: { tx: 4500, ty: 4300 }, blurs: [3] }),
   w.showFrame(),
   w.end(),
 );
 const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 
-// Force slow first builds across the settling deadline, without losing either context: Pixi's
-// render groups settle, the renderer of swf2es's own's plans no such thing.
-if (!own) {
-  assert.deepEqual(
-    await withPage("contextLossPlanSwf", async (evaluate) => {
-      const setup = await evaluate(`(async () => {
-      const { PixiView } = await import("@swf2es/player");
-      const render = PixiView.prototype.render;
-      let clock = 0, frames = 0;
-      performance.now = () => clock;
-      PixiView.prototype.render = function(...args) {
-        const result = render.apply(this, args);
-        clock = ++frames === 1 ? 500 : 2200;
-        return result;
-      };
-      return true;
-    })()`);
-      assert.equal(setup.exception, null);
-      return evaluate<string | null>(
-        `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "tt", false)`,
-      );
-    }),
-    { value: null, exception: null },
-    "both renderers settle in the same frame despite slow draws",
-  );
-}
-
-// Through the table's atlas, and drawn alone from what Pixi packed of each, as without the table.
-assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");
-// Pulled draws asked for, as software GL makes the multi-draws by default (render/table.ts).
-assert.equal(await playLosingContext(swf, 4, true, false, true), null, "with pulled draws");
-assert.equal(await playLosingContext(swf, 4, false), null, "without the transform table");
-assert.equal(await playLosingContext(swf, 4, true, true), null, "with objects turned in 3D");
+assert.equal(await playLosingContext(swf, 4), null, "drawn again");
+assert.equal(await playLosingContext(swf, 4, true), null, "with objects turned in 3D");
 // Lost for frames that draw into nothing, lost twice, and resized while lost and after: every
-// frame drawn with a context matches a renderer that kept its own. With a wait past settling
-// (`w`), its groups settle while it is lost: batched by a shader first linked then, which found no
-// uniforms, they vanished once Pixi kept the sync function chosen for it, which set none, after
-// the context came back; and the rebuild Pixi makes for the new context, were it counted as a
-// change, would draw alone again what the other renderer still batches.
-for (const table of [true, false]) {
-  for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt", "tttwltrttt"]) {
-    assert.equal(await playLosingContextPlan(swf, plan, table), null, `${plan}, table ${table}`);
-  }
+// frame drawn with a context matches a renderer that kept its own.
+for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt"]) {
+  assert.equal(await playLosingContextPlan(swf, plan), null, plan);
 }
-
-for (const plan of ["ttltrtltrtt", "tttwltrttt"]) {
-  assert.equal(
-    await playLosingContextPlan(swf, plan, true, 1, true),
-    null,
-    `${plan}, pulled draws`,
-  );
-}
-
-// At the table's own threshold, its short runs drawn from the atlas a call a draw.
-assert.equal(
-  await playLosingContextPlan(swf, "ttltrtltrtt", true, 16),
-  null,
-  "ttltrtltrtt, the table's own threshold",
-);
 
 console.log("context-loss: ok");

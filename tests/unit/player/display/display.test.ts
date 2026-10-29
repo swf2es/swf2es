@@ -1,6 +1,6 @@
 // The display list and timeline without a renderer: SWFs built with the
 // test writer, played in node. The built package, as the browser loads it;
-// display.js and player.js leave pixi.js out.
+// display.js and player.js leave the renderer out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bounds, toStage } from "../../../../packages/player/dist/display/bounds.js";

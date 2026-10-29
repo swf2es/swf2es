@@ -3,26 +3,21 @@
 // multi-draw as many as its count), program, vertex array and framebuffer
 // binds, and uniform calls, each a mean over 60 frames after a warm-up.
 // The page's clock moves a frame's time a tick and no more (page.ts,
-// benchSwf's clock), so that what the player keeps or lets go by age, as
-// render groups settle after 2 s unchanged, comes on the same frames on a
-// slow CI runner as on a fast machine; the warm-up lasts at least 3 s of
-// that clock, and until the transform table's atlases have made no buffer
-// nor grown for 10 frames, so that the counted frames are a steady
-// scene's. The site's crowd and bounce demos play, and three SWFs made
+// benchSwf's clock), so that what the player and the renderer keep or let
+// go by age comes on the same frames on a slow CI runner as on a fast
+// machine; the warm-up lasts at least 3 s of that clock, and until no
+// buffer has been made for 10 frames, so that the counted frames are a
+// steady scene's. The site's crowd and bounce demos play, and three SWFs made
 // here: a crowd of filled, stroked, bitmap and gradient parts under colour
 // transforms, half of it still; blend modes, a mask, a glow left still and
 // a filtered sprite multiplied between shapes; and a timeline that
 // replaces, removes and adds shapes and morphs every frame. Software GL
-// and a GPU must count the same, so the scenes stay within the texture
-// units of any batch, and the table pulls its draws under both, as the
-// player has it do on a GPU alone (render/table.ts, SOFTWARE). Buffers
-// made anew and copied on the GPU, as a growing geometry atlas makes them
-// (render/table.ts), are printed too.
+// and a GPU must count the same. Buffers made anew and copied on the GPU,
+// as a growing geometry atlas makes them, are printed too.
 //
 //   node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]
 //
-// --update writes the counts as the new baseline, draw-counts.json, or
-// draw-counts-own.json for the renderer of swf2es's own (SWF2ES_RENDERER=own); --runs
+// --update writes the counts as the new baseline, draw-counts.json; --runs
 // plays each case N times and fails if any count differs between them;
 // --write-swfs DIR writes the cases' SWFs there and stops, for another player.
 import assert from "node:assert/strict";
@@ -36,11 +31,9 @@ import { benchPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-// The renderer of swf2es's own (SWF2ES_RENDERER=own) is held to a baseline of its own.
-const baselinePath =
-  process.env.SWF2ES_RENDERER === "own" ? `${here}draw-counts-own.json` : `${here}draw-counts.json`;
+const baselinePath = `${here}draw-counts.json`;
 
-/** The fewest frames of warm-up: past render/settle.ts's SETTLE_MS at 30 frames a second. */
+/** The fewest frames of warm-up: 3 s at 30 frames a second. */
 const WARM_UP = 90;
 /** Frames without a buffer made that end the warm-up, and the most it lasts. */
 const STEADY = 10;
@@ -49,16 +42,7 @@ const COUNTED = 60;
 /** The counts the baseline holds, each a mean a frame. */
 const KEYS = ["calls", "subDraws", "useProgram", "bindVertexArray", "bindFramebuffer", "uniforms"];
 /** Printed beside them, not held to a baseline: the atlas' allocations and copies. */
-const BUFFERS = [
-  "bufferData",
-  "bufferDataBytes",
-  "copyBufferSubData",
-  "copyBufferSubDataBytes",
-  "tableAtlasGrown",
-];
-
-/** WebGL 2's least MAX_TEXTURE_IMAGE_UNITS, SwiftShader's: a batch that fills them splits where a GPU's would not. */
-const MOST_TEXTURES = 16;
+const BUFFERS = ["bufferData", "bufferDataBytes", "copyBufferSubData", "copyBufferSubDataBytes"];
 
 type Counts = Record<string, number>;
 
@@ -392,36 +376,11 @@ async function play(
 ): Promise<{
   counts: Counts;
   warmUp: number;
-  textures: number;
   renderer: string;
 }> {
-  // As a host that draws blend modes makes its renderer (useBackBuffer), on the page's frame clock.
+  // On the page's frame clock.
   const frames = 1 + WARM_UP_MOST + COUNTED;
-  const result = await benchPlayer(
-    swf,
-    frames,
-    gpu,
-    true,
-    0,
-    -1,
-    false,
-    1,
-    false,
-    false,
-    true,
-    undefined,
-    undefined,
-    0,
-    undefined,
-    1,
-    false,
-    undefined,
-    true,
-    true,
-    true,
-    // Pulled draws, which the player leaves to a GPU: software GL, as CI's, counts them too.
-    true,
-  );
+  const result = await benchPlayer(swf, frames, { gpu, clock: true, metered: true });
   if (result.error) {
     throw new Error(result.error);
   }
@@ -431,7 +390,7 @@ async function play(
   let warmUp = WARM_UP_MOST;
   let quiet = 0;
   for (let i = 0; i < WARM_UP_MOST; i++) {
-    quiet = meters[i].bufferData || meters[i].tableAtlasGrown ? 0 : quiet + 1;
+    quiet = meters[i].bufferData ? 0 : quiet + 1;
     if (i + 1 >= WARM_UP && quiet >= STEADY) {
       warmUp = i + 1;
       break;
@@ -440,12 +399,6 @@ async function play(
 
   const counted = meters.slice(warmUp, warmUp + COUNTED);
   assert.equal(counted.length, COUNTED);
-  const textures = Math.max(0, ...result.meters.map((m) => m.batchTexturesMost ?? 0));
-  if (textures >= MOST_TEXTURES) {
-    throw new Error(
-      `a batch drew with ${textures} textures: a GPU with more units would batch otherwise`,
-    );
-  }
 
   const counts: Counts = {};
   for (const key of [...KEYS, ...BUFFERS]) {
@@ -457,7 +410,7 @@ async function play(
     counts[key] = Math.round((sum / COUNTED) * 100) / 100;
   }
 
-  return { counts, warmUp, textures, renderer: result.renderer };
+  return { counts, warmUp, renderer: result.renderer };
 }
 
 const args = process.argv.slice(2);
@@ -482,7 +435,7 @@ if (writeAt >= 0) {
 
 // The libraries bounce plays on, served to the page.
 libraryAbcs();
-// None yet for a renderer --update has not counted: every case is then missing from it.
+// None yet before --update has counted: every case is then missing from it.
 const baseline = (
   existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, "utf8")) : {}
 ) as Record<string, Counts>;
@@ -496,11 +449,11 @@ for (const [name, swf] of cases()) {
 
   let first: Counts | null = null;
   for (let run = 0; run < runs; run++) {
-    const { counts, warmUp, textures, renderer } = await play(swf, gpu);
+    const { counts, warmUp, renderer } = await play(swf, gpu);
     const shown = KEYS.map((k) => `${k} ${counts[k]}`).join(", ");
     const buffers = `bufferData ${counts.bufferData} (${Math.round(counts.bufferDataBytes / 1024)} KB), copyBufferSubData ${counts.copyBufferSubData} (${Math.round(counts.copyBufferSubDataBytes / 1024)} KB)`;
     console.log(
-      `draw-counts: ${name}: ${shown}; ${buffers} a frame after ${warmUp} of warm-up; batches of ${textures} textures at most (${renderer})`,
+      `draw-counts: ${name}: ${shown}; ${buffers} a frame after ${warmUp} of warm-up (${renderer})`,
     );
     if (first) {
       for (const key of KEYS) {

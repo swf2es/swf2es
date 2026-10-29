@@ -82,7 +82,12 @@ function page(
     });
     return prevented;
   };
-  return { canvas: canvas as unknown as HTMLCanvasElement, window, frames, fire };
+  return {
+    canvas: canvas as unknown as Parameters<typeof bindCanvasPointer>[0],
+    window,
+    frames,
+    fire,
+  };
 }
 
 const stage = (x: number, y: number, width: number, height: number) => ({

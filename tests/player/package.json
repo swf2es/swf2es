@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node run.ts && node audio.ts && node leak.ts && node module-cache.ts && node precompiled.ts && node isolation.ts && node resize.ts && node filter-coverage.ts && node context-loss.ts && node hidden-groups.ts && node table-runs.ts && node draw-counts.ts && node text.ts && node --test ../context3d/agal.test.ts && node ../context3d/run.ts && node ../context3d/stress.ts && node ../context3d/reclamation.ts && node ../context3d/host.ts"
+    "test": "node run.ts && node audio.ts && node leak.ts && node module-cache.ts && node precompiled.ts && node isolation.ts && node resize.ts && node filter-coverage.ts && node context-loss.ts && node draw-counts.ts && node --test ../context3d/agal.test.ts && node ../context3d/run.ts && node ../context3d/stress.ts && node ../context3d/reclamation.ts && node ../context3d/host.ts"
   },
   "dependencies": {
     "@swf2es/codegen": "workspace:*",
