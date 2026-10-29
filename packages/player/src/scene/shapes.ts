@@ -2,25 +2,25 @@
 // each fill tessellated (fills.ts), in order, a geometry for each stretch of
 // solid fills and one for each textured fill, a bitmap's or a gradient's,
 // its vertices carrying where they sample in texels, as Pixi's matrices
-// would map them. What is left out is counted.
+// would map them; then drawTriangles' textured triangles, a geometry each
+// mesh. What is left out is counted.
 
 import type { Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
-import type { GradientFill, ImageFill, Path, ShapeLayer } from "../display/shapes.js";
+import type { GradientFill, ImageFill, Path, ShapeLayer, TriangleMesh } from "../display/shapes.js";
 import { convex } from "../render/fill-polygons.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
  * What the renderer cannot draw yet, counted as it is met, for a test or a
- * probe to read: drawTriangles' meshes, and lines that could not be filled
- * with no native tessellator, left out; advanced text drawn as normal;
+ * probe to read: lines that could not be filled with no native
+ * tessellator, left out; advanced text drawn as normal;
  * clips within masks left out; displacement maps and other filters it
  * has no pass for, ignored.
  */
 export const unsupported = {
-  meshes: 0,
   strokes: 0,
   /** Texts with advanced anti-aliasing, drawn as normal. */
   advancedTexts: 0,
@@ -37,12 +37,17 @@ export const unsupported = {
   containedFills: 0,
 };
 
-/** A layer's geometry for one paint: a stretch of solid fills (null), or a bitmap or gradient fill. */
+/**
+ * A layer's geometry for one paint: a stretch of solid fills (null), a
+ * bitmap or gradient fill, or drawTriangles' mesh, whose texels are its u
+ * and v and which carries its t (MESH).
+ */
 export interface Part {
   geometry: GeometryData;
   paint: ImageFill | GradientFill | null;
   /** A radial gradient's region, the texels its texture covers. */
   region: Area | null;
+  mesh: TriangleMesh | null;
 }
 
 const WHITE = 0xffffffff;
@@ -100,6 +105,7 @@ class Gathered {
         },
         paint: this.paint,
         region: this.region,
+        mesh: null,
       });
     }
 
@@ -162,22 +168,62 @@ export function radialTexels(pixels: number): number {
 }
 
 /**
- * `layer`'s fills as geometries in order, positions in the shape's pixels.
- * A fill of a bitmap the SWF lacks is red, as Flash draws it.
+ * `layer`'s fills as geometries in order, positions in the shape's pixels,
+ * then its meshes, drawn after the fills, as drawTriangles' are. A fill of
+ * a bitmap the SWF lacks is red, as Flash draws it.
  */
 export function layerParts(
   layer: ShapeLayer,
   tessellator: FillTessellator,
   masking = false,
 ): Part[] {
-  if (layer.meshes?.length) {
-    unsupported.meshes += layer.meshes.length;
+  const parts = layer.fills.length > 0 ? fillParts(layer, tessellator, masking) : [];
+
+  for (const mesh of layer.meshes ?? []) {
+    const part = meshPart(mesh);
+    if (part) {
+      parts.push(part);
+    }
   }
 
-  if (layer.fills.length === 0) {
-    return [];
+  return parts;
+}
+
+const NO_COLORS = new Uint32Array(0);
+
+/** A mesh's triangles, three vertices each, as a geometry: its u and v the texels, its t their depths. */
+function meshPart(mesh: TriangleMesh): Part | null {
+  // Three vertices a triangle, as drawTriangles keeps them.
+  const count = mesh.positions.length / 2;
+  if (count === 0) {
+    return null;
   }
 
+  const texels = new Float32Array(count * 2);
+  const depths = new Float32Array(count);
+
+  for (let k = 0; k < count; k++) {
+    texels[k * 2] = mesh.uvt[k * 3];
+    texels[k * 2 + 1] = mesh.uvt[k * 3 + 1];
+    depths[k] = mesh.uvt[k * 3 + 2];
+  }
+
+  const indices = new Uint32Array(count);
+
+  for (let k = 0; k < count; k++) {
+    indices[k] = k;
+  }
+
+  return {
+    geometry: { positions: mesh.positions, colors: NO_COLORS, texels, depths, indices },
+    paint: null,
+    region: null,
+    mesh,
+  };
+}
+
+/** `layer`'s fills as geometries in order. */
+function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boolean): Part[] {
   // A drawing used as a mask fills non-zero, whatever its winding (fills.ts, resolveFills).
   const plans = resolveFills(layer, masking, tessellator);
   const out = new Gathered();

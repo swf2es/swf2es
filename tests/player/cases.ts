@@ -9460,6 +9460,20 @@ export const cases: PlayerCase[] = [
     maxOutliers: 52,
   },
   {
+    name: "line-overlaps",
+    swf: (abc) => bare(abc, 1, "LineOverlaps", 200, 80),
+    script: "LineOverlaps",
+    frames: 1,
+    capture: [1],
+    // Within 32 a channel but for 45° edges through pixels' corners, where adl counts the samples
+    // on them and the page does not (as in draw-triangles); a part blended twice is 64 off.
+    tolerance: 32,
+    maxOutliers: 400,
+    // The Pixi view strokes each path, and each of drawTriangles' triangles, as strips blended
+    // over each other where they overlap; the renderer of swf2es's own draws it as adl does.
+    gap: "the Pixi view blends overlapping parts of a path over each other",
+  },
+  {
     name: "filtered-colors",
     swf: (abc) => bare(abc, 1, "FilteredColors", 320, 240),
     script: "FilteredColors",

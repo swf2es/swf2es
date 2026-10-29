@@ -68,6 +68,13 @@ export const SMOOTH = 1;
 export const CLAMP = 0;
 export const REPEAT = 2;
 export const MIRROR = 4;
+/**
+ * Drawn as drawTriangles' textured triangles are: its texels each
+ * vertex's u and v from 0 to 1, interpolated in perspective by the depth
+ * (t) it carries (GeometryData.depths), and the texture read as Flash
+ * reads it, once a pixel of Flash's (webgl/programs.ts, meshFragment).
+ */
+export const MESH = 8;
 
 /**
  * A frame's drawing in order: each entry a geometry drawn under a row with

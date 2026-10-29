@@ -22,6 +22,7 @@ import {
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
+  MESH,
   MIRROR,
   measureLayers,
   NORMAL,
@@ -50,6 +51,7 @@ import { type Region as Area, radialPixels, ramp } from "../display/gradients.js
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
 import {
+  facing,
   type GradientFill,
   type ImageFill,
   type ShapeLayer,
@@ -289,7 +291,7 @@ export class RenderView implements Drawer {
   private readonly movedArea = new Float64Array(4);
   private readonly keptRect = new Int32Array(4);
   /** Where a frame is drawn, filled in as it is. */
-  private target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1 };
+  private target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1, pixel: 1 };
   /**
    * What BitmapData.draw draws alone, while it is drawn (snapshot), and the
    * matrix it is drawn through, after its scroll's shift.
@@ -429,6 +431,8 @@ export class RenderView implements Drawer {
     target.height = this.gl.drawingBufferHeight;
     target.scale = this.scale * this.resolution;
     target.resolution = this.resolution;
+    // A pixel of the screen, where the host says what that is, as the Pixi view's flashPixel.
+    target.pixel = this.screenScale ? target.scale / this.screenScale : 1;
     // Outputs kept at another scale, with bitmaps smoothed otherwise or hairlines at another
     // width, are drawn again.
     if (
@@ -607,8 +611,11 @@ export class RenderView implements Drawer {
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
     // whose bitmap cache Flash shows stale draws what that shows (staleShape).
     const shape = o instanceof ShapeObject ? this.staleShape(o, hidden, a, b, c, d) : null;
-    const drawn = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
     const version = o.drawing ? o.drawing.version : 0;
+    const drawn = o.drawing
+      ? facing(o.drawing.layers, a * d - b * c < 0, version)
+      : (shape?.layers ?? null);
     const layers =
       hidden || !drawn
         ? null
@@ -627,8 +634,9 @@ export class RenderView implements Drawer {
         for (const { part, handle } of this.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(handle.id);
-          const texture = part.paint ? this.paintTexture(part) : null;
-          if (part.paint && !texture) {
+          const textured = part.paint !== null || part.mesh !== null;
+          const texture = textured ? this.paintTexture(part) : null;
+          if (textured && !texture) {
             continue;
           }
 
@@ -645,7 +653,7 @@ export class RenderView implements Drawer {
             row,
             NORMAL,
             texture?.id ?? -1,
-            texture ? this.paintSampler(part.paint as ImageFill | GradientFill) : 0,
+            texture ? this.paintSampler(part) : 0,
           );
         }
 
@@ -1196,14 +1204,21 @@ export class RenderView implements Drawer {
     const tx = pa * m.tx + pc * m.ty + ptx;
     const ty = pb * m.tx + pd * m.ty + pty;
     const shape = o instanceof ShapeObject ? o.drawn() : null;
-    const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    const version = o.drawing ? o.drawing.version : 0;
+    const layers = o.drawing
+      ? facing(o.drawing.layers, a * d - b * c < 0, version)
+      : (shape?.layers ?? null);
     // Its row made as its first draw needs it, in place: a closure here kept every number it took
     // in a context made on each call, boxed, as the walk's did.
     let row = -1;
     if (layers) {
-      const version = o.drawing ? o.drawing.version : 0;
       for (let i = 0; i < layers.length; i++) {
-        for (const { handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
+        for (const { part, handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
+          // A mesh of a bitmap disposed of draws nothing, as it is drawn, and so masks nothing.
+          if (part.mesh?.image.disposed) {
+            continue;
+          }
+
           this.geometries.use(handle.id);
           if (row < 0) {
             row = this.rows.add(a, b, c, d, tx, ty, null);
@@ -1683,8 +1698,16 @@ export class RenderView implements Drawer {
     return handle;
   }
 
-  /** The texture a part's paint samples: its bitmap's, else null till it is decoded, or its gradient's. */
+  /**
+   * The texture a part's paint or mesh samples: its bitmap's, else null till
+   * it is decoded, or its gradient's.
+   */
   private paintTexture(part: Part): TextureHandle | null {
+    if (part.mesh) {
+      const store = part.mesh.image;
+      return store.disposed ? null : this.storeTexture(store);
+    }
+
     const paint = part.paint as ImageFill | GradientFill;
     if (paint.type === "image") {
       const store = paint.image instanceof BitmapStore ? paint.image : characterStore(paint.image);
@@ -1695,11 +1718,18 @@ export class RenderView implements Drawer {
   }
 
   /**
-   * How a paint is sampled. A bitmap fill: smoothed if it asks and the
-   * quality is not low, repeated or clamped. A linear gradient's ramp:
-   * texel by texel, spread as it wraps; a radial one's, smoothed.
+   * How a part's paint is sampled. A bitmap fill, or a mesh's bitmap:
+   * smoothed if it asks and the quality is not low, repeated or clamped. A
+   * linear gradient's ramp: texel by texel, spread as it wraps; a radial
+   * one's, smoothed.
    */
-  private paintSampler(paint: ImageFill | GradientFill): number {
+  private paintSampler(part: Part): number {
+    const mesh = part.mesh;
+    if (mesh) {
+      return MESH | (mesh.smooth && this.smoothing ? SMOOTH : 0) | (mesh.repeat ? REPEAT : CLAMP);
+    }
+
+    const paint = part.paint as ImageFill | GradientFill;
     if (paint.type === "image") {
       return (paint.smooth && this.smoothing ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP);
     }
@@ -1836,7 +1866,15 @@ export class RenderView implements Drawer {
       resolution: this.resolution,
       screenScale: this.screenScale,
     };
-    this.target = { width: width * n, height: height * n, scale: n, x: 0, y: 0, resolution: 1 };
+    this.target = {
+      width: width * n,
+      height: height * n,
+      scale: n,
+      x: 0,
+      y: 0,
+      resolution: 1,
+      pixel: n,
+    };
     this.scale = n;
     this.resolution = 1;
     this.screenScale = 1;

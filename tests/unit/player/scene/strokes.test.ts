@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { outline, strokeWidth } from "../../../../packages/player/dist/scene/strokes.js";
+import { Tessellator } from "@swf2es/native/tessellate";
+import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
+import {
+  layerStrokes,
+  outline,
+  strokeWidth,
+} from "../../../../packages/player/dist/scene/strokes.js";
 
 /** The signed area of a contour, positive turning clockwise on a y-down stage. */
 const area = (p: number[]) => {
@@ -130,4 +136,81 @@ test("a line wider than its curve leaves no hole inside, whatever its joins and 
       assert.notEqual(winding(contours, x, y), 0, `path ${k}: (${x}, ${y}) left out`);
     }
   }
+});
+
+/** How many of a geometry's triangles cover (x, y). */
+const coverings = (
+  g: { positions: ArrayLike<number>; indices: ArrayLike<number> },
+  x: number,
+  y: number,
+) => {
+  let n = 0;
+  for (let k = 0; k < g.indices.length; k += 3) {
+    const p = [0, 1, 2].map((j) => [
+      g.positions[g.indices[k + j] * 2],
+      g.positions[g.indices[k + j] * 2 + 1],
+    ]);
+    const side = (a: number[], b: number[]) =>
+      (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+    const d = [side(p[0], p[1]), side(p[1], p[2]), side(p[2], p[0])];
+    if (d.every((v) => v > 0) || d.every((v) => v < 0)) {
+      n++;
+    }
+  }
+
+  return n;
+};
+
+/** A line `width` pixels wide, round, half clear. */
+const halfClear = (width: number) =>
+  ({
+    width: width * 20,
+    color: 0x80000000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+  }) as never;
+
+test("drawTriangles' outlines are filled once, their full width where triangles meet", () => {
+  // A quad as two triangles sharing a diagonal and two corners: libtess2 once dropped part of a
+  // ring here, where each triangle's inner side passed through the shared corners.
+  const drawing = new Drawing();
+  drawing.lineStyle(halfClear(2));
+  drawing.drawTriangles([0, 10, 50, 0, 50, 50, 0, 40], [0, 1, 2, 0, 2, 3], null, 0);
+  const tessellator = new Tessellator();
+  const g = layerStrokes(drawing.layers[0], 1, 0, 0, 1, 0.25, (c, nonZero) =>
+    tessellator.tessellate(c, nonZero),
+  );
+  tessellator.dispose();
+  assert.ok(g);
+  // Across the top edge at x = 25, which lies at y = 5: covered within a pixel of it, once.
+  assert.deepEqual(
+    [3.8, 4.5, 5, 5.5, 5.9, 6.2].map((y) => coverings(g, 25, y)),
+    [0, 1, 1, 1, 1, 0],
+  );
+  // On the shared diagonal, and at a shared corner: once, as adl fills them (line-overlaps).
+  assert.equal(coverings(g, 25, 30), 1);
+  assert.equal(coverings(g, 0.5, 10.2), 1);
+});
+
+test("a line's paths are each filled once, and blended over each other where they overlap", () => {
+  const drawing = new Drawing();
+  drawing.lineStyle(halfClear(6));
+  drawing.moveTo(0, 0);
+  drawing.lineTo(60, 60);
+  drawing.moveTo(0, 60);
+  drawing.lineTo(60, 0);
+  const tessellator = new Tessellator();
+  const g = layerStrokes(drawing.layers[0], 1, 0, 0, 1, 0.25, (c, nonZero) =>
+    tessellator.tessellate(c, nonZero),
+  );
+  tessellator.dispose();
+  assert.ok(g);
+  assert.equal(coverings(g, 30.3, 30.1), 2);
+  assert.equal(coverings(g, 10.3, 10.1), 1);
 });

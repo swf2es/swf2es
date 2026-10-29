@@ -167,6 +167,7 @@
   "draw-objects",
   "draw-root-blend",
   "draw-scroll",
+  "draw-triangles",
   "draws",
   "dynamic-sound",
   "event-fields",
