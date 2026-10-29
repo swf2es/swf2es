@@ -11,6 +11,7 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
+import { fillCache } from "./cache-fill.js";
 import { newClass, withId } from "./classes.js";
 import type {
   Abc,
@@ -36,7 +37,7 @@ import {
   pairOf,
 } from "./enumeration.js";
 import { FloatValue, floatValue } from "./float.js";
-import type { ClassHook, NativesProvider, PropertyHook } from "./hooks.js";
+import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
   type CountedMethod,
   nativeFactory,
@@ -84,7 +85,6 @@ import {
 import { errorMessages } from "./player-messages.js";
 import {
   cached,
-  entryFor,
   epoch,
   IC_Call,
   IC_Const,
@@ -96,7 +96,6 @@ import {
   IC_Slot,
   invalidate,
   NO_CACHE,
-  PropertyCache,
   REPLACEMENTS,
   UNFILLED,
 } from "./property-cache.js";
@@ -1078,16 +1077,9 @@ export class Runtime {
     }
   }
 
-  /**
-   * Keep what `mn` found on `traits`, `o`'s, for the next lookup on an
-   * object with them: a binding, as getProperty, setProperty and
-   * callProperty use it, or a dynamic property's name. Not where the name
-   * resolves otherwise: through a property hook (a Proxy's, XML's), an
-   * index (a Vector's, an Array's element), or a Dictionary's key; nor on
-   * a primitive's dynamic property, which its prototypes have.
-   */
+  /** fillCache (cache-fill.ts), for a name that caches on traits a cache knows `o` by. */
   private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
-    let head = mn.cache;
+    const head = mn.cache;
     if (
       head === NO_CACHE ||
       (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
@@ -1096,82 +1088,7 @@ export class Runtime {
       return;
     }
 
-    const hook = traits.properties;
-    const id = b >> 3;
-    let kind: number;
-    let key = "";
-    let get: Method | null = null;
-    let set: Method | null = null;
-    let type: TypeRef = null;
-    if (b === 0) {
-      const name = mn.dynamicName();
-      if (
-        name === null ||
-        (typeof o !== "object" && typeof o !== "function") ||
-        hook !== null ||
-        !traits.dynamic ||
-        traits.refusesNames ||
-        traits.getIndex !== undefined ||
-        traits.index !== undefined ||
-        arrayIndex(name) >= 0
-      ) {
-        return;
-      }
-
-      kind = IC_Dynamic;
-      key = name;
-    } else {
-      const hooked = hook !== null && hookedBinding(b, mn, hook);
-      switch (b & 7) {
-        case BIND_Method:
-          kind = hooked ? IC_Call : IC_Method;
-          get = traits.proto[methodKey(id)];
-          break;
-        case BIND_Var:
-        case BIND_Const:
-          kind = (b & 7) === BIND_Var ? IC_Slot : IC_Const;
-          key = slotKey(id);
-          type = traits.slotType(id);
-          break;
-        case BIND_Get:
-          kind = IC_Get;
-          get = traits.proto[methodKey(id)];
-          break;
-        case BIND_Set:
-          kind = IC_Set;
-          set = traits.proto[methodKey(id + 1)];
-          break;
-        case BIND_GetSet:
-          kind = IC_GetSet;
-          get = traits.proto[methodKey(id)];
-          set = traits.proto[methodKey(id + 1)];
-          break;
-        default:
-          return;
-      }
-
-      if (hooked && kind !== IC_Call) {
-        return;
-      }
-    }
-
-    if (head === UNFILLED) {
-      head = new PropertyCache();
-      mn.cache = head;
-    }
-
-    const e = entryFor(head, traits);
-    if (e === null) {
-      return;
-    }
-
-    e.traits = traits;
-    e.kind = kind;
-    e.key = key;
-    e.get = get;
-    e.set = set;
-    e.type = type;
-    e.id = id;
+    fillCache(head, o, traits, b, mn);
   }
 
   /** Method `id` of `o` bound to it, the same function each time. */
@@ -3179,24 +3096,6 @@ export class Runtime {
       v instanceof FloatValue || v === null || (typeof v !== "object" && typeof v !== "function")
     );
   }
-}
-
-/**
- * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
- * traits do not bind, an attribute's, or a public name of a method, as a
- * child or attribute of XML hides the methods of its names (as avmplus'
- * getproperty does for XML and XMLList).
- */
-function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
-  if (b === 0 || mn.attribute) {
-    return true;
-  }
-
-  return (
-    hook.hidesMethods &&
-    (b & 7) === BIND_Method &&
-    mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
-  );
 }
 
 const BUILTIN_REFS = new Set(["int", "uint", "Number", "float", "String", "Boolean", "Object"]);

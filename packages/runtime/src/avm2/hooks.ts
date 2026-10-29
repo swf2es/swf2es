@@ -3,9 +3,9 @@
 // names, and are called and constructed.
 
 import type { AsObject, Method, Value } from "./descriptors.js";
-import type { Multiname } from "./names.js";
+import { type Multiname, NS_Public } from "./names.js";
 import type { Runtime } from "./runtime.js";
-import type { Traits } from "./traits.js";
+import { BIND_Method, type Traits } from "./traits.js";
 
 /** How a class that holds its own elements indexes them. */
 export interface IndexHook {
@@ -47,6 +47,24 @@ export interface PropertyHook {
   toString(rt: Runtime, o: AsObject): string;
   /** An instance as XML text, as esc_xelem writes it. */
   toXMLString(rt: Runtime, o: AsObject): string;
+}
+
+/**
+ * Whether a hooked class's hook resolves `mn`, bound to `b`: a name its
+ * traits do not bind, an attribute's, or a public name of a method, as a
+ * child or attribute of XML hides the methods of its names (as avmplus'
+ * getproperty does for XML and XMLList).
+ */
+export function hookedBinding(b: number, mn: Multiname, hook: PropertyHook): boolean {
+  if (b === 0 || mn.attribute) {
+    return true;
+  }
+
+  return (
+    hook.hidesMethods &&
+    (b & 7) === BIND_Method &&
+    mn.namespaces.some((ns) => ns?.kind === NS_Public && ns.uri === "")
+  );
 }
 
 /** Natives by name, or a function that makes them for the runtime they will serve. */
