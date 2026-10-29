@@ -41,6 +41,7 @@ node tests/context3d/oracle.ts --texturebytes
 node tests/context3d/oracle.ts --vertexformats
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scalarmath
+node tests/context3d/oracle.ts --powersigns
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --bitmapuploads
@@ -366,7 +367,8 @@ resize and disposal. Seventeen AGAL unit tests cover accepted and rejected encod
 math with swizzled inputs, masked writes, independent destinations and supported
 overlapping temporary registers. Discard tests select each scalar lane, cover
 negative/zero/positive values before and after the color write, and discard
-part of a triangle using an interpolated varying.
+part of a triangle using an interpolated varying. Its `pow` bases are all
+positive; `PowerSigns.as` covers negative and zero ones.
 
 `ScalarMath.as` checks `rcp`, `log`, `exp`, `sin` and `cos` with 2,184 pixel
 expectations in both AIR and the browser. Logarithm and exponent use base two;
@@ -382,6 +384,16 @@ Translation happens only at program upload; these operations run on the GPU and
 add no per-draw JavaScript work or allocations. Zero reciprocals, nonpositive
 log inputs, nonfinite values, overflow/underflow and large-angle precision are
 not covered by this fixture.
+
+`PowerSigns.as` checks `pow` where GLSL and AIR part: AIR computes it as
+Direct3D does, `|a|^b`, so a negative base gives the power of its magnitude,
+where GLSL leaves it undefined and a GPU gives NaN. It covers negative bases
+with integer, fractional and negative exponents, zero bases with positive
+exponents, and, in the fragment stage only, `0^-1`, which is infinity. A vertex
+hands that infinity on interpolated, which drivers do differently. It leaves
+out `0^0`, which is NaN in AIR and which drivers write to a color target
+differently. CI's SwiftShader happens to give `|a|^b` for GLSL's `pow` too, so
+`agal.test.ts` checks the translation itself.
 
 `Comparisons.as` checks vertex and fragment `sge`/`slt`/`seq` with 1,452 independently
 calculated pixel expectations: negative, positive and equal inputs, signed zero,
