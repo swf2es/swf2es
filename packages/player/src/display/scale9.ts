@@ -223,37 +223,53 @@ export function sliceLayers(
   m: Matrix | null,
   version = 0,
 ): ShapeLayer[] {
-  const at = m ? `;${m.a},${m.b},${m.c},${m.d},${m.tx},${m.ty}` : "";
-  const key = `${slice.key}${at};${version}`;
+  // Compared as values, not by a key formatted from them on every draw and hit test: the slice
+  // by its own key, made once with it, its matrix by its numbers.
   let kept = sliced.get(layers);
-  const found = kept?.get(key);
-  if (found) {
-    return found;
+  for (const e of kept ?? []) {
+    if (
+      e.version === version &&
+      (e.slice === slice || e.slice.key === slice.key) &&
+      (e.m === null
+        ? m === null
+        : m !== null &&
+          e.m.a === m.a &&
+          e.m.b === m.b &&
+          e.m.c === m.c &&
+          e.m.d === m.d &&
+          e.m.tx === m.tx &&
+          e.m.ty === m.ty)
+    ) {
+      return e.layers;
+    }
   }
 
   const made = moveLayers(layers, slice, m);
   if (!kept) {
-    kept = new Map();
+    kept = [];
     sliced.set(layers, kept);
   }
 
   // The oldest goes past a few: instances of one symbol at a few sizes alternate.
-  if (kept.size >= SLICES_KEPT) {
-    kept.delete(kept.keys().next().value as string);
+  if (kept.length >= SLICES_KEPT) {
+    kept.shift();
   }
 
-  kept.set(key, made);
+  kept.push({ slice, m: m && { ...m }, version, layers: made });
   return made;
 }
 
 const SLICES_KEPT = 4;
 
 /**
- * The latest slices of each set of layers, by the key of the slice, matrix
- * and version: a hit test asks on every pointer move, and the renderer
- * again on a redraw that is not a reslice.
+ * The latest slices of each set of layers, with the slice, matrix and
+ * version each was made for: a hit test asks on every pointer move, and
+ * the renderer again on a redraw that is not a reslice.
  */
-const sliced = new WeakMap<ShapeLayer[], Map<string, ShapeLayer[]>>();
+const sliced = new WeakMap<
+  ShapeLayer[],
+  { slice: Slice; m: Matrix | null; version: number; layers: ShapeLayer[] }[]
+>();
 
 function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): ShapeLayer[] {
   const inverse = m && invert(m);
