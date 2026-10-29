@@ -18,13 +18,10 @@ import {
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
-  MESH,
-  MIRROR,
   measureLayers,
   NORMAL,
   PLANE,
   plan,
-  REPEAT,
   Rows,
   SceneList,
   SMOOTH,
@@ -33,7 +30,7 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { argbOf, BitmapStore, characterStore, type PixelRect, rgbaOf } from "../bitmap/bitmap.js";
+import { argbOf, type BitmapStore, type PixelRect } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColorInto, IDENTITY_COLOR, sameColor } from "../display/color.js";
 import { Container } from "../display/container.js";
@@ -45,7 +42,6 @@ import {
   sameFilterRecords,
 } from "../display/filters.js";
 import { concat, invert, shifted } from "../display/geometry.js";
-import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import {
   bitmapScale,
   drawnRect,
@@ -55,7 +51,7 @@ import {
 } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
-import { facing, type GradientFill, type ShapeLayer, shapeLayers } from "../display/shapes.js";
+import { facing, type ShapeLayer, shapeLayers } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { ShapeCharacter } from "../display/timeline.js";
@@ -75,15 +71,9 @@ import { type AdvancedGlyphs, fieldQuads, staticQuads } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
 import { LineCache } from "./lines.js";
+import { GRADIENT_IDLE_FRAMES, Paints, paintSampler } from "./paints.js";
 import { bindCanvasPointer } from "./pointer.js";
-import {
-  type BitmapSampling,
-  bitmapQuad,
-  layerParts,
-  type Part,
-  radialTexels,
-  unsupported,
-} from "./shapes.js";
+import { bitmapQuad, layerParts, type Part, unsupported } from "./shapes.js";
 import {
   type DeviceItem,
   deviceTextResolution,
@@ -119,20 +109,10 @@ export interface RenderViewOptions {
 }
 
 /**
- * How many frames a gradient's texture may go undrawn: a morph tweening a
- * gradient makes a new one for each ratio, up to a megabyte each, which
- * the usual idle frames would hold hundreds of.
- */
-const GRADIENT_IDLE_FRAMES = 30;
-
-/**
  * Device texts with runs kept, and quads made, past which those let go of
  * are looked for and forgotten.
  */
 const RUN_KEYS = 512;
-
-/** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
-const GRADIENT_REGIONS = 8;
 
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
@@ -265,12 +245,6 @@ interface DrawnLayers {
   layers: Set<ShapeLayer>;
 }
 
-/** A texture made of pixels that change: a store's, kept as of its version. */
-interface Kept {
-  handle: TextureHandle;
-  version: number;
-}
-
 /**
  * Draws the player's display list on a canvas of its own. Each render
  * walks the whole list, writing a row for each object drawn and an entry
@@ -359,6 +333,7 @@ export class RenderView implements Drawer {
   private readonly geometries = new Geometries();
   private readonly lineCache: LineCache;
   private readonly textures = new Textures();
+  private readonly paints = new Paints(this.textures);
   private commands = new Commands();
   private filters = new Filters();
   /** Each filtered object's filters worked out, for the records, units and room they were for. */
@@ -482,12 +457,6 @@ export class RenderView implements Drawer {
   /** The canvas device text is rasterized on, made as first needed. */
   private textCanvas: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null =
     null;
-  private readonly stores = new WeakMap<BitmapStore, Kept>();
-  /** Each gradient's textures, by the region a radial one covers (null for a linear one), the latest used last. */
-  private readonly gradients = new WeakMap<
-    GradientFill,
-    { region: Area | null; handle: TextureHandle }[]
-  >();
 
   constructor(options: RenderViewOptions) {
     // First, so that a page that cannot run the render module throws before a context is made.
@@ -863,7 +832,7 @@ export class RenderView implements Drawer {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(handle.id);
           const textured = part.paint !== null || part.mesh !== null;
-          const texture = textured ? this.paintTexture(part) : null;
+          const texture = textured ? this.paints.paintTexture(part) : null;
           if (textured && !texture) {
             continue;
           }
@@ -881,7 +850,7 @@ export class RenderView implements Drawer {
             row,
             NORMAL,
             texture?.id ?? -1,
-            texture ? this.paintSampler(part) : 0,
+            texture ? paintSampler(part, this.smoothing) : 0,
           );
         }
 
@@ -1005,7 +974,7 @@ export class RenderView implements Drawer {
     const store = o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
       const quad = this.quad(store.width, store.height);
-      const texture = this.storeTexture(store);
+      const texture = this.paints.storeTexture(store);
       if (row < 0) {
         row = this.rows.addPlaced(this.places, at + 6, color);
       }
@@ -1329,7 +1298,7 @@ export class RenderView implements Drawer {
 
         // A map set anew is a copy anew, as a tween writing the filters takes one each frame:
         // its texture goes soon once the next one takes its place.
-        texture = this.storeTexture(pass.map, GRADIENT_IDLE_FRAMES).id;
+        texture = this.paints.storeTexture(pass.map, GRADIENT_IDLE_FRAMES).id;
         this.textures.use(texture);
       }
 
@@ -2318,142 +2287,6 @@ export class RenderView implements Drawer {
 
     const handle = this.geometries.add(bitmapQuad(width, height));
     byHeight.set(height, handle);
-    return handle;
-  }
-
-  /**
-   * The texture a part's paint or mesh samples: its bitmap's, else null till
-   * it is decoded, or its gradient's.
-   */
-  private paintTexture(part: Part): TextureHandle | null {
-    if (part.mesh) {
-      const store = part.mesh.image;
-      return store.disposed ? null : this.storeTexture(store);
-    }
-
-    const paint = part.paint as BitmapSampling | GradientFill;
-    if (paint.type === "image") {
-      const store = paint.image instanceof BitmapStore ? paint.image : characterStore(paint.image);
-      return store && !store.disposed ? this.storeTexture(store) : null;
-    }
-
-    return this.gradientTexture(paint, part.region);
-  }
-
-  /**
-   * How a part's paint is sampled. A bitmap fill, or a mesh's bitmap:
-   * smoothed if it asks and the quality is not low, repeated or clamped. A
-   * linear gradient's ramp: texel by texel, spread as it wraps; a radial
-   * one's, smoothed.
-   */
-  private paintSampler(part: Part): number {
-    const mesh = part.mesh;
-    if (mesh) {
-      return MESH | (mesh.smooth && this.smoothing ? SMOOTH : 0) | (mesh.repeat ? REPEAT : CLAMP);
-    }
-
-    const paint = part.paint as BitmapSampling | GradientFill;
-    if (paint.type === "image") {
-      return (paint.smooth && this.smoothing ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP);
-    }
-
-    if (paint.radial) {
-      return SMOOTH | CLAMP;
-    }
-
-    return paint.spread === 1 ? MIRROR : paint.spread === 2 ? REPEAT : CLAMP;
-  }
-
-  /** `store`'s texture, its pixels uploaded again if they changed since. */
-  private storeTexture(store: BitmapStore, idle?: number): TextureHandle {
-    const kept = this.stores.get(store);
-    if (kept && this.textures.alive(kept.handle)) {
-      if (kept.version !== store.version) {
-        kept.version = store.version;
-        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.readable));
-      }
-
-      return kept.handle;
-    }
-
-    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable), idle);
-    this.stores.set(store, { handle, version: store.version });
-    return handle;
-  }
-
-  /**
-   * A gradient's texture: a linear one's ramp of 256 colours, a radial one
-   * computed over its region, a texel a pixel up to 512 a side
-   * (display/gradients.ts).
-   */
-  private gradientTexture(fill: GradientFill, region: Area | null): TextureHandle {
-    let made = this.gradients.get(fill);
-    if (!made) {
-      made = [];
-      this.gradients.set(fill, made);
-    }
-
-    // By its region's numbers, the latest used first: a fill is drawn over one region, or a few
-    // as its shape changes.
-    let known: { region: Area | null; handle: TextureHandle } | null = null;
-    for (let i = made.length - 1; i >= 0; i--) {
-      const r = made[i].region;
-      if (
-        r === region ||
-        (r &&
-          region &&
-          same(r.x, region.x) &&
-          same(r.y, region.y) &&
-          same(r.width, region.width) &&
-          same(r.height, region.height))
-      ) {
-        known = i === made.length - 1 ? made[i] : moveLast(made, i);
-        break;
-      }
-    }
-
-    if (known && this.textures.alive(known.handle)) {
-      return known.handle;
-    }
-
-    const colors = ramp(fill.stops, fill.linearRgb);
-    let handle: TextureHandle;
-    if (fill.radial && region) {
-      const columns = radialTexels(region.width);
-      const rows = radialTexels(region.height);
-      const pixels = radialPixels(
-        colors,
-        fill.matrix,
-        fill.focal,
-        fill.spread,
-        region,
-        columns,
-        rows,
-      );
-      handle = this.textures.add(columns, rows, rgbaOf(pixels), GRADIENT_IDLE_FRAMES);
-    } else {
-      handle = this.textures.add(colors.length, 1, rgbaOf(colors), GRADIENT_IDLE_FRAMES);
-    }
-
-    // Its region's texture made again, or a new region's kept: those let go of forgotten, and the
-    // least lately used past GRADIENT_REGIONS.
-    if (known) {
-      known.handle = handle;
-    } else {
-      const list = made;
-      makeRoom(
-        list,
-        GRADIENT_REGIONS,
-        (e) => !this.textures.alive(e.handle),
-        (e) => {
-          if (this.textures.alive(e.handle)) {
-            this.textures.remove(e.handle.id);
-          }
-        },
-      );
-      list.push({ region: region && { ...region }, handle });
-    }
-
     return handle;
   }
 
