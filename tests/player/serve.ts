@@ -155,7 +155,10 @@ export async function serve(
         continue;
       }
 
-      const file = normalize(join(dir, path.slice(prefix.length)));
+      // A directory's index.html, as GitHub Pages serves the site's pages.
+      const file = normalize(
+        join(dir, path.slice(prefix.length), path.endsWith("/") ? "index.html" : ""),
+      );
       if (!file.startsWith(dir)) {
         break;
       }
