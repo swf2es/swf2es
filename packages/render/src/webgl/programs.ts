@@ -38,19 +38,26 @@ export const TABLE_ENTRIES = 48;
 /** Segments a row of the outlines' texture, as the player's text/saffron.ts stores them. */
 export const OUTLINE_ROW = 1024;
 
+/** The most draws a multi-draw of the fill program makes, their rows in its uniforms. */
+export const RUN_MOST = 256;
+
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
  * Flash's (uUnit of them a stage pixel, from the stage's origin) where
  * uSnap (SNAP), then on the target by uView (scale and offset into clip
  * space), and passes on its straight colour and the row's colour transform.
+ * With `multi` (WEBGL_multi_draw), a multi-draw's draws past its first
+ * read their rows from uRuns by gl_DrawID, which is 0 in a draw of its own.
  */
-export const fillVertex = `#version 300 es
+export const fillVertex = (multi: boolean) => `#version 300 es
+${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
 precision highp float;
 layout(location = ${POSITION_AT}) in vec2 aPosition;
 layout(location = ${TEXEL_AT}) in vec2 aTexel;
 layout(location = ${COLOR_AT}) in vec4 aColor;
 uniform highp sampler2D uRows;
 uniform int uRow;
+${multi ? `uniform ivec4 uRuns[${RUN_MOST / 4}];` : ""}
 uniform vec4 uView;
 uniform bool uSnap;
 uniform float uUnit;
@@ -60,7 +67,8 @@ flat out vec4 vMul;
 flat out vec4 vAdd;
 
 void main(void) {
-  ivec2 at = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
+  int row = ${multi ? "gl_DrawID == 0 ? uRow : uRuns[gl_DrawID >> 2][gl_DrawID & 3]" : "uRow"};
+  ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
   vec4 m = texelFetch(uRows, at, 0);
   vec4 t = texelFetch(uRows, at + ivec2(1, 0), 0);
   vMul = texelFetch(uRows, at + ivec2(2, 0), 0);

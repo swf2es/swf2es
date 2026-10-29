@@ -49,9 +49,23 @@ import {
   POSITION_AT,
   ROW_TEXELS,
   RUN_AT,
+  RUN_MOST,
   TEXEL_AT,
   TINT_AT,
 } from "./programs.js";
+
+/** What the backend calls of WEBGL_multi_draw. */
+interface MultiDraw {
+  multiDrawElementsWEBGL(
+    mode: number,
+    counts: Int32Array,
+    countsOffset: number,
+    type: number,
+    offsets: Int32Array,
+    offsetsOffset: number,
+    drawCount: number,
+  ): void;
+}
 
 /**
  * Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four
@@ -229,6 +243,15 @@ export class WebGLBackend {
   private fillUnitLocation: WebGLUniformLocation | null = null;
   /** Whether the fill program snaps (SNAP) as the last draw told it. */
   private lastSnap = false;
+  /** WEBGL_multi_draw, which draws a run of fills alike a call (drawEntries), where there is. */
+  private multi: MultiDraw | null = null;
+  private runsLocation: WebGLUniformLocation | null = null;
+  /** A run's draws: their index counts, their offsets in bytes, and their rows. */
+  private readonly runCounts = new Int32Array(RUN_MOST);
+  private readonly runOffsets = new Int32Array(RUN_MOST);
+  private readonly runRows = new Int32Array(RUN_MOST);
+  /** Draws gathered by gatherRun. */
+  private runCount = 0;
   /** The meshes' program (MESH), and where it takes its row, view, fragments' place and mode. */
   private mesh!: WebGLProgram;
   private meshRowLocation: WebGLUniformLocation | null = null;
@@ -369,8 +392,10 @@ export class WebGLBackend {
   private setUp(): void {
     const gl = this.gl;
     this.state.forget();
-    this.program = linkProgram(gl, fillVertex, fillFragment);
+    this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
+    this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
     this.rowLocation = gl.getUniformLocation(this.program, "uRow");
+    this.runsLocation = gl.getUniformLocation(this.program, "uRuns");
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
     this.state.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
@@ -1379,12 +1404,81 @@ export class WebGLBackend {
         );
       }
 
-      gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
+      const last = this.multi ? this.gatherRun(scene, i, end, stencil, place) : i;
+      if (last === i) {
+        gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
+        continue;
+      }
+
+      const draws = this.runCount;
+      gl.uniform4iv(this.runsLocation, this.runRows, 0, Math.ceil(draws / 4) * 4);
+      (this.multi as MultiDraw).multiDrawElementsWEBGL(
+        gl.TRIANGLES,
+        this.runCounts,
+        0,
+        gl.UNSIGNED_INT,
+        this.runOffsets,
+        0,
+        draws,
+      );
+      i = last;
     }
 
     if (other) {
       this.useFill();
     }
+  }
+
+  /**
+   * The fills that follow entry `i` and draw as it does, its texture,
+   * sampling and snapping, gathered with it as one multi-draw's runCounts,
+   * runOffsets and runRows: the last entry of the run, `i` for a run of one.
+   */
+  private gatherRun(
+    scene: SceneList,
+    i: number,
+    end: number,
+    stencil: boolean,
+    place: Place,
+  ): number {
+    const id = stencil ? -1 : scene.texture[i];
+    // Without a texture, only snapping tells the draws apart.
+    const bits = id >= 0 ? SMOOTH | REPEAT | MIRROR | SNAP : SNAP;
+    const sampling = scene.sampler[i] & bits;
+    let draws = 1;
+    let last = i;
+    this.runCounts[0] = place.indices;
+    this.runOffsets[0] = place.indexStart * 4;
+    this.runRows[0] = scene.row[i];
+
+    for (let j = i + 1; j < end && draws < RUN_MOST; j++) {
+      if (scene.kind[j] !== DRAW) {
+        continue;
+      }
+
+      const next = this.places[scene.geometry[j]];
+      if (!next) {
+        continue;
+      }
+
+      if (
+        next.glyphs ||
+        (!stencil && scene.sampler[j] & (MESH | PLANE)) ||
+        (stencil ? -1 : scene.texture[j]) !== id ||
+        (scene.sampler[j] & bits) !== sampling
+      ) {
+        break;
+      }
+
+      this.runCounts[draws] = next.indices;
+      this.runOffsets[draws] = next.indexStart * 4;
+      this.runRows[draws] = scene.row[j];
+      draws++;
+      last = j;
+    }
+
+    this.runCount = draws;
+    return last;
   }
 
   /**

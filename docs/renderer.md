@@ -237,6 +237,10 @@ WebGL. It is small by design:
   pulled), drawTriangles' meshes (textured in perspective, their bitmap
   read as adl reads it), the filter passes, the blend formulas, the 3D
   plane. A closed set, compiled once a context.
+- **Runs:** consecutive fills drawn alike (one texture, sampling and
+  snapping) are one multi-draw of the atlas's index ranges
+  (`WEBGL_multi_draw`), each draw reading its row by `gl_DrawID` from a
+  uniform array; without the extension, a call a draw.
 - **A state cache,** so no bind, blend or stencil state is set twice.
 - **Uploads** of rows and run chunks once a frame, as the table does.
 
