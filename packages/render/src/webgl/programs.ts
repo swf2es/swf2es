@@ -41,13 +41,25 @@ export const OUTLINE_ROW = 1024;
 /** The most draws a multi-draw of the fill program makes, their rows in its uniforms. */
 export const RUN_MOST = 256;
 
+/** Textures the fill program samples in one draw call, each on a unit of its own. */
+export const FILL_TEXTURES = 8;
+
+/**
+ * A fill draw's row and how it is drawn, in one int: the row in the bits
+ * below FILL_SLOT, then which of the fill program's textures it samples, one
+ * past its index or 0 for none, then SNAP_BIT where it snaps (SNAP).
+ */
+export const FILL_SLOT = 24;
+export const SNAP_BIT = 1 << 28;
+
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
- * Flash's (uUnit of them a stage pixel, from the stage's origin) where
- * uSnap (SNAP), then on the target by uView (scale and offset into clip
- * space), and passes on its straight colour and the row's colour transform.
- * With `multi` (WEBGL_multi_draw), a multi-draw's draws past its first
- * read their rows from uRuns by gl_DrawID, which is 0 in a draw of its own.
+ * Flash's (uUnit of them a stage pixel, from the stage's origin) where it
+ * snaps (SNAP), then on the target by uView (scale and offset into clip
+ * space), and passes on its straight colour, the row's colour transform
+ * and the texture it samples. uRow names the draw's row (FILL_SLOT); with
+ * `multi` (WEBGL_multi_draw), a multi-draw's draws past its first read
+ * theirs from uRuns by gl_DrawID, which is 0 in a draw of its own.
  */
 export const fillVertex = (multi: boolean) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
@@ -59,22 +71,24 @@ uniform highp sampler2D uRows;
 uniform int uRow;
 ${multi ? `uniform ivec4 uRuns[${RUN_MOST / 4}];` : ""}
 uniform vec4 uView;
-uniform bool uSnap;
 uniform float uUnit;
 out vec4 vColor;
 out vec2 vTexel;
 flat out vec4 vMul;
 flat out vec4 vAdd;
+flat out int vSlot;
 
 void main(void) {
-  int row = ${multi ? "gl_DrawID == 0 ? uRow : uRuns[gl_DrawID >> 2][gl_DrawID & 3]" : "uRow"};
+  int draw = ${multi ? "gl_DrawID == 0 ? uRow : uRuns[gl_DrawID >> 2][gl_DrawID & 3]" : "uRow"};
+  int row = draw & ${(1 << FILL_SLOT) - 1};
+  vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
   vec4 m = texelFetch(uRows, at, 0);
   vec4 t = texelFetch(uRows, at + ivec2(1, 0), 0);
   vMul = texelFetch(uRows, at + ivec2(2, 0), 0);
   vAdd = texelFetch(uRows, at + ivec2(3, 0), 0);
   vec2 p = vec2(m.x * aPosition.x + m.z * aPosition.y + t.x, m.y * aPosition.x + m.w * aPosition.y + t.y);
-  if (uSnap) {
+  if ((draw & ${SNAP_BIT}) != 0) {
     p = roundEven(p * uUnit * 4.0) / (uUnit * 4.0);
   }
 
@@ -83,6 +97,13 @@ void main(void) {
   vTexel = aTexel;
 }
 `;
+
+/** Texel `at` of the fill program's texture `slot` names, which only a constant may index. */
+const slotTexel = Array.from(
+  { length: FILL_TEXTURES },
+  (_, k) => `    case ${k + 1}:
+      return texture(uTextures[${k}], at / vec2(textureSize(uTextures[${k}], 0)));`,
+).join("\n");
 
 /**
  * Flash's colour transform on the straight colour, clamped, then
@@ -96,14 +117,22 @@ in vec4 vColor;
 in vec2 vTexel;
 flat in vec4 vMul;
 flat in vec4 vAdd;
-uniform sampler2D uTexture;
-uniform bool uTextured;
+flat in int vSlot;
+uniform sampler2D uTextures[${FILL_TEXTURES}];
 out vec4 finalColor;
+
+vec4 texel(vec2 at) {
+  switch (vSlot) {
+${slotTexel}
+  }
+
+  return vec4(0.0);
+}
 
 void main(void) {
   vec4 straight = vColor;
-  if (uTextured) {
-    vec4 t = texture(uTexture, vTexel / vec2(textureSize(uTexture, 0)));
+  if (vSlot != 0) {
+    vec4 t = texel(vTexel);
     if (t.a == 0.0) {
       finalColor = vec4(0.0);
       return;
