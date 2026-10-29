@@ -14,6 +14,7 @@ import {
 } from "./display.js";
 import { apply, invert, type Rect, union } from "./geometry.js";
 import { MOVE, pointsOf, type ShapeLayer } from "./shapes.js";
+import { makeRoom, moveLast, same } from "./value-lists.js";
 
 /**
  * One axis of a slice, in the owner's space: the bounds' and the grid's
@@ -226,21 +227,23 @@ export function sliceLayers(
   // Compared as values, not by a key formatted from them on every draw and hit test: the slice
   // by its own key, made once with it, its matrix by its numbers.
   let kept = sliced.get(layers);
-  for (const e of kept ?? []) {
+  for (let i = kept ? kept.length - 1 : -1; i >= 0; i--) {
+    const e = (kept as SlicedLayers[])[i];
     if (
       e.version === version &&
       (e.slice === slice || e.slice.key === slice.key) &&
       (e.m === null
         ? m === null
         : m !== null &&
-          e.m.a === m.a &&
-          e.m.b === m.b &&
-          e.m.c === m.c &&
-          e.m.d === m.d &&
-          e.m.tx === m.tx &&
-          e.m.ty === m.ty)
+          same(e.m.a, m.a) &&
+          same(e.m.b, m.b) &&
+          same(e.m.c, m.c) &&
+          same(e.m.d, m.d) &&
+          same(e.m.tx, m.tx) &&
+          same(e.m.ty, m.ty))
     ) {
-      return e.layers;
+      return (i === (kept as SlicedLayers[]).length - 1 ? e : moveLast(kept as SlicedLayers[], i))
+        .layers;
     }
   }
 
@@ -250,11 +253,13 @@ export function sliceLayers(
     sliced.set(layers, kept);
   }
 
-  // The oldest goes past a few: instances of one symbol at a few sizes alternate.
-  if (kept.length >= SLICES_KEPT) {
-    kept.shift();
-  }
-
+  // The least lately used goes past a few: instances of one symbol at a few sizes alternate.
+  makeRoom(
+    kept,
+    SLICES_KEPT,
+    () => false,
+    () => {},
+  );
   kept.push({ slice, m: m && { ...m }, version, layers: made });
   return made;
 }
@@ -266,10 +271,15 @@ const SLICES_KEPT = 4;
  * version each was made for: a hit test asks on every pointer move, and
  * the renderer again on a redraw that is not a reslice.
  */
-const sliced = new WeakMap<
-  ShapeLayer[],
-  { slice: Slice; m: Matrix | null; version: number; layers: ShapeLayer[] }[]
->();
+const sliced = new WeakMap<ShapeLayer[], SlicedLayers[]>();
+
+/** A set of layers as sliced, and the slice, matrix and version it was sliced for. */
+interface SlicedLayers {
+  slice: Slice;
+  m: Matrix | null;
+  version: number;
+  layers: ShapeLayer[];
+}
 
 function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): ShapeLayer[] {
   const inverse = m && invert(m);

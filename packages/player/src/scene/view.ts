@@ -56,6 +56,7 @@ import {
   shapeLayers,
 } from "../display/shapes.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
+import { makeRoom, moveLast, same } from "../display/value-lists.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import type { Player } from "../player.js";
@@ -103,8 +104,17 @@ const GRADIENT_IDLE_FRAMES = 30;
 /** The most transforms a layer's lines are kept for: its instances in step, and a loop's turns. */
 const LINE_KEYS = 64;
 
-/** Device text runs kept by key past which those let go of are forgotten. */
+/**
+ * Device texts with runs kept, and quads made, past which those let go of
+ * are looked for and forgotten.
+ */
 const RUN_KEYS = 512;
+
+/** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
+const GRADIENT_REGIONS = 8;
+
+/** Runs kept of one text, in its styles, sizes and resolutions. */
+const TEXT_RUNS = 8;
 
 /**
  * How many frames a run of device text may go undrawn: a counter or a field
@@ -116,11 +126,10 @@ const TEXT_IDLE_FRAMES = 30;
 /** The most texels a run of device text has a side, under every WebGL 2's least texture size. */
 const TEXT_MOST = 4096;
 
-/** A run of device text rasterized: its texture and size, its origin `left` texels in, and its canvas pixels a stage pixel. */
 /**
  * A device text run rasterized: its texture, its size and left overhang in
- * canvas pixels at `resolution`; and the style and resolution it was asked
- * for, which find it again among the runs of its text.
+ * canvas pixels at `resolution`; and the style, metrics and resolution it
+ * was asked for, which find it again among the runs of its text.
  */
 interface DeviceRun {
   handle: TextureHandle;
@@ -133,6 +142,8 @@ interface DeviceRun {
   bold: boolean;
   italic: boolean;
   letterSpacing: number;
+  ascent: number;
+  descent: number;
   asked: number;
 }
 
@@ -273,9 +284,8 @@ export class RenderView implements Drawer {
   /** The masks pushed and not yet popped, as each one's first draw and count. */
   private readonly masks: number[] = [];
   /**
-   * Each layer's lines by what they were stroked for: the linear transform
-   * on the stage and the least width, a pixel of the screen, as a key; and
-   * the drawing's version.
+   * Each layer's lines by what they were stroked for (LineEntry), the latest
+   * used last, found by their numbers.
    */
   private readonly lines = new WeakMap<ShapeLayer, LineEntry[]>();
   /** Quads by their width, then their height: numbers, not a key formatted from them. */
@@ -284,13 +294,13 @@ export class RenderView implements Drawer {
   private quadsMade = 0;
   /** Each glyph's fill, made once for every text drawn in it; null for an empty glyph. */
   private readonly glyphs = new WeakMap<Glyph, GeometryHandle | null>();
-  /** Device text rasterized, by its text, font, spacing and resolution. */
+  /** Device text rasterized, by its text; among its runs, by style, metrics and resolution. */
   private readonly runs = new Map<string, DeviceRun[]>();
   /** The canvas device text is rasterized on, made as first needed. */
   private textCanvas: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null =
     null;
   private readonly stores = new WeakMap<BitmapStore, Kept>();
-  /** Each gradient's textures, by the region a radial one covers ("" for a linear one). */
+  /** Each gradient's textures, by the region a radial one covers (null for a linear one), the latest used last. */
   private readonly gradients = new WeakMap<
     GradientFill,
     { region: Area | null; handle: TextureHandle }[]
@@ -1189,26 +1199,26 @@ export class RenderView implements Drawer {
       this.lines.set(layer, kept);
     }
 
-    // Compared as numbers, the latest first: a layer is nearly always seen as it was last frame,
-    // and a key formatted from its numbers on every frame cost more than drawing it.
+    // Compared as numbers, the latest used first: a layer is nearly always seen as it was last
+    // frame, and a key formatted from its numbers on every frame cost more than drawing it.
     let known: LineEntry | null = null;
     for (let i = kept.length - 1; i >= 0; i--) {
       const e = kept[i];
       if (
-        e.a === a &&
-        e.b === b &&
-        e.c === c &&
-        e.d === d &&
-        e.least === least &&
+        same(e.a, a) &&
+        same(e.b, b) &&
+        same(e.c, c) &&
+        same(e.d, d) &&
+        same(e.least, least) &&
         (e.by === null
           ? by === null
           : by !== null &&
-            e.by[0] === by[0] &&
-            e.by[1] === by[1] &&
-            e.by[2] === by[2] &&
-            e.by[3] === by[3])
+            same(e.by[0], by[0]) &&
+            same(e.by[1], by[1]) &&
+            same(e.by[2], by[2]) &&
+            same(e.by[3], by[3]))
       ) {
-        known = e;
+        known = i === kept.length - 1 ? e : moveLast(kept, i);
         break;
       }
     }
@@ -1225,23 +1235,19 @@ export class RenderView implements Drawer {
       this.geometries.remove(known.handle.id);
     }
 
-    // Those let go of are forgotten, and the oldest past LINE_KEYS, so that a layer seen through
-    // ever new transforms keeps no more than that; looked through only once that many are kept.
-    if (!known && kept.length >= LINE_KEYS) {
-      let live = 0;
-      for (const e of kept) {
-        if (!e.handle || this.geometries.alive(e.handle)) {
-          kept[live++] = e;
-        }
-      }
-
-      kept.length = live;
-      while (kept.length >= LINE_KEYS) {
-        const oldest = kept.shift() as LineEntry;
-        if (oldest.handle && this.geometries.alive(oldest.handle)) {
-          this.geometries.remove(oldest.handle.id);
-        }
-      }
+    // Those let go of are forgotten, and the least lately used past LINE_KEYS, so that a layer
+    // seen through ever new transforms keeps no more than that.
+    if (!known) {
+      makeRoom(
+        kept,
+        LINE_KEYS,
+        (e) => e.handle !== null && !this.geometries.alive(e.handle),
+        (e) => {
+          if (e.handle && this.geometries.alive(e.handle)) {
+            this.geometries.remove(e.handle.id);
+          }
+        },
+      );
     }
 
     const data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by);
@@ -1382,18 +1388,21 @@ export class RenderView implements Drawer {
    */
   private deviceRun(item: DeviceItem, resolution: number): DeviceRun | null {
     // By its text, a string there is already; then its style compared as values.
-    let same = this.runs.get(item.text);
-    for (const run of same ?? []) {
+    let runs = this.runs.get(item.text);
+    for (let i = runs ? runs.length - 1 : -1; i >= 0; i--) {
+      const run = (runs as DeviceRun[])[i];
       if (
         run.family === item.family &&
-        run.size === item.size &&
+        same(run.size, item.size) &&
         run.bold === item.bold &&
         run.italic === item.italic &&
-        run.letterSpacing === item.letterSpacing &&
-        run.asked === resolution &&
+        same(run.letterSpacing, item.letterSpacing) &&
+        same(run.ascent, item.ascent) &&
+        same(run.descent, item.descent) &&
+        same(run.asked, resolution) &&
         this.textures.alive(run.handle)
       ) {
-        return run;
+        return i === (runs as DeviceRun[]).length - 1 ? run : moveLast(runs as DeviceRun[], i);
       }
     }
 
@@ -1441,18 +1450,23 @@ export class RenderView implements Drawer {
       pixels[i + 2] = Math.round((pixels[i + 2] * alpha) / 255);
     }
 
-    // Those let go of are forgotten, so that text typed and scrolled keeps no keys for them.
+    // Those let go of are forgotten, so that text typed and scrolled keeps no lists for them.
     if (this.runs.size > RUN_KEYS) {
-      for (const [text, runs] of this.runs) {
-        const live = runs.filter((r) => this.textures.alive(r.handle));
-        if (live.length === 0) {
+      for (const [text, list] of this.runs) {
+        let kept = 0;
+        for (const r of list) {
+          if (this.textures.alive(r.handle)) {
+            list[kept++] = r;
+          }
+        }
+
+        list.length = kept;
+        if (kept === 0) {
           this.runs.delete(text);
-        } else {
-          this.runs.set(text, live);
         }
       }
 
-      same = this.runs.get(item.text);
+      runs = this.runs.get(item.text);
     }
 
     const run: DeviceRun = {
@@ -1466,17 +1480,27 @@ export class RenderView implements Drawer {
       bold: item.bold,
       italic: item.italic,
       letterSpacing: item.letterSpacing,
+      ascent: item.ascent,
+      descent: item.descent,
       asked: resolution,
     };
-    if (same) {
-      // Its text's runs of a style no longer asked for go with their textures.
-      const live = same.filter((r) => this.textures.alive(r.handle));
-      live.push(run);
-      this.runs.set(item.text, live);
-    } else {
-      this.runs.set(item.text, [run]);
+    if (!runs) {
+      runs = [];
+      this.runs.set(item.text, runs);
     }
 
+    // Its text's runs gone with their textures, and the least lately used past TEXT_RUNS.
+    makeRoom(
+      runs,
+      TEXT_RUNS,
+      (r) => !this.textures.alive(r.handle),
+      (r) => {
+        if (this.textures.alive(r.handle)) {
+          this.textures.remove(r.handle.id);
+        }
+      },
+    );
+    runs.push(run);
     return run;
   }
 
@@ -1527,6 +1551,9 @@ export class RenderView implements Drawer {
           this.quads.delete(w);
         }
       }
+
+      // Its width's map, which the sweep may have let go of.
+      byHeight = this.quads.get(width);
     }
 
     if (!byHeight) {
@@ -1596,26 +1623,27 @@ export class RenderView implements Drawer {
       this.gradients.set(fill, made);
     }
 
-    // By its region's numbers: a fill is drawn over one region, or a few as its shape changes.
-    let i = 0;
-    for (; i < made.length; i++) {
+    // By its region's numbers, the latest used first: a fill is drawn over one region, or a few
+    // as its shape changes.
+    let known: { region: Area | null; handle: TextureHandle } | null = null;
+    for (let i = made.length - 1; i >= 0; i--) {
       const r = made[i].region;
       if (
         r === region ||
         (r &&
           region &&
-          r.x === region.x &&
-          r.y === region.y &&
-          r.width === region.width &&
-          r.height === region.height)
+          same(r.x, region.x) &&
+          same(r.y, region.y) &&
+          same(r.width, region.width) &&
+          same(r.height, region.height))
       ) {
+        known = i === made.length - 1 ? made[i] : moveLast(made, i);
         break;
       }
     }
 
-    const known = made[i]?.handle;
-    if (known && this.textures.alive(known)) {
-      return known;
+    if (known && this.textures.alive(known.handle)) {
+      return known.handle;
     }
 
     const colors = ramp(fill.stops, fill.linearRgb);
@@ -1637,14 +1665,23 @@ export class RenderView implements Drawer {
       handle = this.textures.add(colors.length, 1, rgbaOf(colors), GRADIENT_IDLE_FRAMES);
     }
 
-    // Its region's texture made again, or a new region's kept, those let go of forgotten.
-    const entry = { region: region && { ...region }, handle };
-    if (i < made.length) {
-      made[i] = entry;
+    // Its region's texture made again, or a new region's kept: those let go of forgotten, and the
+    // least lately used past GRADIENT_REGIONS.
+    if (known) {
+      known.handle = handle;
     } else {
-      const live = made.filter((e) => this.textures.alive(e.handle));
-      live.push(entry);
-      this.gradients.set(fill, live);
+      const list = made;
+      makeRoom(
+        list,
+        GRADIENT_REGIONS,
+        (e) => !this.textures.alive(e.handle),
+        (e) => {
+          if (this.textures.alive(e.handle)) {
+            this.textures.remove(e.handle.id);
+          }
+        },
+      );
+      list.push({ region: region && { ...region }, handle });
     }
 
     return handle;
