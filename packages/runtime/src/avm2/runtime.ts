@@ -598,10 +598,24 @@ export class Runtime {
 
   private scopeHas(o: AsObject, mn: Multiname, isWith: number): boolean {
     if (isWith) {
-      return this.hasProperty(o, mn);
+      return this.withHas(o, mn);
     }
 
     return this.traitsOf(o).find(mn) !== 0;
+  }
+
+  /**
+   * As MethodEnv::findWithProperty: a with scope has `mn` by its traits,
+   * then by what its class says it has (an XML's children), then by its
+   * prototype chain, where an XML's methods are, as an E4X filter calls them.
+   */
+  private withHas(o: AsObject, mn: Multiname): boolean {
+    if (this.traitsOf(o).find(mn) !== 0 || this.hasProperty(o, mn)) {
+      return true;
+    }
+
+    const p = this.protoOf(o);
+    return p !== null && this.hasProperty(p, mn);
   }
 
   // Properties.
