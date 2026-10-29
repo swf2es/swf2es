@@ -95,7 +95,8 @@ void main(void) {
  * A layer composited onto what is below over its rectangle, pixel for
  * pixel: its rows run down, as the filters read them, and the target's up
  * where it is the canvas (uFlip), from uOffset in its framebuffer; what is
- * below copied from uBackOffset. Coloured by its
+ * below copied with the rectangle's corner uBackOffset short of where it
+ * lies. Coloured by its
  * row's colour transform where it has one (uRow not -1), on its straight
  * colour where it covers anything; then blended by its mode. Normal, layer,
  * add and screen are left to GL's blending; the rest read what is below

@@ -86,6 +86,8 @@ export interface RenderViewOptions {
   preserveDrawingBuffer?: boolean;
   /** The fills' tessellator: @swf2es/native's, made here, if left out. */
   fillTessellator?: FillTessellator;
+  /** Samples a pixel the stage and its layers are multisampled with (`samples`); 1, none, if left out. */
+  samples?: number;
 }
 
 /**
@@ -277,6 +279,7 @@ export class RenderView implements Drawer {
 
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
+    this.samples = options.samples ?? 1;
     this.textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     if (options.fillTessellator) {
       this.tessellator = options.fillTessellator;
@@ -311,6 +314,24 @@ export class RenderView implements Drawer {
     return this.drawRoot ? this.scale > 1 : this.stageQuality !== "LOW";
   }
 
+  /**
+   * Samples a pixel the stage and its blend and filter layers are
+   * multisampled with, as the GPU allows, 1 for none: Flash's anti-aliasing,
+   * which its host sets by the stage's quality, none at low whatever is set.
+   * A BitmapData's draw supersamples instead, as Flash's does.
+   */
+  get samples(): number {
+    return this.wantedSamples;
+  }
+
+  set samples(samples: number) {
+    this.wantedSamples = Math.max(1, Math.floor(samples) || 1);
+    this.backend.samples = this.stageQuality === "LOW" ? 1 : this.wantedSamples;
+  }
+
+  /** The samples the host asked for, which the stage's low quality sets aside (`samples`). */
+  private wantedSamples = 1;
+
   /** The stage's quality, "LOW" to "BEST", which will decide bitmaps' smoothing. */
   get quality(): string {
     return this.stageQuality;
@@ -318,6 +339,8 @@ export class RenderView implements Drawer {
 
   set quality(quality: string) {
     this.stageQuality = quality;
+    // Flash draws edges aliased at low, whatever samples the host asked for.
+    this.samples = this.wantedSamples;
   }
 
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
