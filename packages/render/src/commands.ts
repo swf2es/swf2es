@@ -35,10 +35,17 @@ export class Commands {
   params = new Float32Array(64);
   length = 0;
   paramLength = 0;
+  /**
+   * Whether a layer is composited onto the target itself in erase or alpha,
+   * which leaves it less than opaque where it covers, as adl clears the
+   * stage, for the blends after it to read.
+   */
+  clearsTarget = false;
 
   reset(): void {
     this.length = 0;
     this.paramLength = 0;
+    this.clearsTarget = false;
   }
 
   push(op: number, a = 0, b = 0, c = 0): void {

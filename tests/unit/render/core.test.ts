@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  ALPHA,
   BLUR,
   CLEAR,
   COLOR_MATRIX,
   COMPOSITE,
   Commands,
+  ERASE,
   FILTER,
   Filters,
   Geometries,
@@ -239,6 +241,31 @@ test("a layer of no size is left out, all in it, layers inside it too", () => {
   const commands = new Commands();
   plan(scene, 0xffffffff, commands);
   assert.deepEqual(ops(commands).slice(1), [[RUN, 6, 1, 0]]);
+});
+
+test("an erase or alpha layer composited onto the target itself clears it, one inside another not", () => {
+  const commands = new Commands();
+  const planned = (outer: number, inner: number, kept: number) => {
+    const scene = new SceneList();
+    scene.layerBegin();
+    scene.layerBegin();
+    scene.draw(0, 0, 0);
+    scene.layerEnd(inner, -1);
+    scene.layerEnd(outer, -1);
+    scene.keptLayer(0, kept, -1, 0, 0, 10, 10);
+    for (let layer = 0; layer < 2; layer++) {
+      scene.layerRect(layer, 0, 0, 10, 10);
+    }
+
+    plan(scene, 0xffffffff, commands);
+    return commands.clearsTarget;
+  };
+
+  assert.equal(planned(ERASE, NORMAL, NORMAL), true);
+  assert.equal(planned(NORMAL, ALPHA, NORMAL), false);
+  assert.equal(planned(NORMAL, ERASE, ALPHA), true);
+  // Planning again starts afresh.
+  assert.equal(planned(MULTIPLY, NORMAL, NORMAL), false);
 });
 
 /** A geometry of one triangle with the corners (x0, y0) and (x1, y1). */
