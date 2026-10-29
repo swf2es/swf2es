@@ -22,15 +22,17 @@ test("a fill's contours close, a drawPath's winding is the fill's, and copying f
   // Another rule in the same fill: an entry of its own, the first's rule kept.
   d.drawPath([1, 2, 2, 2], [30, 0, 40, 0, 40, 10, 30, 10], "evenOdd");
   d.endFill();
-  assert.equal(d.layers[1].fills.length, 2);
-  assert.equal(d.layers[1].fills[0].winding, "nonZero");
-  assert.equal(d.layers[1].fills[1].winding, "evenOdd");
+  // On in the first layer, which holds fills alone, after the first fill's entry.
+  assert.equal(d.layers.length, 1);
+  assert.equal(d.layers[0].fills.length, 3);
+  assert.equal(d.layers[0].fills[1].winding, "nonZero");
+  assert.equal(d.layers[0].fills[2].winding, "evenOdd");
 
   // Copied from another: the layers come over, winding included.
   const copy = new Drawing();
   copy.copyFrom(d);
-  assert.equal(copy.layers.length, 2);
-  assert.equal(copy.layers[1].fills[0].winding, "nonZero");
+  assert.equal(copy.layers.length, 1);
+  assert.equal(copy.layers[0].fills[1].winding, "nonZero");
   assert.deepEqual(copy.bounds(false), { xMin: 0, yMin: 0, xMax: 40, yMax: 20 });
 
   // Copied from itself: cleared first, so nothing is left to copy, as Flash has it.
@@ -59,7 +61,7 @@ test("a fill's contours close, a drawPath's winding is the fill's, and copying f
   assert.deepEqual(e.bounds(true), { xMin: 49, yMin: 49, xMax: 61, yMax: 51 });
 });
 
-test("each fill begins a layer, and the lines drawn till the next fill go over it, as Flash draws them", () => {
+test("a fill after lines begins a layer, and the lines drawn till the next fill go over it, as Flash draws them", () => {
   const line = (color: number) => ({
     width: 80,
     color,
@@ -115,6 +117,49 @@ test("each fill begins a layer, and the lines drawn till the next fill go over i
     [[0xff0000ff], [0xff000000, 0xff00ff00]],
     [[0xffff0000], []],
   ]);
+});
+
+test("fills one after another share a layer, in order, while it holds no lines, triangles or meshes", () => {
+  const blue = { type: "solid" as const, color: 0xff0000ff };
+  const d = new Drawing();
+  for (const fill of [red, blue, red]) {
+    d.beginFill(fill);
+    d.drawRect(0, 0, 10, 10);
+  }
+
+  d.endFill();
+  assert.equal(d.layers.length, 1);
+  assert.deepEqual(
+    d.layers[0].fills.map((f) => (f.fill.type === "solid" ? f.fill.color : 0)),
+    [0xffff0000, 0xff0000ff, 0xffff0000],
+  );
+
+  // At most SHARED_FILLS, 256, go on in one layer; the next begins another.
+  const many = new Drawing();
+  for (let i = 0; i < 300; i++) {
+    many.beginFill(i % 2 ? red : blue);
+    many.drawRect(i, 0, 1, 1);
+  }
+
+  many.endFill();
+  assert.deepEqual(
+    many.layers.map((l) => l.fills.length),
+    [256, 44],
+  );
+
+  // An empty fill ended by drawTriangles goes from the shared layer alone: the fills before stay.
+  const e = new Drawing();
+  e.beginFill(red);
+  e.drawRect(0, 0, 10, 10);
+  e.beginFill(blue);
+  e.drawTriangles([0, 0, 10, 0, 0, 10], null, null, 0);
+  assert.equal(e.layers[0].fills.length, 1);
+  assert.equal(e.layers[0].fills[0].fill, red);
+  // The triangles a layer of their own, which a fill after does not go on in.
+  assert.ok(e.layers[1].extent);
+  e.beginFill(red);
+  e.drawRect(0, 0, 10, 10);
+  assert.notEqual(e.layers.at(-1), e.layers[1]);
 });
 
 test("an open contour is closed with a line in the line style of the time, kept apart from the paths, as in Flash", () => {

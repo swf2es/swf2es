@@ -1,4 +1,5 @@
-// Independent ray crossings check both fill rules, including self-intersecting contours, and
+// Independent ray crossings check both fill rules, including self-intersecting contours and
+// convex ones, some far larger, which the module fills by a fan within libtess2's range, and
 // every eight fills tessellated as a layer must give each what it gave alone: by libtess2, and
 // by the bands the module fills by where libtess2 fails (bands.zig). Then curved fills:
 // the layer call's flattening must match a JS one, as the player's was, the same points where
@@ -112,7 +113,16 @@ for (const by of [tessellator, banded]) {
   state = seed;
   for (let i = 0; i < cases; i++) {
     const contours: number[][] = [];
-    for (let j = 0; j < 1 + Math.floor(random() * 3); j++) {
+    // A convex contour every fourth case, points on a circle in order, as the module fills by a fan.
+    const convex = i % 4 === 3;
+    if (convex) {
+      const n = 3 + Math.floor(random() * 10);
+      const angles = Array.from({ length: n }, () => random() * 2 * Math.PI).sort((a, b) => a - b);
+      const r = 10 + random() * 40;
+      contours.push(angles.flatMap((a) => [50 + r * Math.cos(a), 50 + r * Math.sin(a)]));
+    }
+
+    for (let j = 0; !convex && j < 1 + Math.floor(random() * 3); j++) {
       const points: number[] = [];
       for (let k = 0; k < 3 + Math.floor(random() * 20); k++) {
         const x = Math.floor(random() * 100);
@@ -136,10 +146,14 @@ for (const by of [tessellator, banded]) {
     }
 
     const nonZero = i % 2 === 1;
-    const context = JSON.stringify({ seed, case: i, nonZero, contours });
-    const result = by.tessellate(contours, nonZero);
+    // Every other convex one far larger: within libtess2's range, and past it, where the bands fill.
+    const scale = convex && i % 8 === 7 ? ((i >> 3) % 2 ? 1e7 : 1e3) : 1;
+    const given = contours.map((c) => c.map((v) => v * scale));
+    const context = JSON.stringify({ seed, case: i, nonZero, scale, contours });
+    const result = by.tessellate(given, nonZero);
     assert.ok(result, `rejected ${context}`);
-    const { vertices, indices } = result;
+    const indices = result.indices;
+    const vertices = scale === 1 ? result.vertices : result.vertices.map((v) => v / scale);
     for (let j = 0; j < vertices.length; j++) {
       assert.ok(Number.isFinite(vertices[j]), `nonfinite vertex: ${context}`);
     }
@@ -187,7 +201,7 @@ for (const by of [tessellator, banded]) {
       checked++;
     }
 
-    pending.push({ contours, nonZero, alone: result });
+    pending.push({ contours: given, nonZero, alone: result });
     if (pending.length === 8) {
       checkLayer(by);
     }

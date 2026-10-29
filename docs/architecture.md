@@ -3158,12 +3158,22 @@ leaves an overlap empty while non-zero can fill it (`crossing-fills`).
 `clear` takes everything and the styles away; `copyFrom` clears first
 and then copies, so a drawing copied from itself ends empty, as Flash's
 does (the `draws` case). The drawn order is the calls' order but for
-lines, which draw over the fill they are drawn with: each fill begins a
-layer, as a SWF shape's new styles do, and the lines drawn from then
-until the next fill begins go in it, over the fill and under the next,
-whenever their `lineStyle` was set; a line open as a fill begins goes on
-in the new layer, and lines drawn before any fill are a layer of their
-own (the `line-order` case). A sprite's drawing is under its children.
+lines, which draw over the fill they are drawn with: a fill begun after
+lines, triangles or meshes begins a layer, as a SWF shape's new styles
+do, and the lines drawn from then until the next fill begins go in it,
+over the fill and under the next, whenever their `lineStyle` was set; a
+line open as a fill begins goes on in the new layer, and lines drawn
+before any fill are a layer of their own (the `line-order` case). A fill
+begun while the last layer holds fills alone goes on in it, after them,
+as fills in a layer draw in order: a drawing redrawn every frame a fill
+a triangle, as a software 3D engine draws, is one layer, not thousands.
+A sprite's drawing is under its children.
+
+A layer's fills are its geometries in order: a stretch of solid fills
+one, and a stretch of bitmap fills of one bitmap, smoothed and repeated
+alike, one, each vertex sampling through its own fill's matrix
+(`scene/shapes.ts`); any other fill between them parts them. A gradient
+fill is one of its own.
 
 The renderer keeps a drawing's fills and strokes as it keeps a shape's,
 per display object rather than per character, since a drawing changes,
