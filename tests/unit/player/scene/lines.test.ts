@@ -2,6 +2,7 @@
 // again by their transform, and let go of within its budget.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Tessellator } from "@swf2es/native/tessellate";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
 import { Geometries } from "../../../../packages/render/dist/index.js";
@@ -100,4 +101,41 @@ test("after a busy stretch, the lines no longer drawn go within a sweep", () => 
     [true, false, false, false, false, false, false, false, false, false],
   );
   assert.equal(lines.kept, 1);
+});
+
+test("a tessellator that builds lines builds them, one that refuses leaves them to JS alike", () => {
+  const tessellate = new Tessellator().tessellate;
+  let built = 0;
+  let refused = 0;
+  const counting = (refuse: boolean) =>
+    Object.assign(
+      (contours: readonly (readonly number[])[], nonZero: boolean) => tessellate(contours, nonZero),
+      {
+        lines: {
+          input: (n: number) => tessellate.lines.input(n),
+          build: (length: number) => {
+            if (refuse) {
+              refused++;
+              return undefined;
+            }
+
+            built++;
+            return tessellate.lines.build(length);
+          },
+        },
+      },
+    );
+  const layer = straightLine();
+  const native = new Geometries();
+  const js = new Geometries();
+  // Drawn opaque, and through a fade, where the line is outlined and its outline tessellated.
+  for (const opaque of [true, false]) {
+    const a = new LineCache(native, counting(false)).take(layer, 0, 2, 0, 0, 2, 1, null, opaque);
+    const b = new LineCache(js, counting(true)).take(layer, 0, 2, 0, 0, 2, 1, null, opaque);
+    assert.ok(a && b);
+    assert.deepEqual(native.get(a.id), js.get(b.id));
+  }
+
+  assert.equal(built, 2);
+  assert.equal(refused, 2);
 });
