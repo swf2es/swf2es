@@ -4,15 +4,7 @@
 
 import type { Abc, AsObject, Value } from "./descriptors.js";
 import type { Domain } from "./domain.js";
-import {
-  CONSTANT_Qname,
-  Multiname,
-  NS_Public,
-  namespace,
-  publicNs,
-  qname,
-  userVersions,
-} from "./names.js";
+import { CONSTANT_Qname, Multiname, NS_Public, namespace, publicNs, qname } from "./names.js";
 import type { Runtime } from "./runtime.js";
 
 /**
@@ -21,20 +13,7 @@ import type { Runtime } from "./runtime.js";
  * and a player's lookups by name go through, at every version.
  */
 export function classNamed(rt: Runtime, qualified: string, domain: Domain | null): AsObject {
-  const named = (domain ?? rt.root).named;
-  const known = named.get(qualified);
-  if (known) {
-    return known;
-  }
-
-  const mn = qualifiedNameIn(rt, qualified, domain);
-  const cls = rt.resolveName(mn);
-  // A script still running its initializer may not have made the class yet.
-  if (cls) {
-    named.set(qualified, cls);
-  }
-
-  return cls;
+  return classIn(rt, qualified, domain, (domain ?? rt.root).named, null);
 }
 
 /**
@@ -43,7 +22,29 @@ export function classNamed(rt: Runtime, qualified: string, domain: Domain | null
  * or the VM's own is a ReferenceError.
  */
 export function classNamedByCode(rt: Runtime, qualified: string, domain: Domain): AsObject {
-  return rt.resolveName(qualifiedNameIn(rt, qualified, domain, userVersions(rt.apiVersion)));
+  return classIn(rt, qualified, domain, domain.namedByCode, rt.userVersions);
+}
+
+/** The class `qualified` names, at `versions` or every version, kept in `named` once found. */
+function classIn(
+  rt: Runtime,
+  qualified: string,
+  domain: Domain | null,
+  named: Map<string, AsObject>,
+  versions: readonly number[] | null,
+): AsObject {
+  const known = named.get(qualified);
+  if (known) {
+    return known;
+  }
+
+  const cls = rt.resolveName(qualifiedNameIn(rt, qualified, domain, versions));
+  // A script still running its initializer may not have made the class yet.
+  if (cls) {
+    named.set(qualified, cls);
+  }
+
+  return cls;
 }
 
 /**
@@ -56,7 +57,7 @@ export function classNamedByCode(rt: Runtime, qualified: string, domain: Domain)
  * or the VM's own is not defined, as it is not to the code itself.
  */
 export function definitionNamed(rt: Runtime, qualified: string, domain: Domain): Value {
-  const mn = qualifiedNameIn(rt, qualified, domain, userVersions(rt.apiVersion));
+  const mn = qualifiedNameIn(rt, qualified, domain, rt.userVersions);
   const script = rt.findScript(mn);
   if (!script) {
     throw rt.error("ReferenceError", 1065, mn.name);
@@ -67,18 +68,19 @@ export function definitionNamed(rt: Runtime, qualified: string, domain: Domain):
 
 /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
 export function definingAbc(rt: Runtime, qualified: string, domain: Domain): Abc | null {
-  return rt.findScript(qualifiedNameIn(rt, qualified, domain))?.abc ?? null;
+  return rt.findScript(qualifiedNameIn(rt, qualified, domain, null))?.abc ?? null;
 }
 
 /**
  * The public name "pkg::Name" or "Name" stands for, looked up in `domain`:
- * at every version, as the host reaches names, or at `versions`.
+ * at `versions`, user code's as code finds a name, or with null at every
+ * version, as the host reaches names.
  */
 function qualifiedNameIn(
   rt: Runtime,
   qualified: string,
   domain: Domain | null,
-  versions?: readonly number[],
+  versions: readonly number[] | null,
 ): Multiname {
   const i = qualified.lastIndexOf("::");
   const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));

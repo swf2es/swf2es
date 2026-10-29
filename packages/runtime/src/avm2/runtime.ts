@@ -11,6 +11,7 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture/compiler.md, "Modules and the bootstrap").
 
+import { API_VERSION, checkApiVersion } from "@swf2es/format";
 import { AmfClasses } from "./amf-classes.js";
 import { ArrayConversion } from "./array-conversion.js";
 import { fillCache } from "./cache-fill.js";
@@ -52,7 +53,6 @@ import {
 } from "./method-factories.js";
 import { Modules } from "./modules.js";
 import {
-  API_USER,
   arrayIndex,
   CONSTANT_Multiname,
   CONSTANT_MultinameA,
@@ -146,6 +146,10 @@ export class Runtime {
   swfVersion: number;
   /** See RuntimeOptions.apiVersion. */
   readonly apiVersion: number;
+  /** The versions of a name user code makes from a string (publicQname): the one list, made once. */
+  readonly userVersions: readonly number[];
+  /** JSON.stringify's toJSON, at user code's version, made once. */
+  readonly toJSONName: Multiname;
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
@@ -219,7 +223,9 @@ export class Runtime {
     this.workerInit = options.worker ?? null;
     this.syncInit = options.sync ?? null;
     this.swfVersion = options.swfVersion ?? 31;
-    this.apiVersion = options.apiVersion ?? API_USER;
+    this.apiVersion = checkApiVersion(options.apiVersion ?? API_VERSION);
+    this.userVersions = [this.apiVersion];
+    this.toJSONName = publicQname("toJSON", this.userVersions);
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
     this.objectTraits.testsValues = true;
@@ -462,7 +468,7 @@ export class Runtime {
     // one defining Object makes XML while XML's needs Object.
     if (!this.toplevelReady) {
       this.toplevelReady = true;
-      const toplevel = this.findScript(publicQname("Object", this.apiVersion));
+      const toplevel = this.findScript(publicQname("Object", this.userVersions));
       this.toplevel = toplevel;
       if (toplevel && toplevel !== script) {
         this.initScript(toplevel);
@@ -1258,7 +1264,7 @@ export class Runtime {
       );
     }
 
-    return this.hasProperty(o, publicQname(this.nameString(name), this.apiVersion));
+    return this.hasProperty(o, publicQname(this.nameString(name), this.userVersions));
   }
 
   /** Whether `o` itself has element `i`: its class's indexing, an Array's, or a dynamic property. */
@@ -2322,7 +2328,7 @@ export class Runtime {
     // that is not a function is TypeError 1006; a Namespace is a primitive.
     const order = hint === "string" ? STRING_PRIMITIVE_ORDER : NUMBER_PRIMITIVE_ORDER;
     for (const name of order) {
-      const v = this.callProperty(o, publicQname(name, this.apiVersion));
+      const v = this.callProperty(o, publicQname(name, this.userVersions));
       if (
         v === null ||
         typeof v !== "object" ||

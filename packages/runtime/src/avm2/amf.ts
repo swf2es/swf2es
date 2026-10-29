@@ -332,7 +332,7 @@ export class Writer implements ExternalStream {
     this.u8(d.$weakKeys ? 1 : 0);
     for (const name of names) {
       this.value(name);
-      this.value(rt.getProperty(d, publicQname(name, rt.apiVersion)));
+      this.value(rt.getProperty(d, publicQname(name, rt.userVersions)));
     }
 
     for (const [key, value] of keys) {
@@ -371,7 +371,7 @@ export class Writer implements ExternalStream {
         continue;
       }
 
-      const value = rt.getProperty(a, publicQname(name, rt.apiVersion));
+      const value = rt.getProperty(a, publicQname(name, rt.userVersions));
       if (value?.$f) {
         continue;
       }
@@ -448,7 +448,7 @@ export class Writer implements ExternalStream {
 
     const info = known[1];
     if (info.externalizable) {
-      const write = this.rt.getProperty(o, publicQname("writeExternal", this.rt.apiVersion));
+      const write = this.rt.getProperty(o, publicQname("writeExternal", this.rt.userVersions));
       if (write?.$f) {
         this.rt.callValue(write, o, [externalStream(this.rt, "ObjectOutput", this)], null);
       }
@@ -457,7 +457,7 @@ export class Writer implements ExternalStream {
     }
 
     for (const name of info.sealed) {
-      this.value(this.rt.getProperty(o, publicQname(name, this.rt.apiVersion)));
+      this.value(this.rt.getProperty(o, publicQname(name, this.rt.userVersions)));
     }
 
     if (info.dynamic) {
@@ -466,7 +466,7 @@ export class Writer implements ExternalStream {
         this.dynamicProperties(writer, o);
       } else {
         for (const name of this.rt.enumerableNames(o)) {
-          const value = this.rt.getProperty(o, publicQname(name, this.rt.apiVersion));
+          const value = this.rt.getProperty(o, publicQname(name, this.rt.userVersions));
           if (value?.$f || name.length === 0) {
             continue;
           }
@@ -487,7 +487,7 @@ export class Writer implements ExternalStream {
    */
   private dynamicProperties(writer: AsObject, o: AsObject): void {
     const rt = this.rt;
-    const f = rt.getProperty(writer, publicQname("writeDynamicProperties", rt.apiVersion));
+    const f = rt.getProperty(writer, publicQname("writeDynamicProperties", rt.userVersions));
     if (f === null || typeof f !== "object") {
       return;
     }
@@ -612,7 +612,7 @@ export class Reader implements ExternalStream {
    */
   private set(o: AsObject, name: string, value: Value): void {
     try {
-      this.rt.setProperty(o, publicQname(name, this.rt.apiVersion), value);
+      this.rt.setProperty(o, publicQname(name, this.rt.userVersions), value);
     } catch (e) {
       if (e instanceof Error) {
         throw e;
@@ -639,7 +639,7 @@ export class Reader implements ExternalStream {
       const key = this.value();
       const value = this.value();
       if (typeof key === "string") {
-        rt.setProperty(d, publicQname(key, rt.apiVersion), value);
+        rt.setProperty(d, publicQname(key, rt.userVersions), value);
       } else if (typeof key === "object" && key !== null) {
         d.$keys.set(key, value);
       } else {
@@ -868,7 +868,7 @@ export class Reader implements ExternalStream {
     const o = rt.constructClass(cls, []);
     this.objects.push(o);
     if (info.externalizable) {
-      const read = rt.getProperty(o, publicQname("readExternal", rt.apiVersion));
+      const read = rt.getProperty(o, publicQname("readExternal", rt.userVersions));
       if (read?.$f) {
         rt.callValue(read, o, [externalStream(rt, "ObjectInput", this)], null);
       }

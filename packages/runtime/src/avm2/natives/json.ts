@@ -316,7 +316,7 @@ function parse(rt: Runtime, text: string): Value {
             }
 
             advance();
-            rt.setProperty(o, publicQname(name, rt.apiVersion), parseValue());
+            rt.setProperty(o, publicQname(name, rt.userVersions), parseValue());
             if (current() !== ",") {
               break;
             }
@@ -467,12 +467,12 @@ class Serializer {
     const traits = rt.traitsOf(value);
     let bound = boundToJSON.get(traits);
     if (bound === undefined) {
-      bound = traits.find(publicQname("toJSON", rt.apiVersion)) !== 0;
+      bound = traits.find(rt.toJSONName) !== 0;
       boundToJSON.set(traits, bound);
     }
 
     if (bound) {
-      return rt.getProperty(value, publicQname("toJSON", rt.apiVersion));
+      return rt.getProperty(value, rt.toJSONName);
     }
 
     const own: Map<string, Value> | null | undefined =
@@ -508,7 +508,7 @@ class Serializer {
       // A dynamic property of its own is where getProperty would find it.
       const v = own?.has(name)
         ? own.get(name)
-        : rt.getProperty(value, publicQname(name, rt.apiVersion));
+        : rt.getProperty(value, publicQname(name, rt.userVersions));
       const written = this.str(name, v, value);
       if (written === undefined) {
         return;

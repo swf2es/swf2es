@@ -13,7 +13,7 @@ export const objectNatives: Natives = {
   "Object.Object::_hasOwnProperty": (rt) => (o: Value, v: Value) => {
     const name = rt.toString(v);
     const traits = rt.traitsOf(o);
-    if (traits.find(publicQname(name, rt.apiVersion)) !== 0) {
+    if (traits.find(publicQname(name, rt.userVersions)) !== 0) {
       return true;
     }
 

@@ -40,6 +40,8 @@ export class Domain {
    * one for each object it makes, need not name it anew each time.
    */
   readonly named = new Map<string, AsObject>();
+  /** The same, of the classes code finds by name, at user code's version (classNamedByCode). */
+  readonly namedByCode = new Map<string, AsObject>();
   readonly own: string[] = [];
   /** Each of its ABCs' place among all the runtime loads. */
   readonly ownOrder: number[] = [];

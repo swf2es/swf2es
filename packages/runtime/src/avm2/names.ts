@@ -251,32 +251,13 @@ export function qname(ns: Namespace, name: string): Multiname {
 }
 
 /**
- * Flash Player's latest API version, 50: user code's by default, which a
- * host resets codegen's domains with too (its API_VERSION). An AIR host's
- * is AIR's (RuntimeOptions.apiVersion).
- */
-export const API_USER = 50;
-const versionLists = new Map<number, readonly number[]>();
-
-/** The versions of a name seen at user code's API version `version`: one list for each version. */
-export function userVersions(version: number): readonly number[] {
-  let list = versionLists.get(version);
-  if (!list) {
-    list = [version];
-    versionLists.set(version, list);
-  }
-
-  return list;
-}
-
-/**
  * A public name the runtime makes from a string, as `in`, hasOwnProperty,
  * JSON and AMF do: seen at user code's version, as avmplus' findPublicNamespace
  * sees it from the user code on the call stack, so an AIR-only or a
  * VM-internal binding is not there, as it is not to the code itself.
  */
-export function publicQname(name: string, version: number): Multiname {
-  return new Multiname(CONSTANT_Qname, PUBLIC_NAMESPACES, userVersions(version), name, false);
+export function publicQname(name: string, versions: readonly number[]): Multiname {
+  return new Multiname(CONSTANT_Qname, PUBLIC_NAMESPACES, versions, name, false);
 }
 
 /** The builtin Vector classes, which avmplus names as the types they are vectors of. */
