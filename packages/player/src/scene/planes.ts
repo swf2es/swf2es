@@ -33,26 +33,30 @@ function planeQuadData(
   width: number,
   height: number,
 ): boolean {
+  // A function, not a closure over `changed`: it ran for every 3D object on every frame.
   let changed = false;
-  const set = (array: Float32Array, i: number, v: number) => {
-    const stored = Math.fround(v);
-    if (array[i] !== stored) {
-      array[i] = stored;
-      changed = true;
-    }
-  };
-
   for (let i = 0; i < 8; i++) {
-    set(data.positions, i, quad.positions[i]);
+    changed = setStored(data.positions, i, quad.positions[i]) || changed;
   }
 
   for (let i = 0; i < 4; i++) {
-    set(data.texels, i * 2, i === 1 || i === 2 ? width : 0);
-    set(data.texels, i * 2 + 1, i >= 2 ? height : 0);
-    set(data.depths, i, 1 / quad.ws[i]);
+    changed = setStored(data.texels, i * 2, i === 1 || i === 2 ? width : 0) || changed;
+    changed = setStored(data.texels, i * 2 + 1, i >= 2 ? height : 0) || changed;
+    changed = setStored(data.depths, i, 1 / quad.ws[i]) || changed;
   }
 
   return changed;
+}
+
+/** `v` stored at `array[i]` as a 32-bit float: whether that changed it. */
+function setStored(array: Float32Array, i: number, v: number): boolean {
+  const stored = Math.fround(v);
+  if (array[i] === stored) {
+    return false;
+  }
+
+  array[i] = stored;
+  return true;
 }
 
 /** What a 3D object's bitmap was last drawn of, and its bounds then (RenderView.drawPlane). */
