@@ -3,7 +3,7 @@
 // bitmap sampled alike, and each gradient fill, its vertices carrying where they sample in texels;
 // then drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
 
-import type { Matrix } from "@swf2es/format";
+import { IDENTITY, type Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
@@ -67,13 +67,49 @@ export function vertexColor(argb: number): number {
   );
 }
 
+/**
+ * What the part open is gathered in, grown as it needs and kept for the
+ * next: a drawing redrawn on every frame made each part's numbers in lists
+ * and copied them out, garbage on every frame. A part copies out what it used.
+ */
+const SCRATCH_VERTICES = 512;
+/** The vertices past which scratch grown for a large drawing is let go of after it, not kept. */
+const MOST_KEPT_VERTICES = 65536;
+let scratchPositions = new Float32Array(SCRATCH_VERTICES * 2);
+let scratchColors = new Uint32Array(SCRATCH_VERTICES);
+let scratchTexels = new Float32Array(SCRATCH_VERTICES * 2);
+let scratchIndices = new Uint32Array(SCRATCH_VERTICES * 3);
+
+/** `array` with room for `n` elements, its first `used` kept. */
+function roomy<T extends Float32Array | Uint32Array>(array: T, n: number, used: number): T {
+  if (n <= array.length) {
+    return array;
+  }
+
+  const grown = new (array.constructor as new (n: number) => T)(Math.max(n, array.length * 2));
+  grown.set(array.subarray(0, used));
+
+  return grown;
+}
+
+/** The scratch back at its usual size, where a large drawing grew it. */
+function shrinkScratch(): void {
+  if (scratchColors.length > MOST_KEPT_VERTICES) {
+    scratchPositions = new Float32Array(SCRATCH_VERTICES * 2);
+    scratchColors = new Uint32Array(SCRATCH_VERTICES);
+    scratchTexels = new Float32Array(SCRATCH_VERTICES * 2);
+  }
+
+  if (scratchIndices.length > MOST_KEPT_VERTICES * 3) {
+    scratchIndices = new Uint32Array(SCRATCH_VERTICES * 3);
+  }
+}
+
 /** The parts being gathered: positions, colours, texels and indices of the part open. */
 class Gathered {
   readonly parts: Part[] = [];
-  private positions: number[] = [];
-  private colors: number[] = [];
-  private texels: number[] = [];
-  private indices: number[] = [];
+  private vertices = 0;
+  private corners = 0;
   private paint: ImageFill | GradientFill | null = null;
   private region: Area | null = null;
 
@@ -97,26 +133,49 @@ class Gathered {
     this.region = region;
   }
 
-  /** A vertex at (x, y) of `color`, sampling at texel (u, v): its index in the part. */
-  vertex(x: number, y: number, color: number, u: number, v: number): number {
-    this.positions.push(x, y);
-    this.colors.push(color);
-    this.texels.push(u, v);
-    return this.positions.length / 2 - 1;
+  /** The index the next vertex takes in the part. */
+  get next(): number {
+    return this.vertices;
   }
 
+  /** Room for `vertices` more vertices and `corners` more indices, which vertex and triangle take. */
+  reserve(vertices: number, corners: number): void {
+    const n = this.vertices + vertices;
+    scratchPositions = roomy(scratchPositions, n * 2, this.vertices * 2);
+    scratchColors = roomy(scratchColors, n, this.vertices);
+    scratchTexels = roomy(scratchTexels, n * 2, this.vertices * 2);
+    scratchIndices = roomy(scratchIndices, this.corners + corners, this.corners);
+  }
+
+  /** A vertex at (x, y) of `color`, sampling at texel (u, v), in room reserve made. */
+  vertex(x: number, y: number, color: number, u: number, v: number): void {
+    const n = this.vertices;
+    scratchPositions[n * 2] = x;
+    scratchPositions[n * 2 + 1] = y;
+    scratchColors[n] = color;
+    scratchTexels[n * 2] = u;
+    scratchTexels[n * 2 + 1] = v;
+    this.vertices = n + 1;
+  }
+
+  /** A triangle of the part's vertices `a`, `b` and `c`, in room reserve made. */
   triangle(a: number, b: number, c: number): void {
-    this.indices.push(a, b, c);
+    const n = this.corners;
+    scratchIndices[n] = a;
+    scratchIndices[n + 1] = b;
+    scratchIndices[n + 2] = c;
+    this.corners = n + 3;
   }
 
   close(): void {
-    if (this.indices.length > 0) {
+    const n = this.vertices;
+    if (this.corners > 0) {
       this.parts.push({
         geometry: {
-          positions: Float32Array.from(this.positions),
-          colors: Uint32Array.from(this.colors),
-          texels: this.paint ? Float32Array.from(this.texels) : undefined,
-          indices: Uint32Array.from(this.indices),
+          positions: scratchPositions.slice(0, n * 2),
+          colors: scratchColors.slice(0, n),
+          texels: this.paint ? scratchTexels.slice(0, n * 2) : undefined,
+          indices: scratchIndices.slice(0, this.corners),
         },
         paint: this.paint,
         region: this.region,
@@ -124,10 +183,8 @@ class Gathered {
       });
     }
 
-    this.positions = [];
-    this.colors = [];
-    this.texels = [];
-    this.indices = [];
+    this.vertices = 0;
+    this.corners = 0;
   }
 }
 
@@ -136,46 +193,52 @@ class Gathered {
  * bitmap: through its matrix's inverse. A linear gradient: across its ramp,
  * half a pixel back so that a pixel's centre reads what Flash reads at its
  * corner. A radial one: across the region its texture was computed over.
+ * at() leaves the texel in u and v, not in a pair made for each vertex,
+ * and one is set again for each fill (sampling), not made for each.
  */
-type Sampling = (x: number, y: number) => [number, number];
+class Sampling {
+  u = 0;
+  v = 0;
+  region: Area | null = null;
+  private kind: "image" | "linear" | "radial" = "image";
+  private m: Matrix = IDENTITY;
+  private columns = 0;
+  private rows = 0;
 
-function sampling(
-  paint: ImageFill | GradientFill,
-  contours: readonly Path[],
-): {
-  at: Sampling;
-  region: Area | null;
-} {
-  const m = invert(paint.matrix) as Matrix;
-  const inverse = (x: number, y: number): [number, number] => [
-    m.a * x + m.c * y + m.tx,
-    m.b * x + m.d * y + m.ty,
-  ];
-  if (paint.type === "image") {
-    return { at: inverse, region: null };
+  set(paint: ImageFill | GradientFill, contours: readonly Path[]): this {
+    this.m = invert(paint.matrix) as Matrix;
+    this.kind = paint.type === "image" ? "image" : paint.radial ? "radial" : "linear";
+    this.region = this.kind === "radial" ? regionOf(contours as Path[]) : null;
+    this.columns = this.region ? radialTexels(this.region.width) : 0;
+    this.rows = this.region ? radialTexels(this.region.height) : 0;
+    return this;
   }
 
-  if (!paint.radial) {
-    return {
-      at: (x, y) => {
-        const [sx, sy] = inverse(x - 0.5, y - 0.5);
-        return [((sx + 819.2) * RAMP) / 1638.4, (sy + 819.2) / 1638.4];
-      },
-      region: null,
-    };
+  at(x: number, y: number): void {
+    const m = this.m;
+    switch (this.kind) {
+      case "image":
+        this.u = m.a * x + m.c * y + m.tx;
+        this.v = m.b * x + m.d * y + m.ty;
+        break;
+      case "linear": {
+        const sx = m.a * (x - 0.5) + m.c * (y - 0.5) + m.tx;
+        const sy = m.b * (x - 0.5) + m.d * (y - 0.5) + m.ty;
+        this.u = ((sx + 819.2) * RAMP) / 1638.4;
+        this.v = (sy + 819.2) / 1638.4;
+        break;
+      }
+      default: {
+        const r = this.region as Area;
+        this.u = ((x - r.x) * this.columns) / r.width;
+        this.v = ((y - r.y) * this.rows) / r.height;
+      }
+    }
   }
-
-  const region = regionOf(contours as Path[]);
-  const columns = radialTexels(region.width);
-  const rows = radialTexels(region.height);
-  return {
-    at: (x, y) => [
-      ((x - region.x) * columns) / region.width,
-      ((y - region.y) * rows) / region.height,
-    ],
-    region,
-  };
 }
+
+/** The one Sampling fillParts sets for each textured fill. */
+const sampling = new Sampling();
 
 /** The texels a radial gradient's texture has across `pixels` of its region. */
 export function radialTexels(pixels: number): number {
@@ -253,21 +316,21 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
       }
     }
 
-    const how = textured ? sampling(textured, contours) : null;
+    const how = textured ? sampling.set(textured, contours) : null;
     out.open(textured, how?.region ?? null);
     const color = textured ? WHITE : vertexColor(fill.type === "solid" ? fill.color : 0xffff0000);
-    const vertex = (x: number, y: number) => {
-      const [u, v] = how ? how.at(x, y) : [0, 0];
-      return out.vertex(x, y, color, u, v);
-    };
 
     // A fill refused, or of nothing, adds no vertex.
     const geometry = geometries[i];
     if (geometry && geometry.vertices.length > 0) {
       const { vertices, indices, indexOffset = 0 } = geometry;
-      const first = vertex(vertices[0], vertices[1]);
-      for (let k = 2; k < vertices.length; k += 2) {
-        vertex(vertices[k], vertices[k + 1]);
+      out.reserve(vertices.length / 2, indices.length);
+      const first = out.next;
+      for (let k = 0; k < vertices.length; k += 2) {
+        const x = vertices[k];
+        const y = vertices[k + 1];
+        how?.at(x, y);
+        out.vertex(x, y, color, how ? how.u : 0, how ? how.v : 0);
       }
 
       for (let k = 0; k < indices.length; k += 3) {
@@ -281,6 +344,8 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
   }
 
   out.close();
+  shrinkScratch();
+
   return out.parts;
 }
 

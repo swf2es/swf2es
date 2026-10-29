@@ -22,6 +22,8 @@ const JOINTS: Record<string, number> = { round: 0, bevel: 1, miter: 2 };
 /** Which way round a triangle drawTriangles drops: 1 clockwise on a y-down screen, -1 the other. */
 const CULLING: Record<string, number> = { none: 0, positive: 1, negative: -1 };
 const IDENTITY = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+// Made once: a drawing may begin a bitmap fill for each triangle it draws on every frame.
+const MATRIX_NAMES = ["a", "b", "c", "d", "tx", "ty"].map((k) => avm2.qname(avm2.publicNs, k));
 
 /** The gradients begun with no matrix, which read back with Flash's default for one. */
 const unplaced = new WeakSet<Paint>();
@@ -53,6 +55,24 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
   const num = (v: Value, fallback = 0) => {
     const n = Number(v);
     return Number.isNaN(n) ? fallback : n;
+  };
+  /** A fill's matrix from an AS3 Matrix, or the identity for none. */
+  const matrixFrom = (matrix: Value): Matrix => {
+    if (matrix === null || matrix === undefined) {
+      return { ...IDENTITY };
+    }
+
+    const rt = s.rt;
+    const m = matrix as AsObject;
+
+    return {
+      a: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[0])),
+      b: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[1])),
+      c: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[2])),
+      d: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[3])),
+      tx: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[4])),
+      ty: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[5])),
+    };
   };
 
   /** The data of `display`'s drawing, a timeline shape's too, and with `recurse` its children's, each through `m`. */
@@ -190,10 +210,6 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const read = (k: string, fallback: number) =>
-        matrix === null || matrix === undefined
-          ? fallback
-          : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
       const spread = s.rt.toString(spreadMethod);
       const fill: Paint = {
         type: "gradient",
@@ -202,14 +218,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         stops: c.slice(0, 16).map((color, i) => ({ ratio: r[i], color: argb(color, a[i]) })),
         spread: spread === "reflect" ? 1 : spread === "repeat" ? 2 : 0,
         linearRgb: s.rt.toString(interpolationMethod) === "linearRGB",
-        matrix: {
-          a: read("a", 1),
-          b: read("b", 0),
-          c: read("c", 0),
-          d: read("d", 1),
-          tx: read("tx", 0),
-          ty: read("ty", 0),
-        },
+        matrix: matrixFrom(matrix),
       };
       if (matrix === null || matrix === undefined) {
         unplaced.add(fill);
@@ -234,22 +243,11 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2015);
       }
 
-      const read = (k: string, fallback: number) =>
-        matrix === null || matrix === undefined
-          ? fallback
-          : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
       store.views.add(this.$display.ref);
       drawing(this).beginFill({
         type: "image",
         image: store,
-        matrix: {
-          a: read("a", 1),
-          b: read("b", 0),
-          c: read("c", 0),
-          d: read("d", 1),
-          tx: read("tx", 0),
-          ty: read("ty", 0),
-        },
+        matrix: matrixFrom(matrix),
         repeat: !!repeat,
         smooth: !!smooth,
       });
