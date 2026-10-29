@@ -40,14 +40,16 @@ function mixHash(h: number, x: number): number {
 /**
  * A layer's lines as of its drawing's `version`: whether they all scale
  * both ways (scalesEvenly), what the layer brings to its object's settled
- * stretch (evenWidth), whether any is of whole alpha, and their entries by
- * their key's hash.
+ * stretch (evenWidth), whether any is of whole alpha, whether the native
+ * line builder refused them, which leaves them to layerStrokes until the
+ * drawing changes, and their entries by their key's hash.
  */
 export interface LayerLines {
   version: number;
   even: boolean;
   width: number;
   whole: boolean;
+  refused: boolean;
   byHash: Map<number, LineEntry[]>;
 }
 
@@ -106,7 +108,14 @@ export class LineCache {
   of(layer: ShapeLayer, version: number): LayerLines {
     let lines = this.byLayer.get(layer);
     if (!lines) {
-      lines = { version: -1, even: false, width: 0, whole: false, byHash: new Map() };
+      lines = {
+        version: -1,
+        even: false,
+        width: 0,
+        whole: false,
+        refused: false,
+        byHash: new Map(),
+      };
       this.byLayer.set(layer, lines);
     }
 
@@ -115,6 +124,7 @@ export class LineCache {
       lines.even = scalesEvenly(layer);
       lines.width = evenWidth(layer);
       lines.whole = false;
+      lines.refused = false;
       for (let i = 0; !lines.whole && i < layer.strokes.length; i++) {
         lines.whole = layer.strokes[i].line.color >>> 24 === 255;
       }
@@ -195,12 +205,16 @@ export class LineCache {
     }
 
     this.counts.strokeContexts++;
-    // Natively where the tessellator builds lines, else, or where it refuses them, in JS.
-    const native = this.tessellator.lines;
+    // Natively where the tessellator builds lines, else, or where it refused them, in JS.
+    const native = lines.refused ? undefined : this.tessellator.lines;
     let data = native
       ? layerStrokesNative(layer, a, b, c, d, least, native, by, opaque)
       : undefined;
     if (data === undefined) {
+      if (native) {
+        lines.refused = true;
+      }
+
       data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by, opaque);
     }
 

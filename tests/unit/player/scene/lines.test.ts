@@ -139,3 +139,29 @@ test("a tessellator that builds lines builds them, one that refuses leaves them 
   assert.equal(built, 2);
   assert.equal(refused, 2);
 });
+
+test("a layer the line builder refused goes to JS until its drawing changes", () => {
+  const tessellate = new Tessellator().tessellate;
+  let asked = 0;
+  const refusing = Object.assign(
+    (contours: readonly (readonly number[])[], nonZero: boolean) => tessellate(contours, nonZero),
+    {
+      lines: {
+        input: (n: number) => tessellate.lines.input(n),
+        build: () => {
+          asked++;
+          return undefined;
+        },
+      },
+    },
+  );
+  const lines = new LineCache(new Geometries(), refusing);
+  const layer = straightLine();
+  for (let scale = 1; scale <= 3; scale++) {
+    assert.ok(lines.take(layer, 0, scale, 0, 0, scale, 1, null, true));
+  }
+
+  assert.equal(asked, 1);
+  assert.ok(lines.take(layer, 1, 1, 0, 0, 1, 1, null, true));
+  assert.equal(asked, 2);
+});
