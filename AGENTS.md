@@ -127,9 +127,6 @@ node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property ac
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
                               # and Vectors (map, filter, sort, conversion), as the one above
-pnpm dlx knip                 # files and exports nothing uses (knip.json; not a dependency);
-                              # generated code calls the runtime by name, so grep the emitters'
-                              # strings before removing what it lists
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
