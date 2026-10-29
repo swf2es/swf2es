@@ -111,7 +111,7 @@ test("a line wider than its curve leaves no hole inside, whatever its joins and 
     for (let i = 0; i < n; i++) {
       angle += (random() - 0.5) * 1.6;
       const step = 0.3 + random() * 4;
-      p.push(p.at(-2) + Math.cos(angle) * step, p.at(-1) + Math.sin(angle) * step);
+      p.push(p[p.length - 2] + Math.cos(angle) * step, p[p.length - 1] + Math.sin(angle) * step);
     }
 
     const h = 0.2 + random() * 7;
