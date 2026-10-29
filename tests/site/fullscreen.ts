@@ -63,7 +63,7 @@ export function fullscreenChecks(page: Page): [string, () => Promise<void>][] {
       "fullscreen enlarges Stage3D and its overlay together, keeps input and restores layout",
       async () => {
         await metrics(320, 600);
-        await navigate("index.html");
+        await navigate("play/");
         const abc = compileScripts(
           [
             {
@@ -85,9 +85,12 @@ export function fullscreenChecks(page: Page): [string, () => Promise<void>][] {
           .find(c => c.width === 32 && c.height === 32)`);
         const before = await state();
         const pixel = async (x: number, y: number, expected: number[]) => {
+          // The clip is in the document's coordinates, and the page behind the stage may have
+          // scrolled to the player as it took focus.
+          const [scrollX, scrollY] = await value<number[]>("[scrollX, scrollY]");
           const shot = await send<{ data: string }>("Page.captureScreenshot", {
             format: "png",
-            clip: { x, y, width: 1, height: 1, scale: 1 },
+            clip: { x: x + scrollX, y: y + scrollY, width: 1, height: 1, scale: 1 },
           });
           assert.deepEqual([...decodePng(Buffer.from(shot.data, "base64")).data], expected);
         };
@@ -206,7 +209,7 @@ export function fullscreenChecks(page: Page): [string, () => Promise<void>][] {
     [
       "ordinary playback keeps its responsive fullscreen viewport",
       async () => {
-        await navigate("index.html?swf=demos%2Fbounce.swf");
+        await navigate("play/?swf=demos%2Fbounce.swf");
         await until("document.getElementById('status').textContent === 'Playing bounce.swf.'");
         try {
           await enter();

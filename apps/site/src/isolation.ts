@@ -80,8 +80,10 @@ export async function isolate(): Promise<boolean> {
       container.addEventListener("controllerchange", () => done(true), { once: true });
       setTimeout(() => done(false), WAIT);
     });
-    const registration = await container.register(new URL("service-worker.js", document.baseURI), {
-      scope: "./",
+    // At the site's root, above app/, serving every page of the site.
+    const site = new URL("../", import.meta.url);
+    const registration = await container.register(new URL("service-worker.js", site), {
+      scope: site.href,
     });
     // Active already, but not serving this page, as after a reload that
     // bypassed it (Shift-reload): it claims no client again, but serves

@@ -1,0 +1,41 @@
+---
+// The header's links to the site's parts, before Starlight's social icons.
+import Default from "@astrojs/starlight/components/SocialIcons.astro";
+import { base } from "../site.ts";
+
+const here = Astro.url.pathname;
+const links = [
+  { label: "Play", href: `${base}play/` },
+  { label: "Guide", href: `${base}docs/` },
+];
+---
+
+<nav class="site-links" aria-label="Site">
+  {
+    links.map(({ label, href }) => (
+      <a href={href} aria-current={here.startsWith(href) ? "page" : undefined}>
+        {label}
+      </a>
+    ))
+  }
+</nav>
+<Default />
+
+<style>
+  .site-links {
+    display: flex;
+    gap: 1rem;
+    margin-inline-end: 0.5rem;
+  }
+
+  .site-links a {
+    color: var(--sl-color-gray-2);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .site-links a:hover,
+  .site-links a[aria-current="page"] {
+    color: var(--sl-color-text-accent);
+  }
+</style>

@@ -1,7 +1,7 @@
 name: Pages
-# The demo site (apps/site), built from main and published to
-# https://swf2es.github.io/swf2es/. Its ActionScript 3 demo compiles with
-# ASC in the oracle's image, so the job pulls it as CI's does.
+# The site (apps/site: the player and the guide, built by Astro), built from
+# main and published to https://swf2es.github.io/swf2es/. Its ActionScript 3
+# demo compiles with ASC in the oracle's image, so the job pulls it as CI's does.
 on:
   push:
     branches: [main]

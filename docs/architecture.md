@@ -41,7 +41,8 @@ topic each:
   Flash tags.
 - [The desktop app](architecture/desktop.md): its page, sandbox,
   network, files, settings and sockets.
-- [The demo site](architecture/site.md).
+- [The demo site](architecture/site.md): the player and the guide on
+  GitHub Pages, built by Astro and Starlight.
 - [Testing against oracles](architecture/testing.md): avmshell, Flash as
   adl runs it, Ruffle's corpus, fuzzing the compiler.
 

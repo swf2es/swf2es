@@ -64,7 +64,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         await send("Page.addScriptToEvaluateOnNewDocument", {
           source: "performance.setResourceTimingBufferSize(5000)",
         });
-        await navigate("index.html");
+        await navigate("play/");
         await open();
         assert.equal(await value(backendRequests), 0, "default playback fetched the backend");
         const path = `${site}app/stage3d.js`;
@@ -84,7 +84,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
           await click("close");
           await value("releaseSiteStage3D()");
           // Await the same import so its late completion can resume play().
-          await value("import(new URL('app/stage3d.js', document.baseURI).href).then(() => true)");
+          await value("import(new URL('../app/stage3d.js', location.href).href).then(() => true)");
         } finally {
           writeFileSync(path, source);
           rmSync(original);
@@ -98,7 +98,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
     [
       "Stage3D opts in, draws beside a real Worker, restarts and releases its contexts",
       async () => {
-        await navigate("index.html");
+        await navigate("play/");
         assert.equal(await value("document.getElementById('stage3d').checked"), false);
         await open();
         assert.equal(await value(backendRequests), 0, "default playback fetched the backend");
@@ -154,7 +154,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         await click("close");
         await retired();
         assert.equal(await value("document.getElementById('status').textContent"), "Closed.");
-        await navigate("index.html");
+        await navigate("play/");
         assert.equal(await value("document.getElementById('stage3d').checked"), false);
         assert.equal(await value(backendRequests), 0, "a fresh page eagerly fetched the backend");
       },

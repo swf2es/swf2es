@@ -12,3 +12,4 @@ as3/*/bin/
 zig-out/
 .claude/worktrees/
 .claude/settings.local.json
+.astro/

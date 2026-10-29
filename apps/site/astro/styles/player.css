@@ -1,52 +1,30 @@
-:root {
-  color-scheme: light dark;
-  --bg: #f7f7f5;
-  --fg: #1d1f21;
-  --muted: #5d6166;
-  --panel: #ffffff;
-  --border: #d9dad6;
-  --accent: #1f5fbf;
-  --accent-fg: #ffffff;
-  --stage: #e9e9e4;
-  --error: #b3261e;
-  --warn: #8a5a00;
-  --info: #5d6166;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15171a;
-    --fg: #e6e6e3;
-    --muted: #a0a4a8;
-    --panel: #1d2024;
-    --border: #33373c;
-    --accent: #6ea8fe;
-    --accent-fg: #0b1220;
-    --stage: #0e0f11;
-    --error: #ff8a80;
-    --warn: #f2c063;
-    --info: #a0a4a8;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
+/* The player page's controls and panels, in Starlight's colours: its
+   light and dark themes are the page's. Under .player-app, which Starlight's
+   content styles leave alone (.not-content). */
+.player-app {
+  --fg: var(--sl-color-white);
+  --muted: var(--sl-color-gray-3);
+  --panel: var(--sl-color-bg-nav);
+  --border: var(--sl-color-hairline-light);
+  --accent: var(--sl-color-text-accent);
+  --accent-fg: var(--sl-color-black);
+  --stage: var(--sl-color-gray-6);
+  --error: var(--sl-color-red-high);
+  --warn: var(--sl-color-orange-high);
+  --info: var(--sl-color-gray-3);
+  --mono: var(--__sl-font-mono);
   line-height: 1.45;
 }
 
-a {
-  color: var(--accent);
+.player-app a {
+  color: var(--sl-color-text-accent);
 }
 
-.visually-hidden {
+.player-app * {
+  box-sizing: border-box;
+}
+
+.player-app .visually-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -55,43 +33,10 @@ a {
   white-space: nowrap;
 }
 
-.bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 16px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-}
-
-.bar h1 {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.tagline {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  flex: 1 1 16rem;
-}
-
-.bar nav {
-  display: flex;
-  gap: 16px;
-}
-
-main {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 16px 32px;
-}
-
-button,
-.button,
-select,
-input {
+.player-app button,
+.player-app .button,
+.player-app select,
+.player-app input {
   font: inherit;
   font-size: 0.95rem;
   color: var(--fg);
@@ -102,52 +47,52 @@ input {
   min-height: 36px;
 }
 
-button,
-.button {
+.player-app button,
+.player-app .button {
   cursor: pointer;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
 }
 
-button:disabled {
+.player-app button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.primary {
+.player-app .primary {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-.open {
+.player-app .open {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
-.url {
+.player-app .url {
   display: flex;
   flex: 1 1 18rem;
   gap: 8px;
   min-width: 0;
 }
 
-.url input {
+.player-app .url input {
   flex: 1;
   min-width: 0;
 }
 
-.note {
+.player-app .note {
   margin: 8px 0 12px;
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-.stage {
+.player-app .stage {
   --w: 550;
   --h: 400;
   position: relative;
@@ -160,7 +105,7 @@ button:disabled {
   overflow: hidden;
 }
 
-.stage:fullscreen {
+.player-app .stage:fullscreen {
   width: 100%;
   height: 100%;
   border: 0;
@@ -168,22 +113,22 @@ button:disabled {
   background: #000;
 }
 
-body.dragging .stage {
+body.dragging .player-app .stage {
   outline: 3px dashed var(--accent);
   outline-offset: 4px;
 }
 
-swf2es-player {
+.player-app swf2es-player {
   display: block;
   position: absolute;
   inset: 0;
 }
 
-swf2es-player[hidden] {
+.player-app swf2es-player[hidden] {
   display: none;
 }
 
-.stage:fullscreen.composed-fullscreen swf2es-player {
+.player-app .stage:fullscreen.composed-fullscreen swf2es-player {
   width: var(--fullscreen-width);
   height: var(--fullscreen-height);
   inset: 50% auto auto 50%;
@@ -191,7 +136,7 @@ swf2es-player[hidden] {
   transform: translate(-50%, -50%) scale(var(--fullscreen-scale, 1));
 }
 
-.empty {
+.player-app .empty {
   position: absolute;
   inset: 0;
   display: flex;
@@ -202,27 +147,27 @@ swf2es-player[hidden] {
   color: var(--muted);
 }
 
-.ask {
+.player-app .ask {
   overflow: auto;
   color: var(--fg);
 }
 
-.ask p {
+.player-app .ask p {
   margin: 0 0 12px;
   overflow-wrap: anywhere;
 }
 
-.ask .warning {
+.player-app .ask .warning {
   color: var(--muted);
   max-width: 44ch;
   margin-inline: auto;
 }
 
-.empty[hidden] {
+.player-app .empty[hidden] {
   display: none;
 }
 
-.status {
+.player-app .status {
   min-height: 1.45em;
   margin: 8px 0;
   font-size: 0.9rem;
@@ -230,25 +175,25 @@ swf2es-player[hidden] {
   overflow-wrap: anywhere;
 }
 
-.status.error {
+.player-app .status.error {
   color: var(--error);
 }
 
-.controls {
+.player-app .controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
   align-items: center;
 }
 
-.controls label {
+.player-app .controls label {
   display: inline-flex;
   gap: 6px;
   align-items: center;
   font-size: 0.9rem;
 }
 
-.stats {
+.player-app .stats {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 6px;
@@ -258,21 +203,21 @@ swf2es-player[hidden] {
 }
 
 /* Each figure with its label, so that a narrow page wraps between figures, never within one. */
-.stats > div {
+.player-app .stats > div {
   display: flex;
   gap: 6px;
 }
 
-.stats dt {
+.player-app .stats dt {
   color: var(--muted);
 }
 
-.stats dd {
+.player-app .stats dd {
   margin: 0 10px 0 0;
   min-width: 4.5em;
 }
 
-.panels {
+.player-app .panels {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 12px;
@@ -280,16 +225,16 @@ swf2es-player[hidden] {
 }
 
 @media (max-width: 760px) {
-  .panels {
+  .player-app .panels {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .stats {
+  .player-app .stats {
     margin-left: 0;
   }
 }
 
-.panel {
+.player-app .panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -298,16 +243,16 @@ swf2es-player[hidden] {
   min-width: 0;
 }
 
-.panels .panel {
+.player-app .panels .panel {
   margin-top: 0;
 }
 
-.panel h2 {
+.player-app .panel h2 {
   margin: 0 0 6px;
   font-size: 1rem;
 }
 
-.panel-head {
+.player-app .panel-head {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -315,33 +260,33 @@ swf2es-player[hidden] {
   margin-bottom: 6px;
 }
 
-.panel-head h2 {
+.player-app .panel-head h2 {
   margin: 0 auto 0 0;
 }
 
-.trace-toggle {
+.player-app .trace-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 0.85rem;
 }
 
-.trace-toggle input,
-.controls input[type="checkbox"] {
+.player-app .trace-toggle input,
+.player-app .controls input[type="checkbox"] {
   min-height: 0;
   margin: 0;
   padding: 0;
   accent-color: var(--accent);
 }
 
-.panel-head button,
-.panel-head .button {
+.player-app .panel-head button,
+.player-app .panel-head .button {
   min-height: 30px;
   padding: 3px 10px;
   font-size: 0.85rem;
 }
 
-.log {
+.player-app .log {
   height: 16rem;
   overflow: auto;
   font-family: var(--mono);
@@ -352,20 +297,20 @@ swf2es-player[hidden] {
   padding-top: 4px;
 }
 
-.log .error {
+.player-app .log .error {
   color: var(--error);
 }
 
-.log .warn {
+.player-app .log .warn {
   color: var(--warn);
 }
 
-.log .info {
+.player-app .log .info {
   color: var(--info);
   font-style: italic;
 }
 
-.facts {
+.player-app .facts {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 2px 12px;
@@ -373,16 +318,16 @@ swf2es-player[hidden] {
   font-size: 0.9rem;
 }
 
-.facts dt {
+.player-app .facts dt {
   color: var(--muted);
 }
 
-.facts dd {
+.player-app .facts dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.demos {
+.player-app .demos {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -390,47 +335,38 @@ swf2es-player[hidden] {
   gap: 8px;
 }
 
-.demos li {
+.player-app .demos li {
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-.demos button {
+.player-app .demos button {
   margin-right: 4px;
 }
 
-.about ul {
+.player-app .about ul {
   padding-left: 1.2em;
   margin: 0;
 }
 
-.about li {
+.player-app .about li {
   margin: 4px 0;
 }
 
-.build {
+.player-app .build {
   color: var(--muted);
   font-size: 0.8rem;
   margin: 8px 0 0;
 }
 
-code {
+.player-app code {
   font-family: var(--mono);
   font-size: 0.9em;
 }
 
-.notices section {
-  margin-top: 12px;
-}
-
-.notices pre {
-  white-space: pre-wrap;
-  font-size: 0.8rem;
-}
-
 /* Last, as the most specific: the hidden file input lends its focus ring to its label. */
-:focus-visible,
-#file:focus-visible + label {
+.player-app :focus-visible,
+.player-app #file:focus-visible + label {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
