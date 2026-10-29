@@ -1,6 +1,6 @@
-// Random shape layers of lines, for the native line builder's parity test
-// and benchmark (tests/bench/strokes-native): polygons, triangles, curved
-// outlines, dots and degenerate turns, of whole alpha or translucent.
+// Random shape layers of lines, for the line builder's tests (strokes.test.ts):
+// polygons, triangles, curved outlines, dots and degenerate turns, of whole
+// alpha or translucent.
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 
 const MOVE = 1;

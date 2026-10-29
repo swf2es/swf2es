@@ -1,6 +1,6 @@
 // A shape layer's lines as the renderer of swf2es's own keeps them: stroked
-// (scene/strokes.ts, or natively by the tessellator's line builder,
-// strokes-native.ts) for each transform a layer is seen through, found again
+// by the tessellator's line builder (strokes.ts) for each transform a layer
+// is seen through, found again
 // by a hash of the transform's numbers, and kept while the geometries keep
 // them, within a budget of vertices for those not drawn lately.
 import { type Geometries, type GeometryHandle, IDLE_FRAMES } from "@swf2es/render";
@@ -9,7 +9,6 @@ import { evenWidth, scalesEvenly } from "../display/stretch.js";
 import { same } from "../display/value-lists.js";
 import type { FillTessellator } from "./fills.js";
 import { layerStrokes } from "./strokes.js";
-import { layerStrokesNative } from "./strokes-native.js";
 
 /**
  * The vertices kept lines may hold before those drawn neither this frame
@@ -40,16 +39,14 @@ function mixHash(h: number, x: number): number {
 /**
  * A layer's lines as of its drawing's `version`: whether they all scale
  * both ways (scalesEvenly), what the layer brings to its object's settled
- * stretch (evenWidth), whether any is of whole alpha, whether the native
- * line builder refused them, which leaves them to layerStrokes until the
- * drawing changes, and their entries by their key's hash.
+ * stretch (evenWidth), whether any is of whole alpha, and their entries by
+ * their key's hash.
  */
 export interface LayerLines {
   version: number;
   even: boolean;
   width: number;
   whole: boolean;
-  refused: boolean;
   byHash: Map<number, LineEntry[]>;
 }
 
@@ -115,7 +112,6 @@ export class LineCache {
         even: false,
         width: 0,
         whole: false,
-        refused: false,
         byHash: new Map(),
       };
       this.byLayer.set(layer, lines);
@@ -126,7 +122,6 @@ export class LineCache {
       lines.even = scalesEvenly(layer);
       lines.width = evenWidth(layer);
       lines.whole = false;
-      lines.refused = false;
       for (let i = 0; !lines.whole && i < layer.strokes.length; i++) {
         lines.whole = layer.strokes[i].line.color >>> 24 === 255;
       }
@@ -207,18 +202,7 @@ export class LineCache {
     }
 
     this.counts.strokeContexts++;
-    // Natively where the tessellator builds lines, else, or where it refused them, in JS.
-    const native = lines.refused ? undefined : this.tessellator.lines;
-    let data = native
-      ? layerStrokesNative(layer, a, b, c, d, least, native, by, opaque)
-      : undefined;
-    if (data === undefined) {
-      if (native) {
-        lines.refused = true;
-      }
-
-      data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by, opaque);
-    }
+    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator.lines, by, opaque);
 
     const handle = data ? this.geometries.add(data) : null;
     const vertices = data ? data.positions.length / 2 : 0;

@@ -2,7 +2,7 @@
 // the element and the device's pixels, the pointer, the keys and the
 // focus, and the loop that plays and draws, all of which destroy lets go.
 
-import type { Convolver, Tessellator } from "@swf2es/native/render";
+import type { Convolver } from "@swf2es/native/render";
 import { bindActivation, bindKeyboard, type Player, type Scripting } from "@swf2es/player";
 import type { RenderView } from "@swf2es/player/scene";
 import { configuration } from "./config.js";
@@ -46,7 +46,6 @@ export class Playback {
     private readonly look: () => Look,
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
-    private readonly tessellator: Tessellator | null,
     private readonly convolver: Convolver | null,
   ) {
     const canvas = view.canvas;
@@ -96,21 +95,16 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
-    // All load together, so none costs playback another round trip. An embedder without a native
-    // module, or a page that cannot load it, plays through JS.
-    const { nativeFills, nativeBitmaps } = configuration();
-    const [tessellator, convolver, scene] = await Promise.all([
-      nativeFills === false
-        ? null
-        : import("@swf2es/native/render")
-            .then(({ Tessellator }): Tessellator => new Tessellator())
-            .catch(() => null),
+    // Both load together, so neither costs playback another round trip. The view makes its own
+    // tessellator, and throws where the page cannot run the render module.
+    const { nativeBitmaps } = configuration();
+    const [convolver, scene] = await Promise.all([
       nativeBitmaps === false
         ? null
         : import("@swf2es/native/render")
             .then(({ Convolver }): Convolver => new Convolver())
             .catch(() => null),
-      // Settled, not rejected, so that the native instances made beside it go if it fails to load.
+      // Settled, not rejected, so that the native instance made beside it goes if it fails to load.
       import("@swf2es/player/scene").then(
         (module) => module,
         (error: unknown) => ({ error }),
@@ -129,26 +123,14 @@ export class Playback {
         resolution: 1,
         background: player.background,
         transparent: !!stage3D || look().wmode === "transparent",
-        fillTessellator: tessellator?.tessellate,
       });
     } catch (error) {
-      // The renderer did not load or start, and no playback lets go of them: they go here.
-      tessellator?.dispose();
+      // The renderer did not load or start, and no playback lets go of it: it goes here.
       convolver?.dispose();
       throw error;
     }
 
-    return new Playback(
-      box,
-      player,
-      scripting,
-      view,
-      look,
-      report,
-      stage3D,
-      tessellator,
-      convolver,
-    );
+    return new Playback(box, player, scripting, view, look, report, stage3D, convolver);
   }
 
   /** The renderer's WebGL context, null once destroyed. */
@@ -364,8 +346,6 @@ export class Playback {
     this.convolver?.dispose();
 
     this.view.destroy();
-    // The view's geometry let go of first, which the native scratch may then follow.
-    this.tessellator?.dispose();
     this.view.canvas.remove();
   }
 }

@@ -1,4 +1,4 @@
-import { renderInstance } from "./module.js";
+import { renderInstance, renderModule } from "./module.js";
 
 /** A layer's lines as triangles: two floats a vertex, its colour, and three indices a triangle. */
 export interface LineGeometry {
@@ -25,16 +25,16 @@ export interface LineBuilderOptions {
 
 /**
  * A shape layer's lines built in one call by the render module's
- * strokes.zig, as the player's scene/strokes.ts builds them, its outlines
- * filled by the module's libtess2: the caller writes the layer into
- * input() as strokes.zig reads it and calls build() with its length. Its
- * instance is its own, apart from any Tessellator's, and held to the same
- * limits as a Tessellator's (TessellatorOptions), which pass them on: where
- * a fill would have run out of memory, so do the lines, and JS builds them.
+ * strokes.zig, its outlines filled by the module's libtess2, or its bands
+ * where libtess2 fails: the caller writes the layer into input() as
+ * strokes.zig reads it (the player's scene/strokes.ts) and calls build()
+ * with its length. Its instance is its own, apart from any Tessellator's,
+ * and held to the same limits as a Tessellator's (TessellatorOptions),
+ * which pass them on: where a fill would have run out of memory, so do the
+ * lines, and none are drawn.
  */
 export class LineBuilder {
   private instance: NativeExports | null = null;
-  private unavailable = false;
   private view = new Float64Array(0);
   private layout = new Uint32Array(0);
   /** libtess2 trapped the last instance: the next fills its outlines by the bands alone. */
@@ -45,6 +45,7 @@ export class LineBuilder {
   constructor(options: LineBuilderOptions = {}) {
     this.limit = options.memoryLimit ?? 128 << 20;
     this.keep = options.retainMemory ?? 8 << 20;
+    renderModule();
   }
 
   /** Current retained Wasm capacity. */
@@ -52,20 +53,14 @@ export class LineBuilder {
     return this.instance?.memory.buffer.byteLength ?? 0;
   }
 
-  /** A view of at least `n` f64s of input, valid until build(); null where the module is unavailable. */
+  /** A view of at least `n` f64s of input, valid until build(); null where no instance could be made. */
   input(n: number): Float64Array | null {
-    if (this.unavailable) {
-      return null;
-    }
-
     if (!this.instance) {
       try {
         this.instance = renderInstance(() => {
           throw new Error("line tessellation allocation failed");
         }) as unknown as NativeExports;
       } catch {
-        // A missing Wasm engine or SIMD, or a CSP refusal, is tried only once per owner.
-        this.unavailable = true;
         return null;
       }
 
@@ -91,9 +86,9 @@ export class LineBuilder {
   /**
    * The layer in the input's first `length` f64s, copied out in one
    * block: null for none, undefined where the module refused it (a
-   * position not a number) or failed, for the caller to build in JS. Where
-   * libtess2 trapped, the next instance fills the layer's outlines by the
-   * bands alone, for the caller's next input() and build().
+   * position not a number) or failed. Where libtess2 trapped, the next
+   * instance fills the layer's outlines by the bands alone, for the
+   * caller's next input() and build().
    */
   build(length: number): LineGeometry | null | undefined {
     const x = this.instance;

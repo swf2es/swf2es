@@ -702,10 +702,12 @@ async function activationPlayer() {
 const fillMemories: WeakRef<WebAssembly.Memory>[] = [];
 let fillPlayer: Player | null = null;
 
-/** Exercise native selection and teardown without compiling scripts or decoding compressed data. */
-async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
-  const { web } = await loading;
-  web.configure({ nativeFills: mode === "js" ? false : undefined });
+/**
+ * Fills drawn by the render module and its instances let go of with their playbacks, or, where the
+ * page cannot load or compile the module, no playback and why: without compiling scripts or
+ * decoding compressed data.
+ */
+async function fillRun(mode: "default" | "blocked" | "missing" | "csp") {
   const Module = WebAssembly.Module;
   const Instance = WebAssembly.Instance;
   let compiles = 0;
@@ -729,14 +731,21 @@ async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
     },
   });
   let rect: [number, number, number, number] = [0, 0, 0, 0];
+  let error: string | null = null;
   try {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 3 && error === null; i++) {
       const p = document.createElement("swf2es-player") as Player;
       p.setAttribute("quality", "low");
       p.setAttribute("src", "/web-test/fills.swf");
       document.body.append(p);
       try {
-        await p.ready;
+        try {
+          await p.ready;
+        } catch (failure) {
+          error = failure instanceof Error ? failure.message : String(failure);
+          continue;
+        }
+
         await frames(3);
         const canvas = p.shadowRoot?.querySelector("canvas");
         if (!canvas) {
@@ -764,6 +773,7 @@ async function fillRun(mode: "js" | "default" | "blocked" | "missing" | "csp") {
     rect,
     compiles,
     instances,
+    error,
   };
 }
 
@@ -773,11 +783,9 @@ let bitmapPlayer: Player | null = null;
 async function bitmapRun(mode: string, vm: string) {
   const { web } = await loading;
   web.configure({
-    nativeFills: false,
     nativeBitmaps: mode === "js" ? false : undefined,
     cache: false,
   });
-  const Module = WebAssembly.Module;
   const Instance = WebAssembly.Instance;
   const log = console.log;
   const error = console.error;
@@ -785,31 +793,24 @@ async function bitmapRun(mode: string, vm: string) {
   const errors: string[] = [];
   let calls = 0;
   let instances = 0;
-  let requests = 0;
   console.log = (...values) => traces.push(values.join(" "));
   console.error = (...values) => errors.push(values.join(" "));
-  WebAssembly.Module = new Proxy(Module, {
-    construct(target, args) {
-      if (mode === "blocked") {
-        throw new WebAssembly.CompileError("test bitmap compilation refusal");
-      }
-      return Reflect.construct(target, args);
-    },
-  });
   WebAssembly.Instance = new Proxy(Instance, {
     construct(target, args) {
       const instance = Reflect.construct(target, args) as WebAssembly.Instance;
-      if (typeof instance.exports.convolve !== "function") {
-        return instance;
-      }
-
-      instances++;
       bitmapMemories.push(new WeakRef(instance.exports.memory as WebAssembly.Memory));
+      // Every instance of the render module exports the kernel: the view's tessellator's too. An
+      // instance counts as the convolver's once the kernel runs in it.
+      let convolving = false;
       return {
         exports: {
           ...instance.exports,
           convolve: (...params: number[]) => {
             calls++;
+            if (!convolving) {
+              convolving = true;
+              instances++;
+            }
             if (mode === "trap") {
               throw new WebAssembly.RuntimeError("test bitmap trap");
             }
@@ -840,17 +841,13 @@ async function bitmapRun(mode: string, vm: string) {
         }
       }
     }
-    requests = performance
-      .getEntriesByType("resource")
-      .filter((r) => r.name.includes("/native/render/")).length;
   } finally {
     console.log = log;
     console.error = error;
-    WebAssembly.Module = Module;
     WebAssembly.Instance = Instance;
   }
 
-  return { traces: traces.slice(-1), errors, calls, instances, requests, rect };
+  return { traces: traces.slice(-1), errors, calls, instances, rect };
 }
 
 Object.assign(globalThis, {

@@ -21,8 +21,9 @@ arena (`src/render/arena.zig`), which each call resets.
 `render` requires wasm SIMD, which every current browser ships (Chrome 91,
 Firefox 89, Safari 16.4 on): it is built with SIMD throughout and has no
 scalar build. An engine without it refuses the module, as one without Wasm
-or under a CSP refusal does, and the bitmap filters, the fills and the
-lines then all keep to their JS paths.
+or under a CSP without `'wasm-unsafe-eval'` does: the player then plays
+nothing, as its fills and lines need the module. Only the bitmap filters
+have a JS path, for `nativeBitmaps: false` and the kernel's own refusals.
 
 ## Building
 
@@ -63,8 +64,7 @@ libtess2 is under SGI Free Software License B.
 ## bitmap
 
 The web host uses these kernels by default, with the JS path as fallback;
-`configure({ nativeBitmaps: false })` keeps new playbacks on JS and loads
-no native bitmap code. The output is the same pixels either way. Each
+`configure({ nativeBitmaps: false })` keeps new playbacks' filters on JS. The output is the same pixels either way. Each
 playback owns its convolution scratch, instantiated on first use, and
 releases it at teardown. AS3 and AVM1 BitmapData.applyFilter use the same hook;
 GPU filters and other CPU filters are unchanged. Worker instances without a
@@ -220,29 +220,26 @@ This compiles the small double-precision patch in `vendor/libtess2`.
 `b.addTranslateC`, as for MP3 and compression. libtess2 remains under SGI
 Free Software License B.
 
-`@swf2es/web` uses native fills by default. Each playback lazily loads and
-owns a tessellator, then releases its scratch on teardown.
-`configure({ nativeFills: false })` keeps new playbacks on the JS path and
-skips native loading. Missing modules or unavailable Wasm also use JS.
-
-When constructing a `RenderView` directly, opt in through its generic hook:
+The player draws every fill and line through it. A `RenderView` makes a
+`Tessellator` of its own, or takes one as its `fillTessellator` option
+(its `tessellate`), which several views may share:
 
 ```ts
-import { RenderView } from "@swf2es/player/scene";
 import { Tessellator } from "@swf2es/native/render";
+import { RenderView } from "@swf2es/player/scene";
 
 const tessellator = new Tessellator();
 const view = new RenderView({ width, height, fillTessellator: tessellator.tessellate });
 ```
 
-The player retains its paint and draw order. A fill alone
-(`tessellate(contours, nonZero)`) takes the player's flattened polygons. It
-passes every contour of one fill together, using even-odd or non-zero
-winding, with non-zero for masks. Rejection or an exception selects the
-existing JS fill construction, which is resolved once with the rest of
-the layer (`scene/fills.ts`, `resolveFills`), so nothing retries the
-tessellator. Dynamic drawings and morph ratios construct new results when
-their contents change.
+A `Tessellator` compiles the module as it is made, and throws where the
+host refuses it. The player keeps its paint and draw order, and passes
+every contour of a fill together, using even-odd or non-zero winding, with
+non-zero for masks; a fill the tessellator refuses is left out, resolved
+once with the rest of the layer (`scene/fills.ts`, `resolveFills`), so
+nothing retries it. Dynamic drawings and morph ratios construct new
+results when their contents change. A fill alone, `tessellate(contours,
+nonZero)`, takes flattened polygons, for other hosts.
 
 The player tessellates a shape layer's fills in one call,
 `tessellator.tessellate.layer(fills, nonZero)`, which takes each contour as
@@ -254,12 +251,11 @@ each contour as the player's JS does (`scene/fills.ts`'s `trace`):
 chords within 0.02 px of the curve, at most 256 a curve, at the same
 parametric points, repeated points dropped, a closing point that repeats the
 first dropped, and contours of fewer than three points left out, all in
-strict f64 arithmetic. So the player builds no point arrays for a layer it
-hands over; it flattens in JS only the fills the call leaves to it. The one
-difference is the chords' length: a plain square root where JS uses
-`Math.hypot`, which may differ in the last bit, so a curve whose bend falls
-within that bit of a whole number of chords takes one chord more or fewer.
-Either is within the flatness. Then `layer` runs libtess2 on each fill as
+strict f64 arithmetic. So the player builds no point arrays for a layer.
+The chords' length takes a plain square root where JS used `Math.hypot`,
+which may differ in the last bit, so a curve whose bend falls within that
+bit of a whole number of chords takes one chord more or fewer. Either is
+within the flatness. Then `layer` runs libtess2 on each fill as
 `run` would alone on those polygons, keeps each fill's output past its
 scratch, which then goes, and gathers every fill's positions into one buffer
 and its indices into another, counted from the layer's first vertex. The
@@ -269,16 +265,14 @@ Positions remain doubles; indices use 16 bits through 65,536 vertices in the
 layer and 32 bits above that. The module
 checks every input coordinate and every output position and index, so the
 player draws a layer's output unchecked; a fill alone (`tessellate(contours,
-nonZero)`) is checked by the player, as any custom tessellator's is. A fill
-rejected in a layer falls back to JS alone, as do malformed commands and a
-fill whose curves would flatten to more than a million points; one libtess2
-failed, which may be the layer's memory, is tried as a layer of its own, and
-a layer that unwinds or does not fit is tried a fill at a time, so a layer
-gives every fill what a layer of its own would. No cached geometry aliases Wasm scratch. The
+nonZero)`) is checked by its caller. Malformed commands and a fill whose
+curves would flatten to more than a million points are refused; a fill
+that ran out of memory, which may be the layer's, is tried as a layer of
+its own, and a layer that unwinds or does not fit is tried a fill at a
+time, so a layer gives every fill what a layer of its own would. No cached geometry aliases Wasm scratch. The
 renderer copies each fill's triangles into a geometry of its own with its
 paint's colours and texels (`scene/shapes.ts`), which its atlas holds
 through context loss.
-The hook also accepts another tessellator with the same structural result.
 
 The absolute memory ceiling is 128 MiB, including static data, the C stack
 and the arena. Instances above 8 MiB are discarded after the call. Options
@@ -299,59 +293,43 @@ by the bands alone, for tests. Arena reset alone
 does not shrink Wasm memory. `dispose()` drops retained scratch without
 affecting previous output.
 
-Different triangle layouts can change subpixel edge coverage and interior
-gradient or bitmap interpolation. At low quality this can switch a whole
-boundary pixel. AIR comparisons do not show either backend consistently
-closer to Flash; enabling native fills accepts these differences.
-
 The player references and context-loss checks draw with the native
-tessellator, as the element does by default.
+tessellator, as everything does.
 `node tests/fuzz/tessellate.ts [cases] [seed]`
 checks both fill rules against independent ray crossings, by libtess2 and
 again by the bands alone; the default test suite includes 2,000 fills and
 24,000 coverage samples each way. It then flattens
 curved layers, quadratics, cubics, curves of no length and NaN coordinates,
-and checks each fill against the JS flattening tessellated alone: drawn or
-left to JS alike, the same geometry bit for bit as JS with plain square
-roots gives, and within the flatness of what `Math.hypot` gives. `zig build
+and checks each fill against a JS flattening tessellated alone: drawn or
+refused alike, the same geometry bit for bit as JS with plain square roots
+gives, and within the flatness of what `Math.hypot` gives. `zig build
 test` in this folder runs `flatten.zig`'s and `bands.zig`'s own tests. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
 
 ## lines
 
 `tessellator.tessellate.lines`, a `LineBuilder`, builds a shape layer's
-lines for the player's own renderer in one call, as its
-`scene/strokes.ts` (`layerStrokes`) builds them: the player packs the
-layer into `input(n)` (`scene/strokes-native.ts`) and `build(length)`
-returns its positions, colours and indices, copied out in one block.
-`src/render/strokes.zig` is a port of the TS with the same arithmetic in
-the same order, so the output is the TS's bit for bit in V8, where the
-parity test runs. A line drawn
-opaque is triangles along its path; any other is outlined and its
-outline filled non-zero by the module's own libtess2, as the
-`Tessellator` fills it, with no call back to JS. Two things keep the bits
-the same: `Math.hypot` is V8's algorithm (normalised to the larger value,
-summed with Kahan's compensation), and `Math.sin` and `Math.cos` are the
-host's own, imported, since engines differ in their last bit. `atan2` and
-`acos` are Zig's, which are fdlibm's, as V8's are. Another engine's
-`Math.hypot`, `atan2` or `acos` may round otherwise, and there the last
-bits of a position may differ from its JS's.
+lines in one call: the player packs the layer into `input(n)`
+(`scene/strokes.ts`) and `build(length)` returns its positions, colours
+and indices, copied out in one block. `src/render/strokes.zig` is the
+player's only line builder. It began as a port of the player's TS, with
+the same arithmetic in the same order, and keeps JS's semantics where they
+show: `Math.hypot` is V8's algorithm (normalised to the larger value,
+summed with Kahan's compensation), `Math.sin` and `Math.cos` are the host's
+own, imported, since engines differ in their last bit, and `atan2` and
+`acos` are Zig's, which are fdlibm's, as V8's are. A line drawn opaque is
+triangles along its path; any other is outlined and its outline filled
+non-zero by the module's own libtess2, or its bands, as the `Tessellator`
+fills it, with no call back to JS.
 
-Where it cannot build a layer as the TS would, `build()` returns
-`undefined` and the player builds it in JS: an outline neither libtess2
-nor the bands could fill in its memory; a position that is NaN, whose bits
-JS writes its own way; a case where the TS throws; and an instance that
-failed to instantiate or unwound, which is not tried again: the next
-instance fills the layer's outlines by the bands alone, until a layer is
-built. The builder has an
-instance of its own, which no `Tessellator` call shares, held to its
-`Tessellator`'s `memoryLimit` and `retainMemory`, and counted in its
-`capacity`: a layer that would grow it past the limit is left to JS, as a
-fill would be, and an instance grown past what is retained is let go
-after its call. The player's line cache remembers a layer the builder
-refused, and builds it in JS until its drawing changes.
-
-`node --test tests/unit/player/scene/strokes-native.test.ts` compares the
-two on 3,000 random layers, opaque and translucent, bit for bit in Node's
-V8, and
-`node tests/bench/strokes-native/run.ts [runs]` times them.
+Where it cannot build a layer, `build()` returns `undefined`: an outline it
+could not fill in its memory, a position that is NaN, or an instance that
+unwound, after which the next fills the layer's outlines by the bands
+alone; the player asks once more and otherwise draws the layer without
+lines. The builder has an instance of its own, which no `Tessellator` call
+shares, held to its `Tessellator`'s `memoryLimit` and `retainMemory`, and
+counted in its `capacity`; an instance grown past what is retained is let
+go after its call. `tests/unit/player/scene/strokes.test.ts` checks the
+lines it builds: their widths, caps, joins and miters by the area they
+cover, that a wide line on a short curve leaves no hole, that an opaque
+line's triangles cover what its outline does and meet corner to corner.

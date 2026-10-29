@@ -1505,7 +1505,9 @@ const unisolated = await withPage(
 
 let fillFailures = 0;
 let fillReference: Image | null = null;
-for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
+// Drawn by the render module; where the page cannot load it (missing) or compile it (blocked, a CSP
+// without 'wasm-unsafe-eval'), no playback, and the element says why.
+for (const mode of ["default", "blocked", "missing", "csp"] as const) {
   try {
     await withPage(
       "fillRun",
@@ -1525,7 +1527,22 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
           rect: [number, number, number, number];
           compiles: number;
           instances: number;
+          error: string | null;
         }>(evaluate, `fillRun(${JSON.stringify(mode)})`);
+        if (mode !== "default") {
+          assert.ok(r.error, "a page that cannot run the render module played");
+          assert.equal(r.instances, 0);
+          if (mode === "missing") {
+            assert.ok(nativeRequests.length > 0, "the blocked module was not asked for");
+            assert.equal(r.compiles, 0);
+          } else {
+            assert.ok(r.compiles > 0, "the module was not compiled");
+          }
+
+          return;
+        }
+
+        assert.equal(r.error, null);
         const [x, y, width, height] = r.rect;
         const shot = await send<{ data: string }>("Page.captureScreenshot", {
           format: "png",
@@ -1546,15 +1563,10 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
           fillReference = image;
         }
 
-        assert.equal(
-          r.compiles,
-          mode === "default" ? 1 : mode === "blocked" || mode === "csp" ? 3 : 0,
-        );
-        assert.equal(r.instances, mode === "default" ? 3 : 0);
-        // The JS opt-out makes no tessellator, though the bitmap kernel loads the same module.
-        if (mode === "missing") {
-          assert.equal(nativeRequests.length > 0, true, "the blocked module was not asked for");
-        }
+        // One compile for the page; each playback's tessellator an instance, and no line builder's,
+        // as fills.swf has no lines.
+        assert.equal(r.compiles, 1);
+        assert.equal(r.instances, 3);
 
         await call(evaluate, "fillDestroy()");
         await send("HeapProfiler.collectGarbage");
@@ -1588,22 +1600,17 @@ let bitmapFailures = 0;
 for (const vm of ["as3", "avm1"]) {
   let reference: string[] | null = null;
   let imageReference: Image | null = null;
-  for (const mode of ["js", "default", "blocked", "missing", "trap"]) {
+  // Where the page cannot load or compile the render module, nothing plays (native fills, above).
+  for (const mode of ["js", "default", "trap"]) {
     try {
       await withPage(
         "bitmapRun",
         async (evaluate, send) => {
-          if (mode === "missing") {
-            await send("Network.enable");
-            await send("Network.setBlockedURLs", { urls: ["*/native/render/*"] });
-          }
-
           const result = await call<{
             traces: string[];
             errors: string[];
             calls: number;
             instances: number;
-            requests: number;
             rect: [number, number, number, number];
           }>(evaluate, `bitmapRun(${JSON.stringify(mode)}, ${JSON.stringify(vm)})`);
           assert.deepEqual(result.errors, []);
@@ -1628,9 +1635,6 @@ for (const vm of ["as3", "avm1"]) {
 
           assert.equal(result.calls, mode === "default" || mode === "trap" ? 6 : 0);
           assert.equal(result.instances, mode === "default" ? 3 : mode === "trap" ? 6 : 0);
-          if (mode === "js") {
-            assert.equal(result.requests, 0, "the JS opt-out loaded native bitmap code");
-          }
 
           await call(evaluate, "bitmapDestroy()");
           await send("HeapProfiler.collectGarbage");

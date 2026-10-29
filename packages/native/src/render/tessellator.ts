@@ -1,5 +1,5 @@
 import { LineBuilder } from "./lines.js";
-import { renderCompiled, renderInstance } from "./module.js";
+import { renderInstance, renderModule } from "./module.js";
 
 /** Buffers are owned by the caller; subsequent calls and disposal cannot change them. */
 export interface FillGeometry {
@@ -19,8 +19,7 @@ export interface FillTessellate {
    * Every fill of a layer in one native call, its contours as path
    * commands (PATH_MOVE, PATH_LINE, PATH_CURVE, PATH_CUBIC) that the module
    * flattens itself: each fill's geometry, or null for JS to fill it, all
-   * fills' positions and indices in one buffer each; null where the module
-   * is unavailable. Its output needs no checking: the module has checked
+   * fills' positions and indices in one buffer each. Its output needs no checking: the module has checked
    * every coordinate finite and every index in range.
    */
   layer(
@@ -87,10 +86,13 @@ const REJECTED = 2;
 const LAYER = 5;
 const RANGE = 5;
 
-/** Optional synchronous double-precision tessellator. Rejection returns null for the caller's fallback. */
+/**
+ * Synchronous double-precision tessellator. It compiles the render module
+ * as it is made, and throws where the host refuses it. A fill it refuses
+ * (not finite, malformed, too large, or out of memory) is null.
+ */
 export class Tessellator {
   private instance: NativeExports | null = null;
-  private unavailable = false;
   private readonly limit: number;
   private readonly keep: number;
   private readonly bands: boolean;
@@ -111,6 +113,7 @@ export class Tessellator {
       throw new RangeError("invalid tessellator memory limit");
     }
 
+    renderModule();
     this.lines = new LineBuilder({ memoryLimit: this.limit, retainMemory: this.keep });
     this.tessellate = Object.assign(this.fill, { layer: this.layer, lines: this.lines });
   }
@@ -140,10 +143,8 @@ export class Tessellator {
     return x;
   }
 
-  /** A call that threw: the module is tried once per owner, and a trapped instance never again. */
+  /** A call that threw: a trapped instance is never used again. */
   private failed(): void {
-    // Compilation can be blocked by CSP or unavailable on the host.
-    this.unavailable = !renderCompiled();
     // In particular, longjmp unwinds through a throwing import: never resume that C instance. The
     // line builder's instance is its own.
     this.instance = null;
@@ -168,7 +169,7 @@ export class Tessellator {
     nonZero: boolean,
     bands: boolean,
   ): FillGeometry | null {
-    if (this.unavailable || contours.length > MOST_CONTOURS) {
+    if (contours.length > MOST_CONTOURS) {
       return null;
     }
 
@@ -220,7 +221,7 @@ export class Tessellator {
       return { vertices, indices };
     } catch {
       this.failed();
-      return this.unavailable || bands ? null : this.fillBy(contours, nonZero, true);
+      return bands ? null : this.fillBy(contours, nonZero, true);
     } finally {
       this.trim();
     }
@@ -238,10 +239,6 @@ export class Tessellator {
     nonZero: readonly boolean[],
     bands: boolean,
   ): (FillGeometry | null)[] | null {
-    if (this.unavailable) {
-      return null;
-    }
-
     let length = 0;
     let contours = 0;
     const rules = new Uint8Array(fills.length);
@@ -312,7 +309,7 @@ export class Tessellator {
           : new Uint32Array(buffer, ranges[1], ranges[3]).slice();
     } catch {
       this.failed();
-      if (this.unavailable || bands) {
+      if (bands) {
         return null;
       }
 
