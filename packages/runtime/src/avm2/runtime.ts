@@ -33,8 +33,8 @@ import {
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
   type Enumeration,
+  elementsAt,
   enumerated,
-  enumeratedElement,
   INT_ATOM_LIMIT,
   nextIndex,
   ownNames,
@@ -2543,12 +2543,14 @@ export class Runtime {
       return index === 1 ? "uri" : index === 2 ? pair : null;
     }
 
-    const element = enumeratedElement(o, index);
-    if (element >= 0) {
+    // As avmplus' ArrayObject and TypedVectorObject: the elements, then the other names.
+    const length = elementsAt(o, index);
+    if (index > 0 && index <= length) {
+      const element = index - 1;
       return element < INT_ATOM_LIMIT ? element : String(element);
     }
 
-    const name = enumerated(this.enumerating, o, index);
+    const name = enumerated(this.enumerating, o, index - length);
     if (typeof name !== "string") {
       return name;
     }
@@ -2576,15 +2578,20 @@ export class Runtime {
       return index === 1 ? local : index === 2 ? uri : null;
     }
 
-    const element = enumeratedElement(o, index);
-    if (element >= 0 && traits === this.arrayTraits) {
-      const v = o.$a[element];
-      if (v !== undefined || element in o.$a) {
-        return v;
+    const length = elementsAt(o, index);
+    if (index > 0 && index <= length) {
+      const element = index - 1;
+      if (traits?.getIndex) {
+        return traits.getIndex(o, element, this);
+      }
+
+      if (traits === this.arrayTraits && element in o.$a) {
+        return o.$a[element];
       }
     }
 
-    const name = element >= 0 ? String(element) : enumerated(this.enumerating, o, index);
+    const name =
+      index <= length ? String(index - 1) : enumerated(this.enumerating, o, index - length);
     if (typeof name !== "string") {
       return o.$keys.get(name);
     }

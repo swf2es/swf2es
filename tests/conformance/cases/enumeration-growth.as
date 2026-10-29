@@ -179,3 +179,30 @@ for each (var v:int in far) {
   }
 }
 trace("far", farSeen.sort().join(","));
+
+// Reordered during the walk, the elements are read where they are now.
+var reordered:Array = [1, 2, 3, 4, 5, 6, 7, 8];
+var reorderedSeen:Array = [];
+for (var o:* in reordered) {
+  reorderedSeen.push(o + "=" + reordered[o]);
+  if (o == 1) {
+    reordered.splice(0, 2, 9, 9);
+  }
+
+  if (o == 3) {
+    reordered.reverse();
+  }
+}
+trace("reordered", reorderedSeen.join(","));
+
+var reversed:Array = [1, 2, 3, 4, 5, 6, 7, 8];
+delete reversed[5];
+delete reversed[6];
+var reversedSeen:Array = [];
+for each (var e:int in reversed) {
+  reversedSeen.push(e);
+  if (reversedSeen.length == 2) {
+    reversed.reverse();
+  }
+}
+trace("reversed", reversedSeen.join(","));
