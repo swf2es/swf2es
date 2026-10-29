@@ -209,8 +209,16 @@ async function check(): Promise<void> {
             });
             writeFileSync(`${out}site.png`, Buffer.from(page.data, "base64"));
 
-            // The stats count the renderer's draw calls while they are on screen.
+            // The stats count the renderer's draws, and the GL calls that make them, while they are
+            // on screen: a multi-draw is one call of many draws.
             await until("Number(document.getElementById('draws').textContent) > 0");
+            const calls = await value<number>(
+              "Number(document.getElementById('calls').textContent)",
+            );
+            const draws = await value<number>(
+              "Number(document.getElementById('draws').textContent)",
+            );
+            assert.ok(calls > 0 && calls <= draws, `${calls} GL calls for ${draws} draws`);
             // Off screen, and while the context is lost, the context has its own functions back.
             const gl = "document.getElementById('player').gl";
             const wrapped = `Object.hasOwn(${gl}, 'drawElements')`;
