@@ -114,7 +114,7 @@ export class Playback {
 
     const view = await stageView(
       player,
-      renderer === "own",
+      renderer !== "pixi",
       !!stage3D || look().wmode === "transparent",
       tessellator,
     );

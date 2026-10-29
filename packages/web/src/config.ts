@@ -66,9 +66,9 @@ export interface Configuration {
   /** Use native Wasm fill tessellation, with JS fallback; on by default. Applies to new playbacks. */
   nativeFills?: boolean;
   /**
-   * What draws the stage: "pixi", the default, or "own", the renderer of
-   * swf2es's own (docs/renderer.md), which takes WebGL 2. Applies to new
-   * playbacks.
+   * What draws the stage: "own", the renderer of swf2es's own
+   * (docs/renderer.md), the default, which takes WebGL 2; or "pixi", the
+   * Pixi view it replaces, until that goes. Applies to new playbacks.
    */
   renderer?: "pixi" | "own";
   /** Use native Wasm BitmapData convolution, with JS fallback; on by default. Applies to new playbacks. */

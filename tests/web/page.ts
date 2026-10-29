@@ -185,8 +185,8 @@ const loading = import("@swf2es/web").then((web) => {
     },
     socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
     cache: true,
-    // The renderer of swf2es's own under SWF2ES_RENDERER=own (chrome.ts), else Pixi.
-    renderer: new URLSearchParams(location.search).has("own") ? "own" : undefined,
+    // The element's own renderer, or Pixi where the page asks for it (chrome.ts, SWF2ES_RENDERER).
+    renderer: new URLSearchParams(location.search).has("pixi") ? "pixi" : undefined,
   });
   return { web, replaced: web.replaceFlash() };
 });
