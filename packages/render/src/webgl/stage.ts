@@ -20,7 +20,7 @@ export class Stage {
   private readonly pool: TargetPool;
   /** The most samples the GPU takes, and whether the canvas has alpha, asked once. */
   private maxSamples = 1;
-  canvasAlpha = false;
+  private hasAlpha = false;
   /**
    * The stage's multisampled buffers, and the texture they resolve into before a canvas they may
    * not be resolved onto (present), made as first needed.
@@ -41,6 +41,11 @@ export class Stage {
     this.pool = pool;
   }
 
+  /** Whether the canvas has alpha, as asked of the context in setUp. */
+  get canvasAlpha(): boolean {
+    return this.hasAlpha;
+  }
+
   /** Nothing made yet, and the GPU and the canvas asked again, as the context comes or comes back. */
   setUp(): void {
     const gl = this.gl;
@@ -49,7 +54,7 @@ export class Stage {
     this.directResolve = null;
     this.stageLayer = null;
     this.maxSamples = gl.getParameter(gl.MAX_SAMPLES) as number;
-    this.canvasAlpha = gl.getContextAttributes()?.alpha ?? false;
+    this.hasAlpha = gl.getContextAttributes()?.alpha ?? false;
   }
 
   /**
@@ -60,7 +65,7 @@ export class Stage {
   present(msaa: Multisampled): void {
     const gl = this.gl;
     const { width, height } = msaa;
-    if (this.canvasAlpha && this.directResolve !== false) {
+    if (this.hasAlpha && this.directResolve !== false) {
       const finding = this.directResolve === null;
       if (finding) {
         gl.getError();
