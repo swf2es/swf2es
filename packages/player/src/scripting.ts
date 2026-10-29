@@ -12,7 +12,6 @@
 import { API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import type { BitmapConvolver } from "./bitmap/filters.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
@@ -200,8 +199,6 @@ export class Scripting {
    * has a renderer (a RenderView); null where there is none.
    */
   drawer: Drawer | null = null;
-  /** Optional CPU convolution supplied and released by the host. */
-  bitmapConvolver: BitmapConvolver | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
   /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's. */

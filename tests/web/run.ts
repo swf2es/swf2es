@@ -1505,24 +1505,14 @@ const unisolated = await withPage(
 
 let fillFailures = 0;
 let fillReference: Image | null = null;
-// Drawn by the render module; where the page cannot load it (missing) or compile it (blocked, a CSP
-// without 'wasm-unsafe-eval'), no playback, and the element says why.
-for (const mode of ["default", "blocked", "missing", "csp"] as const) {
+// Drawn by the render module; where the page cannot compile it (blocked, a CSP without
+// 'wasm-unsafe-eval'), no playback, and the element says why. The player loads the module with
+// itself, so a page without it has no player at all.
+for (const mode of ["default", "blocked", "csp"] as const) {
   try {
     await withPage(
       "fillRun",
-      async (evaluate, send, _fresh, listen) => {
-        const nativeRequests: string[] = [];
-        await send("Network.enable");
-        listen("Network.requestWillBeSent", (params) => {
-          const request = params.request as { url: string };
-          if (request.url.includes("/native/render/")) {
-            nativeRequests.push(request.url);
-          }
-        });
-        if (mode === "missing") {
-          await send("Network.setBlockedURLs", { urls: ["*/native/render/*"] });
-        }
+      async (evaluate, send) => {
         const r = await call<{
           rect: [number, number, number, number];
           compiles: number;
@@ -1532,12 +1522,7 @@ for (const mode of ["default", "blocked", "missing", "csp"] as const) {
         if (mode !== "default") {
           assert.ok(r.error, "a page that cannot run the render module played");
           assert.equal(r.instances, 0);
-          if (mode === "missing") {
-            assert.ok(nativeRequests.length > 0, "the blocked module was not asked for");
-            assert.equal(r.compiles, 0);
-          } else {
-            assert.ok(r.compiles > 0, "the module was not compiled");
-          }
+          assert.ok(r.compiles > 0, "the module was not compiled");
 
           return;
         }
@@ -1600,8 +1585,8 @@ let bitmapFailures = 0;
 for (const vm of ["as3", "avm1"]) {
   let reference: string[] | null = null;
   let imageReference: Image | null = null;
-  // Where the page cannot load or compile the render module, nothing plays (native fills, above).
-  for (const mode of ["js", "default", "trap"]) {
+  // Where the page cannot compile the render module, nothing plays (native fills, above).
+  for (const mode of ["default", "trap"]) {
     try {
       await withPage(
         "bitmapRun",
@@ -1633,13 +1618,15 @@ for (const vm of ["as3", "avm1"]) {
             imageReference = image;
           }
 
-          assert.equal(result.calls, mode === "default" || mode === "trap" ? 6 : 0);
-          assert.equal(result.instances, mode === "default" ? 3 : mode === "trap" ? 6 : 0);
+          // One kernel for the page's players; a trapped call made again in a new instance.
+          assert.equal(result.calls, mode === "trap" ? 7 : 6);
+          assert.equal(result.instances, mode === "trap" ? 2 : 1);
 
           await call(evaluate, "bitmapDestroy()");
           await send("HeapProfiler.collectGarbage");
           await send("HeapProfiler.collectGarbage");
-          assert.equal(await call(evaluate, "bitmapSurvivors()"), 0);
+          // The page's kernel keeps its instance for the next player; the rest go with theirs.
+          assert.ok((await call<number>(evaluate, "bitmapSurvivors()")) <= 1);
         },
         false,
         {
@@ -1668,14 +1655,19 @@ try {
       const result = await call(
         evaluate,
         `import("@swf2es/native/render").then(({Convolver}) => {
-      const owner = new Convolver();
-      const source = {width:1,height:1,transparent:true,pixels:new Uint32Array([0xff123456])};
-      const rect = {x:0,y:0,width:1,height:1};
-      const filter = {matrixX:1,matrixY:1,matrix:[1],divisor:1,bias:0,color:0,alpha:0,clamp:true,preserveAlpha:true};
-      return owner.convolve(source,rect,filter,true) === null && owner.capacity === 0;
+      try {
+        new Convolver();
+        return false;
+      } catch {
+        return true;
+      }
     })`,
       );
-      assert.equal(result, true, "CSP refusal must return the JS fallback signal");
+      assert.equal(
+        result,
+        true,
+        "a CSP that refuses the module must refuse the kernel as it is made",
+      );
     },
     false,
     {
@@ -1687,11 +1679,11 @@ try {
       ],
     },
   );
-  console.log("ok native bitmaps: CSP fallback");
+  console.log("ok native bitmaps: CSP refusal");
 } catch (error) {
   bitmapFailures++;
   console.log(
-    `not ok native bitmaps: CSP fallback\n  ${error instanceof Error ? error.stack : String(error)}`,
+    `not ok native bitmaps: CSP refusal\n  ${error instanceof Error ? error.stack : String(error)}`,
   );
 }
 

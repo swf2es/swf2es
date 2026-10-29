@@ -55,7 +55,6 @@ jobs:
             run: node tests/player/run.ts --shard 3/3
           - name: player
             run: pnpm --filter ./tests/player run test:other
-            bitmaps: true
           - name: compiler
             run: >-
               pnpm -r --filter ./tests/unit --filter ./tests/conformance --filter ./tests/programs
@@ -76,10 +75,6 @@ jobs:
           checked: ${{ matrix.mode == 'checked' || matrix.part.determinism == true }}
           store: ${{ matrix.mode }}-${{ matrix.part.name }}
       - run: ${{ matrix.part.run }}
-      - if: matrix.mode == 'release' && matrix.part.bitmaps
-        run: node tests/player/run.ts apply-filter apply-filter-inner convolution convolution-draw
-        env:
-          SWF2ES_NATIVE_BITMAPS: "1"
       # After the conformance and programs runners, whose ABCs it compiles again.
       - if: matrix.mode == 'release' && matrix.part.determinism
         run: pnpm determinism

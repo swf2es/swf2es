@@ -704,10 +704,10 @@ let fillPlayer: Player | null = null;
 
 /**
  * Fills drawn by the render module and its instances let go of with their playbacks, or, where the
- * page cannot load or compile the module, no playback and why: without compiling scripts or
+ * page cannot compile the module, no playback and why: without compiling scripts or
  * decoding compressed data.
  */
-async function fillRun(mode: "default" | "blocked" | "missing" | "csp") {
+async function fillRun(mode: "default" | "blocked" | "csp") {
   // The element defined before it is made.
   await loading;
   const Module = WebAssembly.Module;
@@ -784,10 +784,7 @@ let bitmapPlayer: Player | null = null;
 
 async function bitmapRun(mode: string, vm: string) {
   const { web } = await loading;
-  web.configure({
-    nativeBitmaps: mode === "js" ? false : undefined,
-    cache: false,
-  });
+  web.configure({ cache: false });
   const Instance = WebAssembly.Instance;
   const log = console.log;
   const error = console.error;
@@ -795,6 +792,7 @@ async function bitmapRun(mode: string, vm: string) {
   const errors: string[] = [];
   let calls = 0;
   let instances = 0;
+  let trapped = false;
   console.log = (...values) => traces.push(values.join(" "));
   console.error = (...values) => errors.push(values.join(" "));
   WebAssembly.Instance = new Proxy(Instance, {
@@ -813,7 +811,10 @@ async function bitmapRun(mode: string, vm: string) {
               convolving = true;
               instances++;
             }
-            if (mode === "trap") {
+
+            // The first call alone, which the player makes again in a new instance.
+            if (mode === "trap" && !trapped) {
+              trapped = true;
               throw new WebAssembly.RuntimeError("test bitmap trap");
             }
             return (instance.exports.convolve as (...args: number[]) => number)(...params);
