@@ -594,6 +594,8 @@ export class RenderView implements Drawer {
       const least = 1 / (this.screenScale ?? this.scale * this.resolution);
       // Alpha left whole by the colour transform: a line's overlaps then draw nothing new.
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
+      // Read once for the object, not for each textured part.
+      const smoothing = this.smoothing;
       for (let i = 0; i < layers.length; i++) {
         for (const { part, handle } of this.parts.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
@@ -617,7 +619,7 @@ export class RenderView implements Drawer {
             row,
             NORMAL,
             texture?.id ?? -1,
-            texture ? paintSampler(part, this.smoothing) : 0,
+            texture ? paintSampler(part, smoothing) : 0,
           );
         }
 
