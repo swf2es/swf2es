@@ -783,10 +783,10 @@ function meter(renderer: object): { read(): Record<string, number> } {
       }
     };
   };
-  around(r.renderPipes.flashTable, (by) => {
+  around(r.renderPipes?.flashTable, (by) => {
     inTable += by;
   });
-  around(r.renderPipes.graphics, (by) => {
+  around(r.renderPipes?.graphics, (by) => {
     inGraphics += by;
   });
   wrap(gl, "drawElements", () => {
@@ -794,11 +794,11 @@ function meter(renderer: object): { read(): Record<string, number> } {
       add("tableLoopDraws");
     }
   });
-  wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
-  wrap(r.renderPipes.batch, "execute", () => add("batches"));
+  wrap(r.renderPipes?.graphics, "execute", () => add("aloneGraphics"));
+  wrap(r.renderPipes?.batch, "execute", () => add("batches"));
   // The most textures a batch drew with: past WebGL 2's least 16 units, a GPU with more would
   // batch what software GL splits.
-  wrap(r.renderPipes.batch, "execute", (args) => {
+  wrap(r.renderPipes?.batch, "execute", (args) => {
     const textures = (args[0] as { textures?: { count: number } }).textures?.count ?? 0;
     counts.batchTexturesMost = Math.max(counts.batchTexturesMost ?? 0, textures);
   });
@@ -811,8 +811,9 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("rebuilds");
     add("rebuildMs", took);
   });
-  // Tessellation: a context Pixi has no GPU data for yet, or one marked dirty, built now.
-  const contexts = r.graphicsContext as unknown as Record<string, unknown>;
+  // Tessellation: a context Pixi has no GPU data for yet, or one marked dirty, built now. The
+  // renderer of swf2es's own has no contexts: its GL calls alone are counted.
+  const contexts = (r.graphicsContext ?? {}) as unknown as Record<string, unknown>;
   const update = contexts.updateGpuContext as (context: object) => unknown;
   contexts.updateGpuContext = function (
     this: unknown,
@@ -902,24 +903,42 @@ async function benchSwf(
     const uncaught: unknown[] = [];
     const scripting = await scriptingFor(bytes, [], null, uncaught);
     const player = new Player(bytes, scripting);
-    const renderer = await autoDetectRenderer({
-      preference: "webgl",
-      width: player.width,
-      height: player.height,
-      background: player.background,
-      antialias,
-      resolution: 1,
-      // As a host that draws blend modes makes it: a full-screen copy a frame.
-      useBackBuffer: backBuffer,
-    });
-    document.body.replaceChildren(renderer.canvas);
-    const view = new PixiView(renderer, fillOptions);
+    // With ?own, the renderer of swf2es's own draws, its walk and draw one step: timed as the
+    // draw, the sync none.
+    const own = ownRenderer ? await ownSurface(player, 1, 1, 1, antialias) : null;
+    const renderer = own
+      ? ({ gl: own.gl, render() {}, destroy: () => own.destroy() } as unknown as Awaited<
+          ReturnType<typeof autoDetectRenderer>
+        >)
+      : await autoDetectRenderer({
+          preference: "webgl",
+          width: player.width,
+          height: player.height,
+          background: player.background,
+          antialias,
+          resolution: 1,
+          // As a host that draws blend modes makes it: a full-screen copy a frame.
+          useBackBuffer: backBuffer,
+        });
+    document.body.replaceChildren(own ? own.canvas : renderer.canvas);
+    const pixi = own ? null : new PixiView(renderer, fillOptions);
+    const view = {
+      render: (root: Player["stage"]) => (own ? own.render(root) : pixi?.render(root)),
+      prepare: (root: Player["stage"]) => pixi?.prepare(root),
+      get counts(): PixiView["counts"] {
+        return pixi ? pixi.counts : ({ strokeContexts: 0 } as PixiView["counts"]);
+      },
+      get stage() {
+        return (pixi as PixiView).stage;
+      },
+    };
+    const drawer = own ? own.drawer : (pixi as PixiView);
     if (scripting) {
-      scripting.drawer = view;
+      scripting.drawer = drawer;
     }
 
     if (player.avm1) {
-      player.avm1.drawer = view;
+      player.avm1.drawer = drawer;
     }
 
     await player.start();
@@ -1002,7 +1021,12 @@ async function benchSwf(
 
       view.prepare(player.stage);
       const synced = performance.now();
-      renderer.render(view.stage);
+      if (own) {
+        own.render(player.stage);
+      } else {
+        renderer.render(view.stage);
+      }
+
       const drawn = performance.now();
       // Pipelined, the GPU's work goes on behind the next frames', as a page's does, and only
       // every so many frames is waited for: what the frames take is then the slower of the two.
