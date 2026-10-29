@@ -11,8 +11,15 @@ const { tamarin, corpus, api, groups } = compatibility;
 const { build, blob } = facts;
 const source = (path: string) => `${blob}${path}`;
 
-const percent = (done: number, of: number) =>
-  of === 0 ? "–" : `${((100 * done) / of).toFixed(1).replace(/\.0$/, "")}%`;
+/** To a tenth, as docs/coverage.md rounds, but never 100% short of complete. */
+const percent = (done: number, of: number) => {
+  if (of === 0) {
+    return "–";
+  }
+
+  const tenths = Math.round((1000 * done) / of);
+  return `${((done < of ? Math.min(tenths, 999) : tenths) / 10).toFixed(1).replace(/\.0$/, "")}%`;
+};
 const number = (n: number) => n.toLocaleString("en-US");
 const bar = (done: number, of: number) => `--done: ${of === 0 ? 0 : (100 * done) / of}%`;
 /** Members a group of unimplemented natives leaves missing, or none once the group is gone. */
@@ -144,7 +151,7 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     name: "Printing",
     status: "missing",
     note: printing
-      ? `PrintJob: ${printing.members.of - printing.members.done} of ${printing.members.of} members not supported yet.`
+      ? `flash.printing: ${printing.members.of - printing.members.done} of its ${printing.members.of} members not supported yet.`
       : "PrintJob.",
     href: "#the-flash-api",
   },
@@ -263,9 +270,18 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   </details>
   <p class="note">
     Of the {number(tamarin.compiled)} tests avmshell compiles, {tamarin.uncounted.length} are left
-    out because avmshell's own counts follow the date or the machine, and
-    {tamarin.varying.length} because swf2es' result varies from run to run
-    ({tamarin.varying.map((t, i) => <>{i > 0 && ", "}<code>{t}</code></>)}).
+    out because avmshell's own counts follow the date or the machine{
+      tamarin.varying.length > 0 ? (
+        <>
+          , and {tamarin.varying.length} because swf2es' result varies from run to run (
+          {tamarin.varying.map((t, i) => <>{i > 0 && ", "}<code>{t}</code></>)})
+        </>
+      ) : null
+    }.{
+      tamarin.unrecorded.length > 0 && (
+        <> {tamarin.unrecorded.length} are not in swf2es' baseline and count as not matching.</>
+      )
+    }
   </p>
 
   <h2 id="ruffles-test-corpus">Ruffle's test corpus</h2>
@@ -339,7 +355,11 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   </table>
   <p class="note">
     Most of the rest trace a line otherwise than Flash did and stop being compared there;
-    {number(corpus.otherUnsupported)} stop at something else not supported yet.
+    {number(corpus.otherUnsupported)} stop at something else not supported yet.{
+      corpus.varying > 0 && (
+        <> {number(corpus.varying)} whose standing varies from run to run are left out.</>
+      )
+    }
   </p>
 
   <h2 id="the-flash-api">The flash.* API</h2>
