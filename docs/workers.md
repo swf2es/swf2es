@@ -725,7 +725,7 @@ Where swf2es differs from the oracle's avmshell:
 
 Each a PR, in this order:
 
-1. **Message-passing workers** (this PR): `Worker.isSupported`,
+1. **Message-passing workers** (built): `Worker.isSupported`,
    `WorkerDomain.createWorker` on a host's thread, `start`, `terminate`,
    `listWorkers`, `workerState`, shared properties of copied values,
    `MessageChannel` with copied values (`send`, `receive(false)`,
