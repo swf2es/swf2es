@@ -1,69 +1,42 @@
 // The renderer as the player drives it (docs/renderer.md): a view that
 // owns a WebGL 2 canvas, walks the display list into a scene list and its
 // rows, and has @swf2es/render plan and draw it.
-import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
+import { type ColorTransform, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import {
   BLEND_NAMES,
   CLAMP,
   Commands,
-  drawnArea,
   Filters,
-  filteredRect,
   Geometries,
-  type GeometryHandle,
   type KeepHandle,
   Keeps,
   LAYER,
-  MASK_BEGIN,
-  MASK_POP,
-  MASK_USE,
-  MESH,
-  MIRROR,
   measureLayers,
   NORMAL,
   PLANE,
   plan,
-  REPEAT,
   Rows,
   SceneList,
   SMOOTH,
-  SNAP,
-  type TextureHandle,
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { argbOf, BitmapStore, characterStore, type PixelRect, rgbaOf } from "../bitmap/bitmap.js";
+import { argbOf, type BitmapStore } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColorInto, IDENTITY_COLOR, sameColor } from "../display/color.js";
 import { Container } from "../display/container.js";
-import { CLEAN, type DisplayObject, TRANSFORM } from "../display/displayobject.js";
-import {
-  type Filter as FilterRecord,
-  filterRoom,
-  paddingCap,
-  sameFilterRecords,
-} from "../display/filters.js";
+import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 import { concat, invert, shifted } from "../display/geometry.js";
-import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
-import {
-  bitmapScale,
-  drawnRect,
-  outsideMaskMap,
-  type PlaneQuad,
-  placeQuad,
-} from "../display/plane.js";
+import { bitmapScale, drawnRect, outsideMaskMap, placeQuad } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
-import { facing, type GradientFill, type ShapeLayer, shapeLayers } from "../display/shapes.js";
+import { ShapeObject } from "../display/shapeobject.js";
+import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
-import type { ShapeCharacter } from "../display/timeline.js";
-import { makeRoom, moveLast, same } from "../display/value-lists.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import type { Player } from "../player.js";
-import { cssFont } from "../text/fonts.js";
 import {
   allowResets,
   holdSegments,
@@ -71,28 +44,20 @@ import {
   resetSegments,
   store as saffronStore,
 } from "../text/saffron.js";
-import { type AdvancedGlyphs, fieldQuads, staticQuads } from "./advanced.js";
+import { AdvancedTexts } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
-import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
+import { FilterLayers, type KeptOutput } from "./filter-layers.js";
+import { undrawnFilter } from "./filters.js";
 import { LineCache } from "./lines.js";
+import { Masks } from "./masks.js";
+import { Paints, paintSampler } from "./paints.js";
+import { Parts } from "./parts.js";
+import { Planes, planeUnchanged } from "./planes.js";
 import { bindCanvasPointer } from "./pointer.js";
-import {
-  type BitmapSampling,
-  bitmapQuad,
-  layerParts,
-  type Part,
-  radialTexels,
-  unsupported,
-} from "./shapes.js";
-import {
-  type DeviceItem,
-  deviceTextResolution,
-  fieldItems,
-  glyphShape,
-  staticItems,
-  type TextItem,
-  type TextOmissions,
-} from "./text.js";
+import { unsupported } from "./shapes.js";
+import { StaleShapes } from "./stale-shapes.js";
+import { deviceTextResolution, fieldItems, staticItems, type TextOmissions } from "./text.js";
+import { placedRow, TextItems } from "./text-items.js";
 
 export interface RenderViewOptions {
   /** The stage's size in pixels, and the canvas' pixels a stage pixel. */
@@ -118,184 +83,8 @@ export interface RenderViewOptions {
   samples?: number;
 }
 
-/**
- * How many frames a gradient's texture may go undrawn: a morph tweening a
- * gradient makes a new one for each ratio, up to a megabyte each, which
- * the usual idle frames would hold hundreds of.
- */
-const GRADIENT_IDLE_FRAMES = 30;
-
-/**
- * Device texts with runs kept, and quads made, past which those let go of
- * are looked for and forgotten.
- */
-const RUN_KEYS = 512;
-
-/** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
-const GRADIENT_REGIONS = 8;
-
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
-/** A geometry's colours where its vertices carry none, a 3D object's quad's. */
-const NO_COLORS = new Uint32Array(0);
-
-/**
- * A 3D object's quad written into its geometry's arrays in place: its
- * corners, its texels the bitmap's, `width` by `height`, and each corner's
- * depth its w's inverse. Whether any of it changed, as stored.
- */
-function planeQuadData(
-  data: { positions: Float32Array; texels: Float32Array; depths: Float32Array },
-  quad: PlaneQuad,
-  width: number,
-  height: number,
-): boolean {
-  let changed = false;
-  const set = (array: Float32Array, i: number, v: number) => {
-    const stored = Math.fround(v);
-    if (array[i] !== stored) {
-      array[i] = stored;
-      changed = true;
-    }
-  };
-
-  for (let i = 0; i < 8; i++) {
-    set(data.positions, i, quad.positions[i]);
-  }
-
-  for (let i = 0; i < 4; i++) {
-    set(data.texels, i * 2, i === 1 || i === 2 ? width : 0);
-    set(data.texels, i * 2 + 1, i >= 2 ? height : 0);
-    set(data.depths, i, 1 / quad.ws[i]);
-  }
-
-  return changed;
-}
-
-/** Runs kept of one text, in its styles, sizes and resolutions. */
-const TEXT_RUNS = 8;
-
-/**
- * How many frames a run of device text may go undrawn: a counter or a field
- * typed into makes a new one each frame, which the usual idle frames would
- * hold hundreds of.
- */
-const TEXT_IDLE_FRAMES = 30;
-
-/** The most texels a run of device text has a side, under every WebGL 2's least texture size. */
-const TEXT_MOST = 4096;
-
-/**
- * A device text run rasterized: its texture, its size and left overhang in
- * canvas pixels at `resolution`; and the style, metrics and resolution it
- * was asked for, which find it again among the runs of its text.
- */
-interface DeviceRun {
-  handle: TextureHandle;
-  width: number;
-  height: number;
-  left: number;
-  resolution: number;
-  family: string;
-  size: number;
-  bold: boolean;
-  italic: boolean;
-  letterSpacing: number;
-  ascent: number;
-  descent: number;
-  asked: number;
-}
-
-/**
- * A filtered object's output as last made: whether it was kept, as which
- * kept output, for which plan and generation; its scale and turn on the
- * stage and its place there in target pixels; its area as measured and
- * its rectangle; and how many frames in a row it changed. `reused` and
- * `keeping` say what this frame does with it.
- */
-interface KeptOutput {
-  handle: KeepHandle | null;
-  plan: FilterPlan;
-  generation: number;
-  /** The stage's frame it was last drawn on, whether it scrolled then, and whether it was measured. */
-  seenAt: number;
-  /** The key of the 9-slice that reshaped what it drew, or "". */
-  sliceKey: string;
-  scrolled: boolean;
-  measured: boolean;
-  kept: boolean;
-  reused: boolean;
-  keeping: boolean;
-  changing: number;
-  linear: number[];
-  x: number;
-  y: number;
-  pad: number;
-  area: Float64Array;
-  rect: Int32Array;
-}
-
-/**
- * A filtered object's filters worked out for its records at its units,
- * and cut to the last cap its padding needed, if any.
- */
-interface KeptPlan {
-  records: readonly FilterRecord[];
-  units: number;
-  plan: FilterPlan | null;
-  cap: number;
-  capped: FilterPlan | null;
-}
-
-/** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
-interface Made {
-  parts: { part: Part; handle: GeometryHandle }[];
-  version: number;
-}
-
-/**
- * The layers an object's drawing was last drawn as, of its version
- * (dropUndrawn): a set, as a drawing refills its own list as it is cleared
- * and drawn again, and the list they came in, which a frame's walk passes
- * again unchanged.
- */
-interface DrawnLayers {
-  version: number;
-  source: ShapeLayer[];
-  layers: Set<ShapeLayer>;
-}
-
-/** A texture made of pixels that change: a store's, kept as of its version. */
-interface Kept {
-  handle: TextureHandle;
-  version: number;
-}
-
-/**
- * Draws the player's display list on a canvas of its own. Each render
- * walks the whole list, writing a row for each object drawn and an entry
- * for each of its layers' geometries, each geometry made once and kept
- * while drawn; then plans the frame and has the backend draw it.
- */
-/** What a 3D object's bitmap was last drawn of, and its bounds then (RenderView.drawPlane). */
-interface PlaneState {
-  seenAt: number;
-  generation: number;
-  rect: PixelRect | null;
-  scrolled: boolean;
-  filters: readonly FilterRecord[];
-  /** Whether its pass placed a 3D object or an outside mask, which move as all above does. */
-  unkeepable: boolean;
-  mask: DisplayObject | null;
-  left: number;
-  top: number;
-  texels: number;
-  samples: number;
-  width: number;
-  height: number;
-  color: ColorTransform;
-  colored: boolean;
-}
 
 /** What a pass of its own swaps out of the walk (RenderView.passState). */
 interface PassState {
@@ -316,23 +105,12 @@ interface PassState {
   ownerSlice: Slice | null;
 }
 
-/** A text's glyph quads as Saffron draws them (RenderView.advancedText), and what they were made of. */
-interface AdvancedText {
-  source: unknown;
-  scale: number;
-  resets: number;
-  scrollV: number;
-  scrollH: number;
-  left: number;
-  top: number;
-  height: number;
-  grid: string;
-  thickness: number;
-  sharpness: number;
-  glyphs: AdvancedGlyphs | null;
-  handle: GeometryHandle | null;
-}
-
+/**
+ * Draws the player's display list on a canvas of its own. Each render
+ * walks the whole list, writing a row for each object drawn and an entry
+ * for each of its layers' geometries, each geometry made once and kept
+ * while drawn; then plans the frame and has the backend draw it.
+ */
 export class RenderView implements Drawer {
   readonly canvas: HTMLCanvasElement;
   readonly gl: WebGL2RenderingContext;
@@ -357,63 +135,20 @@ export class RenderView implements Drawer {
   private scene = new SceneList();
   private rows = new Rows();
   private readonly geometries = new Geometries();
-  private readonly lineCache: LineCache;
   private readonly textures = new Textures();
   private commands = new Commands();
   private filters = new Filters();
-  /** Each filtered object's filters worked out, for the records, units and room they were for. */
-  private readonly filterPlans = new WeakMap<DisplayObject, KeptPlan>();
+  private readonly lineCache: LineCache;
+  private readonly parts: Parts;
+  private readonly paints = new Paints(this.textures);
+  private readonly staleShapes = new StaleShapes();
+  private readonly textItems: TextItems;
+  private readonly advancedTexts: AdvancedTexts;
+  private readonly masks: Masks;
+  private readonly filterLayers: FilterLayers;
+  private readonly planes: Planes;
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
-  private textureLimit = 4096;
-  /** Each stale cache a Shape has shown, and the scale and turn it was first drawn at. */
-  private readonly stales = new WeakMap<
-    ShapeObject,
-    { cache: StaleCache; a: number; b: number; c: number; d: number; spent: boolean }
-  >();
-  /** Each 3D object's kept bitmap, and its quad as last made (drawPlane). */
-  private readonly planeKeeps = new WeakMap<DisplayObject, KeepHandle>();
-  private readonly planeQuads = new WeakMap<
-    DisplayObject,
-    {
-      handle: GeometryHandle;
-      data: {
-        positions: Float32Array;
-        colors: Uint32Array;
-        texels: Float32Array;
-        depths: Float32Array;
-        indices: Uint32Array;
-      };
-    }
-  >();
-  /** What each 3D object's bitmap was drawn of, which it is kept while unchanged (drawPlane). */
-  private readonly planeStates = new WeakMap<DisplayObject, PlaneState>();
-  /** BitmapData.draw's kept bitmaps of 3D objects, apart from the stage's. */
-  private readonly drawnPlaneKeeps = new WeakMap<DisplayObject, KeepHandle>();
-  /**
-   * How many 3D objects and masks from outside them passes have placed: a
-   * pass that places one draws a bitmap that cannot be kept (drawPlane).
-   */
-  private passPlaced = 0;
-  /** Where drawPlane works out a quad. */
-  private readonly planeQuad: PlaneQuad = {
-    x: 0,
-    y: 0,
-    width: 0,
-    height: 0,
-    positions: new Float64Array(8),
-    ws: new Float64Array(4),
-  };
-  /** How many 3D objects' passes the walk is in, and each depth's lists, kept for the next. */
-  private planeDepth = 0;
-  private readonly planePasses: {
-    scene: SceneList;
-    rows: Rows;
-    filters: Filters;
-    commands: Commands;
-  }[] = [];
-  /** Each advanced text's glyph quads, and what they were made of (advancedText); BitmapData.draw's apart. */
-  private readonly advancedTexts = new WeakMap<DisplayObject, AdvancedText>();
-  private readonly drawnAdvanced = new WeakMap<DisplayObject, AdvancedText>();
+  private readonly textureLimit: number;
   /** The outlines' store kept while the view is (text/saffron.ts, holdSegments), let go of with it. */
   private readonly releaseOutlines = holdSegments();
   /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
@@ -421,20 +156,12 @@ export class RenderView implements Drawer {
   /** Each depth's transform on the stage, a b c d tx ty, which its children are placed under. */
   private places = new Float64Array(6 * 64);
   private readonly colorSlots: ColorTransform[] = [];
-  /** A text item's colour, and that before its object's, made in place for each item drawn. */
-  private readonly itemColor: ColorTransform = { ...IDENTITY_COLOR };
-  private readonly itemColored: ColorTransform = { ...IDENTITY_COLOR };
   /** The sliced owner whose children are walked now, its slice, and its parent's linear transform. */
   private sliceOwner: DisplayObject | null = null;
   private ownerSlice: Slice | null = null;
   private ownerParent: number[] = [1, 0, 0, 1];
-  /** A filtered object's drawn area, measured where its padding may not fit (fitFilters). */
-  private readonly drawn: number[] = [];
-  /** The outputs kept for filtered objects, and what they were kept for. */
+  /** The outputs kept: filtered objects' (FilterLayers) and 3D objects' bitmaps (Planes). */
   private readonly keeps = new Keeps();
-  private readonly outputs = new WeakMap<DisplayObject, KeptOutput>();
-  /** The filtered layers drawn this frame, each its output's record and its layer number. */
-  private readonly ran: (KeptOutput | number)[] = [];
   /** Moves on as what every kept output was made at changes: the scale, the stage's quality. */
   private keptGeneration = 0;
   private keptScale = 0;
@@ -442,8 +169,6 @@ export class RenderView implements Drawer {
   private keptScreen: number | null = null;
   /** The stage's frames drawn. */
   private frames = 0;
-  private readonly movedArea = new Float64Array(4);
-  private readonly keptRect = new Int32Array(4);
   /** Where a frame is drawn, filled in as it is. */
   private target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1, pixel: 1 };
   /**
@@ -460,34 +185,8 @@ export class RenderView implements Drawer {
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
-  private readonly made = new WeakMap<ShapeLayer, Made>();
-  private readonly maskMade = new WeakMap<ShapeLayer, Made>();
-  /**
-   * The layers each object's drawing (Graphics) was last drawn as, and of
-   * which version: those its next version leaves out are let go of then.
-   */
-  private readonly drawnLayers = new WeakMap<DisplayObject, DrawnLayers>();
-  /** The masks pushed and not yet popped, as each one's first draw and count. */
-  private readonly masks: number[] = [];
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
   private readonly stretchScratch: Linear = [0, 0, 0, 0];
-  /** Quads by their width, then their height: numbers, not a key formatted from them. */
-  private readonly quads = new Map<number, Map<number, GeometryHandle>>();
-  /** Quads made since the last were let go of, which past RUN_KEYS looks for those gone. */
-  private quadsMade = 0;
-  /** Each glyph's fill, made once for every text drawn in it; null for an empty glyph. */
-  private readonly glyphs = new WeakMap<Glyph, GeometryHandle | null>();
-  /** Device text rasterized, by its text; among its runs, by style, metrics and resolution. */
-  private readonly runs = new Map<string, DeviceRun[]>();
-  /** The canvas device text is rasterized on, made as first needed. */
-  private textCanvas: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null =
-    null;
-  private readonly stores = new WeakMap<BitmapStore, Kept>();
-  /** Each gradient's textures, by the region a radial one covers (null for a linear one), the latest used last. */
-  private readonly gradients = new WeakMap<
-    GradientFill,
-    { region: Area | null; handle: TextureHandle }[]
-  >();
 
   constructor(options: RenderViewOptions) {
     // First, so that a page that cannot run the render module throws before a context is made.
@@ -519,6 +218,12 @@ export class RenderView implements Drawer {
 
     this.lineCache = new LineCache(this.geometries, this.tessellator);
     this.counts = this.lineCache.counts;
+    this.parts = new Parts(this.geometries, this.tessellator, this.lineCache);
+    this.textItems = new TextItems(this.geometries, this.textures, this.parts);
+    this.advancedTexts = new AdvancedTexts(this.geometries);
+    this.masks = new Masks(this.geometries, this.parts);
+    this.filterLayers = new FilterLayers(this.geometries, this.textures, this.keeps, this.paints);
+    this.planes = new Planes(this.geometries);
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
     this.canvas.addEventListener("webglcontextrestored", this.restored);
@@ -601,7 +306,7 @@ export class RenderView implements Drawer {
 
   /** How many device texts' runs it keeps drawn (rasterized device text), which a page may check. */
   get textRuns(): number {
-    return this.runs.size;
+    return this.textItems.runCount;
   }
 
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
@@ -653,7 +358,7 @@ export class RenderView implements Drawer {
     }
 
     measureLayers(this.scene, this.rows, this.geometries, target);
-    this.noteKept();
+    this.filterLayers.noteKept(this.scene);
     this.frames++;
     plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
     this.uploadOutlines();
@@ -734,9 +439,21 @@ export class RenderView implements Drawer {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
         const w = this.placedMask(mask);
-        const first = this.maskBegin();
-        this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true);
-        this.maskUse(first);
+        const first = this.masks.maskBegin(this.scene);
+        this.masks.walkMask(
+          this.scene,
+          this.rows,
+          this.snapshotting,
+          mask,
+          w.a,
+          w.b,
+          w.c,
+          w.d,
+          w.tx,
+          w.ty,
+          true,
+        );
+        this.masks.maskUse(this.scene, first);
         clipped = true;
       } else {
         unsupported.masks++;
@@ -776,7 +493,10 @@ export class RenderView implements Drawer {
         : null);
     // A 3D object's content is drawn in its own space into a bitmap, which its quad then places in
     // perspective (drawPlane); its filters run in the bitmap, its blend on the quad.
-    const filtering = hidden || plane || o.filters.length === 0 ? null : this.filterPlan(o);
+    const filtering =
+      hidden || plane || o.filters.length === 0
+        ? null
+        : this.filterLayers.filterPlan(o, this.filterUnits, this.scale, this.drawRoot !== null);
     // Its colour, which a 3D object's bitmap takes, all above it drawn into it.
     const full = color;
     let layerRow = -1;
@@ -793,11 +513,24 @@ export class RenderView implements Drawer {
       // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
       output =
         filtering && !this.drawRoot
-          ? this.keptOutput(o, filtering, slice?.key ?? "", a, b, c, d, tx, ty)
+          ? this.filterLayers.keptOutput(
+              o,
+              filtering,
+              slice?.key ?? "",
+              a,
+              b,
+              c,
+              d,
+              tx,
+              ty,
+              this.target,
+              this.frames,
+              this.keptGeneration,
+            )
           : null;
       if (output?.reused) {
         const k = output.handle as KeepHandle;
-        const rect = this.keptRect;
+        const rect = this.filterLayers.keptRect;
         this.scene.keptLayer(k.id, mode, layerRow, rect[0], rect[1], rect[2], rect[3]);
         this.keeps.use(k.id);
         hidden = true;
@@ -821,14 +554,17 @@ export class RenderView implements Drawer {
       // A rectangle of no size clips everything, as an empty one does.
       const width = Math.max(0, r.xMax - r.xMin);
       const height = Math.max(0, r.yMax - r.yMin);
-      const first = this.maskBegin();
-      this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, width, height);
-      this.maskUse(first);
+      const first = this.masks.maskBegin(this.scene);
+      this.masks.rectMask(this.scene, this.rows, a, b, c, d, tx, ty, r.xMin, r.yMin, width, height);
+      this.masks.maskUse(this.scene, first);
     }
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
     // whose bitmap cache Flash shows stale draws what that shows (staleShape).
-    const shape = o instanceof ShapeObject ? this.staleShape(o, hidden, a, b, c, d) : null;
+    const shape =
+      o instanceof ShapeObject
+        ? this.staleShapes.staleShape(o, hidden, this.snapshotting, a, b, c, d)
+        : null;
     // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
     const version = o.drawing ? o.drawing.version : 0;
     const drawn = o.drawing
@@ -841,7 +577,7 @@ export class RenderView implements Drawer {
           ? sliceLayers(drawn, slice, ownSlice ? null : o.placed, version)
           : drawn;
     if (o.drawing && layers) {
-      this.dropUndrawn(o, layers, version);
+      this.parts.dropUndrawn(o, layers, version);
     }
 
     // A sliced line keeps the width it has in its owner's parent's space, as adl's does, times a
@@ -858,12 +594,14 @@ export class RenderView implements Drawer {
       const least = 1 / (this.screenScale ?? this.scale * this.resolution);
       // Alpha left whole by the colour transform: a line's overlaps then draw nothing new.
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
+      // Read once for the object, not for each textured part.
+      const smoothing = this.smoothing;
       for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.partsOf(layers[i], version)) {
+        for (const { part, handle } of this.parts.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(handle.id);
           const textured = part.paint !== null || part.mesh !== null;
-          const texture = textured ? this.paintTexture(part) : null;
+          const texture = textured ? this.paints.paintTexture(part) : null;
           if (textured && !texture) {
             continue;
           }
@@ -881,7 +619,7 @@ export class RenderView implements Drawer {
             row,
             NORMAL,
             texture?.id ?? -1,
-            texture ? this.paintSampler(part) : 0,
+            texture ? paintSampler(part, smoothing) : 0,
           );
         }
 
@@ -951,7 +689,9 @@ export class RenderView implements Drawer {
       // them was, else as normal text.
       // In a 3D object's bitmap, whose pixels are not the stage's, as normal text.
       const advanced =
-        omitted.advanced && this.planeDepth === 0 ? this.advancedText(o, a, b, c, d) : null;
+        omitted.advanced && !this.planes.inPass
+          ? this.advancedTexts.advancedText(o, a, b, c, d, this.target, this.drawRoot !== null)
+          : null;
       if (omitted.advanced && !advanced) {
         unsupported.advancedTexts++;
       }
@@ -970,9 +710,22 @@ export class RenderView implements Drawer {
 
       for (let k = 0; k < items.length; k++) {
         if (clip && k === omitted.clipFrom) {
-          const first = this.maskBegin();
-          this.rectMask(a, b, c, d, tx, ty, clip.x, clip.y, clip.width, clip.height);
-          this.maskUse(first);
+          const first = this.masks.maskBegin(this.scene);
+          this.masks.rectMask(
+            this.scene,
+            this.rows,
+            a,
+            b,
+            c,
+            d,
+            tx,
+            ty,
+            clip.x,
+            clip.y,
+            clip.width,
+            clip.height,
+          );
+          this.masks.maskUse(this.scene, first);
         }
 
         // A glyph whose tables found no room among Saffron's is drawn as normal text.
@@ -985,27 +738,39 @@ export class RenderView implements Drawer {
         }
 
         if (!advanced || item.kind !== "glyph" || drawnNormal) {
-          this.drawTextItem(item, a, b, c, d, tx, ty, color, resolution);
+          this.textItems.drawTextItem(
+            this.scene,
+            this.rows,
+            item,
+            a,
+            b,
+            c,
+            d,
+            tx,
+            ty,
+            color,
+            resolution,
+          );
         } else if (!glyphsDrawn && advanced.handle) {
           glyphsDrawn = true;
           this.geometries.use(advanced.handle.id);
           this.scene.draw(
             advanced.handle.id,
-            this.placedRow(a, b, c, d, tx, ty, advanced.m, color),
+            placedRow(this.rows, a, b, c, d, tx, ty, advanced.m, color),
             NORMAL,
           );
         }
 
         if (clip && k === omitted.clipTo - 1) {
-          this.popMask();
+          this.masks.popMask(this.scene);
         }
       }
     }
 
     const store = o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      const quad = this.quad(store.width, store.height);
-      const texture = this.storeTexture(store);
+      const quad = this.parts.quad(store.width, store.height);
+      const texture = this.paints.storeTexture(store);
       if (row < 0) {
         row = this.rows.addPlaced(this.places, at + 6, color);
       }
@@ -1042,14 +807,26 @@ export class RenderView implements Drawer {
         if (clips) {
           const n = clips.enter(child);
           for (; open > n; open--) {
-            this.popMask();
+            this.masks.popMask(this.scene);
           }
         }
 
         if (child.clipDepth > 0 && !hidden) {
-          const first = this.maskBegin();
-          this.walkMask(child, a, b, c, d, tx, ty, false);
-          this.maskUse(first);
+          const first = this.masks.maskBegin(this.scene);
+          this.masks.walkMask(
+            this.scene,
+            this.rows,
+            this.snapshotting,
+            child,
+            a,
+            b,
+            c,
+            d,
+            tx,
+            ty,
+            false,
+          );
+          this.masks.maskUse(this.scene, first);
           open++;
           continue;
         }
@@ -1061,7 +838,7 @@ export class RenderView implements Drawer {
       this.ownerSlice = ownerSlice;
       this.ownerParent = ownerParent;
       for (; open > 0; open--) {
-        this.popMask();
+        this.masks.popMask(this.scene);
       }
 
       if (!this.snapshotting) {
@@ -1070,25 +847,36 @@ export class RenderView implements Drawer {
     }
 
     if (r) {
-      this.popMask();
+      this.masks.popMask(this.scene);
     }
 
     if (output?.reused) {
       // Composited again already.
     } else if (filtering) {
-      const fitted = this.fitFilters(o, filtering, drawnFrom);
+      const fitted = this.filterLayers.fitFilters(
+        o,
+        filtering,
+        drawnFrom,
+        this.scene,
+        this.rows,
+        this.target,
+        this.resolution,
+        this.scale,
+        this.drawRoot !== null,
+        this.textureLimit,
+      );
       this.scene.padLayer(layer, fitted.padding);
-      this.scene.layerEnd(mode, layerRow, this.chainOf(fitted));
+      this.scene.layerEnd(mode, layerRow, this.filterLayers.chainOf(fitted, this.filters));
       if (output) {
         output.pad = fitted.padding;
-        this.ran.push(output, layer);
+        this.filterLayers.ranLayer(output, layer);
       }
     } else if (mode !== NORMAL) {
       this.scene.layerEnd(mode, layerRow);
     }
 
     if (clipped) {
-      this.popMask();
+      this.masks.popMask(this.scene);
     }
 
     this.walkDepth--;
@@ -1096,247 +884,6 @@ export class RenderView implements Drawer {
     if (!this.snapshotting) {
       o.dirty = CLEAN;
     }
-  }
-
-  /**
-   * Whether `o`'s filters' output kept last can be drawn again, its rectangle then in keptRect;
-   * else whether to keep what they make now. Kept while nothing they ran on changed but where it is
-   * on the stage: not past a change in `o` but a move, in what is in it, in its scale or turn on
-   * the stage (a b c d), a move of what it scrolls, its filters, or the screen's scale; and drawn
-   * again only while its rectangle moved with it, its size the same and its corner within a pixel.
-   * One that changes frame after frame is not kept, as keeping it would cost a target for nothing.
-   */
-  private keptOutput(
-    o: DisplayObject,
-    plan: FilterPlan,
-    sliceKey: string,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
-  ): KeptOutput {
-    let k = this.outputs.get(o);
-    if (!k) {
-      k = {
-        handle: null,
-        plan,
-        generation: this.keptGeneration,
-        seenAt: -1,
-        sliceKey,
-        scrolled: false,
-        measured: false,
-        kept: false,
-        reused: false,
-        keeping: false,
-        changing: 0,
-        linear: [a, b, c, d],
-        x: 0,
-        y: 0,
-        pad: 0,
-        area: new Float64Array(4),
-        rect: new Int32Array(4),
-      };
-      this.outputs.set(o, k);
-    }
-
-    const target = this.target;
-    const x = tx * target.scale;
-    const y = ty * target.scale;
-    const l = k.linear;
-    // One not drawn on the frame before was hidden, or off the list, where a walk cleared its flags
-    // and its children's without it hearing of a change.
-    // A slice moves what it draws as its owner's other children change, which its flags miss.
-    const changed =
-      k.seenAt !== this.frames - 1 ||
-      k.sliceKey !== sliceKey ||
-      k.plan !== plan ||
-      k.generation !== this.keptGeneration ||
-      (o.dirty & ~TRANSFORM) !== 0 ||
-      (o.dirty & TRANSFORM && (o.scroll !== null || k.scrolled)) ||
-      (o instanceof Container && o.descendantsDirty) ||
-      l[0] !== a ||
-      l[1] !== b ||
-      l[2] !== c ||
-      l[3] !== d;
-    k.seenAt = this.frames;
-    k.sliceKey = sliceKey;
-    k.scrolled = o.scroll !== null;
-    let same = false;
-    if (!changed && k.measured) {
-      // Its area as measured, moved as it moved, measured into a rectangle again.
-      const moved = this.movedArea;
-      moved[0] = k.area[0] + x - k.x;
-      moved[1] = k.area[1] + y - k.y;
-      moved[2] = k.area[2] + x - k.x;
-      moved[3] = k.area[3] + y - k.y;
-      const rect = this.keptRect;
-      filteredRect(moved, 0, k.pad, target, rect, 0);
-      same =
-        rect[2] === k.rect[2] &&
-        rect[3] === k.rect[3] &&
-        Math.abs(rect[0] - x - (k.rect[0] - k.x)) <= 1 &&
-        Math.abs(rect[1] - y - (k.rect[1] - k.y)) <= 1;
-    }
-
-    k.reused = !changed && same && k.kept && k.handle !== null && this.keeps.alive(k.handle);
-    if (k.reused) {
-      k.changing = 0;
-      return k;
-    }
-
-    // Unchanged but not kept, as after it was filtered without keeping: kept now.
-    k.changing = changed || !same ? k.changing + 1 : 0;
-    k.keeping = k.changing <= 1;
-    k.kept = false;
-    k.plan = plan;
-    k.generation = this.keptGeneration;
-    l[0] = a;
-    l[1] = b;
-    l[2] = c;
-    l[3] = d;
-    k.x = x;
-    k.y = y;
-    // Let go of at the end of the first frame it is not drawn: one whose object was not drawn on
-    // the frame before is drawn anew (`changed`), and a timeline makes filtered objects anew as it
-    // plays, whose outputs, kept for a second, held hundreds of MB.
-    if (k.keeping && (!k.handle || !this.keeps.alive(k.handle))) {
-      k.handle = this.keeps.add(0);
-    }
-
-    if (k.keeping) {
-      this.keeps.use((k.handle as KeepHandle).id);
-    }
-
-    return k;
-  }
-
-  /** What the filtered layers drawn this frame measured, for their outputs kept to be drawn again. */
-  private noteKept(): void {
-    const ran = this.ran;
-    const scene = this.scene;
-    for (let i = 0; i < ran.length; i += 2) {
-      const k = ran[i] as KeptOutput;
-      const layer = ran[i + 1] as number;
-      for (let j = 0; j < 4; j++) {
-        k.area[j] = scene.areas[layer * 4 + j];
-        k.rect[j] = scene.layers[layer * 4 + j];
-      }
-
-      // Kept where its output was: a layer of no size draws nothing, and keeps nothing, nor does one
-      // in a layer of no size, which the planner leaves out with all in it.
-      k.measured = k.rect[2] > 0 && k.rect[3] > 0;
-      k.kept = k.keeping && k.measured && drawnWithin(scene, layer);
-    }
-
-    ran.length = 0;
-  }
-
-  /**
-   * `o`'s filters worked out for the units they are drawn at and the room a
-   * texture has, again only as one of those or their values change: null
-   * where it has none drawn.
-   */
-  private filterPlan(o: DisplayObject): FilterPlan | null {
-    const records = o.filters;
-    // A stage scaled to nothing filters at a unit a pixel rather than not at all.
-    const units =
-      this.filterUnits ?? (Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1);
-    const kept = this.filterPlans.get(o);
-    // A draw for BitmapData plans at its own units, leaving the stage's plans be.
-    if (this.drawRoot) {
-      return kept?.units === units
-        ? kept.plan
-        : planFilters(records, units, Number.POSITIVE_INFINITY, kept?.plan ?? null);
-    }
-
-    if (kept && kept.units === units) {
-      if (kept.records === records) {
-        return kept.plan;
-      }
-
-      // Set again with the same values, as a tween writes them on each frame.
-      if (sameFilterRecords(records, kept.records)) {
-        kept.records = records;
-        return kept.plan;
-      }
-    }
-
-    const plan = planFilters(records, units, Number.POSITIVE_INFINITY, kept?.plan ?? null);
-    this.filterPlans.set(o, { records, units, plan, cap: Number.POSITIVE_INFINITY, capped: null });
-    return plan;
-  }
-
-  /**
-   * `plan`, `o`'s, with its padding cut where it would not fit a texture
-   * round what `o` drew, the scene's entries from `from` on: its area cut
-   * to the target, as PixiJS's filter system measures it (measure.ts in
-   * @swf2es/render). Only a padding past what fits round the whole target asks
-   * for the area.
-   */
-  private fitFilters(o: DisplayObject, plan: FilterPlan, from: number): FilterPlan {
-    const res = this.resolution;
-    const width = this.target.width / res;
-    const height = this.target.height / res;
-    if (plan.padding <= filterRoom(this.textureLimit, res, width, height)) {
-      return plan;
-    }
-
-    const area = this.drawn;
-    drawnArea(this.scene, this.rows, this.geometries, from, this.scale * res, area);
-    const room = filterRoom(
-      this.textureLimit,
-      res,
-      Math.min(area[2] / res, width) - Math.max(area[0] / res, 0),
-      Math.min(area[3] / res, height) - Math.max(area[1] / res, 0),
-    );
-    const cap = paddingCap(plan.wanted, room);
-    const kept = this.filterPlans.get(o);
-    if (cap === Number.POSITIVE_INFINITY || !kept) {
-      return plan;
-    }
-
-    if (this.drawRoot) {
-      return planFilters(kept.records, kept.units, cap, plan) ?? plan;
-    }
-
-    if (kept.cap !== cap || !kept.capped) {
-      kept.cap = cap;
-      kept.capped = planFilters(kept.records, kept.units, cap, kept.capped ?? plan) ?? plan;
-    }
-
-    return kept.capped;
-  }
-
-  /** `plan`'s passes added to the frame's filters as a chain, their gradients' textures uploaded: its number. */
-  private chainOf(plan: FilterPlan): number {
-    for (const pass of plan.passes) {
-      let texture = -1;
-      if (pass.colors) {
-        if (!pass.texture || !this.textures.alive(pass.texture)) {
-          // A copy, as the backend lets the pixels it uploads go.
-          pass.texture = this.textures.add(256, 1, pass.colors.slice(), GRADIENT_IDLE_FRAMES);
-        }
-
-        texture = pass.texture.id;
-        this.textures.use(texture);
-      } else if (pass.map) {
-        // Its map as it is now, a texture of its pixels kept as a bitmap's is.
-        if (pass.map.disposed) {
-          continue;
-        }
-
-        // A map set anew is a copy anew, as a tween writing the filters takes one each frame:
-        // its texture goes soon once the next one takes its place.
-        texture = this.storeTexture(pass.map, GRADIENT_IDLE_FRAMES).id;
-        this.textures.use(texture);
-      }
-
-      this.filters.add(pass.kind, pass.values, texture);
-    }
-
-    return this.filters.close();
   }
 
   /**
@@ -1379,122 +926,6 @@ export class RenderView implements Drawer {
   }
 
   /**
-   * The shape a Shape draws: the one Flash's stale bitmap cache shows, given
-   * another of the same bounds while cached (display/shapeobject.ts), while
-   * it stands on the stage at the scale and turn (a b c d) it was first
-   * drawn at and stays cached; from a frame either changes, what it is
-   * (`cache-replace`). Only a frame that
-   * draws it decides: one walked hidden draws nothing of it, and
-   * BitmapData.draw's walk is in the bitmap's space, which shows the cache
-   * as the stage last did.
-   */
-  private staleShape(
-    o: ShapeObject,
-    hidden: boolean,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-  ): ShapeCharacter | null {
-    const cache = o.stale;
-    if (!cache || hidden) {
-      return o.drawn();
-    }
-
-    let seen = this.stales.get(o);
-    if (this.snapshotting) {
-      return seen?.cache === cache && seen.spent ? o.drawn() : cache.shape;
-    }
-
-    if (!seen || seen.cache !== cache) {
-      // A first frame with its cache off already draws it as it is.
-      seen = { cache, a, b, c, d, spent: !cached(o) };
-      this.stales.set(o, seen);
-    } else if (
-      !seen.spent &&
-      (seen.a !== a || seen.b !== b || seen.c !== c || seen.d !== d || !cached(o))
-    ) {
-      seen.spent = true;
-    }
-
-    return seen.spent ? o.drawn() : cache.shape;
-  }
-
-  /**
-   * A text's glyphs as Saffron draws them, of its glyphs' quads made again
-   * as its layout, scroll or place in its field, its settings, its scale
-   * in Flash's pixels or the outlines' store change: their geometry, in the
-   * field's pixels or the StaticText's definition's, and what places them
-   * there in the text's space. Null where it cannot be drawn so, which is
-   * kept too.
-   */
-  private advancedText(
-    o: TextObject | StaticTextObject,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-  ): { handle: GeometryHandle | null; normal: number[]; m: Matrix } | null {
-    const field = o instanceof TextObject ? o : null;
-    const m = field ? IDENTITY : this.staticMatrix(o as StaticTextObject);
-    // Flash's pixels a pixel of the text: the target's pixels a stage pixel over a pixel of Flash's.
-    // Kept in steps of a square root of two, the step down: the quads reach out as far as at the
-    // scale itself or further, and their cost counts as at most twice less, so that a text that
-    // grows or shrinks makes its quads again only now and then.
-    const target = this.target;
-    const exact =
-      Math.sqrt(Math.abs((a * d - b * c) * (m.a * m.d - m.b * m.c))) *
-      (target.scale / target.pixel);
-    const scale =
-      exact > 0 && Number.isFinite(exact) ? Math.SQRT2 ** Math.floor(Math.log2(exact) * 2) : 1;
-    const source = field ? field.layout : (o as StaticTextObject).glyphs;
-    // The stage's and BitmapData.draw's apart, as they draw it at scales of their own.
-    const texts = this.drawRoot ? this.drawnAdvanced : this.advancedTexts;
-    let kept = texts.get(o);
-    if (
-      kept &&
-      kept.source === source &&
-      kept.scale === scale &&
-      kept.resets === saffronStore.resets &&
-      (!field ||
-        (kept.scrollV === field.scrollV &&
-          kept.scrollH === field.scrollH &&
-          kept.left === field.left &&
-          kept.top === field.top &&
-          kept.height === field.height &&
-          kept.grid === field.gridFitType &&
-          kept.thickness === field.thickness &&
-          kept.sharpness === field.sharpness)) &&
-      (!kept.handle || this.geometries.alive(kept.handle))
-    ) {
-      return kept.glyphs ? { handle: kept.handle, normal: kept.glyphs.normal, m } : null;
-    }
-
-    if (kept?.handle && this.geometries.alive(kept.handle)) {
-      this.geometries.remove(kept.handle.id);
-    }
-
-    const glyphs = field ? fieldQuads(field, scale) : staticQuads(o as StaticTextObject, scale);
-    kept = {
-      source,
-      scale,
-      resets: saffronStore.resets,
-      scrollV: field?.scrollV ?? 0,
-      scrollH: field?.scrollH ?? 0,
-      left: field?.left ?? 0,
-      top: field?.top ?? 0,
-      height: field?.height ?? 0,
-      grid: field?.gridFitType ?? "",
-      thickness: field?.thickness ?? 0,
-      sharpness: field?.sharpness ?? 0,
-      glyphs,
-      handle: glyphs?.geometry ? this.geometries.add(glyphs.geometry) : null,
-    };
-    texts.set(o, kept);
-    return glyphs ? { handle: kept.handle, normal: glyphs.normal, m } : null;
-  }
-
-  /**
    * A 3D object drawn as Flash draws it (display/plane.ts): what it and its
    * children draw, in its own space, a texel a pixel at `samples` a side
    * and averaged down, into a bitmap kept as a kept output, in a pass of
@@ -1520,16 +951,14 @@ export class RenderView implements Drawer {
       return false;
     }
 
-    // In another's bitmap, placed by what moves with all above it.
-    if (this.planeDepth > 0) {
-      this.passPlaced++;
-    }
+    // Counted in another's bitmap, placed by what moves with all above it.
+    this.planes.place();
 
     // What it draws, measured again only where something in it may have changed.
-    const k = this.planeState(o);
-    const unchanged = this.unchanged(o, k);
+    const k = this.planes.state(o);
+    const unchanged = planeUnchanged(o, k, this.frames, this.snapshotting);
     const rect = unchanged && k.rect ? k.rect : drawnRect(o);
-    const quad = this.planeQuad;
+    const quad = this.planes.quad;
     if (
       !rect ||
       !placeQuad(o.placed, rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, quad)
@@ -1543,7 +972,7 @@ export class RenderView implements Drawer {
     // Let go of on the first frame it is not drawn: one not drawn on the frame before is drawn
     // anew, and a timeline makes 3D objects anew as it plays. BitmapData.draw's apart, in its
     // colour and at its quality, which the stage's bitmap must not take.
-    const keeps = this.snapshotting ? this.drawnPlaneKeeps : this.planeKeeps;
+    const keeps = this.snapshotting ? this.planes.drawnBitmaps : this.planes.keptBitmaps;
     let keep = keeps.get(o);
     const alive = keep !== undefined && this.keeps.alive(keep);
     if (!keep || !alive) {
@@ -1553,25 +982,9 @@ export class RenderView implements Drawer {
 
     this.keeps.use(keep.id);
 
-    // Its quad, made again as it moves: its texels the bitmap's, each corner's depth its w. Made
-    // before its content's pass, in which a 3D object inside it works out its own in `quad`.
-    let kept = this.planeQuads.get(o);
-    if (!kept || !this.geometries.alive(kept.handle)) {
-      const data = {
-        positions: new Float32Array(8),
-        colors: NO_COLORS,
-        texels: new Float32Array(8),
-        depths: new Float32Array(4),
-        indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
-      };
-      planeQuadData(data, quad, width, height);
-      kept = { handle: this.geometries.add(data), data };
-      this.planeQuads.set(o, kept);
-    } else if (planeQuadData(kept.data, quad, width, height)) {
-      this.geometries.update(kept.handle.id);
-    }
-
-    const handle = kept.handle;
+    // Its quad, made before its content's pass, in which a 3D object inside it works out its own in
+    // `quad`.
+    const handle = this.planes.quadGeometry(o, width, height);
     this.geometries.use(handle.id);
     const row = this.rows.add(a, b, c, d, tx, ty, null);
     const left = quad.x;
@@ -1627,54 +1040,6 @@ export class RenderView implements Drawer {
     return true;
   }
 
-  /** What `o`'s bitmap was last drawn of (drawPlane), made on its first. */
-  private planeState(o: DisplayObject): PlaneState {
-    let k = this.planeStates.get(o);
-    if (!k) {
-      k = {
-        seenAt: -1,
-        generation: -1,
-        rect: null,
-        scrolled: false,
-        filters: [],
-        unkeepable: false,
-        mask: null,
-        left: 0,
-        top: 0,
-        texels: 0,
-        samples: 0,
-        width: 0,
-        height: 0,
-        color: { ...IDENTITY_COLOR },
-        colored: false,
-      };
-      this.planeStates.set(o, k);
-    }
-
-    return k;
-  }
-
-  /**
-   * Whether nothing a 3D object's bitmap holds changed since the frame
-   * before drew it: in it but its own transform, which moves its quad
-   * alone, nor its filters' values, which setting flags as a transform.
-   * One whose pass placed a 3D object or a mask from outside it in it
-   * (unkeepable) is drawn anew on every frame, as those move with what
-   * above them moves, which flags nothing in it; and BitmapData.draw draws
-   * anew.
-   */
-  private unchanged(o: DisplayObject, k: PlaneState): boolean {
-    return (
-      !this.snapshotting &&
-      !k.unkeepable &&
-      k.seenAt === this.frames - 1 &&
-      (o.dirty & ~TRANSFORM) === 0 &&
-      !(o.dirty & TRANSFORM && (o.scroll !== null || k.scrolled)) &&
-      !(o instanceof Container && o.descendantsDirty) &&
-      sameFilterRecords(k.filters, o.filters)
-    );
-  }
-
   /**
    * A 3D object's content drawn into its bitmap, kept as kept output `keep`:
    * walked with the object as the root of a pass of its own, as
@@ -1693,18 +1058,7 @@ export class RenderView implements Drawer {
     height: number,
     keep: number,
   ): boolean {
-    const depth = this.planeDepth;
-    const placed = this.passPlaced;
-    let pass = this.planePasses[depth];
-    if (!pass) {
-      pass = {
-        scene: new SceneList(),
-        rows: new Rows(),
-        filters: new Filters(),
-        commands: new Commands(),
-      };
-      this.planePasses[depth] = pass;
-    }
+    const pass = this.planes.enter();
 
     const outer = this.passState();
     const target = {
@@ -1732,7 +1086,7 @@ export class RenderView implements Drawer {
     this.drawMatrix = o.scroll ? shifted(m, o.scroll) : m;
     this.sliceOwner = null;
     this.ownerSlice = null;
-    this.planeDepth++;
+    let placed = false;
     try {
       this.scene.reset();
       this.rows.reset();
@@ -1766,695 +1120,16 @@ export class RenderView implements Drawer {
         samples,
       );
     } finally {
-      this.planeDepth--;
+      placed = this.planes.leave();
       this.restorePass(outer);
     }
 
-    return this.passPlaced !== placed;
+    return placed;
   }
 
   /** What advanced text's quads name of the outlines' store, uploaded. */
   private uploadOutlines(): void {
     this.backend.uploadOutlines(saffronStore.data, saffronStore.used, saffronStore.epoch);
-  }
-
-  /** A StaticText's matrix, from its definition's space to its own pixels. */
-  private staticMatrix(o: StaticTextObject): Matrix {
-    const m = o.definition.definition.matrix;
-    return { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 };
-  }
-
-  /** A mask begun: its draws follow, till it is used (maskUse); its first entry's index. */
-  private maskBegin(): number {
-    this.scene.marker(MASK_BEGIN);
-    return this.scene.length;
-  }
-
-  /**
-   * The mask begun at entry `first` (maskBegin) used from here, its draws
-   * those since. Begun and used around the mask's draws, with no closure:
-   * one in the walk kept every number it took in a context made on each
-   * call, boxed, though no mask was drawn.
-   */
-  private maskUse(first: number): void {
-    const count = this.scene.length - first;
-    this.scene.marker(MASK_USE, first, count);
-    this.masks.push(first, count);
-  }
-
-  /** The mask pushed last taken out: its draws named again. */
-  private popMask(): void {
-    const count = this.masks.pop() as number;
-    const first = this.masks.pop() as number;
-    this.scene.marker(MASK_POP, first, count);
-  }
-
-  /** A rectangle of `o`'s space, x y width height, under its transform (a b c d tx ty), as a mask's draw. */
-  private rectMask(
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ): void {
-    const quad = this.unitQuad();
-    const row = this.placedRow(
-      a,
-      b,
-      c,
-      d,
-      tx,
-      ty,
-      { a: width, b: 0, c: 0, d: height, tx: x, ty: y },
-      null,
-    );
-    this.geometries.use(quad.id);
-    this.scene.draw(quad.id, row, NORMAL);
-  }
-
-  /**
-   * `o` and all in it drawn as a mask, under its parent's transform: fills
-   * alone, a drawing's non-zero, glyphs and bitmaps' rectangles, whatever
-   * their visibility, as Flash masks by them. `own` says (a b c d tx ty) is
-   * already `o`'s own place, as a mask elsewhere on the list is found; else
-   * its own matrix is applied. Flags are cleared as the walk clears them.
-   */
-  private walkMask(
-    o: DisplayObject,
-    pa: number,
-    pb: number,
-    pc: number,
-    pd: number,
-    ptx: number,
-    pty: number,
-    own: boolean,
-  ): void {
-    const m = own ? IDENTITY : o.flatPlaced;
-    // What would clip a mask's own coverage needs a stencil within the stencil: drawn whole, and counted.
-    if (o.mask || o.scroll || o.clipDepth > 0) {
-      unsupported.masks++;
-    }
-
-    const a = pa * m.a + pc * m.b;
-    const b = pb * m.a + pd * m.b;
-    const c = pa * m.c + pc * m.d;
-    const d = pb * m.c + pd * m.d;
-    const tx = pa * m.tx + pc * m.ty + ptx;
-    const ty = pb * m.tx + pd * m.ty + pty;
-    const shape = o instanceof ShapeObject ? o.drawn() : null;
-    const version = o.drawing ? o.drawing.version : 0;
-    const layers = o.drawing
-      ? facing(o.drawing.layers, a * d - b * c < 0, version)
-      : (shape?.layers ?? null);
-    // A mask's drawing drawn again lets go of its old layers too.
-    if (o.drawing && layers) {
-      this.dropUndrawn(o, layers, version);
-    }
-
-    // Its row made as its first draw needs it, in place: a closure here kept every number it took
-    // in a context made on each call, boxed, as the walk's did.
-    let row = -1;
-    if (layers) {
-      for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
-          // A mesh of a bitmap disposed of draws nothing, as it is drawn, and so masks nothing.
-          if (part.mesh?.image.disposed) {
-            continue;
-          }
-
-          this.geometries.use(handle.id);
-          if (row < 0) {
-            row = this.rows.add(a, b, c, d, tx, ty, null);
-          }
-
-          this.scene.draw(handle.id, row, NORMAL);
-        }
-      }
-    }
-
-    if (o instanceof TextObject || o instanceof StaticTextObject) {
-      const omitted: TextOmissions = { advanced: false, clip: null, clipFrom: 0, clipTo: 0 };
-      for (const item of o instanceof TextObject
-        ? fieldItems(o, omitted)
-        : staticItems(o, omitted)) {
-        const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : null;
-        if (item.kind === "glyph" && geometry) {
-          const glyphRow = this.placedRow(a, b, c, d, tx, ty, item.m, null);
-          this.geometries.use(geometry.id);
-          this.scene.draw(geometry.id, glyphRow, NORMAL, -1, SNAP);
-        }
-      }
-    }
-
-    const store = o instanceof BitmapObject ? o.store : null;
-    if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      const quad = this.quad(store.width, store.height);
-      this.geometries.use(quad.id);
-      if (row < 0) {
-        row = this.rows.add(a, b, c, d, tx, ty, null);
-      }
-
-      this.scene.draw(quad.id, row, NORMAL);
-    }
-
-    if (o instanceof Container) {
-      for (const child of o.children) {
-        this.walkMask(child, a, b, c, d, tx, ty, false);
-      }
-
-      if (!this.snapshotting) {
-        o.descendantsDirty = false;
-      }
-    }
-
-    // A draw for BitmapData leaves them for the stage's.
-    if (!this.snapshotting) {
-      o.dirty = CLEAN;
-    }
-  }
-
-  /**
-   * `o`'s drawing drawn as `layers` of `version`: the parts of the layers it
-   * was last drawn as and is no more let go of now. A drawing cleared and
-   * drawn again on every frame, as a software 3D engine draws its
-   * triangles, makes new layers each time, whose old parts the idle frames
-   * would otherwise keep for hundreds of frames.
-   */
-  private dropUndrawn(o: DisplayObject, layers: ShapeLayer[], version: number): void {
-    const last = this.drawnLayers.get(o);
-    if (last?.version === version) {
-      // Another set of the same version, mirrored (facing) or sliced, kept beside the first.
-      if (layers !== last.source) {
-        for (const layer of layers) {
-          last.layers.add(layer);
-        }
-      }
-
-      return;
-    }
-
-    if (last) {
-      const now = new Set(layers);
-      for (const layer of last.layers) {
-        if (!now.has(layer)) {
-          this.dropParts(this.made, layer);
-          this.dropParts(this.maskMade, layer);
-          this.lineCache.drop(layer);
-        }
-      }
-    }
-
-    this.drawnLayers.set(o, { version, source: layers, layers: new Set(layers) });
-  }
-
-  /** `layer`'s parts in `cache` let go of. */
-  private dropParts(cache: WeakMap<ShapeLayer, Made>, layer: ShapeLayer): void {
-    const made = cache.get(layer);
-    if (!made) {
-      return;
-    }
-
-    for (const { handle } of made.parts) {
-      if (this.geometries.alive(handle)) {
-        this.geometries.remove(handle.id);
-      }
-    }
-
-    cache.delete(layer);
-  }
-
-  /**
-   * `layer`'s parts, made if they were not, or one was let go of, or its
-   * drawing changed since; a drawing used as a mask's apart, filled non-zero.
-   */
-  private partsOf(layer: ShapeLayer, version: number, masking = false): Made["parts"] {
-    const cache = masking ? this.maskMade : this.made;
-    const made = cache.get(layer);
-    // A loop, not every with a closure: each shape layer drawn asks on every frame.
-    if (made && made.version === version) {
-      let alive = true;
-
-      for (let i = 0; alive && i < made.parts.length; i++) {
-        alive = this.geometries.alive(made.parts[i].handle);
-      }
-
-      if (alive) {
-        return made.parts;
-      }
-    }
-
-    for (const { handle } of made?.parts ?? []) {
-      if (this.geometries.alive(handle)) {
-        this.geometries.remove(handle.id);
-      }
-    }
-
-    const parts = layerParts(layer, this.tessellator, masking).map((part) => ({
-      part,
-      handle: this.geometries.add(part.geometry),
-    }));
-    cache.set(layer, { parts, version });
-    return parts;
-  }
-
-  /**
-   * A text's item under the object's transform (a b c d tx ty) and colour
-   * transform: a glyph its fill, a rectangle the unit quad, each placed by
-   * its row and coloured by its colour as a multiplier before the object's;
-   * a device run its rasterized texture, a texel a canvas pixel.
-   */
-  private drawTextItem(
-    item: TextItem,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
-    color: ColorTransform | null,
-    resolution: number,
-  ): void {
-    // Its colour as a multiplier, and that before the object's, in slots of the view's: the row
-    // made of them copies them.
-    const tint = item.color;
-    const own = this.itemColor;
-    own.rMul = ((tint >>> 16) & 0xff) / 255;
-    own.gMul = ((tint >>> 8) & 0xff) / 255;
-    own.bMul = (tint & 0xff) / 255;
-    own.aMul = (tint >>> 24) / 255;
-    const colored = color ? concatColorInto(this.itemColored, color, own) : own;
-    if (item.kind === "device") {
-      const run = this.deviceRun(item, resolution);
-      if (!run) {
-        return;
-      }
-
-      // A texel a canvas pixel, the run's origin `left` texels in, past its overhang.
-      const k = 1 / run.resolution;
-      const x = item.x - run.left * k;
-      const row = this.rows.add(
-        a * k,
-        b * k,
-        c * k,
-        d * k,
-        a * x + c * item.top + tx,
-        b * x + d * item.top + ty,
-        colored,
-      );
-      const quad = this.quad(run.width, run.height);
-      this.geometries.use(quad.id);
-      this.textures.use(run.handle.id);
-      this.scene.draw(quad.id, row, NORMAL, run.handle.id, SMOOTH | CLAMP);
-      return;
-    }
-
-    const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : this.unitQuad();
-    if (!geometry) {
-      return;
-    }
-
-    const m =
-      item.kind === "glyph"
-        ? item.m
-        : { a: item.width, b: 0, c: 0, d: item.height, tx: item.x, ty: item.y };
-    this.geometries.use(geometry.id);
-    // A glyph's outline on quarters of a stage pixel, as Flash places it.
-    this.scene.draw(
-      geometry.id,
-      this.placedRow(a, b, c, d, tx, ty, m, colored),
-      NORMAL,
-      -1,
-      item.kind === "glyph" ? SNAP : 0,
-    );
-  }
-
-  /** A row for what `m` places within an object under the transform (a b c d tx ty). */
-  private placedRow(
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
-    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
-    color: ColorTransform | null,
-  ): number {
-    return this.rows.add(
-      a * m.a + c * m.b,
-      b * m.a + d * m.b,
-      a * m.c + c * m.d,
-      b * m.c + d * m.d,
-      a * m.tx + c * m.ty + tx,
-      b * m.tx + d * m.ty + ty,
-      color,
-    );
-  }
-
-  /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */
-  private glyphGeometry(glyph: Glyph): GeometryHandle | null {
-    const known = this.glyphs.get(glyph);
-    if (known === null || (known && this.geometries.alive(known))) {
-      return known;
-    }
-
-    const layers = shapeLayers(glyphShape(glyph));
-    const part = layers.length > 0 ? layerParts(layers[0], this.tessellator)[0] : undefined;
-    const handle = part ? this.geometries.add(part.geometry) : null;
-    this.glyphs.set(glyph, handle);
-    return handle;
-  }
-
-  /** A white square of a pixel, for a row to scale to a rectangle. */
-  private unitQuad(): GeometryHandle {
-    return this.quad(1, 1);
-  }
-
-  /**
-   * A run of device text rasterized white at `resolution` canvas pixels a
-   * stage pixel, or less where that would pass TEXT_MOST texels a side: its
-   * ink whole, the overhang left of its origin and past its advance too, its
-   * top at the ascent above the baseline; premultiplied, and kept while
-   * drawn, for every colour it is drawn in. Null for nothing to draw.
-   */
-  private deviceRun(item: DeviceItem, resolution: number): DeviceRun | null {
-    // By its text, a string there is already; then its style compared as values.
-    let runs = this.runs.get(item.text);
-    for (let i = runs ? runs.length - 1 : -1; i >= 0; i--) {
-      const run = (runs as DeviceRun[])[i];
-      if (
-        run.family === item.family &&
-        same(run.size, item.size) &&
-        run.bold === item.bold &&
-        run.italic === item.italic &&
-        same(run.letterSpacing, item.letterSpacing) &&
-        same(run.ascent, item.ascent) &&
-        same(run.descent, item.descent) &&
-        same(run.asked, resolution) &&
-        this.textures.alive(run.handle)
-      ) {
-        return i === (runs as DeviceRun[]).length - 1 ? run : moveLast(runs as DeviceRun[], i);
-      }
-    }
-
-    if (!this.textCanvas) {
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) {
-        return null;
-      }
-
-      this.textCanvas = { canvas, context };
-    }
-
-    const { canvas, context } = this.textCanvas;
-    let scale = resolution;
-    let size = { left: 0, width: 0, height: 0 };
-    for (let tries = 0; tries < 2; tries++) {
-      size = this.measureRun(context, item, scale);
-      const most = Math.max(size.width, size.height);
-      if (most <= TEXT_MOST) {
-        break;
-      }
-
-      scale *= TEXT_MOST / most;
-    }
-
-    const { left, width, height } = size;
-    if (item.size <= 0 || width <= 2 || height <= 2 || width > TEXT_MOST || height > TEXT_MOST) {
-      return null;
-    }
-
-    canvas.width = width;
-    canvas.height = height;
-    this.fontAt(context, item, scale);
-    context.fillStyle = "#ffffff";
-    context.textBaseline = "alphabetic";
-    context.fillText(item.text, left, item.ascent * scale + 1);
-    const pixels = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
-
-    // The canvas gives straight colour; textures hold it premultiplied.
-    for (let i = 0; i < pixels.length; i += 4) {
-      const alpha = pixels[i + 3];
-      pixels[i] = Math.round((pixels[i] * alpha) / 255);
-      pixels[i + 1] = Math.round((pixels[i + 1] * alpha) / 255);
-      pixels[i + 2] = Math.round((pixels[i + 2] * alpha) / 255);
-    }
-
-    // Those let go of are forgotten, so that text typed and scrolled keeps no lists for them.
-    if (this.runs.size > RUN_KEYS) {
-      for (const [text, list] of this.runs) {
-        let kept = 0;
-        for (const r of list) {
-          if (this.textures.alive(r.handle)) {
-            list[kept++] = r;
-          }
-        }
-
-        list.length = kept;
-        if (kept === 0) {
-          this.runs.delete(text);
-        }
-      }
-
-      runs = this.runs.get(item.text);
-    }
-
-    const run: DeviceRun = {
-      handle: this.textures.add(width, height, pixels, TEXT_IDLE_FRAMES),
-      width,
-      height,
-      left,
-      resolution: scale,
-      family: item.family,
-      size: item.size,
-      bold: item.bold,
-      italic: item.italic,
-      letterSpacing: item.letterSpacing,
-      ascent: item.ascent,
-      descent: item.descent,
-      asked: resolution,
-    };
-    if (!runs) {
-      runs = [];
-      this.runs.set(item.text, runs);
-    }
-
-    // Its text's runs gone with their textures, and the least lately used past TEXT_RUNS.
-    makeRoom(
-      runs,
-      TEXT_RUNS,
-      (r) => !this.textures.alive(r.handle),
-      (r) => {
-        if (this.textures.alive(r.handle)) {
-          this.textures.remove(r.handle.id);
-        }
-      },
-    );
-    runs.push(run);
-    return run;
-  }
-
-  /** The run's font and spacing set on the canvas at `scale` canvas pixels a stage pixel. */
-  private fontAt(context: CanvasRenderingContext2D, item: DeviceItem, scale: number): void {
-    context.font = cssFont(item.family, item.size * scale, item.bold, item.italic);
-    context.letterSpacing = `${item.letterSpacing * scale}px`;
-  }
-
-  /** The texels a run takes at `scale`: its ink left of its origin, and its whole width and height, a texel spare round. */
-  private measureRun(
-    context: CanvasRenderingContext2D,
-    item: DeviceItem,
-    scale: number,
-  ): { left: number; width: number; height: number } {
-    this.fontAt(context, item, scale);
-    const m = context.measureText(item.text);
-    const left = Math.max(0, Math.ceil(m.actualBoundingBoxLeft)) + 1;
-    const right = Math.max(m.width, Math.ceil(m.actualBoundingBoxRight));
-    return {
-      left,
-      width: Math.ceil(left + right) + 1,
-      height: Math.ceil((item.ascent + item.descent) * scale) + 2,
-    };
-  }
-
-  /** A bitmap's quad of its size, made once for every bitmap of that size. */
-  private quad(width: number, height: number): GeometryHandle {
-    let byHeight = this.quads.get(width);
-    const known = byHeight?.get(height);
-    if (known && this.geometries.alive(known)) {
-      return known;
-    }
-
-    // Device text makes quads of many sizes: those let go of are forgotten.
-    if (++this.quadsMade > RUN_KEYS) {
-      this.quadsMade = 0;
-      for (const [w, heights] of this.quads) {
-        for (const [h, handle] of heights) {
-          if (!this.geometries.alive(handle)) {
-            heights.delete(h);
-          } else {
-            this.quadsMade++;
-          }
-        }
-
-        if (heights.size === 0) {
-          this.quads.delete(w);
-        }
-      }
-
-      // Its width's map, which the sweep may have let go of.
-      byHeight = this.quads.get(width);
-    }
-
-    if (!byHeight) {
-      byHeight = new Map();
-      this.quads.set(width, byHeight);
-    }
-
-    const handle = this.geometries.add(bitmapQuad(width, height));
-    byHeight.set(height, handle);
-    return handle;
-  }
-
-  /**
-   * The texture a part's paint or mesh samples: its bitmap's, else null till
-   * it is decoded, or its gradient's.
-   */
-  private paintTexture(part: Part): TextureHandle | null {
-    if (part.mesh) {
-      const store = part.mesh.image;
-      return store.disposed ? null : this.storeTexture(store);
-    }
-
-    const paint = part.paint as BitmapSampling | GradientFill;
-    if (paint.type === "image") {
-      const store = paint.image instanceof BitmapStore ? paint.image : characterStore(paint.image);
-      return store && !store.disposed ? this.storeTexture(store) : null;
-    }
-
-    return this.gradientTexture(paint, part.region);
-  }
-
-  /**
-   * How a part's paint is sampled. A bitmap fill, or a mesh's bitmap:
-   * smoothed if it asks and the quality is not low, repeated or clamped. A
-   * linear gradient's ramp: texel by texel, spread as it wraps; a radial
-   * one's, smoothed.
-   */
-  private paintSampler(part: Part): number {
-    const mesh = part.mesh;
-    if (mesh) {
-      return MESH | (mesh.smooth && this.smoothing ? SMOOTH : 0) | (mesh.repeat ? REPEAT : CLAMP);
-    }
-
-    const paint = part.paint as BitmapSampling | GradientFill;
-    if (paint.type === "image") {
-      return (paint.smooth && this.smoothing ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP);
-    }
-
-    if (paint.radial) {
-      return SMOOTH | CLAMP;
-    }
-
-    return paint.spread === 1 ? MIRROR : paint.spread === 2 ? REPEAT : CLAMP;
-  }
-
-  /** `store`'s texture, its pixels uploaded again if they changed since. */
-  private storeTexture(store: BitmapStore, idle?: number): TextureHandle {
-    const kept = this.stores.get(store);
-    if (kept && this.textures.alive(kept.handle)) {
-      if (kept.version !== store.version) {
-        kept.version = store.version;
-        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.readable));
-      }
-
-      return kept.handle;
-    }
-
-    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable), idle);
-    this.stores.set(store, { handle, version: store.version });
-    return handle;
-  }
-
-  /**
-   * A gradient's texture: a linear one's ramp of 256 colours, a radial one
-   * computed over its region, a texel a pixel up to 512 a side
-   * (display/gradients.ts).
-   */
-  private gradientTexture(fill: GradientFill, region: Area | null): TextureHandle {
-    let made = this.gradients.get(fill);
-    if (!made) {
-      made = [];
-      this.gradients.set(fill, made);
-    }
-
-    // By its region's numbers, the latest used first: a fill is drawn over one region, or a few
-    // as its shape changes.
-    let known: { region: Area | null; handle: TextureHandle } | null = null;
-    for (let i = made.length - 1; i >= 0; i--) {
-      const r = made[i].region;
-      if (
-        r === region ||
-        (r &&
-          region &&
-          same(r.x, region.x) &&
-          same(r.y, region.y) &&
-          same(r.width, region.width) &&
-          same(r.height, region.height))
-      ) {
-        known = i === made.length - 1 ? made[i] : moveLast(made, i);
-        break;
-      }
-    }
-
-    if (known && this.textures.alive(known.handle)) {
-      return known.handle;
-    }
-
-    const colors = ramp(fill.stops, fill.linearRgb);
-    let handle: TextureHandle;
-    if (fill.radial && region) {
-      const columns = radialTexels(region.width);
-      const rows = radialTexels(region.height);
-      const pixels = radialPixels(
-        colors,
-        fill.matrix,
-        fill.focal,
-        fill.spread,
-        region,
-        columns,
-        rows,
-      );
-      handle = this.textures.add(columns, rows, rgbaOf(pixels), GRADIENT_IDLE_FRAMES);
-    } else {
-      handle = this.textures.add(colors.length, 1, rgbaOf(colors), GRADIENT_IDLE_FRAMES);
-    }
-
-    // Its region's texture made again, or a new region's kept: those let go of forgotten, and the
-    // least lately used past GRADIENT_REGIONS.
-    if (known) {
-      known.handle = handle;
-    } else {
-      const list = made;
-      makeRoom(
-        list,
-        GRADIENT_REGIONS,
-        (e) => !this.textures.alive(e.handle),
-        (e) => {
-          if (this.textures.alive(e.handle)) {
-            this.textures.remove(e.handle.id);
-          }
-        },
-      );
-      list.push({ region: region && { ...region }, handle });
-    }
-
-    return handle;
   }
 
   /**
@@ -2581,7 +1256,7 @@ export class RenderView implements Drawer {
   private placedMask(mask: DisplayObject): Matrix {
     const root = this.drawRoot;
     // In a 3D object's bitmap by the matrices up to it, or Flash's rule for one outside it.
-    if (root && this.planeDepth > 0) {
+    if (root && this.planes.inPass) {
       return this.planeMask(root, mask);
     }
 
@@ -2613,7 +1288,7 @@ export class RenderView implements Drawer {
       }
     } else {
       m = outsideMaskMap(o, mask);
-      this.passPlaced++;
+      this.planes.place();
     }
 
     return concat(m, this.drawMatrix);
@@ -2664,18 +1339,6 @@ export class RenderView implements Drawer {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
-}
-
-/** Whether every layer `layer` is in has a size, as the planner draws only such. */
-function drawnWithin(scene: SceneList, layer: number): boolean {
-  const r = scene.layers;
-  for (let p = scene.parents[layer]; p >= 0; p = scene.parents[p]) {
-    if (r[p * 4 + 2] <= 0 || r[p * 4 + 3] <= 0) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */

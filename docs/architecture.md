@@ -1330,13 +1330,20 @@ and the player's paths in this document are relative to it:
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
 - `scene/`: the view that drives `@swf2es/render` (`view.ts`,
-  `RenderView`, `@swf2es/player/scene`) and what only it uses: shapes'
-  fills resolved (`fills.ts`) and made geometries (`shapes.ts`), lines
-  stroked (`strokes.ts`) and kept by the transform they are seen through
-  (`lines.ts`), filters worked out into passes (`filters.ts`), text as
-  items to draw (`text.ts`) and advanced text's glyph quads
-  (`advanced.ts`), the pointer on the canvas (`pointer.ts`) and the
-  context menu (`context-menu.ts`).
+  `RenderView`, `@swf2es/player/scene`: the display list's walk, its
+  passes for `BitmapData.draw` and 3D objects, the canvas and its
+  context) and what only it uses: shapes' fills resolved (`fills.ts`)
+  and made geometries (`shapes.ts`), kept while drawn with bitmaps'
+  quads and glyphs' fills (`parts.ts`), the textures paints sample
+  (`paints.ts`), a stale bitmap cache's shapes (`stale-shapes.ts`),
+  lines stroked (`strokes.ts`) and kept by the transform they are seen
+  through (`lines.ts`), masks (`masks.ts`), filters worked out into
+  passes (`filters.ts`) and a filtered object's layer and kept output
+  (`filter-layers.ts`), 3D objects' bitmaps and quads (`planes.ts`),
+  text as items (`text.ts`) drawn with device text's runs
+  (`text-items.ts`) and advanced text's glyph quads (`advanced.ts`), the
+  pointer on the canvas (`pointer.ts`) and the context menu
+  (`context-menu.ts`).
 - `playerglobal/`: the `flash.*` classes, a path per package and class,
   and the AIR classes the player declares itself (`air/`, see
   [AIR's WebSocket](#airs-websocket)).
@@ -3030,7 +3037,8 @@ works out from Flash's shapes; the layers, passes and draw calls are the
 renderer's.
 
 A shape layer's fills are geometries of the renderer's, made once for
-the layer and shared by every instance that draws it (`partsOf`), a
+the layer and shared by every instance that draws it (`scene/parts.ts`,
+`partsOf`), a
 drawing's for each version of it, and let go of once undrawn for 300
 frames (`IDLE_FRAMES`). They are built from Flash's edges
 (`display/shapes.ts`: each edge goes to its right fill forward and its
@@ -3453,7 +3461,8 @@ blend mode composites the drawn bitmap, its filters' result included,
 with what is behind it (`three-d-filter-blend`); and its
 scrollRect counts for nothing, Flash drawing, bounding and hitting all of
 it (`three-d-mixed`, the same in adl and Flash Player). The view does the
-same (`scene/view.ts`, `drawPlane`, with `display/plane.ts`): what the
+same (`scene/view.ts`, `drawPlane`, with `scene/planes.ts` and
+`display/plane.ts`): what the
 object and its children draw, coloured from the stage down, is drawn in
 a pass of its own before the frame's into a bitmap of the object's
 bounds (filters' reach included) out to whole pixels, at 4 samples a
@@ -3801,7 +3810,7 @@ A bitmap's pixels are the CPU's: every operation, `draw` included, which
 reads its snapshot back (above), writes the store, and the renderer
 uploads a store's premultiplied ARGB, as it is, into a texture of its
 own when a Bitmap or a bitmap fill first shows it, and again when the
-store's version has moved since (`RenderView.storeTexture`). Every
+store's version has moved since (`scene/paints.ts`, `storeTexture`). Every
 Bitmap showing a store samples that one texture, smoothed or not as each
 asks. A texture not drawn for a while is let go of, and made again from
 the store when shown again; after a lost context, every texture is
@@ -4139,7 +4148,7 @@ the `filtered-colors` case. A colour that changes
 draws the output it kept again in the new colour, with no filter run.
 
 Stencil masks ignore their own and their ancestors' visibility and colour,
-while retaining ancestor transforms (`RenderView.walkMask`).
+while retaining ancestor transforms (`scene/masks.ts`, `walkMask`).
 `mask-ancestors` checks hidden, transparent and
 tinted ancestors, moving them, and removing and restoring the masks against
 Flash.
@@ -4378,7 +4387,7 @@ beside its unfiltered neighbours' smooth ones; the passes themselves
 draw single-sampled ([renderer.md](renderer.md#the-backend)).
 
 As Flash caches a filtered object as a bitmap, an object's filters run
-as one chain whose output is kept (`RenderView.keptOutput`, `@swf2es/render`'s
+as one chain whose output is kept (`scene/filter-layers.ts`, `keptOutput`, `@swf2es/render`'s
 `Keeps`) and drawn again until what it was run on changes: the object or anything below it, its
 transform other than a move, or how much of it the screen shows (its
 colour colours the output as it is drawn). Filters set again with the values they had,
@@ -4482,7 +4491,7 @@ timeline's, is never hit by a shape test, nor is what is in it (the
 `scale9-hits` case), and a Bitmap, masking or not, is hit over its whole
 rectangle. The view writes each mask
 into the scene list as a stencil: its drawing between a push and its
-use, then what it masks, then a pop (`RenderView.walkMask`), a
+use, then what it masks, then a pop (`scene/masks.ts`, `walkMask`), a
 timeline's range so clipped by its clip-depth child, and a mask's lines
 left out. When both objects are cached as bitmaps Flash clips by the
 mask's alpha; that, and a text field as a mask, are still to come.
