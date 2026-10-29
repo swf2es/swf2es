@@ -436,7 +436,7 @@ async function runSwf(
     // The renderer that draws: Pixi through PixiView, or with ?own the renderer of swf2es's own
     // (docs/renderer.md), which owns its canvas.
     const surface = ownRenderer
-      ? await ownSurface(player, n * zoom, shownAt, zoom)
+      ? await ownSurface(player, n * zoom, shownAt, zoom, antialias)
       : await pixiSurface(player, n * zoom, shownAt, zoom, antialias);
     const context = surface.gl;
     const info = context?.getExtension("WEBGL_debug_renderer_info");
@@ -558,6 +558,7 @@ async function ownSurface(
   resolution: number,
   shownAt: number,
   zoom: number,
+  antialias: boolean,
 ): Promise<Surface> {
   const { RenderView } = await import("@swf2es/player/scene");
   const view = new RenderView({
@@ -567,6 +568,8 @@ async function ownSurface(
     background: player.background,
     preserveDrawingBuffer: true,
     fillTessellator: fillOptions.fillTessellator,
+    // As many samples as a browser's antialiased context takes by default, as pixiSurface's has.
+    samples: antialias ? 4 : 1,
   });
   view.quality = player.quality;
   // Drawn n times finer to be averaged down: the screen is the output canvas.

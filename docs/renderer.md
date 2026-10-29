@@ -239,6 +239,18 @@ WebGL. It is small by design:
 - **A state cache,** so no bind, blend or stencil state is set twice.
 - **Uploads** of rows and run chunks once a frame, as the table does.
 
+**Anti-aliasing** is the GPU's multisampling, as the Pixi view's is
+(architecture.md, "Stage quality"): the host sets the samples by the
+stage's quality, and the stage is drawn into multisampled buffers the
+canvas's size, resolved into a texture and then onto the canvas, as a
+resolve must keep its format and an opaque canvas has no alpha. A blend
+or filter layer draws into multisampled buffers of its own, resolved into
+its texture before a filter or its composite reads it, its rectangle
+alone or, filtered, all of it. A blend's backdrop is copied to where it
+lies, as a blit out of a multisampled target must keep its rectangle.
+Filter passes draw single-sampled, and BitmapData's draws supersample, as
+Flash's do.
+
 It reuses context3d's low-level WebGL 2 mechanisms (state tables,
 program linking, buffers, limits), extracted where needed so that both
 can use them. Context3D's own draw path stays Stage3D's: it validates and
