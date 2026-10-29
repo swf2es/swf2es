@@ -132,6 +132,14 @@ hold more than 2M actions or whose decoding would read more than eight
 bytes per byte of it (and a megabyte besides), so a crafted block costs
 time in proportion to its size.
 
+`tests/fuzz/pbj.ts` does it for Pixel Bender's bytecode, which a script
+hands `Shader` as any bytes: kernels built of operations whose register
+kinds and sizes adl takes, branches and matrices among them, mutated or
+cut short or garbage alone. `readPbj` must refuse each with PbjError
+(2004 or 2030) or read it, the same twice, and the interpreter must run
+whatever it reads over a few pixels, any parameters and images, writing
+only its output.
+
 `tests/fuzz/domains.ts` gives two instances the same ABCs, child domains
 and findings in a seeded random order, and lets one of them also drop,
 evict, revive and rebuild domains; every module, entry, method compiled
