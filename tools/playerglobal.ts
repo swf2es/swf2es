@@ -9,7 +9,9 @@
 // writes tests/player/out/playerglobal/playerglobal.abc; --check then holds
 // its classes to Flash Player's playerglobal.abc (tests/player/out/libraries/,
 // from the oracle's image), as SWFs see them, and --update writes the ABC
-// into playerglobal-library.ts, which the player ships.
+// into playerglobal-library.ts, which the player ships. The classes the
+// browser's Flash Player lacks though Flash's playerglobal does not mark
+// them AIR's are marked so as they compile (playerglobal-air.ts).
 
 import {
   existsSync,
@@ -25,6 +27,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { container, containerEngine, libraries } from "../oracle/oracle.ts";
 import { type Class, readSurface, type Trait } from "./abc-surface/read.ts";
+import { AIR_ONLY } from "./playerglobal-air.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const SOURCES = "as3/playerglobal/src";
@@ -89,11 +92,51 @@ function versionMarks(abc: Uint8Array): Uint8Array {
   return out;
 }
 
+/** AIR 1.0's API version: what AIR_ONLY's classes are marked with. */
+const AIR_1_0 = "661";
+
+/** "pkg::Name" as its source's path under SOURCES. */
+const pathOf = (qualified: string) => `${qualified.replace("::", "/").replaceAll(".", "/")}.as`;
+
+/**
+ * The source of `file` with its class marked as AIR 1.0's, if AIR_ONLY
+ * names it, written under `outDir`; else `file` itself.
+ */
+function markAirOnly(file: string, outDir: string): string {
+  const path = relative(SOURCES, file);
+  const qualified = AIR_ONLY.find((name) => pathOf(name) === path);
+  if (qualified === undefined) {
+    return file;
+  }
+
+  const local = qualified.replace(/^.*::/, "");
+  const source = readFileSync(join(root, file), "utf8");
+  const declaration = new RegExp(
+    `^([ \\t]*)public\\s+(?:\\w+\\s+)*(?:class|interface)\\s+${local}\\b`,
+    "m",
+  );
+  if (!declaration.test(source)) {
+    throw new Error(`${file} declares no ${local}`);
+  }
+
+  const copy = join(outDir, "air-only", path);
+  mkdirSync(join(copy, ".."), { recursive: true });
+  writeFileSync(copy, source.replace(declaration, `$1[API("${AIR_1_0}")]\n$&`));
+  return relative(root, copy);
+}
+
 /** Compile our playerglobal into `outDir`, in the repository, which the container sees. */
 export function build(outDir = join(root, OUT)): Uint8Array {
-  const files = sources(SOURCES).sort();
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
+  const files = sources(SOURCES)
+    .sort()
+    .map((file) => markAirOnly(file, outDir));
+  const unknown = AIR_ONLY.filter((name) => !existsSync(join(root, SOURCES, pathOf(name))));
+  if (unknown.length) {
+    throw new Error(`AIR_ONLY names what has no source: ${unknown.join(", ")}`);
+  }
+
   const asc = [
     "java -ea -DAS3 -DAVMPLUS -classpath /opt/flex/lib/asc.jar macromedia.asc.embedding.ScriptCompiler",
     `-import ${BUILTIN} -builtin -apiversioning -strict -AS3`,
@@ -242,17 +285,27 @@ const NEWER = new Set([
   "flash.net.drm::DRMDeviceGroup instance getter serverURL",
 ]);
 
+/** A class's shape as AIR_ONLY has it: its name AIR 1.0's where Flash Player's is unversioned. */
+function airMarked(shape: Shape): Shape {
+  const c = JSON.parse(shape.get("(class)") as string);
+  const out = new Map(shape);
+  out.set("(class)", JSON.stringify({ ...c, name: c.name.replace(/@v0\}/, "@v1}") }));
+  return out;
+}
+
 /** Each difference between our classes and Flash Player's same ones, as a line. */
 export function check(ours: Uint8Array, flash: Uint8Array): string[] {
   const theirs = shapes(flash);
   const out: string[] = [];
   const mine = shapes(ours);
   for (const [name, shape] of mine) {
-    const ref = theirs.get(name);
-    if (!ref) {
+    const flashShape = theirs.get(name);
+    if (!flashShape) {
       out.push(`${name}: not Flash Player's`);
       continue;
     }
+
+    const ref = AIR_ONLY.includes(name) ? airMarked(flashShape) : flashShape;
 
     for (const [key, v] of ref) {
       if (shape.get(key) !== v) {

@@ -27,6 +27,12 @@ one of two ways:
   method is `native`: the player's TypeScript natives under
   `packages/player/src/playerglobal/` implement it, or it is not supported yet.
 
+AIR's classes that Flash Player's playerglobal declares unmarked, though
+the browser's Flash Player lacks them, as NativeApplication, are marked as
+AIR 1.0's as `tools/playerglobal.ts` compiles them, so a SWF on the web
+finds none of them: `tools/playerglobal-air.ts` lists them, how they were
+measured, and those of them the web keeps.
+
 The player's natives were written against Flash Player's playerglobal: a
 method native there is native here too, and where Flash Player's has an AS3
 body, ours needs one, written or taken from Ruffle.

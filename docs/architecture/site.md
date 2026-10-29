@@ -42,7 +42,8 @@ it needs. Its pages, under the base path:
     a native `unimplemented-natives.json` lists, which
     `natives-coverage.test.ts` keeps to exactly the natives the player
     does not register. AIR's own API is left out, by its API versions,
-    `AIR_CLASSES` and the list's `air` group;
+    `AIR_CLASSES` (what the web keeps of AIR's unmarked classes,
+    `tools/playerglobal-air.ts`) and the list's `air` group;
   - the player's features, by hand, with counts from the same list.
 
   Reading and scoring all three takes about 25 ms, so every build does it

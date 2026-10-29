@@ -25,6 +25,7 @@ import {
   type Recorded,
 } from "../../tests/tamarin/score.ts";
 import { readSurface, type Trait } from "../../tools/abc-surface/read.ts";
+import { AIR_KEPT } from "../../tools/playerglobal-air.ts";
 
 /** Done of how many. */
 export interface Share {
@@ -245,30 +246,12 @@ export function playerglobalAbc(source: string): Uint8Array {
 }
 
 /**
- * Classes AIR alone has that Flash Player's playerglobal declares with no
- * API version of AIR's, so that their names do not say so: they are left
- * out with what the version marks leave out. NativeMenu and NativeMenuItem
- * stay, ContextMenu's bases in Flash Player.
+ * Classes AIR alone has that our playerglobal leaves unmarked, so that
+ * their names do not say so: those the web keeps (tools/playerglobal-air.ts),
+ * left out with what the version marks leave out. NativeMenu and
+ * NativeMenuItem stay, ContextMenu's bases in Flash Player.
  */
-export const AIR_CLASSES = [
-  "flash.desktop::InvokeEventReason",
-  "flash.desktop::NativeApplication",
-  "flash.desktop::NativeDragActions",
-  "flash.desktop::NativeDragOptions",
-  "flash.desktop::Updater",
-  "flash.display::NativeWindow",
-  "flash.events::NativeDragEvent",
-  "flash.filesystem::StorageVolumeInfo",
-  "flash.html::HTMLHost",
-  "flash.html::HTMLLoader",
-  "flash.html::HTMLPDFCapability",
-  "flash.net::URLRequestDefaults",
-  "flash.security::IURIDereferencer",
-  "flash.security::RevocationCheckSettings",
-  "flash.security::SignatureStatus",
-  "flash.security::SignerTrustSettings",
-  "flash.security::XMLSignatureValidator",
-];
+export const AIR_CLASSES = AIR_KEPT;
 
 /** A trait's name, `{kind:uri@vN,...}::local`, as its namespaces, versions and local name. */
 function parseName(name: string): { uri: string; versions: number[]; local: string } {
