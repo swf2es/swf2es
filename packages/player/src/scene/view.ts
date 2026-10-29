@@ -32,6 +32,7 @@ import {
   Rows,
   SceneList,
   SMOOTH,
+  SNAP,
   type TextureHandle,
   Textures,
 } from "@swf2es/render";
@@ -1817,18 +1818,9 @@ export class RenderView implements Drawer {
         : staticItems(o, omitted)) {
         const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : null;
         if (item.kind === "glyph" && geometry) {
-          const g = item.m;
-          const glyphRow = this.rows.add(
-            a * g.a + c * g.b,
-            b * g.a + d * g.b,
-            a * g.c + c * g.d,
-            b * g.c + d * g.d,
-            a * g.tx + c * g.ty + tx,
-            b * g.tx + d * g.ty + ty,
-            null,
-          );
+          const glyphRow = this.placedRow(a, b, c, d, tx, ty, item.m, null);
           this.geometries.use(geometry.id);
-          this.scene.draw(geometry.id, glyphRow, NORMAL);
+          this.scene.draw(geometry.id, glyphRow, NORMAL, -1, SNAP);
         }
       }
     }
@@ -2048,7 +2040,14 @@ export class RenderView implements Drawer {
         ? item.m
         : { a: item.width, b: 0, c: 0, d: item.height, tx: item.x, ty: item.y };
     this.geometries.use(geometry.id);
-    this.scene.draw(geometry.id, this.placedRow(a, b, c, d, tx, ty, m, colored), NORMAL);
+    // A glyph's outline on quarters of a stage pixel, as Flash places it.
+    this.scene.draw(
+      geometry.id,
+      this.placedRow(a, b, c, d, tx, ty, m, colored),
+      NORMAL,
+      -1,
+      item.kind === "glyph" ? SNAP : 0,
+    );
   }
 
   /** A row for what `m` places within an object under the transform (a b c d tx ty). */
