@@ -11,6 +11,7 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
+import { ArrayConversion } from "./array-conversion.js";
 import { fillCache } from "./cache-fill.js";
 import { newClass, withId } from "./classes.js";
 import type {
@@ -73,7 +74,7 @@ import {
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import type { SyncInit } from "./natives/sync.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
-import { numberReadBack, numberToString, stringToNumber } from "./number-strings.js";
+import { numberToString, stringToNumber } from "./number-strings.js";
 import {
   defaultPrint,
   memoryFiles,
@@ -476,7 +477,7 @@ export class Runtime {
 
       script.state = 2;
       if (script === this.toplevel) {
-        this.noteConversions();
+        this.arrayConversion.noteConversions();
       }
     }
 
@@ -688,40 +689,12 @@ export class Runtime {
 
   private readonly builtinClasses = new Map<string, AsObject>();
 
-  // What Number(array) runs unless a script replaced it: Array's traits,
-  // Array.prototype, its toString and Object.prototype.valueOf, as the
-  // script defining Object leaves them, before any other script runs.
-  private arrayClass: AsObject | null = null;
-  private arrayTraits: Traits | null = null;
-  private arrayPrototype: AsObject | null = null;
-  private arrayToString: Value = NOT_FOUND;
-  private objectValueOf: Value = NOT_FOUND;
+  /** What Number(array) runs unless a script replaced it. */
+  private readonly arrayConversion = new ArrayConversion();
 
   /** Notes the builtin Array class, once its static initializer has run. */
   noteArrayClass(cls: AsObject): void {
-    this.arrayClass = cls;
-  }
-
-  /**
-   * Notes Array's builtin conversion functions, once the script defining
-   * Object, and Array beside it, has set its prototypes' functions.
-   */
-  private noteConversions(): void {
-    const cls = this.arrayClass;
-    if (cls === null) {
-      return;
-    }
-
-    const prototype: AsObject = cls.$prototype;
-    const objectPrototype: AsObject | null = prototype.$p;
-    const toStringFn = prototype.$d.get("toString");
-    const valueOfFn = objectPrototype?.$d.get("valueOf");
-    if (toStringFn?.$f && valueOfFn?.$f) {
-      this.arrayTraits = cls.$it;
-      this.arrayPrototype = prototype;
-      this.arrayToString = toStringFn;
-      this.objectValueOf = valueOfFn;
-    }
+    this.arrayConversion.noteArrayClass(cls);
   }
 
   prototypeOf(ref: TypeRef): AsObject {
@@ -2267,7 +2240,7 @@ export class Runtime {
 
   toNumeric(v: Value): number | FloatValue {
     if (v !== null && typeof v === "object" && !(v instanceof FloatValue)) {
-      const n = this.arrayToNumber(v);
+      const n = this.arrayConversion.arrayToNumber(v);
       if (n !== undefined) {
         return n;
       }
@@ -2347,80 +2320,8 @@ export class Runtime {
   }
 
   private objectToNumber(o: AsObject): number {
-    const n = this.arrayToNumber(o);
+    const n = this.arrayConversion.arrayToNumber(o);
     return n !== undefined ? n : this.toNumber(this.toPrimitive(o, "number"));
-  }
-
-  /**
-   * Number(a) for an Array whose conversion is still the builtins': its
-   * valueOf returns it, and its toString joins its elements with commas,
-   * which then read back as a number. Without formatting and parsing, for
-   * the Arrays whose result is plain: none or one primitive element, or
-   * only primitives, whose join holds a comma and so is NaN, unless a NUL
-   * ends the number before it. Undefined for any other, which takes the
-   * general path, as does one with a hole, whose element the prototypes
-   * give.
-   */
-  private arrayToNumber(o: AsObject): number | undefined {
-    const traits = this.arrayTraits;
-    if (traits === null || o.$traits !== traits) {
-      return undefined;
-    }
-
-    const prototype = this.arrayPrototype as AsObject;
-    const d: Map<string, Value> | null = o.$d;
-    const pd: Map<string, Value> = prototype.$d;
-    if (
-      (d !== null && (d.has("valueOf") || d.has("toString"))) ||
-      pd.has("valueOf") ||
-      pd.get("toString") !== this.arrayToString ||
-      (prototype.$p as AsObject).$d.get("valueOf") !== this.objectValueOf
-    ) {
-      return undefined;
-    }
-
-    const a: Value[] = o.$a;
-    const length = a.length;
-    if (length === 0) {
-      return 0;
-    }
-
-    if (length === 1) {
-      if (!(0 in a)) {
-        return undefined;
-      }
-
-      const v = a[0];
-      switch (typeof v) {
-        case "number":
-          return numberReadBack(v);
-        case "string":
-          return stringToNumber(v);
-        case "boolean":
-          return Number.NaN;
-        case "undefined":
-          return 0;
-        default:
-          return v === null ? 0 : undefined;
-      }
-    }
-
-    for (let i = 0; i < length; i++) {
-      if (!(i in a)) {
-        return undefined;
-      }
-
-      const v = a[i];
-      if (v !== null && typeof v === "object") {
-        return undefined;
-      }
-
-      if (typeof v === "string" && v.includes("\0")) {
-        return undefined;
-      }
-    }
-
-    return Number.NaN;
   }
 
   toInt(v: Value): number {
@@ -2729,7 +2630,7 @@ export class Runtime {
 
     // These builtins have no bindings over their enumerated own properties.
     // A missing value still needs the full lookup, including the prototype.
-    if (traits === this.arrayTraits || traits === this.objectTraits) {
+    if (traits === this.arrayConversion.arrayTraits || traits === this.objectTraits) {
       const own = this.getOwn(o, name);
       if (own !== NOT_FOUND) {
         return own;
