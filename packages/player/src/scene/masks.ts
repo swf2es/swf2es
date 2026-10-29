@@ -2,7 +2,7 @@
 // for what it masks and popped, as stencil markers in the scene list; a
 // rectangle, a scroll's or a text's gutter, as the unit quad; and an
 // object drawn whole as a mask, fills alone.
-import { IDENTITY, type Matrix } from "@swf2es/format";
+import { IDENTITY } from "@swf2es/format";
 import {
   type Geometries,
   MASK_BEGIN,
@@ -16,7 +16,6 @@ import {
 import { BitmapObject } from "../display/bitmapobject.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
-import { concat } from "../display/geometry.js";
 import { ShapeObject } from "../display/shapeobject.js";
 import { facing } from "../display/shapes.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
@@ -193,14 +192,4 @@ export class Masks {
       o.dirty = CLEAN;
     }
   }
-}
-
-export /** Where `o` stands on the stage, its matrices as the walk takes them, after their scroll's shift. */
-function toStageFlat(o: DisplayObject): Matrix {
-  let m = o.flatPlaced;
-  for (let p = o.parent; p; p = p.parent) {
-    m = concat(m, p.flatPlaced);
-  }
-
-  return m;
 }

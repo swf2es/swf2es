@@ -49,7 +49,7 @@ import type { FillTessellator } from "./fills.js";
 import { FilterLayers, type KeptOutput } from "./filter-layers.js";
 import { undrawnFilter } from "./filters.js";
 import { LineCache } from "./lines.js";
-import { Masks, toStageFlat } from "./masks.js";
+import { Masks } from "./masks.js";
 import { Paints, paintSampler } from "./paints.js";
 import { Parts } from "./parts.js";
 import { Planes, planeUnchanged } from "./planes.js";
@@ -1344,4 +1344,14 @@ function noteUnsupported(o: DisplayObject): void {
   if (o.filters.length > 0 && undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
+}
+
+/** Where `o` stands on the stage, its matrices as the walk takes them, after their scroll's shift. */
+function toStageFlat(o: DisplayObject): Matrix {
+  let m = o.flatPlaced;
+  for (let p = o.parent; p; p = p.parent) {
+    m = concat(m, p.flatPlaced);
+  }
+
+  return m;
 }
