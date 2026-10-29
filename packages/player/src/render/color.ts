@@ -37,6 +37,7 @@ import {
   Shader,
   UniformGroup,
 } from "pixi.js";
+import { protoChanged } from "./table.js";
 import { copyContext } from "./tessellate.js";
 
 const NAME = "flash-color";
@@ -655,6 +656,8 @@ export function setFlashColor(leaf: Container, ct: ColorTransform | null): void 
   }
 
   colored.flashColor = ct;
+  // Pixi is not told of a Graphics drawn alone, whose row has its transform: the prototype's kept rows are.
+  protoChanged(leaf);
   let drawnAlone = false;
   if (leaf instanceof Graphics) {
     const before = leaf.context;
