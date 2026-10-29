@@ -1175,34 +1175,106 @@ WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssem
  * fitting the stage to a page that resizes does (resize.ts): what threw,
  * if anything.
  */
-async function resizeSwf(
-  base64: string,
-  sizes: [number, number, number][],
-): Promise<string | null> {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+/**
+ * A player and what draws it, as the context-loss and resize checks drive
+ * them: Pixi through a PixiView, or with ?own the renderer of swf2es's own.
+ * Its context is lost and given back as Pixi gives it back, once the
+ * frames drawn before the next wait are drawn.
+ */
+interface Drawn {
+  player: Player;
+  gl: WebGL2RenderingContext;
+  canvas: HTMLCanvasElement;
+  render(): void;
+  loseContext(): void;
+  resize(width: number, height: number, resolution?: number): void;
+  destroy(): void;
+}
+
+async function drawn(bytes: Uint8Array, preserve: boolean): Promise<Drawn> {
   const player = new Player(bytes, null);
+  if (ownRenderer) {
+    const surface = await ownSurface(player, 1, 1, 1, false, preserve);
+    const view = surface.drawer as unknown as {
+      resize(width: number, height: number, resolution?: number): void;
+    };
+    const gl = surface.gl as WebGL2RenderingContext;
+    const lose = gl.getExtension("WEBGL_lose_context");
+    await player.start();
+    return {
+      player,
+      gl,
+      canvas: surface.canvas,
+      render: () => surface.render(player.stage),
+      loseContext: () => {
+        surface.canvas.addEventListener(
+          "webglcontextlost",
+          () => setTimeout(() => lose?.restoreContext(), 0),
+          { once: true },
+        );
+        lose?.loseContext();
+      },
+      resize: (width, height, resolution) => view.resize(width, height, resolution),
+      destroy: () => surface.destroy(),
+    };
+  }
+
   const renderer = await autoDetectRenderer({
     preference: "webgl",
     width: player.width,
     height: player.height,
     background: player.background,
     resolution: 1,
+    preserveDrawingBuffer: preserve,
     useBackBuffer: true,
   });
+  const view = new PixiView(renderer, fillOptions);
+  await player.start();
+  return {
+    player,
+    gl: (renderer as unknown as { gl: WebGL2RenderingContext }).gl,
+    canvas: renderer.canvas as HTMLCanvasElement,
+    render: () => view.render(player.stage),
+    loseContext: () =>
+      (renderer as unknown as { context: { forceContextLoss(): void } }).context.forceContextLoss(),
+    resize: (width, height, resolution) => renderer.resize(width, height, resolution),
+    destroy: () => renderer.destroy(),
+  };
+}
+
+/** Every pixel of `gl`'s drawing buffer, read back. */
+function pixelsOf(gl: WebGL2RenderingContext): Uint8Array {
+  const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+  gl.readPixels(
+    0,
+    0,
+    gl.drawingBufferWidth,
+    gl.drawingBufferHeight,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    out,
+  );
+  return out;
+}
+
+async function resizeSwf(
+  base64: string,
+  sizes: [number, number, number][],
+): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const d = await drawn(bytes, false);
   try {
-    const view = new PixiView(renderer, fillOptions);
-    await player.start();
     for (const [width, height, resolution] of sizes) {
-      renderer.resize(width, height, resolution);
-      player.tick();
-      view.render(player.stage);
+      d.resize(width, height, resolution);
+      d.player.tick();
+      d.render();
     }
 
     return null;
   } catch (e) {
     return describe(e, null);
   } finally {
-    renderer.destroy();
+    d.destroy();
   }
 }
 
@@ -1220,39 +1292,14 @@ async function contextLossSwf(
   tablePull?: boolean,
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const player = new Player(bytes, null);
   setTransformTable(table, 1, true, tablePull);
-  const renderer = await autoDetectRenderer({
-    preference: "webgl",
-    width: player.width,
-    height: player.height,
-    background: player.background,
-    resolution: 1,
-    preserveDrawingBuffer: true,
-    useBackBuffer: true,
-  });
-  const gl = (renderer as unknown as { gl: WebGL2RenderingContext }).gl;
-  const pixels = () => {
-    const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
-    gl.readPixels(
-      0,
-      0,
-      gl.drawingBufferWidth,
-      gl.drawingBufferHeight,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      out,
-    );
-    return out;
-  };
+  const d = await drawn(bytes, true);
   try {
-    const view = new PixiView(renderer, fillOptions);
-    await player.start();
     for (let i = 0; i < frames; i++) {
-      player.tick();
+      d.player.tick();
       if (turned && i === 0) {
         // Some objects turned in 3D, each drawn from a bitmap of its own (render/three.ts).
-        const root = player.stage.children[0] as unknown as { children: DisplayObject[] };
+        const root = d.player.stage.children[0] as unknown as { children: DisplayObject[] };
         root.children.forEach((child, n) => {
           if (n % 3 === 0) {
             child.set3D("rotationY", 30 + n);
@@ -1260,20 +1307,20 @@ async function contextLossSwf(
         });
       }
 
-      view.render(player.stage);
+      d.render();
     }
 
-    const before = pixels();
+    const before = pixelsOf(d.gl);
     const restored = new Promise((done) =>
-      renderer.canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
+      d.canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
         once: true,
       }),
     );
-    (renderer as unknown as { context: { forceContextLoss(): void } }).context.forceContextLoss();
+    d.loseContext();
     await restored;
     const drawnBefore = transformTableDrawn().draws;
-    view.render(player.stage);
-    const after = pixels();
+    d.render();
+    const after = pixelsOf(d.gl);
     let differ = 0;
     for (let i = 0; i < before.length; i += 4) {
       if (
@@ -1287,13 +1334,15 @@ async function contextLossSwf(
     }
 
     for (let i = 0; i < frames; i++) {
-      player.tick();
-      view.render(player.stage);
+      d.player.tick();
+      d.render();
     }
 
+    // The table is Pixi's: the renderer of swf2es's own has none to check.
     if (
       table &&
-      gl instanceof WebGL2RenderingContext &&
+      !ownRenderer &&
+      d.gl instanceof WebGL2RenderingContext &&
       transformTableDrawn().draws === drawnBefore
     ) {
       return "the table drew nothing after the context came back";
@@ -1303,7 +1352,7 @@ async function contextLossSwf(
   } catch (e) {
     return describe(e, null);
   } finally {
-    renderer.destroy();
+    d.destroy();
     setTransformTable(true);
   }
 }
@@ -1328,38 +1377,9 @@ async function contextLossPlanSwf(
 ): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   setTransformTable(table, tableMinRun, true, tablePull);
-  const make = async () => {
-    const player = new Player(bytes, null);
-    const renderer = await autoDetectRenderer({
-      preference: "webgl",
-      width: player.width,
-      height: player.height,
-      background: player.background,
-      resolution: 1,
-      preserveDrawingBuffer: true,
-      useBackBuffer: true,
-    });
-    const view = new PixiView(renderer, fillOptions);
-    await player.start();
-    return { player, renderer, view };
-  };
-  const steady = await make();
-  const losing = await make();
-  const glOf = (r: typeof steady) => (r.renderer as unknown as { gl: WebGL2RenderingContext }).gl;
-  const pixels = (gl: WebGL2RenderingContext) => {
-    const out = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
-    gl.readPixels(
-      0,
-      0,
-      gl.drawingBufferWidth,
-      gl.drawingBufferHeight,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      out,
-    );
-    return out;
-  };
-  const canvas = losing.renderer.canvas as HTMLCanvasElement;
+  const steady = await drawn(bytes, true);
+  const losing = await drawn(bytes, true);
+  const canvas = losing.canvas;
   const within = (event: Promise<unknown>) =>
     Promise.race([
       event.then(() => true),
@@ -1378,24 +1398,32 @@ async function contextLossPlanSwf(
           try {
             for (const r of [steady, losing]) {
               r.player.tick();
-              r.view.render(r.player.stage);
+              r.render();
             }
           } finally {
             performance.now = now;
           }
 
           if (!lost) {
-            const a = pixels(glOf(steady));
-            const b = pixels(glOf(losing));
+            const a = pixelsOf(steady.gl);
+            const b = pixelsOf(losing.gl);
+            // The renderer of swf2es's own draws a filtered layer whose kept output was lost with
+            // the context as a held layer, reading its passes' targets within a shared page, whose
+            // texel coordinates may round a level apart from a texture of its own's: a level, times
+            // the strength a glow multiplies it by, 2 at most in context-loss.ts.
+            const slack = ownRenderer ? 2 : 0;
             let differ = 0;
+            let most = 0;
             for (let i = 0; i < a.length; i++) {
-              if (a[i] !== b[i]) {
+              const by = Math.abs(a[i] - b[i]);
+              most = Math.max(most, by);
+              if (by > slack) {
                 differ++;
               }
             }
 
             if (differ > 0) {
-              return `step ${step} of ${plan}: ${differ} of ${a.length} bytes differ`;
+              return `step ${step} of ${plan}: ${differ} of ${a.length} bytes differ, by ${most} at most`;
             }
           }
 
@@ -1406,10 +1434,8 @@ async function contextLossPlanSwf(
           const gone = new Promise((done) =>
             canvas.addEventListener("webglcontextlost", done, { once: true }),
           );
-          // Pixi gives it back once the frames drawn till the next await are drawn.
-          (
-            losing.renderer as unknown as { context: { forceContextLoss(): void } }
-          ).context.forceContextLoss();
+          // Given back once the frames drawn till the next await are drawn (drawn()).
+          losing.loseContext();
           if (!(await within(gone))) {
             return `step ${step} of ${plan}: the context was not lost`;
           }
@@ -1442,7 +1468,7 @@ async function contextLossPlanSwf(
         case "s": {
           wide = !wide;
           for (const r of [steady, losing]) {
-            r.renderer.resize(r.player.width + (wide ? 37 : 0), r.player.height + (wide ? 21 : 0));
+            r.resize(r.player.width + (wide ? 37 : 0), r.player.height + (wide ? 21 : 0));
           }
 
           break;
@@ -1454,8 +1480,8 @@ async function contextLossPlanSwf(
   } catch (e) {
     return describe(e, null);
   } finally {
-    steady.renderer.destroy();
-    losing.renderer.destroy();
+    steady.destroy();
+    losing.destroy();
     setTransformTable(true);
   }
 }
