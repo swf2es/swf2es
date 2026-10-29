@@ -4,6 +4,7 @@ import { Tessellator } from "@swf2es/native/tessellate";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import {
   layerStrokes,
+  lineTriangles,
   outline,
   strokeWidth,
 } from "../../../../packages/player/dist/scene/strokes.js";
@@ -213,4 +214,61 @@ test("a line's paths are each filled once, and blended over each other where the
   assert.ok(g);
   assert.equal(coverings(g, 30.3, 30.1), 2);
   assert.equal(coverings(g, 10.3, 10.1), 1);
+});
+
+test("an opaque line's triangles cover what its outline does, whatever its joins and caps", () => {
+  let seed = 11;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let k = 0; k < 300; k++) {
+    const n = 2 + Math.floor(random() * 10);
+    const p = [0, 0];
+    let angle = random() * Math.PI * 2;
+    for (let i = 1; i < n; i++) {
+      angle += (random() - 0.5) * (k % 3 === 0 ? 5 : 1.6);
+      const step = 0.3 + random() * 6;
+      p.push(p[p.length - 2] + Math.cos(angle) * step, p[p.length - 1] + Math.sin(angle) * step);
+    }
+
+    const closed = k % 4 === 1;
+    const h = 0.2 + random() * 4;
+    const caps = Math.floor(random() * 3);
+    const join = Math.floor(random() * 3);
+    const contours = outline(p, closed, h, caps, join, 3, 0.05);
+    const g = { positions: [] as number[], indices: [] as number[] };
+    lineTriangles(p, closed, h, caps, join, 3, 0.05, 0, g.positions, [], g.indices);
+    const xs = p.filter((_, i) => i % 2 === 0);
+    const ys = p.filter((_, i) => i % 2 === 1);
+    for (let s = 0; s < 400; s++) {
+      const x = Math.min(...xs) - 4 * h + random() * (Math.max(...xs) - Math.min(...xs) + 8 * h);
+      const y = Math.min(...ys) - 4 * h + random() * (Math.max(...ys) - Math.min(...ys) + 8 * h);
+      assert.equal(
+        coverings(g, x, y) > 0,
+        winding(contours, x, y) !== 0,
+        `path ${k} (${closed ? "closed" : "open"}, caps ${caps}, join ${join}): (${x}, ${y})`,
+      );
+    }
+  }
+});
+
+test("a line of whole alpha drawn opaque takes no tessellator, any other is tessellated", () => {
+  const drawing = new Drawing();
+  drawing.lineStyle({ ...(halfClear(4) as object), color: 0xff000000 } as never);
+  drawing.moveTo(0, 0);
+  drawing.lineTo(60, 60);
+  drawing.lineTo(0, 60);
+  const refuse = () => {
+    throw new Error("tessellated");
+  };
+  const g = layerStrokes(drawing.layers[0], 1, 0, 0, 1, 0.25, refuse, null, true);
+  assert.ok(g);
+  // The turn's inner corner, where the segments' quads overlap.
+  assert.equal(coverings(g, 57, 59), 2);
+  assert.equal(coverings(g, 30, 29.5), 1);
+  // Not opaque, the tessellator fills its outline, here refusing it, so that JS fills it.
+  const tessellated = layerStrokes(drawing.layers[0], 1, 0, 0, 1, 0.25, refuse, null, false);
+  assert.ok(tessellated);
+  assert.equal(coverings(tessellated, 57, 59), 1);
 });

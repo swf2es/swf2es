@@ -6,7 +6,10 @@
 // width, joined on the outer side of each turn as the line joins; on the
 // inner side, where the sides cross for a gentle turn, else through the
 // turn's own point, so that it never winds back; capped at its ends; a
-// closed path's sides are two loops, wound opposite ways.
+// closed path's sides are two loops, wound opposite ways. A line drawn at
+// whole alpha, where an overlap shows nothing, is triangles along its path
+// instead (lineTriangles), with no tessellator, which was most of what
+// stroking cost.
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
@@ -348,10 +351,198 @@ export function outline(
 }
 
 /**
+ * The polyline `p` of a line drawn opaque as triangles that may overlap,
+ * where an overlap draws the same pixels again: a quad along each segment,
+ * each turn's outer wedge as `join` joins it (0 round, 1 bevel, 2 miter up
+ * to `limit` half widths) and the caps, which cover what outline()'s
+ * contours do, with no tessellator. Onto the arrays, in `color`. Segments
+ * share their corners at a gentle turn, as outline() takes it: where their
+ * inner sides cross, and their outer ones; they overlap only at a sharper
+ * turn, around the turn's own point.
+ */
+export function lineTriangles(
+  p: number[],
+  closed: boolean,
+  h: number,
+  caps: number,
+  join: number,
+  limit: number,
+  flatness: number,
+  color: number,
+  positions: number[],
+  colors: number[],
+  indices: number[],
+): void {
+  let n = p.length / 2;
+  if (closed && n > 1 && p[0] === p[(n - 1) * 2] && p[1] === p[(n - 1) * 2 + 1]) {
+    n--;
+  }
+
+  const vertex = (x: number, y: number) => {
+    positions.push(x, y);
+    colors.push(color);
+    return positions.length / 2 - 1;
+  };
+  // A fan about vertex `center` over the vertices in `ring`.
+  const ring: number[] = [];
+  const fan = (center: number) => {
+    for (let k = 1; k < ring.length; k++) {
+      indices.push(center, ring[k - 1], ring[k]);
+    }
+
+    ring.length = 0;
+  };
+  const arcVertices = (x: number, y: number, from: number, sweep: number) => {
+    const points: number[] = [];
+    arc(points, x, y, h, from, sweep, flatness);
+    // Its last point is where the ring goes on to.
+    for (let k = 0; k < points.length - 2; k += 2) {
+      ring.push(vertex(points[k], points[k + 1]));
+    }
+  };
+
+  if (n === 1) {
+    if (caps === 0) {
+      ring.push(vertex(p[0] + h, p[1]));
+      arcVertices(p[0], p[1], 0, 2 * Math.PI);
+      ring.push(ring[0]);
+      fan(vertex(p[0], p[1]));
+    }
+
+    return;
+  }
+
+  // Each segment's corners, on its left and its right on a y-down stage, at its start and end.
+  const segments = closed ? n : n - 1;
+  const startL = new Int32Array(segments);
+  const startR = new Int32Array(segments);
+  const endL = new Int32Array(segments);
+  const endR = new Int32Array(segments);
+  if (!closed) {
+    const [sx, sy] = direction(p, 0, 1);
+    startL[0] = vertex(p[0] + sy * h, p[1] - sx * h);
+    startR[0] = vertex(p[0] - sy * h, p[1] + sx * h);
+    const [ex, ey] = direction(p, n - 2, n - 1);
+    const x = p[(n - 1) * 2];
+    const y = p[(n - 1) * 2 + 1];
+    endL[n - 2] = vertex(x + ey * h, y - ex * h);
+    endR[n - 2] = vertex(x - ey * h, y + ex * h);
+  }
+
+  for (let j = closed ? 0 : 1; j < (closed ? n : n - 1); j++) {
+    const before = (j + n - 1) % n;
+    const after = (j + 1) % n;
+    const x = p[j * 2];
+    const y = p[j * 2 + 1];
+    const [tx, ty] = direction(p, before, j);
+    const [ux, uy] = direction(p, j, after);
+    const cross = tx * uy - ty * ux;
+    const dot = tx * ux + ty * uy;
+    if (cross === 0 && dot > 0) {
+      endL[before] = startL[j] = vertex(x + ty * h, y - tx * h);
+      endR[before] = startR[j] = vertex(x - ty * h, y + tx * h);
+      continue;
+    }
+
+    // The outer side, as side() takes it: the left where the way turns right on a y-down stage,
+    // and the left too where it turns right back, around its tip.
+    const s = cross < 0 ? -1 : 1;
+    const nx = ty * s * h;
+    const ny = -tx * s * h;
+    const mx = uy * s * h;
+    const my = -ux * s * h;
+    const turn = Math.atan2(Math.abs(cross), dot);
+    const back = (h * Math.abs(cross)) / (1 + dot);
+    const gentle =
+      dot > 0 &&
+      2 * back <= Math.hypot(x - p[before * 2], y - p[before * 2 + 1]) &&
+      2 * back <= Math.hypot(p[after * 2] - x, p[after * 2 + 1] - y);
+    const outerEnd = vertex(x + nx, y + ny);
+    const outerStart = vertex(x + mx, y + my);
+    // Gentle, the inner sides meet where they cross, and the wedge fans from there; else each
+    // segment's inner corner is its own, the segments overlap, and it fans from the turn's point.
+    const center = gentle ? vertex(x - nx - tx * back, y - ny - ty * back) : vertex(x, y);
+    const innerEnd = gentle ? center : vertex(x - nx, y - ny);
+    const innerStart = gentle ? center : vertex(x - mx, y - my);
+    if (s === 1) {
+      endL[before] = outerEnd;
+      endR[before] = innerEnd;
+      startL[j] = outerStart;
+      startR[j] = innerStart;
+    } else {
+      endR[before] = outerEnd;
+      endL[before] = innerEnd;
+      startR[j] = outerStart;
+      startL[j] = innerStart;
+    }
+
+    ring.push(outerEnd);
+    if (join === 0) {
+      const way = cross !== 0 ? Math.sign(nx * my - ny * mx) : Math.sign(nx * ty - ny * tx);
+      arcVertices(x, y, Math.atan2(ny, nx), way * turn);
+    } else if (join === 2) {
+      const ratio = 1 / Math.cos(turn / 2);
+      let bx = nx + mx;
+      let by = ny + my;
+      const l = Math.hypot(bx, by);
+      [bx, by] = l ? [bx / l, by / l] : [tx, ty];
+      if (ratio <= limit) {
+        ring.push(vertex(x + bx * h * ratio, y + by * h * ratio));
+      } else {
+        const reach = limit * h;
+        const cut = (px: number, py: number, dx: number, dy: number) => {
+          const along = dx * bx + dy * by;
+          const t = along ? (reach - (px * bx + py * by)) / along : 0;
+          ring.push(vertex(x + px + dx * t, y + py + dy * t));
+        };
+        cut(nx, ny, tx, ty);
+        cut(mx, my, -ux, -uy);
+      }
+    }
+
+    ring.push(outerStart);
+    fan(center);
+  }
+
+  for (let k = 0; k < segments; k++) {
+    indices.push(startL[k], startR[k], endR[k], startL[k], endR[k], endL[k]);
+  }
+
+  if (closed || caps === 1) {
+    return;
+  }
+
+  // Each end facing out along its segment, from the left of the way out round to its right: the
+  // path's right side at its start, its left at its end.
+  for (const [k, from, left, right] of [
+    [n - 1, n - 2, endL[n - 2], endR[n - 2]],
+    [0, 1, startR[0], startL[0]],
+  ]) {
+    const x = p[k * 2];
+    const y = p[k * 2 + 1];
+    const [tx, ty] = direction(p, from, k);
+    const lx = ty * h;
+    const ly = -tx * h;
+    ring.push(left);
+    if (caps === 0) {
+      arcVertices(x, y, Math.atan2(ly, lx), Math.PI);
+    } else {
+      ring.push(vertex(x + lx + tx * h, y + ly + ty * h), vertex(x - lx + tx * h, y - ly + ty * h));
+    }
+
+    ring.push(right);
+    fan(vertex(x, y));
+  }
+}
+
+/**
  * `layer`'s lines as seen through the linear transform (a b c d) on the
  * stage, in its axes, each at least `least` wide, as wide as `by` makes
  * them where it is given (a 9-slice's line space), as one geometry in
  * their order; null if it has none, or none came out of the tessellator.
+ * `opaque` where they are drawn at a colour transform that leaves alpha
+ * whole: a line of whole alpha then draws as lineTriangles, its overlaps
+ * unseen, and only another is outlined and tessellated.
  */
 export function layerStrokes(
   layer: ShapeLayer,
@@ -362,6 +553,7 @@ export function layerStrokes(
   least: number,
   tessellator: FillTessellator,
   by: readonly number[] | null = null,
+  opaque = false,
 ): GeometryData | null {
   // Seen through a transform that collapses the plane, lines cover nothing, as in the Pixi view.
   if (a * d - b * c === 0) {
@@ -383,6 +575,7 @@ export function layerStrokes(
     const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];
     const color = vertexColor(line.color);
+    const overlaps = opaque && line.color >>> 24 === 255;
     for (const { path, home } of strokePaths(stroke)) {
       // A move alone draws nothing, where a move and a line back to it draw a dot.
       if (path.length <= 3) {
@@ -396,6 +589,23 @@ export function layerStrokes(
           points[0] === points[points.length - 2] &&
           points[1] === points[points.length - 1]);
       const limit = Math.max(1, line.miterLimit);
+      if (overlaps) {
+        lineTriangles(
+          points,
+          closedPath,
+          h,
+          caps,
+          join,
+          limit,
+          flatness,
+          color,
+          positions,
+          colors,
+          indices,
+        );
+        continue;
+      }
+
       contours.push(
         ...((closedPath && triangleRing(points, h, caps, join, limit, flatness)) ||
           outline(points, closedPath, h, caps, join, limit, flatness)),
