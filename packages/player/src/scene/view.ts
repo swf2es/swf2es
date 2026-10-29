@@ -867,7 +867,7 @@ export class RenderView implements Drawer {
       this.scene.layerEnd(mode, layerRow, this.filterLayers.chainOf(fitted, this.filters));
       if (output) {
         output.pad = fitted.padding;
-        this.filterLayers.ran.push(output, layer);
+        this.filterLayers.ranLayer(output, layer);
       }
     } else if (mode !== NORMAL) {
       this.scene.layerEnd(mode, layerRow);

@@ -74,7 +74,7 @@ export class FilterLayers {
   /** What each filtered object's output was kept for. */
   private readonly outputs = new WeakMap<DisplayObject, KeptOutput>();
   /** The filtered layers drawn this frame, each its output's record and its layer number. */
-  readonly ran: (KeptOutput | number)[] = [];
+  private readonly ran: (KeptOutput | number)[] = [];
   private readonly movedArea = new Float64Array(4);
   /** A reused output's rectangle (keptOutput). */
   readonly keptRect = new Int32Array(4);
@@ -201,6 +201,11 @@ export class FilterLayers {
     }
 
     return k;
+  }
+
+  /** `output`'s object's filters drawn this frame as layer `layer`, for noteKept to measure. */
+  ranLayer(output: KeptOutput, layer: number): void {
+    this.ran.push(output, layer);
   }
 
   /** What the filtered layers drawn this frame measured, for their outputs kept to be drawn again. */
