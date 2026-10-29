@@ -16,6 +16,27 @@ const cases = readdirSync(`${here}cases`)
   .filter((f) => f.endsWith(".as"))
   .map((f) => `${here}cases/${f}`);
 
+/**
+ * avmshell's arguments for a case, from a line `// avmshell: -api AIR_1_5`
+ * at its top, and the API version its -api names, which swf2es runs it at.
+ */
+function shellArgsOf(source: string): { args: string[]; apiVersion?: number } {
+  const line = /^\/\/ avmshell: (.*)$/m.exec(readFileSync(source, "utf8"));
+  const args = line ? line[1].trim().split(/\s+/) : [];
+  const api = args.indexOf("-api");
+  if (api < 0) {
+    return { args };
+  }
+
+  const versions = readFileSync(`${root}oracle/avmplus/core/api-versions.h`, "utf8");
+  const number = new RegExp(`kApiVersion_${args[api + 1]} = (\\d+)`).exec(versions);
+  if (!number) {
+    throw new Error(`${source}: no API version ${args[api + 1]}`);
+  }
+
+  return { args, apiVersion: Number(number[1]) };
+}
+
 // Larger ABCs to parse, whose run output does not matter.
 const parseOnly = [`${root}oracle/avmplus/utils/abcdump.as`];
 
@@ -30,7 +51,10 @@ try {
 // With -md, ASC keeps metadata, such as the [Transient] that AMF and JSON
 // leave a member out for, as Tamarin's JSON tests are compiled.
 const results = runOracle(
-  [...cases.map((source) => ({ source, ascArgs: ["-md"] })), ...parseOnly],
+  [
+    ...cases.map((source) => ({ source, ascArgs: ["-md"], shellArgs: shellArgsOf(source).args })),
+    ...parseOnly,
+  ],
   `${here}out`,
   { engine, abcdump: true },
 );
@@ -69,7 +93,7 @@ for (const r of results) {
     const expected = r.output.replace(/\n$/, "").split("\n");
     let actual: string[];
     try {
-      actual = await runSwf2es(builtins, abcOf(r));
+      actual = await runSwf2es(builtins, abcOf(r), shellArgsOf(`${root}${r.file}`).apiVersion);
     } catch (e) {
       // The first frames, with each module's data URL shortened.
       const stack = (e instanceof Error ? (e.stack ?? e.message) : String(e))
