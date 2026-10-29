@@ -26,24 +26,9 @@ import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
 import { Stage } from "./stage.js";
-import { type Layer, type Open, TargetPool } from "./targets.js";
+import { type Layer, type Open, type Target, TargetPool } from "./targets.js";
 
-/** Where a frame is drawn: the target's size in pixels, and how stage pixels map onto it. */
-export interface Target {
-  width: number;
-  height: number;
-  /** Target pixels a stage pixel, and where the stage's origin lies on the target. */
-  scale: number;
-  x: number;
-  y: number;
-  /** Target pixels a unit of the target's own, which filters read their input's size in. */
-  resolution: number;
-  /**
-   * Target pixels a side of a pixel of Flash's, which a mesh's texture is
-   * read once in: a pixel of the screen, or a BitmapData's draw's sample.
-   */
-  pixel: number;
-}
+export type { Target } from "./targets.js";
 
 /**
  * Executes a frame's commands on a WebGL 2 context it owns, through one

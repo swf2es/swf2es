@@ -11,7 +11,6 @@ import {
   SNAP,
 } from "../scene.js";
 import type { GeometryAtlas, Place } from "./atlas.js";
-import type { Target } from "./backend.js";
 import type { GpuTextures } from "./gpu-textures.js";
 import {
   FILL_SLOT,
@@ -28,7 +27,7 @@ import {
   SNAP_BIT,
   TEXTURE_UNIT,
 } from "./programs.js";
-import { framebufferOf, type Open, type TargetPool } from "./targets.js";
+import { framebufferOf, type Open, type Target, type TargetPool } from "./targets.js";
 
 /** What the backend calls of WEBGL_multi_draw. */
 interface MultiDraw {

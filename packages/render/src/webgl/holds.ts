@@ -12,7 +12,6 @@ import { FilterPlan, planChain } from "../filter-plan.js";
 import type { Filters } from "../filters.js";
 import type { SceneList } from "../scene.js";
 import { Shelves } from "../shelves.js";
-import type { Target } from "./backend.js";
 import type { Compositor } from "./composite.js";
 import { type Draws, STENCIL_MOST } from "./draws.js";
 import type { FilterRunner, FilterTarget } from "./filters.js";
@@ -24,6 +23,7 @@ import {
   layerSide,
   MSAA_BYTES,
   type Open,
+  type Target,
   type TargetPool,
 } from "./targets.js";
 

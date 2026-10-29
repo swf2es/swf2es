@@ -2,6 +2,23 @@ import type { GlState } from "@swf2es/context3d/device";
 import { SizedPool } from "./pool.js";
 import { LAYER_UNIT } from "./programs.js";
 
+/** Where a frame is drawn: the target's size in pixels, and how stage pixels map onto it. */
+export interface Target {
+  width: number;
+  height: number;
+  /** Target pixels a stage pixel, and where the stage's origin lies on the target. */
+  scale: number;
+  x: number;
+  y: number;
+  /** Target pixels a unit of the target's own, which filters read their input's size in. */
+  resolution: number;
+  /**
+   * Target pixels a side of a pixel of Flash's, which a mesh's texture is
+   * read once in: a pixel of the screen, or a BitmapData's draw's sample.
+   */
+  pixel: number;
+}
+
 /**
  * A target a layer is drawn into: a texture at least its rectangle's size,
  * with a stencil of its own for masks within it. Its rows run down, the
