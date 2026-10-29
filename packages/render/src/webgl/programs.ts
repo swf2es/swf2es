@@ -92,7 +92,7 @@ void main(void) {
 export const compositeVertex = `#version 300 es
 uniform vec4 uRect;
 void main(void) {
-  int k = gl_VertexID % 6;
+  int k = gl_VertexID;
   vec2 p = vec2(k == 1 || k == 2 || k == 4 ? 1.0 : 0.0, k == 2 || k == 4 || k == 5 ? 1.0 : 0.0);
   gl_Position = vec4(mix(uRect.xy, uRect.zw, p), 0.0, 1.0);
 }

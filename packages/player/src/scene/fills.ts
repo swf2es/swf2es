@@ -110,7 +110,7 @@ function onOutline(points: number[], px: number, py: number): boolean {
  * own flattening allows a fraction of the curve's length, which leaves
  * Flash's long curves visibly polygonal; this holds up to a few times scale.
  */
-const FLATNESS = 0.02;
+export const FLATNESS = 0.02;
 
 export function trace(
   context: { moveTo(x: number, y: number): unknown; lineTo(x: number, y: number): unknown },
