@@ -11,7 +11,7 @@
 //
 // So nothing the compiler keeps between calls, such as its reused buffers,
 // leaks into what it writes. Then the JIT/AOT invariant of
-// docs/architecture.md: each method compiled alone, as lazy JIT will
+// docs/architecture/overview.md: each method compiled alone, as lazy JIT will
 // compile it, byte for byte its entry in its module, in order with a new
 // emitter each and in the reverse order with one for all.
 //

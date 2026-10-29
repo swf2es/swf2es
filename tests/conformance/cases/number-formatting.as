@@ -19,7 +19,7 @@ for (var i:int = 0; i < 240; i++) {
   if (Math.abs(v) < 1e21) line += " " + v.toFixed(i % 21);
   line += " " + v.toPrecision(1 + i % 21) + " " + v.toExponential(i % 21);
   // Above 2^53, avmshell's radix digits depend on its x87 arithmetic (it
-  // is a 32-bit x86 build), and are garbage anyway: see docs/architecture.md.
+  // is a 32-bit x86 build), and are garbage anyway: see docs/architecture/testing.md.
   if (i % 5 == 0 && Math.abs(v) < 9007199254740992) line += " " + v.toString(2 + i % 35);
   trace(line);
 }

@@ -1,4 +1,4 @@
-// A 3D display object's plane in perspective (docs/architecture.md, "3D
+// A 3D display object's plane in perspective (docs/architecture/rendering.md, "3D
 // display objects"): as Flash Player and adl project it, through the
 // perspective projection of the nearest container above it that has one
 // set, or else of its SWF's root (the stage's, for one put on the stage).

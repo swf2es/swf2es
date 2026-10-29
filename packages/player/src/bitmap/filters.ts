@@ -1,5 +1,5 @@
 // BitmapData.applyFilter and generateFilterRect, on the CPU, as adl
-// computes them (docs/architecture.md, "Filters"): the source filtered, past
+// computes them (docs/architecture/compositing.md, "Filters"): the source filtered, past
 // the source rect too, and the filter's rect written whole into the
 // destination; a blur's runs truncated to 8 bits each, a glow's alpha from
 // the blur so truncated times strength, a bevel's from the difference of two

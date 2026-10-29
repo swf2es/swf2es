@@ -1,6 +1,6 @@
 // A ModuleCache in the browser's IndexedDB: the modules the compiler wrote
 // for a page's SWFs, kept for its next load. A large application's module
-// took 250 ms to compile and 10 ms to read back (see docs/architecture.md,
+// took 250 ms to compile and 10 ms to read back (see docs/architecture/modules.md,
 // Caching modules). Anything that fails, a database that will not open, a
 // quota, a store that is gone, makes a miss, and the player compiles.
 import type { CachedModule, ModuleCache } from "@swf2es/player";

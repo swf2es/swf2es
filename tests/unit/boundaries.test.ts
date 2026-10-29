@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// Package boundaries (docs/architecture.md). pnpm only links the packages a
+// Package boundaries (docs/architecture/overview.md). pnpm only links the packages a
 // package.json lists, so the build already rejects imports that are not
 // declared; this test guards the declarations themselves.
 const allowed: Record<string, string[]> = {
@@ -125,7 +125,7 @@ for (const core of ["context3d", "render"]) {
 
 // Inside the player, playerglobal/ is AS3's bindings only: it imports the
 // player, and the player imports it once, where Scripting registers its
-// natives and hooks (docs/architecture.md, "Source layout").
+// natives and hooks (docs/architecture/player.md, "Source layout").
 const playerSrc = fileURLToPath(new URL("player/src/", root));
 const registration = "scripting.ts -> playerglobal/index.ts";
 

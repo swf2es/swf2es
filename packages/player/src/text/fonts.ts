@@ -1,4 +1,4 @@
-// The fonts a field's text is laid out in (docs/architecture.md, "Text"):
+// The fonts a field's text is laid out in (docs/architecture/text.md, "Text"):
 // a SWF's embedded fonts, found by name, and the browser's for a device
 // font, measured on a canvas where there is one.
 import type { Font } from "@swf2es/format";

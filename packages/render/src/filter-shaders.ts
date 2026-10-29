@@ -1,4 +1,4 @@
-// The fragment shaders of Flash's filters, as adl draws them (docs/architecture.md,
+// The fragment shaders of Flash's filters, as adl draws them (docs/architecture/compositing.md,
 // "Filters"), which the renderer's passes (webgl/filters.ts) run, so that their
 // exactness rules live in one place. GLSL ES 3 bodies, with no version or precision
 // line; each reads vTextureCoord, its input's texture coordinate, and writes finalColor.

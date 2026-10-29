@@ -1,6 +1,6 @@
 // Flash's filters as passes a layer takes before it is composited: what
 // each kind reads, as the floats a frame's filter list holds for it, and
-// the rules its passes keep to match adl (docs/architecture.md,
+// the rules its passes keep to match adl (docs/architecture/compositing.md,
 // "Filters"), which the backend's runner (webgl/filters.ts) follows.
 // Offsets and insets are in the target's units, its pixels over the
 // resolution, as the shaders read their input's size in.

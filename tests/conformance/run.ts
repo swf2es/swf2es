@@ -2,7 +2,7 @@
 // result, and the case compiled by swf2es and run in node, after the
 // builtins avmshell loads, also compiled by swf2es, must print the same
 // lines. Each case will also be compiled in JIT mode and AOT mode, which must
-// give identical output (see docs/architecture.md). swf2es must also parse
+// give identical output (see docs/architecture/overview.md). swf2es must also parse
 // each case's ABC to the same facts as avmplus' abcdump.
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -25,7 +25,7 @@ const EXPORT = "export default ";
  * functions. A module is one exported function and nothing else, so it
  * runs the same returned from a strict Function, the names its code uses
  * its own function's variables (see Lazy compilation in
- * docs/architecture.md); its lines in a stack are its file's two further
+ * docs/architecture/compiler.md); its lines in a stack are its file's two further
  * on, after Function's header.
  */
 export function evaluateFunction(module: string, script: string): Factory {

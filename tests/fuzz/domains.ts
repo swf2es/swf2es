@@ -4,7 +4,7 @@
 // drops, evicts, revives and rebuilds domains at random, and every module,
 // entry and method compiled alone of a live ABC must come out of both the
 // same, byte for byte: what a rebuild links and resolves again must be what
-// the reference linked and resolved the first time (docs/architecture.md,
+// the reference linked and resolved the first time (docs/architecture/compiler.md,
 // "Parsing, linking and verifying").
 //
 // The ABCs are the conformance cases, compiled into this package's out/,

@@ -53,7 +53,7 @@ of each kind of object is in modules of its own under
 - `pointer.ts`, `context-menu.ts`: the canvas's input.
 
 What the view works out from Flash's shapes, lines, bitmaps and text is
-in [architecture.md](architecture.md#rendering); this document is about
+in [architecture/rendering.md](architecture/rendering.md#rendering); this document is about
 what happens after.
 
 A drawing redrawn every frame, as a software 3D engine draws its
@@ -182,7 +182,7 @@ with the context:
   blend or stencil state is set twice.
 
 **Anti-aliasing** is the GPU's multisampling
-([architecture.md](architecture.md#showing-a-player)): the host sets the
+([architecture/web.md](architecture/web.md#showing-a-player)): the host sets the
 samples by the stage's quality, and the stage is drawn into multisampled
 buffers the canvas's size, resolved into a texture and then onto the
 canvas, as a resolve must keep its format, which the canvas's need not
@@ -242,7 +242,7 @@ runtime. The player depends on it and feeds it scene lists. Like
 context3d, its core (scene list, registries, planner, command buffer)
 loads no DOM types, and its WebGL backend is a sub-path
 (`@swf2es/render/webgl`); `tests/unit/boundaries.test.ts` and
-[architecture.md](architecture.md#packages) hold it to that.
+[architecture/overview.md](architecture/overview.md#packages) hold it to that.
 
 ## Measuring
 
