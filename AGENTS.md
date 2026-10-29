@@ -81,6 +81,8 @@ node tests/player/precompiled.ts    # AOT modules played in Chrome, imported und
                               # without 'unsafe-eval' too (part of pnpm test)
 node tests/player/resize.ts         # filters inside filters drawn while the renderer is resized
                               # in Chrome (part of pnpm test)
+node tests/player/redraw.ts         # a drawing cleared and drawn again every frame keeps one
+                              # frame's geometries, not one for each frame (part of pnpm test)
 node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]   # GL draw calls,
                               # sub-draws, binds and uniform calls a frame in Chrome vs
                               # draw-counts.json, which may only go down (part of pnpm test)

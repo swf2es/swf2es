@@ -772,6 +772,20 @@ export function playResized(
   });
 }
 
+/** Play a SWF with no AS3 in the page's redrawSwf for `frames` frames; the geometries its view keeps. */
+export function playRedrawn(swf: Uint8Array, frames: number): Promise<number> {
+  return withPage("redrawSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<number>(
+      `redrawSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames})`,
+    );
+    if (exception !== null || value === undefined) {
+      throw new Error(exception ?? "redrawSwf gave nothing");
+    }
+
+    return value;
+  });
+}
+
 /** Play a SWF with no scripts in the page's contextLossPlanSwf, in two renderers, one losing its context as `plan` says. */
 export function playLosingContextPlan(swf: Uint8Array, plan: string): Promise<string | null> {
   return withPage("contextLossPlanSwf", async (evaluate) => {

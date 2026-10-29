@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node run.ts && pnpm run test:other",
-    "test:other": "node audio.ts && node leak.ts && node module-cache.ts && node precompiled.ts && node isolation.ts && node resize.ts && node filter-coverage.ts && node context-loss.ts && node draw-counts.ts && node --test ../context3d/agal.test.ts && node ../context3d/run.ts && node ../context3d/stress.ts && node ../context3d/reclamation.ts && node ../context3d/host.ts"
+    "test:other": "node audio.ts && node leak.ts && node module-cache.ts && node precompiled.ts && node isolation.ts && node resize.ts && node redraw.ts && node filter-coverage.ts && node context-loss.ts && node draw-counts.ts && node --test ../context3d/agal.test.ts && node ../context3d/run.ts && node ../context3d/stress.ts && node ../context3d/reclamation.ts && node ../context3d/host.ts"
   },
   "dependencies": {
     "@swf2es/codegen": "workspace:*",
