@@ -11,10 +11,18 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 The package depends on no other package and uses no DOM or node APIs.
 `compress` and `mp3` each compile their own module. What the renderer
 computes, `bitmap` and `tessellate`, shares one module, `render`
-(`src/render/`), compiled once; each user instantiates it apart (a
-`Convolver`, a `Tessellator` and its `LineBuilder`), so each has its own
-memory and lifetime, and a large bitmap job never grows the tessellator's
-memory, nor does disposing one take the other down.
+(`src/render/`, about 68 KB), so loading either compiles the whole of it,
+once; each user instantiates it apart (a `Convolver`, a `Tessellator` and
+its `LineBuilder`), so each has its own memory and lifetime, and a large
+bitmap job never grows the tessellator's memory, nor does disposing one
+take the other down. Within an instance, every part allocates from one
+arena (`src/render/arena.zig`), which each call resets.
+
+`render` requires wasm SIMD, which every current browser ships (Chrome 91,
+Firefox 89, Safari 16.4 on): it is built with SIMD throughout and has no
+scalar build. An engine without it refuses the module, as one without Wasm
+or under a CSP refusal does, and the bitmap filters, the fills and the
+lines then all keep to their JS paths.
 
 ## Building
 
@@ -76,9 +84,8 @@ so a call's scratch stays near 2 MiB even 4096 pixels wide, and a playback
 filtering large bitmaps every frame keeps its instance. Existing player
 code handles clipping, destination writing and notifications. Strict double
 arithmetic and Flash's fixed-point 3×3 quirks match the existing JS path.
-The kernel uses explicit f64x2 wasm SIMD, and there is no scalar build:
-every current browser ships wasm SIMD (Chrome 91, Firefox 89, Safari 16.4
-on), and the whole `render` module is built with it. An instance refused,
+The kernel uses explicit f64x2 wasm SIMD, as all of `render` may: an
+engine without SIMD refuses the module (above), and an instance refused,
 as without Wasm or under a CSP refusal, leaves the filter to the JS path.
 A refusal is tried once per owner, traps discard the instance, and normal
 rejection can reuse its arena.
@@ -307,23 +314,31 @@ lines for the player's own renderer in one call, as its
 layer into `input(n)` (`scene/strokes-native.ts`) and `build(length)`
 returns its positions, colours and indices, copied out in one block.
 `src/render/strokes.zig` is a port of the TS with the same arithmetic in
-the same order, so the output is the TS's bit for bit. A line drawn
+the same order, so the output is the TS's bit for bit in V8, where the
+parity test runs. A line drawn
 opaque is triangles along its path; any other is outlined and its
 outline filled non-zero by the module's own libtess2, as the
 `Tessellator` fills it, with no call back to JS. Two things keep the bits
 the same: `Math.hypot` is V8's algorithm (normalised to the larger value,
 summed with Kahan's compensation), and `Math.sin` and `Math.cos` are the
 host's own, imported, since engines differ in their last bit. `atan2` and
-`acos` are Zig's, which are fdlibm's, as V8's are.
+`acos` are Zig's, which are fdlibm's, as V8's are. Another engine's
+`Math.hypot`, `atan2` or `acos` may round otherwise, and there the last
+bits of a position may differ from its JS's.
 
 Where it cannot build a layer as the TS would, `build()` returns
 `undefined` and the player builds it in JS: an outline libtess2 refuses,
 which JS fills its own way; a position that is NaN, whose bits JS writes
 its own way; a case where the TS throws; and an instance that failed to
-instantiate or unwound. The builder has an instance of its own, from
-`wasm_allocator`, which no `Tessellator` call shares; one grown past
-8 MiB is let go after its call.
+instantiate or unwound, which is not tried again. The builder has an
+instance of its own, which no `Tessellator` call shares, held to its
+`Tessellator`'s `memoryLimit` and `retainMemory`, and counted in its
+`capacity`: a layer that would grow it past the limit is left to JS, as a
+fill would be, and an instance grown past what is retained is let go
+after its call. The player's line cache remembers a layer the builder
+refused, and builds it in JS until its drawing changes.
 
 `node --test tests/unit/player/scene/strokes-native.test.ts` compares the
-two on 3,000 random layers, opaque and translucent, bit for bit, and
+two on 3,000 random layers, opaque and translucent, bit for bit in Node's
+V8, and
 `node tests/bench/strokes-native/run.ts [runs]` times them.

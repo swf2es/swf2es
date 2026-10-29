@@ -1,7 +1,8 @@
 // layerStrokes in one native call: a layer's lines packed as @swf2es/native's
 // strokes.zig reads them, built there as strokes.ts builds them, to the last
-// bit, their outlines filled there by the same libtess2 the native
-// tessellator fills them with.
+// bit in V8 (another engine's Math.hypot, atan2 or acos may round its last
+// bits otherwise), their outlines filled there by the same libtess2 the
+// native tessellator fills them with.
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type ShapeLayer } from "../display/shapes.js";
 import type { LineBuilder } from "./fills.js";

@@ -4828,14 +4828,16 @@ result is copied into an owned Uint32Array before existing clipping and
 destination writing. This preserves self-filtering and notifications, and
 allows later calls, memory growth or disposal without invalidating results.
 Strict double arithmetic preserves coefficient order and Flash's fixed-point
-3×3 convolution quirks. The module uses wasm SIMD and has no scalar
-build: every current browser ships SIMD, and an engine without it refuses
-the module as one without Wasm does, so it keeps the JS path. The module
-imports nothing. Compilation refusal, missing optional modules, allocation rejection and traps fall back
+3×3 convolution quirks. The module, `render`, which it shares with the
+tessellator and the own renderer's lines, uses wasm SIMD and has no
+scalar build: every current browser ships SIMD, and an engine without it
+refuses the module as one without Wasm does, so filters, fills and lines
+keep their JS paths. Compilation refusal, missing optional modules, allocation rejection and traps fall back
 to JS before destination pixels are written. Trapped instances are dropped;
 ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
 instances above the default 8 MiB retention threshold are dropped after a
-call. The package's other sub-paths keep independent modules and lifetimes.
+call. Each user of `render` instantiates it apart, with its own memory and
+lifetime.
 
 ### Masks and scroll rectangles
 
