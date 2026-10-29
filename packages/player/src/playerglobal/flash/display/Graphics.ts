@@ -14,7 +14,6 @@ import type { Paint } from "../../../display/shapes.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
-type Multiname = ReturnType<avm2.Runtime["publicName"]>;
 type Value = avm2.Value;
 
 const TWIPS = 20;
@@ -23,6 +22,8 @@ const JOINTS: Record<string, number> = { round: 0, bevel: 1, miter: 2 };
 /** Which way round a triangle drawTriangles drops: 1 clockwise on a y-down screen, -1 the other. */
 const CULLING: Record<string, number> = { none: 0, positive: 1, negative: -1 };
 const IDENTITY = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+// Made once: a drawing may begin a bitmap fill for each triangle it draws on every frame.
+const MATRIX_NAMES = ["a", "b", "c", "d", "tx", "ty"].map((k) => avm2.qname(avm2.publicNs, k));
 
 /** The gradients begun with no matrix, which read back with Flash's default for one. */
 const unplaced = new WeakSet<Paint>();
@@ -55,18 +56,23 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
     const n = Number(v);
     return Number.isNaN(n) ? fallback : n;
   };
-  /** a, b, c, d, tx and ty as names, made once: a fill begun on every triangle made them each time. */
-  let matrixNames: Multiname[] | null = null;
   /** A fill's matrix from an AS3 Matrix, or the identity for none. */
   const matrixFrom = (matrix: Value): Matrix => {
     if (matrix === null || matrix === undefined) {
-      return { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+      return { ...IDENTITY };
     }
 
-    matrixNames ??= ["a", "b", "c", "d", "tx", "ty"].map((k) => s.rt.publicName(k));
-    const read = (k: number) =>
-      s.rt.toNumber(s.rt.getProperty(matrix as AsObject, (matrixNames as Multiname[])[k]));
-    return { a: read(0), b: read(1), c: read(2), d: read(3), tx: read(4), ty: read(5) };
+    const rt = s.rt;
+    const m = matrix as AsObject;
+
+    return {
+      a: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[0])),
+      b: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[1])),
+      c: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[2])),
+      d: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[3])),
+      tx: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[4])),
+      ty: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[5])),
+    };
   };
 
   /** The data of `display`'s drawing, a timeline shape's too, and with `recurse` its children's, each through `m`. */
