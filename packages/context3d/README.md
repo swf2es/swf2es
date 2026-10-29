@@ -3,7 +3,8 @@
 `@swf2es/context3d` provides resource/lifecycle contracts and AGAL v1 to GLSL
 translation. Its core has no dependencies or browser types. The optional
 `@swf2es/context3d/webgl` entry exports `WebGLContext3D`, which owns the supplied
-WebGL2 context exclusively. It does not share GL state or resources with Pixi.
+WebGL2 context exclusively. It does not share GL state or resources with the
+display list's renderer.
 
 The WebGL entry re-exports the context owner from `webgl/context.ts`. That owner
 keeps resource maps, byte accounting, bindings and draw/present ordering together.

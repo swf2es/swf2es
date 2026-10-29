@@ -15,12 +15,11 @@ must give **identical output** in both modes.
 ## Commands
 
 ```sh
-git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb,
-                              # vendor/pixijs (the Pixi fork the player draws with), and
+git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb, and
                               # vendor/minimp3, vendor/zlib, vendor/lzma-sdk and vendor/libtess2 (C compiled into
                               # packages/native's wasm)
 pnpm install
-pnpm build       # the Pixi fork, asc → codegen.wasm, then tsc -b for all packages
+pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
@@ -42,11 +41,8 @@ pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests
                               # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
-node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames
+node tests/player/run.ts [case...]   # the player's cases in Chrome vs Flash's frames
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
-SWF2ES_RENDERER=own node tests/player/run.ts [--update-baseline] [case...]   # the cases drawn by
-                              # the renderer of swf2es's own (docs/renderer.md); those it draws as
-                              # Flash does, listed in own-renderer.json, may not fail again
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
 pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm1, avm2
                               # and timeline tests vs corpus/baseline.json (Chrome; about 5 minutes; CI's
@@ -115,8 +111,6 @@ pnpm as3:format               # format them with Apache Royale's asformat, in it
                               # (ASFORMAT names its script if it is not on the PATH)
 SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
-node tools/pixijs.ts [--force]   # build vendor/pixijs's lib/ and the bundles swf2es loads (pnpm
-                              # build's first step; skipped while the fork is unchanged)
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (bitmap, compress, mp3,
                               # tessellate) with the pinned Zig, after the bitmap kernel's zig tests;
                               # pnpm build only checks their inputs' digests
@@ -160,10 +154,6 @@ of its own.
   its own that carry the MPL-2.0 header; nothing from avmplus goes into an
   Apache-2.0 file, so the MPL's file-level copyleft never reaches the rest.
 - **Only redistributable SWFs** go into the repository.
-- **PixiJS is the fork in `vendor/pixijs`**, pinned to its `swf2es` branch
-  (its `SWF2ES.md` has the plan). Change Pixi there, in commits of its own
-  on `swf2es`, which is never rebased, then move the submodule. The
-  fork's commits carry no attribution trailers either.
 
 ## Code style
 

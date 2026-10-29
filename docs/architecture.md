@@ -218,8 +218,9 @@ The web host then shares them with player natives through Scripting's synchronou
 setters and authored dimensions; AVM1 and default embedding alignment keep their
 existing behavior when both opposite edges are named. It resizes the display
 viewport before `resizeStage` dispatches a Stage-only RESIZE event in noScale;
-other scale modes retain the SWF's authored dimensions. PixiView's viewport
-keeps display-list translation, its hit area and pointer coordinates aligned.
+other scale modes retain the SWF's authored dimensions. RenderView's viewport
+(`setViewport`) keeps the display list's translation and pointer coordinates
+aligned.
 Context3D canvases retain their explicit back-buffer sizes across embedding and
 DPR changes. These host hooks do not depend on ActionScript workers.
 
@@ -1269,13 +1270,9 @@ module, which decompresses the SWF, needs
 `script-src 'self' 'wasm-unsafe-eval'`, without `'unsafe-eval'`. Any
 module the cache lacks is compiled and its evaluation refused
 (`EvalError`), the load failing: a child SWF loaded into a context the
-command did not compile for, or a module of another compiler's.
-
-Pixi too builds code with `new Function` unless its `pixi.js/unsafe-eval`
-is imported, which a host drawing on such a page
-imports with Pixi (`tests/player/precompiled.ts`, whose page imports the
-bundle's `packages/unsafe-eval.mjs`, which patches the classes the player
-draws with, plays a SWF so under that policy and draws it as without one).
+command did not compile for, or a module of another compiler's. The
+renderer builds no code at run time; `tests/player/precompiled.ts` plays a
+SWF under that policy and draws it as without one.
 
 ## The player
 
@@ -1286,9 +1283,9 @@ display object each have a module of their own: `displayobject.ts`,
 `container.ts`, `movieclip.ts`, `buttonobject.ts`, `shapeobject.ts`,
 `textobjects.ts`, `bitmapobject.ts`, `videoobject.ts`, with `walk.ts` for
 the frame's walks and `instantiate.ts` for what a character makes), and
-PixiJS only mirrors it
-(`render/view.ts`): a container per display object, kept from frame to frame
-and updated where the display object marks itself changed.
+the renderer draws it (`scene/view.ts`, `RenderView`): each frame it walks
+the display list into a scene list for `@swf2es/render`, keeping what a
+display object drew while it is unchanged (see [Rendering](#rendering)).
 
 ### Source layout
 
@@ -1331,21 +1328,15 @@ and the player's paths in this document are relative to it:
   and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
 - `input/`: the pointer and the keyboard.
-- `render/`: the PixiJS view (`view.ts`, the walk that keeps each
-  object's node, `node.ts`, in step) and what only it uses: what an
-  object itself draws (`art.ts`), how it is blended (`compositing.ts`),
-  3D objects' planes (`planes.ts`), released nodes kept for reuse
-  (`spares.ts`), BitmapData.draw's sampling (`snapshot.ts`), the pointer
-  on the canvas (`pointer.ts`), shapes'
-  fills tessellated (`tessellate.ts`) and lines stroked (`strokes.ts`)
-  into shared contexts, where the player plugs into the Pixi fork's
-  extension points (`hooks.ts`), render groups settling (`settle.ts`),
-  the Graphics that draws a shared context (`shared.ts`), what the view
-  and Pixi pool and how much (`pools.ts`),
-  text drawn (`text.ts`), bitmaps' and gradients' textures
-  (`bitmaps.ts`), drawTriangles' textured triangles (`triangles.ts`), batchers kept for new groups (`batchers.ts`), the
-  transform table, colour transforms, blend modes, filters and resolves
-  on the GPU.
+- `scene/`: the view that drives `@swf2es/render` (`view.ts`,
+  `RenderView`, `@swf2es/player/scene`) and what only it uses: shapes'
+  fills resolved (`fills.ts`, crossing contours split by
+  `fill-polygons.ts`) and made geometries (`shapes.ts`), lines stroked
+  (`strokes.ts`) and kept by the transform they are seen through
+  (`lines.ts`), filters worked out into passes (`filters.ts`), text as
+  items to draw (`text.ts`) and advanced text's glyph quads
+  (`advanced.ts`), the pointer on the canvas (`pointer.ts`) and the
+  context menu (`context-menu.ts`).
 - `playerglobal/`: the `flash.*` classes, a path per package and class,
   and the AIR classes the player declares itself (`air/`, see
   [AIR's WebSocket](#airs-websocket)).
@@ -1394,7 +1385,7 @@ so it runs with the AS3 object as `this`; the class is only how they are
 written, and a private native is registered by name beside it. The class
 lives in the factory that makes the natives, so it closes over its
 `Scripting`; an AVM1 movie's children, and a timeline child without a
-class, have `object === null`, and nothing in `display/display.ts` or `render/view.ts`
+class, have `object === null`, and nothing in `display/display.ts` or `scene/view.ts`
 depends on which VM drives them.
 
 Construction follows Flash's order, which playerglobal's own constructors
@@ -2274,7 +2265,8 @@ corpus). AIR's `playerglobal.abc` adds `commandKey`, `controlKey` and
 `mouseevent_valueof_tostring` has none of them, so that one output still
 differs though its native values match.
 
-`PixiView.bindPointer(player)` takes the pointer's position on the canvas,
+`RenderView.bindPointer(player)` (`scene/pointer.ts`) takes the pointer's
+position on the canvas from the browser's pointer events,
 scaled to the SWF's stage, within the box CSS `object-fit` shows the
 canvas's pixels in (`contain`, `scale-down`, `cover` or `none`, centred as
 the default `object-position` has it, inside borders and padding), and
@@ -2299,7 +2291,7 @@ first. `supportsCursor` and `supportsNativeCursor` are true, as in
 desktop Flash.
 The display list decides the target, so masks, scroll rectangles, depth,
 visibility, `mouseEnabled` and `mouseChildren` use the same objects that
-scripts see; Pixi's render tree does not choose a Flash target. The
+scripts see; the renderer does not choose a Flash target. The
 pointer sends `mouseOver`, `mouseOut`, `rollOver`, `rollOut`, `mouseMove`,
 `mouseDown`, `mouseUp`, `click` and `doubleClick` through EventDispatcher's capture and
 bubble phases, and the stage's `mouseLeave`, in the order Flash Player 32
@@ -2470,8 +2462,8 @@ What Flash did there is not known. A touch's begin, end and tap are a
 user's gesture for the clipboard, as a press is; the browser itself
 counts only a touch's release as the user's activation, so a write in
 `touchBegin`, or in the `mouseDown` a touch makes, may be refused by its
-async API. The canvas keeps Pixi's `touch-action:
-none` whatever the mode: Flash's plug-in took every touch on it, and a
+async API. The canvas keeps `touch-action: none` while bound, whatever the
+mode: Flash's plug-in took every touch on it, and a
 SWF that drags with the mouse needs it, as a page that scrolled under the
 finger would cancel the drag. None of the order between touch and mouse
 events could be measured: adl under Wine and Flash Player 32 on Linux
@@ -2552,7 +2544,7 @@ change their captions, visibility and enabled state. A selection sends
 and `contextMenuOwner`, in a clipboard gesture. Later item changes do
 not rewrite a menu already open. Destruction makes its callbacks inert.
 
-`render/context-menu.ts`, bound with the pointer, presents the snapshot
+`scene/context-menu.ts`, bound with the pointer, presents the snapshot
 in a DOM popover shared by the web element and desktop player. Captions
 are text, never markup. Only an open menu holds DOM nodes and document
 listeners; closing, blur, outside focus, resize or unbinding releases
@@ -3029,163 +3021,90 @@ renderer, input bindings and loop, the host lets go itself, as
 
 ### Rendering
 
-The player draws with PixiJS; a renderer of swf2es' own, which replaces it a
-step at a time, is planned in [renderer.md](renderer.md).
+The player draws with the renderer of swf2es's own, `@swf2es/render`,
+whose design is in [renderer.md](renderer.md). `RenderView`
+(`scene/view.ts`) walks the display list each frame into a scene list,
+its draws' transforms and colour transforms into rows, and has the
+planner and the WebGL 2 backend draw it. What follows is what the view
+works out from Flash's shapes; the layers, passes and draw calls are the
+renderer's.
 
-A branch with at least 64 immediate art objects across its subtree owns
-a Pixi render group. Children already grouped do not count again, so
-wrappers do not all gain a group. Each group keeps its own instructions
-and batches: changing an animated branch's children no longer repacks
-unrelated scenery. Promotion persists when the branch shrinks, avoiding
-repeated batcher destruction. Masks and their targets must belong to the
-same group; references to partners outside a subtree prevent grouping,
-and a mask moved outside an existing group removes that group. Timeline
-masks stay with their siblings. A fresh view for BitmapData.draw does not
-group. An off-list branch keeps its group hierarchy and batches for five
-seconds so it can return without rebuilding. At most 64 groups that have never
-returned are parked; new one-off branches evict the oldest batches. Evicted
-batchers, up to 16 groups' worth (`render/batchers.ts`), go to the next group a view makes rather
-than being freed while a new group allocates its own; a root rendered once,
-as BitmapData.draw's, allocates its own, since Pixi destroys it after. On
-WebGL 2 the batches are kept on the GPU alone (the fork's
-`BatcherPipe.gpuResident`): every group's batchers pack into one set of
-buffers per batcher kind, lent for each build and grown to the largest,
-and what a build packed is written to the batcher's GPU buffers as it
-ends; an element updated in place is packed apart and written, runs of
-neighbours together, before the batches draw. A batcher kept its buffers
-for as long as it lived, grown to the most it ever packed, so a renderer
-of many groups held all their vertices on the CPU too: `bench.ts
---branches 64` held 45 MB of them. After a lost context, groups are built
-again from the display list when needed (the fork's `RenderGroupSystem`). Elsewhere a
-batcher keeps its own buffers, cut back once they stay mostly empty.
-The colour batcher's shader ignores Pixi's group colour, since
-its vertex colour transform already includes every ancestor. The
-`render-groups` case checks colours, masks moved between branches, scrolls,
-filters, and a branch shrinking and growing against Flash. The
-`bench.ts --branches N --gpu` workload changes a quarter of N independent
-coloured branches while the rest stay still.
+A shape layer's fills are geometries of the renderer's, made once for
+the layer and shared by every instance that draws it (`partsOf`), a
+drawing's for each version of it, and let go of once undrawn for 300
+frames (`IDLE_FRAMES`). They are built from Flash's edges
+(`display/shapes.ts`: each edge goes to its right fill forward and its
+left fill reversed, joined into contours; one with the same fill on both
+sides, a seam Flash Pro leaves inside a fill, goes to neither, so it
+cannot change the winding, `shared-fill-edges`) and tessellated by
+`@swf2es/native`'s libtess2, a layer in one call (`scene/fills.ts`,
+`resolveFills`; [packages/native](../packages/native/README.md)). Without
+it, as where a page refuses the module, fills are planned in JS:
+crossing or touching contours take `scene/fill-polygons.ts`, where an
+edge sweep finds their crossings and each horizontal band between
+vertices and crossings is filled as disjoint trapezoids under its
+winding rule; other contours form a containment tree (a contour is in
+another by a point of it off the other's outline, `glyph-contours`), and
+a region with nothing in it that is convex is a fan. A region with holes,
+or not convex, is left out in JS and counted
+(`unsupported.containedFills`). Curves use the same fine chords as the
+native flattening. No overlapping paint is needed, including for
+translucent fills, gradients, bitmaps and masks (`crossing-fills`,
+`crossing-cones`). A Graphics drawing used as a stencil mask fills
+non-zero regardless of `drawPath`'s winding, while static shapes keep
+their authored winding (`static-mask-winding`); its mask's geometry is
+made apart. The crossing detector excludes disjoint contour bounds and
+bounding boxes strictly inside a convex contour before building edges.
+It reuses numeric scratch, retaining at most 4,096 edges, contour records
+or levels after a call; larger calls release the scratch. Band levels
+are collected only after a crossing is found, and finished polygons own
+their coordinates separately. `node --expose-gc tests/bench/fills.ts
+<ref> --allocs` compares construction time and sampled allocations with
+the two modules from a git ref.
 
-An invisible group keeps clean instructions, but a structural or view
-change retires its obsolete instructions and GPU batches. Transforms and
-render callbacks still update; the group stays dirty until it is revealed.
-Only the view's mask-contained groups opt into this through
-`RenderGroupSystem.canDeferInvisibleGroup`. Host-owned groups, cached
-textures and explicit render roots keep Pixi's existing update path.
-Rendering a child as a root ignores the visibility of its scene parent,
-as a bitmap draw requires. `hidden-render-groups` compares reveal,
-reparenting and bitmap draws with Flash; `hidden-groups.ts` checks nested
-masks and filters, context restoration and collection of retired objects.
-
-A shape's fills are immutable `GraphicsContext`s shared by its instances
-(`render/tessellate.ts`),
-counted as they take and give them back, and destroyed once none has held
-them for 5 s: kept for as long as their shape lived, every shape a long
-session had shown kept its fills, their geometry and their coloured
-copies, hundreds of MB. They are built
-from Flash's edges (`display/shapes.ts`: each edge goes to its right fill
-forward and its left fill reversed, joined into contours; one with the
-same fill on both sides, a seam Flash Pro leaves inside a fill, goes to
-neither, so it cannot change the winding, `shared-fill-edges`) and filled
-even-odd through a containment tree of nonintersecting contours, holes cut: all of a
-region's at once, before the islands in them, since Pixi's `cut()` also
-lands a hole in the fill before the last once the last has one
-(`fill-holes`). A contour is in another by a point of it off the other's
-outline (`glyph-contours`). Crossing or touching contours instead take
-`render/fill-polygons.ts`: an edge sweep finds their crossings, then each
-horizontal band between vertices and crossings is filled as disjoint
-trapezoids under its winding rule. Curves use the same fine chords as
-rendering; separate convex contours skip the edge sweep. No overlapping
-paint is needed, including for translucent fills, gradients, bitmaps and
-masks (`crossing-fills`, `crossing-cones`). The resulting contexts are
-cached as usual. A Graphics drawing used as a stencil mask uses non-zero
-regardless of `drawPath`'s winding, while static shapes keep their authored
-winding (`static-mask-winding`). Changing a drawing's mask role rebuilds
-its fills, and a fresh view borrows only from the same role.
-The detector excludes disjoint contour bounds and bounding boxes strictly
-inside a convex contour before building edges. It reuses numeric scratch,
-retaining at most 4,096 edges, contour records or levels after a call;
-larger calls release the scratch. Band levels are collected only after a
-crossing is found, and finished polygons own their coordinates separately.
-`node --expose-gc tests/bench/fills.ts <ref> --allocs` compares construction
-time and sampled allocations with the two render modules from a git ref.
-Its lines (`render/strokes.ts`) are drawn in the stage's axes, because Flash
-strokes a transformed line with one width all along, not the local width
-stretched by the transform: so a line's context depends on the linear
-part of its transform on the stage, and is kept by layer and that
-transform, shared by every instance that sees the layer alike (a crowd
-of one creature in step) and found again when one comes back to it (a
-loop's next turn). A transform is a turn or a mirror times a symmetric
-stretch, and a line scaled both ways is as wide through any turn of it:
-such a layer's lines are stroked through the stretch alone and turned by
-their Graphics' matrix, so a limb that turns on every frame, or a
-squashed particle that spins, shares one context through every angle,
-and a turn that keeps the stretch leaves its lines as they are.
-The stretch is then settled on a grid of its logarithm, in a step of at
-most 1/64 and fine enough that the lines' edges stand within a fiftieth
-of a screen pixel of their place (`settledStretch`): stroked through the
-grid's stretch and taken back by its inverse, the lines follow the path
+Lines (`scene/strokes.ts`) are stroked in the stage's axes, because
+Flash strokes a transformed line with one width all along, not the local
+width stretched by the transform: so a line's geometry depends on the
+linear part of its transform on the stage, and is kept by layer and that
+transform (`scene/lines.ts`), shared by every instance that sees the
+layer alike (a crowd of one creature in step) and found again when one
+comes back to it (a loop's next turn). A transform is a turn or a mirror
+times a symmetric stretch, and a line scaled both ways is as wide
+through any turn of it: such a layer's lines are stroked through the
+stretch alone and turned by their row, so a limb that turns on every
+frame, or a squashed particle that spins, shares one geometry through
+every angle. The stretch is then settled on a grid of its logarithm, in
+a step of at most 1/64 and fine enough that the lines' edges stand
+within a fiftieth of a screen pixel of their place
+(`display/stretch.ts`, `settledStretch`): stroked through the grid's
+stretch and taken back by its inverse, the lines follow the path
 exactly, and only their width sees the difference. A character that
-breathes, scaling a percent or two on every frame, had a stretch for
-each frame of each loop, and a crowd of them made its lines faster than
-the cache could keep them; settled, a pulse has a few (`bench.ts --town
-60`: 75,000 contexts in 300 frames, 2,500 settled, and a frame's sync
-and draw from 9 to 2.5 ms). One with a line scaled one way alone, which turns with it, or a
-transform near collapse, which rounding would distort, keeps the
-transform exactly. Contexts are counted as instances take and give
-them back. An object that leaves the list, and those of its
-descendants that leave with it (not one moved to a parent on the list,
-which draws it), keep what they drew 5 s, at most 1024 of them, for a
-pool's object or a panel hidden and shown to come back to as it was
-(`bench.ts --toggle N`, `--toggle-static N`); then they give their
-contexts back, drawn again if they return, their lines for the screen's
-scale of then. Their Graphics, emptied of their geometry, are kept, up
-to 4096, for the next shape drawn to take: a frame-by-frame timeline
-takes its children off and puts new ones on every frame, and making and
-destroying their Graphics was most of a swap's cost (`bench.ts --rig N
---swap`). Pixi keeps a Graphics it has
-drawn, with its geometry, for a minute after it was last drawn, and a
-timeline that makes its children anew on every frame, as a goto back
-does, so held gigabytes. A BitmapData's draw of an object off the list
-borrows the stage's fills and lines where they are still kept. A
-Graphics of a shared context (a shape's, a blend's or a glyph's fills,
-or lines) does not listen on it, as no such context changes once built:
-a listener a Graphics made each destroy search them all, so a text of n
-glyphs of one font took O(n²) to go. Once Pixi has built a view's fills
-or lines, their paths go altogether, the bounds measured and the vertices
-weighed first (`render/tessellate.ts`, `remakeable`): Pixi draws them from
-their tessellation, kept from its collection of what went unused for a
-minute, which would build them again from their paths, and a batched copy
-is made anew from the layer, which its shape keeps anyway. Kept, the
-flattened points were a second copy of every outline, some 8 MB in
-`bench.ts --town 200`. A glyph's fill, which every view shares, keeps
-them, for each renderer to build it.
-A line context no one holds stays idle 30
-s, by the clock, not renders, which a host may make many of between
-frames, at most 4096 of them and half a million of their vertices (some
-70 MB), before it is destroyed: kept 5 s, a third of the lines a crowded
-room made were ones it had made before and dropped, an animation's
-rarer turns coming back after tens of seconds (`bench.ts --pulse 16
---pace 150`, whose stretches come round again some 7 s apart, made 11
-contexts a frame kept 5 s and 2 kept 30). A drawing's lines
-are its own, as it changes. No line is thinner than a pixel of the
-screen, which is how wide Flash draws a hairline however far its stage
-is zoomed: `PixiView.screenScale` screen pixels to a stage pixel, the
-renderer's resolution unless the host says otherwise, as the test page,
-drawing finer to average down, does. A host showing the stage at three
-times its size so draws thin outlines a screen pixel wide, as Flash
-does, not three.
+breathes, scaling a percent or two on every frame, otherwise had a
+stretch for each frame of each loop. One with a line scaled one way
+alone, which turns with it, or a transform near collapse, which rounding
+would distort, keeps the transform exactly. Kept lines are held within a
+budget of a million vertices for those not drawn lately
+(`LINE_VERTICES`). A line drawn at whole alpha, where an overlap shows
+nothing, is triangles along its path; any other is outlined and filled
+non-zero, so that where it overlaps itself it is drawn once. No line is
+thinner than a pixel of the screen, which is how wide Flash draws a
+hairline however far its stage is zoomed: `RenderView.screenScale`
+screen pixels to a stage pixel, the view's scale and resolution unless
+the host says otherwise, as the test page, drawing finer to average down,
+does. A host showing the stage at three times its size so draws thin
+outlines a screen pixel wide, as Flash does, not three.
+
 Shapes are shared across SWFs too: a DefineShape tag whose bytes another
 SWF defined alike gives that SWF's shape, held weakly, so a crowd whose
 members each load the same SWF draws with one set of fills and lines, not
-one per load, whose lines alone overran the idle limit and were
-tessellated again on every turn of their loop. A shape filled with a
-bitmap keeps to its own SWF, whose bitmap it is. A shape is drawn into its
-layers when first asked for, not as its SWF is read: of the 17,000 shapes
-a large application had loaded after ten minutes, 14,000 had no instance,
-and their layers, 191 MB of the 222 MB all held, were never used. The tag
-is read once as the SWF is, for the bounds and the bitmaps its fills take
-as the SWF has them then, and again when it is first drawn; the SWF's
-bytes, which its sounds and placements keep, are there to read it from.
+one per load. A shape filled with a bitmap keeps to its own SWF, whose
+bitmap it is. A shape is drawn into its layers when first asked for, not
+as its SWF is read: of the 17,000 shapes a large application had loaded
+after ten minutes, 14,000 had no instance, and their layers, 191 MB of
+the 222 MB all held, were never used. The tag is read once as the SWF
+is, for the bounds and the bitmaps its fills take as the SWF has them
+then, and again when it is first drawn; the SWF's bytes, which its
+sounds and placements keep, are there to read it from.
 A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
 edges pair in order; a `MorphShape` shows their blend at the ratio its
 placements give (`display/morph.ts`), a shape like any other, so it draws,
@@ -3195,162 +3114,10 @@ keeps them to whole twips, so a closed path stays closed for `display/shapes.ts`
 to join. A morph keeps only its 64 latest blends, which instances in step
 share, and which a looping tween finds again on its next turn: with 16, a
 tween of 37 frames made each anew on every turn, its fills tessellated
-again, some 400 shapes a second in a crowded room. A blend's fills are shared by the instances drawn at it, counted
-as they take and give them back, and go once the morph drops the blend,
-or idle 5 s, as a shape's do: a tween asks for a new ratio on each
-frame, while a crowd in step, or a timeline that places the morph anew on
-each frame, would otherwise tessellate the same blend for every instance. Its lines
-are shared as a shape's, a blend's layers never changing. Flash takes a
-new ratio on only as it draws: a script that moves the timeline and
-asks for bounds before the next render gets the last drawn blend's
-(`morph-shapes`, the corpus's `hittest_morph`). Only a timeline makes a
-`MorphShape`; a script's `new` is refused, #2012.
-Tessellating lines, round joins most of all, was the largest part of a
-frame of a dozen animated instances; `bench.ts --rig N` measures it.
-Fills and lines are drawn unbatched, each Graphics a draw of its own
-geometry under its transform. Pixi batches small Graphics by packing
-their vertices, already transformed, into one buffer, which it packs and
-uploads again whenever its render group changes structure: on most
-frames of an animation, whose timelines add and remove children. Larger
-ones it draws alone anyway, so batches and those alternate, switching
-programs at each. Unbatched, a shape's geometry is uploaded once: more
-draw calls, but far fewer program switches and uploads, and `bench.ts
---rig 32` draws in half the time on a GPU and a quarter of it under
-software GL. But a crowded scene is mostly still: of some 4,400 draws a
-frame in a room of a dozen characters, half were in render groups no
-timeline had rebuilt for seconds. A render group not rebuilt for 2 s has
-its Graphics batched (`render/settle.ts`), each drawing a batched copy of its shared context,
-as a colour transform does: packed once, as nothing rebuilds the group,
-and drawn in a few calls, which took a frame's render from 17–18 ms to
-15. Rebuilt again by anything but its batching, the group draws them
-alone again.
-
-Drawn alone, each Graphics was still a draw call of its own, binding its
-context's buffers and setting its uniforms: of `bench.ts --rig 400`'s
-main-thread render, 9,600 draws a frame, that was most. Where the
-renderer is WebGL 2 with `WEBGL_multi_draw`, a transform table draws
-them instead (`render/table.ts`): each context's local vertices are copied
-once into one atlas buffer, as Pixi packed them for it, and Graphics
-drawn alone one after another in a group's instructions make a run,
-drawn as one multi-draw of their index ranges. Each draw reads its
-transform and tint from a row of a float texture by `gl_DrawID`, so a
-frame writes and uploads a row for each and moves no vertex, and the
-shader is Pixi's graphics shader with the uniforms read from the row. A
-context with a texture, a gradient's or a bitmap's, or a Graphics that
-rounds to pixels, is drawn by Pixi's pipe in its place in the run, as is
-all of a run in a context restored without the extension, or past the
-rows a texture may hold. Contexts are placed on most frames of an
-animation, its lines stroked for a new stretch, so only the vertices and
-indices added since the last draw are uploaded: `bench.ts --rig 400
---fresh`, whose parts take a new size on every frame, uploads 0.5 MB a
-frame where uploading the atlas whole sent 7. The atlas is kept on the
-GPU alone: what a frame places is gathered in arrays of 65,536 vertices
-and written in a call or two, and a full atlas grows by half with the GPU
-copying what it held (the fork's `resizeOnGpu`), so no copy of it stays
-on the CPU, where `bench.ts --town 200` held 127 MB of one; a lost
-context's atlas starts again empty, its contexts copied in as they are
-drawn. A context rebuilt or destroyed leaves a hole, and between frames
-the atlas starts again from scratch once the holes pass 65,536 vertices
-and the live ones, at half again what is live; the table never shrinks
-from its peak. On a desktop GPU the render's main-thread time
-fell from 9–10 to 2 ms on `--rig 400` and `--rig 400 --fresh`, 0.7 to
-0.1 on `--rig 32`, 1.2 to 0.5 on `--rig 32 --swap`, 18 to 8 on `--rig
-400 --swap` and 2.5 to 0.2 on the 2,000 shapes, with GL's own time
-halved as well; under software GL the same. A filter ends a run, and
-where creatures carry a dozen filters each, runs are a few Graphics
-long: there a multi-draw cost Chrome's GPU process some 5 to 15 µs more
-than its draws one by one, and saved the main thread under a microsecond
-a draw. On `bench.ts --rig 128 --filtered K --gpu`, runs of 2 to 10
-draws took a frame 1 to 5 ms longer than Pixi's own draws, and runs of
-22 broke even, so a run of fewer than 16 draws, whether its contexts'
-batches are fewer or a blend mode or a Graphics the table cannot draw
-has cut it short, is not a multi-draw (`--min-run` times other
-thresholds). It is drawn from the atlas a call a draw instead: its rows
-passed in the uniform array at once, the atlas bound once, and each draw
-told its row by a uniform, as `gl_DrawID` is 0 in a draw of its own.
-Pixi's pipe, which drew such runs at first (`--no-loop`), binds each
-context's buffers and sets each Graphics' uniforms. In a recorded crowded
-scene, some 1,100 of 2,000 draws a frame came in such runs, between
-filters; drawn from the atlas, the render took 13% less main-thread time
-(15.3 to 13.3 ms a frame on average, with the two alternating in blocks
-of frames in one replay), and on `--rig 128 --filtered 2 --gpu` a frame
-went from some 21 to 17 ms, GL's own time from 7.7 to 5.8. A multi-draw
-of those short runs saved no more main-thread time and cost GL more,
-again. Under software GL the
-table won at every length, by 5 ms on runs of 6, but a player's GPU is
-what counts. A run of up to 40 draws takes its rows in a uniform array,
-not the table texture, as an upload between draws cost a few µs more a
-run (0.5 ms a frame on 128 runs of 22); a longer one uploads its rows in
-one call, the whole lines they span if more than one. The rows are
-uploaded between draws that read the table, which a driver may make wait
-for the earlier draws (ANGLE on D3D11 or Metal, unmeasured).
-
-That is the table where WebGL 2 lacks float framebuffers, on a renderer
-that draws on the CPU, or switched to it (`setTransformTable`'s `pull`,
-`bench.ts --multi-draw`; `--pull` the other way): Chrome's GPU
-process pays for each draw of a multi-draw as for a call of its own, so
-in a recorded crowded scene its 13 multi-draws a frame, of 383 draws,
-saved it nothing. Elsewhere a run of one blend mode is one pulled draw,
-a `drawArraysInstanced` with no attributes. The atlas keeps each index'
-vertex in a float texture instead, its position and its colour's bytes
-two to a float (the expanded atlas), and an instance is a chunk of up to
-96 of a batch's indices, whose texel in a third texture names its row,
-its first index and how many it has: the vertex shader fetches the
-chunk, the vertex and the row, and puts a vertex past the chunk's end
-outside the clip volume. One draw of the run's vertices, each finding
-its batch by halves among the run's rows, took GL's time on `bench.ts
---rig 400 --gpu`'s 9,600 batches from 13 to 15–17 ms on an integrated
-GPU; chunks take 12.4. A run is planned as its render group's batches
-are uploaded, the group's transforms updated (`render/hooks.ts`), so
-that a frame's rows and chunks go up in a call each before anything is
-drawn, not between draws; one planned for an earlier render, or whose
-contexts have left the atlas since, is planned again as it is drawn.
-The three textures are bound to the last texture units, which nothing
-else takes: bound as Pixi binds a shader's, from unit 0, which every
-other draw takes too, they cost a thousand binds a frame more than the
-uniforms they saved. In the recorded scene, on an Intel Iris Xe at
-2131×1221, draws went from 2,010 to 1,413 a frame and the table's from
-1,020 to 422, uniform calls from 2,960 to 2,151 and GL calls from 12,700
-to 11,273; Chrome's GPU process spent 16.5 ms on its main thread a
-render, not 17.3 (four runs of each, alternated), and the GPU's time
-stayed at some 20 ms. The page's main thread spent some 0.5 ms more,
-on the plans, as on `--rig 400 --fresh` (0.3 ms; GL's time 2 ms, not
-3.2). Software GL draws them slower: SwiftShader's GL time on `--rig
-400 --fresh` doubled, from 130 to 286 ms, its vertex shader's texture
-fetches slow, and Chrome draws on it, or on Mesa's llvmpipe, without a
-GPU it may use (a blocklisted driver, a virtual machine, a remote
-desktop): a renderer whose name says SwiftShader, llvmpipe or software
-makes the multi-draws unless pulled draws are asked for. `table-runs.ts`
-and `draw-counts.ts` ask for them, so that software GL, as CI's, draws
-and counts them too.
-
-Small Graphics under a Flash colour transform, and a settled group's, stay
-batched copies with the colour batcher: drawn by the table, `--branches
-64`'s few batches became 12,000 draws, which saved the main thread a
-millisecond and cost GL two on a GPU, fifteen under software GL. A large
-one, of 200 vertices or more as Pixi draws alone uncoloured, in a group
-that has not settled, is drawn alone instead (`render/color.ts`,
-`showFor`): a batched copy's vertices were packed and uploaded again with
-each rebuild and each change of the transform, and a busy monster SWF
-whose creatures, rebuilt on most frames, fade out under a tween packed
-some 55 MB a frame of them. A flat one takes its transform in its row,
-which grows to five texels with the multipliers, the offsets and a flag;
-a Graphics Pixi's pipe draws, of a gradient or a bitmap, one that rounds
-to pixels, or any with the table switched off, takes Pixi's graphics
-shader with the colour batcher's colour, the transform in uniforms. Both apply it as the colour
-batcher does, to the straight colour, the fill's times the Graphics' own
-tint rounded to a byte, clamped and premultiplied after, and leave out
-Pixi's group colour; where a renderer is not WebGL, every one is a
-batched copy, those already drawn alone too as one is made
-(`ColorAloneSystem`). A context is weighed before it is built, from its
-paths' points (a line's by its joins, round ones some ten vertices a
-point), as a part may keep the transform it first shows under. The
-`color-alone` case draws large discs, gradients and bitmaps under changing
-transforms each way, and `color-alone-runs` a run of 48 that the table
-draws from its texture. `bench.ts --no-table` draws without the table, and
-the `table-runs` case, with `draw-objects`, is played with the table
-drawing even its shortest runs and without it, and must draw the same
-pixels (`run.ts --table-ab` asks it of every case).
+again. Flash takes a new ratio on only as it draws: a script that moves
+the timeline and asks for bounds before the next render gets the last
+drawn blend's (`morph-shapes`, the corpus's `hittest_morph`). Only a
+timeline makes a `MorphShape`; a script's `new` is refused, #2012.
 
 Flash anti-aliases by supersampling on a grid: none at low quality, 2×2 at
 medium, 4×4 at high and best. The test page draws the same way, at that
@@ -3359,8 +3126,8 @@ frames then match Flash's to the pixel for straight edges, and within a
 quarter pixel's anti-aliasing for curved lines and lines under a skew.
 A case may give a zoom, as a host showing the stage larger does: the
 page's resolution is then the zoom times the grid, and the stage is drawn
-at the zoom's inverse, so the samples are the same and only Pixi's
-arithmetic at that resolution, no whole number, differs.
+at the zoom's inverse, so the samples are the same and only the
+renderer's arithmetic at that resolution, no whole number, differs.
 Or it may have the stage shown at the zoom, as a game's page does, its
 frames the zoom's size; Flash, which cannot, then draws a SWF the case
 builds at that size.
@@ -3441,16 +3208,10 @@ as they turn in the drawing's own space for `readGraphicsData`; and in a
 fill does. With `uvtData`, two or three numbers a vertex, only a bitmap
 fill draws, the triangles textured and its matrix ignored; any other fill
 draws nothing, nor its lines, though without a fill the lines draw. The
-textured triangles are a layer's `meshes`, drawn after its fills by a
-Pixi mesh of their own (`render/triangles.ts`, WebGL alone): u·t, v·t and
-t a vertex, which the GPU interpolates straight and each pixel divides,
-so t is a perspective. A 3D engine clears its Graphics and draws them
-again every frame, so a redraw keeps the meshes, taken in place where the
-layers lay out as before or from those the view keeps, with their
-buffers, vertex arrays and shaders: new vertices go into the same
-buffers, and every mesh draws from one buffer of indices in order. Kept
-ones no content takes go after `IDLE_MS`, and all as the context is lost.
-adl maps u and v from 0 to 1 onto the bitmap's first texel's centre to
+textured triangles are a layer's `meshes`, drawn after its fills by the
+renderer's mesh program (`scene/shapes.ts`, `@swf2es/render`'s `MESH`):
+u·t, v·t and t a vertex, which the GPU interpolates straight and each
+pixel divides, so t is a perspective. adl maps u and v from 0 to 1 onto the bitmap's first texel's centre to
 its last's, wrapped there when the fill repeats
 or clamped, a hair nearer 0 as its fixed-point steps come out, and
 samples once a pixel at the pixel's top left corner: the nearer texel,
@@ -3458,7 +3219,7 @@ or the four around weighed when smoothed; a bitmap a texel high shows its
 first texel throughout. The shader reads the texels itself, so the
 texture's sampling counts for nothing, and every sample of a pixel the
 page draws finer takes the pixel's value. Flash colour transforms apply
-as the colour batcher's do. The bounds count every triangle given, culled
+as to fills. The bounds count every triangle given, culled
 or drawing nothing, with the line's width if a line was set; the hit
 tests count the textured triangles; `readGraphicsData` gives each
 untextured triangle as a fill, a path and an end, the lines all in one
@@ -3695,20 +3456,18 @@ blend mode composites the drawn bitmap, its filters' result included,
 with what is behind it (`three-d-filter-blend`); and its
 scrollRect counts for nothing, Flash drawing, bounding and hitting all of
 it (`three-d-mixed`, the same in adl and Flash Player). The view does the
-same (`render/three.ts`): the object's container is in a holder of its
-own, coloured from the stage down, drawn before the stage into a texture
-of the object's bounds (filters' reach included) out to whole pixels, at
-4 samples a side averaged down to a texel a pixel in one pass, as the
-stage's edges are anti-aliased, with a texel of nothing around; in its
-place in its parent is a quad of the texture's four corners, each with
-the w its plane gives it, so that the GPU interpolates in perspective,
-which takes none of Pixi's colour and carries the blend mode. Where the
-samples would pass the GPU's largest texture or 4M texels, fewer are
-taken; past 2048 texels a side, the bitmap holds less than a texel a
-pixel, and its lines and filters are made for the units it is drawn at.
-Textures are kept in sizes of 32-texel steps, so an object whose
-children move each frame keeps its bitmap and the pool's intermediates.
-A 3D object in another draws its quad into the other's bitmap, by its
+same (`scene/view.ts`, `drawPlane`, with `display/plane.ts`): what the
+object and its children draw, coloured from the stage down, is drawn in
+a pass of its own before the frame's into a bitmap of the object's
+bounds (filters' reach included) out to whole pixels, at 4 samples a
+side averaged down to a texel a pixel, as the stage's edges are
+anti-aliased, with a texel of nothing around, and kept as a kept output;
+in its place in its parent is a quad of the bitmap's four corners, each
+with the w its plane gives it, so that the GPU interpolates in
+perspective, which carries the blend mode. Where the samples would pass
+the GPU's largest texture or 4M texels, fewer are taken; past 2048
+texels a side, the bitmap holds less than a texel a pixel, and its lines
+and filters are made for the units it is drawn at. A 3D object in another draws its quad into the other's bitmap, by its
 plane in the other's space, so the two are drawn deepest first. Its
 hairlines are a texel. The bitmap is drawn again only when what is in it
 changes, not as the object moves or turns: 100 turning 3D rigs of 12
@@ -4004,19 +3763,15 @@ not supported. The snapshot renders only the object's bounds through
 the matrix, a pixel wider, within the clip and the bitmap, so its cost is
 the object's size, not the bitmap's; at 4 × 4 samples a pixel averaged
 down, as Flash covers edges at its high quality (`drawWithQuality` takes
-1, 2 or 4 for low, medium and high), in a fresh view
-that leaves the objects' dirty flags to the stage's. The view borrows
-from the stage's what is still current: an object's fills while its
-content is unchanged, its lines while its transform on the stage is the
-draw's too, and a Bitmap's texture while its pixels are, so a draw of
-the stage builds no geometry; it builds lines at the draw's own scale and
-renders the whole n times larger, so curves are no finer than on the
-stage. The samples are averaged on the GPU, halved by linear filtering
-at the corner four texels share, and only the final pixels are read
-back; a snapshot is composited unscaled at a whole pixel, which copies
-each pixel straight. A 1920 × 1080 stage of 1,500 outlined shapes draws
-in about 110 ms on a desktop GPU against Flash's 44 (from 810 before),
-most of it the wait for the GPU before the read.
+1, 2 or 4 for low, medium and high), in a pass of the stage's view of
+its own (`RenderView.snapshot`), which leaves the objects' dirty flags
+and kept outputs to the stage's. Fills and a Bitmap's texture are the
+stage's while current, so a draw of the stage builds no fill geometry;
+lines are built at the draw's own scale, and the whole is rendered n
+times larger, so curves are no finer than on the stage. The samples are
+halved on the GPU till a sample a pixel, and only the final pixels are
+read back; a snapshot is composited unscaled at a whole pixel, which
+copies each pixel straight.
 
 Each rule of a draw is Flash's
 as the `draw-bitmaps` and `draw-objects` cases trace and draw it under
@@ -4038,38 +3793,16 @@ frame, within 2 a channel.
 
 #### Bitmaps on the GPU
 
-A bitmap's pixels are kept where they were last written, as
-Ruffle does (its `DirtyState`). With a renderer, a store has a GPU
-texture in it, one a renderer, made when a Bitmap first shows it or a
-draw first renders into it, holding the store's premultiplied ARGB exactly, uploaded and read
-back as they are, never premultiplied or divided on the way; every
-Bitmap showing the store samples that one texture, nearest, and a
-smoothed one a second, linearly sampled copy made on the GPU as the
-first changes, since a texture's sampling is its source's in Pixi. A store is newer on
-the CPU or on the GPU: a CPU operation that changes it uploads the whole
-store before the next render that needs it, as now, while `draw` of a
-display object in the `normal` blend mode with no colour transform
-renders straight into the texture, the samples averaged as above and
-the last halving composited source over at the reach, and leaves the
-store newer on the GPU. Reading `pixels`, which every CPU operation does,
-first reads the texture back if the GPU's copy is newer, once, so a
-script that draws the stage into a bitmap and shows it never waits on
-the GPU, and one that then calls `getPixel` waits as before. Any other
-draw (another blend mode, a colour transform, a bitmap source) stays
-the CPU's, after that read. A store a draw left newer on one renderer's
-GPU is read back through that renderer before another uploads it.
-Without a renderer, as in node, a store is the CPU's alone. GPU compositing rounds source over in floating point
-where the CPU's is Flash's 8-bit arithmetic, which parts by at most 1 a
-channel. A texture lives as long as its store: `dispose` frees it, and a
-store collected frees it through a FinalizationRegistry; Pixi's texture
-collector never unloads it, as a texture newer than its store cannot be
-uploaded again. A store larger than the GPU's texture limit stays the
-CPU's. A texture starts with no bytes, and a store whose pixels are all
-one colour, as a new bitmap's are, is cleared to it on the GPU rather
-than uploaded; the scan that tells stops at the first pixel that
-differs. The stage of 1,500 outlined shapes above draws into a new
-1920 × 1080 bitmap in about 38 ms against Flash's 44, and with a
-`getPixel` after it in about 65.
+A bitmap's pixels are the CPU's: every operation, `draw` included, which
+reads its snapshot back (above), writes the store, and the renderer
+uploads a store's premultiplied ARGB, as it is, into a texture of its
+own when a Bitmap or a bitmap fill first shows it, and again when the
+store's version has moved since (`RenderView.storeTexture`). Every
+Bitmap showing a store samples that one texture, smoothed or not as each
+asks. A texture not drawn for a while is let go of, and made again from
+the store when shown again; after a lost context, every texture is
+added again as it is drawn. Without a renderer, as in node, a store is
+the CPU's alone.
 
 #### A SWF's bitmaps
 
@@ -4143,12 +3876,10 @@ character as the shape is read, the bitmaps being defined first, and is
 drawn from one store made of the character's pixels; `beginBitmapFill`
 keeps the BitmapData's store itself, so the fill shows its later changes,
 the shape a view of the store as a Bitmap is. The renderer draws a fill
-as a Pixi texture fill in global texture space, the matrix as it is,
-sampling a copy of the store's texture kept for the fill's repeat and
-smoothing: a texture's sampling is its source's in Pixi, which also
-switches any fill's texture from clamping to repeating by its
-`addressMode`, so a clipped fill's copy reads as clamping there while
-WebGL, which reads each axis's mode, clamps it. Without scripts, a SWF's
+as geometry whose vertices carry where they sample the store's texture,
+through the inverse of its matrix (`scene/shapes.ts`), each draw saying
+whether it repeats or clamps and whether it is smoothed, so one texture
+serves every fill of a store. Without scripts, a SWF's
 images are decoded at `start` too, for its bitmap fills. A bitmap line
 (`lineBitmapStyle`, a LINESTYLE2 bitmap fill) still draws its first
 colour.
@@ -4266,14 +3997,16 @@ clipped inside the gutter: a character of an embedded font as its glyph's
 fill, a shape made once for the glyph and shared by every character
 drawn in it, scaled to its size, tinted its colour, and moved by its
 pair's kerning (its boundaries stay); a run of a device font in one
-format as one Pixi Text on the line's baseline. A device font
+format as one item on the line's baseline (`scene/text.ts`), which a
+canvas rasterizes white and its row colours. A device font
 (`_sans`, `_serif`, `_typewriter`) is the browser's of that kind, any
 other by its name. Bullets, underlines, input and selection are still
 to come.
 
 A field whose `antiAliasType` is advanced has its embedded glyphs drawn
-as Flash's Saffron draws them (`render/saffron.ts`), all of a field's in
-one mesh under a shader of its own, measured in adl with fonts of bars
+as Flash's Saffron draws them (`scene/advanced.ts`, `text/saffron.ts`
+and the renderer's glyph program), all of a field's as one geometry of
+quads, measured in adl with fonts of bars
 (`text-advanced`, `text-advanced-draw`). Each of Flash's pixels is
 covered by a ramp over its signed distance to the glyph's outline, from
 0 at an outside cutoff to 1 at an inside one: the shader finds the
@@ -4293,12 +4026,12 @@ adl puts it: the field's origin on the screen at a whole pixel, the pen
 `gridFitType` none, an eighth across and a whole pixel down under pixel,
 a quarter across and a whole pixel down under subpixel, ties to even, and
 sampled half a pixel left of the pixel's centre; turned or skewed, where
-it falls. The grid is the stage's, inside a filter's input too (the Pixi
-fork's `uWorldOffset`), and a BitmapData's in a draw. What the shader
+it falls. The grid is the stage's, inside a filter's input too, and a
+BitmapData's in a draw. What the shader
 goes through is bounded: a glyph of more than 2048 segments, or a field
 whose glyphs' segments times their quads' pixels pass 2^25, is drawn as
-normal text, all of the field alike, as advanced text is under a
-renderer other than WebGL 2 and in a 3D object's bitmap. The store of
+normal text, all of the field alike, as advanced text is in a 3D
+object's bitmap. The store of
 segments, 16 MB at most, starts again when full, drawing again the texts
 drawn from it, uploads only the rows added since, and goes with the last
 view that draws on a stage. Fitting stems to
@@ -4377,20 +4110,12 @@ offset channel by channel, alpha too, and clamped to 0–255. An alpha
 offset so shows a fill of alpha 0, while a bitmap's fully transparent
 pixels stay transparent. A gradient's stops are transformed and its ramp
 made from them. Nested transforms apply the child's first, then the
-parent's: (c · m₁ + a₁) · m₂ + a₂. The renderer keeps Pixi's tint and
-alpha for a transform that only multiplies, by 0 to 1, as most do. Any
-other, with an offset or a multiplier beyond 0–1, sends what is drawn
-under it to a batcher of swf2es's own, whose shader takes each vertex's
-whole transform, concatenated from the stage down, and applies it to the
-straight colour; such objects still batch together. A shape's fills, a
-glyph's and a layer's lines are drawn from unbatched contexts that are
-shared, by a character's instances, a font's text and instances in step,
-so one drawn under such a transform draws a batched copy instead, made
-once, and the context itself never changes: switched to batched, the
-other instances' Graphics, set up unbatched, drew nothing
-(`shared-colors`). A shape's lines keep standing for the shared context,
-which their cache counts. A glyph's colour, its Graphics' tint, goes into the
-vertex colour there too. A gradient there is
+parent's: (c · m₁ + a₁) · m₂ + a₂. The renderer puts each draw's whole
+transform, concatenated from the stage down, in its row, and its
+programs apply it to the straight colour of each vertex or texel, so the
+geometries a character's instances, a font's text and instances in step
+share draw under any transform unchanged (`shared-colors`). A glyph's
+colour goes into its row too. A gradient there is
 transformed pixel by pixel, which clamps after the ramp where Flash clamps
 its stops, so the two part only where a transformed stop is clamped.
 
@@ -4399,25 +4124,19 @@ make, the glow and the shadow too, not what they are run on. Its
 colour transform from the stage down, or from the filtered object it is
 in, is applied by its chain's last pass to the straight colour of each
 pixel the filters made, a clear one staying clear, and what is in it is
-drawn as though nothing above it, itself included, were coloured: the
-fork's `Container.colorRoot` keeps Pixi's tint and alpha, the render
-group's included, from reaching it. A glowing object faded to an alpha of
+drawn as though nothing above it, itself included, were coloured. A glowing object faded to an alpha of
 0.6 had its glow drawn from its faded shape, 65 off, and offsets left the
 glow as it was, 139 off (`blend-filtered-alpha`). A filtered 3D object
 is coloured so in its bitmap: one at an alpha of 0.6 drew its glow from
 its faded shape, 77 off. Children's own colours, masks, text, bitmaps,
-filtered objects in filtered objects, render groups in and around them,
+filtered objects in filtered objects,
 filters taken off and put on, and the colours that leave one clear, are
 the `filtered-colors` case. A colour that changes
-draws the output it kept again in the new colour, with no filter run;
-one that leaves every pixel clear draws nothing and runs none, as Pixi
-skipped an object at an alpha of 0 before its colour went to the chain
-(a rig's faded glowing parts took 12 ms a frame for nothing, 2 skipped).
+draws the output it kept again in the new colour, with no filter run.
 
 Stencil masks ignore their own and their ancestors' visibility and colour,
-while retaining ancestor transforms. The view uses the fork's
-`Container.visibilityRoot` and `colorRoot` on mask nodes; removing a mask role
-restores ordinary inheritance. `mask-ancestors` checks hidden, transparent and
+while retaining ancestor transforms (`RenderView.walkMask`).
+`mask-ancestors` checks hidden, transparent and
 tinted ancestors, moving them, and removing and restoring the masks against
 Flash.
 
@@ -4425,116 +4144,44 @@ Flash.
 
 adl composites an object with a blend mode as a layer, its children
 together in the normal way, and blends that with what is below, the
-stage's colour included, where Pixi would blend each child on its own.
+stage's colour included, rather than blending each child on its own.
 An explicit `layer` with children also applies its colour transform to
 their combined pixels, including any graphics on the clip itself. Without
-children, it colours its fills individually. The view resets colour
-inheritance at the former and colours the empty filter chain's output;
-that pass replaces the plain layer copy, without keeping another bitmap.
+children, it colours its fills individually.
 `blend-layer-fade` checks an AVM1 timeline's fading layer, and
 `blend-layer-colors` checks colour and alpha offsets, adding and removing
 children, mode changes and ancestor colours against AIR.
-Where Pixi draws such a layer at once, as a single fill with no masks or
-as a filtered object's result, and the GPU's own blending computes
-Flash's blend, the GPU blends it, with no copy of what is below:
-`screen` and `add` over any ground, `subtract` and `multiply` while the
-stage's pixels are opaque, add and subtract under WebGL alone (WebGPU's
-add leaves an opaque target less than opaque, and it has no subtract),
-and none below a blended, filtered or clipped ancestor, which may draw it
-into a layer whose ground is clear. Over a clear pixel the GPU's multiply
-drops the object's own colour, which Flash keeps (off by up to 128), and
-its subtract the alpha. The stage's pixels may be clear while its
-background is (a host's transparent window mode, set at any time) or
-while an `erase` or `alpha` blend outside any layer is on the list, which
-clears what it covers of the stage as adl does; the view checks both
-before and after it brings the list up to date, and where that changes,
-each multiply and subtract blend outside a layer chooses again, so that
-it switches on the frame the change is drawn on (`blend-direct-clear`).
-Pixi drew its back buffer onto the canvas blended, over what the canvas
-held: with a drawing buffer kept, as the test page keeps it, the frame
-before showed through such cleared pixels, and an erase added after the
-first frame seemed to clear nothing. The fork copies it instead
-(`stage-erase`). A filtered object's chain draws
-its result with that blend (`FilterChain.blendOver`); the Pixi fork maps
-`subtract` to WebGL's reverse subtraction. adl's lighten, darken and
-difference blend the straight colours, which the GPU's min and max of
-premultiplied ones match only where the object is opaque, and overlay
-and hard light depend on what is below, so those keep the filter. The
-`blend-formulas` case puts each mode's formula against adl, at five
-alphas over five grounds, unfiltered and through a filter, and
-`blend-direct-filtered` draws filtered blends over the stage, in layers
-and as they change; the GPU's blends draw what the filter drew, byte for
-byte. On the bench (`--rig 300 --filtered 3 --added --glide
---back-buffer --gpu`, an RX 7900 XTX) a frame fell from some 43 ms to
-37 ms, and on a busy page of 66 added fills the frame's framebuffer
-binds fell by an eighth. Other blends use a filter (`render/blend.ts`): `layer`
-one that only makes it a layer, any other one that reads the back buffer
-and computes the mode in premultiplied colour, its result replacing what
-is there. Multiply, screen, lighten, darken, difference, overlay and
-hardlight are the separable blends of the straight colours, composited
-source over; `add` adds and `subtract` takes the object from what is
-below, each clamped, subtract's alpha the object's over what is below
-(over a layer's clear ground adl leaves the object's alpha in black); `invert` inverts what is below as far as the
+
+The view writes such an object as a layer of the scene list, which the
+planner sizes by what is drawn in it (`@swf2es/render`'s `measure.ts`),
+so a layer, a blend's or a filter's, holds what its filtered children
+draw past their shapes, as adl's holds a child's glow whole
+(`blend-nested`). The backend composites a layer over its rectangle
+alone (`compositeLayer`): through the GPU's blending where it computes
+Flash's blend (`normal`, `layer`, `add`, `screen`), else with the
+composite program reading a copy of what is below that rectangle, its
+result replacing it; out of a multisampled target, the rectangle is
+resolved before it is copied. The formulas are the composite program's
+(`packages/render/src/webgl/programs.ts`). Multiply, screen, lighten,
+darken, difference, overlay and hardlight are the separable blends of
+the straight colours, composited source over; `add` adds and `subtract`
+takes the object from what is below, each clamped, subtract's alpha the
+object's over what is below (over a layer's clear ground adl leaves the
+object's alpha in black); `invert` inverts what is below as far as the
 object covers it; `alpha` and `erase` scale the layer below by the
-object's alpha, or by what it leaves, only where the object has any.
-The `blend-modes` case draws each over two grounds against adl. Pixi
-reads the back buffer only from a renderer made with `useBackBuffer:
-true`, which a host passes (`@swf2es/web`'s `playback.ts` does);
-without it filter-backed modes draw as normal, and the view warns once.
-Direct blends still draw as blends. The back buffer is a full-screen
-copy a frame: on the bench (`--back-buffer`, an
-RTX 4060) it adds some 0.05 ms to the draw. What is behind an object is
-copied from the pixels its bounds cover, which Pixi puts on whole pixels
-of the target but keeps in stage units, as k · (1/r): at a resolution
-that is no whole number, as a host fitting the stage to its page gives,
-k · (1/r) · r can fall a hair short of k, and Pixi's floor took the pixel
-before. The blend read what was behind it a pixel off at those positions
-alone, so a moving blend shook what showed through it, which Flash leaves
-still. The copy's corner and size are rounded instead. Pixi also pads a
-filter's region by whole pixels after putting it on the texels, which at
-such a resolution left it between them: a blend nested in a layer, its
-region starting left of or above the layer's, read along its top and
-left edge texels of the pooled back texture the copy never reached, and
-drew lines of what it last held, which Flash does not draw. The region
-is put on the texels again after the padding. The `blend-drift` case
-moves a blend a quarter pixel a frame, at a zoom of 1.5 that gives the
-test page a resolution of 6; unit tests hold the region's snap.
-
-What is behind a blended object is copied into a texture the filter
-reads, and Pixi's copy is held to both that texture and what it copies
-from: an object past the edge of what it is drawn over, the stage's or a
-layer's cut by a scrollRect, which bounds an object's filter but not its
-children's, asked for a width or height below zero, which GL refuses
-(GL_INVALID_VALUE) and WebGPU fails the frame for. The part the copy does
-not reach is left as the pooled texture had it: it maps past what the
-target has, where the filter's output is cut off. The `blend-edges` case draws such
-objects against adl, and the player's test page fails a case whose
-drawing GL refused.
-
-A renderer made with `antialias: true` draws into multisampled targets,
-which must be resolved before they are read, and Pixi resolves the whole
-target at each step: before a blend copies its backdrop, again in the
-copy, and after each filter pass drawn on the back buffer, a full-screen
-resolve for each small blend. The Pixi fork resolves only the copy's
-clipped source rectangle when a backdrop is copied, skips the resolve
-before the copy, and leaves the back buffer unresolved after filter
-passes until it is presented; a filter's intermediate textures still
-resolve before they are sampled. On a scene of 100 nested blends and
-glows (RX 7900 XTX) the GPU's frame fell from some 4.1 ms to 3.3 ms, the
-frames unchanged. It is in the fork's `FilterSystem` and WebGL render
-target adaptor (`finishRenderPass`), and relies on the order the filter
-system calls them in. The `blend-antialias` case
-draws nested blends, a blurred child of a blend and blends past the
-stage's edges multisampled against adl, the only case that runs these
-paths; a resolve skipped or of the wrong rectangle fails it, and
-`bench.ts --back-buffer --antialias` times them.
-
-A layer, a blend's or a filter's, holds what its filtered children draw
-past their shapes, as adl's layer holds a child's glow whole: Pixi
-measures a filtered object by its descendants' shapes alone, which cut a
-blurred child of a blend off at its shapes' edges, so each filter below
-grows the region by its padding (`blend-nested` draws such children
-against adl).
+object's alpha, or by what it leaves, only where the object has any. An
+`erase` or `alpha` blend outside any layer clears what it covers of the
+stage, as adl does, which the blends after it read: an opaque canvas
+keeps no alpha, so without multisampling such a frame is drawn into a
+layer the canvas's size and copied onto it (`stage-erase`,
+`blend-direct-clear`). The `blend-modes` case draws each over two
+grounds against adl, and `blend-formulas` puts each mode's formula
+against adl, at five alphas over five grounds, unfiltered and through a
+filter. `blend-drift` moves a blend a quarter pixel a frame at a zoom
+that gives no whole resolution, which must not shake what shows through
+it; `blend-edges` draws blended objects past the edge of what they are
+drawn over; `blend-antialias` draws nested blends, a blurred child of a
+blend and blends past the stage's edges multisampled.
 
 ### Filters
 
@@ -4666,8 +4313,12 @@ an opaque destination's pixels; what lies past the source stays as it
 was.
 
 The renderer draws a display object's blur, glow, drop shadow, colour
-matrix, bevel and convolution as adl does (`render/filters.ts`, its shaders in `@swf2es/render`'s
-`filter-shaders.ts`, which the renderer's own passes run too), before its blend mode: a blur is
+matrix, bevel and convolution as adl does, before its blend mode: the
+view works out each filter's values, padding and insets
+(`scene/filters.ts`, with the rules `display/filters.ts` and
+`bitmap/filters.ts` share with applyFilter), and `@swf2es/render` runs
+them as passes (`filters.ts`, its shaders in `filter-shaders.ts`, run by
+`webgl/filters.ts`). A blur is
 a box blurX by blurY pixels wide, the pixels at its ends weighted by how
 much of them it covers, run `quality` times each way and truncated to 8
 bits each time, so that blur 2.5 weighs 0.3, 0.4 and 0.3, and the filter
@@ -4711,23 +4362,19 @@ stepping a stage pixel's texels instead, on a stage shown at three times
 its size, it strode over texels past its padding and cut a soft shadow
 off square (the `blurred-shadow` case). A
 BitmapData's pixel is a screen pixel to a draw into it, rendered at its
-samples a side. The passes are Pixi filters at the target's resolution,
-for WebGL: under WebGPU, where Pixi would skip an object's whole chain
-for one it cannot run, they are left out and a blend mode is kept. A
-view made for one draw destroys the filters it made with it. The object
-goes into its chain, or a blend mode's filter, multisampled as the
-target is (Pixi's filters default to "off"): a filtered caption's edges
-were stepped beside its unfiltered neighbours' smooth ones, for some
-0.1 ms of GPU time a frame on a screen of filters and blends.
+samples a side. The object goes into its filter layer multisampled as
+the target is, as a filtered caption's edges would otherwise be stepped
+beside its unfiltered neighbours' smooth ones; the passes themselves
+draw single-sampled ([renderer.md](renderer.md#the-backend)).
 
 As Flash caches a filtered object as a bitmap, an object's filters run
-as one chain (`FilterChain`) whose output is kept and drawn again until
-what it was run on changes: the object or anything below it, its
+as one chain whose output is kept (`RenderView.keptOutput`, `@swf2es/render`'s
+`Keeps`) and drawn again until what it was run on changes: the object or anything below it, its
 transform other than a move, or how much of it the screen shows (its
 colour colours the output as it is drawn). Filters set again with the values they had,
 as a tween writes them on each frame or a script sets them from their
 own, keep the chain and its output; a displacement's map is the same only
-as the same object, which setting it again takes anew. A wide blur's
+as the same object, which setting it again takes anew (`filterPlans`). A wide blur's
 passes read blur × texels to a screen pixel a pixel, over an area grown
 by its reach, so their cost rises with the cube of the texels to a stage
 pixel; kept, a still object costs one copy a frame. Where there are more
@@ -4756,29 +4403,14 @@ some changes undrawn: a child moved within its parent's bounds shows in
 its capture where it was as well as where it is, and a mask from outside
 the object that moves leaves it clipped as it was. swf2es draws the
 child once, where it is now, and also keeps the output for such a mask,
-unless the object's bounds change with it. Each pass lets go of the
-pool's textures it drew with, which the pool destroys as the screen's
-size changes. Pixi measures a filtered object's bounds each time it runs
-its chain, unless given a `filterArea`; that measuring is some 1% of the
-main thread on a page of 32 animated creatures running 450 chains a
-frame, and 0.13 ms of a 3.3 ms draw on `bench.ts --rig 32 --blurred`
-(the `filterAreaMs` meter), less than the runs vary, so no area is set.
-In a busy town of an application, though, with hundreds of filtered
-characters and scenery, it was 1 ms of a 14 ms frame, so a chain keeps
-the area it was measured at with the object's transform on the stage,
-and gives it again, moved as the object moved, until the object changes
-as its kept output goes stale or its transform's linear part changes;
-one with a mask from outside it in it is measured each time, as that
-mask may move with nothing in it changing (`FilterChain.keptArea`).
-Each filter pass clears the texture it draws into: Pixi clears a chain's
-input as it binds it, and the box blur's runs and a chain's steps clear
-their pool textures, some 1,230 clears a frame on that page and 769 on
-the rig. None is skipped. Their textures carry no stencil, so the
-stencil bit of Pixi's `CLEAR.ALL` costs nothing, and dropping every
-clear but the screen's, which draws wrongly, moves neither a frame there
-nor `bench.ts --rig 32 --blurred --gpu` by more than the runs vary, on
-the discrete GPU or the integrated one: the textures are small, some
-0.4 megapixels of inputs a frame.
+unless the object's bounds change with it. A filtered layer is measured
+by what is drawn in it, cut to the target, out to whole pixels, then
+padded (`@swf2es/render`'s `measure.ts`), the rules the filters'
+exactness was found with; where nothing is drawn in it, it draws
+nothing. Filtered layers that hold only draws, masks and other such
+layers, not kept, are drawn ahead of the stage, a level at a time, and
+their passes in waves ([renderer.md](renderer.md#the-backend), held
+layers).
 
 #### Native CPU convolution
 
@@ -4827,19 +4459,14 @@ null. Neither kind changes bounds or `width`, and a shape hit test
 follows `mask` but not a timeline's masks; a mask, a script's or a
 timeline's, is never hit by a shape test, nor is what is in it (the
 `scale9-hits` case), and a Bitmap, masking or not, is hit over its whole
-rectangle. The renderer gives each
-mask to Pixi as a stencil: a timeline's range goes in a container whose
-mask is the clip-depth child, and a mask's lines are hidden while it
-masks. When both objects are cached as bitmaps Flash clips by the
+rectangle. The view writes each mask
+into the scene list as a stencil: its drawing between a push and its
+use, then what it masks, then a pop (`RenderView.walkMask`), a
+timeline's range so clipped by its clip-depth child, and a mask's lines
+left out. When both objects are cached as bitmaps Flash clips by the
 mask's alpha; that, and a text field as a mask, are still to come.
-Pixi 8.21 draws every mask through the stencil: its `ScissorMask` has no
-pipe and is never chosen. A scissor for a rectangle upright on the screen
-was weighed and left out: `bench.ts --masks 40 --gpu`, 40 scrolling lists
-each clipped by a timeline's rectangle, takes some 0.7 ms a frame more
-than the same art unclipped (`--unmasked`), about 10 µs of CPU a mask,
-which bounds what a scissor could gain, while a multisampled target, as
-the hosts draw, gives a stencil's edges the coverage a scissor's
-whole-pixel box would lose.
+What would clip a mask's own coverage (its own mask, scroll rectangle or
+a field's gutter) is drawn without, and counted (`unsupported.masks`).
 
 `scrollRect` is kept as set, its edges rounded to whole pixels half to
 even, so its width and height are the rounded right and bottom less the
@@ -5080,7 +4707,7 @@ override. A SWF with no ActionScript 3 plays with no Scripting.
 
 ### Showing a player
 
-`playback.ts` shows a player in the element: a Pixi renderer whose
+`playback.ts` shows a player in the element: a `RenderView` whose
 screen is the element's box taken into stage coordinates, and whose
 resolution is the device's pixels to a stage pixel, so the canvas covers
 the box and the view's pointer mapping, which reads the canvas's box, holds
@@ -5109,16 +4736,14 @@ script sets, `Stage.quality` or AVM1's `_quality`, from the next frame.
 Flash draws edges aliased and smooths no bitmap at low, a Bitmap's or a
 bitmap fill's that asks for it among them, and supersamples on a grid
 of 2×2 at medium and 4×4 at high and best (the `stage-quality-*` cases).
-The canvas is not multisampled; the back buffer the stage is drawn into
-is, but at low (the Pixi fork's `GlBackBufferSystem.antialias`, which
-makes it anew), and `PixiView.quality` at low samples the smoothed copies
-of the stores' textures, and drawTriangles' fills, nearest. Medium and
-high are the GPU's multisampling, which costs the GPU memory and
-bandwidth but no shading: supersampling, 4 or 16 times the pixels, would
-cost more than the edges show. The back buffer and the filter and blend
-layers take 4 samples at medium, 8 at high and 16 at best, as many as the
-GPU allows (the fork's `backBufferSamples` and `msaaSamples`), remade at
-the next frame. Flash covers an edge with 16 at high; 8 look alike but on
+The canvas is not multisampled; the buffers the stage is drawn into
+are, resolved onto it, but at low, where `RenderView.quality` also
+smooths no bitmap. Medium and high are the GPU's multisampling, which
+costs the GPU memory and bandwidth but no shading: supersampling, 4 or
+16 times the pixels, would cost more than the edges show. The stage's
+buffers and the filter and blend layers take 4 samples at medium, 8 at
+high and 16 at best, as many as the GPU allows (`RenderView.samples`),
+remade at the next frame. Flash covers an edge with 16 at high; 8 look alike but on
 the longest, shallowest edges, at half the memory, and best takes 16.
 Every sample costs its pixels 8 bytes, colour and depth-stencil, so a
 canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
@@ -5133,12 +4758,11 @@ disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
 false })` keeps new playbacks on JS and skips loading the native package.
 A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation
 is tried only once per tessellator. A shape layer's fills are tessellated in
-one call into one position and one index buffer, which Pixi draws from as they
-are (`packages/native/README.md`). A rejected fill resolves its JS fallback
-at construction, and the successful result is cached. Cached geometry owns
-its CPU buffers independently of Wasm scratch, including for context restoration.
-`@swf2es/player` retains its generic `PixiView` fill hook without importing the
-native package. Different triangle layouts can change subpixel edge coverage
+one call into one position and one index buffer (`packages/native/README.md`).
+A rejected fill resolves its JS fallback once, with the rest of its layer.
+The renderer's geometry owns its buffers independently of Wasm scratch,
+including for context restoration. `RenderView` takes the tessellator as its
+`fillTessellator` option without importing the native package. Different triangle layouts can change subpixel edge coverage
 and paint interpolation, so native and JS need not draw identical pixels.
 
 `configure` (`config.ts`) sets what every player on the page shares:
@@ -5337,8 +4961,8 @@ Nothing is loaded from `file:`. One privileged scheme, `swf2es:`,
 standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
 as https, has two hosts. `swf2es://app/` is the page,
 `static/index.html` and its stylesheet, the renderer's build,
-`/modules/<package>/` for the packages' builds and their libraries
-(pixi.js), which the page's import map names as
+`/modules/<package>/` for the packages' builds, which the page's import
+map names as
 `tests/player/serve.ts`'s does, and `/libraries/builtin.abc` and
 `/libraries/playerglobal.abc`, read from where the settings say.
 `swf2es://file/` is the local files the SWF playing may read, by its
@@ -5679,7 +5303,7 @@ from `main` to https://swf2es.github.io/swf2es/, that plays the SWFs
 people open: one `<swf2es-player>`, the panels a person trying a SWF wants
 around it, and three demos. It is the web embedding with nothing in
 between, so a static host is all it needs: `build.ts` copies the packages
-as `tsc` wrote them, the Pixi fork's bundle, `codegen.wasm` and
+as `tsc` wrote them, `codegen.wasm` and
 `builtin.abc` into `apps/site/dist/site/`, under an import map of relative
 URLs, so it plays under Pages' `/swf2es/` as at a server's root.
 
@@ -5706,7 +5330,8 @@ URLs, so it plays under Pages' `/swf2es/` as at a server's root.
   crowd. The workflow pulls the oracle's image for the first.
 - **Licences**: `notices.html` gives builtin.abc's MPL-2.0 and lists the
   files translated from avmplus and taken from Ruffle, found by their
-  headers as the site builds, with the licences of PixiJS, zlib and the LZMA SDK.
+  headers as the site builds, with the licences of minimp3, libtess2, zlib and
+  the LZMA SDK.
 
 `tests/site/run.ts`, part of `pnpm test`, builds the site and checks it in
 Chrome under `/swf2es/`; `--serve` serves it to look at.

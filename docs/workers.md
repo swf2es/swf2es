@@ -545,8 +545,8 @@ The options for the primordial:
 2. **tryLock only**: `lock` fails when contended. Wrong for Crossbridge's
    handshake.
 3. **The primordial VM in a worker**, the stage drawn on the main thread
-   from what it sends (the paused "VM in a worker, Pixi on main" plan of
-   2026-10-19): the primordial may then truly block. It is the render
+   from what it sends (the paused "VM in a worker, drawing on main" plan
+   of 2026-10-19): the primordial may then truly block. It is the render
    worker project in full: the scene protocol, synchronous
    ExternalInterface both ways, `BitmapData.draw`. It would make blocking
    free, but blocking does not need it.

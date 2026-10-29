@@ -214,23 +214,24 @@ owns a tessellator, then releases its scratch on teardown.
 `configure({ nativeFills: false })` keeps new playbacks on the JS path and
 skips native loading. Missing modules or unavailable Wasm also use JS.
 
-When constructing a `PixiView` directly, opt in through its generic hook:
+When constructing a `RenderView` directly, opt in through its generic hook:
 
 ```ts
-import { PixiView } from "@swf2es/player";
+import { RenderView } from "@swf2es/player/scene";
 import { Tessellator } from "@swf2es/native/tessellate";
 
 const tessellator = new Tessellator();
-const view = new PixiView(renderer, { fillTessellator: tessellator.tessellate });
+const view = new RenderView({ width, height, fillTessellator: tessellator.tessellate });
 ```
 
 The player retains its paint and draw order. A fill alone
 (`tessellate(contours, nonZero)`) takes the player's flattened polygons. It
 passes every contour of one fill together, using even-odd or non-zero
 winding, with non-zero for masks. Rejection or an exception selects the
-existing JS fill construction. The chosen result is retained by the
-context factory so copies do not retry the tessellator. Dynamic drawings
-and morph ratios construct new results when their contents change.
+existing JS fill construction, which is resolved once with the rest of
+the layer (`scene/fills.ts`, `resolveFills`), so nothing retries the
+tessellator. Dynamic drawings and morph ratios construct new results when
+their contents change.
 
 The player tessellates a shape layer's fills in one call,
 `tessellator.tessellate.layer(fills, nonZero)`, which takes each contour as
@@ -238,7 +239,7 @@ the shape's own path commands (`PATH_MOVE`, `PATH_LINE`, `PATH_CURVE`,
 `PATH_CUBIC`, each followed by its coordinates), not as points: the wrapper
 copies every fill's commands, the contours' ends, each fill's last contour
 and its rule into one allocation, and `src/tessellate/flatten.zig` flattens
-each contour as the player's JS does (`render/tessellate.ts`'s `trace`):
+each contour as the player's JS does (`scene/fills.ts`'s `trace`):
 chords within 0.02 px of the curve, at most 256 a curve, at the same
 parametric points, repeated points dropped, a closing point that repeats the
 first dropped, and contours of fewer than three points left out, all in
@@ -254,8 +255,7 @@ and its indices into another, counted from the layer's first vertex. The
 wrapper copies those two out once into JS-owned typed arrays and gives each
 fill views of its part, with `indexOffset`, its first vertex in the layer.
 Positions remain doubles; indices use 16 bits through 65,536 vertices in the
-layer and 32 bits above that, as Pixi would type them. Pixi retains both
-buffers as they are when the draw transforms are identities. The module
+layer and 32 bits above that. The module
 checks every input coordinate and every output position and index, so the
 player draws a layer's output unchecked; a fill alone (`tessellate(contours,
 nonZero)`) is checked by the player, as any custom tessellator's is. A fill
@@ -263,9 +263,10 @@ rejected in a layer falls back to JS alone, as do malformed commands and a
 fill whose curves would flatten to more than a million points; one libtess2
 failed, which may be the layer's memory, is tried as a layer of its own, and
 a layer that unwinds or does not fit is tried a fill at a time, so a layer
-gives every fill what a layer of its own would. No cached geometry aliases Wasm scratch. Pixi consumes these through
-`GraphicsContext.fillGeometry`, generating the usual paint UVs and batches;
-the immutable source buffers survive path retirement and context restoration.
+gives every fill what a layer of its own would. No cached geometry aliases Wasm scratch. The
+renderer copies each fill's triangles into a geometry of its own with its
+paint's colours and texels (`scene/shapes.ts`), which its atlas holds
+through context loss.
 The hook also accepts another tessellator with the same structural result.
 
 The absolute memory ceiling is 128 MiB, including static data, the C stack
@@ -283,8 +284,8 @@ gradient or bitmap interpolation. At low quality this can switch a whole
 boundary pixel. AIR comparisons do not show either backend consistently
 closer to Flash; enabling native fills accepts these differences.
 
-Run the player references and context-loss checks with
-`SWF2ES_NATIVE_FILLS=1` to exercise the native hook in those tests.
+The player references and context-loss checks draw with the native
+tessellator, as the element does by default.
 `node tests/fuzz/tessellate.ts [cases] [seed]`
 checks both fill rules against independent ray crossings; the default test
 suite includes 2,000 fills and 24,000 coverage samples. It then flattens
