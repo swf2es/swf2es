@@ -15,9 +15,6 @@ import {
   type KeepHandle,
   Keeps,
   LAYER,
-  MASK_BEGIN,
-  MASK_POP,
-  MASK_USE,
   measureLayers,
   NORMAL,
   PLANE,
@@ -25,7 +22,6 @@ import {
   Rows,
   SceneList,
   SMOOTH,
-  SNAP,
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
@@ -68,6 +64,7 @@ import { type AdvancedGlyphs, fieldQuads, staticQuads } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
 import { LineCache } from "./lines.js";
+import { Masks, toStageFlat } from "./masks.js";
 import { GRADIENT_IDLE_FRAMES, Paints, paintSampler } from "./paints.js";
 import { Parts } from "./parts.js";
 import { bindCanvasPointer } from "./pointer.js";
@@ -267,6 +264,7 @@ export class RenderView implements Drawer {
   private readonly lineCache: LineCache;
   private readonly parts: Parts;
   private readonly textItems: TextItems;
+  private readonly masks: Masks;
   private readonly textures = new Textures();
   private readonly paints = new Paints(this.textures);
   private commands = new Commands();
@@ -367,8 +365,6 @@ export class RenderView implements Drawer {
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
-  /** The masks pushed and not yet popped, as each one's first draw and count. */
-  private readonly masks: number[] = [];
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
   private readonly stretchScratch: Linear = [0, 0, 0, 0];
 
@@ -404,6 +400,7 @@ export class RenderView implements Drawer {
     this.counts = this.lineCache.counts;
     this.parts = new Parts(this.geometries, this.tessellator, this.lineCache);
     this.textItems = new TextItems(this.geometries, this.textures, this.parts);
+    this.masks = new Masks(this.geometries, this.parts);
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
     this.canvas.addEventListener("webglcontextrestored", this.restored);
@@ -619,9 +616,21 @@ export class RenderView implements Drawer {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
         const w = this.placedMask(mask);
-        const first = this.maskBegin();
-        this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true);
-        this.maskUse(first);
+        const first = this.masks.maskBegin(this.scene);
+        this.masks.walkMask(
+          this.scene,
+          this.rows,
+          this.snapshotting,
+          mask,
+          w.a,
+          w.b,
+          w.c,
+          w.d,
+          w.tx,
+          w.ty,
+          true,
+        );
+        this.masks.maskUse(this.scene, first);
         clipped = true;
       } else {
         unsupported.masks++;
@@ -706,9 +715,9 @@ export class RenderView implements Drawer {
       // A rectangle of no size clips everything, as an empty one does.
       const width = Math.max(0, r.xMax - r.xMin);
       const height = Math.max(0, r.yMax - r.yMin);
-      const first = this.maskBegin();
-      this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, width, height);
-      this.maskUse(first);
+      const first = this.masks.maskBegin(this.scene);
+      this.masks.rectMask(this.scene, this.rows, a, b, c, d, tx, ty, r.xMin, r.yMin, width, height);
+      this.masks.maskUse(this.scene, first);
     }
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
@@ -855,9 +864,22 @@ export class RenderView implements Drawer {
 
       for (let k = 0; k < items.length; k++) {
         if (clip && k === omitted.clipFrom) {
-          const first = this.maskBegin();
-          this.rectMask(a, b, c, d, tx, ty, clip.x, clip.y, clip.width, clip.height);
-          this.maskUse(first);
+          const first = this.masks.maskBegin(this.scene);
+          this.masks.rectMask(
+            this.scene,
+            this.rows,
+            a,
+            b,
+            c,
+            d,
+            tx,
+            ty,
+            clip.x,
+            clip.y,
+            clip.width,
+            clip.height,
+          );
+          this.masks.maskUse(this.scene, first);
         }
 
         // A glyph whose tables found no room among Saffron's is drawn as normal text.
@@ -894,7 +916,7 @@ export class RenderView implements Drawer {
         }
 
         if (clip && k === omitted.clipTo - 1) {
-          this.popMask();
+          this.masks.popMask(this.scene);
         }
       }
     }
@@ -939,14 +961,26 @@ export class RenderView implements Drawer {
         if (clips) {
           const n = clips.enter(child);
           for (; open > n; open--) {
-            this.popMask();
+            this.masks.popMask(this.scene);
           }
         }
 
         if (child.clipDepth > 0 && !hidden) {
-          const first = this.maskBegin();
-          this.walkMask(child, a, b, c, d, tx, ty, false);
-          this.maskUse(first);
+          const first = this.masks.maskBegin(this.scene);
+          this.masks.walkMask(
+            this.scene,
+            this.rows,
+            this.snapshotting,
+            child,
+            a,
+            b,
+            c,
+            d,
+            tx,
+            ty,
+            false,
+          );
+          this.masks.maskUse(this.scene, first);
           open++;
           continue;
         }
@@ -958,7 +992,7 @@ export class RenderView implements Drawer {
       this.ownerSlice = ownerSlice;
       this.ownerParent = ownerParent;
       for (; open > 0; open--) {
-        this.popMask();
+        this.masks.popMask(this.scene);
       }
 
       if (!this.snapshotting) {
@@ -967,7 +1001,7 @@ export class RenderView implements Drawer {
     }
 
     if (r) {
-      this.popMask();
+      this.masks.popMask(this.scene);
     }
 
     if (output?.reused) {
@@ -985,7 +1019,7 @@ export class RenderView implements Drawer {
     }
 
     if (clipped) {
-      this.popMask();
+      this.masks.popMask(this.scene);
     }
 
     this.walkDepth--;
@@ -1681,161 +1715,6 @@ export class RenderView implements Drawer {
     return { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 };
   }
 
-  /** A mask begun: its draws follow, till it is used (maskUse); its first entry's index. */
-  private maskBegin(): number {
-    this.scene.marker(MASK_BEGIN);
-    return this.scene.length;
-  }
-
-  /**
-   * The mask begun at entry `first` (maskBegin) used from here, its draws
-   * those since. Begun and used around the mask's draws, with no closure:
-   * one in the walk kept every number it took in a context made on each
-   * call, boxed, though no mask was drawn.
-   */
-  private maskUse(first: number): void {
-    const count = this.scene.length - first;
-    this.scene.marker(MASK_USE, first, count);
-    this.masks.push(first, count);
-  }
-
-  /** The mask pushed last taken out: its draws named again. */
-  private popMask(): void {
-    const count = this.masks.pop() as number;
-    const first = this.masks.pop() as number;
-    this.scene.marker(MASK_POP, first, count);
-  }
-
-  /** A rectangle of `o`'s space, x y width height, under its transform (a b c d tx ty), as a mask's draw. */
-  private rectMask(
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ): void {
-    const quad = this.parts.unitQuad();
-    const row = placedRow(
-      this.rows,
-      a,
-      b,
-      c,
-      d,
-      tx,
-      ty,
-      { a: width, b: 0, c: 0, d: height, tx: x, ty: y },
-      null,
-    );
-    this.geometries.use(quad.id);
-    this.scene.draw(quad.id, row, NORMAL);
-  }
-
-  /**
-   * `o` and all in it drawn as a mask, under its parent's transform: fills
-   * alone, a drawing's non-zero, glyphs and bitmaps' rectangles, whatever
-   * their visibility, as Flash masks by them. `own` says (a b c d tx ty) is
-   * already `o`'s own place, as a mask elsewhere on the list is found; else
-   * its own matrix is applied. Flags are cleared as the walk clears them.
-   */
-  private walkMask(
-    o: DisplayObject,
-    pa: number,
-    pb: number,
-    pc: number,
-    pd: number,
-    ptx: number,
-    pty: number,
-    own: boolean,
-  ): void {
-    const m = own ? IDENTITY : o.flatPlaced;
-    // What would clip a mask's own coverage needs a stencil within the stencil: drawn whole, and counted.
-    if (o.mask || o.scroll || o.clipDepth > 0) {
-      unsupported.masks++;
-    }
-
-    const a = pa * m.a + pc * m.b;
-    const b = pb * m.a + pd * m.b;
-    const c = pa * m.c + pc * m.d;
-    const d = pb * m.c + pd * m.d;
-    const tx = pa * m.tx + pc * m.ty + ptx;
-    const ty = pb * m.tx + pd * m.ty + pty;
-    const shape = o instanceof ShapeObject ? o.drawn() : null;
-    const version = o.drawing ? o.drawing.version : 0;
-    const layers = o.drawing
-      ? facing(o.drawing.layers, a * d - b * c < 0, version)
-      : (shape?.layers ?? null);
-    // A mask's drawing drawn again lets go of its old layers too.
-    if (o.drawing && layers) {
-      this.parts.dropUndrawn(o, layers, version);
-    }
-
-    // Its row made as its first draw needs it, in place: a closure here kept every number it took
-    // in a context made on each call, boxed, as the walk's did.
-    let row = -1;
-    if (layers) {
-      for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.parts.partsOf(layers[i], version, o.drawing !== null)) {
-          // A mesh of a bitmap disposed of draws nothing, as it is drawn, and so masks nothing.
-          if (part.mesh?.image.disposed) {
-            continue;
-          }
-
-          this.geometries.use(handle.id);
-          if (row < 0) {
-            row = this.rows.add(a, b, c, d, tx, ty, null);
-          }
-
-          this.scene.draw(handle.id, row, NORMAL);
-        }
-      }
-    }
-
-    if (o instanceof TextObject || o instanceof StaticTextObject) {
-      const omitted: TextOmissions = { advanced: false, clip: null, clipFrom: 0, clipTo: 0 };
-      for (const item of o instanceof TextObject
-        ? fieldItems(o, omitted)
-        : staticItems(o, omitted)) {
-        const geometry = item.kind === "glyph" ? this.parts.glyphGeometry(item.glyph) : null;
-        if (item.kind === "glyph" && geometry) {
-          const glyphRow = placedRow(this.rows, a, b, c, d, tx, ty, item.m, null);
-          this.geometries.use(geometry.id);
-          this.scene.draw(geometry.id, glyphRow, NORMAL, -1, SNAP);
-        }
-      }
-    }
-
-    const store = o instanceof BitmapObject ? o.store : null;
-    if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      const quad = this.parts.quad(store.width, store.height);
-      this.geometries.use(quad.id);
-      if (row < 0) {
-        row = this.rows.add(a, b, c, d, tx, ty, null);
-      }
-
-      this.scene.draw(quad.id, row, NORMAL);
-    }
-
-    if (o instanceof Container) {
-      for (const child of o.children) {
-        this.walkMask(child, a, b, c, d, tx, ty, false);
-      }
-
-      if (!this.snapshotting) {
-        o.descendantsDirty = false;
-      }
-    }
-
-    // A draw for BitmapData leaves them for the stage's.
-    if (!this.snapshotting) {
-      o.dirty = CLEAN;
-    }
-  }
-
   /**
    * `o` drawn alone, as BitmapData.draw takes a display object, through `m`
    * into a `width` by `height` bitmap, read back as premultiplied ARGB: at
@@ -2062,14 +1941,4 @@ function noteUnsupported(o: DisplayObject): void {
   if (o.filters.length > 0 && undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
-}
-
-/** Where `o` stands on the stage, its matrices as the walk takes them, after their scroll's shift. */
-function toStageFlat(o: DisplayObject): Matrix {
-  let m = o.flatPlaced;
-  for (let p = o.parent; p; p = p.parent) {
-    m = concat(m, p.flatPlaced);
-  }
-
-  return m;
 }
