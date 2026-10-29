@@ -27,10 +27,92 @@ export interface ConvolutionFilter {
   preserveAlpha: boolean;
 }
 
+/**
+ * A glow's, a drop shadow's, a bevel's or a gradient glow's or bevel's
+ * values, as the player keeps them (alphas in 255ths, strength in 256ths),
+ * and what the layer reads: `invert`, 255 less the source's alpha, as an
+ * inner glow blurs what the source leaves; a gradient filter's 256
+ * premultiplied colours.
+ */
+export interface LayerFilter {
+  kind: "glow" | "dropShadow" | "bevel" | "gradientGlow" | "gradientBevel";
+  inner: boolean;
+  knockout: boolean;
+  hideObject: boolean;
+  /** A bevel's or a gradient filter's: "inner", "outer" or "full". */
+  type: string;
+  invert: boolean;
+  quality: number;
+  blurX: number;
+  blurY: number;
+  strength: number;
+  alpha: number;
+  highlightAlpha: number;
+  shadowAlpha: number;
+  color: number;
+  highlightColor: number;
+  shadowColor: number;
+  table: Uint32Array | null;
+}
+
+/** A read of the blurred block `read` at each pixel of the layer, moved by (x, y). */
+export interface LayerMove {
+  read: number;
+  x: number;
+  y: number;
+}
+
 interface NativeExports {
   memory: WebAssembly.Memory;
   resetArena(bytes: number): number;
   convolve(params: number): number;
+  blurFilter(params: number): number;
+  layerFilter(params: number): number;
+}
+
+// blur.zig's Kind and Flags.
+const KINDS = ["glow", "dropShadow", "bevel", "gradientGlow", "gradientBevel"];
+const LAYER_INNER = 1;
+const LAYER_KNOCKOUT = 2;
+const LAYER_HIDE_OBJECT = 4;
+const LAYER_TYPE_INNER = 8;
+const LAYER_TYPE_OUTER = 16;
+const LAYER_INVERT = 32;
+/** blur.zig's LayerParams, and a gradient's table after it. */
+const LAYER_PARAMS = 176;
+const TABLE_BYTES = 1024;
+
+/** What a call's input and scratch may take of the module's 128 MiB, the stack's room left. */
+const MOST_BYTES = 120 * 1024 * 1024;
+
+/** Whether `area` is a rect the kernels take: whole, of some size, within an int's reach. */
+function takes(area: BitmapRect): boolean {
+  const { x, y, width: w, height: h } = area;
+  return (
+    [x, y, w, h].every(Number.isInteger) &&
+    w > 0 &&
+    h > 0 &&
+    Math.abs(x) <= 0x3fffffff &&
+    Math.abs(y) <= 0x3fffffff &&
+    w <= 0x100000 &&
+    h <= 0x100000
+  );
+}
+
+/** `area` of the source into `into`, row by row; 0 past the bitmap. */
+function copy(source: BitmapSource, area: BitmapRect, into: Uint32Array): void {
+  const { width: sw, height: sh, pixels } = source;
+  const x0 = Math.max(0, area.x);
+  const y0 = Math.max(0, area.y);
+  const x1 = Math.min(sw, area.x + area.width);
+  const y1 = Math.min(sh, area.y + area.height);
+  if (x0 > area.x || y0 > area.y || x1 < area.x + area.width || y1 < area.y + area.height) {
+    into.fill(0);
+  }
+
+  for (let sy = y0; sy < y1 && x1 > x0; sy++) {
+    into.set(pixels.subarray(sy * sw + x0, sy * sw + x1), (sy - area.y) * area.width + x0 - area.x);
+  }
 }
 
 export interface ConvolverOptions {
@@ -232,6 +314,158 @@ export class Convolver {
       // A trap: never resume that instance; the call once more in a new one.
       this.dispose();
       return again ? this.run(source, area, filter, transparent, false) : null;
+    } finally {
+      if (this.capacity > this.keep) {
+        this.dispose();
+      }
+    }
+  }
+
+  /**
+   * The blur filter over `area` of the source, 0 past the bitmap: its
+   * premultiplied channels blurred apart (blur.zig), owned by the caller;
+   * null where they would not fit. A trap is made again in a new instance
+   * once. Never writes to the source.
+   */
+  readonly blur = (
+    source: BitmapSource,
+    area: BitmapRect,
+    blurX: number,
+    blurY: number,
+    quality: number,
+  ): Uint32Array | null => {
+    const n = area.width * area.height;
+    if (!takes(area) || !(quality >= 0 && quality <= 15) || n * 6 + area.width * 8 > MOST_BYTES) {
+      return null;
+    }
+
+    return this.call((wasm) => {
+      const pointer = wasm.resetArena(32 + n * 4);
+      if (!pointer) {
+        return null;
+      }
+
+      new Int32Array(wasm.memory.buffer, pointer, 4).set([
+        area.width,
+        area.height,
+        quality | 0,
+        pointer + 32,
+      ]);
+      new Float64Array(wasm.memory.buffer, pointer + 16, 2).set([blurX, blurY]);
+      copy(source, area, new Uint32Array(wasm.memory.buffer, pointer + 32, n));
+      const out = wasm.blurFilter(pointer);
+      return out ? new Uint32Array(wasm.memory.buffer.slice(out, out + n * 4)) : null;
+    }, true);
+  };
+
+  /**
+   * A glow's, a shadow's, a bevel's or a gradient one's result over `area`
+   * of the source (blur.zig): the alpha of each of `reads`, blocks of the
+   * source, blurred, each of `moves` read from its block, and the layer
+   * placed on the source's pixels; owned by the caller, null where they
+   * would not fit. A trap is made again in a new instance once. Never
+   * writes to the source.
+   */
+  readonly layer = (
+    source: BitmapSource,
+    area: BitmapRect,
+    f: LayerFilter,
+    reads: readonly BitmapRect[],
+    moves: readonly LayerMove[],
+  ): Uint32Array | null => {
+    const kind = KINDS.indexOf(f.kind);
+    const n = area.width * area.height;
+    const read = reads.reduce((sum, r) => sum + r.width * r.height, 0);
+    if (
+      kind < 0 ||
+      !takes(area) ||
+      !reads.every(takes) ||
+      reads.length < 1 ||
+      reads.length > 2 ||
+      moves.length < 1 ||
+      moves.length > 2 ||
+      !(f.quality >= 0 && f.quality <= 15) ||
+      (f.table !== null && f.table.length !== 256) ||
+      n * (4 + moves.length) + read * 6 + area.width * 24 > MOST_BYTES
+    ) {
+      return null;
+    }
+
+    return this.call((wasm) => {
+      const pointer = wasm.resetArena(LAYER_PARAMS + TABLE_BYTES + (n + read) * 4);
+      if (!pointer) {
+        return null;
+      }
+
+      const buffer = wasm.memory.buffer;
+      const table = pointer + LAYER_PARAMS;
+      const pixels = table + TABLE_BYTES;
+      const flags =
+        (f.inner ? LAYER_INNER : 0) |
+        (f.knockout ? LAYER_KNOCKOUT : 0) |
+        (f.hideObject ? LAYER_HIDE_OBJECT : 0) |
+        (f.type === "inner" ? LAYER_TYPE_INNER : 0) |
+        (f.type === "outer" ? LAYER_TYPE_OUTER : 0) |
+        (f.invert ? LAYER_INVERT : 0);
+      const ints = new Int32Array(buffer, pointer, LAYER_PARAMS / 4);
+      ints.fill(0);
+      ints.set([
+        kind,
+        flags,
+        area.width,
+        area.height,
+        pixels,
+        f.quality | 0,
+        reads.length,
+        moves.length,
+      ]);
+      let at = pixels + n * 4;
+      for (const [k, r] of reads.entries()) {
+        ints.set([at, r.width, r.height], 8 + k * 4);
+        copy(source, r, new Uint32Array(buffer, at, r.width * r.height));
+        at += r.width * r.height * 4;
+      }
+
+      const floats = new Float64Array(buffer, pointer, LAYER_PARAMS / 8);
+      for (const [k, m] of moves.entries()) {
+        ints[16 + k * 6] = m.read;
+        floats[9 + k * 3] = m.x;
+        floats[10 + k * 3] = m.y;
+      }
+
+      floats.set([f.blurX, f.blurY, f.strength, f.alpha, f.highlightAlpha, f.shadowAlpha], 14);
+      ints.set([f.color, f.highlightColor, f.shadowColor, table], 40);
+      if (f.table) {
+        new Uint32Array(buffer, table, 256).set(f.table);
+      }
+
+      copy(source, area, new Uint32Array(buffer, pixels, n));
+      const out = wasm.layerFilter(pointer);
+      return out ? new Uint32Array(wasm.memory.buffer.slice(out, out + n * 4)) : null;
+    }, true);
+  };
+
+  /** `body` on the instance, made where there is none: made again in a new one where it traps if `again`. */
+  private call(
+    body: (wasm: NativeExports) => Uint32Array | null,
+    again: boolean,
+  ): Uint32Array | null {
+    try {
+      if (!this.instance) {
+        try {
+          this.instance = renderInstance(() => {
+            throw new Error("the bitmap kernel takes no tessellator");
+          }) as unknown as NativeExports;
+        } catch {
+          return null;
+        }
+      }
+
+      return body(this.instance);
+    } catch {
+      // A trap: never resume that instance.
+      this.dispose();
+      return again ? this.call(body, false) : null;
     } finally {
       if (this.capacity > this.keep) {
         this.dispose();

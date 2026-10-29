@@ -7,6 +7,8 @@ export {
   type ConvolutionFilter,
   Convolver,
   type ConvolverOptions,
+  type LayerFilter,
+  type LayerMove,
 } from "./convolver.js";
 export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "./lines.js";
 export {
