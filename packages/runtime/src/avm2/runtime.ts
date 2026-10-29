@@ -14,6 +14,7 @@
 import { ArrayConversion } from "./array-conversion.js";
 import { fillCache } from "./cache-fill.js";
 import { newClass, withId } from "./classes.js";
+import { classNamed, definingAbc, definitionNamed } from "./definitions.js";
 import type {
   Abc,
   AbcDesc,
@@ -1916,26 +1917,9 @@ export class Runtime {
     return cls;
   }
 
-  /**
-   * The class `qualified` names, "pkg::Name" or "Name", its defining script
-   * run; a ReferenceError if no script defines it. What a SWF's SymbolClass
-   * and a player's lookups by name go through.
-   */
+  /** The class `qualified` names, "pkg::Name" or "Name" (see classNamed in definitions.ts). */
   classNamed(qualified: string, domain: Domain | null = null): AsObject {
-    const named = (domain ?? this.root).named;
-    const known = named.get(qualified);
-    if (known) {
-      return known;
-    }
-
-    const mn = this.qualifiedNameIn(qualified, domain);
-    const cls = this.resolveName(mn);
-    // A script still running its initializer may not have made the class yet.
-    if (cls) {
-      named.set(qualified, cls);
-    }
-
-    return cls;
+    return classNamed(this, qualified, domain);
   }
 
   /**
@@ -1947,35 +1931,14 @@ export class Runtime {
     return definitionNames(domain);
   }
 
-  /**
-   * What `qualified` names in `domain`, as Flash's
-   * ApplicationDomain.getDefinition finds it: a name no script defines is
-   * refused by its local name, and a script whose initializer threw runs
-   * again, its error coming through each time, where a name's lookup by
-   * code keeps it as run, as avmplus does.
-   */
+  /** What `qualified` names in `domain`, as ApplicationDomain.getDefinition finds it (definitions.ts). */
   definitionNamed(qualified: string, domain: Domain): Value {
-    const mn = this.qualifiedNameIn(qualified, domain);
-    const script = this.findScript(mn);
-    if (!script) {
-      throw this.error("ReferenceError", 1065, mn.name);
-    }
-
-    return this.getProperty(this.initScript(script, true), mn);
+    return definitionNamed(this, qualified, domain);
   }
 
   /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
   definingAbc(qualified: string, domain: Domain): Abc | null {
-    return this.findScript(this.qualifiedNameIn(qualified, domain))?.abc ?? null;
-  }
-
-  /** The public name "pkg::Name" or "Name" stands for, looked up in `domain`. */
-  private qualifiedNameIn(qualified: string, domain: Domain | null): Multiname {
-    const i = qualified.lastIndexOf("::");
-    const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
-    const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
-    mn.domain = domain === this.root ? null : domain;
-    return mn;
+    return definingAbc(this, qualified, domain);
   }
 
   /** The class a multiname or TypeName names. */
