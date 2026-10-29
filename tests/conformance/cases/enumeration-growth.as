@@ -93,3 +93,89 @@ for each (var z:int in shrink) {
   }
 }
 trace("shrink", shrinkSeen.join(","));
+
+// Past the elements come the other names, their indices after the elements'
+// length: one pushed while at the only dynamic name moves that name back
+// under the walk, which goes through it again and never reaches the push,
+// even past a for-in inside it that went through everything, and past a
+// name deleted before.
+var named:Array = [1, 2];
+named.gone = 1;
+named.kept = 1;
+delete named.gone;
+var namedSeen:Array = [];
+var pushed:Boolean = false;
+for (var n:* in named) {
+  namedSeen.push(n);
+  if (n == "kept" && !pushed) {
+    pushed = true;
+    named.push(3);
+    var within:Array = [];
+    for (var w:* in named) {
+      within.push(w);
+    }
+    trace("named inner", within.join(","));
+  }
+}
+trace("named", namedSeen.join(","));
+
+// Pushed while still in the elements, it comes before the dynamic names.
+var mixed:Array = [1, 2];
+mixed.x = 1;
+var mixedSeen:Array = [];
+for (var m:* in mixed) {
+  mixedSeen.push(m);
+  if (m == 0) {
+    mixed.push(3);
+  }
+}
+trace("mixed", mixedSeen.join(","));
+
+// A dynamic name added during the elements is reached too.
+var later:Array = [1, 2];
+var laterSeen:Array = [];
+for (var l:* in later) {
+  laterSeen.push(l);
+  if (l == 0) {
+    later.w = 1;
+  }
+}
+trace("later name", laterSeen.join(","));
+
+// A hole filled in ahead of the walk is reached in its place.
+var filled:Array = [];
+filled[0] = 1;
+filled[2] = 3;
+var filledSeen:Array = [];
+for (var f:* in filled) {
+  filledSeen.push(f);
+  if (f == 0) {
+    filled[1] = 2;
+  }
+}
+trace("filled", filledSeen.join(","));
+
+var refilled:Array = [1, 2, 3, 4];
+delete refilled[1];
+var refilledSeen:Array = [];
+for each (var r:int in refilled) {
+  refilledSeen.push(r);
+  if (r == 1) {
+    refilled[1] = 9;
+  }
+}
+trace("refilled", refilledSeen.join(","));
+
+// Elements far apart, and one written far out during the walk.
+var far:Array = [];
+far[0] = 1;
+far[5000] = 2;
+far[100000000] = 3;
+var farSeen:Array = [];
+for each (var v:int in far) {
+  farSeen.push(v);
+  if (v == 1) {
+    far[200000000] = 4;
+  }
+}
+trace("far", farSeen.sort().join(","));

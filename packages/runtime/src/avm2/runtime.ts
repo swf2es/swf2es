@@ -34,6 +34,7 @@ import { compileUnit, Domain, definitionNames, findScript, type Script } from ".
 import {
   type Enumeration,
   enumerated,
+  enumeratedElement,
   INT_ATOM_LIMIT,
   nextIndex,
   ownNames,
@@ -2542,6 +2543,11 @@ export class Runtime {
       return index === 1 ? "uri" : index === 2 ? pair : null;
     }
 
+    const element = enumeratedElement(o, index);
+    if (element >= 0) {
+      return element < INT_ATOM_LIMIT ? element : String(element);
+    }
+
     const name = enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return name;
@@ -2570,7 +2576,15 @@ export class Runtime {
       return index === 1 ? local : index === 2 ? uri : null;
     }
 
-    const name = enumerated(this.enumerating, o, index);
+    const element = enumeratedElement(o, index);
+    if (element >= 0 && traits === this.arrayTraits) {
+      const v = o.$a[element];
+      if (v !== undefined || element in o.$a) {
+        return v;
+      }
+    }
+
+    const name = element >= 0 ? String(element) : enumerated(this.enumerating, o, index);
     if (typeof name !== "string") {
       return o.$keys.get(name);
     }
