@@ -5,7 +5,7 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 - `@swf2es/native/render`: what the renderer computes natively, each a
   wrapper over an instance of its own: double-precision libtess2 fill
   tessellation (`Tessellator`), a shape layer's lines built in one call
-  (`LineBuilder`), and BitmapData convolution kernels (`BitmapKernel`).
+  (`LineBuilder`), and BitmapData's filters and pixel operations (`BitmapKernel`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 
@@ -64,13 +64,22 @@ libtess2 is under SGI Free Software License B.
 
 `BitmapKernel` is BitmapData's CPU filters: `convolve()` a convolution
 (`src/render/convolve.zig`), `blur()` a blur, and `layer()` a glow, a
-drop shadow, a bevel or a gradient glow or bevel (`src/render/blur.zig`).
+drop shadow, a bevel or a gradient glow or bevel (`src/render/blur.zig`);
+and the loops of BitmapData's pixel operations (`src/render/pixels.zig`,
+wrapped by `pixel-ops.ts`): `copy()` for copyChannel, merge, paletteMap and
+a colour matrix filter, `transform()` for colorTransform, `noise()` and
+`perlin()`. Those work a band of rows of about 1 MiB at a time, each
+copied in and back before the next, which reads what the bands before it
+wrote; where the source is the destination and a band's rows of the two
+overlap, both go in as one block, so that a pixel reads what the pixels
+before it wrote, as in Flash. A band that traps is made again in a new
+instance, the bands before it not twice.
 The player filters through it alone: AS3's and AVM1's
 `BitmapData.applyFilter` call the one `BitmapKernel` of their realm
 (`packages/player/src/bitmap/filters.ts`), made at the first filter that
 needs it, which compiles the module; where it traps, the call is made
 again in a new instance, and where that fails too, nothing is written. A
-colour matrix, a displacement map and GPU filters are unchanged. Each
+displacement map and GPU filters are unchanged. Each
 returns owned premultiplied ARGB `Uint32Array` pixels, or `null` where
 they would not fit or the instance trapped. No source pixels are changed.
 Results survive later calls, memory growth, rejection and disposal.
@@ -117,8 +126,8 @@ to be collected.
 
 The package's build first runs the kernels' Zig tests on the host (`zig
 build test` in this folder): exact pixels for small cases, and every
-allocation failing in turn. The kernels, `src/render/convolve.zig` and
-`src/render/blur.zig`, take any `std.mem.Allocator`;
+allocation failing in turn. The kernels, `src/render/convolve.zig`,
+`src/render/blur.zig` and `src/render/pixels.zig`, take any `std.mem.Allocator` or slices;
 `src/render/bitmap.zig` wraps them in the Wasm module's bump arena. No external dependency is needed.
 
 `node --test tests/unit/native-bitmap.test.ts` holds the convolution to
@@ -127,7 +136,9 @@ bit for bit on thousands of random filters, special numbers among them,
 and checks ownership, rejection and traps; `native-blur.test.ts` holds
 `applyFilter`'s blurs, glows, shadows and bevels to theirs
 (`blur-reference.ts`), and takes `SWF2ES_FUZZ_STEPS` and
-`SWF2ES_FUZZ_SEED` for longer runs. The player's references
+`SWF2ES_FUZZ_SEED` for longer runs; `native-pixels.test.ts` holds the
+pixel operations to theirs (`pixels-reference.ts`), bit for bit, onto
+their own bitmaps too and across bands, and a band that traps. The player's references
 (`apply-filter`, `convolution`) hold it to Flash's own pixels.
 
 ## compress
