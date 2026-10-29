@@ -382,6 +382,7 @@ export function layerStrokes(
     const caps = line.startCap <= 2 ? line.startCap : 0;
     const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];
+    const color = vertexColor(line.color);
     for (const { path, home } of strokePaths(stroke)) {
       // A move alone draws nothing, where a move and a line back to it draw a dot.
       if (path.length <= 3) {
@@ -397,16 +398,16 @@ export function layerStrokes(
       contours.push(
         ...outline(points, closedPath, h, caps, join, Math.max(1, line.miterLimit), flatness),
       );
+      // drawTriangles' triangles each filled alone, as the Pixi view strokes them: their outlines'
+      // inner sides all pass through the corners they share, where libtess2's sweep was seen to
+      // drop part of a ring when they were filled as one.
+      if (stroke.triangles) {
+        fillUsable(contours, tessellator, color, positions, colors, indices);
+        contours.length = 0;
+      }
     }
 
-    const usable = contours.filter((contour) => contour.length >= 6);
-    if (usable.length === 0) {
-      continue;
-    }
-
-    if (!fillOutline(usable, tessellator, vertexColor(line.color), positions, colors, indices)) {
-      unsupported.strokes++;
-    }
+    fillUsable(contours, tessellator, color, positions, colors, indices);
   }
 
   if (indices.length === 0) {
@@ -426,6 +427,21 @@ export function layerStrokes(
  * it can be, its crossing spans or a region convex alone each as a fan.
  * False if none of it could be.
  */
+/** `contours` of a line's outline, those not too short to cover anything, filled (fillOutline). */
+function fillUsable(
+  contours: number[][],
+  tessellator: FillTessellator,
+  color: number,
+  positions: number[],
+  colors: number[],
+  indices: number[],
+): void {
+  const usable = contours.filter((contour) => contour.length >= 6);
+  if (usable.length > 0 && !fillOutline(usable, tessellator, color, positions, colors, indices)) {
+    unsupported.strokes++;
+  }
+}
+
 function fillOutline(
   contours: number[][],
   tessellator: FillTessellator,
