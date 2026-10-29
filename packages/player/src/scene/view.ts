@@ -1907,7 +1907,7 @@ function drawnWithin(scene: SceneList, layer: number): boolean {
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 function noteUnsupported(o: DisplayObject): void {
-  if (undrawnFilter(o.filters)) {
+  if (o.filters.length > 0 && undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
 }

@@ -106,6 +106,28 @@ function fittingSamples(width: number, height: number, samples: number, least = 
 
 /** The sizes a layer's texture is made in: rounded up to a multiple, so that one serves many. */
 const LAYER_STEP = 128;
+/**
+ * The sizes a small layer's side is made in, under LAYER_STEP: a glow of a
+ * few dozen pixels took a texture of 128 a side, and a crowd keeps
+ * thousands of them as their filters' outputs.
+ */
+const SMALL_STEP = 16;
+/** The most the free layers may take, past which the least lately freed go. */
+const FREE_LAYER_BYTES = 128 * 1024 * 1024;
+/** What a free layer's size is keyed by: its width times this, and its height. */
+const SIZE_KEY = 65536;
+
+/** A side of a layer made for `n` pixels: rounded up to SMALL_STEP, past LAYER_STEP to that. */
+function layerSide(n: number): number {
+  return n <= LAYER_STEP
+    ? Math.max(SMALL_STEP, Math.ceil(n / SMALL_STEP) * SMALL_STEP)
+    : Math.ceil(n / LAYER_STEP) * LAYER_STEP;
+}
+
+/** The bytes a layer takes: its colour, and its stencil where it has one. */
+function layerBytes(layer: { width: number; height: number; stencil: unknown }): number {
+  return layer.width * layer.height * (layer.stencil ? 8 : 4);
+}
 /** Frames a free layer is kept undrawn into before it is let go of. */
 const LAYER_IDLE_FRAMES = 60;
 
@@ -174,7 +196,9 @@ export class WebGLBackend {
   /** The filters' passes, their programs made as first run. */
   private filters!: FilterRunner<Layer>;
   /** Layers free to draw into, and those drawn into now, innermost last. */
-  private freeLayers: Layer[] = [];
+  /** By their size (SIZE_KEY), the latest freed last; and the bytes they take together. */
+  private freeLayers = new Map<number, Layer[]>();
+  private freeBytes = 0;
   private layers: Open[] = [];
   /** Frames executed, which a layer's idleness is counted in. */
   private frame = 0;
@@ -276,7 +300,8 @@ export class WebGLBackend {
       texture: (id) => this.textures[id] ?? null,
       sampler: (bits) => this.sampler(bits),
     });
-    this.freeLayers = [];
+    this.freeLayers = new Map();
+    this.freeBytes = 0;
     this.layers = [];
     this.kept = [];
     this.stageMsaa = null;
@@ -578,12 +603,19 @@ export class WebGLBackend {
 
   /** The free layers undrawn into for LAYER_IDLE_FRAMES let go of. */
   private dropIdleLayers(): void {
-    const free = this.freeLayers;
-    for (let i = free.length - 1; i >= 0; i--) {
-      if (this.frame - free[i].usedAt > LAYER_IDLE_FRAMES) {
-        this.deleteLayer(free[i]);
-        free[i] = free[free.length - 1];
-        free.pop();
+    // Each size's least lately freed first: those idle are at its start.
+    for (const [key, free] of this.freeLayers) {
+      let idle = 0;
+      while (idle < free.length && this.frame - free[idle].usedAt > LAYER_IDLE_FRAMES) {
+        this.freeBytes -= layerBytes(free[idle]);
+        this.deleteLayer(free[idle]);
+        idle++;
+      }
+
+      if (idle === free.length) {
+        this.freeLayers.delete(key);
+      } else if (idle > 0) {
+        free.splice(0, idle);
       }
     }
 
@@ -804,29 +836,30 @@ export class WebGLBackend {
    */
   private takeLayer(width: number, height: number, exact = false): Layer {
     const gl = this.gl;
-    const free = this.freeLayers;
-    let best = -1;
-    width = Math.ceil(width / LAYER_STEP) * LAYER_STEP;
-    height = Math.ceil(height / LAYER_STEP) * LAYER_STEP;
-    for (let i = 0; i < free.length; i++) {
-      const l = free[i];
-      if (
-        exact
-          ? l.width === width && l.height === height
-          : l.width >= width &&
-            l.height >= height &&
-            (best < 0 || l.width * l.height < free[best].width * free[best].height)
-      ) {
-        best = i;
+    width = layerSide(width);
+    height = layerSide(height);
+    // Found by its size, or the smallest size that holds it: a few sizes looked at, not every
+    // layer free, of which a crowd's churning outputs left thousands.
+    let key = width * SIZE_KEY + height;
+    let list = this.freeLayers.get(key);
+    if (!exact && !list?.length) {
+      let least = Number.POSITIVE_INFINITY;
+      for (const [k, l] of this.freeLayers) {
+        const w = Math.floor(k / SIZE_KEY);
+        const h = k % SIZE_KEY;
+        if (l.length > 0 && w >= width && h >= height && w * h < least) {
+          least = w * h;
+          key = k;
+          list = l;
+        }
       }
     }
 
-    if (best >= 0) {
-      const layer = free[best];
-      free[best] = free[free.length - 1];
-      free.pop();
-      layer.usedAt = this.frame;
-      return layer;
+    const found = list?.pop();
+    if (found) {
+      this.freeBytes -= layerBytes(found);
+      found.usedAt = this.frame;
+      return found;
     }
 
     const texture = gl.createTexture() as WebGLTexture;
@@ -842,10 +875,49 @@ export class WebGLBackend {
     return { framebuffer, texture, stencil: null, width, height, usedAt: this.frame };
   }
 
-  /** A layer free again, kept for the layers after it while it is drawn into often enough. */
+  /**
+   * A layer free again, kept for the layers after it while it is drawn into
+   * often enough; past FREE_LAYER_BYTES, the least lately freed go, down to
+   * three quarters of it.
+   */
   private giveLayer(layer: Layer): void {
     layer.usedAt = this.frame;
-    this.freeLayers.push(layer);
+    const key = layer.width * SIZE_KEY + layer.height;
+    let list = this.freeLayers.get(key);
+    if (!list) {
+      list = [];
+      this.freeLayers.set(key, list);
+    }
+
+    list.push(layer);
+    this.freeBytes += layerBytes(layer);
+    if (this.freeBytes > FREE_LAYER_BYTES) {
+      const all: Layer[] = [];
+      for (const l of this.freeLayers.values()) {
+        all.push(...l);
+      }
+
+      all.sort((x, y) => x.usedAt - y.usedAt);
+      const going = new Set<Layer>();
+      for (const l of all) {
+        if (this.freeBytes <= FREE_LAYER_BYTES * 0.75) {
+          break;
+        }
+
+        going.add(l);
+        this.freeBytes -= layerBytes(l);
+        this.deleteLayer(l);
+      }
+
+      for (const [k, l] of this.freeLayers) {
+        const kept = l.filter((x) => !going.has(x));
+        if (kept.length > 0) {
+          this.freeLayers.set(k, kept);
+        } else {
+          this.freeLayers.delete(k);
+        }
+      }
+    }
   }
 
   private deleteLayer(layer: Layer): void {
@@ -1269,7 +1341,7 @@ export class WebGLBackend {
     gl.deleteTexture(this.rowsTexture);
     gl.deleteProgram(this.composite);
     this.filters.destroy();
-    for (const layer of this.freeLayers) {
+    for (const layer of [...this.freeLayers.values()].flat()) {
       this.deleteLayer(layer);
     }
 
