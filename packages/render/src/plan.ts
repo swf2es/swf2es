@@ -42,31 +42,23 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
   }
 
   heldAt.fill(-1, 0, scene.length);
+  findHolds(scene);
   let holds = 0;
+  for (let level = 0; level <= mostLevel; level++) {
+    for (let h = 0; h < heldBegin.length; h++) {
+      if (heldLevel[h] !== level) {
+        continue;
+      }
 
-  for (let i = 0; i < scene.length; i++) {
-    if (scene.kind[i] !== LAYER_BEGIN) {
-      continue;
-    }
-
-    const at = scene.geometry[i] * 4;
-    if (scene.layers[at + 2] <= 0 || scene.layers[at + 3] <= 0) {
-      // Left out, all in it (emit): none held.
-      i = layerEnd(scene, i);
-    } else if (holdable(scene, i)) {
-      heldAt[i] = holds++;
-    }
-  }
-
-  for (let i = 0; i < scene.length; i++) {
-    if (scene.kind[i] === LAYER_BEGIN && heldAt[i] >= 0) {
+      const i = heldBegin[h];
       const r = scene.layers;
       const at = scene.geometry[i] * 4;
       const end = layerEnd(scene, i);
-      out.push(HOLD_PUSH, out.param(r[at], r[at + 1], r[at + 2], r[at + 3]), heldAt[i]);
+      heldAt[i] = holds;
+      out.push(HOLD_PUSH, out.param(r[at], r[at + 1], r[at + 2], r[at + 3]), holds, level);
       emit(scene, i + 1, end, out);
-      out.push(HOLD_POP, scene.texture[end], heldAt[i]);
-      i = end;
+      out.push(HOLD_POP, scene.texture[end], holds);
+      holds++;
     }
   }
 
@@ -184,28 +176,74 @@ function emit(scene: SceneList, from: number, to: number, out: Commands): void {
 /** Each entry's held layer, by number, where a layer it begins is held; else -1. */
 let heldAt = new Int32Array(256);
 
-/**
- * Whether the layer begun at entry `begin`, of some size, is held: filtered,
- * not kept for the frames after, and of draws and masks alone, with no
- * layer or kept output in it, whose content no other target takes part in.
- */
-function holdable(scene: SceneList, begin: number): boolean {
-  const layer = scene.geometry[begin];
-  if (scene.pads[layer] < 0 || scene.keeps[layer] >= 0) {
-    return false;
-  }
+/** The held layers found (findHolds): where each begins, and its level; the deepest level. */
+const heldBegin: number[] = [];
+const heldLevel: number[] = [];
+let mostLevel = 0;
 
-  for (let i = begin + 1; i < scene.length; i++) {
+/** The layers open as findHolds walks: where each begins, the level its held layers reach, whether it may be held. */
+const openBegin: number[] = [];
+const openLevel: number[] = [];
+const openHoldable: boolean[] = [];
+
+/**
+ * The layers held: filtered, not kept for the frames after, of some size,
+ * and of draws, masks and held layers alone, with no other layer or kept
+ * output in them, whose content no other target takes part in. Each has a
+ * level, one past the deepest of those in it, and leaves 0, so that a held
+ * layer's are drawn before it. A layer of no size is left out, all in it.
+ */
+function findHolds(scene: SceneList): void {
+  heldBegin.length = 0;
+  heldLevel.length = 0;
+  openBegin.length = 0;
+  openLevel.length = 0;
+  openHoldable.length = 0;
+  mostLevel = 0;
+
+  for (let i = 0; i < scene.length; i++) {
     switch (scene.kind[i]) {
-      case LAYER_END:
-        return scene.texture[i] >= 0;
-      case LAYER_BEGIN:
+      case LAYER_BEGIN: {
+        const layer = scene.geometry[i];
+        if (scene.layers[layer * 4 + 2] <= 0 || scene.layers[layer * 4 + 3] <= 0) {
+          i = layerEnd(scene, i);
+          break;
+        }
+
+        openBegin.push(i);
+        openLevel.push(0);
+        openHoldable.push(scene.pads[layer] >= 0 && scene.keeps[layer] < 0);
+        break;
+      }
       case KEPT:
-        return false;
+        if (openHoldable.length > 0) {
+          openHoldable[openHoldable.length - 1] = false;
+        }
+
+        break;
+      case LAYER_END: {
+        const begin = openBegin.pop() as number;
+        const level = openLevel.pop() as number;
+        const held = (openHoldable.pop() as boolean) && scene.texture[i] >= 0;
+        if (held) {
+          heldBegin.push(begin);
+          heldLevel.push(level);
+          mostLevel = Math.max(mostLevel, level);
+        }
+
+        const top = openBegin.length - 1;
+        if (top >= 0) {
+          if (held) {
+            openLevel[top] = Math.max(openLevel[top], level + 1);
+          } else {
+            openHoldable[top] = false;
+          }
+        }
+
+        break;
+      }
     }
   }
-
-  return false;
 }
 
 /** The layers pushed and not yet popped, by number, innermost last. */

@@ -242,6 +242,8 @@ interface Hold {
   wave: number;
   /** Whether its pass of the wave drawing is drawn, or it has none. */
   drawn: boolean;
+  /** Its level (HOLD_PUSH), one past the deepest held layer in it. */
+  level: number;
 }
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const LEAST = 1 << 16;
@@ -723,24 +725,10 @@ export class WebGLBackend {
           }
 
           break;
-        case HELD: {
-          const hold = this.holds[ops[at + 1]];
-          const result = hold.result;
-          if (result) {
-            const held = this.heldOpen;
-            held.layer = result.page;
-            held.x = hold.x;
-            held.y = hold.y;
-            held.width = hold.width;
-            held.height = hold.height;
-            held.ox = result.x;
-            held.oy = result.y;
-            state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
-            this.compositeLayer(held, this.layers.at(-1) ?? canvas, ops[at + 2], ops[at + 3]);
-          }
-
+        case HELD:
+          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          this.compositeHeld(ops[at + 1], this.layers.at(-1) ?? canvas, ops[at + 2], ops[at + 3]);
           break;
-        }
 
         case LAYER_PUSH: {
           below.push(depth, past);
@@ -1063,20 +1051,40 @@ export class WebGLBackend {
    */
   private drawHolds(commands: Commands, scene: SceneList, filters: Filters, target: Target): void {
     const count = this.gatherHolds(commands);
-    if (count === 0) {
-      return;
-    }
+    // A level at a time, which the planner gives in order: a held layer's content composites
+    // those in it, of the levels before.
+    for (let from = 0; from < count; ) {
+      let to = from + 1;
+      while (to < count && this.holds[to].level === this.holds[from].level) {
+        to++;
+      }
 
+      this.drawHoldLevel(from, to, commands, scene, filters, target);
+      from = to;
+    }
+  }
+
+  /** Held layers `from` up to `to`, of one level, drawn side by side (drawHolds). */
+  private drawHoldLevel(
+    from: number,
+    to: number,
+    commands: Commands,
+    scene: SceneList,
+    filters: Filters,
+    target: Target,
+  ): void {
     const gl = this.gl;
     const state = this.state;
     const holds = this.holds;
+    // The pages this level takes, from here on, which its waves give back.
+    const levelPages = this.pages.length;
     const shelves = this.shelves;
     this.lastRow = -1;
     // Their content, each at the size its own layer would take, on pages no taller than the
     // frame's samples fit (fittingSamples), so that each takes them as its own layer did.
     let area = 0;
     let widest = 0;
-    for (let h = 0; h < count; h++) {
+    for (let h = from; h < to; h++) {
       area += layerSide(holds[h].width) * layerSide(holds[h].height);
       widest = Math.max(widest, layerSide(holds[h].width));
     }
@@ -1085,7 +1093,7 @@ export class WebGLBackend {
     let width = this.pageWidth(area, widest);
     const fitting = Math.floor(MSAA_BYTES / (width * samples * 8) / LAYER_STEP) * LAYER_STEP;
     shelves.reset(width, samples > 1 ? Math.min(this.textureMost, fitting) : this.textureMost);
-    for (let h = 0; h < count; h++) {
+    for (let h = from; h < to; h++) {
       const hold = holds[h];
       hold.shelf = shelves.add(layerSide(hold.width), layerSide(hold.height));
       if (hold.shelf < 0) {
@@ -1109,7 +1117,7 @@ export class WebGLBackend {
       gl.clearStencil(0);
       gl.stencilMask(0xff);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-      for (let h = 0; h < count; h++) {
+      for (let h = from; h < to; h++) {
         const hold = holds[h];
         if (hold.shelf < 0 || shelves.page[hold.shelf] !== p) {
           continue;
@@ -1126,7 +1134,7 @@ export class WebGLBackend {
         content.oy = shelves.y[hold.shelf];
         this.drawInto(content, target);
         state.scissor([content.ox, content.oy, hold.width, hold.height]);
-        this.drawHoldContent(commands, hold, scene);
+        this.drawHoldContent(commands, hold, scene, content);
         state.scissor(null);
         this.slotOf(hold, 0, index, content.ox, content.oy, hold.width, hold.height);
       }
@@ -1138,7 +1146,7 @@ export class WebGLBackend {
     // own, which none of its passes reads, as each reads what earlier waves drew. A page goes back
     // once no pass after reads it, unless an output is on it.
     let waves = 0;
-    for (let h = 0; h < count; h++) {
+    for (let h = from; h < to; h++) {
       const hold = holds[h];
       if (hold.shelf < 0) {
         continue;
@@ -1174,7 +1182,7 @@ export class WebGLBackend {
     for (let k = 0; k < waves; k++) {
       area = 0;
       widest = 0;
-      for (let h = 0; h < count; h++) {
+      for (let h = from; h < to; h++) {
         const hold = holds[h];
         const plan = hold.plan;
         if (hold.shelf >= 0 && k < plan.count && !hold.targets[plan.passes[k].output]) {
@@ -1186,7 +1194,7 @@ export class WebGLBackend {
 
       width = this.pageWidth(area, widest);
       shelves.reset(width, this.textureMost);
-      for (let h = 0; h < count; h++) {
+      for (let h = from; h < to; h++) {
         const hold = holds[h];
         const plan = hold.plan;
         hold.wave = -1;
@@ -1199,7 +1207,7 @@ export class WebGLBackend {
         }
       }
 
-      const from = this.pages.length;
+      const first = this.pages.length;
       for (let p = 0; p < shelves.pages; p++) {
         const page = this.pages[this.takePage(width, shelves.heights[p])] as Layer;
         state.bindFramebuffer(page.framebuffer);
@@ -1209,7 +1217,7 @@ export class WebGLBackend {
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
 
-      for (let h = 0; h < count; h++) {
+      for (let h = from; h < to; h++) {
         const hold = holds[h];
         if (hold.wave >= 0) {
           const plan = hold.plan;
@@ -1217,7 +1225,7 @@ export class WebGLBackend {
           this.slotOf(
             hold,
             slot,
-            from + shelves.page[hold.wave],
+            first + shelves.page[hold.wave],
             shelves.x[hold.wave],
             shelves.y[hold.wave],
             plan.slotWidth[slot],
@@ -1230,7 +1238,7 @@ export class WebGLBackend {
       // The passes drawing into one page together, so that it is bound once: a target drawn into
       // again, as a blur's runs take turns between two, is on an earlier wave's page.
       let left = 0;
-      for (let h = 0; h < count; h++) {
+      for (let h = from; h < to; h++) {
         const hold = holds[h];
         hold.drawn = !(hold.shelf >= 0 && k < hold.plan.count);
         left += hold.drawn ? 0 : 1;
@@ -1238,7 +1246,7 @@ export class WebGLBackend {
 
       while (left > 0) {
         let page = -1;
-        for (let h = 0; h < count; h++) {
+        for (let h = from; h < to; h++) {
           const hold = holds[h];
           if (hold.drawn) {
             continue;
@@ -1257,7 +1265,7 @@ export class WebGLBackend {
         }
       }
 
-      for (let index = 0; index < this.pages.length; index++) {
+      for (let index = levelPages; index < this.pages.length; index++) {
         const page = this.pages[index];
         if (page && !this.pageKept[index] && this.pageUntil[index] <= k) {
           this.giveLayer(page);
@@ -1266,7 +1274,7 @@ export class WebGLBackend {
       }
     }
 
-    for (let h = 0; h < count; h++) {
+    for (let h = from; h < to; h++) {
       const hold = holds[h];
       if (hold.shelf >= 0) {
         hold.result = hold.targets[hold.plan.result];
@@ -1327,11 +1335,13 @@ export class WebGLBackend {
           shelf: -1,
           wave: -1,
           drawn: false,
+          level: 0,
         };
         holds[count] = hold;
       }
 
       count++;
+      hold.level = ops[k * 4 + 3];
       hold.x = params[from];
       hold.y = params[from + 1];
       hold.width = params[from + 2];
@@ -1396,8 +1406,11 @@ export class WebGLBackend {
   /** Whether texture `id` of the frame's is there, for a filter that reads it. */
   private readonly hasTexture = (id: number) => id >= 0 && (this.textures[id] ?? null) !== null;
 
-  /** Held layer `hold`'s draws and masks, into the target bound, its stencil starting clear. */
-  private drawHoldContent(commands: Commands, hold: Hold, scene: SceneList): void {
+  /**
+   * Held layer `hold`'s draws, masks and held layers' composites into
+   * `open`, bound, its stencil starting clear.
+   */
+  private drawHoldContent(commands: Commands, hold: Hold, scene: SceneList, open: Open): void {
     const gl = this.gl;
     const state = this.state;
     const ops = commands.ops;
@@ -1430,10 +1443,36 @@ export class WebGLBackend {
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
           break;
         }
+
+        case HELD:
+          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          this.compositeHeld(ops[at + 1], open, ops[at + 2], ops[at + 3]);
+          // Kept to its rectangle again, which the composite let go of.
+          state.scissor([open.ox ?? 0, open.oy ?? 0, open.width, open.height]);
+          break;
       }
     }
 
     state.stencil(null);
+  }
+
+  /** Held output `held` composited onto `under`, bound, in blend mode `mode`, coloured by `row`. */
+  private compositeHeld(held: number, under: Open, mode: number, row: number): void {
+    const hold = this.holds[held];
+    const result = hold.result;
+    if (!result) {
+      return;
+    }
+
+    const open = this.heldOpen;
+    open.layer = result.page;
+    open.x = hold.x;
+    open.y = hold.y;
+    open.width = hold.width;
+    open.height = hold.height;
+    open.ox = result.x;
+    open.oy = result.y;
+    this.compositeLayer(open, under, mode, row);
   }
 
   /**
@@ -1466,7 +1505,7 @@ export class WebGLBackend {
     gl.clearStencil(0);
     gl.stencilMask(0xff);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-    this.drawHoldContent(commands, hold, scene);
+    this.drawHoldContent(commands, hold, scene, open);
     this.resolve(open, layer.width, layer.height);
     const output = this.filters.run(
       filters,
@@ -1773,16 +1812,20 @@ export class WebGLBackend {
     }
 
     const direct = mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN;
+    // The rectangle's corner in the target's framebuffer, where the target is a held layer's
+    // rectangle of a page (HOLD_PUSH).
+    const fx = x0 + (under.ox ?? 0);
+    const fy = y0 + (under.oy ?? 0);
     // Where the copy of what is below has the rectangle's corner, less where the target has it.
     let backX = 0;
     let backY = 0;
     if (!direct) {
       // Copied from its corner, or out of a multisampled target to where it lies, as a blit
       // resolving must keep its rectangle: then as large as the rectangle's far corner.
-      const bx = under.msaa ? x0 : 0;
-      const by = under.msaa ? y0 : 0;
-      backX = x0 - bx;
-      backY = y0 - by;
+      const bx = under.msaa ? fx : 0;
+      const by = under.msaa ? fy : 0;
+      backX = fx - bx;
+      backY = fy - by;
       const right = bx + width;
       const top = by + height;
       if (!this.back || this.backWidth < right || this.backHeight < top) {
@@ -1834,10 +1877,10 @@ export class WebGLBackend {
 
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
       gl.blitFramebuffer(
-        x0,
-        y0,
-        x0 + width,
-        y0 + height,
+        fx,
+        fy,
+        fx + width,
+        fy + height,
         bx,
         by,
         right,
@@ -1856,10 +1899,11 @@ export class WebGLBackend {
     state.bindVertexArray(null);
     gl.uniform1i(this.modeLocation, mode);
     gl.uniform1i(this.compositeRowLocation, row);
-    // Less its corner on its page, where it is a held layer's rectangle of one (HELD).
-    const ox = open.ox ?? 0;
-    const oy = open.oy ?? 0;
-    gl.uniform2i(this.offsetLocation, dx - ox, flip ? under.height - 1 - dy + oy : dy - oy);
+    // Less its corner on its page, where it is a held layer's rectangle of one (HELD), and past
+    // the target's, where that is one.
+    const ox = (under.ox ?? 0) - (open.ox ?? 0);
+    const oy = (under.oy ?? 0) - (open.oy ?? 0);
+    gl.uniform2i(this.offsetLocation, dx + ox, flip ? under.height - 1 - dy - oy : dy + oy);
     gl.uniform1i(this.flipLocation, flip ? 1 : 0);
     gl.uniform2i(this.backOffsetLocation, backX, backY);
     switch (mode) {
@@ -1887,7 +1931,7 @@ export class WebGLBackend {
       (2 * (x0 + width)) / tw - 1,
       (2 * (y0 + height)) / th - 1,
     );
-    state.scissor([x0, y0, width, height]);
+    state.scissor([fx, fy, width, height]);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     state.scissor(null);
   }
