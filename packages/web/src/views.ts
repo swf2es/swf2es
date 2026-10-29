@@ -27,19 +27,19 @@ export interface StageView {
 }
 
 /**
- * The view the element draws by: the renderer of swf2es's own where `own`
- * asks for it, which takes WebGL 2, else Pixi. The canvas keeps alpha where
+ * The view the element draws by: the renderer of swf2es's own where its
+ * module, `scene`, is given, which takes WebGL 2, else Pixi. The canvas keeps alpha where
  * it may ever be left clear, for a transparent wmode or Stage3D's layers
  * below.
  */
 export async function stageView(
   player: Player,
-  own: boolean,
+  scene: typeof import("@swf2es/player/scene") | null,
   alpha: boolean,
   tessellator: Tessellator | null,
 ): Promise<StageView> {
-  if (own) {
-    const { RenderView } = await import("@swf2es/player/scene");
+  if (scene) {
+    const { RenderView } = scene;
     return ownView(
       new RenderView({
         width: player.width,
@@ -67,23 +67,19 @@ export async function stageView(
 }
 
 function ownView(view: import("@swf2es/player/scene").RenderView): StageView {
-  let resolution = 1;
   return {
     canvas: view.canvas,
     gl: view.gl,
     drawer: view,
     get resolution() {
-      return resolution;
+      return view.canvasResolution;
     },
     bindPointer: (player) => view.bindPointer(player),
     setQuality(quality, samples) {
       view.quality = quality;
       view.samples = samples;
     },
-    resize(width, height, at) {
-      resolution = at;
-      view.resize(width, height, at);
-    },
+    resize: (width, height, resolution) => view.resize(width, height, resolution),
     setViewport: (x, y, width, height) => view.setViewport(x, y, width, height),
     render(player, background, transparent) {
       view.background = background;

@@ -401,11 +401,16 @@ async function churn(n: number, source = "embed.swf") {
     await p.ready;
     await frames(2);
     if (source === "text.swf") {
-      const drawer = p.player?.scripting?.drawer as PixiView | object | null | undefined;
+      const drawer = p.player?.scripting?.drawer as
+        | PixiView
+        | { textRuns: number }
+        | null
+        | undefined;
       // Pixi's scene, which holds the text it measured; the renderer of swf2es's own's view,
-      // which holds its runs.
+      // which holds the runs it drew.
       const scene = drawer && "stage" in drawer ? drawer.stage : drawer;
-      if (!scene || ("children" in scene && scene.children.length === 0)) {
+      const drew = scene && ("textRuns" in scene ? scene.textRuns > 0 : scene.children.length > 0);
+      if (!scene || !drew) {
         throw new Error("text scene did not draw");
       }
 

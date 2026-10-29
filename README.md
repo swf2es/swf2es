@@ -64,7 +64,9 @@ first player loads:
 ```
 
 The packages are ES modules, so serve them with a bundler or an import map
-for `@swf2es/*` and `pixi.js` (`tests/player/serve.ts` has one). The
+for `@swf2es/*` and `pixi.js` (`tests/player/serve.ts` has one), the
+renderer's `@swf2es/player/scene`, `@swf2es/render/webgl` and
+`@swf2es/context3d/device` among them. The
 element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality` and
 `allownetworking`. It has `load(url | bytes)` and `destroy()`, which gives
 back its GL context, audio and sockets. It fires `load`, `error` and
