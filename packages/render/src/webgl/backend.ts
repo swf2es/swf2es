@@ -19,16 +19,12 @@ import type { Geometries } from "../geometry.js";
 import type { Keeps } from "../keeps.js";
 import type { Rows } from "../rows.js";
 import {
-  ADD,
   CLAMP,
   DRAW,
-  LAYER,
   MESH,
   MIRROR,
-  NORMAL,
   PLANE,
   REPEAT,
-  SCREEN,
   type SceneList,
   SMOOTH,
   SNAP,
@@ -36,11 +32,9 @@ import {
 import { Shelves } from "../shelves.js";
 import type { Textures } from "../textures.js";
 import { GeometryAtlas, type Place } from "./atlas.js";
+import { Compositor } from "./composite.js";
 import { FilterRunner, type FilterTarget } from "./filters.js";
 import {
-  BACK_UNIT,
-  compositeFragment,
-  compositeVertex,
   FILL_SLOT,
   FILL_TEXTURES,
   FILL_UNIT,
@@ -48,7 +42,6 @@ import {
   fillVertex,
   glyphsFragment,
   glyphsVertex,
-  LAYER_UNIT,
   meshFragment,
   meshVertex,
   OUTLINE_UNIT,
@@ -157,6 +150,7 @@ export class WebGLBackend {
   private readonly stage: Stage;
   private readonly gpu: GpuTextures;
   private readonly atlas: GeometryAtlas;
+  private readonly compositor: Compositor;
   private program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
@@ -209,15 +203,6 @@ export class WebGLBackend {
   private glyphStale = true;
   /** Flash's pixels a stage pixel: the target's pixels a stage pixel over those a pixel of Flash's. */
   private unit = 1;
-  /** The layers' composite program and where it takes its mode and row. */
-  private composite!: WebGLProgram;
-  private modeLocation: WebGLUniformLocation | null = null;
-  private compositeRowLocation: WebGLUniformLocation | null = null;
-  private offsetLocation: WebGLUniformLocation | null = null;
-
-  private flipLocation: WebGLUniformLocation | null = null;
-  private backOffsetLocation: WebGLUniformLocation | null = null;
-  private rectLocation: WebGLUniformLocation | null = null;
   /** The filters' passes, their programs made as first run. */
   private filters!: FilterRunner<Layer>;
   /** The layers drawn into now, innermost last. */
@@ -245,11 +230,6 @@ export class WebGLBackend {
   samples = 1;
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
-  /** A copy of what is below a layer whose mode reads it, the target's size. */
-  private back: WebGLTexture | null = null;
-  private backFramebuffer: WebGLFramebuffer | null = null;
-  private backWidth = 0;
-  private backHeight = 0;
   /** The row and texture the last draw was told, so neither is told again. */
   private lastRow = -1;
 
@@ -260,6 +240,7 @@ export class WebGLBackend {
     this.stage = new Stage(gl, this.state, this.targets);
     this.gpu = new GpuTextures(gl, this.state);
     this.atlas = new GeometryAtlas(gl, this.state);
+    this.compositor = new Compositor(gl, this.state);
     this.setUp();
   }
 
@@ -327,17 +308,7 @@ export class WebGLBackend {
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uSegments"), OUTLINE_UNIT);
     this.glyphStale = true;
-    this.composite = linkProgram(gl, compositeVertex, compositeFragment);
-    this.state.useProgram(this.composite);
-    gl.uniform1i(gl.getUniformLocation(this.composite, "uLayer"), LAYER_UNIT);
-    gl.uniform1i(gl.getUniformLocation(this.composite, "uBack"), BACK_UNIT);
-    gl.uniform1i(gl.getUniformLocation(this.composite, "uRows"), 0);
-    this.modeLocation = gl.getUniformLocation(this.composite, "uMode");
-    this.compositeRowLocation = gl.getUniformLocation(this.composite, "uRow");
-    this.offsetLocation = gl.getUniformLocation(this.composite, "uOffset");
-    this.flipLocation = gl.getUniformLocation(this.composite, "uFlip");
-    this.backOffsetLocation = gl.getUniformLocation(this.composite, "uBackOffset");
-    this.rectLocation = gl.getUniformLocation(this.composite, "uRect");
+    this.compositor.setUp();
     this.filters = new FilterRunner(gl, this.state, {
       take: (width, height) => this.targets.takeLayer(width, height, true),
       give: (layer) => this.targets.giveLayer(layer),
@@ -347,10 +318,6 @@ export class WebGLBackend {
     this.targets.setUp();
     this.layers = [];
     this.stage.setUp();
-    this.back = null;
-    this.backFramebuffer = null;
-    this.backWidth = 0;
-    this.backHeight = 0;
     this.atlas.setUp();
     this.gpu.setUp();
   }
@@ -548,7 +515,7 @@ export class WebGLBackend {
           this.drawInto(under, target);
           // Composited where the masks on the target below let it be.
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
-          this.compositeLayer(open, under, ops[at + 1], ops[at + 2]);
+          this.compositor.compositeLayer(open, under, ops[at + 1], ops[at + 2]);
           const keep = ops[at + 3];
           if (keep >= 0) {
             // Kept for the frames after, the output kept before given back.
@@ -579,7 +546,12 @@ export class WebGLBackend {
               height: p[from + 3],
             };
             state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
-            this.compositeLayer(kept, this.layers.at(-1) ?? canvas, ops[at + 2], ops[at + 3]);
+            this.compositor.compositeLayer(
+              kept,
+              this.layers.at(-1) ?? canvas,
+              ops[at + 2],
+              ops[at + 3],
+            );
           }
 
           break;
@@ -1213,7 +1185,7 @@ export class WebGLBackend {
     open.height = hold.height;
     open.ox = result.x;
     open.oy = result.y;
-    this.compositeLayer(open, under, mode, row);
+    this.compositor.compositeLayer(open, under, mode, row);
   }
 
   /**
@@ -1268,175 +1240,6 @@ export class WebGLBackend {
     this.state.useProgram(this.program);
     this.state.bindVertexArray(this.atlas.vertexArray);
     this.state.bindTexture(0, this.gpu.rowsTexture);
-  }
-
-  /**
-   * `open` composited onto `under`, bound, in blend mode `mode`, coloured by
-   * row `row` (or -1), over its rectangle alone: through GL's blending where
-   * it computes Flash's blend, else from a copy of what is below there, the
-   * result replacing it. Its rectangle is cut to `under`'s, as a filtered
-   * one may reach past the canvas; in `under`'s framebuffer its rows run
-   * up on the canvas and down in a layer.
-   */
-  private compositeLayer(open: Open, under: Open, mode: number, row: number): void {
-    const gl = this.gl;
-    const state = this.state;
-    const dx = open.x - under.x;
-    const dy = open.y - under.y;
-    const flip = !under.layer;
-    const y = flip ? under.height - dy - open.height : dy;
-    const x0 = Math.max(0, dx);
-    const y0 = Math.max(0, y);
-    const width = Math.min(under.width, dx + open.width) - x0;
-    const height = Math.min(under.height, y + open.height) - y0;
-    if (width <= 0 || height <= 0) {
-      return;
-    }
-
-    const direct = mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN;
-    // The rectangle's corner in the target's framebuffer, where the target is a held layer's
-    // rectangle of a page (HOLD_PUSH).
-    const fx = x0 + (under.ox ?? 0);
-    const fy = y0 + (under.oy ?? 0);
-    // Where the copy of what is below has the rectangle's corner, less where the target has it.
-    let backX = 0;
-    let backY = 0;
-    if (!direct) {
-      // Out of a multisampled page, its rectangle resolved into the page's own texture first, which
-      // a blit may then copy anywhere: copied where it lies, the copy would stay as large as the
-      // page's far corner.
-      let from = framebufferOf(under);
-      const paged = under.msaa !== null && under.layer !== null && under.ox !== undefined;
-      if (paged) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, (under.layer as Layer).framebuffer);
-        gl.blitFramebuffer(
-          fx,
-          fy,
-          fx + width,
-          fy + height,
-          fx,
-          fy,
-          fx + width,
-          fy + height,
-          gl.COLOR_BUFFER_BIT,
-          gl.NEAREST,
-        );
-        from = (under.layer as Layer).framebuffer;
-      }
-
-      // Copied from its corner, or out of a multisampled target to where it lies, as a blit
-      // resolving must keep its rectangle: then as large as the rectangle's far corner.
-      const bx = under.msaa && !paged ? fx : 0;
-      const by = under.msaa && !paged ? fy : 0;
-      backX = fx - bx;
-      backY = fy - by;
-      const right = bx + width;
-      const top = by + height;
-      if (!this.back || this.backWidth < right || this.backHeight < top) {
-        if (this.back) {
-          state.dropTexture(this.back);
-          gl.deleteTexture(this.back);
-          gl.deleteFramebuffer(this.backFramebuffer);
-          this.backFramebuffer = null;
-        }
-
-        this.back = gl.createTexture() as WebGLTexture;
-        this.backWidth = Math.max(this.backWidth, Math.ceil(right / LAYER_STEP) * LAYER_STEP);
-        this.backHeight = Math.max(this.backHeight, Math.ceil(top / LAYER_STEP) * LAYER_STEP);
-        state.bindTexture(BACK_UNIT, this.back);
-        state.activeTexture(BACK_UNIT);
-        gl.texImage2D(
-          gl.TEXTURE_2D,
-          0,
-          gl.RGBA8,
-          this.backWidth,
-          this.backHeight,
-          0,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          null,
-        );
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      }
-
-      // Blitted, not copied: the canvas' colour may have no alpha, which copyTexSubImage2D into an
-      // RGBA texture refuses, where a blit fills it in.
-      // Out of a multisampled target the blit resolves the rectangle alone.
-      if (!this.backFramebuffer) {
-        this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
-        gl.framebufferTexture2D(
-          gl.DRAW_FRAMEBUFFER,
-          gl.COLOR_ATTACHMENT0,
-          gl.TEXTURE_2D,
-          this.back,
-          0,
-        );
-      } else {
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
-      }
-
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
-      gl.blitFramebuffer(
-        fx,
-        fy,
-        fx + width,
-        fy + height,
-        bx,
-        by,
-        right,
-        top,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
-      // Both bindings back as the state cache has them.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebufferOf(under));
-    }
-
-    state.bindTexture(LAYER_UNIT, (open.layer as Layer).texture);
-    state.bindSampler(LAYER_UNIT, null);
-    state.bindSampler(BACK_UNIT, null);
-    state.useProgram(this.composite);
-    state.bindVertexArray(null);
-    gl.uniform1i(this.modeLocation, mode);
-    gl.uniform1i(this.compositeRowLocation, row);
-    // Less its corner on its page, where it is a held layer's rectangle of one (HELD), and past
-    // the target's, where that is one.
-    const ox = (under.ox ?? 0) - (open.ox ?? 0);
-    const oy = (under.oy ?? 0) - (open.oy ?? 0);
-    gl.uniform2i(this.offsetLocation, dx + ox, flip ? under.height - 1 - dy - oy : dy + oy);
-    gl.uniform1i(this.flipLocation, flip ? 1 : 0);
-    gl.uniform2i(this.backOffsetLocation, backX, backY);
-    switch (mode) {
-      case ADD:
-        state.setBlend(gl.ONE, gl.ONE);
-        break;
-      case SCREEN:
-        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
-        break;
-      case NORMAL:
-      case LAYER:
-        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        break;
-      default:
-        state.setBlend(null);
-    }
-
-    // Over the rectangle alone, in the target's clip space; the scissor keeps it to whole pixels.
-    const tw = under.width;
-    const th = under.height;
-    gl.uniform4f(
-      this.rectLocation,
-      (2 * x0) / tw - 1,
-      (2 * y0) / th - 1,
-      (2 * (x0 + width)) / tw - 1,
-      (2 * (y0 + height)) / th - 1,
-    );
-    state.scissor([fx, fy, width, height]);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    state.scissor(null);
   }
 
   /** The draws at `scene`'s entries from `first` up to `end`; for the stencil alone, untextured. */
@@ -1696,7 +1499,7 @@ export class WebGLBackend {
     const gl = this.gl;
     gl.deleteProgram(this.program);
     this.atlas.destroy();
-    gl.deleteProgram(this.composite);
+    this.compositor.destroy();
     gl.deleteProgram(this.mesh);
     gl.deleteProgram(this.glyphProgram);
     this.filters.destroy();
@@ -1707,11 +1510,6 @@ export class WebGLBackend {
     }
 
     this.targets.destroy();
-
-    if (this.back) {
-      gl.deleteTexture(this.back);
-      gl.deleteFramebuffer(this.backFramebuffer);
-    }
 
     this.stage.destroy();
 
