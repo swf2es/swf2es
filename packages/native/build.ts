@@ -103,10 +103,7 @@ function notices(): string {
     ["@swf2es/native/compress: zlib", readFileSync(join(vendor, "zlib/LICENSE"), "utf8")],
     ["@swf2es/native/compress: the LZMA SDK", LZMA_SDK],
     ["@swf2es/native/mp3: minimp3", readFileSync(join(vendor, "minimp3/LICENSE"), "utf8")],
-    [
-      "@swf2es/native/tessellate: libtess2",
-      readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8"),
-    ],
+    ["@swf2es/native/render: libtess2", readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8")],
   ];
 
   return [

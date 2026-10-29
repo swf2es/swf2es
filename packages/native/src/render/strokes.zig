@@ -1,21 +1,19 @@
-//! A shape layer's lines as triangles, in one call: the player's
-//! scene/strokes.ts (layerStrokes and what it calls) ported with the same
-//! arithmetic in the same order, so that in V8 its output is the TS's bit
-//! for bit; in another engine, whose Math.hypot, atan2 or acos may round
-//! otherwise, the last bits may differ.
+//! A shape layer's lines as triangles, in one call, the player's only line
+//! builder. It began as a port of the player's TS (scene/strokes.ts, before
+//! this replaced it) with the same arithmetic in the same order, and keeps
+//! JS's semantics where they show: a number's truthiness, Math.hypot as
+//! V8's algorithm, atan2 and acos Zig's, which are fdlibm's, as V8's are, and
+//! Math.sin and Math.cos the host's own, imported, as engines differ in
+//! their last bit, which moves a corner.
 //! A line drawn opaque is triangles along its paths (lineTriangles); any
 //! other is outlined (outline, triangleRing) and its outline filled non-zero
-//! by tessellate.zig's libtess2, as the host's Tessellator fills it, without going
-//! back to JS. Positions are worked out in f64 and rounded to f32 last, as
-//! Float32Array.from rounds them. Math.hypot is V8's algorithm, and atan2 and
-//! acos Zig's, which are fdlibm's, as V8's are; Math.sin and Math.cos are
-//! the host's own, imported, as engines differ in their last bit, which
-//! moves a corner.
+//! by tessellate.zig, by libtess2 or its bands, as the host's Tessellator
+//! fills it. Positions are worked out in f64 and rounded to f32 last, as
+//! Float32Array.from rounds them.
 //!
-//! What it cannot build as the TS does, it refuses, for the host to build in
-//! JS: an outline libtess2 refuses, which JS fills its own way; a position
-//! that is NaN, which JS writes with bits of its own; and where the TS
-//! throws (a NaN arc's chords taken back from none).
+//! What it cannot build, it refuses, and the player draws no lines for the
+//! layer: an outline it could not fill in its memory; a position that is
+//! NaN; and a NaN arc's chords taken back from none.
 //!
 //! The input is a run of f64s: a, b, c, d (the linear transform), the
 //! flatness and the number of lines; each line its half width, caps, join,
@@ -91,8 +89,7 @@ export fn lineHeader() usize {
 }
 
 /// The layer in the first `length` f64s of the input, its geometry for the
-/// header to describe: 0; -1 out of memory, -2 malformed, -3 refused, for
-/// JS to build.
+/// header to describe: 0; -1 out of memory, -2 malformed, or -3 refused.
 export fn lineBuild(length: usize) i32 {
     layout = @splat(0);
     // A reset since, by another of the module's calls, leaves no input.
@@ -143,7 +140,9 @@ fn count(value: f64, most: usize) Error!usize {
     return @intFromFloat(value);
 }
 
-/// strokes.ts's layerStrokes, from the paths on.
+/// The layer's lines as seen through the linear transform on the stage, in its axes, each at least
+/// its half width, as one geometry in their order. A line of whole alpha drawn opaque draws as
+/// lineTriangles, its overlaps unseen, and only another is outlined and tessellated.
 fn layer(in: []const f64) Error!void {
     if (in.len < 6) {
         return error.Malformed;
@@ -270,7 +269,7 @@ fn steps(raw: f64, most: f64) usize {
     return @intFromFloat(@min(most, @max(1, raw)));
 }
 
-/// A run of points from `start` of `list`, as the TS's number[] it stands for.
+/// A run of points from `start` of `list`.
 const Points = struct {
     list: *std.ArrayList(f64),
     start: usize,
@@ -283,7 +282,7 @@ const Points = struct {
         try self.list.appendSlice(allocator, &.{ x, y });
     }
 
-    /// strokes.ts's put: (x, y), unless it is the point last put.
+    /// (x, y), unless it is the point last put.
     fn put(self: Points, x: f64, y: f64) Error!void {
         const items = self.list.items;
         const n = items.len;
@@ -386,7 +385,7 @@ fn polyline(path: []const f64, a: f64, b: f64, c: f64, d: f64, flatness: f64) Er
     }
 }
 
-/// strokes.ts's arcStep: the widest angle a chord of an arc of radius `r` may span.
+/// The widest angle a chord of an arc of radius `r` may span.
 fn arcStep(r: f64, flatness: f64) f64 {
     return if (r > flatness) 2 * std.math.acos(1 - flatness / r) else std.math.pi;
 }
@@ -431,7 +430,7 @@ inline fn truthy(x: f64) bool {
     return x != 0 and !std.math.isNan(x);
 }
 
-/// strokes.ts's side: one side of `p` (n points), `h` out on the left of its way (s 1) or the right (-1).
+/// One side of `p` (n points), `h` out on the left of its way (s 1) or the right (-1).
 fn side(out: Points, p: []const f64, n: usize, closed: bool, h: f64, s: f64, join: usize, limit: f64, step: f64) Error!void {
     const segments = if (closed) n else n - 1;
     const w = try segmentWays(p, n, segments);
@@ -484,7 +483,9 @@ fn side(out: Points, p: []const f64, n: usize, closed: bool, h: f64, s: f64, joi
     }
 }
 
-/// strokes.ts's outerJoin, onto `out`.
+/// The points a turn at (x, y) from one way to the next puts onto `out` between its outer side's
+/// corners, as `join` joins it: a round join's arc, a miter's tip or the cut the limit (half widths)
+/// makes of it, a bevel's none.
 fn outerJoin(out: Points, x: f64, y: f64, nx: f64, ny: f64, mx: f64, my: f64, tx: f64, ty: f64, ux: f64, uy: f64, cross: f64, dot: f64, h: f64, join: usize, limit: f64, step: f64) Error!void {
     switch (join) {
         0 => {
@@ -524,13 +525,15 @@ fn outerJoin(out: Points, x: f64, y: f64, nx: f64, ny: f64, mx: f64, my: f64, tx
     }
 }
 
-/// strokes.ts's gentleBack.
+/// How far a turn of half width `h` cuts back each segment's inner side where the two cross: within
+/// the half of each next to it, at a turn of less than a right angle; -1 where it is sharper or the
+/// segments shorter, and the inner sides go through the turn's own point.
 fn gentleBack(h: f64, cross: f64, dot: f64, length_in: f64, length_out: f64) f64 {
     const back = (h * @abs(cross)) / (1 + dot);
     return if (dot > 0 and 2 * back <= length_in and 2 * back <= length_out) back else -1;
 }
 
-/// strokes.ts's cap, onto `out`.
+/// A cap at a point of a polyline, facing out along its way, from one side to the other, onto `out`.
 fn cap(out: Points, p: []const f64, i: usize, tx: f64, ty: f64, h: f64, kind: usize, step: f64) Error!void {
     const x = p[i * 2];
     const y = p[i * 2 + 1];
@@ -563,7 +566,10 @@ fn contourAt(k: usize) []f64 {
     return outlines.items[from..ends.items[k]];
 }
 
-/// strokes.ts's outline, its contours after the outlines'.
+/// The outline of a polyline as contours to fill non-zero, after the outlines': an open one is one
+/// contour, out along its left side, around its end cap, back along its right side and around its
+/// start cap; a closed one is two, its left side forward and its right side back. A single point
+/// with round caps is a dot; with others, nothing.
 fn outline(p: []const f64, closed: bool, h: f64, caps: usize, join: usize, limit: f64, flatness: f64) Error!void {
     var n = p.len / 2;
     if (closed and n > 1 and p[0] == p[(n - 1) * 2] and p[1] == p[(n - 1) * 2 + 1]) {
@@ -644,7 +650,10 @@ fn contourArea(p: []const f64) f64 {
     return sum;
 }
 
-/// strokes.ts's triangleRing, its contours after the outlines': false, adding none, for any path
+/// A closed triangle's outline as two plain contours, after the outlines': its outer side, and the
+/// triangle inset by the half width, wound the other way, so that its inner side never passes
+/// through its corners, which a drawTriangles mesh's neighbours share and libtess2's sweep was seen
+/// to drop part of a ring at: false, adding none, for any path
 /// but a closed triangle, for outline() to outline.
 fn triangleRing(p: []const f64, h: f64, caps: usize, join: usize, limit: f64, flatness: f64) Error!bool {
     const closes = p.len == 8 and p[0] == p[6] and p[1] == p[7];
@@ -711,9 +720,9 @@ fn triangleRing(p: []const f64, h: f64, caps: usize, join: usize, limit: f64, fl
     return true;
 }
 
-/// strokes.ts's fillUsable and fillOutline, for an outline the tessellator fills: the outline
-/// contours of three points or more filled non-zero by libtess2, as the host's Tessellator fills
-/// them, onto the geometry; refused where it refuses them, for JS to fill.
+/// An outline the tessellator fills: its contours of three points or more filled non-zero, by
+/// libtess2 or its bands, as the host's Tessellator fills them, onto the geometry; refused where
+/// neither could fill them in the memory left.
 fn fillUsable() Error!void {
     defer {
         outlines.clearRetainingCapacity();
@@ -744,21 +753,20 @@ fn fillUsable() Error!void {
     // down over it, as tessellate.zig's layer keeps a fill's.
     const mark = arena.top;
     const status = tessellate.fill(outlines.items[0..written], ends.items[0..kept], 1);
-    const t = tessellate.tess orelse {
+    const result = tessellate.current() orelse {
         arena.top = mark;
-        return error.Refused;
+        return if (status == -1) error.OutOfMemory else error.Refused;
     };
     if (status != 0) {
-        tessellate.tess = null;
+        tessellate.clear();
         arena.top = mark;
         return error.Refused;
     }
 
-    const result = tessellate.output(t);
     const position_bytes = result.positions.len * @sizeOf(f64);
     const bytes = position_bytes + result.indices.len * @sizeOf(u32);
     const staged = arena.alloc(bytes);
-    tessellate.tess = null;
+    tessellate.clear();
     if (staged == 0) {
         arena.top = mark;
         return error.OutOfMemory;
@@ -836,7 +844,11 @@ const END_L: usize = 3;
 const END_R: usize = 4;
 const END_M: usize = 5;
 
-/// strokes.ts's lineTriangles.
+/// A polyline of a line drawn opaque as triangles that may overlap, where an overlap draws the same
+/// pixels again: a quad along each segment, each turn's outer wedge as the line joins it
+/// (outerJoin) and the caps, which cover what outline's contours do, with no tessellator. Segments
+/// share their corners at a gentle turn (gentleBack); at a sharper one they overlap, each with a
+/// corner at the turn's own point too, which its wedge fans from. No vertex lies on another's edge.
 fn lineTriangles(p: []const f64, closed: bool, h: f64, caps: usize, join: usize, limit: f64, flatness: f64) Error!void {
     var n = p.len / 2;
     if (closed and n > 1 and p[0] == p[(n - 1) * 2] and p[1] == p[(n - 1) * 2 + 1]) {

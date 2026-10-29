@@ -34,8 +34,7 @@ const mounts: [string, string][] = [
 
 export const importMap = {
   imports: {
-    "@swf2es/native/tessellate": "/native/tessellate/index.js",
-    "@swf2es/native/bitmap": "/native/bitmap/index.js",
+    "@swf2es/native/render": "/native/render/index.js",
     "@swf2es/native/compress": "/native/compress/index.js",
     "@swf2es/format": "/format/index.js",
     "@swf2es/native/mp3": "/native/mp3/index.js",

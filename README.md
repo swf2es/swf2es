@@ -71,12 +71,12 @@ for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
 back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
 
-Fill tessellation uses `@swf2es/native/tessellate`'s Wasm module by default, with
-JS fallback if it is unavailable or rejects a fill. Include that entry in
-the import map. `configure({ nativeFills: false })` keeps new playbacks on
-JS and skips loading the native package. BitmapData convolution likewise
-uses `@swf2es/native/bitmap` by default, with the same pixels as its JS
-fallback; `configure({ nativeBitmaps: false })` opts out.
+Fills and lines are drawn through `@swf2es/native/render`'s Wasm module,
+which the page must let compile: with WebAssembly SIMD, and under a CSP
+with `'wasm-unsafe-eval'`. Include that entry in the import map. Where it
+cannot load or compile, the SWF does not play, and the element says why.
+BitmapData convolution uses the same module by default, with the same
+pixels as its JS fallback; `configure({ nativeBitmaps: false })` opts out.
 
 ActionScript's workers (`flash.system.Worker`) run on Web Workers by
 default, as in Flash. `configure({ workers: false })` turns them off for

@@ -7,16 +7,11 @@ let module: WebAssembly.Module | null = null;
  * kernel, the tessellator and the lines each make an instance of their
  * own, so that each has its memory and lifecycle apart. It needs wasm
  * SIMD throughout; this throws where the host refuses to compile it, as
- * without SIMD or Wasm or under a CSP, and each user then keeps to JS.
+ * without SIMD or Wasm or under a CSP without 'wasm-unsafe-eval'.
  */
 export function renderModule(): WebAssembly.Module {
   module ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
   return module;
-}
-
-/** Whether the module has compiled: a call that threw before it did means it never will. */
-export function renderCompiled(): boolean {
-  return module !== null;
 }
 
 /**

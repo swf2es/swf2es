@@ -175,8 +175,8 @@ For more information, please see
 
 
 
-@swf2es/native/tessellate: libtess2
-===================================
+@swf2es/native/render: libtess2
+===============================
 
 ** SGI FREE SOFTWARE LICENSE B (Version 2.0, Sept. 18, 2008) 
 ** Copyright (C) [dates of first publication] Silicon Graphics, Inc.

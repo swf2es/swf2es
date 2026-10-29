@@ -1331,9 +1331,8 @@ and the player's paths in this document are relative to it:
 - `input/`: the pointer and the keyboard.
 - `scene/`: the view that drives `@swf2es/render` (`view.ts`,
   `RenderView`, `@swf2es/player/scene`) and what only it uses: shapes'
-  fills resolved (`fills.ts`, crossing contours split by
-  `fill-polygons.ts`) and made geometries (`shapes.ts`), lines stroked
-  (`strokes.ts`) and kept by the transform they are seen through
+  fills resolved (`fills.ts`) and made geometries (`shapes.ts`), lines
+  stroked (`strokes.ts`) and kept by the transform they are seen through
   (`lines.ts`), filters worked out into passes (`filters.ts`), text as
   items to draw (`text.ts`) and advanced text's glyph quads
   (`advanced.ts`), the pointer on the canvas (`pointer.ts`) and the
@@ -3039,29 +3038,16 @@ left fill reversed, joined into contours; one with the same fill on both
 sides, a seam Flash Pro leaves inside a fill, goes to neither, so it
 cannot change the winding, `shared-fill-edges`) and tessellated by
 `@swf2es/native`'s libtess2, a layer in one call (`scene/fills.ts`,
-`resolveFills`; [packages/native](../packages/native/README.md)). Without
-it, as where a page refuses the module, fills are planned in JS:
-crossing or touching contours take `scene/fill-polygons.ts`, where an
-edge sweep finds their crossings and each horizontal band between
-vertices and crossings is filled as disjoint trapezoids under its
-winding rule; other contours form a containment tree (a contour is in
-another by a point of it off the other's outline, `glyph-contours`), and
-a region with nothing in it that is convex is a fan. A region with holes,
-or not convex, is left out in JS and counted
-(`unsupported.containedFills`). Curves use the same fine chords as the
-native flattening. No overlapping paint is needed, including for
-translucent fills, gradients, bitmaps and masks (`crossing-fills`,
-`crossing-cones`). A Graphics drawing used as a stencil mask fills
-non-zero regardless of `drawPath`'s winding, while static shapes keep
-their authored winding (`static-mask-winding`); its mask's geometry is
-made apart. The crossing detector excludes disjoint contour bounds and
-bounding boxes strictly inside a convex contour before building edges.
-It reuses numeric scratch, retaining at most 4,096 edges, contour records
-or levels after a call; larger calls release the scratch. Band levels
-are collected only after a crossing is found, and finished polygons own
-their coordinates separately. `node --expose-gc tests/bench/fills.ts
-<ref> --allocs` compares construction time and sampled allocations with
-the two modules from a git ref.
+`resolveFills`; [packages/native](../packages/native/README.md)), which
+flattens their curves too. What libtess2 refuses or fails at, the module
+fills itself by bands: each horizontal band between vertices and
+crossings filled as disjoint trapezoids under its winding rule
+(`bands.zig`). The module is required: there is no JS path for fills or
+lines. No overlapping paint is needed, including for translucent fills,
+gradients, bitmaps and masks (`crossing-fills`, `crossing-cones`). A
+Graphics drawing used as a stencil mask fills non-zero regardless of
+`drawPath`'s winding, while static shapes keep their authored winding
+(`static-mask-winding`); its mask's geometry is made apart.
 
 Lines (`scene/strokes.ts`) are stroked in the stage's axes, because
 Flash strokes a transformed line with one width all along, not the local
@@ -4421,7 +4407,7 @@ layers).
 #### Native CPU convolution
 
 New web playbacks convolve BitmapData on the CPU through
-`@swf2es/native/bitmap` by default, loaded alongside the fill tessellator;
+`@swf2es/native/render` by default, loaded alongside the fill tessellator;
 `configure({ nativeBitmaps: false })` keeps them on JS and loads no native
 bitmap module. Both paths give the same pixels. Each playback supplies one
 `Convolver.convolve` to its Scripting or Avm1 `bitmapConvolver` hook before
@@ -4440,9 +4426,10 @@ Strict double arithmetic preserves coefficient order and Flash's fixed-point
 3×3 convolution quirks. The module, `render`, which it shares with the
 tessellator and the own renderer's lines, uses wasm SIMD and has no
 scalar build: every current browser ships SIMD, and an engine without it
-refuses the module as one without Wasm does, so filters, fills and lines
-keep their JS paths. Compilation refusal, missing optional modules, allocation rejection and traps fall back
-to JS before destination pixels are written. Trapped instances are dropped;
+refuses the module as one without Wasm does, where nothing plays, as
+fills and lines need it. Under `nativeBitmaps: false`, and where the
+convolver rejects a call or traps, convolution falls back to JS before
+destination pixels are written. Trapped instances are dropped;
 ordinary rejection can reuse scratch. Scratch has a 128 MiB absolute limit;
 instances above the default 8 MiB retention threshold are dropped after a
 call. Each user of `render` instantiates it apart, with its own memory and
@@ -4760,18 +4747,16 @@ quality smooths no bitmap either.
 
 ### The page's configuration
 
-The web host uses native fill tessellation by default. Each playback owns a
-`Tessellator` from `@swf2es/native/tessellate`, loaded when playback is created, and
-disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
-false })` keeps new playbacks on JS and skips loading the native package.
-A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation
-is tried only once per tessellator. A shape layer's fills are tessellated in
-one call into one position and one index buffer (`packages/native/README.md`).
-A rejected fill resolves its JS fallback once, with the rest of its layer.
-The renderer's geometry owns its buffers independently of Wasm scratch,
-including for context restoration. `RenderView` takes the tessellator as its
-`fillTessellator` option without importing the native package. Different triangle layouts can change subpixel edge coverage
-and paint interpolation, so native and JS need not draw identical pixels.
+Fills and lines are drawn through `@swf2es/native/render`. Each
+`RenderView` makes a `Tessellator` of its own, which compiles the render
+module as it is made, unless it is given one (`fillTessellator`), and
+disposes its Wasm scratch with itself. Where the page cannot load or
+compile the module, the view throws and the SWF does not play, the
+element saying why. A shape layer's fills are tessellated in one call
+into one position and one index buffer (`packages/native/README.md`); a
+fill the tessellator refuses (not finite, malformed or past its memory)
+is left out. The renderer's geometry owns its buffers independently of
+Wasm scratch, including for context restoration.
 
 `configure` (`config.ts`) sets what every player on the page shares:
 `libraries`, the URLs of builtin.abc and playerglobal.abc, which the page

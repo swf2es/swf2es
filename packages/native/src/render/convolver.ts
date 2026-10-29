@@ -1,4 +1,4 @@
-import { renderInstance } from "../render/module.js";
+import { renderInstance } from "./module.js";
 
 export interface BitmapSource {
   width: number;

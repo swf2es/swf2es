@@ -2,7 +2,7 @@
 // zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK) and render
 // (bitmap's SIMD kernels, libtess2's fills and the lines). build.ts runs
 // this with the pinned Zig and checks the results in as base64; `zig build
-// test` runs the bitmap kernel's and the fill flattener's tests on the host.
+// test` runs the bitmap kernel's, the fill flattener's and the band filler's tests on the host.
 const std = @import("std");
 
 /// The C libraries are pinned git submodules of the repository, under
@@ -30,10 +30,10 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
     });
 }
 
-/// The kernels' and the fill flattener's tests, on the host.
+/// The kernels', the fill flattener's and the band filler's tests, on the host.
 fn tests(b: *std.Build) void {
-    const test_step = b.step("test", "Run the bitmap kernel's and the fill flattener's tests on the host");
-    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" } }) |unit| {
+    const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's and the band filler's tests on the host");
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" } }) |unit| {
         const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
     }
@@ -195,9 +195,9 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         "bucketalloc.c", "dict.c", "geom.c", "mesh.c", "priorityq.c", "sweep.c", "tess.c",
     };
     const exports = [_][]const u8{
-        "reset",      "alloc",     "run",      "vertices", "indices",   "vertexCount", "triangleCount",
-        "highWater",  "allocated", "setLimit", "layer",    "lineInput", "lineHeader",  "lineBuild",
-        "resetArena", "convolve",  "capacity",
+        "reset",      "alloc",     "run",      "vertices",  "indices",   "vertexCount", "triangleCount",
+        "highWater",  "allocated", "setLimit", "layer",     "lineInput", "lineHeader",  "lineBuild",
+        "resetArena", "convolve",  "capacity", "bandsOnly",
     };
 
     const library = b.path(vendor ++ "libtess2");

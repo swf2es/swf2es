@@ -41,17 +41,17 @@ import { type RecordedEvent, Replay } from "./replay.ts";
  * The native tessellator the renderer draws fills with, as an element's does by default, made as it
  * first needs it.
  */
-let nativeFills: import("@swf2es/native/tessellate").Tessellator | null = null;
+let nativeFills: import("@swf2es/native/render").Tessellator | null = null;
 
 async function fillTessellator(): Promise<
-  import("@swf2es/native/tessellate").Tessellator["tessellate"]
+  import("@swf2es/native/render").Tessellator["tessellate"]
 > {
-  nativeFills ??= new (await import("@swf2es/native/tessellate")).Tessellator();
+  nativeFills ??= new (await import("@swf2es/native/render")).Tessellator();
   return nativeFills.tessellate;
 }
 
 const bitmapKernel = new URLSearchParams(location.search).has("nativeBitmaps")
-  ? new (await import("@swf2es/native/bitmap")).Convolver()
+  ? new (await import("@swf2es/native/render")).Convolver()
   : null;
 
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe

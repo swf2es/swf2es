@@ -8,18 +8,14 @@ import type { GeometryData } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
 import type { GradientFill, ImageFill, Path, ShapeLayer, TriangleMesh } from "../display/shapes.js";
-import { convex } from "./fill-polygons.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
  * What the renderer cannot draw yet, counted as it is met, for a test or a
- * probe to read: lines that could not be filled with no native
- * tessellator, left out; advanced text drawn as normal;
- * clips within masks left out; displacement maps and other filters it
- * has no pass for, ignored.
+ * probe to read: advanced text drawn as normal; clips within masks left
+ * out; displacement maps and other filters it has no pass for, ignored.
  */
 export const unsupported = {
-  strokes: 0,
   /** Texts with advanced anti-aliasing, drawn as normal. */
   advancedTexts: 0,
   /**
@@ -31,8 +27,6 @@ export const unsupported = {
   /** Blend modes no blend is drawn for, a Pixel Bender shader's, drawn as normal. */
   blendModes: 0,
   filters: 0,
-  /** Fills the native tessellator refused, of contours one inside another that are not convex alone. */
-  containedFills: 0,
 };
 
 /**
@@ -223,7 +217,7 @@ function meshPart(mesh: TriangleMesh): Part | null {
 /** `layer`'s fills as geometries in order. */
 function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boolean): Part[] {
   // A drawing used as a mask fills non-zero, whatever its winding (fills.ts, resolveFills).
-  const plans = resolveFills(layer, masking, tessellator);
+  const geometries = resolveFills(layer, masking, tessellator);
   const out = new Gathered();
   for (let i = 0; i < layer.fills.length; i++) {
     const { fill, contours } = layer.fills[i];
@@ -244,9 +238,10 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
       return out.vertex(x, y, color, u, v);
     };
 
-    const plan = plans[i];
-    if (plan.geometry) {
-      const { vertices, indices, indexOffset = 0 } = plan.geometry;
+    // A fill refused, or of nothing, adds no vertex.
+    const geometry = geometries[i];
+    if (geometry && geometry.vertices.length > 0) {
+      const { vertices, indices, indexOffset = 0 } = geometry;
       const first = vertex(vertices[0], vertices[1]);
       for (let k = 2; k < vertices.length; k += 2) {
         vertex(vertices[k], vertices[k + 1]);
@@ -258,36 +253,6 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
           first + indices[k + 1] - indexOffset,
           first + indices[k + 2] - indexOffset,
         );
-      }
-    } else if (plan.crossing) {
-      // Disjoint convex pieces between the crossings: each a fan from its first corner.
-      for (const piece of plan.crossing) {
-        const first = vertex(piece[0], piece[1]);
-        for (let k = 2; k < piece.length; k += 2) {
-          vertex(piece[k], piece[k + 1]);
-        }
-
-        for (let k = 2; k < piece.length / 2; k++) {
-          out.triangle(first, first + k - 1, first + k);
-        }
-      }
-    } else {
-      // Each region with nothing inside it, convex, as a fan; anything else needs a triangulator of holes.
-      for (const root of plan.roots) {
-        const points = root.points;
-        if (root.children.length > 0 || convex(points) === 0) {
-          unsupported.containedFills++;
-          continue;
-        }
-
-        const first = vertex(points[0], points[1]);
-        for (let k = 2; k < points.length; k += 2) {
-          vertex(points[k], points[k + 1]);
-        }
-
-        for (let k = 2; k < points.length / 2; k++) {
-          out.triangle(first, first + k - 1, first + k);
-        }
       }
     }
   }

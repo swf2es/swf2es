@@ -2,6 +2,7 @@
 // owns a WebGL 2 canvas, walks the display list into a scene list and its
 // rows, and has @swf2es/render plan and draw it.
 import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
+import { Tessellator } from "@swf2es/native/render";
 import {
   BLEND_NAMES,
   CLAMP,
@@ -106,10 +107,12 @@ export interface RenderViewOptions {
   preserveDrawingBuffer?: boolean;
   /**
    * The fills' and lines' tessellator, as @swf2es/native's Tessellator gives
-   * it; null or left out, fills and lines are made in JS. The view loads no
-   * native module itself, which a page may not let it.
+   * it; left out, the view makes one of its own, which it disposes of with
+   * itself. Either way the render module must compile: where a page does
+   * not let it (no WebAssembly or SIMD, or a CSP without
+   * 'wasm-unsafe-eval'), the view throws.
    */
-  fillTessellator?: FillTessellator | null;
+  fillTessellator?: FillTessellator;
   /** Samples a pixel the stage and its layers are multisampled with (`samples`); 1, none, if left out. */
   samples?: number;
 }
@@ -129,9 +132,6 @@ const RUN_KEYS = 512;
 
 /** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
 const GRADIENT_REGIONS = 8;
-
-/** A tessellator that leaves every fill to JS (fills.ts). */
-const IN_JS: FillTessellator = () => null;
 
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
@@ -340,6 +340,7 @@ export class RenderView implements Drawer {
   /** Whether the view made its canvas, whose context it then loses with itself. */
   private readonly ownCanvas: boolean;
   /** The tessellator the view made, which it disposes of with itself; none if it was given one. */
+  private readonly ownTessellator: Tessellator | null;
   private scene = new SceneList();
   private rows = new Rows();
   private readonly geometries = new Geometries();
@@ -471,6 +472,9 @@ export class RenderView implements Drawer {
   >();
 
   constructor(options: RenderViewOptions) {
+    // First, so that a page that cannot run the render module throws before a context is made.
+    this.ownTessellator = options.fillTessellator ? null : new Tessellator();
+    this.tessellator = options.fillTessellator ?? (this.ownTessellator as Tessellator).tessellate;
     this.width = options.width;
     this.height = options.height;
     this.resolution = options.resolution ?? 1;
@@ -494,7 +498,6 @@ export class RenderView implements Drawer {
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
     this.textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    this.tessellator = options.fillTessellator ?? IN_JS;
 
     this.lineCache = new LineCache(this.geometries, this.tessellator);
     this.counts = this.lineCache.counts;
@@ -2574,6 +2577,7 @@ export class RenderView implements Drawer {
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
     this.releaseOutlines();
+    this.ownTessellator?.dispose();
     if (this.ownCanvas) {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }

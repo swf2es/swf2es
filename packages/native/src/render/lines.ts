@@ -1,4 +1,4 @@
-import { renderInstance } from "./module.js";
+import { renderInstance, renderModule } from "./module.js";
 
 /** A layer's lines as triangles: two floats a vertex, its colour, and three indices a triangle. */
 export interface LineGeometry {
@@ -13,6 +13,7 @@ interface NativeExports {
   lineHeader(): number;
   lineBuild(length: number): number;
   setLimit(n: number): void;
+  bandsOnly(on: number): void;
 }
 
 export interface LineBuilderOptions {
@@ -20,28 +21,41 @@ export interface LineBuilderOptions {
   memoryLimit?: number;
   /** Drop instances larger than this after each call. Defaults to 8 MiB. */
   retainMemory?: number;
+  /** Fill outlines by the module's bands alone, never by libtess2: for tests of the bands. */
+  bands?: boolean;
 }
 
 /**
  * A shape layer's lines built in one call by the render module's
- * strokes.zig, as the player's scene/strokes.ts builds them, its outlines
- * filled by the module's libtess2: the caller writes the layer into
- * input() as strokes.zig reads it and calls build() with its length. Its
- * instance is its own, apart from any Tessellator's, and held to the same
- * limits as a Tessellator's (TessellatorOptions), which pass them on: where
- * a fill would have run out of memory, so do the lines, and JS builds them.
+ * strokes.zig, its outlines filled by the module's libtess2, or its bands
+ * where libtess2 fails: the caller writes the layer into input() as
+ * strokes.zig reads it (the player's scene/strokes.ts) and calls build()
+ * with its length. Its instance is its own, apart from any Tessellator's,
+ * and held to the same limits as a Tessellator's (TessellatorOptions),
+ * which pass them on: where a fill would have run out of memory, so do the
+ * lines, and none are drawn.
  */
 export class LineBuilder {
   private instance: NativeExports | null = null;
-  private unavailable = false;
   private view = new Float64Array(0);
   private layout = new Uint32Array(0);
+  /** libtess2 trapped the last instance: the next fills its outlines by the bands alone. */
+  private trapped = false;
+  private lastUnwound = false;
   private readonly limit: number;
   private readonly keep: number;
+  private readonly bands: boolean;
 
   constructor(options: LineBuilderOptions = {}) {
     this.limit = options.memoryLimit ?? 128 << 20;
     this.keep = options.retainMemory ?? 8 << 20;
+    this.bands = options.bands ?? false;
+    renderModule();
+  }
+
+  /** Whether the last build() unwound, which the next, in a new instance by the bands, may not. */
+  get unwound(): boolean {
+    return this.lastUnwound;
   }
 
   /** Current retained Wasm capacity. */
@@ -49,24 +63,19 @@ export class LineBuilder {
     return this.instance?.memory.buffer.byteLength ?? 0;
   }
 
-  /** A view of at least `n` f64s of input, valid until build(); null where the module is unavailable. */
+  /** A view of at least `n` f64s of input, valid until build(); null where no instance could be made. */
   input(n: number): Float64Array | null {
-    if (this.unavailable) {
-      return null;
-    }
-
     if (!this.instance) {
       try {
         this.instance = renderInstance(() => {
           throw new Error("line tessellation allocation failed");
         }) as unknown as NativeExports;
       } catch {
-        // A missing Wasm engine or SIMD, or a CSP refusal, is tried only once per owner.
-        this.unavailable = true;
         return null;
       }
 
       this.instance.setLimit(this.limit);
+      this.instance.bandsOnly(Number(this.bands || this.trapped));
     }
 
     const x = this.instance;
@@ -86,18 +95,27 @@ export class LineBuilder {
 
   /**
    * The layer in the input's first `length` f64s, copied out in one
-   * block: null for none, undefined where the module refused it (a fill
-   * libtess2 refused, which JS fills its own way, or a position not a
-   * number) or failed, for the caller to build in JS.
+   * block: null for none, undefined where the module refused it (a
+   * position not a number) or failed. Where libtess2 trapped, the next
+   * instance fills the layer's outlines by the bands alone, for the
+   * caller's next input() and build().
    */
   build(length: number): LineGeometry | null | undefined {
+    this.lastUnwound = false;
     const x = this.instance;
     if (!x) {
       return undefined;
     }
 
     try {
-      if (x.lineBuild(length) !== 0) {
+      const status = x.lineBuild(length);
+      // Built without unwinding: libtess2 again for the next.
+      if (this.trapped) {
+        this.trapped = false;
+        x.bandsOnly(Number(this.bands));
+      }
+
+      if (status !== 0) {
         return undefined;
       }
 
@@ -115,6 +133,8 @@ export class LineBuilder {
     } catch {
       // libtess2 unwound through the failure import: never resume that instance.
       this.dispose();
+      this.trapped = true;
+      this.lastUnwound = true;
       return undefined;
     } finally {
       if (this.capacity > this.keep) {
