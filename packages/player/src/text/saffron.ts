@@ -39,15 +39,29 @@ export const STRIDE = 18;
 /**
  * The glyphs' outlines as segments, in the font's units over 20 (as
  * shapeLayers reads them), each glyph's a run of its own: added as a glyph
- * is first drawn, kept until the store is full, when it starts again and
- * its `epoch` moves on, which it does too as it grows, for a renderer to
- * upload it whole.
+ * is first drawn, kept until the store is full, when it starts again. Its
+ * `resets` count those, after which every glyph's run is another; its
+ * `epoch` moves on with each, and as it grows, for a renderer to upload it
+ * whole.
  */
 export const store = {
   data: new Float32Array(ROW * 4 * 16),
   used: 0,
   epoch: 0,
+  resets: 0,
 };
+
+/**
+ * Whether a full store may start again as a glyph is reserved: not while
+ * the renderer of swf2es's own walks a frame, whose texts drawn before
+ * would then name runs let go of; it starts the store again between frames
+ * instead, and a text that finds it full meanwhile is drawn as normal text.
+ */
+let resetsAllowed = true;
+
+export function allowResets(allowed: boolean): void {
+  resetsAllowed = allowed;
+}
 
 /** A glyph's run of segments and its outline's bounds, in the font's units over 20. */
 interface Outline {
@@ -78,6 +92,7 @@ export function onSegmentsReset(listener: () => void): () => void {
 export function resetSegments(): void {
   store.used = 0;
   store.epoch++;
+  store.resets++;
   outlines = new WeakMap();
   for (const listener of resets) {
     listener();
@@ -88,6 +103,24 @@ export function resetSegments(): void {
 export function freeSegments(): void {
   resetSegments();
   store.data = new Float32Array(ROW * 4 * 16);
+}
+
+/** The views that draw from the store, by which it is kept. */
+let holders = 0;
+
+/** The store kept for a view, till the view lets go of it by what this returns: it goes with the last. */
+export function holdSegments(): () => void {
+  holders++;
+  let held = true;
+  return () => {
+    if (held) {
+      held = false;
+      holders--;
+      if (holders === 0) {
+        freeSegments();
+      }
+    }
+  };
 }
 
 /** How many segments the store holds, for tests. */
@@ -249,6 +282,29 @@ const CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1];
 /** The vertices a builder writes, reused by the next: builders build one at a time. */
 let scratch = new Float32Array(STRIDE * 4 * 64);
 
+/** Indices of quads in order, two triangles each: views of one array, which only grows. */
+let quads = new Uint32Array(0);
+
+/** The indices of `count` quads of four vertices each, in order. */
+export function quadIndices(count: number): Uint32Array {
+  if (quads.length < count * 6) {
+    const n = Math.max(count, quads.length / 3);
+    quads = new Uint32Array(n * 6);
+    for (let i = 0; i < n; i++) {
+      const v = i * 4;
+      const at = i * 6;
+      quads[at] = v;
+      quads[at + 1] = v + 1;
+      quads[at + 2] = v + 2;
+      quads[at + 3] = v;
+      quads[at + 4] = v + 2;
+      quads[at + 5] = v + 3;
+    }
+  }
+
+  return quads.subarray(0, count * 6);
+}
+
 /** The finite value of `v`, 0 for NaN or an infinity, as a field's settings reach the shader. */
 const finite = (v: number) => (Number.isFinite(v) ? v : 0);
 
@@ -320,7 +376,7 @@ export class GlyphQuads {
   reserve(glyph: Glyph, em: number, size: number, tables: readonly [CsmTable, CsmTable]): boolean {
     const units = em / 20;
     let outline = outlineOf(glyph, units / TOLERANCE);
-    if (outline === undefined && outlines.get(glyph) !== TOO_MANY) {
+    if (outline === undefined && outlines.get(glyph) !== TOO_MANY && resetsAllowed) {
       resetSegments();
       outline = outlineOf(glyph, units / TOLERANCE);
     }

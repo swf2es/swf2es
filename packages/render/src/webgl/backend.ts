@@ -243,7 +243,7 @@ export class WebGLBackend {
   /**
    * Advanced text's program (GeometryData.glyphs), where it takes its row, view, Flash's
    * pixels a stage pixel, mode and table; and its own atlas of vertices,
-   * which shares the index buffer, and the outlines' texture.
+   * with its own index buffer, and the outlines' texture.
    */
   private glyphProgram!: WebGLProgram;
   private glyphRowLocation: WebGLUniformLocation | null = null;
@@ -256,8 +256,16 @@ export class WebGLBackend {
   private unit = 1;
   private glyphArray!: WebGLVertexArrayObject;
   private glyphBuffer!: WebGLBuffer;
-  private glyphCapacity = 0;
-  private glyphTop = 0;
+  private glyphIndexBuffer!: WebGLBuffer;
+  /** The glyph atlas' room and top, of vertices and of indices, and its vertices live and let go of. */
+  private readonly glyphs = {
+    capacity: 0,
+    top: 0,
+    indexCapacity: 0,
+    indexTop: 0,
+    live: 0,
+    holes: 0,
+  };
   private outlines: WebGLTexture | null = null;
   /** The outlines uploaded: of which epoch, how many segments, and the texture's rows. */
   private outlineEpoch = -1;
@@ -347,6 +355,7 @@ export class WebGLBackend {
     geometries.added.length = 0;
     geometries.removed.length = 0;
     this.repack(geometries);
+    this.repackGlyphs(geometries);
   }
 
   /** Programs, buffers and textures made, as the context comes or comes back. */
@@ -434,9 +443,10 @@ export class WebGLBackend {
     gl.vertexAttribPointer(DEPTH_AT, 1, gl.FLOAT, false, VERTEX_BYTES, 16);
     this.glyphArray = gl.createVertexArray() as WebGLVertexArrayObject;
     this.glyphBuffer = gl.createBuffer() as WebGLBuffer;
+    this.glyphIndexBuffer = gl.createBuffer() as WebGLBuffer;
     this.state.bindVertexArray(this.glyphArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.glyphBuffer);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.glyphIndexBuffer);
     gl.enableVertexAttribArray(POSITION_AT);
     gl.vertexAttribPointer(POSITION_AT, 2, gl.FLOAT, false, GLYPH_BYTES, 0);
     for (const [at, offset] of [
@@ -449,8 +459,14 @@ export class WebGLBackend {
       gl.vertexAttribPointer(at, 4, gl.FLOAT, false, GLYPH_BYTES, offset);
     }
 
-    this.glyphCapacity = 0;
-    this.glyphTop = 0;
+    Object.assign(this.glyphs, {
+      capacity: 0,
+      top: 0,
+      indexCapacity: 0,
+      indexTop: 0,
+      live: 0,
+      holes: 0,
+    });
     this.rowsTexture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(0, this.rowsTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -1345,6 +1361,8 @@ export class WebGLBackend {
     const gl = this.gl;
     const state = this.state;
     state.useProgram(this.mesh);
+    // The atlas' vertices, which a glyph draw before may have left bound for its own.
+    state.bindVertexArray(this.vertexArray);
     if (this.meshStale) {
       gl.uniform4fv(this.meshViewLocation, this.view);
       gl.uniform4fv(this.meshFragLocation, this.frag);
@@ -1489,7 +1507,11 @@ export class WebGLBackend {
   private place(geometries: Geometries): void {
     for (const id of geometries.removed) {
       const place = this.places[id];
-      if (place) {
+      if (place?.glyphs) {
+        this.places[id] = null;
+        this.glyphs.live -= place.vertices;
+        this.glyphs.holes += place.vertices;
+      } else if (place) {
         this.places[id] = null;
         this.live -= place.vertices;
         this.holes += place.vertices;
@@ -1498,33 +1520,42 @@ export class WebGLBackend {
 
     geometries.removed.length = 0;
     let vertices = 0;
-    let glyphs = 0;
     let indices = 0;
+    let glyphVertices = 0;
+    let glyphIndices = 0;
     for (const id of geometries.added) {
       const data = geometries.get(id);
       if (data?.glyphs) {
-        glyphs += data.glyphs.vertices.length / GLYPH_FLOATS;
-        indices += data.indices.length;
+        glyphVertices += data.glyphs.vertices.length / GLYPH_FLOATS;
+        glyphIndices += data.indices.length;
       } else if (data) {
         vertices += data.positions.length / 2;
         indices += data.indices.length;
       }
     }
 
-    if (
+    // Each atlas packed again on its own, so that texts' quads made again often never repack
+    // the shapes', nor shapes the texts'.
+    const g = this.glyphs;
+    const shapes =
       this.vertexTop + vertices > this.vertexCapacity ||
-      this.glyphTop + glyphs > this.glyphCapacity ||
       this.indexTop + indices > this.indexCapacity ||
-      (this.holes > SLACK && this.holes > this.live)
-    ) {
-      geometries.added.length = 0;
+      (this.holes > SLACK && this.holes > this.live);
+    const texts =
+      g.top + glyphVertices > g.capacity ||
+      g.indexTop + glyphIndices > g.indexCapacity ||
+      (g.holes > GLYPHS_LEAST && g.holes > g.live);
+    if (shapes) {
       this.repack(geometries);
-      return;
+    }
+
+    if (texts) {
+      this.repackGlyphs(geometries);
     }
 
     for (const id of geometries.added) {
       const data = geometries.get(id);
-      if (data) {
+      if (data && !(data.glyphs ? texts : shapes)) {
         this.copyIn(id, data);
       }
     }
@@ -1532,22 +1563,18 @@ export class WebGLBackend {
     geometries.added.length = 0;
   }
 
-  /** Every live geometry copied into new buffers, with room for twice what is live. */
+  /** Every live shape's geometry copied into new buffers, with room for twice what is live. */
   private repack(geometries: Geometries): void {
     const gl = this.gl;
     const ids = geometries.live();
     let vertices = 0;
-    let glyphs = 0;
     let indices = 0;
     for (const id of ids) {
       const data = geometries.get(id) as GeometryData;
-      if (data.glyphs) {
-        glyphs += data.glyphs.vertices.length / GLYPH_FLOATS;
-      } else {
+      if (!data.glyphs) {
         vertices += data.positions.length / 2;
+        indices += data.indices.length;
       }
-
-      indices += data.indices.length;
     }
 
     this.vertexCapacity = Math.max(LEAST, vertices * 2);
@@ -1556,18 +1583,48 @@ export class WebGLBackend {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.vertexCapacity * VERTEX_BYTES, gl.STATIC_DRAW);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.indexCapacity * 4, gl.STATIC_DRAW);
-    // The glyph atlas only once a text needs it.
-    this.glyphCapacity = glyphs > 0 ? Math.max(GLYPHS_LEAST, glyphs * 2) : 0;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.glyphBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.glyphCapacity * GLYPH_BYTES, gl.STATIC_DRAW);
-    this.glyphTop = 0;
     this.vertexTop = 0;
     this.indexTop = 0;
     this.live = 0;
     this.holes = 0;
-    this.places = [];
     for (const id of ids) {
-      this.copyIn(id, geometries.get(id) as GeometryData);
+      const data = geometries.get(id) as GeometryData;
+      if (!data.glyphs) {
+        this.copyIn(id, data);
+      }
+    }
+  }
+
+  /** Every live text's quads copied into new glyph buffers: none till a text needs them. */
+  private repackGlyphs(geometries: Geometries): void {
+    const gl = this.gl;
+    const g = this.glyphs;
+    const ids = geometries.live();
+    let vertices = 0;
+    let indices = 0;
+    for (const id of ids) {
+      const data = geometries.get(id) as GeometryData;
+      if (data.glyphs) {
+        vertices += data.glyphs.vertices.length / GLYPH_FLOATS;
+        indices += data.indices.length;
+      }
+    }
+
+    g.capacity = vertices > 0 ? Math.max(GLYPHS_LEAST, vertices * 2) : 0;
+    g.indexCapacity = vertices > 0 ? Math.max(GLYPHS_LEAST * 2, indices * 2) : 0;
+    this.state.bindVertexArray(this.glyphArray);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.glyphBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, g.capacity * GLYPH_BYTES, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, g.indexCapacity * 4, gl.STATIC_DRAW);
+    g.top = 0;
+    g.indexTop = 0;
+    g.live = 0;
+    g.holes = 0;
+    for (const id of ids) {
+      const data = geometries.get(id) as GeometryData;
+      if (data.glyphs) {
+        this.copyGlyphs(id, data);
+      }
     }
   }
 
@@ -1622,28 +1679,28 @@ export class WebGLBackend {
   /** Glyph quads copied in at the top of the glyph atlas, their indices made absolute in it. */
   private copyGlyphs(id: number, data: GeometryData): void {
     const gl = this.gl;
+    const g = this.glyphs;
     const glyphs = data.glyphs as NonNullable<GeometryData["glyphs"]>;
     const count = glyphs.vertices.length / GLYPH_FLOATS;
-    const base = this.glyphTop;
     const indices = new Uint32Array(data.indices.length);
     for (let i = 0; i < indices.length; i++) {
-      indices[i] = data.indices[i] + base;
+      indices[i] = data.indices[i] + g.top;
     }
 
     this.state.bindVertexArray(this.glyphArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.glyphBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, base * GLYPH_BYTES, glyphs.vertices);
-    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, this.indexTop * 4, indices);
+    gl.bufferSubData(gl.ARRAY_BUFFER, g.top * GLYPH_BYTES, glyphs.vertices);
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, g.indexTop * 4, indices);
     this.places[id] = {
-      vertexStart: base,
+      vertexStart: g.top,
       vertices: count,
-      indexStart: this.indexTop,
+      indexStart: g.indexTop,
       indices: indices.length,
       glyphs: { mode: glyphs.mode, table: glyphs.table },
     };
-    this.glyphTop += count;
-    this.indexTop += indices.length;
-    this.live += count;
+    g.top += count;
+    g.indexTop += indices.length;
+    g.live += count;
   }
 
   /** What the backend made on the context, deleted. */
@@ -1659,6 +1716,7 @@ export class WebGLBackend {
     gl.deleteProgram(this.glyphProgram);
     gl.deleteVertexArray(this.glyphArray);
     gl.deleteBuffer(this.glyphBuffer);
+    gl.deleteBuffer(this.glyphIndexBuffer);
     if (this.outlines) {
       gl.deleteTexture(this.outlines);
     }

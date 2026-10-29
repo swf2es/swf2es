@@ -36,9 +36,10 @@ import {
 import {
   type BuiltQuads,
   ENTRIES,
-  freeSegments,
   GlyphQuads,
+  holdSegments,
   onSegmentsReset,
+  quadIndices,
   ROW,
   STRIDE,
   store,
@@ -302,12 +303,12 @@ export function uploadSegments(renderer: Renderer): void {
   upload.segments = used;
 }
 
-/** The views that draw on the stage, by which the store is kept: it goes with the last. */
+/** The views that draw on the stage, by which the store is kept (holdSegments): its texture goes with the last. */
 let views = 0;
-const viewsGone = new FinalizationRegistry<null>(() => {
+const viewsGone = new FinalizationRegistry<() => void>((release) => {
+  release();
   views--;
   if (views === 0) {
-    freeSegments();
     source?.destroy();
     source = null;
   }
@@ -330,7 +331,7 @@ export class SaffronView {
       (renderer as WebGLRenderer).context?.webGLVersion === 2;
     if (keeps) {
       views++;
-      viewsGone.register(this, null);
+      viewsGone.register(this, holdSegments());
     }
   }
 
@@ -345,28 +346,6 @@ export class SaffronView {
       this.uniforms.update();
     }
   }
-}
-
-/** Indices of quads in order, two triangles each: views of one array, which only grows. */
-let quads = new Uint32Array(0);
-
-function quadIndices(count: number): Uint32Array {
-  if (quads.length < count * 6) {
-    const n = Math.max(count, quads.length / 3);
-    quads = new Uint32Array(n * 6);
-    for (let i = 0; i < n; i++) {
-      const v = i * 4;
-      const at = i * 6;
-      quads[at] = v;
-      quads[at + 1] = v + 1;
-      quads[at + 2] = v + 2;
-      quads[at + 3] = v;
-      quads[at + 4] = v + 2;
-      quads[at + 5] = v + 3;
-    }
-  }
-
-  return quads.subarray(0, count * 6);
 }
 
 /**

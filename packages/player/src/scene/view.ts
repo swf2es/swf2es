@@ -64,8 +64,14 @@ import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import type { Player } from "../player.js";
 import { cssFont } from "../text/fonts.js";
-import { MOST, resetSegments, store as saffronStore } from "../text/saffron.js";
-import { fieldQuads, staticQuads } from "./advanced.js";
+import {
+  allowResets,
+  holdSegments,
+  MOST,
+  resetSegments,
+  store as saffronStore,
+} from "../text/saffron.js";
+import { type AdvancedGlyphs, fieldQuads, staticQuads } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
 import { bindCanvasPointer } from "./pointer.js";
@@ -230,6 +236,23 @@ interface Kept {
  * for each of its layers' geometries, each geometry made once and kept
  * while drawn; then plans the frame and has the backend draw it.
  */
+/** A text's glyph quads as Saffron draws them (RenderView.advancedText), and what they were made of. */
+interface AdvancedText {
+  source: unknown;
+  scale: number;
+  resets: number;
+  scrollV: number;
+  scrollH: number;
+  left: number;
+  top: number;
+  height: number;
+  grid: string;
+  thickness: number;
+  sharpness: number;
+  glyphs: AdvancedGlyphs | null;
+  handle: GeometryHandle | null;
+}
+
 export class RenderView implements Drawer {
   readonly canvas: HTMLCanvasElement;
   readonly gl: WebGL2RenderingContext;
@@ -264,24 +287,11 @@ export class RenderView implements Drawer {
     ShapeObject,
     { cache: StaleCache; a: number; b: number; c: number; d: number; spent: boolean }
   >();
-  /** Each advanced text's glyph quads, and what they were made of (advancedText). */
-  private readonly advancedTexts = new WeakMap<
-    DisplayObject,
-    {
-      source: unknown;
-      scale: number;
-      epoch: number;
-      scrollV: number;
-      scrollH: number;
-      left: number;
-      top: number;
-      height: number;
-      grid: string;
-      thickness: number;
-      sharpness: number;
-      handle: GeometryHandle | null;
-    }
-  >();
+  /** Each advanced text's glyph quads, and what they were made of (advancedText); BitmapData.draw's apart. */
+  private readonly advancedTexts = new WeakMap<DisplayObject, AdvancedText>();
+  private readonly drawnAdvanced = new WeakMap<DisplayObject, AdvancedText>();
+  /** The outlines' store kept while the view is (text/saffron.ts, holdSegments), let go of with it. */
+  private readonly releaseOutlines = holdSegments();
   /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
   private walkDepth = 0;
   /** Each depth's transform on the stage, a b c d tx ty, which its children are placed under. */
@@ -466,13 +476,19 @@ export class RenderView implements Drawer {
       this.keptGeneration++;
     }
 
-    // The outlines' store started again before it fills, so that no text's quads drawn in a frame
-    // name outlines it let go of later in that frame.
+    // The outlines' store started again between frames, before it fills: not in a walk, where the
+    // quads drawn before would name runs it let go of (text/saffron.ts, allowResets).
     if (saffronStore.used > MOST * 0.75) {
       resetSegments();
     }
 
-    this.walkFrom(root);
+    allowResets(false);
+    try {
+      this.walkFrom(root);
+    } finally {
+      allowResets(true);
+    }
+
     measureLayers(this.scene, this.rows, this.geometries, target);
     this.noteKept();
     this.frames++;
@@ -715,6 +731,8 @@ export class RenderView implements Drawer {
       }
 
       let glyphsDrawn = false;
+      let glyph = 0;
+      let normal = 0;
 
       // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch.
       const resolution =
@@ -731,9 +749,18 @@ export class RenderView implements Drawer {
           this.maskUse(first);
         }
 
-        if (!advanced || items[k].kind !== "glyph") {
-          this.drawTextItem(items[k], a, b, c, d, tx, ty, color, resolution);
-        } else if (!glyphsDrawn) {
+        // A glyph whose tables found no room among Saffron's is drawn as normal text.
+        const item = items[k];
+        let drawnNormal = false;
+        if (advanced && item.kind === "glyph") {
+          drawnNormal = advanced.normal[normal] === glyph;
+          normal += drawnNormal ? 1 : 0;
+          glyph++;
+        }
+
+        if (!advanced || item.kind !== "glyph" || drawnNormal) {
+          this.drawTextItem(item, a, b, c, d, tx, ty, color, resolution);
+        } else if (!glyphsDrawn && advanced.handle) {
           glyphsDrawn = true;
           this.geometries.use(advanced.handle.id);
           this.scene.draw(
@@ -1178,21 +1205,28 @@ export class RenderView implements Drawer {
     b: number,
     c: number,
     d: number,
-  ): { handle: GeometryHandle; m: Matrix } | null {
+  ): { handle: GeometryHandle | null; normal: number[]; m: Matrix } | null {
     const field = o instanceof TextObject ? o : null;
     const m = field ? IDENTITY : this.staticMatrix(o as StaticTextObject);
     // Flash's pixels a pixel of the text: the target's pixels a stage pixel over a pixel of Flash's.
+    // Kept in steps of a square root of two, the step down: the quads reach out as far as at the
+    // scale itself or further, and their cost counts as at most twice less, so that a text that
+    // grows or shrinks makes its quads again only now and then.
     const target = this.target;
-    const scale =
+    const exact =
       Math.sqrt(Math.abs((a * d - b * c) * (m.a * m.d - m.b * m.c))) *
       (target.scale / target.pixel);
+    const scale =
+      exact > 0 && Number.isFinite(exact) ? Math.SQRT2 ** Math.floor(Math.log2(exact) * 2) : 1;
     const source = field ? field.layout : (o as StaticTextObject).glyphs;
-    let kept = this.advancedTexts.get(o);
+    // The stage's and BitmapData.draw's apart, as they draw it at scales of their own.
+    const texts = this.drawRoot ? this.drawnAdvanced : this.advancedTexts;
+    let kept = texts.get(o);
     if (
       kept &&
       kept.source === source &&
       kept.scale === scale &&
-      kept.epoch === saffronStore.epoch &&
+      kept.resets === saffronStore.resets &&
       (!field ||
         (kept.scrollV === field.scrollV &&
           kept.scrollH === field.scrollH &&
@@ -1204,18 +1238,18 @@ export class RenderView implements Drawer {
           kept.sharpness === field.sharpness)) &&
       (!kept.handle || this.geometries.alive(kept.handle))
     ) {
-      return kept.handle ? { handle: kept.handle, m } : null;
+      return kept.glyphs ? { handle: kept.handle, normal: kept.glyphs.normal, m } : null;
     }
 
     if (kept?.handle && this.geometries.alive(kept.handle)) {
       this.geometries.remove(kept.handle.id);
     }
 
-    const data = field ? fieldQuads(field, scale) : staticQuads(o as StaticTextObject, scale);
+    const glyphs = field ? fieldQuads(field, scale) : staticQuads(o as StaticTextObject, scale);
     kept = {
       source,
       scale,
-      epoch: saffronStore.epoch,
+      resets: saffronStore.resets,
       scrollV: field?.scrollV ?? 0,
       scrollH: field?.scrollH ?? 0,
       left: field?.left ?? 0,
@@ -1224,10 +1258,11 @@ export class RenderView implements Drawer {
       grid: field?.gridFitType ?? "",
       thickness: field?.thickness ?? 0,
       sharpness: field?.sharpness ?? 0,
-      handle: data ? this.geometries.add(data) : null,
+      glyphs,
+      handle: glyphs?.geometry ? this.geometries.add(glyphs.geometry) : null,
     };
-    this.advancedTexts.set(o, kept);
-    return kept.handle ? { handle: kept.handle, m } : null;
+    texts.set(o, kept);
+    return glyphs ? { handle: kept.handle, normal: glyphs.normal, m } : null;
   }
 
   /** What advanced text's quads name of the outlines' store, uploaded. */
@@ -2004,6 +2039,11 @@ export class RenderView implements Drawer {
       this.scene.reset();
       this.rows.reset();
       this.filters.reset();
+      if (saffronStore.used > MOST * 0.75) {
+        resetSegments();
+      }
+
+      allowResets(false);
       this.walkFrom(o);
       measureLayers(this.scene, this.rows, this.geometries, this.target);
       plan(this.scene, 0, this.commands);
@@ -2023,6 +2063,7 @@ export class RenderView implements Drawer {
       );
       return argbOf(bytes);
     } finally {
+      allowResets(true);
       this.target = stage.target;
       this.scale = stage.scale;
       this.resolution = stage.resolution;
@@ -2084,6 +2125,7 @@ export class RenderView implements Drawer {
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
     this.ownTessellator?.dispose();
+    this.releaseOutlines();
     if (this.ownCanvas) {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }

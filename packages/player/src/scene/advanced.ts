@@ -7,7 +7,7 @@ import type { GeometryData } from "@swf2es/render";
 import type { StaticTextObject, TextObject } from "../display/display.js";
 import { csmTables } from "../text/csm.js";
 import { GUTTER, shownLines } from "../text/layout.js";
-import { type BuiltQuads, GlyphQuads, reserveAll, STRIDE } from "../text/saffron.js";
+import { GlyphQuads, quadIndices, reserveAll, STRIDE } from "../text/saffron.js";
 
 /** gridFitType's values, in the order the shader and CSMTextSettings number them. */
 const GRIDS = ["none", "pixel", "subpixel"];
@@ -15,12 +15,24 @@ const GRIDS = ["none", "pixel", "subpixel"];
 const NO_COLORS = new Uint32Array(0);
 
 /**
+ * A text's glyphs as Saffron draws them: the geometry of their quads, null
+ * for none, and those of its glyphs, counted in the order its items have
+ * them (scene/text.ts), drawn as normal text, as the Pixi view draws a glyph
+ * whose tables find no room.
+ */
+export interface AdvancedGlyphs {
+  geometry: GeometryData | null;
+  normal: number[];
+}
+
+/**
  * A field's embedded glyphs as quads, at `scale` of Flash's pixels to a
  * pixel of the field, of the lines it shows, each where its pen stood in
- * fractions of a twip, as adl places it; null where one cannot be drawn
- * so, for the field to be drawn as normal text, all of it alike.
+ * fractions of a twip, as adl places it; null where they cannot be drawn
+ * so, a glyph or the whole asking too much of the shader, for the field to
+ * be drawn as normal text, all of it alike.
  */
-export function fieldQuads(o: TextObject, scale: number): GeometryData | null {
+export function fieldQuads(o: TextObject, scale: number): AdvancedGlyphs | null {
   const layout = o.layout;
   if (!o.model.text || layout.lines.length === 0) {
     return null;
@@ -54,14 +66,18 @@ export function fieldQuads(o: TextObject, scale: number): GeometryData | null {
     return null;
   }
 
+  const normal: number[] = [];
+  let glyph = 0;
+
   for (let l = first; l <= last; l++) {
     const line = layout.lines[l];
     const baseline = (dy + line.y + line.ascent) / 20;
     for (const c of line.chars) {
+      if (!c.shown || !c.font || !c.glyph) {
+        continue;
+      }
+
       if (
-        c.shown &&
-        c.font &&
-        c.glyph &&
         !quads.add(
           c.glyph,
           c.font.em,
@@ -73,21 +89,23 @@ export function fieldQuads(o: TextObject, scale: number): GeometryData | null {
           csmTables(c.font),
         )
       ) {
-        return null;
+        normal.push(glyph);
       }
+
+      glyph++;
     }
   }
 
-  return geometryOf(quads.built());
+  return { geometry: geometryOf(quads), normal };
 }
 
 /**
  * A StaticText's glyphs as quads in its definition's space, at `scale` of
- * Flash's pixels to a pixel of it there; null where one cannot be drawn so.
+ * Flash's pixels to a pixel of it there; null where they cannot be drawn so.
  */
-export function staticQuads(o: StaticTextObject, scale: number): GeometryData | null {
+export function staticQuads(o: StaticTextObject, scale: number): AdvancedGlyphs | null {
   const csm = o.definition.csm;
-  if (!csm) {
+  if (!csm?.useFlashType) {
     return null;
   }
 
@@ -101,7 +119,10 @@ export function staticQuads(o: StaticTextObject, scale: number): GeometryData | 
     return null;
   }
 
-  for (const placed of glyphs) {
+  const normal: number[] = [];
+
+  for (let i = 0; i < glyphs.length; i++) {
+    const placed = glyphs[i];
     if (
       !quads.add(
         placed.glyph,
@@ -114,15 +135,16 @@ export function staticQuads(o: StaticTextObject, scale: number): GeometryData | 
         csmTables(placed.font),
       )
     ) {
-      return null;
+      normal.push(i);
     }
   }
 
-  return geometryOf(quads.built());
+  return { geometry: geometryOf(quads), normal };
 }
 
-/** `built`'s quads as a geometry: their positions apart, for its bounds, and two triangles each. */
-function geometryOf(built: BuiltQuads | null): GeometryData | null {
+/** The quads added as a geometry: their positions apart, for its bounds; null for none. */
+function geometryOf(quads: GlyphQuads): GeometryData | null {
+  const built = quads.built();
   if (!built) {
     return null;
   }
@@ -135,17 +157,10 @@ function geometryOf(built: BuiltQuads | null): GeometryData | null {
     positions[k * 2 + 1] = built.vertices[k * STRIDE + 1];
   }
 
-  const indices = new Uint32Array(built.glyphs * 6);
-
-  for (let i = 0; i < built.glyphs; i++) {
-    const v = i * 4;
-    indices.set([v, v + 1, v + 2, v, v + 2, v + 3], i * 6);
-  }
-
   return {
     positions,
     colors: NO_COLORS,
-    indices,
+    indices: quadIndices(built.glyphs),
     glyphs: { vertices: built.vertices, mode: built.mode, table: built.table },
   };
 }
