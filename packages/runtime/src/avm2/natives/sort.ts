@@ -78,7 +78,10 @@ export function sort(rt: Runtime, d: Value, args: Value[]): Value {
       }
 
       // The comparator's result counts by its sign, as a Number. Its arguments go in one pair for
-      // the sort, which a call spreads into its own: a sort of n elements made n log n of them.
+      // the sort, not one a comparison: the comparator has $f, which callValue calls with apply,
+      // and apply copies the pair into the call's own parameters, rest or arguments, a native's
+      // as an AS3 method's, keeping no reference to it. A comparator that sorts inside itself has
+      // its own sort's pair.
       const pair: Value[] = [undefined, undefined];
       compare = (x, y) => {
         pair[0] = x;
@@ -143,8 +146,13 @@ export function sortOn(rt: Runtime, d: Value, names: Value, optionsIn: Value): V
     }
   }
 
-  return sortWith(rt, d, options, fieldCompare(rt, fields, options), false, fields);
+  // One field sorts by its values (sortWith), which needs no comparison of the elements.
+  const compare = fields.length === 1 ? unused : fieldCompare(rt, fields, options);
+  return sortWith(rt, d, options, compare, false, fields);
 }
+
+/** No comparison: sortWith makes its own where it is given this. */
+const unused: Compare = () => 0;
 
 /** As ArraySort::FieldCompare: by each field in turn, until one differs. */
 function fieldCompare(rt: Runtime, fields: Field[], options: number): Compare {

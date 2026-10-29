@@ -57,6 +57,7 @@ const CUBIC_POINTS = [0, 0, 0, 0, 0, 0];
 function append(paths: Path[], kind: number, points: readonly number[]): void {
   const path = paths[paths.length - 1];
   path.push(kind);
+
   for (let i = 0; i < points.length; i++) {
     path.push(points[i]);
   }
