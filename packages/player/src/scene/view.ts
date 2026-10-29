@@ -1,7 +1,7 @@
 // The renderer as the player drives it (docs/renderer.md): a view that
 // owns a WebGL 2 canvas, walks the display list into a scene list and its
 // rows, and has @swf2es/render plan and draw it.
-import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
+import { type ColorTransform, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import {
   BLEND_NAMES,
@@ -51,7 +51,7 @@ import {
 } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
-import { facing, type ShapeLayer, shapeLayers } from "../display/shapes.js";
+import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { ShapeCharacter } from "../display/timeline.js";
@@ -72,13 +72,13 @@ import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
 import { LineCache } from "./lines.js";
 import { GRADIENT_IDLE_FRAMES, Paints, paintSampler } from "./paints.js";
+import { Parts, RUN_KEYS } from "./parts.js";
 import { bindCanvasPointer } from "./pointer.js";
-import { bitmapQuad, layerParts, type Part, unsupported } from "./shapes.js";
+import { unsupported } from "./shapes.js";
 import {
   type DeviceItem,
   deviceTextResolution,
   fieldItems,
-  glyphShape,
   staticItems,
   type TextItem,
   type TextOmissions,
@@ -107,12 +107,6 @@ export interface RenderViewOptions {
   /** Samples a pixel the stage and its layers are multisampled with (`samples`); 1, none, if left out. */
   samples?: number;
 }
-
-/**
- * Device texts with runs kept, and quads made, past which those let go of
- * are looked for and forgotten.
- */
-const RUN_KEYS = 512;
 
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
@@ -227,24 +221,6 @@ interface KeptPlan {
   capped: FilterPlan | null;
 }
 
-/** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
-interface Made {
-  parts: { part: Part; handle: GeometryHandle }[];
-  version: number;
-}
-
-/**
- * The layers an object's drawing was last drawn as, of its version
- * (dropUndrawn): a set, as a drawing refills its own list as it is cleared
- * and drawn again, and the list they came in, which a frame's walk passes
- * again unchanged.
- */
-interface DrawnLayers {
-  version: number;
-  source: ShapeLayer[];
-  layers: Set<ShapeLayer>;
-}
-
 /**
  * Draws the player's display list on a canvas of its own. Each render
  * walks the whole list, writing a row for each object drawn and an entry
@@ -332,6 +308,7 @@ export class RenderView implements Drawer {
   private rows = new Rows();
   private readonly geometries = new Geometries();
   private readonly lineCache: LineCache;
+  private readonly parts: Parts;
   private readonly textures = new Textures();
   private readonly paints = new Paints(this.textures);
   private commands = new Commands();
@@ -435,23 +412,10 @@ export class RenderView implements Drawer {
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
-  private readonly made = new WeakMap<ShapeLayer, Made>();
-  private readonly maskMade = new WeakMap<ShapeLayer, Made>();
-  /**
-   * The layers each object's drawing (Graphics) was last drawn as, and of
-   * which version: those its next version leaves out are let go of then.
-   */
-  private readonly drawnLayers = new WeakMap<DisplayObject, DrawnLayers>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
   private readonly masks: number[] = [];
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
   private readonly stretchScratch: Linear = [0, 0, 0, 0];
-  /** Quads by their width, then their height: numbers, not a key formatted from them. */
-  private readonly quads = new Map<number, Map<number, GeometryHandle>>();
-  /** Quads made since the last were let go of, which past RUN_KEYS looks for those gone. */
-  private quadsMade = 0;
-  /** Each glyph's fill, made once for every text drawn in it; null for an empty glyph. */
-  private readonly glyphs = new WeakMap<Glyph, GeometryHandle | null>();
   /** Device text rasterized, by its text; among its runs, by style, metrics and resolution. */
   private readonly runs = new Map<string, DeviceRun[]>();
   /** The canvas device text is rasterized on, made as first needed. */
@@ -488,6 +452,7 @@ export class RenderView implements Drawer {
 
     this.lineCache = new LineCache(this.geometries, this.tessellator);
     this.counts = this.lineCache.counts;
+    this.parts = new Parts(this.geometries, this.tessellator, this.lineCache);
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
     this.canvas.addEventListener("webglcontextrestored", this.restored);
@@ -810,7 +775,7 @@ export class RenderView implements Drawer {
           ? sliceLayers(drawn, slice, ownSlice ? null : o.placed, version)
           : drawn;
     if (o.drawing && layers) {
-      this.dropUndrawn(o, layers, version);
+      this.parts.dropUndrawn(o, layers, version);
     }
 
     // A sliced line keeps the width it has in its owner's parent's space, as adl's does, times a
@@ -828,7 +793,7 @@ export class RenderView implements Drawer {
       // Alpha left whole by the colour transform: a line's overlaps then draw nothing new.
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
       for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.partsOf(layers[i], version)) {
+        for (const { part, handle } of this.parts.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(handle.id);
           const textured = part.paint !== null || part.mesh !== null;
@@ -973,7 +938,7 @@ export class RenderView implements Drawer {
 
     const store = o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      const quad = this.quad(store.width, store.height);
+      const quad = this.parts.quad(store.width, store.height);
       const texture = this.paints.storeTexture(store);
       if (row < 0) {
         row = this.rows.addPlaced(this.places, at + 6, color);
@@ -1791,7 +1756,7 @@ export class RenderView implements Drawer {
     width: number,
     height: number,
   ): void {
-    const quad = this.unitQuad();
+    const quad = this.parts.unitQuad();
     const row = this.placedRow(
       a,
       b,
@@ -1842,7 +1807,7 @@ export class RenderView implements Drawer {
       : (shape?.layers ?? null);
     // A mask's drawing drawn again lets go of its old layers too.
     if (o.drawing && layers) {
-      this.dropUndrawn(o, layers, version);
+      this.parts.dropUndrawn(o, layers, version);
     }
 
     // Its row made as its first draw needs it, in place: a closure here kept every number it took
@@ -1850,7 +1815,7 @@ export class RenderView implements Drawer {
     let row = -1;
     if (layers) {
       for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
+        for (const { part, handle } of this.parts.partsOf(layers[i], version, o.drawing !== null)) {
           // A mesh of a bitmap disposed of draws nothing, as it is drawn, and so masks nothing.
           if (part.mesh?.image.disposed) {
             continue;
@@ -1871,7 +1836,7 @@ export class RenderView implements Drawer {
       for (const item of o instanceof TextObject
         ? fieldItems(o, omitted)
         : staticItems(o, omitted)) {
-        const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : null;
+        const geometry = item.kind === "glyph" ? this.parts.glyphGeometry(item.glyph) : null;
         if (item.kind === "glyph" && geometry) {
           const glyphRow = this.placedRow(a, b, c, d, tx, ty, item.m, null);
           this.geometries.use(geometry.id);
@@ -1882,7 +1847,7 @@ export class RenderView implements Drawer {
 
     const store = o instanceof BitmapObject ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      const quad = this.quad(store.width, store.height);
+      const quad = this.parts.quad(store.width, store.height);
       this.geometries.use(quad.id);
       if (row < 0) {
         row = this.rows.add(a, b, c, d, tx, ty, null);
@@ -1905,90 +1870,6 @@ export class RenderView implements Drawer {
     if (!this.snapshotting) {
       o.dirty = CLEAN;
     }
-  }
-
-  /**
-   * `o`'s drawing drawn as `layers` of `version`: the parts of the layers it
-   * was last drawn as and is no more let go of now. A drawing cleared and
-   * drawn again on every frame, as a software 3D engine draws its
-   * triangles, makes new layers each time, whose old parts the idle frames
-   * would otherwise keep for hundreds of frames.
-   */
-  private dropUndrawn(o: DisplayObject, layers: ShapeLayer[], version: number): void {
-    const last = this.drawnLayers.get(o);
-    if (last?.version === version) {
-      // Another set of the same version, mirrored (facing) or sliced, kept beside the first.
-      if (layers !== last.source) {
-        for (const layer of layers) {
-          last.layers.add(layer);
-        }
-      }
-
-      return;
-    }
-
-    if (last) {
-      const now = new Set(layers);
-      for (const layer of last.layers) {
-        if (!now.has(layer)) {
-          this.dropParts(this.made, layer);
-          this.dropParts(this.maskMade, layer);
-          this.lineCache.drop(layer);
-        }
-      }
-    }
-
-    this.drawnLayers.set(o, { version, source: layers, layers: new Set(layers) });
-  }
-
-  /** `layer`'s parts in `cache` let go of. */
-  private dropParts(cache: WeakMap<ShapeLayer, Made>, layer: ShapeLayer): void {
-    const made = cache.get(layer);
-    if (!made) {
-      return;
-    }
-
-    for (const { handle } of made.parts) {
-      if (this.geometries.alive(handle)) {
-        this.geometries.remove(handle.id);
-      }
-    }
-
-    cache.delete(layer);
-  }
-
-  /**
-   * `layer`'s parts, made if they were not, or one was let go of, or its
-   * drawing changed since; a drawing used as a mask's apart, filled non-zero.
-   */
-  private partsOf(layer: ShapeLayer, version: number, masking = false): Made["parts"] {
-    const cache = masking ? this.maskMade : this.made;
-    const made = cache.get(layer);
-    // A loop, not every with a closure: each shape layer drawn asks on every frame.
-    if (made && made.version === version) {
-      let alive = true;
-
-      for (let i = 0; alive && i < made.parts.length; i++) {
-        alive = this.geometries.alive(made.parts[i].handle);
-      }
-
-      if (alive) {
-        return made.parts;
-      }
-    }
-
-    for (const { handle } of made?.parts ?? []) {
-      if (this.geometries.alive(handle)) {
-        this.geometries.remove(handle.id);
-      }
-    }
-
-    const parts = layerParts(layer, this.tessellator, masking).map((part) => ({
-      part,
-      handle: this.geometries.add(part.geometry),
-    }));
-    cache.set(layer, { parts, version });
-    return parts;
   }
 
   /**
@@ -2035,14 +1916,15 @@ export class RenderView implements Drawer {
         b * x + d * item.top + ty,
         colored,
       );
-      const quad = this.quad(run.width, run.height);
+      const quad = this.parts.quad(run.width, run.height);
       this.geometries.use(quad.id);
       this.textures.use(run.handle.id);
       this.scene.draw(quad.id, row, NORMAL, run.handle.id, SMOOTH | CLAMP);
       return;
     }
 
-    const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : this.unitQuad();
+    const geometry =
+      item.kind === "glyph" ? this.parts.glyphGeometry(item.glyph) : this.parts.unitQuad();
     if (!geometry) {
       return;
     }
@@ -2082,25 +1964,6 @@ export class RenderView implements Drawer {
       b * m.tx + d * m.ty + ty,
       color,
     );
-  }
-
-  /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */
-  private glyphGeometry(glyph: Glyph): GeometryHandle | null {
-    const known = this.glyphs.get(glyph);
-    if (known === null || (known && this.geometries.alive(known))) {
-      return known;
-    }
-
-    const layers = shapeLayers(glyphShape(glyph));
-    const part = layers.length > 0 ? layerParts(layers[0], this.tessellator)[0] : undefined;
-    const handle = part ? this.geometries.add(part.geometry) : null;
-    this.glyphs.set(glyph, handle);
-    return handle;
-  }
-
-  /** A white square of a pixel, for a row to scale to a rectangle. */
-  private unitQuad(): GeometryHandle {
-    return this.quad(1, 1);
   }
 
   /**
@@ -2249,45 +2112,6 @@ export class RenderView implements Drawer {
       width: Math.ceil(left + right) + 1,
       height: Math.ceil((item.ascent + item.descent) * scale) + 2,
     };
-  }
-
-  /** A bitmap's quad of its size, made once for every bitmap of that size. */
-  private quad(width: number, height: number): GeometryHandle {
-    let byHeight = this.quads.get(width);
-    const known = byHeight?.get(height);
-    if (known && this.geometries.alive(known)) {
-      return known;
-    }
-
-    // Device text makes quads of many sizes: those let go of are forgotten.
-    if (++this.quadsMade > RUN_KEYS) {
-      this.quadsMade = 0;
-      for (const [w, heights] of this.quads) {
-        for (const [h, handle] of heights) {
-          if (!this.geometries.alive(handle)) {
-            heights.delete(h);
-          } else {
-            this.quadsMade++;
-          }
-        }
-
-        if (heights.size === 0) {
-          this.quads.delete(w);
-        }
-      }
-
-      // Its width's map, which the sweep may have let go of.
-      byHeight = this.quads.get(width);
-    }
-
-    if (!byHeight) {
-      byHeight = new Map();
-      this.quads.set(width, byHeight);
-    }
-
-    const handle = this.geometries.add(bitmapQuad(width, height));
-    byHeight.set(height, handle);
-    return handle;
   }
 
   /**
