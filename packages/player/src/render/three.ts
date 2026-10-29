@@ -30,37 +30,10 @@ import {
   TextureSource,
   UniformGroup,
 } from "pixi.js";
-import { isProjective } from "../display/geometry.js";
+import { bitmapScale, type PlaneQuad, placeQuad, SAMPLES } from "../display/plane.js";
 import { drawTarget, releaseDrawTarget } from "./pools.js";
 
-/** The samples a side the bitmap is drawn at before it is averaged to a texel a pixel, as Flash's high quality covers edges. */
-export const SAMPLES = 4;
-
-/** The most texels a side of a bitmap: larger, the object is drawn into it at less than a texel a pixel. */
-const LARGEST = 2048;
-
-/** The most texels the samples a bitmap is drawn at may take (16 MiB): past it, fewer samples. */
-const SAMPLED_TEXELS = 4 * 1024 * 1024;
-
-/** The samples a side, and texels a pixel of the object's space, a bitmap of a w by h rectangle is drawn at. */
-export function bitmapScale(
-  width: number,
-  height: number,
-  largest: number,
-): { samples: number; texels: number } {
-  const texels = Math.min(1, Math.min(LARGEST, largest) / Math.max(width, height));
-  const w = Math.max(1, Math.ceil(width * texels));
-  const h = Math.max(1, Math.ceil(height * texels));
-  let samples = SAMPLES;
-  while (
-    samples > 1 &&
-    (w * samples > largest || h * samples > largest || w * h * samples * samples > SAMPLED_TEXELS)
-  ) {
-    samples /= 2;
-  }
-
-  return { samples, texels };
-}
+export { bitmapScale, SAMPLES } from "../display/plane.js";
 
 /** Each renderer's largest texture a side. */
 const largestTextures = new WeakMap<Renderer, number>();
@@ -317,6 +290,15 @@ export class Plane {
   readonly quad: Mesh<MeshGeometry, Shader>;
   private readonly positions = new Float32Array(8);
   private readonly ws = new Float32Array(4);
+  /** Where place() works out the quad. */
+  private readonly placing: PlaneQuad = {
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    positions: new Float64Array(8),
+    ws: new Float64Array(4),
+  };
   private readonly uvs = new Float32Array(8);
   private readonly geometry: MeshGeometry;
   private readonly shader: Shader;
@@ -383,68 +365,28 @@ export class Plane {
       uniforms.uPixel = pixel;
     }
 
-    // The bitmap from the object's left and top out to whole pixels, a texel a pixel, and a texel
-    // of nothing around. Flash draws it a texel wider and taller than it is, about its centre,
-    // and half a pixel of the stage right and down: so unturned at a texel a pixel its left and
-    // top edges stay where they are, and magnified it grows as much each way.
-    const xFrom = Math.floor(xMin);
-    const yFrom = Math.floor(yMin);
-    const across = Math.ceil(xMax) - xFrom;
-    const down = Math.ceil(yMax) - yFrom;
-    if (!(across >= 1 && down >= 1 && across < 1e6 && down < 1e6)) {
+    const quad = this.placing;
+    if (!placeQuad(m, xMin, yMin, xMax, yMax, quad)) {
       return false;
     }
 
-    const x0 = xFrom - 1;
-    const y0 = yFrom - 1;
-    const width = across + 2;
-    const height = down + 2;
-    const [u, v, w] = isProjective(m) ? [m.u, m.v, m.w] : [0, 0, 1];
-    const cx = xFrom + across / 2;
-    const cy = yFrom + down / 2;
-    const at = (x: number, y: number): [number, number] => {
-      const q = u * x + v * y + w;
-      return [(m.a * x + m.c * y + m.tx) / q, (m.b * x + m.d * y + m.ty) / q];
-    };
-    // Half a pixel of the stage right and down, in the object's space: through the inverse of
-    // how its plane moves a point at the centre.
-    const [ax, ay] = at(cx - 0.5, cy);
-    const [bx, by] = at(cx + 0.5, cy);
-    const [dx, dy] = at(cx, cy - 0.5);
-    const [ex, ey] = at(cx, cy + 0.5);
-    const jxx = bx - ax;
-    const jyx = by - ay;
-    const jxy = ex - dx;
-    const jyy = ey - dy;
-    const det = jxx * jyy - jxy * jyx;
-    const shiftX = det ? (0.5 * jyy - 0.5 * jxy) / det : 0;
-    const shiftY = det ? (0.5 * jxx - 0.5 * jyx) / det : 0;
-    const sx = (across + 1) / across;
-    const sy = (down + 1) / down;
-    const left = cx + shiftX - (across / 2 + 1) * sx;
-    const right = cx + shiftX + (across / 2 + 1) * sx;
-    const top = cy + shiftY - (down / 2 + 1) * sy;
-    const bottom = cy + shiftY + (down / 2 + 1) * sy;
-    for (let i = 0; i < 4; i++) {
-      // Corners in the uvs' order: top left, top right, bottom right, bottom left.
-      const x = i === 1 || i === 2 ? right : left;
-      const y = i >= 2 ? bottom : top;
-      const q = u * x + v * y + w;
-      if (!(q > 0)) {
-        return false;
-      }
-
-      const px = (m.a * x + m.c * y + m.tx) / q;
-      const py = (m.b * x + m.d * y + m.ty) / q;
-      if (px !== this.positions[i * 2] || py !== this.positions[i * 2 + 1] || q !== this.ws[i]) {
+    for (let i = 0; i < 8; i++) {
+      if (quad.positions[i] !== this.positions[i]) {
         this.changed = true;
       }
 
-      this.positions[i * 2] = px;
-      this.positions[i * 2 + 1] = py;
-      this.ws[i] = q;
+      this.positions[i] = quad.positions[i];
     }
 
+    for (let i = 0; i < 4; i++) {
+      if (quad.ws[i] !== this.ws[i]) {
+        this.changed = true;
+      }
+
+      this.ws[i] = quad.ws[i];
+    }
+
+    const { x: x0, y: y0, width, height } = quad;
     this.geometry.getBuffer("aPosition").update();
     this.geometry.getBuffer("aW").update();
     if (x0 !== this.x || y0 !== this.y || width !== this.width || height !== this.height) {
