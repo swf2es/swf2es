@@ -44,10 +44,16 @@ first player loads:
 The packages are ES modules, so serve them with a bundler or an import map
 for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
 `@swf2es/player/scene`, `@swf2es/render/webgl` and
-`@swf2es/context3d/device` among them. The element also takes `salign`,
-`wmode`, `bgcolor`, `base`, `quality` and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which gives
-back its GL context, audio and sockets. It fires `load`, `error` and
+`@swf2es/context3d/device` among them.
+
+## The element and its options
+
+The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
+and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
+gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
+
+## WebAssembly and CSP
 
 Fills, lines and BitmapData's filters and pixel operations are computed by
 `@swf2es/native/render`'s Wasm module, which the page must let compile:
@@ -55,6 +61,8 @@ with WebAssembly SIMD, and under a CSP with `'wasm-unsafe-eval'`. Include
 that entry in the import map: the player loads it with itself, so a
 page without it has no player. Where it cannot compile, the SWF does not
 play, and the element says why.
+
+## Workers
 
 ActionScript's workers (`flash.system.Worker`) run on Web Workers by
 default, as in Flash. `configure({ workers: false })` turns them off for
