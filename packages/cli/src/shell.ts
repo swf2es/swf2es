@@ -54,9 +54,14 @@ export interface ShellOptions {
   workers?: ShellWorkerHost;
   /** The background worker these ABCs run as, in the thread its host started (RuntimeOptions.worker). */
   worker?: ShellWorkerInit;
+  /**
+   * The ABCs' API version, as avmshell's -api gives it, whose series is
+   * the run's: Flash Player's latest, 50, by default.
+   */
+  apiVersion?: number;
 }
 
-/** avmshell's API version for the ABCs it runs, Flash Player's. */
+/** avmshell's API version for the ABCs it runs by default, Flash Player's. */
 const API_VERSION = 50;
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -73,7 +78,7 @@ export function evaluateModule(js: string, name: string): ShellModule {
  * The compiler for one runtime: the libraries and ABCs added to the root
  * domain, and RuntimeOptions.compileAbc for those Domain.loadBytes loads.
  */
-export function shellDomain(compiler: ShellCompiler) {
+export function shellDomain(compiler: ShellCompiler, apiVersion = API_VERSION) {
   // The compiler's number for each of the runtime's domains, and the
   // compiler's index of each ABC loaded into one, in load order.
   const domains = new Map<number, number>([[0, 0]]);
@@ -85,7 +90,7 @@ export function shellDomain(compiler: ShellCompiler) {
   let added = 0;
   let evaluated = 0;
 
-  compiler.reset(API_VERSION);
+  compiler.reset(apiVersion);
 
   /** Add an ABC to the runtime's domain `domain`: 0, or the VerifyError it was rejected with. */
   const add = (bytes: Uint8Array, builtin: boolean, domain = 0): number => {
@@ -162,9 +167,11 @@ export async function runShell(
 
   const { print } = options;
   const load = options.load ?? evaluateModule;
-  const domain = shellDomain(options.compiler);
+  const apiVersion = options.apiVersion ?? API_VERSION;
+  const domain = shellDomain(options.compiler, apiVersion);
   const rt = options.createRuntime({
     print,
+    apiVersion,
     // Domain.loadBytes runs the ABC at once, so its module is evaluated, not imported.
     compileAbc: (bytes, unit) => domain.compileAbc(bytes, unit),
     ...(options.files ? { files: options.files } : {}),

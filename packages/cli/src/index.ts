@@ -2,6 +2,7 @@
 export {
   type AbcInput,
   type ActionsModule,
+  AIR_API_VERSION,
   API_VERSION,
   type Avm1Input,
   compileActionsAhead,

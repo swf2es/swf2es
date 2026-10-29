@@ -40,7 +40,7 @@ function swf2es(...args: string[]) {
 }
 
 /** The modules the player compiles for `swf` as its main movie: the libraries' first. */
-async function playerModules(swf: Uint8Array, libs: Uint8Array[]): Promise<string[]> {
+async function playerModules(swf: Uint8Array, libs: Uint8Array[], air = false): Promise<string[]> {
   const modules: string[] = [];
   const codegen = await createCodegen(wasm);
   const recording: Codegen = Object.create(codegen);
@@ -50,16 +50,24 @@ async function playerModules(swf: Uint8Array, libs: Uint8Array[]): Promise<strin
     return module;
   };
 
-  const scripting = new Scripting(recording);
+  const scripting = new Scripting(recording, { air });
   await scripting.loadLibraries(libs);
   await scripting.code.link(readSwf(swf), scripting.mainDomain, "", {} as Library);
   return modules;
 }
 
 /** The command's modules for the file at `path`, the libraries' first, as manifest.json lists them. */
-function cliModules(path: string, libs: string[], name: string): Buffer[] {
+function cliModules(path: string, libs: string[], name: string, ...options: string[]): Buffer[] {
   const dir = `${out}aot/${name}/`;
-  const r = swf2es(path, "-o", dir, "--emit-libraries", "-q", ...libs.flatMap((l) => ["--lib", l]));
+  const r = swf2es(
+    path,
+    "-o",
+    dir,
+    "--emit-libraries",
+    "-q",
+    ...options,
+    ...libs.flatMap((l) => ["--lib", l]),
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
   const manifest = JSON.parse(readFileSync(`${dir}manifest.json`, "utf8"));
@@ -130,6 +138,34 @@ test("the command's modules are the player's for its cases' SWFs", { skip }, asy
   assert.equal(again.status, 0, again.stderr);
   assert.ok(!existsSync(`${dir}lib-0.js`) && !existsSync(`${dir}lib-1.js`));
   assert.ok(existsSync(`${dir}abc-1.js`) && existsSync(`${dir}notes.txt`));
+});
+
+test("with --air, the command's modules are an AIR player's, keyed apart", { skip }, async () => {
+  const libs = libraryAbcs(`${out}libraries/`);
+  const libPaths = libraryFiles(`${out}libraries/`);
+  const scripted = cases.find((c) => c.name === "scripted");
+  assert.ok(scripted);
+  const abc = compileScripts([scripted.script as string], `${out}scripts-air`).get(
+    scripted.script as string,
+  ) as Uint8Array;
+  const swf = (scripted.swf as (abc: Uint8Array) => Uint8Array)(abc);
+  mkdirSync(`${out}swfs`, { recursive: true });
+  const path = `${out}swfs/scripted-air.swf`;
+  writeFileSync(path, swf);
+
+  assertSame(
+    cliModules(path, libPaths, "scripted-air", "--air"),
+    await playerModules(swf, libs, true),
+  );
+  cliModules(path, libPaths, "scripted-web");
+  const manifest = (name: string) =>
+    JSON.parse(readFileSync(`${out}aot/${name}/manifest.json`, "utf8"));
+  const air = manifest("scripted-air");
+  const web = manifest("scripted-web");
+  assert.deepEqual([air.apiVersion, web.apiVersion], [51, 50]);
+  // A host of the other mode asks for keys the manifest does not have.
+  const keys = (m: { abcs: { key: string }[] }) => new Set(m.abcs.map((e) => e.key));
+  assert.ok([...keys(air)].every((key) => !keys(web).has(key)));
 });
 
 test("the command's modules are the player's for as3pb's ABC", { skip }, async () => {
