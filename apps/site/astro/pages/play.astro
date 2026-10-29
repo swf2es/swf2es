@@ -3,12 +3,11 @@
 // around it, run by src/main.ts (dist/js/, staged in app/). Its ids are what
 // main.ts and tests/site/run.ts look for.
 
-import facts from "virtual:swf2es/facts";
+import { base, facts } from "../site.ts";
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import "../styles/player.css";
 
 const { build, importMap } = facts;
-const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
 ---
 
 <StarlightPage

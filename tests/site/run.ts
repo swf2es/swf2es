@@ -101,7 +101,11 @@ const site = `${root}apps/site/dist/site/`;
 const out = `${here}out/`;
 const mounts: [string, string][] = [["/swf2es/", site]];
 
-execFileSync(process.execPath, [`${root}apps/site/build.ts`], { stdio: "inherit" });
+// Under /swf2es/, as GitHub Pages serves it, whatever SITE_BASE says.
+execFileSync(process.execPath, [`${root}apps/site/build.ts`], {
+  stdio: "inherit",
+  env: { ...process.env, SITE_BASE: "/swf2es/" },
+});
 
 if (process.argv.includes("--serve")) {
   const { url } = await serve(mounts, undefined, false);

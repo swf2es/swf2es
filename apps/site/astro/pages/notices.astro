@@ -2,11 +2,10 @@
 // The licences of what the site serves, and the files each covers, which
 // the build finds by their headers.
 
-import facts from "virtual:swf2es/facts";
+import { base, facts } from "../site.ts";
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 
 const { build, blob, avmplusSource, avmplusCommit, mpl, ruffle } = facts;
-const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
 const licence = (file: string) => `${base}licenses/${file}`;
 const sourceUrl = (file: string) => `${blob}${file}`;
 ---

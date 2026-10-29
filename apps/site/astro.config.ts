@@ -19,13 +19,15 @@ import { readGuide } from "./guide.ts";
 const REPOSITORY = "https://github.com/swf2es/swf2es";
 
 /**
- * What the pages show of the build, as the module virtual:swf2es/facts: the
+ * What the pages show of the build, and the base they link under, as the
+ * module virtual:swf2es/facts (read through astro/site.ts): the
  * pages are bundled, where facts.ts would no longer find the repository by
  * its own URL.
  */
 function facts() {
   const id = "virtual:swf2es/facts";
   const source = `export default ${JSON.stringify({
+    base: BASE,
     build,
     importMap,
     blob,

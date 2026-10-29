@@ -10,8 +10,12 @@ export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const SOURCE = "https://github.com/swf2es/swf2es/blob/";
 export const AVMPLUS = "https://github.com/swf2es/avmplus";
 
-/** Where GitHub Pages serves the site, and where the tests serve it. */
-export const BASE = "/swf2es/";
+const trimmed = (process.env.SITE_BASE ?? "/swf2es/").replace(/^\/+|\/+$/g, "");
+/**
+ * The path the site is served under: SITE_BASE, by default /swf2es/, where
+ * GitHub Pages serves it and the tests do. Always with its slashes, "/" at a root.
+ */
+export const BASE = trimmed ? `/${trimmed}/` : "/";
 
 function head(cwd: string): string {
   try {
