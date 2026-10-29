@@ -34,7 +34,7 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
+import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
@@ -302,6 +302,15 @@ export class RenderView implements Drawer {
     this.keeps.lost();
   };
 
+  /**
+   * Whether bitmaps that ask to be are smoothed: not at the stage's low
+   * quality, nor in a draw for BitmapData at a sample a pixel, as the Pixi
+   * view's snapshot has it.
+   */
+  private get smoothing(): boolean {
+    return this.drawRoot ? this.scale > 1 : this.stageQuality !== "LOW";
+  }
+
   /** The stage's quality, "LOW" to "BEST", which will decide bitmaps' smoothing. */
   get quality(): string {
     return this.stageQuality;
@@ -555,7 +564,7 @@ export class RenderView implements Drawer {
 
       this.geometries.use(quad.id);
       this.textures.use(texture.id);
-      const smooth = (o as BitmapObject).smoothing && this.stageQuality !== "LOW";
+      const smooth = (o as BitmapObject).smoothing && this.smoothing;
       this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
     }
 
@@ -765,6 +774,13 @@ export class RenderView implements Drawer {
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
     const units = Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1;
     const kept = this.filterPlans.get(o);
+    // A draw for BitmapData plans at its own units, leaving the stage's plans be.
+    if (this.drawRoot) {
+      return kept?.units === units
+        ? kept.plan
+        : planFilters(records, units, Number.POSITIVE_INFINITY, kept?.plan ?? null);
+    }
+
     if (kept && kept.units === units) {
       if (kept.records === records) {
         return kept.plan;
@@ -809,6 +825,10 @@ export class RenderView implements Drawer {
     const kept = this.filterPlans.get(o);
     if (cap === Number.POSITIVE_INFINITY || !kept) {
       return plan;
+    }
+
+    if (this.drawRoot) {
+      return planFilters(kept.records, kept.units, cap, plan) ?? plan;
     }
 
     if (kept.cap !== cap || !kept.capped) {
@@ -1334,9 +1354,7 @@ export class RenderView implements Drawer {
    */
   private paintSampler(paint: ImageFill | GradientFill): number {
     if (paint.type === "image") {
-      return (
-        (paint.smooth && this.stageQuality !== "LOW" ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP)
-      );
+      return (paint.smooth && this.smoothing ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP);
     }
 
     if (paint.radial) {
@@ -1449,7 +1467,7 @@ export class RenderView implements Drawer {
       this.walk(o, 1, 0, 0, 1, 0, 0, null, false);
       measureLayers(this.scene, this.rows, this.geometries, this.target);
       plan(this.scene, 0, this.commands);
-      return this.backend.snapshot(
+      const bytes = this.backend.snapshot(
         this.commands,
         this.scene,
         this.rows,
@@ -1462,6 +1480,7 @@ export class RenderView implements Drawer {
         height,
         n,
       );
+      return argbOf(bytes);
     } finally {
       this.target = stage.target;
       this.scale = stage.scale;
@@ -1483,11 +1502,16 @@ export class RenderView implements Drawer {
       return onStage;
     }
 
+    // One drawn through no inverse, scaled to nothing on the stage, has no place to measure the mask
+    // from: it masks as it stands on the stage.
     const rootInverse = invert(toStageFlat(root));
     return rootInverse ? concat(concat(onStage, rootInverse), this.drawMatrix) : onStage;
   }
 
-  /** Drawn on the GPU into a store, which this renderer does not keep there: BitmapData.draw takes a snapshot. */
+  /**
+   * Drawn on the GPU into a store, which this renderer does not keep there:
+   * BitmapData.draw takes a snapshot.
+   */
   drawInto(
     _store: BitmapStore,
     _o: DisplayObject,

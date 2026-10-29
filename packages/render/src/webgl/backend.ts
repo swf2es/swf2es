@@ -255,6 +255,9 @@ export class WebGLBackend {
     target: Target,
     root: Layer | null = null,
   ): void {
+    // A frame drawn into a layer, for BitmapData, is no frame of the canvas': idle layers are
+    // counted in the canvas' frames.
+    const counted = root === null;
     const gl = this.gl;
     if (gl.isContextLost()) {
       return;
@@ -428,15 +431,17 @@ export class WebGLBackend {
     }
 
     state.stencil(null);
-    this.dropIdleLayers();
-    this.frame++;
+    if (counted) {
+      this.dropIdleLayers();
+      this.frame++;
+    }
   }
 
   /**
    * A frame drawn into a layer `samples` times the size of a `width` by
    * `height` bitmap a side, as `execute` draws, then halved till a sample a
-   * pixel, and read back: premultiplied ARGB, a row at a time from the top.
-   * BitmapData.draw takes its pixels so, as the Pixi view's snapshot does.
+   * pixel, and read back: premultiplied RGBA bytes, a row at a time from
+   * the top, as BitmapData.draw takes them, as the Pixi view's snapshot does.
    */
   snapshot(
     commands: Commands,
@@ -450,14 +455,14 @@ export class WebGLBackend {
     width: number,
     height: number,
     samples: number,
-  ): Uint32Array {
+  ): Uint8Array {
     const gl = this.gl;
-    const pixels = new Uint32Array(width * height);
+    const bytes = new Uint8Array(width * height * 4);
     if (gl.isContextLost()) {
-      return pixels;
+      return bytes;
     }
 
-    let layer = this.takeLayer(width * samples, height * samples, true);
+    let layer = this.takeLayer(width * samples, height * samples);
     this.execute(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
     for (let k = samples; k > 1; k /= 2) {
       const half = this.filters.halve(layer, (width * k) / 2, (height * k) / 2);
@@ -465,17 +470,10 @@ export class WebGLBackend {
       layer = half;
     }
 
-    const bytes = new Uint8Array(width * height * 4);
     this.state.bindFramebuffer(layer.framebuffer);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
     this.giveLayer(layer);
-    for (let i = 0; i < pixels.length; i++) {
-      const at = i * 4;
-      pixels[i] =
-        ((bytes[at + 3] << 24) | (bytes[at] << 16) | (bytes[at + 1] << 8) | bytes[at + 2]) >>> 0;
-    }
-
-    return pixels;
+    return bytes;
   }
 
   /** The free layers undrawn into for LAYER_IDLE_FRAMES let go of. */

@@ -11,6 +11,7 @@ import {
   type TextureSource,
 } from "pixi.js";
 import {
+  argbOf,
   type BitmapStore,
   characterStore,
   type GpuCopy,
@@ -46,17 +47,6 @@ function destroyTexture(texture: Texture): void {
   source.style.removeAllListeners("change");
   texture.destroy(true);
   (source as unknown as { options: { resource?: unknown } }).options.resource = undefined;
-}
-
-/** RGBA bytes read from a texture as premultiplied ARGB. */
-export function argbOf(bytes: Uint8Array | Uint8ClampedArray): Uint32Array {
-  const out = new Uint32Array(bytes.length / 4);
-  for (let i = 0; i < out.length; i++) {
-    const j = i * 4;
-    out[i] = ((bytes[j + 3] << 24) | (bytes[j] << 16) | (bytes[j + 1] << 8) | bytes[j + 2]) >>> 0;
-  }
-
-  return out;
 }
 
 /**

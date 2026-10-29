@@ -56,7 +56,7 @@ void main(void) {
 
 const HEADER = "#version 300 es\nprecision highp float;\n";
 
-/** The input as it is, read where the vertex shader says: halved, at the corner four texels share. */
+/** The input as it is, read where the vertex shader says: halved, at a corner four texels share. */
 const COPY = `in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;

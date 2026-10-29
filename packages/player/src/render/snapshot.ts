@@ -3,9 +3,9 @@
 // averaged down to the BitmapData's pixels, read back or drawn into its
 // store's texture.
 import { Container as PixiContainer, type RenderTexture, Sprite } from "pixi.js";
-import type { BitmapStore } from "../bitmap/bitmap.js";
+import { argbOf, type BitmapStore } from "../bitmap/bitmap.js";
 import type { DisplayObject } from "../display/display.js";
-import { argbOf, gpuBitmaps } from "./bitmaps.js";
+import { gpuBitmaps } from "./bitmaps.js";
 import { drawTarget, releaseDrawTarget } from "./pools.js";
 import type { PixiView } from "./view.js";
 
