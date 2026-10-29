@@ -21,11 +21,13 @@
 //
 //   node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]
 //
-// --update writes the counts as the new baseline, draw-counts.json; --runs
+// --update writes the counts as the new baseline, draw-counts.json, or
+// draw-counts-own.json for the renderer of swf2es's own (SWF2ES_RENDERER=own); --runs
 // plays each case N times and fails if any count differs between them;
 // --write-swfs DIR writes the cases' SWFs there and stops, for another player.
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDemos } from "../../apps/site/demos.ts";
 import { zlibCompress } from "../../packages/format/dist/index.js";
@@ -34,7 +36,9 @@ import { benchPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const baselinePath = `${here}draw-counts.json`;
+// The renderer of swf2es's own (SWF2ES_RENDERER=own) is held to a baseline of its own.
+const baselinePath =
+  process.env.SWF2ES_RENDERER === "own" ? `${here}draw-counts-own.json` : `${here}draw-counts.json`;
 
 /** The fewest frames of warm-up: past render/settle.ts's SETTLE_MS at 30 frames a second. */
 const WARM_UP = 90;
@@ -478,7 +482,10 @@ if (writeAt >= 0) {
 
 // The libraries bounce plays on, served to the page.
 libraryAbcs();
-const baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as Record<string, Counts>;
+// None yet for a renderer --update has not counted: every case is then missing from it.
+const baseline = (
+  existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, "utf8")) : {}
+) as Record<string, Counts>;
 const failures: string[] = [];
 const lower: string[] = [];
 const measured: Record<string, Counts> = { ...baseline };
@@ -514,7 +521,7 @@ for (const [name, swf] of cases()) {
   }
 
   if (!was) {
-    failures.push(`${name}: not in draw-counts.json; run with --update to add it`);
+    failures.push(`${name}: not in ${basename(baselinePath)}; run with --update to add it`);
     continue;
   }
 

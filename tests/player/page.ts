@@ -46,7 +46,8 @@ import { type RecordedEvent, Replay } from "./replay.ts";
 const fillOptions = new URLSearchParams(location.search).has("nativeFills")
   ? { fillTessellator: new (await import("@swf2es/native/tessellate")).Tessellator().tessellate }
   : {};
-// The renderer of swf2es's own in place of Pixi (SWF2ES_RENDERER=own, chrome.ts): reference cases only.
+// The renderer of swf2es's own in place of Pixi (SWF2ES_RENDERER=own, chrome.ts): the reference
+// cases, and the bench (benchSwf), which draw-counts.ts counts.
 const ownRenderer = new URLSearchParams(location.search).has("own");
 const bitmapKernel = new URLSearchParams(location.search).has("nativeBitmaps")
   ? new (await import("@swf2es/native/bitmap")).Convolver()
@@ -559,6 +560,7 @@ async function ownSurface(
   shownAt: number,
   zoom: number,
   antialias: boolean,
+  preserve = true,
 ): Promise<Surface> {
   const { RenderView } = await import("@swf2es/player/scene");
   const view = new RenderView({
@@ -566,7 +568,8 @@ async function ownSurface(
     height: player.height,
     resolution,
     background: player.background,
-    preserveDrawingBuffer: true,
+    // Kept for a read of the frame after it is shown; a bench's frames are read not.
+    preserveDrawingBuffer: preserve,
     fillTessellator: fillOptions.fillTessellator,
     // As many samples as a browser's antialiased context takes by default, as pixiSurface's has.
     samples: antialias ? 4 : 1,
@@ -783,10 +786,10 @@ function meter(renderer: object): { read(): Record<string, number> } {
       }
     };
   };
-  around(r.renderPipes.flashTable, (by) => {
+  around(r.renderPipes?.flashTable, (by) => {
     inTable += by;
   });
-  around(r.renderPipes.graphics, (by) => {
+  around(r.renderPipes?.graphics, (by) => {
     inGraphics += by;
   });
   wrap(gl, "drawElements", () => {
@@ -794,11 +797,11 @@ function meter(renderer: object): { read(): Record<string, number> } {
       add("tableLoopDraws");
     }
   });
-  wrap(r.renderPipes.graphics, "execute", () => add("aloneGraphics"));
-  wrap(r.renderPipes.batch, "execute", () => add("batches"));
+  wrap(r.renderPipes?.graphics, "execute", () => add("aloneGraphics"));
+  wrap(r.renderPipes?.batch, "execute", () => add("batches"));
   // The most textures a batch drew with: past WebGL 2's least 16 units, a GPU with more would
   // batch what software GL splits.
-  wrap(r.renderPipes.batch, "execute", (args) => {
+  wrap(r.renderPipes?.batch, "execute", (args) => {
     const textures = (args[0] as { textures?: { count: number } }).textures?.count ?? 0;
     counts.batchTexturesMost = Math.max(counts.batchTexturesMost ?? 0, textures);
   });
@@ -811,27 +814,31 @@ function meter(renderer: object): { read(): Record<string, number> } {
     add("rebuilds");
     add("rebuildMs", took);
   });
-  // Tessellation: a context Pixi has no GPU data for yet, or one marked dirty, built now.
-  const contexts = r.graphicsContext as unknown as Record<string, unknown>;
-  const update = contexts.updateGpuContext as (context: object) => unknown;
-  contexts.updateGpuContext = function (
-    this: unknown,
-    context: { dirty: boolean; _gpuData: object },
-  ) {
-    const fresh = context.dirty || !(context._gpuData as Record<number, unknown>)[r.uid];
-    const begun = performance.now();
-    const out = update.call(this, context);
-    if (fresh) {
-      add("tessellated");
-      add("tessMs", performance.now() - begun);
-      add(
-        "tessVertices",
-        r.graphicsContext.getGpuContext(context).geometryData.vertices.length / 2,
-      );
-    }
+  // Tessellation: a context Pixi has no GPU data for yet, or one marked dirty, built now. The
+  // renderer of swf2es's own has no contexts: its GL calls alone are counted.
+  const contexts = r.graphicsContext as unknown as Record<string, unknown> | undefined;
+  const update = contexts?.updateGpuContext as ((context: object) => unknown) | undefined;
+  if (contexts && update) {
+    contexts.updateGpuContext = function (
+      this: unknown,
+      context: { dirty: boolean; _gpuData: object },
+    ) {
+      const fresh = context.dirty || !(context._gpuData as Record<number, unknown>)[r.uid];
+      const begun = performance.now();
+      const out = update.call(this, context);
+      if (fresh) {
+        add("tessellated");
+        add("tessMs", performance.now() - begun);
+        add(
+          "tessVertices",
+          r.graphicsContext.getGpuContext(context).geometryData.vertices.length / 2,
+        );
+      }
 
-    return out;
-  };
+      return out;
+    };
+  }
+
   // The table's draw calls and the contexts' batches they drew, whichever way it draws.
   let tableCalls = transformTableDrawn().calls;
   let tableDraws = transformTableDrawn().draws;
@@ -902,24 +909,40 @@ async function benchSwf(
     const uncaught: unknown[] = [];
     const scripting = await scriptingFor(bytes, [], null, uncaught);
     const player = new Player(bytes, scripting);
-    const renderer = await autoDetectRenderer({
-      preference: "webgl",
-      width: player.width,
-      height: player.height,
-      background: player.background,
-      antialias,
-      resolution: 1,
-      // As a host that draws blend modes makes it: a full-screen copy a frame.
-      useBackBuffer: backBuffer,
-    });
-    document.body.replaceChildren(renderer.canvas);
-    const view = new PixiView(renderer, fillOptions);
+    // With ?own, the renderer of swf2es's own draws, its walk and draw one step: timed as the
+    // draw, the sync none.
+    // Its drawing buffer not kept, as Pixi's renderer here keeps none.
+    const own = ownRenderer ? await ownSurface(player, 1, 1, 1, antialias, false) : null;
+    // Pixi's render groups alone nest; its back buffer the renderer of swf2es's own needs not, as
+    // it copies what is behind a blend itself.
+    if (own && nestedGroups) {
+      throw new Error("--nested-groups benches the Pixi view alone");
+    }
+
+    const renderer = own
+      ? null
+      : await autoDetectRenderer({
+          preference: "webgl",
+          width: player.width,
+          height: player.height,
+          background: player.background,
+          antialias,
+          resolution: 1,
+          // As a host that draws blend modes makes it: a full-screen copy a frame.
+          useBackBuffer: backBuffer,
+        });
+    const pixi = renderer ? new PixiView(renderer, fillOptions) : null;
+    document.body.replaceChildren(
+      own ? own.canvas : (renderer as NonNullable<typeof renderer>).canvas,
+    );
+    const render = (root: Player["stage"]) => (own ? own.render(root) : pixi?.render(root));
+    const drawer = own ? own.drawer : (pixi as PixiView);
     if (scripting) {
-      scripting.drawer = view;
+      scripting.drawer = drawer;
     }
 
     if (player.avm1) {
-      player.avm1.drawer = view;
+      player.avm1.drawer = drawer;
     }
 
     await player.start();
@@ -932,15 +955,15 @@ async function benchSwf(
       throw uncaught[0];
     }
 
-    // Which renderer Pixi chose and what it draws with; WebGPU when WebGL
-    // could not be had, which the output must say.
-    const { gl, gpu } = renderer as unknown as {
+    // Which renderer drew, the renderer of swf2es's own or which one Pixi chose, and what it draws
+    // with; WebGPU when WebGL could not be had, which the output must say.
+    const { gl, gpu } = (renderer ?? { gl: own?.gl }) as unknown as {
       gl?: WebGLRenderingContext;
       gpu?: { adapter: { info?: { description?: string; vendor?: string } }; device: GPUDevice };
     };
     const info = gl?.getExtension("WEBGL_debug_renderer_info");
     name = gl
-      ? `WebGL, ${String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))}`
+      ? `${own ? "own, " : ""}WebGL, ${String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))}`
       : gpu
         ? `WebGPU, ${gpu.adapter.info?.description || gpu.adapter.info?.vendor || "unknown adapter"}`
         : "unknown renderer";
@@ -956,9 +979,9 @@ async function benchSwf(
       (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ??
       0;
     const toggled = toggle >= 0 ? await toggling(player.root, toggle) : [];
-    view.render(player.stage);
-    if (nestedGroups) {
-      const outer = view.stage.children[0]?.children[1];
+    render(player.stage);
+    if (nestedGroups && pixi) {
+      const outer = pixi.stage.children[0]?.children[1];
       const inner = outer?.children[1];
       if (!outer || !inner) {
         throw new Error("missing nested benchmark containers");
@@ -966,15 +989,17 @@ async function benchSwf(
 
       outer.enableRenderGroup();
       inner.enableRenderGroup();
-      view.render(player.stage);
+      render(player.stage);
     }
     await finish();
     const first = performance.now() - start;
     const heapBefore = heapNow();
     const meters: Record<string, number>[] = [];
     // Only when asked for: each call wrapped and timed would slow the frames timed.
-    const counter = metered ? meter(renderer) : { read: () => ({}) as Record<string, number> };
-    let stroked = view.counts.strokeContexts;
+    const counter = metered
+      ? meter(renderer ?? { gl })
+      : { read: () => ({}) as Record<string, number> };
+    let stroked = pixi?.counts.strokeContexts ?? 0;
     for (let frame = 2; frame <= frames; frame++) {
       // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
       if (cpuProfile && frame === PROFILED_FROM) {
@@ -1000,9 +1025,14 @@ async function benchSwf(
         throw uncaught[0];
       }
 
-      view.prepare(player.stage);
+      pixi?.prepare(player.stage);
       const synced = performance.now();
-      renderer.render(view.stage);
+      if (own) {
+        own.render(player.stage);
+      } else if (renderer && pixi) {
+        renderer.render(pixi.stage);
+      }
+
       const drawn = performance.now();
       // Pipelined, the GPU's work goes on behind the next frames', as a page's does, and only
       // every so many frames is waited for: what the frames take is then the slower of the two.
@@ -1014,15 +1044,18 @@ async function benchSwf(
       sync.push(synced - ticked);
       draw.push(drawn - synced);
       finished.push(performance.now() - drawn);
-      // Lines' contexts made, tessellated or not yet.
+      // Lines' contexts made, tessellated or not yet: the Pixi view's alone.
       const reading = counter.read();
-      reading.strokeContexts = view.counts.strokeContexts - stroked;
-      stroked = view.counts.strokeContexts;
+      if (pixi) {
+        reading.strokeContexts = pixi.counts.strokeContexts - stroked;
+        stroked = pixi.counts.strokeContexts;
+      }
+
       meters.push(reading);
       // Renders no tick came before, as a host that draws on every animation frame does.
       for (let k = 0; k < idleRenders; k++) {
         const begun = performance.now();
-        view.render(player.stage);
+        render(player.stage);
         await finish();
         idle.push(performance.now() - begun);
       }
@@ -1038,7 +1071,7 @@ async function benchSwf(
       (console as Profiling).profileEnd("frames");
     }
 
-    const counts = { ...view.counts };
+    const counts = pixi ? { ...pixi.counts } : {};
     const heap: [number, number] = [heapBefore, heapNow()];
     // Everything still held while chrome.ts collects and measures what the frames left (benchHold).
     if (hold) {
@@ -1047,7 +1080,12 @@ async function benchSwf(
       });
     }
 
-    renderer.destroy();
+    if (own) {
+      own.destroy();
+    } else {
+      renderer?.destroy();
+    }
+
     return {
       counts,
       meters,

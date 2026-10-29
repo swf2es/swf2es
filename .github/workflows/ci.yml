@@ -43,8 +43,9 @@ jobs:
       - run: node tests/player/run.ts && node tests/player/context-loss.ts && node tests/player/leak.ts
         env:
           SWF2ES_NATIVE_FILLS: "1"
-      # The renderer of swf2es's own (docs/renderer.md): none of the cases it drew may fail again.
-      - run: node tests/player/run.ts
+      # The renderer of swf2es's own (docs/renderer.md): none of the cases it drew may fail again,
+      # nor its draw counts rise past draw-counts-own.json.
+      - run: node tests/player/run.ts && node tests/player/draw-counts.ts
         env:
           SWF2ES_RENDERER: own
       - run: pnpm test:checked
