@@ -13,7 +13,7 @@
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
-import { convex, crossingFill } from "../render/fill-polygons.js";
+import { convex, crossingFill } from "./fill-polygons.js";
 import {
   containment,
   type FillGeometry,

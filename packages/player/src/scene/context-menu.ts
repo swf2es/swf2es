@@ -9,7 +9,7 @@ export function aboutCaption(build: string | null): string {
 }
 
 /**
- * DOM menus stay outside Pixi's scene graph and exist only while open.
+ * DOM menus stay outside the canvas and exist only while open.
  * `shown` is what the canvas shows in stage coordinates, which may reach
  * past the stage into the margins, as Flash takes the pointer there too;
  * the stage where it is not given.

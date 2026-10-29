@@ -19,7 +19,7 @@ import {
   trace,
 } from "../scene/fills.js";
 import { takeBatchedCopy, weigh } from "./color.js";
-import { crossingFill } from "./fill-polygons.js";
+import { crossingFill } from "../scene/fill-polygons.js";
 import {
   type DeviceMemory,
   deviceMemory,

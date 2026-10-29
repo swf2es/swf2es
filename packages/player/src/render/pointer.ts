@@ -11,7 +11,7 @@ import { canvasPoint, wheelLines } from "../input/canvas.js";
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
-import { bindContextMenu } from "./context-menu.js";
+import { bindContextMenu } from "../scene/context-menu.js";
 
 /**
  * Where a pointer event is on the SWF's stage. CSS `object-fit` shows the

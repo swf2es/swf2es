@@ -10,7 +10,7 @@ import type { GeometryData } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
 import type { GradientFill, ImageFill, Path, ShapeLayer, TriangleMesh } from "../display/shapes.js";
-import { convex } from "../render/fill-polygons.js";
+import { convex } from "./fill-polygons.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**

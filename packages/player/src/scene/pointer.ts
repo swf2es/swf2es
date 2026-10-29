@@ -7,7 +7,7 @@ import { canvasPoint, wheelLines } from "../input/canvas.js";
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
-import { bindContextMenu } from "../render/context-menu.js";
+import { bindContextMenu } from "./context-menu.js";
 
 /** The part of the stage the canvas shows, read as each event comes, as the view may be zoomed. */
 export interface ShownStage {

@@ -1,7 +1,7 @@
-// A shape's fills resolved for drawing, by either renderer: each fill's
-// contours flattened as Flash's curves need and tessellated by the native
-// tessellator, else planned for JS as crossing spans or a containment tree
-// (render/fill-polygons.ts). Nothing here draws.
+// A shape's fills resolved for drawing: each fill's contours flattened as
+// Flash's curves need and tessellated by the native tessellator, else
+// planned for JS as crossing spans or a containment tree
+// (fill-polygons.ts). Nothing here draws.
 import type { Region as Area } from "../display/gradients.js";
 import {
   CUBIC,
@@ -12,7 +12,7 @@ import {
   type Path,
   type ShapeLayer,
 } from "../display/shapes.js";
-import { crossingFill } from "../render/fill-polygons.js";
+import { crossingFill } from "./fill-polygons.js";
 
 /** Triangles a tessellator made of a fill: positions, two a vertex, and indices, three a triangle. */
 export interface FillGeometry {
