@@ -481,3 +481,37 @@ test("a layer short of memory gives each fill what a layer of its own would", ()
     }
   }
 });
+
+test("one convex contour is a fan, its points as given; one that winds round twice is not", () => {
+  const tess = new Tessellator();
+  for (const n of [3, 4, 7, 32]) {
+    const points = Array.from({ length: n }, (_, i) => [
+      100 * Math.cos((2 * Math.PI * i) / n),
+      100 * Math.sin((2 * Math.PI * i) / n),
+    ]).flat();
+    for (const nonZero of [false, true]) {
+      const geometry = tess.tessellate([points], nonZero);
+      assert.ok(geometry);
+      assert.deepEqual(Array.from(geometry.vertices), points);
+      assert.equal(geometry.indices.length, (n - 2) * 3);
+      const expected = (n / 2) * 100 * 100 * Math.sin((2 * Math.PI) / n);
+      assert.ok(Math.abs(area(geometry) - expected) < 1e-6 * expected, `${n}-gon`);
+    }
+  }
+
+  // A point along an edge, and the other way round: a fan still.
+  assert.equal(area(tess.tessellate([[0, 0, 5, 0, 10, 0, 0, 10]], false)), 50);
+  assert.equal(area(tess.tessellate([[0, 0, 0, 10, 10, 0]], true)), 50);
+
+  // A pentagram turns one way all round but winds twice: even-odd leaves its centre empty.
+  const star = Array.from({ length: 5 }, (_, i) => [
+    100 * Math.cos(Math.PI / 2 + (4 * Math.PI * i) / 5),
+    100 * Math.sin(Math.PI / 2 + (4 * Math.PI * i) / 5),
+  ]).flat();
+  const odd = area(tess.tessellate([star], false));
+  const all = area(tess.tessellate([star], true));
+  const inner = (100 * Math.sin(Math.PI / 10)) / Math.sin((7 * Math.PI) / 10);
+  const pentagon = 2.5 * inner * inner * Math.sin((2 * Math.PI) / 5);
+  assert.ok(Math.abs(all - odd - pentagon) < 1e-6 * pentagon);
+  tess.dispose();
+});

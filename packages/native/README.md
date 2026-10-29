@@ -269,7 +269,11 @@ The absolute memory ceiling is 128 MiB, including static data, the C stack
 and the arena. Instances above 8 MiB are discarded after the call. Options
 can lower the limit or retained capacity. Coordinates that are not
 finite, malformed contours, more than one million input vertices and
-running out of memory return `null`. What libtess2 fails at, gives output
+running out of memory return `null`. A fill of one convex contour, a
+triangle above all, is a fan from its first point, its points as given,
+with no sweep: convex as every turn goes one way and its edges go back
+along each axis at most twice, which a contour winding round more than
+once, as a pentagram, does not pass. What libtess2 fails at, gives output
 unfit to draw for, or cannot take (coordinates outside ±2^23), the module
 fills by bands (`src/render/bands.zig`): the fill cut at every vertex's
 height and every height two edges cross at, each span the rule fills a
