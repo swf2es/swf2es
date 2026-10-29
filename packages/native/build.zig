@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) void {
     mp3(b, wasm(b, &.{.bulk_memory}), optimize, include);
     compress(b, wasm(b, &.{.bulk_memory}), optimize, include);
     tessellate(b, wasm(b, &.{.bulk_memory}), optimize, include);
+    strokes(b, wasm(b, &.{.bulk_memory}), optimize);
 }
 
 fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.ResolvedTarget {
@@ -246,6 +247,23 @@ fn tessellate(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
     const module = b.addExecutable(.{ .name = "tessellate", .root_module = root });
     module.entry = .disabled;
     module.stack_size = 256 * 1024;
+    module.max_memory = 128 * 1024 * 1024;
+    b.installArtifact(module);
+}
+
+/// A layer's opaque lines as triangles, ported from the player's scene/strokes.ts.
+fn strokes(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize) void {
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/strokes/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+        .strip = true,
+    });
+    root.export_symbol_names = &.{ "input", "build", "positionsAt", "colorsAt", "indicesAt", "vertexCount", "indexCount" };
+    const module = b.addExecutable(.{ .name = "strokes", .root_module = root });
+    module.entry = .disabled;
+    module.stack_size = 64 * 1024;
     module.max_memory = 128 * 1024 * 1024;
     b.installArtifact(module);
 }

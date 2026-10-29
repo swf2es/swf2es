@@ -73,6 +73,13 @@ const BINARIES: Binary[] = [
     ],
     note: "; libtess2 is under SGI Free Software License B",
   },
+  {
+    path: "strokes",
+    modules: { binary: "strokes" },
+    imports: [],
+    vendored: [],
+    note: "",
+  },
 ];
 
 /** Our notice for the LZMA SDK, which has no licence file to copy. */

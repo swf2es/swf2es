@@ -17,6 +17,10 @@
       "types": "./dist/mp3/index.d.ts",
       "default": "./dist/mp3/index.js"
     },
+    "./strokes": {
+      "types": "./dist/strokes/index.d.ts",
+      "default": "./dist/strokes/index.js"
+    },
     "./tessellate": {
       "types": "./dist/tessellate/index.d.ts",
       "default": "./dist/tessellate/index.js"
