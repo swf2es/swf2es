@@ -5,7 +5,7 @@
 import { Badge } from "@astrojs/starlight/components";
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { PACKAGE_LEVEL } from "../../compatibility.ts";
-import { base, compatibility, facts } from "../site.ts";
+import { base, compatibility, facts, url } from "../site.ts";
 
 const { tamarin, corpus, api, groups } = compatibility;
 const { build, blob } = facts;
@@ -26,6 +26,10 @@ const bar = (done: number, of: number) => `--done: ${of === 0 ? 0 : (100 * done)
 const natives = (group: string) => groups[group]?.natives ?? 0;
 const pkg = (name: string) => api.packages.find((p) => p.name === name);
 const printing = pkg("flash.printing");
+const varyingClause =
+  tamarin.varying.length > 0
+    ? `, and ${tamarin.varying.length} because swf2es' result varies from run to run`
+    : "";
 
 const SUITES: Record<string, string> = {
   ecma3: "ECMAScript 3",
@@ -115,19 +119,19 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     name: "ExternalInterface",
     status: "supported",
     note: "Calls between the SWF and the page.",
-    href: `${base}docs/externalinterface/`,
+    href: url("docs/externalinterface/"),
   },
   {
     name: "Sockets",
     status: "partial",
     note: "In a browser through a WebSocket relay you run, which this site has none of; directly in node and the desktop app.",
-    href: `${base}docs/sockets-and-files/`,
+    href: url("docs/sockets-and-files/"),
   },
   {
     name: "Workers",
     status: "supported",
     note: "In Web Workers, where the page is cross-origin isolated.",
-    href: `${base}docs/workers/`,
+    href: url("docs/workers/"),
   },
   {
     name: "Stage3D",
@@ -270,17 +274,17 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   </details>
   <p class="note">
     Of the {number(tamarin.compiled)} tests avmshell compiles, {tamarin.uncounted.length} are left
-    out because avmshell's own counts follow the date or the machine{
-      tamarin.varying.length > 0 ? (
-        <>
-          , and {tamarin.varying.length} because swf2es' result varies from run to run (
-          {tamarin.varying.map((t, i) => <>{i > 0 && ", "}<code>{t}</code></>)})
-        </>
-      ) : null
-    }.{
-      tamarin.unrecorded.length > 0 && (
-        <> {tamarin.unrecorded.length} are not in swf2es' baseline and count as not matching.</>
+    out because avmshell's own counts follow the date or the machine{varyingClause}.
+    {
+      tamarin.varying.length > 0 && (
+        <span>
+          Those that vary: {tamarin.varying.map((t, i) => <>{i > 0 && ", "}<code>{t}</code></>)}.
+        </span>
       )
+    }
+    {
+      tamarin.unrecorded.length > 0 &&
+        `${tamarin.unrecorded.length} are not in swf2es' baseline and count as not matching.`
     }
   </p>
 
@@ -522,6 +526,10 @@ const features: { name: string; status: Status; note: string; href: string }[] =
 
   .package code {
     justify-self: start;
+  }
+
+  .package .counts {
+    justify-self: end;
   }
 
   /* On a phone the figures say it: the bars of the tables go. */
