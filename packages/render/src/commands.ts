@@ -25,6 +25,17 @@ export const FILTER = 7;
  * and height, then its id, are params from `a`.
  */
 export const COMPOSITE = 8;
+/**
+ * A filtered layer drawn ahead of the stage (plan), its draws and masks
+ * the operations between: begun over the rectangle of params from `a`,
+ * its output held as held output `b`; ended with chain `a` of the frame's
+ * filters run over it, held output `b`. Held layers come before the
+ * stage's CLEAR, and the backend draws them side by side, their passes too.
+ */
+export const HOLD_PUSH = 9;
+export const HOLD_POP = 10;
+/** Held output `a` composited onto the target drawn into, in blend mode `b`, coloured by row `c` (or -1). */
+export const HELD = 11;
 
 /**
  * What a frame asks of the backend, in order: each operation an opcode and

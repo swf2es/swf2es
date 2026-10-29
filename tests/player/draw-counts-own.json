@@ -10,10 +10,10 @@
   "bounce": {
     "calls": 52.33,
     "subDraws": 52.33,
-    "useProgram": 48.22,
-    "bindVertexArray": 19.47,
-    "bindFramebuffer": 47.92,
-    "uniforms": 325.17
+    "useProgram": 21.5,
+    "bindVertexArray": 10.2,
+    "bindFramebuffer": 22.17,
+    "uniforms": 210.45
   },
   "mixed-crowd": {
     "calls": 1,
