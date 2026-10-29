@@ -319,6 +319,12 @@ export function bitmapDataClass(host: BitmapHost): Obj {
     return 0;
   });
   method("draw", 0, (store, args, v) => {
+    // A matrix given as null or undefined draws nothing, -4, before the source is looked at;
+    // a draw returns 0, no source -2, a disposed one -3 (adl).
+    if (args.length > 1 && (args[1] === null || args[1] === undefined)) {
+      return -4;
+    }
+
     const m = matrixOf(args[1], v);
     const c = colorOf(args[2]);
     // draw takes anything that is no blend mode as normal (adl).
@@ -332,7 +338,7 @@ export function bitmapDataClass(host: BitmapHost): Obj {
       }
 
       drawBitmap(store, source, m, c, blend, clip, smooth);
-      return undefined;
+      return 0;
     }
 
     const d = displayOf(args[0]);
@@ -345,7 +351,7 @@ export function bitmapDataClass(host: BitmapHost): Obj {
       drawDisplayObject(host.drawer, store, d, m, c, blend, clip, samplesOf(host.quality));
     }
 
-    return undefined;
+    return 0;
   });
   method("clone", 0, (store, _, v, self) => {
     // A bare object of this one's prototype, a subclass's too (Ruffle).

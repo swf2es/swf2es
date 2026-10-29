@@ -10209,6 +10209,16 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
+  {
+    // BitmapData.draw of a clip with erase and alpha, as AS3's (draw-erase).
+    name: "avm1-draw-erase",
+    swf: avm1Script("draw-erase", 8),
+    traced: true,
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   ...[7, 8].map(
     (version): PlayerCase => ({
       name: `avm1-drawing-frames-swf${version}`,
