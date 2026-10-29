@@ -203,3 +203,17 @@ For more information, please see
 ** Except as contained in this notice, the name of Silicon Graphics, Inc. shall not
 ** be used in advertising or otherwise to promote the sale, use or other dealings in
 ** this Software without prior written authorization from Silicon Graphics, Inc.
+
+
+@swf2es/native/render: SVG's feTurbulence (perlinNoise)
+=======================================================
+
+src/render/pixels.zig's noise for BitmapData.perlinNoise is derived from
+the reference implementation of feTurbulence in Scalable Vector Graphics
+(SVG) 1.1 (Second Edition),
+https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement
+
+Copyright © 2015 W3C® (MIT, ERCIM, Keio, Beihang). This software or
+document includes material copied from or derived from SVG 1.1, under the
+W3C Software and Document License:
+https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document

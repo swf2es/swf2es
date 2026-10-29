@@ -2,33 +2,26 @@
 // (bitmap.ts): each on unmultiplied ARGB as Flash's results show it works,
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
+import type { CopyOp } from "@swf2es/native/render";
 import { type BitmapStore, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
-import { Turbulence } from "./turbulence.js";
+import { bitmapKernel } from "./kernel.js";
+import { perlinSetup } from "./turbulence.js";
 
 const M = 2147483647;
 
 /**
- * Flash's noise generator: Park-Miller's minimal standard, x * 16807 mod
- * 2^31 - 1, a seed of 0 taken as 1 and one under 0 as -seed + 1 (all 25
- * pixels Ruffle's bitmapdata_getvector records of noise(0) match).
+ * Flash's noise generator's first state: Park-Miller's minimal standard,
+ * x * 16807 mod 2^31 - 1, a seed of 0 taken as 1 and one under 0 as
+ * -seed + 1 (all 25 pixels Ruffle's bitmapdata_getvector records of
+ * noise(0) match). The render module draws from it (pixels.zig).
  */
-class ParkMiller {
-  private x: number;
-
-  constructor(seed: number) {
-    let s = seed | 0;
-    if (s <= 0) {
-      s = -s + 1;
-    }
-
-    this.x = s % M || 1;
+function noiseState(seed: number): number {
+  let s = seed | 0;
+  if (s <= 0) {
+    s = -s + 1;
   }
 
-  next(): number {
-    // 16807 * x stays below 2^46: exact in a double.
-    this.x = (this.x * 16807) % M;
-    return this.x;
-  }
+  return s % M || 1;
 }
 
 /**
@@ -46,36 +39,17 @@ export function noise(
   channels: number,
   gray: boolean,
 ): void {
-  const rng = new ParkMiller(seed);
   const lo = Math.max(0, Math.min(255, low));
   const hi = Math.max(0, Math.min(255, high));
-  const span = hi - lo + 1;
-  const draw = () => (span <= 0 ? lo : lo + (rng.next() % span));
-  const alpha = (channels & 8) !== 0 && store.transparent;
-  for (let i = 0; i < store.pixels.length; i++) {
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    if (gray) {
-      r = g = b = draw();
-    } else {
-      if (channels & 1) {
-        r = draw();
-      }
-
-      if (channels & 2) {
-        g = draw();
-      }
-
-      if (channels & 4) {
-        b = draw();
-      }
-    }
-
-    const a = alpha ? draw() : 255;
-    store.pixels[i] = store.premultiplied(((a << 24) | (r << 16) | (g << 8) | b) >>> 0);
-  }
-
+  bitmapKernel()?.noise(
+    store.pixels,
+    noiseState(seed),
+    lo,
+    hi - lo + 1,
+    channels & 15,
+    gray,
+    store.transparent,
+  );
   store.changed();
 }
 
@@ -112,10 +86,7 @@ export function copyChannel(
   }
 
   // A source of more than one channel, or none, copies 0, as Flash does.
-  forEachCopied(store, source, rect, dx, dy, (s, d) => {
-    const v = fromShift < 0 ? 0 : (s >>> fromShift) & 0xff;
-    return ((d & ~(0xff << toShift)) | (v << toShift)) >>> 0;
-  });
+  copied(store, source, rect, dx, dy, { op: "channel", from: fromShift, to: toShift });
 }
 
 /**
@@ -146,33 +117,9 @@ export function colorTransform(
   }
 
   const fixed = (m: number) => Math.trunc(m * 256);
-  const [rm, gm, bm, am] = [ct.rMul, ct.gMul, ct.bMul, ct.aMul].map(fixed);
-  const [ro, go, bo, ao] = [ct.rAdd, ct.gAdd, ct.bAdd, ct.aAdd].map(Math.trunc);
-
-  for (let y = c.y; y < c.y + c.height; y++) {
-    for (let x = c.x; x < c.x + c.width; x++) {
-      const i = y * store.width + x;
-      const p = store.pixels[i];
-      const a0 = p >>> 24;
-      // A pixel of alpha 0 is left as it is, offsets and all.
-      if (a0 === 0) {
-        continue;
-      }
-
-      // An opaque bitmap's alpha is transformed too: down to 0, the pixel reads 0.
-      const a = colorChannel(a0, am, ao);
-      const r = colorChannel(straightChannel(p, a0, 16), rm, ro);
-      const g = colorChannel(straightChannel(p, a0, 8), gm, go);
-      const b = colorChannel(straightChannel(p, a0, 0), bm, bo);
-      store.pixels[i] =
-        ((a << 24) |
-          (premultipliedChannel(r, a) << 16) |
-          (premultipliedChannel(g, a) << 8) |
-          premultipliedChannel(b, a)) >>>
-        0;
-    }
-  }
-
+  const muls = [ct.rMul, ct.gMul, ct.bMul, ct.aMul].map(fixed);
+  const adds = [ct.rAdd, ct.gAdd, ct.bAdd, ct.aAdd].map(Math.trunc);
+  bitmapKernel()?.transform(store.pixels, store.width, c, muls, adds);
   store.changed();
 }
 
@@ -190,38 +137,23 @@ export function merge(
   dy: number,
   muls: [number, number, number, number],
 ): void {
-  const [rm, gm, bm, am] = muls;
-  const mix = (s: number, d: number, shift: number, m: number) =>
-    Math.floor((((s >>> shift) & 0xff) * m + ((d >>> shift) & 0xff) * (256 - m)) / 256) & 0xff;
-  forEachCopied(
-    store,
-    source,
-    rect,
-    dx,
-    dy,
-    (s, d) =>
-      ((mix(s, d, 24, am) << 24) |
-        (mix(s, d, 16, rm) << 16) |
-        (mix(s, d, 8, gm) << 8) |
-        mix(s, d, 0, bm)) >>>
-      0,
-  );
+  copied(store, source, rect, dx, dy, { op: "merge", muls });
 }
 
 /**
  * The source rect's pixels against the destination's at the point, both
- * clipped and unmultiplied, each destination pixel set to what `f` makes
- * of the pair. In place, rows down and pixels along, each read as the
- * ones before it left it, as Flash does: a move down or right repeats what
- * it wrote.
+ * clipped and unmultiplied, each destination pixel made by `op` of the
+ * pair (pixel-ops.ts). In place, rows down and pixels along, each read as
+ * the ones before it left it, as Flash does: a move down or right repeats
+ * what it wrote.
  */
-function forEachCopied(
+function copied(
   store: BitmapStore,
   source: BitmapStore,
   rect: PixelRect,
   dx: number,
   dy: number,
-  f: (s: number, d: number) => number,
+  op: CopyOp,
 ): void {
   const s = source.clip(rect);
   if (!s) {
@@ -235,19 +167,12 @@ function forEachCopied(
     return;
   }
 
-  const sx = s.x + (d.x - dx);
-  const sy = s.y + (d.y - dy);
   // The store written first: if it is the source, both are then its own array.
   const into = store.pixels;
-  const pixels = source.readable;
-  for (let row = 0; row < d.height; row++) {
-    for (let i = 0; i < d.width; i++) {
-      const to = (d.y + row) * store.width + d.x + i;
-      const p = unmultiply(pixels[(sy + row) * source.width + sx + i]);
-      into[to] = store.premultiplied(f(p, unmultiply(into[to])));
-    }
-  }
-
+  const from = source.readable;
+  const sx = s.x + (d.x - dx);
+  const sy = s.y + (d.y - dy);
+  bitmapKernel()?.copy(into, store.width, from, source.width, d, sx, sy, store.transparent, op);
   store.changed();
 }
 
@@ -265,15 +190,7 @@ export function paletteMap(
   dy: number,
   tables: readonly [Uint32Array, Uint32Array, Uint32Array, Uint32Array],
 ): void {
-  const [r, g, b, a] = tables;
-  forEachCopied(
-    store,
-    source,
-    rect,
-    dx,
-    dy,
-    (p) => (r[(p >>> 16) & 0xff] + g[(p >>> 8) & 0xff] + b[p & 0xff] + a[p >>> 24]) >>> 0,
-  );
+  copied(store, source, rect, dx, dy, { op: "palette", tables });
 }
 
 /**
@@ -321,43 +238,20 @@ export function perlinNoise(
   channels: number,
   gray: boolean,
 ): void {
-  const turbulence = new Turbulence(seed);
   const { width, height } = store;
   // A base's sign is dropped (adl).
   const frequency: [number, number] = [
     base[0] === 0 ? 0 : 1 / Math.abs(base[0]),
     base[1] === 0 ? 0 : 1 / Math.abs(base[1]),
   ];
-  const at = (channel: number, x: number, y: number) =>
-    turbulence.turbulence(channel, x, y, frequency, offsets, fractal, stitch, width, height);
-  // A byte as Flash makes it of a noise, saturating, the half added before the halving; past an
-  // int, as wild noise goes, x86's conversion gives -2^31 and the byte 0.
-  const byte = (n: number) => {
-    const v = fractal ? (n * 255 + 255 + 0.5) / 2 : n * 255 + 0.5;
-    return !(v < 2147483648) ? 0 : v >= 255 ? 255 : v > 0 ? Math.trunc(v) : 0;
-  };
-  const noise = [0, 0, 0, 0];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (gray) {
-        noise[0] = noise[1] = noise[2] = at(0, x, y);
-        noise[3] = channels & 8 ? at(1, x, y) : 1;
-      } else {
-        let channel = 0;
-        for (let c = 0; c < 4; c++) {
-          noise[c] = c === 3 ? 1 : -1;
-          if (channels & (1 << c)) {
-            noise[c] = at(channel++, x, y);
-          }
-        }
-      }
-
-      const a = store.transparent ? byte(noise[3]) : 255;
-      store.pixels[y * width + x] =
-        ((a << 24) | (byte(noise[0]) << 16) | (byte(noise[1]) << 8) | byte(noise[2])) >>> 0;
-    }
-  }
-
+  bitmapKernel()?.perlin(store.pixels, width, {
+    ...perlinSetup(seed, frequency, stitch, width, height),
+    offsets,
+    fractal,
+    channels: channels & 15,
+    gray,
+    transparent: store.transparent,
+  });
   store.changed();
 }
 
@@ -457,7 +351,7 @@ export function threshold(
 
   const sx = s.x + (d.x - dx);
   const sy = s.y + (d.y - dy);
-  // In place, each pixel read as the ones before it left it (forEachCopied).
+  // In place, each pixel read as the ones before it left it (copied).
   const into = store.pixels;
   const pixels = source.readable;
   const opaque = store.transparent ? 0 : 0xff000000;

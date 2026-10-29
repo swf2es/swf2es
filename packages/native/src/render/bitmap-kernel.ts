@@ -1,4 +1,17 @@
 import { renderInstance, renderModule } from "./module.js";
+import {
+  type CopyOp,
+  copyRows,
+  noiseRows,
+  type PerlinSetup,
+  type PixelExports,
+  type PixelRegion,
+  type Progress,
+  perlinRows,
+  transformRows,
+} from "./pixel-ops.js";
+
+export type { CopyOp, PerlinSetup, PixelRegion } from "./pixel-ops.js";
 
 export interface BitmapSource {
   width: number;
@@ -56,7 +69,7 @@ export interface LayerFilter {
   table: Uint32Array | null;
 }
 
-interface NativeExports {
+interface NativeExports extends PixelExports {
   memory: WebAssembly.Memory;
   resetArena(bytes: number): number;
   convolve(params: number): number;
@@ -698,11 +711,115 @@ export class BitmapKernel {
     }, true);
   };
 
+  /**
+   * `region` of `into` (`intoWidth` wide) made by the copy `op` of `from`'s
+   * pixels from (sx, sy) on: copyChannel, merge, paletteMap or a colour
+   * matrix filter (pixel-ops.ts), each pixel reading what the pixels before
+   * it wrote where `from` is `into`. False where the module refused it,
+   * which may leave the rows done before it done.
+   */
+  copy(
+    into: Uint32Array,
+    intoWidth: number,
+    from: Uint32Array,
+    fromWidth: number,
+    region: PixelRegion,
+    sx: number,
+    sy: number,
+    transparent: boolean,
+    op: CopyOp,
+  ): boolean {
+    if (!whole(region) || !Number.isInteger(sx) || !Number.isInteger(sy)) {
+      return false;
+    }
+
+    const progress: Progress = { row: 0, state: 0 };
+    return (
+      this.call(
+        (wasm) =>
+          copyRows(
+            wasm,
+            into,
+            intoWidth,
+            from,
+            fromWidth,
+            region,
+            sx,
+            sy,
+            transparent,
+            op,
+            progress,
+          )
+            ? true
+            : null,
+        true,
+      ) ?? false
+    );
+  }
+
+  /** colorTransform over `region` of `pixels` (`width` wide), in place: false where the module refused it. */
+  transform(
+    pixels: Uint32Array,
+    width: number,
+    region: PixelRegion,
+    muls: readonly number[],
+    adds: readonly number[],
+  ): boolean {
+    if (!whole(region)) {
+      return false;
+    }
+
+    const progress: Progress = { row: 0, state: 0 };
+    return (
+      this.call(
+        (wasm) => (transformRows(wasm, pixels, width, region, muls, adds, progress) ? true : null),
+        true,
+      ) ?? false
+    );
+  }
+
+  /**
+   * noise over every pixel, Park-Miller's generator from `state` (1 to
+   * 2^31 - 2), values lo + r % span: false where the module refused it.
+   */
+  noise(
+    pixels: Uint32Array,
+    state: number,
+    lo: number,
+    span: number,
+    channels: number,
+    gray: boolean,
+    transparent: boolean,
+  ): boolean {
+    if (!(Number.isInteger(state) && state >= 1 && state < 2147483647) || pixels.length === 0) {
+      return false;
+    }
+
+    const progress: Progress = { row: 0, state };
+    return (
+      this.call(
+        (wasm) =>
+          noiseRows(wasm, pixels, lo, span, channels, gray, transparent, progress) ? true : null,
+        true,
+      ) ?? false
+    );
+  }
+
+  /** perlinNoise over every pixel of a `width`-wide store: false where the module refused it. */
+  perlin(pixels: Uint32Array, width: number, setup: PerlinSetup): boolean {
+    if (!(width > 0) || pixels.length % width !== 0 || pixels.length === 0) {
+      return false;
+    }
+
+    const progress: Progress = { row: 0, state: 0 };
+    return (
+      this.call((wasm) => (perlinRows(wasm, pixels, width, setup, progress) ? true : null), true) ??
+      false
+    );
+  }
+
   /** `body` on the instance, made where there is none: made again in a new one where it traps if `again`. */
-  private call(
-    body: (wasm: NativeExports) => Uint32Array | null,
-    again: boolean,
-  ): Uint32Array | null {
+  private call<T>(body: (wasm: NativeExports) => T | null, again: boolean): T | null {
     try {
       if (!this.instance) {
         try {
@@ -725,4 +842,15 @@ export class BitmapKernel {
       }
     }
   }
+}
+
+/** Whether `r` is a rect of whole pixels with an area, within a store. */
+function whole(r: PixelRegion): boolean {
+  return (
+    [r.x, r.y, r.width, r.height].every(Number.isInteger) &&
+    r.x >= 0 &&
+    r.y >= 0 &&
+    r.width > 0 &&
+    r.height > 0
+  );
 }
