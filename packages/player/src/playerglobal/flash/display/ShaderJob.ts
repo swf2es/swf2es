@@ -1,0 +1,340 @@
+// flash.display.ShaderJob: a kernel run over a BitmapData, a ByteArray or
+// a Vector.<Number> (bitmap/pixel-bender.ts), as adl runs one. A job runs
+// once; start() checks everything and runs the kernel then, its
+// parameters and inputs read as they stand, and an asynchronous job's
+// result reaches the target, with ShaderEvent.COMPLETE, after the frame's
+// EXIT_FRAME (Scripting.afterExitFrame).
+// adl runs those jobs on a thread of its own and drops some, one started
+// while another runs among them; here each job completes.
+import { PBJ_TYPE_SIZES, PBJ_TYPES, type PbjParameter, pbjFloatType } from "@swf2es/format";
+import { avm2 } from "@swf2es/runtime";
+import type { BitmapStore } from "../../../bitmap/bitmap.js";
+import { nearest } from "../../../bitmap/bitmap.js";
+import { OUT_COORD, type ShaderImage } from "../../../bitmap/pixel-bender.js";
+import { dispatchEvent } from "../../../scripting/events.js";
+import type { Scripting } from "../../../scripting.js";
+import { storeOf } from "./BitmapData.js";
+import { programOf } from "./ShaderData.js";
+
+type Value = avm2.Value;
+type AsObject = avm2.AsObject;
+
+const IDLE = 0;
+const RUNNING = 1;
+const DONE = 2;
+
+/** A float as a target's byte: clamped, NaN as 0, then rounded to the nearest, a half to the even. */
+function byteOf(v: number): number {
+  const c = v > 0 ? (v < 1 ? v : 1) : 0;
+  return nearest(Math.fround(c * 255));
+}
+
+/** A parameter value's number as its register takes it: float32, or an int as SSE truncates one. */
+function numberOf(v: number, float: boolean): number {
+  if (float) {
+    return Math.fround(v);
+  }
+
+  const t = Math.trunc(v);
+  return t >= -2147483648 && t <= 2147483647 ? t : -2147483648;
+}
+
+export function shaderJobNatives(s: Scripting): avm2.Natives {
+  const natives: avm2.Natives = {};
+  const cls = (name: string) => s.rt.classNamed(name);
+  const isA = (v: Value, name: string) => s.rt.isInstance(v, cls(name));
+  const isVector = (v: Value) => s.rt.isInstance(v, s.rt.resolve(s.rt.vector("Number")));
+  const refuse = (id: number, ...args: Value[]): never => {
+    throw s.rt.error("ArgumentError", id, ...args);
+  };
+
+  /**
+   * A parameter's numbers: those of the ShaderParameter of its name, where
+   * one of its type is there, else its default, as adl takes them; each a
+   * number, or ArgumentError 2004, as many as its type holds, 0 past the
+   * Array's end.
+   */
+  const valuesOf = (data: AsObject, p: PbjParameter): number[] => {
+    const size = PBJ_TYPE_SIZES[p.type] ?? 0;
+    const float = pbjFloatType(p.type);
+    const own = data.$d.get(p.name);
+    let value: Value;
+    if (isA(own, "flash.display::ShaderParameter") && own.$type === (PBJ_TYPES[p.type] ?? null)) {
+      value = own.$value ?? null;
+    } else {
+      const fallback = p.metadata.filter((m) => m.key === "defaultValue").pop();
+      value =
+        fallback && typeof fallback.value !== "string" ? s.rt.array([...fallback.value]) : null;
+    }
+
+    const values: number[] = [];
+    const items: Value[] = isA(value, "Array") ? (value as AsObject).$a : [];
+    for (let k = 0; k < size; k++) {
+      if (k >= items.length) {
+        values.push(0);
+        continue;
+      }
+
+      const item = items[k];
+      if (typeof item !== "number") {
+        refuse(2004);
+      }
+
+      values.push(numberOf(item as number, float));
+    }
+
+    return values;
+  };
+
+  /** An input's image, read now: a BitmapData's pixels, or as many floats as its size needs. */
+  const imageOf = (data: AsObject, name: string, channels: number): ShaderImage => {
+    const own = data.$d.get(name);
+    if (!isA(own, "flash.display::ShaderInput")) {
+      refuse(2167);
+    }
+
+    const o = own as AsObject;
+    const input: Value = o.$input ?? null;
+    if (input === null) {
+      refuse(2164, name);
+    }
+
+    if (isA(input, "flash.display::BitmapData")) {
+      const store = storeOf(s, input as AsObject);
+      return { width: store.width, height: store.height, pixels: store.readable, channels };
+    }
+
+    const width: number = o.$width ?? 0;
+    const height: number = o.$height ?? 0;
+    if (width <= 0 || height <= 0) {
+      refuse(2166, name);
+    }
+
+    // Allocated once the input is known to hold them, whatever size the script set.
+    const count = width * height * channels;
+    if (isVector(input)) {
+      const items: number[] = (input as AsObject).$a;
+      if (items.length < count) {
+        refuse(2165, name);
+      }
+
+      return { width, height, floats: Float32Array.from(items.slice(0, count)), channels };
+    }
+
+    // From the start, whatever the position, which is left past what was read.
+    const bytes = avm2.bytesOf(s.rt, input as AsObject);
+    if (bytes.length < count * 4) {
+      refuse(2165, name);
+    }
+
+    const floats = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      floats[i] = bytes.view.getFloat32(i * 4, bytes.littleEndian);
+    }
+
+    bytes.position = count * 4;
+    return { width, height, floats, channels };
+  };
+
+  /** Write the output, `channels` floats a pixel, to the target. */
+  const deliver = (target: AsObject, out: Float32Array, channels: number): void => {
+    if (isA(target, "flash.display::BitmapData")) {
+      const store: BitmapStore = target.$store;
+      if (store.disposed) {
+        return;
+      }
+
+      // Premultiplied as they come, each colour at most its alpha; three channels are opaque.
+      const pixels = new Uint32Array(store.width * store.height);
+      for (let i = 0, at = 0; i < pixels.length; i++, at += channels) {
+        const a = channels > 3 ? byteOf(out[at + 3]) : 255;
+        const r = Math.min(a, byteOf(out[at]));
+        const g = Math.min(a, channels > 1 ? byteOf(out[at + 1]) : 0);
+        const b = Math.min(a, channels > 2 ? byteOf(out[at + 2]) : 0);
+        pixels[i] = (((store.transparent ? a : 255) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+      }
+
+      store.pixels = pixels;
+      store.changed();
+      return;
+    }
+
+    if (isVector(target)) {
+      target.$a = Array.from(out);
+      return;
+    }
+
+    const bytes = avm2.bytesOf(s.rt, target);
+    const data = new Uint8Array(out.length * 4);
+    const view = new DataView(data.buffer);
+    for (let i = 0; i < out.length; i++) {
+      view.setFloat32(i * 4, out[i], bytes.littleEndian);
+    }
+
+    bytes.setLength(0);
+    bytes.position = 0;
+    bytes.write(data);
+  };
+
+  class ShaderJobNatives {
+    declare $jobShader: Value | undefined;
+    declare $jobTarget: Value | undefined;
+    declare $jobWidth: number | undefined;
+    declare $jobHeight: number | undefined;
+    declare $jobState: number | undefined;
+    declare $jobProgress: number | undefined;
+
+    get shader(): Value {
+      return this.$jobShader ?? null;
+    }
+
+    set shader(v: Value) {
+      this.$jobShader = v ?? null;
+    }
+
+    get target(): Value {
+      return this.$jobTarget ?? null;
+    }
+
+    set target(v: Value) {
+      this.$jobTarget = v ?? null;
+    }
+
+    get width(): number {
+      return this.$jobWidth ?? 0;
+    }
+
+    set width(v: Value) {
+      this.$jobWidth = s.rt.toInt(v);
+    }
+
+    get height(): number {
+      return this.$jobHeight ?? 0;
+    }
+
+    set height(v: Value) {
+      this.$jobHeight = s.rt.toInt(v);
+    }
+
+    get progress(): number {
+      return this.$jobProgress ?? Number.NaN;
+    }
+
+    start(waitForCompletion: Value): void {
+      if ((this.$jobState ?? IDLE) !== IDLE) {
+        refuse(2172);
+      }
+
+      const shader: Value = this.$jobShader ?? null;
+      if (shader === null) {
+        throw s.rt.error("TypeError", 2007, "shader");
+      }
+
+      const data: AsObject | null = (shader as AsObject).$data ?? null;
+      if (data === null || !data.$kernel) {
+        refuse(2171);
+      }
+
+      const program = programOf((data as AsObject).$kernel);
+      const target: Value = this.$jobTarget ?? null;
+      let width = this.$jobWidth ?? 0;
+      let height = this.$jobHeight ?? 0;
+      if (isA(target, "flash.display::BitmapData")) {
+        // A BitmapData is written whole, whatever the job's size; a disposed one is
+        // an output adl cannot write.
+        const store: BitmapStore | null = (target as AsObject).$store;
+        const type = program.output.type;
+        if (!store || store.disposed || (type !== 0x3 && type !== 0x4)) {
+          refuse(2162);
+        }
+
+        width = (store as BitmapStore).width;
+        height = (store as BitmapStore).height;
+      } else if (
+        !(isVector(target) || isA(target, "flash.utils::ByteArray")) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        refuse(2004);
+      }
+
+      const kernel = program.kernel;
+      const images = new Map<number, ShaderImage>();
+      for (const input of kernel.inputs) {
+        images.set(input.index, imageOf(data as AsObject, input.name, input.channels));
+      }
+
+      for (const texture of program.sampled) {
+        if (!images.has(texture)) {
+          refuse(2167);
+        }
+      }
+
+      const values = new Map<PbjParameter, number[]>();
+      for (const p of kernel.parameters) {
+        if (!p.output && p.name !== OUT_COORD) {
+          values.set(p, valuesOf(data as AsObject, p));
+        }
+      }
+
+      // A ByteArray or a Vector the browser cannot allocate is refused, not the player ended.
+      let out: Float32Array;
+      try {
+        out = new Float32Array(width * height * program.channels);
+      } catch (e) {
+        if (e instanceof RangeError) {
+          refuse(2004);
+        }
+
+        throw e;
+      }
+
+      const vector = isVector(target) ? (target as AsObject) : null;
+      if (vector?.$fixed && vector.$a.length !== out.length) {
+        throw s.rt.error("RangeError", 1126);
+      }
+
+      program.run(values, images, width, height, out);
+      if (waitForCompletion) {
+        deliver(target as AsObject, out, program.channels);
+        this.$jobState = DONE;
+        this.$jobProgress = 1;
+        return;
+      }
+
+      // Done already, as adl's thread nearly is by the time start returns; the target waits.
+      this.$jobState = RUNNING;
+      this.$jobProgress = 1;
+      s.afterExitFrame.push(() => {
+        if (this.$jobState !== RUNNING) {
+          return;
+        }
+
+        this.$jobState = DONE;
+        deliver(target as AsObject, out, program.channels);
+        const o = target as AsObject;
+        const event = s.rt.construct(
+          cls("flash.events::ShaderEvent"),
+          "complete",
+          false,
+          false,
+          isA(o, "flash.display::BitmapData") ? o : null,
+          isA(o, "flash.utils::ByteArray") ? o : null,
+          vector,
+        ) as AsObject;
+        dispatchEvent(s, this as unknown as AsObject, event);
+      });
+    }
+
+    /** A running job's result is dropped, its progress 0 again; before start, or after, nothing happens. */
+    cancel(): void {
+      if (this.$jobState === RUNNING) {
+        this.$jobState = DONE;
+        this.$jobProgress = 0;
+      }
+    }
+  }
+
+  avm2.registerNativeClass(natives, "flash.display::ShaderJob", ShaderJobNatives);
+  return natives;
+}

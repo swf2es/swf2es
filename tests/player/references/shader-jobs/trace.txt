@@ -1,0 +1,5 @@
+source ff0000c0 ea2a2abf d55454bf c07e7ec1 aba8a8c0 96d3d3c0
+mixed ff2d2d7a ff4a4e7d ff62687f ff747e7f ff818c7c ff889477
+checker 9955aa6a 9955aa6a 9955aa6a 9955aa6a 9955aa6a 9955aa6a
+stretched ffff0000 ffff0000 f8ab3c3c d59bafaf 92ffffff 80ffffff
+complete true
