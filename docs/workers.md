@@ -652,6 +652,7 @@ three to four minutes on the primordial, then fail with 1009 in their
 `Console.init` before they make any worker, in node too, which is
 another gap.
 
+### avmshell's workers
 
 The runtime's shell natives (`natives/shell.ts`) run avmshell's Worker
 and WorkerDomain as avmplus' Aggregate and Isolate do, with
