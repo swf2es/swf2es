@@ -163,10 +163,12 @@ tags.push(
 );
 const swf = w.swf({ width: 400, height: 300, frameCount: 1, tags });
 
-// Force slow first builds across the settling deadline, without losing either context.
-assert.deepEqual(
-  await withPage("contextLossPlanSwf", async (evaluate) => {
-    const setup = await evaluate(`(async () => {
+// Force slow first builds across the settling deadline, without losing either context: Pixi's
+// render groups settle, the renderer of swf2es's own's plans no such thing.
+if (!own) {
+  assert.deepEqual(
+    await withPage("contextLossPlanSwf", async (evaluate) => {
+      const setup = await evaluate(`(async () => {
       const { PixiView } = await import("@swf2es/player");
       const render = PixiView.prototype.render;
       let clock = 0, frames = 0;
@@ -178,14 +180,15 @@ assert.deepEqual(
       };
       return true;
     })()`);
-    assert.equal(setup.exception, null);
-    return evaluate<string | null>(
-      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "tt", false)`,
-    );
-  }),
-  { value: null, exception: null },
-  "both renderers settle in the same frame despite slow draws",
-);
+      assert.equal(setup.exception, null);
+      return evaluate<string | null>(
+        `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "tt", false)`,
+      );
+    }),
+    { value: null, exception: null },
+    "both renderers settle in the same frame despite slow draws",
+  );
+}
 
 // Through the table's atlas, and drawn alone from what Pixi packed of each, as without the table.
 assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");

@@ -96,10 +96,11 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
-    // Both load together, so the second costs playback no extra round trip. An
-    // embedder without a module, or a page that cannot load it, plays through JS.
+    // All load together, so none costs playback another round trip. An embedder without a native
+    // module, or a page that cannot load it, plays through JS.
     const { nativeFills, nativeBitmaps, renderer } = configuration();
-    const [tessellator, convolver] = await Promise.all([
+    const own = renderer !== "pixi";
+    const [tessellator, convolver, scene] = await Promise.all([
       nativeFills === false
         ? null
         : import("@swf2es/native/tessellate")
@@ -110,14 +111,24 @@ export class Playback {
         : import("@swf2es/native/bitmap")
             .then(({ Convolver }): Convolver => new Convolver())
             .catch(() => null),
+      own ? import("@swf2es/player/scene") : null,
     ]);
 
-    const view = await stageView(
-      player,
-      renderer !== "pixi",
-      !!stage3D || look().wmode === "transparent",
-      tessellator,
-    );
+    let view: StageView;
+    try {
+      view = await stageView(
+        player,
+        scene,
+        !!stage3D || look().wmode === "transparent",
+        tessellator,
+      );
+    } catch (error) {
+      // No playback to let go of them: the native instances go here.
+      tessellator?.dispose();
+      convolver?.dispose();
+      throw error;
+    }
+
     return new Playback(
       box,
       player,

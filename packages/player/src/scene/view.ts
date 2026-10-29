@@ -573,6 +573,16 @@ export class RenderView implements Drawer {
   private viewX = 0;
   private viewY = 0;
 
+  /** Canvas pixels a stage pixel (resize). */
+  get canvasResolution(): number {
+    return this.resolution;
+  }
+
+  /** How many device texts' runs it keeps drawn (rasterized device text), which a page may check. */
+  get textRuns(): number {
+    return this.runs.size;
+  }
+
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
   resize(width: number, height: number, resolution = this.resolution): void {
     this.width = width;
