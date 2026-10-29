@@ -4,12 +4,16 @@ import {
   COMPOSITE,
   type Commands,
   FILTER,
+  HELD,
+  HOLD_POP,
+  HOLD_PUSH,
   LAYER_POP,
   LAYER_PUSH,
   RUN,
   STENCIL_POP,
   STENCIL_PUSH,
 } from "../commands.js";
+import { FilterPlan, planChain } from "../filter-plan.js";
 import type { Filters } from "../filters.js";
 import { type Geometries, type GeometryData, GLYPH_FLOATS } from "../geometry.js";
 import type { Keeps } from "../keeps.js";
@@ -29,8 +33,9 @@ import {
   SMOOTH,
   SNAP,
 } from "../scene.js";
+import { Shelves } from "../shelves.js";
 import type { Textures } from "../textures.js";
-import { FilterRunner } from "./filters.js";
+import { FilterRunner, type FilterTarget } from "./filters.js";
 import { SizedPool } from "./pool.js";
 import {
   COLOR_AT,
@@ -196,6 +201,42 @@ interface Open {
   y: number;
   width: number;
   height: number;
+  /** Where its rectangle's corner is in its framebuffer, a page's (HOLD_PUSH); else 0, 0. */
+  ox?: number;
+  oy?: number;
+}
+
+/** The width of the pages held layers and their filters' targets are placed on, side by side. */
+const PAGE_WIDTH = 2048;
+
+/** A rectangle of a page, read and drawn into as a texture of its own (FilterTarget). */
+interface Slot extends FilterTarget {
+  x: number;
+  y: number;
+  page: Layer;
+}
+
+/**
+ * A held layer (HOLD_PUSH): its rectangle on the target, the operations it
+ * draws by, its chain of filters, planned, and its targets by the plan's
+ * slots; its output once drawn, or null where none is.
+ */
+interface Hold {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  first: number;
+  end: number;
+  chain: number;
+  plan: FilterPlan;
+  targets: (Slot | null)[];
+  result: Slot | null;
+  /** Its content's rectangle on the pages (Shelves), -1 where it is drawn alone; the wave's. */
+  shelf: number;
+  wave: number;
+  /** Whether its pass of the wave drawing is drawn, or it has none. */
+  drawn: boolean;
 }
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const LEAST = 1 << 16;
@@ -314,6 +355,7 @@ export class WebGLBackend {
   private modeLocation: WebGLUniformLocation | null = null;
   private compositeRowLocation: WebGLUniformLocation | null = null;
   private offsetLocation: WebGLUniformLocation | null = null;
+
   private flipLocation: WebGLUniformLocation | null = null;
   private backOffsetLocation: WebGLUniformLocation | null = null;
   private rectLocation: WebGLUniformLocation | null = null;
@@ -325,6 +367,12 @@ export class WebGLBackend {
   private layers: Open[] = [];
   /** Frames executed, which a layer's idleness is counted in. */
   private frame = 0;
+  /** The frame's held layers (HOLD_PUSH), and the pages they took. */
+  private readonly holds: Hold[] = [];
+  private readonly pages: Layer[] = [];
+  private readonly shelves = new Shelves();
+  /** The largest side a texture may have. */
+  private textureMost = 4096;
   /** The layers kept from frame to frame, by their ids in Keeps. */
   private kept: (Layer | null)[] = [];
   /**
@@ -400,6 +448,7 @@ export class WebGLBackend {
   private setUp(): void {
     const gl = this.gl;
     this.state.forget();
+    this.textureMost = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
     try {
       this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
@@ -591,6 +640,7 @@ export class WebGLBackend {
     }
 
     this.frameSamples = stage?.samples ?? 1;
+    this.drawHolds(commands, scene, filters, target);
     const canvas: Open = {
       layer: into,
       msaa: stage,
@@ -648,6 +698,34 @@ export class WebGLBackend {
           depth += push ? 1 : -1;
           state.colorMask(15);
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          break;
+        }
+
+        case HOLD_PUSH:
+          // Drawn ahead of the stage (drawHolds).
+          while (ops[k * 4] !== HOLD_POP) {
+            k++;
+          }
+
+          break;
+        case HELD: {
+          const hold = this.holds[ops[at + 1]];
+          const result = hold.result;
+          if (result) {
+            const held: Open = {
+              layer: result.page,
+              msaa: null,
+              x: hold.x,
+              y: hold.y,
+              width: hold.width,
+              height: hold.height,
+              ox: result.x,
+              oy: result.y,
+            };
+            state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+            this.compositeLayer(held, this.layers.at(-1) ?? canvas, ops[at + 2], ops[at + 3]);
+          }
+
           break;
         }
 
@@ -761,6 +839,11 @@ export class WebGLBackend {
       this.toCanvas(cleared.framebuffer, target.width, target.height, true);
     }
 
+    for (const page of this.pages) {
+      this.giveLayer(page);
+    }
+
+    this.pages.length = 0;
     if (counted) {
       this.dropIdleLayers();
       this.frame++;
@@ -929,8 +1012,10 @@ export class WebGLBackend {
   private drawInto(open: Open, target: Target): void {
     const gl = this.gl;
     const state = this.state;
+    const ox = open.ox ?? 0;
+    const oy = open.oy ?? 0;
     state.bindFramebuffer(this.framebufferOf(open));
-    state.viewport(0, 0, open.width, open.height);
+    state.viewport(ox, oy, open.width, open.height);
     state.useProgram(this.program);
     const down = open.layer ? 1 : -1;
     const view = this.view;
@@ -941,14 +1026,337 @@ export class WebGLBackend {
     gl.uniform4fv(this.viewLocation, view);
     // A layer's rows run down from its corner; the canvas' up from its bottom.
     const frag = this.frag;
-    frag[0] = open.x - target.x;
-    frag[1] = (open.layer ? open.y : open.y + open.height) - target.y;
+    frag[0] = open.x - target.x - ox;
+    frag[1] = (open.layer ? open.y : open.y + open.height) - target.y - oy;
     frag[2] = down;
     frag[3] = target.pixel;
     this.unit = target.scale / target.pixel;
     gl.uniform1f(this.fillUnitLocation, this.unit);
     this.meshStale = true;
     this.glyphStale = true;
+  }
+
+  /**
+   * The frame's held layers (HOLD_PUSH), drawn ahead of the stage side by
+   * side: their content on pages of their own, one bind, clear and resolve
+   * a page; then their filters' passes in waves, the k-th pass of every
+   * chain at once, each wave's targets on pages of its own, which no pass
+   * of it reads. Each layer's output is left on its page for HELD. A layer
+   * larger than a page is drawn alone, as a layer of its own.
+   */
+  private drawHolds(commands: Commands, scene: SceneList, filters: Filters, target: Target): void {
+    const count = this.gatherHolds(commands);
+    if (count === 0) {
+      return;
+    }
+
+    const gl = this.gl;
+    const state = this.state;
+    const holds = this.holds;
+    const width = Math.min(PAGE_WIDTH, this.textureMost);
+    const shelves = this.shelves;
+    this.lastRow = -1;
+    // Their content, each at the size its own layer would take.
+    shelves.reset(width, this.textureMost);
+    for (let h = 0; h < count; h++) {
+      const hold = holds[h];
+      hold.shelf = shelves.add(layerSide(hold.width), layerSide(hold.height));
+      if (hold.shelf < 0) {
+        this.drawHoldAlone(hold, commands, scene, filters, target);
+      }
+    }
+
+    for (let p = 0; p < shelves.pages; p++) {
+      const page = this.takeLayer(width, shelves.heights[p]);
+      this.pages.push(page);
+      const whole: Open = {
+        layer: page,
+        msaa: this.layerMsaa(page, this.frameSamples),
+        x: 0,
+        y: 0,
+        width: page.width,
+        height: page.height,
+      };
+      state.bindFramebuffer(this.framebufferOf(whole));
+      state.scissor(null);
+      state.stencil(null);
+      state.colorMask(15);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clearStencil(0);
+      gl.stencilMask(0xff);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+      for (let h = 0; h < count; h++) {
+        const hold = holds[h];
+        if (hold.shelf < 0 || shelves.page[hold.shelf] !== p) {
+          continue;
+        }
+
+        const ox = shelves.x[hold.shelf];
+        const oy = shelves.y[hold.shelf];
+        const content: Open = {
+          layer: page,
+          msaa: whole.msaa,
+          x: hold.x,
+          y: hold.y,
+          width: hold.width,
+          height: hold.height,
+          ox,
+          oy,
+        };
+        this.drawInto(content, target);
+        state.scissor([ox, oy, hold.width, hold.height]);
+        this.drawHoldContent(commands, hold, scene);
+        state.scissor(null);
+        hold.targets[0] = this.slotOf(page, ox, oy, hold.width, hold.height);
+      }
+
+      this.resolve(whole, page.width, page.height);
+    }
+
+    // Their filters, planned, then drawn a wave at a time: each wave's new targets on pages of its
+    // own, which none of its passes reads, as each reads what earlier waves drew.
+    let waves = 0;
+    for (let h = 0; h < count; h++) {
+      const hold = holds[h];
+      if (hold.shelf >= 0) {
+        const plan = hold.plan;
+        planChain(
+          plan,
+          filters,
+          hold.chain,
+          hold.width,
+          hold.height,
+          target.resolution,
+          this.hasTexture,
+        );
+        hold.targets.length = plan.slots;
+        hold.targets.fill(null, 1);
+        waves = Math.max(waves, plan.count);
+      }
+    }
+
+    for (let k = 0; k < waves; k++) {
+      shelves.reset(width, this.textureMost);
+      for (let h = 0; h < count; h++) {
+        const hold = holds[h];
+        const plan = hold.plan;
+        hold.wave = -1;
+        if (hold.shelf >= 0 && k < plan.count && !hold.targets[plan.passes[k].output]) {
+          const slot = plan.passes[k].output;
+          hold.wave = shelves.add(
+            layerSide(plan.slotWidth[slot]),
+            layerSide(plan.slotHeight[slot]),
+          );
+        }
+      }
+
+      const from = this.pages.length;
+      for (let p = 0; p < shelves.pages; p++) {
+        const page = this.takeLayer(width, shelves.heights[p]);
+        this.pages.push(page);
+        state.bindFramebuffer(page.framebuffer);
+        state.scissor(null);
+        state.colorMask(15);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+
+      for (let h = 0; h < count; h++) {
+        const hold = holds[h];
+        if (hold.wave >= 0) {
+          const plan = hold.plan;
+          const slot = plan.passes[k].output;
+          hold.targets[slot] = this.slotOf(
+            this.pages[from + shelves.page[hold.wave]],
+            shelves.x[hold.wave],
+            shelves.y[hold.wave],
+            plan.slotWidth[slot],
+            plan.slotHeight[slot],
+          );
+        }
+      }
+
+      // The passes drawing into one page together, so that it is bound once: a target drawn into
+      // again, as a blur's runs take turns between two, is on an earlier wave's page.
+      let left = 0;
+      for (let h = 0; h < count; h++) {
+        const hold = holds[h];
+        hold.drawn = !(hold.shelf >= 0 && k < hold.plan.count);
+        left += hold.drawn ? 0 : 1;
+      }
+
+      while (left > 0) {
+        let page: Layer | null = null;
+        for (let h = 0; h < count; h++) {
+          const hold = holds[h];
+          if (hold.drawn) {
+            continue;
+          }
+
+          const output = hold.targets[hold.plan.passes[k].output] as Slot;
+          page ??= output.page;
+          if (output.page === page) {
+            this.filters.drawPass(hold.plan, k, hold.targets, false);
+            hold.drawn = true;
+            left--;
+          }
+        }
+      }
+    }
+
+    for (let h = 0; h < count; h++) {
+      const hold = holds[h];
+      if (hold.shelf >= 0) {
+        hold.result = hold.targets[hold.plan.result];
+      }
+    }
+  }
+
+  /** The held layers' rectangles and operations (HOLD_PUSH), which the commands begin with: how many. */
+  private gatherHolds(commands: Commands): number {
+    const ops = commands.ops;
+    const params = commands.params;
+    const holds = this.holds;
+    let count = 0;
+    for (let k = 0; k < commands.length && ops[k * 4] === HOLD_PUSH; k++) {
+      const from = ops[k * 4 + 1];
+      let hold = holds[count];
+      if (!hold) {
+        hold = {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          first: 0,
+          end: 0,
+          chain: 0,
+          plan: new FilterPlan(),
+          targets: [],
+          result: null,
+          shelf: -1,
+          wave: -1,
+          drawn: false,
+        };
+        holds[count] = hold;
+      }
+
+      count++;
+      hold.x = params[from];
+      hold.y = params[from + 1];
+      hold.width = params[from + 2];
+      hold.height = params[from + 3];
+      hold.first = k + 1;
+      while (ops[k * 4] !== HOLD_POP) {
+        k++;
+      }
+
+      hold.end = k;
+      hold.chain = ops[k * 4 + 1];
+      hold.result = null;
+      hold.targets.length = 0;
+    }
+
+    return count;
+  }
+
+  /** The rectangle of `page` from (x, y) a target of `width` by `height` takes, as its own layer would. */
+  private slotOf(page: Layer, x: number, y: number, width: number, height: number): Slot {
+    return {
+      framebuffer: page.framebuffer,
+      texture: page.texture,
+      x,
+      y,
+      width: layerSide(width),
+      height: layerSide(height),
+      page,
+    };
+  }
+
+  /** Whether texture `id` of the frame's is there, for a filter that reads it. */
+  private readonly hasTexture = (id: number) => id >= 0 && (this.textures[id] ?? null) !== null;
+
+  /** Held layer `hold`'s draws and masks, into the target bound, its stencil starting clear. */
+  private drawHoldContent(commands: Commands, hold: Hold, scene: SceneList): void {
+    const gl = this.gl;
+    const state = this.state;
+    const ops = commands.ops;
+    let depth = 0;
+    let past = 0;
+    state.stencil(null);
+    state.colorMask(15);
+    for (let k = hold.first; k < hold.end; k++) {
+      const at = k * 4;
+      switch (ops[at]) {
+        case RUN:
+          this.useFill();
+          state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], false);
+          break;
+        case STENCIL_PUSH:
+        case STENCIL_POP: {
+          const push = ops[at] === STENCIL_PUSH;
+          if (push ? depth >= STENCIL_MOST || past > 0 : past > 0) {
+            past += push ? 1 : -1;
+            break;
+          }
+
+          this.useFill();
+          state.colorMask(0);
+          state.stencil(gl.EQUAL, depth, push ? gl.INCR : gl.DECR);
+          this.drawEntries(scene, ops[at + 1], ops[at + 1] + ops[at + 2], true);
+          depth += push ? 1 : -1;
+          state.colorMask(15);
+          state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+          break;
+        }
+      }
+    }
+
+    state.stencil(null);
+  }
+
+  /**
+   * Held layer `hold`, too large for a page, drawn as a layer of its own and
+   * filtered there, its output left in a page of its own.
+   */
+  private drawHoldAlone(
+    hold: Hold,
+    commands: Commands,
+    scene: SceneList,
+    filters: Filters,
+    target: Target,
+  ): void {
+    const gl = this.gl;
+    const state = this.state;
+    const layer = this.takeLayer(hold.width, hold.height, true);
+    const open: Open = {
+      layer,
+      msaa: this.layerMsaa(layer, this.frameSamples),
+      x: hold.x,
+      y: hold.y,
+      width: hold.width,
+      height: hold.height,
+    };
+    this.drawInto(open, target);
+    state.scissor(null);
+    state.colorMask(15);
+    state.stencil(null);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clearStencil(0);
+    gl.stencilMask(0xff);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    this.drawHoldContent(commands, hold, scene);
+    this.resolve(open, layer.width, layer.height);
+    const output = this.filters.run(
+      filters,
+      hold.chain,
+      layer,
+      hold.width,
+      hold.height,
+      target.resolution,
+    );
+    this.pages.push(output);
+    hold.result = this.slotOf(output, 0, 0, output.width, output.height);
   }
 
   /** The framebuffer `open` is drawn into: its multisampled one while it has one, else its own. */
@@ -1324,7 +1732,10 @@ export class WebGLBackend {
     state.bindVertexArray(null);
     gl.uniform1i(this.modeLocation, mode);
     gl.uniform1i(this.compositeRowLocation, row);
-    gl.uniform2i(this.offsetLocation, dx, flip ? under.height - 1 - dy : dy);
+    // Less its corner on its page, where it is a held layer's rectangle of one (HELD).
+    const ox = open.ox ?? 0;
+    const oy = open.oy ?? 0;
+    gl.uniform2i(this.offsetLocation, dx - ox, flip ? under.height - 1 - dy + oy : dy - oy);
     gl.uniform1i(this.flipLocation, flip ? 1 : 0);
     gl.uniform2i(this.backOffsetLocation, backX, backY);
     switch (mode) {

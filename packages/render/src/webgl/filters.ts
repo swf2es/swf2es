@@ -18,12 +18,18 @@ import * as shaders from "../filter-shaders.js";
 import type { Filters } from "../filters.js";
 import { CLAMP, SMOOTH } from "../scene.js";
 
-/** A texture a pass draws into through its framebuffer, and reads: at least its frame's size. */
+/**
+ * A texture a pass draws into through its framebuffer, and reads: at least
+ * its frame's size; or a rectangle of one, `width` by `height` from texel
+ * (x, y), read as if it were a texture of its own, its edges clamped.
+ */
 export interface FilterTarget {
   framebuffer: WebGLFramebuffer;
   texture: WebGLTexture;
   width: number;
   height: number;
+  x?: number;
+  y?: number;
 }
 
 /** Where the runner takes its targets from and gives them back, and finds textures and samplers. */
@@ -61,6 +67,31 @@ void main(void) {
 
 const HEADER = "#version 300 es\nprecision highp float;\n";
 
+/**
+ * The input and the blur read within their rectangles (FilterTarget), as a
+ * texture of their own size clamped to its edges reads, linearly: a texel
+ * coordinate kept half a texel in from each edge reads the edge texel, as
+ * the edge's clamp does.
+ */
+const READS = `uniform vec4 uTextureRect;
+uniform vec4 uBlurredRect;
+vec4 within(sampler2D t, vec4 rect, vec2 at) {
+  vec2 texel = clamp(at * rect.zw, vec2(0.5), rect.zw - 0.5);
+  return texture(t, (rect.xy + texel) / vec2(textureSize(t, 0)));
+}
+`;
+
+/** A filter's fragment shader reading its input and its blur within their rectangles (READS). */
+function withinRects(fragment: string): string {
+  const reads = fragment
+    .replaceAll("texture(uTexture,", "within(uTexture, uTextureRect,")
+    .replaceAll("texture(uBlurred,", "within(uBlurred, uBlurredRect,");
+  // After the samplers' declarations, which READS's function takes.
+  const at = reads.lastIndexOf("uniform sampler2D");
+  const end = reads.indexOf("\n", at) + 1;
+  return reads.slice(0, end) + READS + reads.slice(end);
+}
+
 /** The input as it is, read where the vertex shader says: halved, at a corner four texels share. */
 const COPY = `in vec2 vTextureCoord;
 out vec4 finalColor;
@@ -72,6 +103,8 @@ void main(void) {
 interface Pass {
   program: WebGLProgram;
   uniforms: Map<string, WebGLUniformLocation | null>;
+  /** The values of up to four floats it was last told for each uniform, by name (set). */
+  told: Map<string, Float32Array>;
 }
 
 /**
@@ -140,8 +173,6 @@ export class FilterRunner<T extends FilterTarget> {
    * that reads it, but the one the plan leaves its output in.
    */
   private execute(plan: FilterPlan, input: T): T {
-    const gl = this.gl;
-    this.resolution = plan.resolution;
     const targets = this.targets;
     const last = this.lastUse;
     targets.length = plan.slots;
@@ -160,36 +191,14 @@ export class FilterRunner<T extends FilterTarget> {
 
     for (let k = 0; k < plan.count; k++) {
       const pass = plan.passes[k];
-      const from = targets[pass.input] as T;
-      let to = targets[pass.output];
-      if (!to) {
-        to = this.host.take(plan.slotWidth[pass.output], plan.slotHeight[pass.output]);
-        targets[pass.output] = to;
-      }
-
-      const program = this.program(pass.program);
-      for (let u = pass.first; u < pass.end; u++) {
-        this.setUniform(program, plan, u);
-      }
-
-      if (pass.texture >= 0) {
-        this.state.bindTexture(EXTRA_UNIT, this.host.texture(pass.texture));
-        this.state.bindSampler(EXTRA_UNIT, this.host.sampler(CLAMP));
-      }
-
-      if (pass.blurred !== NO_BLUR) {
-        // The blur, or the input where nothing blurred it, with the scale between them.
-        const blurred = pass.blurred >= 0 ? (targets[pass.blurred] as T) : from;
-        this.state.bindTexture(BLURRED_UNIT, blurred.texture);
-        this.state.bindSampler(BLURRED_UNIT, this.host.sampler(SMOOTH | CLAMP));
-        gl.uniform2f(
-          this.at(program, "uBlurredScale"),
-          from.width / (blurred.width * pass.across),
-          from.height / (blurred.height * pass.down),
+      if (!targets[pass.output]) {
+        targets[pass.output] = this.host.take(
+          plan.slotWidth[pass.output],
+          plan.slotHeight[pass.output],
         );
       }
 
-      this.draw(program, from, pass.readWidth, pass.readHeight, to, pass.width, pass.height);
+      this.drawPass(plan, k, targets, true);
       for (let slot = 0; slot < plan.slots; slot++) {
         const target = targets[slot];
         if (target && last[slot] === k && slot !== plan.result) {
@@ -200,6 +209,100 @@ export class FilterRunner<T extends FilterTarget> {
     }
 
     return targets[plan.result] as T;
+  }
+
+  /**
+   * Pass `k` of `plan` drawn from and into `targets`, by slot, which hold
+   * every one it reads and draws into; its output's rectangle cleared first
+   * where `clear`, else left as it is, as a rectangle no pass drew into yet is.
+   */
+  drawPass(
+    plan: FilterPlan,
+    k: number,
+    targets: readonly (FilterTarget | null)[],
+    clear: boolean,
+  ): void {
+    this.resolution = plan.resolution;
+    const pass = plan.passes[k];
+    const from = targets[pass.input] as FilterTarget;
+    const to = targets[pass.output] as FilterTarget;
+    const program = this.program(pass.program);
+    for (let u = pass.first; u < pass.end; u++) {
+      this.setUniform(program, plan, u);
+    }
+
+    if (pass.texture >= 0) {
+      this.state.bindTexture(EXTRA_UNIT, this.host.texture(pass.texture));
+      this.state.bindSampler(EXTRA_UNIT, this.host.sampler(CLAMP));
+    }
+
+    if (pass.blurred !== NO_BLUR) {
+      // The blur, or the input where nothing blurred it, with the scale between them.
+      const blurred = pass.blurred >= 0 ? (targets[pass.blurred] as FilterTarget) : from;
+      this.state.bindTexture(BLURRED_UNIT, blurred.texture);
+      this.state.bindSampler(BLURRED_UNIT, this.host.sampler(SMOOTH | CLAMP));
+      this.set(
+        program,
+        "uBlurredScale",
+        2,
+        from.width / (blurred.width * pass.across),
+        from.height / (blurred.height * pass.down),
+      );
+      this.set(
+        program,
+        "uBlurredRect",
+        4,
+        blurred.x ?? 0,
+        blurred.y ?? 0,
+        blurred.width,
+        blurred.height,
+      );
+    }
+
+    this.draw(program, from, pass.readWidth, pass.readHeight, to, pass.width, pass.height, clear);
+  }
+
+  /**
+   * `pass`'s uniform `name`, of `count` floats, set to `x` and those after,
+   * unless it was told them last: a frame's glows alike tell their passes
+   * the same values over and over.
+   */
+  private set(pass: Pass, name: string, count: number, x: number, y = 0, z = 0, w = 0): void {
+    let told = pass.told.get(name);
+    if (!told) {
+      told = new Float32Array(4).fill(Number.NaN);
+      pass.told.set(name, told);
+    }
+
+    // Compared as the floats the uniform holds.
+    if (
+      told[0] === Math.fround(x) &&
+      told[1] === Math.fround(y) &&
+      told[2] === Math.fround(z) &&
+      told[3] === Math.fround(w)
+    ) {
+      return;
+    }
+
+    told[0] = x;
+    told[1] = y;
+    told[2] = z;
+    told[3] = w;
+    const gl = this.gl;
+    const location = this.at(pass, name);
+    switch (count) {
+      case 1:
+        gl.uniform1f(location, x);
+        break;
+      case 2:
+        gl.uniform2f(location, x, y);
+        break;
+      case 3:
+        gl.uniform3f(location, x, y, z);
+        break;
+      default:
+        gl.uniform4f(location, x, y, z, w);
+    }
   }
 
   /** Uniform `u` of `plan` set on `pass`, in use. */
@@ -217,19 +320,15 @@ export class FilterRunner<T extends FilterTarget> {
         gl.uniform4fv(location, values, at, count);
         break;
       default:
-        switch (count) {
-          case 1:
-            gl.uniform1f(location, values[at]);
-            break;
-          case 2:
-            gl.uniform2f(location, values[at], values[at + 1]);
-            break;
-          case 3:
-            gl.uniform3f(location, values[at], values[at + 1], values[at + 2]);
-            break;
-          default:
-            gl.uniform4f(location, values[at], values[at + 1], values[at + 2], values[at + 3]);
-        }
+        this.set(
+          pass,
+          plan.uniformName[u],
+          count,
+          values[at],
+          count > 1 ? values[at + 1] : 0,
+          count > 2 ? values[at + 2] : 0,
+          count > 3 ? values[at + 3] : 0,
+        );
     }
   }
 
@@ -264,43 +363,47 @@ export class FilterRunner<T extends FilterTarget> {
    */
   private draw(
     pass: Pass,
-    input: T,
+    input: FilterTarget,
     readWidth: number,
     readHeight: number,
-    output: T,
+    output: FilterTarget,
     width: number,
     height: number,
+    clear = true,
   ): void {
     const gl = this.gl;
     const state = this.state;
+    const x = output.x ?? 0;
+    const y = output.y ?? 0;
     state.bindFramebuffer(output.framebuffer);
-    state.viewport(0, 0, width, height);
-    state.scissor(null);
+    state.viewport(x, y, width, height);
     state.colorMask(15);
     state.stencil(null);
     state.setBlend(null);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (clear) {
+      state.scissor([x, y, output.width, output.height]);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+
+    state.scissor(null);
     state.useProgram(pass.program);
     state.bindVertexArray(null);
     state.bindTexture(INPUT_UNIT, input.texture);
     state.bindSampler(INPUT_UNIT, this.host.sampler(SMOOTH | CLAMP));
     const res = this.resolution;
-    gl.uniform4f(
-      this.at(pass, "uInputSize"),
+    this.set(
+      pass,
+      "uInputSize",
+      4,
       input.width / res,
       input.height / res,
       res / input.width,
       res / input.height,
     );
-    gl.uniform4f(
-      this.at(pass, "uInputPixel"),
-      input.width,
-      input.height,
-      1 / input.width,
-      1 / input.height,
-    );
-    gl.uniform2f(this.at(pass, "uCoord"), readWidth / input.width, readHeight / input.height);
+    this.set(pass, "uInputPixel", 4, input.width, input.height, 1 / input.width, 1 / input.height);
+    this.set(pass, "uCoord", 2, readWidth / input.width, readHeight / input.height);
+    this.set(pass, "uTextureRect", 4, input.x ?? 0, input.y ?? 0, input.width, input.height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -309,8 +412,12 @@ export class FilterRunner<T extends FilterTarget> {
     const gl = this.gl;
     let pass = this.passes.get(name);
     if (!pass) {
-      const program = linkProgram(gl, VERTEX, HEADER + fragment);
-      pass = { program, uniforms: new Map() };
+      const program = linkProgram(gl, VERTEX, HEADER + withinRects(fragment));
+      pass = {
+        program,
+        uniforms: new Map(),
+        told: new Map(),
+      };
       this.passes.set(name, pass);
       this.state.useProgram(program);
       gl.uniform1i(gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);

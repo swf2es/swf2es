@@ -11,6 +11,9 @@ import {
   FILTER,
   Filters,
   Geometries,
+  HELD,
+  HOLD_POP,
+  HOLD_PUSH,
   IDLE_FRAMES,
   KEEP_IDLE_FRAMES,
   Keeps,
@@ -366,19 +369,59 @@ test("a filter list closes its filters into chains, each one's values after the 
   assert.deepEqual(Array.from(filters.start.subarray(0, 2)), [0, 4]);
 });
 
-test("a filtered layer clears past its rectangle, and runs its chain before it composites", () => {
+test("a filtered layer of draws alone is held: drawn before the stage, composited where it stands", () => {
   const scene = new SceneList();
+  scene.draw(0, 0, 0);
   scene.layerBegin(3);
   scene.draw(0, 0, 0);
   scene.layerEnd(NORMAL, 2, 0);
   scene.layerRect(0, 1, 2, 3, 4);
+  scene.draw(0, 0, 0);
   const commands = new Commands();
   plan(scene, 0xffffffff, commands);
-  assert.deepEqual(ops(commands).slice(1), [
-    [LAYER_PUSH, 4, 1, 0],
-    [RUN, 1, 1, 0],
+  assert.deepEqual(ops(commands), [
+    [HOLD_PUSH, 0, 0, 0],
+    [RUN, 2, 1, 0],
+    [HOLD_POP, 0, 0, 0],
+    [CLEAR, 4, 0, 0],
+    [RUN, 0, 1, 0],
+    [HELD, 0, NORMAL, 2],
+    [RUN, 4, 1, 0],
+  ]);
+  assert.deepEqual(Array.from(commands.params.subarray(0, 4)), [1, 2, 3, 4]);
+});
+
+test("a filtered layer with a layer in it, or kept, is drawn in its place; one in it may be held", () => {
+  const scene = new SceneList();
+  scene.layerBegin(3);
+  scene.layerBegin(3);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(NORMAL, -1, 1);
+  scene.layerEnd(NORMAL, -1, 0);
+  scene.layerBegin(3, 7);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(NORMAL, -1, 2);
+  for (let layer = 0; layer < 3; layer++) {
+    scene.layerRect(layer, 1, 2, 3, 4);
+  }
+
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(3), [
+    [CLEAR, 4, 0, 0],
+    [LAYER_PUSH, 8, 1, 0],
+    [HELD, 0, NORMAL, -1],
     [FILTER, 0, 0, 0],
-    [LAYER_POP, NORMAL, 2, -1],
+    [LAYER_POP, NORMAL, -1, -1],
+    [LAYER_PUSH, 12, 1, 0],
+    [RUN, 6, 1, 0],
+    [FILTER, 2, 0, 0],
+    [LAYER_POP, NORMAL, -1, 7],
+  ]);
+  assert.deepEqual(ops(commands).slice(0, 3), [
+    [HOLD_PUSH, 0, 0, 0],
+    [RUN, 2, 1, 0],
+    [HOLD_POP, 1, 0, 0],
   ]);
 });
 

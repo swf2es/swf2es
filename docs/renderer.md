@@ -242,6 +242,14 @@ WebGL. It is small by design:
   program's eight units, each draw reading its row, its texture's unit and
   whether it snaps by `gl_DrawID` from a uniform array; without the
   extension, a call a draw.
+- **Held layers:** a filtered layer of draws and masks alone, not kept,
+  is drawn before the stage with every other such (the planner's
+  `HOLD_PUSH`): their content side by side on pages, then their filters'
+  passes in waves, the k-th of every chain at once, planned ahead as data
+  (`filter-plan.ts`), each wave's targets on pages of their own. A pass
+  reads a target within its rectangle as a texture of its own size. On a
+  busy scene's 260 glows, a frame's framebuffer binds went from 1,300 to
+  255, and its GPU time from about 13 ms to 6.
 - **A state cache,** so no bind, blend or stencil state is set twice.
 - **Uploads** of rows and run chunks once a frame, as the table does.
 
