@@ -9773,6 +9773,31 @@ export const cases: PlayerCase[] = [
     maxOutliers: 20,
   },
   {
+    // Filtered objects in filtered objects: the own renderer draws the inner ones a level before
+    // the outer, side by side, and composites them into the outer's content.
+    name: "filters-nested",
+    swf: (abc) => bare(abc, 1, "FiltersNested", 300, 200),
+    script: "FiltersNested",
+    frames: 1,
+    capture: [1],
+    // As "filters": the page's samples against adl's whole pixels, up to 12 a channel in the
+    // shadow of 0.6 alpha round the two glows, and along the multiplied shadow's edge.
+    tolerance: 12,
+    maxOutliers: 0,
+  },
+  {
+    // As "filters-nested" at low quality, where nothing is multisampled: the multiplied shadow
+    // copies what is below it out of its outer layer's page as it is.
+    name: "filters-nested-low",
+    swf: (abc) => bare(abc, 1, "FiltersNested", 300, 200),
+    script: "FiltersNested",
+    quality: "low",
+    frames: 1,
+    capture: [1],
+    tolerance: 12,
+    maxOutliers: 0,
+  },
+  {
     // Filters on objects that draw nothing draw nothing, glows, shadows and colour matrices alike.
     name: "filters-empty",
     swf: (abc) => bare(abc, 1, "FiltersEmpty", 330, 132),

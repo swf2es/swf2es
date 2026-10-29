@@ -405,7 +405,7 @@ test("a filtered layer in a layer of no size is left out with it, not held", () 
   assert.deepEqual(ops(commands), [[CLEAR, 0, 0, 0]]);
 });
 
-test("a filtered layer with a layer in it, or kept, is drawn in its place; one in it may be held", () => {
+test("held layers in a held layer are drawn a level before it; a kept one is drawn in its place", () => {
   const scene = new SceneList();
   scene.layerBegin(3);
   scene.layerBegin(3);
@@ -421,21 +421,56 @@ test("a filtered layer with a layer in it, or kept, is drawn in its place; one i
 
   const commands = new Commands();
   plan(scene, 0xffffffff, commands);
-  assert.deepEqual(ops(commands).slice(3), [
-    [CLEAR, 4, 0, 0],
-    [LAYER_PUSH, 8, 1, 0],
+  assert.deepEqual(ops(commands), [
+    [HOLD_PUSH, 0, 0, 0],
+    [RUN, 2, 1, 0],
+    [HOLD_POP, 1, 0, 0],
+    [HOLD_PUSH, 4, 1, 1],
     [HELD, 0, NORMAL, -1],
-    [FILTER, 0, 0, 0],
-    [LAYER_POP, NORMAL, -1, -1],
+    [HOLD_POP, 0, 1, 0],
+    [CLEAR, 8, 0, 0],
+    [HELD, 1, NORMAL, -1],
     [LAYER_PUSH, 12, 1, 0],
     [RUN, 6, 1, 0],
     [FILTER, 2, 0, 0],
     [LAYER_POP, NORMAL, -1, 7],
   ]);
-  assert.deepEqual(ops(commands).slice(0, 3), [
-    [HOLD_PUSH, 0, 0, 0],
+});
+
+test("a held layer erased into a held layer clears the layer's page, not the stage", () => {
+  const scene = new SceneList();
+  scene.layerBegin(3);
+  scene.layerBegin(3);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(ERASE, -1, 1);
+  scene.layerEnd(NORMAL, -1, 0);
+  scene.layerRect(0, 1, 2, 3, 4);
+  scene.layerRect(1, 1, 2, 3, 4);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.equal(commands.clearsTarget, false);
+  assert.deepEqual(ops(commands)[4], [HELD, 0, ERASE, -1]);
+});
+
+test("a filtered layer with a layer in it that is not held is drawn in its place", () => {
+  const scene = new SceneList();
+  scene.layerBegin(3);
+  scene.layerBegin();
+  scene.draw(0, 0, 0);
+  scene.layerEnd(MULTIPLY, -1);
+  scene.layerEnd(NORMAL, -1, 0);
+  scene.layerRect(0, 1, 2, 3, 4);
+  scene.layerRect(1, 1, 2, 3, 4);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands), [
+    [CLEAR, 0, 0, 0],
+    [LAYER_PUSH, 4, 1, 0],
+    [LAYER_PUSH, 8, 0, 0],
     [RUN, 2, 1, 0],
-    [HOLD_POP, 1, 0, 0],
+    [LAYER_POP, MULTIPLY, -1, -1],
+    [FILTER, 0, 0, 0],
+    [LAYER_POP, NORMAL, -1, -1],
   ]);
 });
 
