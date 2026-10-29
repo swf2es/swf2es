@@ -14,6 +14,8 @@ interface NativeExports {
   memory: WebAssembly.Memory;
   input(n: number): number;
   build(length: number): number;
+  pack(): number;
+  headerAt(): number;
   positionsAt(): number;
   colorsAt(): number;
   indicesAt(): number;
@@ -33,6 +35,7 @@ export class LineBuilder {
   private readonly x: NativeExports;
   private view = new Float64Array(0);
   private capacity = 0;
+  private header = new Uint32Array(0);
 
   constructor() {
     module ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
@@ -73,6 +76,31 @@ export class LineBuilder {
       positions: new Float32Array(buffer, x.positionsAt(), vertices * 2).slice(),
       colors: new Uint32Array(buffer, x.colorsAt(), vertices).slice(),
       indices: new Uint32Array(buffer, x.indicesAt(), x.indexCount()).slice(),
+    };
+  }
+
+  /** As build(), the geometry laid out in one block in the module and copied out at once. */
+  buildBlock(length: number): LineGeometry | null {
+    const x = this.x;
+    if (x.build(length) !== 0 || x.pack() !== 0) {
+      return null;
+    }
+
+    const buffer = x.memory.buffer;
+    if (this.header.buffer !== buffer) {
+      this.header = new Uint32Array(buffer, x.headerAt(), 3);
+    }
+
+    const [at, vertices, count] = this.header;
+    if (count === 0) {
+      return null;
+    }
+
+    const copy = buffer.slice(at, at + (vertices * 3 + count) * 4);
+    return {
+      positions: new Float32Array(copy, 0, vertices * 2),
+      colors: new Uint32Array(copy, vertices * 8, vertices),
+      indices: new Uint32Array(copy, vertices * 12, count),
     };
   }
 }

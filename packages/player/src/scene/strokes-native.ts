@@ -25,6 +25,7 @@ export function layerStrokesNative(
   least: number,
   builder: LineBuilder,
   by: readonly number[] | null = null,
+  block = true,
 ): GeometryData | null | undefined {
   if (a * d - b * c === 0) {
     return null;
@@ -79,5 +80,5 @@ export function layerStrokesNative(
     }
   }
 
-  return builder.build(at);
+  return block ? builder.buildBlock(at) : builder.build(at);
 }

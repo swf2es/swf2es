@@ -31,7 +31,32 @@ var indices: std.ArrayList(u32) = .empty;
 var points: std.ArrayList(f64) = .empty;
 var between: std.ArrayList(f64) = .empty;
 var corners: std.ArrayList(i32) = .empty;
+/// Each segment's unit direction and length, as direction() and gentleBack() take them.
+var ways: std.ArrayList(Way) = .empty;
+/// The geometry laid out in one block for one copy: positions, colours, indices.
+var block: std.ArrayList(u32) = .empty;
+/// Where the block is, its vertices and its indices.
+var header: [3]u32 = .{ 0, 0, 0 };
 var color: u32 = 0;
+
+const Way = struct { x: f64, y: f64, length: f64 };
+
+export fn headerAt() usize {
+    return @intFromPtr(&header);
+}
+
+/// The geometry built last as one block, for the header to describe: 0, or -1 out of memory.
+export fn pack() i32 {
+    const v = colors.items.len;
+    const n = indices.items.len;
+    block.resize(allocator, v * 3 + n) catch return -1;
+    const out = block.items;
+    @memcpy(out[0 .. v * 2], @as([]const u32, @ptrCast(positions.items)));
+    @memcpy(out[v * 2 .. v * 3], colors.items);
+    @memcpy(out[v * 3 ..], indices.items);
+    header = .{ @intCast(@intFromPtr(out.ptr)), @intCast(v), @intCast(n) };
+    return 0;
+}
 
 /// Room for `n` f64s of input, or 0.
 export fn input(n: usize) usize {
@@ -275,8 +300,19 @@ fn polyline(path: []const f64, a: f64, b: f64, c: f64, d: f64, flatness: f64) Er
 }
 
 /// The chords of an arc about (cx, cy) of radius `r`, from `from` turning `sweep`, past its start.
+/// The widest piece of an arc of the last radius and flatness: a line's every join and cap shares it.
+var arc_r: f64 = std.math.nan(f64);
+var arc_flatness: f64 = std.math.nan(f64);
+var arc_most: f64 = 0;
+
 fn arc(cx: f64, cy: f64, r: f64, from: f64, sweep: f64, flatness: f64) Error!void {
-    const most = if (r > flatness) 2 * std.math.acos(1 - flatness / r) else std.math.pi;
+    if (r != arc_r or flatness != arc_flatness) {
+        arc_r = r;
+        arc_flatness = flatness;
+        arc_most = if (r > flatness) 2 * std.math.acos(1 - flatness / r) else std.math.pi;
+    }
+
+    const most = arc_most;
     const pieces = steps(@ceil(@abs(sweep) / most), 256);
     const total: f64 = @floatFromInt(pieces);
     try between.ensureUnusedCapacity(allocator, pieces * 2);
@@ -291,16 +327,6 @@ fn dropLast() void {
     between.items.len -= @min(between.items.len, 2);
 }
 
-const Direction = struct { x: f64, y: f64 };
-
-/// The unit direction from point `i` to point `j` of `p`.
-inline fn direction(p: []const f64, i: usize, j: usize) Direction {
-    const dx = p[j * 2] - p[i * 2];
-    const dy = p[j * 2 + 1] - p[i * 2 + 1];
-    const l = hypot(dx, dy);
-    return .{ .x = dx / l, .y = dy / l };
-}
-
 /// JS truthiness of a number.
 inline fn truthy(x: f64) bool {
     return x != 0 and !std.math.isNan(x);
@@ -308,14 +334,15 @@ inline fn truthy(x: f64) bool {
 
 /// strokes.ts's outerJoin, onto `between`.
 fn outerJoin(x: f64, y: f64, nx: f64, ny: f64, mx: f64, my: f64, tx: f64, ty: f64, ux: f64, uy: f64, cross: f64, dot: f64, h: f64, join: usize, limit: f64, flatness: f64) Error!void {
-    const turn = std.math.atan2(@abs(cross), dot);
     switch (join) {
         0 => {
+            const turn = std.math.atan2(@abs(cross), dot);
             const way = if (cross != 0) sign(nx * my - ny * mx) else sign(nx * ty - ny * tx);
             try arc(x, y, h, std.math.atan2(ny, nx), way * turn, flatness);
             dropLast();
         },
         2 => {
+            const turn = std.math.atan2(@abs(cross), dot);
             const ratio = 1 / @cos(turn / 2);
             var bx = nx + mx;
             var by = ny + my;
@@ -346,13 +373,10 @@ fn outerJoin(x: f64, y: f64, nx: f64, ny: f64, mx: f64, my: f64, tx: f64, ty: f6
 }
 
 /// strokes.ts's gentleBack.
-fn gentleBack(p: []const f64, before: usize, j: usize, after: usize, h: f64, cross: f64, dot: f64) f64 {
+/// The segments' lengths are those direction() took: hypot is the same of (dx, dy) and (-dx, -dy).
+fn gentleBack(before: f64, after: f64, h: f64, cross: f64, dot: f64) f64 {
     const back = (h * @abs(cross)) / (1 + dot);
-    const x = p[j * 2];
-    const y = p[j * 2 + 1];
-    return if (dot > 0 and
-        2 * back <= hypot(x - p[before * 2], y - p[before * 2 + 1]) and
-        2 * back <= hypot(p[after * 2] - x, p[after * 2 + 1] - y)) back else -1;
+    return if (dot > 0 and 2 * back <= before and 2 * back <= after) back else -1;
 }
 
 /// strokes.ts's cap, onto `between`.
@@ -421,6 +445,17 @@ fn lineTriangles(p: []const f64, closed: bool, h: f64, caps: usize, join: usize,
     }
 
     const segments = if (closed) n else n - 1;
+    try ways.resize(allocator, segments);
+    const w = ways.items;
+    for (0..segments) |k| {
+        const i = k * 2;
+        const j = ((k + 1) % n) * 2;
+        const dx = p[j] - p[i];
+        const dy = p[j + 1] - p[i + 1];
+        const l = hypot(dx, dy);
+        w[k] = .{ .x = dx / l, .y = dy / l, .length = l };
+    }
+
     try corners.resize(allocator, segments * CORNERS);
     const c = corners.items;
     for (0..segments) |k| {
@@ -429,10 +464,10 @@ fn lineTriangles(p: []const f64, closed: bool, h: f64, caps: usize, join: usize,
     }
 
     if (!closed) {
-        const s = direction(p, 0, 1);
+        const s = w[0];
         c[START_L] = try vertex(p[0] + s.y * h, p[1] - s.x * h);
         c[START_R] = try vertex(p[0] - s.y * h, p[1] + s.x * h);
-        const e = direction(p, n - 2, n - 1);
+        const e = w[n - 2];
         const x = p[(n - 1) * 2];
         const y = p[(n - 1) * 2 + 1];
         const end = (n - 2) * CORNERS;
@@ -443,11 +478,10 @@ fn lineTriangles(p: []const f64, closed: bool, h: f64, caps: usize, join: usize,
     var j: usize = if (closed) 0 else 1;
     while (j < (if (closed) n else n - 1)) : (j += 1) {
         const before = (j + n - 1) % n;
-        const after = (j + 1) % n;
         const x = p[j * 2];
         const y = p[j * 2 + 1];
-        const t = direction(p, before, j);
-        const u = direction(p, j, after);
+        const t = w[before];
+        const u = w[j];
         const tx = t.x;
         const ty = t.y;
         const ux = u.x;
@@ -471,7 +505,7 @@ fn lineTriangles(p: []const f64, closed: bool, h: f64, caps: usize, join: usize,
         const ny = -tx * s * h;
         const mx = uy * s * h;
         const my = -ux * s * h;
-        const back = gentleBack(p, before, j, after, h, cross, dot);
+        const back = gentleBack(t.length, u.length, h, cross, dot);
         const outerEnd = try vertex(x + nx, y + ny);
         const outerStart = try vertex(x + mx, y + my);
         const center = if (back >= 0) try vertex(x - nx - tx * back, y - ny - ty * back) else try vertex(x, y);
@@ -518,8 +552,9 @@ fn lineTriangles(p: []const f64, closed: bool, h: f64, caps: usize, join: usize,
         .{ c[(n - 2) * CORNERS + END_L], c[(n - 2) * CORNERS + END_R] },
         .{ c[START_R], c[START_L] },
     };
-    for (ends, sides) |e, side| {
-        const t = direction(p, e[1], e[0]);
+    // Out of the start is its first segment's way back: negated exactly, as JS's division gives it.
+    const outs = [2]Way{ w[n - 2], .{ .x = -w[0].x, .y = -w[0].y, .length = w[0].length } };
+    for (ends, sides, outs) |e, side, t| {
         try cap(p, e[0], t.x, t.y, h, caps, flatness);
         dropLast();
         if (between.items.len == 0) {

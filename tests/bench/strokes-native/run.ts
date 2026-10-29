@@ -18,11 +18,15 @@ const RUN_MS = 60;
 const builder = new LineBuilder();
 const tessellator = (() => null) as unknown as Parameters<typeof layerStrokes>[6];
 // Packing alone: the real input view, no call.
-const packer = { input: (n: number) => builder.input(n), build: () => null } as unknown as LineBuilder;
+const packer = {
+  input: (n: number) => builder.input(n),
+  build: () => null,
+  buildBlock: () => null,
+} as unknown as LineBuilder;
 let lastLength = 0;
 const measurer = {
   input: (n: number) => builder.input(n),
-  build: (length: number) => {
+  buildBlock: (length: number) => {
     lastLength = length;
     return null;
   },
@@ -93,7 +97,7 @@ function time(pool: ShapeLayer[], f: (layer: ShapeLayer) => unknown): number {
 
 const rows: string[] = [];
 const header =
-  "| layer | width | join | pts | verts | JS ns | Zig ns | Zig/JS | pack | call | copy | JS ns/pt | Zig ns/pt |";
+  "| layer | width | join | pts | verts | JS ns | Zig ns | Zig/JS | pack | call | copy | 3-copy Zig ns | JS ns/pt | Zig ns/pt |";
 rows.push(header, header.replace(/[^|]+/g, "---"));
 let jsTotal = 0;
 let zigTotal = 0;
@@ -114,6 +118,9 @@ for (const [shapeName, make] of shapes) {
         pool.reduce((sum, layer) => sum + (js(layer)?.positions.length ?? 0) / 2, 0) / POOL;
       const tJs = time(pool, js);
       const tZig = time(pool, zig);
+      const tZig3 = time(pool, (layer) =>
+        layerStrokesNative(layer, 1, 0, 0, 1, 1, builder, null, false),
+      );
       const tPack = time(pool, (layer) => layerStrokesNative(layer, 1, 0, 0, 1, 1, packer));
       // The call alone, on each layer packed once beforehand into a buffer of its own.
       const packed = pool.map((layer) => {
@@ -139,7 +146,7 @@ for (const [shapeName, make] of shapes) {
       rows.push(
         `| ${shapeName} | ${widthName} | ${joinName} | ${pts.toFixed(0)} | ${verts.toFixed(0)} | ` +
           `${tJs.toFixed(0)} | ${tZig.toFixed(0)} | ${(tZig / tJs).toFixed(2)} | ` +
-          `${tPack.toFixed(0)} | ${call.toFixed(0)} | ${copy.toFixed(0)} | ` +
+          `${tPack.toFixed(0)} | ${call.toFixed(0)} | ${copy.toFixed(0)} | ${tZig3.toFixed(0)} | ` +
           `${(tJs / pts).toFixed(1)} | ${(tZig / pts).toFixed(1)} |`,
       );
       console.error(rows[rows.length - 1]);

@@ -260,7 +260,7 @@ fn strokes(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
         .single_threaded = true,
         .strip = true,
     });
-    root.export_symbol_names = &.{ "input", "build", "positionsAt", "colorsAt", "indicesAt", "vertexCount", "indexCount" };
+    root.export_symbol_names = &.{ "input", "build", "pack", "headerAt", "positionsAt", "colorsAt", "indicesAt", "vertexCount", "indexCount" };
     const module = b.addExecutable(.{ .name = "strokes", .root_module = root });
     module.entry = .disabled;
     module.stack_size = 64 * 1024;
