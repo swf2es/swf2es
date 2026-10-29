@@ -72,3 +72,8 @@ truth.
   lazy ABC parser in TypeScript descended from Shumway. Apache-2.0.
 - **Shumway** (archived): [`mozilla/shumway`](https://github.com/mozilla/shumway),
   the origin of AwayFL's AVM2, with its SWF tag parsers. Apache-2.0.
+- **PixiJS v8's `FilterSystem`**: how a filtered layer is measured and
+  padded (`packages/render/src/measure.ts`), which the filters'
+  exactness rules were found against while the player drew with Pixi.
+  The renderer has replaced Pixi otherwise ([renderer.md](renderer.md)).
+  MIT.

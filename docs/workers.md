@@ -652,6 +652,7 @@ three to four minutes on the primordial, then fail with 1009 in their
 `Console.init` before they make any worker, in node too, which is
 another gap.
 
+### avmshell's workers
 
 The runtime's shell natives (`natives/shell.ts`) run avmshell's Worker
 and WorkerDomain as avmplus' Aggregate and Isolate do, with
@@ -725,7 +726,7 @@ Where swf2es differs from the oracle's avmshell:
 
 Each a PR, in this order:
 
-1. **Message-passing workers** (this PR): `Worker.isSupported`,
+1. **Message-passing workers** (built): `Worker.isSupported`,
    `WorkerDomain.createWorker` on a host's thread, `start`, `terminate`,
    `listWorkers`, `workerState`, shared properties of copied values,
    `MessageChannel` with copied values (`send`, `receive(false)`,
