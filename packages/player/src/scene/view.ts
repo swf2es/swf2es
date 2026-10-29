@@ -1213,7 +1213,12 @@ export class RenderView implements Drawer {
     let row = -1;
     if (layers) {
       for (let i = 0; i < layers.length; i++) {
-        for (const { handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
+        for (const { part, handle } of this.partsOf(layers[i], version, o.drawing !== null)) {
+          // A mesh of a bitmap disposed of draws nothing, as it is drawn, and so masks nothing.
+          if (part.mesh?.image.disposed) {
+            continue;
+          }
+
           this.geometries.use(handle.id);
           if (row < 0) {
             row = this.rows.add(a, b, c, d, tx, ty, null);

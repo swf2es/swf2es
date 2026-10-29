@@ -223,6 +223,9 @@ export class WebGLBackend {
   private readonly view = new Float32Array(4);
   private readonly frag = new Float32Array(4);
   private meshStale = true;
+  /** The row and mode (REPEAT, SMOOTH) the mesh program was told last, -1 for none. */
+  private meshRow = -1;
+  private meshMode = -1;
   /** The layers' composite program and where it takes its mode and row. */
   private composite!: WebGLProgram;
   private modeLocation: WebGLUniformLocation | null = null;
@@ -329,6 +332,8 @@ export class WebGLBackend {
     gl.uniform1i(gl.getUniformLocation(this.mesh, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.mesh, "uTexture"), TEXTURE_UNIT);
     this.meshStale = true;
+    this.meshRow = -1;
+    this.meshMode = -1;
     this.textures = [];
     this.samplers = [];
     this.composite = linkProgram(gl, compositeVertex, compositeFragment);
@@ -700,7 +705,7 @@ export class WebGLBackend {
     // A layer's rows run down from its corner; the canvas' up from its bottom.
     const frag = this.frag;
     frag[0] = open.x - target.x;
-    frag[1] = open.layer ? open.y - target.y : open.height - target.y;
+    frag[1] = (open.layer ? open.y : open.y + open.height) - target.y;
     frag[2] = down;
     frag[3] = target.pixel;
     this.meshStale = true;
@@ -1116,6 +1121,8 @@ export class WebGLBackend {
   private drawEntries(scene: SceneList, first: number, end: number, stencil: boolean): void {
     const gl = this.gl;
     const state = this.state;
+    // Whether the mesh program is in use, till the next entry that is no mesh.
+    let meshing = false;
     for (let i = first; i < end; i++) {
       if (scene.kind[i] !== DRAW) {
         continue;
@@ -1128,8 +1135,13 @@ export class WebGLBackend {
 
       // A mesh by the mesh program; in a mask, its triangles' coverage as a fill's.
       if (!stencil && scene.sampler[i] & MESH) {
-        this.drawMesh(scene, i, place);
+        meshing = this.drawMesh(scene, i, place) || meshing;
         continue;
+      }
+
+      if (meshing) {
+        state.useProgram(this.program);
+        meshing = false;
       }
 
       const row = scene.row[i];
@@ -1156,17 +1168,22 @@ export class WebGLBackend {
 
       gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
     }
+
+    if (meshing) {
+      state.useProgram(this.program);
+    }
   }
 
   /**
    * Entry `i`, a mesh (MESH), drawn by the mesh program, which is told the
-   * view as it changed; the fill program used again after.
+   * view as it changed, and its row and mode as they change; whether it
+   * was drawn, the mesh program left in use.
    */
-  private drawMesh(scene: SceneList, i: number, place: Place): void {
+  private drawMesh(scene: SceneList, i: number, place: Place): boolean {
     const id = scene.texture[i];
     const texture = id >= 0 ? (this.textures[id] ?? null) : null;
     if (!texture) {
-      return;
+      return false;
     }
 
     const gl = this.gl;
@@ -1178,14 +1195,23 @@ export class WebGLBackend {
       this.meshStale = false;
     }
 
-    const bits = scene.sampler[i];
-    gl.uniform1i(this.meshRowLocation, scene.row[i]);
-    gl.uniform2i(this.meshModeLocation, bits & REPEAT ? 1 : 0, bits & SMOOTH ? 1 : 0);
+    const row = scene.row[i];
+    if (row !== this.meshRow) {
+      this.meshRow = row;
+      gl.uniform1i(this.meshRowLocation, row);
+    }
+
+    const mode = scene.sampler[i] & (REPEAT | SMOOTH);
+    if (mode !== this.meshMode) {
+      this.meshMode = mode;
+      gl.uniform2i(this.meshModeLocation, mode & REPEAT ? 1 : 0, mode & SMOOTH ? 1 : 0);
+    }
+
     state.bindTexture(TEXTURE_UNIT, texture);
     // Read texel by texel, but through a sampler without mipmaps, as a texture with none needs.
     state.bindSampler(TEXTURE_UNIT, this.sampler(CLAMP));
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
-    state.useProgram(this.program);
+    return true;
   }
 
   /** The textures removed since the last frame deleted, and those added or changed uploaded, their pixels let go. */

@@ -19,9 +19,11 @@ export type GeometryHandle = Handle;
  */
 export interface GeometryData {
   positions: Float32Array;
+  /** None for a mesh, whose depths take their place. */
   colors: Uint32Array;
+  /** A mesh's (MESH) are its u and v from 0 to 1, which its program reads as they are. */
   texels?: Float32Array;
-  /** A mesh's (MESH) depth at each vertex, its t, in place of its colour. */
+  /** A mesh's depth at each vertex, its t, in place of its colour. */
   depths?: Float32Array;
   indices: Uint32Array;
 }

@@ -178,6 +178,7 @@ export function layerParts(
   masking = false,
 ): Part[] {
   const parts = layer.fills.length > 0 ? fillParts(layer, tessellator, masking) : [];
+
   for (const mesh of layer.meshes ?? []) {
     const part = meshPart(mesh);
     if (part) {
@@ -188,35 +189,33 @@ export function layerParts(
   return parts;
 }
 
+const NO_COLORS = new Uint32Array(0);
+
 /** A mesh's triangles, three vertices each, as a geometry: its u and v the texels, its t their depths. */
 function meshPart(mesh: TriangleMesh): Part | null {
+  // Three vertices a triangle, as drawTriangles keeps them.
   const count = mesh.positions.length / 2;
-  const drawn = count - (count % 3);
-  if (drawn === 0) {
+  if (count === 0) {
     return null;
   }
 
   const texels = new Float32Array(count * 2);
   const depths = new Float32Array(count);
+
   for (let k = 0; k < count; k++) {
     texels[k * 2] = mesh.uvt[k * 3];
     texels[k * 2 + 1] = mesh.uvt[k * 3 + 1];
     depths[k] = mesh.uvt[k * 3 + 2];
   }
 
-  const indices = new Uint32Array(drawn);
-  for (let k = 0; k < drawn; k++) {
+  const indices = new Uint32Array(count);
+
+  for (let k = 0; k < count; k++) {
     indices[k] = k;
   }
 
   return {
-    geometry: {
-      positions: mesh.positions,
-      colors: new Uint32Array(count),
-      texels,
-      depths,
-      indices,
-    },
+    geometry: { positions: mesh.positions, colors: NO_COLORS, texels, depths, indices },
     paint: null,
     region: null,
     mesh,
