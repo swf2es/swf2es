@@ -2,8 +2,7 @@
 // the element and the device's pixels, the pointer, the keys and the
 // focus, and the loop that plays and draws, all of which destroy lets go.
 
-import type { Convolver } from "@swf2es/native/bitmap";
-import type { Tessellator } from "@swf2es/native/tessellate";
+import type { Convolver, Tessellator } from "@swf2es/native/render";
 import { bindActivation, bindKeyboard, type Player, type Scripting } from "@swf2es/player";
 import type { RenderView } from "@swf2es/player/scene";
 import { configuration } from "./config.js";
@@ -103,12 +102,12 @@ export class Playback {
     const [tessellator, convolver, scene] = await Promise.all([
       nativeFills === false
         ? null
-        : import("@swf2es/native/tessellate")
+        : import("@swf2es/native/render")
             .then(({ Tessellator }): Tessellator => new Tessellator())
             .catch(() => null),
       nativeBitmaps === false
         ? null
-        : import("@swf2es/native/bitmap")
+        : import("@swf2es/native/render")
             .then(({ Convolver }): Convolver => new Convolver())
             .catch(() => null),
       // Settled, not rejected, so that the native instances made beside it go if it fails to load.

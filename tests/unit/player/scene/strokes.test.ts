@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Tessellator } from "@swf2es/native/tessellate";
+import { Tessellator } from "@swf2es/native/render";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import {
   layerStrokes,

@@ -2,7 +2,7 @@
 // again by their transform, and let go of within its budget.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Tessellator } from "@swf2es/native/tessellate";
+import { Tessellator } from "@swf2es/native/render";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
 import { Geometries } from "../../../../packages/render/dist/index.js";

@@ -437,7 +437,7 @@ try {
       "Page.getResourceTree",
     );
     assert.ok(
-      frameTree.resources.some((r) => r.url.endsWith("/modules/native/bitmap/index.js")),
+      frameTree.resources.some((r) => r.url.endsWith("/modules/native/render/index.js")),
       "playback did not load the native bitmap kernels",
     );
 

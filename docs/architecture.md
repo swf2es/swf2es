@@ -4421,7 +4421,7 @@ layers).
 #### Native CPU convolution
 
 New web playbacks convolve BitmapData on the CPU through
-`@swf2es/native/bitmap` by default, loaded alongside the fill tessellator;
+`@swf2es/native/render` by default, loaded alongside the fill tessellator;
 `configure({ nativeBitmaps: false })` keeps them on JS and loads no native
 bitmap module. Both paths give the same pixels. Each playback supplies one
 `Convolver.convolve` to its Scripting or Avm1 `bitmapConvolver` hook before
@@ -4761,7 +4761,7 @@ quality smooths no bitmap either.
 ### The page's configuration
 
 The web host uses native fill tessellation by default. Each playback owns a
-`Tessellator` from `@swf2es/native/tessellate`, loaded when playback is created, and
+`Tessellator` from `@swf2es/native/render`, loaded when playback is created, and
 disposes its Wasm scratch when playback is destroyed. `configure({ nativeFills:
 false })` keeps new playbacks on JS and skips loading the native package.
 A missing module or unavailable Wasm keeps JS usable; failed Wasm compilation

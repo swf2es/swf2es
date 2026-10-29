@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  PATH_CUBIC,
-  PATH_CURVE,
-  PATH_LINE,
-  PATH_MOVE,
-  Tessellator,
-} from "@swf2es/native/tessellate";
+import { PATH_CUBIC, PATH_CURVE, PATH_LINE, PATH_MOVE, Tessellator } from "@swf2es/native/render";
 import { binary } from "../../packages/native/dist/render/binary.js";
 import { tessellationFixtures } from "./tessellate-fixtures.ts";
 

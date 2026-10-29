@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Convolver } from "@swf2es/native/bitmap";
+import { Convolver } from "@swf2es/native/render";
 import { binary } from "../../packages/native/dist/render/binary.js";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";

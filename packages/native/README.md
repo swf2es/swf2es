@@ -2,16 +2,16 @@
 
 swf2es's WebAssembly modules, built with the repository's pinned Zig:
 
-- `@swf2es/native/bitmap`: BitmapData convolution kernels.
+- `@swf2es/native/render`: what the renderer computes natively, each a
+  wrapper over an instance of its own: double-precision libtess2 fill
+  tessellation (`Tessellator`), a shape layer's lines built in one call
+  (`LineBuilder`), and BitmapData convolution kernels (`Convolver`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
-- `@swf2es/native/tessellate`: double-precision libtess2 fill tessellation,
-  and a shape layer's lines built in one call (`LineBuilder`).
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress` and `mp3` each compile their own module. What the renderer
-computes, `bitmap` and `tessellate`, shares one module, `render`
-(`src/render/`, about 68 KB), so loading either compiles the whole of it,
+computes is one module, `render` (`src/render/`, about 76 KB), compiled
 once; each user instantiates it apart (a `Convolver`, a `Tessellator` and
 its `LineBuilder`), so each has its own memory and lifetime, and a large
 bitmap job never grows the tessellator's memory, nor does disposing one
@@ -29,7 +29,7 @@ lines then all keep to their JS paths.
 The package is one Zig project inside the npm package: `build.zig` at its
 root builds every binary, and each binary's Zig source, in `src/<binary>/`,
 sits beside its generated `binary.ts` and its TypeScript wrapper
-(`index.ts`; `render`'s wrappers are `src/bitmap/` and `src/tessellate/`). tsc compiles only the `.ts` files, and only `dist/` and
+(`index.ts`). tsc compiles only the `.ts` files, and only `dist/` and
 `LICENSE.third-party` are published, so the Zig and C sources are in the
 repository but not in the npm tarball. `include/` holds the libc headers
 the vendored C includes, which wasm32-freestanding lacks: `string.h` maps
@@ -229,7 +229,7 @@ When constructing a `RenderView` directly, opt in through its generic hook:
 
 ```ts
 import { RenderView } from "@swf2es/player/scene";
-import { Tessellator } from "@swf2es/native/tessellate";
+import { Tessellator } from "@swf2es/native/render";
 
 const tessellator = new Tessellator();
 const view = new RenderView({ width, height, fillTessellator: tessellator.tessellate });

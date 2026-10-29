@@ -1,7 +1,5 @@
-import { LineBuilder } from "../render/lines.js";
-import { renderCompiled, renderInstance } from "../render/module.js";
-
-export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "../render/lines.js";
+import { LineBuilder } from "./lines.js";
+import { renderCompiled, renderInstance } from "./module.js";
 
 /** Buffers are owned by the caller; subsequent calls and disposal cannot change them. */
 export interface FillGeometry {

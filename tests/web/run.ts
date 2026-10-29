@@ -1514,12 +1514,12 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
         await send("Network.enable");
         listen("Network.requestWillBeSent", (params) => {
           const request = params.request as { url: string };
-          if (request.url.includes("/tessellate/")) {
+          if (request.url.includes("/native/render/")) {
             nativeRequests.push(request.url);
           }
         });
         if (mode === "missing") {
-          await send("Network.setBlockedURLs", { urls: ["*/tessellate/*"] });
+          await send("Network.setBlockedURLs", { urls: ["*/native/render/*"] });
         }
         const r = await call<{
           rect: [number, number, number, number];
@@ -1551,8 +1551,9 @@ for (const mode of ["js", "default", "blocked", "missing", "csp"] as const) {
           mode === "default" ? 1 : mode === "blocked" || mode === "csp" ? 3 : 0,
         );
         assert.equal(r.instances, mode === "default" ? 3 : 0);
-        if (mode === "js") {
-          assert.equal(nativeRequests.length, 0, "the JS opt-out loaded the native package");
+        // The JS opt-out makes no tessellator, though the bitmap kernel loads the same module.
+        if (mode === "missing") {
+          assert.equal(nativeRequests.length > 0, true, "the blocked module was not asked for");
         }
 
         await call(evaluate, "fillDestroy()");
@@ -1594,7 +1595,7 @@ for (const vm of ["as3", "avm1"]) {
         async (evaluate, send) => {
           if (mode === "missing") {
             await send("Network.enable");
-            await send("Network.setBlockedURLs", { urls: ["*/native/bitmap/*"] });
+            await send("Network.setBlockedURLs", { urls: ["*/native/render/*"] });
           }
 
           const result = await call<{
@@ -1662,7 +1663,7 @@ try {
     async (evaluate) => {
       const result = await call(
         evaluate,
-        `import("@swf2es/native/bitmap").then(({Convolver}) => {
+        `import("@swf2es/native/render").then(({Convolver}) => {
       const owner = new Convolver();
       const source = {width:1,height:1,transparent:true,pixels:new Uint32Array([0xff123456])};
       const rect = {x:0,y:0,width:1,height:1};

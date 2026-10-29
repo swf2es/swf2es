@@ -5,10 +5,6 @@
   "license": "Apache-2.0 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0",
   "type": "module",
   "exports": {
-    "./bitmap": {
-      "types": "./dist/bitmap/index.d.ts",
-      "default": "./dist/bitmap/index.js"
-    },
     "./compress": {
       "types": "./dist/compress/index.d.ts",
       "default": "./dist/compress/index.js"
@@ -17,9 +13,9 @@
       "types": "./dist/mp3/index.d.ts",
       "default": "./dist/mp3/index.js"
     },
-    "./tessellate": {
-      "types": "./dist/tessellate/index.d.ts",
-      "default": "./dist/tessellate/index.js"
+    "./render": {
+      "types": "./dist/render/index.d.ts",
+      "default": "./dist/render/index.js"
     }
   },
   "files": [

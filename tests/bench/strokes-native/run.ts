@@ -2,7 +2,7 @@
 // the native line builder, packing and copying out included, on
 // representative layers, opaque and translucent: ns per layer, the median of
 // several runs after warm-up.
-import { Tessellator } from "../../../packages/native/dist/tessellate/index.js";
+import { Tessellator } from "../../../packages/native/dist/render/index.js";
 import type { ShapeLayer } from "../../../packages/player/dist/display/shapes.js";
 import { trace } from "../../../packages/player/dist/scene/fills.js";
 import { layerStrokes } from "../../../packages/player/dist/scene/strokes.js";

@@ -842,7 +842,7 @@ async function bitmapRun(mode: string, vm: string) {
     }
     requests = performance
       .getEntriesByType("resource")
-      .filter((r) => r.name.includes("/native/bitmap/")).length;
+      .filter((r) => r.name.includes("/native/render/")).length;
   } finally {
     console.log = log;
     console.error = error;

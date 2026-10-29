@@ -26,7 +26,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     const { Container, TRANSFORM } = await import("/player/display/display.js");
     const { Drawing } = await import("/player/display/drawing.js");
     const { filterDefaults } = await import("/player/display/filters.js");
-    const { Tessellator } = await import("@swf2es/native/tessellate");
+    const { Tessellator } = await import("@swf2es/native/render");
     const tessellator = new Tessellator();
     // Each pattern, and the share of its area it covers.
     const rect = (d, x, y, w, h) => d.drawRect(x, y, w, h);

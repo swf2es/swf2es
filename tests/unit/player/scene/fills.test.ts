@@ -3,7 +3,7 @@
 // call a fill, and left to JS where it fails or gives what cannot be drawn.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Tessellator } from "@swf2es/native/tessellate";
+import { Tessellator } from "@swf2es/native/render";
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import { resolveFills } from "../../../../packages/player/dist/scene/fills.js";
 

@@ -13,7 +13,7 @@ import {
   PATH_LINE,
   PATH_MOVE,
   Tessellator,
-} from "../../packages/native/dist/tessellate/index.js";
+} from "../../packages/native/dist/render/index.js";
 
 const cases = Number(process.argv[2] ?? 2000);
 const seed = Number(process.argv[3] ?? 1);

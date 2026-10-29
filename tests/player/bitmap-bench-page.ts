@@ -1,4 +1,4 @@
-import { Convolver } from "@swf2es/native/bitmap";
+import { Convolver } from "@swf2es/native/render";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
 import { filterDefaults } from "../../packages/player/dist/display/filters.js";

@@ -4,7 +4,7 @@
 // that leaves the layer to layerStrokes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Tessellator } from "@swf2es/native/tessellate";
+import { Tessellator } from "@swf2es/native/render";
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import { layerStrokes } from "../../../../packages/player/dist/scene/strokes.js";
 import { layerStrokesNative } from "../../../../packages/player/dist/scene/strokes-native.js";
