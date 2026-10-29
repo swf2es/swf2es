@@ -27,6 +27,7 @@
 // --write-swfs DIR writes the cases' SWFs there and stops, for another player.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDemos } from "../../apps/site/demos.ts";
 import { zlibCompress } from "../../packages/format/dist/index.js";
@@ -481,7 +482,7 @@ if (writeAt >= 0) {
 
 // The libraries bounce plays on, served to the page.
 libraryAbcs();
-// None yet, as for a renderer --update has not counted: every count is then new.
+// None yet for a renderer --update has not counted: every case is then missing from it.
 const baseline = (
   existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, "utf8")) : {}
 ) as Record<string, Counts>;
@@ -520,7 +521,7 @@ for (const [name, swf] of cases()) {
   }
 
   if (!was) {
-    failures.push(`${name}: not in draw-counts.json; run with --update to add it`);
+    failures.push(`${name}: not in ${basename(baselinePath)}; run with --update to add it`);
     continue;
   }
 
