@@ -97,5 +97,5 @@ launch.ts       `start`: finds Electron and runs the app
 The page (`src/renderer`, `static`) knows the shell only through
 `window.swf2esDesktop` (`src/shared/api.ts`), so another shell, Tauri
 say, can serve the same page by giving the same API.
-[docs/architecture.md](../../docs/architecture.md#the-desktop-app) has
+[docs/architecture/desktop.md](../../docs/architecture/desktop.md) has
 the design, its security among it.

@@ -103,7 +103,7 @@ movie.setScore(120); // arrays and objects go both ways; the call is synchronous
 The page's calls into the SWF need no `eval`. Any SWF that runs can reach
 the page through another's code, so on a page that mixes trusted and
 untrusted SWFs, do not give script access to any of them
-([why](architecture.md#externalinterface)).
+([why](architecture/services.md#externalinterface)).
 
 ## Compile ahead of time
 

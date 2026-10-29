@@ -145,7 +145,7 @@ of its own.
   `render`'s cores load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
-  together with docs/architecture.md.
+  together with docs/architecture/overview.md.
 - **The Tamarin baseline is avmshell's behaviour**, failures included:
   swf2es must reproduce what avmshell prints, not what a test expects.
   Update `tests/tamarin/baseline.json` only when the oracle or the harness

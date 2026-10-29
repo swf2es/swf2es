@@ -1,8 +1,9 @@
 # Roadmap
 
 Where swf2es stands, and the work queued after it, in order. What is
-built is described in [architecture.md](architecture.md); how much of
-AS3 and Flash's behaviour it matches, in [coverage.md](coverage.md).
+built is described in [architecture.md](architecture.md) and the files it
+links; how much of AS3 and Flash's behaviour it matches, in
+[coverage.md](coverage.md).
 
 ## Where it stands
 
@@ -71,7 +72,7 @@ Each waits for a profile, a case or a user that asks for it:
 
 Milestone 1, the as3pb benchmark compiled by swf2es matching avmshell's
 output and faster than AwayFL's JIT, was met at #23
-([architecture.md](architecture.md#milestone-1)). Since then, in rough
+([architecture/overview.md](architecture/overview.md#milestone-1)). Since then, in rough
 order:
 
 - the Tamarin suite through the oracle and in swf2es, each with its

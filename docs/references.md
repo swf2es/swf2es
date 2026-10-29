@@ -20,7 +20,7 @@ add a conformance case for the difference.
   Apache-2.0 file.
 - **Flash Player, as AIR's `adl` runs it**, for the player: what it traces
   and draws decides (`oracle/flash.ts`; see [Testing against
-  oracles](architecture.md#testing-against-oracles)). Where Flash and
+  oracles](architecture/testing.md#testing-against-oracles)). Where Flash and
   Ruffle differ, Flash wins.
 
 ## Specifications
@@ -44,7 +44,7 @@ add a conformance case for the difference.
 - **Content Security Policy Level 3**: `'unsafe-eval'` and
   `'wasm-unsafe-eval'`, which decide how the player may run its modules
   ([spec](https://www.w3.org/TR/CSP3/); see [Pages without
-  'unsafe-eval'](architecture.md#pages-without-unsafe-eval)).
+  'unsafe-eval'](architecture/modules.md#pages-without-unsafe-eval)).
 - **"Beyond Relooper"** (Norman Ramsey, 2022), how the emitter structures
   reducible control flow: [paper](https://doi.org/10.1145/3547621).
 - **SVG `feTurbulence`**, whose reference implementation `perlinNoise`
@@ -62,7 +62,7 @@ truth.
   the mouse pick (`mouse_pick_avm2`), sound mixing
   (`SoundTransform::concat`, `transform_for_sound`, `EnvelopeSignal`),
   ADPCM, CSS (`CssStream`) and feTurbulence, each cited where it is used
-  in architecture.md.
+  in [architecture.md](architecture.md)'s files.
 - **Ruffle**: [`swf/src/avm2/read.rs`](https://github.com/ruffle-rs/ruffle/blob/master/swf/src/avm2/read.rs)
   reads every ABC table as plain data, with years of fixes for malformed
   SWFs, and [`swf/src/avm2/opcode.rs`](https://github.com/ruffle-rs/ruffle/blob/master/swf/src/avm2/opcode.rs)
