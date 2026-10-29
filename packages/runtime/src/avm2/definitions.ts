@@ -4,8 +4,18 @@
 
 import type { Abc, AsObject, Value } from "./descriptors.js";
 import type { Domain } from "./domain.js";
-import { type Multiname, NS_Public, namespace, publicNs, qname } from "./names.js";
+import {
+  API_USER,
+  CONSTANT_Qname,
+  Multiname,
+  NS_Public,
+  namespace,
+  publicNs,
+  qname,
+} from "./names.js";
 import type { Runtime } from "./runtime.js";
+
+const USER_VERSIONS: readonly number[] = [API_USER];
 
 /**
  * The class `qualified` names, "pkg::Name" or "Name", its defining script
@@ -34,10 +44,12 @@ export function classNamed(rt: Runtime, qualified: string, domain: Domain | null
  * ApplicationDomain.getDefinition finds it: a name no script defines is
  * refused by its local name, and a script whose initializer threw runs
  * again, its error coming through each time, where a name's lookup by
- * code keeps it as run, as avmplus does.
+ * code keeps it as run, as avmplus does. Seen at user code's version, as
+ * avmplus' public namespace is the caller's: a name of the other series'
+ * or the VM's own is not defined, as it is not to the code itself.
  */
 export function definitionNamed(rt: Runtime, qualified: string, domain: Domain): Value {
-  const mn = qualifiedNameIn(rt, qualified, domain);
+  const mn = qualifiedNameIn(rt, qualified, domain, USER_VERSIONS);
   const script = rt.findScript(mn);
   if (!script) {
     throw rt.error("ReferenceError", 1065, mn.name);
@@ -51,11 +63,22 @@ export function definingAbc(rt: Runtime, qualified: string, domain: Domain): Abc
   return rt.findScript(qualifiedNameIn(rt, qualified, domain))?.abc ?? null;
 }
 
-/** The public name "pkg::Name" or "Name" stands for, looked up in `domain`. */
-function qualifiedNameIn(rt: Runtime, qualified: string, domain: Domain | null): Multiname {
+/**
+ * The public name "pkg::Name" or "Name" stands for, looked up in `domain`:
+ * at every version, as the host reaches names, or at `versions`.
+ */
+function qualifiedNameIn(
+  rt: Runtime,
+  qualified: string,
+  domain: Domain | null,
+  versions?: readonly number[],
+): Multiname {
   const i = qualified.lastIndexOf("::");
   const ns = i < 0 ? publicNs : namespace(NS_Public, qualified.slice(0, i));
-  const mn = qname(ns, i < 0 ? qualified : qualified.slice(i + 2));
+  const local = i < 0 ? qualified : qualified.slice(i + 2);
+  const mn = versions
+    ? new Multiname(CONSTANT_Qname, [ns], versions, local, false)
+    : qname(ns, local);
   mn.domain = domain === rt.root ? null : domain;
   return mn;
 }

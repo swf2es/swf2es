@@ -251,8 +251,10 @@ export function qname(ns: Namespace, name: string): Multiname {
 }
 
 /**
- * The API version of user code: Flash Player's latest, 50, which every
- * host resets codegen's domains with (its API_VERSION).
+ * The API version of user code: Flash Player's latest, 50, which hosts
+ * reset codegen's domains with (its API_VERSION). An AIR host's, AIR's
+ * 51, sees no more by it: in AIR's series only Flash Player's 50 moves to
+ * 51, and no library has a name of it.
  */
 export const API_USER = 50;
 const USER_VERSIONS: readonly number[] = [API_USER];
