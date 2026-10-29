@@ -95,7 +95,8 @@ void main(void) {
  * A layer composited onto what is below over its rectangle, pixel for
  * pixel: its rows run down, as the filters read them, and the target's up
  * where it is the canvas (uFlip), from uOffset in its framebuffer; what is
- * below copied to where it lies. Coloured by its
+ * below copied with the rectangle's corner uBackOffset short of where it
+ * lies. Coloured by its
  * row's colour transform where it has one (uRow not -1), on its straight
  * colour where it covers anything; then blended by its mode. Normal, layer,
  * add and screen are left to GL's blending; the rest read what is below
@@ -112,6 +113,7 @@ uniform int uRow;
 uniform int uMode;
 uniform ivec2 uOffset;
 uniform bool uFlip;
+uniform ivec2 uBackOffset;
 out vec4 finalColor;
 
 vec3 straight(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
@@ -138,7 +140,7 @@ void main(void) {
     return;
   }
 
-  vec4 back = texelFetch(uBack, frag, 0);
+  vec4 back = texelFetch(uBack, frag - uBackOffset, 0);
   vec3 cb = straight(back);
   vec3 cf = straight(front);
   vec3 b;
