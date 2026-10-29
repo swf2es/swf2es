@@ -239,7 +239,11 @@ export class WebGLBackend {
     this.places = [];
   }
 
-  /** Draw a frame: what the geometries added and removed first, then the rows, then the commands. */
+  /**
+   * Draw a frame: what the geometries added and removed first, then the
+   * rows, then the commands; onto the canvas, or into `root`, a layer the
+   * target's size, as BitmapData.draw's frames go.
+   */
   execute(
     commands: Commands,
     scene: SceneList,
@@ -249,7 +253,11 @@ export class WebGLBackend {
     filters: Filters,
     keeps: Keeps,
     target: Target,
+    root: Layer | null = null,
   ): void {
+    // A frame drawn into a layer, for BitmapData, is no frame of the canvas': idle layers are
+    // counted in the canvas' frames.
+    const counted = root === null;
     const gl = this.gl;
     if (gl.isContextLost()) {
       return;
@@ -273,7 +281,7 @@ export class WebGLBackend {
     state.useProgram(this.program);
     state.bindVertexArray(this.vertexArray);
     state.bindTexture(0, this.rowsTexture);
-    const canvas: Open = { layer: null, x: 0, y: 0, width: target.width, height: target.height };
+    const canvas: Open = { layer: root, x: 0, y: 0, width: target.width, height: target.height };
     this.layers.length = 0;
     this.drawInto(canvas, target);
 
@@ -423,8 +431,49 @@ export class WebGLBackend {
     }
 
     state.stencil(null);
-    this.dropIdleLayers();
-    this.frame++;
+    if (counted) {
+      this.dropIdleLayers();
+      this.frame++;
+    }
+  }
+
+  /**
+   * A frame drawn into a layer `samples` times the size of a `width` by
+   * `height` bitmap a side, as `execute` draws, then halved till a sample a
+   * pixel, and read back: premultiplied RGBA bytes, a row at a time from
+   * the top, as BitmapData.draw takes them, as the Pixi view's snapshot does.
+   */
+  snapshot(
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    width: number,
+    height: number,
+    samples: number,
+  ): Uint8Array {
+    const gl = this.gl;
+    const bytes = new Uint8Array(width * height * 4);
+    if (gl.isContextLost()) {
+      return bytes;
+    }
+
+    let layer = this.takeLayer(width * samples, height * samples);
+    this.execute(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
+    for (let k = samples; k > 1; k /= 2) {
+      const half = this.filters.halve(layer, (width * k) / 2, (height * k) / 2);
+      this.giveLayer(layer);
+      layer = half;
+    }
+
+    this.state.bindFramebuffer(layer.framebuffer);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    this.giveLayer(layer);
+    return bytes;
   }
 
   /** The free layers undrawn into for LAYER_IDLE_FRAMES let go of. */

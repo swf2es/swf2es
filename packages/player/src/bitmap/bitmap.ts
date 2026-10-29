@@ -691,3 +691,14 @@ export function rgbaOf(pixels: Uint32Array): Uint8Array {
 
   return out;
 }
+
+/** RGBA bytes read from a texture as premultiplied ARGB. */
+export function argbOf(bytes: Uint8Array | Uint8ClampedArray): Uint32Array {
+  const out = new Uint32Array(bytes.length / 4);
+  for (let i = 0; i < out.length; i++) {
+    const j = i * 4;
+    out[i] = ((bytes[j + 3] << 24) | (bytes[j] << 16) | (bytes[j + 1] << 8) | bytes[j + 2]) >>> 0;
+  }
+
+  return out;
+}

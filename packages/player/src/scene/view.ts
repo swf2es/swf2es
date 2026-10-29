@@ -34,7 +34,7 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
+import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
@@ -45,7 +45,7 @@ import {
   paddingCap,
   sameFilterRecords,
 } from "../display/filters.js";
-import { concat } from "../display/geometry.js";
+import { concat, invert, shifted } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { ShapeObject } from "../display/shapeobject.js";
 import {
@@ -223,7 +223,13 @@ export class RenderView implements Drawer {
   private readonly movedArea = new Float64Array(4);
   private readonly keptRect = new Int32Array(4);
   /** Where a frame is drawn, filled in as it is. */
-  private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1 };
+  private target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1 };
+  /**
+   * What BitmapData.draw draws alone, while it is drawn (snapshot), and the
+   * matrix it is drawn through, after its scroll's shift.
+   */
+  private drawRoot: DisplayObject | null = null;
+  private drawMatrix: Matrix = IDENTITY;
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
@@ -295,6 +301,15 @@ export class RenderView implements Drawer {
     this.textures.lost();
     this.keeps.lost();
   };
+
+  /**
+   * Whether bitmaps that ask to be are smoothed: not at the stage's low
+   * quality, nor in a draw for BitmapData at a sample a pixel, as the Pixi
+   * view's snapshot has it.
+   */
+  private get smoothing(): boolean {
+    return this.drawRoot ? this.scale > 1 : this.stageQuality !== "LOW";
+  }
 
   /** The stage's quality, "LOW" to "BEST", which will decide bitmaps' smoothing. */
   get quality(): string {
@@ -375,7 +390,8 @@ export class RenderView implements Drawer {
     tint: ColorTransform | null,
     hidden: boolean,
   ): void {
-    const m = o.flatPlaced;
+    const root = o === this.drawRoot;
+    const m = root ? this.drawMatrix : o.flatPlaced;
     const a = pa * m.a + pc * m.b;
     const b = pb * m.a + pd * m.b;
     const c = pa * m.c + pc * m.d;
@@ -386,9 +402,11 @@ export class RenderView implements Drawer {
       noteUnsupported(o);
     }
 
-    hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
+    // What BitmapData.draw takes is drawn though hidden, or a mask.
+    hidden ||= !root && (!o.visible || o.maskOf !== null || o.clipDepth > 0);
 
-    const own = o.colorTransform;
+    // BitmapData.draw takes its object without its own colour transform, as adl draws it.
+    const own = root ? null : o.colorTransform;
     let color = own ? (tint ? concatColor(tint, own) : own) : tint;
     // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
     // a 3D mask, or one inside what it masks, masks nothing in Flash.
@@ -396,7 +414,7 @@ export class RenderView implements Drawer {
     if (!hidden && o.mask) {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
-        const w = toStageFlat(mask);
+        const w = this.placedMask(mask);
         this.pushMask(() => this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true));
         clipped = true;
       } else {
@@ -409,7 +427,8 @@ export class RenderView implements Drawer {
     // no colour of their own; without children, it colours each fill (render/view.ts, rooted).
     // A layer of no children is its fills, drawn as normal; a mode it has no blend for (a Pixel
     // Bender shader's) is drawn as normal, and counted.
-    const named = BLEND_NAMES.indexOf(o.blendMode);
+    // BitmapData.draw takes its object with no blend mode, as with no transform or colour.
+    const named = root ? NORMAL : BLEND_NAMES.indexOf(o.blendMode);
     if (named < 0 && !hidden) {
       unsupported.blendModes++;
     }
@@ -431,7 +450,8 @@ export class RenderView implements Drawer {
 
       // What its filters made last, where nothing they ran on changed: composited again where it
       // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
-      output = filtering ? this.keptOutput(o, filtering, a, b, c, d, tx, ty) : null;
+      output =
+        filtering && !this.drawRoot ? this.keptOutput(o, filtering, a, b, c, d, tx, ty) : null;
       if (output?.reused) {
         const k = output.handle as KeepHandle;
         const rect = this.keptRect;
@@ -544,7 +564,7 @@ export class RenderView implements Drawer {
 
       this.geometries.use(quad.id);
       this.textures.use(texture.id);
-      const smooth = (o as BitmapObject).smoothing && this.stageQuality !== "LOW";
+      const smooth = (o as BitmapObject).smoothing && this.smoothing;
       this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
     }
 
@@ -581,7 +601,9 @@ export class RenderView implements Drawer {
         this.popMask();
       }
 
-      o.descendantsDirty = false;
+      if (!this.drawRoot) {
+        o.descendantsDirty = false;
+      }
     }
 
     if (r) {
@@ -606,7 +628,10 @@ export class RenderView implements Drawer {
       this.popMask();
     }
 
-    o.dirty = CLEAN;
+    // A draw for BitmapData leaves them for the stage's.
+    if (!this.drawRoot) {
+      o.dirty = CLEAN;
+    }
   }
 
   /**
@@ -749,6 +774,13 @@ export class RenderView implements Drawer {
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
     const units = Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1;
     const kept = this.filterPlans.get(o);
+    // A draw for BitmapData plans at its own units, leaving the stage's plans be.
+    if (this.drawRoot) {
+      return kept?.units === units
+        ? kept.plan
+        : planFilters(records, units, Number.POSITIVE_INFINITY, kept?.plan ?? null);
+    }
+
     if (kept && kept.units === units) {
       if (kept.records === records) {
         return kept.plan;
@@ -775,8 +807,8 @@ export class RenderView implements Drawer {
    */
   private fitFilters(o: DisplayObject, plan: FilterPlan, from: number): FilterPlan {
     const res = this.resolution;
-    const width = this.gl.drawingBufferWidth / res;
-    const height = this.gl.drawingBufferHeight / res;
+    const width = this.target.width / res;
+    const height = this.target.height / res;
     if (plan.padding <= filterRoom(this.textureLimit, res, width, height)) {
       return plan;
     }
@@ -793,6 +825,10 @@ export class RenderView implements Drawer {
     const kept = this.filterPlans.get(o);
     if (cap === Number.POSITIVE_INFINITY || !kept) {
       return plan;
+    }
+
+    if (this.drawRoot) {
+      return planFilters(kept.records, kept.units, cap, plan) ?? plan;
     }
 
     if (kept.cap !== cap || !kept.capped) {
@@ -963,10 +999,15 @@ export class RenderView implements Drawer {
         this.walkMask(child, a, b, c, d, tx, ty, false);
       }
 
-      o.descendantsDirty = false;
+      if (!this.drawRoot) {
+        o.descendantsDirty = false;
+      }
     }
 
-    o.dirty = CLEAN;
+    // A draw for BitmapData leaves them for the stage's.
+    if (!this.drawRoot) {
+      o.dirty = CLEAN;
+    }
   }
 
   /**
@@ -1313,9 +1354,7 @@ export class RenderView implements Drawer {
    */
   private paintSampler(paint: ImageFill | GradientFill): number {
     if (paint.type === "image") {
-      return (
-        (paint.smooth && this.stageQuality !== "LOW" ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP)
-      );
+      return (paint.smooth && this.smoothing ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP);
     }
 
     if (paint.radial) {
@@ -1383,11 +1422,96 @@ export class RenderView implements Drawer {
     return handle;
   }
 
-  /** BitmapData.draw of a display object: not drawn by this renderer yet. */
-  snapshot(): Uint32Array {
-    throw new Error("BitmapData.draw of a display object is not drawn by the own renderer yet");
+  /**
+   * `o` drawn alone, as BitmapData.draw takes a display object, through `m`
+   * into a `width` by `height` bitmap, read back as premultiplied ARGB: at
+   * `samples` a side and averaged, as Flash covers edges (4 at its high
+   * quality), as the Pixi view's snapshot draws it. Built at the draw's own
+   * scale, a hairline a pixel of the bitmap, then drawn `samples` times
+   * larger, filters and device text at that many units a pixel; no flag of
+   * any object is cleared, nor an output kept, which are the stage's.
+   */
+  snapshot(
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    width: number,
+    height: number,
+    samples = 4,
+  ): Uint32Array {
+    // As many samples as a texture holds, halved as BitmapData.draw's are.
+    let n = Math.max(1, samples);
+    while (n > 1 && Math.max(width, height) * n > this.textureLimit) {
+      n /= 2;
+    }
+
+    if (width <= 0 || height <= 0 || Math.max(width, height) > this.textureLimit) {
+      return new Uint32Array(Math.max(0, width * height));
+    }
+
+    const stage = {
+      target: this.target,
+      scale: this.scale,
+      resolution: this.resolution,
+      screenScale: this.screenScale,
+    };
+    this.target = { width: width * n, height: height * n, scale: n, x: 0, y: 0, resolution: 1 };
+    this.scale = n;
+    this.resolution = 1;
+    this.screenScale = 1;
+    this.drawRoot = o;
+    this.drawMatrix = o.scroll ? shifted(m, o.scroll) : m;
+    try {
+      this.scene.reset();
+      this.rows.reset();
+      this.filters.reset();
+      this.walk(o, 1, 0, 0, 1, 0, 0, null, false);
+      measureLayers(this.scene, this.rows, this.geometries, this.target);
+      plan(this.scene, 0, this.commands);
+      const bytes = this.backend.snapshot(
+        this.commands,
+        this.scene,
+        this.rows,
+        this.geometries,
+        this.textures,
+        this.filters,
+        this.keeps,
+        this.target,
+        width,
+        height,
+        n,
+      );
+      return argbOf(bytes);
+    } finally {
+      this.target = stage.target;
+      this.scale = stage.scale;
+      this.resolution = stage.resolution;
+      this.screenScale = stage.screenScale;
+      this.drawRoot = null;
+      this.drawMatrix = IDENTITY;
+    }
   }
 
+  /**
+   * Where a mask is drawn: on the stage, or, in a draw for BitmapData, in
+   * the bitmap, where it stands to what is drawn as it stands on the stage.
+   */
+  private placedMask(mask: DisplayObject): Matrix {
+    const onStage = toStageFlat(mask);
+    const root = this.drawRoot;
+    if (!root) {
+      return onStage;
+    }
+
+    // One drawn through no inverse, scaled to nothing on the stage, has no place to measure the mask
+    // from: it masks as it stands on the stage.
+    const rootInverse = invert(toStageFlat(root));
+    return rootInverse ? concat(concat(onStage, rootInverse), this.drawMatrix) : onStage;
+  }
+
+  /**
+   * Drawn on the GPU into a store, which this renderer does not keep there:
+   * BitmapData.draw takes a snapshot.
+   */
   drawInto(
     _store: BitmapStore,
     _o: DisplayObject,

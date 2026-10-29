@@ -537,7 +537,8 @@ export class PixiView {
       container.visible = (o.visible || masking) && !(o.maskOf && o.space);
       // A blend mode composites the object as a layer (render/blend.ts); a mask is its fills alone.
       // Its filters, then its blend: adl filters the object, then blends what they make.
-      const blend = masking ? "normal" : o.blendMode;
+      // BitmapData.draw takes its object with no blend mode of its own, as with no transform or colour.
+      const blend = masking || o === this.drawRoot ? "normal" : o.blendMode;
       const records = masking ? NO_RECORDS : o.filters;
       // Filters set again with the same values, as a tween writes them on each frame, keep their
       // chain and the output it kept.
