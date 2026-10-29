@@ -83,11 +83,18 @@ void main(void) {
 }
 `;
 
-/** A triangle that covers the target, for a layer's composite. */
+/**
+ * Two triangles over a layer's rectangle of the target, uRect its corners
+ * in clip space: a rasteriser then steps over those pixels alone, as a
+ * software one does not for a triangle over the whole target cut by the
+ * scissor.
+ */
 export const compositeVertex = `#version 300 es
+uniform vec4 uRect;
 void main(void) {
-  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  int k = gl_VertexID % 6;
+  vec2 p = vec2(k == 1 || k == 2 || k == 4 ? 1.0 : 0.0, k == 2 || k == 4 || k == 5 ? 1.0 : 0.0);
+  gl_Position = vec4(mix(uRect.xy, uRect.zw, p), 0.0, 1.0);
 }
 `;
 
