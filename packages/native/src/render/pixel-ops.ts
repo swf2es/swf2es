@@ -52,7 +52,6 @@ export type CopyOp =
       matrix: readonly number[];
       near: PixelRegion | null;
       empty: number;
-      opaque: boolean;
     };
 
 /**
@@ -112,9 +111,14 @@ export function copyRows(
       dst = base;
       src = base + rows * w;
       stride = w;
+      // paletteMap's and a colour matrix's pixels are the source's alone: the destination's are not read.
+      const reads = op.op === "channel" || op.op === "merge";
       for (let row = 0; row < rows; row++) {
-        const to = (dy0 + row) * intoWidth + dx;
-        memory.set(into.subarray(to, to + w), dst + row * w);
+        if (reads) {
+          const to = (dy0 + row) * intoWidth + dx;
+          memory.set(into.subarray(to, to + w), dst + row * w);
+        }
+
         const fromAt = (sy0 + row) * fromWidth + sx;
         memory.set(from.subarray(fromAt, fromAt + w), src + row * w);
       }
@@ -160,7 +164,7 @@ export function copyRows(
         params.setUint32(48, near?.width ?? 0, true);
         params.setUint32(52, near?.height ?? 0, true);
         params.setUint32(56, op.empty >>> 0, true);
-        params.setUint32(60, op.opaque ? 0xff000000 : 0, true);
+        params.setUint32(60, 0, true);
         for (let k = 0; k < 20; k++) {
           params.setFloat64(64 + k * 8, op.matrix[k], true);
         }
@@ -308,27 +312,27 @@ export function perlinRows(
 ): boolean {
   const height = pixels.length / width;
   const octaves = setup.offsets.length;
-  const tables = 2056 + 32896 + octaves * 16;
   const band = Math.max(1, Math.floor(BAND_BYTES / (width * 4)));
+  // The tables once, and a band's block, which each band uses again.
+  const at = wasm.resetArena(HEAD + 2056 + 8 + 32896 + octaves * 16 + band * width * 4);
+  if (!at) {
+    return false;
+  }
+
+  const lattice = at + HEAD;
+  const gradients = lattice + 2056 + 8 - ((lattice + 2056) & 7);
+  const offsets = gradients + 32896;
+  const block = offsets + octaves * 16;
+  new Int32Array(wasm.memory.buffer, lattice, 514).set(setup.lattice);
+  new Float64Array(wasm.memory.buffer, gradients, 4112).set(setup.gradients);
+  const list = new Float64Array(wasm.memory.buffer, offsets, octaves * 2);
+  for (let k = 0; k < octaves; k++) {
+    list[k * 2] = setup.offsets[k][0];
+    list[k * 2 + 1] = setup.offsets[k][1];
+  }
+
   for (; progress.row < height; progress.row += band) {
     const rows = Math.min(band, height - progress.row);
-    const at = wasm.resetArena(HEAD + tables + 8 + rows * width * 4);
-    if (!at) {
-      return false;
-    }
-
-    const lattice = at + HEAD;
-    const gradients = lattice + 2056 + 8 - ((lattice + 2056) & 7);
-    const offsets = gradients + 32896;
-    const block = offsets + octaves * 16;
-    new Int32Array(wasm.memory.buffer, lattice, 514).set(setup.lattice);
-    new Float64Array(wasm.memory.buffer, gradients, 4112).set(setup.gradients);
-    const list = new Float64Array(wasm.memory.buffer, offsets, octaves * 2);
-    setup.offsets.forEach(([ox, oy], k) => {
-      list[k * 2] = ox;
-      list[k * 2 + 1] = oy;
-    });
-
     const params = new DataView(wasm.memory.buffer, at, HEAD);
     const words = [width, rows, progress.row, block, lattice, gradients, offsets, octaves];
     words.push(setup.channels, Number(setup.gray), Number(setup.fractal), Number(setup.stitch));

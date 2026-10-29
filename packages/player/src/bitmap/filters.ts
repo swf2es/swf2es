@@ -527,7 +527,7 @@ function colorMatrix(
     shown.x,
     shown.y,
     dest.transparent,
-    { op: "matrix", matrix: m, near, empty, opaque: !dest.transparent },
+    { op: "matrix", matrix: m, near, empty },
   );
   dest.changed();
 }
