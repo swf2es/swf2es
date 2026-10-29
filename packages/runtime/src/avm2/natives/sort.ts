@@ -77,9 +77,13 @@ export function sort(rt: Runtime, d: Value, args: Value[]): Value {
         throw rt.error("TypeError", 1034, rt.describe(arg0), "Function");
       }
 
-      // The comparator's result counts by its sign, as a Number.
+      // The comparator's result counts by its sign, as a Number. Its arguments go in one pair for
+      // the sort, which a call spreads into its own: a sort of n elements made n log n of them.
+      const pair: Value[] = [undefined, undefined];
       compare = (x, y) => {
-        const result = rt.toNumber(rt.callValue(arg0, d, [x, y], null));
+        pair[0] = x;
+        pair[1] = y;
+        const result = rt.toNumber(rt.callValue(arg0, d, pair, null));
         return result > 0 ? 1 : result < 0 ? -1 : 0;
       };
       if (args.length >= 2) {
@@ -144,6 +148,13 @@ export function sortOn(rt: Runtime, d: Value, names: Value, optionsIn: Value): V
 
 /** As ArraySort::FieldCompare: by each field in turn, until one differs. */
 function fieldCompare(rt: Runtime, fields: Field[], options: number): Compare {
+  // Each field's name and comparison made once for the sort, not for each comparison.
+  const names = fields.map((field) => publicQname(field.name));
+  const compares = fields.map((field) =>
+    field.options & kNumeric
+      ? numericCompare(rt)
+      : stringCompare(rt, (field.options & kCaseInsensitive) !== 0),
+  );
   return (j, k) => {
     let opt = options;
     let result = 0;
@@ -154,9 +165,9 @@ function fieldCompare(rt: Runtime, fields: Field[], options: number): Compare {
       return opt & kDescending ? -result : result;
     }
 
-    for (const field of fields) {
-      const name = publicQname(field.name);
-      opt = field.options;
+    for (let f = 0; f < fields.length; f++) {
+      const name = names[f];
+      opt = fields[f].options;
       const x = rt.getProperty(objJ, name);
       const y = rt.getProperty(objK, name);
       const defX = x !== undefined;
@@ -171,10 +182,8 @@ function fieldCompare(rt: Runtime, fields: Field[], options: number): Compare {
           const hasY = rt.hasProperty(objK, name);
           result = !hasX && hasY ? 1 : hasX && !hasY ? -1 : 0;
         }
-      } else if (opt & kNumeric) {
-        result = numericCompare(rt)(x, y);
       } else {
-        result = stringCompare(rt, (opt & kCaseInsensitive) !== 0)(x, y);
+        result = compares[f](x, y);
       }
 
       if (result !== 0) {
@@ -292,14 +301,14 @@ function sortWith(
   }
 
   // Into the elements as they are now: a comparison may have set a
-  // Vector's length, which gives it a new array.
+  // Vector's length, which gives it a new array. Read through the order from
+  // the sort's own copy of them.
   const source = fieldAtoms ?? atoms;
-  const sorted = index.slice(0, newlen).map((i) => source[i]);
   const target: Value[] | undefined = d.$a;
   if (target === undefined || target === SEALED_ELEMENTS) {
     // As setUintProperty and delUintProperty: the length is left as it is.
     for (let i = 0; i < newlen; i++) {
-      rt.setProperty(d, rt.publicName(i), sorted[i]);
+      rt.setProperty(d, rt.publicName(i), source[index[i]]);
     }
 
     for (let i = newlen; i < len; i++) {
@@ -315,14 +324,14 @@ function sortWith(
     }
 
     for (let i = 0; i < newlen; i++) {
-      target.data[i] = rt.toNumber(sorted[i]);
+      target.data[i] = rt.toNumber(source[index[i]]);
     }
 
     return d;
   }
 
   for (let i = 0; i < newlen; i++) {
-    target[i] = sorted[i];
+    target[i] = source[index[i]];
   }
 
   for (let i = newlen; i < len; i++) {
@@ -341,7 +350,8 @@ function qsort(
 ): void {
   let lo = loIn;
   let hi = hiIn;
-  const stack: [number, number][] = [];
+  // Each frame's lo and hi, flat: a pair for each was garbage of the sort.
+  const stack: number[] = [];
   if (lo >= hi) {
     return;
   }
@@ -391,7 +401,7 @@ function qsort(
       // Unsigned in avmplus: right - 1 - lo wraps when right is lo.
       if ((right - 1 - lo) >>> 0 >= (hi - left) >>> 0) {
         if (lo + 1 < right) {
-          stack.push([lo, right - 1]);
+          stack.push(lo, right - 1);
         }
 
         if (left < hi) {
@@ -400,7 +410,7 @@ function qsort(
         }
       } else {
         if (left < hi) {
-          stack.push([left, hi]);
+          stack.push(left, hi);
         }
 
         if (lo + 1 < right) {
@@ -410,11 +420,11 @@ function qsort(
       }
     }
 
-    const frame = stack.pop();
-    if (!frame) {
+    if (stack.length === 0) {
       return;
     }
 
-    [lo, hi] = frame;
+    hi = stack.pop() as number;
+    lo = stack.pop() as number;
   }
 }
