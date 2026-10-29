@@ -17,12 +17,9 @@ export const createStage3D: Stage3DSurfaceFactory = () => {
   try {
     return {
       canvas,
-      context: new WebGLContext3D(gl, {
-        maxBufferBytes: 64 * 1024 * 1024,
-        maxTextureBytes: 128 * 1024 * 1024,
-        maxTargetDepthBytes: 16 * 1024 * 1024,
-        maxTargetColorBytes: 16 * 1024 * 1024,
-      }),
+      // Flash Player's own resource limits, the context's defaults: tighter ones refused scenes
+      // that play in Flash, an engine retrying the allocation every frame.
+      context: new WebGLContext3D(gl),
       destroy: () => gl.getExtension("WEBGL_lose_context")?.loseContext(),
     };
   } catch (error) {
