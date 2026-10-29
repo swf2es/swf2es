@@ -162,6 +162,7 @@
   "dissolve-noise",
   "draw-bitmaps",
   "draw-objects",
+  "draw-root-blend",
   "draw-scroll",
   "draws",
   "dynamic-sound",

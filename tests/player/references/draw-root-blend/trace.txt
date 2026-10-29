@@ -1,0 +1,10 @@
+erase 0 bfcc3300
+erase 2 ff3300cc
+alpha 0 bfcc3300
+alpha 2 ff3300cc
+multiply 0 bfcc3300
+multiply 2 ff3300cc
+invert 0 bfcc3300
+invert 2 ff3300cc
+layer 0 bfcc3300
+layer 2 ff3300cc

@@ -418,7 +418,8 @@ export class RenderView implements Drawer {
     // no colour of their own; without children, it colours each fill (render/view.ts, rooted).
     // A layer of no children is its fills, drawn as normal; a mode it has no blend for (a Pixel
     // Bender shader's) is drawn as normal, and counted.
-    const named = BLEND_NAMES.indexOf(o.blendMode);
+    // BitmapData.draw takes its object with no blend mode, as with no transform or colour.
+    const named = root ? NORMAL : BLEND_NAMES.indexOf(o.blendMode);
     if (named < 0 && !hidden) {
       unsupported.blendModes++;
     }

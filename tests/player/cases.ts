@@ -9809,6 +9809,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // BitmapData.draw takes its source with no blend mode of its own (scripts/DrawRootBlend.as).
+    name: "draw-root-blend",
+    swf: (abc) => bare(abc, 1, "DrawRootBlend", 320, 120),
+    script: "DrawRootBlend",
+    frames: 1,
+    capture: [1],
+    tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
     name: "draw-objects",
     swf: drawObjects,
     script: "DrawObjects",
