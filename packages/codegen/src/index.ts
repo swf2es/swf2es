@@ -6,23 +6,17 @@
  * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture/overview.md.
  */
+import { AIR_API_VERSION, API_VERSION, checkApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
 
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
 
-/**
- * The API version of Flash Player's SWFs' ABCs, which the player and the
- * swf2es command reset the compiler with, and module cache keys name.
- */
-export const API_VERSION = 50;
-
-/**
- * The API version of AIR's SWFs' ABCs, AIR 20's, the latest avmplus
- * numbers: a domain reset with it runs AIR's series, whose names Flash
- * Player's leaves out.
- */
-export const AIR_API_VERSION = 51;
+// The API versions the player and the swf2es command reset the compiler
+// with, which module cache keys name: Flash Player's, and AIR's, whose
+// series has the names Flash Player's leaves out. format's, which the
+// runtime takes too.
+export { AIR_API_VERSION, API_VERSION };
 
 /** The ABCs added to a compiler, by their indices: each one's hash, and whether it was added as a library. */
 export interface AddedAbcs {
@@ -203,7 +197,8 @@ export interface Codegen {
   abcVersion(abc: Uint8Array): AbcVersion | null;
   /**
    * Start a domain whose user ABCs have API version `apiVersion`: Flash
-   * Player's, API_VERSION, by default, or AIR's, AIR_API_VERSION.
+   * Player's, API_VERSION, by default, or AIR's, AIR_API_VERSION; one
+   * that is neither series' (checkApiVersion) is a RangeError.
    */
   reset(apiVersion?: number): void;
   /** The API version of the last reset. */
@@ -508,6 +503,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return epoch;
     },
     reset(version = API_VERSION) {
+      checkApiVersion(version);
       added = 0;
       epoch++;
       apiVersion = version;

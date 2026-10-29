@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { API_VERSION, createCodegen, moduleKey } from "@swf2es/codegen";
+import { AIR_API_VERSION, API_VERSION, createCodegen, moduleKey } from "@swf2es/codegen";
 import { abc, tables, u30 } from "./abc-builder.ts";
 import { script } from "./ir-cases.ts";
 import { classes, METHOD, mn, pool, SLOT } from "./link-cases.ts";
@@ -23,6 +23,18 @@ test("codegen.wasm imports nothing but abort", () => {
 
 test("wrapper and wasm agree on the compiler version", async () => {
   await createCodegen(module); // throws on a mismatch
+});
+
+test("the compiler is reset only at an API version ABCs run at, which keys name", async () => {
+  const codegen = await createCodegen(module);
+  for (const version of [0, 52, 256 + API_VERSION, 1.5]) {
+    assert.throws(() => codegen.reset(version), RangeError, `${version}`);
+  }
+
+  codegen.reset(AIR_API_VERSION);
+  assert.equal(codegen.apiVersion, AIR_API_VERSION);
+  codegen.reset();
+  assert.equal(codegen.apiVersion, API_VERSION);
 });
 
 test("a module key names the compiler, the ABCs its domain sees and what it found", async () => {
