@@ -11,22 +11,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm oracle:pull
-      # The oracle's store (oracle/store.ts): its entries are content-keyed, so any
-      # earlier store helps; a new oracle.ts starts over.
-      - uses: actions/cache@v4
-        with:
-          # Not abcdump's dumps, nine tenths of the store: abcdump runs again instead.
-          path: |
-            ~/.cache/swf2es/oracle
-            !~/.cache/swf2es/oracle/**/*.dump
-          key: oracle-tamarin-${{ hashFiles('oracle/oracle.ts') }}-${{ github.sha }}
-          restore-keys: oracle-tamarin-${{ hashFiles('oracle/oracle.ts') }}-
+          oracle: "true"
+          store: tamarin
       - run: pnpm tamarin

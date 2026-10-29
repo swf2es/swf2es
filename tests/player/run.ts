@@ -7,7 +7,7 @@
 // and expected to fail, and one that passes is reported for its mark to
 // come off.
 //
-//   node tests/player/run.ts [--lazy] [case...]   check
+//   node tests/player/run.ts [--lazy] [--shard i/n] [case...]   check (the i-th of n parts)
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,11 +22,21 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
 const update = args.includes("--update");
 const lazyCompilation = args.includes("--lazy");
-const names = args.filter((a) => !a.startsWith("--"));
+const shardAt = args.indexOf("--shard");
+const [shard, shards] =
+  shardAt < 0 ? [1, 1] : (args[shardAt + 1] ?? "").split("/").map((n) => Number(n || NaN));
+if (!(Number.isInteger(shard) && Number.isInteger(shards) && shard >= 1 && shard <= shards)) {
+  throw new Error(`--shard takes i/n, whole numbers with 1 <= i <= n, not ${args[shardAt + 1]}`);
+}
+
+const names = args.filter((a, i) => !a.startsWith("--") && (shardAt < 0 || i !== shardAt + 1));
 // A case marked as a known gap runs only when named; left out, its SWF is
-// still built, so that a gap case that no longer builds is noticed.
-const chosen = cases.filter((c) => (names.length ? names.includes(c.name) : !c.gap));
-const gaps = update || names.length ? [] : cases.filter((c) => c.gap);
+// still built, so that a gap case that no longer builds is noticed. Shards
+// take every n-th case, which mixes slow and fast ones alike.
+const chosen = cases
+  .filter((c) => (names.length ? names.includes(c.name) : !c.gap))
+  .filter((_, i) => i % shards === shard - 1);
+const gaps = update || names.length || shard > 1 ? [] : cases.filter((c) => c.gap);
 const reference = (name: string, frame: number) => `${here}references/${name}/frame-${frame}.png`;
 const traceReference = (name: string) => `${here}references/${name}/trace.txt`;
 
