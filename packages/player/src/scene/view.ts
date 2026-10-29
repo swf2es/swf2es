@@ -66,6 +66,13 @@ import {
   type ShapeLayer,
   shapeLayers,
 } from "../display/shapes.js";
+import {
+  type Linear,
+  scalesEvenly,
+  settledStretch,
+  stretchOf,
+  widestLine,
+} from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
@@ -83,9 +90,9 @@ import {
 import { type AdvancedGlyphs, fieldQuads, staticQuads } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
+import { LineCache } from "./lines.js";
 import { bindCanvasPointer } from "./pointer.js";
 import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
-import { layerStrokes } from "./strokes.js";
 import {
   type DeviceItem,
   deviceTextResolution,
@@ -121,8 +128,17 @@ export interface RenderViewOptions {
  */
 const GRADIENT_IDLE_FRAMES = 30;
 
-/** The most transforms a layer's lines are kept for: its instances in step, and a loop's turns. */
-const LINE_KEYS = 64;
+/** The widest line, in twips, of the layers whose lines scale both ways, which settle a stretch. */
+function evenWidest(layers: readonly ShapeLayer[]): number {
+  let widest = 0;
+  for (const layer of layers) {
+    if (layer.strokes.length > 0 && scalesEvenly(layer)) {
+      widest = Math.max(widest, widestLine(layer));
+    }
+  }
+
+  return widest;
+}
 
 /**
  * Device texts with runs kept, and quads made, past which those let go of
@@ -246,24 +262,6 @@ interface KeptPlan {
   capped: FilterPlan | null;
 }
 
-/**
- * A layer's lines as stroked through the linear transform (a b c d), at
- * least `least` wide, as wide as `by` makes them (a 9-slice's line space)
- * or null; their geometry, and the drawing's version they were made for.
- */
-interface LineEntry {
-  a: number;
-  b: number;
-  c: number;
-  d: number;
-  least: number;
-  by: number[] | null;
-  /** Drawn at whole alpha, where lines of whole alpha may overlap themselves (layerStrokes). */
-  opaque: boolean;
-  handle: GeometryHandle | null;
-  version: number;
-}
-
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 interface Made {
   parts: { part: Part; handle: GeometryHandle }[];
@@ -347,6 +345,8 @@ export class RenderView implements Drawer {
   screenScale: number | null = null;
   background: number;
   transparent: boolean;
+  /** Lines stroked anew and lines found stroked already, as the Pixi view counts its contexts. */
+  readonly counts: LineCache["counts"];
   private resolution: number;
   private width: number;
   private height: number;
@@ -360,6 +360,7 @@ export class RenderView implements Drawer {
   private scene = new SceneList();
   private rows = new Rows();
   private readonly geometries = new Geometries();
+  private readonly lineCache: LineCache;
   private readonly textures = new Textures();
   private commands = new Commands();
   private filters = new Filters();
@@ -470,7 +471,8 @@ export class RenderView implements Drawer {
    * Each layer's lines by what they were stroked for (LineEntry), the latest
    * used last, found by their numbers.
    */
-  private readonly lines = new WeakMap<ShapeLayer, LineEntry[]>();
+  /** An object's transform's linear part, made its stretch in place (stretchOf). */
+  private readonly stretchScratch: Linear = [0, 0, 0, 0];
   /** Quads by their width, then their height: numbers, not a key formatted from them. */
   private readonly quads = new Map<number, Map<number, GeometryHandle>>();
   /** Quads made since the last were let go of, which past RUN_KEYS looks for those gone. */
@@ -519,6 +521,9 @@ export class RenderView implements Drawer {
       this.ownTessellator = new Tessellator();
       this.tessellator = this.ownTessellator.tessellate;
     }
+
+    this.lineCache = new LineCache(this.geometries, this.tessellator);
+    this.counts = this.lineCache.counts;
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
     this.canvas.addEventListener("webglcontextrestored", this.restored);
@@ -817,6 +822,10 @@ export class RenderView implements Drawer {
     let lineBy: number[] | null = null;
     let row = -1;
     let lineRow = -1;
+    // Lines that scale both ways, stroked through the transform's settled stretch, which every
+    // angle and instance shares (display/stretch.ts), and placed by the rest of it.
+    let stretch: Linear | null | undefined;
+    let stretchRow = -1;
     if (layers) {
       // A pixel of the screen, in the stage's pixels: the least a line is wide.
       const least = 1 / (this.screenScale ?? this.scale * this.resolution);
@@ -849,23 +858,56 @@ export class RenderView implements Drawer {
           );
         }
 
-        // The layer's lines after its fills, stroked in the stage's axes: placed by the translation alone.
-        if (slice && !lineBy && layers[i].strokes.length > 0) {
+        // The layer's lines after its fills: through its stretch where they scale both ways, else
+        // stroked in the stage's axes and placed by the translation alone.
+        if (layers[i].strokes.length === 0) {
+          continue;
+        }
+
+        if (slice && !lineBy) {
           lineBy = ownSlice ? [pa, pb, pc, pd] : this.childLineSpace(o);
         }
 
-        const lines =
-          layers[i].strokes.length > 0
-            ? this.linesOf(layers[i], version, a, b, c, d, least, lineBy, opaque)
-            : null;
-        if (lines) {
-          if (lineRow < 0) {
-            lineRow = this.rows.addTranslated(this.places, at + 6, color);
-          }
-
-          this.geometries.use(lines.id);
-          this.scene.draw(lines.id, lineRow, NORMAL);
+        const even = !lineBy && scalesEvenly(layers[i]);
+        if (even && stretch === undefined) {
+          const m = this.stretchScratch;
+          m[0] = a;
+          m[1] = b;
+          m[2] = c;
+          m[3] = d;
+          stretch = stretchOf(m, m);
+          stretch = stretch && settledStretch(stretch, evenWidest(layers), least, stretch);
         }
+
+        const by = even ? stretch : null;
+        const lines = by
+          ? this.lineCache.take(layers[i], version, by[0], by[1], by[2], by[3], least, null, opaque)
+          : this.lineCache.take(layers[i], version, a, b, c, d, least, lineBy, opaque);
+        if (!lines) {
+          continue;
+        }
+
+        if (by && stretchRow < 0) {
+          // m s⁻¹, s symmetric: what turns and mirrors the stretched lines into place.
+          const det = by[0] * by[3] - by[1] * by[1];
+          const n0 = by[3] / det;
+          const n1 = -by[1] / det;
+          const n3 = by[0] / det;
+          stretchRow = this.rows.add(
+            a * n0 + c * n1,
+            b * n0 + d * n1,
+            a * n1 + c * n3,
+            b * n1 + d * n3,
+            tx,
+            ty,
+            color,
+          );
+        } else if (!by && lineRow < 0) {
+          lineRow = this.rows.addTranslated(this.places, at + 6, color);
+        }
+
+        this.geometries.use(lines.id);
+        this.scene.draw(lines.id, by ? stretchRow : lineRow, NORMAL);
       }
     }
 
@@ -1888,109 +1930,6 @@ export class RenderView implements Drawer {
     }));
     cache.set(layer, { parts, version });
     return parts;
-  }
-
-  /**
-   * `layer`'s lines through the linear transform (a b c d), at least `least`
-   * wide: stroked again for another transform, screen or version of its
-   * drawing, the old ones kept while drawn as the geometries keep them.
-   */
-  private linesOf(
-    layer: ShapeLayer,
-    version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
-    by: readonly number[] | null,
-    drawnOpaque: boolean,
-  ): GeometryHandle | null {
-    // Only a line of whole alpha draws otherwise when opaque (layerStrokes): a layer of none keeps
-    // one geometry through a fade.
-    let opaque = false;
-    for (let i = 0; drawnOpaque && !opaque && i < layer.strokes.length; i++) {
-      opaque = layer.strokes[i].line.color >>> 24 === 255;
-    }
-
-    let kept = this.lines.get(layer);
-    if (!kept) {
-      kept = [];
-      this.lines.set(layer, kept);
-    }
-
-    // Compared as numbers, the latest used first: a layer is nearly always seen as it was last
-    // frame, and a key formatted from its numbers on every frame cost more than drawing it.
-    let known: LineEntry | null = null;
-    for (let i = kept.length - 1; i >= 0; i--) {
-      const e = kept[i];
-      if (
-        same(e.a, a) &&
-        same(e.b, b) &&
-        same(e.c, c) &&
-        same(e.d, d) &&
-        same(e.least, least) &&
-        e.opaque === opaque &&
-        (e.by === null
-          ? by === null
-          : by !== null &&
-            same(e.by[0], by[0]) &&
-            same(e.by[1], by[1]) &&
-            same(e.by[2], by[2]) &&
-            same(e.by[3], by[3]))
-      ) {
-        known = i === kept.length - 1 ? e : moveLast(kept, i);
-        break;
-      }
-    }
-
-    if (
-      known &&
-      known.version === version &&
-      (!known.handle || this.geometries.alive(known.handle))
-    ) {
-      return known.handle;
-    }
-
-    if (known?.handle && this.geometries.alive(known.handle)) {
-      this.geometries.remove(known.handle.id);
-    }
-
-    // Those let go of are forgotten, and the least lately used past LINE_KEYS, so that a layer
-    // seen through ever new transforms keeps no more than that.
-    if (!known) {
-      makeRoom(
-        kept,
-        LINE_KEYS,
-        (e) => e.handle !== null && !this.geometries.alive(e.handle),
-        (e) => {
-          if (e.handle && this.geometries.alive(e.handle)) {
-            this.geometries.remove(e.handle.id);
-          }
-        },
-      );
-    }
-
-    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by, opaque);
-    const handle = data ? this.geometries.add(data) : null;
-    if (known) {
-      known.handle = handle;
-      known.version = version;
-    } else {
-      kept.push({
-        a,
-        b,
-        c,
-        d,
-        least,
-        by: by ? [by[0], by[1], by[2], by[3]] : null,
-        opaque,
-        handle,
-        version,
-      });
-    }
-
-    return handle;
   }
 
   /**

@@ -515,6 +515,8 @@ interface Surface {
   canvas: HTMLCanvasElement;
   gl: WebGLRenderingContext | WebGL2RenderingContext | undefined;
   drawer: Drawer;
+  /** Lines stroked anew and found stroked already, where the view counts them. */
+  counts?: { strokeContexts: number; strokeReuses: number };
   render(root: Player["stage"]): void;
   destroy(): void;
 }
@@ -583,6 +585,7 @@ async function ownSurface(
     canvas: view.canvas,
     gl: view.gl,
     drawer: view,
+    counts: view.counts,
     render: (root) => view.render(root),
     destroy: () => view.destroy(),
   };
@@ -999,7 +1002,8 @@ async function benchSwf(
     const counter = metered
       ? meter(renderer ?? { gl })
       : { read: () => ({}) as Record<string, number> };
-    let stroked = pixi?.counts.strokeContexts ?? 0;
+    const lineCounts = pixi?.counts ?? own?.counts ?? null;
+    let stroked = lineCounts?.strokeContexts ?? 0;
     for (let frame = 2; frame <= frames; frame++) {
       // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
       if (cpuProfile && frame === PROFILED_FROM) {
@@ -1044,11 +1048,11 @@ async function benchSwf(
       sync.push(synced - ticked);
       draw.push(drawn - synced);
       finished.push(performance.now() - drawn);
-      // Lines' contexts made, tessellated or not yet: the Pixi view's alone.
+      // Lines stroked anew this frame: the Pixi view's contexts, tessellated or not yet.
       const reading = counter.read();
-      if (pixi) {
-        reading.strokeContexts = pixi.counts.strokeContexts - stroked;
-        stroked = pixi.counts.strokeContexts;
+      if (lineCounts) {
+        reading.strokeContexts = lineCounts.strokeContexts - stroked;
+        stroked = lineCounts.strokeContexts;
       }
 
       meters.push(reading);
@@ -1071,7 +1075,7 @@ async function benchSwf(
       (console as Profiling).profileEnd("frames");
     }
 
-    const counts = pixi ? { ...pixi.counts } : {};
+    const counts = lineCounts ? { ...lineCounts } : {};
     const heap: [number, number] = [heapBefore, heapNow()];
     // Everything still held while chrome.ts collects and measures what the frames left (benchHold).
     if (hold) {
