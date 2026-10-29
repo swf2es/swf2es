@@ -7,7 +7,6 @@
 // straight colour, truncated; the blurs, glows, shadows, bevels and
 // convolutions by the render module.
 
-import { BitmapKernel } from "@swf2es/native/render";
 import type { Filter } from "../display/filters.js";
 import { ramp } from "../display/gradients.js";
 import {
@@ -19,6 +18,7 @@ import {
   premultiply,
   unmultiply,
 } from "./bitmap.js";
+import { bitmapKernel } from "./kernel.js";
 
 /** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
 export const GLOWS: ReadonlySet<string> = new Set([
@@ -494,22 +494,16 @@ function colorMatrix(
     return;
   }
 
-  // The map of straight (r, g, b, a) into `mapped`, each clamped and rounded.
-  const mapped = [0, 0, 0, 0];
-  const map = (cr: number, cg: number, cb: number, ca: number) => {
-    for (let row = 0; row < 4; row++) {
-      const v =
-        m[row * 5] * cr +
-        m[row * 5 + 1] * cg +
-        m[row * 5 + 2] * cb +
-        m[row * 5 + 3] * ca +
-        m[row * 5 + 4];
-      mapped[row] = Math.max(0, Math.min(255, Math.round(Number.isNaN(v) ? 0 : v)));
-    }
-
-    return mapped;
-  };
-  const [er, eg, eb, ea] = map(0, 0, 0, 0);
+  // The map of a transparent pixel, each channel clamped and rounded.
+  const [er, eg, eb, ea] = [0, 1, 2, 3].map((row) => {
+    const v =
+      m[row * 5] * 0 +
+      m[row * 5 + 1] * 0 +
+      m[row * 5 + 2] * 0 +
+      m[row * 5 + 3] * 0 +
+      m[row * 5 + 4];
+    return Math.max(0, Math.min(255, Math.round(Number.isNaN(v) ? 0 : v)));
+  });
   const empty = dest.premultiplied(((ea << 24) | (er << 16) | (eg << 8) | eb) >>> 0);
 
   // What the source has, and one more each way.
@@ -520,57 +514,21 @@ function colorMatrix(
     width: content.width + 2,
     height: content.height + 2,
   };
-  const from = source.pixels;
-  const into = dest.pixels;
-  const opaque = dest.transparent ? 0 : 0xff000000;
-  const pixel = (x: number, y: number): number => {
-    if (
-      !near ||
-      x < near.x ||
-      y < near.y ||
-      x >= near.x + near.width ||
-      y >= near.y + near.height
-    ) {
-      return empty;
-    }
-
-    const p = from[y * source.width + x];
-    const a = p >>> 24;
-    const s = a > 0 ? 255 / a : 0;
-    const [nr, ng, nb, na] = map(
-      ((p >>> 16) & 0xff) * s,
-      ((p >>> 8) & 0xff) * s,
-      (p & 0xff) * s,
-      a,
-    );
-    return (
-      ((na << 24) |
-        (Math.floor((nr * na) / 255) << 16) |
-        (Math.floor((ng * na) / 255) << 8) |
-        Math.floor((nb * na) / 255)) >>>
-      0
-    );
-  };
-
   // Rows down, each in fours from its start, a four read whole before it is
   // written, the rest one by one: in place, a move right repeats what the
-  // fours before wrote, as 480 rows under adl show.
-  const four = [0, 0, 0, 0];
-  const end = shown.x + shown.width;
-  for (let y = shown.y; y < shown.y + shown.height; y++) {
-    const row = (y + my) * dest.width + mx;
-    for (let x = shown.x; x < end; ) {
-      const n = end - x >= 4 ? 4 : 1;
-      for (let k = 0; k < n; k++) {
-        four[k] = pixel(x + k, y);
-      }
-
-      for (let k = 0; k < n; k++, x++) {
-        into[row + x] = (four[k] | opaque) >>> 0;
-      }
-    }
-  }
-
+  // fours before wrote, as 480 rows under adl show (pixels.zig).
+  const into = dest.pixels;
+  bitmapKernel()?.copy(
+    into,
+    dest.width,
+    source.pixels,
+    source.width,
+    { x: shown.x + mx, y: shown.y + my, width: shown.width, height: shown.height },
+    shown.x,
+    shown.y,
+    dest.transparent,
+    { op: "matrix", matrix: m, near, empty, opaque: !dest.transparent },
+  );
   dest.changed();
 }
 
@@ -725,13 +683,6 @@ function copyEmpty(
 }
 
 /**
- * The realm's filter kernel, made at its first filter that needs it:
- * @swf2es/native's, in Wasm. False where the realm refused the module, as
- * a worker served with a CSP without 'wasm-unsafe-eval' may.
- */
-let kernel: BitmapKernel | false | null = null;
-
-/**
  * A convolution over `area` of the source, as adl computes it, by the
  * render module (convolve.zig): each tap reads the source's straight
  * colour, past the rect too, and past the bitmap the nearest edge's or the
@@ -748,19 +699,6 @@ function convolve(
   transparent: boolean,
 ): Uint32Array | null {
   return bitmapKernel()?.convolve(source, area, f, transparent) ?? null;
-}
-
-/** The realm's kernel, made as it is first needed; null where the realm refused the module. */
-function bitmapKernel(): BitmapKernel | null {
-  if (kernel === null) {
-    try {
-      kernel = new BitmapKernel();
-    } catch {
-      kernel = false;
-    }
-  }
-
-  return kernel || null;
 }
 
 /**

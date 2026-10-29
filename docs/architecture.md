@@ -3687,7 +3687,10 @@ counts in a version the node compares.
 
 The pixel operations that read and write the store alone are in
 `bitmap/ops.ts`, beside the store and its premultiplied arithmetic in
-`bitmap/bitmap.ts`: `noise` and
+`bitmap/bitmap.ts`; the loops of `noise`, `perlinNoise`, `copyChannel`,
+`colorTransform`, `merge`, `paletteMap` and a colour matrix filter run in
+the render module (`packages/native/src/render/pixels.zig`), a band of rows
+at a time, which keeps their arithmetic: `noise` and
 `pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
 to the values Ruffle's corpus recorded of it; `copyChannel`,
 `colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
@@ -3731,7 +3734,8 @@ differs of the alpha difference in every premultiplied channel (the
 SVG's feTurbulence, which Flash's matches to the byte (`bitmap/turbulence.ts`,
 after Ruffle's port): Park-Miller seeds four channels' gradients, each
 octave moved by its offset, a channel's noise drawn from the next of
-the four only for the channels asked for, a byte made of it as Flash
+the four only for the channels asked for (the set-up in TypeScript, the
+noise of each pixel in pixels.zig, in the same f64 arithmetic), a byte made of it as Flash
 makes it, and the pixel written as it comes, not premultiplied (the
 `perlin-noise` case). A double past an int converts as on x86, to -2^31,
 so that octaves enough to take the lattice that far give Flash's wild
@@ -4429,11 +4433,13 @@ bitmap Flash allows. It takes values only within the ranges the player's
 filter objects keep, and refuses others; the player brings a filter from
 a SWF's tags (filterOfSwf), whose passes, blurs and strength may lie past
 them, within them first: passes to 15, blurs to 0 through 255, a negative
-strength none. The colour matrix and the displacement map stay in JS. The JS the
-player had is kept as the kernels' reference in the unit tests
-(`tests/unit/player/bitmap/convolution-reference.ts`,
-`blur-reference.ts`), which hold the kernels to it bit for bit
-(`native-bitmap.test.ts`, `native-blur.test.ts`).
+strength none. The colour matrix runs in the module too (pixels.zig); the
+displacement map stays in JS, as it may read anywhere in its rect, which
+no band of rows bounds. The JS the player had is kept as the kernels'
+reference in the unit tests (`tests/unit/player/bitmap/convolution-reference.ts`,
+`blur-reference.ts`, `pixels-reference.ts`), which hold the kernels to it
+bit for bit (`native-bitmap.test.ts`, `native-blur.test.ts`,
+`native-pixels.test.ts`).
 
 The native package depends on no other package and loads no DOM or node
 types. The kernel receives numeric records and premultiplied ARGB pixels.
