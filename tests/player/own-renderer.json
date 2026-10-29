@@ -258,6 +258,7 @@
   "shared-fill-edges",
   "shared-lines",
   "shared-objects",
+  "slice-filtered",
   "small-natives",
   "sound-extract",
   "sound-extract-sync",

@@ -471,13 +471,18 @@ export class RenderView implements Drawer {
     // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
     // The 9-slice grid that reshapes what it draws itself (display/scale9.ts): its own, sliced as
     // its morphs take their new ratios, so that its bounds are this frame's, as the Pixi view
-    // slices it; or, for a Shape, its owner's, kept as the owner's children are walked. Masks are
+    // slices it; or, for a Shape, its owner's, kept as the owner's children are walked, unless it
+    // is filtered, which adl draws as a bitmap of it, stretched whole (sliceFor). Masks are
     // hidden, and draw unsliced; so does what BitmapData.draw takes, its Shapes by its grid too,
     // which draws with no transform of its own.
     const ownSlice = !hidden && o.scale9Grid && !root ? sliceDrawn(o) : null;
     const slice =
       ownSlice ??
-      (!hidden && o instanceof ShapeObject && o.parent !== null && o.parent === this.sliceOwner
+      (!hidden &&
+      o instanceof ShapeObject &&
+      o.parent !== null &&
+      o.parent === this.sliceOwner &&
+      o.filters.length === 0
         ? this.ownerSlice
         : null);
     const filtering = hidden || o.filters.length === 0 ? null : this.filterPlan(o);

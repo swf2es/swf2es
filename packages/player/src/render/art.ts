@@ -259,8 +259,11 @@ export class Art {
     }
 
     const parent = o.parent;
+    // A filtered Shape adl draws as a bitmap of it, stretched whole (display/scale9.ts, sliceFor).
     const slice =
-      o instanceof ShapeObject && parent?.scale9Grid ? this.nodes.get(parent)?.slice : null;
+      o instanceof ShapeObject && parent?.scale9Grid && o.filters.length === 0
+        ? this.nodes.get(parent)?.slice
+        : null;
     return slice ? { slice, m: o.placed } : null;
   }
 
