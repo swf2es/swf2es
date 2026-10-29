@@ -518,7 +518,10 @@ export function readPbj(bytes: Uint8Array): PbjKernel {
       }
 
       case PbjOp.nop: {
-        if (r.u24() !== 0 || r.u24() !== 0) {
+        // Both words read first: a nop cut short is EOFError 2030, whatever its bytes.
+        const first = r.u24();
+        const second = r.u24();
+        if (first !== 0 || second !== 0) {
           refuse();
         }
 

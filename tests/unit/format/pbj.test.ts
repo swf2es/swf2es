@@ -93,6 +93,9 @@ test("bytes that end inside an opcode are EOFError 2030", () => {
   assert.equal(refusal(new Uint8Array([0xa4])), 2030);
   assert.equal(refusal(new PbjAssembler().version(1).raw(0xa4, 0xff, 0, 0x6b).bytes()), 2030);
   assert.equal(refusal(head().raw(0x1d, 0, 0, 0xf0).bytes()), 2030);
+  // A nop cut short, whatever bytes it has.
+  assert.equal(refusal(head().raw(0, 1, 0, 0).bytes()), 2030);
+  assert.equal(refusal(head().raw(0, 0, 0, 0, 1).bytes()), 2030);
   // A metadata type adl cannot size reads on to the end.
   assert.equal(refusal(head().raw(0xa0, 0x11, 0x6b, 0, 0, 0).bytes()), 2030);
 });
