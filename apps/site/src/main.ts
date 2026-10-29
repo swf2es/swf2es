@@ -156,7 +156,13 @@ let current: {
   stage3D: boolean;
 } | null = null;
 let loadGeneration = 0;
-const stats = new Stats(byId("fps"), byId("frame-time"), byId("draws"), byId("heap"));
+const stats = new Stats(
+  byId("fps"),
+  byId("frame-time"),
+  byId("sub-draws"),
+  byId("gl-calls"),
+  byId("heap"),
+);
 
 function showStatus(message: string, isError = false): void {
   status.textContent = message;

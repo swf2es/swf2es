@@ -1,7 +1,8 @@
 // The figures under the player, twice a second: the SWF's frames played a
 // second against its frame rate, the main thread's time in an animation
-// frame, the WebGL draw calls of a frame the player drew, and the JS heap
-// where the browser tells it (Chromium's performance.memory).
+// frame, the draws of a frame the player drew and the WebGL calls that made
+// them, and the JS heap where the browser tells it (Chromium's
+// performance.memory).
 
 /** What the element's player gives that is counted here: its advance, which the element calls each animation frame. */
 interface Advancing {
@@ -27,10 +28,12 @@ const MULTI_DRAWS = [
  * The draw calls made on a context, counted by wrapping its draw functions
  * only while the figures are on screen: off it, and before a context is
  * given, the context has its own functions back and the count costs
- * nothing. A multi-draw counts as the draws it makes, as the GPU sees them.
+ * nothing. A multi-draw is one call and the draws it makes, as the GPU sees
+ * them.
  */
 class DrawCounter {
   draws = 0;
+  calls = 0;
   private gl: GL | null = null;
   private shown = false;
   private readonly restores: (() => void)[] = [];
@@ -95,6 +98,7 @@ class DrawCounter {
     const own = Object.getOwnPropertyDescriptor(target, name);
     functions[name] = (...args: unknown[]) => {
       this.draws += count(args);
+      this.calls++;
       return original.apply(target, args);
     };
     this.restores.push(() => {
@@ -118,18 +122,21 @@ export class Stats {
   /** The time the animation frame being measured started at. */
   private frameStart = 0;
   private readonly counter = new DrawCounter();
-  /** The draws of the frames since the figures were last shown that drew. */
+  /** The draws, and the calls that made them, of the frames that drew since the last showing. */
   private draws = 0;
+  private calls = 0;
   private drawnFrames = 0;
 
   constructor(
     private readonly fps: HTMLElement,
     private readonly frameTime: HTMLElement,
-    private readonly drawCalls: HTMLElement,
+    private readonly subDraws: HTMLElement,
+    private readonly glCalls: HTMLElement,
     private readonly heap: HTMLElement,
   ) {
+    // The figures' list, which holds both of the counter's.
     new IntersectionObserver(([entry]) => this.counter.show(entry.isIntersecting)).observe(
-      drawCalls,
+      subDraws.closest("dl") ?? subDraws,
     );
     // A message posted from an animation frame arrives once the frame's
     // callbacks, style, layout and paint are done: that much is its work.
@@ -147,7 +154,11 @@ export class Stats {
     this.rate = frameRate;
     this.played = 0;
     this.counter.attach(gl);
-    this.drawCalls.textContent = "–";
+    // The last player's frames counted towards nothing shown for this one.
+    this.counter.draws = this.counter.calls = 0;
+    this.draws = this.calls = this.drawnFrames = 0;
+    this.subDraws.textContent = "–";
+    this.glCalls.textContent = "–";
     if (!player) {
       return;
     }
@@ -167,10 +178,12 @@ export class Stats {
   private readonly frame = (now: number) => {
     this.frameStart = now;
     // One player's frame falls between two of these, whichever runs first.
-    if (this.counter.draws > 0) {
+    if (this.counter.calls > 0) {
       this.draws += this.counter.draws;
+      this.calls += this.counter.calls;
       this.drawnFrames++;
       this.counter.draws = 0;
+      this.counter.calls = 0;
     }
 
     this.channel.port2.postMessage(0);
@@ -187,7 +200,8 @@ export class Stats {
       this.frames > 0 ? `${(this.busy / this.frames).toFixed(1)} ms` : "–";
     // A still stage draws nothing: the last frame drawn stands.
     if (this.drawnFrames > 0) {
-      this.drawCalls.textContent = String(Math.round(this.draws / this.drawnFrames));
+      this.subDraws.textContent = String(Math.round(this.draws / this.drawnFrames));
+      this.glCalls.textContent = String(Math.round(this.calls / this.drawnFrames));
     }
     const memory = (performance as { memory?: MemoryInfo }).memory;
     this.heap.textContent = memory ? `${(memory.usedJSHeapSize / 1048576).toFixed(0)} MB` : "n/a";
@@ -195,6 +209,7 @@ export class Stats {
     this.busy = 0;
     this.frames = 0;
     this.draws = 0;
+    this.calls = 0;
     this.drawnFrames = 0;
     this.since = now;
   }

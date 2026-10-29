@@ -209,8 +209,14 @@ async function check(): Promise<void> {
             });
             writeFileSync(`${out}site.png`, Buffer.from(page.data, "base64"));
 
-            // The stats count the renderer's draw calls while they are on screen.
-            await until("Number(document.getElementById('draws').textContent) > 0");
+            // The stats count the renderer's draws, and the GL calls that make them, while they are
+            // on screen: a multi-draw is one call of many draws.
+            await until("Number(document.getElementById('sub-draws').textContent) > 0");
+            // Both read at once, so that they are of one showing.
+            const [calls, draws] = await value<number[]>(
+              "['gl-calls', 'sub-draws'].map((id) => Number(document.getElementById(id).textContent))",
+            );
+            assert.ok(calls > 0 && calls <= draws, `${calls} GL calls for ${draws} draws`);
             // Off screen, and while the context is lost, the context has its own functions back.
             const gl = "document.getElementById('player').gl";
             const wrapped = `Object.hasOwn(${gl}, 'drawElements')`;
@@ -225,8 +231,8 @@ async function check(): Promise<void> {
             await until(`!${wrapped}`);
             await value("(lose.restoreContext(), true)");
             await until(wrapped);
-            await value("(document.getElementById('draws').textContent = '', true)");
-            await until("Number(document.getElementById('draws').textContent) > 0");
+            await value("(document.getElementById('sub-draws').textContent = '', true)");
+            await until("Number(document.getElementById('sub-draws').textContent) > 0");
 
             // The context menu's About item names the build the page was made from.
             for (const type of ["mousePressed", "mouseReleased"]) {
