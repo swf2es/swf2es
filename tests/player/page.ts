@@ -81,10 +81,18 @@ async function scriptingFor(
   trace: string[],
   url: string | null,
   uncaught: unknown[],
-  moduleCache: ModuleCache | null = null,
-  onCompile?: () => void,
-  lazyCompilation = false,
-  air = false,
+  {
+    moduleCache = null,
+    onCompile,
+    lazyCompilation = false,
+    air = false,
+  }: {
+    moduleCache?: ModuleCache | null;
+    onCompile?: () => void;
+    lazyCompilation?: boolean;
+    /** Played as AIR plays it (Scripting's `air`). */
+    air?: boolean;
+  } = {},
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
   if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
@@ -385,21 +393,43 @@ function downsample(from: HTMLCanvasElement, to: HTMLCanvasElement, n: number): 
   target.putImageData(image, 0, 0);
 }
 
+/** How runSwf plays a SWF: chrome.ts's PlayerJob, as the page takes it, by name. */
+interface RunSwfOptions {
+  frames: number;
+  /** The frames to draw, 1 the first. */
+  capture?: number[];
+  /** Its stage quality, 0 low to 3 best. */
+  quality?: number;
+  url?: string | null;
+  zoom?: number;
+  antialias?: boolean;
+  shown?: boolean;
+  input?: RecordedEvent[] | null;
+  viewport?: { width: number; height: number } | null;
+  logFetch?: boolean;
+  socket?: SocketStep[] | null;
+  lazyCompilation?: boolean;
+  /** Played as AIR plays it (Scripting's `air`). */
+  air?: boolean;
+}
+
 async function runSwf(
   base64: string,
-  frames: number,
-  capture: number[],
-  quality: number,
-  url: string | null = null,
-  zoom = 1,
-  antialias = false,
-  shown = false,
-  input: RecordedEvent[] | null = null,
-  viewport: { width: number; height: number } | null = null,
-  logFetch = false,
-  socket: SocketStep[] | null = null,
-  lazyCompilation = false,
-  air = false,
+  {
+    frames,
+    capture = [],
+    quality = 2,
+    url = null,
+    zoom = 1,
+    antialias = false,
+    shown = false,
+    input = null,
+    viewport = null,
+    logFetch = false,
+    socket = null,
+    lazyCompilation = false,
+    air = false,
+  }: RunSwfOptions,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const images: Record<number, string> = {};
@@ -414,16 +444,7 @@ async function runSwf(
     }
   };
   try {
-    scripting = await scriptingFor(
-      bytes,
-      trace,
-      url,
-      uncaught,
-      null,
-      undefined,
-      lazyCompilation,
-      air,
-    );
+    scripting = await scriptingFor(bytes, trace, url, uncaught, { lazyCompilation, air });
     const player = new Player(
       bytes,
       scripting,
@@ -1237,7 +1258,9 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
       leakCache ??= indexedDbModuleCache({ name: `swf2es-leak-${Math.random()}` });
     }
 
-    scripting = await scriptingFor(bytes, trace, url, uncaught, cached ? leakCache : null);
+    scripting = await scriptingFor(bytes, trace, url, uncaught, {
+      moduleCache: cached ? leakCache : null,
+    });
     const player = new Player(bytes, scripting);
     await player.start();
     opened = { player, scripting, trace, uncaught };
@@ -1332,7 +1355,10 @@ async function moduleCacheSwf(base64: string): Promise<CacheCheck> {
     const uncaught: unknown[] = [];
     let scripting: Scripting | null = null;
     try {
-      scripting = await scriptingFor(bytes, trace, null, uncaught, watched, () => compiled++);
+      scripting = await scriptingFor(bytes, trace, null, uncaught, {
+        moduleCache: watched,
+        onCompile: () => compiled++,
+      });
       const player = new Player(bytes, scripting);
       await player.start();
       loads.push({
@@ -1473,7 +1499,10 @@ async function precompiledSwf(
   let image: string | null = null;
   try {
     const cache = precompiledModules(manifest, { importModules });
-    scripting = await scriptingFor(bytes, trace, null, uncaught, cache, () => compiled++);
+    scripting = await scriptingFor(bytes, trace, null, uncaught, {
+      moduleCache: cache,
+      onCompile: () => compiled++,
+    });
     const player = new Player(bytes, scripting);
     await player.start();
     for (let frame = 2; frame <= frames && uncaught.length === 0; frame++) {
