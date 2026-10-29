@@ -18,6 +18,27 @@ export class Rows {
   }
 
   /**
+   * A row for the transform at `places[at]`, a b c d tx ty: numbers a
+   * caller keeps in a typed array, so that none are boxed passing them.
+   */
+  addPlaced(places: Float64Array, at: number, ct: ColorRow | null): number {
+    return this.add(
+      places[at],
+      places[at + 1],
+      places[at + 2],
+      places[at + 3],
+      places[at + 4],
+      places[at + 5],
+      ct,
+    );
+  }
+
+  /** A row for the translation of the transform at `places[at]` alone. */
+  addTranslated(places: Float64Array, at: number, ct: ColorRow | null): number {
+    return this.add(1, 0, 0, 1, places[at + 4], places[at + 5], ct);
+  }
+
+  /**
    * A row for the transform `m` and, unless null, the colour transform's
    * multipliers and offsets `ct`: its index.
    */
