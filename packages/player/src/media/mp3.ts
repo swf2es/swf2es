@@ -31,8 +31,6 @@ export interface Mp3Frames {
   whole: number[];
   /** Where reading goes on from with more bytes: after the last whole frame. */
   end: number;
-  /** The first frame's bytes when it is a Xing, Info or VBRI header, which a browser would trim by. */
-  header: [number, number] | null;
 }
 
 interface Header {
@@ -145,19 +143,13 @@ export function mp3Frames(bytes: Uint8Array, before: Mp3Frames | null = null): M
   const like = before?.whole.length ? header(bytes, before.whole[0]) : null;
   if (!like) {
     const run = nextRun(bytes, 0, null);
-    return run ? readFrames(bytes, run[0], run[1], [], null) : null;
+    return run ? readFrames(bytes, run[0], run[1], []) : null;
   }
 
-  return readFrames(bytes, before?.end ?? 0, like, before?.whole ?? [], before?.header ?? null);
+  return readFrames(bytes, before?.end ?? 0, like, before?.whole ?? []);
 }
 
-function readFrames(
-  bytes: Uint8Array,
-  from: number,
-  like: Header,
-  before: number[],
-  headerFrame: [number, number] | null,
-): Mp3Frames {
+function readFrames(bytes: Uint8Array, from: number, like: Header, before: number[]): Mp3Frames {
   const whole = before.slice();
   let frames = whole.length / 2;
   let at = from;
@@ -183,7 +175,6 @@ function readFrames(
     end = at;
   }
 
-  const first = before.length ? null : whole[0];
   return {
     rate: like.rate,
     channels: like.channels,
@@ -191,12 +182,6 @@ function readFrames(
     frames,
     whole,
     end,
-    header:
-      first === undefined || first === null
-        ? headerFrame
-        : isHeaderFrame(bytes, first, like)
-          ? [first, whole[1]]
-          : null,
   };
 }
 

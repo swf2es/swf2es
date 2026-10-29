@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { type Mp3Frames, mp3Frames } from "../../../../packages/player/dist/media/mp3.js";
+import {
+  type Mp3Frames,
+  mp3Frames,
+  mp3HeaderFrame,
+} from "../../../../packages/player/dist/media/mp3.js";
 
 const sound = (name: string) =>
   new Uint8Array(readFileSync(new URL(`../../../player/sounds/${name}`, import.meta.url)));
@@ -18,10 +22,10 @@ const concat = (...parts: Uint8Array[]) => {
   return out;
 };
 
-/** The whole frames back to back, a Xing, Info or VBRI header left out. */
+/** The whole frames back to back, a Xing, Info or VBRI header's too, as extract.ts decodes them. */
 const wholeFrames = (bytes: Uint8Array, mp3: Mp3Frames) => {
   const parts: Uint8Array[] = [];
-  for (let i = mp3.header ? 2 : 0; i < mp3.whole.length; i += 2) {
+  for (let i = 0; i < mp3.whole.length; i += 2) {
     parts.push(bytes.subarray(mp3.whole[i], mp3.whole[i + 1]));
   }
 
@@ -39,15 +43,16 @@ const id3 = (body: Uint8Array) =>
 test("an MP3's frames are counted by their headers, a frame cut short too", () => {
   const all = mp3Frames(tone);
   assert.deepEqual(
-    [all?.rate, all?.channels, all?.samplesPerFrame, all?.frames, all?.end, all?.header],
-    [44100, 2, 1152, 11, tone.length, null],
+    [all?.rate, all?.channels, all?.samplesPerFrame, all?.frames, all?.end],
+    [44100, 2, 1152, 11, tone.length],
   );
   const cut = mp3Frames(tone.subarray(0, 1000));
   assert.deepEqual([cut?.frames, cut?.end, cut?.whole.length], [4, 940, 6]);
   assert.equal(mp3Frames(new TextEncoder().encode("not an mp3")), null);
 
   // A LAME header frame is found, for the decode to keep from the browser.
-  assert.deepEqual(mp3Frames(sound("tone-tagged.mp3"))?.header, [0, 313]);
+  assert.equal(mp3HeaderFrame(tone), null);
+  assert.deepEqual(mp3HeaderFrame(sound("tone-tagged.mp3")), [0, 313]);
 });
 
 test("bytes added read on from where the frames before stopped, as the whole would read", () => {
