@@ -162,7 +162,7 @@ export class HeldLayers {
     // The pages this level takes, from here on, which its waves give back.
     const levelPages = this.pages.length;
     const shelves = this.shelves;
-    this.draws.lastRow = -1;
+    this.draws.forgetRow();
     // Their content, each at the size its own layer would take, on pages no taller than the
     // frame's samples fit (fittingSamples), so that each takes them as its own layer did.
     let area = 0;

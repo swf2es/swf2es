@@ -180,7 +180,7 @@ export class WebGLBackend {
     this.layers.length = 0;
     this.draws.drawInto(canvas, target);
 
-    this.draws.lastRow = -1;
+    this.draws.forgetRow();
     // The masks pushed on the target drawn into: what is drawn passes where its stencil holds as
     // many. Its eight bits hold 255: those pushed past that are left out, and their pops with
     // them. A layer has a stencil of its own, and the target below keeps its count meanwhile.

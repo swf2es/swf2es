@@ -110,8 +110,11 @@ export class Draws {
   private glyphStale = true;
   /** Flash's pixels a stage pixel: the target's pixels a stage pixel over those a pixel of Flash's. */
   private unit = 1;
-  /** The row and texture the last draw was told, so neither is told again. */
-  lastRow = -1;
+  /**
+   * The row a fill drawn alone (without WEBGL_multi_draw) last told the fill
+   * program, so that it is not told again; -1 for none (forgetRow).
+   */
+  private lastRow = -1;
 
   constructor(
     gl: WebGL2RenderingContext,
@@ -175,6 +178,7 @@ export class Draws {
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uSegments"), OUTLINE_UNIT);
     this.glyphStale = true;
+    this.lastRow = -1;
   }
 
   /**
@@ -208,6 +212,11 @@ export class Draws {
     gl.uniform1f(this.fillUnitLocation, this.unit);
     this.meshStale = true;
     this.glyphStale = true;
+  }
+
+  /** The row the fill program was told forgotten, so that the next fill tells it again. */
+  forgetRow(): void {
+    this.lastRow = -1;
   }
 
   /** The fill program, its vertex array and rows bound, as runs and masks draw with them. */
