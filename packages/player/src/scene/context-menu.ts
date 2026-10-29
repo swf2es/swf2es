@@ -80,6 +80,7 @@ export function bindContextMenu(
         max-height:calc(100dvh - 8px); overflow:auto; padding:4px; border:1px solid #777;
         border-radius:6px; background:Canvas; color:CanvasText;
         box-shadow:0 4px 16px #0006; font:13px system-ui,sans-serif; }
+      [role=menu]:focus { outline:none; }
       button { display:block; width:100%; box-sizing:border-box; padding:6px 18px;
         border:0; border-radius:3px; background:transparent; color:inherit;
         text-align:left; font:inherit; white-space:pre-wrap; overflow-wrap:anywhere; cursor:default; }
