@@ -144,18 +144,18 @@ export class TargetPool {
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
   /** Frames executed, which a layer's idleness is counted in. */
-  frame = 0;
+  private frameCount = 0;
   /**
    * The samples the layers of the frame drawing take: the stage's, which a
    * BitmapData's frame draws with none of.
    */
-  frameSamples = 1;
+  private layerSamples = 1;
   /** Layers free to draw into, by their size. */
   private freeLayers = new SizedPool<Layer>(layerBytes);
   /** Multisampled buffers free to draw a layer into, kept while drawn into often enough. */
   private freeMsaa = new SizedPool<Multisampled>(msaaBytes);
   /** The layers kept from frame to frame, by their ids in Keeps. */
-  kept: (Layer | null)[] = [];
+  private kept: (Layer | null)[] = [];
 
   constructor(gl: WebGL2RenderingContext, state: GlState) {
     this.gl = gl;
@@ -169,14 +169,61 @@ export class TargetPool {
     this.freeMsaa = new SizedPool<Multisampled>(msaaBytes);
   }
 
-  /** The free layers and multisampled buffers undrawn into for LAYER_IDLE_FRAMES let go of. */
-  dropIdleLayers(): void {
-    this.freeLayers.trim(this.frame, LAYER_IDLE_FRAMES, FREE_BYTES - this.freeMsaa.bytes, (l) =>
-      this.deleteLayer(l),
+  get frame(): number {
+    return this.frameCount;
+  }
+
+  get frameSamples(): number {
+    return this.layerSamples;
+  }
+
+  /** A frame begun, its layers taking `samples`: the stage's, 1 for a BitmapData's frame. */
+  beginFrame(samples: number): void {
+    this.layerSamples = samples;
+  }
+
+  /**
+   * A frame of the canvas' ended: the free layers and multisampled buffers
+   * undrawn into for LAYER_IDLE_FRAMES let go of, and the frame counted.
+   */
+  endFrame(): void {
+    this.freeLayers.trim(
+      this.frameCount,
+      LAYER_IDLE_FRAMES,
+      FREE_BYTES - this.freeMsaa.bytes,
+      (l) => this.deleteLayer(l),
     );
-    this.freeMsaa.trim(this.frame, LAYER_IDLE_FRAMES, FREE_BYTES - this.freeLayers.bytes, (m) =>
-      this.deleteMultisampled(m),
+    this.freeMsaa.trim(
+      this.frameCount,
+      LAYER_IDLE_FRAMES,
+      FREE_BYTES - this.freeLayers.bytes,
+      (m) => this.deleteMultisampled(m),
     );
+    this.frameCount++;
+  }
+
+  /** The layer kept as output `id` (Keeps), or none. */
+  keptLayer(id: number): Layer | null {
+    return this.kept[id] ?? null;
+  }
+
+  /** `layer` kept as output `id` (Keeps) for the frames after, the one kept before given back. */
+  keep(id: number, layer: Layer): void {
+    const before = this.kept[id];
+    if (before && before !== layer) {
+      this.giveLayer(before);
+    }
+
+    this.kept[id] = layer;
+  }
+
+  /** The layer kept as output `id` given back, as Keeps let go of it. */
+  release(id: number): void {
+    const layer = this.kept[id];
+    if (layer) {
+      this.giveLayer(layer);
+      this.kept[id] = null;
+    }
   }
 
   /**
@@ -198,7 +245,7 @@ export class TargetPool {
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
     open.msaa = null;
     // Free for the next layer: only those drawn into now hold multisampled buffers.
-    this.freeMsaa.give(msaa, this.frame, msaa.samples);
+    this.freeMsaa.give(msaa, this.frameCount, msaa.samples);
   }
 
   /**
@@ -250,7 +297,15 @@ export class TargetPool {
       gl.RENDERBUFFER,
       depthStencil,
     );
-    const msaa = { framebuffer, color, depthStencil, width, height, samples, usedAt: this.frame };
+    const msaa = {
+      framebuffer,
+      color,
+      depthStencil,
+      width,
+      height,
+      samples,
+      usedAt: this.frameCount,
+    };
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       this.deleteMultisampled(msaa);
       return null;
@@ -279,7 +334,7 @@ export class TargetPool {
       this.freeLayers.take(width, height) ??
       (exact ? null : this.freeLayers.takeFitting(width, height));
     if (found) {
-      found.usedAt = this.frame;
+      found.usedAt = this.frameCount;
       return found;
     }
 
@@ -299,12 +354,12 @@ export class TargetPool {
     const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
     this.state.bindFramebuffer(framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    return { framebuffer, texture, stencil: null, width, height, usedAt: this.frame };
+    return { framebuffer, texture, stencil: null, width, height, usedAt: this.frameCount };
   }
 
   /** A layer free again, kept for the layers after it while it is drawn into often enough. */
   giveLayer(layer: Layer): void {
-    this.freeLayers.give(layer, this.frame);
+    this.freeLayers.give(layer, this.frameCount);
   }
 
   deleteLayer(layer: Layer): void {

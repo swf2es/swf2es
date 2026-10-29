@@ -140,11 +140,7 @@ export class WebGLBackend {
     this.atlas.place(geometries);
     this.gpu.uploadTextures(textures);
     for (const id of keeps.removed) {
-      const layer = this.pool.kept[id];
-      if (layer) {
-        this.pool.giveLayer(layer);
-        this.pool.kept[id] = null;
-      }
+      this.pool.release(id);
     }
 
     keeps.removed.length = 0;
@@ -171,7 +167,7 @@ export class WebGLBackend {
       this.pool.layerMsaa(into, 1);
     }
 
-    this.pool.frameSamples = stage?.samples ?? 1;
+    this.pool.beginFrame(stage?.samples ?? 1);
     this.holds.drawHolds(commands, scene, filters, target);
     const canvas: Open = {
       layer: into,
@@ -315,12 +311,7 @@ export class WebGLBackend {
           const keep = ops[at + 3];
           if (keep >= 0) {
             // Kept for the frames after, the output kept before given back.
-            const before = this.pool.kept[keep];
-            if (before && before !== open.layer) {
-              this.pool.giveLayer(before);
-            }
-
-            this.pool.kept[keep] = open.layer;
+            this.pool.keep(keep, open.layer as Layer);
           } else {
             this.pool.giveLayer(open.layer as Layer);
           }
@@ -331,7 +322,7 @@ export class WebGLBackend {
         case COMPOSITE: {
           const p = commands.params;
           const from = ops[at + 1];
-          const layer = this.pool.kept[p[from + 4]];
+          const layer = this.pool.keptLayer(p[from + 4]);
           if (layer) {
             const kept: Open = {
               layer,
@@ -367,8 +358,9 @@ export class WebGLBackend {
 
     this.holds.givePages();
     if (counted) {
-      this.dropIdleLayers();
-      this.pool.frame++;
+      // The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of.
+      this.stage.dropIdleLayer();
+      this.pool.endFrame();
     }
   }
 
@@ -472,12 +464,7 @@ export class WebGLBackend {
     }
 
     this.state.scissor(null);
-    const before = this.pool.kept[keep];
-    if (before && before !== layer) {
-      this.pool.giveLayer(before);
-    }
-
-    this.pool.kept[keep] = layer;
+    this.pool.keep(keep, layer);
   }
 
   /**
@@ -507,12 +494,6 @@ export class WebGLBackend {
     }
 
     return layer;
-  }
-
-  /** The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of. */
-  private dropIdleLayers(): void {
-    this.stage.dropIdleLayer();
-    this.pool.dropIdleLayers();
   }
 
   /** Advanced text's outlines uploaded (GpuTextures.uploadOutlines). */

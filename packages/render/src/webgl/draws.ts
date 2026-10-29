@@ -422,7 +422,7 @@ export class Draws {
       id < 0
         ? null
         : plane
-          ? (this.pool.kept[id]?.texture ?? null)
+          ? (this.pool.keptLayer(id)?.texture ?? null)
           : (this.gpu.textures[id] ?? null);
     if (!texture) {
       return false;
