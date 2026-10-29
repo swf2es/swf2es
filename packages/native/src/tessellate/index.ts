@@ -65,6 +65,7 @@ interface NativeExports {
   triangleCount(): number;
   highWater(): number;
   setLimit(n: number): void;
+  bandsOnly(on: number): void;
 }
 
 export interface TessellatorOptions {
@@ -72,6 +73,11 @@ export interface TessellatorOptions {
   memoryLimit?: number;
   /** Drop instances larger than this after each call. Defaults to 8 MiB. */
   retainMemory?: number;
+  /**
+   * Fill by the module's bands alone (bands.zig), as it does after libtess2
+   * has trapped, never by libtess2: for tests of the bands.
+   */
+  bands?: boolean;
 }
 
 /** What root.zig takes of one fill; it rejects more too. */
@@ -89,11 +95,13 @@ export class Tessellator {
   private unavailable = false;
   private readonly limit: number;
   private readonly keep: number;
+  private readonly bands: boolean;
   private readonly lines: LineBuilder;
 
   constructor(options: TessellatorOptions = {}) {
     this.limit = options.memoryLimit ?? 128 << 20;
     this.keep = options.retainMemory ?? 8 << 20;
+    this.bands = options.bands ?? false;
     if (
       !Number.isInteger(this.limit) ||
       this.limit < 0 ||
@@ -122,14 +130,15 @@ export class Tessellator {
     this.lines.dispose();
   }
 
-  /** The instance, made on first use, its arena reset. */
-  private arena(): NativeExports {
+  /** The instance, made on first use, its arena reset; filling by the bands alone where `bands`. */
+  private arena(bands: boolean): NativeExports {
     this.instance ??= renderInstance(() => {
       throw new Error("tessellation allocation failed");
     }) as unknown as NativeExports;
     const x = this.instance;
     x.reset();
     x.setLimit(this.limit);
+    x.bandsOnly(Number(bands));
     return x;
   }
 
@@ -153,7 +162,14 @@ export class Tessellator {
   private readonly fill = (
     contours: readonly (readonly number[])[],
     nonZero: boolean,
-  ): FillGeometry | null => {
+  ): FillGeometry | null => this.fillBy(contours, nonZero, this.bands);
+
+  /** One fill, by the bands alone where `bands`; again so in a new instance where libtess2 trapped. */
+  private fillBy(
+    contours: readonly (readonly number[])[],
+    nonZero: boolean,
+    bands: boolean,
+  ): FillGeometry | null {
     if (this.unavailable || contours.length > MOST_CONTOURS) {
       return null;
     }
@@ -176,7 +192,7 @@ export class Tessellator {
     }
 
     try {
-      const x = this.arena();
+      const x = this.arena(bands);
       // One allocation: coordinates, then contours' ends.
       const coordAt = x.alloc(count * 16 + contours.length * 4);
       if (!coordAt) {
@@ -206,17 +222,24 @@ export class Tessellator {
       return { vertices, indices };
     } catch {
       this.failed();
-      return null;
+      return this.unavailable || bands ? null : this.fillBy(contours, nonZero, true);
     } finally {
       this.trim();
     }
-  };
+  }
 
   /** Each fill flattened and tessellated, as `fill` would make its polygons, in one call and one copy out. */
   private readonly layer = (
     fills: readonly (readonly (readonly number[])[])[],
     nonZero: readonly boolean[],
-  ): (FillGeometry | null)[] | null => {
+  ): (FillGeometry | null)[] | null => this.layerBy(fills, nonZero, this.bands);
+
+  /** The layer, by the bands alone where `bands`; again so in a new instance where libtess2 trapped. */
+  private layerBy(
+    fills: readonly (readonly (readonly number[])[])[],
+    nonZero: readonly boolean[],
+    bands: boolean,
+  ): (FillGeometry | null)[] | null {
     if (this.unavailable) {
       return null;
     }
@@ -244,7 +267,7 @@ export class Tessellator {
     let indices: Uint16Array | Uint32Array;
     try {
       // One allocation: commands, contours' ends, each fill's last contour, then rules.
-      const x = this.arena();
+      const x = this.arena(bands);
       const commandAt = x.alloc(length * 8 + contours * 4 + fills.length * 5);
       if (!commandAt) {
         throw new Error("tessellation input allocation failed");
@@ -276,7 +299,9 @@ export class Tessellator {
       const head = x.layer(commandAt, length, endsAt, contours, fillsAt, rulesAt, fills.length);
       if (head === 0) {
         // The layer's own output did not fit: a call a fill.
-        return fills.length === 1 ? [null] : fills.map((fill, i) => this.alone(fill, nonZero[i]));
+        return fills.length === 1
+          ? [null]
+          : fills.map((fill, i) => this.alone(fill, nonZero[i], bands));
       }
 
       // The one copy out, its ranges read before a retry resets the arena.
@@ -289,12 +314,15 @@ export class Tessellator {
           : new Uint32Array(buffer, ranges[1], ranges[3]).slice();
     } catch {
       this.failed();
-      // A trapped layer leaves each fill to a fresh instance.
-      if (this.unavailable || fills.length === 1) {
-        return this.unavailable ? null : [null];
+      if (this.unavailable || bands) {
+        return null;
       }
 
-      return fills.map((fill, i) => this.alone(fill, nonZero[i]));
+      // libtess2 trapped: each fill in a fresh instance, and one that traps alone again by the
+      // bands, which never trap.
+      return fills.length === 1
+        ? this.layerBy(fills, nonZero, true)
+        : fills.map((fill, i) => this.alone(fill, nonZero[i], false));
     } finally {
       this.trim();
     }
@@ -312,17 +340,21 @@ export class Tessellator {
           indexOffset: vertexStart,
         };
       } else {
-        // libtess2 failing may be the layer's memory, where the fill alone fits.
-        out[i] = status === -1 && fills.length > 1 ? this.alone(fills[i], nonZero[i]) : null;
+        // Running out may be the layer's memory, where the fill alone fits.
+        out[i] = status === -1 && fills.length > 1 ? this.alone(fills[i], nonZero[i], bands) : null;
       }
     }
 
     return out;
-  };
+  }
 
   /** One fill's commands as a layer of its own, in a fresh arena. */
-  private alone(contours: readonly (readonly number[])[], nonZero: boolean): FillGeometry | null {
-    const geometry = this.layer([contours], [nonZero])?.[0] ?? null;
+  private alone(
+    contours: readonly (readonly number[])[],
+    nonZero: boolean,
+    bands: boolean,
+  ): FillGeometry | null {
+    const geometry = this.layerBy([contours], [nonZero], bands)?.[0] ?? null;
     return geometry && { vertices: geometry.vertices, indices: geometry.indices };
   }
 

@@ -1,5 +1,6 @@
 // Independent ray crossings check both fill rules, including self-intersecting contours, and
-// every eight fills tessellated as a layer must give each what it gave alone. Then curved fills:
+// every eight fills tessellated as a layer must give each what it gave alone: by libtess2, and
+// by the bands the module fills by where libtess2 fails (bands.zig). Then curved fills:
 // the layer call's flattening must match the player's JS, the same points where the two take a
 // curve in as many chords, and within the flatness where a bend at a whole number of chords
 // rounds the other way; the same fills drawn and the same left to JS.
@@ -67,6 +68,7 @@ function boundary(contours: number[][], x: number, y: number): boolean {
 }
 
 const tessellator = new Tessellator();
+const banded = new Tessellator({ bands: true });
 let checked = 0;
 let layered = 0;
 const pending: { contours: number[][]; nonZero: boolean; alone: FillGeometry }[] = [];
@@ -82,8 +84,8 @@ function path(points: readonly number[]): number[] {
 }
 
 /** The pending fills as a layer, each as it was alone, bit for bit. */
-function checkLayer(): void {
-  const layer = tessellator.tessellate.layer(
+function checkLayer(by: Tessellator): void {
+  const layer = by.tessellate.layer(
     pending.map(({ contours }) => contours.map(path)),
     pending.map(({ nonZero }) => nonZero),
   );
@@ -105,93 +107,97 @@ function checkLayer(): void {
 
   pending.length = 0;
 }
-for (let i = 0; i < cases; i++) {
-  const contours: number[][] = [];
-  for (let j = 0; j < 1 + Math.floor(random() * 3); j++) {
-    const points: number[] = [];
-    for (let k = 0; k < 3 + Math.floor(random() * 20); k++) {
-      const x = Math.floor(random() * 100);
-      const y = Math.floor(random() * 100);
-      // A repeated point, or a closing one, the layer's flattening drops, as the player's does.
-      if (
-        (points.length > 0 && points.at(-2) === x && points.at(-1) === y) ||
-        (k > 1 && points[0] === x && points[1] === y)
-      ) {
+
+for (const by of [tessellator, banded]) {
+  state = seed;
+  for (let i = 0; i < cases; i++) {
+    const contours: number[][] = [];
+    for (let j = 0; j < 1 + Math.floor(random() * 3); j++) {
+      const points: number[] = [];
+      for (let k = 0; k < 3 + Math.floor(random() * 20); k++) {
+        const x = Math.floor(random() * 100);
+        const y = Math.floor(random() * 100);
+        // A repeated point, or a closing one, the layer's flattening drops, as the player's does.
+        if (
+          (points.length > 0 && points.at(-2) === x && points.at(-1) === y) ||
+          (k > 1 && points[0] === x && points[1] === y)
+        ) {
+          continue;
+        }
+
+        points.push(x, y);
+      }
+
+      if (points.length < 6) {
+        points.push(200, 200);
+      }
+
+      contours.push(points);
+    }
+
+    const nonZero = i % 2 === 1;
+    const context = JSON.stringify({ seed, case: i, nonZero, contours });
+    const result = by.tessellate(contours, nonZero);
+    assert.ok(result, `rejected ${context}`);
+    const { vertices, indices } = result;
+    for (let j = 0; j < vertices.length; j++) {
+      assert.ok(Number.isFinite(vertices[j]), `nonfinite vertex: ${context}`);
+    }
+    for (let j = 0; j < indices.length; j++) {
+      assert.ok(indices[j] < vertices.length / 2, `invalid index: ${context}`);
+    }
+
+    for (let sample = 0; sample < 12; sample++) {
+      const x = random() * 100;
+      const y = random() * 100;
+      if (boundary(contours, x, y)) {
         continue;
       }
 
-      points.push(x, y);
-    }
+      const count = winding(contours, x, y);
+      const expected = nonZero ? count !== 0 : Math.abs(count) % 2 === 1;
+      let covered = false;
+      for (let j = 0; j < indices.length; j += 3) {
+        const a = indices[j] * 2;
+        const b = indices[j + 1] * 2;
+        const c = indices[j + 2] * 2;
+        const area =
+          (vertices[b] - vertices[a]) * (vertices[c + 1] - vertices[a + 1]) -
+          (vertices[b + 1] - vertices[a + 1]) * (vertices[c] - vertices[a]);
+        if (area === 0) {
+          continue;
+        }
 
-    if (points.length < 6) {
-      points.push(200, 200);
-    }
-
-    contours.push(points);
-  }
-
-  const nonZero = i % 2 === 1;
-  const context = JSON.stringify({ seed, case: i, nonZero, contours });
-  const result = tessellator.tessellate(contours, nonZero);
-  assert.ok(result, `rejected ${context}`);
-  const { vertices, indices } = result;
-  for (let j = 0; j < vertices.length; j++) {
-    assert.ok(Number.isFinite(vertices[j]), `nonfinite vertex: ${context}`);
-  }
-  for (let j = 0; j < indices.length; j++) {
-    assert.ok(indices[j] < vertices.length / 2, `invalid index: ${context}`);
-  }
-
-  for (let sample = 0; sample < 12; sample++) {
-    const x = random() * 100;
-    const y = random() * 100;
-    if (boundary(contours, x, y)) {
-      continue;
-    }
-
-    const count = winding(contours, x, y);
-    const expected = nonZero ? count !== 0 : Math.abs(count) % 2 === 1;
-    let covered = false;
-    for (let j = 0; j < indices.length; j += 3) {
-      const a = indices[j] * 2;
-      const b = indices[j + 1] * 2;
-      const c = indices[j + 2] * 2;
-      const area =
-        (vertices[b] - vertices[a]) * (vertices[c + 1] - vertices[a + 1]) -
-        (vertices[b + 1] - vertices[a + 1]) * (vertices[c] - vertices[a]);
-      if (area === 0) {
-        continue;
+        const p =
+          (vertices[b] - vertices[a]) * (y - vertices[a + 1]) -
+          (vertices[b + 1] - vertices[a + 1]) * (x - vertices[a]);
+        const q =
+          (vertices[c] - vertices[b]) * (y - vertices[b + 1]) -
+          (vertices[c + 1] - vertices[b + 1]) * (x - vertices[b]);
+        const r =
+          (vertices[a] - vertices[c]) * (y - vertices[c + 1]) -
+          (vertices[a + 1] - vertices[c + 1]) * (x - vertices[c]);
+        if ((p >= 0 && q >= 0 && r >= 0) || (p <= 0 && q <= 0 && r <= 0)) {
+          covered = true;
+          break;
+        }
       }
 
-      const p =
-        (vertices[b] - vertices[a]) * (y - vertices[a + 1]) -
-        (vertices[b + 1] - vertices[a + 1]) * (x - vertices[a]);
-      const q =
-        (vertices[c] - vertices[b]) * (y - vertices[b + 1]) -
-        (vertices[c + 1] - vertices[b + 1]) * (x - vertices[b]);
-      const r =
-        (vertices[a] - vertices[c]) * (y - vertices[c + 1]) -
-        (vertices[a + 1] - vertices[c + 1]) * (x - vertices[c]);
-      if ((p >= 0 && q >= 0 && r >= 0) || (p <= 0 && q <= 0 && r <= 0)) {
-        covered = true;
-        break;
-      }
+      assert.equal(covered, expected, `coverage at ${x},${y}: ${context}`);
+      checked++;
     }
 
-    assert.equal(covered, expected, `coverage at ${x},${y}: ${context}`);
-    checked++;
+    pending.push({ contours, nonZero, alone: result });
+    if (pending.length === 8) {
+      checkLayer(by);
+    }
   }
 
-  pending.push({ contours, nonZero, alone: result });
-  if (pending.length === 8) {
-    checkLayer();
-  }
+  checkLayer(by);
 }
 
-checkLayer();
-
 console.log(
-  `fuzz tessellate: ${cases} fills, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
+  `fuzz tessellate: ${cases} fills by libtess2 and as many by the bands, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
 );
 
 /** A contour flattened as the player's scene/fills.ts does, with its length function. */

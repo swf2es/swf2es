@@ -13,6 +13,7 @@ interface NativeExports {
   lineHeader(): number;
   lineBuild(length: number): number;
   setLimit(n: number): void;
+  bandsOnly(on: number): void;
 }
 
 export interface LineBuilderOptions {
@@ -36,6 +37,8 @@ export class LineBuilder {
   private unavailable = false;
   private view = new Float64Array(0);
   private layout = new Uint32Array(0);
+  /** libtess2 trapped the last instance: the next fills its outlines by the bands alone. */
+  private trapped = false;
   private readonly limit: number;
   private readonly keep: number;
 
@@ -67,6 +70,7 @@ export class LineBuilder {
       }
 
       this.instance.setLimit(this.limit);
+      this.instance.bandsOnly(Number(this.trapped));
     }
 
     const x = this.instance;
@@ -86,9 +90,10 @@ export class LineBuilder {
 
   /**
    * The layer in the input's first `length` f64s, copied out in one
-   * block: null for none, undefined where the module refused it (a fill
-   * libtess2 refused, which JS fills its own way, or a position not a
-   * number) or failed, for the caller to build in JS.
+   * block: null for none, undefined where the module refused it (a
+   * position not a number) or failed, for the caller to build in JS. Where
+   * libtess2 trapped, the next instance fills the layer's outlines by the
+   * bands alone, for the caller's next input() and build().
    */
   build(length: number): LineGeometry | null | undefined {
     const x = this.instance;
@@ -99,6 +104,11 @@ export class LineBuilder {
     try {
       if (x.lineBuild(length) !== 0) {
         return undefined;
+      }
+
+      if (this.trapped) {
+        this.trapped = false;
+        x.bandsOnly(0);
       }
 
       const [at, vertices, count] = this.header(x);
@@ -115,6 +125,7 @@ export class LineBuilder {
     } catch {
       // libtess2 unwound through the failure import: never resume that instance.
       this.dispose();
+      this.trapped = true;
       return undefined;
     } finally {
       if (this.capacity > this.keep) {

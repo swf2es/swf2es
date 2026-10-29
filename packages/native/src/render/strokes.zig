@@ -744,21 +744,20 @@ fn fillUsable() Error!void {
     // down over it, as tessellate.zig's layer keeps a fill's.
     const mark = arena.top;
     const status = tessellate.fill(outlines.items[0..written], ends.items[0..kept], 1);
-    const t = tessellate.tess orelse {
+    const result = tessellate.current() orelse {
         arena.top = mark;
-        return error.Refused;
+        return if (status == -1) error.OutOfMemory else error.Refused;
     };
     if (status != 0) {
-        tessellate.tess = null;
+        tessellate.clear();
         arena.top = mark;
         return error.Refused;
     }
 
-    const result = tessellate.output(t);
     const position_bytes = result.positions.len * @sizeOf(f64);
     const bytes = position_bytes + result.indices.len * @sizeOf(u32);
     const staged = arena.alloc(bytes);
-    tessellate.tess = null;
+    tessellate.clear();
     if (staged == 0) {
         arena.top = mark;
         return error.OutOfMemory;

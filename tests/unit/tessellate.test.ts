@@ -180,14 +180,12 @@ test("double precision retains thin fills at a large origin", () => {
 
 test("malformed inputs and allocation failure leave the next fill usable", () => {
   const tess = new Tessellator({ memoryLimit: 600000 });
-  for (const input of [
-    [[NaN, 0, 1, 1, 0, 1]],
-    [[0, 0]],
-    [[0, 0, 1, 0, 0, Infinity]],
-    [[2 ** 24, 0, 1, 0, 0, 1]],
-  ]) {
+  for (const input of [[[NaN, 0, 1, 1, 0, 1]], [[0, 0]], [[0, 0, 1, 0, 0, Infinity]]]) {
     assert.equal(tess.tessellate(input, false), null);
   }
+
+  // Past libtess2's range, filled by the bands.
+  assert.equal(area(tess.tessellate([[2 ** 24, 0, 1, 0, 0, 1]], false)), 2 ** 23 - 0.5);
 
   const many = Array.from({ length: 10000 }, (_, i) => {
     const x = i * 0.1;
@@ -287,7 +285,7 @@ test("a layer call tessellates each fill as a call of its own does, into one buf
   assert.deepEqual(tess.tessellate.layer([], []), []);
 });
 
-test("a layer leaves rejected fills to JS and draws the rest", () => {
+test("a layer refuses malformed fills and draws the rest, past libtess2's range by the bands", () => {
   const tess = new Tessellator();
   const fills = [
     [path(square)],
@@ -307,7 +305,7 @@ test("a layer leaves rejected fills to JS and draws the rest", () => {
   assert.ok(layer);
   assert.deepEqual(
     layer.map((geometry) => geometry && area(geometry)),
-    [100, null, 0, 0, null, null, null, 64],
+    [100, null, 0, 0, null, null, 2 ** 23 - 0.5, 64],
   );
   assert.deepEqual(
     plain(layer[7]),

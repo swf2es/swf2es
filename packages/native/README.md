@@ -282,11 +282,20 @@ The hook also accepts another tessellator with the same structural result.
 
 The absolute memory ceiling is 128 MiB, including static data, the C stack
 and the arena. Instances above 8 MiB are discarded after the call. Options
-can lower the limit or retained capacity. Invalid
-coordinates (including values outside ±2^23), malformed contours, more
-than one million input vertices, allocation failure and native failure
-return `null`. A throwing failure import replaces libtess2's longjmp;
-that instance is always discarded before another call. Arena reset alone
+can lower the limit or retained capacity. Coordinates that are not
+finite, malformed contours, more than one million input vertices and
+running out of memory return `null`. What libtess2 fails at, gives output
+unfit to draw for, or cannot take (coordinates outside ±2^23), the module
+fills by bands (`src/render/bands.zig`): the fill cut at every vertex's
+height and every height two edges cross at, each span the rule fills a
+trapezoid between two edges, the bands meeting along horizontal lines,
+which the rasterizer splits without a crack. A fill that would make it
+test more than 2^26 pairs of edges for a crossing is left out, as too slow
+for a frame. A throwing failure import replaces libtess2's longjmp; that
+instance is always discarded before another call, and the call is tried
+again in a new one: a layer a fill at a time, and a fill that unwinds alone
+by the bands, which never unwind. `new Tessellator({ bands: true })` fills
+by the bands alone, for tests. Arena reset alone
 does not shrink Wasm memory. `dispose()` drops retained scratch without
 affecting previous output.
 
@@ -298,13 +307,14 @@ closer to Flash; enabling native fills accepts these differences.
 The player references and context-loss checks draw with the native
 tessellator, as the element does by default.
 `node tests/fuzz/tessellate.ts [cases] [seed]`
-checks both fill rules against independent ray crossings; the default test
-suite includes 2,000 fills and 24,000 coverage samples. It then flattens
+checks both fill rules against independent ray crossings, by libtess2 and
+again by the bands alone; the default test suite includes 2,000 fills and
+24,000 coverage samples each way. It then flattens
 curved layers, quadratics, cubics, curves of no length and NaN coordinates,
 and checks each fill against the JS flattening tessellated alone: drawn or
 left to JS alike, the same geometry bit for bit as JS with plain square
 roots gives, and within the flatness of what `Math.hypot` gives. `zig build
-test` in this folder runs `flatten.zig`'s own tests. Synthetic fixtures
+test` in this folder runs `flatten.zig`'s and `bands.zig`'s own tests. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
 
 ## lines
@@ -328,10 +338,12 @@ host's own, imported, since engines differ in their last bit. `atan2` and
 bits of a position may differ from its JS's.
 
 Where it cannot build a layer as the TS would, `build()` returns
-`undefined` and the player builds it in JS: an outline libtess2 refuses,
-which JS fills its own way; a position that is NaN, whose bits JS writes
-its own way; a case where the TS throws; and an instance that failed to
-instantiate or unwound, which is not tried again. The builder has an
+`undefined` and the player builds it in JS: an outline neither libtess2
+nor the bands could fill in its memory; a position that is NaN, whose bits
+JS writes its own way; a case where the TS throws; and an instance that
+failed to instantiate or unwound, which is not tried again: the next
+instance fills the layer's outlines by the bands alone, until a layer is
+built. The builder has an
 instance of its own, which no `Tessellator` call shares, held to its
 `Tessellator`'s `memoryLimit` and `retainMemory`, and counted in its
 `capacity`: a layer that would grow it past the limit is left to JS, as a

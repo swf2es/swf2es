@@ -1,5 +1,6 @@
 // libtess2 for wasm32-freestanding, with the curves of a layer's fills
-// flattened first (flatten.zig). The host resets the module's bounded bump
+// flattened first (flatten.zig), and the band filler (bands.zig) for what
+// libtess2 refuses or fails at. The host resets the module's bounded bump
 // arena (arena.zig) before each call, a fill (run) or a layer's fills (layer), and copies the
 // resulting geometry into owned buffers.
 // The vendored C uses its allocator callbacks; libc allocation and longjmp
@@ -8,21 +9,41 @@ const std = @import("std");
 const c = @import("c");
 const flatten = @import("flatten.zig");
 const arena = @import("arena.zig");
+const bands = @import("bands.zig");
 
 extern "env" fn failure(code: c_int) noreturn;
 
-pub var tess: ?*c.TESStesselator = null;
-/// The arena's generation `tess` was made in: another's reset leaves it none.
+/// A fill's positions, two a vertex, and triangles, three indices each.
+pub const Output = struct {
+    positions: []const f64,
+    indices: []const c.TESSindex,
+};
+
+/// The last fill's output, libtess2's or the band filler's, in the arena.
+var out: ?Output = null;
+/// The arena's generation `out` was made in: another's reset leaves it none.
 var made_in: u32 = 0;
+/// Off once libtess2 has unwound an instance through `failure`: the host
+/// then fills the call again in a new instance by the bands alone.
+var libtess = true;
 
 export fn reset() void {
     arena.reset();
-    tess = null;
+    out = null;
 }
 
-/// `tess`, if no reset has let its memory go since.
-fn current() ?*c.TESStesselator {
-    return if (made_in == arena.generation) tess else null;
+export fn bandsOnly(on: i32) void {
+    libtess = on == 0;
+}
+
+/// The last fill's output, if no reset has let its memory go since.
+pub fn current() ?Output {
+    return if (made_in == arena.generation) out else null;
+}
+
+/// The last fill's output let go of, its memory the caller's to reuse.
+pub fn clear() void {
+    out = null;
 }
 
 fn get(_: ?*anyopaque, n: c_uint) callconv(.c) ?*anyopaque {
@@ -45,16 +66,16 @@ export fn longjmp(_: ?*anyopaque, code: c_int) noreturn {
 const most_contours = 100000;
 const most_points = 1000000;
 
-/// Whether a fill's input is fit for libtess2: `coords` holds the points
-/// `ends` closes contours at, every contour has three points or more, and
-/// every coordinate is finite and within libtess2's range.
+/// Whether a fill's input can be filled: `coords` holds the points `ends`
+/// closes contours at, every contour has three points or more, and every
+/// coordinate is finite.
 fn valid(coords: []const f64, ends: []const u32, nonzero: i32) bool {
     if (ends.len > most_contours or coords.len > most_points * 2 or nonzero < 0 or nonzero > 1) {
         return false;
     }
 
     for (coords) |value| {
-        if (!std.math.isFinite(value) or value < c.TESS_MIN_VALID_INPUT_VALUE or value > c.TESS_MAX_VALID_INPUT_VALUE) {
+        if (!std.math.isFinite(value)) {
             return false;
         }
     }
@@ -71,19 +92,51 @@ fn valid(coords: []const f64, ends: []const u32, nonzero: i32) bool {
     return at == coords.len / 2;
 }
 
-/// Tessellates a valid fill into `tess`: 0, -1 where libtess2 fails, or -3
-/// where its output is not fit to draw (a coordinate not finite or an index
-/// past the vertices), which the host then fills itself.
+/// Tessellates a valid fill into `out`: 0, or -1 where neither libtess2 nor
+/// the bands could fill it in the memory left.
 fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
+    out = null;
+    made_in = arena.generation;
+    const mark = arena.top;
+    if (libtess and inRange(coords)) {
+        if (libtess2(coords, ends, nonzero)) |result| {
+            out = result;
+            return 0;
+        }
+
+        arena.top = mark;
+    }
+
+    // What libtess2 refused, failed at or gave unfit to draw, or the coordinates past its range.
+    const result = bands.fill(arena.allocator, coords, ends, nonzero) orelse {
+        arena.top = mark;
+        return -1;
+    };
+    out = .{ .positions = result.positions, .indices = result.indices };
+    return 0;
+}
+
+fn inRange(coords: []const f64) bool {
+    for (coords) |value| {
+        if (value < c.TESS_MIN_VALID_INPUT_VALUE or value > c.TESS_MAX_VALID_INPUT_VALUE) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/// libtess2's fill of `coords`, in its memory: null where it fails, or its
+/// output is not fit to draw (a coordinate not finite or an index past the
+/// vertices).
+fn libtess2(coords: []const f64, ends: []const u32, nonzero: bool) ?Output {
     var allocator = std.mem.zeroes(c.TESSalloc);
     allocator.memalloc = get;
     allocator.memrealloc = grow;
     allocator.memfree = drop;
     // A small intersection reserve; denser crossings can still grow the queue.
     allocator.extraVertices = @intCast(coords.len / 8 + 16);
-    tess = c.tessNewTess(&allocator);
-    made_in = arena.generation;
-    const t = tess orelse return -1;
+    const t = c.tessNewTess(&allocator) orelse return null;
 
     var at: usize = 0;
     for (ends) |end| {
@@ -94,41 +147,33 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     const normal = [_]f64{ 0, 0, 1 };
     const rule = if (nonzero) c.TESS_WINDING_NONZERO else c.TESS_WINDING_ODD;
     if (c.tessTesselate(t, rule, c.TESS_POLYGONS, 3, 2, &normal) == 0) {
-        tess = null;
-        return -1;
+        return null;
     }
 
-    const result = output(t);
+    const vertex_count: usize = @intCast(c.tessGetVertexCount(t));
+    const triangle_count: usize = @intCast(c.tessGetElementCount(t));
+    const result: Output = .{
+        .positions = c.tessGetVertices(t)[0 .. vertex_count * 2],
+        .indices = c.tessGetElements(t)[0 .. triangle_count * 3],
+    };
     for (result.positions) |value| {
         if (!std.math.isFinite(value)) {
-            tess = null;
-            return -3;
+            return null;
         }
     }
 
     for (result.indices) |index| {
-        if (index < 0 or @as(usize, @intCast(index)) >= result.positions.len / 2) {
-            tess = null;
-            return -3;
+        if (index < 0 or @as(usize, @intCast(index)) >= vertex_count) {
+            return null;
         }
     }
 
-    return 0;
-}
-
-/// A successful tessellation's positions and triangles, in libtess2's memory.
-pub fn output(t: *c.TESStesselator) struct { positions: []const f64, indices: []const c.TESSindex } {
-    const vertex_count: usize = @intCast(c.tessGetVertexCount(t));
-    const triangle_count: usize = @intCast(c.tessGetElementCount(t));
-    return .{
-        .positions = c.tessGetVertices(t)[0 .. vertex_count * 2],
-        .indices = c.tessGetElements(t)[0 .. triangle_count * 3],
-    };
+    return result;
 }
 
 export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: usize, nonzero: i32) i32 {
     if (contours > most_contours or count > most_points) {
-        tess = null;
+        out = null;
         return -2;
     }
 
@@ -136,9 +181,9 @@ export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: 
 }
 
 /// run's checks and tessellation of `coords`, each contour ending at its
-/// point in `ends`: run's status, its output in `tess`.
+/// point in `ends`: run's status, its output in `out`.
 pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32) i32 {
-    tess = null;
+    out = null;
     if (!valid(coords, ends, nonzero)) {
         return -2;
     }
@@ -147,19 +192,19 @@ pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32) i32 {
 }
 
 export fn vertices() usize {
-    return if (current()) |value| @intFromPtr(c.tessGetVertices(value)) else 0;
+    return if (current()) |value| @intFromPtr(value.positions.ptr) else 0;
 }
 
 export fn indices() usize {
-    return if (current()) |value| @intFromPtr(c.tessGetElements(value)) else 0;
+    return if (current()) |value| @intFromPtr(value.indices.ptr) else 0;
 }
 
 export fn vertexCount() u32 {
-    return if (current()) |value| @intCast(c.tessGetVertexCount(value)) else 0;
+    return if (current()) |value| @intCast(value.positions.len / 2) else 0;
 }
 
 export fn triangleCount() u32 {
-    return if (current()) |value| @intCast(c.tessGetElementCount(value)) else 0;
+    return if (current()) |value| @intCast(value.indices.len / 3) else 0;
 }
 
 /// A layer's output (layer), followed in memory by a Range for each fill.
@@ -176,8 +221,8 @@ const Layer = extern struct {
 
 /// Where a fill's output lies in its layer's.
 const Range = extern struct {
-    /// run's: 0, -1 where libtess2 failed, which may be the layer's memory
-    /// and is worth trying alone, -2 where the input was rejected, or -3.
+    /// run's: 0, -1 where it ran out of memory, which may be the layer's
+    /// and is worth trying alone, or -2 where the input was rejected.
     status: i32,
     vertex_start: u32,
     vertex_count: u32,
@@ -186,8 +231,8 @@ const Range = extern struct {
 };
 
 /// A fill's contours, `commands[from..]` up to each of `ends`, flattened
-/// (flatten.zig) into the arena and tessellated into `tess`: run's status,
-/// with `tess` left null for a fill of no polygon. Its scratch is the
+/// (flatten.zig) into the arena and tessellated into `out`: run's status,
+/// with `out` left null for a fill of no polygon. Its scratch is the
 /// caller's to let go.
 fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i32 {
     if (ends.len > most_contours) {
@@ -219,7 +264,7 @@ fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i3
     for (ends) |end| {
         const added = flatten.polygon(commands[start..end], points[written * 2 ..]);
         start = end;
-        // Fewer than three points enclose nothing, and the JS fill leaves them out too.
+        // Fewer than three points enclose nothing.
         if (added >= 3) {
             written += added;
             kept[contours] = @intCast(written);
@@ -248,7 +293,7 @@ fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i3
 /// where the arguments disagree or the layer's own output does not fit, for
 /// the host to try each fill alone.
 export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, contours: usize, fills: [*]const u32, rules: [*]const u8, count: usize) usize {
-    tess = null;
+    out = null;
     const head = arena.alloc(@sizeOf(Layer) + count * @sizeOf(Range));
     const kept = arena.alloc(count * @sizeOf(usize));
     if (head == 0 or kept == 0) {
@@ -282,21 +327,24 @@ export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, conto
         chunk.* = 0;
         const mark = arena.top;
         range.status = flattened(commands[0..length], from, own, rules[i]);
-        if (range.status != 0 or tess == null) {
+        const result = out orelse {
             arena.top = mark;
-            tess = null;
+            continue;
+        };
+        if (range.status != 0) {
+            arena.top = mark;
+            out = null;
             continue;
         }
 
         // Its output, copied past the scratch and then down over it.
-        const result = output(tess.?);
         const position_bytes = result.positions.len * @sizeOf(f64);
         const bytes = position_bytes + result.indices.len * @sizeOf(c.TESSindex);
         const staged = arena.alloc(bytes);
         if (staged == 0) {
             range.status = -1;
             arena.top = mark;
-            tess = null;
+            out = null;
             continue;
         }
 
@@ -306,7 +354,7 @@ export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, conto
         const at = std.mem.alignForward(usize, mark, 16);
         @memmove(@as([*]u8, @ptrFromInt(at))[0..bytes], to[0..bytes]);
         arena.top = at + bytes;
-        tess = null;
+        out = null;
 
         chunk.* = at;
         range.vertex_start = @intCast(vertex_total);
