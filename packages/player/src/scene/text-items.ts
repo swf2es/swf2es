@@ -16,8 +16,11 @@ import {
 import { concatColorInto, IDENTITY_COLOR } from "../display/color.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
 import { cssFont } from "../text/fonts.js";
-import { type Parts, RUN_KEYS } from "./parts.js";
+import type { Parts } from "./parts.js";
 import type { DeviceItem, TextItem } from "./text.js";
+
+/** Device texts with runs kept, past which those let go of are looked for and forgotten. */
+const RUN_KEYS = 512;
 
 /** Runs kept of one text, in its styles, sizes and resolutions. */
 const TEXT_RUNS = 8;

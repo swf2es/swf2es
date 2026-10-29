@@ -12,11 +12,8 @@ import type { LineCache } from "./lines.js";
 import { bitmapQuad, layerParts, type Part } from "./shapes.js";
 import { glyphShape } from "./text.js";
 
-/**
- * Device texts with runs kept, and quads made, past which those let go of
- * are looked for and forgotten.
- */
-export const RUN_KEYS = 512;
+/** Quads made, past which those let go of are looked for and forgotten. */
+const QUAD_KEYS = 512;
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 export interface Made {
@@ -46,7 +43,7 @@ export class Parts {
   private readonly drawnLayers = new WeakMap<DisplayObject, DrawnLayers>();
   /** Quads by their width, then their height: numbers, not a key formatted from them. */
   private readonly quads = new Map<number, Map<number, GeometryHandle>>();
-  /** Quads made since the last were let go of, which past RUN_KEYS looks for those gone. */
+  /** Quads made since the last were let go of, which past QUAD_KEYS looks for those gone. */
   private quadsMade = 0;
   /** Each glyph's fill, made once for every text drawn in it; null for an empty glyph. */
   private readonly glyphs = new WeakMap<Glyph, GeometryHandle | null>();
@@ -169,7 +166,7 @@ export class Parts {
     }
 
     // Device text makes quads of many sizes: those let go of are forgotten.
-    if (++this.quadsMade > RUN_KEYS) {
+    if (++this.quadsMade > QUAD_KEYS) {
       this.quadsMade = 0;
       for (const [w, heights] of this.quads) {
         for (const [h, handle] of heights) {
