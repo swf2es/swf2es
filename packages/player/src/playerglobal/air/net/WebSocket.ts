@@ -1,5 +1,5 @@
 // air.net.WebSocket, AIR 51's client, over the host's WebSocket (hosts.ts).
-// What it throws and dispatches is what adl does (docs/architecture.md);
+// What it throws and dispatches is what adl does (docs/architecture/services.md);
 // where a browser cannot do as AIR does, the nearest it can.
 import { avm2 } from "@swf2es/runtime";
 import type { WebSocketTransport } from "../../../hosts.js";

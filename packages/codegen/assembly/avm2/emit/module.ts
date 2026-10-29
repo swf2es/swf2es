@@ -1,7 +1,7 @@
 // Writes an ABC as one ES module: its names, a factory per method, the
 // layouts of its traits as the compiler computed them, its classes and its
 // scripts. The runtime builds its objects from these and never derives a
-// layout itself (see docs/architecture.md, "Modules and the bootstrap").
+// layout itself (see docs/architecture/compiler.md, "Modules and the bootstrap").
 // Those layouts depend on the ABCs loaded before this one, so the module
 // names them by hash, and the runtime refuses it after any others.
 //

@@ -376,7 +376,7 @@ export class Player {
    * grid of the frame rate's duration. Without streamed audio, those a
    * long frame or a stall lost are dropped, not caught up with. Flash runs
    * the frame due at once after an overrun and the next at its grid slot, never two
-   * back to back (measured in adl, docs/architecture.md), so content that
+   * back to back (measured in adl, docs/architecture/input.md), so content that
    * moves by the time between frames always sees time pass between them.
    * A call runs as many frames as the host's typical interval holds, the
    * lower median of its recent calls and never the current one, so a

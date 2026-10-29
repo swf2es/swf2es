@@ -2,7 +2,7 @@
 // too: a SWF's action blocks, given as ranges of its bytes in the order
 // format's readActions lists them, compiled to one module, and each block
 // alone, as its entry in the module (the JIT/AOT invariant of
-// docs/architecture.md), and each unit a block goes on in alone, as its
+// docs/architecture/overview.md), and each unit a block goes on in alone, as its
 // entry in the module's units. Nothing is kept from one SWF to the next
 // but the emitter's buffers.
 import { handOut, Output } from "../output";

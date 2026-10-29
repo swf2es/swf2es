@@ -9,7 +9,7 @@
 // instances' traits in $it.
 //
 // Layouts come from the module, computed by the compiler: the runtime never
-// derives one (docs/architecture.md, "Modules and the bootstrap").
+// derives one (docs/architecture/compiler.md, "Modules and the bootstrap").
 
 import { AmfClasses } from "./amf-classes.js";
 import { ArrayConversion } from "./array-conversion.js";

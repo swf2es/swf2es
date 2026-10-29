@@ -2,7 +2,7 @@
 // so that the two builds run the same code: a domain the ABCs are added
 // to, and the module, the source map and the method entries the last one
 // compiles to, whole, as the JIT and ahead-of-time compilation take them,
-// or a method at a time, as lazy compilation will (see docs/architecture.md).
+// or a method at a time, as lazy compilation will (see docs/architecture/compiler.md).
 import { bodyDecoder, releaseDecoder, verifyMethods } from "./avm2/abc/code";
 import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";

@@ -7,7 +7,7 @@
 //   - the compiler did not trap;
 //   - a module it accepted imports as an ES module;
 //   - each method compiled alone, as the JIT compiles it, is byte for byte
-//     its entry in the module (docs/architecture.md's JIT/AOT invariant).
+//     its entry in the module (docs/architecture/overview.md's JIT/AOT invariant).
 //
 // The seeds are the unit tests' hand-built ABCs and the conformance cases,
 // compiled into this package's own out/. A case that fails is written to

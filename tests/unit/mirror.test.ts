@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// The player's unit tests mirror its sources (docs/architecture.md, "Source
+// The player's unit tests mirror its sources (docs/architecture/player.md, "Source
 // layout"): tests/unit/player/<path>.test.ts tests packages/player/src/<path>.ts,
 // so that a module's tests are where its path says.
 const tests = fileURLToPath(new URL("player/", import.meta.url));

@@ -1,7 +1,7 @@
 // What happens to a display object with an AS3 object as it comes and
 // goes: ADDED and ADDED_TO_STAGE as it is put on the display list, REMOVED
 // and REMOVED_FROM_STAGE as it is taken off, and, off it, its life as an
-// orphan, which plays on as Flash's does, for a while (docs/architecture.md,
+// orphan, which plays on as Flash's does, for a while (docs/architecture/player.md,
 // "Orphans").
 import { avm2 } from "@swf2es/runtime";
 import { Container, type DisplayObject, MovieClip, scriptWork } from "../display/display.js";

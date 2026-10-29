@@ -6,7 +6,7 @@
 //   - the decoder did not trap (with SWF2ES_CHECKED, nor read past an array);
 //   - each region lists an action at most once among its blocks;
 //   - the block decodes to the same regions again, after other blocks, as
-//     the JIT/AOT invariant asks (docs/architecture.md);
+//     the JIT/AOT invariant asks (docs/architecture/overview.md);
 //   - its module, at SWF 5 or 10, is well-formed UTF-8 that imports as an
 //     ES module, and the block compiled alone is its entry in it.
 //

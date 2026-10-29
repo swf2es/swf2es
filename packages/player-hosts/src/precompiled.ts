@@ -4,7 +4,7 @@
 // command compiled it for, with its log, which the player replays as it
 // does a cached module's. A key the manifest lacks, as one taken by
 // another compiler, whose identity keys name, is a miss, and the player
-// compiles (see docs/architecture.md, Caching modules).
+// compiles (see docs/architecture/modules.md, Caching modules).
 import type { CachedModule, ModuleCache } from "@swf2es/player";
 
 export interface PrecompiledModulesOptions {

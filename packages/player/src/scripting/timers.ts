@@ -212,7 +212,7 @@ export class Timers {
    * is shorter than the frame fire once each. Flash fires those between
    * frames at their times and holds a longer one for the next frame, a
    * 45 ms timer at 24 fps firing every other frame though the player
-   * checks between (measured in adl, docs/architecture.md).
+   * checks between (measured in adl, docs/architecture/input.md).
    */
   betweenFrames(frameMs: number): void {
     if (!this.realTime) {

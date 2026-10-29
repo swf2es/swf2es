@@ -1,7 +1,7 @@
 // Ahead-of-time compilation: a SWF's ABCs compiled as the player compiles
 // them for a SWF it loads as its main movie, so that each module is byte
 // for byte what the browser would compile (the JIT/AOT invariant in
-// docs/architecture.md). The steps are Code's in packages/player, in the
+// docs/architecture/overview.md). The steps are Code's in packages/player, in the
 // same order: the libraries added to the root domain, each compiled as it
 // is added, then the SWF's DoABCs all added to a child of the root before
 // any of them compiles. An AVM1 SWF's action blocks compile to one module

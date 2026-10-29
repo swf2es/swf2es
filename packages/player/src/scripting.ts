@@ -1,6 +1,6 @@
 // A SWF's scripts: the runtime with playerglobal's natives, the link
 // between a display object and the AS3 object that is its other face
-// (docs/architecture.md, "Scripts and the display list"), and the frame
+// (docs/architecture/player.md, "Scripts and the display list"), and the frame
 // that runs them: its events, frame scripts, gotos' cycles and the
 // construction of what timelines placed. The runtime allocates every
 // DisplayObject through a hook that takes the display object the player
