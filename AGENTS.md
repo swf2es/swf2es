@@ -44,6 +44,9 @@ node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
 node tests/player/run.ts [--table-ab] [case...]   # the player's cases in Chrome vs Flash's frames
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
+SWF2ES_RENDERER=own node tests/player/run.ts [--update-baseline] [case...]   # the cases drawn by
+                              # the renderer of swf2es's own (docs/renderer.md); those it draws as
+                              # Flash does, listed in own-renderer.json, may not fail again
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
 pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm1, avm2
                               # and timeline tests vs corpus/baseline.json (Chrome; about 5 minutes; CI's
@@ -134,11 +137,11 @@ of its own.
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
 - **Package boundaries.** `native` and `context3d` depend on nothing, `format` on `native`,
-  `codegen` and `runtime` on `format`, `cli` on `format`, `codegen` and `runtime`,
-  `player` on those plus `context3d` and `native`, `player-hosts` on `player`, `web` on
+  `render` on `context3d`, `codegen` and `runtime` on `format`, `cli` on `format`, `codegen` and
+  `runtime`, `player` on those plus `context3d`, `native` and `render`, `player-hosts` on `player`, `web` on
   `codegen`, `format`, `native`, `player` and `player-hosts`. `codegen` never imports the
-  runtime implementation. `native`, `format`, `codegen`, `runtime` and `context3d`'s core
-  load no DOM or node types. Apps
+  runtime implementation. `native`, `format`, `codegen`, `runtime`, and `context3d`'s and
+  `render`'s cores load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
   together with docs/architecture.md.

@@ -5,13 +5,17 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./context3d": {
       "types": "./dist/playerglobal/context3d.d.ts",
       "default": "./dist/playerglobal/context3d.js"
     },
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./scene": {
+      "types": "./dist/scene/view.d.ts",
+      "default": "./dist/scene/view.js"
     },
     "./worker": {
       "types": "./dist/workers/thread.d.ts",
@@ -27,6 +31,7 @@
     "@swf2es/format": "workspace:*",
     "@swf2es/runtime": "workspace:*",
     "pixi.js": "workspace:*",
-    "@swf2es/native": "workspace:*"
+    "@swf2es/native": "workspace:*",
+    "@swf2es/render": "workspace:*"
   }
 }

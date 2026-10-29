@@ -111,6 +111,9 @@ importers:
       '@swf2es/native':
         specifier: workspace:*
         version: link:../native
+      '@swf2es/render':
+        specifier: workspace:*
+        version: link:../render
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -123,6 +126,12 @@ importers:
       '@swf2es/player':
         specifier: workspace:*
         version: link:../player
+
+  packages/render:
+    dependencies:
+      '@swf2es/context3d':
+        specifier: workspace:*
+        version: link:../context3d
 
   packages/runtime:
     dependencies:

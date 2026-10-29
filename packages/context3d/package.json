@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./device": {
+      "types": "./dist/device/index.d.ts",
+      "default": "./dist/device/index.js"
+    },
     "./webgl": {
       "types": "./dist/webgl/index.d.ts",
       "default": "./dist/webgl/index.js"

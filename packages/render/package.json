@@ -1,0 +1,23 @@
+{
+  "name": "@swf2es/render",
+  "version": "0.0.0",
+  "description": "swf2es's own renderer: a scene list, a planner and a WebGL 2 backend (docs/renderer.md)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./webgl": {
+      "types": "./dist/webgl/index.d.ts",
+      "default": "./dist/webgl/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@swf2es/context3d": "workspace:*"
+  }
+}

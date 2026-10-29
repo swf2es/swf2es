@@ -13,7 +13,8 @@ const allowed: Record<string, string[]> = {
   context3d: [],
   codegen: ["format"],
   runtime: ["format"],
-  player: ["codegen", "context3d", "format", "native", "runtime"],
+  render: ["context3d"],
+  player: ["codegen", "context3d", "format", "native", "render", "runtime"],
   "player-hosts": ["player"],
   web: ["codegen", "format", "native", "player", "player-hosts"],
   cli: ["codegen", "format", "runtime"],
@@ -141,11 +142,13 @@ for (const name of portable) {
   });
 }
 
-test("context3d's core has no DOM or node types", () => {
-  const { compilerOptions } = readJsonc("context3d/tsconfig.core.json");
-  assert.deepEqual(compilerOptions.types, []);
-  assert.deepEqual(compilerOptions.lib, ["ES2022"]);
-});
+for (const core of ["context3d", "render"]) {
+  test(`${core}'s core has no DOM or node types`, () => {
+    const { compilerOptions } = readJsonc(`${core}/tsconfig.core.json`);
+    assert.deepEqual(compilerOptions.types, []);
+    assert.deepEqual(compilerOptions.lib, ["ES2022"]);
+  });
+}
 
 // Inside the player, playerglobal/ is AS3's bindings only: it imports the
 // player, and the player imports it once, where Scripting registers its

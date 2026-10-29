@@ -8,5 +8,12 @@
     "lib": ["ES2022", "DOM"]
   },
   "include": ["src/webgl"],
-  "references": [{ "path": "./tsconfig.core.json" }]
+  "references": [
+    {
+      "path": "./tsconfig.core.json"
+    },
+    {
+      "path": "./tsconfig.device.json"
+    }
+  ]
 }
