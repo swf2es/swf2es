@@ -15,6 +15,7 @@ import { BitmapStore } from "../bitmap/bitmap.js";
 import {
   BitmapObject,
   CONTENT,
+  cached,
   type DisplayObject,
   ShapeObject,
   StaticTextObject,
@@ -398,7 +399,8 @@ export class Art {
     }
 
     if (node.stale?.cache !== cache) {
-      node.stale = { cache, world: [...node.world], spent: false };
+      // A first frame with its cache off already draws it as it is.
+      node.stale = { cache, world: [...node.world], spent: !cached(o) };
     }
 
     return node.stale.spent ? o.drawn() : cache.shape;
