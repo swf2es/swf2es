@@ -20,7 +20,7 @@ interface Chunk {
 }
 
 /** A clip's static texts' text, as they were when the snapshot was made. */
-export class Snapshot {
+class Snapshot {
   readonly chunks: Chunk[] = [];
   readonly count: number;
 

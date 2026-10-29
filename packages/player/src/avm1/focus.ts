@@ -26,7 +26,7 @@ import { nativeOf } from "./globals/MovieClip.js";
 import { stateOf } from "./globals/TextField.js";
 
 /** What the tab order reads of the movie's objects, their AS2 properties as code reads them. */
-export interface TabHost {
+interface TabHost {
   /** A tabEnabled set, or undefined where none is. */
   tabEnabled(d: DisplayObject): boolean | undefined;
   /** tabChildren, true where it is not set. */
@@ -42,7 +42,7 @@ interface Tabbed {
 }
 
 /** The objects Tab moves the focus through, in order, from `root`, on `stage`. */
-export function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
+function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
   const found: Tabbed[] = [];
   let custom = false;
   const walk = (d: DisplayObject) => {

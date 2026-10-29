@@ -679,7 +679,7 @@ function colorArgs(d: DisplayObject): number[] {
 }
 
 /** `matrix` set on `d` where it has all six fields of its own: whole twips, as Flash keeps the translation. */
-export function setDisplayMatrix(d: DisplayObject, matrix: Value, v: number): void {
+function setDisplayMatrix(d: DisplayObject, matrix: Value, v: number): void {
   if (
     !(matrix instanceof avm1.Avm1Object) ||
     MATRIX_NAMES.some((n) => matrix.own(n, v) === undefined)
@@ -698,7 +698,7 @@ export function setDisplayMatrix(d: DisplayObject, matrix: Value, v: number): vo
  * clip keeps them: the multipliers in 8.8 fixed point, the offsets whole,
  * each 16 bits, wrapped (the corpus's `transform`: -66682.5 is -1147).
  */
-export function setDisplayColor(d: DisplayObject, color: Value): void {
+function setDisplayColor(d: DisplayObject, color: Value): void {
   const c = colorValues(color);
   if (c === null) {
     return;

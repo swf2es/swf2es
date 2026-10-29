@@ -21,15 +21,15 @@ type Value = avm1.Value;
 type Obj = avm1.Avm1Object;
 
 // parseXML's statuses, as Flash 8 lists them.
-export const OK = 0;
-export const CDATA_NOT_TERMINATED = -2;
-export const DECL_NOT_TERMINATED = -3;
-export const DOCTYPE_NOT_TERMINATED = -4;
-export const COMMENT_NOT_TERMINATED = -5;
-export const ELEMENT_MALFORMED = -6;
-export const ATTRIBUTE_NOT_TERMINATED = -8;
-export const MISMATCHED_START = -9;
-export const MISMATCHED_END = -10;
+const OK = 0;
+const CDATA_NOT_TERMINATED = -2;
+const DECL_NOT_TERMINATED = -3;
+const DOCTYPE_NOT_TERMINATED = -4;
+const COMMENT_NOT_TERMINATED = -5;
+const ELEMENT_MALFORMED = -6;
+const ATTRIBUTE_NOT_TERMINATED = -8;
+const MISMATCHED_START = -9;
+const MISMATCHED_END = -10;
 
 /** The entities Flash knows by name, nbsp among them (adl). */
 const NAMED: Record<string, string> = {
@@ -78,7 +78,7 @@ function entity(text: string): string | null {
  * bare `&` before one is kept, and `&&amp;` is `&&`, as Flash has them
  * (Ruffle's avm1_unescape); `&#X41;`, an unknown name, are kept as written.
  */
-export function unescapeXml(text: string): string {
+function unescapeXml(text: string): string {
   return text.includes("&") ? text.replace(/&[^;&]*;/g, (e) => entity(e) ?? e) : text;
 }
 
@@ -86,7 +86,7 @@ const isWhite = (c: string | undefined) => c === " " || c === "\t" || c === "\n"
 const allWhite = (text: string) => /^[ \t\n\r]*$/.test(text);
 
 /** What parsing found besides the tree. */
-export interface Parsed {
+interface Parsed {
   status: number;
   xmlDecl: string | null;
   docTypeDecl: string | null;
@@ -103,7 +103,7 @@ export interface Parsed {
  * It stops at the first error, what it read before kept. `id` gets each
  * element with an `id` attribute.
  */
-export function parseXml(
+function parseXml(
   text: string,
   root: XmlNode,
   ignoreWhite: boolean,
@@ -516,6 +516,6 @@ export function xmlClass(host: XmlClassHost, nodes: XmlNodes): avm1.Avm1Function
 }
 
 /** `self[name](...args)` where it is a function. */
-export function call(self: Obj, name: string, args: Value[], v: number): Value {
+function call(self: Obj, name: string, args: Value[], v: number): Value {
   return avm1.invoke(avm1.get(self, name, v), self, args, v);
 }

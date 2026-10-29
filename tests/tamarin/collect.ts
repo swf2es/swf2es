@@ -5,7 +5,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-export const ACCEPTANCE = "oracle/avmplus/test/acceptance";
+const ACCEPTANCE = "oracle/avmplus/test/acceptance";
 const acceptance = join(root, ACCEPTANCE);
 
 /** runtestBase.py's config string for this avmshell: 32-bit x86 Linux, ASC 2.0, release. */

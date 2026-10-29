@@ -90,7 +90,7 @@ export interface ChannelClose {
 }
 
 /** A worker that a background worker made has started or ended, told to the worker that made it. */
-export interface StateMessage {
+interface StateMessage {
   type: "state";
   worker: number;
   state: "running" | "terminated";

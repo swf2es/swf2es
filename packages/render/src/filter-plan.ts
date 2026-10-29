@@ -24,10 +24,10 @@ export const BEVEL_PASS = 5;
 export const GRADIENT_PASS = 6;
 export const MATRIX_PASS = 7;
 export const CONVOLUTION_PASS = 8;
-export const DISPLACE_PASS = 9;
+const DISPLACE_PASS = 9;
 
 /** How a uniform's values are set: one to four floats, an array of vec4s, or a 4 by 4 matrix. */
-export const FLOATS = 1;
+const FLOATS = 1;
 export const VEC4S = 2;
 export const MATRIX4 = 3;
 
@@ -36,7 +36,7 @@ export const NO_BLUR = -2;
 export const INPUT_BLUR = -1;
 
 /** The most floats a convolution's matrix takes in its shader: 57 vec4s. */
-export const CONVOLUTION_FLOATS = 57 * 4;
+const CONVOLUTION_FLOATS = 57 * 4;
 
 /** One pass: a program drawn from slot `input` into slot `output`, its uniforms in its plan's. */
 export interface FilterPass {

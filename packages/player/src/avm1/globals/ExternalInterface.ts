@@ -37,7 +37,7 @@ const ESCAPES: [string, string][] = [
 ];
 
 /** `text` with XML's five characters escaped, `&` first. */
-export function escapeXml(text: string): string {
+function escapeXml(text: string): string {
   let out = text;
   for (const [c, entity] of ESCAPES) {
     out = out.replaceAll(c, entity);
@@ -47,7 +47,7 @@ export function escapeXml(text: string): string {
 }
 
 /** `text` with the five entities read back, `&amp;` last. */
-export function unescapeXml(text: string): string {
+function unescapeXml(text: string): string {
   let out = text;
   for (let i = ESCAPES.length - 1; i >= 0; i--) {
     out = out.replaceAll(ESCAPES[i][1], ESCAPES[i][0]);

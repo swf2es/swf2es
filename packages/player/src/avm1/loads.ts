@@ -35,7 +35,7 @@ import { Avm1Swf, readRootFrames } from "./swf.js";
 type Value = avm1.Value;
 
 /** What a load brought, by what its bytes are. */
-export type Arrival =
+type Arrival =
   /** Nothing came: the URL was not found, or the request failed. */
   | { type: "failed"; status: number }
   /** A SWF, read, its images decoded. */
@@ -46,7 +46,7 @@ export type Arrival =
   | { type: "unknown"; status: number };
 
 /** What `result`'s bytes are, read and decoded as far as a frame needs them. */
-export async function arrive(result: FetchResult, decode: ImageDecode | null): Promise<Arrival> {
+async function arrive(result: FetchResult, decode: ImageDecode | null): Promise<Arrival> {
   const bytes = result.bytes;
   const status = result.status;
   if (bytes === null) {
@@ -82,7 +82,7 @@ export async function arrive(result: FetchResult, decode: ImageDecode | null): P
  * Ruffle's movie_loader_complete defines a movie's parameters: decoded,
  * `+` a space, a name without `=` an empty value.
  */
-export function queryVariables(url: string): [name: string, value: string][] {
+function queryVariables(url: string): [name: string, value: string][] {
   const path = url.split("#", 1)[0];
   const at = path.indexOf("?");
   if (at < 0) {

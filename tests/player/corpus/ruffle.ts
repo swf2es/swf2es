@@ -15,7 +15,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 export const corpus = process.env.SWF2ES_RUFFLE ?? join(here, "ruffle/tests/tests/swfs");
 
 /** A frame to compare, and how closely. */
-export interface ImageCheck {
+interface ImageCheck {
   name: string;
   /** The frame it is drawn at, 1 the first; the test's last by default. */
   frame: number;
@@ -59,7 +59,7 @@ export interface RuffleTest {
  * with numbers, strings, booleans and inline tables as values. An array of
  * tables' entries are numbered, as "checks.0".
  */
-export function readToml(text: string): Map<string, string> {
+function readToml(text: string): Map<string, string> {
   const values = new Map<string, string>();
   const counts = new Map<string, number>();
   let table = "";

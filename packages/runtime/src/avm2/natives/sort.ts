@@ -15,11 +15,11 @@ import { lowerCase } from "./case.js";
 import { getElement, isObject, lengthOf } from "./define.js";
 import { FloatVector } from "./float-vector.js";
 
-export const kCaseInsensitive = 1;
-export const kDescending = 2;
-export const kUniqueSort = 4;
-export const kReturnIndexedArray = 8;
-export const kNumeric = 16;
+const kCaseInsensitive = 1;
+const kDescending = 2;
+const kUniqueSort = 4;
+const kReturnIndexedArray = 8;
+const kNumeric = 16;
 
 type Compare = (x: Value, y: Value) => number;
 

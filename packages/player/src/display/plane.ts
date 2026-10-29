@@ -15,7 +15,7 @@ import { apply, concat, isProjective } from "./geometry.js";
  * The samples a side the bitmap is drawn at before it is averaged to a
  * texel a pixel, as Flash's high quality covers edges.
  */
-export const SAMPLES = 4;
+const SAMPLES = 4;
 
 /**
  * The most texels a side of a bitmap: larger, the object is drawn into it

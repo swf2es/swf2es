@@ -50,7 +50,7 @@ function line(r: () => number, options?: Partial<LineOptions>): Stroke["line"] {
 }
 
 /** A regular-ish polygon of `sides` sides, closed or open. */
-export function polygon(
+function polygon(
   r: () => number,
   sides: number,
   closed: boolean,

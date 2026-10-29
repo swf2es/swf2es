@@ -32,14 +32,14 @@ import type { Realm } from "../realm.js";
 import { isPrimitive, stringOf, toNumber, type Value } from "../values.js";
 
 // sort's and sortOn's options.
-export const CASE_INSENSITIVE = 1;
-export const DESCENDING = 2;
-export const UNIQUE_SORT = 4;
-export const RETURN_INDEXED_ARRAY = 8;
-export const NUMERIC = 16;
+const CASE_INSENSITIVE = 1;
+const DESCENDING = 2;
+const UNIQUE_SORT = 4;
+const RETURN_INDEXED_ARRAY = 8;
+const NUMERIC = 16;
 
 /** Element `i`'s stored value, undefined where there is none. */
-export function element(a: Avm1Object, i: number): Value {
+function element(a: Avm1Object, i: number): Value {
   const elems = a.elems;
   if (elems !== null) {
     return i >= 0 && i < elems.length ? elems[i].value : undefined;
@@ -53,7 +53,7 @@ export function element(a: Avm1Object, i: number): Value {
  * Element `i` set: an array's `length` grown past it first, its watcher
  * told, then the element's, then the value stored unless it is read-only.
  */
-export function setElement(a: Avm1Object, i: number, value: Value, version: number): void {
+function setElement(a: Avm1Object, i: number, value: Value, version: number): void {
   if (a.array && i >= lengthOf(a, version)) {
     growTo(a, (i + 1) | 0, version);
   }
@@ -127,7 +127,7 @@ function replaceElement(a: Avm1Object, i: number, value: Value, version: number)
  * `length` set, its watcher told, though what it gives is not kept (adl,
  * an array or not): an array's elements past it deleted.
  */
-export function setLength(a: Avm1Object, length: number, version: number): void {
+function setLength(a: Avm1Object, length: number, version: number): void {
   const p = a.props.get("length");
   if (a.watchers !== null) {
     watched(a, "length", p === undefined ? undefined : p.value, length, version);
@@ -489,12 +489,7 @@ export function arrayClass(realm: Realm): { constr: Avm1Function; proto: Avm1Obj
 }
 
 /** `self` made an array of `args`, or of a length where the one argument is a number. */
-export function initArray(
-  realm: Realm,
-  self: Avm1Object,
-  args: Value[],
-  version: number,
-): Avm1Object {
+function initArray(realm: Realm, self: Avm1Object, args: Value[], version: number): Avm1Object {
   if (args.length === 1 && typeof args[0] === "number") {
     realm.fillArray(self, [], version);
     setLength(self, clampInt(args[0]), version);

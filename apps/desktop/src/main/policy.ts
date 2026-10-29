@@ -18,7 +18,7 @@ const META_POLICIES = new Set<string>([
 /** A port, or an inclusive range of them. */
 type Ports = readonly (readonly [from: number, to: number])[];
 
-export interface AccessRule {
+interface AccessRule {
   domain: string;
   /** The attribute as written; null where left out, its default then the file kind's. */
   secure: boolean | null;
@@ -26,7 +26,7 @@ export interface AccessRule {
   ports: Ports | null;
 }
 
-export interface HeaderRule {
+interface HeaderRule {
   domain: string;
   /** Lower case: a name, a prefix ending in "*", or "*". */
   headers: readonly string[];

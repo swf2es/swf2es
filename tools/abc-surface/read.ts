@@ -12,7 +12,7 @@ export interface Surface {
   orphans: Method[];
 }
 
-export interface Script {
+interface Script {
   init: Method;
   traits: Trait[];
 }
@@ -57,7 +57,7 @@ export interface Method {
   code?: number;
 }
 
-export interface Param {
+interface Param {
   type: string;
   name?: string;
   default?: Value;
@@ -67,7 +67,7 @@ export interface Param {
 export type Value = [string, string | number | boolean | null];
 
 /** A metadata entry: its name and its [key, value] items, key "" for a bare value. */
-export type Meta = [string, [string, string][]];
+type Meta = [string, [string, string][]];
 
 const NS_KINDS: Record<number, string> = {
   5: "private",

@@ -52,7 +52,7 @@ export const pool = {
   ],
 };
 const AMBIGUOUS_A = STRINGS.length;
-export const I_M = STRINGS.length + 2;
+const I_M = STRINGS.length + 2;
 
 /** A trait; methods, getters and setters get a method of their own, with signature `sig`. */
 type Member = Omit<Trait, "index"> & { index?: number; sig?: Method };

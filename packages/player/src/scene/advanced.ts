@@ -29,7 +29,7 @@ const NO_COLORS = new Uint32Array(0);
  * them (scene/text.ts), drawn as normal text: those whose tables find no
  * room.
  */
-export interface AdvancedGlyphs {
+interface AdvancedGlyphs {
   geometry: GeometryData | null;
   normal: number[];
 }
@@ -41,7 +41,7 @@ export interface AdvancedGlyphs {
  * so, a glyph or the whole asking too much of the shader, for the field to
  * be drawn as normal text, all of it alike.
  */
-export function fieldQuads(o: TextObject, scale: number): AdvancedGlyphs | null {
+function fieldQuads(o: TextObject, scale: number): AdvancedGlyphs | null {
   const layout = o.layout;
   if (!o.model.text || layout.lines.length === 0) {
     return null;
@@ -112,7 +112,7 @@ export function fieldQuads(o: TextObject, scale: number): AdvancedGlyphs | null 
  * A StaticText's glyphs as quads in its definition's space, at `scale` of
  * Flash's pixels to a pixel of it there; null where they cannot be drawn so.
  */
-export function staticQuads(o: StaticTextObject, scale: number): AdvancedGlyphs | null {
+function staticQuads(o: StaticTextObject, scale: number): AdvancedGlyphs | null {
   const csm = o.definition.csm;
   if (!csm?.useFlashType) {
     return null;

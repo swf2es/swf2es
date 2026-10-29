@@ -23,7 +23,7 @@ export const TRANSFORM = 1;
 export const CHILDREN = 2;
 export const CONTENT = 4;
 /** A Bitmap's pixels changed in place: the texture uploads again, nothing is rebuilt. */
-export const PIXELS = 8;
+const PIXELS = 8;
 
 /**
  * A count that moves whenever something changes that a round of frame

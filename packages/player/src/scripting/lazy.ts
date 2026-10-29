@@ -2,7 +2,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 
-export type MethodFactory = (...args: unknown[]) => avm2.Method;
+type MethodFactory = (...args: unknown[]) => avm2.Method;
 export type LazyCompiler = (body: number, bindings: unknown[]) => MethodFactory;
 
 // Entries that never read A still need their originating ABC for caller URL checks.

@@ -18,7 +18,7 @@ export function string(text: string): number[] {
   return [...u30(utf8.length), ...utf8];
 }
 
-export function double(value: number): number[] {
+function double(value: number): number[] {
   const bytes = new Uint8Array(8);
   new DataView(bytes.buffer).setFloat64(0, value, true);
   return [...bytes];

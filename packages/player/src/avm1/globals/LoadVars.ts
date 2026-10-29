@@ -39,7 +39,7 @@ function setHidden(o: Obj, name: string, value: Value, version: number): void {
 }
 
 /** The text of a load's answer as Flash reads it: UTF-8, a BOM dropped, bad bytes replaced. */
-export function textOf(bytes: Uint8Array): string {
+function textOf(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 

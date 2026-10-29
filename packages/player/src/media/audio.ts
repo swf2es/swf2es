@@ -24,7 +24,7 @@ export interface PlayingSound {
 }
 
 /** A point of a sound's envelope: its time from the start of playing, in ms, and each channel's level. */
-export interface EnvelopePoint {
+interface EnvelopePoint {
   ms: number;
   left: number;
   right: number;

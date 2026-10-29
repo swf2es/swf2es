@@ -5,7 +5,7 @@ import { connect, type Socket } from "node:net";
 import type { SocketEvent } from "../shared/api.js";
 
 /** As many as a page may hold open at once; past it a connection is refused. */
-export const MAX_OPEN = 64;
+const MAX_OPEN = 64;
 
 /**
  * The bytes a connection may hold unsent. A peer that stops reading would

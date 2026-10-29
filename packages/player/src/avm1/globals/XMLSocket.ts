@@ -53,7 +53,7 @@ interface Connection {
  * The most a message may hold before its zero byte: a server that never
  * ends one has its connection closed, rather than the player's memory fill.
  */
-export const MAX_MESSAGE = 16 * 1024 * 1024;
+const MAX_MESSAGE = 16 * 1024 * 1024;
 
 const decoder = new TextDecoder();
 

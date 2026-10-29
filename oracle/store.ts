@@ -20,7 +20,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export function storeDir(): string {
+function storeDir(): string {
   return (
     process.env.SWF2ES_ORACLE_CACHE ||
     join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "swf2es", "oracle")

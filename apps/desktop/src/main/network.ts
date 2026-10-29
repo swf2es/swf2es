@@ -104,7 +104,7 @@ export interface Limits {
   policyFiles: number;
 }
 
-export const LIMITS: Limits = {
+const LIMITS: Limits = {
   url: 64 * 1024,
   headers: 32,
   headerBytes: 8 * 1024,

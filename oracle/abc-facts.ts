@@ -201,7 +201,7 @@ export function verifyErrors(facts: AbcFacts): number[] {
  * `builtins` (such as builtin and shell_toplevel) and resolving the types
  * of all its traits, or 0; `builtin` links `abc` as a builtin ABC too.
  */
-export function linkError(builtins: Uint8Array[], abc: Uint8Array, builtin = false): number {
+function linkError(builtins: Uint8Array[], abc: Uint8Array, builtin = false): number {
   testing.domainReset(50);
   for (const b of builtins) {
     const error = testing.domainAdd(b, true) as number;

@@ -58,7 +58,7 @@ function projects(d: DisplayObject): boolean {
 }
 
 /** The container whose projection `o` is drawn through: the nearest above it that projects. */
-export function projectorOf(o: DisplayObject): DisplayObject | null {
+function projectorOf(o: DisplayObject): DisplayObject | null {
   for (let p = o.parent; p; p = p.parent) {
     if (projects(p)) {
       return p;
@@ -69,7 +69,7 @@ export function projectorOf(o: DisplayObject): DisplayObject | null {
 }
 
 /** The projection `d` projects through: its own, or the default of the stage or a root. */
-export function projectionOf(d: DisplayObject): Projection {
+function projectionOf(d: DisplayObject): Projection {
   if (d.projection) {
     return d.projection;
   }
@@ -88,7 +88,7 @@ export function projectionOf(d: DisplayObject): Projection {
  * as Flash's: the stage's projection measures 500 wide, any other object's
  * the stage's width.
  */
-export function focalLength(radians: number, d: DisplayObject): number {
+function focalLength(radians: number, d: DisplayObject): number {
   const width = d.parent === null && d.loaderInfo !== null ? 500 : stageSizeOf(d).width;
   return Math.fround((width / 2) * Math.fround(Math.tan((Math.PI - radians) / 2)));
 }
@@ -127,7 +127,7 @@ function multiply(a: M4, b: M4): M4 {
 }
 
 /** `d`'s space to `top`'s in 3D, `top` excluded; null where `top` is not above it. */
-export function toSpace(d: DisplayObject, top: DisplayObject | null): M4 | null {
+function toSpace(d: DisplayObject, top: DisplayObject | null): M4 | null {
   let m = own3D(d);
   for (let p = d.parent; p !== top; p = p.parent) {
     if (!p) {
@@ -146,7 +146,7 @@ export function toSpace(d: DisplayObject, top: DisplayObject | null): M4 | null 
  * (cx, cy), and a point at depth z drawn at f / (f + z) of its distance
  * from the centre.
  */
-export function project(
+function project(
   projector: DisplayObject,
   x: number,
   y: number,

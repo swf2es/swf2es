@@ -345,7 +345,7 @@ function now(version: number): number {
 }
 
 /** ASnative(103, index): a Date method, the constructor, or Date.UTC. */
-export function dateNative(index: number): Native {
+function dateNative(index: number): Native {
   return (self, rawArgs, version) => {
     const args = numbers(rawArgs, version);
     if (index === CONSTRUCTOR) {

@@ -377,7 +377,7 @@ export class Writer {
 }
 
 /** The constructor AMF0 types an object by: an own `constructor`, else `__constructor__`. */
-export function constructorOf(o: Obj, version: number): Value {
+function constructorOf(o: Obj, version: number): Value {
   const own = o.own("constructor", version);
   if (own) {
     return own.get ? undefined : own.value;

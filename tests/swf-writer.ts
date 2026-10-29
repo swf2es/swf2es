@@ -67,7 +67,7 @@ export class BitWriter {
 }
 
 /** Bits for a signed value in SB[n]. */
-export function sbits(...values: number[]): number {
+function sbits(...values: number[]): number {
   let n = 1;
   for (const v of values) {
     while (v < -(2 ** (n - 1)) || v >= 2 ** (n - 1)) {
@@ -250,7 +250,7 @@ export function shape(spec: ShapeSpec): Uint8Array {
 type MatrixSpec = { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
 
 /** A morph fill: a solid colour, or a linear or radial gradient, at both ends; colours 0xAARRGGBB. */
-export type MorphFillSpec =
+type MorphFillSpec =
   | { start: number; end: number }
   | {
       type: 0x10 | 0x12;
