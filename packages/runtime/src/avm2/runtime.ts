@@ -179,7 +179,7 @@ export class Runtime {
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
   dynamicPropertyWriter: AsObject | null = null;
   /** Class aliases and the classes AMF makes. */
-  private readonly amfClasses = new AmfClasses();
+  private readonly amfClasses = new AmfClasses(this);
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
@@ -2671,20 +2671,20 @@ export class Runtime {
 
   /** The class of an alias: as getClassByAlias, ReferenceError 1014 if none, or Object if `orObject`. */
   classByAlias(name: string, orObject = false): AsObject {
-    return this.amfClasses.classByAlias(this, name, orObject);
+    return this.amfClasses.classByAlias(name, orObject);
   }
 
   byteArrayClass(): AsObject {
-    return this.amfClasses.byteArrayClass(this);
+    return this.amfClasses.byteArrayClass();
   }
 
   dictionaryClass(): AsObject {
-    return this.amfClasses.dictionaryClass(this);
+    return this.amfClasses.dictionaryClass();
   }
 
   /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
-    return this.amfClasses.vectorClass(this, param);
+    return this.amfClasses.vectorClass(param);
   }
 
   /** Each Vector class made, by its element class (null for *), kept by Vector's apply. */

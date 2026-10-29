@@ -15,7 +15,13 @@ export class AmfClasses {
   private dictionaryCls: AsObject | null = null;
   private vectorCls: AsObject | null = null;
 
-  /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
+  constructor(private readonly rt: Runtime) {}
+
+  /**
+   * As Toplevel::registerClassAlias: a class by a name, replacing what the
+   * name had. The class the name had loses its alias, even one it has under
+   * another name since, as Flash's does (tests/unit/runtime/class-aliases).
+   */
   registerClassAlias(name: string, cls: AsObject): void {
     const previous = this.aliases.get(name);
     if (previous) {
@@ -32,31 +38,37 @@ export class AmfClasses {
   }
 
   /** The class of an alias: as getClassByAlias, ReferenceError 1014 if none, or Object if `orObject`. */
-  classByAlias(rt: Runtime, name: string, orObject: boolean): AsObject {
+  classByAlias(name: string, orObject: boolean): AsObject {
     const cls = this.aliases.get(name);
     if (cls) {
       return cls;
     }
 
     if (orObject) {
-      return rt.builtinClass("Object");
+      return this.rt.builtinClass("Object");
     }
 
-    throw rt.error("ReferenceError", 1014, name);
+    throw this.rt.error("ReferenceError", 1014, name);
   }
 
-  byteArrayClass(rt: Runtime): AsObject {
+  // By a reference in the domain loading at the first call, as builtinClass
+  // resolves its names: any domain finds a builtin's in the root first.
+
+  byteArrayClass(): AsObject {
+    const rt = this.rt;
     this.byteArrayCls ??= rt.resolve(rt.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
     return this.byteArrayCls;
   }
 
-  dictionaryClass(rt: Runtime): AsObject {
+  dictionaryClass(): AsObject {
+    const rt = this.rt;
     this.dictionaryCls ??= rt.resolve(rt.cls(namespace(NS_Public, "flash.utils"), "Dictionary"));
     return this.dictionaryCls;
   }
 
   /** Vector.<T>, for a class T or null for *. */
-  vectorClass(rt: Runtime, param: AsObject | null): AsObject {
+  vectorClass(param: AsObject | null): AsObject {
+    const rt = this.rt;
     const specialized = rt.vectorClasses.get(param);
     if (specialized) {
       return specialized;
