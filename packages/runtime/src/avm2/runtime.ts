@@ -11,6 +11,7 @@
 // Layouts come from the module, computed by the compiler: the runtime never
 // derives one (docs/architecture.md, "Modules and the bootstrap").
 
+import { AmfClasses } from "./amf-classes.js";
 import { ArrayConversion } from "./array-conversion.js";
 import { fillCache } from "./cache-fill.js";
 import { newClass, withId } from "./classes.js";
@@ -177,9 +178,8 @@ export class Runtime {
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
   dynamicPropertyWriter: AsObject | null = null;
-  /** Class aliases, as registerClassAlias sets them, both ways. */
-  private readonly aliases = new Map<string, AsObject>();
-  private readonly aliasByTraits = new Map<Traits, string>();
+  /** Class aliases and the classes AMF makes. */
+  private readonly amfClasses = new AmfClasses();
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
@@ -2699,64 +2699,34 @@ export class Runtime {
     return new Error(`swf2es: ${what} is not supported yet`);
   }
 
-  // Class aliases, for AMF.
+  // Class aliases and the classes AMF makes (amf-classes.ts).
 
   /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
   registerClassAlias(name: string, cls: AsObject): void {
-    const previous = this.aliases.get(name);
-    if (previous) {
-      this.aliasByTraits.delete(previous.$it);
-    }
-
-    this.aliases.set(name, cls);
-    this.aliasByTraits.set(cls.$it, name);
+    this.amfClasses.registerClassAlias(name, cls);
   }
 
   /** The alias of a class's instances' traits, or "". */
   aliasOf(traits: Traits): string {
-    return this.aliasByTraits.get(traits) ?? "";
+    return this.amfClasses.aliasOf(traits);
   }
 
   /** The class of an alias: as getClassByAlias, ReferenceError 1014 if none, or Object if `orObject`. */
   classByAlias(name: string, orObject = false): AsObject {
-    const cls = this.aliases.get(name);
-    if (cls) {
-      return cls;
-    }
-
-    if (orObject) {
-      return this.builtinClass("Object");
-    }
-
-    throw this.error("ReferenceError", 1014, name);
+    return this.amfClasses.classByAlias(this, name, orObject);
   }
 
-  // ByteArray, Dictionary and Vector, as AMF makes them for each value it reads: resolved once.
-  private byteArrayCls: AsObject | null = null;
-  private dictionaryCls: AsObject | null = null;
-  private vectorCls: AsObject | null = null;
-
   byteArrayClass(): AsObject {
-    this.byteArrayCls ??= this.resolve(this.cls(namespace(NS_Public, "flash.utils"), "ByteArray"));
-    return this.byteArrayCls;
+    return this.amfClasses.byteArrayClass(this);
   }
 
   dictionaryClass(): AsObject {
-    this.dictionaryCls ??= this.resolve(
-      this.cls(namespace(NS_Public, "flash.utils"), "Dictionary"),
-    );
-    return this.dictionaryCls;
+    return this.amfClasses.dictionaryClass(this);
   }
 
   /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
-    const specialized = this.vectorClasses.get(param);
-    if (specialized) {
-      return specialized;
-    }
-
-    this.vectorCls ??= this.resolve(this.cls(namespace(NS_Public, "__AS3__.vec"), "Vector"));
-    return this.applyType(this.vectorCls, [param]);
+    return this.amfClasses.vectorClass(this, param);
   }
 
   /** Each Vector class made, by its element class (null for *), kept by Vector's apply. */
