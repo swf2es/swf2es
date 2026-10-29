@@ -145,8 +145,11 @@ of its own.
 - **The Tamarin baseline is avmshell's behaviour**, failures included:
   swf2es must reproduce what avmshell prints, not what a test expects.
   Update `tests/tamarin/baseline.json` only when the oracle or the harness
-  changes, never to make swf2es pass. `tests/player/corpus/baseline.json`
-  is the player's own standing on Ruffle's corpus, failures included:
+  changes, never to make swf2es pass. A test whose avmshell result follows
+  the current date or time is relaxed (`--relax`: its counts and output set
+  to null, so they are not compared) rather than updated.
+  `tests/player/corpus/baseline.json` is the player's own standing on
+  Ruffle's corpus, failures included:
   a change may not lower a test's standing, and one that raises it
   updates the baseline with `--update-baseline`.
 - **avmshell is the reference.** For AS3 semantics, the expected result is
