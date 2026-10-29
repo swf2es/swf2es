@@ -99,8 +99,9 @@ node tests/site/run.ts [--serve]   # the built site in Chrome under /swf2es/, or
                               # (part of pnpm test)
 node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
                               # socket, a drop (part of pnpm test; skipped without Electron's binary)
-node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
-                              # timeline in Chrome; keep a change only for a gain that repeats;
+node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--gpu]   # time the player on a
+                              # busy synthetic timeline in Chrome (--town: a busy room's mix, see
+                              # docs/renderer.md); keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
 node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classes, traits and
                               # signatures; how many methods are native and how many AS3
@@ -122,6 +123,9 @@ node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property ac
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
                               # and Vectors (map, filter, sort, conversion), as the one above
+pnpm dlx knip                 # files and exports nothing uses (knip.json; not a dependency);
+                              # generated code calls the runtime by name, so grep the emitters'
+                              # strings before removing what it lists
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
