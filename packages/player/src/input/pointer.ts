@@ -1,5 +1,5 @@
 // Browser pointer input enters here; Flash chooses targets from its display
-// list, while Pixi only supplies the pointer's position and buttons.
+// list, while the canvas only supplies the pointer's position and buttons.
 import type { Matrix } from "@swf2es/format";
 import {
   hidden3D,
@@ -50,7 +50,7 @@ export interface PointerState {
 }
 
 /**
- * The pointer as a host drives it (PixiView.bindPointer, bindKeyboard): an
+ * The pointer as a host drives it (RenderView.bindPointer, bindKeyboard): an
  * AS3 movie's PointerInput, or an AVM1 movie's (avm1/pointer.ts), whose
  * buttons and clips take the pointer by AVM1's rules.
  */

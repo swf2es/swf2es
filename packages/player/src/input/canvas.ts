@@ -1,6 +1,6 @@
-// What both views' pointer bindings (render/pointer.ts, scene/pointer.ts)
-// take from the browser alike: where a client point lies on a canvas's
-// pixels as CSS shows them, and the wheel's movement in Flash's lines.
+// What the pointer binding (scene/pointer.ts) takes from the browser:
+// where a client point lies on a canvas's pixels as CSS shows them, and the
+// wheel's movement in Flash's lines.
 
 /**
  * Where a client point lies on `canvas`'s pixels. CSS `object-fit` shows

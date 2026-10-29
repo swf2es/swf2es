@@ -20,12 +20,6 @@ export interface PlayerJob {
   zoom?: number;
   /** Drawn multisampled, as a host's renderer made with `antialias: true` draws (page.ts). */
   antialias?: boolean;
-  /** Drawn without the transform table (render/table.ts) where false; with it by default. */
-  table?: boolean;
-  /** The fewest draws a run makes through the table; its default where not given. */
-  tableMinRun?: number;
-  /** Pulled draws (render/table.ts) or multi-draws; left out, the player's choice: multi-draws on software GL. */
-  tablePull?: boolean;
   /** The stage shown at the zoom, its frames that size, rather than drawn back to its size (page.ts). */
   shown?: boolean;
   /** Ruffle's recorded input, played after each frame (replay.ts). */
@@ -62,11 +56,8 @@ export interface PlayerResult {
   images: Map<number, Uint8Array>;
   /** What the SWF's scripts traced, a line each. */
   trace: string[];
-  /** The contexts' batches the transform table drew. */
-  tableDraws: number;
-  /** What drew, and whether it was WebGL 2, which the table needs. */
+  /** What drew: the GL renderer's name. */
   gl: string;
-  webGL2: boolean;
   /** What stopped the player, if anything. */
   error: string | null;
 }
@@ -237,13 +228,8 @@ export async function withPage<T>(
       // too, and SWF2ES_PLAYERGLOBAL=adobe plays on Flash Player's playerglobal (page.ts).
       const flags = [
         ...(process.env.SWF2ES_CHECKED ? ["checked"] : []),
-        ...(process.env.SWF2ES_NATIVE_FILLS ? ["nativeFills"] : []),
         ...(process.env.SWF2ES_NATIVE_BITMAPS ? ["nativeBitmaps"] : []),
         ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? ["adobe"] : []),
-        // The renderer of swf2es's own in place of Pixi (docs/renderer.md): run.ts's cases; and
-        // Pixi in place of the web element's own renderer.
-        ...(process.env.SWF2ES_RENDERER === "own" ? ["own"] : []),
-        ...(process.env.SWF2ES_RENDERER === "pixi" ? ["pixi"] : []),
       ];
       await devtools.send("Page.navigate", {
         url: `${url}${page}${flags.length ? `?${flags.join("&")}` : ""}`,
@@ -346,9 +332,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
           | {
               images: Record<string, string>;
               trace: string[];
-              tableDraws: number;
               gl: string;
-              webGL2: boolean;
               error: string | null;
             }
           | undefined;
@@ -356,7 +340,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const begun = performance.now();
         try {
           const answer = evaluate<NonNullable<typeof value>>(
-            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.table ?? true}, ${job.tableMinRun}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false}, ${job.tablePull})`,
+            `runSwf(${JSON.stringify(Buffer.from(job.swf).toString("base64"))}, ${job.frames}, ${JSON.stringify(job.capture)}, ${QUALITIES.indexOf(job.quality ?? "high")}, ${JSON.stringify(job.url ?? null)}, ${job.zoom ?? 1}, ${job.antialias ?? false}, ${job.shown ?? false}, ${JSON.stringify(job.input ?? null)}, ${JSON.stringify(job.viewport ?? null)}, ${job.logFetch ?? false}, ${JSON.stringify(job.socket ?? null)}, ${job.lazyCompilation ?? false})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
           ({ value, exception } = await (options.timeout
@@ -396,9 +380,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
         const result = {
           images,
           trace: value?.trace ?? [],
-          tableDraws: value?.tableDraws ?? 0,
           gl: value?.gl ?? "unknown",
-          webGL2: value?.webGL2 ?? false,
           error,
         };
         results.push(result);
@@ -413,15 +395,15 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
 }
 
 /**
- * What timing a SWF in the player gave: each frame's tick, sync to Pixi,
- * Pixi's draw and GL's finish, in ms, the first frame's load and draw, and
- * which GL renderer drew.
+ * What timing a SWF in the player gave: each frame's tick, draw (the walk
+ * of the display list, planning and GL calls) and GL's finish, in ms, the
+ * first frame's load and draw, and which GL renderer drew.
  */
 export interface BenchResult {
   counts: Record<string, number>;
-  /** Each frame's draw calls, rebuilds, tessellation, uploads and program switches (page.ts, meter). */
+  /** Each frame's draw calls, state changes, uploads and readbacks (page.ts, meter). */
   meters: Record<string, number>[];
-  /** Bytes allocated in the frames' tick, sync and render, sampled, with `allocs`. */
+  /** Bytes allocated in the frames' tick and render, sampled, with `allocs`. */
   allocated: number;
   heap: [number, number];
   /**
@@ -430,13 +412,42 @@ export interface BenchResult {
    */
   retained: { heap: number; buffers: number };
   tick: number[];
-  sync: number[];
   draw: number[];
   gl: number[];
   idle: number[];
   first: number;
   renderer: string;
   error: string | null;
+}
+
+/** How benchPlayer plays: see page.ts's benchSwf, and bench.ts's options of the same names. */
+export interface BenchOptions {
+  /** Let Chrome use the machine's GPU; software GL otherwise. */
+  gpu?: boolean;
+  /** Renders after each frame with no tick between. */
+  idleRenders?: number;
+  /** Sprites to add and take off, -1 for none, every `toggleEvery` frames. */
+  toggle?: number;
+  toggleEvery?: number;
+  /** Drawn multisampled. */
+  antialias?: boolean;
+  /** Sample the heap, keeping the profile at `profilePath` if given. */
+  allocs?: boolean;
+  profilePath?: string;
+  /** Milliseconds to wait after each frame. */
+  pace?: number;
+  /** Sample the frames after the warm-up in Chrome's profiler, written here. */
+  cpuProfilePath?: string;
+  /** Wait for the GPU every so many frames. */
+  finishEvery?: number;
+  /** The mouse held still over the stage's middle. */
+  hover?: boolean;
+  /** A heap snapshot of what the frames left, written here. */
+  snapshotPath?: string;
+  /** The page's clock moves a frame's time a tick and no more. */
+  clock?: boolean;
+  /** Each frame's GL calls counted (meters). */
+  metered?: boolean;
 }
 
 /** A node of a sampled heap profile: what was allocated under a call, and the calls under it. */
@@ -448,10 +459,10 @@ interface SampledNode {
 
 /**
  * What a bench's frames allocated: the samples under the frame loop's
- * tick, prepare and render, not the player's start, which compiles.
+ * tick and render, not the player's start, which compiles.
  */
 function framesAllocated(head: SampledNode): number {
-  const frameCalls = new Set(["tick", "prepare", "render"]);
+  const frameCalls = new Set(["tick", "render"]);
   const sum = (node: SampledNode, inBench: boolean, inFrame: boolean): number => {
     const name = node.callFrame.functionName;
     const bench = inBench || name === "benchSwf";
@@ -478,27 +489,24 @@ function framesAllocated(head: SampledNode): number {
 export function benchPlayer(
   swf: Uint8Array,
   frames: number,
-  gpu = false,
-  backBuffer = false,
-  idleRenders = 0,
-  toggle = -1,
-  antialias = false,
-  toggleEvery = 1,
-  nestedGroups = false,
-  allocs = false,
-  table = true,
-  tableMinRun?: number,
-  profilePath?: string,
-  pace = 0,
-  cpuProfilePath?: string,
-  finishEvery = 1,
-  hover = false,
-  snapshotPath?: string,
-  tableLoop = true,
-  clock = false,
-  metered = false,
-  tablePull?: boolean,
+  options: BenchOptions = {},
 ): Promise<BenchResult> {
+  const {
+    gpu = false,
+    idleRenders = 0,
+    toggle = -1,
+    antialias = false,
+    toggleEvery = 1,
+    allocs = false,
+    profilePath,
+    pace = 0,
+    cpuProfilePath,
+    finishEvery = 1,
+    hover = false,
+    snapshotPath,
+    clock = false,
+    metered = false,
+  } = options;
   return withPage(
     "benchSwf",
     async (evaluate, send, _fresh, listen) => {
@@ -520,7 +528,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${backBuffer}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${nestedGroups}, ${table}, ${tableMinRun}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${tableLoop}, ${clock}, ${metered}, ${tablePull})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${clock}, ${metered})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };
@@ -577,7 +585,6 @@ export function benchPlayer(
           heap: [0, 0],
           retained: { heap: 0, buffers: 0 },
           tick: [],
-          sync: [],
           draw: [],
           gl: [],
           idle: [],
@@ -767,16 +774,10 @@ export function playResized(
 }
 
 /** Play a SWF with no scripts in the page's contextLossPlanSwf, in two renderers, one losing its context as `plan` says. */
-export function playLosingContextPlan(
-  swf: Uint8Array,
-  plan: string,
-  table: boolean,
-  tableMinRun = 1,
-  tablePull?: boolean,
-): Promise<string | null> {
+export function playLosingContextPlan(swf: Uint8Array, plan: string): Promise<string | null> {
   return withPage("contextLossPlanSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)}, ${table}, ${tableMinRun}, ${tablePull})`,
+      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${JSON.stringify(plan)})`,
     );
     return exception ?? value ?? null;
   });
@@ -786,13 +787,11 @@ export function playLosingContextPlan(
 export function playLosingContext(
   swf: Uint8Array,
   frames: number,
-  table: boolean,
   turned = false,
-  tablePull?: boolean,
 ): Promise<string | null> {
   return withPage("contextLossSwf", async (evaluate) => {
     const { value, exception } = await evaluate<string | null>(
-      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${table}, ${turned}, ${tablePull})`,
+      `contextLossSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${turned})`,
     );
     return exception ?? value ?? null;
   });

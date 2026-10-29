@@ -52,7 +52,7 @@ export const pickWork = { changes: 0, picks: 0 };
  * How many times a SWF's content was let go of, a Loader's unloaded or
  * replaced or a player destroyed: a renderer lets go then of what it kept
  * of objects off the list for others to take, which holds their SWF's
- * characters (render/view.ts).
+ * characters.
  */
 export const unloads = { count: 0 };
 

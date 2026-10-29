@@ -40,14 +40,6 @@ jobs:
       - run: node tests/player/run.ts apply-filter apply-filter-inner convolution convolution-draw
         env:
           SWF2ES_NATIVE_BITMAPS: "1"
-      - run: node tests/player/run.ts && node tests/player/context-loss.ts && node tests/player/leak.ts
-        env:
-          SWF2ES_NATIVE_FILLS: "1"
-      # The renderer of swf2es's own (docs/renderer.md): none of the cases it drew may fail again,
-      # nor its draw counts rise past draw-counts-own.json.
-      - run: node tests/player/run.ts && node tests/player/draw-counts.ts
-        env:
-          SWF2ES_RENDERER: own
       - run: pnpm test:checked
       - run: pnpm determinism
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
@@ -90,6 +82,3 @@ jobs:
           path: tests/player/corpus/ruffle
           key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
       - run: pnpm corpus
-      - run: pnpm corpus
-        env:
-          SWF2ES_NATIVE_FILLS: "1"

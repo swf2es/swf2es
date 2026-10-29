@@ -66,7 +66,7 @@ from `oracle/flash.ts`: that harness uses CPU display-list capture, which
 does not capture Stage3D.
 
 The native adapter exchanges buffers, programs, textures and pixels through
-`@swf2es/context3d`; the adapter imports no Pixi or WebGL code. The WebGL2
+`@swf2es/context3d`; the adapter imports no renderer or WebGL code. The WebGL2
 backend owns its context and resources. Presentation copies the offscreen back buffer to
 the canvas, so a subsequent clear does not alter the presented image.
 Readback reuses its storage and converts GL's bottom-up rows to top-down
@@ -741,8 +741,8 @@ handles, and context recovery restores the default all-channel mask.
 
 `Composition.as` exercises two Stage3D slots beneath ordinary Flash
 graphics, including an opaque and a translucent overlay. The browser test
-uses the existing Pixi view for the display list and separate canvas layers
-for Stage3D. The host receives only slot indices, position, visibility and
+draws the display list with `RenderView`, on a transparent canvas, above
+separate canvas layers for Stage3D. The host receives only slot indices, position, visibility and
 resource operations. It removes each surface when its context is disposed.
 
 The composition test compares eight interior pixel samples in nine states
@@ -788,7 +788,7 @@ The implementation is extracted into [packages/context3d](../../packages/context
 `@swf2es/context3d` exposes renderer-neutral resource/lifecycle contracts and AGAL
 translation, built without DOM or node types. The optional
 `@swf2es/context3d/webgl` entry owns WebGL resources. Neither entry imports player
-AS objects or Pixi. The normal build checks both projects.
+AS objects. The normal build checks both projects.
 
 The AS native adapter and Flash validation are in `player`, exposed through the
 separate experimental `@swf2es/player/context3d` entry. `installContext3D` runs
@@ -827,8 +827,7 @@ reloads; every handle/listener is released and retired players, scripting,
 backends, canvases and elements must be collectible. Heap plus backing storage
 may grow at most 1 MiB between warm load 4 and load 20.
 
-Web teardown also disposes its display-list scene before its renderer. The web
-suite checks collection of device-font scenes held by Pixi's measurement cache,
+The web suite checks that device-font scenes are collected with their player,
 including when Stage3D is disabled.
 
 `StageLayout.as` and `stage-layout-reference.json` add AIR references for live
@@ -916,9 +915,7 @@ messages. Worker-pool spares are distinct from running Flash worker threads.
 
 Stage3D and the display list occupy separate canvases. Blend effects on the 2D
 list sample transparency rather than Stage3D pixels; cross-layer blend parity is
-an experimental limitation. Default `Playback.destroy()` also disposes its Pixi
-scene before its renderer, intentionally releasing cached text-style listeners;
-ordinary web collection checks cover this shared change.
+an experimental limitation.
 
 
 `ByteBudgets.as` keeps enough real resources to exceed the old 64 MiB ceiling in

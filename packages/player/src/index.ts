@@ -1,7 +1,7 @@
 /**
- * Browser SWF player: display list, timeline, playerglobal (flash.*) and
- * the PixiJS renderer. It compiles a SWF's ABCs with
- * @swf2es/codegen as the SWF loads (its JIT), or takes their modules from a
+ * Browser SWF player: display list, timeline and playerglobal (flash.*),
+ * drawn by RenderView (@swf2es/player/scene). It compiles a SWF's ABCs
+ * with @swf2es/codegen as the SWF loads (its JIT), or takes their modules from a
  * module cache, those the swf2es command compiled ahead of time included.
  */
 export { Avm1, type Avm1Options } from "./avm1/avm1.js";
@@ -53,8 +53,6 @@ export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js"
 export type { Pointer, PointerState } from "./input/pointer.js";
 export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
-export { setTransformTable, transformTableDrawn } from "./render/table.js";
-export type { FillTessellator } from "./render/tessellate.js";
-export { PixiView, type PixiViewOptions } from "./render/view.js";
+export type { FillTessellator } from "./scene/fills.js";
 export { airLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
 export type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";

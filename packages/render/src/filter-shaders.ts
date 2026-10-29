@@ -1,8 +1,7 @@
 // The fragment shaders of Flash's filters, as adl draws them (docs/architecture.md,
-// "Filters"): what the Pixi view's filters (player's render/filters.ts) and the
-// renderer's own passes (webgl/filters.ts) both run, so that their exactness rules
-// live in one place. GLSL ES 3 bodies, with no version or precision line; each reads
-// vTextureCoord, its input's texture coordinate, and writes finalColor.
+// "Filters"), which the renderer's passes (webgl/filters.ts) run, so that their
+// exactness rules live in one place. GLSL ES 3 bodies, with no version or precision
+// line; each reads vTextureCoord, its input's texture coordinate, and writes finalColor.
 
 /** Truncated to 8 bits, as adl's each pass is: a hair over, so that an exact value stays. */
 export const TRUNCATE = "floor(c * 255.0 + 0.001) / 255.0";

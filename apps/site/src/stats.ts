@@ -84,7 +84,7 @@ class DrawCounter {
     }
   }
 
-  /** Wrap `target[name]`, to be put back as it was: Pixi gives a WebGL 1 context instanced draws of its own. */
+  /** Wrap `target[name]`, to be put back as it was, a property of its own or its prototype's. */
   private patch(target: object, name: string, count: (args: unknown[]) => number): void {
     const functions = target as Record<string, unknown>;
     const original = functions[name];

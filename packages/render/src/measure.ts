@@ -38,7 +38,7 @@ const open: number[] = [];
  * the rectangles of the layers in it; out to whole pixels and a pixel more
  * each way, cut to the target. What is drawn is what is measured, so a
  * layer covers its draws however they came to be where they are. A
- * filtered layer is measured as Pixi's filter system measured it, which
+ * filtered layer is measured as PixiJS's filter system measures it, which
  * the filters' exactness rules were found with: cut to the target, out to
  * whole pixels, then padded, not cut again; where nothing is drawn in it,
  * it draws nothing.
@@ -147,7 +147,7 @@ export function measureLayers(
 /**
  * The rectangle a filtered layer padded by `pad` units covers, from its
  * area (least x and y, greatest x and y in target pixels, from `area[at]`)
- * as Pixi's filter system had it (FilterSystem's _calculateFilterArea): in
+ * as PixiJS's filter system has it (FilterSystem's _calculateFilterArea): in
  * units, the area cut to the target, out to whole pixels at the
  * resolution, padded; nothing where it has no size then; its edges
  * snapped to the pixels they lie on. Into `out` from `to`: x, y, width,

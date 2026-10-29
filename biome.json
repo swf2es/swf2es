@@ -16,7 +16,6 @@
       "!tests/player/corpus/baseline.json",
       "!tests/programs/as3pb",
       "!tests/programs/com-lz4-as3",
-      "!vendor/pixijs",
       "!vendor/libtess2",
       "!vendor/minimp3",
       "!vendor/zlib",

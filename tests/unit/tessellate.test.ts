@@ -315,7 +315,7 @@ test("a layer leaves rejected fills to JS and draws the rest", () => {
   );
 });
 
-/** A contour flattened as the player's render/tessellate.ts trace does. */
+/** A contour flattened as the player's scene/fills.ts trace does. */
 function flattened(commands: readonly number[]): number[] {
   const points: number[] = [];
   const append = (x: number, y: number) => {

@@ -1,6 +1,6 @@
 // A shape layer's lines as a geometry of the renderer's, stroked as Flash
 // strokes them: in the stage's axes, at one width all along, never under a
-// pixel of the screen (render/strokes.ts has the rules), each line's path
+// pixel of the screen (strokeWidth), each line's path
 // outlined and its outline filled non-zero, so that where it overlaps itself
 // it is drawn once. The outline is the flattened path's sides at half the
 // width, joined on the outer side of each turn as the line joins; on the
@@ -13,7 +13,7 @@
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
-import { convex, crossingFill } from "../render/fill-polygons.js";
+import { convex, crossingFill } from "./fill-polygons.js";
 import {
   containment,
   type FillGeometry,
@@ -28,7 +28,7 @@ import { unsupported, vertexColor } from "./shapes.js";
  * How far, in pixels of the screen, a line's flattened curves and its
  * round joins' and caps' chords may stray from the curve: a tenth of one,
  * where the fills' finer flatness made strokes several times the
- * triangles the Pixi view's are, which a software rasteriser pays for; a
+ * triangles, which a software rasteriser pays for; a
  * quarter shows on the references' curved lines. A 9-slice's lines take
  * half that, as its small rounded corners, which Flash draws as exact
  * curves, show a tenth.
@@ -658,7 +658,7 @@ export function layerStrokes(
   by: readonly number[] | null = null,
   opaque = false,
 ): GeometryData | null {
-  // Seen through a transform that collapses the plane, lines cover nothing, as in the Pixi view.
+  // Seen through a transform that collapses the plane, lines cover nothing.
   if (a * d - b * c === 0) {
     return null;
   }
@@ -673,7 +673,7 @@ export function layerStrokes(
     const h = by
       ? strokeWidth(line, by[0], by[1], by[2], by[3], least) / 2
       : strokeWidth(line, a, b, c, d, least) / 2;
-    // Codes a SWF reserves draw round, as the Pixi view draws them.
+    // Codes a SWF reserves draw round.
     const caps = line.startCap <= 2 ? line.startCap : 0;
     const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];

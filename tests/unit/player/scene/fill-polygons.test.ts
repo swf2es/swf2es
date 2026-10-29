@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { crossingFill } from "../../../../packages/player/dist/render/fill-polygons.js";
+import { crossingFill } from "../../../../packages/player/dist/scene/fill-polygons.js";
 
 const square = (x: number, y: number, size: number) => [
   x,

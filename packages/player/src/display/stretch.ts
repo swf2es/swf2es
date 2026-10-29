@@ -1,8 +1,8 @@
 // A line's stretch: the part of a transform, without its turn or mirror,
 // that a line scaled both ways is as wide through as through the whole,
 // settled on a grid, so that lines stroked through it are shared by every
-// angle and instance and taken back through its inverse. Both views stroke
-// lines so (render/strokes.ts, scene/view.ts).
+// angle and instance and taken back through its inverse. The renderer
+// strokes lines so (scene/view.ts).
 import type { ShapeLayer } from "./shapes.js";
 
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */

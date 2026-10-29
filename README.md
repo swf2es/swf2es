@@ -64,11 +64,10 @@ first player loads:
 ```
 
 The packages are ES modules, so serve them with a bundler or an import map
-for `@swf2es/*` and `pixi.js` (`tests/player/serve.ts` has one), the
-renderer's `@swf2es/player/scene`, `@swf2es/render/webgl` and
-`@swf2es/context3d/device` among them. The
-element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality` and
-`allownetworking`. It has `load(url | bytes)` and `destroy()`, which gives
+for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
+`@swf2es/player/scene`, `@swf2es/render/webgl` and
+`@swf2es/context3d/device` among them. The element also takes `salign`,
+`wmode`, `bgcolor`, `base`, `quality` and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which gives
 back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
 
@@ -171,9 +170,10 @@ nothing else, as the main movie or by a `Loader` into
 `new ApplicationDomain(null)`. Other modules compile as usual. If `importModules` is on and the libraries were
 compiled with `--emit-libraries`, every module is imported rather than
 evaluated, so the page runs under `script-src 'self' 'wasm-unsafe-eval'`,
-without `'unsafe-eval'`. Pixi then needs `import "pixi.js/unsafe-eval"`.
-To draw the player, see `PixiView` (`packages/player/src/render/view.ts`)
-and how the element uses it (`packages/web/src/playback.ts`).
+without `'unsafe-eval'`.
+To draw the player, see `RenderView` (`@swf2es/player/scene`,
+`packages/player/src/scene/view.ts`) and how the element uses it
+(`packages/web/src/playback.ts`).
 
 ### Run a SWF headless in node
 
@@ -256,7 +256,8 @@ packages/
   format/        SWF container and tag parsers (a DoABC's bytes; codegen parses the ABC)
   codegen/       bytecode → ES modules, in AssemblyScript (codegen.wasm), for JIT and AOT
   runtime/       the AS3 language runtime
-  player/        display list, timeline, playerglobal, PixiJS renderer
+  render/        the renderer: scene list, planner and WebGL 2 backend (docs/renderer.md)
+  player/        display list, timeline, playerglobal, and the view that drives render/
   player-hosts/  optional hosts: Node TCP, WebSocket relay, IndexedDB and precompiled module caches
   web/           <swf2es-player>, replaceFlash and ExternalInterface for any page
   cli/           the swf2es ahead-of-time compiler
@@ -264,7 +265,6 @@ apps/
   desktop/       the desktop app: an Electron shell around <swf2es-player>
   site/          the demo site on GitHub Pages: <swf2es-player> on a static page
 vendor/
-  pixijs/        the swf2es fork of PixiJS (MIT), a submodule built by pnpm build
   zlib/          zlib 1.3.2 (swf2es's fork), a submodule compiled into packages/native
   lzma-sdk/      the LZMA SDK 26.05 (public domain), a submodule compiled into packages/native
   minimp3/       minimp3 (CC0), a submodule compiled into packages/native
@@ -292,5 +292,4 @@ for coding agents, and it applies to people just as well.
 ## License
 
 Apache-2.0. Files translated from avmplus are MPL-2.0 and say so at
-the top. PixiJS, in the `vendor/pixijs` submodule, is MIT, under its own
-`LICENSE` there.
+the top.

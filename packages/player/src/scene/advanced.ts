@@ -1,7 +1,6 @@
-// Advanced anti-aliasing (Saffron) in the renderer of swf2es's own: a
-// text's glyphs as one geometry of quads (text/saffron.ts' GlyphQuads),
-// which the backend's glyph program covers pixel by pixel from the glyphs'
-// outlines, as the Pixi view's render/saffron.ts does. A field's quads lie
+// Advanced anti-aliasing (Saffron) in the renderer: a text's glyphs as one
+// geometry of quads (text/saffron.ts' GlyphQuads), which the backend's
+// glyph program covers pixel by pixel from the glyphs' outlines. A field's quads lie
 // in its own pixels, a StaticText's in its definition's, under its matrix.
 import type { GeometryData } from "@swf2es/render";
 import type { StaticTextObject, TextObject } from "../display/display.js";
@@ -17,8 +16,8 @@ const NO_COLORS = new Uint32Array(0);
 /**
  * A text's glyphs as Saffron draws them: the geometry of their quads, null
  * for none, and those of its glyphs, counted in the order its items have
- * them (scene/text.ts), drawn as normal text, as the Pixi view draws a glyph
- * whose tables find no room.
+ * them (scene/text.ts), drawn as normal text: those whose tables find no
+ * room.
  */
 export interface AdvancedGlyphs {
   geometry: GeometryData | null;

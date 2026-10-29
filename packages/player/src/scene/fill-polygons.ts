@@ -1,4 +1,4 @@
-// Crossing contours cannot be passed to Pixi as an outline with interior holes.
+// Crossing contours cannot be filled as an outline with interior holes (fills.ts).
 // Split their filled spans at every vertex and crossing: within each horizontal
 // band the edge order is fixed, and each span is a convex trapezoid.
 

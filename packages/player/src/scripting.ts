@@ -197,7 +197,7 @@ export class Scripting {
   readonly decodeImage: ImageDecode | null;
   /**
    * How BitmapData.draw renders a display object, set by the host once it
-   * has a renderer (a PixiView); null where there is none.
+   * has a renderer (a RenderView); null where there is none.
    */
   drawer: Drawer | null = null;
   /** Optional CPU convolution supplied and released by the host. */

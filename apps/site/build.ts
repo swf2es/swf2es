@@ -1,9 +1,7 @@
-// Assembles the demo site into apps/site/dist/site/, a static directory
-// GitHub Pages serves as it is: the page, the built packages as tsc wrote
-// them under an import map, the Pixi fork's bundle, codegen.wasm,
-// builtin.abc, the demo SWFs and the licences. Every URL in it is
-// relative, so it plays at https://swf2es.github.io/swf2es/ as at a local
-// server's root. Run after `pnpm build`:
+// Assembles the demo site into apps/site/dist/site/, a static directory GitHub Pages serves as it
+// is: the page, the built packages as tsc wrote them under an import map, codegen.wasm,
+// builtin.abc, the demo SWFs and the licences. Every URL in it is relative, so it plays at
+// https://swf2es.github.io/swf2es/ as at a local server's root. Run after `pnpm build`:
 //
 //   pnpm --filter @swf2es/site build      (or node apps/site/build.ts)
 //
@@ -67,7 +65,6 @@ const importMap = {
     "@swf2es/player-hosts/workers": "./modules/player-hosts/workers.js",
     "@swf2es/web": "./modules/web/index.js",
     "@swf2es/codegen/codegen.wasm": "./modules/codegen/codegen.wasm",
-    "pixi.js": "./modules/pixi/pixi.mjs",
   },
 };
 
@@ -162,10 +159,6 @@ copyFileSync(
   join(root, "packages/codegen/dist/codegen.wasm"),
   join(out, "modules/codegen/codegen.wasm"),
 );
-// The Pixi fork's bundle, its chunks and packages with it, if it has them.
-copyTree(join(root, "vendor/pixijs/dist"), join(out, "modules/pixi"), (file) =>
-  /\.(m?js)$/.test(file),
-);
 copyTree(
   join(here, "dist/js"),
   join(out, "app"),
@@ -212,7 +205,6 @@ const licenses = join(out, "licenses");
 mkdirSync(licenses, { recursive: true });
 copyFileSync(join(root, "LICENSE"), join(licenses, "swf2es-Apache-2.0.txt"));
 copyFileSync(join(root, "oracle/avmplus/LICENSE"), join(licenses, "MPL-2.0.txt"));
-copyFileSync(join(root, "vendor/pixijs/LICENSE"), join(licenses, "pixijs-MIT.txt"));
 copyFileSync(join(root, "vendor/minimp3/LICENSE"), join(licenses, "minimp3-CC0.txt"));
 copyFileSync(join(root, "vendor/zlib/LICENSE"), join(licenses, "zlib.txt"));
 copyFileSync(join(root, "vendor/libtess2/LICENSE.txt"), join(licenses, "libtess2-SGI.txt"));
@@ -221,49 +213,31 @@ copyFileSync(
   join(root, "packages/native/LICENSE.third-party"),
   join(licenses, "native-third-party.txt"),
 );
-// What Pixi's bundle takes in of its dependencies, each under its own
-// licence, whose notice goes with it; a package with no licence file of its
-// own is under the MIT licence its package.json names, as its author.
-const mitText = readFileSync(join(root, "vendor/pixijs/LICENSE"), "utf8");
-const PIXI_DEPENDENCIES = [
-  "earcut",
-  "eventemitter3",
-  "tiny-lru",
-  "ismobilejs",
-  "@pixi/colord",
-  "parse-svg-path",
-];
-const pixiDependencies = PIXI_DEPENDENCIES.map((name) => {
-  const dir = join(root, "vendor/pixijs/node_modules", name);
-  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
-    version: string;
-    license: string;
-    author?: string | { name: string };
-  };
-  const file = `pixi-${name.replace("@pixi/", "")}.txt`;
-  const own = readdirSync(dir).find((f) => /^licen[cs]e/i.test(f));
-  if (own) {
-    copyFileSync(join(dir, own), join(licenses, file));
-  } else if (manifest.license === "MIT" && manifest.author) {
-    const author = typeof manifest.author === "string" ? manifest.author : manifest.author.name;
-    writeFileSync(
-      join(licenses, file),
-      mitText.replace(/Copyright \(c\) .*/, `Copyright (c) ${author}`),
-    );
-  } else {
-    throw new Error(`${name}: no licence file to copy`);
-  }
-
-  return `<li><code>${html(name)}</code> ${html(manifest.version)}, ${html(manifest.license)}: <a href="licenses/${file}">licence text</a></li>`;
-});
-
 // Ruffle's MIT terms are the MIT licence's, under Ruffle's copyright, as its files give it.
 writeFileSync(
   join(licenses, "ruffle-MIT.txt"),
-  mitText.replace(
-    /Copyright \(c\) .*/,
-    "Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors",
-  ),
+  `The MIT License (MIT)
+
+Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`,
 );
 
 const list = (files: string[]) =>
@@ -286,7 +260,6 @@ const values = {
   BUILD: build,
   AVMPLUS_SOURCE: html(avmplus ? `${AVMPLUS}/tree/${avmplus}` : AVMPLUS),
   AVMPLUS_COMMIT: html(avmplus ? avmplus.slice(0, 12) : "its default branch"),
-  PIXI_DEPENDENCIES: pixiDependencies.join(""),
   MPL_COUNT: String(mpl.length),
   MPL_FILES: list(mpl),
   RUFFLE_COUNT: String(ruffle.length),

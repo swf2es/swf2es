@@ -1,31 +1,32 @@
-# The renderer (planned)
+# The renderer
 
-The player draws with PixiJS, a fork of it in `vendor/pixijs`. Pixi is a
-general engine: a scene graph of its own, render groups, instruction sets
-rebuilt as the graph changes, pipes and systems behind an extension
-registry, and renderers for WebGL, WebGPU and the 2D canvas. swf2es uses a
-small part of it, and mirrors Flash's display list into Pixi's graph
-(`render/view.ts`) to use even that. Much of `render/` is now spent
-steering Pixi through hooks in the fork (`render/hooks.ts`): the transform
-table draws runs of Graphics through a pipe of its own and plans its rows
-from an upload hook (`render/table.ts`), groups settle and unsettle
-around Pixi's rebuilds (`render/settle.ts`), and filters keep their areas
-and outputs through the fork's filter pipe.
+The player draws with a renderer of swf2es's own, which only draws what
+Flash draws: TypeScript for the GPU calls, data-oriented, in typed
+arrays, with WebAssembly for the kernels that pay for it. Crossing from
+wasm to WebGL costs a call per command, so the commands stay in
+JavaScript. It is `@swf2es/render` and the view that drives it,
+`RenderView` (`packages/player/src/scene/view.ts`).
+
+It replaced PixiJS, which the player drew with through a fork until
+[step 4](#steps). Pixi is a general engine: a scene graph of its own,
+render groups, instruction sets rebuilt as the graph changes, pipes and
+systems behind an extension registry. swf2es used a small part of it,
+mirrored Flash's display list into Pixi's graph to use even that, and
+spent much of its view steering Pixi through hooks in the fork.
 
 A crowded room's frame costs in two places. Its commands, about 12,700
-GL calls a frame, are executed on the main thread of Chrome's GPU
-process, which spends some 17 ms a frame on them. Its fill, some
+GL calls a frame under Pixi, are executed on the main thread of Chrome's
+GPU process, which spent some 17 ms a frame on them. Its fill, some
 20 ms of GPU time on an Intel Iris Xe, is mostly multisampling and blend
 layers drawn again every frame. Sending fewer commands needs the whole
 frame known in one place; drawing fewer pixels needs the layers planned
-from it. Pixi spreads that knowledge over its systems, pipes and render
+from it. Pixi spread that knowledge over its systems, pipes and render
 groups.
 
-Fewer commands is a means, not the goal. Pulled draws took that scene from
-12,700 GL calls to 11,273 ([architecture.md](architecture.md#rendering)).
-Chrome's GPU process went from 17.3 to 16.5 ms a frame, the GPU's own
-time did not move, and the page spent 0.5 ms more planning. Each step
-here is judged by frame time:
+Fewer commands is a means, not the goal. Pulled draws took that scene
+under Pixi from 12,700 GL calls to 11,273: Chrome's GPU process went
+from 17.3 to 16.5 ms a frame, the GPU's own time did not move, and the
+page spent 0.5 ms more planning. Each change is judged by frame time:
 
 - median and p95 frame time;
 - planning and submission time on the page;
@@ -39,9 +40,9 @@ GPU time is measured with the GPU saturated, frames drawn as fast as it
 goes, in clock cycles a render: an integrated GPU lowers its clock when
 it has less to do, so at a scene's own frame rate its timer hides most
 changes. Measured so, the busy room's GPU time is mostly fill: 8×
-multisampling of the back buffer, and blend layers drawn again every
-frame. Fewer commands save the GPU process's time, not the GPU's; both
-are reported.
+multisampling of the stage, and blend layers drawn again every frame.
+Fewer commands save the GPU process's time, not the GPU's; both are
+reported.
 
 The replay is the acceptance test, but it takes minutes and a private
 recording. For each pull request, a synthetic scene in
@@ -57,15 +58,8 @@ busy room's measured mix and checked once against the replay's counts:
 It measures a change in seconds.
 
 Command and draw counts are supporting evidence. `draw-counts.ts` keeps
-them from creeping up unnoticed, but a step that raises them and is
+them from creeping up unnoticed, but a change that raises them and is
 measurably faster updates the baseline on purpose.
-
-This document plans a renderer of swf2es' own, which only draws what Flash
-draws: TypeScript for the GPU calls, data-oriented, in typed arrays,
-with WebAssembly for the kernels that pay for it. Crossing from wasm to
-WebGL costs a call per command, so the commands stay in JavaScript. It
-is built beside Pixi, behind a switch, and replaces it once it draws
-everything Pixi draws and measures better (see [Steps](#steps)).
 
 ## Layers
 
@@ -86,9 +80,9 @@ Each layer can be tested alone. Only the backend calls the GPU.
 
 ### The scene list
 
-The view's sync walks the display list, as it does now, but writes a flat
-list in drawing order in place of updating Pixi containers. It is a
-structure of typed arrays, an entry a drawable or a boundary:
+The view walks the display list and writes a flat list in drawing order
+(`scene.ts`). It is a structure of typed arrays, an entry a drawable or a
+boundary:
 
 - **Draw:** what is drawn (a range of the geometry atlas, a texture, a
   glyph run, a video frame, a 3D object's plane), its row, its blend mode,
@@ -96,26 +90,26 @@ structure of typed arrays, an entry a drawable or a boundary:
   are atlas geometry too: in the busy room, bitmap and gradient fills
   are as common as bitmaps.
 - **Rows:** a row is an object's concatenated transform and colour
-  transform, the table's row today (five texels: the linear part, the
-  translation, the tint, the colour transform's multipliers and offsets).
-  Rows live in a table of their own, indexed by the list.
+  transform (`rows.ts`: the linear part, the translation, the colour
+  transform's multipliers and offsets). Rows live in a table of their
+  own, indexed by the list, and go up together.
 - **Boundaries:** push and pop of a filter layer, a blend layer, a mask
   (its drawing between push and use), a scroll rectangle's clip, and
   `cacheAsBitmap`. Each push names its object's filter or blend records and
   its bounds.
 
-Each node keeps the span of the list its subtree wrote. A frame where only
-transforms or colours changed, an animation's usual frame, writes rows
-and leaves the list alone; the rows it wrote go up in coalesced ranges,
-not one by one.
+The view writes the list and its rows anew each frame. Still to come:
+each node keeps the span of the list its subtree wrote, and a frame where
+only transforms or colours changed, an animation's usual frame, writes
+rows and leaves the list alone; the rows it wrote go up in coalesced
+ranges, not one by one.
 
-Some changes of a transform do invalidate entries, as they redraw today
-(`render/view.ts`):
+Some changes of a transform do invalidate entries:
 
 - a scale-nine object, whose slices depend on its scale;
 - device text, whose texture's resolution follows its scale on screen;
 - a stroke, whose lines are shared only by instances under the same
-  transform (`render/strokes.ts`).
+  settled stretch (`scene/lines.ts`).
 
 Each entry kind states what invalidates it: its geometry, its textures,
 its clip, its filter inputs.
@@ -126,13 +120,12 @@ ranges) costs time in proportion to the whole scene, so it is measured
 before it is relied on. Stable chunks, linked in order, are the
 alternative if it is not cheap enough.
 
-A subtree off the list keeps its span for as long as its nodes are kept
-(`render/spares.ts`), so it can come back without being walked.
+A subtree off the list would keep its span for as long as it is kept, so
+it can come back without being walked.
 
-This replaces Pixi's render groups and instruction sets: the group
-heuristics in [architecture.md](architecture.md#rendering) (64 art objects
-a group, settling, parking and eviction) exist only because a Pixi group
-rebuilds whole.
+This replaces Pixi's render groups and instruction sets, and their
+heuristics (64 art objects a group, settling, parking and eviction),
+which existed only because a Pixi group rebuilt whole.
 
 ### The planner
 
@@ -140,9 +133,9 @@ The planner turns the scene list into a command buffer. It is pure:
 no GPU, no DOM, no clock. What depends on time, such as how long a span
 has stood unchanged, comes in as a frame count. Given a scene list and the
 resources' state, it always plans the same commands, which makes it unit
-tested as data: this list, these commands. The draw-count check
-(`tests/player/draw-counts.ts`) becomes a planner test, alongside the
-browser case it is now.
+tested as data: this list, these commands (`tests/unit/render`). The
+draw-count check (`tests/player/draw-counts.ts`) may become a planner
+test too, alongside the browser case it is now.
 
 It decides:
 
@@ -154,23 +147,22 @@ It decides:
   - plain indexed draws from the atlas, a call a draw with its buffers
     bound once for the run, which beat a multi-draw on short runs;
   - a baked copy of the vertices, for a span that stood unchanged, as a
-    settled group's Graphics are batched today.
+    settled Pixi group's Graphics were batched.
 
   The choice depends on the backend's capabilities and on measured rules
   the planner is given. Each wins somewhere: pulled draws more than
   doubled SwiftShader's GL time on one workload, and small coloured
-  Graphics drawn by the table cost a GPU more than the CPU saved. Runs of
-  a few draws that change every frame want a lighter program than the
+  Graphics drawn by Pixi's transform table cost a GPU more than the CPU
+  saved. Runs of a few draws that change every frame want a lighter program than the
   textured pulled one, such as untextured pulled draws or plain indexed
   draws. In step 0 such a scene took 16.1 ms a frame with the textured
-  program, against 13.0 ms with today's table.
+  program, against 13.0 ms with Pixi's transform table.
 - **Texture batching.** Fills, bitmaps, gradients and glyphs share
   texture units in a run as far as Flash's drawing order allows. Which
   textures a run binds, and where it must break, is part of the plan.
 - **Layers.** Which filter and blend layers to draw, at what size,
-  resolution, padding and samples (the rules now in `render/filters.ts`
-  and `render/compositing.ts`: `blurShrink`, dense samples, kept areas);
-  which kept outputs to reuse while their objects stand still; and where a
+  resolution, padding and samples (`filters.ts`' `blurShrink`, dense
+  samples, kept outputs); which kept outputs to reuse while their objects stand still; and where a
   blend needs a copy of the backdrop or the GPU's blending matches Flash.
   A layer's size is what its draws cover, their geometries' boxes placed
   by their rows and cut by the masks among them (`measure.ts`), not the
@@ -182,7 +174,7 @@ It decides:
   explicit inputs and outputs, sample counts and resolves. One layer can
   hold several targets at once: its source, a filter's intermediates, the
   original image a glow or bevel combines with, and the backdrop a blend
-  reads (`render/filters.ts`). A temporary target is given back after its
+  reads (`webgl/filters.ts`). A temporary target is given back after its
   last use in the frame. A retained one, such as a kept filter output or
   `cacheAsBitmap`, belongs to its object until the object changes or the
   budget reclaims it. The pool is sized by those lifetimes, not by
@@ -208,20 +200,22 @@ GL calls. Planning a frame allocates nothing.
 
 Everything on the GPU, owned in one place:
 
-- **The geometry atlas:** fills and lines as native tessellation writes
-  them, placed by `Ranges` and grown in place (`render/table.ts` today),
-  with the expanded atlas for pulled draws. Textured fills' coordinates
-  do not widen every index's record: step 0's two texels an index
+- **The geometry atlas:** fills and lines as tessellation writes them,
+  copied once into a vertex and an index buffer (`webgl/backend.ts`), a
+  hole left where one goes and the atlas packed again once the holes
+  outweigh what is live; perhaps an expanded atlas for pulled draws.
+  Textured fills' coordinates do not widen every index's record: step 0's two texels an index
   halved what the atlas held. They live in a texture of their own, or
   vertices are fetched by index rather than expanded per index. An
   atlas that outgrows its largest texture, as a long session's contexts
   and the holes they leave can make it, starts again with only what is
   live, rather than failing.
-- **Textures:** bitmaps (`render/bitmaps.ts`), device text, video frames,
-  gradients.
+- **Textures:** bitmaps, device text, video frames, gradients
+  (`textures.ts`).
 - **Render targets:** pooled by size and samples, for layers, cached
   filter outputs and `BitmapData.draw`.
-- **Glyphs:** Saffron's outline data (`render/saffron.ts`).
+- **Glyphs:** Saffron's outline data (the player's `text/saffron.ts`)
+  and advanced text's glyph quads, in an atlas of their own.
 
 Each kind has a budget; what goes over is reclaimed oldest first, never
 while a planned frame uses it. After a lost context everything is made
@@ -253,13 +247,15 @@ WebGL. It is small by design:
   framebuffer binds went from 1,300 to 9, and its GPU time from about
   13 ms to 4.
 - **A state cache,** so no bind, blend or stencil state is set twice.
-- **Uploads** of rows and run chunks once a frame, as the table does.
+- **Uploads** of rows once a frame.
 
-**Anti-aliasing** is the GPU's multisampling, as the Pixi view's is
-(architecture.md, "Stage quality"): the host sets the samples by the
-stage's quality, and the stage is drawn into multisampled buffers the
-canvas's size, resolved into a texture and then onto the canvas, as a
-resolve must keep its format and an opaque canvas has no alpha. Without
+**Anti-aliasing** is the GPU's multisampling
+([architecture.md](architecture.md#showing-a-player)): the host sets the
+samples by the stage's quality, and the stage is drawn into multisampled
+buffers the canvas's size, resolved into a texture and then onto the
+canvas, as a resolve must keep its format, which the canvas's need not
+be: an opaque canvas has no alpha, and SwiftShader refuses a resolve
+onto one with it. Without
 multisampling, a frame in which an erase or alpha blend clears the stage
 itself, as adl clears it, is drawn into a layer the canvas's size and
 copied onto the canvas, so that the blends after it read that alpha. A blend
@@ -288,10 +284,10 @@ a context, and each could change GL state behind the other's cache. A
 stale cache draws wrong, and resetting everything at each handoff spends
 the commands saved: in step 0, resetting Pixi's state after each run
 cost 1.3 ms a frame, more than the prototype saved. So the context's
-state has a single cache from the first draw, which Stage3D's surfaces
-use too, and they compose with the display list in one context without
-copies. With the switch on, Pixi does not draw at all, so it never
-shares the context with the backend.
+state has a single cache from the first draw (`@swf2es/context3d/device`),
+which Stage3D's surfaces are to use too, so that they compose with the
+display list in one context without copies; for now they draw on canvases
+of their own below the stage's.
 
 A WebGPU backend later implements the same interface: the command buffer
 maps onto a render pass, and a span that stands still onto a render
@@ -299,14 +295,14 @@ bundle. An experimental backend, such as Vello's, could implement it too.
 
 ## Alongside
 
-- **Filters and blend modes** become the passes the planner emits: blur,
+- **Filters and blend modes** are the passes the planner emits: blur,
   glow, shadow, bevel, gradient glow and bevel, colour matrix, convolution
-  and displacement map, as they are drawn now to match adl. The filters'
-  shaders and `blurShrink` moved unchanged to `filter-shaders.ts` and
-  `filters.ts`, where the Pixi view reads them too; the player works out
-  each filter's values, padding and insets (`scene/filters.ts`), and a
-  filtered layer is measured as Pixi's filter system measured it. The
-  blend formulas moved from `render/blend.ts` to the composite program.
+  and displacement map, drawn to match adl. The filters' shaders and
+  `blurShrink` are `filter-shaders.ts` and `filters.ts`, moved unchanged
+  from the Pixi view; the player works out each filter's values, padding
+  and insets (`scene/filters.ts`), and a filtered layer is measured as
+  Pixi's filter system measured it, which the filters' exactness rules
+  were found with. The blend formulas are the composite program's.
 - **Text** stays laid out by the player. The renderer sees glyph runs:
   Saffron's quads, or a device text texture.
 - **`BitmapData.draw`** plans a scene list into a render target with the
@@ -320,13 +316,13 @@ bundle. An experimental backend, such as Vello's, could implement it too.
 
 ## Package
 
-The renderer becomes `@swf2es/render`, which depends on `context3d` alone
+The renderer is `@swf2es/render`, which depends on `context3d` alone
 and knows nothing about AS3, timelines or display objects, as codegen
 knows nothing about the runtime. The player depends on it and feeds it
 scene lists. Like context3d, its core (scene list, planner, command
 buffer) loads no DOM types, and its WebGL backend is a sub-path
-(`@swf2es/render/webgl`). The table in `tests/unit/boundaries.test.ts`
-and [architecture.md](architecture.md#packages) change with the package.
+(`@swf2es/render/webgl`); `tests/unit/boundaries.test.ts` and
+[architecture.md](architecture.md#packages) hold it to that.
 
 ## Steps
 
@@ -338,39 +334,28 @@ from 784 to 51 KB; on a mostly still scene with small edits, frames from
 4.1 to 1.0 ms. It lost where every short run changed every frame. Most of
 its work and all of its bugs were in interleaving with Pixi: runs bounded
 by Pixi's render groups, change signals borrowed from Pixi, a colour
-transform Pixi never hears of. Taking object kinds from Pixi a step at a
-time would build that interleaving and then take it apart. So the
-renderer is built beside Pixi instead:
+transform Pixi never heard of. So the renderer was built beside Pixi
+instead:
 
-1. **A renderer behind a switch,** on `dev`, off by default. With the
-   switch on it owns the whole frame and the GL context: its own sync
-   from the display list, writing the scene list and rows from the
-   player's change signals (transforms and colours write rows, structure
-   writes spans), the planner, resources and backend. Pixi stays the
-   default, and takes only fixes the player meets, not upstream's
-   releases.
-2. **Grown to completeness,** in pull requests each small enough to
-   review, in about this order:
-   - shapes, bitmaps and text;
-   - masks and scroll clips;
-   - blend modes;
-   - filters;
-   - `BitmapData.draw`;
-   - 3D planes;
-   - context loss.
-
-   The player's Flash references, the corpus and the draw counts run
-   with the switch on as well as off. What passes with it on is how
-   complete it is, and a reference that passed may not fail again.
-3. **The default flipped** once every reference passes with the switch
-   on and it measures better on the three scenes, on an integrated GPU
-   and a discrete one, and no worse under software GL, which CI draws
-   with and a player without a usable GPU falls back to: there the
-   planner chooses strategies that suit it, as pulled draws did not.
-4. **Pixi removed:** its containers, render groups, settling, pools,
-   spare batchers and the fork.
+1. **A renderer behind a switch** (done), owning the whole frame and the
+   GL context when on: its own walk of the display list, the planner,
+   resources and backend.
+2. **Grown to completeness** (done), in pull requests each small enough
+   to review: shapes, bitmaps and text; masks and scroll clips; blend
+   modes; filters; `BitmapData.draw`; 3D planes; context loss. The
+   player's Flash references, the corpus and the draw counts ran with the
+   switch on as well as off, and a reference that passed with it on could
+   not fail again.
+3. **The default flipped** (done, #650) for the web element, the demo
+   site and the desktop app, once every reference case, the corpus and
+   the context-loss, resize, web, site and desktop checks passed with it.
+4. **Pixi removed** (done): the Pixi view, its containers, render groups,
+   settling, pools, batchers and transform table, the fork in
+   `vendor/pixijs` and its build.
 5. **WebGPU,** behind the same command buffer.
 
-Until the default flips, each pull request is judged by what it adds to
-the switch's completeness and by its measurements, not by improving the
-default renderer.
+What [the scene list](#the-scene-list) and [the planner](#the-planner)
+still describe as to come (spans kept across frames, plans reused, the
+choice of strategy a run) is judged by its measurements on the three
+scenes, on an integrated GPU and a discrete one, and under software GL,
+which CI draws with and a player without a usable GPU falls back to.

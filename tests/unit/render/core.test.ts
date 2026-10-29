@@ -474,7 +474,7 @@ test("a filtered layer with a layer in it that is not held is drawn in its place
   ]);
 });
 
-test("a filtered layer is measured as Pixi's filter system measured it, padded past the target", () => {
+test("a filtered layer is measured as PixiJS's filter system measures it, padded past the target", () => {
   const geometries = new Geometries();
   const rows = new Rows();
   const scene = new SceneList();

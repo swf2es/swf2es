@@ -888,8 +888,8 @@ test("an AVM1 SWF from bytes closed or unloaded before the frame's end never com
 test("content unloaded, or its player destroyed, is told to the renderer, which keeps what it drew for others", {
   skip,
 }, async () => {
-  // A renderer keeps the nodes of objects off the list for new objects of their characters: kept
-  // past an unload, they would keep the SWF's characters (render/view.ts, dropSpares).
+  // A renderer that keeps what it drew of objects off the list for new objects of their characters
+  // lets go of it at an unload, which it counts, or it would keep the SWF's characters.
   const { unloads } = await import("../../../../packages/player/dist/display/display.js");
   const { scripting, player, rt, loader, content } = await avm1Loading();
   scripting.loads.requestLoad(loader, avm1Swf());

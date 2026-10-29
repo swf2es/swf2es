@@ -1,6 +1,5 @@
-// A 3D display object's bitmap and the quad it is drawn through, as both
-// views draw it (render/three.ts for the Pixi view, scene/view.ts for the
-// renderer of swf2es's own): what it and its children draw, in its own
+// A 3D display object's bitmap and the quad it is drawn through, as the
+// renderer draws it (scene/view.ts): what it and its children draw, in its own
 // space, a pixel of it a texel, drawn into a bitmap at SAMPLES a side and
 // averaged down, with a texel of nothing around; and the bitmap's quad
 // placed through the object's plane in perspective (display/perspective.ts)

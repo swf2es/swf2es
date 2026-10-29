@@ -1,5 +1,5 @@
 // The display list the player owns: display objects, containers and
-// movie clips, as Flash has them. A renderer mirrors it (see render/view.ts) and
+// movie clips, as Flash has them. The renderer walks it (see scene/view.ts) and
 // never decides its order. Each kind of object has a module of its own; this
 // one gathers them for the rest of the player, which imports them from here.
 export { BitmapObject } from "./bitmapobject.js";

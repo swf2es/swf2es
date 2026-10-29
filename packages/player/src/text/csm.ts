@@ -106,7 +106,8 @@ export function setCsmTable(
  * Whether Flash takes a colour, 0xRRGGBB, for light text: its luma,
  * 30:59:11, over 200 of 255. It is the colour as drawn, under the
  * object's colour transform. This and cutoffs mirror what
- * render/saffron.ts' vertex shader does in GLSL, which draws by it: a
+ * the renderer's glyph program (@swf2es/render's webgl/programs.ts) does
+ * in GLSL, which draws by it: a
  * change to one is a change to the other.
  */
 export function isLight(color: number): boolean {
@@ -133,7 +134,7 @@ export function csmTables(font: {
  * 200) and `sharpness` (-400 to 400), into `out` as inside, outside: each
  * moves them by a fiftieth of a pixel per pixel of size at its end of its
  * range, thickness both outward, sharpness the two together; met, they
- * stay where they met. render/saffron.ts' shader does the same per glyph.
+ * stay where they met. The renderer's glyph program does the same per glyph.
  */
 export function cutoffs(
   table: CsmTable,

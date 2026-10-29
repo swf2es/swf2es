@@ -1,16 +1,14 @@
-// A shape layer's fills as geometries of the renderer's (@swf2es/render):
-// each fill tessellated (fills.ts), in order, a geometry for each stretch of
-// solid fills and one for each textured fill, a bitmap's or a gradient's,
-// its vertices carrying where they sample in texels, as Pixi's matrices
-// would map them; then drawTriangles' textured triangles, a geometry each
-// mesh. What is left out is counted.
+// A shape layer's fills as geometries of the renderer's (@swf2es/render): each fill tessellated
+// (fills.ts), in order, a geometry for each stretch of solid fills and one for each textured fill,
+// a bitmap's or a gradient's, its vertices carrying where they sample in texels; then
+// drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
 
 import type { Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
 import type { GradientFill, ImageFill, Path, ShapeLayer, TriangleMesh } from "../display/shapes.js";
-import { convex } from "../render/fill-polygons.js";
+import { convex } from "./fill-polygons.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
@@ -162,7 +160,7 @@ function sampling(
   };
 }
 
-/** The texels a radial gradient's texture has across `pixels` of its region, as the Pixi view computes it. */
+/** The texels a radial gradient's texture has across `pixels` of its region. */
 export function radialTexels(pixels: number): number {
   return Math.min(RADIAL_MAX, pixels);
 }
@@ -230,7 +228,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
   for (let i = 0; i < layer.fills.length; i++) {
     const { fill, contours } = layer.fills[i];
     const textured = fill.type === "image" || fill.type === "gradient" ? fill : null;
-    // A paint whose matrix collapses the plane covers nothing, as in the Pixi view.
+    // A paint whose matrix collapses the plane covers nothing.
     if (textured) {
       const m = textured.matrix;
       if (m.a * m.d - m.b * m.c === 0) {

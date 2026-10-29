@@ -1,5 +1,4 @@
 import type { Swf2esPlayerElement } from "@swf2es/web";
-import type { PixiView } from "../../packages/player/dist/index.js";
 
 // The web test's page (run.ts writes its HTML): <swf2es-player>s and Flash
 // tags for replaceFlash, the page's functions the SWF calls, and what
@@ -185,8 +184,6 @@ const loading = import("@swf2es/web").then((web) => {
     },
     socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
     cache: true,
-    // The element's own renderer, or Pixi where the page asks for it (chrome.ts, SWF2ES_RENDERER).
-    renderer: new URLSearchParams(location.search).has("pixi") ? "pixi" : undefined,
   });
   return { web, replaced: web.replaceFlash() };
 });
@@ -401,16 +398,9 @@ async function churn(n: number, source = "embed.swf") {
     await p.ready;
     await frames(2);
     if (source === "text.swf") {
-      const drawer = p.player?.scripting?.drawer as
-        | PixiView
-        | { textRuns: number }
-        | null
-        | undefined;
-      // Pixi's scene, which holds the text it measured; the renderer of swf2es's own's view,
-      // which holds the runs it drew.
-      const scene = drawer && "stage" in drawer ? drawer.stage : drawer;
-      const drew = scene && ("textRuns" in scene ? scene.textRuns > 0 : scene.children.length > 0);
-      if (!scene || !drew) {
+      // The renderer's view, which holds the runs of device text it drew.
+      const scene = p.player?.scripting?.drawer as { textRuns: number } | null | undefined;
+      if (!scene || !(scene.textRuns > 0)) {
         throw new Error("text scene did not draw");
       }
 

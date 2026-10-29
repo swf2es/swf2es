@@ -327,7 +327,7 @@ export class Tessellator {
   }
 
   /**
-   * Use as PixiView's fillTessellator. A fill alone takes its contours
+   * Use as RenderView's fillTessellator. A fill alone takes its contours
    * flattened already; a layer takes them as path commands; and a layer's
    * lines take the layer as the player packs it (`lines`).
    */

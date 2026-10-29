@@ -6,6 +6,6 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["page.ts", "hidden-groups-page.ts", "bitmap-bench-page.ts"],
+  "include": ["page.ts", "bitmap-bench-page.ts"],
   "exclude": []
 }

@@ -1,24 +1,21 @@
-// Times the player on a synthetic SWF in headless Chrome: a few shape
-// characters placed many times over, some moving each frame, some turning
-// (which draws their lines again), a few replaced; what a busy timeline
-// does. Prints the median and p90 of a frame's tick (the timeline), sync
-// (the display list brought to Pixi), draw (Pixi's instructions, batches
-// and GL calls) and gl (the wait for GL to finish them) after the first
-// frames warm up. Chrome's software GL draws by default, so the draw is CPU
-// time that compares run to run on one machine; --gpu lets Chrome use the
-// machine's GPU, for what a user would see, and the output names which drew.
+// Times the player on a synthetic SWF in headless Chrome: a few shape characters placed many times
+// over, some moving each frame, some turning (which draws their lines again), a few replaced; what
+// a busy timeline does. Prints the median and p90 of a frame's tick (the timeline), draw (the walk
+// of the display list, the plan and its GL calls) and gl (the wait for GL to finish them) after the
+// first frames warm up. Chrome's software GL draws by default, so the draw is CPU time that
+// compares run to run on one machine; --gpu lets Chrome use the machine's GPU, for what a user
+// would see, and the output names which drew.
 //
-// --back-buffer makes the renderer as a host that draws blend modes must,
-// with Pixi's back buffer. --antialias makes it multisampled, as a host
-// made with `antialias: true`; with --back-buffer, what blends and
-// filters resolve of it (the Pixi fork's bounded resolves) counts in the draw and gl.
+// --antialias makes the renderer multisampled, as a host made with
+// `antialias: true`: what blends and filters resolve of it counts in the
+// draw and gl.
 //
 // --rig N plays instead N instances of one animated character, a sprite of
 // 12 outlined parts that turn and swell on a loop of 24 frames, all in
 // step, as a game's crowd of the same creature does: what the lines cost
 // when only their transforms change. --swap has each part taken off and
 // another put in its place on every frame instead, as a frame-by-frame
-// timeline does: what changing children costs, render group rebuilds and all.
+// timeline does: what changing children costs.
 // --fresh has the parts swell to a new size on every frame, never coming
 // round again, so each frame strokes their lines anew: new contexts for the
 // renderer to take on, as objects that turn and stretch in a game give it.
@@ -26,12 +23,12 @@
 // filtered part writes its filters on every frame: each part filtered on
 // its own, run again as it turns. --glide has the parts slide instead of
 // turning, a move alone, whose filters' output is kept. --filtered K
-// blurs only every K-th part, as --blurred does all: each filter ends the
-// transform table's run (render/table.ts), which then draws only the parts
-// between two, as in a game's creatures with a glow on every few parts.
+// blurs only every K-th part, as --blurred does all: each filter ends a
+// run, which then draws only the parts between two, as in a game's
+// creatures with a glow on every few parts.
 // The rig has 12 parts, so any K of 12 or more blurs the first alone.
 // --added adds the blurred parts to what is below (blend mode add), as a
-// game's glowing effects do; with --back-buffer, as blends need it.
+// game's glowing effects do.
 // --colored gives the blurred parts a colour transform, an alpha and
 // offsets, which their chain's last pass applies to what the blur made;
 // --fade changes the alpha on every frame, as a tween fades a creature.
@@ -46,7 +43,7 @@
 // parts turn inside a parent scaled unevenly, as a game's limbs do inside
 // a body squashed for a pose: each turn a stretch of its own.
 // --pace MS waits that many milliseconds after each frame, so that what is
-// kept by age (lines idle, render/strokes.ts) ages between the loop's turns.
+// kept by age (lines idle, scene/lines.ts) ages between the loop's turns.
 //
 // --masks N plays instead N panels of a scrolling list, each a sprite of
 // 20 rows clipped by a rectangle on the timeline (clipDepth), the rows
@@ -69,20 +66,8 @@
 // shapes, the timeline's: what leaving costs, with glyphs that share a
 // font's fills.
 //
-// --no-table draws the Graphics drawn alone each with a call of its own,
-// as Pixi does, not through the transform table (render/table.ts): the two
-// timed apart. --min-run N has the table draw only runs of N draws or
-// more as one multi-draw, to time where that starts to gain; it draws the
-// shorter from its atlas a call a draw, or with --no-loop leaves them to Pixi.
-// --multi-draw has the table make those multi-draws, as it did before it
-// drew each run in one call that fetches its vertices (pulled draws), and
-// --pull has it pull them, to time the two apart; left to it, it pulls
-// them on a GPU and makes multi-draws under software GL. --min-run and
-// --no-loop are about the multi-draws alone.
-//
-// --counts counts what the frames ask of GL and of Pixi's pipes (perFrame
-// in --json's output), each call wrapped: left out, the frames are timed
-// unwrapped.
+// --counts counts what the frames ask of GL (perFrame in --json's
+// output), each call wrapped: left out, the frames are timed unwrapped.
 //
 // --scripted N plays instead N rigs whose 12 parts are clips of a class
 // with a frame script, each frame taken off and new ones put in their
@@ -97,7 +82,6 @@
 // --branches N places N coloured branches of 128 shapes. A quarter replace
 // one child each frame; the rest stay still, as scenery beside animated art.
 // --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
-// --nested-groups also renders nested Pixi groups while they leave and return.
 //
 // --town N plays instead a busy town: N characters, each of its own parts
 // (outlined in hairlines, as a game's are), on loops of different lengths:
@@ -108,7 +92,7 @@
 // fro, all of them clips of a class with frame scripts. Among
 // them scenery: N clips of eight clips of two shapes, every fourth glowing,
 // every fifth pulsing. What a crowded town's characters cost: new lines for
-// new stretches, filters, render group rebuilds and the frame's walks.
+// new stretches, filters and the frame's walks.
 //
 // --pipelined waits for the GPU only every 30 frames, not after each, so
 // that its work goes on behind the next frames' as a page's does: the
@@ -137,26 +121,22 @@
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
 //
-// Each run also gives per-frame means of what the renderer did: GL draw
-// calls, Pixi's unbatched Graphics and batches, render group rebuilds and
-// their time, contexts tessellated with their vertices and time, buffer
-// uploads and bytes, texture uploads, program switches, and the table's
-// runs and draws. --allocs samples the heap and gives the KB the frames
-// allocated, the player's start left out; --profile FILE also writes the
-// sampled profile there, for DevTools' Memory panel to open. After the
-// frames, with the renderer still alive, it gives what the page holds after
-// a full collection, the JS heap and array buffers' data apart; --snapshot
-// FILE also writes a heap snapshot then.
+// With --counts, each run also gives per-frame means of what the renderer asked of GL: draw calls
+// and the draws they make, program, vertex array and framebuffer binds, uniform calls, stencil
+// state and clears, buffer and texture uploads and their bytes, readbacks, and lines stroked anew.
+// --allocs samples the heap and gives the KB the frames allocated, the player's start left out;
+// --profile FILE also writes the sampled profile there, for DevTools' Memory panel to open. After
+// the frames, with the renderer still alive, it gives what the page holds after a full collection,
+// the JS heap and array buffers' data apart; --snapshot FILE also writes a heap snapshot then.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
-//     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--nested-groups] [--frames N] [--idle K]
-//     [--swap] [--gpu] [--back-buffer] [--antialias] [--allocs [--profile FILE]] [--no-table]
-//     [--min-run N] [--no-loop] [--multi-draw | --pull] [--counts] [--pace MS] [--hover]
-//     [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
+//     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--frames N] [--idle K]
+//     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
+//     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
@@ -181,7 +161,6 @@ const fade = args.includes("--fade");
 const branches = option("branches", 0);
 const toggleBranches = option("toggle-branches", 0);
 const toggleEvery = Math.max(1, option("toggle-every", 1));
-const nestedGroups = args.includes("--nested-groups");
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const masks = option("masks", 0);
@@ -1349,30 +1328,21 @@ if (args.includes("--write-swf")) {
   process.exit(0);
 }
 
-const result = await benchPlayer(
-  swf,
-  frames,
-  args.includes("--gpu"),
-  args.includes("--back-buffer"),
+const result = await benchPlayer(swf, frames, {
+  gpu: args.includes("--gpu"),
   idleRenders,
-  toggleBranches > 0 ? 0 : toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
-  args.includes("--antialias"),
+  toggle: toggleBranches > 0 ? 0 : toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
+  antialias: args.includes("--antialias"),
   toggleEvery,
-  nestedGroups,
-  args.includes("--allocs"),
-  !args.includes("--no-table"),
-  args.includes("--min-run") ? option("min-run", 1) : undefined,
-  profile,
+  allocs: args.includes("--allocs"),
+  profilePath: profile,
   pace,
-  cpuProfile,
-  args.includes("--pipelined") ? 30 : 1,
-  args.includes("--hover"),
-  args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
-  !args.includes("--no-loop"),
-  false,
-  args.includes("--counts"),
-  args.includes("--multi-draw") ? false : args.includes("--pull") ? true : undefined,
-);
+  cpuProfilePath: cpuProfile,
+  finishEvery: args.includes("--pipelined") ? 30 : 1,
+  hover: args.includes("--hover"),
+  snapshotPath: args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
+  metered: args.includes("--counts"),
+});
 if (result.error) {
   console.error(result.error);
   process.exit(1);
@@ -1393,10 +1363,9 @@ function perFrame(frames: Record<string, number>[]): Record<string, number> {
 }
 
 const tick = result.tick.slice(WARMUP);
-const sync = result.sync.slice(WARMUP);
 const draw = result.draw.slice(WARMUP);
 const gl = result.gl.slice(WARMUP);
-const total = tick.map((t, i) => t + sync[i] + draw[i] + gl[i]);
+const total = tick.map((t, i) => t + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
@@ -1436,14 +1405,13 @@ const summary = {
   renderer: result.renderer,
   firstFrameMs: result.first,
   tick: stats(tick),
-  sync: stats(sync),
   draw: stats(draw),
   gl: stats(gl),
   frame: stats(total),
   // The frames' mean, whole: pipelined, the time the slower of the page and the GPU takes a frame.
   frameMean: Math.round((total.reduce((a, b) => a + b, 0) / total.length) * 100) / 100,
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
-  // Each counter's mean over the measured frames: draws, rebuilds, tessellation, uploads.
+  // Each counter's mean over the measured frames: draws, binds, uploads, lines stroked.
   ...(args.includes("--counts") ? { perFrame: perFrame(result.meters.slice(WARMUP)) } : {}),
   ...(args.includes("--allocs")
     ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
@@ -1452,7 +1420,6 @@ const summary = {
     ? {
         attached: stats(total.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
         detached: stats(total.filter((_, i) => (i + WARMUP + 2) % 2 === 1)),
-        attachedSync: stats(sync.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
         attachedDraw: stats(draw.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
         attachedGl: stats(gl.filter((_, i) => (i + WARMUP + 2) % 2 === 0)),
       }
@@ -1481,9 +1448,7 @@ function selfTimes(path: string, measured: number): { areas: string[]; functions
     const url = frame.url.replace(/[?#].*/, "");
     const area = /^\(/.test(frame.functionName)
       ? frame.functionName
-      : /pixi/.test(url)
-        ? "pixi"
-        : (/\/(player|runtime|codegen|format)\//.exec(url)?.[1] ?? (url ? "other" : "native"));
+      : (/\/(player|render|runtime|codegen|format)\//.exec(url)?.[1] ?? (url ? "other" : "native"));
     const name = `${frame.functionName || "(anonymous)"} ${url.split("/").slice(-2).join("/")}:${frame.lineNumber + 1}`;
     functions.set(name, (functions.get(name) ?? 0) + dt);
     areas.set(area, (areas.get(area) ?? 0) + dt);
@@ -1511,7 +1476,6 @@ if (args.includes("--json")) {
     `  held    ${summary.retainedMb.heap} MB of JS heap and ${summary.retainedMb.buffers} MB of array buffers after a full collection`,
   );
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
-  console.log(`  sync    median ${ms(summary.sync.median)}  p90 ${ms(summary.sync.p90)}`);
   console.log(`  draw    median ${ms(summary.draw.median)}  p90 ${ms(summary.draw.p90)}`);
   console.log(`  gl      median ${ms(summary.gl.median)}  p90 ${ms(summary.gl.p90)}`);
   if (idleRenders > 0) {
@@ -1521,10 +1485,10 @@ if (args.includes("--json")) {
   }
   if (toggleBranches > 0 || toggle > 0 || toggleStatic > 0) {
     // Frame k (from 2) takes the objects off on odd k; the warm-up's 10 are left out.
-    const off = sync.filter((_, i) => (i + WARMUP + 2) % 2 === 1);
-    const on = sync.filter((_, i) => (i + WARMUP + 2) % 2 === 0);
+    const off = draw.filter((_, i) => (i + WARMUP + 2) % 2 === 1);
+    const on = draw.filter((_, i) => (i + WARMUP + 2) % 2 === 0);
     console.log(
-      `  sync    off median ${ms(quantile(off, 0.5))}  back median ${ms(quantile(on, 0.5))}`,
+      `  draw    off median ${ms(quantile(off, 0.5))}  back median ${ms(quantile(on, 0.5))}`,
     );
   }
 

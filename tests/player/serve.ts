@@ -29,7 +29,6 @@ const mounts: [string, string][] = [
   ["/web/", join(root, "packages/web/dist/")],
   // The ABCs a SWF's code links against, the player tests' own copies (libraries.ts).
   ["/libraries/", join(here, "out/libraries/")],
-  ["/pixi/", join(root, "packages/player/node_modules/pixi.js/dist/")],
   ["/page/", here],
 ];
 
@@ -58,7 +57,6 @@ export const importMap = {
     "@swf2es/player-hosts/workers": "/player-hosts/workers.js",
     "@swf2es/web": "/web/index.js",
     "@swf2es/codegen/codegen.wasm": "/codegen/codegen.wasm",
-    "pixi.js": "/pixi/pixi.mjs",
   },
 };
 

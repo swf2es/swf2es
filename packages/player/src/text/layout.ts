@@ -18,7 +18,7 @@ export interface LaidChar {
   x: number;
   /**
    * Where advanced text's pen stood as it started the character, in
-   * fractions of a twip, which Saffron draws it at (render/saffron.ts);
+   * fractions of a twip, which Saffron draws it at (scene/advanced.ts);
    * x is that truncated, where its boundaries start.
    */
   at: number;

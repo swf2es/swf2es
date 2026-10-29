@@ -1,7 +1,7 @@
 // A host resizing its renderer while filters inside filters play, as a
-// page fitting the stage to a window being resized does: Pixi's texture
-// pool lets go of the textures it kept for the old size, and the frames
-// drawn after must not throw.
+// page fitting the stage to a window being resized does: the targets kept
+// for the old size are let go of, and the frames drawn after must not
+// throw.
 import assert from "node:assert/strict";
 import * as w from "../swf-writer.ts";
 import { playResized } from "./chrome.ts";
@@ -24,8 +24,7 @@ const square = w.shape({
   ],
 });
 // Three levels of filtered sprites, the inner one moving every frame, and
-// enough draws beside them for the view to give the middle one a render
-// group of its own.
+// many draws beside them.
 const inner = w.sprite(2, 2, [
   w.place({ depth: 1, character: 1, blurs: [4] }),
   w.showFrame(),

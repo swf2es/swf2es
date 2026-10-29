@@ -79,7 +79,6 @@ function moduleMounts(): Map<string, string> {
     ["player", dist("@swf2es/player")],
     ["player-hosts", dist("@swf2es/player-hosts/indexeddb")],
     ["web", dist("@swf2es/web")],
-    ["pixi", dist("pixi.js", player)],
   ]);
 }
 

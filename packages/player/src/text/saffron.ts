@@ -1,6 +1,5 @@
-// What both views draw advanced anti-aliasing (Saffron) from, apart from
-// their renderers (render/saffron.ts for the Pixi view, scene/advanced.ts
-// for the renderer of swf2es's own): the store of glyphs' outlines as
+// What the renderer draws advanced anti-aliasing (Saffron) from, apart from
+// its drawing (scene/advanced.ts): the store of glyphs' outlines as
 // segments, x0 y0 x1 y1 a texel, which a shader goes through for each
 // pixel; and the quads of a text's glyphs, each vertex its corner and what
 // the shader needs of its glyph (GlyphQuads).
