@@ -48,6 +48,20 @@ function fillsOnly(layer: ShapeLayer): boolean {
   return !layer.strokes.length && !layer.meshes && !layer.extent;
 }
 
+/** The points lineTo, curveTo and cubicCurveTo pass on, which command copies. */
+const LINE_POINTS = [0, 0];
+const CURVE_POINTS = [0, 0, 0, 0];
+const CUBIC_POINTS = [0, 0, 0, 0, 0, 0];
+
+/** `kind` and `points` onto the last of `paths`. */
+function append(paths: Path[], kind: number, points: readonly number[]): void {
+  const path = paths[paths.length - 1];
+  path.push(kind);
+  for (let i = 0; i < points.length; i++) {
+    path.push(points[i]);
+  }
+}
+
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
   /** Counts the changes to `layers`, which change in place: what is kept of them goes by it. */
@@ -65,8 +79,13 @@ export class Drawing {
   private stroke: Stroke | null = null;
   /** The line closing the open contour, or the one endFill closed, while a line drawn on may take it away. */
   private closing: { stroke: Stroke; close: Close } | null = null;
-  /** A point of the open contour off its start, for whether it leaves the line through them. */
-  private toward: [number, number] | null = null;
+  /**
+   * A point of the open contour off its start, for whether it leaves the
+   * line through them: its offset from the start, while `heading`.
+   */
+  private towardX = 0;
+  private towardY = 0;
+  private heading = false;
   /** Whether the open contour has an area: one along a line has no closing line, which would retrace it. */
   private bent = false;
   /** Whether drawPath drew the open contour, which Flash never closes with a line. */
@@ -178,15 +197,27 @@ export class Drawing {
   }
 
   lineTo(x: number, y: number): void {
-    this.command(LINE, [x, y]);
+    LINE_POINTS[0] = x;
+    LINE_POINTS[1] = y;
+    this.command(LINE, LINE_POINTS);
   }
 
   curveTo(cx: number, cy: number, x: number, y: number): void {
-    this.command(CURVE, [cx, cy, x, y]);
+    CURVE_POINTS[0] = cx;
+    CURVE_POINTS[1] = cy;
+    CURVE_POINTS[2] = x;
+    CURVE_POINTS[3] = y;
+    this.command(CURVE, CURVE_POINTS);
   }
 
   cubicCurveTo(c1x: number, c1y: number, c2x: number, c2y: number, x: number, y: number): void {
-    this.command(CUBIC, [c1x, c1y, c2x, c2y, x, y]);
+    CUBIC_POINTS[0] = c1x;
+    CUBIC_POINTS[1] = c1y;
+    CUBIC_POINTS[2] = c2x;
+    CUBIC_POINTS[3] = c2y;
+    CUBIC_POINTS[4] = x;
+    CUBIC_POINTS[5] = y;
+    this.command(CUBIC, CUBIC_POINTS);
   }
 
   drawRect(x: number, y: number, w: number, h: number): void {
@@ -492,7 +523,7 @@ export class Drawing {
       const [ox, oy] = origin;
       const away = ox !== this.x || oy !== this.y;
       this.fill.contours.push(away ? [MOVE, ox, oy, LINE, this.x, this.y] : [MOVE, ox, oy]);
-      this.toward = null;
+      this.heading = false;
       this.bent = false;
       if (away) {
         this.bend([this.x, this.y]);
@@ -620,7 +651,7 @@ export class Drawing {
 
   private beginContour(): void {
     this.begin((this.fill as { contours: Path[] }).contours);
-    this.toward = null;
+    this.heading = false;
     this.bent = false;
   }
 
@@ -630,13 +661,16 @@ export class Drawing {
     paths.push([MOVE, this.x, this.y]);
   }
 
-  private command(kind: number, points: number[]): void {
+  /** `points` added to the open contour and path with `kind`, copied: they may be scratch. */
+  private command(kind: number, points: readonly number[]): void {
     this.version++;
     this.unclose();
-    for (const paths of [this.fill?.contours, this.stroke?.paths]) {
-      if (paths) {
-        paths[paths.length - 1].push(kind, ...points);
-      }
+    if (this.fill) {
+      append(this.fill.contours, kind, points);
+    }
+
+    if (this.stroke) {
+      append(this.stroke.paths, kind, points);
     }
 
     this.x = points[points.length - 2];
@@ -648,25 +682,29 @@ export class Drawing {
   }
 
   /** Whether the contour's new points, control points too, leave the line it has run along. */
-  private bend(points: number[]): void {
+  private bend(points: readonly number[]): void {
     const contour = this.fill?.contours[this.fill.contours.length - 1];
     if (this.bent || !contour) {
       return;
     }
 
-    const [sx, sy] = [contour[1], contour[2]];
+    const sx = contour[1];
+    const sy = contour[2];
     for (let i = 0; i < points.length; i += 2) {
       const dx = points[i] - sx;
       const dy = points[i + 1] - sy;
-      if (!this.toward) {
+      if (!this.heading) {
         if (dx || dy) {
-          this.toward = [dx, dy];
+          this.towardX = dx;
+          this.towardY = dy;
+          this.heading = true;
         }
 
         continue;
       }
 
-      const [tx, ty] = this.toward;
+      const tx = this.towardX;
+      const ty = this.towardY;
       if (
         Math.abs(tx * dy - ty * dx) >
         1e-9 * (Math.abs(tx) + Math.abs(ty)) * (Math.abs(dx) + Math.abs(dy))
