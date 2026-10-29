@@ -76,8 +76,9 @@ export interface PlaneState {
 }
 
 export class Planes {
-  /** Each 3D object's kept bitmap, and its quad as last made (drawPlane). */
-  readonly keeps: WeakMap<DisplayObject, KeepHandle> = new WeakMap();
+  /** Each 3D object's kept bitmap (drawPlane). */
+  readonly keptBitmaps: WeakMap<DisplayObject, KeepHandle> = new WeakMap();
+  /** Each 3D object's quad as last made (quadGeometry). */
   private readonly quads = new WeakMap<
     DisplayObject,
     {
@@ -94,7 +95,7 @@ export class Planes {
   /** What each 3D object's bitmap was drawn of, which it is kept while unchanged (drawPlane). */
   private readonly states = new WeakMap<DisplayObject, PlaneState>();
   /** BitmapData.draw's kept bitmaps of 3D objects, apart from the stage's. */
-  readonly drawnKeeps: WeakMap<DisplayObject, KeepHandle> = new WeakMap();
+  readonly drawnBitmaps: WeakMap<DisplayObject, KeepHandle> = new WeakMap();
   /**
    * How many 3D objects and masks from outside them passes have placed: a
    * pass that places one draws a bitmap that cannot be kept (drawPlane).

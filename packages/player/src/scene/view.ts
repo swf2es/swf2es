@@ -970,7 +970,7 @@ export class RenderView implements Drawer {
     // Let go of on the first frame it is not drawn: one not drawn on the frame before is drawn
     // anew, and a timeline makes 3D objects anew as it plays. BitmapData.draw's apart, in its
     // colour and at its quality, which the stage's bitmap must not take.
-    const keeps = this.snapshotting ? this.planes.drawnKeeps : this.planes.keeps;
+    const keeps = this.snapshotting ? this.planes.drawnBitmaps : this.planes.keptBitmaps;
     let keep = keeps.get(o);
     const alive = keep !== undefined && this.keeps.alive(keep);
     if (!keep || !alive) {
