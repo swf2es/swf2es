@@ -1,4 +1,4 @@
-import { binary } from "./binary.js";
+import { renderInstance } from "../render/module.js";
 
 export interface BitmapSource {
   width: number;
@@ -38,7 +38,7 @@ export interface ConvolverOptions {
   retainMemory?: number;
 }
 
-// Params.flags in root.zig.
+// Params.flags in convolve.zig.
 const FLAG_CLAMP = 1;
 const FLAG_SOURCE_TRANSPARENT = 2;
 const FLAG_PRESERVE_ALPHA = 4;
@@ -48,15 +48,6 @@ const FLAG_PREMULTIPLY = 8;
 // convolved a band of rows at a time, so that its scratch stays far under
 // retainMemory's default and the instance is kept rather than regrown.
 const BAND_BYTES = 1 << 20;
-
-let compiledModule: WebAssembly.Module | null = null;
-
-// The module uses wasm SIMD; an engine without it refuses the module as it
-// would a missing Wasm engine, and the caller keeps JS.
-function compiled(): WebAssembly.Module {
-  compiledModule ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
-  return compiledModule;
-}
 
 /** One playback's bounded scratch. Results own their buffers; rejection leaves the source untouched. */
 export class Convolver {
@@ -143,18 +134,13 @@ export class Convolver {
 
     try {
       if (!this.instance) {
-        let module: WebAssembly.Module;
         try {
-          module = compiled();
+          // An instance of the render module of its own, whose memory no fill or line shares.
+          this.instance = renderInstance(() => {
+            throw new Error("the bitmap kernel takes no tessellator");
+          }) as unknown as NativeExports;
         } catch {
-          // A missing Wasm engine or SIMD, or a CSP refusal, is tried only once per owner.
-          this.unavailable = true;
-          return null;
-        }
-
-        try {
-          this.instance = new WebAssembly.Instance(module).exports as unknown as NativeExports;
-        } catch {
+          // A missing Wasm engine or a CSP refusal is tried only once per owner.
           this.unavailable = true;
           return null;
         }
