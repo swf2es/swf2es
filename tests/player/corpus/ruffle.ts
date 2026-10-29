@@ -52,6 +52,8 @@ export interface RuffleTest {
   logFetch: boolean;
   /** Its socket.json, what the server of each connection it makes does, if it has one. */
   socket: string | null;
+  /** Whether Ruffle plays it as AIR does, its traces adl's (`runtime = "AIR"`). */
+  air: boolean;
 }
 
 /**
@@ -182,6 +184,7 @@ function test(path: string): RuffleTest | null {
     viewport: width && height ? { width: Number(width[1]), height: Number(height[1]) } : null,
     logFetch: values.get("log_fetch") === "true",
     socket: existsSync(socket) ? socket : null,
+    air: values.get("player_options.runtime") === '"AIR"',
   };
 }
 
