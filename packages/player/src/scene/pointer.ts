@@ -45,7 +45,14 @@ export function bindCanvasPointer(
     at[1] = cy * ky + bounds.y;
     at[2] = (w / sx) * kx;
     at[3] = (h / sy) * ky;
-    at[4] = e.target === canvas && cx >= 0 && cy >= 0 && cx < canvas.width && cy < canvas.height;
+    // Its first target, the canvas itself where it is in a shadow root, whose host the page's
+    // listeners see as the target.
+    at[4] =
+      e.composedPath()[0] === canvas &&
+      cx >= 0 &&
+      cy >= 0 &&
+      cx < canvas.width &&
+      cy < canvas.height;
     return at;
   };
 

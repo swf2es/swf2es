@@ -46,6 +46,8 @@ import { type RecordedEvent, Replay } from "./replay.ts";
 const fillOptions = new URLSearchParams(location.search).has("nativeFills")
   ? { fillTessellator: new (await import("@swf2es/native/tessellate")).Tessellator().tessellate }
   : {};
+/** The native tessellator the renderer of swf2es's own draws with, where the page made none. */
+const ownTessellator = new (await import("@swf2es/native/tessellate")).Tessellator();
 // The renderer of swf2es's own in place of Pixi (SWF2ES_RENDERER=own, chrome.ts): the reference
 // cases, and the bench (benchSwf), which draw-counts.ts counts.
 const ownRenderer = new URLSearchParams(location.search).has("own");
@@ -572,7 +574,8 @@ async function ownSurface(
     background: player.background,
     // Kept for a read of the frame after it is shown; a bench's frames are read not.
     preserveDrawingBuffer: preserve,
-    fillTessellator: fillOptions.fillTessellator,
+    // Native, as an element's is by default, unless the page asked for its own (nativeFills).
+    fillTessellator: fillOptions.fillTessellator ?? ownTessellator.tessellate,
     // As many samples as a browser's antialiased context takes by default, as pixiSurface's has.
     samples: antialias ? 4 : 1,
   });
