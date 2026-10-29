@@ -606,7 +606,7 @@ export class RenderView implements Drawer {
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
     // whose bitmap cache Flash shows stale draws what that shows (staleShape).
-    const shape = o instanceof ShapeObject ? this.staleShape(o, a, b, c, d) : null;
+    const shape = o instanceof ShapeObject ? this.staleShape(o, hidden, a, b, c, d) : null;
     const drawn = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
     const version = o.drawing ? o.drawing.version : 0;
     const layers =
@@ -1076,23 +1076,32 @@ export class RenderView implements Drawer {
    * another of the same bounds while cached (display/shapeobject.ts), while
    * it stands on the stage at the scale and turn (a b c d) it was first
    * drawn at and stays cached; from a frame either changes, what it is, as
-   * the Pixi view's shapeOf draws it (`cache-replace`).
+   * the Pixi view's shapeOf draws it (`cache-replace`). Only a frame that
+   * draws it decides: one walked hidden draws nothing of it, and
+   * BitmapData.draw's walk is in the bitmap's space, which shows the cache
+   * as the stage last did.
    */
   private staleShape(
     o: ShapeObject,
+    hidden: boolean,
     a: number,
     b: number,
     c: number,
     d: number,
   ): ShapeCharacter | null {
     const cache = o.stale;
-    if (!cache) {
+    if (!cache || hidden) {
       return o.drawn();
     }
 
     let seen = this.stales.get(o);
+    if (this.drawRoot) {
+      return seen?.cache === cache && seen.spent ? o.drawn() : cache.shape;
+    }
+
     if (!seen || seen.cache !== cache) {
-      seen = { cache, a, b, c, d, spent: false };
+      // A first frame with its cache off already draws it as it is.
+      seen = { cache, a, b, c, d, spent: !cached(o) };
       this.stales.set(o, seen);
     } else if (
       !seen.spent &&
