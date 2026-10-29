@@ -65,15 +65,13 @@ import {
   TEXTURE_UNIT,
   TINT_AT,
 } from "./programs.js";
+import { Stage } from "./stage.js";
 import {
-  fittingSamples,
   framebufferOf,
-  LAYER_IDLE_FRAMES,
   LAYER_STEP,
   type Layer,
   layerSide,
   MSAA_BYTES,
-  type Multisampled,
   type Open,
   Targets,
 } from "./targets.js";
@@ -186,6 +184,7 @@ export class WebGLBackend {
   readonly gl: WebGL2RenderingContext;
   readonly state: GlState;
   private readonly targets: Targets;
+  private readonly stage: Stage;
   private program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
@@ -289,22 +288,6 @@ export class WebGLBackend {
    * Flash's anti-aliasing by the quality, as the host sets it.
    */
   samples = 1;
-  /** The most samples the GPU takes, and whether the canvas has alpha, asked once. */
-  private maxSamples = 1;
-  private canvasAlpha = false;
-  /**
-   * The stage's multisampled buffers, and the texture they resolve into before a canvas they may
-   * not be resolved onto (present), made as first needed.
-   */
-  private stageMsaa: Multisampled | null = null;
-  private stageResolved: { framebuffer: WebGLFramebuffer; texture: WebGLTexture } | null = null;
-  /**
-   * Whether the driver resolves the stage straight onto a canvas with alpha, found as it first does
-   * (present): null till then. SwiftShader refuses it.
-   */
-  private directResolve: boolean | null = null;
-  /** The layer a frame that clears the stage is drawn into before an opaque canvas (stageAlpha). */
-  private stageLayer: Layer | null = null;
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
   /** A copy of what is below a layer whose mode reads it, the target's size. */
@@ -335,6 +318,7 @@ export class WebGLBackend {
     this.gl = gl;
     this.state = new GlState(gl);
     this.targets = new Targets(gl, this.state);
+    this.stage = new Stage(gl, this.state, this.targets);
     this.setUp();
   }
 
@@ -427,12 +411,7 @@ export class WebGLBackend {
     });
     this.targets.setUp();
     this.layers = [];
-    this.stageMsaa = null;
-    this.stageResolved = null;
-    this.directResolve = null;
-    this.stageLayer = null;
-    this.maxSamples = gl.getParameter(gl.MAX_SAMPLES) as number;
-    this.canvasAlpha = gl.getContextAttributes()?.alpha ?? false;
+    this.stage.setUp();
     this.back = null;
     this.backFramebuffer = null;
     this.backWidth = 0;
@@ -532,13 +511,13 @@ export class WebGLBackend {
     state.bindTexture(0, this.rowsTexture);
     // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
     // does. Its layers take the stage's, so that their edges are the stage's.
-    const stage = root ? null : this.stageBuffers(target.width, target.height, this.samples);
+    const stage = root ? null : this.stage.stageBuffers(target.width, target.height, this.samples);
     // An erase or alpha blend outside any layer clears what it covers on the stage, as adl does,
     // which the blends after it read: an opaque canvas keeps no alpha, so such a frame is drawn
     // into a layer the canvas' size, then copied onto it. Multisampled buffers keep it already.
     const cleared =
-      !root && !stage && !this.canvasAlpha && commands.clearsTarget
-        ? this.stageAlpha(target.width, target.height)
+      !root && !stage && !this.stage.canvasAlpha && commands.clearsTarget
+        ? this.stage.stageAlpha(target.width, target.height)
         : null;
     const into = root ?? cleared;
     if (into) {
@@ -722,12 +701,12 @@ export class WebGLBackend {
 
     state.stencil(null);
     if (canvas.msaa) {
-      this.present(canvas.msaa);
+      this.stage.present(canvas.msaa);
     }
 
     if (cleared) {
       // Its rows run down, the canvas' up.
-      this.toCanvas(cleared.framebuffer, target.width, target.height, true);
+      this.stage.toCanvas(cleared.framebuffer, target.width, target.height, true);
     }
 
     for (const page of this.pages) {
@@ -884,12 +863,7 @@ export class WebGLBackend {
 
   /** The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of. */
   private dropIdleLayers(): void {
-    const stage = this.stageLayer;
-    if (stage && this.targets.frame - stage.usedAt > LAYER_IDLE_FRAMES) {
-      this.targets.deleteLayer(stage);
-      this.stageLayer = null;
-    }
-
+    this.stage.dropIdleLayer();
     this.targets.dropIdleLayers();
   }
 
@@ -1402,144 +1376,6 @@ export class WebGLBackend {
     this.pageUntil.push(-1);
     this.pageKept.push(true);
     hold.result = this.slotOf(hold, 0, index, 0, 0, output.width, output.height);
-  }
-
-  /**
-   * The stage's multisampled pixels onto the canvas: resolved straight onto one with alpha where
-   * the driver lets a resolve go there, else into a texture first, as an opaque canvas's must be, a
-   * resolve keeping its format. Whether the driver lets it is found once, by the error it raises.
-   */
-  private present(msaa: Multisampled): void {
-    const gl = this.gl;
-    const { width, height } = msaa;
-    if (this.canvasAlpha && this.directResolve !== false) {
-      const finding = this.directResolve === null;
-      if (finding) {
-        gl.getError();
-      }
-
-      this.toCanvas(msaa.framebuffer, width, height, false);
-      if (finding) {
-        this.directResolve = gl.getError() !== gl.INVALID_OPERATION;
-      }
-
-      if (this.directResolve) {
-        return;
-      }
-    }
-
-    const resolved = this.resolveTarget(width, height);
-    this.state.bindFramebuffer(msaa.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolved.framebuffer);
-    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    this.toCanvas(resolved.framebuffer, width, height, false);
-  }
-
-  /** The texture the stage resolves into before the canvas (present), made as first needed. */
-  private resolveTarget(
-    width: number,
-    height: number,
-  ): { framebuffer: WebGLFramebuffer; texture: WebGLTexture } {
-    if (this.stageResolved) {
-      return this.stageResolved;
-    }
-
-    const gl = this.gl;
-    const texture = gl.createTexture() as WebGLTexture;
-    this.state.bindTexture(LAYER_UNIT, texture);
-    this.state.activeTexture(LAYER_UNIT);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
-    this.state.bindFramebuffer(framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    this.stageResolved = { framebuffer, texture };
-    return this.stageResolved;
-  }
-
-  /**
-   * The first `width` by `height` pixels of `source` copied onto the canvas,
-   * upside down where `flip`. Bound through the state cache first and as
-   * it was after, so the cache holds what is bound, whatever it held.
-   */
-  private toCanvas(source: WebGLFramebuffer, width: number, height: number, flip: boolean): void {
-    const gl = this.gl;
-    this.state.bindFramebuffer(source);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    const top = flip ? 0 : height;
-    gl.blitFramebuffer(
-      0,
-      0,
-      width,
-      height,
-      0,
-      height - top,
-      width,
-      top,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, source);
-  }
-
-  /**
-   * The layer the canvas' size a frame that clears the stage is drawn into
-   * before an opaque canvas (execute): its own, kept apart from the free
-   * layers so that none smaller takes it, made again for another size, let
-   * go of once idle as they are.
-   */
-  private stageAlpha(width: number, height: number): Layer {
-    const known = this.stageLayer;
-    if (known && known.width === width && known.height === height) {
-      known.usedAt = this.targets.frame;
-      return known;
-    }
-
-    if (known) {
-      this.targets.deleteLayer(known);
-    }
-
-    const layer = this.targets.makeLayer(width, height);
-    this.stageLayer = layer;
-    return layer;
-  }
-
-  /**
-   * The stage's multisampled buffers, made again for another size or samples, their resolve's
-   * texture let go of; none where it takes no samples.
-   */
-  private stageBuffers(width: number, height: number, wanted: number): Multisampled | null {
-    const samples = fittingSamples(width, height, Math.min(wanted, this.maxSamples), 4);
-    const known = this.stageMsaa;
-    if (known && known.width === width && known.height === height && known.samples === samples) {
-      return known;
-    }
-
-    this.dropStageBuffers();
-    const msaa = samples > 1 ? this.targets.multisampled(width, height, samples) : null;
-    if (!msaa) {
-      return null;
-    }
-
-    this.stageMsaa = msaa;
-    return msaa;
-  }
-
-  /** The stage's multisampled buffers and their resolve let go of, as samples or size change. */
-  private dropStageBuffers(): void {
-    const gl = this.gl;
-    if (this.stageMsaa) {
-      this.targets.deleteMultisampled(this.stageMsaa);
-      this.stageMsaa = null;
-    }
-
-    if (this.stageResolved) {
-      this.state.dropTexture(this.stageResolved.texture);
-      gl.deleteTexture(this.stageResolved.texture);
-      gl.deleteFramebuffer(this.stageResolved.framebuffer);
-      this.stageResolved = null;
-    }
   }
 
   /** The fill program, its vertex array and rows bound, as runs and masks draw with them. */
@@ -2389,10 +2225,7 @@ export class WebGLBackend {
       gl.deleteFramebuffer(this.backFramebuffer);
     }
 
-    this.dropStageBuffers();
-    if (this.stageLayer) {
-      this.targets.deleteLayer(this.stageLayer);
-    }
+    this.stage.destroy();
 
     for (const texture of this.textures) {
       if (texture) {
