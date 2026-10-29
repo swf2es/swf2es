@@ -26,7 +26,9 @@ import { unsupported, vertexColor } from "./shapes.js";
  * round joins' and caps' chords may stray from the curve: a tenth of one,
  * where the fills' finer flatness made strokes several times the
  * triangles the Pixi view's are, which a software rasteriser pays for; a
- * quarter shows on the references' curved lines.
+ * quarter shows on the references' curved lines. A 9-slice's lines take
+ * half that, as its small rounded corners, which Flash draws as exact
+ * curves, show a tenth.
  */
 const STROKE_FLATNESS = 0.1;
 
@@ -347,8 +349,9 @@ export function outline(
 
 /**
  * `layer`'s lines as seen through the linear transform (a b c d) on the
- * stage, in its axes, each at least `least` wide, as one geometry in their
- * order; null if it has none, or none came out of the tessellator.
+ * stage, in its axes, each at least `least` wide, as wide as `by` makes
+ * them where it is given (a 9-slice's line space), as one geometry in
+ * their order; null if it has none, or none came out of the tessellator.
  */
 export function layerStrokes(
   layer: ShapeLayer,
@@ -358,6 +361,7 @@ export function layerStrokes(
   d: number,
   least: number,
   tessellator: FillTessellator,
+  by: readonly number[] | null = null,
 ): GeometryData | null {
   // Seen through a transform that collapses the plane, lines cover nothing, as in the Pixi view.
   if (a * d - b * c === 0) {
@@ -368,15 +372,22 @@ export function layerStrokes(
   const colors: number[] = [];
   const indices: number[] = [];
   // `least` is a pixel of the screen, in the stage's pixels the lines are drawn in.
-  const flatness = STROKE_FLATNESS * least;
+  const flatness = (by ? STROKE_FLATNESS / 2 : STROKE_FLATNESS) * least;
   for (const stroke of layer.strokes) {
     const line = stroke.line;
-    const h = strokeWidth(line, a, b, c, d, least) / 2;
+    const h = by
+      ? strokeWidth(line, by[0], by[1], by[2], by[3], least) / 2
+      : strokeWidth(line, a, b, c, d, least) / 2;
     // Codes a SWF reserves draw round, as the Pixi view draws them.
     const caps = line.startCap <= 2 ? line.startCap : 0;
     const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];
     for (const { path, home } of strokePaths(stroke)) {
+      // A move alone draws nothing, where a move and a line back to it draw a dot.
+      if (path.length <= 3) {
+        continue;
+      }
+
       const points = polyline(transformedPath(path, a, b, c, d), flatness);
       const closedPath =
         home ||

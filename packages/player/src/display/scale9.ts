@@ -171,7 +171,8 @@ export function onAxis(axis: Axis, v: number): number {
 /**
  * The slice that reshapes what `d` itself draws, and the matrix from its
  * space to the owner's, null for the owner itself: its own grid's, or,
- * for a shape, its parent's. Null for none.
+ * for a shape, its parent's, unless it is filtered, which adl draws as a
+ * bitmap of it, stretched whole (the `slice-filtered` case). Null for none.
  */
 export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } | null {
   if (withinMask(d)) {
@@ -186,7 +187,7 @@ export function sliceFor(d: DisplayObject): { slice: Slice; m: Matrix | null } |
   }
 
   const parent = d.parent;
-  if (d instanceof ShapeObject && parent?.scale9Grid) {
+  if (d instanceof ShapeObject && parent?.scale9Grid && d.filters.length === 0) {
     const slice = sliceOf(parent);
     if (slice) {
       return { slice, m: d.placed };

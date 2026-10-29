@@ -8407,6 +8407,18 @@ export const cases: PlayerCase[] = [
     maxOutliers: 1150,
   },
   {
+    // A filtered Shape in a 9-slice panel whose slice moves as a sibling grows
+    // (scripts/SliceFiltered.as): stretched whole, not sliced, as adl draws it.
+    name: "slice-filtered",
+    swf: (abc) => bare(abc, 3, "SliceFiltered", 320, 120),
+    script: "SliceFiltered",
+    frames: 3,
+    capture: [1, 3],
+    // The glow's and the rounded corners' edges anti-alias within a pixel of Flash's.
+    tolerance: 32,
+    maxOutliers: 200,
+  },
+  {
     name: "scale9-changes",
     swf: scale9Changes,
     script: "Scale9Changes",

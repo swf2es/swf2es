@@ -47,6 +47,7 @@ import {
 } from "../display/filters.js";
 import { concat, invert, shifted } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
+import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { ShapeObject } from "../display/shapeobject.js";
 import {
   type GradientFill,
@@ -137,6 +138,8 @@ interface KeptOutput {
   generation: number;
   /** The stage's frame it was last drawn on, whether it scrolled then, and whether it was measured. */
   seenAt: number;
+  /** The key of the 9-slice that reshaped what it drew, or "". */
+  sliceKey: string;
   scrolled: boolean;
   measured: boolean;
   kept: boolean;
@@ -210,6 +213,10 @@ export class RenderView implements Drawer {
   private readonly filterPlans = new WeakMap<DisplayObject, KeptPlan>();
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
   private textureLimit = 4096;
+  /** The sliced owner whose children are walked now, its slice, and its parent's linear transform. */
+  private sliceOwner: DisplayObject | null = null;
+  private ownerSlice: Slice | null = null;
+  private ownerParent: number[] = [1, 0, 0, 1];
   /** A filtered object's drawn area, measured where its padding may not fit (fitFilters). */
   private readonly drawn: number[] = [];
   /** The outputs kept for filtered objects, and what they were kept for. */
@@ -462,6 +469,22 @@ export class RenderView implements Drawer {
     const mode = hidden || named < 0 || (named === LAYER && !childful) ? NORMAL : named;
     // Its filters draw it as a layer too, which they run over before its blend: adl filters the
     // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
+    // The 9-slice grid that reshapes what it draws itself (display/scale9.ts): its own, sliced as
+    // its morphs take their new ratios, so that its bounds are this frame's, as the Pixi view
+    // slices it; or, for a Shape, its owner's, kept as the owner's children are walked, unless it
+    // is filtered, which adl draws as a bitmap of it, stretched whole (sliceFor). Masks are
+    // hidden, and draw unsliced; so does what BitmapData.draw takes, its Shapes by its grid too,
+    // which draws with no transform of its own.
+    const ownSlice = !hidden && o.scale9Grid && !root ? sliceDrawn(o) : null;
+    const slice =
+      ownSlice ??
+      (!hidden &&
+      o instanceof ShapeObject &&
+      o.parent !== null &&
+      o.parent === this.sliceOwner &&
+      o.filters.length === 0
+        ? this.ownerSlice
+        : null);
     const filtering = hidden || o.filters.length === 0 ? null : this.filterPlan(o);
     let layerRow = -1;
     let layer = -1;
@@ -476,7 +499,9 @@ export class RenderView implements Drawer {
       // What its filters made last, where nothing they ran on changed: composited again where it
       // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
       output =
-        filtering && !this.drawRoot ? this.keptOutput(o, filtering, a, b, c, d, tx, ty) : null;
+        filtering && !this.drawRoot
+          ? this.keptOutput(o, filtering, slice?.key ?? "", a, b, c, d, tx, ty)
+          : null;
       if (output?.reused) {
         const k = output.handle as KeepHandle;
         const rect = this.keptRect;
@@ -503,11 +528,20 @@ export class RenderView implements Drawer {
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
     const shape = o instanceof ShapeObject ? o.drawn() : null;
-    const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    const drawn = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    const version = o.drawing ? o.drawing.version : 0;
+    const layers =
+      hidden || !drawn
+        ? null
+        : slice
+          ? sliceLayers(drawn, slice, ownSlice ? null : o.placed, version)
+          : drawn;
+    // A sliced line keeps the width it has in its owner's parent's space, as adl's does, times a
+    // Shape child's own scale (render/view.ts, lineSpace); made as a stroked layer first needs it.
+    let lineBy: number[] | null = null;
     let row = -1;
     let lineRow = -1;
-    if (!hidden && layers) {
-      const version = o.drawing ? o.drawing.version : 0;
+    if (layers) {
       // A pixel of the screen, in the stage's pixels: the least a line is wide.
       const least = 1 / (this.screenScale ?? this.scale * this.resolution);
       for (let i = 0; i < layers.length; i++) {
@@ -537,8 +571,14 @@ export class RenderView implements Drawer {
         }
 
         // The layer's lines after its fills, stroked in the stage's axes: placed by the translation alone.
+        if (slice && !lineBy && layers[i].strokes.length > 0) {
+          lineBy = ownSlice ? [pa, pb, pc, pd] : this.childLineSpace(o);
+        }
+
         const lines =
-          layers[i].strokes.length > 0 ? this.linesOf(layers[i], version, a, b, c, d, least) : null;
+          layers[i].strokes.length > 0
+            ? this.linesOf(layers[i], version, a, b, c, d, least, lineBy)
+            : null;
         if (lines) {
           if (lineRow < 0) {
             lineRow = this.rows.add(1, 0, 0, 1, tx, ty, color);
@@ -600,6 +640,16 @@ export class RenderView implements Drawer {
       let clips: Clips | null = null;
       let open = 0;
 
+      // A sliced owner's Shapes are sliced by its grid, their lines as wide as in its parent's space.
+      const owner = this.sliceOwner;
+      const ownerSlice = this.ownerSlice;
+      const ownerParent = this.ownerParent;
+      this.sliceOwner = ownSlice ? o : null;
+      this.ownerSlice = ownSlice;
+      if (ownSlice) {
+        this.ownerParent = [pa, pb, pc, pd];
+      }
+
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         if (!clips && child.clipDepth > 0) {
@@ -622,6 +672,9 @@ export class RenderView implements Drawer {
         this.walk(child, a, b, c, d, tx, ty, color, hidden);
       }
 
+      this.sliceOwner = owner;
+      this.ownerSlice = ownerSlice;
+      this.ownerParent = ownerParent;
       for (; open > 0; open--) {
         this.popMask();
       }
@@ -673,6 +726,7 @@ export class RenderView implements Drawer {
   private keptOutput(
     o: DisplayObject,
     plan: FilterPlan,
+    sliceKey: string,
     a: number,
     b: number,
     c: number,
@@ -687,6 +741,7 @@ export class RenderView implements Drawer {
         plan,
         generation: this.keptGeneration,
         seenAt: -1,
+        sliceKey,
         scrolled: false,
         measured: false,
         kept: false,
@@ -709,8 +764,10 @@ export class RenderView implements Drawer {
     const l = k.linear;
     // One not drawn on the frame before was hidden, or off the list, where a walk cleared its flags
     // and its children's without it hearing of a change.
+    // A slice moves what it draws as its owner's other children change, which its flags miss.
     const changed =
       k.seenAt !== this.frames - 1 ||
+      k.sliceKey !== sliceKey ||
       k.plan !== plan ||
       k.generation !== this.keptGeneration ||
       (o.dirty & ~TRANSFORM) !== 0 ||
@@ -721,6 +778,7 @@ export class RenderView implements Drawer {
       l[2] !== c ||
       l[3] !== d;
     k.seenAt = this.frames;
+    k.sliceKey = sliceKey;
     k.scrolled = o.scroll !== null;
     let same = false;
     if (!changed && k.measured) {
@@ -892,6 +950,22 @@ export class RenderView implements Drawer {
     }
 
     return this.filters.close();
+  }
+
+  /**
+   * The linear transform a Shape child of a sliced owner draws its lines
+   * as wide through: the owner's parent's, kept as the owner's children
+   * are walked, times its own matrix.
+   */
+  private childLineSpace(o: DisplayObject): number[] {
+    const q = this.ownerParent;
+    const m = o.matrix;
+    return [
+      q[0] * m.a + q[2] * m.b,
+      q[1] * m.a + q[3] * m.b,
+      q[0] * m.c + q[2] * m.d,
+      q[1] * m.c + q[3] * m.d,
+    ];
   }
 
   /** A mask's draws, which `emit` writes, between its markers, kept on the stack of masks open for its pop. */
@@ -1077,6 +1151,7 @@ export class RenderView implements Drawer {
     c: number,
     d: number,
     least: number,
+    by: readonly number[] | null = null,
   ): GeometryHandle | null {
     let byKey = this.lines.get(layer);
     if (!byKey) {
@@ -1084,7 +1159,9 @@ export class RenderView implements Drawer {
       this.lines.set(layer, byKey);
     }
 
-    const key = `${a} ${b} ${c} ${d} ${least}`;
+    const key = by
+      ? `${a} ${b} ${c} ${d} ${least} ${by.join(" ")}`
+      : `${a} ${b} ${c} ${d} ${least}`;
     const known = byKey.get(key);
     if (
       known &&
@@ -1117,7 +1194,7 @@ export class RenderView implements Drawer {
       }
     }
 
-    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator);
+    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by);
     const handle = data ? this.geometries.add(data) : null;
     byKey.set(key, { handle, version });
     return handle;
@@ -1588,10 +1665,6 @@ function drawnWithin(scene: SceneList, layer: number): boolean {
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 function noteUnsupported(o: DisplayObject): void {
-  if (o.scale9Grid) {
-    unsupported.scale9Grids++;
-  }
-
   if (undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
