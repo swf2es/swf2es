@@ -52,7 +52,7 @@ export function overruns(
 }
 
 /** A glyph of an embedded font: its outline in the font's units over 20, placed by a matrix in the text's pixels. */
-interface GlyphItem {
+export interface GlyphItem {
   kind: "glyph";
   glyph: Glyph;
   em: number;
@@ -62,7 +62,7 @@ interface GlyphItem {
 }
 
 /** A rectangle in the text's pixels, of one colour, ARGB straight. */
-interface RectItem {
+export interface RectItem {
   kind: "rect";
   x: number;
   y: number;

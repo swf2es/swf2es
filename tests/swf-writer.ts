@@ -250,7 +250,7 @@ export function shape(spec: ShapeSpec): Uint8Array {
 type MatrixSpec = { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
 
 /** A morph fill: a solid colour, or a linear or radial gradient, at both ends; colours 0xAARRGGBB. */
-type MorphFillSpec =
+export type MorphFillSpec =
   | { start: number; end: number }
   | {
       type: 0x10 | 0x12;

@@ -23,7 +23,7 @@ export class Halt extends Error {
  * own check (adl; Ruffle's continue_if_base_clip_exists). One instance,
  * thrown as a signal and never shown.
  */
-class BaseRemoved extends Error {
+export class BaseRemoved extends Error {
   override name = "Avm1BaseRemoved";
 }
 

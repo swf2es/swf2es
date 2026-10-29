@@ -16,7 +16,7 @@ import type { Duplex } from "node:stream";
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 /** What one client did. */
-interface Client {
+export interface Client {
   path: string;
   protocols: string[];
   /** Each message it sent, as [opcode, payload]: 1 text, 2 binary, 9 ping, 10 pong. */

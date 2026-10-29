@@ -15,7 +15,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 export const corpus = process.env.SWF2ES_RUFFLE ?? join(here, "ruffle/tests/tests/swfs");
 
 /** A frame to compare, and how closely. */
-interface ImageCheck {
+export interface ImageCheck {
   name: string;
   /** The frame it is drawn at, 1 the first; the test's last by default. */
   frame: number;

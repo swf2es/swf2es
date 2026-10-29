@@ -33,7 +33,7 @@ export interface LaidChar {
   format: CharFormat;
 }
 
-interface Line {
+export interface Line {
   /** Its characters, [start, end) of the text, a newline that ends it included. */
   start: number;
   end: number;

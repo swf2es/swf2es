@@ -175,7 +175,7 @@ export function unpackTable(bytes: Uint8Array): TableEntry[] {
  * number, its maker's, its SWF, and its shared properties as its maker
  * had them, which the maker's own messages may not have brought yet.
  */
-interface Job {
+export interface Job {
   id: number;
   creator: number;
   swf: Uint8Array<ArrayBuffer>;

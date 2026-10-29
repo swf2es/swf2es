@@ -31,7 +31,7 @@ import { emptyKernel, type Filter as FilterRecord, filterOffset } from "../displ
  * colours with their texture, and a displacement's map, whose texture the
  * view keeps as it keeps a bitmap's.
  */
-interface Pass {
+export interface Pass {
   kind: number;
   values: Float32Array;
   colors: Uint8Array | null;

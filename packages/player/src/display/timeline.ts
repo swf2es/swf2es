@@ -62,7 +62,7 @@ import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shap
  * timeline, its DoAction tags by their bodies' offsets, which the clip
  * queues as it reaches them (avm1/avm1.ts).
  */
-type FrameCommand =
+export type FrameCommand =
   | { type: "place"; place: Place }
   | { type: "remove"; depth: number }
   | { type: "actions"; tag: number };
@@ -113,7 +113,7 @@ export interface Timeline {
  * a place at a depth already taken, which Flash's log tells of, and a
  * removal, which a clip with an unload handler outlives for a frame.
  */
-interface TimelineActions {
+export interface TimelineActions {
   /** A display object about to be placed by `place`, before it is made: its clip actions. */
   placing(display: DisplayObject, place: Place): void;
   made(display: DisplayObject): void;
@@ -173,7 +173,7 @@ export interface MorphCharacter {
   bitmap: (id: number) => BitmapCharacter | null;
 }
 
-interface SpriteCharacter {
+export interface SpriteCharacter {
   type: "sprite";
   id: number;
   timeline: Timeline;
@@ -219,7 +219,7 @@ export interface FontCharacter extends FontName {
 }
 
 /** DefineFont4: CFF fonts belong to the Flash Text Engine, not classic TextField layout. */
-interface CffFontCharacter extends FontName {
+export interface CffFontCharacter extends FontName {
   type: "fontCff";
   font: Font4;
 }
@@ -245,7 +245,7 @@ export interface BitmapCharacter {
 }
 
 /** DefineBinaryData's bytes, which a ByteArray subclass bound to them starts with. */
-interface BinaryCharacter {
+export interface BinaryCharacter {
   type: "binary";
   id: number;
   data: Uint8Array;

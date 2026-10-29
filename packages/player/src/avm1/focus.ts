@@ -26,7 +26,7 @@ import { nativeOf } from "./globals/MovieClip.js";
 import { stateOf } from "./globals/TextField.js";
 
 /** What the tab order reads of the movie's objects, their AS2 properties as code reads them. */
-interface TabHost {
+export interface TabHost {
   /** A tabEnabled set, or undefined where none is. */
   tabEnabled(d: DisplayObject): boolean | undefined;
   /** tabChildren, true where it is not set. */
