@@ -201,7 +201,7 @@ GL calls. Planning a frame allocates nothing.
 Everything on the GPU, owned in one place:
 
 - **The geometry atlas:** fills and lines as tessellation writes them,
-  copied once into a vertex and an index buffer (`webgl/backend.ts`), a
+  copied once into a vertex and an index buffer (`webgl/atlas.ts`), a
   hole left where one goes and the atlas packed again once the holes
   outweigh what is live; perhaps an expanded atlas for pulled draws.
   Textured fills' coordinates do not widen every index's record: step 0's two texels an index
@@ -211,9 +211,9 @@ Everything on the GPU, owned in one place:
   and the holes they leave can make it, starts again with only what is
   live, rather than failing.
 - **Textures:** bitmaps, device text, video frames, gradients
-  (`textures.ts`).
+  (`textures.ts`, uploaded by `webgl/gpu-textures.ts`).
 - **Render targets:** pooled by size and samples, for layers, cached
-  filter outputs and `BitmapData.draw`.
+  filter outputs and `BitmapData.draw` (`webgl/targets.ts`).
 - **Glyphs:** Saffron's outline data (the player's `text/saffron.ts`)
   and advanced text's glyph quads, in an atlas of their own.
 
@@ -225,7 +225,9 @@ budgets and reclaiming do the same for its resources).
 ### The backend
 
 The backend executes a command buffer, and is the only code that calls
-WebGL. It is small by design:
+WebGL. It is small by design: `webgl/backend.ts` runs a frame's commands
+through parts of a file each, which it owns and makes again with the
+context.
 
 - **Programs:** the row program (fills, bitmaps and colour transforms,
   pulled), drawTriangles' meshes (textured in perspective, their bitmap
@@ -235,7 +237,8 @@ WebGL. It is small by design:
   ranges (`WEBGL_multi_draw`) for as long as their textures fit the fill
   program's eight units, each draw reading its row, its texture's unit and
   whether it snaps by `gl_DrawID` from a uniform array; without the
-  extension, a call a draw.
+  extension, a call a draw (`webgl/draws.ts`, with meshes, glyphs and
+  masks).
 - **Held layers:** a filtered layer of draws, masks and held layers
   alone, not kept, is drawn before the stage with every other such of its
   level (the planner's `HOLD_PUSH`), after the levels it holds, whose
@@ -245,7 +248,9 @@ WebGL. It is small by design:
   their own. A pass reads a target within its rectangle as a texture of
   its own size. On a busy scene's 300 glows, some in others, a frame's
   framebuffer binds went from 1,300 to 9, and its GPU time from about
-  13 ms to 4.
+  13 ms to 4 (`webgl/holds.ts`).
+- **Composites** of layers in their blend modes (`webgl/composite.ts`),
+  and the stage's way onto the canvas (`webgl/stage.ts`).
 - **A state cache,** so no bind, blend or stencil state is set twice.
 - **Uploads** of rows once a frame.
 

@@ -4170,36 +4170,36 @@ planner sizes by what is drawn in it (`@swf2es/render`'s `measure.ts`),
 so a layer, a blend's or a filter's, holds what its filtered children
 draw past their shapes, as adl's holds a child's glow whole
 (`blend-nested`). The backend composites a layer over its rectangle
-alone (`compositeLayer`): through the GPU's blending where it computes
-Flash's blend (`normal`, `layer`, `add`, `screen`), else with the
-composite program reading a copy of what is below that rectangle, its
-result replacing it; out of a multisampled target, the rectangle is
-resolved before it is copied. The formulas are the composite program's
-(`packages/render/src/webgl/programs.ts`). Multiply, screen, lighten,
-darken, difference, overlay and hardlight are the separable blends of
-the straight colours, composited source over; `add` adds and `subtract`
-takes the object from what is below, each clamped, subtract's alpha the
-object's over what is below (over a layer's clear ground adl leaves the
-object's alpha in black); `invert` inverts what is below as far as the
-object covers it; `alpha` and `erase` scale the layer below by the
-object's alpha, or by what it leaves, only where the object has any. An
-`erase` or `alpha` blend outside any layer clears what it covers of the
-stage, as adl does, which the blends after it read: an opaque canvas
-keeps no alpha, so without multisampling such a frame is drawn into a
-layer the canvas's size and copied onto it (`stage-erase`,
-`blend-direct-clear`). The `blend-modes` case draws each over two
-grounds against adl, and `blend-formulas` puts each mode's formula
-against adl, at five alphas over five grounds, unfiltered and through a
-filter. `blend-drift` moves a blend a quarter pixel a frame at a zoom
-that gives no whole resolution, which must not shake what shows through
-it; `blend-edges` draws blended objects past the edge of what they are
-drawn over; `blend-antialias` draws nested blends, a blurred child of a
-blend and blends past the stage's edges multisampled. `blend-kept` keeps
-blends still, moved, recoloured, with a child moving, over a ground
-changing under them, inside a filtered sprite and with a filter of their
-own, and `blend-kept-antialias` the same multisampled;
-`blend-outside-mask` masks a blend from outside it, and `blend-subpixel`
-moves one by part of a pixel.
+alone (`compositeLayer`, `webgl/composite.ts`): through the GPU's
+blending where it computes Flash's blend (`normal`, `layer`, `add`,
+`screen`), else with the composite program reading a copy of what is
+below that rectangle, its result replacing it; out of a multisampled
+target, the rectangle is resolved before it is copied. The formulas are
+the composite program's (`packages/render/src/webgl/programs.ts`).
+Multiply, screen, lighten, darken, difference, overlay and hardlight are
+the separable blends of the straight colours, composited source over;
+`add` adds and `subtract` takes the object from what is below, each
+clamped, subtract's alpha the object's over what is below (over a
+layer's clear ground adl leaves the object's alpha in black); `invert`
+inverts what is below as far as the object covers it; `alpha` and
+`erase` scale the layer below by the object's alpha, or by what it
+leaves, only where the object has any. An `erase` or `alpha` blend
+outside any layer clears what it covers of the stage, as adl does, which
+the blends after it read: an opaque canvas keeps no alpha, so without
+multisampling such a frame is drawn into a layer the canvas's size and
+copied onto it (`stage-erase`, `blend-direct-clear`). The `blend-modes`
+case draws each over two grounds against adl, and `blend-formulas` puts
+each mode's formula against adl, at five alphas over five grounds,
+unfiltered and through a filter. `blend-drift` moves a blend a quarter
+pixel a frame at a zoom that gives no whole resolution, which must not
+shake what shows through it; `blend-edges` draws blended objects past
+the edge of what they are drawn over; `blend-antialias` draws nested
+blends, a blurred child of a blend and blends past the stage's edges
+multisampled. `blend-kept` keeps blends still, moved, recoloured, with a
+child moving, over a ground changing under them, inside a filtered
+sprite and with a filter of their own, and `blend-kept-antialias` the
+same multisampled; `blend-outside-mask` masks a blend from outside it,
+and `blend-subpixel` moves one by part of a pixel.
 
 ### Filters
 
