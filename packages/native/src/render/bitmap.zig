@@ -1,4 +1,4 @@
-//! What the bitmap kernels' wrapper (convolver.ts) calls: the module's
+//! What the bitmap kernels' wrapper (bitmap-kernel.ts) calls: the module's
 //! arena (arena.zig), which resetArena resets before each call, and
 //! convolve.zig's and blur.zig's kernels over the input written into it.
 const std = @import("std");

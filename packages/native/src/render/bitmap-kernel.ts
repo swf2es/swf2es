@@ -115,7 +115,7 @@ function copy(source: BitmapSource, area: BitmapRect, into: Uint32Array): void {
   }
 }
 
-export interface ConvolverOptions {
+export interface BitmapKernelOptions {
   /** Drop instances larger than this after a call; defaults to 8 MiB, at most 128 MiB. */
   retainMemory?: number;
 }
@@ -132,18 +132,21 @@ const FLAG_PREMULTIPLY = 8;
 const BAND_BYTES = 1 << 20;
 
 /**
- * BitmapData's convolution, its scratch bounded. It compiles the render
- * module as it is made, and throws where the host refuses it. Results own
- * their buffers; rejection leaves the source untouched.
+ * BitmapData's CPU filters in the render module: a convolution
+ * (convolve.zig), and a blur, a glow, a drop shadow, a bevel and a gradient
+ * glow or bevel (blur.zig), on one instance, its scratch bounded. It
+ * compiles the render module as it is made, and throws where the host
+ * refuses it. Results own their buffers; rejection leaves the source
+ * untouched.
  */
-export class Convolver {
+export class BitmapKernel {
   private instance: NativeExports | null = null;
   private readonly keep: number;
 
-  constructor(options: ConvolverOptions = {}) {
+  constructor(options: BitmapKernelOptions = {}) {
     this.keep = options.retainMemory ?? 8 << 20;
     if (!Number.isInteger(this.keep) || this.keep < 0 || this.keep > 128 << 20) {
-      throw new RangeError("invalid convolution memory limit");
+      throw new RangeError("invalid bitmap kernel memory limit");
     }
 
     renderModule();

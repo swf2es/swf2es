@@ -4408,7 +4408,7 @@ layers).
 
 BitmapData's convolution is computed on the CPU by
 `@swf2es/native/render` alone: AS3's and AVM1's `applyFilter` call the one
-`Convolver` of their realm (`bitmap/filters.ts`), made at the first
+`BitmapKernel` of their realm (`bitmap/filters.ts`), made at the first
 convolution, a worker's in its own. A trap is tried again in a new
 instance, and where that fails too, nothing is written. GPU filters and
 other BitmapData operations are unchanged. The JS the player had is kept

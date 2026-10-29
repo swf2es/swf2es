@@ -4,9 +4,10 @@
 // destination; a blur's runs truncated to 8 bits each, a glow's alpha from
 // the blur so truncated times strength, a bevel's from the difference of two
 // reads of it, a colour matrix of straight colour, rounded, a convolution of
-// straight colour, truncated, by the render module.
+// straight colour, truncated; the blurs, glows, shadows, bevels and
+// convolutions by the render module.
 
-import { Convolver, type LayerMove } from "@swf2es/native/render";
+import { BitmapKernel, type LayerMove } from "@swf2es/native/render";
 import type { Filter } from "../display/filters.js";
 import { ramp } from "../display/gradients.js";
 import {
@@ -790,11 +791,11 @@ function copyEmpty(
 }
 
 /**
- * The realm's convolution kernel, made at its first convolution:
+ * The realm's filter kernel, made at its first filter that needs it:
  * @swf2es/native's, in Wasm. False where the realm refused the module, as
  * a worker served with a CSP without 'wasm-unsafe-eval' may.
  */
-let kernel: Convolver | false | null = null;
+let kernel: BitmapKernel | false | null = null;
 
 /**
  * A convolution over `area` of the source, as adl computes it, by the
@@ -826,10 +827,10 @@ function convolve(
 }
 
 /** The realm's kernel, made as it is first needed; null where the realm refused the module. */
-function bitmapKernel(): Convolver | null {
+function bitmapKernel(): BitmapKernel | null {
   if (kernel === null) {
     try {
-      kernel = new Convolver();
+      kernel = new BitmapKernel();
     } catch {
       kernel = false;
     }

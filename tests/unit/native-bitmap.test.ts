@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Convolver } from "@swf2es/native/render";
+import { BitmapKernel } from "@swf2es/native/render";
 import { binary } from "../../packages/native/dist/render/binary.js";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
@@ -41,7 +41,7 @@ test("the kernel convolves as the JS reference does, to the bit, whatever the fi
   const pick = <T>(values: T[]) => values[Math.floor(random() * values.length)];
   const special = [NaN, Infinity, -Infinity, -0, 0, 1e-300, 1e300, -1e300, 1 / 3, -1 / 3];
   const number = (n: number) => (random() < 0.1 ? pick(special) : (random() * 2 - 1) * n);
-  const owners = [new Convolver()];
+  const owners = [new BitmapKernel()];
   let calls = 0;
   for (let i = 0; i < 5000; i++) {
     const sw = 1 + ((random() * 17) | 0),
@@ -119,7 +119,7 @@ test("a rect convolved in bands of rows matches the reference across the bands' 
       ((alpha << 24) | (((((seed >>> 16) & 255) * alpha) / 255) << 16) | (seed & alpha)) >>> 0;
   }
 
-  const native = new Convolver();
+  const native = new BitmapKernel();
   for (const clamp of [true, false]) {
     const f = {
       ...filter(),
@@ -143,7 +143,7 @@ test("a rect convolved in bands of rows matches the reference across the bands' 
 });
 
 test("published convolution pixels survive growth, rejection, scratch reuse and disposal", () => {
-  const native = new Convolver();
+  const native = new BitmapKernel();
   const source = new BitmapStore(16, 16, true, 0x80305070);
   const out = native.convolve(source, area, filter(), true);
   assert.ok(out);
@@ -154,7 +154,7 @@ test("published convolution pixels survive growth, rejection, scratch reuse and 
   const large = new BitmapStore(2048, 2048, true, 0xff884422);
   assert.ok(native.convolve(large, { ...area, width: 2048, height: 2048 }, filter(), true));
   assert.ok(native.capacity > 0 && native.capacity <= 4 << 20, "large rects run in small bands");
-  const small = new Convolver({ retainMemory: 1 << 16 });
+  const small = new BitmapKernel({ retainMemory: 1 << 16 });
   assert.ok(small.convolve(large, { ...area, width: 64, height: 64 }, filter(), true));
   assert.equal(small.capacity, 0, "scratch over retainMemory must be discarded");
   assert.ok(native.convolve(source, area, filter(), true));
@@ -232,7 +232,7 @@ test("a trapped kernel instance is replaced, a rejected call keeps it", () => {
     },
   });
   try {
-    const native = new Convolver();
+    const native = new BitmapKernel();
     const source = new BitmapStore(16, 16, true, 0x80305070);
     for (const state of ["reject", "trap", null] as const) {
       fail = state;
@@ -289,7 +289,7 @@ test("an instance that cannot be made gives no pixels, and is tried again on the
   });
   try {
     const source = new BitmapStore(16, 16, true, 0x80305070);
-    const unavailable = new Convolver();
+    const unavailable = new BitmapKernel();
     assert.equal(unavailable.convolve(source, area, filter(), true), null);
     assert.equal(unavailable.convolve(source, area, filter(), true), null);
     assert.equal(attempts, 2);

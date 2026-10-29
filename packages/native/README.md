@@ -5,14 +5,14 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 - `@swf2es/native/render`: what the renderer computes natively, each a
   wrapper over an instance of its own: double-precision libtess2 fill
   tessellation (`Tessellator`), a shape layer's lines built in one call
-  (`LineBuilder`), and BitmapData convolution kernels (`Convolver`).
+  (`LineBuilder`), and BitmapData convolution kernels (`BitmapKernel`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress` and `mp3` each compile their own module. What the renderer
 computes is one module, `render` (`src/render/`, about 76 KB), compiled
-once; each user instantiates it apart (a `Convolver`, a `Tessellator` and
+once; each user instantiates it apart (a `BitmapKernel`, a `Tessellator` and
 its `LineBuilder`), so each has its own memory and lifetime, and a large
 bitmap job never grows the tessellator's memory, nor does disposing one
 take the other down. Within an instance, every part allocates from one
@@ -62,9 +62,9 @@ libtess2 is under SGI Free Software License B.
 
 ## bitmap
 
-`Convolver` is BitmapData's convolution. The player convolves through it
+`BitmapKernel` is BitmapData's convolution. The player convolves through it
 alone: AS3's and AVM1's `BitmapData.applyFilter` with a convolution filter
-call the one `Convolver` of their realm (`packages/player/src/bitmap/
+call the one `BitmapKernel` of their realm (`packages/player/src/bitmap/
 filters.ts`), made at the first convolution, which compiles the module;
 where it traps, the call is made again in a new instance, and where that
 fails too, nothing is written. Other CPU filters and GPU filters are
@@ -86,7 +86,7 @@ computed them. The kernel uses explicit f64x2 wasm SIMD, as all of
 its arena.
 
 Wasm memory has a 128 MiB maximum. Instances above 8 MiB are dropped after a
-call; `new Convolver({ retainMemory: bytes })` adjusts that threshold.
+call; `new BitmapKernel({ retainMemory: bytes })` adjusts that threshold.
 Arena reset reuses capacity; only dropping the instance permits its memory
 to be collected.
 

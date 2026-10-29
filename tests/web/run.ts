@@ -1654,9 +1654,9 @@ try {
     async (evaluate) => {
       const result = await call(
         evaluate,
-        `import("@swf2es/native/render").then(({Convolver}) => {
+        `import("@swf2es/native/render").then(({BitmapKernel}) => {
       try {
-        new Convolver();
+        new BitmapKernel();
         return false;
       } catch {
         return true;
