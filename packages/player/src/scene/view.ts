@@ -53,7 +53,7 @@ import {
   resetSegments,
   store as saffronStore,
 } from "../text/saffron.js";
-import { type AdvancedGlyphs, fieldQuads, staticQuads } from "./advanced.js";
+import { AdvancedTexts } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
 import { FilterLayers, type KeptOutput } from "./filter-layers.js";
 import { undrawnFilter } from "./filters.js";
@@ -173,23 +173,6 @@ interface PassState {
   ownerSlice: Slice | null;
 }
 
-/** A text's glyph quads as Saffron draws them (RenderView.advancedText), and what they were made of. */
-interface AdvancedText {
-  source: unknown;
-  scale: number;
-  resets: number;
-  scrollV: number;
-  scrollH: number;
-  left: number;
-  top: number;
-  height: number;
-  grid: string;
-  thickness: number;
-  sharpness: number;
-  glyphs: AdvancedGlyphs | null;
-  handle: GeometryHandle | null;
-}
-
 export class RenderView implements Drawer {
   readonly canvas: HTMLCanvasElement;
   readonly gl: WebGL2RenderingContext;
@@ -219,6 +202,7 @@ export class RenderView implements Drawer {
   private readonly textItems: TextItems;
   private readonly masks: Masks;
   private readonly filterLayers: FilterLayers;
+  private readonly advancedTexts: AdvancedTexts;
   private readonly textures = new Textures();
   private readonly paints = new Paints(this.textures);
   private commands = new Commands();
@@ -271,9 +255,6 @@ export class RenderView implements Drawer {
     filters: Filters;
     commands: Commands;
   }[] = [];
-  /** Each advanced text's glyph quads, and what they were made of (advancedText); BitmapData.draw's apart. */
-  private readonly advancedTexts = new WeakMap<DisplayObject, AdvancedText>();
-  private readonly drawnAdvanced = new WeakMap<DisplayObject, AdvancedText>();
   /** The outlines' store kept while the view is (text/saffron.ts, holdSegments), let go of with it. */
   private readonly releaseOutlines = holdSegments();
   /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
@@ -353,6 +334,7 @@ export class RenderView implements Drawer {
     this.parts = new Parts(this.geometries, this.tessellator, this.lineCache);
     this.textItems = new TextItems(this.geometries, this.textures, this.parts);
     this.masks = new Masks(this.geometries, this.parts);
+    this.advancedTexts = new AdvancedTexts(this.geometries);
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
     this.canvas.addEventListener("webglcontextrestored", this.restored);
@@ -813,7 +795,9 @@ export class RenderView implements Drawer {
       // them was, else as normal text.
       // In a 3D object's bitmap, whose pixels are not the stage's, as normal text.
       const advanced =
-        omitted.advanced && this.planeDepth === 0 ? this.advancedText(o, a, b, c, d) : null;
+        omitted.advanced && this.planeDepth === 0
+          ? this.advancedTexts.advancedText(o, a, b, c, d, this.target, this.drawRoot !== null)
+          : null;
       if (omitted.advanced && !advanced) {
         unsupported.advancedTexts++;
       }
@@ -1086,80 +1070,6 @@ export class RenderView implements Drawer {
     }
 
     return seen.spent ? o.drawn() : cache.shape;
-  }
-
-  /**
-   * A text's glyphs as Saffron draws them, of its glyphs' quads made again
-   * as its layout, scroll or place in its field, its settings, its scale
-   * in Flash's pixels or the outlines' store change: their geometry, in the
-   * field's pixels or the StaticText's definition's, and what places them
-   * there in the text's space. Null where it cannot be drawn so, which is
-   * kept too.
-   */
-  private advancedText(
-    o: TextObject | StaticTextObject,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-  ): { handle: GeometryHandle | null; normal: number[]; m: Matrix } | null {
-    const field = o instanceof TextObject ? o : null;
-    const m = field ? IDENTITY : this.staticMatrix(o as StaticTextObject);
-    // Flash's pixels a pixel of the text: the target's pixels a stage pixel over a pixel of Flash's.
-    // Kept in steps of a square root of two, the step down: the quads reach out as far as at the
-    // scale itself or further, and their cost counts as at most twice less, so that a text that
-    // grows or shrinks makes its quads again only now and then.
-    const target = this.target;
-    const exact =
-      Math.sqrt(Math.abs((a * d - b * c) * (m.a * m.d - m.b * m.c))) *
-      (target.scale / target.pixel);
-    const scale =
-      exact > 0 && Number.isFinite(exact) ? Math.SQRT2 ** Math.floor(Math.log2(exact) * 2) : 1;
-    const source = field ? field.layout : (o as StaticTextObject).glyphs;
-    // The stage's and BitmapData.draw's apart, as they draw it at scales of their own.
-    const texts = this.drawRoot ? this.drawnAdvanced : this.advancedTexts;
-    let kept = texts.get(o);
-    if (
-      kept &&
-      kept.source === source &&
-      kept.scale === scale &&
-      kept.resets === saffronStore.resets &&
-      (!field ||
-        (kept.scrollV === field.scrollV &&
-          kept.scrollH === field.scrollH &&
-          kept.left === field.left &&
-          kept.top === field.top &&
-          kept.height === field.height &&
-          kept.grid === field.gridFitType &&
-          kept.thickness === field.thickness &&
-          kept.sharpness === field.sharpness)) &&
-      (!kept.handle || this.geometries.alive(kept.handle))
-    ) {
-      return kept.glyphs ? { handle: kept.handle, normal: kept.glyphs.normal, m } : null;
-    }
-
-    if (kept?.handle && this.geometries.alive(kept.handle)) {
-      this.geometries.remove(kept.handle.id);
-    }
-
-    const glyphs = field ? fieldQuads(field, scale) : staticQuads(o as StaticTextObject, scale);
-    kept = {
-      source,
-      scale,
-      resets: saffronStore.resets,
-      scrollV: field?.scrollV ?? 0,
-      scrollH: field?.scrollH ?? 0,
-      left: field?.left ?? 0,
-      top: field?.top ?? 0,
-      height: field?.height ?? 0,
-      grid: field?.gridFitType ?? "",
-      thickness: field?.thickness ?? 0,
-      sharpness: field?.sharpness ?? 0,
-      glyphs,
-      handle: glyphs?.geometry ? this.geometries.add(glyphs.geometry) : null,
-    };
-    texts.set(o, kept);
-    return glyphs ? { handle: kept.handle, normal: glyphs.normal, m } : null;
   }
 
   /**
@@ -1444,12 +1354,6 @@ export class RenderView implements Drawer {
   /** What advanced text's quads name of the outlines' store, uploaded. */
   private uploadOutlines(): void {
     this.backend.uploadOutlines(saffronStore.data, saffronStore.used, saffronStore.epoch);
-  }
-
-  /** A StaticText's matrix, from its definition's space to its own pixels. */
-  private staticMatrix(o: StaticTextObject): Matrix {
-    const m = o.definition.definition.matrix;
-    return { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 };
   }
 
   /**

@@ -2,11 +2,21 @@
 // geometry of quads (text/saffron.ts' GlyphQuads), which the backend's
 // glyph program covers pixel by pixel from the glyphs' outlines. A field's quads lie
 // in its own pixels, a StaticText's in its definition's, under its matrix.
-import type { GeometryData } from "@swf2es/render";
-import type { StaticTextObject, TextObject } from "../display/display.js";
+// The view keeps each text's quads while what they were made of holds
+// (AdvancedTexts).
+import { IDENTITY, type Matrix } from "@swf2es/format";
+import type { Geometries, GeometryData, GeometryHandle } from "@swf2es/render";
+import type { DisplayObject } from "../display/displayobject.js";
+import { type StaticTextObject, TextObject } from "../display/textobjects.js";
 import { csmTables } from "../text/csm.js";
 import { GUTTER, shownLines } from "../text/layout.js";
-import { GlyphQuads, quadIndices, reserveAll, STRIDE } from "../text/saffron.js";
+import {
+  GlyphQuads,
+  quadIndices,
+  reserveAll,
+  STRIDE,
+  store as saffronStore,
+} from "../text/saffron.js";
 
 /** gridFitType's values, in the order the shader and CSMTextSettings number them. */
 const GRIDS = ["none", "pixel", "subpixel"];
@@ -162,4 +172,111 @@ function geometryOf(quads: GlyphQuads): GeometryData | null {
     indices: quadIndices(built.glyphs),
     glyphs: { vertices: built.vertices, mode: built.mode, table: built.table },
   };
+}
+
+/** A text's glyph quads as Saffron draws them (AdvancedTexts.advancedText), and what they were made of. */
+interface AdvancedText {
+  source: unknown;
+  scale: number;
+  resets: number;
+  scrollV: number;
+  scrollH: number;
+  left: number;
+  top: number;
+  height: number;
+  grid: string;
+  thickness: number;
+  sharpness: number;
+  glyphs: AdvancedGlyphs | null;
+  handle: GeometryHandle | null;
+}
+
+/** Texts' glyph quads as the view draws them, made again only as what they were made of changes. */
+export class AdvancedTexts {
+  /** Each advanced text's glyph quads, and what they were made of (advancedText); BitmapData.draw's apart. */
+  private readonly advancedTexts = new WeakMap<DisplayObject, AdvancedText>();
+  private readonly drawnAdvanced = new WeakMap<DisplayObject, AdvancedText>();
+
+  constructor(private readonly geometries: Geometries) {}
+
+  /**
+   * A text's glyphs as Saffron draws them, of its glyphs' quads made again
+   * as its layout, scroll or place in its field, its settings, its scale
+   * in Flash's pixels or the outlines' store change: their geometry, in the
+   * field's pixels or the StaticText's definition's, and what places them
+   * there in the text's space. Null where it cannot be drawn so, which is
+   * kept too.
+   */
+  advancedText(
+    o: TextObject | StaticTextObject,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    target: { scale: number; pixel: number },
+    drawing: boolean,
+  ): { handle: GeometryHandle | null; normal: number[]; m: Matrix } | null {
+    const field = o instanceof TextObject ? o : null;
+    const m = field ? IDENTITY : staticMatrix(o as StaticTextObject);
+    // Flash's pixels a pixel of the text: the target's pixels a stage pixel over a pixel of Flash's.
+    // Kept in steps of a square root of two, the step down: the quads reach out as far as at the
+    // scale itself or further, and their cost counts as at most twice less, so that a text that
+    // grows or shrinks makes its quads again only now and then.
+    const exact =
+      Math.sqrt(Math.abs((a * d - b * c) * (m.a * m.d - m.b * m.c))) *
+      (target.scale / target.pixel);
+    const scale =
+      exact > 0 && Number.isFinite(exact) ? Math.SQRT2 ** Math.floor(Math.log2(exact) * 2) : 1;
+    const source = field ? field.layout : (o as StaticTextObject).glyphs;
+    // The stage's and BitmapData.draw's apart, as they draw it at scales of their own.
+    const texts = drawing ? this.drawnAdvanced : this.advancedTexts;
+    let kept = texts.get(o);
+    if (
+      kept &&
+      kept.source === source &&
+      kept.scale === scale &&
+      kept.resets === saffronStore.resets &&
+      (!field ||
+        (kept.scrollV === field.scrollV &&
+          kept.scrollH === field.scrollH &&
+          kept.left === field.left &&
+          kept.top === field.top &&
+          kept.height === field.height &&
+          kept.grid === field.gridFitType &&
+          kept.thickness === field.thickness &&
+          kept.sharpness === field.sharpness)) &&
+      (!kept.handle || this.geometries.alive(kept.handle))
+    ) {
+      return kept.glyphs ? { handle: kept.handle, normal: kept.glyphs.normal, m } : null;
+    }
+
+    if (kept?.handle && this.geometries.alive(kept.handle)) {
+      this.geometries.remove(kept.handle.id);
+    }
+
+    const glyphs = field ? fieldQuads(field, scale) : staticQuads(o as StaticTextObject, scale);
+    kept = {
+      source,
+      scale,
+      resets: saffronStore.resets,
+      scrollV: field?.scrollV ?? 0,
+      scrollH: field?.scrollH ?? 0,
+      left: field?.left ?? 0,
+      top: field?.top ?? 0,
+      height: field?.height ?? 0,
+      grid: field?.gridFitType ?? "",
+      thickness: field?.thickness ?? 0,
+      sharpness: field?.sharpness ?? 0,
+      glyphs,
+      handle: glyphs?.geometry ? this.geometries.add(glyphs.geometry) : null,
+    };
+    texts.set(o, kept);
+    return glyphs ? { handle: kept.handle, normal: glyphs.normal, m } : null;
+  }
+}
+
+/** A StaticText's matrix, from its definition's space to its own pixels. */
+function staticMatrix(o: StaticTextObject): Matrix {
+  const m = o.definition.definition.matrix;
+  return { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 };
 }
