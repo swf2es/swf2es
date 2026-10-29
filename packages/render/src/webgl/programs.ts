@@ -92,7 +92,8 @@ void main(void) {
 `;
 
 /**
- * A layer composited onto what is below, pixel for pixel: coloured by its
+ * A layer composited onto what is below over its rectangle (uOffset its
+ * corner in the target's framebuffer), pixel for pixel: coloured by its
  * row's colour transform where it has one (uRow not -1), on its straight
  * colour where it covers anything; then blended by its mode. Normal, layer,
  * add and screen are left to GL's blending; the rest read what is below
@@ -107,6 +108,7 @@ uniform sampler2D uBack;
 uniform highp sampler2D uRows;
 uniform int uRow;
 uniform int uMode;
+uniform ivec2 uOffset;
 out vec4 finalColor;
 
 vec3 straight(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
@@ -117,7 +119,8 @@ vec3 hardlight(vec3 cb, vec3 cf) {
 }
 
 void main(void) {
-  ivec2 at = ivec2(gl_FragCoord.xy);
+  // The layer's texel, and the copy of what is below, from the rectangle's corner.
+  ivec2 at = ivec2(gl_FragCoord.xy) - uOffset;
   vec4 front = texelFetch(uLayer, at, 0);
   if (uRow >= 0 && front.a > 0.0) {
     ivec2 row = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});

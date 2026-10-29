@@ -5,7 +5,6 @@ import {
   Commands,
   Geometries,
   IDLE_FRAMES,
-  LAYER_BEGIN,
   LAYER_END,
   LAYER_POP,
   LAYER_PUSH,
@@ -13,6 +12,7 @@ import {
   MASK_POP,
   MASK_USE,
   MULTIPLY,
+  measureLayers,
   plan,
   ROW_FLOATS,
   Rows,
@@ -199,18 +199,92 @@ test("masks nest, each popped where its marker says", () => {
 test("a layer's draws run inside its push, and it composites in its mode and colour at its pop", () => {
   const scene = new SceneList();
   scene.draw(0, 0, 0);
-  scene.marker(LAYER_BEGIN);
+  scene.layerBegin();
   scene.draw(1, 1, 0);
   scene.draw(2, 1, 0);
+  scene.layerRect(0, 10, 20, 30, 40);
   scene.marker(LAYER_END, MULTIPLY, 7);
   scene.draw(3, 2, 0);
   const commands = new Commands();
   plan(scene, 0xffffffff, commands);
   assert.deepEqual(ops(commands).slice(1), [
     [RUN, 0, 1, 0],
-    [LAYER_PUSH, 0, 0, 0],
+    [LAYER_PUSH, 4, 0, 0],
     [RUN, 2, 2, 0],
     [LAYER_POP, MULTIPLY, 7, 0],
     [RUN, 5, 1, 0],
   ]);
+  // The rectangle after the background's four, as the push names them.
+  assert.deepEqual(Array.from(commands.params.subarray(4, 8)), [10, 20, 30, 40]);
+});
+
+test("a layer of no size is left out, all in it, layers inside it too", () => {
+  const scene = new SceneList();
+  scene.layerBegin();
+  scene.draw(0, 0, 0);
+  scene.layerBegin();
+  scene.draw(1, 0, 0);
+  scene.marker(LAYER_END, MULTIPLY, -1);
+  scene.marker(LAYER_END, MULTIPLY, -1);
+  scene.draw(2, 0, 0);
+  scene.layerRect(1, 0, 0, 10, 10);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [[RUN, 6, 1, 0]]);
+});
+
+/** A geometry of one triangle with the corners (x0, y0) and (x1, y1). */
+const spanning = (
+  geometries: InstanceType<typeof Geometries>,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+) =>
+  geometries.add({
+    positions: new Float32Array([x0, y0, x1, y0, x1, y1]),
+    colors: new Uint32Array(3),
+    indices: new Uint32Array([0, 1, 2]),
+  }).id;
+
+test("a layer covers its draws as their rows place them, out to whole pixels and one more", () => {
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const scene = new SceneList();
+  const small = spanning(geometries, 0, 0, 10, 10);
+  // Scaled twice and moved; then turned a quarter, which takes the box's other corners.
+  const moved = rows.add(2, 0, 0, 2, 20.5, 30, null);
+  const turned = rows.add(0, 1, -1, 0, 100, 100, null);
+  scene.layerBegin();
+  scene.draw(small, moved, 0);
+  scene.marker(LAYER_END, MULTIPLY, -1);
+  scene.layerBegin();
+  scene.draw(small, turned, 0);
+  scene.marker(LAYER_END, MULTIPLY, -1);
+  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1 });
+  assert.deepEqual(Array.from(scene.layers.subarray(0, 8)), [19, 29, 23, 22, 89, 99, 12, 12]);
+  // At twice the pixels a stage pixel, cut to the target.
+  measureLayers(scene, rows, geometries, { width: 100, height: 100, scale: 2 });
+  assert.deepEqual(Array.from(scene.layers.subarray(0, 4)), [40, 59, 42, 41]);
+});
+
+test("a mask cuts what it clips in a layer to its own draws, which the layer does not cover", () => {
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const scene = new SceneList();
+  const big = spanning(geometries, 0, 0, 100, 100);
+  const small = spanning(geometries, 40, 40, 50, 50);
+  const row = rows.add(1, 0, 0, 1, 0, 0, null);
+  scene.layerBegin();
+  scene.marker(MASK_BEGIN);
+  scene.draw(small, row, 0);
+  scene.marker(MASK_USE, 2, 1);
+  // A layer inside a layer: the outer one covers the inner one's rectangle.
+  scene.layerBegin();
+  scene.draw(big, row, 0);
+  scene.marker(LAYER_END, MULTIPLY, -1);
+  scene.marker(MASK_POP, 2, 1);
+  scene.marker(LAYER_END, MULTIPLY, -1);
+  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1 });
+  assert.deepEqual(Array.from(scene.layers.subarray(0, 8)), [39, 39, 12, 12, 0, 0, 101, 101]);
 });

@@ -13,12 +13,12 @@ import {
   Geometries,
   type GeometryHandle,
   LAYER,
-  LAYER_BEGIN,
   LAYER_END,
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
   MIRROR,
+  measureLayers,
   NORMAL,
   plan,
   REPEAT,
@@ -150,6 +150,8 @@ export class RenderView implements Drawer {
   private readonly geometries = new Geometries();
   private readonly textures = new Textures();
   private readonly commands = new Commands();
+  /** Where a frame is drawn, filled in as it is. */
+  private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0 };
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
@@ -243,15 +245,21 @@ export class RenderView implements Drawer {
     this.scene.reset();
     this.rows.reset();
     this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
-    plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
-    this.backend.execute(this.commands, this.scene, this.rows, this.geometries, this.textures, {
-      width: this.gl.drawingBufferWidth,
-      height: this.gl.drawingBufferHeight,
-      scale: this.scale * this.resolution,
-      x: 0,
-      y: 0,
-    });
+    const target = this.target;
+    target.width = this.gl.drawingBufferWidth;
+    target.height = this.gl.drawingBufferHeight;
+    target.scale = this.scale * this.resolution;
+    measureLayers(this.scene, this.rows, this.geometries, target);
+    plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
+    this.backend.execute(
+      this.commands,
+      this.scene,
+      this.rows,
+      this.geometries,
+      this.textures,
+      target,
+    );
     this.geometries.endFrame();
     this.textures.endFrame();
   }
@@ -321,7 +329,8 @@ export class RenderView implements Drawer {
         color = null;
       }
 
-      this.scene.marker(LAYER_BEGIN);
+      // Over the rectangle of what is drawn in it, which measureLayers finds.
+      this.scene.layerBegin();
     }
 
     // Its scroll's rectangle clips what it draws, inside its layer.

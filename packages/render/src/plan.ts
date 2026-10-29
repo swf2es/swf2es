@@ -21,7 +21,7 @@ import {
  * Plan a frame: clear to `background` (0xAARRGGBB, straight), then a run
  * for each stretch of the list under one blend mode, each mask pushed into
  * the stencil and popped out, and each layer pushed and composited, where
- * their markers say. Pure: the same
+ * their markers say; a layer of no size is left out, all in it. Pure: the same
  * list plans the same commands.
  */
 export function plan(scene: SceneList, background: number, out: Commands): void {
@@ -73,10 +73,19 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
         close(i);
         out.push(STENCIL_POP, scene.geometry[i], scene.row[i]);
         break;
-      case LAYER_BEGIN:
+      case LAYER_BEGIN: {
         close(i);
-        out.push(LAYER_PUSH);
+        const r = scene.layers;
+        const at = scene.geometry[i] * 4;
+        if (r[at + 2] <= 0 || r[at + 3] <= 0) {
+          // Nothing of it shows: all in it left out, up to its end.
+          i = layerEnd(scene, i);
+          break;
+        }
+
+        out.push(LAYER_PUSH, out.param(r[at], r[at + 1], r[at + 2], r[at + 3]));
         break;
+      }
       case LAYER_END:
         close(i);
         out.push(LAYER_POP, scene.geometry[i], scene.row[i]);
@@ -85,4 +94,24 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
   }
 
   close(scene.length);
+}
+
+/** The LAYER_END that closes the layer begun at entry `begin`. */
+function layerEnd(scene: SceneList, begin: number): number {
+  let depth = 0;
+  for (let i = begin; i < scene.length; i++) {
+    switch (scene.kind[i]) {
+      case LAYER_BEGIN:
+        depth++;
+        break;
+      case LAYER_END:
+        if (--depth === 0) {
+          return i;
+        }
+
+        break;
+    }
+  }
+
+  return scene.length;
 }
