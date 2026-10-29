@@ -375,10 +375,18 @@ export class HeldLayers {
 
   /** A page of at least `width` by `height` taken for the frame: its index in `pages`. */
   private takePage(width: number, height: number): number {
+    return this.addPage(this.pool.takeLayer(width, height), false);
+  }
+
+  /**
+   * `layer` added to the frame's pages, read by no pass yet, kept for the
+   * frame where `kept`: its index in `pages`.
+   */
+  private addPage(layer: Layer, kept: boolean): number {
     const index = this.pages.length;
-    this.pages.push(this.pool.takeLayer(width, height));
+    this.pages.push(layer);
     this.pageUntil.push(-1);
-    this.pageKept.push(false);
+    this.pageKept.push(kept);
     return index;
   }
 
@@ -592,10 +600,7 @@ export class HeldLayers {
       hold.height,
       target.resolution,
     );
-    const index = this.pages.length;
-    this.pages.push(output);
-    this.pageUntil.push(-1);
-    this.pageKept.push(true);
+    const index = this.addPage(output, true);
     hold.result = this.slotOf(hold, 0, index, 0, 0, output.width, output.height);
   }
 
