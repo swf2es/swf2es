@@ -84,8 +84,6 @@ export class FilterLayers {
     private readonly textures: Textures,
     private readonly keeps: Keeps,
     private readonly paints: Paints,
-    /** The largest texture side the context makes, which a filtered layer's padding must fit. */
-    private readonly textureLimit: number,
   ) {}
 
   /**
@@ -269,7 +267,7 @@ export class FilterLayers {
    * round what `o` drew, the scene's entries from `from` on: its area cut
    * to the target, as PixiJS's filter system measures it (measure.ts in
    * @swf2es/render). Only a padding past what fits round the whole target asks
-   * for the area.
+   * for the area. `textureLimit` is the view's, the largest texture side the context makes.
    */
   fitFilters(
     o: DisplayObject,
@@ -281,18 +279,19 @@ export class FilterLayers {
     resolution: number,
     scale: number,
     drawing: boolean,
+    textureLimit: number,
   ): FilterPlan {
     const res = resolution;
     const width = target.width / res;
     const height = target.height / res;
-    if (plan.padding <= filterRoom(this.textureLimit, res, width, height)) {
+    if (plan.padding <= filterRoom(textureLimit, res, width, height)) {
       return plan;
     }
 
     const area = this.drawn;
     drawnArea(scene, rows, this.geometries, from, scale * res, area);
     const room = filterRoom(
-      this.textureLimit,
+      textureLimit,
       res,
       Math.min(area[2] / res, width) - Math.max(area[0] / res, 0),
       Math.min(area[3] / res, height) - Math.max(area[1] / res, 0),

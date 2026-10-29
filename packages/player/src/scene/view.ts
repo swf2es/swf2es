@@ -148,7 +148,7 @@ export class RenderView implements Drawer {
   private readonly filterLayers: FilterLayers;
   private readonly planes: Planes;
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
-  private textureLimit = 4096;
+  private readonly textureLimit: number;
   /** The outlines' store kept while the view is (text/saffron.ts, holdSegments), let go of with it. */
   private readonly releaseOutlines = holdSegments();
   /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
@@ -222,13 +222,7 @@ export class RenderView implements Drawer {
     this.textItems = new TextItems(this.geometries, this.textures, this.parts);
     this.advancedTexts = new AdvancedTexts(this.geometries);
     this.masks = new Masks(this.geometries, this.parts);
-    this.filterLayers = new FilterLayers(
-      this.geometries,
-      this.textures,
-      this.keeps,
-      this.paints,
-      this.textureLimit,
-    );
+    this.filterLayers = new FilterLayers(this.geometries, this.textures, this.keeps, this.paints);
     this.planes = new Planes(this.geometries);
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
@@ -867,6 +861,7 @@ export class RenderView implements Drawer {
         this.resolution,
         this.scale,
         this.drawRoot !== null,
+        this.textureLimit,
       );
       this.scene.padLayer(layer, fitted.padding);
       this.scene.layerEnd(mode, layerRow, this.filterLayers.chainOf(fitted, this.filters));
