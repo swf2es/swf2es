@@ -17,7 +17,7 @@ import { FilterPlan, planChain } from "../filter-plan.js";
 import type { Filters } from "../filters.js";
 import { type Geometries, type GeometryData, GLYPH_FLOATS } from "../geometry.js";
 import type { Keeps } from "../keeps.js";
-import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
+import type { Rows } from "../rows.js";
 import {
   ADD,
   CLAMP,
@@ -54,10 +54,8 @@ import {
   meshFragment,
   meshVertex,
   ORIGIN_AT,
-  OUTLINE_ROW,
   OUTLINE_UNIT,
   POSITION_AT,
-  ROW_TEXELS,
   RUN_AT,
   RUN_MOST,
   SNAP_BIT,
@@ -75,6 +73,7 @@ import {
   type Open,
   Targets,
 } from "./targets.js";
+import { GpuTextures } from "./textures.js";
 
 /** What the backend calls of WEBGL_multi_draw. */
 interface MultiDraw {
@@ -185,6 +184,7 @@ export class WebGLBackend {
   readonly state: GlState;
   private readonly targets: Targets;
   private readonly stage: Stage;
+  private readonly gpu: GpuTextures;
   private program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
@@ -226,7 +226,7 @@ export class WebGLBackend {
   /**
    * Advanced text's program (GeometryData.glyphs), where it takes its row, view, Flash's
    * pixels a stage pixel, mode and table; and its own atlas of vertices,
-   * with its own index buffer, and the outlines' texture.
+   * with its own index buffer.
    */
   private glyphProgram!: WebGLProgram;
   private glyphRowLocation: WebGLUniformLocation | null = null;
@@ -249,11 +249,6 @@ export class WebGLBackend {
     live: 0,
     holes: 0,
   };
-  private outlines: WebGLTexture | null = null;
-  /** The outlines uploaded: of which epoch, how many segments, and the texture's rows. */
-  private outlineEpoch = -1;
-  private outlineCount = 0;
-  private outlineRows = 0;
   /** The layers' composite program and where it takes its mode and row. */
   private composite!: WebGLProgram;
   private modeLocation: WebGLUniformLocation | null = null;
@@ -297,15 +292,9 @@ export class WebGLBackend {
   private backHeight = 0;
   /** The row and texture the last draw was told, so neither is told again. */
   private lastRow = -1;
-  /** The textures uploaded, by the registry's ids, and their sizes; the samplers made, by their bits. */
-  private textures: (WebGLTexture | null)[] = [];
-  private sizes: number[] = [];
-  private samplers: (WebGLSampler | null)[] = [];
   private vertexArray!: WebGLVertexArrayObject;
   private vertexBuffer!: WebGLBuffer;
   private indexBuffer!: WebGLBuffer;
-  private rowsTexture!: WebGLTexture;
-  private rowLines = 0;
   private vertexCapacity = 0;
   private indexCapacity = 0;
   private vertexTop = 0;
@@ -319,6 +308,7 @@ export class WebGLBackend {
     this.state = new GlState(gl);
     this.targets = new Targets(gl, this.state);
     this.stage = new Stage(gl, this.state, this.targets);
+    this.gpu = new GpuTextures(gl, this.state);
     this.setUp();
   }
 
@@ -386,12 +376,6 @@ export class WebGLBackend {
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uSegments"), OUTLINE_UNIT);
     this.glyphStale = true;
-    this.outlines = null;
-    this.outlineEpoch = -1;
-    this.outlineCount = 0;
-    this.outlineRows = 0;
-    this.textures = [];
-    this.samplers = [];
     this.composite = linkProgram(gl, compositeVertex, compositeFragment);
     this.state.useProgram(this.composite);
     gl.uniform1i(gl.getUniformLocation(this.composite, "uLayer"), LAYER_UNIT);
@@ -406,8 +390,8 @@ export class WebGLBackend {
     this.filters = new FilterRunner(gl, this.state, {
       take: (width, height) => this.targets.takeLayer(width, height, true),
       give: (layer) => this.targets.giveLayer(layer),
-      texture: (id) => this.textures[id] ?? null,
-      sampler: (bits) => this.sampler(bits),
+      texture: (id) => this.gpu.textures[id] ?? null,
+      sampler: (bits) => this.gpu.sampler(bits),
     });
     this.targets.setUp();
     this.layers = [];
@@ -457,11 +441,7 @@ export class WebGLBackend {
       live: 0,
       holes: 0,
     });
-    this.rowsTexture = gl.createTexture() as WebGLTexture;
-    this.state.bindTexture(0, this.rowsTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    this.rowLines = 0;
+    this.gpu.setUp();
     this.vertexCapacity = 0;
     this.indexCapacity = 0;
     this.places = [];
@@ -492,7 +472,7 @@ export class WebGLBackend {
     }
 
     this.place(geometries);
-    this.uploadTextures(textures);
+    this.gpu.uploadTextures(textures);
     for (const id of keeps.removed) {
       const layer = this.targets.kept[id];
       if (layer) {
@@ -502,13 +482,13 @@ export class WebGLBackend {
     }
 
     keeps.removed.length = 0;
-    this.uploadRows(rows);
+    this.gpu.uploadRows(rows);
     const state = this.state;
     state.scissor(null);
     state.colorMask(15);
     state.useProgram(this.program);
     state.bindVertexArray(this.vertexArray);
-    state.bindTexture(0, this.rowsTexture);
+    state.bindTexture(0, this.gpu.rowsTexture);
     // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
     // does. Its layers take the stage's, so that their edges are the stage's.
     const stage = root ? null : this.stage.stageBuffers(target.width, target.height, this.samples);
@@ -1018,7 +998,7 @@ export class WebGLBackend {
         hold.width,
         hold.height,
         target.resolution,
-        this.hasTexture,
+        this.gpu.hasTexture,
       );
       hold.targets.length = plan.slots;
       hold.targets.fill(null, 1);
@@ -1261,9 +1241,6 @@ export class WebGLBackend {
     return record;
   }
 
-  /** Whether texture `id` of the frame's is there, for a filter that reads it. */
-  private readonly hasTexture = (id: number) => id >= 0 && (this.textures[id] ?? null) !== null;
-
   /**
    * Held layer `hold`'s draws, masks and held layers' composites into
    * `open`, bound, its stencil starting clear.
@@ -1382,7 +1359,7 @@ export class WebGLBackend {
   private useFill(): void {
     this.state.useProgram(this.program);
     this.state.bindVertexArray(this.vertexArray);
-    this.state.bindTexture(0, this.rowsTexture);
+    this.state.bindTexture(0, this.gpu.rowsTexture);
   }
 
   /**
@@ -1596,8 +1573,8 @@ export class WebGLBackend {
 
       for (let k = 0; k < FILL_TEXTURES; k++) {
         if (this.runUnits & (1 << k)) {
-          state.bindTexture(FILL_UNIT + k, this.textures[this.unitIds[k]] as WebGLTexture);
-          state.bindSampler(FILL_UNIT + k, this.sampler(this.unitSampling[k]));
+          state.bindTexture(FILL_UNIT + k, this.gpu.textures[this.unitIds[k]] as WebGLTexture);
+          state.bindSampler(FILL_UNIT + k, this.gpu.sampler(this.unitSampling[k]));
         }
       }
 
@@ -1636,6 +1613,7 @@ export class WebGLBackend {
    * past those whose texture is gone, which draw nothing.
    */
   private gatherRun(scene: SceneList, i: number, end: number, stencil: boolean): number {
+    const textures = this.gpu.textures;
     const most = this.multi ? RUN_MOST : 1;
     let draws = 0;
     let last = i;
@@ -1658,7 +1636,7 @@ export class WebGLBackend {
       const id = stencil ? -1 : scene.texture[j];
       let slot = 0;
       if (id >= 0) {
-        if (!this.textures[id]) {
+        if (!textures[id]) {
           last = j;
           continue;
         }
@@ -1739,61 +1717,9 @@ export class WebGLBackend {
     gl.uniform1i(this.glyphRowLocation, scene.row[i]);
     gl.uniform4fv(this.glyphModeLocation, glyphs.mode);
     gl.uniform4fv(this.glyphTableLocation, glyphs.table);
-    state.bindTexture(OUTLINE_UNIT, this.outlines);
+    state.bindTexture(OUTLINE_UNIT, this.gpu.outlines);
     state.bindSampler(OUTLINE_UNIT, null);
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
-  }
-
-  /**
-   * Advanced text's outlines (GeometryData.glyphs), `count` segments of four floats each
-   * in `data`, as the player's store holds them: uploaded whole for another
-   * `epoch` or a larger store, else the rows added since.
-   */
-  uploadOutlines(data: Float32Array, count: number, epoch: number): void {
-    const gl = this.gl;
-    if (gl.isContextLost() || count === 0) {
-      return;
-    }
-
-    const rows = data.length / 4 / OUTLINE_ROW;
-    let from = epoch === this.outlineEpoch ? this.outlineCount : 0;
-    if (!this.outlines || rows !== this.outlineRows) {
-      if (this.outlines) {
-        this.state.dropTexture(this.outlines);
-        gl.deleteTexture(this.outlines);
-      }
-
-      this.outlines = gl.createTexture() as WebGLTexture;
-      this.state.bindTexture(OUTLINE_UNIT, this.outlines);
-      this.state.activeTexture(OUTLINE_UNIT);
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, OUTLINE_ROW, rows);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      this.outlineRows = rows;
-      from = 0;
-    }
-
-    if (from < count) {
-      const first = Math.floor(from / OUTLINE_ROW);
-      const height = Math.ceil(count / OUTLINE_ROW) - first;
-      this.state.bindTexture(OUTLINE_UNIT, this.outlines);
-      this.state.activeTexture(OUTLINE_UNIT);
-      gl.texSubImage2D(
-        gl.TEXTURE_2D,
-        0,
-        0,
-        first,
-        OUTLINE_ROW,
-        height,
-        gl.RGBA,
-        gl.FLOAT,
-        data,
-        first * OUTLINE_ROW * 4,
-      );
-    }
-
-    this.outlineEpoch = epoch;
-    this.outlineCount = count;
   }
 
   /**
@@ -1809,7 +1735,7 @@ export class WebGLBackend {
         ? null
         : plane
           ? (this.targets.kept[id]?.texture ?? null)
-          : (this.textures[id] ?? null);
+          : (this.gpu.textures[id] ?? null);
     if (!texture) {
       return false;
     }
@@ -1845,120 +1771,9 @@ export class WebGLBackend {
     state.bindTexture(TEXTURE_UNIT, texture);
     // A plane's bitmap smoothed; a mesh's read texel by texel, but through a sampler without
     // mipmaps, as a texture with none needs.
-    state.bindSampler(TEXTURE_UNIT, this.sampler(plane ? SMOOTH | CLAMP : CLAMP));
+    state.bindSampler(TEXTURE_UNIT, this.gpu.sampler(plane ? SMOOTH | CLAMP : CLAMP));
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
     return true;
-  }
-
-  /** The textures removed since the last frame deleted, and those added or changed uploaded, their pixels let go. */
-  private uploadTextures(textures: Textures): void {
-    const gl = this.gl;
-    for (const id of textures.removed) {
-      const texture = this.textures[id];
-      if (texture) {
-        this.state.dropTexture(texture);
-        gl.deleteTexture(texture);
-        this.textures[id] = null;
-      }
-    }
-
-    textures.removed.length = 0;
-    for (const id of textures.pending) {
-      const data = textures.get(id);
-      if (!data?.pixels) {
-        continue;
-      }
-
-      let texture = this.textures[id];
-      if (!texture) {
-        texture = gl.createTexture() as WebGLTexture;
-        this.textures[id] = texture;
-        this.sizes[id * 2] = -1;
-      }
-
-      this.state.bindTexture(TEXTURE_UNIT, texture);
-      this.state.activeTexture(TEXTURE_UNIT);
-      // Pixels of the same size go into the texture there is; another size makes it again.
-      if (this.sizes[id * 2] === data.width && this.sizes[id * 2 + 1] === data.height) {
-        gl.texSubImage2D(
-          gl.TEXTURE_2D,
-          0,
-          0,
-          0,
-          data.width,
-          data.height,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          data.pixels,
-        );
-        data.pixels = null;
-        continue;
-      }
-
-      this.sizes[id * 2] = data.width;
-      this.sizes[id * 2 + 1] = data.height;
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA8,
-        data.width,
-        data.height,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        data.pixels,
-      );
-      data.pixels = null;
-    }
-
-    textures.pending.length = 0;
-  }
-
-  /** The sampler for `bits` (SMOOTH, and REPEAT or MIRROR), made as first asked for. */
-  private sampler(bits: number): WebGLSampler {
-    const known = this.samplers[bits];
-    if (known) {
-      return known;
-    }
-
-    const gl = this.gl;
-    const sampler = gl.createSampler() as WebGLSampler;
-    const filter = bits & SMOOTH ? gl.LINEAR : gl.NEAREST;
-    const wrap = bits & REPEAT ? gl.REPEAT : bits & MIRROR ? gl.MIRRORED_REPEAT : gl.CLAMP_TO_EDGE;
-    gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, filter);
-    gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
-    gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, wrap);
-    gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, wrap);
-    this.samplers[bits] = sampler;
-    return sampler;
-  }
-
-  /** The rows a frame wrote, uploaded in one call, the texture made taller first if they need it. */
-  private uploadRows(rows: Rows): void {
-    const gl = this.gl;
-    const lines = Math.max(1, Math.ceil(rows.count / ROWS_A_LINE));
-    const width = ROWS_A_LINE * ROW_TEXELS;
-    this.state.bindTexture(0, this.rowsTexture);
-    this.state.activeTexture(0);
-    if (lines > this.rowLines) {
-      this.rowLines = Math.max(lines, this.rowLines * 2);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, this.rowLines, 0, gl.RGBA, gl.FLOAT, null);
-    }
-
-    if (rows.count > 0) {
-      // Whole lines: the data holds ROW_FLOATS a row for as many rows as its lines hold.
-      gl.texSubImage2D(
-        gl.TEXTURE_2D,
-        0,
-        0,
-        0,
-        width,
-        lines,
-        gl.RGBA,
-        gl.FLOAT,
-        rows.data.subarray(0, lines * ROWS_A_LINE * ROW_FLOATS),
-      );
-    }
   }
 
   /**
@@ -2193,6 +2008,11 @@ export class WebGLBackend {
     g.live += count;
   }
 
+  /** Advanced text's outlines uploaded (GpuTextures.uploadOutlines). */
+  uploadOutlines(data: Float32Array, count: number, epoch: number): void {
+    this.gpu.uploadOutlines(data, count, epoch);
+  }
+
   /** What the backend made on the context, deleted. */
   destroy(): void {
     const gl = this.gl;
@@ -2200,17 +2020,12 @@ export class WebGLBackend {
     gl.deleteVertexArray(this.vertexArray);
     gl.deleteBuffer(this.vertexBuffer);
     gl.deleteBuffer(this.indexBuffer);
-    gl.deleteTexture(this.rowsTexture);
     gl.deleteProgram(this.composite);
     gl.deleteProgram(this.mesh);
     gl.deleteProgram(this.glyphProgram);
     gl.deleteVertexArray(this.glyphArray);
     gl.deleteBuffer(this.glyphBuffer);
     gl.deleteBuffer(this.glyphIndexBuffer);
-    if (this.outlines) {
-      gl.deleteTexture(this.outlines);
-    }
-
     this.filters.destroy();
     for (const open of this.layers) {
       if (open.layer) {
@@ -2227,18 +2042,7 @@ export class WebGLBackend {
 
     this.stage.destroy();
 
-    for (const texture of this.textures) {
-      if (texture) {
-        gl.deleteTexture(texture);
-      }
-    }
-
-    for (const sampler of this.samplers) {
-      if (sampler) {
-        gl.deleteSampler(sampler);
-      }
-    }
-
+    this.gpu.destroy();
     this.state.forget();
   }
 }
