@@ -86,6 +86,8 @@ writeFileSync(
     var f = new flash.filters.ConvolutionFilter(3, 3, [1,1,1,1,1,1,1,1,1], 9);
     dest.applyFilter(source, source.rectangle, new flash.geom.Point(0, 0), f);
     dest.applyFilter(dest, dest.rectangle, new flash.geom.Point(0, 0), f);
+    dest.applyFilter(dest, dest.rectangle, new flash.geom.Point(0, 0), new flash.filters.BlurFilter(4, 4, 1));
+    dest.applyFilter(dest, dest.rectangle, new flash.geom.Point(0, 0), new flash.filters.GlowFilter(0xff0000, 1, 4, 4, 2, 1));
     trace(dest.getPixel32(8, 8) + " " + dest.getPixel32(0, 0));
     this.attachBitmap(dest, 1);
     stop();
@@ -1618,9 +1620,10 @@ for (const vm of ["as3", "avm1"]) {
             imageReference = image;
           }
 
-          // One kernel for the page's players; a trapped call made again in a new instance.
-          assert.equal(result.calls, mode === "trap" ? 7 : 6);
-          assert.equal(result.instances, mode === "trap" ? 2 : 1);
+          // One kernel for the page's players, each of which convolves twice, blurs and glows; the
+          // first call of each kind trapped and made again in a new instance.
+          assert.equal(result.calls, mode === "trap" ? 15 : 12);
+          assert.equal(result.instances, mode === "trap" ? 4 : 1);
 
           await call(evaluate, "bitmapDestroy()");
           await send("HeapProfiler.collectGarbage");

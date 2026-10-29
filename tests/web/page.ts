@@ -792,35 +792,37 @@ async function bitmapRun(mode: string, vm: string) {
   const errors: string[] = [];
   let calls = 0;
   let instances = 0;
-  let trapped = false;
+  const trapped = new Set<string>();
   console.log = (...values) => traces.push(values.join(" "));
   console.error = (...values) => errors.push(values.join(" "));
   WebAssembly.Instance = new Proxy(Instance, {
     construct(target, args) {
       const instance = Reflect.construct(target, args) as WebAssembly.Instance;
       bitmapMemories.push(new WeakRef(instance.exports.memory as WebAssembly.Memory));
-      // Every instance of the render module exports the kernel: the view's tessellator's too. An
-      // instance counts as the convolver's once the kernel runs in it.
-      let convolving = false;
-      return {
-        exports: {
-          ...instance.exports,
-          convolve: (...params: number[]) => {
-            calls++;
-            if (!convolving) {
-              convolving = true;
-              instances++;
-            }
+      // Every instance of the render module exports the kernels: the view's tessellator's too. An
+      // instance counts as the bitmap kernel's once one of them runs in it.
+      let filtering = false;
+      const exports: Record<string, unknown> = { ...instance.exports };
+      for (const name of ["convolve", "blurFilter", "layerFilter"]) {
+        const kernel = instance.exports[name] as (...args: number[]) => number;
+        exports[name] = (...params: number[]) => {
+          calls++;
+          if (!filtering) {
+            filtering = true;
+            instances++;
+          }
 
-            // The first call alone, which the player makes again in a new instance.
-            if (mode === "trap" && !trapped) {
-              trapped = true;
-              throw new WebAssembly.RuntimeError("test bitmap trap");
-            }
-            return (instance.exports.convolve as (...args: number[]) => number)(...params);
-          },
-        },
-      };
+          // The first call of each kind alone, which the player makes again in a new instance.
+          if (mode === "trap" && !trapped.has(name)) {
+            trapped.add(name);
+            throw new WebAssembly.RuntimeError("test bitmap trap");
+          }
+
+          return kernel(...params);
+        };
+      }
+
+      return { exports };
     },
   });
   let rect: [number, number, number, number] = [0, 0, 0, 0];
