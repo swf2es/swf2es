@@ -1535,7 +1535,14 @@ export class RenderView implements Drawer {
 
   /** The mouse, touches and wheel on the canvas to `player`'s stage (pointer.ts); what undoes it. */
   bindPointer(player: Player): () => void {
-    return bindCanvasPointer(this.canvas, player);
+    // The stage the canvas shows, read as each event comes: the host may zoom the view.
+    const view = this;
+    return bindCanvasPointer(this.canvas, player, {
+      get bounds() {
+        const k = view.scale * view.resolution;
+        return { x: 0, y: 0, width: view.canvas.width / k, height: view.canvas.height / k };
+      },
+    });
   }
 
   /**
