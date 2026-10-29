@@ -1818,16 +1818,7 @@ export class RenderView implements Drawer {
         : staticItems(o, omitted)) {
         const geometry = item.kind === "glyph" ? this.glyphGeometry(item.glyph) : null;
         if (item.kind === "glyph" && geometry) {
-          const g = item.m;
-          const glyphRow = this.rows.add(
-            a * g.a + c * g.b,
-            b * g.a + d * g.b,
-            a * g.c + c * g.d,
-            b * g.c + d * g.d,
-            a * g.tx + c * g.ty + tx,
-            b * g.tx + d * g.ty + ty,
-            null,
-          );
+          const glyphRow = this.placedRow(a, b, c, d, tx, ty, item.m, null);
           this.geometries.use(geometry.id);
           this.scene.draw(geometry.id, glyphRow, NORMAL, -1, SNAP);
         }

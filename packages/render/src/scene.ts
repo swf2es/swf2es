@@ -83,8 +83,10 @@ export const MESH = 8;
  */
 export const PLANE = 16;
 /**
- * Its vertices placed on quarters of a stage pixel, ties to even, as Flash
- * places a glyph's outline (the `legacy-static-text` case, drawn in adl).
+ * Its vertices placed on quarters of a pixel of Flash's, ties to even, as
+ * Flash places a glyph's outline (the `legacy-static-text` case, drawn in
+ * adl): a pixel of the screen, a BitmapData's in a draw, a texel of a 3D
+ * object's bitmap.
  */
 export const SNAP = 32;
 

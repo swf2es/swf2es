@@ -39,10 +39,10 @@ export const TABLE_ENTRIES = 48;
 export const OUTLINE_ROW = 1024;
 
 /**
- * Places a vertex by its row's transform, on a quarter of a stage pixel
- * where uSnap (SNAP), then on the target by uView (scale and offset into
- * clip space), and passes on its straight colour and the row's colour
- * transform.
+ * Places a vertex by its row's transform, on a quarter of a pixel of
+ * Flash's (uUnit of them a stage pixel, from the stage's origin) where
+ * uSnap (SNAP), then on the target by uView (scale and offset into clip
+ * space), and passes on its straight colour and the row's colour transform.
  */
 export const fillVertex = `#version 300 es
 precision highp float;
@@ -53,6 +53,7 @@ uniform highp sampler2D uRows;
 uniform int uRow;
 uniform vec4 uView;
 uniform bool uSnap;
+uniform float uUnit;
 out vec4 vColor;
 out vec2 vTexel;
 flat out vec4 vMul;
@@ -66,7 +67,7 @@ void main(void) {
   vAdd = texelFetch(uRows, at + ivec2(3, 0), 0);
   vec2 p = vec2(m.x * aPosition.x + m.z * aPosition.y + t.x, m.y * aPosition.x + m.w * aPosition.y + t.y);
   if (uSnap) {
-    p = roundEven(p * 4.0) / 4.0;
+    p = roundEven(p * uUnit * 4.0) / (uUnit * 4.0);
   }
 
   gl_Position = vec4(p * uView.xy + uView.zw, 0.0, 1.0);
