@@ -57,9 +57,11 @@ import {
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
+import type { Player } from "../player.js";
 import { cssFont } from "../text/fonts.js";
 import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
+import { bindCanvasPointer } from "./pointer.js";
 import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
 import { layerStrokes } from "./strokes.js";
 import {
@@ -1523,6 +1525,11 @@ export class RenderView implements Drawer {
     // from: it masks as it stands on the stage.
     const rootInverse = invert(toStageFlat(root));
     return rootInverse ? concat(concat(onStage, rootInverse), this.drawMatrix) : onStage;
+  }
+
+  /** The mouse, touches and wheel on the canvas to `player`'s stage (pointer.ts); what undoes it. */
+  bindPointer(player: Player): () => void {
+    return bindCanvasPointer(this.canvas, player);
   }
 
   /**
