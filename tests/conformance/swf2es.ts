@@ -67,7 +67,7 @@ export async function runSwf2es(
   const print = (line: string) => lines.push(line);
   const libraries = builtins.map((bytes, i) => ({ name: `builtin-${i}`, abc: bytes }));
   const abcs = [{ name: "main", abc }];
-  const threads = nodeShellThreads({ codegen, libraries, abcs, print });
+  const threads = nodeShellThreads({ codegen, libraries, abcs, print, apiVersion });
   try {
     await runShell(libraries, abcs, {
       compiler: testingCompiler(testing),

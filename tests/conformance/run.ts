@@ -16,6 +16,8 @@ const cases = readdirSync(`${here}cases`)
   .filter((f) => f.endsWith(".as"))
   .map((f) => `${here}cases/${f}`);
 
+const apiVersions = readFileSync(`${root}oracle/avmplus/core/api-versions.h`, "utf8");
+
 /**
  * avmshell's arguments for a case, from a line `// avmshell: -api AIR_1_5`
  * at its top, and the API version its -api names, which swf2es runs it at.
@@ -28,14 +30,16 @@ function shellArgsOf(source: string): { args: string[]; apiVersion?: number } {
     return { args };
   }
 
-  const versions = readFileSync(`${root}oracle/avmplus/core/api-versions.h`, "utf8");
-  const number = new RegExp(`kApiVersion_${args[api + 1]} = (\\d+)`).exec(versions);
+  const number = new RegExp(`kApiVersion_${args[api + 1]} = (\\d+)`).exec(apiVersions);
   if (!number) {
     throw new Error(`${source}: no API version ${args[api + 1]}`);
   }
 
   return { args, apiVersion: Number(number[1]) };
 }
+
+// Each case's, read once.
+const shellArgs = new Map(cases.map((source) => [source, shellArgsOf(source)]));
 
 // Larger ABCs to parse, whose run output does not matter.
 const parseOnly = [`${root}oracle/avmplus/utils/abcdump.as`];
@@ -52,7 +56,11 @@ try {
 // leave a member out for, as Tamarin's JSON tests are compiled.
 const results = runOracle(
   [
-    ...cases.map((source) => ({ source, ascArgs: ["-md"], shellArgs: shellArgsOf(source).args })),
+    ...cases.map((source) => ({
+      source,
+      ascArgs: ["-md"],
+      shellArgs: shellArgs.get(source)?.args,
+    })),
     ...parseOnly,
   ],
   `${here}out`,
@@ -93,7 +101,7 @@ for (const r of results) {
     const expected = r.output.replace(/\n$/, "").split("\n");
     let actual: string[];
     try {
-      actual = await runSwf2es(builtins, abcOf(r), shellArgsOf(`${root}${r.file}`).apiVersion);
+      actual = await runSwf2es(builtins, abcOf(r), shellArgs.get(`${root}${r.file}`)?.apiVersion);
     } catch (e) {
       // The first frames, with each module's data URL shortened.
       const stack = (e instanceof Error ? (e.stack ?? e.message) : String(e))

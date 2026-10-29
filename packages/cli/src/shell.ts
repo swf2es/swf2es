@@ -6,7 +6,7 @@
 // Domain.loadBytes loads compiles against what its domain sees, a
 // sibling's ABCs left out.
 import { createHash } from "node:crypto";
-import type { Codegen } from "@swf2es/codegen";
+import { API_VERSION, type Codegen } from "@swf2es/codegen";
 import type {
   Abc,
   CompileUnit,
@@ -60,9 +60,6 @@ export interface ShellOptions {
    */
   apiVersion?: number;
 }
-
-/** avmshell's API version for the ABCs it runs by default, Flash Player's. */
-const API_VERSION = 50;
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 

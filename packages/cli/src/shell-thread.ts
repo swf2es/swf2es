@@ -14,7 +14,8 @@ import {
 import { runShell } from "./shell.js";
 import { nodeShellThreads, type ShellThreadData } from "./threads.js";
 
-const { codegen, libraries, abcs, init, post, group, memories } = workerData as ShellThreadData;
+const { codegen, libraries, abcs, init, post, group, memories, apiVersion } =
+  workerData as ShellThreadData;
 const print = post
   ? (line: string) => parentPort?.postMessage(line)
   : (line: string) => writeSync(1, `${line}\n`);
@@ -26,6 +27,7 @@ if (startShellWorker(init)) {
     abcs,
     group,
     memories,
+    apiVersion,
     ...(post ? { print } : {}),
   });
   let exception = true;
@@ -37,6 +39,7 @@ if (startShellWorker(init)) {
       print,
       workers: threads.host,
       worker: init,
+      apiVersion,
     });
     exception = exitCode !== 0;
   } catch (e) {
