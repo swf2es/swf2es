@@ -7,6 +7,7 @@ import {
   Rectangle,
   type Renderer,
 } from "pixi.js";
+import { canvasPoint, wheelLines } from "../input/canvas.js";
 import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
@@ -53,49 +54,10 @@ function stagePoint(
     return toStage(e.global.x, e.global.y, size.width, size.height);
   }
 
-  // The content box: the element's rectangle within its borders and padding.
-  const px = (v: string | undefined) => Number.parseFloat(v ?? "") || 0;
-  const rect = canvas.getBoundingClientRect();
-  let left = rect.left + px(style.borderLeftWidth) + px(style.paddingLeft);
-  let top = rect.top + px(style.borderTopWidth) + px(style.paddingTop);
-  const width =
-    rect.width -
-    px(style.borderLeftWidth) -
-    px(style.paddingLeft) -
-    px(style.borderRightWidth) -
-    px(style.paddingRight);
-  const height =
-    rect.height -
-    px(style.borderTopWidth) -
-    px(style.paddingTop) -
-    px(style.borderBottomWidth) -
-    px(style.paddingBottom);
-
-  let sx = width / canvas.width;
-  let sy = height / canvas.height;
-  const fit = style.objectFit;
-  if (fit === "contain" || fit === "scale-down" || fit === "cover" || fit === "none") {
-    let scale = fit === "cover" ? Math.max(sx, sy) : fit === "none" ? 1 : Math.min(sx, sy);
-    if (fit === "scale-down") {
-      scale = Math.min(scale, 1);
-    }
-
-    left += (width - canvas.width * scale) / 2;
-    top += (height - canvas.height * scale) / 2;
-    sx = scale;
-    sy = scale;
-  }
-
+  const [cx, cy, sx, sy] = canvasPoint(canvas, style, e.clientX, e.clientY);
   // The canvas can already have resized while the renderer's screen still
   // describes its previous texture frame. Normalize against the pixels shown.
-  return toStage(
-    (e.clientX - left) / sx,
-    (e.clientY - top) / sy,
-    size.width / sx,
-    size.height / sy,
-    canvas.width,
-    canvas.height,
-  );
+  return toStage(cx, cy, size.width / sx, size.height / sy, canvas.width, canvas.height);
 }
 
 /** Let Pixi normalize browser coordinates; Flash's display list chooses the target. */
@@ -255,31 +217,17 @@ export function bindPointer(
     }
   };
   canvas?.addEventListener?.("pointercancel", cancel);
-  // The wheel in Flash's lines, up positive: 3 a notch, Flash's delta on
-  // Windows. A browser gives a notch as 3 lines, or as about 100 pixels,
-  // fewer where the page is zoomed or the screen scaled, and several at
-  // once as their multiple; a touchpad's few pixels at a time add up, 100
-  // to 3 lines. The page scrolls unless the SWF takes the wheel where the
-  // pointer is. With Ctrl, as a touchpad's pinch comes too, the page zooms
-  // and the SWF hears nothing. Pixi listens passively.
-  let lines = 0;
+  // The wheel in Flash's lines (input/canvas.ts). The page scrolls unless the SWF takes the
+  // wheel where the pointer is. With Ctrl, as a touchpad's pinch comes too, the page zooms and
+  // the SWF hears nothing. Pixi listens passively.
+  const left = { lines: 0 };
   const wheel = (e: WheelEvent) => {
     const pointer = player.pointer;
     if (!pointer || e.deltaY === 0 || e.ctrlKey) {
       return;
     }
 
-    const size = Math.abs(e.deltaY);
-    if (e.deltaMode !== 0) {
-      lines = -e.deltaY * (e.deltaMode === 2 ? 3 : 1);
-    } else if (size >= 50) {
-      lines = -Math.sign(e.deltaY) * 3 * Math.max(1, Math.round(size / 100));
-    } else {
-      lines -= (e.deltaY * 3) / 100;
-    }
-
-    const delta = Math.trunc(lines);
-    lines -= delta;
+    const delta = wheelLines(left, e);
     const at = { clientX: e.clientX, clientY: e.clientY, global: { x: e.offsetX, y: e.offsetY } };
     const [x, y] = stagePoint(renderer, player, at, style, viewport);
     const p: PointerState = {
