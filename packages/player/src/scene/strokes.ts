@@ -395,13 +395,14 @@ export function layerStrokes(
         (points.length > 4 &&
           points[0] === points[points.length - 2] &&
           points[1] === points[points.length - 1]);
+      const limit = Math.max(1, line.miterLimit);
       contours.push(
-        ...outline(points, closedPath, h, caps, join, Math.max(1, line.miterLimit), flatness),
+        ...((closedPath && triangleRing(points, h, caps, join, limit, flatness)) ||
+          outline(points, closedPath, h, caps, join, limit, flatness)),
       );
-      // drawTriangles' triangles each filled alone, as the Pixi view strokes them: their outlines'
-      // inner sides all pass through the corners they share, where libtess2's sweep was seen to
-      // drop part of a ring when they were filled as one.
-      if (stroke.triangles) {
+      // adl blends a line's paths over each other where they overlap, each filled as one; but
+      // drawTriangles' outlines, which it keeps as one path, once (`line-overlaps`).
+      if (!stroke.triangles) {
         fillUsable(contours, tessellator, color, positions, colors, indices);
         contours.length = 0;
       }
@@ -421,12 +422,6 @@ export function layerStrokes(
   };
 }
 
-/**
- * The outline `contours` filled non-zero onto the arrays, in `color`: by the
- * tessellator, its output checked as a fill's is (fills.ts), else in JS where
- * it can be, its crossing spans or a region convex alone each as a fan.
- * False if none of it could be.
- */
 /** `contours` of a line's outline, those not too short to cover anything, filled (fillOutline). */
 function fillUsable(
   contours: number[][],
@@ -442,6 +437,94 @@ function fillUsable(
   }
 }
 
+/**
+ * A closed triangle's outline as two plain contours: its outer side, as
+ * outline() goes round it, and the triangle inset by `h`, wound the other
+ * way; none inset where the line is as wide as the triangle is deep. Its
+ * inner side so never passes through its corners, as outline()'s does at a
+ * sharp turn, where a drawTriangles mesh's neighbours share them: there
+ * libtess2's sweep was seen to drop part of a ring. Null for any other
+ * path.
+ */
+function triangleRing(
+  p: number[],
+  h: number,
+  caps: number,
+  join: number,
+  limit: number,
+  flatness: number,
+): number[][] | null {
+  const closes = p.length === 8 && p[0] === p[6] && p[1] === p[7];
+  if (p.length !== 6 && !closes) {
+    return null;
+  }
+
+  const area = contourArea(p.slice(0, 6));
+  if (area === 0) {
+    return null;
+  }
+
+  // Its outer side the larger of outline()'s two contours.
+  let outer: number[] | null = null;
+  for (const contour of outline(p, true, h, caps, join, limit, flatness)) {
+    if (!outer || Math.abs(contourArea(contour)) > Math.abs(contourArea(outer))) {
+      outer = contour;
+    }
+  }
+
+  if (!outer) {
+    return null;
+  }
+
+  const perimeter =
+    Math.hypot(p[2] - p[0], p[3] - p[1]) +
+    Math.hypot(p[4] - p[2], p[5] - p[3]) +
+    Math.hypot(p[0] - p[4], p[1] - p[5]);
+  if ((2 * Math.abs(area)) / perimeter <= h) {
+    return [outer];
+  }
+
+  // Each corner where the sides next to it, moved in by h, cross.
+  const inset: number[] = [];
+  const s = Math.sign(area);
+  for (let i = 0; i < 3; i++) {
+    const x = p[i * 2];
+    const y = p[i * 2 + 1];
+    const [ux, uy] = direction(p, (i + 2) % 3, i);
+    const [vx, vy] = direction(p, i, (i + 1) % 3);
+    // In from each side: its left on a y-down stage for a contour of negative area.
+    const ax = -uy * s * h;
+    const ay = ux * s * h;
+    const bx = -vy * s * h;
+    const by = vx * s * h;
+    const t = ((bx - ax) * -vy - (by - ay) * -vx) / (ux * -vy - uy * -vx);
+    inset.push(x + ax + ux * t, y + ay + uy * t);
+  }
+
+  // Wound against the outer side, so that it is the ring's hole.
+  const hole =
+    Math.sign(contourArea(inset)) === Math.sign(contourArea(outer))
+      ? [inset[4], inset[5], inset[2], inset[3], inset[0], inset[1]]
+      : inset;
+  return [outer, hole];
+}
+
+/** Twice a contour's signed area, positive turning clockwise on a y-down stage. */
+function contourArea(p: number[]): number {
+  let sum = 0;
+  for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+    sum += p[j] * p[i + 1] - p[i] * p[j + 1];
+  }
+
+  return sum;
+}
+
+/**
+ * The outline `contours` filled non-zero onto the arrays, in `color`: by the
+ * tessellator, its output checked as a fill's is (fills.ts), else in JS where
+ * it can be, its crossing spans or a region convex alone each as a fan.
+ * False if none of it could be.
+ */
 function fillOutline(
   contours: number[][],
   tessellator: FillTessellator,
