@@ -48,7 +48,7 @@ import {
 import { concat, invert, shifted } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import { ShapeObject } from "../display/shapeobject.js";
+import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
 import {
   type GradientFill,
   type ImageFill,
@@ -56,6 +56,7 @@ import {
   shapeLayers,
 } from "../display/shapes.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
+import type { ShapeCharacter } from "../display/timeline.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
@@ -254,6 +255,11 @@ export class RenderView implements Drawer {
   private readonly filterPlans = new WeakMap<DisplayObject, KeptPlan>();
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
   private textureLimit = 4096;
+  /** Each stale cache a Shape has shown, and the scale and turn it was first drawn at. */
+  private readonly stales = new WeakMap<
+    ShapeObject,
+    { cache: StaleCache; a: number; b: number; c: number; d: number; spent: boolean }
+  >();
   /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
   private walkDepth = 0;
   /** Each depth's transform on the stage, a b c d tx ty, which its children are placed under. */
@@ -598,8 +604,9 @@ export class RenderView implements Drawer {
       this.maskUse(first);
     }
 
-    // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
-    const shape = o instanceof ShapeObject ? o.drawn() : null;
+    // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
+    // whose bitmap cache Flash shows stale draws what that shows (staleShape).
+    const shape = o instanceof ShapeObject ? this.staleShape(o, a, b, c, d) : null;
     const drawn = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
     const version = o.drawing ? o.drawing.version : 0;
     const layers =
@@ -1062,6 +1069,39 @@ export class RenderView implements Drawer {
     }
 
     return concatColorInto(slot, parent, child);
+  }
+
+  /**
+   * The shape a Shape draws: the one Flash's stale bitmap cache shows, given
+   * another of the same bounds while cached (display/shapeobject.ts), while
+   * it stands on the stage at the scale and turn (a b c d) it was first
+   * drawn at and stays cached; from a frame either changes, what it is, as
+   * the Pixi view's shapeOf draws it (`cache-replace`).
+   */
+  private staleShape(
+    o: ShapeObject,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+  ): ShapeCharacter | null {
+    const cache = o.stale;
+    if (!cache) {
+      return o.drawn();
+    }
+
+    let seen = this.stales.get(o);
+    if (!seen || seen.cache !== cache) {
+      seen = { cache, a, b, c, d, spent: false };
+      this.stales.set(o, seen);
+    } else if (
+      !seen.spent &&
+      (seen.a !== a || seen.b !== b || seen.c !== c || seen.d !== d || !cached(o))
+    ) {
+      seen.spent = true;
+    }
+
+    return seen.spent ? o.drawn() : cache.shape;
   }
 
   /** A mask begun: its draws follow, till it is used (maskUse); its first entry's index. */
