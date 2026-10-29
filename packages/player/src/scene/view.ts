@@ -36,7 +36,7 @@ import {
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
-import { concatColor } from "../display/color.js";
+import { IDENTITY_COLOR } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject, TRANSFORM } from "../display/displayobject.js";
 import {
@@ -112,6 +112,9 @@ const RUN_KEYS = 512;
 
 /** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
 const GRADIENT_REGIONS = 8;
+
+/** No transform, where a walk starts. */
+const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
 
 /** Runs kept of one text, in its styles, sizes and resolutions. */
 const TEXT_RUNS = 8;
@@ -251,6 +254,14 @@ export class RenderView implements Drawer {
   private readonly filterPlans = new WeakMap<DisplayObject, KeptPlan>();
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
   private textureLimit = 4096;
+  /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
+  private walkDepth = 0;
+  /** Each depth's transform on the stage, a b c d tx ty, which its children are placed under. */
+  private places = new Float64Array(6 * 64);
+  private readonly colorSlots: ColorTransform[] = [];
+  /** A text item's colour, and that before its object's, made in place for each item drawn. */
+  private readonly itemColor: ColorTransform = { ...IDENTITY_COLOR };
+  private readonly itemColored: ColorTransform = { ...IDENTITY_COLOR };
   /** The sliced owner whose children are walked now, its slice, and its parent's linear transform. */
   private sliceOwner: DisplayObject | null = null;
   private ownerSlice: Slice | null = null;
@@ -425,7 +436,7 @@ export class RenderView implements Drawer {
       this.keptGeneration++;
     }
 
-    this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
+    this.walkFrom(root);
     measureLayers(this.scene, this.rows, this.geometries, target);
     this.noteKept();
     this.frames++;
@@ -451,17 +462,18 @@ export class RenderView implements Drawer {
    * what is hidden; every object's flags are cleared, as the player
    * expects of a renderer.
    */
-  private walk(
-    o: DisplayObject,
-    pa: number,
-    pb: number,
-    pc: number,
-    pd: number,
-    ptx: number,
-    pty: number,
-    tint: ColorTransform | null,
-    hidden: boolean,
-  ): void {
+  private walk(o: DisplayObject, tint: ColorTransform | null, hidden: boolean): void {
+    // Its parent's transform from the stack of them, where its own goes for its children: numbers
+    // a recursive call passed were boxed, six an object on every frame.
+    const depth = this.walkDepth++;
+    let places = this.places;
+    const at = depth * 6;
+    const pa = places[at];
+    const pb = places[at + 1];
+    const pc = places[at + 2];
+    const pd = places[at + 3];
+    const ptx = places[at + 4];
+    const pty = places[at + 5];
     const root = o === this.drawRoot;
     const m = root ? this.drawMatrix : o.flatPlaced;
     const a = pa * m.a + pc * m.b;
@@ -470,6 +482,21 @@ export class RenderView implements Drawer {
     const d = pb * m.c + pd * m.d;
     const tx = pa * m.tx + pc * m.ty + ptx;
     const ty = pb * m.tx + pd * m.ty + pty;
+    // Its own after its parent's, where its rows and its children read it.
+    if (at + 12 > places.length) {
+      const grown = new Float64Array(places.length * 2);
+      grown.set(places);
+      this.places = grown;
+      places = grown;
+    }
+
+    places[at + 6] = a;
+    places[at + 7] = b;
+    places[at + 8] = c;
+    places[at + 9] = d;
+    places[at + 10] = tx;
+    places[at + 11] = ty;
+
     if (!hidden && o.visible) {
       noteUnsupported(o);
     }
@@ -479,7 +506,8 @@ export class RenderView implements Drawer {
 
     // BitmapData.draw takes its object without its own colour transform, as adl draws it.
     const own = root ? null : o.colorTransform;
-    let color = own ? (tint ? concatColor(tint, own) : own) : tint;
+    // Into a slot of its depth's, which its subtree's walk alone reads: rows copy what they take.
+    let color = own ? (tint ? this.concatAt(depth, tint, own) : own) : tint;
     // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
     // a 3D mask, or one inside what it masks, masks nothing in Flash.
     let clipped = false;
@@ -487,7 +515,9 @@ export class RenderView implements Drawer {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
         const w = this.placedMask(mask);
-        this.pushMask(() => this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true));
+        const first = this.maskBegin();
+        this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true);
+        this.maskUse(first);
         clipped = true;
       } else {
         unsupported.masks++;
@@ -563,7 +593,9 @@ export class RenderView implements Drawer {
       // A rectangle of no size clips everything, as an empty one does.
       const width = Math.max(0, r.xMax - r.xMin);
       const height = Math.max(0, r.yMax - r.yMin);
-      this.pushMask(() => this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, width, height));
+      const first = this.maskBegin();
+      this.rectMask(a, b, c, d, tx, ty, r.xMin, r.yMin, width, height);
+      this.maskUse(first);
     }
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
@@ -594,7 +626,7 @@ export class RenderView implements Drawer {
           }
 
           if (row < 0) {
-            row = this.rows.add(a, b, c, d, tx, ty, color);
+            row = this.rows.addPlaced(this.places, at + 6, color);
           }
 
           if (texture) {
@@ -621,7 +653,7 @@ export class RenderView implements Drawer {
             : null;
         if (lines) {
           if (lineRow < 0) {
-            lineRow = this.rows.add(1, 0, 0, 1, tx, ty, color);
+            lineRow = this.rows.addTranslated(this.places, at + 6, color);
           }
 
           this.geometries.use(lines.id);
@@ -647,9 +679,9 @@ export class RenderView implements Drawer {
 
       for (let k = 0; k < items.length; k++) {
         if (clip && k === omitted.clipFrom) {
-          this.pushMask(() =>
-            this.rectMask(a, b, c, d, tx, ty, clip.x, clip.y, clip.width, clip.height),
-          );
+          const first = this.maskBegin();
+          this.rectMask(a, b, c, d, tx, ty, clip.x, clip.y, clip.width, clip.height);
+          this.maskUse(first);
         }
 
         this.drawTextItem(items[k], a, b, c, d, tx, ty, color, resolution);
@@ -664,7 +696,7 @@ export class RenderView implements Drawer {
       const quad = this.quad(store.width, store.height);
       const texture = this.storeTexture(store);
       if (row < 0) {
-        row = this.rows.add(a, b, c, d, tx, ty, color);
+        row = this.rows.addPlaced(this.places, at + 6, color);
       }
 
       this.geometries.use(quad.id);
@@ -704,12 +736,14 @@ export class RenderView implements Drawer {
         }
 
         if (child.clipDepth > 0 && !hidden) {
-          this.pushMask(() => this.walkMask(child, a, b, c, d, tx, ty, false));
+          const first = this.maskBegin();
+          this.walkMask(child, a, b, c, d, tx, ty, false);
+          this.maskUse(first);
           open++;
           continue;
         }
 
-        this.walk(child, a, b, c, d, tx, ty, color, hidden);
+        this.walk(child, color, hidden);
       }
 
       this.sliceOwner = owner;
@@ -746,6 +780,7 @@ export class RenderView implements Drawer {
       this.popMask();
     }
 
+    this.walkDepth--;
     // A draw for BitmapData leaves them for the stage's.
     if (!this.drawRoot) {
       o.dirty = CLEAN;
@@ -1008,11 +1043,54 @@ export class RenderView implements Drawer {
     ];
   }
 
-  /** A mask's draws, which `emit` writes, between its markers, kept on the stack of masks open for its pop. */
-  private pushMask(emit: () => void): void {
+  /** `o` walked from the stage's origin, untinted. */
+  private walkFrom(o: DisplayObject): void {
+    this.walkDepth = 0;
+    this.places.set(UNIT_PLACE);
+    this.walk(o, null, false);
+  }
+
+  /** `parent` and `child` concatenated into depth `depth`'s colour slot, made once and kept. */
+  private concatAt(depth: number, parent: ColorTransform, child: ColorTransform): ColorTransform {
+    let slot = this.colorSlots[depth];
+    if (!slot) {
+      slot = { ...IDENTITY_COLOR };
+      this.colorSlots[depth] = slot;
+    }
+
+    return this.concatInto(slot, parent, child);
+  }
+
+  /** `parent` and `child` concatenated into `slot`, as display/color.ts's concatColor makes them. */
+  private concatInto(
+    slot: ColorTransform,
+    parent: ColorTransform,
+    child: ColorTransform,
+  ): ColorTransform {
+    slot.rMul = child.rMul * parent.rMul;
+    slot.gMul = child.gMul * parent.gMul;
+    slot.bMul = child.bMul * parent.bMul;
+    slot.aMul = child.aMul * parent.aMul;
+    slot.rAdd = child.rAdd * parent.rMul + parent.rAdd;
+    slot.gAdd = child.gAdd * parent.gMul + parent.gAdd;
+    slot.bAdd = child.bAdd * parent.bMul + parent.bAdd;
+    slot.aAdd = child.aAdd * parent.aMul + parent.aAdd;
+    return slot;
+  }
+
+  /** A mask begun: its draws follow, till it is used (maskUse); its first entry's index. */
+  private maskBegin(): number {
     this.scene.marker(MASK_BEGIN);
-    const first = this.scene.length;
-    emit();
+    return this.scene.length;
+  }
+
+  /**
+   * The mask begun at entry `first` (maskBegin) used from here, its draws
+   * those since. Begun and used around the mask's draws, with no closure:
+   * one in the walk kept every number it took in a context made on each
+   * call, boxed, though no mask was drawn.
+   */
+  private maskUse(first: number): void {
     const count = this.scene.length - first;
     this.scene.marker(MASK_USE, first, count);
     this.masks.push(first, count);
@@ -1156,12 +1234,16 @@ export class RenderView implements Drawer {
   private partsOf(layer: ShapeLayer, version: number, masking = false): Made["parts"] {
     const cache = masking ? this.maskMade : this.made;
     const made = cache.get(layer);
-    if (
-      made &&
-      made.version === version &&
-      made.parts.every(({ handle }) => this.geometries.alive(handle))
-    ) {
-      return made.parts;
+    // A loop, not every with a closure: each shape layer drawn asks on every frame.
+    if (made && made.version === version) {
+      let alive = true;
+      for (let i = 0; alive && i < made.parts.length; i++) {
+        alive = this.geometries.alive(made.parts[i].handle);
+      }
+
+      if (alive) {
+        return made.parts;
+      }
     }
 
     for (const { handle } of made?.parts ?? []) {
@@ -1288,18 +1370,15 @@ export class RenderView implements Drawer {
     color: ColorTransform | null,
     resolution: number,
   ): void {
+    // Its colour as a multiplier, and that before the object's, in slots of the view's: the row
+    // made of them copies them.
     const tint = item.color;
-    const own: ColorTransform = {
-      rMul: ((tint >>> 16) & 0xff) / 255,
-      gMul: ((tint >>> 8) & 0xff) / 255,
-      bMul: (tint & 0xff) / 255,
-      aMul: (tint >>> 24) / 255,
-      rAdd: 0,
-      gAdd: 0,
-      bAdd: 0,
-      aAdd: 0,
-    };
-    const colored = color ? concatColor(color, own) : own;
+    const own = this.itemColor;
+    own.rMul = ((tint >>> 16) & 0xff) / 255;
+    own.gMul = ((tint >>> 8) & 0xff) / 255;
+    own.bMul = (tint & 0xff) / 255;
+    own.aMul = (tint >>> 24) / 255;
+    const colored = color ? this.concatInto(this.itemColored, color, own) : own;
     if (item.kind === "device") {
       const run = this.deviceRun(item, resolution);
       if (!run) {
@@ -1729,7 +1808,7 @@ export class RenderView implements Drawer {
       this.scene.reset();
       this.rows.reset();
       this.filters.reset();
-      this.walk(o, 1, 0, 0, 1, 0, 0, null, false);
+      this.walkFrom(o);
       measureLayers(this.scene, this.rows, this.geometries, this.target);
       plan(this.scene, 0, this.commands);
       const bytes = this.backend.snapshot(
