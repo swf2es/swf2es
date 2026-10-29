@@ -1904,8 +1904,15 @@ export class RenderView implements Drawer {
     d: number,
     least: number,
     by: readonly number[] | null,
-    opaque: boolean,
+    drawnOpaque: boolean,
   ): GeometryHandle | null {
+    // Only a line of whole alpha draws otherwise when opaque (layerStrokes): a layer of none keeps
+    // one geometry through a fade.
+    let opaque = false;
+    for (let i = 0; drawnOpaque && !opaque && i < layer.strokes.length; i++) {
+      opaque = layer.strokes[i].line.color >>> 24 === 255;
+    }
+
     let kept = this.lines.get(layer);
     if (!kept) {
       kept = [];
