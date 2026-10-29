@@ -15,7 +15,8 @@ must give **identical output** in both modes.
 ## Commands
 
 ```sh
-git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb, and
+git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb and
+                              # com-lz4-as3 (program tests), and
                               # vendor/minimp3, vendor/zlib, vendor/lzma-sdk and vendor/libtess2 (C compiled into
                               # packages/native's wasm)
 pnpm install
@@ -23,9 +24,12 @@ pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit, conformance, library, program, fuzz, player and web tests
-                 # (needs podman or docker, and Chrome; CHROME names another browser)
+pnpm test        # unit, conformance, library, program, fuzz, player, web, site and desktop
+                 # tests (needs podman or docker, and Chrome; CHROME names another browser;
+                 # the desktop's are skipped without Electron's binary)
 pnpm test:checked # the same with every array access bounds-checked
+pnpm dlx knip                 # unused files, exports and dependencies (knip.json); before
+                              # removing anything, see "Code generated code calls" below
 pnpm determinism              # each module the same however it is compiled, and each method
                               # compiled alone its entry in the module (after the runners)
 pnpm oracle path/to/file.as   # print avmshell's output for a file (oracle:abcdump its dump)
@@ -123,9 +127,6 @@ node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property ac
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
                               # and Vectors (map, filter, sort, conversion), as the one above
-pnpm dlx knip                 # files and exports nothing uses (knip.json; not a dependency);
-                              # generated code calls the runtime by name, so grep the emitters'
-                              # strings before removing what it lists
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
@@ -158,7 +159,18 @@ of its own.
   updates the baseline with `--update-baseline`.
 - **avmshell is the reference.** For AS3 semantics, the expected result is
   what avmshell prints, not what JavaScript or the spec suggests. Add a case
-  under `tests/conformance/cases/` for any semantic you implement.
+  under `tests/conformance/cases/` for any semantic you implement. For the
+  player's API (`flash.*`, AVM1's globals, drawing), Flash is the reference:
+  what it traces and draws under AIR's adl (`oracle/flash.ts`), where
+  avmshell, which has no player, may differ.
+- **Code generated code calls is not dead.** Compiled modules reach the
+  runtime by name: the emitters in `packages/codegen/assembly` write runtime
+  helpers' and Runtime members' names as strings, natives are bound by name
+  from ABC metadata, and AVM1's helpers by the AVM1 emitter. No tool sees
+  those callers, so before removing or renaming anything in
+  `packages/runtime` or the player's natives, grep the emitters and the
+  native tables for it, and run conformance, Tamarin, programs, libraries
+  and the corpus.
 - **Never edit `oracle/avmplus`.** It is a submodule (MPL-2.0). Patches go to
   the swf2es/avmplus fork. Code translated from avmplus stays in files of
   its own that carry the MPL-2.0 header; nothing from avmplus goes into an
