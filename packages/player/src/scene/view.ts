@@ -135,18 +135,18 @@ export class RenderView implements Drawer {
   private scene = new SceneList();
   private rows = new Rows();
   private readonly geometries = new Geometries();
-  private readonly lineCache: LineCache;
-  private readonly parts: Parts;
-  private readonly textItems: TextItems;
-  private readonly masks: Masks;
-  private readonly filterLayers: FilterLayers;
-  private readonly advancedTexts: AdvancedTexts;
-  private readonly staleShapes = new StaleShapes();
-  private readonly planes: Planes;
   private readonly textures = new Textures();
-  private readonly paints = new Paints(this.textures);
   private commands = new Commands();
   private filters = new Filters();
+  private readonly lineCache: LineCache;
+  private readonly parts: Parts;
+  private readonly paints = new Paints(this.textures);
+  private readonly staleShapes = new StaleShapes();
+  private readonly textItems: TextItems;
+  private readonly advancedTexts: AdvancedTexts;
+  private readonly masks: Masks;
+  private readonly filterLayers: FilterLayers;
+  private readonly planes: Planes;
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
   private textureLimit = 4096;
   /** The outlines' store kept while the view is (text/saffron.ts, holdSegments), let go of with it. */
@@ -215,6 +215,13 @@ export class RenderView implements Drawer {
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
     this.textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+
+    this.lineCache = new LineCache(this.geometries, this.tessellator);
+    this.counts = this.lineCache.counts;
+    this.parts = new Parts(this.geometries, this.tessellator, this.lineCache);
+    this.textItems = new TextItems(this.geometries, this.textures, this.parts);
+    this.advancedTexts = new AdvancedTexts(this.geometries);
+    this.masks = new Masks(this.geometries, this.parts);
     this.filterLayers = new FilterLayers(
       this.geometries,
       this.textures,
@@ -222,13 +229,6 @@ export class RenderView implements Drawer {
       this.paints,
       this.textureLimit,
     );
-
-    this.lineCache = new LineCache(this.geometries, this.tessellator);
-    this.counts = this.lineCache.counts;
-    this.parts = new Parts(this.geometries, this.tessellator, this.lineCache);
-    this.textItems = new TextItems(this.geometries, this.textures, this.parts);
-    this.masks = new Masks(this.geometries, this.parts);
-    this.advancedTexts = new AdvancedTexts(this.geometries);
     this.planes = new Planes(this.geometries);
 
     this.canvas.addEventListener("webglcontextlost", this.lost);
