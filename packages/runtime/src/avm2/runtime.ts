@@ -608,10 +608,65 @@ export class Runtime {
 
   private scopeHas(o: AsObject, mn: Multiname, isWith: number): boolean {
     if (isWith) {
-      return this.hasProperty(o, mn);
+      return this.withHas(o, mn);
     }
 
     return this.traitsOf(o).find(mn) !== 0;
+  }
+
+  /**
+   * As MethodEnv::findWithProperty: a with scope has `mn` if it, or an
+   * object on its prototype chain, binds it in its traits or has it itself.
+   * An E4X filter asks this of every item, and finds XML's methods on
+   * XML.prototype.
+   */
+  private withHas(o: Value, mn: Multiname): boolean {
+    if (this.delegateHas(o, mn, true)) {
+      return true;
+    }
+
+    // An activation or a catch scope has no prototype.
+    for (let p = this.protoOf(o); p; p = p.$p) {
+      if (this.delegateHas(p, mn, false)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Whether `d` binds `mn` in its traits, which no attribute is, or has it
+   * itself, as hasMultinameProperty: the scope object a key of a
+   * Dictionary, what a hooked class says (an XML's children and
+   * attributes, a Proxy's hasProperty), an element or a dynamic property;
+   * a prototype on its chain an element or a property of its own.
+   */
+  private delegateHas(d: Value, mn: Multiname, scope: boolean): boolean {
+    const traits = this.traitsOf(d);
+    if (!mn.attribute && traits.find(mn) !== 0) {
+      return true;
+    }
+
+    if (!scope) {
+      const name = mn.dynamicName();
+      return name !== null && this.protoOwn(d, name) !== NOT_FOUND;
+    }
+
+    if (mn.key !== undefined && d?.$keys !== undefined) {
+      return d.$keys.has(mn.key);
+    }
+
+    if (traits.properties !== null) {
+      return traits.properties.has(this, d, mn);
+    }
+
+    const name = mn.dynamicName();
+    if (name === null) {
+      return false;
+    }
+
+    return this.indexHas(d, name) ?? this.getOwn(d, name) !== NOT_FOUND;
   }
 
   // Properties.
@@ -1308,6 +1363,32 @@ export class Runtime {
     return false;
   }
 
+  /**
+   * Whether a class that indexes itself (a Vector) has the element `name`,
+   * which is there only within its length: undefined for a name that is
+   * no number, or for another class.
+   */
+  private indexHas(o: Value, name: string): boolean | undefined {
+    const traits: Traits | undefined = typeof o === "object" && o !== null ? o.$traits : undefined;
+    if (!traits?.hasIndex) {
+      return undefined;
+    }
+
+    const i = arrayIndex(name);
+    if (i >= 0) {
+      return traits.hasIndex(o, i);
+    }
+
+    // Another number, negative or fractional, is no index it has, as
+    // VectorBaseObject::hasAtomProperty has it, where a get throws.
+    const c = name.charCodeAt(0);
+    if (((c >= 0x30 && c <= 0x39) || c === 0x2d) && !Number.isNaN(Number(name))) {
+      return false;
+    }
+
+    return undefined;
+  }
+
   /** Whether `o` has `mn`: bound, dynamic, or on its prototype chain. */
   hasProperty(o: Value, mn: Multiname): boolean {
     if (mn.key !== undefined && o?.$keys !== undefined) {
@@ -1329,20 +1410,9 @@ export class Runtime {
       return false;
     }
 
-    // An index a class indexes itself is there only within its length.
-    const traits: Traits | undefined = typeof o === "object" && o !== null ? o.$traits : undefined;
-    if (traits?.hasIndex) {
-      const i = arrayIndex(name);
-      if (i >= 0) {
-        return traits.hasIndex(o, i);
-      }
-
-      // Another number, negative or fractional, is no index it has, as
-      // VectorBaseObject::hasAtomProperty has it, where a get throws.
-      const c = name.charCodeAt(0);
-      if (((c >= 0x30 && c <= 0x39) || c === 0x2d) && !Number.isNaN(Number(name))) {
-        return false;
-      }
+    const indexed = this.indexHas(o, name);
+    if (indexed !== undefined) {
+      return indexed;
     }
 
     if (this.getOwn(o, name) !== NOT_FOUND) {
