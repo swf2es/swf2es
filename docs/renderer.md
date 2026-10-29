@@ -243,7 +243,10 @@ WebGL. It is small by design:
 (architecture.md, "Stage quality"): the host sets the samples by the
 stage's quality, and the stage is drawn into multisampled buffers the
 canvas's size, resolved into a texture and then onto the canvas, as a
-resolve must keep its format and an opaque canvas has no alpha. A blend
+resolve must keep its format and an opaque canvas has no alpha. Without
+multisampling, a frame in which an erase or alpha blend clears the stage
+itself, as adl clears it, is drawn into a layer the canvas's size and
+copied onto the canvas, so that the blends after it read that alpha. A blend
 or filter layer draws into multisampled buffers of its own, resolved into
 its texture before a filter or its composite reads it, its rectangle
 alone or, filtered, all of it. A blend's backdrop is copied to where it
