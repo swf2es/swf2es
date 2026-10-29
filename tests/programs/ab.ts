@@ -10,8 +10,8 @@
 //   node tests/programs/ab.ts <dir A> <dir B> [runs, 7]
 //
 // A snapshot holds the runtime's dist and the compiler's release test
-// build (packages/runtime/dist, packages/codegen/dist-test), with format's
-// dist and its dependencies for the runtime to import, so that a change to
+// build (packages/runtime/dist, packages/codegen/dist-test), with the dist
+// of each package the runtime depends on for it to import, so that a change to
 // any of them can be timed: snapshot, change, build, snapshot again.
 // AB_NODE_ARGS="--flag ..." runs both with those node options, such as V8
 // flags to measure a change against.
@@ -40,12 +40,27 @@ if (process.argv[2] === "--snapshot") {
   rmSync(dir, { recursive: true, force: true });
   cpSync(`${root}packages/runtime/dist`, join(dir, "runtime"), { recursive: true });
   cpSync(`${root}packages/codegen/dist-test`, join(dir, "codegen"), { recursive: true });
-  // The runtime imports format, and format compress: a copy of each where
-  // the runtime's imports find them, as node resolves a package.
-  for (const name of ["format", "compress"]) {
-    const copy = join(dir, "node_modules/@swf2es", name);
-    cpSync(`${root}packages/${name}/dist`, join(copy, "dist"), { recursive: true });
-    cpSync(`${root}packages/${name}/package.json`, join(copy, "package.json"));
+  // A copy of each package the runtime depends on, and each they depend on,
+  // where the runtime's imports find them, as node resolves a package: read
+  // from their package.json files, so that a renamed package is followed.
+  const pending = ["runtime"];
+  const copied = new Set<string>();
+  while (pending.length) {
+    const manifest = JSON.parse(
+      readFileSync(`${root}packages/${pending.pop()}/package.json`, "utf8"),
+    );
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      const name = dependency.replace(/^@swf2es\//, "");
+      if (name === dependency || copied.has(name)) {
+        continue;
+      }
+
+      copied.add(name);
+      pending.push(name);
+      const copy = join(dir, "node_modules/@swf2es", name);
+      cpSync(`${root}packages/${name}/dist`, join(copy, "dist"), { recursive: true });
+      cpSync(`${root}packages/${name}/package.json`, join(copy, "package.json"));
+    }
   }
 
   console.log(`snapshot of the builds in ${dir}`);
