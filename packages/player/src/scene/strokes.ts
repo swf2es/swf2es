@@ -112,6 +112,11 @@ function polyline(path: Path, flatness: number): number[] {
   return points;
 }
 
+/** The widest piece of an arc of the last radius and flatness: a line's every join and cap shares it. */
+let arcR = Number.NaN;
+let arcFlatness = Number.NaN;
+let arcMost = 0;
+
 /**
  * The chords of an arc about (cx, cy) of radius `r`, from angle `from`
  * turning `sweep`, past its start, none further than `flatness` from it.
@@ -125,7 +130,13 @@ function arc(
   sweep: number,
   flatness: number,
 ): void {
-  const most = r > flatness ? 2 * Math.acos(1 - flatness / r) : Math.PI;
+  if (r !== arcR || flatness !== arcFlatness) {
+    arcR = r;
+    arcFlatness = flatness;
+    arcMost = r > flatness ? 2 * Math.acos(1 - flatness / r) : Math.PI;
+  }
+
+  const most = arcMost;
   // As many as a curve's at most (fills.ts, trace), however far the stage is zoomed.
   const pieces = Math.min(256, Math.max(1, Math.ceil(Math.abs(sweep) / most)));
   for (let i = 1; i <= pieces; i++) {
@@ -197,8 +208,17 @@ function side(
       // never runs back, as it would where the line is wider than its curve. Else the inner side
       // goes through the turn's own point, so that the outline never winds back; and so at a
       // closed contour's last turn, to its first segment's start, already out.
+      const after = (j + 1) % n;
       const back =
-        closed && k === segments - 1 ? -1 : gentleBack(p, i, j, (j + 1) % n, h, cross, dot);
+        closed && k === segments - 1
+          ? -1
+          : gentleBack(
+              h,
+              cross,
+              dot,
+              Math.hypot(p[j * 2] - p[i * 2], p[j * 2 + 1] - p[i * 2 + 1]),
+              Math.hypot(p[after * 2] - p[j * 2], p[after * 2 + 1] - p[j * 2 + 1]),
+            );
       if (back >= 0) {
         put(out, x + nx - tx * back, y + ny - ty * back);
         started = true;
@@ -244,9 +264,9 @@ function outerJoin(
   limit: number,
   flatness: number,
 ): void {
-  const turn = Math.atan2(Math.abs(cross), dot);
   switch (join) {
     case 0: {
+      const turn = Math.atan2(Math.abs(cross), dot);
       // Around from this side's normal to the next's, by way of the tip where the way turns back.
       const way = cross !== 0 ? Math.sign(nx * my - ny * mx) : Math.sign(nx * ty - ny * tx);
       arc(out, x, y, h, Math.atan2(ny, nx), way * turn, flatness);
@@ -255,6 +275,7 @@ function outerJoin(
       break;
     }
     case 2: {
+      const turn = Math.atan2(Math.abs(cross), dot);
       const ratio = 1 / Math.cos(turn / 2);
       let bx = nx + mx;
       let by = ny + my;
@@ -281,29 +302,15 @@ function outerJoin(
 }
 
 /**
- * How far a turn at point `j` of `p`, between points `before` and `after`,
- * cuts back each segment's inner side where the two cross: within the half
- * of each next to it, at a turn of less than a right angle; -1 where it is
- * sharper or the segments shorter, and the inner sides go through the
- * turn's own point.
+ * How far a turn of half width `h` cuts back each segment's inner side
+ * where the two cross, the segment into it `before` long and the one out
+ * of it `after`: within the half of each next to it, at a turn of less
+ * than a right angle; -1 where it is sharper or the segments shorter, and
+ * the inner sides go through the turn's own point.
  */
-function gentleBack(
-  p: number[],
-  before: number,
-  j: number,
-  after: number,
-  h: number,
-  cross: number,
-  dot: number,
-): number {
+function gentleBack(h: number, cross: number, dot: number, before: number, after: number): number {
   const back = (h * Math.abs(cross)) / (1 + dot);
-  const x = p[j * 2];
-  const y = p[j * 2 + 1];
-  return dot > 0 &&
-    2 * back <= Math.hypot(x - p[before * 2], y - p[before * 2 + 1]) &&
-    2 * back <= Math.hypot(p[after * 2] - x, p[after * 2 + 1] - y)
-    ? back
-    : -1;
+  return dot > 0 && 2 * back <= before && 2 * back <= after ? back : -1;
 }
 
 /** (x, y) onto `out`, unless it is the point last put there. */
@@ -406,8 +413,9 @@ export function outline(
   return [contour];
 }
 
-/** lineTriangles' scratch: each segment's corners (CORNERS), and a turn's or a cap's points. */
+/** lineTriangles' scratch: each segment's corners (CORNERS), its way and length, and a turn's or a cap's points. */
 let corners = new Int32Array(64 * 6);
+let ways = new Float64Array(64 * 3);
 const between: number[] = [];
 
 /**
@@ -484,6 +492,22 @@ export function lineTriangles(
     corners = new Int32Array(segments * CORNERS * 2);
   }
 
+  if (ways.length < segments * 3) {
+    ways = new Float64Array(segments * 3 * 2);
+  }
+
+  const w = ways;
+  for (let k = 0; k < segments; k++) {
+    const i = k * 2;
+    const j = ((k + 1) % n) * 2;
+    const dx = p[j] - p[i];
+    const dy = p[j + 1] - p[i + 1];
+    const l = Math.hypot(dx, dy);
+    w[k * 3] = dx / l;
+    w[k * 3 + 1] = dy / l;
+    w[k * 3 + 2] = l;
+  }
+
   const c = corners;
   for (let k = 0; k < segments; k++) {
     c[k * CORNERS + START_M] = -1;
@@ -491,10 +515,12 @@ export function lineTriangles(
   }
 
   if (!closed) {
-    const [sx, sy] = direction(p, 0, 1);
+    const sx = w[0];
+    const sy = w[1];
     c[START_L] = vertex(p[0] + sy * h, p[1] - sx * h);
     c[START_R] = vertex(p[0] - sy * h, p[1] + sx * h);
-    const [ex, ey] = direction(p, n - 2, n - 1);
+    const ex = w[(n - 2) * 3];
+    const ey = w[(n - 2) * 3 + 1];
     const x = p[(n - 1) * 2];
     const y = p[(n - 1) * 2 + 1];
     const end = (n - 2) * CORNERS;
@@ -504,11 +530,12 @@ export function lineTriangles(
 
   for (let j = closed ? 0 : 1; j < (closed ? n : n - 1); j++) {
     const before = (j + n - 1) % n;
-    const after = (j + 1) % n;
     const x = p[j * 2];
     const y = p[j * 2 + 1];
-    const [tx, ty] = direction(p, before, j);
-    const [ux, uy] = direction(p, j, after);
+    const tx = w[before * 3];
+    const ty = w[before * 3 + 1];
+    const ux = w[j * 3];
+    const uy = w[j * 3 + 1];
     const cross = tx * uy - ty * ux;
     const dot = tx * ux + ty * uy;
     const end = before * CORNERS;
@@ -526,7 +553,7 @@ export function lineTriangles(
     const ny = -tx * s * h;
     const mx = uy * s * h;
     const my = -ux * s * h;
-    const back = gentleBack(p, before, j, after, h, cross, dot);
+    const back = gentleBack(h, cross, dot, w[before * 3 + 2], w[j * 3 + 2]);
     const outerEnd = vertex(x + nx, y + ny);
     const outerStart = vertex(x + mx, y + my);
     // Gentle, the inner sides meet where they cross, and the wedge fans from there; else each
@@ -572,12 +599,18 @@ export function lineTriangles(
 
   // Each end facing out along its segment, fanned from the corner on the left of the way out
   // round to the one on its right: the path's right side at its start, its left at its end.
+  // Out of the start is its first segment's way back, negated exactly as the division gives it.
   const ends = [
-    [n - 1, n - 2, c[(n - 2) * CORNERS + END_L], c[(n - 2) * CORNERS + END_R]],
-    [0, 1, c[START_R], c[START_L]],
+    [
+      n - 1,
+      w[(n - 2) * 3],
+      w[(n - 2) * 3 + 1],
+      c[(n - 2) * CORNERS + END_L],
+      c[(n - 2) * CORNERS + END_R],
+    ],
+    [0, -w[0], -w[1], c[START_R], c[START_L]],
   ];
-  for (const [k, from, left, right] of ends) {
-    const [tx, ty] = direction(p, from, k);
+  for (const [k, tx, ty, left, right] of ends) {
     cap(between, p, k, tx, ty, h, caps, flatness);
     // Its last point is the corner on the right; a cap of no more is a chord, covering nothing.
     between.length -= 2;
