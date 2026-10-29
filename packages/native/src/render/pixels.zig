@@ -7,7 +7,17 @@
 //! is read as the pixels before it left it, so that where the source is the
 //! destination a move down or right repeats what was written, as in Flash.
 //! bitmap.zig wraps them for Wasm.
+//!
+//! perlinNoise's noise (Noise below) is the reference implementation of
+//! SVG's feTurbulence, as the player's turbulence.ts ports it:
+//! Derived from https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement,
+//! Copyright © 2015 W3C® (MIT, ERCIM, Keio, Beihang), under the W3C software
+//! license.
 const std = @import("std");
+const color = @import("color.zig");
+const premultiply = color.premultiply;
+const unmultiply = color.unmultiply;
+const toInt32 = color.toInt32;
 
 /// The destination's rows, `w` pixels of `h` rows `dst_stride` apart, and
 /// the source's they read, `src_stride` apart, which may be the same block.
@@ -55,8 +65,7 @@ pub const MatrixParams = extern struct {
     near_w: u32,
     near_h: u32,
     empty: u32,
-    /// 0xff000000 where the destination is opaque, else 0.
-    opaque_alpha: u32,
+    unused: u32,
     matrix: [20]f64,
 };
 
@@ -116,45 +125,24 @@ pub const PerlinParams = extern struct {
     stitch_h: f64,
 };
 
-const RECIPROCAL: [256]u32 = blk: {
-    var table: [256]u32 = undefined;
-    table[0] = 0;
-    for (1..256) |a| table[a] = 0xff00 / a;
-    break :blk table;
-};
-
-/// A premultiplied pixel with its alpha divided back out (bitmap.ts's unmultiply).
-pub fn unmultiply(pixel: u32) u32 {
-    const a = pixel >> 24;
-    if (a == 255) return pixel;
-    if (a == 0) return 0;
-    const k = RECIPROCAL[a];
-    const r: u32 = @min(255, (((pixel >> 16) & 0xff) * k + 127) >> 8);
-    const g: u32 = @min(255, (((pixel >> 8) & 0xff) * k + 127) >> 8);
-    const b: u32 = @min(255, ((pixel & 0xff) * k + 127) >> 8);
-    return (a << 24) | (r << 16) | (g << 8) | b;
-}
-
-/// `argb` with its colour premultiplied by its alpha (bitmap.ts's premultiply).
-pub fn premultiply(argb: u32) u32 {
-    const a = argb >> 24;
-    if (a == 255) return argb;
-    if (a == 0) return 0;
-    const r = (((argb >> 16) & 0xff) * a + 127) / 255;
-    const g = (((argb >> 8) & 0xff) * a + 127) / 255;
-    const b = ((argb & 0xff) * a + 127) / 255;
-    return (a << 24) | (r << 16) | (g << 8) | b;
-}
-
 /// `argb` as a store keeps it: premultiplied, and opaque where it is.
 fn keep(transparent: bool, argb: u32) u32 {
     return premultiply(if (transparent) argb else argb | 0xff000000);
 }
 
-/// Whether rows of `w` by `h` with `stride` lie within `n` pixels.
-pub fn fits(w: u32, h: u32, stride: u32, n: usize) bool {
-    if (w == 0 or h == 0 or w > stride) return false;
-    return (@as(u64, h) - 1) * stride + w <= n;
+/// The bytes of `h` rows of `w` pixels `stride` apart, worked out in 64
+/// bits: null for no rows, a stride under a row, or more than a 32-bit
+/// memory holds, which a wrapped product would let through.
+pub fn rowsBytes(w: u32, h: u32, stride: u32) ?usize {
+    if (w == 0 or h == 0 or w > stride) return null;
+    const n = ((@as(u64, h) - 1) * stride + w) * 4;
+    return if (n > std.math.maxInt(u32)) null else @intCast(n);
+}
+
+/// The bytes of `count` things of `size` bytes, worked out in 64 bits: null past a 32-bit memory.
+pub fn bytesOf(count: u64, size: u64) ?usize {
+    const n = count * size;
+    return if (count > std.math.maxInt(u32) or n > std.math.maxInt(u32)) null else @intCast(n);
 }
 
 /// Each destination pixel of `p` made by `f` of the source's and its own, unmultiplied.
@@ -262,6 +250,8 @@ fn matrixOf(columns: *const Columns, px: u32) u32 {
 /// `near` a pixel takes `empty`. A pixel like the last one mapped takes its map.
 pub fn colorMatrix(dst: [*]u32, src: [*]const u32, p: *const MatrixParams) void {
     const columns = Columns.of(&p.matrix);
+    // An opaque destination's alpha whole.
+    const opaque_alpha: u32 = if (p.rows.transparent != 0) 0 else 0xff000000;
     var last: u32 = 0;
     var last_map = matrixOf(&columns, 0);
     var four: [4]u32 = undefined;
@@ -289,7 +279,7 @@ pub fn colorMatrix(dst: [*]u32, src: [*]const u32, p: *const MatrixParams) void 
                 four[k] = last_map;
             }
 
-            for (0..n) |k| d[col + k] = four[k] | p.opaque_alpha;
+            for (0..n) |k| d[col + k] = four[k] | opaque_alpha;
             col += n;
         }
     }
@@ -357,14 +347,6 @@ fn draw(x: *u64, lo: u32, span: i32) u32 {
     if (span <= 0) return lo;
     x.* = (x.* * 16807) % M;
     return lo + @as(u32, @intCast(x.* % @as(u64, @intCast(span))));
-}
-
-/// JS's ToInt32 of a double: wrapped modulo 2^32, NaN and infinities 0.
-fn toInt32(v: f64) i32 {
-    if (@abs(v) < 2147483648.0) return @intFromFloat(@trunc(v));
-    if (!std.math.isFinite(v)) return 0;
-    const m = @mod(@trunc(v), 4294967296.0);
-    return @bitCast(@as(u32, @intFromFloat(m)));
 }
 
 /// A double to int as x86's conversion makes it: out of range, or NaN, -2^31.
@@ -486,12 +468,6 @@ pub fn perlin(pixels: []u32, p: *const PerlinParams, lattice: []const i32, gradi
     }
 }
 
-test "premultiply and unmultiply round as the store does" {
-    try std.testing.expectEqual(@as(u32, 0x80402010), premultiply(0x80804020));
-    try std.testing.expectEqual(@as(u32, 0), premultiply(0x00ffffff));
-    try std.testing.expectEqual(@as(u32, 0x807f4020), unmultiply(0x80402010));
-}
-
 test "merge mixes each channel by its multiplier, unclamped and wrapped" {
     var dst = [_]u32{0xff000000};
     const src = [_]u32{0xffffffff};
@@ -520,9 +496,11 @@ test "noise draws the same sequence however it is split" {
     try std.testing.expectEqualSlices(u32, &whole, &parts);
 }
 
-test "toInt32 wraps as JS does" {
-    try std.testing.expectEqual(@as(i32, -2147483648), toInt32(2147483648.0));
-    try std.testing.expectEqual(@as(i32, 1), toInt32(4294967297.0));
-    try std.testing.expectEqual(@as(i32, 0), toInt32(std.math.inf(f64)));
-    try std.testing.expectEqual(@as(i32, -1), toInt32(-1.5));
+test "extents that a 32-bit product would wrap are refused" {
+    try std.testing.expectEqual(@as(?usize, null), rowsBytes(1, 65537, 65536));
+    try std.testing.expectEqual(@as(?usize, null), rowsBytes(0x40000001, 1, 0x40000001));
+    try std.testing.expectEqual(@as(?usize, null), rowsBytes(4, 2, 3));
+    try std.testing.expectEqual(@as(?usize, null), bytesOf(0x40000001, 4));
+    try std.testing.expectEqual(@as(?usize, null), bytesOf(65536 * 65536, 4));
+    try std.testing.expectEqual(@as(?usize, 16 * 4 + 8 * 4), rowsBytes(8, 2, 16));
 }

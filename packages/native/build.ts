@@ -97,13 +97,26 @@ This notice records where they come from.
 https://www.7-zip.org/sdk.html
 `;
 
-/** Each vendored library's notice, verbatim, under the sub-path that compiles it in. */
+/** pixels.zig's perlinNoise noise, derived from SVG 1.1's feTurbulence reference implementation. */
+const FE_TURBULENCE = `src/render/pixels.zig's noise for BitmapData.perlinNoise is derived from
+the reference implementation of feTurbulence in Scalable Vector Graphics
+(SVG) 1.1 (Second Edition),
+https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement
+
+Copyright © 2015 W3C® (MIT, ERCIM, Keio, Beihang). This software or
+document includes material copied from or derived from SVG 1.1, under the
+W3C Software and Document License:
+https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document
+`;
+
+/** Each vendored library's notice, verbatim, and the derived work's, under the sub-path that compiles it in. */
 function notices(): string {
   const sections: [string, string][] = [
     ["@swf2es/native/compress: zlib", readFileSync(join(vendor, "zlib/LICENSE"), "utf8")],
     ["@swf2es/native/compress: the LZMA SDK", LZMA_SDK],
     ["@swf2es/native/mp3: minimp3", readFileSync(join(vendor, "minimp3/LICENSE"), "utf8")],
     ["@swf2es/native/render: libtess2", readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8")],
+    ["@swf2es/native/render: SVG's feTurbulence (perlinNoise)", FE_TURBULENCE],
   ];
 
   return [

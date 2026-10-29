@@ -103,10 +103,9 @@ export fn layerFilter(address: usize) usize {
 /// The destination and source rows a copy's params name, within the input: null where they are not.
 fn copyRows(r: ops.Rows) ?struct { dst: [*]u32, src: [*]u32 } {
     if (r.transparent > 1 or r.unused != 0) return null;
-    if (r.w == 0 or r.h == 0 or r.w > r.dst_stride or r.w > r.src_stride) return null;
-    const dst_n = (@as(usize, r.h) - 1) * r.dst_stride + r.w;
-    const src_n = (@as(usize, r.h) - 1) * r.src_stride + r.w;
-    if (!holds(r.dst, dst_n * 4, 4) or !holds(r.src, src_n * 4, 4)) return null;
+    const dst_bytes = ops.rowsBytes(r.w, r.h, r.dst_stride) orelse return null;
+    const src_bytes = ops.rowsBytes(r.w, r.h, r.src_stride) orelse return null;
+    if (!holds(r.dst, dst_bytes, 4) or !holds(r.src, src_bytes, 4)) return null;
     return .{ .dst = @ptrFromInt(r.dst), .src = @ptrFromInt(r.src) };
 }
 
@@ -144,7 +143,7 @@ export fn palettePixels(address: usize) usize {
 export fn matrixPixels(address: usize) usize {
     if (!holds(address, @sizeOf(ops.MatrixParams), @alignOf(ops.MatrixParams))) return 0;
     const p = @as(*const ops.MatrixParams, @ptrFromInt(address)).*;
-    if (p.opaque_alpha != 0 and p.opaque_alpha != 0xff000000) return 0;
+    if (p.unused != 0) return 0;
     const rows = copyRows(p.rows) orelse return 0;
     ops.colorMatrix(rows.dst, rows.src, &p);
     return 1;
@@ -154,9 +153,8 @@ export fn matrixPixels(address: usize) usize {
 export fn transformPixels(address: usize) usize {
     if (!holds(address, @sizeOf(ops.TransformParams), @alignOf(ops.TransformParams))) return 0;
     const p = @as(*const ops.TransformParams, @ptrFromInt(address)).*;
-    if (p.w == 0 or p.h == 0 or p.w > p.stride) return 0;
-    const n = (@as(usize, p.h) - 1) * p.stride + p.w;
-    if (!holds(p.pixels, n * 4, 4)) return 0;
+    const bytes = ops.rowsBytes(p.w, p.h, p.stride) orelse return 0;
+    if (!holds(p.pixels, bytes, 4)) return 0;
     ops.colorTransform(@ptrFromInt(p.pixels), &p);
     return 1;
 }
@@ -167,7 +165,8 @@ export fn noisePixels(address: usize) usize {
     if (!holds(address, @sizeOf(ops.NoiseParams), @alignOf(ops.NoiseParams))) return 0;
     const p = @as(*const ops.NoiseParams, @ptrFromInt(address)).*;
     if (p.state == 0 or p.state >= 2147483647 or p.lo > 255 or p.span > 256 or p.channels > 15 or p.gray > 1 or p.transparent > 1) return 0;
-    if (p.count == 0 or !holds(p.pixels, @as(usize, p.count) * 4, 4)) return 0;
+    const bytes = ops.bytesOf(p.count, 4) orelse return 0;
+    if (p.count == 0 or !holds(p.pixels, bytes, 4)) return 0;
     return ops.noise(@as([*]u32, @ptrFromInt(p.pixels))[0..p.count], &p);
 }
 
@@ -175,13 +174,13 @@ export fn noisePixels(address: usize) usize {
 export fn perlinPixels(address: usize) usize {
     if (!holds(address, @sizeOf(ops.PerlinParams), @alignOf(ops.PerlinParams))) return 0;
     const p = @as(*const ops.PerlinParams, @ptrFromInt(address)).*;
-    if (p.w == 0 or p.h == 0 or p.channels > 15 or p.gray > 1 or p.fractal > 1 or p.stitch > 1 or p.transparent > 1 or p.unused != 0) return 0;
-    if (p.octaves > 1 << 20) return 0;
-    const count = @as(usize, p.w) * p.h;
-    if (!holds(p.pixels, count * 4, 4)) return 0;
+    if (p.channels > 15 or p.gray > 1 or p.fractal > 1 or p.stitch > 1 or p.transparent > 1 or p.unused != 0) return 0;
+    const bytes = ops.rowsBytes(p.w, p.h, p.w) orelse return 0;
+    const offset_bytes = ops.bytesOf(p.octaves, 16) orelse return 0;
+    if (!holds(p.pixels, bytes, 4)) return 0;
     if (!holds(p.lattice, ops.LATTICE * 4, 4)) return 0;
     if (!holds(p.gradients, ops.LATTICE * 2 * 4 * 8, 8)) return 0;
-    if (!holds(p.offsets, @as(usize, p.octaves) * 2 * 8, 8)) return 0;
+    if (!holds(p.offsets, offset_bytes, 8)) return 0;
     const lattice = @as([*]const i32, @ptrFromInt(p.lattice))[0..ops.LATTICE];
     // The lattice indexes itself and the gradients: every entry a cell of 256.
     for (lattice) |v| {
@@ -189,11 +188,11 @@ export fn perlinPixels(address: usize) usize {
     }
 
     ops.perlin(
-        @as([*]u32, @ptrFromInt(p.pixels))[0..count],
+        @as([*]u32, @ptrFromInt(p.pixels))[0 .. bytes / 4],
         &p,
         lattice,
         @as([*]const f64, @ptrFromInt(p.gradients))[0 .. ops.LATTICE * 2 * 4],
-        @as([*]const f64, @ptrFromInt(p.offsets))[0 .. @as(usize, p.octaves) * 2],
+        @as([*]const f64, @ptrFromInt(p.offsets))[0 .. offset_bytes / 8],
     );
     return 1;
 }
