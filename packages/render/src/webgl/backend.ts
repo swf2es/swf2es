@@ -16,7 +16,9 @@ import type { Keeps } from "../keeps.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
 import {
   ADD,
+  ALPHA,
   DRAW,
+  ERASE,
   LAYER,
   MIRROR,
   NORMAL,
@@ -121,6 +123,35 @@ const SMALL_STEP = 16;
 const FREE_BYTES = 128 * 1024 * 1024;
 
 /** A side of a layer made for `n` pixels: rounded up to SMALL_STEP, past LAYER_STEP to that. */
+/** Whether `commands` composite a layer onto the stage itself in erase or alpha. */
+function clearsStage(commands: Commands): boolean {
+  const ops = commands.ops;
+  let depth = 0;
+  for (let k = 0; k < commands.length; k++) {
+    const at = k * 4;
+    switch (ops[at]) {
+      case LAYER_PUSH:
+        depth++;
+        break;
+      case LAYER_POP:
+        depth--;
+        if (depth === 0 && (ops[at + 1] === ERASE || ops[at + 1] === ALPHA)) {
+          return true;
+        }
+
+        break;
+      case COMPOSITE:
+        if (depth === 0 && (ops[at + 2] === ERASE || ops[at + 2] === ALPHA)) {
+          return true;
+        }
+
+        break;
+    }
+  }
+
+  return false;
+}
+
 function layerSide(n: number): number {
   return n <= LAYER_STEP
     ? Math.max(SMALL_STEP, Math.ceil(n / SMALL_STEP) * SMALL_STEP)
@@ -389,14 +420,22 @@ export class WebGLBackend {
     // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
     // does. Its layers take the stage's, so that their edges are the stage's.
     const stage = root ? null : this.stageBuffers(target.width, target.height, this.samples);
-    if (root) {
+    // An erase or alpha blend outside any layer clears what it covers on the stage, as adl does,
+    // which the blends after it read: an opaque canvas keeps no alpha, so such a frame is drawn
+    // into a layer the canvas' size, then copied onto it. Multisampled buffers keep it already.
+    const cleared =
+      !root && !stage && !this.canvasAlpha && clearsStage(commands)
+        ? this.takeLayer(target.width, target.height)
+        : null;
+    const into = root ?? cleared;
+    if (into) {
       // Its own stencil, for the masks drawn into it.
-      this.layerMsaa(root, 1);
+      this.layerMsaa(into, 1);
     }
 
     this.frameSamples = stage?.samples ?? 1;
     const canvas: Open = {
-      layer: root,
+      layer: into,
       msaa: stage,
       x: 0,
       y: 0,
@@ -560,6 +599,17 @@ export class WebGLBackend {
     state.stencil(null);
     if (canvas.msaa) {
       this.present(canvas.msaa);
+    }
+
+    if (cleared) {
+      // Its rows run down, the canvas' up.
+      const { width, height } = target;
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, cleared.framebuffer);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+      gl.blitFramebuffer(0, 0, width, height, 0, height, width, 0, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      // Bound as the state cache has it.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, cleared.framebuffer);
+      this.giveLayer(cleared);
     }
 
     if (counted) {
