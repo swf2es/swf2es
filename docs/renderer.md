@@ -38,8 +38,10 @@ of each kind of object is in modules of its own under
 - `fills.ts` and `strokes.ts`: fills tessellated, and lines built, by
   `@swf2es/native/render`, a layer in one call; `lines.ts` keeps a
   layer's lines by the stretch they were built for;
-- `shapes.ts`, `stale-shapes.ts`: a SWF's shapes, drawn into layers when
-  first asked for;
+- `shapes.ts`: a shape layer's fills and meshes as geometries, its
+  bitmap fills merged where they sample alike;
+- `stale-shapes.ts`: a Shape's stale bitmap cache, which Flash shows for
+  a Shape given another of the same bounds while cached;
 - `paints.ts`: bitmap and gradient textures (`storeTexture`,
   `gradientTexture`);
 - `text.ts`, `text-items.ts`, `advanced.ts`: device text's textures,
@@ -257,11 +259,18 @@ it has less to do, so at a scene's own frame rate its timer hides most
 changes. Fewer commands save the GPU process's time, not the GPU's; both
 are reported.
 
-`tests/player/bench.ts` builds a synthetic scene and times it in
-seconds; `--town` grows it towards a busy room's mix (about 4,650
-Graphics a frame, most of them still; bitmap and gradient fills; some
-240 filters, most with kept outputs; 100 blend layers; a few masks), and
-`--gpu` draws on the GPU rather than software GL. A change is measured
+The acceptance test is a replay of a busy room, a mostly static scene
+recorded from real content: it takes minutes and a private recording,
+so it is run by hand. Its measured mix is about 4,650 Graphics a frame,
+most of them still; bitmap and gradient fills; some 240 filters, most
+with kept outputs; 100 blend layers; and a few masks.
+
+For each pull request, `tests/player/bench.ts` builds a synthetic scene
+and times it; `--town N` draws N hairline-outlined characters and
+scenery instead, some of them glowing, which is nearer a room's lines and
+filters but has none of its bitmap or gradient fills, blend layers or
+masks. A synthetic scene built to the replay's whole mix is still to
+come. `--gpu` draws on the GPU rather than software GL. A change is measured
 on a GPU and on SwiftShader, which CI draws with and a player without a
 usable GPU falls back to. `tests/player/draw-counts.ts` keeps GL calls,
 sub-draws, binds and uniform calls a frame from creeping up unnoticed
