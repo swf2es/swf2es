@@ -262,7 +262,7 @@ test("a line of whole alpha drawn opaque takes no tessellator, any other is tess
   drawing.lineTo(0, 60);
   const tessellator = new Tessellator();
   let calls = 0;
-  const counted = (c: number[][], nonZero: boolean) => {
+  const counted: Parameters<typeof layerStrokes>[6] = (c, nonZero) => {
     calls++;
     return tessellator.tessellate(c, nonZero);
   };
