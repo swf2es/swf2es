@@ -437,6 +437,21 @@ test("held layers in a held layer are drawn a level before it; a kept one is dra
   ]);
 });
 
+test("a held layer erased into a held layer clears the layer's page, not the stage", () => {
+  const scene = new SceneList();
+  scene.layerBegin(3);
+  scene.layerBegin(3);
+  scene.draw(0, 0, 0);
+  scene.layerEnd(ERASE, -1, 1);
+  scene.layerEnd(NORMAL, -1, 0);
+  scene.layerRect(0, 1, 2, 3, 4);
+  scene.layerRect(1, 1, 2, 3, 4);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.equal(commands.clearsTarget, false);
+  assert.deepEqual(ops(commands)[4], [HELD, 0, ERASE, -1]);
+});
+
 test("a filtered layer with a layer in it that is not held is drawn in its place", () => {
   const scene = new SceneList();
   scene.layerBegin(3);

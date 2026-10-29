@@ -9734,6 +9734,18 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // As "filters-nested" at low quality, where nothing is multisampled: the multiplied shadow
+    // copies what is below it out of its outer layer's page as it is.
+    name: "filters-nested-low",
+    swf: (abc) => bare(abc, 1, "FiltersNested", 300, 200),
+    script: "FiltersNested",
+    quality: "low",
+    frames: 1,
+    capture: [1],
+    tolerance: 12,
+    maxOutliers: 0,
+  },
+  {
     // Filters on objects that draw nothing draw nothing, glows, shadows and colour matrices alike.
     name: "filters-empty",
     swf: (abc) => bare(abc, 1, "FiltersEmpty", 330, 132),

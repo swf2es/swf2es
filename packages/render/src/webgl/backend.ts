@@ -1132,10 +1132,9 @@ export class WebGLBackend {
         content.height = hold.height;
         content.ox = shelves.x[hold.shelf];
         content.oy = shelves.y[hold.shelf];
+        // Kept to its rectangle by the viewport alone, as the composites in it scissor themselves.
         this.drawInto(content, target);
-        state.scissor([content.ox, content.oy, hold.width, hold.height]);
         this.drawHoldContent(commands, hold, scene, content);
-        state.scissor(null);
         this.slotOf(hold, 0, index, content.ox, content.oy, hold.width, hold.height);
       }
 
@@ -1447,8 +1446,6 @@ export class WebGLBackend {
         case HELD:
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
           this.compositeHeld(ops[at + 1], open, ops[at + 2], ops[at + 3]);
-          // Kept to its rectangle again, which the composite let go of.
-          state.scissor([open.ox ?? 0, open.oy ?? 0, open.width, open.height]);
           break;
       }
     }
@@ -1820,10 +1817,33 @@ export class WebGLBackend {
     let backX = 0;
     let backY = 0;
     if (!direct) {
+      // Out of a multisampled page, its rectangle resolved into the page's own texture first, which
+      // a blit may then copy anywhere: copied where it lies, the copy would stay as large as the
+      // page's far corner.
+      let from = this.framebufferOf(under);
+      const paged = under.msaa !== null && under.layer !== null && under.ox !== undefined;
+      if (paged) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, (under.layer as Layer).framebuffer);
+        gl.blitFramebuffer(
+          fx,
+          fy,
+          fx + width,
+          fy + height,
+          fx,
+          fy,
+          fx + width,
+          fy + height,
+          gl.COLOR_BUFFER_BIT,
+          gl.NEAREST,
+        );
+        from = (under.layer as Layer).framebuffer;
+      }
+
       // Copied from its corner, or out of a multisampled target to where it lies, as a blit
       // resolving must keep its rectangle: then as large as the rectangle's far corner.
-      const bx = under.msaa ? fx : 0;
-      const by = under.msaa ? fy : 0;
+      const bx = under.msaa && !paged ? fx : 0;
+      const by = under.msaa && !paged ? fy : 0;
       backX = fx - bx;
       backY = fy - by;
       const right = bx + width;
@@ -1860,7 +1880,6 @@ export class WebGLBackend {
       // RGBA texture refuses, where a blit fills it in.
       // Out of a multisampled target the blit resolves the rectangle, as the Pixi fork's bounded
       // resolve does.
-      const from = this.framebufferOf(under);
       if (!this.backFramebuffer) {
         this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
@@ -1889,7 +1908,7 @@ export class WebGLBackend {
         gl.NEAREST,
       );
       // Both bindings back as the state cache has them.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, from);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebufferOf(under));
     }
 
     state.bindTexture(LAYER_UNIT, (open.layer as Layer).texture);
