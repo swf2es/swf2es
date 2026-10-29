@@ -94,7 +94,7 @@ const lanes = (
       .bytes(),
   );
 
-test("float arithmetic, with SSE's NaN rules and C's pow", () => {
+test("float arithmetic, with SSE's NaN rules", () => {
   assert.deepEqual(binary("mod", [5, -5, 5, -5], [3, 3, -3, -3]), [2, 1, -1, -2]);
   assert.deepEqual(
     binary("pow", [5, -5, 5, -5], [3, 3, -3, -3]),
@@ -113,9 +113,26 @@ test("float arithmetic, with SSE's NaN rules and C's pow", () => {
     1,
   ]);
   assert.deepEqual(binary("step", [0.5, -1.25, 3, 0], [2, 0.75, -0.5, 7]), [0, 0, 1, 0]);
+  // pow's edges as JavaScript's, not C's: 1 to NaN and -1 to Infinity are NaN.
+  assert.deepEqual(binary("pow", [-1, -1, 0, 0], [Infinity, -Infinity, -1, -0.5]), [
+    Number.NaN,
+    Number.NaN,
+    Infinity,
+    Infinity,
+  ]);
+  assert.deepEqual(binary("pow", [-0, -2, Number.NaN, 1], [-1, 0.5, 0, Number.NaN]), [
+    -Infinity,
+    Number.NaN,
+    1,
+    Number.NaN,
+  ]);
   assert.deepEqual(
     binary("atan2", [1, -1, 0, 0], [0, 0, 0, -0]),
     [1.5707963705062866, -1.5707963705062866, 0, 0],
+  );
+  assert.deepEqual(
+    binary("atan2", [Number.NaN, 1, Number.NaN, 1], [1, Number.NaN, Number.NaN, -0]),
+    [Number.NaN, Number.NaN, Number.NaN, 1.5707963705062866],
   );
   assert.deepEqual(unary("rcp", [0.5, -1.25, 3, 0]), [
     2,

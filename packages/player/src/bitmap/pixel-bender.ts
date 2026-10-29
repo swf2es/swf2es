@@ -96,6 +96,8 @@ export class PixelBender {
   private readonly f0: Float32Array;
   private readonly i0: Int32Array;
   private readonly images: (ShaderImage | null)[] = [];
+  /** A matrix product's, or a vector's, values while it is written. */
+  private readonly scratch = new Float32Array(16);
   private readonly coord: number[] = [];
   private readonly out: number[] = [];
   private readonly floats: Slots;
@@ -314,6 +316,9 @@ export class PixelBender {
         }
       }
     }
+
+    // The program lives as long as its kernel; the images, which may be large, not.
+    this.images.length = 0;
   }
 
   private setParameter(p: PbjParameter, v: readonly number[]): void {
@@ -422,22 +427,11 @@ export class PixelBender {
 
   private floatOp(op: number, n: number, d: number, s: number, at: number): void {
     const { code, f, i } = this;
+    // add, mul and mov are pixel()'s.
     switch (op) {
-      case PbjOp.add:
-        for (let k = 0; k < n; k++) {
-          f[code[d + k]] += f[code[s + k]];
-        }
-
-        return;
       case PbjOp.sub:
         for (let k = 0; k < n; k++) {
           f[code[d + k]] -= f[code[s + k]];
-        }
-
-        return;
-      case PbjOp.mul:
-        for (let k = 0; k < n; k++) {
-          f[code[d + k]] *= f[code[s + k]];
         }
 
         return;
@@ -447,23 +441,18 @@ export class PixelBender {
         }
 
         return;
-      case PbjOp.mov:
-        for (let k = 0; k < n; k++) {
-          f[code[d + k]] = f[code[s + k]];
-        }
-
-        return;
       case PbjOp.atan2:
-        // adl's atan2 takes -0 as 0: atan2(0, -0) is 0, not pi.
+        // adl's atan2 takes an x of -0 as 0: atan2(0, -0) is 0, not pi. NaN stays NaN.
         for (let k = 0; k < n; k++) {
-          f[code[d + k]] = Math.atan2(f[code[d + k]], f[code[s + k]] || 0);
+          const x = f[code[s + k]];
+          f[code[d + k]] = Math.atan2(f[code[d + k]], x === 0 ? 0 : x);
         }
 
         return;
       case PbjOp.pow:
+        // As JavaScript's, unlike C's: 1 to NaN and -1 to Infinity are NaN in adl too.
         for (let k = 0; k < n; k++) {
-          const x = f[code[d + k]];
-          f[code[d + k]] = x === 1 ? 1 : x ** f[code[s + k]];
+          f[code[d + k]] **= f[code[s + k]];
         }
 
         return;
@@ -801,24 +790,24 @@ export class PixelBender {
     const n = code[at + LANES];
     const d = at + DST;
     const s = at + SRC;
-    const get = (o: number, c: number, r: number) => f[code[o + c] + r];
+    const scratch = this.scratch;
     switch (op) {
       case PbjOp.matMatMul: {
-        const product: number[] = [];
         for (let c = 0; c < n; c++) {
+          const column = code[s + c];
           for (let r = 0; r < n; r++) {
             let sum = 0;
             for (let k = 0; k < n; k++) {
-              sum = Math.fround(sum + Math.fround(get(d, k, r) * get(s, c, k)));
+              sum = Math.fround(sum + Math.fround(f[code[d + k] + r] * f[column + k]));
             }
 
-            product.push(sum);
+            scratch[c * n + r] = sum;
           }
         }
 
         for (let c = 0; c < n; c++) {
           for (let r = 0; r < n; r++) {
-            f[code[d + c] + r] = product[c * n + r];
+            f[code[d + c] + r] = scratch[c * n + r];
           }
         }
 
@@ -827,12 +816,15 @@ export class PixelBender {
 
       case PbjOp.matVecMul:
       case PbjOp.vecMatMul: {
-        const v = Array.from({ length: n }, (_, k) => f[code[d + k]]);
+        for (let k = 0; k < n; k++) {
+          scratch[k] = f[code[d + k]];
+        }
+
         for (let k = 0; k < n; k++) {
           let sum = 0;
           for (let j = 0; j < n; j++) {
-            const m = op === PbjOp.matVecMul ? get(s, j, k) : get(s, k, j);
-            sum = Math.fround(sum + Math.fround(m * v[j]));
+            const m = op === PbjOp.matVecMul ? f[code[s + j] + k] : f[code[s + k] + j];
+            sum = Math.fround(sum + Math.fround(m * scratch[j]));
           }
 
           f[code[d + k]] = sum;
@@ -846,7 +838,7 @@ export class PixelBender {
         for (let c = 0; c < n; c++) {
           for (let r = 0; r < n; r++) {
             const o = code[d + c] + r;
-            const x = get(s, c, r);
+            const x = f[code[s + c] + r];
             switch (op) {
               case PbjOp.add:
                 f[o] += x;
@@ -971,9 +963,11 @@ function sampleFloatLinear(
   const ty = (Math.round((fy - y0) * 256) || 0) / 256;
   const w = image.width;
   const c = image.channels;
-  const at = (px: number, py: number) =>
-    floats[(clampIndex(py, image.height) * w + clampIndex(px, w)) * c + k];
-  const row0 = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx;
-  const row1 = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx;
+  const left = clampIndex(x0, w) * c + k;
+  const right = clampIndex(x0 + 1, w) * c + k;
+  const top = clampIndex(y0, image.height) * w * c;
+  const bottom = clampIndex(y0 + 1, image.height) * w * c;
+  const row0 = floats[top + left] * (1 - tx) + floats[top + right] * tx;
+  const row1 = floats[bottom + left] * (1 - tx) + floats[bottom + right] * tx;
   return row0 * (1 - ty) + row1 * ty;
 }
