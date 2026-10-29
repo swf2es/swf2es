@@ -15,3 +15,6 @@ export const base: string = facts.base;
 
 /** A path under the site, as a link takes it. */
 export const url = (path = "") => `${base}${path}`;
+
+/** The guide's first page, where its links lead rather than through docs/'s redirect. */
+export const guide: string = url(`${facts.guide}/`);

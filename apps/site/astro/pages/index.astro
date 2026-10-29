@@ -3,7 +3,7 @@
 // the compatibility page.
 import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
-import { base } from "../site.ts";
+import { base, guide } from "../site.ts";
 ---
 
 <StarlightPage
@@ -27,7 +27,7 @@ import { base } from "../site.ts";
       image: { html: `<img src="${base}icon.svg" alt="" width="200" height="200">` },
       actions: [
         { text: "Play a SWF", link: `${base}play/`, icon: "right-arrow" },
-        { text: "Read the guide", link: `${base}docs/`, variant: "minimal" },
+        { text: "Read the guide", link: guide, variant: "minimal" },
       ],
     },
   }}
@@ -70,7 +70,7 @@ import { base } from "../site.ts";
     <LinkCard
       title="Embed a SWF in a page"
       description="The <swf2es-player> element, and replacing a page's Flash tags."
-      href={`${base}docs/`}
+      href={guide}
     />
     <LinkCard
       title="Compatibility"

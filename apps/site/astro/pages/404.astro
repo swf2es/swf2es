@@ -1,7 +1,7 @@
 ---
 // The page GitHub Pages serves for a path the site does not have.
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
-import { base } from "../site.ts";
+import { base, guide } from "../site.ts";
 ---
 
 <StarlightPage
@@ -9,6 +9,6 @@ import { base } from "../site.ts";
 >
   <p>
     This page is not here. Try <a href={`${base}play/`}>the player</a>,
-    <a href={`${base}docs/`}>the guide</a> or <a href={base}>the home page</a>.
+    <a href={guide}>the guide</a> or <a href={base}>the home page</a>.
   </p>
 </StarlightPage>

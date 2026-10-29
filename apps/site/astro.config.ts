@@ -30,6 +30,9 @@ function virtual(id: string, value: unknown) {
   };
 }
 
+const guidePages = readGuide(root, BASE, blob);
+const guide = guidePages.map(({ id }) => ({ slug: id }));
+
 /**
  * What the pages show of the build, and the base they link under, as the
  * module virtual:swf2es/facts (read through astro/site.ts): the
@@ -38,6 +41,7 @@ function virtual(id: string, value: unknown) {
  */
 const facts = virtual("virtual:swf2es/facts", {
   base: BASE,
+  guide: guidePages[0].id,
   build,
   importMap,
   blob,
@@ -48,9 +52,6 @@ const facts = virtual("virtual:swf2es/facts", {
 });
 /** The compatibility page's figures (compatibility.ts), worked out from the repository's baselines. */
 const scores = virtual("virtual:swf2es/compatibility", compatibility(root));
-const guide = readGuide(root, BASE, blob).map(({ id, order }) =>
-  order === 0 ? { slug: id, label: "Overview" } : { slug: id },
-);
 
 export default defineConfig({
   site: "https://swf2es.github.io",
@@ -61,6 +62,8 @@ export default defineConfig({
   vite: { plugins: [facts, scores] },
   // Compressed, a line's break before a link was dropped with the space it stood for.
   compressHTML: false,
+  // The guide starts at its first section, unless it has none: docs/ is then its only page.
+  redirects: guidePages[0].id === "docs" ? {} : { "/docs": `${BASE}${guidePages[0].id}/` },
   integrations: [
     starlight({
       title: "swf2es",
