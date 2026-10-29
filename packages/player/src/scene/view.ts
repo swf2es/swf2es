@@ -13,8 +13,11 @@ import {
   Commands,
   drawnArea,
   Filters,
+  filteredRect,
   Geometries,
   type GeometryHandle,
+  type KeepHandle,
+  Keeps,
   LAYER,
   MASK_BEGIN,
   MASK_POP,
@@ -35,7 +38,7 @@ import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
-import { CLEAN, type DisplayObject } from "../display/displayobject.js";
+import { CLEAN, type DisplayObject, TRANSFORM } from "../display/displayobject.js";
 import {
   type Filter as FilterRecord,
   filterRoom,
@@ -118,6 +121,33 @@ interface DeviceRun {
 }
 
 /**
+ * A filtered object's output as last made: whether it was kept, as which
+ * kept output, for which plan and generation; its scale and turn on the
+ * stage and its place there in target pixels; its area as measured and
+ * its rectangle; and how many frames in a row it changed. `reused` and
+ * `keeping` say what this frame does with it.
+ */
+interface KeptOutput {
+  handle: KeepHandle | null;
+  plan: FilterPlan;
+  generation: number;
+  /** The stage's frame it was last drawn on, whether it scrolled then, and whether it was measured. */
+  seenAt: number;
+  scrolled: boolean;
+  measured: boolean;
+  kept: boolean;
+  reused: boolean;
+  keeping: boolean;
+  changing: number;
+  linear: number[];
+  x: number;
+  y: number;
+  pad: number;
+  area: Float64Array;
+  rect: Int32Array;
+}
+
+/**
  * A filtered object's filters worked out for its records at its units,
  * and cut to the last cap its padding needed, if any.
  */
@@ -178,6 +208,20 @@ export class RenderView implements Drawer {
   private textureLimit = 4096;
   /** A filtered object's drawn area, measured where its padding may not fit (fitFilters). */
   private readonly drawn: number[] = [];
+  /** The outputs kept for filtered objects, and what they were kept for. */
+  private readonly keeps = new Keeps();
+  private readonly outputs = new WeakMap<DisplayObject, KeptOutput>();
+  /** The filtered layers drawn this frame, each its output's record and its layer number. */
+  private readonly ran: (KeptOutput | number)[] = [];
+  /** Moves on as what every kept output was made at changes: the scale, the stage's quality. */
+  private keptGeneration = 0;
+  private keptScale = 0;
+  private keptQuality = "";
+  private keptScreen: number | null = null;
+  /** The stage's frames drawn. */
+  private frames = 0;
+  private readonly movedArea = new Float64Array(4);
+  private readonly keptRect = new Int32Array(4);
   /** Where a frame is drawn, filled in as it is. */
   private readonly target = { width: 0, height: 0, scale: 1, x: 0, y: 0, resolution: 1 };
   private readonly made = new WeakMap<ShapeLayer, Made>();
@@ -249,6 +293,7 @@ export class RenderView implements Drawer {
   private readonly restored = () => {
     this.backend.restore(this.geometries);
     this.textures.lost();
+    this.keeps.lost();
   };
 
   /** The stage's quality, "LOW" to "BEST", which will decide bitmaps' smoothing. */
@@ -274,14 +319,29 @@ export class RenderView implements Drawer {
     this.scene.reset();
     this.rows.reset();
     this.filters.reset();
-    this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
     const target = this.target;
     target.width = this.gl.drawingBufferWidth;
     target.height = this.gl.drawingBufferHeight;
     target.scale = this.scale * this.resolution;
     target.resolution = this.resolution;
+    // Outputs kept at another scale, with bitmaps smoothed otherwise or hairlines at another
+    // width, are drawn again.
+    if (
+      target.scale !== this.keptScale ||
+      this.stageQuality !== this.keptQuality ||
+      this.screenScale !== this.keptScreen
+    ) {
+      this.keptScale = target.scale;
+      this.keptQuality = this.stageQuality;
+      this.keptScreen = this.screenScale;
+      this.keptGeneration++;
+    }
+
+    this.walk(root, 1, 0, 0, 1, 0, 0, null, false);
     measureLayers(this.scene, this.rows, this.geometries, target);
+    this.noteKept();
+    this.frames++;
     plan(this.scene, this.transparent ? 0 : (0xff000000 | this.background) >>> 0, this.commands);
     this.backend.execute(
       this.commands,
@@ -290,10 +350,12 @@ export class RenderView implements Drawer {
       this.geometries,
       this.textures,
       this.filters,
+      this.keeps,
       target,
     );
     this.geometries.endFrame();
     this.textures.endFrame();
+    this.keeps.endFrame();
   }
 
   /**
@@ -360,16 +422,29 @@ export class RenderView implements Drawer {
     let layerRow = -1;
     let layer = -1;
     let drawnFrom = 0;
+    let output: KeptOutput | null = null;
     if (mode !== NORMAL || filtering) {
       if (mode === LAYER || filtering) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
 
-      // Over the rectangle of what is drawn in it, which measureLayers finds; its padding is set once
-      // its filters are fitted to that.
-      drawnFrom = this.scene.length;
-      layer = this.scene.layerBegin(filtering ? 0 : -1);
+      // What its filters made last, where nothing they ran on changed: composited again where it
+      // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
+      output = filtering ? this.keptOutput(o, filtering, a, b, c, d, tx, ty) : null;
+      if (output?.reused) {
+        const k = output.handle as KeepHandle;
+        const rect = this.keptRect;
+        this.scene.keptLayer(k.id, mode, layerRow, rect[0], rect[1], rect[2], rect[3]);
+        this.keeps.use(k.id);
+        hidden = true;
+      } else {
+        // Over the rectangle of what is drawn in it, which measureLayers finds; its padding is set
+        // once its filters are fitted to that.
+        drawnFrom = this.scene.length;
+        const keep = output?.keeping ? (output.handle as KeepHandle).id : -1;
+        layer = this.scene.layerBegin(filtering ? 0 : -1, keep);
+      }
     }
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -513,10 +588,16 @@ export class RenderView implements Drawer {
       this.popMask();
     }
 
-    if (filtering) {
+    if (output?.reused) {
+      // Composited again already.
+    } else if (filtering) {
       const fitted = this.fitFilters(o, filtering, drawnFrom);
       this.scene.padLayer(layer, fitted.padding);
       this.scene.layerEnd(mode, layerRow, this.chainOf(fitted));
+      if (output) {
+        output.pad = fitted.padding;
+        this.ran.push(output, layer);
+      }
     } else if (mode !== NORMAL) {
       this.scene.layerEnd(mode, layerRow);
     }
@@ -526,6 +607,136 @@ export class RenderView implements Drawer {
     }
 
     o.dirty = CLEAN;
+  }
+
+  /**
+   * Whether `o`'s filters' output kept last can be drawn again, its rectangle
+   * then in keptRect; else whether to keep what they make now. Kept while
+   * nothing they ran on changed but where it is on the stage, as the Pixi
+   * view's FilterChain keeps it: not past a change in `o` but a move, in
+   * what is in it, in its scale or turn on the stage (a b c d), a move of
+   * what it scrolls, its filters, or the screen's scale; and drawn again
+   * only while its rectangle moved with it, its size the same and its
+   * corner within a pixel. One that changes frame after frame is not kept,
+   * as keeping it would cost a target for nothing.
+   */
+  private keptOutput(
+    o: DisplayObject,
+    plan: FilterPlan,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    tx: number,
+    ty: number,
+  ): KeptOutput {
+    let k = this.outputs.get(o);
+    if (!k) {
+      k = {
+        handle: null,
+        plan,
+        generation: this.keptGeneration,
+        seenAt: -1,
+        scrolled: false,
+        measured: false,
+        kept: false,
+        reused: false,
+        keeping: false,
+        changing: 0,
+        linear: [a, b, c, d],
+        x: 0,
+        y: 0,
+        pad: 0,
+        area: new Float64Array(4),
+        rect: new Int32Array(4),
+      };
+      this.outputs.set(o, k);
+    }
+
+    const target = this.target;
+    const x = tx * target.scale;
+    const y = ty * target.scale;
+    const l = k.linear;
+    // One not drawn on the frame before was hidden, or off the list, where a walk cleared its flags
+    // and its children's without it hearing of a change.
+    const changed =
+      k.seenAt !== this.frames - 1 ||
+      k.plan !== plan ||
+      k.generation !== this.keptGeneration ||
+      (o.dirty & ~TRANSFORM) !== 0 ||
+      (o.dirty & TRANSFORM && (o.scroll !== null || k.scrolled)) ||
+      (o instanceof Container && o.descendantsDirty) ||
+      l[0] !== a ||
+      l[1] !== b ||
+      l[2] !== c ||
+      l[3] !== d;
+    k.seenAt = this.frames;
+    k.scrolled = o.scroll !== null;
+    let same = false;
+    if (!changed && k.measured) {
+      // Its area as measured, moved as it moved, measured into a rectangle again.
+      const moved = this.movedArea;
+      moved[0] = k.area[0] + x - k.x;
+      moved[1] = k.area[1] + y - k.y;
+      moved[2] = k.area[2] + x - k.x;
+      moved[3] = k.area[3] + y - k.y;
+      const rect = this.keptRect;
+      filteredRect(moved, 0, k.pad, target, rect, 0);
+      same =
+        rect[2] === k.rect[2] &&
+        rect[3] === k.rect[3] &&
+        Math.abs(rect[0] - x - (k.rect[0] - k.x)) <= 1 &&
+        Math.abs(rect[1] - y - (k.rect[1] - k.y)) <= 1;
+    }
+
+    k.reused = !changed && same && k.kept && k.handle !== null && this.keeps.alive(k.handle);
+    if (k.reused) {
+      k.changing = 0;
+      return k;
+    }
+
+    // Unchanged but not kept, as after it was filtered without keeping: kept now.
+    k.changing = changed || !same ? k.changing + 1 : 0;
+    k.keeping = k.changing <= 1;
+    k.kept = false;
+    k.plan = plan;
+    k.generation = this.keptGeneration;
+    l[0] = a;
+    l[1] = b;
+    l[2] = c;
+    l[3] = d;
+    k.x = x;
+    k.y = y;
+    if (k.keeping && (!k.handle || !this.keeps.alive(k.handle))) {
+      k.handle = this.keeps.add();
+    }
+
+    if (k.keeping) {
+      this.keeps.use((k.handle as KeepHandle).id);
+    }
+
+    return k;
+  }
+
+  /** What the filtered layers drawn this frame measured, for their outputs kept to be drawn again. */
+  private noteKept(): void {
+    const ran = this.ran;
+    const scene = this.scene;
+    for (let i = 0; i < ran.length; i += 2) {
+      const k = ran[i] as KeptOutput;
+      const layer = ran[i + 1] as number;
+      for (let j = 0; j < 4; j++) {
+        k.area[j] = scene.areas[layer * 4 + j];
+        k.rect[j] = scene.layers[layer * 4 + j];
+      }
+
+      // Kept where its output was: a layer of no size draws nothing, and keeps nothing, nor does one
+      // in a layer of no size, which the planner leaves out with all in it.
+      k.measured = k.rect[2] > 0 && k.rect[3] > 0;
+      k.kept = k.keeping && k.measured && drawnWithin(scene, layer);
+    }
+
+    ran.length = 0;
   }
 
   /**
@@ -603,6 +814,16 @@ export class RenderView implements Drawer {
         }
 
         texture = pass.texture.id;
+        this.textures.use(texture);
+      } else if (pass.map) {
+        // Its map as it is now, a texture of its pixels kept as a bitmap's is.
+        if (pass.map.disposed) {
+          continue;
+        }
+
+        // A map set anew is a copy anew, as a tween writing the filters takes one each frame:
+        // its texture goes soon once the next one takes its place.
+        texture = this.storeTexture(pass.map, GRADIENT_IDLE_FRAMES).id;
         this.textures.use(texture);
       }
 
@@ -1105,7 +1326,7 @@ export class RenderView implements Drawer {
   }
 
   /** `store`'s texture, its pixels uploaded again if they changed since. */
-  private storeTexture(store: BitmapStore): TextureHandle {
+  private storeTexture(store: BitmapStore, idle?: number): TextureHandle {
     const kept = this.stores.get(store);
     if (kept && this.textures.alive(kept.handle)) {
       if (kept.version !== store.version) {
@@ -1116,7 +1337,7 @@ export class RenderView implements Drawer {
       return kept.handle;
     }
 
-    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable));
+    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable), idle);
     this.stores.set(store, { handle, version: store.version });
     return handle;
   }
@@ -1190,6 +1411,18 @@ export class RenderView implements Drawer {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
+}
+
+/** Whether every layer `layer` is in has a size, as the planner draws only such. */
+function drawnWithin(scene: SceneList, layer: number): boolean {
+  const r = scene.layers;
+  for (let p = scene.parents[layer]; p >= 0; p = scene.parents[p]) {
+    if (r[p * 4 + 2] <= 0 || r[p * 4 + 3] <= 0) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */

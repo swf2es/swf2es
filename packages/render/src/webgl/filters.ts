@@ -6,6 +6,7 @@ import {
   blurShrink,
   COLOR_MATRIX,
   CONVOLUTION,
+  DISPLACEMENT,
   type Filters,
   GLOW,
   GRADIENT,
@@ -154,6 +155,8 @@ export class FilterRunner<T extends FilterTarget> {
         return this.colorMatrix(v, at, input, width, height);
       case CONVOLUTION:
         return this.convolution(v, at, input, width, height);
+      case DISPLACEMENT:
+        return this.displacement(v, at, texture, input, width, height);
       default:
         return input;
     }
@@ -323,6 +326,52 @@ export class FilterRunner<T extends FilterTarget> {
       width / this.resolution - inset + 1,
       height / this.resolution - inset + 1,
     );
+    const out = this.host.take(width, height);
+    this.draw(pass, input, width, height, out, width, height);
+    return out;
+  }
+
+  /** A displacement map: each of the object's pixels read from where its map, texture `id`, moves it. */
+  private displacement(
+    v: Float32Array,
+    at: number,
+    id: number,
+    input: T,
+    width: number,
+    height: number,
+  ): T {
+    const gl = this.gl;
+    const map = id >= 0 ? this.host.texture(id) : null;
+    if (!map) {
+      return input;
+    }
+
+    const pass = this.use("displacement", shaders.DISPLACE);
+    gl.uniform4fv(this.at(pass, "uComponentX"), v, at, 4);
+    gl.uniform4fv(this.at(pass, "uComponentY"), v, at + 4, 4);
+    gl.uniform2f(this.at(pass, "uScale"), v[at + 8], v[at + 9]);
+    gl.uniform1f(this.at(pass, "uMode"), v[at + 10]);
+    gl.uniform4fv(this.at(pass, "uColor"), v, at + 11, 4);
+    gl.uniform2f(this.at(pass, "uGrow"), v[at + 15], v[at + 16]);
+    // The object's pixels and one more right and down, as adl's bitmap of it; the map from its
+    // point past their corner.
+    const inset = v[at + 17];
+    gl.uniform4f(
+      this.at(pass, "uBox"),
+      inset,
+      inset,
+      width / this.resolution - inset + 1,
+      height / this.resolution - inset + 1,
+    );
+    gl.uniform4f(
+      this.at(pass, "uMapAt"),
+      inset + v[at + 18],
+      inset + v[at + 19],
+      v[at + 20],
+      v[at + 21],
+    );
+    this.state.bindTexture(EXTRA_UNIT, map);
+    this.state.bindSampler(EXTRA_UNIT, this.host.sampler(CLAMP));
     const out = this.host.take(width, height);
     this.draw(pass, input, width, height, out, width, height);
     return out;
@@ -500,6 +549,7 @@ export class FilterRunner<T extends FilterTarget> {
       gl.uniform1i(gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);
       gl.uniform1i(gl.getUniformLocation(program, "uBlurred"), BLURRED_UNIT);
       gl.uniform1i(gl.getUniformLocation(program, "uGradient"), EXTRA_UNIT);
+      gl.uniform1i(gl.getUniformLocation(program, "uMap"), EXTRA_UNIT);
     }
 
     this.state.useProgram(pass.program);

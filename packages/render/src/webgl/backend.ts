@@ -1,6 +1,7 @@
 import { GlState, linkProgram } from "@swf2es/context3d/device";
 import {
   CLEAR,
+  COMPOSITE,
   type Commands,
   FILTER,
   LAYER_POP,
@@ -11,6 +12,7 @@ import {
 } from "../commands.js";
 import type { Filters } from "../filters.js";
 import type { Geometries, GeometryData } from "../geometry.js";
+import type { Keeps } from "../keeps.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
 import {
   ADD,
@@ -129,6 +131,8 @@ export class WebGLBackend {
   private layers: Open[] = [];
   /** Frames executed, which a layer's idleness is counted in. */
   private frame = 0;
+  /** The layers kept from frame to frame, by their ids in Keeps. */
+  private kept: (Layer | null)[] = [];
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
   /** A copy of what is below a layer whose mode reads it, the target's size. */
@@ -205,6 +209,7 @@ export class WebGLBackend {
     });
     this.freeLayers = [];
     this.layers = [];
+    this.kept = [];
     this.back = null;
     this.backFramebuffer = null;
     this.backWidth = 0;
@@ -242,6 +247,7 @@ export class WebGLBackend {
     geometries: Geometries,
     textures: Textures,
     filters: Filters,
+    keeps: Keeps,
     target: Target,
   ): void {
     const gl = this.gl;
@@ -251,6 +257,15 @@ export class WebGLBackend {
 
     this.place(geometries);
     this.uploadTextures(textures);
+    for (const id of keeps.removed) {
+      const layer = this.kept[id];
+      if (layer) {
+        this.giveLayer(layer);
+        this.kept[id] = null;
+      }
+    }
+
+    keeps.removed.length = 0;
     this.uploadRows(rows);
     const state = this.state;
     state.scissor(null);
@@ -370,7 +385,38 @@ export class WebGLBackend {
           // Composited where the masks on the target below let it be.
           state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
           this.compositeLayer(open, under, ops[at + 1], ops[at + 2]);
-          this.giveLayer(open.layer as Layer);
+          const keep = ops[at + 3];
+          if (keep >= 0) {
+            // Kept for the frames after, the output kept before given back.
+            const before = this.kept[keep];
+            if (before && before !== open.layer) {
+              this.giveLayer(before);
+            }
+
+            this.kept[keep] = open.layer;
+          } else {
+            this.giveLayer(open.layer as Layer);
+          }
+
+          break;
+        }
+
+        case COMPOSITE: {
+          const p = commands.params;
+          const from = ops[at + 1];
+          const layer = this.kept[p[from + 4]];
+          if (layer) {
+            const kept: Open = {
+              layer,
+              x: p[from],
+              y: p[from + 1],
+              width: p[from + 2],
+              height: p[from + 3],
+            };
+            state.stencil(depth > 0 ? gl.EQUAL : null, depth, gl.KEEP);
+            this.compositeLayer(kept, this.layers.at(-1) ?? canvas, ops[at + 2], ops[at + 3]);
+          }
+
           break;
         }
       }
@@ -479,6 +525,7 @@ export class WebGLBackend {
 
   /** A layer free again, kept for the layers after it while it is drawn into often enough. */
   private giveLayer(layer: Layer): void {
+    layer.usedAt = this.frame;
     this.freeLayers.push(layer);
   }
 
@@ -885,6 +932,12 @@ export class WebGLBackend {
     for (const open of this.layers) {
       if (open.layer) {
         this.deleteLayer(open.layer);
+      }
+    }
+
+    for (const layer of this.kept) {
+      if (layer) {
+        this.deleteLayer(layer);
       }
     }
 

@@ -30,7 +30,15 @@ import {
   TextureSource,
 } from "pixi.js";
 import { rgbaOf } from "../bitmap/bitmap.js";
-import { filterGrowth, gradientTable, integerKernel, paddedDistance } from "../bitmap/filters.js";
+import {
+  channelWeights,
+  displacementAlpha,
+  displacementGrowth,
+  filterGrowth,
+  gradientTable,
+  integerKernel,
+  paddedDistance,
+} from "../bitmap/filters.js";
 import {
   emptyKernel,
   type Filter as FilterRecord,
@@ -574,14 +582,10 @@ class DisplacementFilter extends FlashFilter {
     private readonly f: FilterRecord,
     private readonly map: Texture,
   ) {
-    const pick = (c: number) =>
-      new Float32Array([c === 1 ? 1 : 0, c === 2 ? 1 : 0, c === 4 ? 1 : 0, c === 8 ? 1 : 0]);
+    const pick = (c: number) => Float32Array.from(channelWeights(c));
     // Colour mode draws half the scale round the object, as adl does.
-    const grow =
-      f.mode === "color"
-        ? [Math.floor(Math.abs(f.scaleX) / 2) || 0, Math.floor(Math.abs(f.scaleY) / 2) || 0]
-        : [0, 0];
-    const a = Math.floor(f.alpha * 255) / 255;
+    const grow = displacementGrowth(f);
+    const a = displacementAlpha(f);
     super({
       glProgram: GlProgram.from({ vertex: VERTEX, fragment: DISPLACE, name: "flash-displacement" }),
       resources: {
