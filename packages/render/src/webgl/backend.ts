@@ -38,27 +38,32 @@ import type { Textures } from "../textures.js";
 import { FilterRunner, type FilterTarget } from "./filters.js";
 import { SizedPool } from "./pool.js";
 import {
+  BACK_UNIT,
   COLOR_AT,
   compositeFragment,
   compositeVertex,
   DEPTH_AT,
   FILL_SLOT,
   FILL_TEXTURES,
+  FILL_UNIT,
   fillFragment,
   fillVertex,
   GLYPH_AT,
   glyphsFragment,
   glyphsVertex,
+  LAYER_UNIT,
   meshFragment,
   meshVertex,
   ORIGIN_AT,
   OUTLINE_ROW,
+  OUTLINE_UNIT,
   POSITION_AT,
   ROW_TEXELS,
   RUN_AT,
   RUN_MOST,
   SNAP_BIT,
   TEXEL_AT,
+  TEXTURE_UNIT,
   TINT_AT,
 } from "./programs.js";
 
@@ -82,15 +87,6 @@ interface MultiDraw {
 const VERTEX_BYTES = 20;
 /** The most masks the stencil's eight bits count. */
 const STENCIL_MOST = 255;
-/** The texture unit a mesh's texture is bound to, and textures are uploaded on; the rows are on 0. */
-const TEXTURE_UNIT = 1;
-/** The units a composite reads its layer and what is below from. */
-const LAYER_UNIT = 2;
-const BACK_UNIT = 3;
-/** The unit advanced text's outlines are on (uploadOutlines); the filters take 4 to 6. */
-const OUTLINE_UNIT = 7;
-/** The first of the units the fill program's textures are bound to (FILL_TEXTURES). */
-const FILL_UNIT = 8;
 /** Bytes a vertex of advanced text's glyph quads, in an atlas of their own. */
 const GLYPH_BYTES = GLYPH_FLOATS * 4;
 /** The fewest glyph vertices the glyph atlas holds once a text needs it. */

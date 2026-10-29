@@ -53,6 +53,16 @@ export const FILL_TEXTURES = 8;
 export const FILL_SLOT = 24;
 export const SNAP_BIT = 1 << 28;
 
+/** The texture unit a mesh's texture is bound to, and textures are uploaded on; the rows are on 0. */
+export const TEXTURE_UNIT = 1;
+/** The units a composite reads its layer and what is below from. */
+export const LAYER_UNIT = 2;
+export const BACK_UNIT = 3;
+/** The unit advanced text's outlines are on (uploadOutlines); the filters take 4 to 6. */
+export const OUTLINE_UNIT = 7;
+/** The first of the units the fill program's textures are bound to (FILL_TEXTURES). */
+export const FILL_UNIT = 8;
+
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
  * Flash's (uUnit of them a stage pixel, from the stage's origin) where it
