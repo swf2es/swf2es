@@ -33,7 +33,7 @@ import { unsupported, vertexColor } from "./shapes.js";
  * half that, as its small rounded corners, which Flash draws as exact
  * curves, show a tenth.
  */
-const STROKE_FLATNESS = 0.1;
+export const STROKE_FLATNESS = 0.1;
 
 /**
  * A line's width on the stage through the linear transform (a b c d): its

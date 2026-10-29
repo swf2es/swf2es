@@ -1,9 +1,8 @@
-//! The Wasm module bitmap.ts loads: a bump arena the caller resets before
-//! each call, and convolve.zig's kernel over the input written into it.
+//! What bitmap/index.ts calls: a bump arena the caller resets before each
+//! call, and convolve.zig's kernel over the input written into it.
 const std = @import("std");
 const kernel = @import("convolve.zig");
 
-pub const panic = std.debug.no_panic;
 extern var __heap_base: u8;
 const page = 65536;
 

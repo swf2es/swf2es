@@ -7,7 +7,7 @@ import {
   PATH_MOVE,
   Tessellator,
 } from "@swf2es/native/tessellate";
-import { binary } from "../../packages/native/dist/tessellate/binary.js";
+import { binary } from "../../packages/native/dist/render/binary.js";
 import { tessellationFixtures } from "./tessellate-fixtures.ts";
 
 const square = [0, 0, 10, 0, 10, 10, 0, 10];
@@ -49,9 +49,11 @@ test("native tessellation resolves intersections and global winding rules", () =
   assert.equal(area(tess.tessellate([[0, 0, 0, 0, 0, 0]], false)), 0);
 });
 
-test("the native module imports only its aborting allocation failure callback", async () => {
+test("the native module imports only its aborting allocation failure callback, and sine and cosine", async () => {
   const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
   assert.deepEqual(WebAssembly.Module.imports(module), [
+    { module: "env", name: "cosine", kind: "function" },
+    { module: "env", name: "sine", kind: "function" },
     { module: "env", name: "failure", kind: "function" },
   ]);
 });
@@ -59,7 +61,11 @@ test("the native module imports only its aborting allocation failure callback", 
 test("raw native getters expose only the current successful run", async () => {
   const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
   const instance = await WebAssembly.instantiate(module, {
-    env: { failure: () => assert.fail("unexpected native allocation failure") },
+    env: {
+      failure: () => assert.fail("unexpected native allocation failure"),
+      sine: Math.sin,
+      cosine: Math.cos,
+    },
   });
   const x = instance.exports as unknown as {
     memory: WebAssembly.Memory;

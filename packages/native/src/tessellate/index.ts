@@ -1,4 +1,7 @@
-import { binary } from "./binary.js";
+import { LineBuilder } from "../render/lines.js";
+import { renderCompiled, renderInstance } from "../render/module.js";
+
+export { LineBuilder, type LineGeometry } from "../render/lines.js";
 
 /** Buffers are owned by the caller; subsequent calls and disposal cannot change them. */
 export interface FillGeometry {
@@ -26,6 +29,8 @@ export interface FillTessellate {
     fills: readonly (readonly (readonly number[])[])[],
     nonZero: readonly boolean[],
   ): (FillGeometry | null)[] | null;
+  /** A layer's lines in one call, their outlines filled by the same libtess2 (LineBuilder). */
+  lines: LineBuilder;
 }
 
 /**
@@ -78,14 +83,13 @@ const REJECTED = 2;
 const LAYER = 5;
 const RANGE = 5;
 
-let module: WebAssembly.Module | null = null;
-
 /** Optional synchronous double-precision tessellator. Rejection returns null for the caller's fallback. */
 export class Tessellator {
   private instance: NativeExports | null = null;
   private unavailable = false;
   private readonly limit: number;
   private readonly keep: number;
+  private readonly lines = new LineBuilder();
 
   constructor(options: TessellatorOptions = {}) {
     this.limit = options.memoryLimit ?? 128 << 20;
@@ -109,18 +113,14 @@ export class Tessellator {
 
   dispose(): void {
     this.instance = null;
+    this.lines.dispose();
   }
 
   /** The instance, made on first use, its arena reset. */
   private arena(): NativeExports {
-    module ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
-    this.instance ??= new WebAssembly.Instance(module, {
-      env: {
-        failure: () => {
-          throw new Error("tessellation allocation failed");
-        },
-      },
-    }).exports as unknown as NativeExports;
+    this.instance ??= renderInstance(() => {
+      throw new Error("tessellation allocation failed");
+    }) as unknown as NativeExports;
     const x = this.instance;
     x.reset();
     x.setLimit(this.limit);
@@ -130,7 +130,7 @@ export class Tessellator {
   /** A call that threw: the module is tried once per owner, and a trapped instance never again. */
   private failed(): void {
     // Compilation can be blocked by CSP or unavailable on the host.
-    this.unavailable = module === null;
+    this.unavailable = !renderCompiled();
     // In particular, longjmp unwinds through a throwing import: never resume that C instance.
     this.dispose();
   }
@@ -321,7 +321,11 @@ export class Tessellator {
 
   /**
    * Use as PixiView's fillTessellator. A fill alone takes its contours
-   * flattened already; a layer takes them as path commands.
+   * flattened already; a layer takes them as path commands; and a layer's
+   * lines take the layer as the player packs it (`lines`).
    */
-  readonly tessellate: FillTessellate = Object.assign(this.fill, { layer: this.layer });
+  readonly tessellate: FillTessellate = Object.assign(this.fill, {
+    layer: this.layer,
+    lines: this.lines,
+  });
 }

@@ -1,6 +1,7 @@
-// Random shape layers of opaque lines, for the native line builder's parity
-// check and benchmark: polygons, curved outlines, dots and degenerate turns.
-import type { ShapeLayer } from "../../../packages/player/dist/display/shapes.js";
+// Random shape layers of lines, for the native line builder's parity test
+// and benchmark (tests/bench/strokes-native): polygons, triangles, curved
+// outlines, dots and degenerate turns, of whole alpha or translucent.
+import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 
 const MOVE = 1;
 const LINE = 2;
@@ -25,12 +26,17 @@ export interface LineOptions {
   width: number;
   join: number;
   cap: number;
+  /** The line's alpha, 0 to 255. */
+  alpha: number;
 }
 
 function line(r: () => number, options?: Partial<LineOptions>): Stroke["line"] {
   return {
     width: options?.width ?? [0, 20, 40, 100, 300, 800][Math.floor(r() * 6)],
-    color: (0xff000000 | Math.floor(r() * 0xffffff)) >>> 0,
+    color:
+      (((options?.alpha ?? (r() < 0.5 ? 255 : Math.floor(r() * 256))) << 24) |
+        Math.floor(r() * 0xffffff)) >>>
+      0,
     startCap: options?.cap ?? Math.floor(r() * 3),
     endCap: 0,
     join: options?.join ?? Math.floor(r() * 3),
@@ -44,10 +50,14 @@ function line(r: () => number, options?: Partial<LineOptions>): Stroke["line"] {
 }
 
 /** A regular-ish polygon of `sides` sides, closed or open. */
-export function polygon(r: () => number, sides: number, closed: boolean): number[] {
+export function polygon(
+  r: () => number,
+  sides: number,
+  closed: boolean,
+  radius = 5 + r() * 100,
+): number[] {
   const cx = r() * 400;
   const cy = r() * 400;
-  const radius = 5 + r() * 100;
   const path: number[] = [];
   for (let i = 0; i < sides; i++) {
     const angle = (i / sides) * 2 * Math.PI + r() * 0.3;
@@ -102,7 +112,10 @@ function awkward(r: () => number): number[] {
   return path;
 }
 
-/** A random layer of 1-3 lines of 1-4 paths each, of every kind. */
+/**
+ * A random layer of 1-3 lines of 1-4 paths each, of every kind, each line
+ * of whole alpha or translucent.
+ */
 export function randomLayer(r: () => number): ShapeLayer {
   const strokes: Stroke[] = [];
   const lines = 1 + Math.floor(r() * 3);
@@ -111,7 +124,10 @@ export function randomLayer(r: () => number): ShapeLayer {
     const count = 1 + Math.floor(r() * 4);
     for (let p = 0; p < count; p++) {
       const pick = r();
-      if (pick < 0.3) {
+      if (pick < 0.1) {
+        // A triangle, as drawTriangles outlines it, at most as deep as the line is wide.
+        paths.push(polygon(r, 3, r() < 0.7, r() < 0.5 ? 2 + r() * 10 : undefined));
+      } else if (pick < 0.3) {
         paths.push(polygon(r, 2 + Math.floor(r() * 9), r() < 0.5));
       } else if (pick < 0.55) {
         paths.push(curved(r, 2 + Math.floor(r() * 12), r() < 0.5, 2 + r() * 100));

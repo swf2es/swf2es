@@ -1,20 +1,21 @@
-// An experiment: layerStrokes for a layer whose lines all draw opaque, built
-// by @swf2es/native/strokes in one call. The layer is packed as root.zig
-// reads it, each fill's closing line added as strokePaths adds it.
-import type { LineBuilder } from "@swf2es/native/strokes";
+// layerStrokes in one native call: a layer's lines packed as @swf2es/native's
+// strokes.zig reads them, built there as strokes.ts builds them, to the last
+// bit, their outlines filled there by the same libtess2 the native
+// tessellator fills them with.
 import type { GeometryData } from "@swf2es/render";
-import type { ShapeLayer } from "../display/shapes.js";
-import { LINE } from "../display/shapes.js";
+import { LINE, type ShapeLayer } from "../display/shapes.js";
+import type { LineBuilder } from "./fills.js";
 import { vertexColor } from "./shapes.js";
-import { strokeWidth } from "./strokes.js";
+import { STROKE_FLATNESS, strokeWidth } from "./strokes.js";
 
-/** strokes.ts's STROKE_FLATNESS. */
-const STROKE_FLATNESS = 0.1;
+/** A line's flags in the input: drawn as lineTriangles; its paths' outlines filled as one. */
+const OVERLAPS = 1;
+const TOGETHER = 2;
 
 /**
- * layerStrokes(layer, a, b, c, d, least, _, by, true) by the native
- * builder; undefined where a line is not of whole alpha, which the JS
- * path outlines and tessellates.
+ * layerStrokes(layer, a, b, c, d, least, tessellator, by, opaque) by
+ * `builder`: undefined where it refused the layer or is unavailable, for
+ * layerStrokes to build it.
  */
 export function layerStrokesNative(
   layer: ShapeLayer,
@@ -25,29 +26,31 @@ export function layerStrokesNative(
   least: number,
   builder: LineBuilder,
   by: readonly number[] | null = null,
-  block = true,
+  opaque = false,
 ): GeometryData | null | undefined {
+  // Seen through a transform that collapses the plane, lines cover nothing, as in the Pixi view.
   if (a * d - b * c === 0) {
     return null;
   }
 
   let size = 6;
-  for (const stroke of layer.strokes) {
-    if (stroke.line.color >>> 24 !== 255) {
-      return undefined;
-    }
-
-    size += 6;
-    for (const path of stroke.paths) {
+  for (const { paths } of layer.strokes) {
+    size += 7;
+    for (const path of paths) {
       size += 5 + path.length;
     }
   }
 
   const input = builder.input(size);
+  if (!input) {
+    return undefined;
+  }
+
   input[0] = a;
   input[1] = b;
   input[2] = c;
   input[3] = d;
+  // `least` is a pixel of the screen, in the stage's pixels the lines are drawn in.
   input[4] = (by ? STROKE_FLATNESS / 2 : STROKE_FLATNESS) * least;
   input[5] = layer.strokes.length;
   let at = 6;
@@ -55,12 +58,16 @@ export function layerStrokesNative(
     input[at] = by
       ? strokeWidth(line, by[0], by[1], by[2], by[3], least) / 2
       : strokeWidth(line, a, b, c, d, least) / 2;
+    // Codes a SWF reserves draw round, as the Pixi view draws them.
     input[at + 1] = line.startCap <= 2 ? line.startCap : 0;
     input[at + 2] = line.join <= 2 ? line.join : 0;
     input[at + 3] = Math.max(1, line.miterLimit);
     input[at + 4] = vertexColor(line.color);
-    input[at + 5] = paths.length;
-    at += 6;
+    input[at + 5] =
+      (opaque && line.color >>> 24 === 255 ? OVERLAPS : 0) | (triangles ? TOGETHER : 0);
+    input[at + 6] = paths.length;
+    at += 7;
+    // Each path as strokePaths gives it.
     let next = 0;
     for (let i = 0; i < paths.length; i++) {
       const path = paths[i];
@@ -80,5 +87,5 @@ export function layerStrokesNative(
     }
   }
 
-  return block ? builder.buildBlock(at) : builder.build(at);
+  return builder.build(at);
 }

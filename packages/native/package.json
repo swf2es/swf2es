@@ -1,7 +1,7 @@
 {
   "name": "@swf2es/native",
   "version": "0.0.0",
-  "description": "swf2es's WebAssembly modules: bitmap kernels, MP3 decoding, zlib and LZMA, and fill tessellation",
+  "description": "swf2es's WebAssembly modules: bitmap kernels, MP3 decoding, zlib and LZMA, and fill and line tessellation",
   "license": "Apache-2.0 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0",
   "type": "module",
   "exports": {
@@ -16,10 +16,6 @@
     "./mp3": {
       "types": "./dist/mp3/index.d.ts",
       "default": "./dist/mp3/index.js"
-    },
-    "./strokes": {
-      "types": "./dist/strokes/index.d.ts",
-      "default": "./dist/strokes/index.js"
     },
     "./tessellate": {
       "types": "./dist/tessellate/index.d.ts",

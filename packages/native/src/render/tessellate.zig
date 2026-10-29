@@ -8,8 +8,6 @@ const std = @import("std");
 const c = @import("c");
 const flatten = @import("flatten.zig");
 
-pub const panic = std.debug.no_panic;
-
 extern var __heap_base: u8;
 extern "env" fn failure(code: c_int) noreturn;
 
@@ -19,7 +17,7 @@ var top: usize = 0;
 var spent: usize = 0;
 // Absolute address ceiling, including static data and the C stack.
 var ceiling: usize = 128 << 20;
-var tess: ?*c.TESStesselator = null;
+pub var tess: ?*c.TESStesselator = null;
 
 export fn reset() void {
     if (base == 0) {
@@ -163,13 +161,21 @@ fn valid(coords: []const f64, ends: []const u32, nonzero: i32) bool {
     return at == coords.len / 2;
 }
 
+/// Where libtess2's memory comes from: this file's arena, or strokes.zig's.
+pub const Memory = struct {
+    get: *const fn (?*anyopaque, c_uint) callconv(.c) ?*anyopaque,
+    grow: *const fn (?*anyopaque, ?*anyopaque, c_uint) callconv(.c) ?*anyopaque,
+};
+
+const arena: Memory = .{ .get = get, .grow = grow };
+
 /// Tessellates a valid fill into `tess`: 0, -1 where libtess2 fails, or -3
 /// where its output is not fit to draw (a coordinate not finite or an index
 /// past the vertices), which the host then fills itself.
-fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
+fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool, memory: Memory) i32 {
     var allocator = std.mem.zeroes(c.TESSalloc);
-    allocator.memalloc = get;
-    allocator.memrealloc = grow;
+    allocator.memalloc = memory.get;
+    allocator.memrealloc = memory.grow;
     allocator.memfree = drop;
     // A small intersection reserve; denser crossings can still grow the queue.
     allocator.extraVertices = @intCast(coords.len / 8 + 16);
@@ -208,7 +214,7 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
 }
 
 /// A successful tessellation's positions and triangles, in libtess2's memory.
-fn output(t: *c.TESStesselator) struct { positions: []const f64, indices: []const c.TESSindex } {
+pub fn output(t: *c.TESStesselator) struct { positions: []const f64, indices: []const c.TESSindex } {
     const vertex_count: usize = @intCast(c.tessGetVertexCount(t));
     const triangle_count: usize = @intCast(c.tessGetElementCount(t));
     return .{
@@ -218,12 +224,24 @@ fn output(t: *c.TESStesselator) struct { positions: []const f64, indices: []cons
 }
 
 export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: usize, nonzero: i32) i32 {
-    tess = null;
-    if (contours > most_contours or count > most_points or !valid(coords[0 .. count * 2], ends[0..contours], nonzero)) {
+    if (contours > most_contours or count > most_points) {
+        tess = null;
         return -2;
     }
 
-    return tessellate(coords[0 .. count * 2], ends[0..contours], nonzero == 1);
+    return fill(coords[0 .. count * 2], ends[0..contours], nonzero, arena);
+}
+
+/// run's checks and tessellation of `coords`, each contour ending at its
+/// point in `ends`, libtess2's memory from `memory`: run's status, its
+/// output in `tess`.
+pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32, memory: Memory) i32 {
+    tess = null;
+    if (!valid(coords, ends, nonzero)) {
+        return -2;
+    }
+
+    return tessellate(coords, ends, nonzero == 1, memory);
 }
 
 export fn vertices() usize {
@@ -316,7 +334,7 @@ fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i3
         return 0;
     }
 
-    return tessellate(coords, kept[0..contours], rule == 1);
+    return tessellate(coords, kept[0..contours], rule == 1, arena);
 }
 
 /// Tessellates every fill of a layer in one call, as run would each

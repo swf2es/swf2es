@@ -1,36 +1,20 @@
-// layerStrokes (opaque lines, JS) against the native line builder, packing
-// and copying out included, on representative layers: ns per layer and per
-// flattened point, the median of several runs after warm-up. The native
-// time is split into packing (JS into wasm memory), the call, and copying
-// the geometry out.
-import { LineBuilder } from "../../../packages/native/dist/strokes/index.js";
+// layerStrokes (JS, its outlines filled by the native tessellator) against
+// the native line builder, packing and copying out included, on
+// representative layers, opaque and translucent: ns per layer, the median of
+// several runs after warm-up.
+import { Tessellator } from "../../../packages/native/dist/tessellate/index.js";
 import type { ShapeLayer } from "../../../packages/player/dist/display/shapes.js";
 import { trace } from "../../../packages/player/dist/scene/fills.js";
 import { layerStrokes } from "../../../packages/player/dist/scene/strokes.js";
 import { layerStrokesNative } from "../../../packages/player/dist/scene/strokes-native.js";
-import { curved, layerOf, polygon, random } from "./layers.ts";
+import { curved, layerOf, polygon, random } from "../../unit/player/scene/line-layers.ts";
 
 const RUNS = Number(process.argv[2] ?? 7);
 const POOL = 64;
 /** How long each run lasts, roughly. */
 const RUN_MS = 60;
 
-const builder = new LineBuilder();
-const tessellator = (() => null) as unknown as Parameters<typeof layerStrokes>[6];
-// Packing alone: the real input view, no call.
-const packer = {
-  input: (n: number) => builder.input(n),
-  build: () => null,
-  buildBlock: () => null,
-} as unknown as LineBuilder;
-let lastLength = 0;
-const measurer = {
-  input: (n: number) => builder.input(n),
-  buildBlock: (length: number) => {
-    lastLength = length;
-    return null;
-  },
-} as unknown as LineBuilder;
+const tessellate = new Tessellator().tessellate;
 
 const shapes: [string, (r: () => number) => number[]][] = [
   ["polygon 3-10", (r) => polygon(r, 3 + Math.floor(r() * 8), true)],
@@ -96,63 +80,49 @@ function time(pool: ShapeLayer[], f: (layer: ShapeLayer) => unknown): number {
 }
 
 const rows: string[] = [];
-const header =
-  "| layer | width | join | pts | verts | JS ns | Zig ns | Zig/JS | pack | call | copy | 3-copy Zig ns | JS ns/pt | Zig ns/pt |";
+const header = "| lines | layer | width | join | pts | verts | JS ns | native ns | native/JS |";
 rows.push(header, header.replace(/[^|]+/g, "---"));
-let jsTotal = 0;
-let zigTotal = 0;
-for (const [shapeName, make] of shapes) {
-  for (const [widthName, width] of widths) {
-    for (const [joinName, join] of joins) {
-      const r = random(7);
-      const pool: ShapeLayer[] = [];
-      for (let i = 0; i < POOL; i++) {
-        pool.push(layerOf(r, { width, join, cap: 0 }, 1, make));
-      }
+for (const [kind, alpha] of [
+  ["opaque", 255],
+  ["translucent", 128],
+] as const) {
+  let jsTotal = 0;
+  let nativeTotal = 0;
+  for (const [shapeName, make] of shapes) {
+    for (const [widthName, width] of widths) {
+      for (const [joinName, join] of joins) {
+        const r = random(7);
+        const pool: ShapeLayer[] = [];
+        for (let i = 0; i < POOL; i++) {
+          pool.push(layerOf(r, { width, join, cap: 0, alpha }, 1, make));
+        }
 
-      // Hairlines and 2px lines at whole scale; 10px too.
-      const js = (layer: ShapeLayer) => layerStrokes(layer, 1, 0, 0, 1, 1, tessellator, null, true);
-      const zig = (layer: ShapeLayer) => layerStrokesNative(layer, 1, 0, 0, 1, 1, builder);
-      const pts = pool.reduce((sum, layer) => sum + points(layer), 0) / POOL;
-      const verts =
-        pool.reduce((sum, layer) => sum + (js(layer)?.positions.length ?? 0) / 2, 0) / POOL;
-      const tJs = time(pool, js);
-      const tZig = time(pool, zig);
-      const tZig3 = time(pool, (layer) =>
-        layerStrokesNative(layer, 1, 0, 0, 1, 1, builder, null, false),
-      );
-      const tPack = time(pool, (layer) => layerStrokesNative(layer, 1, 0, 0, 1, 1, packer));
-      // The call alone, on each layer packed once beforehand into a buffer of its own.
-      const packed = pool.map((layer) => {
-        layerStrokesNative(layer, 1, 0, 0, 1, 1, measurer);
-        return builder.input(lastLength).slice(0, lastLength);
-      });
-      let next = 0;
-      const tCall = time(pool, () => {
-        const input = packed[next++ % packed.length];
-        builder.input(input.length).set(input);
-        return builder.run(input.length) === 0;
-      });
-      // The copy-in of the call's own timing is packing's, counted there.
-      const tCopyIn = time(pool, () => {
-        const input = packed[next++ % packed.length];
-        builder.input(input.length).set(input);
-        return true;
-      });
-      const call = tCall - tCopyIn;
-      const copy = tZig - tPack - call;
-      jsTotal += tJs;
-      zigTotal += tZig;
-      rows.push(
-        `| ${shapeName} | ${widthName} | ${joinName} | ${pts.toFixed(0)} | ${verts.toFixed(0)} | ` +
-          `${tJs.toFixed(0)} | ${tZig.toFixed(0)} | ${(tZig / tJs).toFixed(2)} | ` +
-          `${tPack.toFixed(0)} | ${call.toFixed(0)} | ${copy.toFixed(0)} | ${tZig3.toFixed(0)} | ` +
-          `${(tJs / pts).toFixed(1)} | ${(tZig / pts).toFixed(1)} |`,
-      );
-      console.error(rows[rows.length - 1]);
+        // Drawn opaque, where a line of whole alpha takes lineTriangles.
+        const js = (layer: ShapeLayer) =>
+          layerStrokes(layer, 1, 0, 0, 1, 1, tessellate, null, true);
+        const native = (layer: ShapeLayer) =>
+          layerStrokesNative(layer, 1, 0, 0, 1, 1, tessellate.lines, null, true);
+        const pts = pool.reduce((sum, layer) => sum + points(layer), 0) / POOL;
+        const verts =
+          pool.reduce((sum, layer) => sum + (js(layer)?.positions.length ?? 0) / 2, 0) / POOL;
+        const tJs = time(pool, js);
+        const tNative = time(pool, native);
+        jsTotal += tJs;
+        nativeTotal += tNative;
+        rows.push(
+          `| ${kind} | ${shapeName} | ${widthName} | ${joinName} | ${pts.toFixed(0)} | ` +
+            `${verts.toFixed(0)} | ${tJs.toFixed(0)} | ${tNative.toFixed(0)} | ` +
+            `${(tNative / tJs).toFixed(2)} |`,
+        );
+        console.error(rows[rows.length - 1]);
+      }
     }
   }
+
+  rows.push(
+    `| ${kind} | sum over rows | | | | | ${jsTotal.toFixed(0)} | ${nativeTotal.toFixed(0)} | ` +
+      `${(nativeTotal / jsTotal).toFixed(2)} |`,
+  );
 }
 
 console.log(rows.join("\n"));
-console.log(`\nsum over rows: JS ${jsTotal.toFixed(0)} ns, Zig ${zigTotal.toFixed(0)} ns`);
