@@ -5426,7 +5426,7 @@ Chrome under `/swf2es/`; `--serve` serves it to look at.
   tests out.
   A test that does not finish in its time is a timeout, a standing of its
   own. The corpus is fetched, not committed: CI's `corpus` job, beside
-  the build job on every pull request and every push to main or dev,
+  the test jobs on every pull request and every push to main or dev,
   fetches it at
   `RUFFLE_COMMIT`, caches it by that commit, and fails on a lowered
   standing, naming the test, its standing before and after, and where its
