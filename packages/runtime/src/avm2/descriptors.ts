@@ -1,6 +1,6 @@
 // What a compiled module is built against: the values it handles, and the
 // descriptors of its traits, classes and scripts it gives the runtime
-// (docs/architecture.md, "Modules and the bootstrap").
+// (docs/architecture/compiler.md, "Modules and the bootstrap").
 
 import type { Domain, Script } from "./domain.js";
 import type { Multiname, Namespace, TypeName } from "./names.js";

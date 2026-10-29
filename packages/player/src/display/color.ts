@@ -1,4 +1,4 @@
-// Colour transforms as Flash composes them (docs/architecture.md, "Colour
+// Colour transforms as Flash composes them (docs/architecture/compositing.md, "Colour
 // transforms"): offsets in colour units, 0 to 255, applied after the
 // multipliers, the child's transform before its parent's.
 import type { ColorTransform } from "@swf2es/format";

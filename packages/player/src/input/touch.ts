@@ -5,7 +5,7 @@
 // order: a move, then out, over and rolls as the point moves on and off
 // objects; over and rolls, then a begin; an end, and a tap where it ends
 // on the object it began on. Each step's touch events come before its
-// mouse events (docs/architecture.md, Touch).
+// mouse events (docs/architecture/input.md, Touch).
 import { toStage } from "../display/bounds.js";
 import type { Container, DisplayObject } from "../display/display.js";
 import { apply, invert } from "../display/geometry.js";

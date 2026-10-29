@@ -224,8 +224,8 @@ without a worker host has `Worker.isSupported` false, and
 `@swf2es/web` gives every player a `webWorkerHost` by default, as Flash
 had workers on: `configure({ workers: false })` turns them off for the
 page, and an element's `workers` attribute, `"false"` or `"true"`, for
-its own SWFs over the configuration (docs/architecture.md, "Workers in
-the page"). `configure({ workerUrl })` names another script, a
+its own SWFs over the configuration (docs/architecture/web.md, "Workers
+in the page"). `configure({ workerUrl })` names another script, a
 bundler's. A player's host starts Web Workers ahead only for a SWF
 whose ABCs name `WorkerDomain`, which may block on one at once, and the
 element awaits them, ten seconds at most, before the SWF's first frame;
@@ -652,6 +652,7 @@ three to four minutes on the primordial, then fail with 1009 in their
 `Console.init` before they make any worker, in node too, which is
 another gap.
 
+### avmshell's workers
 
 The runtime's shell natives (`natives/shell.ts`) run avmshell's Worker
 and WorkerDomain as avmplus' Aggregate and Isolate do, with
@@ -725,7 +726,7 @@ Where swf2es differs from the oracle's avmshell:
 
 Each a PR, in this order:
 
-1. **Message-passing workers** (this PR): `Worker.isSupported`,
+1. **Message-passing workers** (built): `Worker.isSupported`,
    `WorkerDomain.createWorker` on a host's thread, `start`, `terminate`,
    `listWorkers`, `workerState`, shared properties of copied values,
    `MessageChannel` with copied values (`send`, `receive(false)`,

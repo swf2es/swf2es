@@ -1,18 +1,21 @@
 # AVM1
 
-The plan for ActionScript 1 and 2 in swf2es: what AVM1 bytecode is
-compiled to, where each piece lives, and the pull requests that get it
-there. Steps 1 to 11 are built: `format`'s list of action blocks, the
-decoder, the emitter, the runtime's values and its operators by version,
-its objects, variables and global object, its functions and registers,
-`With`, `Try` and `Throw`, the language's classes, a main AVM1 SWF's
-clips, their AS2 face, paths, targets and timeline actions, played in
-Flash's order by the player, and the frame: clip events and their
-handlers, the action queue's passes, `#initclip`, registered classes,
-clips scripts make and remove, the timers and the script timeout; the
-rest is not.
-[architecture.md](architecture.md) describes what is, and this document
-is folded into it as each piece lands.
+ActionScript 1 and 2 in swf2es: what AVM1 bytecode is compiled to,
+where each piece lives, how the runtime and the player run it, and the
+pull requests that got it there. Steps 1 to 15 of [the plan](#the-plan)
+are built: `format`'s list of action blocks, the decoder, the emitter,
+the runtime's values and its operators by version, its objects,
+variables and global object, its functions and registers, `With`, `Try`
+and `Throw`, the language's classes, a main AVM1 SWF's clips, their AS2
+face, paths, targets and timeline actions, played in Flash's order, the
+frame's events and queue, buttons, the pointer and the keyboard, text
+fields, the drawing, display and sound classes, and loading and I/O,
+each with what it leaves listed. An AVM1 SWF that AS3 loads runs in a
+realm of its own. Left are `AVM1Movie.call` and `addCallback` (step 16)
+and AVM1 modules in the player's module cache and ahead of time
+(step 17). The player passes 590 of the 715 `avm1/` tests of Ruffle's
+corpus ([coverage.md](coverage.md#ruffles-corpus)).
+[architecture.md](architecture.md) describes the rest of the player.
 
 AVM1 is compiled, not interpreted. The same `codegen.wasm` that compiles
 ABCs compiles a SWF's action blocks to an ES module, in the browser as
@@ -1401,7 +1404,7 @@ probes they came of), and the corpus, where it is not what Ruffle does:
   corpus's `movieclip_invalid_get_bounds_*`).
 - StopSounds is minimal: no sound is stopped yet. ToggleQuality toggles
   `_quality`, which the element draws by from the next frame (see
-  architecture.md, "Showing a player").
+  architecture/web.md, "Showing a player").
 
 adl's harness loads a SWF as an `AVM1Movie`, whose root traces as
 `_root`, its dot paths so, with a name and a parent of the harness's, and
@@ -2083,9 +2086,9 @@ else's undefined (adl).
 
 ### Out of scope at first
 
-The first steps leave out: `print`,
-`NetStream` and video, the
-context menu, TextSnapshot's selection, a duplicate of a script's drawing or text
+The steps left out, and still leave out: printing (`PrintJob` prints
+nothing, above), `NetStream` and video, the context menu,
+TextSnapshot's selection, a duplicate of a script's drawing or text
 field's properties, and structured output and stack registers in the
 compiler.
 
@@ -2101,10 +2104,11 @@ compiler.
   as it runs `avm2/` and `timeline/` (`run.ts` takes `avm1/` among its
   default prefixes), in Chrome, the trace compared line by line, each
   test's standing in `baseline.json`, which a change may not lower; the
-  first baseline, step 4's, has 10 of the 649 passing (`looping*`,
+  first baseline, step 4's, had 10 of the 649 passing (`looping*`,
   `single_frame`, `trace`, and three whose traces need no action run), most
-  stopping at their first action not done yet. `mixed_avm/` (12 tests, AS3
-  loading AS2 and the reverse) and `from_gnash/` (404) join later. The tests with `[approximations]` (16) compare numbers within
+  stopping at their first action not done yet, and 590 of the 715 pass
+  now. `mixed_avm/` (12 tests, AS3 loading AS2 and the reverse) and
+  `from_gnash/` (404) are not run yet. The tests with `[approximations]` (16) compare numbers within
   their tolerance once the runner reads it.
 - **adl**: the harness loads a SWF with a `Loader`, so an AVM1 SWF runs
   as an `AVM1Movie`, and adl prints its AVM1 traces with AS3's: the
@@ -2179,10 +2183,9 @@ AVM1, so nothing is expected from it.
   (`tests/avm1-script.ts`: no classes or `try`);
   an AS2 compiler in the oracle's image (MTASC, or Ruffle's test
   compiler) would take AS2's classes too.
-- **A main AVM1 SWF without `Scripting`.** The pointer and keyboard take
-  `Scripting` today. Either they report through an interface both VMs
-  implement (the plan), or an AVM1 SWF gets a `Scripting` with
-  playerglobal loaded, simpler but a cost for every AVM1 SWF.
+- **A main AVM1 SWF without `Scripting`.** Settled in step 12: AVM1 has
+  a pointer and a keyboard of its own (`avm1/pointer.ts`,
+  `avm1/keyboard.ts`), so an AVM1 SWF loads no playerglobal.
 - **Ruffle's AS1 globals.** Written in TypeScript here; or swf2es could
   compile them from AS1 once it has an assembler or a compiler for them.
 - **`from_gnash/`** in the corpus baseline: 404 more tests with Flash's
@@ -2193,7 +2196,8 @@ AVM1, so nothing is expected from it.
 
 ## The plan
 
-Each step is one pull request the user reviews and merges. Every step
+Each step is one pull request the user reviews and merges (some took
+several). Steps 1 to 15 are built; 16 and 17 are open. Every step
 keeps `pnpm check`, `pnpm build`, `pnpm typecheck`, `pnpm test` and `pnpm
 determinism` green, and the corpus baseline may only go up.
 
@@ -2460,10 +2464,16 @@ determinism` green, and the corpus baseline may only go up.
     case's AVM1 then traces, recorded again with adl. Passes
     `mixed_avm/avm2_loads_avm1*` and `avm2_doaction`, and
     `avm2/avm1movie_addcallback_call`.
+    Begun: an AVM1 SWF that AS3 loads runs in a realm of its own, and
+    LocalConnection carries messages between AVM1 and AS3 (see "AVM1 and
+    AVM2"). Left: input routed into a loaded AVM1 movie, and
+    `AVM1Movie.call` and `addCallback`, which still throw #2014.
 17. **AVM1 modules cached and ahead of time in the player.** The
     IndexedDB module cache and precompiled modules (`player-hosts`) take
     AVM1 modules by their key, as `tests/player/module-cache.ts` and
-    `precompiled.ts` check for ABCs.
+    `precompiled.ts` check for ABCs. Open: `swf2es compile` writes a SWF's
+    `avm1.js` and its manifest entry (step 3), but the player compiles
+    AVM1 itself.
 
 After them: structured output and stack registers in the emitter, local
 variables as `let`s, inline caches for names, each measured on the

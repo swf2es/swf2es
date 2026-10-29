@@ -15,7 +15,8 @@ must give **identical output** in both modes.
 ## Commands
 
 ```sh
-git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb, and
+git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb and
+                              # com-lz4-as3 (program tests), and
                               # vendor/minimp3, vendor/zlib, vendor/lzma-sdk and vendor/libtess2 (C compiled into
                               # packages/native's wasm)
 pnpm install
@@ -23,9 +24,12 @@ pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit, conformance, library, program, fuzz, player and web tests
-                 # (needs podman or docker, and Chrome; CHROME names another browser)
+pnpm test        # unit, conformance, library, program, fuzz, player, web, site and desktop
+                 # tests (needs podman or docker, and Chrome; CHROME names another browser;
+                 # the desktop's are skipped without Electron's binary)
 pnpm test:checked # the same with every array access bounds-checked
+pnpm dlx knip                 # unused files, exports and dependencies (knip.json); before
+                              # removing anything, see "Code generated code calls" below
 pnpm determinism              # each module the same however it is compiled, and each method
                               # compiled alone its entry in the module (after the runners)
 pnpm oracle path/to/file.as   # print avmshell's output for a file (oracle:abcdump its dump)
@@ -102,8 +106,9 @@ node tests/site/run.ts [--serve]   # the built site in Chrome under /swf2es/: th
                               # at (part of pnpm test)
 node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
                               # socket, a drop (part of pnpm test; skipped without Electron's binary)
-node tests/player/bench.ts [--shapes N] [--frames N] [--gpu]   # time the player on a busy synthetic
-                              # timeline in Chrome; keep a change only for a gain that repeats;
+node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--gpu]   # time the player on a
+                              # busy synthetic timeline in Chrome (--town: a busy room's mix, see
+                              # docs/renderer.md); keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
 node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classes, traits and
                               # signatures; how many methods are native and how many AS3
@@ -144,7 +149,7 @@ of its own.
   `render`'s cores load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
   `tests/unit/boundaries.test.ts` checks this; change the table there only
-  together with docs/architecture.md.
+  together with docs/architecture/overview.md.
 - **The Tamarin baseline is avmshell's behaviour**, failures included:
   swf2es must reproduce what avmshell prints, not what a test expects.
   Update `tests/tamarin/baseline.json` only when the oracle or the harness
@@ -157,7 +162,18 @@ of its own.
   updates the baseline with `--update-baseline`.
 - **avmshell is the reference.** For AS3 semantics, the expected result is
   what avmshell prints, not what JavaScript or the spec suggests. Add a case
-  under `tests/conformance/cases/` for any semantic you implement.
+  under `tests/conformance/cases/` for any semantic you implement. For the
+  player's API (`flash.*`, AVM1's globals, drawing), Flash is the reference:
+  what it traces and draws under AIR's adl (`oracle/flash.ts`), where
+  avmshell, which has no player, may differ.
+- **Code generated code calls is not dead.** Compiled modules reach the
+  runtime by name: the emitters in `packages/codegen/assembly` write runtime
+  helpers' and Runtime members' names as strings, natives are bound by name
+  from ABC metadata, and AVM1's helpers by the AVM1 emitter. No tool sees
+  those callers, so before removing or renaming anything in
+  `packages/runtime` or the player's natives, grep the emitters and the
+  native tables for it, and run conformance, Tamarin, programs, libraries
+  and the corpus.
 - **Never edit `oracle/avmplus`.** It is a submodule (MPL-2.0). Patches go to
   the swf2es/avmplus fork. Code translated from avmplus stays in files of
   its own that carry the MPL-2.0 header; nothing from avmplus goes into an

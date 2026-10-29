@@ -68,7 +68,10 @@ const ABCDUMP_SOURCE = "oracle/avmplus/utils/abcdump.as";
 
 /** Where the image keeps the ABCs ASC imports: builtin, shell_toplevel, playerglobal... */
 const LIBRARY = "/opt/crossbridge/sdk/usr/lib";
-/** The libraries taken from the avmplus submodule's generated/ instead, newer than the image's (docs/architecture.md). */
+/**
+ * The libraries taken from the avmplus submodule's generated/ instead, newer than the image's
+ * (docs/architecture/runtime.md).
+ */
 const SUBMODULE_LIBRARIES = ["builtin", "shell_toplevel"];
 
 /** ASC 2.0 with the image's library ABCs `imports` on its path, builtin first. */

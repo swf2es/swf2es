@@ -1,6 +1,6 @@
 // swf2es codegen, compiled to WebAssembly with AssemblyScript.
 //
-// Compilation must be a pure function of its input (see docs/architecture.md):
+// Compilation must be a pure function of its input (see docs/architecture/overview.md):
 // no imports besides abort, no clock, no randomness. Running as wasm makes the
 // output identical in the browser JIT, in node and in any server-side runtime.
 

@@ -1,5 +1,13 @@
 # Benchmarks
 
+The compiler's and the runtime's benchmarks, and what they measured. The
+renderer's are in [renderer.md](renderer.md#measuring): the synthetic
+scenes of `tests/player/bench.ts` and the draw counts of
+`tests/player/draw-counts.ts`. The native module's kernels are held to
+the JavaScript they replaced by unit tests, not timed by a benchmark of
+their own; their speed-ups are in the pull requests that moved them
+(#653, #655, #657, #660).
+
 ## AVM1 startup and scene changes
 
 `pnpm bench:avm1 [--runs 5] [--frames 600]` runs a generated, three-scene
@@ -323,7 +331,7 @@ has been asked to run. Medians in ms, interleaved, on an idle machine
 | as3pb ByteArray (9 pairs, twice) | 170, 169 | 155, 154 | −8.8%, −8.9% |
 | as3pb domain memory | 181, 182 | 148, 149 | −18.2%, −18.1% |
 | Untyped display / data / object / poly / string (7 pairs) | 193 / 86 / 594 / 114 / 130 | 183 / 83 / 582 / 104 / 128 | −5.2% / −3.5% / −2.0% / −8.8% / −1.5% |
-| Lines, busy ms per frame (headless Chrome on the GPU, 4 pairs) | 12.10 (11.96–12.47) | 10.51 (10.33–10.89) | −13.1% |
+| Lines, busy ms per frame (headless Chrome on the GPU, drawn by Pixi then, 4 pairs) | 12.10 (11.96–12.47) | 10.51 (10.33–10.89) | −13.1% |
 | Perelith Knight MD2, busy ms per frame | 13.30 | 13.41 | +0.8% |
 
 ### Untyped property access

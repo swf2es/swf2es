@@ -3,7 +3,7 @@
 // space, a pixel of it a texel, drawn into a bitmap at SAMPLES a side and
 // averaged down, with a texel of nothing around; and the bitmap's quad
 // placed through the object's plane in perspective (display/perspective.ts)
-// as Flash places it (docs/architecture.md, "3D display objects").
+// as Flash places it (docs/architecture/rendering.md, "3D display objects").
 import type { Matrix } from "@swf2es/format";
 import type { PixelRect } from "../bitmap/bitmap.js";
 import { filterRect } from "../bitmap/filters.js";

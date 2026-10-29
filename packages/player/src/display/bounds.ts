@@ -1,4 +1,4 @@
-// A display object's bounds and hit tests (docs/architecture.md, "Bounds
+// A display object's bounds and hit tests (docs/architecture/rendering.md, "Bounds
 // and hit tests"): a SWF shape's recorded rectangles, a drawing's true
 // extent, a container's children's through their matrices.
 import type { Matrix } from "@swf2es/format";

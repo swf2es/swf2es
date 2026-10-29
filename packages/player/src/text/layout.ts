@@ -1,4 +1,4 @@
-// A field's text laid out as Flash lays it out (docs/architecture.md,
+// A field's text laid out as Flash lays it out (docs/architecture/text.md,
 // "Text"): lines, and each character's place on them, in twips, which the
 // metrics, the line and character queries, autoSize and the renderer all
 // read. adl sets the rules, with fonts of rectangles from the tests' SWF

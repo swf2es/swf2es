@@ -1,151 +1,102 @@
 # Roadmap
 
-Near-term work, in order. The goal of milestone 1 is in
-[architecture.md](architecture.md#milestone-1).
+Where swf2es stands, and the work queued after it, in order. What is
+built is described in [architecture.md](architecture.md) and the files it
+links; how much of AS3 and Flash's behaviour it matches, in
+[coverage.md](coverage.md).
 
-1. **Tamarin acceptance tests through the oracle**: done. `pnpm tamarin`
-   checks avmshell against `tests/tamarin/baseline.json` and swf2es against
-   abcdump; CI runs a subset on every push and the full set nightly. A
-   second run with ASC 1.0 from the Flex SDK is still open.
-2. **Faster decoding**: done. `pnpm bench` measures it; see
-   [benchmarks.md](benchmarks.md).
-3. **as3pb in avmshell**: done. `tests/programs` builds as3pb's benchmark
-   (the `tests/programs/as3pb` submodule) through the oracle; its
-   deterministic output is `tests/programs/expected/as3pb.txt`, the expected
-   result for milestone 1, and swf2es parses and decodes its ABC like abcdump.
-4. **The verifier**, in three steps (see
-   [architecture.md](architecture.md#compiling-a-method)):
-   1. Structure: done. Stack, scope and register depths, merges, handler
-      entry states and the operand checks that need no types. Every
-      Tamarin method body verifies except the one avmshell also rejects,
-      and `pnpm tamarin` checks that swf2es reports the VerifyErrors
-      avmshell prints.
-   2. Value types and scope chains: done, in three parts:
-      - 2a. A domain and linking: classes looked up by qualified name
-        across ABCs and linked to their base classes and interfaces with
-        avmplus' errors. Builtin ABCs parse in a mode that allows native
-        methods and multi-namespace trait names; `tests/libraries` checks
-        the image's builtin, shell_toplevel, playerglobal and airglobal
-        against abcdump and links them, and every Tamarin ABC links as in
-        avmshell.
-      - 2b. Traits and types: each class's, script's and activation's
-        members laid out as the ABC loads (slot and dispatch ids,
-        overrides), and resolved as avmplus resolves a class when it is
-        created (slot types and initial values, method signatures, final
-        methods, override signatures, implemented interfaces).
-      - 2c. The typed verifier: done. Frame states with each value's
-        type, merged until they settle; each method's declaring scope,
-        captured where it is created in a second pass in code order; and
-        the checks that need them. Every method of the libraries and as3pb
-        verifies, and every Tamarin method that can be created, with the
-        VerifyErrors avmshell prints.
-   3. The IR: done, written by the verifier's second pass. Every method
-      of the libraries, as3pb and Tamarin that verifies gets well formed
-      IR, which the test runs check.
-6. **A dispatcher emitter and a minimal runtime**: JavaScript from the IR
-   with one `switch` over blocks per method, and enough of the runtime to
-   run it, so conformance cases run in node and compare with avmshell. In
-   progress: every instruction of the libraries lowers, exception handlers
-   included, and `tests/conformance` runs each case compiled by swf2es,
-   after builtin.abc and shell_toplevel.abc also compiled by swf2es,
-   comparing its output with avmshell's. 18 cases pass, from arithmetic,
-   control flow and closures to classes, namespaces, Vectors, sorting and
-   avmplus' number formatting, and a module loads only after the ABCs it
-   was compiled against. Every instruction of Tamarin, the libraries and
-   as3pb lowers. With ByteArray, domain memory, AMF3, JSON and Date, as3pb
-   runs compiled by swf2es in node, its output matching avmshell's but for
-   its wire checksum, which the oracle computes with x87 precision. Done;
-   first timings in [benchmarks.md](benchmarks.md).
-7. **Faster generated code**, measured on as3pb against AwayFL and on small
-   loops, including loops with bounds known only at run time. Done:
-   as3pb 1104 / 1412 ms (ByteArray / domain memory) to 207 / 251, against
-   AwayFL's 525 / 689 ([benchmarks.md](benchmarks.md#generated-code-as3pb)).
-   1. Typed comparisons and branches: plain `<`, `>` and `===` where the
-      IR's types are numbers, instead of the runtime's generic ones.
-   2. Structured control flow: loops, `if`s and labelled blocks built from
-      the dominator tree, as in Ramsey's "Beyond Relooper", with copies of
-      stack registers removed, and each handler as a `try` around the code
-      it covers. A method whose control flow is irreducible, or whose
-      handlers' `try`s cannot enclose their ranges in the order avmplus
-      searches them, keeps the dispatcher. Both
-      preserve AS3's semantics exactly: int wrapping, evaluation order, and
-      which instruction an exception comes from, as its handlers see it.
-   3. Source maps from the ABC's debugline and debugfile, to step through
-      the AS3 in DevTools.
-   4. Runtime hot paths, each kept only for a repeatable gain on as3pb:
-      first a check that the JIT and AOT builds of the compiler write the
-      same modules and source maps; then Vector's `push` and `length`,
-      what `findDef` still costs, and domain memory's loads and stores,
-      with AS3's coercions, errors and access widths as they are.
-8. **Type references independent of compile order**: a method's `T[k]`
-   comes from its ABC and the ABCs it links against, not from which of the
-   module's methods is compiled first, so that a method compiled alone,
-   as lazy JIT will compile it, is byte for byte its code in the module.
-   Then the JIT/AOT invariant can be checked as it is stated: each method
-   alone against its module.
-9. **Calling a property an object does not have**: on a sealed object,
-   avmplus' `ReferenceError` 1069 from the lookup, where swf2es calls
-   undefined and throws `TypeError` 1006.
-10. **Domain memory against PepperFlash**: 251 against 83 ms. Profile the
-    generated code of the codecs' loops, not the runtime, and take out of
-    them what does not change, where the IR proves it cannot.
-11. **Compatibility left from steps 6 and 7**: `Date.parse` as avmplus
-    parses; `compress` and `uncompress`, and SWF decompression in `format`
-    (issue #3), first through pako and lzma1, now @swf2es/native/compress; AMF0, and Date, XML and
-    Dictionary in AMF; `[Transient]`, carried from the ABC's metadata; and
-    PR #9, rebased.
-12. **Faster verification**: the minimal runtime halved decoding to about
-   35 ns per instruction, against Ruffle's 15 for decoding alone
-   ([benchmarks.md](benchmarks.md)); the typed verifier still walks every
-   block twice. Profile it with the IR in place.
-13. **Unrolled hot loops**, each kept only for a repeatable gain in
-    `tests/programs/ab.ts` or a benchmark of its own: ASCII detection and
-    copying in `utf8()`, four or eight characters at a time; the emitter's
-    `Output.text()`, four characters at a time; AMF's numeric Vectors,
-    reserving their bytes once.
-14. **JSON through the host's own**: `JSON.parse` by native parsing, then
-    conversion into AS3 values, with the reviver as AS3's and the current
-    parser only for text native parsing rejects; `JSON.stringify` by a
-    tree of AS3's members, written by the native one. Output needs the
-    same keys and values, not the same bytes.
-15. **Faster AMF3 decoding**: 809 ms on as3pb against avmshell's 317.
-    The Vector reader resolves its class by name for each Vector, and
-    sets each element through `setProperty`; profile the rest. Taken
-    before step 12.
+## Where it stands
 
+- **The compiler** (`codegen`, AssemblyScript to `codegen.wasm`) parses,
+  links and verifies ABCs with avmplus' VerifyErrors, and compiles them
+  to ES modules, structured where the control flow allows, the same in
+  the browser as ahead of time. It compiles AVM1 action blocks to
+  modules too. Each method compiled alone is its entry in its module,
+  which `pnpm determinism` checks.
+- **The runtime** runs AS3 as avmshell does on 98.6% of the Tamarin
+  acceptance tests it compares, E4X included, and AVM1 by SWF version.
+- **The player** plays AS3 and AVM1 SWFs: the display list and
+  timelines, its own playerglobal, text, bitmaps and filters, sound,
+  loading and security, input, workers, Stage3D as an experimental
+  option, and AIR's WebSocket client. It passes 1,380 of the 1,984
+  tests of Ruffle's corpus it runs.
+- **The renderer** is its own ([renderer.md](renderer.md)), with
+  fills, lines and BitmapData's CPU kernels in one Zig module.
+- **The embeddings:** the `<swf2es-player>` element and
+  `replaceFlash` (`@swf2es/web`), the desktop app (Electron), and the
+  demo site on GitHub Pages.
 
-## Later
+## Next
 
-Compilation speed is a solid baseline after steps 12 to 15. Application
-coverage comes first, unless loading measurements show the compiler
-stalling. These are measured candidates, not planned steps:
+1. **The site in Astro and Starlight.** The demo site becomes an Astro
+   site with Starlight's documentation, daisyUI where it needs
+   components and no React, the user documentation taken from
+   [guide.md](guide.md), and the player as it is today on a page of its own.
+2. **`architecture.md` split by topic,** move-only.
+3. **Pixel Bender.** `Shader` and `ShaderData` from a PBJ's bytecode,
+   its parameters and inputs as Flash reports them; a compiler from PBJ
+   to GLSL; shader fills (`beginShaderFill`, `lineShaderStyle`); then
+   `ShaderFilter`, `blendShader` and `ShaderJob`. Ruffle's corpus has 27
+   tests that stop at a `Shader` native.
+4. **The compiler's large files split,** move-only, as the renderer's
+   backend, the scene view and the AVM2 runtime were.
 
-- **Verification's IR from the first walk.** The second pass, which walks
-  every block again to emit its IR, is 34% of as3pb's verification and 52%
-  of initializerLargeVector's (`docs/benchmarks.md`, step 12). That is its
-  time, not a saving: its emitting still has to happen somewhere. In a
-  worklist that reaches a fixed point, each block's last visit follows the
-  last change to its entry state, so each block's IR could be kept from
-  its last visit and put together once the types converge. Blocks are
-  still revisited when their entry types change, and IR from earlier
-  visits is thrown away. Before switching:
-  - tests for what step 12 relies on: `getBinding`'s memo after a failed
-    link, and handler merges after a local or its nullability changes
-    (the IR dump shows no locals yet, so it would first need to);
-  - the current emitting pass kept as a reference while it changes, with
-    the IR, generated JavaScript, source maps and VerifyErrors compared;
-  - total compile time and peak memory measured, as discarded IR could
-    offset the gain.
+## Parked
 
-  Worth doing sooner if removing the second walk also simplifies the
-  verifier substantially.
-- **Copy forwarding over the registers holding copies.** The emitter's
-  `copyBelow`, `copyAll` and `uncopy` scan register ranges even when few
-  registers hold pending copies; a sparse set of those registers could
-  scan only them. The set must keep emission order deterministic and be
-  saved, restored and rolled back with branch state. Measure on methods
-  with large stacks but few pending copies, with the compile benchmark of
-  step 13.
-- **The rest of AMF3 decoding:** 457 ms on as3pb against avmshell's 317.
-  Most of it is constructing the objects read, two thirds of it as3pb's own
-  constructors, which avmshell runs too.
+Each waits for a profile, a case or a user that asks for it:
+
+- **Geometry buffers owned by wasm,** so that the native module writes
+  vertices where the renderer reads them; only if profiles ask.
+- **A filtered layer's edges:** at 4 or 8 samples, its edge samples
+  differ from the stage's, which `tests/player/filter-coverage.ts`
+  allows a quarter of a pixel's coverage for.
+- **A mask before a filter:** adl masks an object's content before its
+  filters, so a glow surrounds the masked shape; the renderer filters and
+  then clips.
+- **Touch gestures:** `supportsGestureEvents` is false, so gesture mode
+  leaves touches to the mouse.
+- **NetStream and video:** H.264 through WebCodecs first, the older
+  codecs as small wasm modules later.
+- **The compiler's measured candidates,** after its baseline of
+  benchmarks.md's steps 12 to 15: verification's IR kept from the first
+  walk, where its second pass is 34% of as3pb's verification and 52% of
+  initializerLargeVector's; copy forwarding over only the registers
+  that hold copies; and the rest of AMF3 decoding (457 ms on as3pb
+  against avmshell's 317), mostly as3pb's own constructors.
+- **Domain memory against PepperFlash:** 148 ms on as3pb against its 83
+  ([benchmarks.md](benchmarks.md#finddef-at-the-site)).
+- **A second Tamarin run with ASC 1.0** from the Flex SDK.
+
+## Done
+
+Milestone 1, the as3pb benchmark compiled by swf2es matching avmshell's
+output and faster than AwayFL's JIT, was met at #23
+([architecture/overview.md](architecture/overview.md#milestone-1)). Since then, in rough
+order:
+
+- the Tamarin suite through the oracle and in swf2es, each with its
+  baseline ([coverage.md](coverage.md));
+- the structural and typed verifier, its IR, and faster decoding and
+  verification ([benchmarks.md](benchmarks.md));
+- the dispatcher emitter, then structured control flow, source maps and
+  the runtime's hot paths; type references that do not depend on the
+  order methods compile in, and lazy compilation;
+- JSON through the host's own, faster AMF3, unrolled loops, inline
+  caches for untyped property access;
+- the player: display list, timeline, playerglobal of its own (AS3 of
+  Ruffle's and skeletons, no Adobe bodies), text, bitmaps, filters,
+  sound, loading, input, ExternalInterface, globalization, touch, AIR's
+  WebSocket;
+- workers, slices 1 to 6 ([workers.md](workers.md));
+- AVM1, steps 1 to 15 ([avm1.md](avm1.md#the-plan));
+- modules compiled ahead of time and cached in IndexedDB, and pages
+  without `'unsafe-eval'`;
+- the web element, the desktop app and the demo site;
+- Stage3D, as an experimental option;
+- zlib, LZMA, MP3 and libtess2 in wasm, built by one pinned Zig, then
+  lines and BitmapData's kernels in Zig too, with no JavaScript paths
+  left;
+- the renderer of swf2es's own, replacing Pixi (#650, #651);
+- CI's tests in parallel jobs (#652).
+- A short README with the details in [guide.md](guide.md) (#669), and the
+  internal docs brought up to date (#671).

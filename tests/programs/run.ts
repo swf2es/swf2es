@@ -15,7 +15,7 @@
 //
 // One line is not compared: as3pb's wire checksum multiplies past 2^53,
 // which the oracle's 32-bit avmshell computes in the x87's extended
-// precision and swf2es in IEEE doubles (docs/architecture.md, "Testing
+// precision and swf2es in IEEE doubles (docs/architecture/testing.md, "Testing
 // against oracles").
 //
 //   node tests/programs/run.ts [--update]

@@ -1,4 +1,4 @@
-// 9-slice scaling (docs/architecture.md, "Nine-slice scaling"): an object
+// 9-slice scaling (docs/architecture/rendering.md, "Nine-slice scaling"): an object
 // with a grid draws its shapes, its own and its Shape children's, with
 // each vertex moved region by region, so that the corners keep their size
 // in its parent's space, the edges stretch one way and the centre both.
