@@ -211,7 +211,7 @@ Everything on the GPU, owned in one place:
   and the holes they leave can make it, starts again with only what is
   live, rather than failing.
 - **Textures:** bitmaps, device text, video frames, gradients
-  (`textures.ts`, uploaded by `webgl/textures.ts`).
+  (`textures.ts`, uploaded by `webgl/gpu-textures.ts`).
 - **Render targets:** pooled by size and samples, for layers, cached
   filter outputs and `BitmapData.draw` (`webgl/targets.ts`).
 - **Glyphs:** Saffron's outline data (the player's `text/saffron.ts`)

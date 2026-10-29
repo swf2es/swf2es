@@ -12,6 +12,7 @@ import {
 } from "../scene.js";
 import type { GeometryAtlas, Place } from "./atlas.js";
 import type { Target } from "./backend.js";
+import type { GpuTextures } from "./gpu-textures.js";
 import {
   FILL_SLOT,
   FILL_TEXTURES,
@@ -27,8 +28,7 @@ import {
   SNAP_BIT,
   TEXTURE_UNIT,
 } from "./programs.js";
-import { framebufferOf, type Open, type Targets } from "./targets.js";
-import type { GpuTextures } from "./textures.js";
+import { framebufferOf, type Open, type TargetPool } from "./targets.js";
 
 /** What the backend calls of WEBGL_multi_draw. */
 interface MultiDraw {
@@ -58,7 +58,7 @@ export class Draws {
   private readonly state: GlState;
   private readonly atlas: GeometryAtlas;
   private readonly gpu: GpuTextures;
-  private readonly targets: Targets;
+  private readonly pool: TargetPool;
   /** The fill program, and where it takes its row, view and Flash's pixels a stage pixel. */
   program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
@@ -119,13 +119,13 @@ export class Draws {
     state: GlState,
     atlas: GeometryAtlas,
     gpu: GpuTextures,
-    targets: Targets,
+    pool: TargetPool,
   ) {
     this.gl = gl;
     this.state = state;
     this.atlas = atlas;
     this.gpu = gpu;
-    this.targets = targets;
+    this.pool = pool;
   }
 
   /** The fill, mesh and glyph programs made, as the context comes or comes back. */
@@ -423,7 +423,7 @@ export class Draws {
       id < 0
         ? null
         : plane
-          ? (this.targets.kept[id]?.texture ?? null)
+          ? (this.pool.kept[id]?.texture ?? null)
           : (this.gpu.textures[id] ?? null);
     if (!texture) {
       return false;

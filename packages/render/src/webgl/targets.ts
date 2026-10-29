@@ -123,7 +123,7 @@ export function framebufferOf(open: Open): WebGLFramebuffer | null {
  * layers, given back and let go of once idle; and the layers kept from
  * frame to frame.
  */
-export class Targets {
+export class TargetPool {
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
   /** Frames executed, which a layer's idleness is counted in. */

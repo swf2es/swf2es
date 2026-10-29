@@ -16,6 +16,7 @@ import type { Target } from "./backend.js";
 import type { Compositor } from "./composite.js";
 import { type Draws, STENCIL_MOST } from "./draws.js";
 import type { FilterRunner, FilterTarget } from "./filters.js";
+import type { GpuTextures } from "./gpu-textures.js";
 import {
   framebufferOf,
   LAYER_STEP,
@@ -23,9 +24,8 @@ import {
   layerSide,
   MSAA_BYTES,
   type Open,
-  type Targets,
+  type TargetPool,
 } from "./targets.js";
-import type { GpuTextures } from "./textures.js";
 
 /** The width of the pages held layers and their filters' targets are placed on, side by side. */
 const PAGE_WIDTH = 2048;
@@ -76,7 +76,7 @@ interface Hold {
 export class HeldLayers {
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
-  private readonly targets: Targets;
+  private readonly pool: TargetPool;
   private readonly draws: Draws;
   private readonly compositor: Compositor;
   private readonly gpu: GpuTextures;
@@ -102,14 +102,14 @@ export class HeldLayers {
   constructor(
     gl: WebGL2RenderingContext,
     state: GlState,
-    targets: Targets,
+    pool: TargetPool,
     draws: Draws,
     compositor: Compositor,
     gpu: GpuTextures,
   ) {
     this.gl = gl;
     this.state = state;
-    this.targets = targets;
+    this.pool = pool;
     this.draws = draws;
     this.compositor = compositor;
     this.gpu = gpu;
@@ -172,7 +172,7 @@ export class HeldLayers {
       widest = Math.max(widest, layerSide(holds[h].width));
     }
 
-    const samples = this.targets.frameSamples;
+    const samples = this.pool.frameSamples;
     let width = this.pageWidth(area, widest);
     const fitting = Math.floor(MSAA_BYTES / (width * samples * 8) / LAYER_STEP) * LAYER_STEP;
     shelves.reset(width, samples > 1 ? Math.min(this.textureMost, fitting) : this.textureMost);
@@ -189,7 +189,7 @@ export class HeldLayers {
       const page = this.pages[index] as Layer;
       const whole = this.pageOpen;
       whole.layer = page;
-      whole.msaa = this.targets.layerMsaa(page, samples);
+      whole.msaa = this.pool.layerMsaa(page, samples);
       whole.width = page.width;
       whole.height = page.height;
       state.bindFramebuffer(framebufferOf(whole));
@@ -221,7 +221,7 @@ export class HeldLayers {
         this.slotOf(hold, 0, index, content.ox, content.oy, hold.width, hold.height);
       }
 
-      this.targets.resolve(whole, page.width, page.height);
+      this.pool.resolve(whole, page.width, page.height);
     }
 
     // Their filters, planned, then drawn a wave at a time: each wave's new targets on pages of its
@@ -350,7 +350,7 @@ export class HeldLayers {
       for (let index = levelPages; index < this.pages.length; index++) {
         const page = this.pages[index];
         if (page && !this.pageKept[index] && this.pageUntil[index] <= k) {
-          this.targets.giveLayer(page);
+          this.pool.giveLayer(page);
           this.pages[index] = null;
         }
       }
@@ -376,7 +376,7 @@ export class HeldLayers {
   /** A page of at least `width` by `height` taken for the frame: its index in `pages`. */
   private takePage(width: number, height: number): number {
     const index = this.pages.length;
-    this.pages.push(this.targets.takeLayer(width, height));
+    this.pages.push(this.pool.takeLayer(width, height));
     this.pageUntil.push(-1);
     this.pageKept.push(false);
     return index;
@@ -565,10 +565,10 @@ export class HeldLayers {
   ): void {
     const gl = this.gl;
     const state = this.state;
-    const layer = this.targets.takeLayer(hold.width, hold.height, true);
+    const layer = this.pool.takeLayer(hold.width, hold.height, true);
     const open: Open = {
       layer,
-      msaa: this.targets.layerMsaa(layer, this.targets.frameSamples),
+      msaa: this.pool.layerMsaa(layer, this.pool.frameSamples),
       x: hold.x,
       y: hold.y,
       width: hold.width,
@@ -583,7 +583,7 @@ export class HeldLayers {
     gl.stencilMask(0xff);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
     this.drawHoldContent(commands, hold, scene, open);
-    this.targets.resolve(open, layer.width, layer.height);
+    this.pool.resolve(open, layer.width, layer.height);
     const output = this.filters.run(
       filters,
       hold.chain,
@@ -603,7 +603,7 @@ export class HeldLayers {
   givePages(): void {
     for (const page of this.pages) {
       if (page) {
-        this.targets.giveLayer(page);
+        this.pool.giveLayer(page);
       }
     }
 

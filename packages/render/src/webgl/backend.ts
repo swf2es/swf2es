@@ -23,10 +23,10 @@ import { GeometryAtlas } from "./atlas.js";
 import { Compositor } from "./composite.js";
 import { Draws, STENCIL_MOST } from "./draws.js";
 import { FilterRunner } from "./filters.js";
+import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
 import { Stage } from "./stage.js";
-import { type Layer, type Open, Targets } from "./targets.js";
-import { GpuTextures } from "./textures.js";
+import { type Layer, type Open, TargetPool } from "./targets.js";
 
 /** Where a frame is drawn: the target's size in pixels, and how stage pixels map onto it. */
 export interface Target {
@@ -53,15 +53,15 @@ export interface Target {
  * into a float texture. A geometry let go of leaves a hole, and the atlas
  * is packed again from the geometries' own arrays once the holes outweigh
  * what is live. Its parts, which it owns and makes again with the context:
- * the geometry atlas (atlas.ts), the textures and rows (textures.ts), the
- * entries' draws (draws.ts), the render targets (targets.ts), the held
+ * the geometry atlas (atlas.ts), the textures and rows (gpu-textures.ts),
+ * the entries' draws (draws.ts), the render targets (targets.ts), the held
  * layers (holds.ts), the composites (composite.ts) and the stage's way onto
  * the canvas (stage.ts).
  */
 export class WebGLBackend {
   readonly gl: WebGL2RenderingContext;
   readonly state: GlState;
-  private readonly targets: Targets;
+  private readonly pool: TargetPool;
   private readonly stage: Stage;
   private readonly gpu: GpuTextures;
   private readonly atlas: GeometryAtlas;
@@ -83,20 +83,13 @@ export class WebGLBackend {
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
     this.state = new GlState(gl);
-    this.targets = new Targets(gl, this.state);
-    this.stage = new Stage(gl, this.state, this.targets);
+    this.pool = new TargetPool(gl, this.state);
+    this.stage = new Stage(gl, this.state, this.pool);
     this.gpu = new GpuTextures(gl, this.state);
     this.atlas = new GeometryAtlas(gl, this.state);
     this.compositor = new Compositor(gl, this.state);
-    this.draws = new Draws(gl, this.state, this.atlas, this.gpu, this.targets);
-    this.holds = new HeldLayers(
-      gl,
-      this.state,
-      this.targets,
-      this.draws,
-      this.compositor,
-      this.gpu,
-    );
+    this.draws = new Draws(gl, this.state, this.atlas, this.gpu, this.pool);
+    this.holds = new HeldLayers(gl, this.state, this.pool, this.draws, this.compositor, this.gpu);
     this.setUp();
   }
 
@@ -122,13 +115,13 @@ export class WebGLBackend {
     this.draws.setUp();
     this.compositor.setUp();
     this.filters = new FilterRunner(gl, this.state, {
-      take: (width, height) => this.targets.takeLayer(width, height, true),
-      give: (layer) => this.targets.giveLayer(layer),
+      take: (width, height) => this.pool.takeLayer(width, height, true),
+      give: (layer) => this.pool.giveLayer(layer),
       texture: (id) => this.gpu.textures[id] ?? null,
       sampler: (bits) => this.gpu.sampler(bits),
     });
     this.holds.setUp(this.filters, textureMost);
-    this.targets.setUp();
+    this.pool.setUp();
     this.layers = [];
     this.stage.setUp();
     this.atlas.setUp();
@@ -162,10 +155,10 @@ export class WebGLBackend {
     this.atlas.place(geometries);
     this.gpu.uploadTextures(textures);
     for (const id of keeps.removed) {
-      const layer = this.targets.kept[id];
+      const layer = this.pool.kept[id];
       if (layer) {
-        this.targets.giveLayer(layer);
-        this.targets.kept[id] = null;
+        this.pool.giveLayer(layer);
+        this.pool.kept[id] = null;
       }
     }
 
@@ -190,10 +183,10 @@ export class WebGLBackend {
     const into = root ?? cleared;
     if (into) {
       // Its own stencil, for the masks drawn into it.
-      this.targets.layerMsaa(into, 1);
+      this.pool.layerMsaa(into, 1);
     }
 
-    this.targets.frameSamples = stage?.samples ?? 1;
+    this.pool.frameSamples = stage?.samples ?? 1;
     this.holds.drawHolds(commands, scene, filters, target);
     const canvas: Open = {
       layer: into,
@@ -282,10 +275,10 @@ export class WebGLBackend {
           const height = p[from + 3];
           const filtered = ops[at + 2] === 1;
           // A filtered one of the size its filters' targets take for it, which they read alike.
-          const layer = this.targets.takeLayer(width, height, filtered);
+          const layer = this.pool.takeLayer(width, height, filtered);
           const open: Open = {
             layer,
-            msaa: this.targets.layerMsaa(layer, this.targets.frameSamples),
+            msaa: this.pool.layerMsaa(layer, this.pool.frameSamples),
             x: p[from],
             y: p[from + 1],
             width,
@@ -310,7 +303,7 @@ export class WebGLBackend {
           if (open?.layer) {
             state.stencil(null);
             // Whole, as the filters read past its rectangle.
-            this.targets.resolve(open, open.layer.width, open.layer.height);
+            this.pool.resolve(open, open.layer.width, open.layer.height);
             open.layer = this.filters.run(
               filters,
               ops[at + 1],
@@ -328,7 +321,7 @@ export class WebGLBackend {
           const open = this.layers.pop() as Open;
           past = below.pop() as number;
           depth = below.pop() as number;
-          this.targets.resolve(open, open.width, open.height);
+          this.pool.resolve(open, open.width, open.height);
           const under = this.layers.at(-1) ?? canvas;
           this.draws.drawInto(under, target);
           // Composited where the masks on the target below let it be.
@@ -337,14 +330,14 @@ export class WebGLBackend {
           const keep = ops[at + 3];
           if (keep >= 0) {
             // Kept for the frames after, the output kept before given back.
-            const before = this.targets.kept[keep];
+            const before = this.pool.kept[keep];
             if (before && before !== open.layer) {
-              this.targets.giveLayer(before);
+              this.pool.giveLayer(before);
             }
 
-            this.targets.kept[keep] = open.layer;
+            this.pool.kept[keep] = open.layer;
           } else {
-            this.targets.giveLayer(open.layer as Layer);
+            this.pool.giveLayer(open.layer as Layer);
           }
 
           break;
@@ -353,7 +346,7 @@ export class WebGLBackend {
         case COMPOSITE: {
           const p = commands.params;
           const from = ops[at + 1];
-          const layer = this.targets.kept[p[from + 4]];
+          const layer = this.pool.kept[p[from + 4]];
           if (layer) {
             const kept: Open = {
               layer,
@@ -390,7 +383,7 @@ export class WebGLBackend {
     this.holds.givePages();
     if (counted) {
       this.dropIdleLayers();
-      this.targets.frame++;
+      this.pool.frame++;
     }
   }
 
@@ -434,7 +427,7 @@ export class WebGLBackend {
     );
     this.state.bindFramebuffer(layer.framebuffer);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
-    this.targets.giveLayer(layer);
+    this.pool.giveLayer(layer);
     return bytes;
   }
 
@@ -494,12 +487,12 @@ export class WebGLBackend {
     }
 
     this.state.scissor(null);
-    const before = this.targets.kept[keep];
+    const before = this.pool.kept[keep];
     if (before && before !== layer) {
-      this.targets.giveLayer(before);
+      this.pool.giveLayer(before);
     }
 
-    this.targets.kept[keep] = layer;
+    this.pool.kept[keep] = layer;
   }
 
   /**
@@ -520,11 +513,11 @@ export class WebGLBackend {
     height: number,
     samples: number,
   ): Layer {
-    let layer = this.targets.takeLayer(width * samples, height * samples);
+    let layer = this.pool.takeLayer(width * samples, height * samples);
     this.execute(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
     for (let k = samples; k > 1; k /= 2) {
       const half = this.filters.halve(layer, (width * k) / 2, (height * k) / 2);
-      this.targets.giveLayer(layer);
+      this.pool.giveLayer(layer);
       layer = half;
     }
 
@@ -534,7 +527,7 @@ export class WebGLBackend {
   /** The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of. */
   private dropIdleLayers(): void {
     this.stage.dropIdleLayer();
-    this.targets.dropIdleLayers();
+    this.pool.dropIdleLayers();
   }
 
   /** Advanced text's outlines uploaded (GpuTextures.uploadOutlines). */
@@ -550,11 +543,11 @@ export class WebGLBackend {
     this.filters.destroy();
     for (const open of this.layers) {
       if (open.layer) {
-        this.targets.deleteLayer(open.layer);
+        this.pool.deleteLayer(open.layer);
       }
     }
 
-    this.targets.destroy();
+    this.pool.destroy();
     this.stage.destroy();
     this.gpu.destroy();
     this.state.forget();

@@ -5,7 +5,7 @@ import {
   LAYER_IDLE_FRAMES,
   type Layer,
   type Multisampled,
-  type Targets,
+  type TargetPool,
 } from "./targets.js";
 
 /**
@@ -17,7 +17,7 @@ import {
 export class Stage {
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
-  private readonly targets: Targets;
+  private readonly pool: TargetPool;
   /** The most samples the GPU takes, and whether the canvas has alpha, asked once. */
   private maxSamples = 1;
   canvasAlpha = false;
@@ -35,10 +35,10 @@ export class Stage {
   /** The layer a frame that clears the stage is drawn into before an opaque canvas (stageAlpha). */
   private stageLayer: Layer | null = null;
 
-  constructor(gl: WebGL2RenderingContext, state: GlState, targets: Targets) {
+  constructor(gl: WebGL2RenderingContext, state: GlState, pool: TargetPool) {
     this.gl = gl;
     this.state = state;
-    this.targets = targets;
+    this.pool = pool;
   }
 
   /** Nothing made yet, and the GPU and the canvas asked again, as the context comes or comes back. */
@@ -140,15 +140,15 @@ export class Stage {
   stageAlpha(width: number, height: number): Layer {
     const known = this.stageLayer;
     if (known && known.width === width && known.height === height) {
-      known.usedAt = this.targets.frame;
+      known.usedAt = this.pool.frame;
       return known;
     }
 
     if (known) {
-      this.targets.deleteLayer(known);
+      this.pool.deleteLayer(known);
     }
 
-    const layer = this.targets.makeLayer(width, height);
+    const layer = this.pool.makeLayer(width, height);
     this.stageLayer = layer;
     return layer;
   }
@@ -165,7 +165,7 @@ export class Stage {
     }
 
     this.dropStageBuffers();
-    const msaa = samples > 1 ? this.targets.multisampled(width, height, samples) : null;
+    const msaa = samples > 1 ? this.pool.multisampled(width, height, samples) : null;
     if (!msaa) {
       return null;
     }
@@ -178,7 +178,7 @@ export class Stage {
   dropStageBuffers(): void {
     const gl = this.gl;
     if (this.stageMsaa) {
-      this.targets.deleteMultisampled(this.stageMsaa);
+      this.pool.deleteMultisampled(this.stageMsaa);
       this.stageMsaa = null;
     }
 
@@ -193,8 +193,8 @@ export class Stage {
   /** The stage's layer (stageAlpha) let go of, undrawn into for LAYER_IDLE_FRAMES. */
   dropIdleLayer(): void {
     const stage = this.stageLayer;
-    if (stage && this.targets.frame - stage.usedAt > LAYER_IDLE_FRAMES) {
-      this.targets.deleteLayer(stage);
+    if (stage && this.pool.frame - stage.usedAt > LAYER_IDLE_FRAMES) {
+      this.pool.deleteLayer(stage);
       this.stageLayer = null;
     }
   }
@@ -203,7 +203,7 @@ export class Stage {
   destroy(): void {
     this.dropStageBuffers();
     if (this.stageLayer) {
-      this.targets.deleteLayer(this.stageLayer);
+      this.pool.deleteLayer(this.stageLayer);
     }
   }
 }
