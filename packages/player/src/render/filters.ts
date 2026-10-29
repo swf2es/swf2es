@@ -28,6 +28,7 @@ import {
   TexturePool,
   TextureSource,
 } from "pixi.js";
+import { rgbaOf } from "../bitmap/bitmap.js";
 import { filterRect, gradientTable, integerKernel } from "../bitmap/filters.js";
 import type { Filter as FilterRecord } from "../display/filters.js";
 import type { AreaKeeper, PaddingFitter } from "./blend.js";
@@ -687,21 +688,6 @@ class BevelFilter extends BlurredFilter {
       TexturePool.returnTexture(alpha);
     }
   }
-}
-
-/** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
-export function rgbaOf(pixels: Uint32Array): Uint8Array {
-  const out = new Uint8Array(pixels.length * 4);
-  for (let i = 0; i < pixels.length; i++) {
-    const p = pixels[i];
-    const j = i * 4;
-    out[j] = (p >>> 16) & 0xff;
-    out[j + 1] = (p >>> 8) & 0xff;
-    out[j + 2] = p & 0xff;
-    out[j + 3] = p >>> 24;
-  }
-
-  return out;
 }
 
 /**
@@ -1949,3 +1935,5 @@ export class FilterChain extends Filter implements AreaKeeper, PaddingFitter {
     super.destroy();
   }
 }
+
+export { rgbaOf };

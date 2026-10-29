@@ -43,7 +43,7 @@ let levelCount = 0;
 const NEAR = 1e-7;
 
 /** Consistent turns and one x-direction cycle exclude both dents and wound stars. */
-function convex(points: number[]): number {
+export function convex(points: number[]): number {
   let turn = 0;
   let first = 0;
   let last = 0;

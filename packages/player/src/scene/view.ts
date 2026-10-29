@@ -2,8 +2,8 @@
 // a view that owns a WebGL 2 canvas, walks the display list into a scene
 // list and its rows, and has @swf2es/render plan and draw it. It stands
 // beside PixiView behind a switch until it draws everything Pixi draws;
-// for now, the fills of shapes and drawings, solid, bitmap and gradient, and
-// bitmaps.
+// for now, the fills of shapes and drawings, solid, bitmap and gradient,
+// their lines, and bitmaps.
 import type { ColorTransform } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/tessellate";
 import {
@@ -22,7 +22,7 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { BitmapStore, characterStore } from "../bitmap/bitmap.js";
+import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColor } from "../display/color.js";
 import { Container } from "../display/container.js";
@@ -34,6 +34,7 @@ import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { Drawer } from "../hosts.js";
 import type { FillTessellator } from "./fills.js";
 import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
+import { layerStrokes } from "./strokes.js";
 
 export interface RenderViewOptions {
   /** The stage's size in pixels, and the canvas' pixels a stage pixel. */
@@ -50,6 +51,16 @@ export interface RenderViewOptions {
   /** The fills' tessellator: @swf2es/native's, made here, if left out. */
   fillTessellator?: FillTessellator;
 }
+
+/**
+ * How many frames a gradient's texture may go undrawn: a morph tweening a
+ * gradient makes a new one for each ratio, up to a megabyte each, which
+ * the usual idle frames would hold hundreds of.
+ */
+const GRADIENT_IDLE_FRAMES = 30;
+
+/** The most transforms a layer's lines are kept for: its instances in step, and a loop's turns. */
+const LINE_KEYS = 64;
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 interface Made {
@@ -84,6 +95,8 @@ export class RenderView implements Drawer {
   private stageQuality = "HIGH";
   private readonly backend: WebGLBackend;
   private readonly tessellator: FillTessellator;
+  /** Whether the view made its canvas, whose context it then loses with itself. */
+  private readonly ownCanvas: boolean;
   /** The tessellator the view made, which it disposes of with itself; none if it was given one. */
   private readonly ownTessellator: Tessellator | null = null;
   private readonly scene = new SceneList();
@@ -92,6 +105,15 @@ export class RenderView implements Drawer {
   private readonly textures = new Textures();
   private readonly commands = new Commands();
   private readonly made = new WeakMap<ShapeLayer, Made>();
+  /**
+   * Each layer's lines by what they were stroked for: the linear transform
+   * on the stage and the least width, a pixel of the screen, as a key; and
+   * the drawing's version.
+   */
+  private readonly lines = new WeakMap<
+    ShapeLayer,
+    Map<string, { handle: GeometryHandle | null; version: number }>
+  >();
   private readonly quads = new Map<string, GeometryHandle>();
   private readonly stores = new WeakMap<BitmapStore, Kept>();
   /** Each gradient's textures, by the region a radial one covers ("" for a linear one). */
@@ -103,6 +125,7 @@ export class RenderView implements Drawer {
     this.resolution = options.resolution ?? 1;
     this.background = options.background ?? 0xffffff;
     this.transparent = options.transparent ?? false;
+    this.ownCanvas = !options.canvas;
     this.canvas = options.canvas ?? document.createElement("canvas");
     const gl = this.canvas.getContext("webgl2", {
       alpha: this.transparent,
@@ -200,10 +223,11 @@ export class RenderView implements Drawer {
     const d = pb * m.c + pd * m.d;
     const tx = pa * m.tx + pc * m.ty + ptx;
     const ty = pb * m.tx + pd * m.ty + pty;
-    hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
-    if (!hidden) {
+    if (!hidden && o.visible) {
       noteUnsupported(o);
     }
+
+    hidden ||= !o.visible || o.maskOf !== null || o.clipDepth > 0;
 
     const own = o.colorTransform;
     const color = own ? (tint ? concatColor(tint, own) : own) : tint;
@@ -211,10 +235,15 @@ export class RenderView implements Drawer {
     const shape = o instanceof ShapeObject ? o.drawn() : null;
     const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
     let row = -1;
+    let lineRow = -1;
     if (!hidden && layers) {
       const version = o.drawing ? o.drawing.version : 0;
+      // A pixel of the screen, in the stage's pixels: the least a line is wide.
+      const least = 1 / (this.screenScale ?? this.scale * this.resolution);
       for (let i = 0; i < layers.length; i++) {
         for (const { part, handle } of this.partsOf(layers[i], version)) {
+          // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
+          this.geometries.use(handle.id);
           const texture = part.paint ? this.paintTexture(part) : null;
           if (part.paint && !texture) {
             continue;
@@ -224,7 +253,6 @@ export class RenderView implements Drawer {
             row = this.rows.add(a, b, c, d, tx, ty, color);
           }
 
-          this.geometries.use(handle.id);
           if (texture) {
             this.textures.use(texture.id);
           }
@@ -236,6 +264,18 @@ export class RenderView implements Drawer {
             texture?.id ?? -1,
             texture ? this.paintSampler(part.paint as ImageFill | GradientFill) : 0,
           );
+        }
+
+        // The layer's lines after its fills, stroked in the stage's axes: placed by the translation alone.
+        const lines =
+          layers[i].strokes.length > 0 ? this.linesOf(layers[i], version, a, b, c, d, least) : null;
+        if (lines) {
+          if (lineRow < 0) {
+            lineRow = this.rows.add(1, 0, 0, 1, tx, ty, color);
+          }
+
+          this.geometries.use(lines.id);
+          this.scene.draw(lines.id, lineRow, NORMAL);
         }
       }
     }
@@ -291,6 +331,65 @@ export class RenderView implements Drawer {
     return parts;
   }
 
+  /**
+   * `layer`'s lines through the linear transform (a b c d), at least `least`
+   * wide: stroked again for another transform, screen or version of its
+   * drawing, the old ones kept while drawn as the geometries keep them.
+   */
+  private linesOf(
+    layer: ShapeLayer,
+    version: number,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    least: number,
+  ): GeometryHandle | null {
+    let byKey = this.lines.get(layer);
+    if (!byKey) {
+      byKey = new Map();
+      this.lines.set(layer, byKey);
+    }
+
+    const key = `${a} ${b} ${c} ${d} ${least}`;
+    const known = byKey.get(key);
+    if (
+      known &&
+      known.version === version &&
+      (!known.handle || this.geometries.alive(known.handle))
+    ) {
+      return known.handle;
+    }
+
+    if (known?.handle && this.geometries.alive(known.handle)) {
+      this.geometries.remove(known.handle.id);
+    }
+
+    // Those let go of are forgotten, and the oldest past LINE_KEYS, so that a layer seen through
+    // ever new transforms keeps no more keys than that.
+    for (const [old, kept] of byKey) {
+      if (kept.handle && !this.geometries.alive(kept.handle)) {
+        byKey.delete(old);
+      }
+    }
+
+    for (const [old, kept] of byKey) {
+      if (byKey.size < LINE_KEYS) {
+        break;
+      }
+
+      byKey.delete(old);
+      if (kept.handle && this.geometries.alive(kept.handle)) {
+        this.geometries.remove(kept.handle.id);
+      }
+    }
+
+    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator);
+    const handle = data ? this.geometries.add(data) : null;
+    byKey.set(key, { handle, version });
+    return handle;
+  }
+
   /** A bitmap's quad of its size, made once for every bitmap of that size. */
   private quad(width: number, height: number): GeometryHandle {
     const key = `${width}x${height}`;
@@ -340,13 +439,13 @@ export class RenderView implements Drawer {
     if (kept && this.textures.alive(kept.handle)) {
       if (kept.version !== store.version) {
         kept.version = store.version;
-        this.textures.set(kept.handle.id, store.width, store.height, rgba(store.readable));
+        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.readable));
       }
 
       return kept.handle;
     }
 
-    const handle = this.textures.add(store.width, store.height, rgba(store.readable));
+    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable));
     this.stores.set(store, { handle, version: store.version });
     return handle;
   }
@@ -383,9 +482,9 @@ export class RenderView implements Drawer {
         columns,
         rows,
       );
-      handle = this.textures.add(columns, rows, rgba(pixels));
+      handle = this.textures.add(columns, rows, rgbaOf(pixels), GRADIENT_IDLE_FRAMES);
     } else {
-      handle = this.textures.add(colors.length, 1, rgba(colors));
+      handle = this.textures.add(colors.length, 1, rgbaOf(colors), GRADIENT_IDLE_FRAMES);
     }
 
     made.set(key, handle);
@@ -410,29 +509,16 @@ export class RenderView implements Drawer {
     return false;
   }
 
-  /** What the view made on its context let go of, the context with it, and its tessellator. */
+  /** What the view made on its context let go of, the context with it if the canvas is its own, and its tessellator. */
   destroy(): void {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
     this.ownTessellator?.dispose();
-    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    if (this.ownCanvas) {
+      this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
   }
-}
-
-/** Premultiplied ARGB, as stores and gradients hold it, as the RGBA bytes a texture takes. */
-function rgba(argb: Uint32Array): Uint8Array {
-  const out = new Uint8Array(argb.length * 4);
-  for (let i = 0; i < argb.length; i++) {
-    const p = argb[i];
-    const j = i * 4;
-    out[j] = (p >>> 16) & 0xff;
-    out[j + 1] = (p >>> 8) & 0xff;
-    out[j + 2] = p & 0xff;
-    out[j + 3] = p >>> 24;
-  }
-
-  return out;
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
