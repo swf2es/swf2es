@@ -4161,7 +4161,7 @@ planner sizes by what is drawn in it (`@swf2es/render`'s `measure.ts`),
 so a layer, a blend's or a filter's, holds what its filtered children
 draw past their shapes, as adl's holds a child's glow whole
 (`blend-nested`). The backend composites a layer over its rectangle
-alone (`compositeLayer`): through the GPU's blending where it computes
+alone (`compositeLayer`, `webgl/composite.ts`): through the GPU's blending where it computes
 Flash's blend (`normal`, `layer`, `add`, `screen`), else with the
 composite program reading a copy of what is below that rectangle, its
 result replacing it; out of a multisampled target, the rectangle is
