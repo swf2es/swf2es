@@ -14,6 +14,7 @@ import type { Paint } from "../../../display/shapes.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
+type Multiname = ReturnType<avm2.Runtime["publicName"]>;
 type Value = avm2.Value;
 
 const TWIPS = 20;
@@ -53,6 +54,19 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
   const num = (v: Value, fallback = 0) => {
     const n = Number(v);
     return Number.isNaN(n) ? fallback : n;
+  };
+  /** a, b, c, d, tx and ty as names, made once: a fill begun on every triangle made them each time. */
+  let matrixNames: Multiname[] | null = null;
+  /** A fill's matrix from an AS3 Matrix, or the identity for none. */
+  const matrixFrom = (matrix: Value): Matrix => {
+    if (matrix === null || matrix === undefined) {
+      return { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+    }
+
+    matrixNames ??= ["a", "b", "c", "d", "tx", "ty"].map((k) => s.rt.publicName(k));
+    const read = (k: number) =>
+      s.rt.toNumber(s.rt.getProperty(matrix as AsObject, (matrixNames as Multiname[])[k]));
+    return { a: read(0), b: read(1), c: read(2), d: read(3), tx: read(4), ty: read(5) };
   };
 
   /** The data of `display`'s drawing, a timeline shape's too, and with `recurse` its children's, each through `m`. */
@@ -190,10 +204,6 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const read = (k: string, fallback: number) =>
-        matrix === null || matrix === undefined
-          ? fallback
-          : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
       const spread = s.rt.toString(spreadMethod);
       const fill: Paint = {
         type: "gradient",
@@ -202,14 +212,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         stops: c.slice(0, 16).map((color, i) => ({ ratio: r[i], color: argb(color, a[i]) })),
         spread: spread === "reflect" ? 1 : spread === "repeat" ? 2 : 0,
         linearRgb: s.rt.toString(interpolationMethod) === "linearRGB",
-        matrix: {
-          a: read("a", 1),
-          b: read("b", 0),
-          c: read("c", 0),
-          d: read("d", 1),
-          tx: read("tx", 0),
-          ty: read("ty", 0),
-        },
+        matrix: matrixFrom(matrix),
       };
       if (matrix === null || matrix === undefined) {
         unplaced.add(fill);
@@ -234,22 +237,11 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2015);
       }
 
-      const read = (k: string, fallback: number) =>
-        matrix === null || matrix === undefined
-          ? fallback
-          : s.rt.toNumber(s.rt.getProperty(matrix as AsObject, s.rt.publicName(k)));
       store.views.add(this.$display.ref);
       drawing(this).beginFill({
         type: "image",
         image: store,
-        matrix: {
-          a: read("a", 1),
-          b: read("b", 0),
-          c: read("c", 0),
-          d: read("d", 1),
-          tx: read("tx", 0),
-          ty: read("ty", 0),
-        },
+        matrix: matrixFrom(matrix),
         repeat: !!repeat,
         smooth: !!smooth,
       });
