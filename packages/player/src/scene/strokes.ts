@@ -3,9 +3,10 @@
 // pixel of the screen (render/strokes.ts has the rules), each line's path
 // outlined and its outline filled non-zero, so that where it overlaps itself
 // it is drawn once. The outline is the flattened path's sides at half the
-// width, joined on the outer side of each turn as the line joins, through
-// the turn's own point on the inner side, and capped at its ends; a closed
-// path's sides are two loops, wound opposite ways.
+// width, joined on the outer side of each turn as the line joins; on the
+// inner side, where the sides cross for a gentle turn, else through the
+// turn's own point, so that it never winds back; capped at its ends; a
+// closed path's sides are two loops, wound opposite ways.
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
@@ -14,6 +15,7 @@ import {
   containment,
   type FillGeometry,
   type FillTessellator,
+  FLATNESS,
   trace,
   validGeometry,
 } from "./fills.js";
@@ -119,7 +121,8 @@ function arc(
   flatness: number,
 ): void {
   const most = r > flatness ? 2 * Math.acos(1 - flatness / r) : Math.PI;
-  const pieces = Math.max(1, Math.ceil(Math.abs(sweep) / most));
+  // As many as a curve's at most (fills.ts, trace), however far the stage is zoomed.
+  const pieces = Math.min(256, Math.max(1, Math.ceil(Math.abs(sweep) / most)));
   for (let i = 1; i <= pieces; i++) {
     const angle = from + (sweep * i) / pieces;
     out.push(cx + r * Math.cos(angle), cy + r * Math.sin(angle));
@@ -185,16 +188,18 @@ function side(
     const outer = cross * s > 0 || (cross === 0 && dot < 0);
     const turn = Math.atan2(Math.abs(cross), dot);
     if (!outer) {
-      // A gentle turn's inner sides cross within both segments: one point, where they cross. Else
-      // the inner side goes through the turn's own point, so that the outline never winds back; and
-      // so at a closed contour's last turn, to its first segment's start, already out.
-      const back = h * Math.tan(turn / 2);
+      // A gentle turn's inner sides cross within the half of each segment next to it: one point,
+      // where they cross, which no cut at the segment's other end reaches past, so the inner side
+      // never runs back, as it would where the line is wider than its curve. Else the inner side
+      // goes through the turn's own point, so that the outline never winds back; and so at a
+      // closed contour's last turn, to its first segment's start, already out.
+      const back = (h * Math.abs(cross)) / (1 + dot);
       const next = (j + 1) % n;
       if (
         dot > 0 &&
         !(closed && k === segments - 1) &&
-        back <= Math.hypot(p[j * 2] - p[i * 2], p[j * 2 + 1] - p[i * 2 + 1]) &&
-        back <= Math.hypot(p[next * 2] - p[j * 2], p[next * 2 + 1] - p[j * 2 + 1])
+        2 * back <= Math.hypot(p[j * 2] - p[i * 2], p[j * 2 + 1] - p[i * 2 + 1]) &&
+        2 * back <= Math.hypot(p[next * 2] - p[j * 2], p[next * 2 + 1] - p[j * 2 + 1])
       ) {
         put(out, x + nx - tx * back, y + ny - ty * back);
         started = true;
@@ -287,7 +292,7 @@ export function outline(
   caps: number,
   join: number,
   limit: number,
-  flatness = 0.02,
+  flatness = FLATNESS,
 ): number[][] {
   let n = p.length / 2;
   if (closed && n > 1 && p[0] === p[(n - 1) * 2] && p[1] === p[(n - 1) * 2 + 1]) {

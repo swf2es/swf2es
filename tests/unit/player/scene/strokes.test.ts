@@ -75,3 +75,59 @@ test("a closed path there and back is its one side, joined at both ends", () => 
   // A capsule: the rectangle and a disc's worth of round ends.
   assert.ok(Math.abs(Math.abs(area(loops[0])) - (20 + Math.PI)) < 0.15);
 });
+
+/** The non-zero winding of `contours` about (x, y). */
+const winding = (contours: number[][], x: number, y: number) => {
+  let w = 0;
+  for (const c of contours) {
+    const n = c.length / 2;
+    for (let i = 0; i < n; i++) {
+      const [ax, ay] = [c[i * 2], c[i * 2 + 1]];
+      const [bx, by] = [c[((i + 1) % n) * 2], c[((i + 1) % n) * 2 + 1]];
+      const side = (bx - ax) * (y - ay) - (x - ax) * (by - ay);
+      if (ay <= y && by > y && side > 0) {
+        w++;
+      } else if (ay > y && by <= y && side < 0) {
+        w--;
+      }
+    }
+  }
+
+  return w;
+};
+
+test("a line wider than its curve leaves no hole inside, whatever its joins and caps", () => {
+  // Wandering curves of short chords, as flattened curves are, often wider than they turn: the
+  // inner sides cut at gentle turns once wound back there and left holes the fill skipped.
+  let seed = 7;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let k = 0; k < 400; k++) {
+    const n = 4 + Math.floor(random() * 12);
+    const p = [0, 0];
+    let angle = random() * Math.PI * 2;
+    for (let i = 0; i < n; i++) {
+      angle += (random() - 0.5) * 1.6;
+      const step = 0.3 + random() * 4;
+      p.push(p.at(-2) + Math.cos(angle) * step, p.at(-1) + Math.sin(angle) * step);
+    }
+
+    const h = 0.2 + random() * 7;
+    const caps = Math.floor(random() * 3);
+    const join = Math.floor(random() * 3);
+    const contours = outline(p, false, h, caps, join, 4);
+    // Places well within a segment, out from it less than the half width, are in the line.
+    for (let s = 0; s < 500; s++) {
+      const i = Math.floor(random() * n) * 2;
+      const [dx, dy] = [p[i + 2] - p[i], p[i + 3] - p[i + 1]];
+      const l = Math.hypot(dx, dy);
+      const t = 0.05 + random() * 0.9;
+      const off = (random() * 2 - 1) * (h - 0.05);
+      const x = p[i] + dx * t - (dy / l) * off;
+      const y = p[i + 1] + dy * t + (dx / l) * off;
+      assert.notEqual(winding(contours, x, y), 0, `path ${k}: (${x}, ${y}) left out`);
+    }
+  }
+});

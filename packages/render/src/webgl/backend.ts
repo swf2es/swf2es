@@ -364,7 +364,6 @@ export class WebGLBackend {
     }
 
     this.frameSamples = stage?.samples ?? 1;
-
     const canvas: Open = {
       layer: root,
       msaa: stage,
