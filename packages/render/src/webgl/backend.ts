@@ -53,13 +53,12 @@ const BACK_UNIT = 3;
 interface Layer {
   framebuffer: WebGLFramebuffer;
   texture: WebGLTexture;
-  stencil: WebGLRenderbuffer;
+  /** Its stencil, made as it is first drawn into unmultisampled; filters' targets take none. */
+  stencil: WebGLRenderbuffer | null;
   width: number;
   height: number;
   /** The frame it was last drawn into. */
   usedAt: number;
-  /** Multisampled buffers it is drawn into as a layer, resolved into its texture; made as needed. */
-  msaa: Multisampled | null;
 }
 
 /**
@@ -73,27 +72,36 @@ interface Multisampled {
   width: number;
   height: number;
   samples: number;
+  /** The frame it was last drawn into. */
+  usedAt: number;
 }
 
 /**
  * The most a multisampled target may take, colour and depth-stencil
- * together, 8 bytes a sample, as the Pixi view's canvas takes (web's
- * fittingSamples): a filter's layer padded as far as a texture goes would
- * take gigabytes at 4 samples, which a GPU gives out under.
+ * together, 8 bytes a sample, as web's fittingSamples has for the Pixi
+ * view's canvas.
  */
 const MSAA_BYTES = 256 * 1024 * 1024;
 
 /**
- * The samples a target of `width` by `height` takes for `samples`: halved
- * till its buffers fit MSAA_BYTES, none (1) where two would not.
+ * The samples a target of `width` by `height` takes for `samples`, a power
+ * of two, as a driver rounds others for colour and depth-stencil alike
+ * or not: halved till its buffers fit MSAA_BYTES, none (1) where two would
+ * not. A layer goes so far, as one padded as far as a texture goes would
+ * take gigabytes; the stage, as web's canvas, keeps 4 at least.
  */
-function fittingSamples(width: number, height: number, samples: number): number {
-  let fitting = samples;
-  while (fitting > 1 && width * height * fitting * 8 > MSAA_BYTES) {
+function fittingSamples(width: number, height: number, samples: number, least = 1): number {
+  let fitting = 1;
+  while (fitting * 2 <= samples) {
+    fitting *= 2;
+  }
+
+  const floor = Math.min(fitting, least);
+  while (fitting > floor && width * height * fitting * 8 > MSAA_BYTES) {
     fitting /= 2;
   }
 
-  return fitting >= 2 ? Math.floor(fitting) : 1;
+  return fitting;
 }
 
 /** The sizes a layer's texture is made in: rounded up to a multiple, so that one serves many. */
@@ -161,6 +169,7 @@ export class WebGLBackend {
   private compositeRowLocation: WebGLUniformLocation | null = null;
   private offsetLocation: WebGLUniformLocation | null = null;
   private flipLocation: WebGLUniformLocation | null = null;
+  private backOffsetLocation: WebGLUniformLocation | null = null;
   /** The filters' passes, their programs made as first run. */
   private filters!: FilterRunner<Layer>;
   /** Layers free to draw into, and those drawn into now, innermost last. */
@@ -175,9 +184,20 @@ export class WebGLBackend {
    * Flash's anti-aliasing by the quality, as the host sets it.
    */
   samples = 1;
-  /** The samples of the frame drawing, which a BitmapData's frame draws with none of. */
+  /**
+   * The samples the layers of the frame drawing take: the stage's, which a
+   * BitmapData's frame draws with none of.
+   */
   private frameSamples = 1;
-  /** The stage's multisampled buffers, and the texture they resolve into before the canvas. */
+  /** The most samples the GPU takes, and whether the canvas has alpha, asked once. */
+  private maxSamples = 1;
+  private canvasAlpha = false;
+  /** Multisampled buffers free to draw a layer into, kept while drawn into often enough. */
+  private freeMsaa: Multisampled[] = [];
+  /**
+   * The stage's multisampled buffers, and the texture they resolve into
+   * before an opaque canvas.
+   */
   private stageMsaa: Multisampled | null = null;
   private stageResolved: { framebuffer: WebGLFramebuffer; texture: WebGLTexture } | null = null;
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
@@ -247,6 +267,7 @@ export class WebGLBackend {
     this.compositeRowLocation = gl.getUniformLocation(this.composite, "uRow");
     this.offsetLocation = gl.getUniformLocation(this.composite, "uOffset");
     this.flipLocation = gl.getUniformLocation(this.composite, "uFlip");
+    this.backOffsetLocation = gl.getUniformLocation(this.composite, "uBackOffset");
     this.filters = new FilterRunner(gl, this.state, {
       take: (width, height) => this.takeLayer(width, height, true),
       give: (layer) => this.giveLayer(layer),
@@ -258,6 +279,9 @@ export class WebGLBackend {
     this.kept = [];
     this.stageMsaa = null;
     this.stageResolved = null;
+    this.freeMsaa = [];
+    this.maxSamples = gl.getParameter(gl.MAX_SAMPLES) as number;
+    this.canvasAlpha = gl.getContextAttributes()?.alpha ?? false;
     this.back = null;
     this.backFramebuffer = null;
     this.backWidth = 0;
@@ -329,12 +353,18 @@ export class WebGLBackend {
     state.useProgram(this.program);
     state.bindVertexArray(this.vertexArray);
     state.bindTexture(0, this.rowsTexture);
-    // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw does.
-    const samples = root ? 1 : Math.min(this.samples, gl.getParameter(gl.MAX_SAMPLES) as number);
-    this.frameSamples = samples;
+    // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
+    // does. Its layers take the stage's, so that their edges are the stage's.
+    const stage = root ? null : this.stageBuffers(target.width, target.height, this.samples);
+    if (root) {
+      // Its own stencil, for the masks drawn into it.
+      this.layerMsaa(root, 1);
+    }
+
+    this.frameSamples = stage?.samples ?? 1;
     const canvas: Open = {
       layer: root,
-      msaa: this.stageBuffers(target.width, target.height, samples),
+      msaa: stage,
       x: 0,
       y: 0,
       width: target.width,
@@ -554,6 +584,15 @@ export class WebGLBackend {
         free.pop();
       }
     }
+
+    const msaa = this.freeMsaa;
+    for (let i = msaa.length - 1; i >= 0; i--) {
+      if (this.frame - msaa[i].usedAt > LAYER_IDLE_FRAMES) {
+        this.deleteMultisampled(msaa[i]);
+        msaa[i] = msaa[msaa.length - 1];
+        msaa.pop();
+      }
+    }
   }
 
   /**
@@ -601,21 +640,27 @@ export class WebGLBackend {
     // Bound as the state cache has it.
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
     open.msaa = null;
+    // Free for the next layer: only those drawn into now hold multisampled buffers.
+    msaa.usedAt = this.frame;
+    this.freeMsaa.push(msaa);
   }
 
   /**
-   * The stage's multisampled pixels onto the canvas: resolved into a
-   * texture first, as a resolve must keep its format and the canvas may
-   * have no alpha.
+   * The stage's multisampled pixels onto the canvas: resolved straight onto
+   * one with alpha; into a texture first for an opaque one, as a resolve
+   * must keep its format.
    */
   private present(msaa: Multisampled): void {
     const gl = this.gl;
-    const resolved = this.stageResolved as { framebuffer: WebGLFramebuffer };
     const { width, height } = msaa;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaa.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolved.framebuffer);
-    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, resolved.framebuffer);
+    const resolved = this.stageResolved;
+    if (resolved) {
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolved.framebuffer);
+      gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, resolved.framebuffer);
+    }
+
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
@@ -627,27 +672,23 @@ export class WebGLBackend {
    */
   private stageBuffers(width: number, height: number, wanted: number): Multisampled | null {
     const gl = this.gl;
-    const samples = fittingSamples(width, height, wanted);
-    if (samples < 2) {
-      return null;
-    }
-
+    const samples = fittingSamples(width, height, Math.min(wanted, this.maxSamples), 4);
     const known = this.stageMsaa;
     if (known && known.width === width && known.height === height && known.samples === samples) {
       return known;
     }
 
-    if (known) {
-      this.deleteMultisampled(known);
+    this.dropStageBuffers();
+    const msaa = samples > 1 ? this.multisampled(width, height, samples) : null;
+    if (!msaa) {
+      return null;
     }
 
-    if (this.stageResolved) {
-      this.state.dropTexture(this.stageResolved.texture);
-      gl.deleteTexture(this.stageResolved.texture);
-      gl.deleteFramebuffer(this.stageResolved.framebuffer);
+    this.stageMsaa = msaa;
+    if (this.canvasAlpha) {
+      return msaa;
     }
 
-    const msaa = this.multisampled(width, height, samples);
     const texture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(LAYER_UNIT, texture);
     this.state.activeTexture(LAYER_UNIT);
@@ -657,40 +698,64 @@ export class WebGLBackend {
     const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
     this.state.bindFramebuffer(framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    this.stageMsaa = msaa;
     this.stageResolved = { framebuffer, texture };
     return msaa;
   }
 
+  /** The stage's multisampled buffers and their resolve let go of, as samples or size change. */
+  private dropStageBuffers(): void {
+    const gl = this.gl;
+    if (this.stageMsaa) {
+      this.deleteMultisampled(this.stageMsaa);
+      this.stageMsaa = null;
+    }
+
+    if (this.stageResolved) {
+      this.state.dropTexture(this.stageResolved.texture);
+      gl.deleteTexture(this.stageResolved.texture);
+      gl.deleteFramebuffer(this.stageResolved.framebuffer);
+      this.stageResolved = null;
+    }
+  }
+
   /**
-   * `layer`'s multisampled buffers for `wanted` samples, as many as fit,
-   * made again where it has none of its size; none where it takes none.
+   * Multisampled buffers to draw `layer` into at `wanted` samples, as many
+   * as fit, free ones of its size or made; none where it takes none, its
+   * own stencil then made if it has none.
    */
   private layerMsaa(layer: Layer, wanted: number): Multisampled | null {
     const samples = fittingSamples(layer.width, layer.height, wanted);
-    if (samples < 2) {
-      return null;
+    const free = this.freeMsaa;
+    for (let i = 0; samples > 1 && i < free.length; i++) {
+      const m = free[i];
+      if (m.width === layer.width && m.height === layer.height && m.samples === samples) {
+        free[i] = free[free.length - 1];
+        free.pop();
+        return m;
+      }
     }
 
-    const known = layer.msaa;
-    if (
-      known &&
-      known.width === layer.width &&
-      known.height === layer.height &&
-      known.samples === samples
-    ) {
-      return known;
+    const msaa = samples > 1 ? this.multisampled(layer.width, layer.height, samples) : null;
+    if (!msaa && !layer.stencil) {
+      const gl = this.gl;
+      const stencil = gl.createRenderbuffer() as WebGLRenderbuffer;
+      gl.bindRenderbuffer(gl.RENDERBUFFER, stencil);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, layer.width, layer.height);
+      this.state.bindFramebuffer(layer.framebuffer);
+      gl.framebufferRenderbuffer(
+        gl.FRAMEBUFFER,
+        gl.DEPTH_STENCIL_ATTACHMENT,
+        gl.RENDERBUFFER,
+        stencil,
+      );
+      layer.stencil = stencil;
     }
 
-    if (known) {
-      this.deleteMultisampled(known);
-    }
-
-    layer.msaa = this.multisampled(layer.width, layer.height, samples);
-    return layer.msaa;
+    return msaa;
   }
 
-  private multisampled(width: number, height: number, samples: number): Multisampled {
+  /** Multisampled buffers, or none where the driver leaves their framebuffer incomplete. */
+  private multisampled(width: number, height: number, samples: number): Multisampled | null {
     const gl = this.gl;
     const color = gl.createRenderbuffer() as WebGLRenderbuffer;
     gl.bindRenderbuffer(gl.RENDERBUFFER, color);
@@ -707,7 +772,13 @@ export class WebGLBackend {
       gl.RENDERBUFFER,
       depthStencil,
     );
-    return { framebuffer, color, depthStencil, width, height, samples };
+    const msaa = { framebuffer, color, depthStencil, width, height, samples, usedAt: this.frame };
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      this.deleteMultisampled(msaa);
+      return null;
+    }
+
+    return msaa;
   }
 
   private deleteMultisampled(msaa: Multisampled): void {
@@ -763,19 +834,10 @@ export class WebGLBackend {
     // Read texel by texel: with no mipmaps, the default filter would leave it incomplete, reading 0.
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    const stencil = gl.createRenderbuffer() as WebGLRenderbuffer;
-    gl.bindRenderbuffer(gl.RENDERBUFFER, stencil);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
     const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
     this.state.bindFramebuffer(framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    gl.framebufferRenderbuffer(
-      gl.FRAMEBUFFER,
-      gl.DEPTH_STENCIL_ATTACHMENT,
-      gl.RENDERBUFFER,
-      stencil,
-    );
-    return { framebuffer, texture, stencil, width, height, usedAt: this.frame, msaa: null };
+    return { framebuffer, texture, stencil: null, width, height, usedAt: this.frame };
   }
 
   /** A layer free again, kept for the layers after it while it is drawn into often enough. */
@@ -785,14 +847,12 @@ export class WebGLBackend {
   }
 
   private deleteLayer(layer: Layer): void {
-    if (layer.msaa) {
-      this.deleteMultisampled(layer.msaa);
-    }
-
     this.state.dropTexture(layer.texture);
     this.gl.deleteFramebuffer(layer.framebuffer);
     this.gl.deleteTexture(layer.texture);
-    this.gl.deleteRenderbuffer(layer.stencil);
+    if (layer.stencil) {
+      this.gl.deleteRenderbuffer(layer.stencil);
+    }
   }
 
   /**
@@ -819,11 +879,18 @@ export class WebGLBackend {
     }
 
     const direct = mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN;
+    // Where the copy of what is below has the rectangle's corner, less where the target has it.
+    let backX = 0;
+    let backY = 0;
     if (!direct) {
-      // Copied to where it lies, as a blit out of a multisampled target must keep its rectangle: the
-      // copy is as large as the rectangle's far corner.
-      const right = x0 + width;
-      const top = y0 + height;
+      // Copied from its corner, or out of a multisampled target to where it lies, as a blit
+      // resolving must keep its rectangle: then as large as the rectangle's far corner.
+      const bx = under.msaa ? x0 : 0;
+      const by = under.msaa ? y0 : 0;
+      backX = x0 - bx;
+      backY = y0 - by;
+      const right = bx + width;
+      const top = by + height;
       if (!this.back || this.backWidth < right || this.backHeight < top) {
         if (this.back) {
           state.dropTexture(this.back);
@@ -872,7 +939,18 @@ export class WebGLBackend {
       }
 
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
-      gl.blitFramebuffer(x0, y0, right, top, x0, y0, right, top, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.blitFramebuffer(
+        x0,
+        y0,
+        x0 + width,
+        y0 + height,
+        bx,
+        by,
+        right,
+        top,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
       // Both bindings back as the state cache has them.
       gl.bindFramebuffer(gl.FRAMEBUFFER, from);
     }
@@ -886,6 +964,7 @@ export class WebGLBackend {
     gl.uniform1i(this.compositeRowLocation, row);
     gl.uniform2i(this.offsetLocation, dx, flip ? under.height - 1 - dy : dy);
     gl.uniform1i(this.flipLocation, flip ? 1 : 0);
+    gl.uniform2i(this.backOffsetLocation, backX, backY);
     switch (mode) {
       case ADD:
         state.setBlend(gl.ONE, gl.ONE);
@@ -1199,13 +1278,9 @@ export class WebGLBackend {
       gl.deleteFramebuffer(this.backFramebuffer);
     }
 
-    if (this.stageMsaa) {
-      this.deleteMultisampled(this.stageMsaa);
-    }
-
-    if (this.stageResolved) {
-      gl.deleteTexture(this.stageResolved.texture);
-      gl.deleteFramebuffer(this.stageResolved.framebuffer);
+    this.dropStageBuffers();
+    for (const msaa of this.freeMsaa) {
+      this.deleteMultisampled(msaa);
     }
 
     for (const texture of this.textures) {

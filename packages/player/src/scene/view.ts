@@ -317,16 +317,20 @@ export class RenderView implements Drawer {
   /**
    * Samples a pixel the stage and its blend and filter layers are
    * multisampled with, as the GPU allows, 1 for none: Flash's anti-aliasing,
-   * which its host sets by the stage's quality (none at low). A
-   * BitmapData's draw supersamples instead, as Flash's does.
+   * which its host sets by the stage's quality, none at low whatever is set.
+   * A BitmapData's draw supersamples instead, as Flash's does.
    */
   get samples(): number {
-    return this.backend.samples;
+    return this.wantedSamples;
   }
 
   set samples(samples: number) {
-    this.backend.samples = Math.max(1, Math.floor(samples) || 1);
+    this.wantedSamples = Math.max(1, Math.floor(samples) || 1);
+    this.backend.samples = this.stageQuality === "LOW" ? 1 : this.wantedSamples;
   }
+
+  /** The samples the host asked for, which the stage's low quality sets aside (`samples`). */
+  private wantedSamples = 1;
 
   /** The stage's quality, "LOW" to "BEST", which will decide bitmaps' smoothing. */
   get quality(): string {
@@ -335,6 +339,8 @@ export class RenderView implements Drawer {
 
   set quality(quality: string) {
     this.stageQuality = quality;
+    // Flash draws edges aliased at low, whatever samples the host asked for.
+    this.samples = this.wantedSamples;
   }
 
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
