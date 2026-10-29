@@ -202,5 +202,22 @@ export function widestLine(layer: ShapeLayer): number {
 
 /** Whether every line of the layer scales both ways, whose width no rotation changes; one scaled one way alone turns with it. */
 export function scalesEvenly(layer: ShapeLayer): boolean {
-  return layer.strokes.every(({ line }) => !line.noHScale && !line.noVScale);
+  // A loop, not every() with a closure: a crowd's shapes ask on every frame.
+  for (let i = 0; i < layer.strokes.length; i++) {
+    const line = layer.strokes[i].line;
+    if (line.noHScale || line.noVScale) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * What a layer brings to the width its object's stretch is settled for
+ * (settledStretch): its widest line, in twips, where its lines all scale
+ * both ways; else nothing. An object's is the most of its layers'.
+ */
+export function evenWidth(layer: ShapeLayer): number {
+  return layer.strokes.length > 0 && scalesEvenly(layer) ? widestLine(layer) : 0;
 }

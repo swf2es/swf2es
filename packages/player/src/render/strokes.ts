@@ -19,6 +19,7 @@ import {
 import { destroyContext, remakeable, shapeContext, trace, verticesOf } from "./tessellate.js";
 
 export {
+  evenWidth,
   type Linear,
   sameLinear,
   scalesEvenly,

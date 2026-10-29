@@ -30,6 +30,7 @@ import { SPARE_GRAPHICS_MOST, SPARE_MESHES_MOST } from "./pools.js";
 import { SaffronView } from "./saffron.js";
 import { SharedGraphics } from "./shared.js";
 import {
+  evenWidth,
   type Linear,
   linesContext,
   NO_LINES,
@@ -39,7 +40,6 @@ import {
   settledStretch,
   stretchOf,
   strokeFrame,
-  widestLine,
 } from "./strokes.js";
 import {
   destroyContext,
@@ -515,9 +515,7 @@ export class Art {
     const layers = node.layers;
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
-      if (layer.strokes.length > 0 && scalesEvenly(layer)) {
-        node.widest = Math.max(node.widest, widestLine(layer));
-      }
+      node.widest = Math.max(node.widest, evenWidth(layer));
 
       this.graphic(node, spare, next++, fills[i]);
       const meshes = layer.meshes;

@@ -66,13 +66,7 @@ import {
   type ShapeLayer,
   shapeLayers,
 } from "../display/shapes.js";
-import {
-  type Linear,
-  scalesEvenly,
-  settledStretch,
-  stretchOf,
-  widestLine,
-} from "../display/stretch.js";
+import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { ShapeCharacter } from "../display/timeline.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
@@ -127,18 +121,6 @@ export interface RenderViewOptions {
  * the usual idle frames would hold hundreds of.
  */
 const GRADIENT_IDLE_FRAMES = 30;
-
-/** The widest line, in twips, of the layers whose lines scale both ways, which settle a stretch. */
-function evenWidest(layers: readonly ShapeLayer[]): number {
-  let widest = 0;
-  for (const layer of layers) {
-    if (layer.strokes.length > 0 && scalesEvenly(layer)) {
-      widest = Math.max(widest, widestLine(layer));
-    }
-  }
-
-  return widest;
-}
 
 /**
  * Device texts with runs kept, and quads made, past which those let go of
@@ -467,10 +449,6 @@ export class RenderView implements Drawer {
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
   private readonly masks: number[] = [];
-  /**
-   * Each layer's lines by what they were stroked for (LineEntry), the latest
-   * used last, found by their numbers.
-   */
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
   private readonly stretchScratch: Linear = [0, 0, 0, 0];
   /** Quads by their width, then their height: numbers, not a key formatted from them. */
@@ -868,15 +846,21 @@ export class RenderView implements Drawer {
           lineBy = ownSlice ? [pa, pb, pc, pd] : this.childLineSpace(o);
         }
 
-        const even = !lineBy && scalesEvenly(layers[i]);
+        const even = !lineBy && this.lineCache.of(layers[i], version).even;
         if (even && stretch === undefined) {
+          // Settled for the widest line of the object's layers that scale both ways (evenWidth).
+          let widest = 0;
+          for (let k = 0; k < layers.length; k++) {
+            widest = Math.max(widest, this.lineCache.of(layers[k], version).width);
+          }
+
           const m = this.stretchScratch;
           m[0] = a;
           m[1] = b;
           m[2] = c;
           m[3] = d;
           stretch = stretchOf(m, m);
-          stretch = stretch && settledStretch(stretch, evenWidest(layers), least, stretch);
+          stretch = stretch && settledStretch(stretch, widest, least, stretch);
         }
 
         const by = even ? stretch : null;

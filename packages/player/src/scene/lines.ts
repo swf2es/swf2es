@@ -4,26 +4,49 @@
 // them, within a budget of vertices for those not drawn lately.
 import { type Geometries, type GeometryHandle, IDLE_FRAMES } from "@swf2es/render";
 import type { ShapeLayer } from "../display/shapes.js";
+import { evenWidth, scalesEvenly } from "../display/stretch.js";
 import { same } from "../display/value-lists.js";
 import type { FillTessellator } from "./fills.js";
 import { layerStrokes } from "./strokes.js";
 
 /**
- * The vertices kept lines may hold before those not drawn this frame go,
- * the least lately drawn first: a layer seen through ever new transforms,
- * as a zoom shows it, would otherwise keep each for the geometries' idle
- * frames. Past it with nothing idle, it grows to half again what is drawn.
+ * The vertices kept lines may hold before those drawn neither this frame
+ * nor the last go, the least lately drawn first: a layer seen through ever
+ * new transforms, as a zoom shows it, would otherwise keep each for the
+ * geometries' idle frames. Past it with nothing idle, it grows to half
+ * again what is drawn, and comes back down as less is.
  */
 export const LINE_VERTICES = 1_000_000;
+
+/**
+ * How often, in frames, the kept lines are looked over whatever they hold:
+ * those the geometries let go of, and those that stroked to nothing, add
+ * no vertices that would bring the budget on.
+ */
+const SWEEP_FRAMES = 60;
 
 /** The bits of a number, read as two ints, for mixHash. */
 const hashFloat = new Float64Array(1);
 const hashInts = new Int32Array(hashFloat.buffer);
 
-/** `h` mixed with the bits of `x`, zero's two signs alike, as same() takes them. */
+/** `h` mixed with the bits of `x`, zero's two signs alike and every NaN, as same() takes them. */
 function mixHash(h: number, x: number): number {
-  hashFloat[0] = x === 0 ? 0 : x;
+  hashFloat[0] = x === 0 ? 0 : Number.isNaN(x) ? Number.NaN : x;
   return Math.imul(Math.imul(h ^ hashInts[0], 0x9e3779b1) ^ hashInts[1], 0x85ebca6b);
+}
+
+/**
+ * A layer's lines as of its drawing's `version`: whether they all scale
+ * both ways (scalesEvenly), what the layer brings to its object's settled
+ * stretch (evenWidth), whether any is of whole alpha, and their entries by
+ * their key's hash.
+ */
+export interface LayerLines {
+  version: number;
+  even: boolean;
+  width: number;
+  whole: boolean;
+  byHash: Map<number, LineEntry[]>;
 }
 
 /**
@@ -42,8 +65,11 @@ interface LineEntry {
   opaque: boolean;
   handle: GeometryHandle | null;
   version: number;
-  /** Its layer, its key's hash there (take), its vertices and the frame it was last drawn. */
-  layer: ShapeLayer;
+  /**
+   * Its layer's lines and its key's hash there, which hold no layer; its
+   * vertices, -1 once forgotten; and the frame it was last drawn.
+   */
+  within: LayerLines;
   hash: number;
   vertices: number;
   usedAt: number;
@@ -53,11 +79,13 @@ interface LineEntry {
 export class LineCache {
   /** Lines stroked anew and lines found stroked already, as the Pixi view counts its contexts. */
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
-  /** Each layer's lines by their key's hash, and every entry with the vertices they hold. */
-  private readonly byLayer = new WeakMap<ShapeLayer, Map<number, LineEntry[]>>();
+  private readonly byLayer = new WeakMap<ShapeLayer, LayerLines>();
+  /** Every entry, and the vertices they hold. */
   private readonly entries: LineEntry[] = [];
   private vertices = 0;
   private limit: number;
+  /** The frame the entries were last looked over. */
+  private swept = 0;
 
   constructor(
     private readonly geometries: Geometries,
@@ -67,10 +95,37 @@ export class LineCache {
     this.limit = budget;
   }
 
+  /** How many transforms' lines are kept, of every layer. */
+  get kept(): number {
+    return this.entries.length;
+  }
+
+  /** `layer`'s lines as of its drawing's `version`, what is known of them worked out again for another. */
+  of(layer: ShapeLayer, version: number): LayerLines {
+    let lines = this.byLayer.get(layer);
+    if (!lines) {
+      lines = { version: -1, even: false, width: 0, whole: false, byHash: new Map() };
+      this.byLayer.set(layer, lines);
+    }
+
+    if (lines.version !== version) {
+      lines.version = version;
+      lines.even = scalesEvenly(layer);
+      lines.width = evenWidth(layer);
+      lines.whole = false;
+      for (let i = 0; !lines.whole && i < layer.strokes.length; i++) {
+        lines.whole = layer.strokes[i].line.color >>> 24 === 255;
+      }
+    }
+
+    return lines;
+  }
+
   /**
    * `layer`'s lines through the linear transform (a b c d), at least `least`
-   * wide: stroked again for another transform, screen or version of its
-   * drawing, the old ones kept while drawn as the geometries keep them.
+   * wide, drawn opaque or not: stroked again for another transform, screen
+   * or version of its drawing, the old ones kept while drawn as the
+   * geometries keep them.
    */
   take(
     layer: ShapeLayer,
@@ -83,19 +138,15 @@ export class LineCache {
     by: readonly number[] | null,
     drawnOpaque: boolean,
   ): GeometryHandle | null {
+    const frame = this.geometries.frame;
+    if (frame - this.swept >= SWEEP_FRAMES) {
+      this.trim(frame);
+    }
+
+    const lines = this.of(layer, version);
     // Only a line of whole alpha draws otherwise when opaque (layerStrokes): a layer of none keeps
     // one geometry through a fade.
-    let opaque = false;
-    for (let i = 0; drawnOpaque && !opaque && i < layer.strokes.length; i++) {
-      opaque = layer.strokes[i].line.color >>> 24 === 255;
-    }
-
-    let byHash = this.byLayer.get(layer);
-    if (!byHash) {
-      byHash = new Map();
-      this.byLayer.set(layer, byHash);
-    }
-
+    const opaque = drawnOpaque && lines.whole;
     // Found by a hash of the key's numbers, compared as numbers: a layer seen by many instances
     // keeps a transform for each, and a key formatted on every frame cost more than drawing it.
     let hash = mixHash(mixHash(mixHash(mixHash(mixHash(opaque ? 1 : 0, a), b), c), d), least);
@@ -103,7 +154,7 @@ export class LineCache {
       hash = mixHash(mixHash(mixHash(mixHash(hash, by[0]), by[1]), by[2]), by[3]);
     }
 
-    let bucket = byHash.get(hash);
+    let bucket = lines.byHash.get(hash);
     let known: LineEntry | null = null;
     for (let i = 0; bucket && i < bucket.length; i++) {
       const e = bucket[i];
@@ -127,7 +178,6 @@ export class LineCache {
       }
     }
 
-    const frame = this.geometries.frame;
     if (
       known &&
       known.version === version &&
@@ -155,7 +205,7 @@ export class LineCache {
     } else {
       if (!bucket) {
         bucket = [];
-        byHash.set(hash, bucket);
+        lines.byHash.set(hash, bucket);
       }
 
       const entry: LineEntry = {
@@ -168,7 +218,7 @@ export class LineCache {
         opaque,
         handle,
         version,
-        layer,
+        within: lines,
         hash,
         vertices,
         usedAt: frame,
@@ -186,13 +236,16 @@ export class LineCache {
   }
 
   /**
-   * Kept lines past the limit: those the geometries let go of forgotten,
-   * then those drawn neither in this `frame` nor the last let go of, the
-   * least lately drawn first, down to three quarters of it; the limit
-   * raised to half again what is left where that is more.
+   * The kept lines looked over: those the geometries let go of, or that
+   * stroked to nothing and went undrawn for their idle frames, forgotten;
+   * then, past three quarters of the budget, those drawn neither in this
+   * `frame` nor the last let go of, the least lately drawn first; the limit
+   * set to half again what is left, the budget at least.
    */
   private trim(frame: number): void {
+    this.swept = frame;
     const entries = this.entries;
+    const most = (this.budget * 3) / 4;
     let kept = 0;
     for (const e of entries) {
       if (e.handle ? this.geometries.alive(e.handle) : frame - e.usedAt <= IDLE_FRAMES) {
@@ -203,10 +256,10 @@ export class LineCache {
     }
 
     entries.length = kept;
-    if (this.vertices > (this.budget * 3) / 4) {
+    if (this.vertices > most) {
       // Mid-walk, those drawn last frame may yet be drawn in this one.
       const idle = entries.filter((e) => e.usedAt < frame - 1).sort((x, y) => x.usedAt - y.usedAt);
-      for (let i = 0; i < idle.length && this.vertices > (this.budget * 3) / 4; i++) {
+      for (let i = 0; i < idle.length && this.vertices > most; i++) {
         if (idle[i].handle) {
           this.geometries.remove((idle[i].handle as GeometryHandle).id);
         }
@@ -227,14 +280,14 @@ export class LineCache {
     this.limit = Math.max(this.budget, this.vertices * 1.5);
   }
 
-  /** Line entry `e` taken out of its layer's lines, its vertices no longer counted; -1 marks it. */
+  /** Line entry `e` taken out of its layer's lines, its vertices no longer counted. */
   private forget(e: LineEntry): void {
-    const bucket = this.byLayer.get(e.layer)?.get(e.hash);
+    const bucket = e.within.byHash.get(e.hash);
     const at = bucket ? bucket.indexOf(e) : -1;
     if (bucket && at >= 0) {
       bucket.splice(at, 1);
       if (bucket.length === 0) {
-        this.byLayer.get(e.layer)?.delete(e.hash);
+        e.within.byHash.delete(e.hash);
       }
     }
 

@@ -66,3 +66,38 @@ test("past its budget, lines drawn neither this frame nor the last go, the least
   assert.equal(lines.take(layer, 0, 4, 0, 0, 4, 1, null, true), handles[3]);
   assert.deepEqual(lines.counts, { strokeContexts: 4, strokeReuses: 1 });
 });
+
+test("lines that stroke to nothing are forgotten once undrawn for the idle frames", () => {
+  const geometries = new Geometries();
+  const lines = new LineCache(geometries, refuse);
+  const layer = straightLine();
+  // A transform that flattens the plane strokes nothing, here a new one on every frame.
+  for (let frame = 0; frame < 600; frame++) {
+    assert.equal(lines.take(layer, 0, 0, frame, 0, 0, 1, null, true), null);
+    geometries.endFrame();
+  }
+
+  assert.ok(lines.kept < 400, `${lines.kept} kept`);
+});
+
+test("after a busy stretch, the lines no longer drawn go within a sweep", () => {
+  const geometries = new Geometries();
+  const lines = new LineCache(geometries, refuse, 1);
+  const layer = straightLine();
+  const busy = [];
+  for (let k = 0; k < 10; k++) {
+    busy.push(lines.take(layer, 0, k + 1, 0, 0, k + 1, 1, null, true));
+  }
+
+  geometries.endFrame();
+  for (let frame = 1; frame < 70; frame++) {
+    lines.take(layer, 0, 1, 0, 0, 1, 1, null, true);
+    geometries.endFrame();
+  }
+
+  assert.deepEqual(
+    busy.map((h) => h !== null && geometries.alive(h)),
+    [true, false, false, false, false, false, false, false, false, false],
+  );
+  assert.equal(lines.kept, 1);
+});
