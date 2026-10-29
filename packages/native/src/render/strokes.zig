@@ -1,13 +1,16 @@
 //! A shape layer's lines as triangles, in one call: the player's
 //! scene/strokes.ts (layerStrokes and what it calls) ported with the same
-//! arithmetic in the same order, so that its output is the TS's bit for bit.
+//! arithmetic in the same order, so that in V8 its output is the TS's bit
+//! for bit; in another engine, whose Math.hypot, atan2 or acos may round
+//! otherwise, the last bits may differ.
 //! A line drawn opaque is triangles along its paths (lineTriangles); any
 //! other is outlined (outline, triangleRing) and its outline filled non-zero
 //! by tessellate.zig's libtess2, as the host's Tessellator fills it, without going
 //! back to JS. Positions are worked out in f64 and rounded to f32 last, as
-//! Float32Array.from rounds them. Math.hypot is V8's algorithm; Math.sin and
-//! Math.cos are the host's own, imported, as engines differ in their last
-//! bit, which moves a corner.
+//! Float32Array.from rounds them. Math.hypot is V8's algorithm, and atan2 and
+//! acos Zig's, which are fdlibm's, as V8's are; Math.sin and Math.cos are
+//! the host's own, imported, as engines differ in their last bit, which
+//! moves a corner.
 //!
 //! What it cannot build as the TS does, it refuses, for the host to build in
 //! JS: an outline libtess2 refuses, which JS fills its own way; a position
@@ -22,12 +25,13 @@
 //! (MOVE x y, LINE x y, CURVE cx cy x y, CUBIC c1x c1y c2x c2y x y), a
 //! fill's closing line already added.
 //!
-//! Only an instance that calls nothing else of the module's uses this: its
-//! memory comes from wasm_allocator, which tessellate.zig's arena would overwrite.
+//! Its memory is the module's arena (arena.zig): lineInput resets it, and
+//! each lineBuild lets go of all but the input.
 const std = @import("std");
+const arena = @import("arena.zig");
 const tessellate = @import("tessellate.zig");
 
-const allocator = std.heap.wasm_allocator;
+const allocator = arena.allocator;
 
 extern "env" fn sine(x: f64) f64;
 extern "env" fn cosine(x: f64) f64;
@@ -42,9 +46,13 @@ const TOGETHER: usize = 2;
 
 const Error = error{ OutOfMemory, Malformed, Refused };
 
-var input_buffer: std.ArrayList(f64) = .empty;
+/// The input lineInput reserved, where the arena stood after it, and the arena's generation then.
+var input: []f64 = &.{};
+var input_top: usize = 0;
+var input_generation: u32 = 0;
 var positions: std.ArrayList(f32) = .empty;
-var colors: std.ArrayList(u32) = .empty;
+/// Each line's colour from its first vertex on: the colours are written once, where they go.
+var runs: std.ArrayList(Run) = .empty;
 var indices: std.ArrayList(u32) = .empty;
 /// A path flattened, and backwards for its outline's way back.
 var points: std.ArrayList(f64) = .empty;
@@ -59,42 +67,50 @@ var ways: std.ArrayList(Way) = .empty;
 /// The outline contours a fill takes, one after another, and where each ends, in f64s.
 var outlines: std.ArrayList(f64) = .empty;
 var ends: std.ArrayList(u32) = .empty;
-/// The geometry laid out in one block for one copy: positions, colours, indices.
-var block: std.ArrayList(u32) = .empty;
-/// Where the block is, its vertices and its indices.
-var layout: [3]u32 = .{ 0, 0, 0 };
+/// What lineBuild made, laid out in one block for one copy (positions, colours, indices):
+/// where the block is, its vertices and its indices.
+var layout: [3]u32 = @splat(0);
 var color: u32 = 0;
 /// Whether a position came out NaN.
 var nan_seen = false;
 
 const Way = struct { x: f64, y: f64, length: f64 };
+const Run = extern struct { start: u32, color: u32 };
 
-/// Room for `n` f64s of input, or 0.
+/// The arena reset, and room for `n` f64s of input in it, or 0.
 export fn lineInput(n: usize) usize {
-    input_buffer.resize(allocator, n) catch return 0;
-    return @intFromPtr(input_buffer.items.ptr);
+    arena.reset();
+    input_generation = arena.generation;
+    input = allocator.alloc(f64, n) catch &.{};
+    input_top = arena.top;
+    return if (input.len == n) @intFromPtr(input.ptr) else 0;
 }
 
 export fn lineHeader() usize {
     return @intFromPtr(&layout);
 }
 
-/// The layer in the first `length` f64s of the input, its geometry laid
-/// out in one block for the header to describe: 0; -1 out of memory, -2
-/// malformed, -3 refused, for JS to build.
+/// The layer in the first `length` f64s of the input, its geometry for the
+/// header to describe: 0; -1 out of memory, -2 malformed, -3 refused, for
+/// JS to build.
 export fn lineBuild(length: usize) i32 {
-    positions.clearRetainingCapacity();
-    colors.clearRetainingCapacity();
-    indices.clearRetainingCapacity();
-    outlines.clearRetainingCapacity();
-    ends.clearRetainingCapacity();
-    nan_seen = false;
-    layout = .{ 0, 0, 0 };
-    if (length > input_buffer.items.len) {
+    layout = @splat(0);
+    // A reset since, by another of the module's calls, leaves no input.
+    if (input_generation != arena.generation or length > input.len) {
         return -2;
     }
 
-    layer(input_buffer.items[0..length]) catch |e| return switch (e) {
+    // All but the input let go of: the last call's lists with it.
+    arena.top = input_top;
+    inline for (.{ &positions, &indices, &points, &reversed, &between, &right, &ring, &outlines, &ends }) |list| {
+        list.* = .empty;
+    }
+
+    corners = .empty;
+    ways = .empty;
+    runs = .empty;
+    nan_seen = false;
+    layer(input[0..length]) catch |e| return switch (e) {
         error.OutOfMemory => -1,
         error.Malformed => -2,
         error.Refused => -3,
@@ -103,12 +119,17 @@ export fn lineBuild(length: usize) i32 {
         return -3;
     }
 
-    const v = colors.items.len;
+    // One block, the colours written where they go: two copies out, the colours filled in JS,
+    // measured slower.
+    const v = positions.items.len / 2;
     const n = indices.items.len;
-    block.resize(allocator, v * 3 + n) catch return -1;
-    const out = block.items;
+    const out = allocator.alloc(u32, v * 3 + n) catch return -1;
     @memcpy(out[0 .. v * 2], @as([]const u32, @ptrCast(positions.items)));
-    @memcpy(out[v * 2 .. v * 3], colors.items);
+    for (runs.items, 0..) |run, k| {
+        const end = if (k + 1 < runs.items.len) runs.items[k + 1].start else v;
+        @memset(out[v * 2 + run.start .. v * 2 + end], run.color);
+    }
+
     @memcpy(out[v * 3 ..], indices.items);
     layout = .{ @intCast(@intFromPtr(out.ptr)), @intCast(v), @intCast(n) };
     return 0;
@@ -145,6 +166,7 @@ fn layer(in: []const f64) Error!void {
         const join = try count(in[i + 2], 2);
         const limit = in[i + 3];
         color = @intCast(try count(in[i + 4], 0xffffffff));
+        try colorFrom(@intCast(positions.items.len / 2));
         const flags = try count(in[i + 5], 3);
         const paths = try count(in[i + 6], in.len);
         i += 7;
@@ -689,99 +711,6 @@ fn triangleRing(p: []const f64, h: f64, caps: usize, join: usize, limit: f64, fl
     return true;
 }
 
-/// libtess2's memory while it fills an outline: blocks from the allocator, bumped through, each
-/// allocation after a header that holds its size, as tessellate.zig's arena keeps it. Nothing is freed
-/// until the fill is done; then a fill that took more than one block leaves one as large as all.
-const Arena = struct {
-    const header_size = 16;
-
-    blocks: std.ArrayList([]align(16) u8) = .empty,
-    /// The block in use, how far into it, and where in it the last allocation starts.
-    current: usize = 0,
-    top: usize = 0,
-    last: usize = 0,
-
-    fn alloc(self: *Arena, n: usize) ?[*]u8 {
-        const size = header_size + std.mem.alignForward(usize, n, 16);
-        while (self.current < self.blocks.items.len and self.top + size > self.blocks.items[self.current].len) {
-            self.current += 1;
-            self.top = 0;
-        }
-
-        if (self.current == self.blocks.items.len) {
-            const previous = if (self.blocks.items.len > 0) self.blocks.items[self.blocks.items.len - 1].len else 0;
-            const length = @max(size, previous * 2, 256 * 1024);
-            const fresh = allocator.alignedAlloc(u8, .@"16", length) catch return null;
-            self.blocks.append(allocator, fresh) catch {
-                allocator.free(fresh);
-                return null;
-            };
-            self.top = 0;
-        }
-
-        const memory = self.blocks.items[self.current];
-        const header: *usize = @ptrCast(@alignCast(memory.ptr + self.top));
-        header.* = n;
-        self.last = self.top;
-        self.top += size;
-        return memory.ptr + self.last + header_size;
-    }
-
-    fn realloc(self: *Arena, pointer: ?*anyopaque, n: usize) ?[*]u8 {
-        const old: [*]u8 = @ptrCast(pointer orelse return self.alloc(n));
-        const header: *usize = @ptrCast(@alignCast(old - header_size));
-        const previous = header.*;
-        if (n <= previous) {
-            return old;
-        }
-
-        // The last allocation grows where it is, if its block has the room.
-        if (self.current < self.blocks.items.len) {
-            const memory = self.blocks.items[self.current];
-            const end = self.last + header_size + std.mem.alignForward(usize, n, 16);
-            if (memory.ptr + self.last + header_size == old and end <= memory.len) {
-                header.* = n;
-                self.top = end;
-                return old;
-            }
-        }
-
-        const fresh = self.alloc(n) orelse return null;
-        @memcpy(fresh[0..previous], old[0..previous]);
-        return fresh;
-    }
-
-    fn reset(self: *Arena) void {
-        const blocks = self.blocks.items;
-        if (blocks.len > 1) {
-            var total: usize = 0;
-            for (blocks) |memory| {
-                total += memory.len;
-                allocator.free(memory);
-            }
-
-            self.blocks.clearRetainingCapacity();
-            if (allocator.alignedAlloc(u8, .@"16", total)) |fresh| {
-                self.blocks.appendAssumeCapacity(fresh);
-            } else |_| {}
-        }
-
-        self.current = 0;
-        self.top = 0;
-        self.last = 0;
-    }
-};
-
-var arena: Arena = .{};
-
-fn get(_: ?*anyopaque, n: c_uint) callconv(.c) ?*anyopaque {
-    return arena.alloc(n);
-}
-
-fn grow(_: ?*anyopaque, p: ?*anyopaque, n: c_uint) callconv(.c) ?*anyopaque {
-    return arena.realloc(p, n);
-}
-
 /// strokes.ts's fillUsable and fillOutline, for an outline the tessellator fills: the outline
 /// contours of three points or more filled non-zero by libtess2, as the host's Tessellator fills
 /// them, onto the geometry; refused where it refuses them, for JS to fill.
@@ -811,36 +740,73 @@ fn fillUsable() Error!void {
         return;
     }
 
-    defer arena.reset();
-    const status = tessellate.fill(outlines.items[0..written], ends.items[0..kept], 1, .{ .get = get, .grow = grow });
-    const t = tessellate.tess orelse return error.Refused;
+    // libtess2's scratch goes once its output is kept, which is copied past the scratch and then
+    // down over it, as tessellate.zig's layer keeps a fill's.
+    const mark = arena.top;
+    const status = tessellate.fill(outlines.items[0..written], ends.items[0..kept], 1);
+    const t = tessellate.tess orelse {
+        arena.top = mark;
+        return error.Refused;
+    };
     if (status != 0) {
+        tessellate.tess = null;
+        arena.top = mark;
         return error.Refused;
     }
 
     const result = tessellate.output(t);
-    const base: u32 = @intCast(colors.items.len);
-    try positions.ensureUnusedCapacity(allocator, result.positions.len);
-    try colors.ensureUnusedCapacity(allocator, result.positions.len / 2);
-    for (result.positions) |value| {
+    const position_bytes = result.positions.len * @sizeOf(f64);
+    const bytes = position_bytes + result.indices.len * @sizeOf(u32);
+    const staged = arena.alloc(bytes);
+    tessellate.tess = null;
+    if (staged == 0) {
+        arena.top = mark;
+        return error.OutOfMemory;
+    }
+
+    const stage: [*]u8 = @ptrFromInt(staged);
+    @memcpy(stage[0..position_bytes], std.mem.sliceAsBytes(result.positions));
+    @memcpy(stage[position_bytes..bytes], std.mem.sliceAsBytes(result.indices));
+    arena.top = mark;
+    const kept_at = arena.alloc(bytes);
+    if (kept_at == 0) {
+        return error.OutOfMemory;
+    }
+
+    const to: [*]u8 = @ptrFromInt(kept_at);
+    std.mem.copyForwards(u8, to[0..bytes], stage[0..bytes]);
+    const out_positions = @as([*]const f64, @ptrFromInt(kept_at))[0..result.positions.len];
+    const out_indices = @as([*]const i32, @ptrFromInt(kept_at + position_bytes))[0..result.indices.len];
+
+    const base: u32 = @intCast(positions.items.len / 2);
+    try positions.ensureUnusedCapacity(allocator, out_positions.len);
+    for (out_positions) |value| {
         positions.appendAssumeCapacity(@floatCast(value));
     }
 
-    colors.appendNTimesAssumeCapacity(color, result.positions.len / 2);
-    try indices.ensureUnusedCapacity(allocator, result.indices.len);
-    for (result.indices) |index| {
+    try indices.ensureUnusedCapacity(allocator, out_indices.len);
+    for (out_indices) |index| {
         indices.appendAssumeCapacity(@as(u32, @intCast(index)) + base);
     }
 }
 
+/// The vertices from `start` on in `color`, the line's.
+fn colorFrom(start: u32) Error!void {
+    if (runs.items.len > 0 and runs.items[runs.items.len - 1].start == start) {
+        runs.items[runs.items.len - 1].color = color;
+        return;
+    }
+
+    try runs.append(allocator, .{ .start = start, .color = color });
+}
+
 fn vertex(x: f64, y: f64) Error!i32 {
-    const at: i32 = @intCast(colors.items.len);
+    const at: i32 = @intCast(positions.items.len / 2);
     if (std.math.isNan(x) or std.math.isNan(y)) {
         nan_seen = true;
     }
 
     try positions.appendSlice(allocator, &.{ @floatCast(x), @floatCast(y) });
-    try colors.append(allocator, color);
     return at;
 }
 

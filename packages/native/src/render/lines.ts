@@ -1,4 +1,4 @@
-import { renderCompiled, renderInstance } from "./module.js";
+import { renderInstance } from "./module.js";
 
 /** A layer's lines as triangles: two floats a vertex, its colour, and three indices a triangle. */
 export interface LineGeometry {
@@ -12,23 +12,42 @@ interface NativeExports {
   lineInput(n: number): number;
   lineHeader(): number;
   lineBuild(length: number): number;
+  setLimit(n: number): void;
 }
 
-/** An instance grown past this is let go after its call: what Tessellator keeps by default. */
-const KEEP = 8 << 20;
+export interface LineBuilderOptions {
+  /** Maximum arena address, including the C stack; at most 128 MiB. */
+  memoryLimit?: number;
+  /** Drop instances larger than this after each call. Defaults to 8 MiB. */
+  retainMemory?: number;
+}
 
 /**
  * A shape layer's lines built in one call by the render module's
  * strokes.zig, as the player's scene/strokes.ts builds them, its outlines
  * filled by the module's libtess2: the caller writes the layer into
  * input() as strokes.zig reads it and calls build() with its length. Its
- * instance is its own, apart from any Tessellator's.
+ * instance is its own, apart from any Tessellator's, and held to the same
+ * limits as a Tessellator's (TessellatorOptions), which pass them on: where
+ * a fill would have run out of memory, so do the lines, and JS builds them.
  */
 export class LineBuilder {
   private instance: NativeExports | null = null;
   private unavailable = false;
   private view = new Float64Array(0);
   private layout = new Uint32Array(0);
+  private readonly limit: number;
+  private readonly keep: number;
+
+  constructor(options: LineBuilderOptions = {}) {
+    this.limit = options.memoryLimit ?? 128 << 20;
+    this.keep = options.retainMemory ?? 8 << 20;
+  }
+
+  /** Current retained Wasm capacity. */
+  get capacity(): number {
+    return this.instance?.memory.buffer.byteLength ?? 0;
+  }
 
   /** A view of at least `n` f64s of input, valid until build(); null where the module is unavailable. */
   input(n: number): Float64Array | null {
@@ -36,15 +55,18 @@ export class LineBuilder {
       return null;
     }
 
-    try {
-      this.instance ??= renderInstance(() => {
-        throw new Error("line tessellation allocation failed");
-      }) as unknown as NativeExports;
-    } catch {
-      // Compilation can be blocked by CSP or unavailable on the host.
-      this.unavailable = !renderCompiled();
-      this.dispose();
-      return null;
+    if (!this.instance) {
+      try {
+        this.instance = renderInstance(() => {
+          throw new Error("line tessellation allocation failed");
+        }) as unknown as NativeExports;
+      } catch {
+        // A missing Wasm engine or SIMD, or a CSP refusal, is tried only once per owner.
+        this.unavailable = true;
+        return null;
+      }
+
+      this.instance.setLimit(this.limit);
     }
 
     const x = this.instance;
@@ -79,17 +101,12 @@ export class LineBuilder {
         return undefined;
       }
 
-      const buffer = x.memory.buffer;
-      if (this.layout.buffer !== buffer) {
-        this.layout = new Uint32Array(buffer, x.lineHeader(), 3);
-      }
-
-      const [at, vertices, count] = this.layout;
+      const [at, vertices, count] = this.header(x);
       if (count === 0) {
         return null;
       }
 
-      const copy = buffer.slice(at, at + (vertices * 3 + count) * 4);
+      const copy = x.memory.buffer.slice(at, at + (vertices * 3 + count) * 4);
       return {
         positions: new Float32Array(copy, 0, vertices * 2),
         colors: new Uint32Array(copy, vertices * 8, vertices),
@@ -100,10 +117,19 @@ export class LineBuilder {
       this.dispose();
       return undefined;
     } finally {
-      if (this.instance && this.instance.memory.buffer.byteLength > KEEP) {
+      if (this.capacity > this.keep) {
         this.dispose();
       }
     }
+  }
+
+  /** strokes.zig's layout, read again where memory grew. */
+  private header(x: NativeExports): Uint32Array {
+    if (this.layout.buffer !== x.memory.buffer) {
+      this.layout = new Uint32Array(x.memory.buffer, x.lineHeader(), 3);
+    }
+
+    return this.layout;
   }
 
   /** The instance let go, its memory with it; the next input() makes another. */

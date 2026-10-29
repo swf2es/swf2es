@@ -1,7 +1,7 @@
 import { LineBuilder } from "../render/lines.js";
 import { renderCompiled, renderInstance } from "../render/module.js";
 
-export { LineBuilder, type LineGeometry } from "../render/lines.js";
+export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "../render/lines.js";
 
 /** Buffers are owned by the caller; subsequent calls and disposal cannot change them. */
 export interface FillGeometry {
@@ -89,7 +89,7 @@ export class Tessellator {
   private unavailable = false;
   private readonly limit: number;
   private readonly keep: number;
-  private readonly lines = new LineBuilder();
+  private readonly lines: LineBuilder;
 
   constructor(options: TessellatorOptions = {}) {
     this.limit = options.memoryLimit ?? 128 << 20;
@@ -104,11 +104,17 @@ export class Tessellator {
     ) {
       throw new RangeError("invalid tessellator memory limit");
     }
+
+    this.lines = new LineBuilder({ memoryLimit: this.limit, retainMemory: this.keep });
+    this.tessellate = Object.assign(this.fill, { layer: this.layer, lines: this.lines });
   }
 
-  /** Current retained Wasm capacity. Arena reset alone does not shrink this memory. */
+  /**
+   * Current retained Wasm capacity, the line builder's included. Arena reset
+   * alone does not shrink this memory.
+   */
   get capacity(): number {
-    return this.instance?.memory.buffer.byteLength ?? 0;
+    return (this.instance?.memory.buffer.byteLength ?? 0) + this.lines.capacity;
   }
 
   dispose(): void {
@@ -138,7 +144,7 @@ export class Tessellator {
 
   /** An instance grown past what is kept, let go. */
   private trim(): void {
-    if (this.capacity > this.keep) {
+    if ((this.instance?.memory.buffer.byteLength ?? 0) > this.keep) {
       this.instance = null;
     }
   }
@@ -325,8 +331,5 @@ export class Tessellator {
    * flattened already; a layer takes them as path commands; and a layer's
    * lines take the layer as the player packs it (`lines`).
    */
-  readonly tessellate: FillTessellate = Object.assign(this.fill, {
-    layer: this.layer,
-    lines: this.lines,
-  });
+  readonly tessellate: FillTessellate;
 }

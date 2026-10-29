@@ -1,117 +1,36 @@
 // libtess2 for wasm32-freestanding, with the curves of a layer's fills
-// flattened first (flatten.zig). The host resets this bounded bump arena
-// before each call, a fill (run) or a layer's fills (layer), and copies the
+// flattened first (flatten.zig). The host resets the module's bounded bump
+// arena (arena.zig) before each call, a fill (run) or a layer's fills (layer), and copies the
 // resulting geometry into owned buffers.
 // The vendored C uses its allocator callbacks; libc allocation and longjmp
 // are provided here so no C wrapper or libc is needed.
 const std = @import("std");
 const c = @import("c");
 const flatten = @import("flatten.zig");
+const arena = @import("arena.zig");
 
-extern var __heap_base: u8;
 extern "env" fn failure(code: c_int) noreturn;
 
-const page = 65536;
-var base: usize = 0;
-var top: usize = 0;
-var spent: usize = 0;
-// Absolute address ceiling, including static data and the C stack.
-var ceiling: usize = 128 << 20;
 pub var tess: ?*c.TESStesselator = null;
+/// The arena's generation `tess` was made in: another's reset leaves it none.
+var made_in: u32 = 0;
 
 export fn reset() void {
-    if (base == 0) {
-        base = std.mem.alignForward(usize, @intFromPtr(&__heap_base), 16);
-    }
-
-    top = base;
-    spent = 0;
+    arena.reset();
     tess = null;
 }
 
-export fn setLimit(n: usize) void {
-    ceiling = n;
-}
-
-fn reserve(end: u64) bool {
-    if (end > ceiling) {
-        return false;
-    }
-
-    const have = @as(u64, @wasmMemorySize(0)) * page;
-    if (end > have and @wasmMemoryGrow(0, @intCast((end - have + page - 1) / page)) < 0) {
-        return false;
-    }
-
-    return true;
-}
-
-export fn alloc(n: usize) usize {
-    const start = std.mem.alignForward(u64, top, 16);
-    const end = start + 16 + n;
-    if (!reserve(end)) {
-        return 0;
-    }
-
-    // The header lets realloc copy precisely the preceding allocation.
-    const header: *usize = @ptrFromInt(@as(usize, @intCast(start)));
-    header.* = n;
-    top = @intCast(end);
-    spent += n;
-    return @intCast(start + 16);
-}
-
-export fn malloc(n: usize) ?*anyopaque {
-    return @ptrFromInt(alloc(n));
-}
-
-export fn free(_: ?*anyopaque) void {}
-
-export fn realloc(p: ?*anyopaque, n: usize) ?*anyopaque {
-    if (p) |old| {
-        const address = @intFromPtr(old);
-        const header: *usize = @ptrFromInt(address - 16);
-        const previous = header.*;
-        if (n <= previous) {
-            header.* = n;
-            return old;
-        }
-
-        if (@as(u64, address) + previous == top) {
-            const end = @as(u64, address) + n;
-            if (!reserve(end)) {
-                return null;
-            }
-
-            header.* = n;
-            top = @intCast(end);
-            spent += n - previous;
-            return old;
-        }
-    }
-
-    const at = alloc(n);
-    if (at == 0) {
-        return null;
-    }
-
-    if (p) |old| {
-        const header: *const usize = @ptrFromInt(@intFromPtr(old) - 16);
-        const from: [*]const u8 = @ptrCast(old);
-        const to: [*]u8 = @ptrFromInt(at);
-        const count = @min(header.*, n);
-        @memcpy(to[0..count], from[0..count]);
-    }
-
-    return @ptrFromInt(at);
+/// `tess`, if no reset has let its memory go since.
+fn current() ?*c.TESStesselator {
+    return if (made_in == arena.generation) tess else null;
 }
 
 fn get(_: ?*anyopaque, n: c_uint) callconv(.c) ?*anyopaque {
-    return malloc(n);
+    return arena.malloc(n);
 }
 
 fn grow(_: ?*anyopaque, p: ?*anyopaque, n: c_uint) callconv(.c) ?*anyopaque {
-    return realloc(p, n);
+    return arena.realloc(p, n);
 }
 
 fn drop(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {}
@@ -120,15 +39,6 @@ fn drop(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {}
 // resume an arena whose C stack was unwound without real setjmp support.
 export fn longjmp(_: ?*anyopaque, code: c_int) noreturn {
     failure(code);
-}
-
-export fn highWater() usize {
-    return top - base;
-}
-
-export fn allocated() usize {
-    // Diagnostic payload bytes reserved since reset, excluding headers and alignment.
-    return spent;
 }
 
 /// What one fill may hold: more is rejected, as too slow to tessellate in a frame.
@@ -161,25 +71,18 @@ fn valid(coords: []const f64, ends: []const u32, nonzero: i32) bool {
     return at == coords.len / 2;
 }
 
-/// Where libtess2's memory comes from: this file's arena, or strokes.zig's.
-pub const Memory = struct {
-    get: *const fn (?*anyopaque, c_uint) callconv(.c) ?*anyopaque,
-    grow: *const fn (?*anyopaque, ?*anyopaque, c_uint) callconv(.c) ?*anyopaque,
-};
-
-const arena: Memory = .{ .get = get, .grow = grow };
-
 /// Tessellates a valid fill into `tess`: 0, -1 where libtess2 fails, or -3
 /// where its output is not fit to draw (a coordinate not finite or an index
 /// past the vertices), which the host then fills itself.
-fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool, memory: Memory) i32 {
+fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     var allocator = std.mem.zeroes(c.TESSalloc);
-    allocator.memalloc = memory.get;
-    allocator.memrealloc = memory.grow;
+    allocator.memalloc = get;
+    allocator.memrealloc = grow;
     allocator.memfree = drop;
     // A small intersection reserve; denser crossings can still grow the queue.
     allocator.extraVertices = @intCast(coords.len / 8 + 16);
     tess = c.tessNewTess(&allocator);
+    made_in = arena.generation;
     const t = tess orelse return -1;
 
     var at: usize = 0;
@@ -229,35 +132,34 @@ export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: 
         return -2;
     }
 
-    return fill(coords[0 .. count * 2], ends[0..contours], nonzero, arena);
+    return fill(coords[0 .. count * 2], ends[0..contours], nonzero);
 }
 
 /// run's checks and tessellation of `coords`, each contour ending at its
-/// point in `ends`, libtess2's memory from `memory`: run's status, its
-/// output in `tess`.
-pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32, memory: Memory) i32 {
+/// point in `ends`: run's status, its output in `tess`.
+pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32) i32 {
     tess = null;
     if (!valid(coords, ends, nonzero)) {
         return -2;
     }
 
-    return tessellate(coords, ends, nonzero == 1, memory);
+    return tessellate(coords, ends, nonzero == 1);
 }
 
 export fn vertices() usize {
-    return if (tess) |value| @intFromPtr(c.tessGetVertices(value)) else 0;
+    return if (current()) |value| @intFromPtr(c.tessGetVertices(value)) else 0;
 }
 
 export fn indices() usize {
-    return if (tess) |value| @intFromPtr(c.tessGetElements(value)) else 0;
+    return if (current()) |value| @intFromPtr(c.tessGetElements(value)) else 0;
 }
 
 export fn vertexCount() u32 {
-    return if (tess) |value| @intCast(c.tessGetVertexCount(value)) else 0;
+    return if (current()) |value| @intCast(c.tessGetVertexCount(value)) else 0;
 }
 
 export fn triangleCount() u32 {
-    return if (tess) |value| @intCast(c.tessGetElementCount(value)) else 0;
+    return if (current()) |value| @intCast(c.tessGetElementCount(value)) else 0;
 }
 
 /// A layer's output (layer), followed in memory by a Range for each fill.
@@ -303,8 +205,8 @@ fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i3
         start = end;
     }
 
-    const points_at = alloc(most * 2 * @sizeOf(f64));
-    const kept_at = alloc(ends.len * @sizeOf(u32));
+    const points_at = arena.alloc(most * 2 * @sizeOf(f64));
+    const kept_at = arena.alloc(ends.len * @sizeOf(u32));
     if (points_at == 0 or kept_at == 0) {
         return -1;
     }
@@ -334,7 +236,7 @@ fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i3
         return 0;
     }
 
-    return tessellate(coords, kept[0..contours], rule == 1, arena);
+    return tessellate(coords, kept[0..contours], rule == 1);
 }
 
 /// Tessellates every fill of a layer in one call, as run would each
@@ -347,8 +249,8 @@ fn flattened(commands: []const f64, from: usize, ends: []const u32, rule: u8) i3
 /// the host to try each fill alone.
 export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, contours: usize, fills: [*]const u32, rules: [*]const u8, count: usize) usize {
     tess = null;
-    const head = alloc(@sizeOf(Layer) + count * @sizeOf(Range));
-    const kept = alloc(count * @sizeOf(usize));
+    const head = arena.alloc(@sizeOf(Layer) + count * @sizeOf(Range));
+    const kept = arena.alloc(count * @sizeOf(usize));
     if (head == 0 or kept == 0) {
         return 0;
     }
@@ -378,10 +280,10 @@ export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, conto
 
         range.* = .{ .status = 0, .vertex_start = 0, .vertex_count = 0, .index_start = 0, .index_count = 0 };
         chunk.* = 0;
-        const mark = top;
+        const mark = arena.top;
         range.status = flattened(commands[0..length], from, own, rules[i]);
         if (range.status != 0 or tess == null) {
-            top = mark;
+            arena.top = mark;
             tess = null;
             continue;
         }
@@ -390,10 +292,10 @@ export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, conto
         const result = output(tess.?);
         const position_bytes = result.positions.len * @sizeOf(f64);
         const bytes = position_bytes + result.indices.len * @sizeOf(c.TESSindex);
-        const staged = alloc(bytes);
+        const staged = arena.alloc(bytes);
         if (staged == 0) {
             range.status = -1;
-            top = mark;
+            arena.top = mark;
             tess = null;
             continue;
         }
@@ -403,7 +305,7 @@ export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, conto
         @memcpy(to[position_bytes..bytes], std.mem.sliceAsBytes(result.indices));
         const at = std.mem.alignForward(usize, mark, 16);
         @memmove(@as([*]u8, @ptrFromInt(at))[0..bytes], to[0..bytes]);
-        top = at + bytes;
+        arena.top = at + bytes;
         tess = null;
 
         chunk.* = at;
@@ -420,8 +322,8 @@ export fn layer(commands: [*]const f64, length: usize, ends: [*]const u32, conto
     }
 
     const index_size: usize = if (vertex_total <= 0x10000) 2 else 4;
-    const positions = alloc(@intCast(vertex_total * 2 * @sizeOf(f64)));
-    const indices_at = alloc(@intCast(index_total * index_size));
+    const positions = arena.alloc(@intCast(vertex_total * 2 * @sizeOf(f64)));
+    const indices_at = arena.alloc(@intCast(index_total * index_size));
     if (positions == 0 or indices_at == 0) {
         return 0;
     }

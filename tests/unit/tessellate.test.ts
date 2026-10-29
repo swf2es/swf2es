@@ -100,6 +100,49 @@ test("raw native getters expose only the current successful run", async () => {
   assert.deepEqual(result(), [0, 0, 0, 0]);
 });
 
+test("an instance's families share one arena, and a reset by one leaves another nothing stale", async () => {
+  const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
+  const instance = await WebAssembly.instantiate(module, {
+    env: {
+      failure: () => assert.fail("unexpected native allocation failure"),
+      sine: Math.sin,
+      cosine: Math.cos,
+    },
+  });
+  const x = instance.exports as unknown as {
+    memory: WebAssembly.Memory;
+    reset(): void;
+    alloc(size: number): number;
+    run(coords: number, count: number, ends: number, contours: number, nonzero: number): number;
+    vertexCount(): number;
+    resetArena(bytes: number): number;
+    convolve(params: number): number;
+    lineInput(n: number): number;
+    lineBuild(length: number): number;
+  };
+  x.reset();
+  const coords = x.alloc(square.length * 8);
+  const ends = x.alloc(4);
+  new Float64Array(x.memory.buffer, coords, square.length).set(square);
+  new Uint32Array(x.memory.buffer, ends, 1)[0] = 4;
+  assert.equal(x.run(coords, 4, ends, 1, 0), 0);
+  assert.equal(x.vertexCount(), 4);
+
+  // The lines' input, reserved after the fill, resets the arena: the fill's output is gone.
+  const input = x.lineInput(6);
+  assert.ok(input);
+  new Float64Array(x.memory.buffer, input, 6).set([1, 0, 0, 1, 0.1, 0]);
+  assert.equal(x.lineBuild(6), 0);
+  assert.equal(x.vertexCount(), 0);
+
+  // The bitmap kernel's reset leaves the lines no input, and the lines' none to the kernel.
+  const params = x.resetArena(1024);
+  assert.ok(params);
+  assert.equal(x.lineBuild(6), -2);
+  x.lineInput(6);
+  assert.equal(x.convolve(params), 0);
+});
+
 test("owned buffers survive arena reuse, growth and disposal", () => {
   for (const retainMemory of [0, 8 << 20]) {
     const tess = new Tessellator({ retainMemory });

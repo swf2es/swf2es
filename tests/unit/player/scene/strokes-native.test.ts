@@ -1,14 +1,14 @@
 // The native line builder (@swf2es/native's strokes.zig, through
 // scene/strokes-native.ts) against layerStrokes on random layers, opaque and
-// translucent: the same geometry bit for bit, or a refusal that leaves the
-// layer to layerStrokes.
+// translucent: the same geometry bit for bit, as V8 runs both, or a refusal
+// that leaves the layer to layerStrokes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Tessellator } from "@swf2es/native/tessellate";
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import { layerStrokes } from "../../../../packages/player/dist/scene/strokes.js";
 import { layerStrokesNative } from "../../../../packages/player/dist/scene/strokes-native.js";
-import { random, randomLayer } from "./line-layers.ts";
+import { curved, layerOf, random, randomLayer } from "./line-layers.ts";
 
 const LAYERS = 3000;
 
@@ -100,4 +100,22 @@ test("a NaN position is left to layerStrokes, which writes it with bits of its o
   const lines = tessellator.tessellate.lines;
   assert.equal(layerStrokesNative(layer, 1, 0, 0, 1, 1, lines, null, true), undefined);
   tessellator.dispose();
+});
+
+test("the line builder keeps to its tessellator's memory limit and what it retains", () => {
+  const r = random(4);
+  const layer = layerOf(r, { width: 200, join: 0, cap: 0, alpha: 128 }, 20, (r) =>
+    curved(r, 16, true, 200),
+  );
+  const build = (tessellator: Tessellator) =>
+    layerStrokesNative(layer, 1, 0, 0, 1, 1, tessellator.tessellate.lines, null, false);
+  // Short of memory, the layer is left to layerStrokes, as a fill short of memory is to JS.
+  const short = new Tessellator({ memoryLimit: 1 << 20 });
+  assert.equal(build(short), undefined);
+  const roomy = new Tessellator();
+  assert.ok(build(roomy));
+  assert.ok(roomy.capacity > 0, "the line builder's memory counts in the tessellator's");
+  const keepsNone = new Tessellator({ retainMemory: 0 });
+  assert.ok(build(keepsNone));
+  assert.equal(keepsNone.capacity, 0);
 });
