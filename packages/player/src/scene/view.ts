@@ -258,6 +258,8 @@ interface LineEntry {
   d: number;
   least: number;
   by: number[] | null;
+  /** Drawn at whole alpha, where lines of whole alpha may overlap themselves (layerStrokes). */
+  opaque: boolean;
   handle: GeometryHandle | null;
   version: number;
 }
@@ -818,6 +820,8 @@ export class RenderView implements Drawer {
     if (layers) {
       // A pixel of the screen, in the stage's pixels: the least a line is wide.
       const least = 1 / (this.screenScale ?? this.scale * this.resolution);
+      // Alpha left whole by the colour transform: a line's overlaps then draw nothing new.
+      const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
       for (let i = 0; i < layers.length; i++) {
         for (const { part, handle } of this.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
@@ -852,7 +856,7 @@ export class RenderView implements Drawer {
 
         const lines =
           layers[i].strokes.length > 0
-            ? this.linesOf(layers[i], version, a, b, c, d, least, lineBy)
+            ? this.linesOf(layers[i], version, a, b, c, d, least, lineBy, opaque)
             : null;
         if (lines) {
           if (lineRow < 0) {
@@ -1899,8 +1903,16 @@ export class RenderView implements Drawer {
     c: number,
     d: number,
     least: number,
-    by: readonly number[] | null = null,
+    by: readonly number[] | null,
+    drawnOpaque: boolean,
   ): GeometryHandle | null {
+    // Only a line of whole alpha draws otherwise when opaque (layerStrokes): a layer of none keeps
+    // one geometry through a fade.
+    let opaque = false;
+    for (let i = 0; drawnOpaque && !opaque && i < layer.strokes.length; i++) {
+      opaque = layer.strokes[i].line.color >>> 24 === 255;
+    }
+
     let kept = this.lines.get(layer);
     if (!kept) {
       kept = [];
@@ -1918,6 +1930,7 @@ export class RenderView implements Drawer {
         same(e.c, c) &&
         same(e.d, d) &&
         same(e.least, least) &&
+        e.opaque === opaque &&
         (e.by === null
           ? by === null
           : by !== null &&
@@ -1958,7 +1971,7 @@ export class RenderView implements Drawer {
       );
     }
 
-    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by);
+    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by, opaque);
     const handle = data ? this.geometries.add(data) : null;
     if (known) {
       known.handle = handle;
@@ -1971,6 +1984,7 @@ export class RenderView implements Drawer {
         d,
         least,
         by: by ? [by[0], by[1], by[2], by[3]] : null,
+        opaque,
         handle,
         version,
       });

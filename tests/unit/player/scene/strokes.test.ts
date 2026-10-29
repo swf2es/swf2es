@@ -4,6 +4,7 @@ import { Tessellator } from "@swf2es/native/tessellate";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import {
   layerStrokes,
+  lineTriangles,
   outline,
   strokeWidth,
 } from "../../../../packages/player/dist/scene/strokes.js";
@@ -213,4 +214,154 @@ test("a line's paths are each filled once, and blended over each other where the
   assert.ok(g);
   assert.equal(coverings(g, 30.3, 30.1), 2);
   assert.equal(coverings(g, 10.3, 10.1), 1);
+});
+
+test("an opaque line's triangles cover what its outline does, whatever its joins and caps", () => {
+  let seed = 11;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let k = 0; k < 300; k++) {
+    const n = 2 + Math.floor(random() * 10);
+    const p = [0, 0];
+    let angle = random() * Math.PI * 2;
+    for (let i = 1; i < n; i++) {
+      angle += (random() - 0.5) * (k % 3 === 0 ? 5 : 1.6);
+      const step = 0.3 + random() * 6;
+      p.push(p[p.length - 2] + Math.cos(angle) * step, p[p.length - 1] + Math.sin(angle) * step);
+    }
+
+    const closed = k % 4 === 1;
+    const h = 0.2 + random() * 4;
+    const caps = Math.floor(random() * 3);
+    const join = Math.floor(random() * 3);
+    const contours = outline(p, closed, h, caps, join, 3, 0.05);
+    const g = { positions: [] as number[], indices: [] as number[] };
+    lineTriangles(p, closed, h, caps, join, 3, 0.05, 0, g.positions, [], g.indices);
+    const xs = p.filter((_, i) => i % 2 === 0);
+    const ys = p.filter((_, i) => i % 2 === 1);
+
+    for (let s = 0; s < 400; s++) {
+      const x = Math.min(...xs) - 4 * h + random() * (Math.max(...xs) - Math.min(...xs) + 8 * h);
+      const y = Math.min(...ys) - 4 * h + random() * (Math.max(...ys) - Math.min(...ys) + 8 * h);
+      assert.equal(
+        coverings(g, x, y) > 0,
+        winding(contours, x, y) !== 0,
+        `path ${k} (${closed ? "closed" : "open"}, caps ${caps}, join ${join}): (${x}, ${y})`,
+      );
+    }
+  }
+});
+
+test("a line of whole alpha drawn opaque takes no tessellator, any other is tessellated", () => {
+  const drawing = new Drawing();
+  drawing.lineStyle({ ...(halfClear(4) as object), color: 0xff000000 } as never);
+  drawing.moveTo(0, 0);
+  drawing.lineTo(60, 60);
+  drawing.lineTo(0, 60);
+  const tessellator = new Tessellator();
+  let calls = 0;
+  const counted: Parameters<typeof layerStrokes>[6] = (c, nonZero) => {
+    calls++;
+    return tessellator.tessellate(c, nonZero);
+  };
+  const g = layerStrokes(drawing.layers[0], 1, 0, 0, 1, 0.25, counted, null, true);
+  assert.ok(g);
+  assert.equal(calls, 0);
+  // The turn's inner corner, where the segments' quads overlap.
+  assert.equal(coverings(g, 57, 59), 2);
+  assert.equal(coverings(g, 30, 29.5), 1);
+
+  const tessellated = layerStrokes(drawing.layers[0], 1, 0, 0, 1, 0.25, counted, null, false);
+  tessellator.dispose();
+  assert.ok(tessellated);
+  assert.equal(calls, 1);
+  assert.equal(coverings(tessellated, 57, 59), 1);
+});
+
+/**
+ * The corners of a geometry that lie within one of its triangles' outer
+ * edges, those with no triangle of their own across them, and belong to a
+ * triangle across the edge, which meets it there: a T-junction, where
+ * rounding may open a crack between the two.
+ */
+const tJunctions = (positions: number[], indices: number[]) => {
+  const at = (v: number) => [positions[v * 2], positions[v * 2 + 1]];
+  const side = (a: number, b: number, v: number) => {
+    const [ax, ay] = at(a);
+    const [bx, by] = at(b);
+    const [vx, vy] = at(v);
+    return (bx - ax) * (vy - ay) - (by - ay) * (vx - ax);
+  };
+  const found: string[] = [];
+  for (let t = 0; t < indices.length; t += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = indices[t + e];
+      const b = indices[t + ((e + 1) % 3)];
+      const across = Math.sign(side(a, b, indices[t + ((e + 2) % 3)]));
+      // An edge with a triangle of its own across it is inside what they cover: nothing to crack.
+      let shared = false;
+      for (let u = 0; u < indices.length && !shared; u += 3) {
+        const tri = [indices[u], indices[u + 1], indices[u + 2]];
+        const third = tri.find((w) => w !== a && w !== b);
+        shared =
+          tri.includes(a) &&
+          tri.includes(b) &&
+          third !== undefined &&
+          Math.sign(side(a, b, third)) === -across;
+      }
+
+      if (shared) {
+        continue;
+      }
+
+      const [ax, ay] = at(a);
+      const [bx, by] = at(b);
+      const length = Math.hypot(bx - ax, by - ay);
+      for (let u = 0; u < indices.length; u += 3) {
+        const tri = [indices[u], indices[u + 1], indices[u + 2]];
+        for (const v of tri) {
+          const [vx, vy] = at(v);
+          const along = ((vx - ax) * (bx - ax) + (vy - ay) * (by - ay)) / length;
+          const off = Math.abs(side(a, b, v)) / length;
+          if (off > 1e-9 || along < 1e-9 || along > length - 1e-9) {
+            continue;
+          }
+
+          const ends = tri.filter((w) => w === a || w === b);
+          const third = tri.find((w) => w !== v && w !== a && w !== b);
+          if (
+            ends.length === 1 &&
+            third !== undefined &&
+            Math.sign(side(a, b, third)) === -across
+          ) {
+            found.push(`corner ${v} on edge ${a}-${b}`);
+          }
+        }
+      }
+    }
+  }
+
+  return found;
+};
+
+test("an opaque line's triangles meet corner to corner, no corner within another's edge", () => {
+  const zigzag = [0, 0, 10, 20, 20, 0, 30, 20, 40, 0];
+  const square = [0, 0, 30, 0, 30, 30, 0, 30, 0, 0];
+  const curve = [0, 0, 10, 1, 20, 3, 30, 6, 40, 10];
+  for (const [name, p, closed] of [
+    ["zigzag", zigzag, false],
+    ["square", square, true],
+    ["curve", curve, false],
+  ] as const) {
+    for (let join = 0; join < 3; join++) {
+      for (let caps = 0; caps < 3; caps++) {
+        const positions: number[] = [];
+        const indices: number[] = [];
+        lineTriangles([...p], closed, 3, caps, join, 3, 0.1, 0, positions, [], indices);
+        assert.deepEqual(tJunctions(positions, indices), [], `${name}, join ${join}, caps ${caps}`);
+      }
+    }
+  }
 });
