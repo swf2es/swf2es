@@ -1,13 +1,14 @@
 // The render module's wrappers, each over an instance of its own: fills
 // (Tessellator), a layer's lines (LineBuilder, also a Tessellator's
-// `tessellate.lines`) and BitmapData's convolution (Convolver).
+// `tessellate.lines`) and BitmapData's CPU filters (BitmapKernel).
 export {
+  BitmapKernel,
+  type BitmapKernelOptions,
   type BitmapRect,
   type BitmapSource,
   type ConvolutionFilter,
-  Convolver,
-  type ConvolverOptions,
-} from "./convolver.js";
+  type LayerFilter,
+} from "./bitmap-kernel.js";
 export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "./lines.js";
 export {
   type FillGeometry,

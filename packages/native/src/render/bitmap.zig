@@ -1,8 +1,9 @@
-//! What bitmap/index.ts calls: the module's arena (arena.zig), which
-//! resetArena resets before each call, and convolve.zig's kernel over the
-//! input written into it.
+//! What the bitmap kernels' wrapper (bitmap-kernel.ts) calls: the module's
+//! arena (arena.zig), which resetArena resets before each call, and
+//! convolve.zig's and blur.zig's kernels over the input written into it.
 const std = @import("std");
 const kernel = @import("convolve.zig");
+const filters = @import("blur.zig");
 const arena = @import("arena.zig");
 
 const page = 65536;
@@ -53,4 +54,46 @@ export fn convolve(address: usize) usize {
     const matrix = @as([*]const f64, @ptrFromInt(p.matrix))[0..taps];
     const out = kernel.convolve(arena.allocator, p, pixels, matrix) catch return 0;
     return @intFromPtr(out.ptr);
+}
+
+/// Blurs the pixels the BlurParams at `address` name, in place: their
+/// address, or 0 where the params are invalid or memory runs out.
+export fn blurFilter(address: usize) usize {
+    if (!holds(address, @sizeOf(filters.BlurParams), @alignOf(filters.BlurParams))) return 0;
+    // A copy, which the blocks the call writes into, wherever they lie in the input, leave be.
+    const params = @as(*const filters.BlurParams, @ptrFromInt(address)).*;
+    const p = &params;
+    if (!filters.validBlur(p)) return 0;
+    const count = @as(usize, p.w) * p.h;
+    if (!holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;
+    const pixels = @as([*]u32, @ptrFromInt(p.pixels))[0..count];
+    filters.blurPixels(arena.allocator, pixels, p) catch return 0;
+    return p.pixels;
+}
+
+/// Places the layer the LayerParams at `address` describe over its pixels,
+/// in place: their address, or 0 where the params are invalid or memory
+/// runs out.
+export fn layerFilter(address: usize) usize {
+    if (!holds(address, @sizeOf(filters.LayerParams), @alignOf(filters.LayerParams))) return 0;
+    // A copy, which the blocks the call writes into, wherever they lie in the input, leave be.
+    const params = @as(*const filters.LayerParams, @ptrFromInt(address)).*;
+    const p = &params;
+    if (!filters.validLayer(p)) return 0;
+    const count = @as(usize, p.w) * p.h;
+    if (!holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;
+    var reads: [2][]u8 = .{ &.{}, &.{} };
+    for (0..p.reads) |k| {
+        const r = p.read[k];
+        const n = @as(usize, r.rw) * r.rh;
+        if (!holds(r.alpha, n, 1)) return 0;
+        reads[k] = @as([*]u8, @ptrFromInt(r.alpha))[0..n];
+    }
+
+    const gradient = p.kind == .gradient_glow or p.kind == .gradient_bevel;
+    if (gradient and !holds(p.table, 256 * @sizeOf(u32), @alignOf(u32))) return 0;
+    const table: []const u32 = if (gradient) @as([*]const u32, @ptrFromInt(p.table))[0..256] else &.{};
+    const pixels = @as([*]u32, @ptrFromInt(p.pixels))[0..count];
+    filters.layer(arena.allocator, pixels, reads[0..p.reads], p, table) catch return 0;
+    return p.pixels;
 }

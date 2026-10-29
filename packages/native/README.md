@@ -5,14 +5,14 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 - `@swf2es/native/render`: what the renderer computes natively, each a
   wrapper over an instance of its own: double-precision libtess2 fill
   tessellation (`Tessellator`), a shape layer's lines built in one call
-  (`LineBuilder`), and BitmapData convolution kernels (`Convolver`).
+  (`LineBuilder`), and BitmapData convolution kernels (`BitmapKernel`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress` and `mp3` each compile their own module. What the renderer
-computes is one module, `render` (`src/render/`, about 76 KB), compiled
-once; each user instantiates it apart (a `Convolver`, a `Tessellator` and
+computes is one module, `render` (`src/render/`, about 90 KB), compiled
+once; each user instantiates it apart (a `BitmapKernel`, a `Tessellator` and
 its `LineBuilder`), so each has its own memory and lifetime, and a large
 bitmap job never grows the tessellator's memory, nor does disposing one
 take the other down. Within an instance, every part allocates from one
@@ -62,16 +62,41 @@ libtess2 is under SGI Free Software License B.
 
 ## bitmap
 
-`Convolver` is BitmapData's convolution. The player convolves through it
-alone: AS3's and AVM1's `BitmapData.applyFilter` with a convolution filter
-call the one `Convolver` of their realm (`packages/player/src/bitmap/
-filters.ts`), made at the first convolution, which compiles the module;
-where it traps, the call is made again in a new instance, and where that
-fails too, nothing is written. Other CPU filters and GPU filters are
-unchanged. `convolve()` returns owned premultiplied ARGB `Uint32Array`
-pixels, or `null` where they would not fit or the instance trapped. No
-source pixels are changed. Results survive later calls, memory growth,
-rejection and disposal.
+`BitmapKernel` is BitmapData's CPU filters: `convolve()` a convolution
+(`src/render/convolve.zig`), `blur()` a blur, and `layer()` a glow, a
+drop shadow, a bevel or a gradient glow or bevel (`src/render/blur.zig`).
+The player filters through it alone: AS3's and AVM1's
+`BitmapData.applyFilter` call the one `BitmapKernel` of their realm
+(`packages/player/src/bitmap/filters.ts`), made at the first filter that
+needs it, which compiles the module; where it traps, the call is made
+again in a new instance, and where that fails too, nothing is written. A
+colour matrix, a displacement map and GPU filters are unchanged. Each
+returns owned premultiplied ARGB `Uint32Array` pixels, or `null` where
+they would not fit or the instance trapped. No source pixels are changed.
+Results survive later calls, memory growth, rejection and disposal.
+
+`blur()` takes the rect to blur, `layer()` the rect to place a layer on
+and the offsets it reads the source's alpha from (one, or a bevel's two, on
+and back); the wrapper copies in the blocks of the source each reads, 0
+past the bitmap, a layer's alpha a byte a pixel. A large rect is filtered
+in tiles, each read as far round as the blur reaches, so a call's scratch
+stays within 4 MiB, and an instance kept between frames, wherever the
+reach lets it: a tile is four times the reach a side at least, and its
+blocks are cut to the bitmap and the reach round it, past which every pass
+holds nothing. Each takes values within the ranges the player's filter
+objects keep, blurs 0 to 255 or NaN, quality 0 to 15, strength 0 to 255,
+alphas 0 to 1, colours of 24 bits, and refuses others (null), in the
+wrapper and again in `blur.zig`; the player brings a filter from a SWF's
+tags, which may hold more, within them first.
+`blur.zig` keeps the JS's arithmetic, in the same order in f64, converting
+to an int as JS converts, so its pixels are the JS's to the bit: a blur's
+box runs truncated to 8 bits each, a glow's alpha from the blur so
+truncated times strength, a bevel's from the difference of two reads of
+it, placed as adl places them. Planes are bytes, which every value fits,
+so a call's scratch is a few bytes a pixel; runs along y go four columns a
+lane, and reads by whole pixels are row copies. Against the JS in node, on
+a 512-pixel square, a blur is 1.7 to 1.9 times as fast, a glow 1.4, an
+inner glow 2.1, a drop shadow 2.0 and a bevel 1.5.
 
 The wrapper convolves a rect a band of rows at a time, about 1 MiB of
 input and output a call: it copies each band's rows plus the kernel's halo
@@ -86,20 +111,23 @@ computed them. The kernel uses explicit f64x2 wasm SIMD, as all of
 its arena.
 
 Wasm memory has a 128 MiB maximum. Instances above 8 MiB are dropped after a
-call; `new Convolver({ retainMemory: bytes })` adjusts that threshold.
+call; `new BitmapKernel({ retainMemory: bytes })` adjusts that threshold.
 Arena reset reuses capacity; only dropping the instance permits its memory
 to be collected.
 
-The package's build first runs the kernel's Zig tests on the host (`zig
+The package's build first runs the kernels' Zig tests on the host (`zig
 build test` in this folder): exact pixels for small cases, and every
-allocation failing in turn. The kernel is `src/render/convolve.zig`, taking
-any `std.mem.Allocator`; `src/render/bitmap.zig` wraps it in the Wasm
-module's bump arena. No external dependency is needed.
+allocation failing in turn. The kernels, `src/render/convolve.zig` and
+`src/render/blur.zig`, take any `std.mem.Allocator`;
+`src/render/bitmap.zig` wraps them in the Wasm module's bump arena. No external dependency is needed.
 
-`node --test tests/unit/native-bitmap.test.ts` holds the kernel to the JS
-the player had (`tests/unit/player/bitmap/convolution-reference.ts`), bit
-for bit on thousands of random filters, special numbers among them, and
-checks ownership, rejection and traps. The player's references
+`node --test tests/unit/native-bitmap.test.ts` holds the convolution to
+the JS the player had (`tests/unit/player/bitmap/convolution-reference.ts`),
+bit for bit on thousands of random filters, special numbers among them,
+and checks ownership, rejection and traps; `native-blur.test.ts` holds
+`applyFilter`'s blurs, glows, shadows and bevels to theirs
+(`blur-reference.ts`), and takes `SWF2ES_FUZZ_STEPS` and
+`SWF2ES_FUZZ_SEED` for longer runs. The player's references
 (`apply-filter`, `convolution`) hold it to Flash's own pixels.
 
 ## compress

@@ -4204,7 +4204,8 @@ class extending it is refused, while one extending a filter of
 playerglobal's is made.
 
 BitmapData's `applyFilter` filters on the CPU, as adl computes
-(`bitmap/filters.ts`): the source's premultiplied channels, past the
+(`bitmap/filters.ts`; the blurs, glows, shadows, bevels and convolutions
+in `@swf2es/native/render`, below): the source's premultiplied channels, past the
 source rect too as far as the bitmap goes, filtered, and the filter's
 rect of them written whole into the destination, moved to its point and
 clipped; an opaque destination keeps its alpha, and refuses a glow, a
@@ -4414,17 +4415,25 @@ layers, not kept, are drawn ahead of the stage, a level at a time, and
 their passes in waves ([renderer.md](renderer.md#the-backend), held
 layers).
 
-#### Native CPU convolution
+#### Native CPU filters
 
-BitmapData's convolution is computed on the CPU by
-`@swf2es/native/render` alone: AS3's and AVM1's `applyFilter` call the one
-`Convolver` of their realm (`bitmap/filters.ts`), made at the first
-convolution, a worker's in its own. A trap is tried again in a new
-instance, and where that fails too, nothing is written. GPU filters and
-other BitmapData operations are unchanged. The JS the player had is kept
-as the kernel's reference in the unit tests
-(`tests/unit/player/bitmap/convolution-reference.ts`), which hold the
-kernel to it bit for bit.
+BitmapData's convolution, blur, glow, drop shadow, bevel and gradient glow
+and bevel are computed on the CPU by `@swf2es/native/render` alone: AS3's
+and AVM1's `applyFilter` call the one `BitmapKernel` of their realm
+(`bitmap/filters.ts`), made at the first filter that needs it, a worker's
+in its own. A trap is tried again in a new instance, and where that fails
+too, nothing is written. The player works out what a destination shows
+and a shadow's or a bevel's offset; the kernel's wrapper, the blocks each
+reads, in tiles over a large rect, so that its scratch stays small for any
+bitmap Flash allows. It takes values only within the ranges the player's
+filter objects keep, and refuses others; the player brings a filter from
+a SWF's tags (filterOfSwf), whose passes, blurs and strength may lie past
+them, within them first: passes to 15, blurs to 0 through 255, a negative
+strength none. The colour matrix and the displacement map stay in JS. The JS the
+player had is kept as the kernels' reference in the unit tests
+(`tests/unit/player/bitmap/convolution-reference.ts`,
+`blur-reference.ts`), which hold the kernels to it bit for bit
+(`native-bitmap.test.ts`, `native-blur.test.ts`).
 
 The native package depends on no other package and loads no DOM or node
 types. The kernel receives numeric records and premultiplied ARGB pixels.
