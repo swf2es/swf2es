@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node abc.ts && node domains.ts && node avm1.ts && node compress.ts && node tessellate.ts"
+    "test": "node abc.ts && node domains.ts && node avm1.ts && node compress.ts && node pbj.ts && node tessellate.ts"
   }
 }

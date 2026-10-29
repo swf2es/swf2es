@@ -9,6 +9,10 @@ package flash.display
 	{
 		public function ShaderJob(shader:Shader = null, target:Object = null, width:int = 0, height:int = 0)
 		{
+			this.shader = shader;
+			this.target = target;
+			this.width = width;
+			this.height = height;
 		}
 
 		public native function start(waitForCompletion:Boolean = false):void;

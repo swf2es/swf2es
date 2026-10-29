@@ -18,6 +18,7 @@ import { backwardSwf } from "../avm1-backward.ts";
 import { skippedExports } from "../avm1-exports.ts";
 import { maskSwf } from "../avm1-masks.ts";
 import { flashAssembler, script } from "../avm1-script.ts";
+import { PbjAssembler } from "../pbj-assembler.ts";
 import * as w from "../swf-writer.ts";
 import { type Compile, compileScripts } from "./scripts.ts";
 
@@ -10710,6 +10711,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Pixel Bender kernels run by ShaderJob on the CPU (scripts/ShaderJobs.as); the
+    // twirl's sines differ from Flash's in their last bits, a pixel's byte by 1.
+    name: "shader-jobs",
+    build: shaderJobs,
+    frames: 2,
+    capture: [2],
+    tolerance: 1,
+    maxOutliers: 0,
+  },
+  {
     name: "timeline-sounds",
     build: timelineSounds,
     frames: 33,
@@ -10762,6 +10773,119 @@ function timelineSounds(compile: Compile): Uint8Array {
         [1, "Tone"],
       ]),
       ...root.flatMap((frame) => [...frame, w.showFrame()]),
+      w.end(),
+    ],
+  });
+}
+
+/**
+ * The kernels of scripts/ShaderJobs.as, each bound to a ByteArray subclass:
+ * a twirl about a centre, sampled linearly; a 3x3 matrix times each
+ * pixel's colour, out as three channels; a checkerboard of ftoi, int
+ * division, if and select, its colours past its alpha; and floats sampled
+ * linearly, scaled.
+ */
+function shaderJobs(compile: Compile): Uint8Array {
+  const coord = (a: PbjAssembler) => a.version(1).param("in", "float2", "f0.rg", "_OutCoord");
+  const twirl = coord(new PbjAssembler().name("Twirl"))
+    .input(0, 4, "src")
+    .param("out", "float4", "f1.rgba", "dst")
+    .param("in", "float2", "f2.rg", "center")
+    .meta("defaultValue", "float2", [20, 20], true)
+    .param("in", "float", "f2.b", "amount")
+    .meta("defaultValue", "float", 0.15, true)
+    .op("mov", "f3.rg", "f0.rg")
+    .op("sub", "f3.rg", "f2.rg")
+    .op("length", "f3.b", "f3.rg")
+    .op("mul", "f3.b", "f2.b")
+    .op("sin", "f3.a", "f3.b")
+    .op("cos", "f4.r", "f3.b")
+    .op("mov", "f4.g", "f3.r")
+    .op("mul", "f4.g", "f4.r")
+    .op("mov", "f4.b", "f3.g")
+    .op("mul", "f4.b", "f3.a")
+    .op("sub", "f4.g", "f4.b")
+    .op("mov", "f4.b", "f3.r")
+    .op("mul", "f4.b", "f3.a")
+    .op("mov", "f4.a", "f3.g")
+    .op("mul", "f4.a", "f4.r")
+    .op("add", "f4.b", "f4.a")
+    .op("add", "f4.g", "f2.r")
+    .op("add", "f4.b", "f2.g")
+    .sample(true, "f1.rgba", "f4.gb", 0)
+    .bytes();
+  const mixer = coord(new PbjAssembler().name("Mixer"))
+    .input(0, 4, "src")
+    .param("out", "float3", "f1.rgb", "dst")
+    .param("in", "matrix3x3", "f4.m3", "m")
+    .sample(false, "f2.rgba", "f0.rg", 0)
+    .op("mov", "f3.rgb", "f2.rgb")
+    .op("matvecmul", "f3.rgb", "f4.m3")
+    .ld("f8.rgb", 0.1)
+    .op("add", "f3.rgb", "f8.rgb")
+    .op("mov", "f1.rgb", "f3.rgb")
+    .bytes();
+  const checker = coord(new PbjAssembler().name("Checker"))
+    .param("out", "float4", "f1.rgba", "dst")
+    .param("in", "int", "i1.r", "size")
+    .op("ftoi", "i2.rg", "f0.rg")
+    .op("div", "i2.rg", "i1.rr")
+    .op("add", "i2.r", "i2.g")
+    .op("mov", "i4.r", "i2.r")
+    .ld("i3.r", 2)
+    .op("div", "i4.r", "i3.r")
+    .op("mul", "i4.r", "i3.r")
+    .op("sub", "i2.r", "i4.r")
+    .ld("f5.r", 1)
+    .ld("f5.g", 0.25)
+    .if("i2.r")
+    .ld("f1.rg", 0.8)
+    .else()
+    .ld("f1.r", 0.2)
+    .ld("f1.g", 0.4)
+    .endif()
+    .select("f1.b", "i2.r", "f5.r", "f5.g")
+    .ld("f1.a", 0.6)
+    .bytes();
+  const stretch = coord(new PbjAssembler().name("Stretch"))
+    .input(0, 4, "src")
+    .param("out", "float4", "f1.rgba", "dst")
+    .param("in", "float2", "f2.rg", "scale")
+    .op("mov", "f3.rg", "f0.rg")
+    .op("mul", "f3.rg", "f2.rg")
+    .sample(true, "f1.rgba", "f3.rg", 0)
+    .bytes();
+  const kernels: [string, Uint8Array][] = [
+    ["TwirlKernel", twirl],
+    ["MixerKernel", mixer],
+    ["CheckerKernel", checker],
+    ["StretchKernel", stretch],
+  ];
+  return w.swf({
+    width: 270,
+    height: 40,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      ...kernels.map(([, bytes], i) => w.binaryData(i + 1, bytes)),
+      ...kernels.map(([name]) =>
+        w.doAbc(
+          compile(
+            name,
+            `package { import flash.utils.ByteArray; public class ${name} extends ByteArray {} }`,
+          ),
+          name,
+        ),
+      ),
+      w.doAbc(compile("ShaderJobs"), "ShaderJobs"),
+      w.symbolClass([
+        [0, "ShaderJobs"],
+        ...kernels.map(([name], i): [number, string] => [i + 1, name]),
+      ]),
+      w.showFrame(),
+      w.showFrame(),
       w.end(),
     ],
   });

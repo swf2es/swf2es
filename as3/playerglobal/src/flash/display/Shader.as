@@ -9,9 +9,17 @@ package flash.display
 	{
 		public function Shader(bytecode:ByteArray = null)
 		{
+			// An empty ByteArray is still a kernel to read, which Flash refuses.
+			if (bytecode)
+			{
+				this.byteCode = bytecode;
+			}
 		}
 
-		public native function set byteCode(code:ByteArray):void;
+		public function set byteCode(code:ByteArray):void
+		{
+			data = new ShaderData(code);
+		}
 
 		public native function get data():ShaderData;
 

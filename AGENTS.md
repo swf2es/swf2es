@@ -62,6 +62,9 @@ node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks
 node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib and LZMA: the
                               # decoders never trap, refuse with CompressedDataError, and a
                               # SWF that decodes has its prefix
+node tests/fuzz/pbj.ts [cases, 2000] [seed, 1]   # malformed Pixel Bender bytecode: readPbj
+                              # refuses it as adl does or reads it, and the interpreter runs
+                              # whatever it reads
 node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match independent point
                               # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of

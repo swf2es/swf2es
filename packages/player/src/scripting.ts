@@ -243,6 +243,12 @@ export class Scripting {
   invalidated = false;
   /** The objects whose scrollRect was set since the last frame was drawn, which it takes effect at. */
   readonly scrolled = new Set<DisplayObject>();
+  /**
+   * What finishes once this frame's EXIT_FRAME has gone, the frame's ends
+   * after it: an asynchronous ShaderJob's result and its COMPLETE, as adl
+   * delivers them, before the timers that fall between frames.
+   */
+  readonly afterExitFrame: (() => void)[] = [];
   /** The clip whose frame script is running, while one is: a goto it asks for waits for it to return. */
   inFrameScript: MovieClip | null = null;
   /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
@@ -1197,7 +1203,7 @@ export class Scripting {
     }
     this.lifecycle.afterScripts();
     this.broadcast("exitFrame");
-    for (const end of ends) {
+    for (const end of [...ends, ...this.afterExitFrame.splice(0)]) {
       try {
         end();
       } catch (error) {

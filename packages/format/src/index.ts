@@ -1,7 +1,8 @@
 /**
  * Parsers for the SWF container and its tags: shapes, fonts, text, bitmaps,
  * sounds, buttons and filters, a DoABC's bytes, which codegen parses, and
- * the AVM1 action blocks, which it compiles.
+ * the AVM1 action blocks, which it compiles; and Pixel Bender's bytecode,
+ * which a script hands flash.display.Shader.
  * The compiler and the player both use this package, so it must stay free of
  * DOM and node APIs.
  */
@@ -64,6 +65,28 @@ export {
   readFontAlignZones,
   readFontInfo,
 } from "./font.js";
+export {
+  PBJ_RULES,
+  PBJ_STRING,
+  PBJ_TYPE_SIZES,
+  PBJ_TYPES,
+  type PbjCompute,
+  PbjError,
+  type PbjIf,
+  type PbjInput,
+  type PbjKernel,
+  type PbjLoad,
+  type PbjMetadata,
+  PbjOp,
+  type PbjOperation,
+  type PbjParameter,
+  type PbjRegister,
+  type PbjRule,
+  type PbjSample,
+  type PbjSelect,
+  pbjFloatType,
+  readPbj,
+} from "./pbj.js";
 export {
   type ColorTransform,
   type Fill,
