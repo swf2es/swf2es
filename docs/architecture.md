@@ -95,7 +95,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `native`  | the WebAssembly modules, each a sub-path with its own binary and lifetime: `compress` (zlib and LZMA), `mp3` (minimp3), `tessellate` (libtess2 fills) and `bitmap` (CPU kernels), C and Zig built by one Zig project | — |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3) and `render` (fills with libtess2, lines and BitmapData's CPU kernels), C and Zig built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
@@ -148,9 +148,10 @@ unchanged, against the libc stubs in `include/`), writes each module into
 its `binary.ts` with a digest of its inputs, and the vendored
 C's notices, verbatim, into `LICENSE.third-party`. `pnpm build` checks the
 digests and the notices; CI rebuilds the binaries and requires them
-unchanged. `compress` and `mp3` each compile their own module; `bitmap`,
-`tessellate` and the own renderer's lines share one, `render`, which each
-instantiates apart, with its own memory and lifetime. `codegen` knows the runtime's function names and signatures
+unchanged. `compress` and `mp3` each compile their own module; the
+renderer's tessellator and line builder and BitmapData's kernel share
+one, `render`, which each instantiates apart, with its own memory and
+lifetime. `codegen` knows the runtime's function names and signatures
 but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
@@ -3063,6 +3064,21 @@ Graphics drawing used as a stencil mask fills non-zero regardless of
 `drawPath`'s winding, while static shapes keep their authored winding
 (`static-mask-winding`); its mask's geometry is made apart.
 
+A drawing redrawn every frame, as a software 3D engine draws its
+triangles a fill each, is kept from piling up layers. Its new version
+releases the parts of the layers its last version drew and this one no
+longer does (`scene/parts.ts`), rather than leaving them for their idle
+frames. A `beginFill` while the drawing's last layer holds fills alone
+carries on in that layer, up to 256 fills (`display/drawing.ts`,
+`SHARED_FILLS`), which draw in their order as they would in layers of
+their own; a layer with lines, triangles or meshes still ends where it
+is, so that its lines stay over the fills before them. Adjacent fills of
+one bitmap, sampled alike, make one geometry, each vertex's texels by
+its own fill's matrix. And the module fills a single convex contour as a
+fan, with no sweep: convex when every turn goes the same way and its
+edges reverse along each axis at most twice, so a pentagram still goes
+to libtess2.
+
 Lines (`scene/strokes.ts`) are stroked in the stage's axes, because
 Flash strokes a transformed line with one width all along, not the local
 width stretched by the transform: so a line's geometry depends on the
@@ -4442,7 +4458,7 @@ layers).
 BitmapData's convolution, blur, glow, drop shadow, bevel and gradient glow
 and bevel are computed on the CPU by `@swf2es/native/render` alone: AS3's
 and AVM1's `applyFilter` call the one `BitmapKernel` of their realm
-(`bitmap/filters.ts`), made at the first filter that needs it, a worker's
+(`bitmap/kernel.ts`), made at the first filter that needs it, a worker's
 in its own. A trap is tried again in a new instance, and where that fails
 too, nothing is written. The player works out what a destination shows
 and a shadow's or a bevel's offset; the kernel's wrapper, the blocks each
@@ -4467,7 +4483,7 @@ destination writing. This preserves self-filtering and notifications, and
 allows later calls, memory growth or disposal without invalidating results.
 Strict double arithmetic preserves coefficient order and Flash's fixed-point
 3×3 convolution quirks. The module, `render`, which it shares with the
-tessellator and the own renderer's lines, uses wasm SIMD and has no
+renderer's tessellator and line builder, uses wasm SIMD and has no
 scalar build: every current browser ships SIMD, and an engine without it
 refuses the module as one without Wasm does, where nothing plays, as
 fills and lines need it. Trapped instances are dropped;
@@ -5467,6 +5483,17 @@ SWF the test builds as a `DoABC` with a `SymbolClass`. Flash's trace of
 the SWF is recorded by `--update` beside its frames, and the player's
 must match it line for line, as the conformance cases must match
 avmshell's.
+
+CI (`.github/workflows/ci.yml`) runs `pnpm check`, the typecheck and the
+native binaries' rebuild in a job of its own, and `pnpm test` and `pnpm
+test:checked` split into parts side by side: the player's cases in
+thirds (`run.ts --shard i/n`), its other checks, the compiler's packages
+with `pnpm determinism` and the Tamarin subset after them, and the pages
+and fuzzers. A test package that no part runs fails the lint job, so a
+new one cannot drop out of CI unnoticed. The corpus is a job beside
+them (above). The full Tamarin suite runs nightly (`tamarin.yml`), and
+the desktop app's builds and the site's publishing have workflows of
+their own.
 
 ### Fuzzing the compiler
 
