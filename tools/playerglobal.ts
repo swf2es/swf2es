@@ -285,11 +285,22 @@ const NEWER = new Set([
   "flash.net.drm::DRMDeviceGroup instance getter serverURL",
 ]);
 
-/** A class's shape as AIR_ONLY has it: its name AIR 1.0's where Flash Player's is unversioned. */
+/**
+ * A class's shape as AIR_ONLY has it: the class's name, in its one package
+ * namespace, AIR 1.0's where Flash Player's is unversioned, and nothing
+ * else. ASC marks the name alone: the members keep their own versions, so
+ * that any other difference, a member's included, is one --check reports.
+ * A class Flash Player's already marks is left as it is, and reported.
+ */
 function airMarked(shape: Shape): Shape {
   const c = JSON.parse(shape.get("(class)") as string);
+  const name = /^\{package:([^,@}]*)@v0\}::([^,{}]+)$/.exec(c.name);
+  if (!name) {
+    return shape;
+  }
+
   const out = new Map(shape);
-  out.set("(class)", JSON.stringify({ ...c, name: c.name.replace(/@v0\}/, "@v1}") }));
+  out.set("(class)", JSON.stringify({ ...c, name: `{package:${name[1]}@v1}::${name[2]}` }));
   return out;
 }
 
