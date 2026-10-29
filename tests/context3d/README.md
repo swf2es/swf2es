@@ -41,6 +41,7 @@ node tests/context3d/oracle.ts --texturebytes
 node tests/context3d/oracle.ts --vertexformats
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scalarmath
+node tests/context3d/oracle.ts --powersigns
 node tests/context3d/oracle.ts --scissor
 node tests/context3d/oracle.ts --mipmaps
 node tests/context3d/oracle.ts --bitmapuploads

@@ -34,6 +34,7 @@ const fixture =
     "Scissor",
     "ShaderMath",
     "ScalarMath",
+    "PowerSigns",
     "Blending",
     "ColorMask",
     "Stencil",

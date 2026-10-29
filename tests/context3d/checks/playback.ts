@@ -183,6 +183,7 @@ export async function shaderFixture(
     | "VertexFormats"
     | "ShaderMath"
     | "ScalarMath"
+    | "PowerSigns"
     | "Comparisons"
     | "FrameValidation"
     | "FrameValidationFlat"
