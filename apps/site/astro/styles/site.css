@@ -102,3 +102,28 @@
     filter: blur(1.5rem);
   }
 }
+
+/* Link cards ease into their hover state, their arrow leaning towards where they lead. */
+.sl-link-card,
+.sl-link-card .icon {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    translate 0.2s ease;
+}
+
+.sl-link-card:hover .icon {
+  translate: 0.25rem 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-link-card,
+  .sl-link-card .icon {
+    transition: none;
+  }
+
+  .sl-link-card:hover .icon {
+    translate: none;
+  }
+}
