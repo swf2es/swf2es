@@ -489,6 +489,7 @@ test("one convex contour is a fan, its points as given; one that winds round twi
       100 * Math.cos((2 * Math.PI * i) / n),
       100 * Math.sin((2 * Math.PI * i) / n),
     ]).flat();
+
     for (const nonZero of [false, true]) {
       const geometry = tess.tessellate([points], nonZero);
       assert.ok(geometry);
@@ -513,5 +514,28 @@ test("one convex contour is a fan, its points as given; one that winds round twi
   const inner = (100 * Math.sin(Math.PI / 10)) / Math.sin((7 * Math.PI) / 10);
   const pentagon = 2.5 * inner * inner * Math.sin((2 * Math.PI) / 5);
   assert.ok(Math.abs(all - odd - pentagon) < 1e-6 * pentagon);
+
+  // A concave contour so large that its turns' products overflow is no fan: past libtess2's range,
+  // the bands fill it. Its notch, (7, 6) at a scale of one, stays out; (8, 1) is in.
+  const scale = 1e160;
+  const dent = [0, 0, 10, 0, 10, 10, 5, 2].map((v) => v * scale);
+  const geometry = tess.tessellate([dent], false);
+  assert.ok(geometry);
+  const v = Array.from(geometry.vertices, (x) => x / scale);
+  const covers = (x: number, y: number) => {
+    for (let k = 0; k < geometry.indices.length; k += 3) {
+      const [a, b, c] = [0, 1, 2].map((j) => geometry.indices[k + j] * 2);
+      const side = (p: number, q: number) =>
+        (v[q] - v[p]) * (y - v[p + 1]) - (v[q + 1] - v[p + 1]) * (x - v[p]);
+      const d = [side(a, b), side(b, c), side(c, a)];
+      if (d.every((e) => e > 0) || d.every((e) => e < 0)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+  assert.equal(covers(7, 6), false);
+  assert.equal(covers(8, 1), true);
   tess.dispose();
 });

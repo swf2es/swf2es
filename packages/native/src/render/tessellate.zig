@@ -99,8 +99,9 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     made_in = arena.generation;
     const mark = arena.top;
     // One convex contour, a triangle above all, as a drawing redrawn every frame draws thousands:
-    // a fan, which either rule fills alike, and no sweep.
-    if (libtess and ends.len == 1) {
+    // a fan, which either rule fills alike, and no sweep. Within libtess2's range alone, where its
+    // turns' cross products are finite: past it they may overflow and pass a concave contour.
+    if (libtess and ends.len == 1 and inRange(coords)) {
         if (fan(coords)) |result| {
             out = result;
             return 0;
@@ -147,6 +148,7 @@ fn fan(coords: []const f64) ?Output {
     var ey: f64 = 0;
     var sx: f64 = 0;
     var sy: f64 = 0;
+
     // Round twice, counting on the second: each turn and change of way of the closed contour once.
     for (0..2 * n) |i| {
         const a = i % n;
@@ -159,6 +161,11 @@ fn fan(coords: []const f64) ?Output {
 
         if (i >= n) {
             const cross = ex * dy - ey * dx;
+            // A turn not known, its product overflowing, is no convex one.
+            if (!std.math.isFinite(cross)) {
+                return null;
+            }
+
             if (cross > 0) left = true;
             if (cross < 0) right = true;
             if (dx != 0 and sx != 0 and (dx > 0) != (sx > 0)) x_turns += 1;
@@ -175,7 +182,7 @@ fn fan(coords: []const f64) ?Output {
         return null;
     }
 
-    if (x_turns > 2 or y_turns > 2 or !std.math.isFinite(coords[0])) {
+    if (x_turns > 2 or y_turns > 2) {
         return null;
     }
 
