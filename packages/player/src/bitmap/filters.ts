@@ -886,8 +886,12 @@ function copyEmpty(
   dest.changed();
 }
 
-/** The realm's convolution kernel, made at its first convolution: @swf2es/native's, in Wasm. */
-let kernel: Convolver | null = null;
+/**
+ * The realm's convolution kernel, made at its first convolution:
+ * @swf2es/native's, in Wasm. False where the realm refused the module, as
+ * a worker served with a CSP without 'wasm-unsafe-eval' may.
+ */
+let kernel: Convolver | false | null = null;
 
 /**
  * A convolution over `area` of the source, as adl computes it, by the
@@ -896,8 +900,8 @@ let kernel: Convolver | null = null;
  * filter's colour; the sum divided (0 counting as 1), the bias added,
  * clamped and truncated, the alpha the source's where the filter keeps it;
  * the colour premultiplied by that alpha, or kept straight for an opaque
- * destination. Null where the kernel could not, after a trap in a new
- * instance too, as out of memory.
+ * destination. Null where the kernel could not, as out of memory, or the
+ * realm has none.
  */
 function convolve(
   source: BitmapStore,
@@ -905,10 +909,37 @@ function convolve(
   f: Filter,
   transparent: boolean,
 ): Uint32Array | null {
-  kernel ??= new Convolver();
-  return (
-    kernel.convolve(source, area, f, transparent) ?? kernel.convolve(source, area, f, transparent)
-  );
+  if (kernel === null) {
+    try {
+      kernel = new Convolver();
+    } catch {
+      kernel = false;
+    }
+  }
+
+  if (!kernel) {
+    return null;
+  }
+
+  // Wholly past the kernel's reach of the bitmap, every tap reads alike, the nearest edge's or the
+  // filter's colour, wherever the rect is: as far out as pixelEdge lets a rect lie, it is moved in,
+  // within the kernel's bounds.
+  const x = beyond(area.x, area.width, f.matrixX, source.width);
+  const y = beyond(area.y, area.height, f.matrixY, source.height);
+  return kernel.convolve(source, { ...area, x, y }, f, transparent);
+}
+
+/** Where a rect at `at`, `size` long, read `taps` about, lies alike just past a bitmap `length` long. */
+function beyond(at: number, size: number, taps: number, length: number): number {
+  if (at + size + taps < 0) {
+    return -(size + taps);
+  }
+
+  if (at - taps > length) {
+    return length + taps;
+  }
+
+  return at;
 }
 
 /**

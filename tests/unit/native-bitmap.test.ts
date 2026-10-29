@@ -163,7 +163,7 @@ test("published convolution pixels survive growth, rejection, scratch reuse and 
   assert.deepEqual(out, previous);
 });
 
-test("applyFilter convolves again in a new instance after a trap, and writes nothing if it traps again", () => {
+test("applyFilter convolves again in a new instance after a trap, and writes nothing if it traps again", async () => {
   const Instance = wasm.Instance;
   let instances = 0;
   let traps = 0;
@@ -186,19 +186,22 @@ test("applyFilter convolves again in a new instance after a trap, and writes not
     },
   });
   try {
+    // A module of its own, whose realm kernel is made here, under the proxy, whatever ran before.
+    const copy = `${new URL("../../packages/player/dist/bitmap/filters.js", import.meta.url)}?trap`;
+    const { applyFilter: fresh } = (await import(copy)) as { applyFilter: typeof applyFilter };
     const source = new BitmapStore(16, 16, true, 0x80305070);
     const expected = convolveReference(source, area, filter(), true);
     traps = 1;
     const dest = new BitmapStore(16, 16, true, 0);
-    applyFilter(dest, source, area, 0, 0, filter());
+    fresh(dest, source, area, 0, 0, filter());
     assert.deepEqual(dest.pixels, expected);
+    assert.equal(instances, 2, "the trapped call made again in a new instance");
 
     traps = 2;
     const untouched = new BitmapStore(16, 16, true, 0x11223344);
     const before = untouched.pixels.slice();
-    applyFilter(untouched, source, area, 0, 0, filter());
+    fresh(untouched, source, area, 0, 0, filter());
     assert.deepEqual(untouched.pixels, before);
-    assert.ok(instances >= 2, "a trap requires a fresh instance");
   } finally {
     wasm.Instance = Instance;
   }
@@ -238,10 +241,32 @@ test("a trapped kernel instance is replaced, a rejected call keeps it", () => {
       assert.equal(native.capacity === 0, state === "trap");
     }
 
-    assert.equal(instances, 2, "rejection reuses scratch, a trap requires a fresh instance");
+    // The trap made again in a new instance, which traps too; then a third, which convolves.
+    assert.equal(instances, 3, "rejection reuses scratch, a trap requires a fresh instance");
     native.dispose();
   } finally {
     wasm.Instance = Instance;
+  }
+});
+
+test("a rect far past the bitmap convolves as the reference does there, beyond the kernel's bounds", () => {
+  const source = new BitmapStore(4, 4, true, 0);
+  for (let i = 0; i < 16; i++) {
+    source.pixels[i] = (0xff000000 | (i * 0x0f0b07)) >>> 0;
+  }
+
+  for (const clamp of [true, false]) {
+    const f = { ...filter(), clamp };
+    for (const x of [-0x3fffffff - 5, 0x3fffffff + 5]) {
+      const rect = { x, y: 0, width: 4, height: 4 };
+      const dest = new BitmapStore(4, 4, true, 0x12345678);
+      applyFilter(dest, source, rect, 0, 0, f);
+      assert.deepEqual(
+        dest.pixels,
+        convolveReference(source, rect, f, true),
+        `${x}, clamp ${clamp}`,
+      );
+    }
   }
 });
 

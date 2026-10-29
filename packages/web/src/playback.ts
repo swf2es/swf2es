@@ -99,6 +99,7 @@ export class Playback {
       background: player.background,
       transparent: !!stage3D || look().wmode === "transparent",
     });
+
     return new Playback(box, player, scripting, view, look, report, stage3D);
   }
 

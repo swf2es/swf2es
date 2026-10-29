@@ -77,15 +77,24 @@ export class Convolver {
 
   /**
    * The convolved pixels, owned by the caller, or null where they would not
-   * fit or the instance trapped, which the next call makes again. Never
-   * writes to the source.
+   * fit; where the instance traps, the call is made again in a new one
+   * once. Never writes to the source.
    */
   readonly convolve = (
     source: BitmapSource,
     area: BitmapRect,
     filter: ConvolutionFilter,
     transparent: boolean,
-  ): Uint32Array | null => {
+  ): Uint32Array | null => this.run(source, area, filter, transparent, true);
+
+  /** convolve, made again in a new instance where this one traps if `again`. */
+  private run(
+    source: BitmapSource,
+    area: BitmapRect,
+    filter: ConvolutionFilter,
+    transparent: boolean,
+    again: boolean,
+  ): Uint32Array | null {
     const { width: sw, height: sh } = source;
     const { x, y, width: w, height: h } = area;
     const cols = filter.matrixX;
@@ -220,12 +229,13 @@ export class Convolver {
 
       return result;
     } catch {
+      // A trap: never resume that instance; the call once more in a new one.
       this.dispose();
-      return null;
+      return again ? this.run(source, area, filter, transparent, false) : null;
     } finally {
       if (this.capacity > this.keep) {
         this.dispose();
       }
     }
-  };
+  }
 }
