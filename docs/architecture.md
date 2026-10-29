@@ -4182,7 +4182,12 @@ filter. `blend-drift` moves a blend a quarter pixel a frame at a zoom
 that gives no whole resolution, which must not shake what shows through
 it; `blend-edges` draws blended objects past the edge of what they are
 drawn over; `blend-antialias` draws nested blends, a blurred child of a
-blend and blends past the stage's edges multisampled.
+blend and blends past the stage's edges multisampled. `blend-kept` keeps
+blends still, moved, recoloured, with a child moving, over a ground
+changing under them, inside a filtered sprite and with a filter of their
+own, and `blend-kept-antialias` the same multisampled;
+`blend-outside-mask` masks a blend from outside it, and `blend-subpixel`
+moves one by part of a pixel.
 
 ### Filters
 
