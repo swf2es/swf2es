@@ -38,11 +38,10 @@ import {
   placeQuad,
 } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
+import { ShapeObject } from "../display/shapeobject.js";
 import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
-import type { ShapeCharacter } from "../display/timeline.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import type { Player } from "../player.js";
@@ -63,6 +62,7 @@ import { Paints, paintSampler } from "./paints.js";
 import { Parts } from "./parts.js";
 import { bindCanvasPointer } from "./pointer.js";
 import { unsupported } from "./shapes.js";
+import { StaleShapes } from "./stale-shapes.js";
 import { deviceTextResolution, fieldItems, staticItems, type TextOmissions } from "./text.js";
 import { placedRow, TextItems } from "./text-items.js";
 
@@ -203,17 +203,13 @@ export class RenderView implements Drawer {
   private readonly masks: Masks;
   private readonly filterLayers: FilterLayers;
   private readonly advancedTexts: AdvancedTexts;
+  private readonly staleShapes = new StaleShapes();
   private readonly textures = new Textures();
   private readonly paints = new Paints(this.textures);
   private commands = new Commands();
   private filters = new Filters();
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
   private textureLimit = 4096;
-  /** Each stale cache a Shape has shown, and the scale and turn it was first drawn at. */
-  private readonly stales = new WeakMap<
-    ShapeObject,
-    { cache: StaleCache; a: number; b: number; c: number; d: number; spent: boolean }
-  >();
   /** Each 3D object's kept bitmap, and its quad as last made (drawPlane). */
   private readonly planeKeeps = new WeakMap<DisplayObject, KeepHandle>();
   private readonly planeQuads = new WeakMap<
@@ -672,7 +668,10 @@ export class RenderView implements Drawer {
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
     // whose bitmap cache Flash shows stale draws what that shows (staleShape).
-    const shape = o instanceof ShapeObject ? this.staleShape(o, hidden, a, b, c, d) : null;
+    const shape =
+      o instanceof ShapeObject
+        ? this.staleShapes.staleShape(o, hidden, this.snapshotting, a, b, c, d)
+        : null;
     // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
     const version = o.drawing ? o.drawing.version : 0;
     const drawn = o.drawing
@@ -1028,48 +1027,6 @@ export class RenderView implements Drawer {
     }
 
     return concatColorInto(slot, parent, child);
-  }
-
-  /**
-   * The shape a Shape draws: the one Flash's stale bitmap cache shows, given
-   * another of the same bounds while cached (display/shapeobject.ts), while
-   * it stands on the stage at the scale and turn (a b c d) it was first
-   * drawn at and stays cached; from a frame either changes, what it is
-   * (`cache-replace`). Only a frame that
-   * draws it decides: one walked hidden draws nothing of it, and
-   * BitmapData.draw's walk is in the bitmap's space, which shows the cache
-   * as the stage last did.
-   */
-  private staleShape(
-    o: ShapeObject,
-    hidden: boolean,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-  ): ShapeCharacter | null {
-    const cache = o.stale;
-    if (!cache || hidden) {
-      return o.drawn();
-    }
-
-    let seen = this.stales.get(o);
-    if (this.snapshotting) {
-      return seen?.cache === cache && seen.spent ? o.drawn() : cache.shape;
-    }
-
-    if (!seen || seen.cache !== cache) {
-      // A first frame with its cache off already draws it as it is.
-      seen = { cache, a, b, c, d, spent: !cached(o) };
-      this.stales.set(o, seen);
-    } else if (
-      !seen.spent &&
-      (seen.a !== a || seen.b !== b || seen.c !== c || seen.d !== d || !cached(o))
-    ) {
-      seen.spent = true;
-    }
-
-    return seen.spent ? o.drawn() : cache.shape;
   }
 
   /**
