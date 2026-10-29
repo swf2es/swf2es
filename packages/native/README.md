@@ -58,31 +58,37 @@ folder, builds `zig-out/bin/*.wasm` like any Zig project (`.zig-cache/` and
 The wrappers, the Zig and the build are Apache-2.0. `LICENSE.third-party`
 carries each vendored library's notice: zlib is under the zlib license,
 the LZMA SDK files are in the public domain, minimp3 is CC0-1.0, and
-libtess2 is under SGI Free Software License B.
+libtess2 is under SGI Free Software License B; and that of the code
+derived from SVG 1.1's feTurbulence (`src/render/pixels.zig`'s
+perlinNoise), under the W3C Software and Document License.
 
 ## bitmap
 
 `BitmapKernel` is BitmapData's CPU filters: `convolve()` a convolution
 (`src/render/convolve.zig`), `blur()` a blur, and `layer()` a glow, a
-drop shadow, a bevel or a gradient glow or bevel (`src/render/blur.zig`);
-and the loops of BitmapData's pixel operations (`src/render/pixels.zig`,
-wrapped by `pixel-ops.ts`): `copy()` for copyChannel, merge, paletteMap and
-a colour matrix filter, `transform()` for colorTransform, `noise()` and
-`perlin()`. Those work a band of rows of about 1 MiB at a time, each
-copied in and back before the next, which reads what the bands before it
-wrote; where the source is the destination and a band's rows of the two
-overlap, both go in as one block, so that a pixel reads what the pixels
-before it wrote, as in Flash. A band that traps is made again in a new
-instance, the bands before it not twice.
+drop shadow, a bevel or a gradient glow or bevel (`src/render/blur.zig`).
 The player filters through it alone: AS3's and AVM1's
 `BitmapData.applyFilter` call the one `BitmapKernel` of their realm
-(`packages/player/src/bitmap/filters.ts`), made at the first filter that
-needs it, which compiles the module; where it traps, the call is made
-again in a new instance, and where that fails too, nothing is written. A
-displacement map and GPU filters are unchanged. Each
-returns owned premultiplied ARGB `Uint32Array` pixels, or `null` where
-they would not fit or the instance trapped. No source pixels are changed.
+(`packages/player/src/bitmap/kernel.ts`), made at the first filter or
+operation that needs it, which compiles the module; where it traps, the
+call is made again in a new instance, and where that fails too, nothing
+is written. A displacement map and GPU filters are unchanged. These three
+return owned premultiplied ARGB `Uint32Array` pixels, or `null` where they
+would not fit or the instance trapped. No source pixels are changed.
 Results survive later calls, memory growth, rejection and disposal.
+
+It also runs the loops of BitmapData's pixel operations
+(`src/render/pixels.zig`, driven by `pixel-ops.ts`): `copy()` for
+copyChannel, merge, paletteMap and a colour matrix filter, `transform()`
+for colorTransform, `noise()` and `perlin()`. These work in place: they
+write into the caller's arrays, the source too where it is the
+destination, and return whether they did. They go a band of rows of about
+1 MiB at a time, each copied in and back before the next, which reads
+what the bands before it wrote; where the source is the destination and a
+band's rows of the two overlap, both go in as one block, so that a pixel
+reads what the pixels before it wrote, as in Flash. A band that traps is
+made again in a new instance, the bands before it not twice; where it
+fails again, the call returns false with the bands before it written.
 
 `blur()` takes the rect to blur, `layer()` the rect to place a layer on
 and the offsets it reads the source's alpha from (one, or a bevel's two, on

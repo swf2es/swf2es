@@ -487,6 +487,14 @@ export function colorMatrixReference(
   dest.changed();
 }
 
+// Perlin noise as BitmapData.perlinNoise made it in turbulence.ts: the
+// reference implementation of SVG's feTurbulence, which Flash's matches,
+// with an offset for each octave, as Ruffle ports it (turbulence.rs).
+//
+// Derived from https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement,
+// Copyright © 2015 W3C® (MIT, ERCIM, Keio, Beihang), under the W3C software
+// license.
+
 const RAND_M = 2147483647;
 const RAND_A = 16807;
 const RAND_Q = 127773;

@@ -3690,7 +3690,10 @@ The pixel operations that read and write the store alone are in
 `bitmap/bitmap.ts`; the loops of `noise`, `perlinNoise`, `copyChannel`,
 `colorTransform`, `merge`, `paletteMap` and a colour matrix filter run in
 the render module (`packages/native/src/render/pixels.zig`), a band of rows
-at a time, which keeps their arithmetic: `noise` and
+at a time, which keeps their arithmetic. They write into the store in
+place; a band that traps is made again in a new instance, and where that
+fails too the bands before it stay written and the rest are left as they
+were. `noise` and
 `pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
 to the values Ruffle's corpus recorded of it; `copyChannel`,
 `colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
