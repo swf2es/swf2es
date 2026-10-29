@@ -7,8 +7,9 @@ AS3 and AS1/2 alike, to JavaScript, so the browser's own JIT runs it, and
 draws them with a WebGL 2 renderer of its own. Fills, lines and BitmapData
 filters are computed in WebAssembly: Zig, with libtess2 for the fills.
 
-**Try it** at https://swf2es.github.io/swf2es/: open or drop a SWF (it is
-read in your browser, never uploaded), or play a demo. For Stage3D SWFs,
+**Try it** at https://swf2es.github.io/swf2es/play/: open or drop a SWF (it
+is read in your browser, never uploaded), or play a demo. The site has the
+[guide](https://swf2es.github.io/swf2es/docs/) too. For Stage3D SWFs,
 select **Stage3D (experimental)** in the player controls.
 
 **Status:**
