@@ -63,7 +63,7 @@ What stops a test, or makes it differ:
 | 11 | avmshell's sampler (`flash.sampler`, `as3/sampling`), which a SWF in the player does not use |
 | 10 | The same checks passed, but others failed |
 | 7 | Fewer checks passed than in avmshell |
-| 4 | Ended otherwise: 2 ran to their end where avmshell ended with an AS3 exception nothing caught (`Array/insertremove`, `Vector/insertremove`), 2 where avmshell itself died (exit code 128) |
+| 4 | Ended otherwise: 2 ran to their end where avmshell ended with an AS3 exception nothing caught (`Array/insertremove`, `Vector/insertremove`), 2 where avmshell itself died (exit code 128): `regress-303213`, which swf2es runs to its end, and `regress-157652`, where swf2es times out (124) |
 | 4 | The host's limits: a string, an array or the stack too large |
 
 ### Since the first run (2015, 78.2%)

@@ -32,8 +32,7 @@ links; how much of AS3 and Flash's behaviour it matches, in
    site with Starlight's documentation, daisyUI where it needs
    components and no React, the user documentation taken from
    [guide.md](guide.md), and the player as it is today on a page of its own.
-2. **The internal docs brought up to date,** and `architecture.md`
-   split by topic.
+2. **`architecture.md` split by topic,** move-only.
 3. **Pixel Bender.** `Shader` and `ShaderData` from a PBJ's bytecode,
    its parameters and inputs as Flash reports them; a compiler from PBJ
    to GLSL; shader fills (`beginShaderFill`, `lineShaderStyle`); then
@@ -99,3 +98,5 @@ order:
   left;
 - the renderer of swf2es's own, replacing Pixi (#650, #651);
 - CI's tests in parallel jobs (#652).
+- A short README with the details in [guide.md](guide.md) (#669), and the
+  internal docs brought up to date (#671).
