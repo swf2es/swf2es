@@ -4412,10 +4412,11 @@ and bevel are computed on the CPU by `@swf2es/native/render` alone: AS3's
 and AVM1's `applyFilter` call the one `BitmapKernel` of their realm
 (`bitmap/filters.ts`), made at the first filter that needs it, a worker's
 in its own. A trap is tried again in a new instance, and where that fails
-too, nothing is written. The player still works out the rects: what a
-destination shows, the blocks a glow, a shadow or a bevel reads the alpha
-of and its offsets into them, and rects wholly past the bitmap moved in
-alike. The colour matrix and the displacement map stay in JS. The JS the
+too, nothing is written. The player works out what a destination shows
+and a shadow's or a bevel's offset; the kernel's wrapper, the blocks each
+reads, in tiles over a large rect, so that its scratch stays small for any
+bitmap Flash allows. It takes values only as the player's filters hold
+them, and refuses others. The colour matrix and the displacement map stay in JS. The JS the
 player had is kept as the kernels' reference in the unit tests
 (`tests/unit/player/bitmap/convolution-reference.ts`,
 `blur-reference.ts`), which hold the kernels to it bit for bit

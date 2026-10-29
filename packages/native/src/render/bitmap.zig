@@ -61,8 +61,9 @@ export fn convolve(address: usize) usize {
 export fn blurFilter(address: usize) usize {
     if (!holds(address, @sizeOf(filters.BlurParams), @alignOf(filters.BlurParams))) return 0;
     const p: *const filters.BlurParams = @ptrFromInt(address);
+    if (!filters.validBlur(p)) return 0;
     const count = @as(usize, p.w) * p.h;
-    if (count == 0 or p.quality > 15 or !holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;
+    if (!holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;
     const pixels = @as([*]u32, @ptrFromInt(p.pixels))[0..count];
     filters.blurPixels(arena.allocator, pixels, p) catch return 0;
     return p.pixels;
@@ -74,22 +75,15 @@ export fn blurFilter(address: usize) usize {
 export fn layerFilter(address: usize) usize {
     if (!holds(address, @sizeOf(filters.LayerParams), @alignOf(filters.LayerParams))) return 0;
     const p: *const filters.LayerParams = @ptrFromInt(address);
+    if (!filters.validLayer(p)) return 0;
     const count = @as(usize, p.w) * p.h;
-    if (count == 0 or p.quality > 15 or @backingInt(p.kind) > @backingInt(filters.Kind.gradient_bevel)) return 0;
-    if (p.reads < 1 or p.reads > 2 or p.moves < 1 or p.moves > 2) return 0;
     if (!holds(p.pixels, count * @sizeOf(u32), @alignOf(u32))) return 0;
-    const two = p.kind == .bevel or p.kind == .gradient_bevel;
-    if (p.moves != @as(u32, if (two) 2 else 1)) return 0;
-    var reads: [2][]const u32 = .{ &.{}, &.{} };
+    var reads: [2][]u8 = .{ &.{}, &.{} };
     for (0..p.reads) |k| {
         const r = p.read[k];
         const n = @as(usize, r.rw) * r.rh;
-        if (n == 0 or !holds(r.pixels, n * @sizeOf(u32), @alignOf(u32))) return 0;
-        reads[k] = @as([*]const u32, @ptrFromInt(r.pixels))[0..n];
-    }
-
-    for (0..p.moves) |k| {
-        if (p.move[k].read >= p.reads) return 0;
+        if (!holds(r.alpha, n, 1)) return 0;
+        reads[k] = @as([*]u8, @ptrFromInt(r.alpha))[0..n];
     }
 
     const gradient = p.kind == .gradient_glow or p.kind == .gradient_bevel;

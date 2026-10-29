@@ -35,9 +35,9 @@ pub const Flags = packed struct(u32) {
     unused: u26 = 0,
 };
 
-/// A block of the source whose alpha is blurred: rw × rh pixels at `pixels`.
+/// A block of the source whose alpha is blurred: rw × rh bytes at `alpha`, blurred in place.
 pub const Read = extern struct {
-    pixels: u32,
+    alpha: u32,
     rw: u32,
     rh: u32,
     unused: u32,
@@ -85,6 +85,53 @@ comptime {
     std.debug.assert(@offsetOf(LayerParams, "blur_x") == 112);
     std.debug.assert(@offsetOf(LayerParams, "color") == 160);
     std.debug.assert(@sizeOf(LayerParams) == 176);
+}
+
+/// What the kernels take of a plane's sides: as the player's rects are, and
+/// of no more pixels than Flash's bitmaps hold, many times over.
+const most_side = 0x100000;
+const most_pixels: u64 = 1 << 28;
+
+fn sized(w: u32, h: u32) bool {
+    return w > 0 and h > 0 and w <= most_side and h <= most_side and @as(u64, w) * h <= most_pixels;
+}
+
+/// A blur as the player keeps it: 0 to 255, or NaN, which blurs nothing.
+fn blurry(v: f64) bool {
+    return std.math.isNan(v) or (v >= 0 and v <= 255);
+}
+
+fn unit(v: f64) bool {
+    return v >= 0 and v <= 1;
+}
+
+/// Whether BlurParams are as the player gives them: else the kernels refuse
+/// them rather than compute what the JS never did.
+pub fn validBlur(p: *const BlurParams) bool {
+    return sized(p.w, p.h) and p.quality <= 15 and blurry(p.blur_x) and blurry(p.blur_y);
+}
+
+/// Whether LayerParams are as the player gives them: blurs, quality,
+/// strength (0 to 255) and alphas (0 to 1) as its filters keep them,
+/// colours of 24 bits, and moves within an int.
+pub fn validLayer(p: *const LayerParams) bool {
+    if (@backingInt(p.kind) > @backingInt(Kind.gradient_bevel) or p.flags.unused != 0) return false;
+    if (!sized(p.w, p.h) or p.quality > 15 or !blurry(p.blur_x) or !blurry(p.blur_y)) return false;
+    if (!(p.strength >= 0 and p.strength <= 255)) return false;
+    if (!unit(p.alpha) or !unit(p.highlight_alpha) or !unit(p.shadow_alpha)) return false;
+    if (p.color > 0xffffff or p.highlight_color > 0xffffff or p.shadow_color > 0xffffff) return false;
+    if (p.reads < 1 or p.reads > 2 or p.moves < 1 or p.moves > 2) return false;
+    const two = p.kind == .bevel or p.kind == .gradient_bevel;
+    if (p.moves != @as(u32, if (two) 2 else 1)) return false;
+    for (p.read[0..p.reads]) |r| {
+        if (!sized(r.rw, r.rh)) return false;
+    }
+
+    for (p.move[0..p.moves]) |m| {
+        if (m.read >= p.reads or !(@abs(m.x) < 2147483648.0) or !(@abs(m.y) < 2147483648.0)) return false;
+    }
+
+    return true;
 }
 
 /// JS's ToInt32: NaN and the infinities 0, the rest truncated and wrapped.
@@ -543,21 +590,17 @@ fn gradientBevel(pixels: []u32, on: []const u8, back: []const u8, table: []const
     }
 }
 
-/// The layer over `pixels`, in place: each read's alpha blurred, each move
-/// read from its block, and the layer placed on the source.
-pub fn layer(gpa: std.mem.Allocator, pixels: []u32, reads: []const []const u32, p: *const LayerParams, table: []const u32) Error!void {
+/// The layer over `pixels`, in place: each read's alpha (`reads`, blurred
+/// in place) blurred, each move read from its block, and the layer placed
+/// on the source.
+pub fn layer(gpa: std.mem.Allocator, pixels: []u32, reads: []const []u8, p: *const LayerParams, table: []const u32) Error!void {
     const n = pixels.len;
-    var blurred: [2][]u8 = .{ &.{}, &.{} };
-    defer for (blurred) |b| gpa.free(b);
-    for (reads, 0..) |block, k| {
-        const plane = try gpa.alloc(u8, block.len);
-        blurred[k] = plane;
-        for (plane, block) |*v, px| {
-            const a: u8 = @truncate(px >> 24);
-            v.* = if (p.flags.invert) 255 - a else a;
+    for (reads, 0..) |plane, k| {
+        if (p.flags.invert) {
+            for (plane) |*v| v.* = 255 - v.*;
         }
 
-        const temp = try gpa.alloc(u8, block.len);
+        const temp = try gpa.alloc(u8, plane.len);
         defer gpa.free(temp);
         try blur(gpa, plane, temp, p.read[k].rw, p.read[k].rh, p.blur_x, p.blur_y, p.quality);
     }
@@ -568,7 +611,7 @@ pub fn layer(gpa: std.mem.Allocator, pixels: []u32, reads: []const []const u32, 
         const mv = p.move[k];
         const r = p.read[mv.read];
         moved[k] = try gpa.alloc(u8, n);
-        try shifted(gpa, blurred[mv.read], r.rw, r.rh, mv.x, mv.y, if (p.flags.invert) 255 else 0, moved[k], p.w, p.h);
+        try shifted(gpa, reads[mv.read], r.rw, r.rh, mv.x, mv.y, if (p.flags.invert) 255 else 0, moved[k], p.w, p.h);
     }
 
     switch (p.kind) {
@@ -614,6 +657,44 @@ test "toInt32 wraps and takes NaN as 0, as JS converts" {
     try std.testing.expectEqual(@as(i32, -2), toInt32(-2.7));
     try std.testing.expectEqual(@as(f64, 3), round(2.5));
     try std.testing.expectEqual(@as(f64, 0), round(0.49999999999999994));
+}
+
+test "params the player never gives are refused" {
+    const blur_ok: BlurParams = .{ .w = 4, .h = 4, .quality = 2, .pixels = 0, .blur_x = std.math.nan(f64), .blur_y = 3 };
+    try std.testing.expect(validBlur(&blur_ok));
+    for ([_]BlurParams{
+        .{ .w = 0, .h = 4, .quality = 2, .pixels = 0, .blur_x = 3, .blur_y = 3 },
+        .{ .w = 4, .h = 4, .quality = 16, .pixels = 0, .blur_x = 3, .blur_y = 3 },
+        .{ .w = 4, .h = 4, .quality = 2, .pixels = 0, .blur_x = -1, .blur_y = 3 },
+        .{ .w = 4, .h = 4, .quality = 2, .pixels = 0, .blur_x = 256, .blur_y = 3 },
+        .{ .w = 0x100000, .h = 0x100000, .quality = 2, .pixels = 0, .blur_x = 3, .blur_y = 3 },
+    }) |p| try std.testing.expect(!validBlur(&p));
+
+    const read: Read = .{ .alpha = 0, .rw = 8, .rh = 8, .unused = 0 };
+    const move: Move = .{ .read = 0, .unused = 0, .x = 2, .y = 2 };
+    const layer_ok: LayerParams = .{ .kind = .glow, .flags = .{}, .w = 4, .h = 4, .pixels = 0, .quality = 1, .reads = 1, .moves = 1, .read = .{ read, read }, .move = .{ move, move }, .blur_x = 4, .blur_y = 4, .strength = 2, .alpha = 1, .highlight_alpha = 1, .shadow_alpha = 1, .color = 0xff0000, .highlight_color = 0, .shadow_color = 0, .table = 0 };
+    try std.testing.expect(validLayer(&layer_ok));
+    var bad = layer_ok;
+    bad.strength = std.math.nan(f64);
+    try std.testing.expect(!validLayer(&bad));
+    bad = layer_ok;
+    bad.strength = -1;
+    try std.testing.expect(!validLayer(&bad));
+    bad = layer_ok;
+    bad.alpha = std.math.nan(f64);
+    try std.testing.expect(!validLayer(&bad));
+    bad = layer_ok;
+    bad.color = 0x1000000;
+    try std.testing.expect(!validLayer(&bad));
+    bad = layer_ok;
+    bad.flags.unused = 1;
+    try std.testing.expect(!validLayer(&bad));
+    bad = layer_ok;
+    bad.moves = 2;
+    try std.testing.expect(!validLayer(&bad));
+    bad = layer_ok;
+    bad.move[0].x = std.math.inf(f64);
+    try std.testing.expect(!validLayer(&bad));
 }
 
 test "every failed allocation is reported" {

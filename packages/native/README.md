@@ -75,9 +75,17 @@ returns owned premultiplied ARGB `Uint32Array` pixels, or `null` where
 they would not fit or the instance trapped. No source pixels are changed.
 Results survive later calls, memory growth, rejection and disposal.
 
-`blur()` and `layer()` take blocks of the source, 0 past the bitmap: the
-work a blur reads, or the pixels a layer is placed on and the blocks whose
-alpha it blurs, with its reads of them, which the player works out.
+`blur()` takes the rect to blur, `layer()` the rect to place a layer on
+and the offsets it reads the source's alpha from (one, or a bevel's two, on
+and back); the wrapper copies in the blocks of the source each reads, 0
+past the bitmap, a layer's alpha a byte a pixel. A large rect is filtered
+in tiles, each read as far round as the blur reaches, so a call's scratch
+stays within 4 MiB, and an instance kept between frames, wherever the
+reach lets it: a tile is four times the reach a side at least, up to 64
+MiB. Each takes values as the player's filters hold them, blurs 0 to 255 or
+NaN, quality 0 to 15, strength 0 to 255, alphas 0 to 1, colours of 24
+bits, and refuses others (null), in the wrapper and again in `blur.zig`,
+rather than compute what the JS never did.
 `blur.zig` keeps the JS's arithmetic, in the same order in f64, converting
 to an int as JS converts, so its pixels are the JS's to the bit: a blur's
 box runs truncated to 8 bits each, a glow's alpha from the blur so

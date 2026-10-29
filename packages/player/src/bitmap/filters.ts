@@ -7,7 +7,7 @@
 // straight colour, truncated; the blurs, glows, shadows, bevels and
 // convolutions by the render module.
 
-import { BitmapKernel, type LayerMove } from "@swf2es/native/render";
+import { BitmapKernel } from "@swf2es/native/render";
 import type { Filter } from "../display/filters.js";
 import { ramp } from "../display/gradients.js";
 import {
@@ -351,21 +351,12 @@ export function applyFilter(
     return true;
   }
 
-  const native = bitmapKernel();
   if (f.kind === "blur") {
-    // The work: what is shown and as far round it as the blur reaches into
-    // it, which may be past the rect, whose edge cuts what is written alone.
-    const [hx, hy] = blurHalo(f);
-    const work = {
-      x: shown.x - hx,
-      y: shown.y - hy,
-      width: shown.width + 2 * hx,
-      height: shown.height + 2 * hy,
-    };
-    const [near] = inward(source, [work]);
-    const pixels = native?.blur(source, near, f.blurX, f.blurY, f.quality);
+    // What is shown, blurred as far round it as the blur reaches into it, which may be past the
+    // rect, whose edge cuts what is written alone.
+    const pixels = bitmapKernel()?.blur(source, shown, f.blurX, f.blurY, f.quality);
     if (pixels) {
-      write(dest, pixels, work, shown, mx, my);
+      write(dest, pixels, shown, shown, mx, my);
     }
 
     return true;
@@ -383,22 +374,11 @@ export function applyFilter(
     return true;
   }
 
-  const bevelled = f.kind === "bevel" || f.kind === "gradientBevel";
   const glowing = f.kind === "glow" || f.kind === "dropShadow";
-  const { reads, moves } = alphaReads(
-    shown,
-    f,
-    bevelled
-      ? [
-          [ox, oy],
-          [-ox, -oy],
-        ]
-      : [[-ox, -oy]],
-  );
-  const [near, ...nearReads] = inward(source, [shown, ...reads]);
-  const pixels = native?.layer(
+  const bevelled = f.kind === "bevel" || f.kind === "gradientBevel";
+  const pixels = bitmapKernel()?.layer(
     source,
-    near,
+    shown,
     {
       kind: f.kind as "glow",
       inner: glowing && f.inner,
@@ -411,16 +391,22 @@ export function applyFilter(
       blurX: f.blurX,
       blurY: f.blurY,
       strength: f.strength,
-      alpha: f.alpha,
-      highlightAlpha: f.highlightAlpha,
-      shadowAlpha: f.shadowAlpha,
-      color: f.color,
-      highlightColor: f.highlightColor,
-      shadowColor: f.shadowColor,
+      // What the kind does not have, 0, as the kernel takes only values the player's filters hold.
+      alpha: glowing ? f.alpha : 0,
+      highlightAlpha: f.kind === "bevel" ? f.highlightAlpha : 0,
+      shadowAlpha: f.kind === "bevel" ? f.shadowAlpha : 0,
+      color: glowing ? f.color : 0,
+      highlightColor: f.kind === "bevel" ? f.highlightColor : 0,
+      shadowColor: f.kind === "bevel" ? f.shadowColor : 0,
       table: f.kind === "gradientGlow" || f.kind === "gradientBevel" ? gradientTable(f) : null,
     },
-    nearReads,
-    moves,
+    // Read on and back for a bevel, from the offset back for the rest.
+    bevelled
+      ? [
+          [ox, oy],
+          [-ox, -oy],
+        ]
+      : [[-ox, -oy]],
   );
   if (pixels) {
     write(dest, pixels, shown, shown, mx, my);
@@ -429,84 +415,12 @@ export function applyFilter(
   return true;
 }
 
-/**
- * The blocks of the source a layer over `area` blurs the alpha of, and its
- * reads of them, moved by each of `moves`: blurred once over where they all
- * read and as far round it as the blur reaches, as a bevel reads on and
- * back; reads further apart than `area` is wide or high, each over its
- * own, so the work is `area`'s size wherever the offset takes it.
- */
-function alphaReads(
-  area: PixelRect,
-  f: Filter,
-  moves: readonly (readonly [number, number])[],
-): { reads: PixelRect[]; moves: LayerMove[] } {
-  const kxs = moves.map(([dx]) => Math.floor(dx));
-  const kys = moves.map(([, dy]) => Math.floor(dy));
-  const x0 = Math.min(...kxs);
-  const y0 = Math.min(...kys);
-  const spanX = Math.max(...kxs) - x0;
-  const spanY = Math.max(...kys) - y0;
-  if (moves.length > 1 && (spanX > area.width || spanY > area.height)) {
-    const each = moves.map((move) => alphaReads(area, f, [move]));
-    return {
-      reads: each.map(({ reads }) => reads[0]),
-      moves: each.map(({ moves }, k) => ({ ...moves[0], read: k })),
-    };
-  }
-
-  const [hx, hy] = blurHalo(f);
-  const read = {
-    x: area.x + x0 - hx,
-    y: area.y + y0 - hy,
-    width: area.width + 1 + spanX + 2 * hx,
-    height: area.height + 1 + spanY + 2 * hy,
-  };
-  return {
-    reads: [read],
-    moves: moves.map(([dx, dy], i) => ({
-      read: 0,
-      x: hx + (kxs[i] - x0) + (dx - kxs[i]),
-      y: hy + (kys[i] - y0) + (dy - kys[i]),
-    })),
-  };
-}
-
-/**
- * `rects`, moved alike to just past the bitmap where all lie wholly past it
- * on one side: as far out as pixelEdge lets a rect lie, past the kernels'
- * bounds, they read what they read there, the source's nothing.
- */
-function inward(source: BitmapStore, rects: readonly PixelRect[]): PixelRect[] {
-  const along = (at: (r: PixelRect) => number, size: (r: PixelRect) => number, length: number) => {
-    const lo = Math.min(...rects.map(at));
-    const hi = Math.max(...rects.map((r) => at(r) + size(r)));
-    return hi <= 0 ? -hi : lo >= length ? length - lo : 0;
-  };
-  const dx = along(
-    (r) => r.x,
-    (r) => r.width,
-    source.width,
-  );
-  const dy = along(
-    (r) => r.y,
-    (r) => r.height,
-    source.height,
-  );
-  return rects.map((r) => ({ ...r, x: r.x + dx, y: r.y + dy }));
-}
-
 function intersect(p: PixelRect, q: PixelRect): PixelRect | null {
   const x0 = Math.max(p.x, q.x);
   const y0 = Math.max(p.y, q.y);
   const x1 = Math.min(p.x + p.width, q.x + q.width);
   const y1 = Math.min(p.y + p.height, q.y + q.height);
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
-}
-
-/** How far a blur reaches for the source, each way: each of `quality` runs half its box, whole taps. */
-function blurHalo(f: Filter): [number, number] {
-  return [f.quality * Math.ceil((f.blurX || 0) / 2), f.quality * Math.ceil((f.blurY || 0) / 2)];
 }
 
 /** The bounds of the pixels of `rect` of the source that are not transparent: null for none. */
@@ -813,17 +727,7 @@ function convolve(
   f: Filter,
   transparent: boolean,
 ): Uint32Array | null {
-  const native = bitmapKernel();
-  if (!native) {
-    return null;
-  }
-
-  // Wholly past the kernel's reach of the bitmap, every tap reads alike, the nearest edge's or the
-  // filter's colour, wherever the rect is: as far out as pixelEdge lets a rect lie, it is moved in,
-  // within the kernel's bounds.
-  const x = beyond(area.x, area.width, f.matrixX, source.width);
-  const y = beyond(area.y, area.height, f.matrixY, source.height);
-  return native.convolve(source, { ...area, x, y }, f, transparent);
+  return bitmapKernel()?.convolve(source, area, f, transparent) ?? null;
 }
 
 /** The realm's kernel, made as it is first needed; null where the realm refused the module. */
@@ -837,19 +741,6 @@ function bitmapKernel(): BitmapKernel | null {
   }
 
   return kernel || null;
-}
-
-/** Where a rect at `at`, `size` long, read `taps` about, lies alike just past a bitmap `length` long. */
-function beyond(at: number, size: number, taps: number, length: number): number {
-  if (at + size + taps < 0) {
-    return -(size + taps);
-  }
-
-  if (at - taps > length) {
-    return length + taps;
-  }
-
-  return at;
 }
 
 /**

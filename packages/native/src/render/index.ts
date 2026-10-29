@@ -8,7 +8,6 @@ export {
   type BitmapSource,
   type ConvolutionFilter,
   type LayerFilter,
-  type LayerMove,
 } from "./bitmap-kernel.js";
 export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "./lines.js";
 export {

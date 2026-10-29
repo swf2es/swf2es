@@ -6,6 +6,7 @@
 // distances and angles anything.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { BitmapKernel } from "@swf2es/native/render";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
 import { type FilterKind, filterDefaults } from "../../packages/player/dist/display/filters.js";
@@ -127,5 +128,99 @@ test("rects far past the bitmap filter as the reference does there, beyond the k
       applyBlurFamily(reference, source, rect, 0, 0, f);
       assert.deepEqual(native.pixels, reference.pixels, `${kind} at ${x}`);
     }
+  }
+});
+
+/** A bitmap of pixels of every alpha, opaque and clear stretches among them. */
+function large(width: number, height: number): BitmapStore {
+  const store = new BitmapStore(width, height, true, 0);
+  const pixels = store.pixels;
+  for (let i = 0; i < pixels.length; i++) {
+    const h = Math.imul(i ^ (i >>> 7), 2654435761) >>> 0;
+    const a = (i >>> 5) % 3 === 0 ? 0 : (i >>> 5) % 3 === 1 ? 255 : h >>> 24;
+    pixels[i] = ((a << 24) | (h & 0xffffff & (a ? 0xffffff : 0))) >>> 0;
+  }
+
+  return store;
+}
+
+test("a filter over a large bitmap is filtered whole, in tiles, as the reference has it", () => {
+  for (const [width, height, f] of [
+    [4000, 4000, { ...filterDefaults("glow"), blurX: 6, blurY: 6, quality: 1, strength: 2 }],
+    [3000, 3000, { ...filterDefaults("blur"), blurX: 255, blurY: 255, quality: 3 }],
+    [2500, 2000, { ...filterDefaults("bevel"), blurX: 9, blurY: 4, quality: 2, distance: 5 }],
+  ] as const) {
+    const source = large(width, height);
+    const rect = { x: 0, y: 0, width, height };
+    const dest = new BitmapStore(width, height, true, 0);
+    applyFilter(dest, source, rect, 0, 0, f);
+    // Windows of it, each the reference's over a destination of the window's size moved there.
+    for (const [x, y] of [
+      [0, 0],
+      [width - 64, height - 64],
+      [Math.floor(width / 2) - 32, Math.floor(height / 3)],
+      [1023, 2047 % height],
+    ]) {
+      const window = new BitmapStore(64, 64, true, 0);
+      applyBlurFamily(window, source, rect, -x, -y, f);
+      for (let row = 0; row < 64; row++) {
+        const at = (y + row) * width + x;
+        assert.deepEqual(
+          Array.from(dest.pixels.subarray(at, at + 64)),
+          Array.from(window.pixels.subarray(row * 64, row * 64 + 64)),
+          `${f.kind} ${width}x${height}, window at ${x}, ${y}, row ${row}`,
+        );
+      }
+    }
+  }
+});
+
+test("a glow over a million pixels every frame keeps its instance", () => {
+  const wasm = globalThis.WebAssembly as unknown as {
+    Instance: new (module: WebAssembly.Module, imports?: object) => WebAssembly.Instance;
+  };
+  const Instance = wasm.Instance;
+  let instances = 0;
+  wasm.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      instances++;
+      return Reflect.construct(target, args);
+    },
+  });
+  try {
+    const kernel = new BitmapKernel();
+    const source = large(1024, 1024);
+    const area = { x: -8, y: -8, width: 1040, height: 1040 };
+    const glow = {
+      kind: "glow" as const,
+      inner: false,
+      knockout: false,
+      hideObject: false,
+      type: "full",
+      invert: false,
+      quality: 2,
+      blurX: 8,
+      blurY: 8,
+      strength: 2,
+      alpha: 1,
+      highlightAlpha: 0,
+      shadowAlpha: 0,
+      color: 0xff0000,
+      highlightColor: 0,
+      shadowColor: 0,
+      table: null,
+    };
+    const capacities: number[] = [];
+    for (let frame = 0; frame < 5; frame++) {
+      assert.ok(kernel.layer(source, area, glow, [[0, 0]]));
+      assert.ok(kernel.blur(source, area, 8, 8, 2));
+      capacities.push(kernel.capacity);
+    }
+
+    assert.equal(instances, 1);
+    assert.ok(capacities[0] > 0 && capacities[0] <= 8 << 20, `${capacities[0]} bytes`);
+    assert.ok(capacities.every((c) => c === capacities[0]));
+  } finally {
+    wasm.Instance = Instance;
   }
 });
