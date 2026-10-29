@@ -1215,6 +1215,15 @@ check(
         await call(evaluate, "menuHost().shadowRoot.activeElement?.getAttribute('role')"),
         "menu",
       );
+      // Focused, the menu draws no focus ring: its items show focus, and the ring's square corners
+      // stood out past the rounded border.
+      assert.equal(
+        await call(
+          evaluate,
+          'getComputedStyle(menuHost().shadowRoot.querySelector("[role=menu]")).outlineStyle',
+        ),
+        "none",
+      );
       await key("ArrowDown", 40);
       await key("ArrowDown", 40);
       assert.equal(
