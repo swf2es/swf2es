@@ -21,12 +21,12 @@ import { SCOPE_Local, SCOPE_Target, Scope } from "./scope.js";
 import { isPrimitive, type Value } from "./values.js";
 
 // DefineFunction2's flags (the SWF's FunctionFlags).
-export const FUNCTION_PreloadThis = 0x001;
-export const FUNCTION_SuppressThis = 0x002;
-export const FUNCTION_PreloadArguments = 0x004;
-export const FUNCTION_SuppressArguments = 0x008;
-export const FUNCTION_PreloadSuper = 0x010;
-export const FUNCTION_SuppressSuper = 0x020;
+const FUNCTION_PreloadThis = 0x001;
+const FUNCTION_SuppressThis = 0x002;
+const FUNCTION_PreloadArguments = 0x004;
+const FUNCTION_SuppressArguments = 0x008;
+const FUNCTION_PreloadSuper = 0x010;
+const FUNCTION_SuppressSuper = 0x020;
 
 /** A DefineFunction or DefineFunction2's function. */
 export class ScriptFunction extends Avm1Function {

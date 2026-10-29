@@ -18,7 +18,7 @@ export function formatOf(value: Value): PartialFormat | null {
 }
 
 /** A number as Ruffle's round_to_even makes it an int: a half to even, what does not fit -2^31. */
-export function roundToEven(n: number): number {
+function roundToEven(n: number): number {
   const r = Math.round(n);
   const even = Math.abs(n % 1) === 0.5 && r % 2 !== 0 ? r - 1 : r;
   return Number.isFinite(even) && even <= 0x7fffffff && even >= -0x80000000 ? even : -0x80000000;

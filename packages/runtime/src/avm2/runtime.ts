@@ -117,7 +117,6 @@ import {
 } from "./traits.js";
 
 export { NOT_FOUND } from "./descriptors.js";
-export { AsError } from "./errors.js";
 
 /**
  * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject

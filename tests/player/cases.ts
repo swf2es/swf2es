@@ -5604,7 +5604,7 @@ const sine = (n: number, period: number, amplitude: number) =>
  * as DefineSounds, one with seekSamples, and the 44.1 kHz one's bytes,
  * plain and with a LAME header, as ByteArrays, bound to classes by name.
  */
-export const extractSounds =
+const extractSounds =
   (script: string) =>
   (compile: Compile): Uint8Array => {
     const ramp = (n: number, step: number, from = 0) =>

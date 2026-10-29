@@ -418,7 +418,7 @@ function skipSpace(text: string, i: number, step: 1 | -1): number {
 }
 
 /** The index past the spaces from `i` on in direction `step`: Flash's spaces are Unicode's space separators. */
-export function skipSpaces(text: string, i: number, step: 1 | -1): number {
+function skipSpaces(text: string, i: number, step: 1 | -1): number {
   const at = step > 0 ? (j: number) => text[j] : (j: number) => text[j - 1];
   while (isSpace(at(i))) {
     i += step;

@@ -59,7 +59,7 @@ export interface RuffleTest {
  * with numbers, strings, booleans and inline tables as values. An array of
  * tables' entries are numbered, as "checks.0".
  */
-export function readToml(text: string): Map<string, string> {
+function readToml(text: string): Map<string, string> {
   const values = new Map<string, string>();
   const counts = new Map<string, number>();
   let table = "";

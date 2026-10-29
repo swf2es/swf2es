@@ -13,7 +13,7 @@ import { protocol, type Session } from "electron";
 import type { LibraryName, LibraryState } from "../shared/api.js";
 import { FILE_ORIGIN, type Sandbox } from "./sandbox.ts";
 
-export const SCHEME = "swf2es";
+const SCHEME = "swf2es";
 export const APP_ORIGIN = `${SCHEME}://app`;
 
 const appRoot = fileURLToPath(new URL("../../", import.meta.url));

@@ -41,7 +41,7 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 /** The primordial worker's id; background workers count up from 1. */
-export const PRIMORDIAL = 0;
+const PRIMORDIAL = 0;
 
 /** How a background worker's VM reaches the primordial, which started it. */
 export interface ParentLink {

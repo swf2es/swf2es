@@ -106,7 +106,7 @@ function page(): string {
  * that its workers' scripts are too. credentialless, not require-corp: a
  * SWF's cross-origin loads go on, without cookies.
  */
-export const ISOLATION_HEADERS = {
+const ISOLATION_HEADERS = {
   "cross-origin-opener-policy": "same-origin",
   "cross-origin-embedder-policy": "credentialless",
 };

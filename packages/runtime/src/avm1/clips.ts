@@ -188,7 +188,7 @@ export function setProperty(
  * read-only or missing: a number for 0 to 12 but `_target` (11), a string
  * for `_name` and `_quality`, a number for the rest but `_focusrect`.
  */
-export function coerceFor(index: number, value: Value, version: number): void {
+function coerceFor(index: number, value: Value, version: number): void {
   if (index < 0 || index === 11 || index === 14 || index === 15 || index === 17) {
     return;
   }

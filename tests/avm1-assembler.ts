@@ -8,7 +8,7 @@
 //     .bytes();
 
 /** Push's value types (SWF file format specification, ActionPush). */
-export const PushType = {
+const PushType = {
   string: 0,
   float: 1,
   null: 2,

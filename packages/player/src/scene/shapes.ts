@@ -44,7 +44,7 @@ export const unsupported = {
 export type BitmapSampling = Pick<ImageFill, "type" | "image" | "smooth" | "repeat">;
 
 /** Whether `a` and `b` sample one bitmap alike, and so may share a part. */
-export function samplesAlike(a: BitmapSampling, b: BitmapSampling): boolean {
+function samplesAlike(a: BitmapSampling, b: BitmapSampling): boolean {
   return a.image === b.image && a.smooth === b.smooth && a.repeat === b.repeat;
 }
 

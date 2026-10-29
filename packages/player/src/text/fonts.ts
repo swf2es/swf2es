@@ -33,7 +33,7 @@ export class FontSet {
 }
 
 /** A device font as the browser has it: `_sans`, `_serif` and `_typewriter` as its kinds, any other by name, then serif, as Flash's default is. */
-export function fontFamily(font: string): string[] {
+function fontFamily(font: string): string[] {
   switch (font) {
     case "_sans":
       return ["Arial", "Helvetica", "sans-serif"];

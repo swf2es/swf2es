@@ -34,7 +34,7 @@ export const NAME_PARTS =
   /^([a-z]{2,8})(?:[-_. ]+([a-z]{4}))?(?:[-_. ]+([a-z]{2}|\d{3}))?((?:[-_. ]+(?=\d*[a-z])[a-z\d]{2,8})*)[-_. ]*$/i;
 
 /** The keywords after "@" Flash knows; any other leaves a name one it cannot take apart. */
-export const KEYWORDS = ["calendar", "collation", "currency", "numbers"];
+const KEYWORDS = ["calendar", "collation", "currency", "numbers"];
 
 /** A name's keywords, "@key=value;key=value", null for one Flash does not know. */
 export function keywordsOf(name: string): Record<string, string> | null {
@@ -155,7 +155,7 @@ function supported(base: string): { actual: string; status: string } | null {
 }
 
 /** The user's locale, a host's platform's, or en-US where it names none Flash could use. */
-export function defaultLocale(s: Scripting): string {
+function defaultLocale(s: Scripting): string {
   const found = supported(canonicalName(s.platform.locale));
   return found && found.status === NO_ERROR ? found.actual : "en-US";
 }

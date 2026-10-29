@@ -80,11 +80,7 @@ export function uploadProgram(
 }
 
 /** A program linked as the device links one, its failures Context3D's errors as before. */
-export function linkProgram(
-  gl: WebGL2RenderingContext,
-  vertex: string,
-  fragment: string,
-): WebGLProgram {
+function linkProgram(gl: WebGL2RenderingContext, vertex: string, fragment: string): WebGLProgram {
   try {
     return link(gl, vertex, fragment);
   } catch (e) {

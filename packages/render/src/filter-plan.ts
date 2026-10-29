@@ -36,7 +36,7 @@ export const NO_BLUR = -2;
 export const INPUT_BLUR = -1;
 
 /** The most floats a convolution's matrix takes in its shader: 57 vec4s. */
-export const CONVOLUTION_FLOATS = 57 * 4;
+const CONVOLUTION_FLOATS = 57 * 4;
 
 /** One pass: a program drawn from slot `input` into slot `output`, its uniforms in its plan's. */
 export interface FilterPass {

@@ -67,7 +67,7 @@ export class BitWriter {
 }
 
 /** Bits for a signed value in SB[n]. */
-export function sbits(...values: number[]): number {
+function sbits(...values: number[]): number {
   let n = 1;
   for (const v of values) {
     while (v < -(2 ** (n - 1)) || v >= 2 ** (n - 1)) {

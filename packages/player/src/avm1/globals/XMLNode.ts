@@ -223,7 +223,7 @@ export class XmlNode {
 }
 
 /** `from`'s attributes on `to`, in the same for..in order. */
-export function copyAttributes(from: Obj, to: Obj, version: number): void {
+function copyAttributes(from: Obj, to: Obj, version: number): void {
   const names = avm1.keys(from, version);
   for (let i = names.length - 1; i >= 0; i--) {
     to.define(names[i], avm1.get(from, names[i], version), 0);
@@ -238,6 +238,7 @@ const ESCAPES: Record<string, string> = {
   "'": "&apos;",
 };
 
+/** `text` with XML's five characters escaped. */
 export function escapeXml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }

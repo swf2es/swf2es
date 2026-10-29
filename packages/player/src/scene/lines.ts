@@ -17,7 +17,7 @@ import { layerStrokes } from "./strokes.js";
  * geometries' idle frames. Past it with nothing idle, it grows to half
  * again what is drawn, and comes back down as less is.
  */
-export const LINE_VERTICES = 1_000_000;
+const LINE_VERTICES = 1_000_000;
 
 /**
  * How often, in frames, the kept lines are looked over whatever they hold:

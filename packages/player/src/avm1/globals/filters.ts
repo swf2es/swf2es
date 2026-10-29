@@ -132,7 +132,7 @@ export interface FilterFaces {
  * objects up to its length, in order, anything else left out, so an object
  * without a length sets none (adl).
  */
-export function filtersOf(value: Value, version: number): Filter[] {
+function filtersOf(value: Value, version: number): Filter[] {
   const out: Filter[] = [];
   const length = value instanceof avm1.Avm1Object ? lengthOf(value, version) : 0;
   for (let i = 0; i < length; i++) {
@@ -764,7 +764,7 @@ export function filtersProperty(
  * the array, anything else left out; a displacement map's pixels taken as
  * they are now, as AS3's are.
  */
-export function setDisplayFilters(d: DisplayObject, value: Value, version: number): void {
+function setDisplayFilters(d: DisplayObject, value: Value, version: number): void {
   const list = filtersOf(value, version);
   for (const f of list) {
     const store = (f.mapBitmap as { $store?: BitmapStore } | null)?.$store;

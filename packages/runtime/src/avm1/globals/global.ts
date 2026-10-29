@@ -133,7 +133,7 @@ const OFFSETS = [0, 0x3080, 0xe2080, 0x3c82080, 0xfa082080, 0x82082080];
  * ConvertUTF.c sums them; a surrogate or a code point past U+10FFFF is
  * U+FFFD, and a code point of 0, or a sequence cut short, ends the string.
  */
-export function decodeLenient(bytes: ArrayLike<number>): string {
+function decodeLenient(bytes: ArrayLike<number>): string {
   let out = "";
   let i = 0;
   while (i < bytes.length) {

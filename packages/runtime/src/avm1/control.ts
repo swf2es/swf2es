@@ -35,7 +35,7 @@ const HELD_Thrown = 2;
 const HELD_Returned = 3;
 
 /** A Try's catch that a throw does not land in. */
-export const NO_CATCH = -2;
+const NO_CATCH = -2;
 
 export class Held {
   constructor(

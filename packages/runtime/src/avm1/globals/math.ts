@@ -12,7 +12,7 @@ import type { Realm } from "../realm.js";
 import { toNumber } from "../values.js";
 
 /** The methods, in the order of their ASnative indices. */
-export const MATH_METHODS = [
+const MATH_METHODS = [
   "abs",
   "min",
   "max",

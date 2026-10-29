@@ -42,7 +42,7 @@ interface Tabbed {
 }
 
 /** The objects Tab moves the focus through, in order, from `root`, on `stage`. */
-export function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
+function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
   const found: Tabbed[] = [];
   let custom = false;
   const walk = (d: DisplayObject) => {

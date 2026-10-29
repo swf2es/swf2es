@@ -8,12 +8,6 @@ import type { ShapeLayer } from "./shapes.js";
 /** The linear part of a matrix, [a, b, c, d]: all a stroke's width depends on. */
 export type Linear = [number, number, number, number];
 
-export const UNIT: Linear = [1, 0, 0, 1];
-
-export function sameLinear(p: Linear, q: Linear): boolean {
-  return p[0] === q[0] && p[1] === q[1] && p[2] === q[2] && p[3] === q[3];
-}
-
 /**
  * `m`'s stretch, without its turn or mirror: m is a rotation or a mirror
  * times this symmetric stretch, and a line scaled both ways is as wide
@@ -191,7 +185,7 @@ export function settledStretch(s: Linear, widest: number, least: number, out?: L
 }
 
 /** The width of the layer's widest line, in twips. */
-export function widestLine(layer: ShapeLayer): number {
+function widestLine(layer: ShapeLayer): number {
   let widest = 0;
   for (const { line } of layer.strokes) {
     widest = Math.max(widest, line.width);

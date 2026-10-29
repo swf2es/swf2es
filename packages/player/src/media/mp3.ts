@@ -31,8 +31,6 @@ export interface Mp3Frames {
   whole: number[];
   /** Where reading goes on from with more bytes: after the last whole frame. */
   end: number;
-  /** The first frame's bytes when it is a Xing, Info or VBRI header, which a browser would trim by. */
-  header: [number, number] | null;
 }
 
 interface Header {
@@ -145,19 +143,13 @@ export function mp3Frames(bytes: Uint8Array, before: Mp3Frames | null = null): M
   const like = before?.whole.length ? header(bytes, before.whole[0]) : null;
   if (!like) {
     const run = nextRun(bytes, 0, null);
-    return run ? readFrames(bytes, run[0], run[1], [], null) : null;
+    return run ? readFrames(bytes, run[0], run[1], []) : null;
   }
 
-  return readFrames(bytes, before?.end ?? 0, like, before?.whole ?? [], before?.header ?? null);
+  return readFrames(bytes, before?.end ?? 0, like, before?.whole ?? []);
 }
 
-function readFrames(
-  bytes: Uint8Array,
-  from: number,
-  like: Header,
-  before: number[],
-  headerFrame: [number, number] | null,
-): Mp3Frames {
+function readFrames(bytes: Uint8Array, from: number, like: Header, before: number[]): Mp3Frames {
   const whole = before.slice();
   let frames = whole.length / 2;
   let at = from;
@@ -183,7 +175,6 @@ function readFrames(
     end = at;
   }
 
-  const first = before.length ? null : whole[0];
   return {
     rate: like.rate,
     channels: like.channels,
@@ -191,12 +182,6 @@ function readFrames(
     frames,
     whole,
     end,
-    header:
-      first === undefined || first === null
-        ? headerFrame
-        : isHeaderFrame(bytes, first, like)
-          ? [first, whole[1]]
-          : null,
   };
 }
 
@@ -217,22 +202,4 @@ export function mp3HeaderFrame(bytes: Uint8Array): [number, number] | null {
   }
 
   return [first[0], Math.min(bytes.length, first[0] + first[1].length)];
-}
-
-/** The whole frames of MP3 bytes back to back, all else left out, a Xing, Info or VBRI header too. */
-export function mp3Bytes(bytes: Uint8Array, mp3: Mp3Frames): Uint8Array<ArrayBuffer> {
-  const from = mp3.header ? 2 : 0;
-  let size = 0;
-  for (let i = from; i < mp3.whole.length; i += 2) {
-    size += mp3.whole[i + 1] - mp3.whole[i];
-  }
-
-  const out = new Uint8Array(size);
-  let at = 0;
-  for (let i = from; i < mp3.whole.length; i += 2) {
-    out.set(bytes.subarray(mp3.whole[i], mp3.whole[i + 1]), at);
-    at += mp3.whole[i + 1] - mp3.whole[i];
-  }
-
-  return out;
 }

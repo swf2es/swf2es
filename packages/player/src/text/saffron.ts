@@ -78,28 +78,16 @@ const TOO_MANY: Outline = { start: 0, count: 0, xMin: 0, yMin: 0, xMax: 0, yMax:
 /** Each glyph's outline in the store as it now is; null for an empty one. */
 let outlines = new WeakMap<Glyph, Outline | null>();
 
-/** What a view does as the store starts again: the texts drawn from it are drawn again. */
-const resets = new Set<() => void>();
-
-/** `listener` told each time the store starts again, until it is taken off. */
-export function onSegmentsReset(listener: () => void): () => void {
-  resets.add(listener);
-  return () => resets.delete(listener);
-}
-
 /** Start the store again: every outline is cut again on its next draw. */
 export function resetSegments(): void {
   store.used = 0;
   store.epoch++;
   store.resets++;
   outlines = new WeakMap();
-  for (const listener of resets) {
-    listener();
-  }
 }
 
 /** The store let go of, back to its first size, as the last view that draws from it goes. */
-export function freeSegments(): void {
+function freeSegments(): void {
   resetSegments();
   store.data = new Float32Array(ROW * 4 * 16);
 }
