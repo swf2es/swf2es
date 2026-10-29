@@ -42,9 +42,8 @@ function facts() {
     load: (name: string) => (name === `\0${id}` ? source : undefined),
   };
 }
-const guide = readGuide(root, BASE, blob).map(({ id, order }) =>
-  order === 0 ? { slug: id, label: "Overview" } : { slug: id },
-);
+const guidePages = readGuide(root, BASE, blob);
+const guide = guidePages.map(({ id }) => ({ slug: id }));
 
 export default defineConfig({
   site: "https://swf2es.github.io",
@@ -55,6 +54,8 @@ export default defineConfig({
   vite: { plugins: [facts()] },
   // Compressed, a line's break before a link was dropped with the space it stood for.
   compressHTML: false,
+  // The guide starts at its first section: docs/ itself is no page.
+  redirects: { "/docs": `${BASE}${guidePages[0].id}/` },
   integrations: [
     starlight({
       title: "swf2es",

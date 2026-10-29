@@ -29,23 +29,33 @@ const link = (target: string) =>
     guidePages(`# G\n\n[x](${target})\n`, "docs/guide.md", "/", "https://host/blob/abc/")[0].body,
   )?.[1];
 
-test("the guide's title and introduction make its first page, each section a page", () => {
+test("each section is a page, the guide's introduction at the top of the first", () => {
   assert.deepEqual(
     pages.map(({ id, title, order }) => [id, title, order]),
     [
-      ["docs", "Using it", 0],
-      ["docs/first-steps", "First steps", 1],
-      ["docs/second-steps", "Second steps", 2],
+      ["docs/first-steps", "First steps", 0],
+      ["docs/second-steps", "Second steps", 1],
     ],
   );
-  assert.match(page("docs"), /- \[First steps\]\(\/site\/docs\/first-steps\/\)/);
+  assert.match(page("docs/first-steps"), /^The \[README\][^\n]*\n\nSee /);
   assert.match(page("docs/second-steps"), /^### A detail$/m);
 });
 
+test("a guide without sections is one page", () => {
+  assert.deepEqual(
+    guidePages("# G\n\nOnly this.\n", "g.md", "/", "").map(({ id, title, body }) => [
+      id,
+      title,
+      body,
+    ]),
+    [["docs", "G", "Only this."]],
+  );
+});
+
 test("the guide's links lead to the repository on GitHub, or to the page with the heading", () => {
-  assert.match(page("docs"), /\[README\]\(https:\/\/host\/blob\/abc\/README\.md\)/);
-  assert.match(page("docs"), /\(https:\/\/host\/blob\/abc\/docs\/architecture\.md#players\)/);
   const first = page("docs/first-steps");
+  assert.match(first, /\[README\]\(https:\/\/host\/blob\/abc\/README\.md\)/);
+  assert.match(first, /\(https:\/\/host\/blob\/abc\/docs\/architecture\.md#players\)/);
   assert.match(first, /\[the second\]\(\/site\/docs\/second-steps\/\)/);
   assert.match(first, /\[its detail\]\(\/site\/docs\/second-steps\/#a-detail\)/);
   assert.match(first, /\[the web\]\(https:\/\/example\.com\/\)/);
@@ -108,11 +118,22 @@ test("repeated headings are numbered as GitHub numbers them, and pages keep thei
   const pages = guidePages(guide, "docs/guide.md", "/", "");
   assert.deepEqual(
     pages.map((p) => p.id),
-    ["docs", "docs/setup", "docs/setup-1"],
+    ["docs/setup", "docs/setup-1"],
   );
-  assert.match(pages[0].body, /\[one\]\(\/docs\/setup\/#example\)/);
+  // The introduction is on the first section's page, so its first Example is a local anchor.
+  assert.match(pages[0].body, /\[one\]\(#example\)/);
   // On its own page, the second section's first Example is its first.
   assert.match(pages[0].body, /\[two\]\(\/docs\/setup-1\/#example\)/);
   assert.match(pages[0].body, /\[setup\]\(\/docs\/setup-1\/\)/);
-  assert.match(pages[2].body, /\[back\]\(#example-1\)/);
+  assert.match(pages[1].body, /\[back\]\(#example-1\)/);
+});
+
+test("the introduction's headings are numbered with the first section's, on the page they share", () => {
+  const pages = guidePages(
+    "# G\n### Note\n## A\n### Note\n[second](#note-1)\n",
+    "docs/guide.md",
+    "/",
+    "",
+  );
+  assert.match(pages[0].body, /\[second\]\(#note-1\)/);
 });

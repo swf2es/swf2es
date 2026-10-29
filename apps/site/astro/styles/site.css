@@ -1,3 +1,28 @@
+/*
+ * On a wide screen the text keeps to the sidebar, the page's contents beside it, rather than
+ * a column centred in what is left of the page and the contents at its far edge. Unlayered
+ * rules win over Starlight's, which sit in its layers.
+ */
+@media (min-width: 72rem) {
+  :root {
+    --sl-content-width: 56rem;
+    --sl-content-margin-inline: 0;
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane {
+    --sl-content-margin-inline: 0;
+    width: min(
+      calc(100% - var(--sl-sidebar-width)),
+      calc(var(--sl-content-width) + 2 * var(--sl-content-pad-x))
+    );
+  }
+
+  .right-sidebar-container {
+    margin-inline-start: 0;
+    width: var(--sl-sidebar-width);
+  }
+}
+
 /* Starlight's theme, its accent the swf2es icon's blue. */
 :root {
   --sl-color-accent-low: #0f2547;

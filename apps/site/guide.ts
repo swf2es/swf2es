@@ -1,6 +1,6 @@
 // The site's guide pages, from docs/guide.md as the repository keeps it, so
-// that there is one copy: its title and introduction make the guide's first
-// page, and each `##` section a page of its own, in order. Links to other
+// that there is one copy: each `##` section a page of its own, in order, its
+// title and introduction at the top of the first. Links to other
 // files of the repository go to them on GitHub, and links to a heading of
 // the guide to the page that has it.
 import { readFileSync } from "node:fs";
@@ -11,10 +11,10 @@ import type { Loader } from "astro/loaders";
 export const GUIDE = "docs/guide.md";
 
 export interface GuidePage {
-  /** Its path under the site, "docs" for the first page, "docs/<slug>" for a section's. */
+  /** Its path under the site, "docs/<slug>" by its section's heading ("docs" for a guide of none). */
   id: string;
   title: string;
-  /** Its place in the guide, 0 for the first page. */
+  /** Its place in the guide, from 0. */
   order: number;
   body: string;
 }
@@ -118,8 +118,11 @@ export function guidePages(
     if (level === 1 && parts.length === 1 && parts[0].title === "") {
       parts[0].title = text;
     } else if (level === 2) {
+      // The introduction shares the first section's page, and so its numbering.
+      if (parts.length > 1) {
+        pageAnchor = slugger();
+      }
       parts.push({ title: text, anchor, lines: [] });
-      pageAnchor = slugger();
     } else {
       parts[parts.length - 1].lines.push(line);
     }
@@ -127,9 +130,20 @@ export function guidePages(
     targets.set(anchor, { part: parts.length - 1, anchor: level <= 2 ? "" : pageAnchor(text) });
   }
 
+  // The title and introduction go at the top of the first section's page: a page of their own
+  // would only list the sections, which the sidebar lists already.
+  if (parts.length > 1) {
+    const [intro, first] = [parts[0], parts[1]].map((part) => part.lines.join("\n").trim());
+    parts[1].lines = [intro, "", first];
+    parts.shift();
+    for (const target of targets.values()) {
+      target.part = Math.max(0, target.part - 1);
+    }
+  }
+
   // GitHub's anchors are unique in the guide, so a section's makes its page's path.
   const pages = parts.map(({ title, anchor, lines }, order) => ({
-    id: order === 0 ? "docs" : `docs/${anchor}`,
+    id: anchor === "" ? "docs" : `docs/${anchor}`,
     title: title || "Guide",
     order,
     body: lines.join("\n").trim(),
@@ -165,10 +179,6 @@ export function guidePages(
   for (const page of pages) {
     page.body = rewriteLinks(page.body, (target) => link(target, page.order));
   }
-
-  // The first page lists the others, which the guide itself has as its headings.
-  const list = pages.slice(1).map((p) => `- [${p.title}](${base}${p.id}/)`);
-  pages[0].body += `\n\n${list.join("\n")}\n`;
 
   return pages;
 }
@@ -259,13 +269,19 @@ export function guideLoader(options: { root: string; blob: string }): Loader {
         store.clear();
 
         for (const page of readGuide(options.root, base, options.blob)) {
-          const data = await parseData({ id: page.id, data: { title: page.title } });
+          const rendered = await renderMarkdown(page.body);
+          // A page without headings of its own would list only "Overview" beside its text.
+          const tableOfContents = (rendered.metadata?.headings?.length ?? 0) > 0;
+          const data = await parseData({
+            id: page.id,
+            data: { title: page.title, tableOfContents },
+          });
           store.set({
             id: page.id,
             data,
             body: page.body,
             digest: generateDigest(page.body),
-            rendered: await renderMarkdown(page.body),
+            rendered,
           });
         }
       };

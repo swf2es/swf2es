@@ -16,8 +16,9 @@ it needs. Its pages, under the base path:
   `modules/`. The import map's URLs are absolute under the base path, and
   it is the head's first script, before any module of Starlight's.
 - `/docs/` — the guide, made from `docs/guide.md` as it builds, so the
-  repository keeps one copy: `guide.ts` is a content loader that makes the
-  guide's introduction one page and each `##` section another. It reads
+  repository keeps one copy: `guide.ts` is a content loader that makes
+  each `##` section a page, the guide's introduction at the top of the
+  first, and `/docs/` redirects there. It reads
   the Markdown as GitHub does (fences by their character and length,
   headings numbered when repeated), sends links to the repository's other
   files to GitHub at the site's commit, and links to a heading to the page
