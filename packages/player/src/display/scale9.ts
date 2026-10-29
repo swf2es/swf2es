@@ -14,6 +14,7 @@ import {
 } from "./display.js";
 import { apply, invert, type Rect, union } from "./geometry.js";
 import { MOVE, pointsOf, type ShapeLayer } from "./shapes.js";
+import { makeRoom, moveLast, same } from "./value-lists.js";
 
 /**
  * One axis of a slice, in the owner's space: the bounds' and the grid's
@@ -223,37 +224,62 @@ export function sliceLayers(
   m: Matrix | null,
   version = 0,
 ): ShapeLayer[] {
-  const at = m ? `;${m.a},${m.b},${m.c},${m.d},${m.tx},${m.ty}` : "";
-  const key = `${slice.key}${at};${version}`;
+  // Compared as values, not by a key formatted from them on every draw and hit test: the slice
+  // by its own key, made once with it, its matrix by its numbers.
   let kept = sliced.get(layers);
-  const found = kept?.get(key);
-  if (found) {
-    return found;
+  for (let i = kept ? kept.length - 1 : -1; i >= 0; i--) {
+    const e = (kept as SlicedLayers[])[i];
+    if (
+      e.version === version &&
+      (e.slice === slice || e.slice.key === slice.key) &&
+      (e.m === null
+        ? m === null
+        : m !== null &&
+          same(e.m.a, m.a) &&
+          same(e.m.b, m.b) &&
+          same(e.m.c, m.c) &&
+          same(e.m.d, m.d) &&
+          same(e.m.tx, m.tx) &&
+          same(e.m.ty, m.ty))
+    ) {
+      return (i === (kept as SlicedLayers[]).length - 1 ? e : moveLast(kept as SlicedLayers[], i))
+        .layers;
+    }
   }
 
   const made = moveLayers(layers, slice, m);
   if (!kept) {
-    kept = new Map();
+    kept = [];
     sliced.set(layers, kept);
   }
 
-  // The oldest goes past a few: instances of one symbol at a few sizes alternate.
-  if (kept.size >= SLICES_KEPT) {
-    kept.delete(kept.keys().next().value as string);
-  }
-
-  kept.set(key, made);
+  // The least lately used goes past a few: instances of one symbol at a few sizes alternate.
+  makeRoom(
+    kept,
+    SLICES_KEPT,
+    () => false,
+    () => {},
+  );
+  kept.push({ slice, m: m && { ...m }, version, layers: made });
   return made;
 }
 
 const SLICES_KEPT = 4;
 
 /**
- * The latest slices of each set of layers, by the key of the slice, matrix
- * and version: a hit test asks on every pointer move, and the renderer
- * again on a redraw that is not a reslice.
+ * The latest slices of each set of layers, with the slice, matrix and
+ * version each was made for: a hit test asks on every pointer move, and
+ * the renderer again on a redraw that is not a reslice.
  */
-const sliced = new WeakMap<ShapeLayer[], Map<string, ShapeLayer[]>>();
+const sliced = new WeakMap<ShapeLayer[], SlicedLayers[]>();
+
+/** A set of layers as sliced, and the slice, matrix and version it was sliced for. */
+interface SlicedLayers {
+  slice: Slice;
+  m: Matrix | null;
+  version: number;
+  layers: ShapeLayer[];
+}
 
 function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): ShapeLayer[] {
   const inverse = m && invert(m);
