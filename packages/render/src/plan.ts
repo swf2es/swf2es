@@ -3,6 +3,9 @@ import {
   COMPOSITE,
   type Commands,
   FILTER,
+  HELD,
+  HOLD_POP,
+  HOLD_PUSH,
   LAYER_POP,
   LAYER_PUSH,
   RUN,
@@ -26,12 +29,47 @@ import {
  * Plan a frame: clear to `background` (0xAARRGGBB, straight), then a run
  * for each stretch of the list under one blend mode, each mask pushed into
  * the stencil and popped out, and each layer pushed and composited, where
- * their markers say; a layer of no size is left out, all in it. Pure: the same
- * list plans the same commands.
+ * their markers say; a layer of no size is left out, all in it. A filtered
+ * layer of draws and masks alone, not kept, is held: drawn before the
+ * stage, with every other such (HOLD_PUSH), and composited where it stands
+ * (HELD). Pure: the same list plans the same commands.
  */
 export function plan(scene: SceneList, background: number, out: Commands): void {
   out.reset();
   open.length = 0;
+  if (heldAt.length < scene.length) {
+    heldAt = new Int32Array(Math.max(scene.length, heldAt.length * 2));
+  }
+
+  heldAt.fill(-1, 0, scene.length);
+  let holds = 0;
+
+  for (let i = 0; i < scene.length; i++) {
+    if (scene.kind[i] !== LAYER_BEGIN) {
+      continue;
+    }
+
+    const at = scene.geometry[i] * 4;
+    if (scene.layers[at + 2] <= 0 || scene.layers[at + 3] <= 0) {
+      // Left out, all in it (emit): none held.
+      i = layerEnd(scene, i);
+    } else if (holdable(scene, i)) {
+      heldAt[i] = holds++;
+    }
+  }
+
+  for (let i = 0; i < scene.length; i++) {
+    if (scene.kind[i] === LAYER_BEGIN && heldAt[i] >= 0) {
+      const r = scene.layers;
+      const at = scene.geometry[i] * 4;
+      const end = layerEnd(scene, i);
+      out.push(HOLD_PUSH, out.param(r[at], r[at + 1], r[at + 2], r[at + 3]), heldAt[i]);
+      emit(scene, i + 1, end, out);
+      out.push(HOLD_POP, scene.texture[end], heldAt[i]);
+      i = end;
+    }
+  }
+
   const alpha = (background >>> 24) / 255;
   out.push(
     CLEAR,
@@ -42,9 +80,16 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
       alpha,
     ),
   );
+  emit(scene, 0, scene.length, out);
+}
 
-  // A run is a stretch of draws under one blend mode, outside a mask's own draws, which its
-  // markers name for the stencil.
+/**
+ * The commands for the list's entries from `from` to before `to`: a run for
+ * each stretch under one blend mode, outside a mask's own draws, which its
+ * markers name for the stencil; masks, layers and kept outputs where their
+ * markers are; a held layer's composite where it begins (heldAt).
+ */
+function emit(scene: SceneList, from: number, to: number, out: Commands): void {
   let first = -1;
   let masking = false;
   const close = (end: number) => {
@@ -55,7 +100,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
     first = -1;
   };
 
-  for (let i = 0; i < scene.length; i++) {
+  for (let i = from; i < to; i++) {
     switch (scene.kind[i]) {
       case DRAW:
         if (!masking && first >= 0 && scene.blend[i] !== scene.blend[first]) {
@@ -81,6 +126,14 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
         break;
       case LAYER_BEGIN: {
         close(i);
+        if (heldAt[i] >= 0) {
+          const end = layerEnd(scene, i);
+          out.push(HELD, heldAt[i], scene.geometry[end], scene.row[end]);
+          noteClearing(out, scene.geometry[end]);
+          i = end;
+          break;
+        }
+
         const r = scene.layers;
         const at = scene.geometry[i] * 4;
         if (r[at + 2] <= 0 || r[at + 3] <= 0) {
@@ -125,7 +178,34 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
     }
   }
 
-  close(scene.length);
+  close(to);
+}
+
+/** Each entry's held layer, by number, where a layer it begins is held; else -1. */
+let heldAt = new Int32Array(256);
+
+/**
+ * Whether the layer begun at entry `begin`, of some size, is held: filtered,
+ * not kept for the frames after, and of draws and masks alone, with no
+ * layer or kept output in it, whose content no other target takes part in.
+ */
+function holdable(scene: SceneList, begin: number): boolean {
+  const layer = scene.geometry[begin];
+  if (scene.pads[layer] < 0 || scene.keeps[layer] >= 0) {
+    return false;
+  }
+
+  for (let i = begin + 1; i < scene.length; i++) {
+    switch (scene.kind[i]) {
+      case LAYER_END:
+        return scene.texture[i] >= 0;
+      case LAYER_BEGIN:
+      case KEPT:
+        return false;
+    }
+  }
+
+  return false;
 }
 
 /** The layers pushed and not yet popped, by number, innermost last. */
