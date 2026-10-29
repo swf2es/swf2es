@@ -12,16 +12,25 @@ import { bounds, toStage } from "./bounds.js";
 import type { DisplayObject } from "./displayobject.js";
 import { apply, concat, isProjective } from "./geometry.js";
 
-/** The samples a side the bitmap is drawn at before it is averaged to a texel a pixel, as Flash's high quality covers edges. */
+/**
+ * The samples a side the bitmap is drawn at before it is averaged to a
+ * texel a pixel, as Flash's high quality covers edges.
+ */
 export const SAMPLES = 4;
 
-/** The most texels a side of a bitmap: larger, the object is drawn into it at less than a texel a pixel. */
+/**
+ * The most texels a side of a bitmap: larger, the object is drawn into it
+ * at less than a texel a pixel.
+ */
 const LARGEST = 2048;
 
 /** The most texels the samples a bitmap is drawn at may take (16 MiB): past it, fewer samples. */
 const SAMPLED_TEXELS = 4 * 1024 * 1024;
 
-/** The samples a side, and texels a pixel of the object's space, a bitmap of a w by h rectangle is drawn at. */
+/**
+ * The samples a side, and texels a pixel of the object's space, a bitmap of
+ * a w by h rectangle is drawn at.
+ */
 export function bitmapScale(
   width: number,
   height: number,

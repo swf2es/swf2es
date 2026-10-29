@@ -36,7 +36,7 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
+import { argbOf, BitmapStore, characterStore, type PixelRect, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
 import { concatColorInto, IDENTITY_COLOR, sameColor } from "../display/color.js";
 import { Container } from "../display/container.js";
@@ -279,6 +279,45 @@ interface Kept {
  * for each of its layers' geometries, each geometry made once and kept
  * while drawn; then plans the frame and has the backend draw it.
  */
+/** What a 3D object's bitmap was last drawn of, and its bounds then (RenderView.drawPlane). */
+interface PlaneState {
+  seenAt: number;
+  generation: number;
+  rect: PixelRect | null;
+  scrolled: boolean;
+  filters: readonly FilterRecord[];
+  /** Whether its pass placed a 3D object or an outside mask, which move as all above does. */
+  unkeepable: boolean;
+  mask: DisplayObject | null;
+  left: number;
+  top: number;
+  texels: number;
+  samples: number;
+  width: number;
+  height: number;
+  color: ColorTransform;
+  colored: boolean;
+}
+
+/** What a pass of its own swaps out of the walk (RenderView.passState). */
+interface PassState {
+  scene: SceneList;
+  rows: Rows;
+  filters: Filters;
+  commands: Commands;
+  target: RenderView["target"];
+  scale: number;
+  filterUnits: number | null;
+  resolution: number;
+  screenScale: number | null;
+  drawRoot: DisplayObject | null;
+  drawMatrix: Matrix;
+  snapshotting: boolean;
+  walkDepth: number;
+  sliceOwner: DisplayObject | null;
+  ownerSlice: Slice | null;
+}
+
 /** A text's glyph quads as Saffron draws them (RenderView.advancedText), and what they were made of. */
 interface AdvancedText {
   source: unknown;
@@ -345,23 +384,15 @@ export class RenderView implements Drawer {
       };
     }
   >();
-  /** What each 3D object's bitmap was drawn of, which it is kept while unchanged (samePlane). */
-  private readonly planeStates = new WeakMap<
-    DisplayObject,
-    {
-      seenAt: number;
-      generation: number;
-      left: number;
-      top: number;
-      texels: number;
-      samples: number;
-      width: number;
-      height: number;
-      mask: DisplayObject | null;
-      color: ColorTransform;
-      colored: boolean;
-    }
-  >();
+  /** What each 3D object's bitmap was drawn of, which it is kept while unchanged (drawPlane). */
+  private readonly planeStates = new WeakMap<DisplayObject, PlaneState>();
+  /** BitmapData.draw's kept bitmaps of 3D objects, apart from the stage's. */
+  private readonly drawnPlaneKeeps = new WeakMap<DisplayObject, KeepHandle>();
+  /**
+   * How many 3D objects and masks from outside them passes have placed: a
+   * pass that places one draws a bitmap that cannot be kept (drawPlane).
+   */
+  private passPlaced = 0;
   /** Where drawPlane works out a quad. */
   private readonly planeQuad: PlaneQuad = {
     x: 0,
@@ -371,7 +402,7 @@ export class RenderView implements Drawer {
     positions: new Float64Array(8),
     ws: new Float64Array(4),
   };
-  /** How many 3D objects' passes the walk is in, and each depth's lists, kept for the next frame. */
+  /** How many 3D objects' passes the walk is in, and each depth's lists, kept for the next. */
   private planeDepth = 0;
   private readonly planePasses: {
     scene: SceneList;
@@ -425,6 +456,8 @@ export class RenderView implements Drawer {
    * the frame's walk would.
    */
   private snapshotting = false;
+  /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
+  private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
@@ -690,7 +723,8 @@ export class RenderView implements Drawer {
     }
 
     const childful = o instanceof Container && o.children.length > 0;
-    const mode = hidden || named < 0 || (named === LAYER && !childful) ? NORMAL : named;
+    // A 3D object's layer is its bitmap already.
+    const mode = hidden || named < 0 || (named === LAYER && (!childful || plane)) ? NORMAL : named;
     // Its filters draw it as a layer too, which they run over before its blend: adl filters the
     // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
     // The 9-slice grid that reshapes what it draws itself (display/scale9.ts): its own, sliced as
@@ -719,8 +753,7 @@ export class RenderView implements Drawer {
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
     if (mode !== NORMAL || filtering) {
-      // A 3D object's colour is in its bitmap already.
-      if ((mode === LAYER && !plane) || filtering) {
+      if (mode === LAYER || filtering) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
@@ -836,7 +869,7 @@ export class RenderView implements Drawer {
       const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
       // Its embedded glyphs as Saffron draws them, all in one geometry drawn where the first of
       // them was, else as normal text.
-      // In a 3D object's bitmap, whose pixels are not the stage's, as normal text, as in the Pixi view.
+      // In a 3D object's bitmap, whose pixels are not the stage's, as normal text, as Pixi's view.
       const advanced =
         omitted.advanced && this.planeDepth === 0 ? this.advancedText(o, a, b, c, d) : null;
       if (omitted.advanced && !advanced) {
@@ -1131,7 +1164,8 @@ export class RenderView implements Drawer {
   private filterPlan(o: DisplayObject): FilterPlan | null {
     const records = o.filters;
     // A stage scaled to nothing filters at a unit a pixel rather than not at all.
-    const units = Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1;
+    const units =
+      this.filterUnits ?? (Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1);
     const kept = this.filterPlans.get(o);
     // A draw for BitmapData plans at its own units, leaving the stage's plans be.
     if (this.drawRoot) {
@@ -1385,8 +1419,10 @@ export class RenderView implements Drawer {
    * its own before the frame's (drawPlaneContent), in its colour `full`,
    * filtered; then the bitmap's quad, placed by its plane in its parent's
    * space (a b c d tx ty on the stage), smoothed at each pixel of Flash's.
-   * Nothing where its quad has a corner behind the eye, or it draws
-   * nothing, or a 3D object masks it, which leaves nothing of it in Flash.
+   * The bitmap is kept while nothing it holds changes (unchanged). Nothing
+   * where its quad has a corner behind the eye, or it draws nothing, or a
+   * 3D object masks it, which leaves nothing of it in Flash. Whether all in
+   * it was walked, or needs no walk, its flags clear.
    */
   private drawPlane(
     o: DisplayObject,
@@ -1402,7 +1438,15 @@ export class RenderView implements Drawer {
       return false;
     }
 
-    const rect = drawnRect(o);
+    // In another's bitmap, placed by what moves with all above it.
+    if (this.planeDepth > 0) {
+      this.passPlaced++;
+    }
+
+    // What it draws, measured again only where something in it may have changed.
+    const k = this.planeState(o);
+    const unchanged = this.unchanged(o, k);
+    const rect = unchanged && k.rect ? k.rect : drawnRect(o);
     const quad = this.planeQuad;
     if (
       !rect ||
@@ -1415,12 +1459,14 @@ export class RenderView implements Drawer {
     const width = Math.max(1, Math.ceil(quad.width * texels));
     const height = Math.max(1, Math.ceil(quad.height * texels));
     // Let go of on the first frame it is not drawn: one not drawn on the frame before is drawn
-    // anew, and a timeline makes 3D objects anew as it plays.
-    let keep = this.planeKeeps.get(o);
-    const kept0 = keep && this.keeps.alive(keep);
-    if (!keep || !kept0) {
+    // anew, and a timeline makes 3D objects anew as it plays. BitmapData.draw's apart, in its
+    // colour and at its quality, which the stage's bitmap must not take.
+    const keeps = this.snapshotting ? this.drawnPlaneKeeps : this.planeKeeps;
+    let keep = keeps.get(o);
+    const alive = keep !== undefined && this.keeps.alive(keep);
+    if (!keep || !alive) {
       keep = this.keeps.add(0);
-      this.planeKeeps.set(o, keep);
+      keeps.set(o, keep);
     }
 
     this.keeps.use(keep.id);
@@ -1446,60 +1492,13 @@ export class RenderView implements Drawer {
     const handle = kept.handle;
     this.geometries.use(handle.id);
     const row = this.rows.add(a, b, c, d, tx, ty, null);
-    const corner = quad.x;
+    const left = quad.x;
     const top = quad.y;
-    // Its bitmap kept where nothing it holds changed: then nothing in it has a flag to clear.
-    const same = kept0 && this.samePlane(o, full, corner, top, texels, samples, width, height);
-    if (!same) {
-      this.drawPlaneContent(o, full, corner, top, texels, samples, width, height, keep.id);
-    }
-
-    this.scene.draw(handle.id, row, NORMAL, keep.id, PLANE);
-    return true;
-  }
-
-  /**
-   * Whether a 3D object's bitmap, kept from the frame before, holds what it
-   * would draw now: nothing in it changed but its own transform, which
-   * moves its quad alone, nor its bitmap's corner, size or samples, its
-   * colour, or the stage's quality, or the mask it was drawn with (setting
-   * one flags no change); and no mask from outside it, which may have moved. BitmapData.draw draws it anew. Noted for the next frame.
-   */
-  private samePlane(
-    o: DisplayObject,
-    full: ColorTransform | null,
-    left: number,
-    top: number,
-    texels: number,
-    samples: number,
-    width: number,
-    height: number,
-  ): boolean {
-    let k = this.planeStates.get(o);
-    if (!k) {
-      k = {
-        seenAt: -1,
-        generation: -1,
-        left: 0,
-        top: 0,
-        texels: 0,
-        samples: 0,
-        width: 0,
-        height: 0,
-        mask: null,
-        color: { ...IDENTITY_COLOR },
-        colored: false,
-      };
-      this.planeStates.set(o, k);
-    }
-
+    // Its bitmap kept where it holds what it would draw now: nothing in it has a flag to clear.
     const same =
-      !this.snapshotting &&
-      k.seenAt === this.frames - 1 &&
+      alive &&
+      unchanged &&
       k.generation === this.keptGeneration &&
-      (o.dirty & ~TRANSFORM) === 0 &&
-      !(o.dirty & TRANSFORM && o.scroll !== null) &&
-      !(o instanceof Container && o.descendantsDirty) &&
       k.mask === o.mask &&
       (!o.mask || o.encloses(o.mask)) &&
       k.left === left &&
@@ -1509,23 +1508,89 @@ export class RenderView implements Drawer {
       k.width === width &&
       k.height === height &&
       (full ? k.colored && sameColor(k.color, full) : !k.colored);
+    if (!same) {
+      k.unkeepable = this.drawPlaneContent(
+        o,
+        full,
+        left,
+        top,
+        texels,
+        samples,
+        width,
+        height,
+        keep.id,
+      );
+    }
+
     if (!this.snapshotting) {
       k.seenAt = this.frames;
       k.generation = this.keptGeneration;
+      k.rect = rect;
+      k.scrolled = o.scroll !== null;
+      k.filters = o.filters;
+      k.mask = o.mask;
       k.left = left;
       k.top = top;
       k.texels = texels;
       k.samples = samples;
       k.width = width;
       k.height = height;
-      k.mask = o.mask;
       k.colored = full !== null;
       if (full) {
         Object.assign(k.color, full);
       }
     }
 
-    return same;
+    this.scene.draw(handle.id, row, NORMAL, keep.id, PLANE);
+    return true;
+  }
+
+  /** What `o`'s bitmap was last drawn of (drawPlane), made on its first. */
+  private planeState(o: DisplayObject): PlaneState {
+    let k = this.planeStates.get(o);
+    if (!k) {
+      k = {
+        seenAt: -1,
+        generation: -1,
+        rect: null,
+        scrolled: false,
+        filters: [],
+        unkeepable: false,
+        mask: null,
+        left: 0,
+        top: 0,
+        texels: 0,
+        samples: 0,
+        width: 0,
+        height: 0,
+        color: { ...IDENTITY_COLOR },
+        colored: false,
+      };
+      this.planeStates.set(o, k);
+    }
+
+    return k;
+  }
+
+  /**
+   * Whether nothing a 3D object's bitmap holds changed since the frame
+   * before drew it: in it but its own transform, which moves its quad
+   * alone, nor its filters' values, which setting flags as a transform.
+   * One whose pass placed a 3D object or a mask from outside it in it
+   * (unkeepable) is drawn anew on every frame, as those move with what
+   * above them moves, which flags nothing in it; and BitmapData.draw draws
+   * anew.
+   */
+  private unchanged(o: DisplayObject, k: PlaneState): boolean {
+    return (
+      !this.snapshotting &&
+      !k.unkeepable &&
+      k.seenAt === this.frames - 1 &&
+      (o.dirty & ~TRANSFORM) === 0 &&
+      !(o.dirty & TRANSFORM && (o.scroll !== null || k.scrolled)) &&
+      !(o instanceof Container && o.descendantsDirty) &&
+      sameFilterRecords(k.filters, o.filters)
+    );
   }
 
   /**
@@ -1545,8 +1610,9 @@ export class RenderView implements Drawer {
     width: number,
     height: number,
     keep: number,
-  ): void {
+  ): boolean {
     const depth = this.planeDepth;
+    const placed = this.passPlaced;
     let pass = this.planePasses[depth];
     if (!pass) {
       pass = {
@@ -1558,21 +1624,7 @@ export class RenderView implements Drawer {
       this.planePasses[depth] = pass;
     }
 
-    const outer = {
-      scene: this.scene,
-      rows: this.rows,
-      filters: this.filters,
-      commands: this.commands,
-      target: this.target,
-      scale: this.scale,
-      resolution: this.resolution,
-      screenScale: this.screenScale,
-      drawRoot: this.drawRoot,
-      drawMatrix: this.drawMatrix,
-      walkDepth: this.walkDepth,
-      sliceOwner: this.sliceOwner,
-      ownerSlice: this.ownerSlice,
-    };
+    const outer = this.passState();
     const target = {
       width: width * samples,
       height: height * samples,
@@ -1588,6 +1640,8 @@ export class RenderView implements Drawer {
     this.commands = pass.commands;
     this.target = target;
     this.scale = samples;
+    // Filters at the bitmap's units of the object's pixels, which a large object has fewer of.
+    this.filterUnits = samples * texels;
     this.resolution = 1;
     this.screenScale = 1;
     this.drawRoot = o;
@@ -1631,20 +1685,10 @@ export class RenderView implements Drawer {
       );
     } finally {
       this.planeDepth--;
-      this.scene = outer.scene;
-      this.rows = outer.rows;
-      this.filters = outer.filters;
-      this.commands = outer.commands;
-      this.target = outer.target;
-      this.scale = outer.scale;
-      this.resolution = outer.resolution;
-      this.screenScale = outer.screenScale;
-      this.drawRoot = outer.drawRoot;
-      this.drawMatrix = outer.drawMatrix;
-      this.walkDepth = outer.walkDepth;
-      this.sliceOwner = outer.sliceOwner;
-      this.ownerSlice = outer.ownerSlice;
+      this.restorePass(outer);
     }
+
+    return this.passPlaced !== placed;
   }
 
   /** What advanced text's quads name of the outlines' store, uploaded. */
@@ -2397,12 +2441,7 @@ export class RenderView implements Drawer {
       return new Uint32Array(Math.max(0, width * height));
     }
 
-    const stage = {
-      target: this.target,
-      scale: this.scale,
-      resolution: this.resolution,
-      screenScale: this.screenScale,
-    };
+    const stage = this.passState();
     this.target = {
       width: width * n,
       height: height * n,
@@ -2447,14 +2486,50 @@ export class RenderView implements Drawer {
       return argbOf(bytes);
     } finally {
       allowResets(true);
-      this.target = stage.target;
-      this.scale = stage.scale;
-      this.resolution = stage.resolution;
-      this.screenScale = stage.screenScale;
-      this.drawRoot = null;
-      this.snapshotting = false;
-      this.drawMatrix = IDENTITY;
+      this.restorePass(stage);
     }
+  }
+
+  /**
+   * What a pass of its own, BitmapData.draw's or a 3D object's bitmap's,
+   * swaps out of the walk, for it to be put back (restorePass).
+   */
+  private passState(): PassState {
+    return {
+      scene: this.scene,
+      rows: this.rows,
+      filters: this.filters,
+      commands: this.commands,
+      target: this.target,
+      scale: this.scale,
+      filterUnits: this.filterUnits,
+      resolution: this.resolution,
+      screenScale: this.screenScale,
+      drawRoot: this.drawRoot,
+      drawMatrix: this.drawMatrix,
+      snapshotting: this.snapshotting,
+      walkDepth: this.walkDepth,
+      sliceOwner: this.sliceOwner,
+      ownerSlice: this.ownerSlice,
+    };
+  }
+
+  private restorePass(s: PassState): void {
+    this.scene = s.scene;
+    this.rows = s.rows;
+    this.filters = s.filters;
+    this.commands = s.commands;
+    this.target = s.target;
+    this.scale = s.scale;
+    this.filterUnits = s.filterUnits;
+    this.resolution = s.resolution;
+    this.screenScale = s.screenScale;
+    this.drawRoot = s.drawRoot;
+    this.drawMatrix = s.drawMatrix;
+    this.snapshotting = s.snapshotting;
+    this.walkDepth = s.walkDepth;
+    this.sliceOwner = s.sliceOwner;
+    this.ownerSlice = s.ownerSlice;
   }
 
   /**
@@ -2493,6 +2568,7 @@ export class RenderView implements Drawer {
       }
     } else {
       m = outsideMaskMap(o, mask);
+      this.passPlaced++;
     }
 
     return concat(m, this.drawMatrix);
