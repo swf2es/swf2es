@@ -27,7 +27,16 @@ import {
   union,
 } from "./geometry.js";
 import { sliceFor, sliceLayers, withinMask } from "./scale9.js";
-import { facing, flatten, inside, orientation, type Path, type ShapeLayer } from "./shapes.js";
+import {
+  CUBIC,
+  CURVE,
+  facing,
+  flatten,
+  inside,
+  orientation,
+  type Path,
+  type ShapeLayer,
+} from "./shapes.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -424,8 +433,12 @@ function drawnAt(
       let crossings = 0;
       let sum = 0;
       for (const contour of contours) {
+        if (!near(contour, x, y, 0)) {
+          continue;
+        }
+
         const flat = flattened(contour);
-        if (near(flat, x, y, 0) && inside(flat.points, x, y)) {
+        if (inside(flat.points, x, y)) {
           crossings++;
           sum += flat.orientation;
         }
@@ -447,8 +460,7 @@ function drawnAt(
     for (const { line, paths } of layer.strokes) {
       const half = Math.max(line.width / TWIPS, 1) / 2;
       for (const path of paths) {
-        const flat = flattened(path);
-        if (near(flat, x, y, half) && nearPolyline(flat.points, x, y, half)) {
+        if (near(path, x, y, half) && nearPolyline(flattened(path).points, x, y, half)) {
           return true;
         }
       }
@@ -537,6 +549,39 @@ interface Flat {
 }
 
 /**
+ * Whether (x, y) is within `half` of the path's box, as it must be to be in
+ * or on it: the box of its flattening where that was made, else of its
+ * points and control points, which hold its curves, with nothing made. A
+ * drawing redrawn on every frame has new paths each time, most of them far
+ * from the pointer, which were flattened for this alone.
+ */
+function near(path: Path, x: number, y: number, half: number): boolean {
+  const flat = flats.get(path);
+  if (flat && flat.length === path.length) {
+    return nearBox(flat.xMin, flat.yMin, flat.xMax, flat.yMax, x, y, half);
+  }
+
+  let xMin = Infinity;
+  let yMin = Infinity;
+  let xMax = -Infinity;
+  let yMax = -Infinity;
+  for (let i = 0; i < path.length; ) {
+    const command = path[i];
+    const end = i + (command === CUBIC ? 7 : command === CURVE ? 5 : 3);
+    for (let k = i + 1; k < end; k += 2) {
+      xMin = Math.min(xMin, path[k]);
+      xMax = Math.max(xMax, path[k]);
+      yMin = Math.min(yMin, path[k + 1]);
+      yMax = Math.max(yMax, path[k + 1]);
+    }
+
+    i = end;
+  }
+
+  return nearBox(xMin, yMin, xMax, yMax, x, y, half);
+}
+
+/**
  * Paths flattened once, not on every hit test: the pointer asks on every
  * move, of every shape under the point's ancestors, and a curve's chords
  * cost more than a box test that rules most of them out.
@@ -571,16 +616,19 @@ function flattened(path: Path): Flat {
   return flat;
 }
 
-/** Whether (x, y) is within `half` of the path's box, as it must be to be in or on it. */
-function near(flat: Flat, x: number, y: number, half: number): boolean {
+/** Whether (x, y) is within `half` of the box. */
+function nearBox(
+  xMin: number,
+  yMin: number,
+  xMax: number,
+  yMax: number,
+  x: number,
+  y: number,
+  half: number,
+): boolean {
   // Negated, so a box made NaN by a drawing's NaN point rules nothing out:
   // the full test then skips only the NaN edges, as it did.
-  return !(
-    x < flat.xMin - half ||
-    x > flat.xMax + half ||
-    y < flat.yMin - half ||
-    y > flat.yMax + half
-  );
+  return !(x < xMin - half || x > xMax + half || y < yMin - half || y > yMax + half);
 }
 
 /** Whether (px, py) is within `half` of any segment of the open polyline. */
