@@ -2,10 +2,12 @@
 // shape is read into (shapes.ts), so that the renderer draws both alike.
 // Commands go to the fill and the stroke open at the time, each moveTo
 // starting a contour of the fill and a path of the stroke. As Flash draws
-// them, each fill begins a layer, and the lines drawn from then until the
-// next fill begins go in it, over that fill and under the next: a line
-// open at beginFill goes on in the new layer, and one drawn after endFill
-// stays above the fill before it. A fill's contour left open is closed with
+// them, a fill begun after lines begins a layer, and the lines drawn from
+// then until the next fill begins go in it, over that fill and under the
+// next: a line open at beginFill goes on in the new layer, and one drawn
+// after endFill stays above the fill before it. A fill begun while the
+// last layer holds fills alone goes on in it, as fills in a layer draw in
+// order, up to SHARED_FILLS. A fill's contour left open is closed with
 // a line in the line style of the time, as Flash closes it, kept apart from
 // the paths (shapes.ts' Close): a line drawn on after endFill takes it away
 // again, as in Flash, and bounds and hit tests leave it out.
@@ -32,6 +34,19 @@ const TWIPS = 20;
 /** The quadratic approximation of a quarter ellipse Flash's drawRoundRect uses: two curves, meeting at 45°. */
 const TAN_22_5 = Math.SQRT2 - 1;
 const COS_45 = Math.SQRT1_2;
+
+/**
+ * The fills a layer takes on from those before it, at most: a drawing
+ * redrawn every frame a fill a triangle so makes a few layers of them, not
+ * thousands, while a layer's tessellation, its memory and what a failure
+ * of it takes with it, stay bounded.
+ */
+const SHARED_FILLS = 256;
+
+/** Whether `layer` holds fills alone, which a fill begun next may go on after. */
+function fillsOnly(layer: ShapeLayer): boolean {
+  return !layer.strokes.length && !layer.meshes && !layer.extent;
+}
 
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
@@ -73,11 +88,11 @@ export class Drawing {
     const line = this.stroke?.line;
     this.dropStroke();
     this.fill = { fill, contours: [], winding: "evenOdd" };
-    // On in the last layer while it holds fills alone: within a layer fills draw in order, as
-    // across layers, and a drawing redrawn every frame, a fill a triangle, makes one layer of
-    // them where it made thousands. A layer with lines, triangles or meshes ends where it is.
+    // On in the last layer while it holds fills alone, as many as SHARED_FILLS: within a layer
+    // fills draw in order, as across layers. A layer with lines, triangles or meshes ends where it
+    // is.
     const last = this.layers[this.layers.length - 1];
-    if (last && !last.strokes.length && !last.meshes && !last.extent) {
+    if (last && fillsOnly(last) && last.fills.length < SHARED_FILLS) {
       this.fillLayer = last;
       this.fillStart = last.fills.length;
       last.fills.push(this.fill);
@@ -113,21 +128,23 @@ export class Drawing {
    * the open one's, the open fill's entries alone go.
    */
   private dropEmpty(layer: ShapeLayer, from: number): void {
-    if (
-      layer === this.layers[this.layers.length - 1] &&
-      !layer.strokes.length &&
-      !layer.meshes &&
-      !layer.extent &&
-      layer.fills.slice(from).every((f) => f.contours.every((c) => c.length <= 3))
-    ) {
-      if (from > 0) {
-        layer.fills.length = from;
-      } else {
-        this.layers.pop();
-      }
-
-      this.version++;
+    if (layer !== this.layers[this.layers.length - 1] || !fillsOnly(layer)) {
+      return;
     }
+
+    for (let i = from; i < layer.fills.length; i++) {
+      if (layer.fills[i].contours.some((c) => c.length > 3)) {
+        return;
+      }
+    }
+
+    if (from > 0) {
+      layer.fills.length = from;
+    } else {
+      this.layers.pop();
+    }
+
+    this.version++;
   }
 
   /** A stroke from here on with `line`, or none for null; the one before it ends either way. */

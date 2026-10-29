@@ -55,13 +55,7 @@ import {
 } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
-import {
-  facing,
-  type GradientFill,
-  type ImageFill,
-  type ShapeLayer,
-  shapeLayers,
-} from "../display/shapes.js";
+import { facing, type GradientFill, type ShapeLayer, shapeLayers } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { ShapeCharacter } from "../display/timeline.js";
@@ -82,7 +76,14 @@ import type { FillTessellator } from "./fills.js";
 import { type FilterPlan, planFilters, undrawnFilter } from "./filters.js";
 import { LineCache } from "./lines.js";
 import { bindCanvasPointer } from "./pointer.js";
-import { bitmapQuad, layerParts, type Part, radialTexels, unsupported } from "./shapes.js";
+import {
+  type BitmapSampling,
+  bitmapQuad,
+  layerParts,
+  type Part,
+  radialTexels,
+  unsupported,
+} from "./shapes.js";
 import {
   type DeviceItem,
   deviceTextResolution,
@@ -2330,7 +2331,7 @@ export class RenderView implements Drawer {
       return store.disposed ? null : this.storeTexture(store);
     }
 
-    const paint = part.paint as ImageFill | GradientFill;
+    const paint = part.paint as BitmapSampling | GradientFill;
     if (paint.type === "image") {
       const store = paint.image instanceof BitmapStore ? paint.image : characterStore(paint.image);
       return store && !store.disposed ? this.storeTexture(store) : null;
@@ -2351,7 +2352,7 @@ export class RenderView implements Drawer {
       return MESH | (mesh.smooth && this.smoothing ? SMOOTH : 0) | (mesh.repeat ? REPEAT : CLAMP);
     }
 
-    const paint = part.paint as ImageFill | GradientFill;
+    const paint = part.paint as BitmapSampling | GradientFill;
     if (paint.type === "image") {
       return (paint.smooth && this.smoothing ? SMOOTH : 0) | (paint.repeat ? REPEAT : CLAMP);
     }

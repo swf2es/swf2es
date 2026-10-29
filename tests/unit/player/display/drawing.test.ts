@@ -126,11 +126,25 @@ test("fills one after another share a layer, in order, while it holds no lines, 
     d.beginFill(fill);
     d.drawRect(0, 0, 10, 10);
   }
+
   d.endFill();
   assert.equal(d.layers.length, 1);
   assert.deepEqual(
     d.layers[0].fills.map((f) => (f.fill.type === "solid" ? f.fill.color : 0)),
     [0xffff0000, 0xff0000ff, 0xffff0000],
+  );
+
+  // At most SHARED_FILLS, 256, go on in one layer; the next begins another.
+  const many = new Drawing();
+  for (let i = 0; i < 300; i++) {
+    many.beginFill(i % 2 ? red : blue);
+    many.drawRect(i, 0, 1, 1);
+  }
+
+  many.endFill();
+  assert.deepEqual(
+    many.layers.map((l) => l.fills.length),
+    [256, 44],
   );
 
   // An empty fill ended by drawTriangles goes from the shared layer alone: the fills before stay.

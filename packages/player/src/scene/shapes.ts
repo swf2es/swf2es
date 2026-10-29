@@ -1,8 +1,7 @@
 // A shape layer's fills as geometries of the renderer's (@swf2es/render): each fill tessellated
 // (fills.ts), in order, a geometry for each stretch of solid fills, each stretch of fills of one
 // bitmap sampled alike, and each gradient fill, its vertices carrying where they sample in texels;
-// then
-// drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
+// then drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
 
 import type { Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
@@ -36,9 +35,22 @@ export const unsupported = {
  * drawTriangles' mesh, whose texels are its u and v and which carries its
  * t (MESH).
  */
+/**
+ * What a bitmap part is sampled by, all the view reads of its paint
+ * (paintTexture, paintSampler): fills of one bitmap that sample it alike
+ * (samplesAlike) share a part, each through its own matrix, which its
+ * vertices' texels hold.
+ */
+export type BitmapSampling = Pick<ImageFill, "type" | "image" | "smooth" | "repeat">;
+
+/** Whether `a` and `b` sample one bitmap alike, and so may share a part. */
+export function samplesAlike(a: BitmapSampling, b: BitmapSampling): boolean {
+  return a.image === b.image && a.smooth === b.smooth && a.repeat === b.repeat;
+}
+
 export interface Part {
   geometry: GeometryData;
-  paint: ImageFill | GradientFill | null;
+  paint: BitmapSampling | GradientFill | null;
   /** A radial gradient's region, the texels its texture covers. */
   region: Area | null;
   mesh: TriangleMesh | null;
@@ -67,10 +79,8 @@ class Gathered {
 
   /**
    * Open a part for `paint`, the one open first closed, unless both are
-   * solid, or both sample one bitmap alike: a fill's texels, a vertex's
-   * each, hold its own matrix, and the view reads a bitmap part's paint for
-   * its bitmap, smoothing and repeat alone (paintTexture, paintSampler).
-   * A drawing of a bitmap fill a triangle so draws in one part.
+   * solid, or both sample one bitmap alike (samplesAlike): a drawing of a
+   * bitmap fill a triangle so draws in a few parts.
    */
   open(paint: ImageFill | GradientFill | null, region: Area | null): void {
     if (paint === null && this.paint === null) {
@@ -78,13 +88,7 @@ class Gathered {
     }
 
     const open = this.paint;
-    if (
-      paint?.type === "image" &&
-      open?.type === "image" &&
-      paint.image === open.image &&
-      paint.smooth === open.smooth &&
-      paint.repeat === open.repeat
-    ) {
+    if (paint?.type === "image" && open?.type === "image" && samplesAlike(paint, open)) {
       return;
     }
 
