@@ -49,10 +49,16 @@ const traceLogging = byId<HTMLInputElement>("trace-logging");
 const clearLog = byId<HTMLButtonElement>("clear-log");
 const copyLog = byId<HTMLButtonElement>("copy-log");
 const report = byId<HTMLAnchorElement>("report");
-const build = document.documentElement.dataset.build ?? "unknown";
+const build = document.querySelector<HTMLElement>("[data-build]")?.dataset.build ?? "unknown";
+/**
+ * The site's root, which this script is served under (app/main.js): what
+ * the page names by a relative URL, a demo, a library or ?swf=, is there,
+ * wherever the page itself is.
+ */
+const SITE = new URL("../", import.meta.url).href;
 
 configure({
-  libraries: { builtin: new URL("libraries/builtin.abc", document.baseURI).href },
+  libraries: { builtin: new URL("libraries/builtin.abc", SITE).href },
   cache: true,
   build: build === "unknown" ? undefined : build,
 });
@@ -273,7 +279,7 @@ async function playFile(file: File): Promise<void> {
   // Read here, in the browser: the file goes nowhere else.
   // Its own URL under the site, by its name, so that its shared objects are
   // its own and not every local file's; nothing is there to load from it.
-  const base = new URL(`local/${encodeURIComponent(file.name)}`, document.baseURI).href;
+  const base = new URL(`local/${encodeURIComponent(file.name)}`, SITE).href;
   localNames.add(file.name).add(encodeURIComponent(file.name)).add(base);
   await play(new Uint8Array(await file.arrayBuffer()), file.name, LOCAL, base);
 }
@@ -282,7 +288,7 @@ async function playFile(file: File): Promise<void> {
 function swfUrl(url: string): URL | null {
   let absolute: URL;
   try {
-    absolute = new URL(url, document.baseURI);
+    absolute = new URL(url, SITE);
   } catch {
     showStatus(`Not a URL: ${url}`, true);
     return null;
@@ -469,7 +475,7 @@ for (const event of ["pointerdown", "focus", "click"]) {
 
 async function listDemos(): Promise<void> {
   try {
-    const demos = (await (await fetch("demos/demos.json")).json()) as DemoEntry[];
+    const demos = (await (await fetch(new URL("demos/demos.json", SITE))).json()) as DemoEntry[];
     for (const demo of demos) {
       const item = document.createElement("li");
       const button = document.createElement("button");
