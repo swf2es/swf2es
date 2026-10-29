@@ -41,7 +41,8 @@ pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests
                               # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
-node tests/player/run.ts [case...]   # the player's cases in Chrome vs Flash's frames
+node tests/player/run.ts [--shard i/n] [case...]   # the player's cases in Chrome vs Flash's
+                              # frames (--shard: every n-th from the i-th, as CI splits them)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
 node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two below
 pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm1, avm2
