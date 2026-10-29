@@ -1,10 +1,11 @@
 /*
  * On a wide screen the text keeps to the sidebar, the page's contents beside it, rather than
- * a column centred in what is left of the page and the contents at its far edge. Unlayered
- * rules win over Starlight's, which sit in its layers.
+ * a column centred in what is left of the page and the contents at its far edge. Pages
+ * without the sidebar (home, player, 404) stay centred. Unlayered rules win over Starlight's,
+ * which sit in its layers; the main pane sets its own margin beside the contents.
  */
 @media (min-width: 72rem) {
-  :root {
+  :root[data-has-sidebar] {
     --sl-content-width: 56rem;
     --sl-content-margin-inline: 0;
   }

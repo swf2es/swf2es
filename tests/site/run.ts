@@ -48,7 +48,7 @@ const PROBE = `package {
  * that is not there: a page, a file, or a heading of a page.
  */
 const crawl = `async (base) => {
-  const queue = [base, base + "docs/"];
+  const queue = [base];
   const seen = new Set(queue);
   const pages = [];
   const broken = [];
@@ -709,12 +709,22 @@ async function check(): Promise<void> {
             );
             assert.deepEqual(crawled.broken, []);
             const titles = new Map(crawled.pages);
-            for (const page of readGuide(root, "/swf2es/", "")) {
+            const guide = readGuide(root, "/swf2es/", "");
+            for (const page of guide) {
               assert.equal(titles.get(`/swf2es/${page.id}/`), page.title, `${page.id} is missing`);
             }
 
-            for (const path of ["/swf2es/", "/swf2es/play/", "/swf2es/notices/", "/swf2es/docs/"]) {
+            const first = `/swf2es/${guide[0].id}/`;
+            for (const path of ["/swf2es/", "/swf2es/play/", "/swf2es/notices/", first]) {
               assert.ok(titles.has(path), `${path} is not linked from the site`);
+            }
+
+            // docs/, where the guide's old links lead, sends them on to its first page.
+            if (guide[0].id !== "docs") {
+              const docs = await value<string>(
+                `fetch(${JSON.stringify(`${base}docs/`)}).then((r) => r.text())`,
+              );
+              assert.match(docs, new RegExp(`http-equiv="refresh" content="0;url=${first}"`));
             }
           },
         ],

@@ -1,6 +1,6 @@
 // The site's guide pages, from docs/guide.md as the repository keeps it, so
 // that there is one copy: each `##` section a page of its own, in order, its
-// title and introduction at the top of the first. Links to other
+// introduction at the top of the first (its `#` title is the site's "Guide"). Links to other
 // files of the repository go to them on GitHub, and links to a heading of
 // the guide to the page that has it.
 import { readFileSync } from "node:fs";
@@ -130,8 +130,8 @@ export function guidePages(
     targets.set(anchor, { part: parts.length - 1, anchor: level <= 2 ? "" : pageAnchor(text) });
   }
 
-  // The title and introduction go at the top of the first section's page: a page of their own
-  // would only list the sections, which the sidebar lists already.
+  // The introduction goes at the top of the first section's page, under that section's title: a
+  // page of its own would only list the sections, which the sidebar lists already.
   if (parts.length > 1) {
     const [intro, first] = [parts[0], parts[1]].map((part) => part.lines.join("\n").trim());
     parts[1].lines = [intro, "", first];
@@ -271,7 +271,10 @@ export function guideLoader(options: { root: string; blob: string }): Loader {
         for (const page of readGuide(options.root, base, options.blob)) {
           const rendered = await renderMarkdown(page.body);
           // A page without headings of its own would list only "Overview" beside its text.
-          const tableOfContents = (rendered.metadata?.headings?.length ?? 0) > 0;
+          // Starlight lists h2 and h3.
+          const tableOfContents = (rendered.metadata?.headings ?? []).some(
+            ({ depth }) => depth === 2 || depth === 3,
+          );
           const data = await parseData({
             id: page.id,
             data: { title: page.title, tableOfContents },

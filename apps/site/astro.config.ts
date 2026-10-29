@@ -28,6 +28,7 @@ function facts() {
   const id = "virtual:swf2es/facts";
   const source = `export default ${JSON.stringify({
     base: BASE,
+    guide: guidePages[0].id,
     build,
     importMap,
     blob,
@@ -54,8 +55,8 @@ export default defineConfig({
   vite: { plugins: [facts()] },
   // Compressed, a line's break before a link was dropped with the space it stood for.
   compressHTML: false,
-  // The guide starts at its first section: docs/ itself is no page.
-  redirects: { "/docs": `${BASE}${guidePages[0].id}/` },
+  // The guide starts at its first section, unless it has none: docs/ is then its only page.
+  redirects: guidePages[0].id === "docs" ? {} : { "/docs": `${BASE}${guidePages[0].id}/` },
   integrations: [
     starlight({
       title: "swf2es",
