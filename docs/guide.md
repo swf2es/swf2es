@@ -49,7 +49,7 @@ for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
 back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events.
 
-Fills, lines and BitmapData's convolution are computed by
+Fills, lines and BitmapData's filters and pixel operations are computed by
 `@swf2es/native/render`'s Wasm module, which the page must let compile:
 with WebAssembly SIMD, and under a CSP with `'wasm-unsafe-eval'`. Include
 that entry in the import map: the player loads it with itself, so a

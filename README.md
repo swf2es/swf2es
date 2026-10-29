@@ -5,11 +5,11 @@
 swf2es plays SWF files in the browser. It compiles their ActionScript,
 AS3 and AS1/2 alike, to JavaScript, so the browser's own JIT runs it, and
 draws them with a WebGL 2 renderer of its own. Fills, lines and BitmapData
-filters are computed in WebAssembly (Zig).
+filters are computed in WebAssembly: Zig, with libtess2 for the fills.
 
 **Try it** at https://swf2es.github.io/swf2es/: open or drop a SWF (it is
 read in your browser, never uploaded), or play a demo. For Stage3D SWFs,
-tick **Stage3D (experimental)** first.
+select **Stage3D (experimental)** in the player controls.
 
 **Status:**
 - **ActionScript 3** runs as avmshell runs it: 97.9% of Tamarin's
@@ -42,9 +42,12 @@ tick **Stage3D (experimental)** first.
 </script>
 ```
 
-You supply `builtin.abc` (avmplus' standard library); swf2es ships its own
+Call `configure()` once, before the first player loads. You supply
+`builtin.abc` (avmplus' standard library); swf2es ships its own
 playerglobal. The packages are ES modules: serve them through a bundler or
-an import map, and let the page compile WebAssembly (SIMD, and
+an import map that also maps `@swf2es/player/scene`, `@swf2es/render/webgl`,
+`@swf2es/context3d/device` and `@swf2es/native/render`, which the player
+loads with itself. The page must let it compile WebAssembly (SIMD, and
 `'wasm-unsafe-eval'` under a CSP).
 
 Or turn an existing page's Flash tags into players:
@@ -56,13 +59,18 @@ configure({ libraries: { builtin: "/flash/builtin.abc" } });
 watchFlash(); // each <object>/<embed> becomes a <swf2es-player>, those the page adds later too
 ```
 
-Compile ahead of time, so the page loads modules instead of compiling them:
+Compile ahead of time, so the page loads modules instead of compiling them,
+against the libraries the player loads (the player's own playerglobal, which
+the repository's tests write to `tests/player/out/libraries/`):
 
 ```sh
-node packages/cli/dist/main.js movie.swf -o movie.swf2es --lib builtin.abc
+node packages/cli/dist/main.js movie.swf -o movie.swf2es \
+  --lib builtin.abc --lib playerglobal-swf2es.abc --emit-libraries
 ```
 
-Or run AS3 bytecode as avmshell does, its `trace()` on stdout:
+Or run AS3 bytecode as avmshell does, its `trace()` on stdout (in a
+checkout it takes avmshell's libraries from the avmplus submodule;
+elsewhere give them with `--lib`):
 
 ```sh
 node packages/cli/dist/main.js run program.abc
@@ -82,7 +90,8 @@ packages/
   runtime/       the AS3 and AVM1 language runtimes
   render/        the renderer: scene list, planner and WebGL 2 backend
   player/        display list, timeline, playerglobal, and the view that drives render/
-  player-hosts/  optional hosts: workers, sockets, module caches
+  player-hosts/  optional hosts: Web Workers, sockets (WebSocket relay, Node TCP),
+                 IndexedDB and precompiled module caches
   web/           <swf2es-player>, replaceFlash and ExternalInterface for any page
   context3d/     Stage3D's Context3D on WebGL 2
   cli/           the swf2es command: ahead-of-time compiler, avmshell-style runner
