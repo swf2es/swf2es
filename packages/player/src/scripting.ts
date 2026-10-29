@@ -303,7 +303,8 @@ export class Scripting {
 
   constructor(
     readonly codegen: Codegen,
-    options: avm2.RuntimeOptions & {
+    // The API version follows `air`, the one switch for it, below.
+    options: Omit<avm2.RuntimeOptions, "apiVersion"> & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       localConnections?: LocalConnections;
