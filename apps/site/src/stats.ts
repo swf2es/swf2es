@@ -122,7 +122,7 @@ export class Stats {
   /** The time the animation frame being measured started at. */
   private frameStart = 0;
   private readonly counter = new DrawCounter();
-  /** The draws, and the calls that made them, of the frames since the figures were last shown that drew. */
+  /** The draws, and the calls that made them, of the frames that drew since the last showing. */
   private draws = 0;
   private calls = 0;
   private drawnFrames = 0;
@@ -134,8 +134,9 @@ export class Stats {
     private readonly glCalls: HTMLElement,
     private readonly heap: HTMLElement,
   ) {
+    // The figures' list, which holds both of the counter's.
     new IntersectionObserver(([entry]) => this.counter.show(entry.isIntersecting)).observe(
-      subDraws,
+      subDraws.closest("dl") ?? subDraws,
     );
     // A message posted from an animation frame arrives once the frame's
     // callbacks, style, layout and paint are done: that much is its work.
@@ -153,6 +154,9 @@ export class Stats {
     this.rate = frameRate;
     this.played = 0;
     this.counter.attach(gl);
+    // The last player's frames counted towards nothing shown for this one.
+    this.counter.draws = this.counter.calls = 0;
+    this.draws = this.calls = this.drawnFrames = 0;
     this.subDraws.textContent = "–";
     this.glCalls.textContent = "–";
     if (!player) {
@@ -174,7 +178,7 @@ export class Stats {
   private readonly frame = (now: number) => {
     this.frameStart = now;
     // One player's frame falls between two of these, whichever runs first.
-    if (this.counter.draws > 0) {
+    if (this.counter.calls > 0) {
       this.draws += this.counter.draws;
       this.calls += this.counter.calls;
       this.drawnFrames++;

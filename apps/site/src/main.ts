@@ -159,8 +159,8 @@ let loadGeneration = 0;
 const stats = new Stats(
   byId("fps"),
   byId("frame-time"),
-  byId("draws"),
-  byId("calls"),
+  byId("sub-draws"),
+  byId("gl-calls"),
   byId("heap"),
 );
 

@@ -257,6 +257,12 @@ swf2es-player[hidden] {
   font-size: 0.85rem;
 }
 
+/* Each figure with its label, so that a narrow page wraps between figures, never within one. */
+.stats > div {
+  display: flex;
+  gap: 6px;
+}
+
 .stats dt {
   color: var(--muted);
 }
