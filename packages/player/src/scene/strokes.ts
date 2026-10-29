@@ -372,6 +372,11 @@ export function layerStrokes(
     const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];
     for (const { path, home } of strokePaths(stroke)) {
+      // A move alone draws nothing, where a move and a line back to it draw a dot.
+      if (path.length <= 3) {
+        continue;
+      }
+
       const points = polyline(transformedPath(path, a, b, c, d), flatness);
       const closedPath =
         home ||
