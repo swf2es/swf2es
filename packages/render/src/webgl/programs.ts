@@ -27,6 +27,16 @@ export const POSITION_AT = 0;
 export const TEXEL_AT = 1;
 export const COLOR_AT = 2;
 export const DEPTH_AT = 3;
+/** Advanced text's glyph quads' attributes past their position (GeometryData.glyphs), in theirs. */
+export const ORIGIN_AT = 4;
+export const GLYPH_AT = 5;
+export const RUN_AT = 6;
+export const TINT_AT = 7;
+
+/** The most cutoff table entries a text's draw takes, as the player's text/saffron.ts builds them. */
+export const TABLE_ENTRIES = 48;
+/** Segments a row of the outlines' texture, as the player's text/saffron.ts stores them. */
+export const OUTLINE_ROW = 1024;
 
 /**
  * Places a vertex by its row's transform, then on the target by uView
@@ -185,6 +195,186 @@ void main(void) {
 
   vec4 c = clamp(vec4(color.rgb / color.a, color.a) * vMul + vAdd, 0.0, 1.0);
   finalColor = vec4(c.rgb * c.a, c.a);
+}
+`;
+
+/**
+ * Advanced text's glyph quads, as the Pixi view's Saffron shader places
+ * them (player's render/saffron.ts), its transform the row's: the text's
+ * pixels to Flash's, uUnit of them a stage pixel, on their grid from the
+ * stage's origin, a BitmapData's in a draw. A glyph's pen stands where its
+ * text's origin, at a whole pixel, puts it, snapped as its grid fits it
+ * (uMode: gridFitType 0 none, 1 pixel, 2 subpixel, thickness, sharpness),
+ * and its quad reaches out past its outline by the furthest cutoff. Its
+ * colour is drawn under the row's colour transform, light or dark as adl
+ * chooses its table. aOrigin: the pen, and its light and dark tables, each
+ * its first entry plus 64 times its entries; aGlyph: a corner of its
+ * outline's bounds and the way out from it; aRun: its segments, first and
+ * count, the pixels of a unit of its outline, and its size.
+ */
+export const glyphsVertex = `#version 300 es
+precision highp float;
+layout(location = ${POSITION_AT}) in vec2 aPosition;
+layout(location = ${ORIGIN_AT}) in vec4 aOrigin;
+layout(location = ${GLYPH_AT}) in vec4 aGlyph;
+layout(location = ${RUN_AT}) in vec4 aRun;
+layout(location = ${TINT_AT}) in vec4 aColor;
+uniform highp sampler2D uRows;
+uniform int uRow;
+uniform vec4 uView;
+uniform float uUnit;
+uniform vec4 uMode;
+uniform vec4 uTable[${TABLE_ENTRIES}];
+out vec2 vPixel;
+flat out vec2 vPen;
+flat out vec4 vToGlyph;
+flat out vec4 vToPixel;
+flat out vec4 vCut;
+flat out vec4 vShown;
+
+// The cutoffs at ppem by the table of entries start to start + count, as text/csm.ts' cutoffs.
+vec2 cutoffs(int start, int count, float ppem) {
+  vec4 first = uTable[start];
+  vec4 last = uTable[start + count - 1];
+  vec2 c = first.yz;
+  if (ppem >= last.x) {
+    c = last.yz;
+  } else if (ppem > first.x) {
+    for (int i = 1; i < ${TABLE_ENTRIES}; i++) {
+      if (i >= count) {
+        break;
+      }
+
+      vec4 b = uTable[start + i];
+      if (ppem <= b.x) {
+        vec4 a = uTable[start + i - 1];
+        c = mix(a.yz, b.yz, (ppem - a.x) / (b.x - a.x));
+        break;
+      }
+    }
+  }
+
+  float unit = 0.0001 * ppem;
+  float t = clamp(uMode.y, -200.0, 200.0);
+  float s = clamp(uMode.z, -400.0, 400.0);
+  c -= unit * vec2(t + s * 0.5, t - s * 0.5);
+  if (c.x < c.y) {
+    c = vec2((c.x + c.y) * 0.5);
+  }
+
+  return c;
+}
+
+void main(void) {
+  ivec2 at = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
+  vec4 m = texelFetch(uRows, at, 0);
+  vec4 t = texelFetch(uRows, at + ivec2(1, 0), 0);
+  vec4 mul = texelFetch(uRows, at + ivec2(2, 0), 0);
+  vec4 add = texelFetch(uRows, at + ivec2(3, 0), 0);
+  // The text's pixels to Flash's.
+  mat2 linear = mat2(m.xy, m.zw) * uUnit;
+  vec2 origin = t.xy * uUnit;
+  vec2 pen = linear * aOrigin.xy + roundEven(origin);
+  float across = max(abs(linear[0][1]), abs(linear[1][0]));
+  if (across > max(abs(linear[0][0]), abs(linear[1][1])) / 65536.0) {
+    // Turned or skewed: no grid.
+  } else if (uMode.x == 1.0) {
+    pen = vec2(roundEven(pen.x * 8.0) / 8.0 + 0.5, roundEven(pen.y));
+  } else if (uMode.x == 2.0) {
+    pen = vec2(roundEven(pen.x * 4.0) / 4.0 + 0.5, roundEven(pen.y));
+  } else {
+    pen = roundEven(pen * 4.0) / 4.0 + vec2(0.5, 0.0);
+  }
+
+  float ppem = aRun.w * sqrt(abs(determinant(linear)));
+  // The colour as drawn, straight: light or dark by it, as adl chooses.
+  vec4 shown = clamp(aColor * mul + add, 0.0, 1.0);
+  bool light = dot(floor(shown.rgb * 255.0 + 0.5), vec3(30.0, 59.0, 11.0)) > 20000.0;
+  int table = int(light ? aOrigin.z : aOrigin.w);
+  vec2 cut = cutoffs(table & 63, table >> 6, ppem);
+  mat2 toPixel = linear * aRun.z;
+  float margin = max(abs(cut.x), abs(cut.y)) + 1.0;
+  float det = determinant(toPixel);
+  mat2 inverse = det != 0.0
+    ? mat2(toPixel[1][1], -toPixel[0][1], -toPixel[1][0], toPixel[0][0]) / det
+    : mat2(0.0);
+  // Out in the glyph's space, so that the margin stays outside under reflections and turns: each
+  // row of the inverse gives the glyph's units a pixel across that edge takes.
+  vec2 reach = vec2(length(vec2(inverse[0][0], inverse[1][0])),
+                    length(vec2(inverse[0][1], inverse[1][1]))) * margin;
+  vec2 p = pen + toPixel * (aGlyph.xy + aGlyph.zw * reach);
+  vPixel = p;
+  vPen = pen;
+  vToGlyph = vec4(inverse[0], inverse[1]);
+  vToPixel = vec4(toPixel[0], toPixel[1]);
+  vCut = vec4(cut, aRun.xy);
+  vShown = shown;
+  gl_Position = vec4((p / uUnit) * uView.xy + uView.zw, 0.0, 1.0);
+}
+`;
+
+/**
+ * Each pixel of Flash's a glyph's quad covers, by its signed distance to
+ * the glyph's outline (the segments of its run in uSegments, the nearest
+ * and, by parity, whether it is inside), between the cutoffs, as the Pixi
+ * view's Saffron shader covers it. Nothing outside: in a mask, which
+ * writes the stencil wherever it draws, a glyph is its shape.
+ */
+export const glyphsFragment = `#version 300 es
+precision highp float;
+precision highp int;
+in vec2 vPixel;
+flat in vec2 vPen;
+flat in vec4 vToGlyph;
+flat in vec4 vToPixel;
+flat in vec4 vCut;
+flat in vec4 vShown;
+out vec4 finalColor;
+uniform highp sampler2D uSegments;
+
+void main(void) {
+  vec2 centre = floor(vPixel) + 0.5;
+  mat2 toGlyph = mat2(vToGlyph.xy, vToGlyph.zw);
+  mat2 toPixel = mat2(vToPixel.xy, vToPixel.zw);
+  vec2 g = toGlyph * (centre - vPen);
+  int start = int(vCut.z);
+  int count = int(vCut.w);
+  float nearest = 3.4e38;
+  vec2 along = vec2(1.0, 0.0);
+  bool inside = false;
+  for (int i = 0; i < count; i++) {
+    int k = start + i;
+    vec4 s = texelFetch(uSegments, ivec2(k & ${OUTLINE_ROW - 1}, k >> ${Math.log2(OUTLINE_ROW)}), 0);
+    vec2 a = s.xy;
+    vec2 e = s.zw - a;
+    vec2 w = g - a;
+    float t = clamp(dot(w, e) / max(dot(e, e), 1e-20), 0.0, 1.0);
+    vec2 off = w - e * t;
+    float d = dot(off, off);
+    if (d < nearest) {
+      nearest = d;
+      along = e;
+    }
+
+    if ((a.y > g.y) != (s.w > g.y) && a.x + (g.y - a.y) * e.x / e.y > g.x) {
+      inside = !inside;
+    }
+  }
+
+  // In Flash's pixels, across the nearest edge as the transform stretches it.
+  float stretch = length(toPixel * along);
+  float d = stretch > 0.0
+    ? sqrt(nearest) * abs(determinant(toPixel)) * length(along) / stretch
+    : 0.0;
+  d = inside ? d : -d;
+  float coverage = vCut.x > vCut.y
+    ? clamp((d - vCut.y) / (vCut.x - vCut.y), 0.0, 1.0)
+    : step(vCut.x, d);
+  if (coverage <= 0.0) {
+    discard;
+  }
+
+  finalColor = vec4(vShown.rgb * vShown.a, vShown.a) * coverage;
 }
 `;
 

@@ -27,6 +27,7 @@ export {
   Geometries,
   type GeometryData,
   type GeometryHandle,
+  GLYPH_FLOATS,
   IDLE_FRAMES,
 } from "./geometry.js";
 export { KEEP_IDLE_FRAMES, type KeepHandle, Keeps } from "./keeps.js";

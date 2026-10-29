@@ -6,6 +6,9 @@ import { type Handle, Registry } from "./registry.js";
  */
 export const IDLE_FRAMES = 300;
 
+/** Floats a vertex of advanced text's glyph quads (GeometryData.glyphs). */
+export const GLYPH_FLOATS = 18;
+
 /** A geometry as its owner holds it: its id, and the generation the id had, which a reused id moves on. */
 export type GeometryHandle = Handle;
 
@@ -25,6 +28,16 @@ export interface GeometryData {
   texels?: Float32Array;
   /** A mesh's depth at each vertex, its t, in place of its colour. */
   depths?: Float32Array;
+  /**
+   * Advanced text's glyph quads: GLYPH_FLOATS floats a vertex, its position
+   * first, as its positions have it, then its glyph's pen and tables,
+   * outline bounds and corner, segments and size, and colour; and the
+   * text's mode and cutoff tables, which its draw takes as uniforms. Drawn
+   * by the glyph program (webgl/programs.ts, glyphsVertex), each pixel of a
+   * quad covered by its distance to the glyph's outline, in the outlines'
+   * segments (WebGLBackend.uploadOutlines), as adl covers it.
+   */
+  glyphs?: { vertices: Float32Array; mode: Float32Array; table: Float32Array };
   indices: Uint32Array;
 }
 
