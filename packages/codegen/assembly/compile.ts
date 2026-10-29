@@ -8,8 +8,10 @@ import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
 import {
+  API_AllVersions,
   DOMAIN_Live,
   Domain,
+  isAir,
   LOG_Found,
   LOG_None,
   LOG_Resolve,
@@ -35,11 +37,15 @@ const lazyVerified = new Map<u32, StaticArray<i32>>();
  */
 let written: ModuleEmitter | null = null;
 
-/** Start a new domain whose user ABCs have API version `apiVersion`. */
+/**
+ * Start a new domain whose user ABCs have API version `apiVersion`, whose
+ * series, Flash Player's or AIR's, is the domain's.
+ */
 export function domainReset(apiVersion: i32): void {
   domain = new Domain();
   lazyVerified.clear();
   domain.apiVersion = <u8>apiVersion;
+  domain.air = <u8>apiVersion !== API_AllVersions && isAir(<u8>apiVersion);
   verified = null;
   written = null;
   releaseDecoder();

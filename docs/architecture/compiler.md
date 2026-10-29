@@ -15,8 +15,13 @@ three, with the same VerifyError numbers:
    interns strings and namespaces across them and finds script definitions
    by qualified name. Builtin ABCs mark their namespace URIs with the API
    version that introduced a name; as in avmplus, user code sees the names
-   of its own version and series (Flash Player's by default), so AIR-only
-   and VM-internal names stay hidden. While an ABC loads, its classes link
+   of its own version and series, so AIR-only and VM-internal names stay
+   hidden. The version a domain is reset with picks the series: Flash
+   Player's 50 by default, AIR's 51 for an AIR host (the player's `air`).
+   Every namespace's version moves into that series as it is interned, as
+   `AvmCore::newNamespace` moves it, so a lookup and the binding it finds
+   compare versions of one series; in AIR's, a Flash Player version
+   becomes the next AIR one. While an ABC loads, its classes link
    to base classes and interfaces defined by earlier ABCs' scripts or by
    its own earlier classes, as avmplus' `AbcParser` links them.
    The domain's ABCs are loaded into application domains, a tree whose

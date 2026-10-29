@@ -23,11 +23,12 @@
 // in an API version mark (U+E294 + version), which builtin ABCs use to say
 // which player version introduced a name. The mark is stripped from the URI
 // and kept as the namespace's version. Versions come in two interleaved
-// series, Flash Player's and AIR's; a binding gets the earliest version of
-// its namespaces in the domain's series, where AIR-only versions are
-// VM-internal. It is visible to a lookup whose namespace has an equal or
-// later version. User ABCs' public namespaces get the domain's version, so
-// they cannot see VM-internal names.
+// series, Flash Player's and AIR's, and the domain's version says which it
+// runs; every namespace's version moves into that series, where for Flash
+// Player AIR-only versions are VM-internal. A binding gets the earliest
+// version of its namespaces, and is visible to a lookup whose namespace has
+// an equal or later version. User ABCs' public namespaces get the domain's
+// version, so they cannot see VM-internal names.
 import { Abc } from "../abc/abc";
 import { verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
@@ -2048,7 +2049,9 @@ export class Domain {
       }
 
       ids[i] = this.internNamespace(type, uri);
-      versions[i] = version;
+      // As AvmCore::newNamespace: in the domain's series, so that a lookup
+      // compares versions of the series its bindings have.
+      versions[i] = this.activeVersion(version);
     }
 
     this.abcNs.push(ids);
@@ -2348,7 +2351,7 @@ export class Domain {
  * Whether an API version belongs to AIR's series: versions alternate between
  * the series, FP_10_0, FP_10_0_32 and FP_10_1 aside, from FP_10_2 on.
  */
-function isAir(version: u8): bool {
+export function isAir(version: u8): bool {
   if (version >= 10) {
     return (version & 1) === 1;
   }
