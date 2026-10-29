@@ -268,6 +268,24 @@ test("an erase or alpha layer composited onto the target itself clears it, one i
   assert.equal(planned(MULTIPLY, NORMAL, NORMAL), false);
 });
 
+test("a geometry changed in place is measured again and noted for the backend, a removed one not", () => {
+  const geometries = new Geometries();
+  const data = {
+    positions: new Float32Array([0, 0, 10, 0, 10, 10]),
+    colors: new Uint32Array(3),
+    indices: new Uint32Array([0, 1, 2]),
+  };
+  const { id } = geometries.add(data);
+  geometries.added.length = 0;
+  data.positions.set([5, 5, 20, 5, 20, 30]);
+  geometries.update(id);
+  assert.deepEqual(Array.from(geometries.box.subarray(id * 4, id * 4 + 4)), [5, 5, 20, 30]);
+  assert.deepEqual(geometries.updated, [id]);
+  geometries.remove(id);
+  geometries.update(id);
+  assert.deepEqual(geometries.updated, [id]);
+});
+
 /** A geometry of one triangle with the corners (x0, y0) and (x1, y1). */
 const spanning = (
   geometries: InstanceType<typeof Geometries>,

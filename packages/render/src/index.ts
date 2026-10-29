@@ -58,6 +58,7 @@ export {
   MULTIPLY,
   NORMAL,
   OVERLAY,
+  PLANE,
   REPEAT,
   SCREEN,
   SceneList,

@@ -139,8 +139,9 @@ void main(void) {
  * texel, the lower of two as near; smoothed, the four around, weighed.
  * uFrag takes a fragment to the target's pixels from the stage's origin,
  * down (x + uFrag.x, uFrag.y + uFrag.z * y), and is a pixel of Flash's
- * that many of them (w). uMode: whether it repeats, whether it is smoothed.
- * The colour transform then as on a fill.
+ * that many of them (w). uMode: whether it repeats, whether it is smoothed,
+ * and whether it is a 3D object's quad (PLANE), which reads its bitmap
+ * otherwise. The colour transform then as on a fill.
  */
 export const meshFragment = `#version 300 es
 precision highp float;
@@ -149,7 +150,7 @@ flat in vec4 vMul;
 flat in vec4 vAdd;
 uniform sampler2D uTexture;
 uniform vec4 uFrag;
-uniform ivec2 uMode;
+uniform ivec3 uMode;
 out vec4 finalColor;
 
 vec4 texel(ivec2 at) {
@@ -159,10 +160,25 @@ vec4 texel(ivec2 at) {
 void main(void) {
   float pixel = uFrag.w;
   vec2 f = vec2(gl_FragCoord.x + uFrag.x, uFrag.y + uFrag.z * gl_FragCoord.y);
+  vec2 size = vec2(textureSize(uTexture, 0));
+  if (uMode.z != 0) {
+    // A 3D object's quad (PLANE): its bitmap read smoothed at the pixel's centre, in its texels.
+    vec2 centre = (floor(f / pixel) + 0.5) * pixel;
+    vec3 at = vUVT + dFdx(vUVT) * (centre.x - f.x) + dFdy(vUVT) * ((centre.y - f.y) * uFrag.z);
+    vec4 shown = texture(uTexture, (at.z != 0.0 ? at.xy / at.z : vec2(0.0)) / size);
+    if (shown.a == 0.0) {
+      finalColor = vec4(0.0);
+      return;
+    }
+
+    vec4 s = clamp(vec4(shown.rgb / shown.a, shown.a) * vMul + vAdd, 0.0, 1.0);
+    finalColor = vec4(s.rgb * s.a, s.a);
+    return;
+  }
+
   vec2 corner = floor(f / pixel) * pixel;
   vec3 uvt = vUVT + dFdx(vUVT) * (corner.x - f.x) + dFdy(vUVT) * ((corner.y - f.y) * uFrag.z);
   vec2 uv = uvt.z != 0.0 ? uvt.xy / uvt.z : vec2(0.0);
-  vec2 size = vec2(textureSize(uTexture, 0));
   // As adl draws one, a bitmap a texel high shows its first texel throughout.
   if (size.y == 1.0) {
     uv = vec2(0.0);

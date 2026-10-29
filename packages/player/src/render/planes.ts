@@ -2,50 +2,13 @@
 // moved into its plane's holder and drawn into its bitmap, its quad put in
 // its place in its parent and placed in perspective as the frame is
 // prepared (render/three.ts has the plane itself).
-import type { Matrix as FlatMatrix } from "@swf2es/format";
 import type { BLEND_MODES, Container as PixiContainer, Renderer } from "pixi.js";
-import { filterRect } from "../bitmap/filters.js";
-import { bounds, toStage } from "../display/bounds.js";
 import type { DisplayObject } from "../display/display.js";
-import { apply, concat } from "../display/geometry.js";
+import { drawnRect, outsideMaskMap } from "../display/plane.js";
 import { blendFilters } from "./blend.js";
 import { FilterChain } from "./filters.js";
 import type { Node } from "./node.js";
 import { Plane, SAMPLES } from "./three.js";
-
-/**
- * The map from the space of `mask`, a 2D mask outside the 3D object `o`, to
- * `o`'s, as Flash clips the bitmap it draws `o` into: the mask is placed by
- * its matrices up to the nearest 3D object above it (or the stage), and then
- * moved as if the bitmap's corner, `o`'s bounds' top left in its own space,
- * were where `o`'s bounds' top left is on the stage. So a mask over a turned
- * card clips a part of the card that is not under it (the `three-d-mask` case).
- */
-function outsideMaskMap(o: DisplayObject, mask: DisplayObject): FlatMatrix {
-  let m = mask.placed;
-  for (let p = mask.parent; p && !p.space; p = p.parent) {
-    m = concat(m, p.placed);
-  }
-
-  const own = bounds(o, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
-  const up = toStage(o, null);
-  let left = Number.POSITIVE_INFINITY;
-  let top = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < 4; i++) {
-    const [x, y] = apply(up, i & 1 ? own.xMax : own.xMin, i & 2 ? own.yMax : own.yMin);
-    left = Math.min(left, x);
-    top = Math.min(top, y);
-  }
-
-  return {
-    a: m.a,
-    b: m.b,
-    c: m.c,
-    d: m.d,
-    tx: m.tx + own.xMin - Math.round(left),
-    ty: m.ty + own.yMin - Math.round(top),
-  };
-}
 
 /** The view's 3D objects: their planes, and the outside masks they let go of. */
 export class Planes {
@@ -239,13 +202,7 @@ export class Planes {
       const plane = node.plane as Plane;
       // What it draws is measured again only when it may have changed, as its bitmap is drawn.
       if (plane.stale || plane.drawnRect === undefined) {
-        const r = bounds(o, true, true);
-        let rect = r && { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
-        for (const f of node.filterRecords) {
-          rect = rect && filterRect(rect, f);
-        }
-
-        plane.drawnRect = rect;
+        plane.drawnRect = drawnRect(o);
       }
 
       const rect = plane.drawnRect;

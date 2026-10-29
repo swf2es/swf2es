@@ -9474,6 +9474,19 @@ export const cases: PlayerCase[] = [
     gap: "the Pixi view blends overlapping parts of a path over each other",
   },
   {
+    name: "three-d-layer",
+    swf: (abc) => bare(abc, 1, "ThreeDLayer", 320, 160),
+    script: "ThreeDLayer",
+    frames: 1,
+    capture: [1],
+    // Within 8 a channel: adl's rounding of the alpha and of its bitmap's edges.
+    tolerance: 8,
+    maxOutliers: 0,
+    // The Pixi view composites a 3D object's layer blend with its colour as one, where Flash
+    // draws each child's colour into the bitmap; the renderer of swf2es's own draws it as Flash.
+    gap: "the Pixi view colours a 3D object's layer as one",
+  },
+  {
     name: "filtered-colors",
     swf: (abc) => bare(abc, 1, "FilteredColors", 320, 240),
     script: "FilteredColors",

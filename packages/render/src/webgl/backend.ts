@@ -22,6 +22,7 @@ import {
   MESH,
   MIRROR,
   NORMAL,
+  PLANE,
   REPEAT,
   SCREEN,
   type SceneList,
@@ -354,6 +355,7 @@ export class WebGLBackend {
     this.setUp();
     geometries.added.length = 0;
     geometries.removed.length = 0;
+    geometries.updated.length = 0;
     this.repack(geometries);
     this.repackGlyphs(geometries);
   }
@@ -739,6 +741,107 @@ export class WebGLBackend {
       return bytes;
     }
 
+    const layer = this.drawSampled(
+      commands,
+      scene,
+      rows,
+      geometries,
+      textures,
+      filters,
+      keeps,
+      target,
+      width,
+      height,
+      samples,
+    );
+    this.state.bindFramebuffer(layer.framebuffer);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    this.giveLayer(layer);
+    return bytes;
+  }
+
+  /**
+   * A 3D object's bitmap drawn (PLANE): the commands, as `execute` draws
+   * them, into a layer `samples` times the size of a `width` by `height`
+   * bitmap a side, halved till a sample a texel, and kept as kept output
+   * `keep` (Keeps), the one kept before given back. Called as the frame is
+   * walked, before its own commands are drawn, which composite it.
+   */
+  drawPlane(
+    keep: number,
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    width: number,
+    height: number,
+    samples: number,
+  ): void {
+    const gl = this.gl;
+    if (gl.isContextLost()) {
+      return;
+    }
+
+    const layer = this.drawSampled(
+      commands,
+      scene,
+      rows,
+      geometries,
+      textures,
+      filters,
+      keeps,
+      target,
+      width,
+      height,
+      samples,
+    );
+    // Clear past the bitmap, which a layer taken may be larger than: its quad's smoothing reads
+    // half a texel past its edges.
+    this.state.bindFramebuffer(layer.framebuffer);
+    this.state.stencil(null);
+    this.state.colorMask(15);
+    gl.clearColor(0, 0, 0, 0);
+    for (const [x, y, w, h] of [
+      [width, 0, layer.width - width, layer.height],
+      [0, height, width, layer.height - height],
+    ]) {
+      if (w > 0 && h > 0) {
+        this.state.scissor([x, y, w, h]);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+    }
+
+    this.state.scissor(null);
+    const before = this.kept[keep];
+    if (before && before !== layer) {
+      this.giveLayer(before);
+    }
+
+    this.kept[keep] = layer;
+  }
+
+  /**
+   * The commands drawn, as `execute` draws them, into a layer `samples`
+   * times the size of a `width` by `height` bitmap a side, halved till a
+   * sample a pixel: the layer, its first `width` by `height` the bitmap.
+   */
+  private drawSampled(
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    width: number,
+    height: number,
+    samples: number,
+  ): Layer {
     let layer = this.takeLayer(width * samples, height * samples);
     this.execute(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
     for (let k = samples; k > 1; k /= 2) {
@@ -747,10 +850,7 @@ export class WebGLBackend {
       layer = half;
     }
 
-    this.state.bindFramebuffer(layer.framebuffer);
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
-    this.giveLayer(layer);
-    return bytes;
+    return layer;
   }
 
   /** The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of. */
@@ -1229,7 +1329,7 @@ export class WebGLBackend {
         continue;
       }
 
-      if (!stencil && scene.sampler[i] & MESH) {
+      if (!stencil && scene.sampler[i] & (MESH | PLANE)) {
         other = this.drawMesh(scene, i, place) || other;
         continue;
       }
@@ -1353,7 +1453,9 @@ export class WebGLBackend {
    */
   private drawMesh(scene: SceneList, i: number, place: Place): boolean {
     const id = scene.texture[i];
-    const texture = id >= 0 ? (this.textures[id] ?? null) : null;
+    const plane = (scene.sampler[i] & PLANE) !== 0;
+    const texture =
+      id < 0 ? null : plane ? (this.kept[id]?.texture ?? null) : (this.textures[id] ?? null);
     if (!texture) {
       return false;
     }
@@ -1375,15 +1477,21 @@ export class WebGLBackend {
       gl.uniform1i(this.meshRowLocation, row);
     }
 
-    const mode = scene.sampler[i] & (REPEAT | SMOOTH);
+    const mode = scene.sampler[i] & (REPEAT | SMOOTH | PLANE);
     if (mode !== this.meshMode) {
       this.meshMode = mode;
-      gl.uniform2i(this.meshModeLocation, mode & REPEAT ? 1 : 0, mode & SMOOTH ? 1 : 0);
+      gl.uniform3i(
+        this.meshModeLocation,
+        mode & REPEAT ? 1 : 0,
+        mode & SMOOTH ? 1 : 0,
+        mode & PLANE ? 1 : 0,
+      );
     }
 
     state.bindTexture(TEXTURE_UNIT, texture);
-    // Read texel by texel, but through a sampler without mipmaps, as a texture with none needs.
-    state.bindSampler(TEXTURE_UNIT, this.sampler(CLAMP));
+    // A plane's bitmap smoothed; a mesh's read texel by texel, but through a sampler without
+    // mipmaps, as a texture with none needs.
+    state.bindSampler(TEXTURE_UNIT, this.sampler(plane ? SMOOTH | CLAMP : CLAMP));
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
     return true;
   }
@@ -1519,6 +1627,27 @@ export class WebGLBackend {
     }
 
     geometries.removed.length = 0;
+    // Changed in place: copied again where they lie, else as added.
+    for (const id of geometries.updated) {
+      const place = this.places[id];
+      const data = geometries.get(id);
+      if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
+        this.copyVertices(data, place.vertexStart);
+      } else if (place && data) {
+        this.places[id] = null;
+        if (place.glyphs) {
+          this.glyphs.live -= place.vertices;
+          this.glyphs.holes += place.vertices;
+        } else {
+          this.live -= place.vertices;
+          this.holes += place.vertices;
+        }
+
+        geometries.added.push(id);
+      }
+    }
+
+    geometries.updated.length = 0;
     let vertices = 0;
     let indices = 0;
     let glyphVertices = 0;
@@ -1637,6 +1766,31 @@ export class WebGLBackend {
 
     const gl = this.gl;
     const count = data.positions.length / 2;
+    const base = this.vertexTop;
+    this.copyVertices(data, base);
+    const indices = new Uint32Array(data.indices.length);
+    for (let i = 0; i < indices.length; i++) {
+      indices[i] = data.indices[i] + base;
+    }
+
+    this.state.bindVertexArray(this.vertexArray);
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, this.indexTop * 4, indices);
+    this.places[id] = {
+      vertexStart: base,
+      vertices: count,
+      indexStart: this.indexTop,
+      indices: indices.length,
+      glyphs: null,
+    };
+    this.vertexTop += count;
+    this.indexTop += indices.length;
+    this.live += count;
+  }
+
+  /** `data`'s vertices interleaved into the atlas from vertex `base`. */
+  private copyVertices(data: GeometryData, base: number): void {
+    const gl = this.gl;
+    const count = data.positions.length / 2;
     const bytes = new ArrayBuffer(count * VERTEX_BYTES);
     const floats = new Float32Array(bytes);
     const words = new Uint32Array(bytes);
@@ -1654,26 +1808,8 @@ export class WebGLBackend {
       }
     }
 
-    const base = this.vertexTop;
-    const indices = new Uint32Array(data.indices.length);
-    for (let i = 0; i < indices.length; i++) {
-      indices[i] = data.indices[i] + base;
-    }
-
-    this.state.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferSubData(gl.ARRAY_BUFFER, base * VERTEX_BYTES, floats);
-    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, this.indexTop * 4, indices);
-    this.places[id] = {
-      vertexStart: base,
-      vertices: count,
-      indexStart: this.indexTop,
-      indices: indices.length,
-      glyphs: null,
-    };
-    this.vertexTop += count;
-    this.indexTop += indices.length;
-    this.live += count;
   }
 
   /** Glyph quads copied in at the top of the glyph atlas, their indices made absolute in it. */

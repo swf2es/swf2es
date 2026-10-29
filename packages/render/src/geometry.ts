@@ -53,12 +53,31 @@ export class Geometries extends Registry {
   private boxes = new Float32Array(1024);
   /** Added since the backend last took them. */
   added: number[] = [];
+  /** Changed in place since the backend last took them (update). */
+  updated: number[] = [];
 
   add(data: GeometryData): GeometryHandle {
     const handle = this.hold(IDLE_FRAMES);
     const id = handle.id;
     this.data[id] = data;
     this.added.push(id);
+    this.measure(id);
+    return handle;
+  }
+
+  /**
+   * Geometry `id`'s arrays changed in place, their lengths as they were: its
+   * box measured again, and its vertices copied again where they lie.
+   */
+  update(id: number): void {
+    if (this.data[id]) {
+      this.measure(id);
+      this.updated.push(id);
+    }
+  }
+
+  private measure(id: number): void {
+    const data = this.data[id] as GeometryData;
     if (id * 4 >= this.boxes.length) {
       const grown = new Float32Array(Math.max(this.boxes.length * 2, id * 4 + 4));
       grown.set(this.boxes);
@@ -82,7 +101,6 @@ export class Geometries extends Registry {
     box[id * 4 + 1] = y0;
     box[id * 4 + 2] = x1;
     box[id * 4 + 3] = y1;
-    return handle;
   }
 
   /**
