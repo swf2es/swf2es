@@ -1730,7 +1730,7 @@ export class Runtime {
     return hook;
   }
 
-  /** Vector.<T> for a T other than int, uint and Number (see specializeVector in classes.ts). */
+  /** See specializeVector in classes.ts. */
   specializeVector(base: AsObject, param: AsObject): AsObject {
     return specializeVector(this, base, param);
   }
@@ -1902,7 +1902,7 @@ export class Runtime {
     return cls;
   }
 
-  /** The class `qualified` names, "pkg::Name" or "Name" (see classNamed in definitions.ts). */
+  /** See classNamed in definitions.ts. */
   classNamed(qualified: string, domain: Domain | null = null): AsObject {
     return classNamed(this, qualified, domain);
   }
@@ -1916,12 +1916,12 @@ export class Runtime {
     return definitionNames(domain);
   }
 
-  /** What `qualified` names in `domain`, as ApplicationDomain.getDefinition finds it (definitions.ts). */
+  /** See definitionNamed in definitions.ts. */
   definitionNamed(qualified: string, domain: Domain): Value {
     return definitionNamed(this, qualified, domain);
   }
 
-  /** The module whose script defines `qualified` for `domain`, or null: by it a player keys what SymbolClass binds. */
+  /** See definingAbc in definitions.ts. */
   definingAbc(qualified: string, domain: Domain): Abc | null {
     return definingAbc(this, qualified, domain);
   }
@@ -2608,12 +2608,12 @@ export class Runtime {
     return this.constructClass(cls, [message, id]);
   }
 
-  /** Where an AS3 error was made, as JavaScript stack lines (see stackOf in errors.ts). */
+  /** See stackOf in errors.ts. */
   stackOf(error: Value): string | null {
     return stackOf(error);
   }
 
-  /** Error `id`'s message as AS3 sees it (see errorMessage in errors.ts). */
+  /** See errorMessage in errors.ts. */
   errorMessage(id: number, args: Value[] = []): string {
     return errorMessage(this.debugger, id, args);
   }
@@ -2627,7 +2627,7 @@ export class Runtime {
     return this.error("TypeError", v === undefined ? 1010 : 1009);
   }
 
-  /** A value as avmplus names it in an error message. */
+  /** See describe in errors.ts. */
   describe(v: Value): string {
     return describe(this, v);
   }
@@ -2659,17 +2659,14 @@ export class Runtime {
 
   // Class aliases and the classes AMF makes (amf-classes.ts).
 
-  /** As Toplevel::registerClassAlias: a class by a name, replacing what the name had. */
   registerClassAlias(name: string, cls: AsObject): void {
     this.amfClasses.registerClassAlias(name, cls);
   }
 
-  /** The alias of a class's instances' traits, or "". */
   aliasOf(traits: Traits): string {
     return this.amfClasses.aliasOf(traits);
   }
 
-  /** The class of an alias: as getClassByAlias, ReferenceError 1014 if none, or Object if `orObject`. */
   classByAlias(name: string, orObject = false): AsObject {
     return this.amfClasses.classByAlias(name, orObject);
   }
@@ -2682,7 +2679,6 @@ export class Runtime {
     return this.amfClasses.dictionaryClass();
   }
 
-  /** Vector.<T>, for a class T or null for *. */
   vectorClass(param: AsObject | null): AsObject {
     return this.amfClasses.vectorClass(param);
   }
