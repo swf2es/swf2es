@@ -28,13 +28,12 @@ import {
 } from "./geometry.js";
 import { sliceFor, sliceLayers, withinMask } from "./scale9.js";
 import {
-  CUBIC,
-  CURVE,
   facing,
   flatten,
   inside,
   orientation,
   type Path,
+  pointsOf,
   type ShapeLayer,
 } from "./shapes.js";
 
@@ -433,11 +432,12 @@ function drawnAt(
       let crossings = 0;
       let sum = 0;
       for (const contour of contours) {
-        if (!near(contour, x, y, 0)) {
+        const box = boxOf(contour);
+        if (!near(box, x, y, 0)) {
           continue;
         }
 
-        const flat = flattened(contour);
+        const flat = flatOf(contour, box);
         if (inside(flat.points, x, y)) {
           crossings++;
           sum += flat.orientation;
@@ -460,7 +460,8 @@ function drawnAt(
     for (const { line, paths } of layer.strokes) {
       const half = Math.max(line.width / TWIPS, 1) / 2;
       for (const path of paths) {
-        if (near(path, x, y, half) && nearPolyline(flattened(path).points, x, y, half)) {
+        const box = boxOf(path);
+        if (near(box, x, y, half) && nearPolyline(flatOf(path, box).points, x, y, half)) {
           return true;
         }
       }
@@ -536,29 +537,39 @@ export function hidden3D(d: DisplayObject): boolean {
   return r !== null && behindEye(r, d.placed);
 }
 
-/** A path as hit tests read it: its polygon, the polygon's orientation, and the box around it. */
-interface Flat {
-  /** How long the path was: a drawing's paths grow as lineTo adds to them. */
+/** The box around a path, as of its length: a drawing's paths grow as lineTo adds to them. */
+interface Box {
   length: number;
-  points: number[];
-  orientation: number;
   xMin: number;
   yMin: number;
   xMax: number;
   yMax: number;
 }
 
+/** A path as hit tests read it: its polygon, the polygon's orientation, and the box around it. */
+interface Flat extends Box {
+  points: number[];
+  orientation: number;
+}
+
 /**
- * Whether (x, y) is within `half` of the path's box, as it must be to be in
- * or on it: the box of its flattening where that was made, else of its
- * points and control points, which hold its curves, with nothing made. A
- * drawing redrawn on every frame has new paths each time, most of them far
- * from the pointer, which were flattened for this alone.
+ * The boxes of paths not flattened: their points' and control points',
+ * which hold their curves, made with nothing flattened. A drawing redrawn on
+ * every frame has new paths each time, most of them far from the pointer,
+ * which were flattened for their box alone.
  */
-function near(path: Path, x: number, y: number, half: number): boolean {
+const hulls = new WeakMap<Path, Box>();
+
+/** The path's box: its flattening's where that was made, else its points' and control points'. */
+function boxOf(path: Path): Box {
   const flat = flats.get(path);
   if (flat && flat.length === path.length) {
-    return nearBox(flat.xMin, flat.yMin, flat.xMax, flat.yMax, x, y, half);
+    return flat;
+  }
+
+  const kept = hulls.get(path);
+  if (kept && kept.length === path.length) {
+    return kept;
   }
 
   let xMin = Infinity;
@@ -566,8 +577,7 @@ function near(path: Path, x: number, y: number, half: number): boolean {
   let xMax = -Infinity;
   let yMax = -Infinity;
   for (let i = 0; i < path.length; ) {
-    const command = path[i];
-    const end = i + (command === CUBIC ? 7 : command === CURVE ? 5 : 3);
+    const end = i + 1 + pointsOf(path[i]) * 2;
     for (let k = i + 1; k < end; k += 2) {
       xMin = Math.min(xMin, path[k]);
       xMax = Math.max(xMax, path[k]);
@@ -578,7 +588,27 @@ function near(path: Path, x: number, y: number, half: number): boolean {
     i = end;
   }
 
-  return nearBox(xMin, yMin, xMax, yMax, x, y, half);
+  const box = { length: path.length, xMin, yMin, xMax, yMax };
+  hulls.set(path, box);
+
+  return box;
+}
+
+/** The path flattened: `box` itself where boxOf gave its flattening. */
+function flatOf(path: Path, box: Box): Flat {
+  return "points" in box ? (box as Flat) : flattened(path);
+}
+
+/** Whether (x, y) is within `half` of the box, as it must be to be in or on its path. */
+function near(box: Box, x: number, y: number, half: number): boolean {
+  // Negated, so a box made NaN by a drawing's NaN point rules nothing out:
+  // the full test then skips only the NaN edges, as it did.
+  return !(
+    x < box.xMin - half ||
+    x > box.xMax + half ||
+    y < box.yMin - half ||
+    y > box.yMax + half
+  );
 }
 
 /**
@@ -614,21 +644,6 @@ function flattened(path: Path): Flat {
   };
   flats.set(path, flat);
   return flat;
-}
-
-/** Whether (x, y) is within `half` of the box. */
-function nearBox(
-  xMin: number,
-  yMin: number,
-  xMax: number,
-  yMax: number,
-  x: number,
-  y: number,
-  half: number,
-): boolean {
-  // Negated, so a box made NaN by a drawing's NaN point rules nothing out:
-  // the full test then skips only the NaN edges, as it did.
-  return !(x < xMin - half || x > xMax + half || y < yMin - half || y > yMax + half);
 }
 
 /** Whether (px, py) is within `half` of any segment of the open polyline. */
