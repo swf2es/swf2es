@@ -1,6 +1,18 @@
 /** Blend modes as a scene list names them. */
 export const NORMAL = 0;
 
+/**
+ * What an entry is: a draw, or a mask's marker. A mask's own draws lie
+ * between its MASK_BEGIN and its MASK_USE, which names them (its geometry
+ * the first, its row how many) for the planner to push them into the
+ * stencil; what it masks follows, up to the MASK_POP that names them again
+ * to take them out.
+ */
+export const DRAW = 0;
+export const MASK_BEGIN = 1;
+export const MASK_USE = 2;
+export const MASK_POP = 3;
+
 /** How an entry samples its texture: smoothed, and clamped, repeated or mirrored past its edges. */
 export const SMOOTH = 1;
 export const CLAMP = 0;
@@ -18,6 +30,7 @@ export class SceneList {
   blend = new Uint8Array(1024);
   texture = new Int32Array(1024);
   sampler = new Uint8Array(1024);
+  kind = new Uint8Array(1024);
   length = 0;
 
   reset(): void {
@@ -25,15 +38,33 @@ export class SceneList {
   }
 
   draw(geometry: number, row: number, blend: number, texture = -1, sampler = 0): void {
+    this.push(DRAW, geometry, row, blend, texture, sampler);
+  }
+
+  /** A mask's marker; MASK_USE and MASK_POP name its draws, from `first`, `count` of them. */
+  marker(kind: number, first = 0, count = 0): void {
+    this.push(kind, first, count, 0, -1, 0);
+  }
+
+  private push(
+    kind: number,
+    geometry: number,
+    row: number,
+    blend: number,
+    texture: number,
+    sampler: number,
+  ): void {
     if (this.length === this.geometry.length) {
       this.geometry = grow(this.geometry);
       this.row = grow(this.row);
       this.blend = grow(this.blend);
       this.texture = grow(this.texture);
       this.sampler = grow(this.sampler);
+      this.kind = grow(this.kind);
     }
 
     const at = this.length++;
+    this.kind[at] = kind;
     this.geometry[at] = geometry;
     this.row[at] = row;
     this.blend[at] = blend;

@@ -95,10 +95,17 @@ export type TextItem = GlyphItem | RectItem | DeviceItem;
 
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
-/** What a text's drawing leaves out for now: Saffron's anti-aliasing, drawn as normal, and an overrun's clip. */
+/**
+ * What a text's drawing leaves out for now, Saffron's anti-aliasing, drawn
+ * as normal; and, where its text runs over, the rectangle inside the
+ * field's gutter that clips it, and the items that are its text, from
+ * `clipFrom` up to `clipTo`.
+ */
 export interface TextOmissions {
   advanced: boolean;
-  clipped: boolean;
+  clip: { x: number; y: number; width: number; height: number } | null;
+  clipFrom: number;
+  clipTo: number;
 }
 
 /** A glyph's outline as a shape of one white fill, in the font's units over 20, as shapeLayers takes twips. */
@@ -154,6 +161,7 @@ export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
   let bottom = 0;
   let right = 0;
   let left = Number.POSITIVE_INFINITY;
+  const textFrom = items.length;
 
   for (let l = first; l <= last; l++) {
     const line = layout.lines[l];
@@ -204,7 +212,17 @@ export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
     height: o.height - (2 * GUTTER) / 20,
   };
   const top = (dy + layout.lines[first].y) / 20;
-  omitted.clipped ||= overruns(inner, left / 20, top, (right - left) / 20, bottom / 20 - top);
+  if (overruns(inner, left / 20, top, (right - left) / 20, bottom / 20 - top)) {
+    omitted.clip = {
+      x: inner.left,
+      y: inner.top,
+      width: Math.max(0, inner.width),
+      height: Math.max(0, inner.height),
+    };
+    omitted.clipFrom = textFrom;
+    omitted.clipTo = items.length;
+  }
+
   caret(o, items);
   return items;
 }

@@ -2,6 +2,12 @@
 export const CLEAR = 1;
 /** Draw the scene list's entries from `a`, `b` of them, under blend mode `c`. */
 export const RUN = 2;
+/**
+ * A mask: entries from `a`, `b` of them, drawn into the stencil, where what
+ * follows is drawn; and taken out again, the same entries, once it is.
+ */
+export const STENCIL_PUSH = 3;
+export const STENCIL_POP = 4;
 
 /**
  * What a frame asks of the backend, in order: each operation an opcode and

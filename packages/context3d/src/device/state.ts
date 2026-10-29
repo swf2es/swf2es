@@ -17,6 +17,9 @@ export class GlState {
   private scissoring: boolean | undefined;
   private readonly box = [Number.NaN, Number.NaN, Number.NaN, Number.NaN];
   private mask = -1;
+  /** The stencil test: off (undefined unknown), or its function, reference and pass operation. */
+  private stencilling: boolean | undefined;
+  private readonly stencilState = [-1, -1, -1];
   private unit = -1;
   private readonly textures: (WebGLTexture | null | undefined)[] = [];
   private readonly samplers: (WebGLSampler | null | undefined)[] = [];
@@ -36,6 +39,8 @@ export class GlState {
     this.scissoring = undefined;
     this.box.fill(Number.NaN);
     this.mask = -1;
+    this.stencilling = undefined;
+    this.stencilState.fill(-1);
     this.unit = -1;
     this.textures.length = 0;
     this.samplers.length = 0;
@@ -126,6 +131,40 @@ export class GlState {
       b[2] = box[2];
       b[3] = box[3];
       gl.scissor(box[0], box[1], box[2], box[3]);
+    }
+  }
+
+  /**
+   * The stencil test: passing where `func` holds of the stencil and `ref`,
+   * then `pass` done to it (KEEP, INCR, DECR...); off with `func` null.
+   */
+  stencil(func: number | null, ref = 0, pass = 0): void {
+    const gl = this.gl;
+    const on = func !== null;
+    if (on !== this.stencilling) {
+      this.stencilling = on;
+      if (on) {
+        gl.enable(gl.STENCIL_TEST);
+      } else {
+        gl.disable(gl.STENCIL_TEST);
+      }
+    }
+
+    if (!on) {
+      return;
+    }
+
+    const s = this.stencilState;
+    if (s[0] !== func || s[1] !== ref) {
+      s[0] = func;
+      s[1] = ref;
+      gl.stencilFunc(func, ref, 0xff);
+    }
+
+    const op = pass || gl.KEEP;
+    if (s[2] !== op) {
+      s[2] = op;
+      gl.stencilOp(gl.KEEP, gl.KEEP, op);
     }
   }
 
