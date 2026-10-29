@@ -980,6 +980,29 @@ function pixelsOf(gl: WebGL2RenderingContext): Uint8Array {
   return out;
 }
 
+/** The geometries the view keeps after `frames` frames of an AVM1 SWF, each played and drawn. */
+async function redrawSwf(base64: string, frames: number): Promise<number> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const uncaught: unknown[] = [];
+  const player = new Player(bytes, null, await avm1For(bytes, [], uncaught, null, false, null));
+  const view = await surfaceFor(player, 1, 1, 1, false, false);
+  try {
+    await player.start();
+    for (let i = 0; i < frames; i++) {
+      player.tick();
+      view.render(player.stage);
+    }
+
+    if (uncaught.length > 0) {
+      throw uncaught[0];
+    }
+
+    return view.geometryCount;
+  } finally {
+    view.destroy();
+  }
+}
+
 async function resizeSwf(
   base64: string,
   sizes: [number, number, number][],
@@ -1469,6 +1492,7 @@ const page = globalThis as unknown as {
   closeSwf: typeof closeSwf;
   traceSwf: typeof traceSwf;
   resizeSwf: typeof resizeSwf;
+  redrawSwf: typeof redrawSwf;
   contextLossSwf: typeof contextLossSwf;
   contextLossPlanSwf: typeof contextLossPlanSwf;
 };
@@ -1481,5 +1505,6 @@ page.stepSwf = stepSwf;
 page.closeSwf = closeSwf;
 page.traceSwf = traceSwf;
 page.resizeSwf = resizeSwf;
+page.redrawSwf = redrawSwf;
 page.contextLossSwf = contextLossSwf;
 page.contextLossPlanSwf = contextLossPlanSwf;
