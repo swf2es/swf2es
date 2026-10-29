@@ -46,6 +46,8 @@ export interface WorkerInit {
   url: string;
   /** Security.sandboxType, the primordial's. */
   sandboxType: string;
+  /** Whether it sees AIR's API, as the primordial does. */
+  air: boolean;
   /** builtin and playerglobal, as the primordial loaded them. */
   libraries: Uint8Array[];
   /** Its shared properties and the primordial's, as set before it started. */

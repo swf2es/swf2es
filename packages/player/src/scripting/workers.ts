@@ -272,6 +272,7 @@ export class Workers {
           swf,
           url: this.s.url,
           sandboxType: this.s.sandboxType,
+          air: this.s.air,
           libraries: this.libraries,
           shared,
           sync: avm2.syncOf(rt).memory,

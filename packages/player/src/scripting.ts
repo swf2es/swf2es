@@ -9,7 +9,7 @@
 // the SWFs' code, what SymbolClass binds, display objects' comings and
 // goings, loads and timers.
 
-import { API_VERSION, type Codegen } from "@swf2es/codegen";
+import { AIR_API_VERSION, API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
@@ -203,6 +203,8 @@ export class Scripting {
   url = "file:///";
   /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's. */
   readonly sandboxType: string;
+  /** Whether the SWFs see AIR's API, as in AIR, rather than Flash Player's plugin's. */
+  readonly air: boolean;
   /**
    * Takes the policy files Security.loadPolicyFile names, resolved, for a
    * host that judges requests by them; nothing does by default, as a
@@ -304,6 +306,13 @@ export class Scripting {
        * or "localTrusted", as the host placed the SWF; "remote" by default.
        */
       sandboxType?: string;
+      /**
+       * Whether the SWFs see AIR's API, by AIR's series of API versions:
+       * NativeApplication, File and the rest of AIR's are defined. False
+       * by default, as in Flash Player's plugin, where a SWF looks them up
+       * to find it is not in AIR.
+       */
+      air?: boolean;
       /** Takes the URLs Security.loadPolicyFile names, resolved: an "xmlsocket:" one as given. */
       loadPolicyFile?: (url: string) => void;
       /**
@@ -438,6 +447,7 @@ export class Scripting {
       : null;
     this.url = options.url ?? this.url;
     this.sandboxType = options.sandboxType ?? "remote";
+    this.air = options.air ?? false;
     this.loadPolicyFile = options.loadPolicyFile ?? null;
     this.base = options.base ?? null;
     this.loads = new Loads(this, options);
@@ -451,7 +461,7 @@ export class Scripting {
       options,
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);
-    this.codegen.reset(API_VERSION);
+    this.codegen.reset(this.air ? AIR_API_VERSION : API_VERSION);
   }
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
