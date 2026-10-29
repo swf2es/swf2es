@@ -6,7 +6,9 @@
 // placed through the object's plane in perspective (display/perspective.ts)
 // as Flash places it (docs/architecture.md, "3D display objects").
 import type { Matrix } from "@swf2es/format";
-import { isProjective } from "./geometry.js";
+import { bounds, toStage } from "./bounds.js";
+import type { DisplayObject } from "./displayobject.js";
+import { apply, concat, isProjective } from "./geometry.js";
 
 /** The samples a side the bitmap is drawn at before it is averaged to a texel a pixel, as Flash's high quality covers edges. */
 export const SAMPLES = 4;
@@ -122,4 +124,38 @@ export function placeQuad(
   out.width = across + 2;
   out.height = down + 2;
   return true;
+}
+
+/**
+ * The map from the space of `mask`, a 2D mask outside the 3D object `o`, to
+ * `o`'s, as Flash clips the bitmap it draws `o` into: the mask is placed by
+ * its matrices up to the nearest 3D object above it (or the stage), and then
+ * moved as if the bitmap's corner, `o`'s bounds' top left in its own space,
+ * were where `o`'s bounds' top left is on the stage. So a mask over a turned
+ * card clips a part of the card that is not under it (the `three-d-mask` case).
+ */
+export function outsideMaskMap(o: DisplayObject, mask: DisplayObject): Matrix {
+  let m = mask.placed;
+  for (let p = mask.parent; p && !p.space; p = p.parent) {
+    m = concat(m, p.placed);
+  }
+
+  const own = bounds(o, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+  const up = toStage(o, null);
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = apply(up, i & 1 ? own.xMax : own.xMin, i & 2 ? own.yMax : own.yMin);
+    left = Math.min(left, x);
+    top = Math.min(top, y);
+  }
+
+  return {
+    a: m.a,
+    b: m.b,
+    c: m.c,
+    d: m.d,
+    tx: m.tx + own.xMin - Math.round(left),
+    ty: m.ty + own.yMin - Math.round(top),
+  };
 }
