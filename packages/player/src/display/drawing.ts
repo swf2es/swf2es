@@ -2,10 +2,12 @@
 // shape is read into (shapes.ts), so that the renderer draws both alike.
 // Commands go to the fill and the stroke open at the time, each moveTo
 // starting a contour of the fill and a path of the stroke. As Flash draws
-// them, each fill begins a layer, and the lines drawn from then until the
-// next fill begins go in it, over that fill and under the next: a line
-// open at beginFill goes on in the new layer, and one drawn after endFill
-// stays above the fill before it. A fill's contour left open is closed with
+// them, a fill begun after lines begins a layer, and the lines drawn from
+// then until the next fill begins go in it, over that fill and under the
+// next: a line open at beginFill goes on in the new layer, and one drawn
+// after endFill stays above the fill before it. A fill begun while the
+// last layer holds fills alone goes on in it, as fills in a layer draw in
+// order, up to SHARED_FILLS. A fill's contour left open is closed with
 // a line in the line style of the time, as Flash closes it, kept apart from
 // the paths (shapes.ts' Close): a line drawn on after endFill takes it away
 // again, as in Flash, and bounds and hit tests leave it out.
@@ -33,6 +35,19 @@ const TWIPS = 20;
 const TAN_22_5 = Math.SQRT2 - 1;
 const COS_45 = Math.SQRT1_2;
 
+/**
+ * The fills a layer takes on from those before it, at most: a drawing
+ * redrawn every frame a fill a triangle so makes a few layers of them, not
+ * thousands, while a layer's tessellation, its memory and what a failure
+ * of it takes with it, stay bounded.
+ */
+const SHARED_FILLS = 256;
+
+/** Whether `layer` holds fills alone, which a fill begun next may go on after. */
+function fillsOnly(layer: ShapeLayer): boolean {
+  return !layer.strokes.length && !layer.meshes && !layer.extent;
+}
+
 export class Drawing {
   readonly layers: ShapeLayer[] = [];
   /** Counts the changes to `layers`, which change in place: what is kept of them goes by it. */
@@ -45,6 +60,8 @@ export class Drawing {
   private fill: { fill: Paint; contours: Path[]; winding: Winding } | null = null;
   /** The layer the open fill is in, for the entries a change of winding adds beside it. */
   private fillLayer: ShapeLayer | null = null;
+  /** Where the open fill's entries begin in its layer, which fills before it may share. */
+  private fillStart = 0;
   private stroke: Stroke | null = null;
   /** The line closing the open contour, or the one endFill closed, while a line drawn on may take it away. */
   private closing: { stroke: Stroke; close: Close } | null = null;
@@ -71,8 +88,20 @@ export class Drawing {
     const line = this.stroke?.line;
     this.dropStroke();
     this.fill = { fill, contours: [], winding: "evenOdd" };
-    this.fillLayer = { fills: [this.fill], strokes: [] };
-    this.layers.push(this.fillLayer);
+    // On in the last layer while it holds fills alone, as many as SHARED_FILLS: within a layer
+    // fills draw in order, as across layers. A layer with lines, triangles or meshes ends where it
+    // is.
+    const last = this.layers[this.layers.length - 1];
+    if (last && fillsOnly(last) && last.fills.length < SHARED_FILLS) {
+      this.fillLayer = last;
+      this.fillStart = last.fills.length;
+      last.fills.push(this.fill);
+    } else {
+      this.fillLayer = { fills: [this.fill], strokes: [] };
+      this.fillStart = 0;
+      this.layers.push(this.fillLayer);
+    }
+
     this.beginContour();
     if (line) {
       this.stroke = { line, paths: [] };
@@ -87,24 +116,35 @@ export class Drawing {
     this.fill = null;
     this.fillLayer = null;
     if (layer && layer === this.resumed) {
-      this.dropEmpty(layer);
+      this.dropEmpty(layer, this.fillStart);
     }
 
     this.resumed = null;
   }
 
-  /** `layer` taken away if it is the last and draws nothing yet: an empty layer would be a Graphics drawing nothing. */
-  private dropEmpty(layer: ShapeLayer): void {
-    if (
-      layer === this.layers[this.layers.length - 1] &&
-      !layer.strokes.length &&
-      !layer.meshes &&
-      !layer.extent &&
-      layer.fills.every((f) => f.contours.every((c) => c.length <= 3))
-    ) {
-      this.layers.pop();
-      this.version++;
+  /**
+   * `layer` taken away if it is the last and draws nothing yet: an empty
+   * layer would be a Graphics drawing nothing. Where it holds fills before
+   * the open one's, the open fill's entries alone go.
+   */
+  private dropEmpty(layer: ShapeLayer, from: number): void {
+    if (layer !== this.layers[this.layers.length - 1] || !fillsOnly(layer)) {
+      return;
     }
+
+    for (let i = from; i < layer.fills.length; i++) {
+      if (layer.fills[i].contours.some((c) => c.length > 3)) {
+        return;
+      }
+    }
+
+    if (from > 0) {
+      layer.fills.length = from;
+    } else {
+      this.layers.pop();
+    }
+
+    this.version++;
   }
 
   /** A stroke from here on with `line`, or none for null; the one before it ends either way. */
@@ -354,7 +394,7 @@ export class Drawing {
     this.closing = null;
     this.dropStroke();
     if (this.fillLayer) {
-      this.dropEmpty(this.fillLayer);
+      this.dropEmpty(this.fillLayer, this.fillStart);
     }
 
     const paint = fill?.fill;
@@ -447,6 +487,7 @@ export class Drawing {
     if (fill) {
       this.fill = { fill: fill.fill, contours: [], winding: fill.winding };
       this.fillLayer = next;
+      this.fillStart = 0;
       next.fills.push(this.fill);
       const [ox, oy] = origin;
       const away = ox !== this.x || oy !== this.y;

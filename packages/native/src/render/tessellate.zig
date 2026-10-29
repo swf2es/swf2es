@@ -98,6 +98,18 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     out = null;
     made_in = arena.generation;
     const mark = arena.top;
+    // One convex contour, a triangle above all, as a drawing redrawn every frame draws thousands:
+    // a fan, which either rule fills alike, and no sweep. Within libtess2's range alone, where its
+    // turns' cross products are finite: past it they may overflow and pass a concave contour.
+    if (libtess and ends.len == 1 and inRange(coords)) {
+        if (fan(coords)) |result| {
+            out = result;
+            return 0;
+        }
+
+        arena.top = mark;
+    }
+
     if (libtess and inRange(coords)) {
         if (libtess2(coords, ends, nonzero)) |result| {
             out = result;
@@ -114,6 +126,74 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     };
     out = .{ .positions = result.positions, .indices = result.indices };
     return 0;
+}
+
+/// `coords`, one contour, as a fan from its first point, its positions
+/// those given: null where the contour is not convex, as where it turns
+/// both ways, or turns one way but winds round more than once, which its
+/// edges' going back and forth along an axis more than twice shows; or
+/// where memory runs out.
+fn fan(coords: []const f64) ?Output {
+    const n = coords.len / 2;
+    if (n < 3) {
+        return null;
+    }
+
+    var left = false;
+    var right = false;
+    var x_turns: u32 = 0;
+    var y_turns: u32 = 0;
+    // The edge before, and the last ways along x and along y, that moved at all.
+    var ex: f64 = 0;
+    var ey: f64 = 0;
+    var sx: f64 = 0;
+    var sy: f64 = 0;
+
+    // Round twice, counting on the second: each turn and change of way of the closed contour once.
+    for (0..2 * n) |i| {
+        const a = i % n;
+        const b = (a + 1) % n;
+        const dx = coords[b * 2] - coords[a * 2];
+        const dy = coords[b * 2 + 1] - coords[a * 2 + 1];
+        if (dx == 0 and dy == 0) {
+            continue;
+        }
+
+        if (i >= n) {
+            const cross = ex * dy - ey * dx;
+            // A turn not known, its product overflowing, is no convex one.
+            if (!std.math.isFinite(cross)) {
+                return null;
+            }
+
+            if (cross > 0) left = true;
+            if (cross < 0) right = true;
+            if (dx != 0 and sx != 0 and (dx > 0) != (sx > 0)) x_turns += 1;
+            if (dy != 0 and sy != 0 and (dy > 0) != (sy > 0)) y_turns += 1;
+        }
+
+        ex = dx;
+        ey = dy;
+        if (dx != 0) sx = dx;
+        if (dy != 0) sy = dy;
+    }
+
+    if (left and right) {
+        return null;
+    }
+
+    if (x_turns > 2 or y_turns > 2) {
+        return null;
+    }
+
+    const triangles = arena.allocator.alloc(c.TESSindex, (n - 2) * 3) catch return null;
+    for (0..n - 2) |k| {
+        triangles[k * 3] = 0;
+        triangles[k * 3 + 1] = @intCast(k + 1);
+        triangles[k * 3 + 2] = @intCast(k + 2);
+    }
+
+    return .{ .positions = coords, .indices = triangles };
 }
 
 fn inRange(coords: []const f64) bool {
