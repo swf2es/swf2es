@@ -23,13 +23,14 @@ import { unsupported, vertexColor } from "./shapes.js";
 
 /**
  * How far, in pixels of the screen, a line's flattened curves and its
- * round joins' and caps' chords may stray from the curve: a twentieth of
- * one, where the fills' finer flatness made strokes several times the
+ * round joins' and caps' chords may stray from the curve: a tenth of one,
+ * where the fills' finer flatness made strokes several times the
  * triangles the Pixi view's are, which a software rasteriser pays for; a
- * quarter shows on the references' curved lines, and a tenth on a 9-slice
- * panel's small rounded corners, which Flash draws as exact curves.
+ * quarter shows on the references' curved lines. A 9-slice's lines take
+ * half that, as its small rounded corners, which Flash draws as exact
+ * curves, show a tenth.
  */
-const STROKE_FLATNESS = 0.05;
+const STROKE_FLATNESS = 0.1;
 
 /**
  * A line's width on the stage through the linear transform (a b c d): its
@@ -371,7 +372,7 @@ export function layerStrokes(
   const colors: number[] = [];
   const indices: number[] = [];
   // `least` is a pixel of the screen, in the stage's pixels the lines are drawn in.
-  const flatness = STROKE_FLATNESS * least;
+  const flatness = (by ? STROKE_FLATNESS / 2 : STROKE_FLATNESS) * least;
   for (const stroke of layer.strokes) {
     const line = stroke.line;
     const h = by
