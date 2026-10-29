@@ -1,9 +1,9 @@
 // Independent ray crossings check both fill rules, including self-intersecting contours, and
 // every eight fills tessellated as a layer must give each what it gave alone: by libtess2, and
 // by the bands the module fills by where libtess2 fails (bands.zig). Then curved fills:
-// the layer call's flattening must match the player's JS, the same points where the two take a
-// curve in as many chords, and within the flatness where a bend at a whole number of chords
-// rounds the other way; the same fills drawn and the same left to JS.
+// the layer call's flattening must match a JS one, as the player's was, the same points where
+// the two take a curve in as many chords, and within the flatness where a bend at a whole
+// number of chords rounds the other way; the same fills drawn and the same refused.
 // Run with: node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]
 import assert from "node:assert/strict";
 import {
@@ -200,7 +200,7 @@ console.log(
   `fuzz tessellate: ${cases} fills by libtess2 and as many by the bands, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
 );
 
-/** A contour flattened as the player's scene/fills.ts does, with its length function. */
+/** A contour flattened as the player's JS did, with its length function. */
 function flatten(commands: readonly number[], length: (x: number, y: number) => number): number[] {
   const points: number[] = [];
   const append = (x: number, y: number) => {
@@ -387,5 +387,5 @@ for (let i = 0; i < cases / 8; i++) {
 }
 
 console.log(
-  `fuzz tessellate: ${curved} curved fills flattened in layers as JS does (${differing} a chord apart at a boundary, ${rejected} left to JS by both)`,
+  `fuzz tessellate: ${curved} curved fills flattened in layers as JS does (${differing} a chord apart at a boundary, ${rejected} refused by both)`,
 );

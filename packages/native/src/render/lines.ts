@@ -21,6 +21,8 @@ export interface LineBuilderOptions {
   memoryLimit?: number;
   /** Drop instances larger than this after each call. Defaults to 8 MiB. */
   retainMemory?: number;
+  /** Fill outlines by the module's bands alone, never by libtess2: for tests of the bands. */
+  bands?: boolean;
 }
 
 /**
@@ -39,13 +41,21 @@ export class LineBuilder {
   private layout = new Uint32Array(0);
   /** libtess2 trapped the last instance: the next fills its outlines by the bands alone. */
   private trapped = false;
+  private lastUnwound = false;
   private readonly limit: number;
   private readonly keep: number;
+  private readonly bands: boolean;
 
   constructor(options: LineBuilderOptions = {}) {
     this.limit = options.memoryLimit ?? 128 << 20;
     this.keep = options.retainMemory ?? 8 << 20;
+    this.bands = options.bands ?? false;
     renderModule();
+  }
+
+  /** Whether the last build() unwound, which the next, in a new instance by the bands, may not. */
+  get unwound(): boolean {
+    return this.lastUnwound;
   }
 
   /** Current retained Wasm capacity. */
@@ -65,7 +75,7 @@ export class LineBuilder {
       }
 
       this.instance.setLimit(this.limit);
-      this.instance.bandsOnly(Number(this.trapped));
+      this.instance.bandsOnly(Number(this.bands || this.trapped));
     }
 
     const x = this.instance;
@@ -91,19 +101,22 @@ export class LineBuilder {
    * caller's next input() and build().
    */
   build(length: number): LineGeometry | null | undefined {
+    this.lastUnwound = false;
     const x = this.instance;
     if (!x) {
       return undefined;
     }
 
     try {
-      if (x.lineBuild(length) !== 0) {
-        return undefined;
-      }
-
+      const status = x.lineBuild(length);
+      // Built without unwinding: libtess2 again for the next.
       if (this.trapped) {
         this.trapped = false;
-        x.bandsOnly(0);
+        x.bandsOnly(Number(this.bands));
+      }
+
+      if (status !== 0) {
+        return undefined;
       }
 
       const [at, vertices, count] = this.header(x);
@@ -121,6 +134,7 @@ export class LineBuilder {
       // libtess2 unwound through the failure import: never resume that instance.
       this.dispose();
       this.trapped = true;
+      this.lastUnwound = true;
       return undefined;
     } finally {
       if (this.capacity > this.keep) {

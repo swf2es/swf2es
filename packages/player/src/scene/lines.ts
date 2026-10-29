@@ -203,6 +203,10 @@ export class LineCache {
 
     this.counts.strokeContexts++;
     const data = layerStrokes(layer, a, b, c, d, least, this.tessellator.lines, by, opaque);
+    // Not built, as where no instance could be made: none kept, so that a later frame asks again.
+    if (data === undefined) {
+      return null;
+    }
 
     const handle = data ? this.geometries.add(data) : null;
     const vertices = data ? data.positions.length / 2 : 0;

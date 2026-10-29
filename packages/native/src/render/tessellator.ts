@@ -18,7 +18,7 @@ export interface FillTessellate {
   /**
    * Every fill of a layer in one native call, its contours as path
    * commands (PATH_MOVE, PATH_LINE, PATH_CURVE, PATH_CUBIC) that the module
-   * flattens itself: each fill's geometry, or null for JS to fill it, all
+   * flattens itself: each fill's geometry, or null for one it refused, all
    * fills' positions and indices in one buffer each. Its output needs no checking: the module has checked
    * every coordinate finite and every index in range.
    */
@@ -72,7 +72,8 @@ export interface TessellatorOptions {
   retainMemory?: number;
   /**
    * Fill by the module's bands alone (bands.zig), as it does after libtess2
-   * has trapped, never by libtess2: for tests of the bands.
+   * has trapped, never by libtess2, the lines' outlines too: for tests of
+   * the bands.
    */
   bands?: boolean;
 }
@@ -114,7 +115,11 @@ export class Tessellator {
     }
 
     renderModule();
-    this.lines = new LineBuilder({ memoryLimit: this.limit, retainMemory: this.keep });
+    this.lines = new LineBuilder({
+      memoryLimit: this.limit,
+      retainMemory: this.keep,
+      bands: this.bands,
+    });
     this.tessellate = Object.assign(this.fill, { layer: this.layer, lines: this.lines });
   }
 

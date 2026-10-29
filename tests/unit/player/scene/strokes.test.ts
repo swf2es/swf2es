@@ -431,3 +431,30 @@ test("the line builder keeps to its tessellator's memory limit and what it retai
   assert.ok(build(keepsNone));
   assert.equal(keepsNone.capacity, 0);
 });
+
+test("outlines filled by the bands alone cover what libtess2's do", () => {
+  const bands = new Tessellator({ bands: true }).tessellate.lines;
+  const r = random(5);
+  for (let k = 0; k < 50; k++) {
+    const layer = layerOf(r, { alpha: 128 }, 3, (r) => curved(r, 8, k % 2 === 0, 20 + r() * 80));
+    const covered = [builder, bands].map((by) => {
+      const g = layerStrokes(layer, 1, 0, 0, 1, 1, by, null, false);
+      assert.ok(g, `layer ${k}`);
+      let sum = 0;
+      const { positions: v, indices: t } = g;
+      for (let i = 0; i < t.length; i += 3) {
+        const [a, b, c] = [t[i] * 2, t[i + 1] * 2, t[i + 2] * 2];
+        sum +=
+          Math.abs((v[b] - v[a]) * (v[c + 1] - v[a + 1]) - (v[c] - v[a]) * (v[b + 1] - v[a + 1])) /
+          2;
+      }
+
+      return sum;
+    });
+    // Within the f32 rounding of two triangulations' positions.
+    assert.ok(
+      Math.abs(covered[0] - covered[1]) <= covered[0] * 1e-5,
+      `layer ${k}: libtess2 ${covered[0]}, the bands ${covered[1]}`,
+    );
+  }
+});

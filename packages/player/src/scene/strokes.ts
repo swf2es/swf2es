@@ -57,7 +57,8 @@ const TOGETHER = 2;
  * wide, as wide as `by` makes them (a 9-slice's line space) or null, built
  * by `builder`; those of whole alpha as triangles that may overlap where
  * `opaque`. Null for none, or where the builder refused them (a position
- * not a number) or ran out of memory.
+ * not a number, or past its memory); undefined where it had no instance, or
+ * unwound again, which a later frame may try again.
  */
 export function layerStrokes(
   layer: ShapeLayer,
@@ -69,7 +70,7 @@ export function layerStrokes(
   builder: LineBuilder,
   by: readonly number[] | null = null,
   opaque = false,
-): GeometryData | null {
+): GeometryData | null | undefined {
   // Seen through a transform that collapses the plane, lines cover nothing.
   if (a * d - b * c === 0) {
     return null;
@@ -77,12 +78,15 @@ export function layerStrokes(
 
   const built = build(layer, a, b, c, d, least, builder, by, opaque);
   // Once more where libtess2 trapped: the builder's next instance fills the outlines by the bands.
-  return built !== undefined
-    ? built
-    : (build(layer, a, b, c, d, least, builder, by, opaque) ?? null);
+  return built === undefined && builder.unwound
+    ? build(layer, a, b, c, d, least, builder, by, opaque)
+    : built;
 }
 
-/** The layer packed into the builder's input and built: undefined where it did not build it. */
+/**
+ * The layer packed into the builder's input and built: null where the
+ * builder refused it, undefined where it had no instance or unwound.
+ */
 function build(
   layer: ShapeLayer,
   a: number,
@@ -148,5 +152,6 @@ function build(
     }
   }
 
-  return builder.build(at);
+  const built = builder.build(at);
+  return built === undefined && !builder.unwound ? null : built;
 }

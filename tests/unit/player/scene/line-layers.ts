@@ -169,7 +169,7 @@ export function randomLayer(r: () => number): ShapeLayer {
 /** A layer of one line over `paths` paths made by `make`. */
 export function layerOf(
   r: () => number,
-  options: LineOptions,
+  options: Partial<LineOptions>,
   paths: number,
   make: (r: () => number) => number[],
 ): ShapeLayer {

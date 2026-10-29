@@ -183,7 +183,7 @@ async function check(): Promise<void> {
             );
             assert.ok(
               frameTree.resources.some((r) => r.url.endsWith("/modules/native/render/index.js")),
-              "playback did not load the native bitmap kernels",
+              "playback did not load the render module",
             );
             const facts = await value<string>("document.getElementById('facts').innerText");
             assert.match(facts, /3 \(AVM2\)/);
@@ -563,9 +563,9 @@ async function check(): Promise<void> {
           "the licences are there",
           async () => {
             const found = await value<number[]>(
-              "Promise.all(['notices.html', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/native/render/index.js', 'modules/native/render/index.js', 'libraries/builtin.abc'].map((u) => fetch(u).then((r) => r.status)))",
+              "Promise.all(['notices.html', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/native/render/index.js', 'libraries/builtin.abc'].map((u) => fetch(u).then((r) => r.status)))",
             );
-            assert.deepEqual(found, [200, 200, 200, 200, 200, 200, 200]);
+            assert.deepEqual(found, [200, 200, 200, 200, 200, 200]);
             const notices = await value<string>("fetch('notices.html').then((r) => r.text())");
             assert.match(notices, /Mozilla Public License/);
             assert.match(notices, /packages\/runtime\/src\/avm2\/numbers\.ts/);

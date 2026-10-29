@@ -2,9 +2,12 @@
 //! them (tessellate.zig): the fill cut at every vertex's height and every
 //! height two edges cross at, so that within each band the edges keep their
 //! order and each span the rule fills is a trapezoid between two of them.
-//! Bands meet along horizontal lines, which the rasterizer splits without a
-//! crack wherever their corners fall. Its output is libtess2's: positions,
-//! two a vertex, and triangles, three indices each.
+//! Bands meet along horizontal lines, where one band's corners may fall
+//! within the next's edges: without a crack as drawn in the stage's axes,
+//! though a turn of the stage, rounding the corners to f32, may leave a
+//! hairline there, which the fills libtess2 refuses are rare enough to
+//! bear. Its output is libtess2's: positions, two a vertex, and triangles,
+//! three indices each.
 const std = @import("std");
 
 /// Pairs of edges a call may test for a crossing: more is too slow for a frame.
@@ -136,7 +139,7 @@ fn build(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
         // The band cut again at each height two of its edges cross at, the highest first.
         var from = top;
         while (from < bottom) {
-            pairs += active.items.len * active.items.len / 2;
+            pairs += @as(u64, active.items.len) * active.items.len / 2;
             if (pairs > most_pairs) {
                 return error.TooSlow;
             }

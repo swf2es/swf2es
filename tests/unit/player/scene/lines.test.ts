@@ -101,20 +101,38 @@ test("after a busy stretch, the lines no longer drawn go within a sweep", () => 
   assert.equal(lines.kept, 1);
 });
 
-test("a layer the line builder does not build is asked for once more, then has no lines", () => {
-  let asked = 0;
-  const refusing = {
-    layer: tessellate.layer,
-    lines: {
-      input: (n: number) => tessellate.lines.input(n),
-      build: () => {
-        asked++;
-        return undefined;
-      },
+/** A builder that builds nothing, as if refusing each layer or, where `unwinding`, trapping. */
+function failing(unwinding: boolean) {
+  const builder = {
+    asked: 0,
+    unwound: false,
+    input: (n: number) => tessellate.lines.input(n),
+    build: () => {
+      builder.asked++;
+      builder.unwound = unwinding;
+      return undefined;
     },
   };
-  const lines = new LineCache(new Geometries(), refusing);
-  assert.equal(lines.take(straightLine(), 0, 1, 0, 0, 1, 1, null, true), null);
+  return builder;
+}
+
+test("a layer the line builder refuses has no lines, kept so", () => {
+  const builder = failing(false);
+  const lines = new LineCache(new Geometries(), { layer: tessellate.layer, lines: builder });
+  const layer = straightLine();
+  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
+  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
+  assert.equal(builder.asked, 1);
+});
+
+test("a layer the line builder unwound on is asked for once more, and again on a later take", () => {
+  const builder = failing(true);
+  const lines = new LineCache(new Geometries(), { layer: tessellate.layer, lines: builder });
+  const layer = straightLine();
+  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
   // Once more, as after libtess2 trapped, when the builder's next instance fills by the bands.
-  assert.equal(asked, 2);
+  assert.equal(builder.asked, 2);
+  // Not kept as none: what failed for a while is built when it can be.
+  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
+  assert.equal(builder.asked, 4);
 });

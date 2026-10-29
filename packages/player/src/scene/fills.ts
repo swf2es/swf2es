@@ -34,12 +34,13 @@ export interface FillTessellator {
 /**
  * Builds a layer's lines as scene/strokes.ts packs them into input():
  * build() gives their geometry, null for none, or undefined where it built
- * none (refused, or unwound, after which the next is tried again);
- * input() gives null where it is unavailable.
+ * none; input() gives null where it is unavailable. Where the last build()
+ * `unwound`, the next is worth asking for the layer again.
  */
 export interface LineBuilder {
   input(n: number): Float64Array | null;
   build(length: number): GeometryData | null | undefined;
+  readonly unwound: boolean;
 }
 
 /**

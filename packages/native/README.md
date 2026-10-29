@@ -247,7 +247,8 @@ the shape's own path commands (`PATH_MOVE`, `PATH_LINE`, `PATH_CURVE`,
 `PATH_CUBIC`, each followed by its coordinates), not as points: the wrapper
 copies every fill's commands, the contours' ends, each fill's last contour
 and its rule into one allocation, and `src/render/flatten.zig` flattens
-each contour as the player's JS does (`scene/fills.ts`'s `trace`):
+each contour as the player's JS did, and the fuzzer's still does
+(`tests/fuzz/tessellate.ts`):
 chords within 0.02 px of the curve, at most 256 a curve, at the same
 parametric points, repeated points dropped, a closing point that repeats the
 first dropped, and contours of fewer than three points left out, all in
