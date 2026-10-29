@@ -10,11 +10,6 @@
 	path = tests/programs/com-lz4-as3
 	url = https://github.com/33TU/com-lz4-as3.git
 	shallow = true
-[submodule "vendor/pixijs"]
-	path = vendor/pixijs
-	url = https://github.com/swf2es/pixijs.git
-	branch = swf2es
-	shallow = true
 [submodule "vendor/minimp3"]
 	path = vendor/minimp3
 	url = https://github.com/swf2es/minimp3.git

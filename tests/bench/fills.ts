@@ -1,5 +1,6 @@
-// Compare fill construction with two render modules from a git ref, using
-// the current player's other dependencies. Build first, then:
+// Compare fills resolved in JS (scene/fills.ts and scene/fill-polygons.ts)
+// with the two modules from a git ref, using the current player's other
+// dependencies. Build first, then:
 // node --expose-gc tests/bench/fills.ts [ref, HEAD] [iterations, 5000] [samples, 10] [--allocs]
 // Add --staggered for a large fill with unrelated band levels; use fewer iterations.
 import { execFileSync } from "node:child_process";
@@ -8,7 +9,7 @@ import { Session } from "node:inspector";
 import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ShapeLayer } from "../../packages/player/dist/display/shapes.js";
-import * as current from "../../packages/player/dist/render/tessellate.js";
+import * as current from "../../packages/player/dist/scene/fills.js";
 
 const args = process.argv.slice(2).filter((arg) => arg !== "--allocs" && arg !== "--staggered");
 const ref = args[0] ?? "HEAD";
@@ -24,9 +25,9 @@ if (
 }
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const render = `${root}packages/player/dist/render/`;
+const scene = `${root}packages/player/dist/scene/`;
 const name = `fills-bench-${process.pid}`;
-const paths = [`${render}${name}-edges.js`, `${render}${name}.js`];
+const paths = [`${scene}${name}-edges.js`, `${scene}${name}.js`];
 const rect = (x: number, y: number, w: number, h: number) => [
   1,
   x,
@@ -64,7 +65,8 @@ const cases: Record<string, number[][]> = process.argv.includes("--staggered")
         [1, 190, -40, 2, 165, 175, 2, 235, 175, 2, 190, -40],
       ],
     };
-const painter = () => ({ color: 0, alpha: 1 });
+// No tessellator: every fill is planned in JS.
+const inJs = () => null;
 type Module = typeof current;
 const median = (values: number[]) => {
   values.sort((a, b) => a - b);
@@ -75,7 +77,7 @@ const median = (values: number[]) => {
 function run(module: Module, layer: ShapeLayer, count: number): number {
   const start = performance.now();
   for (let i = 0; i < count; i++) {
-    module.destroyContext(module.fillContext(layer, painter));
+    module.resolveFills(layer, false, inJs);
   }
 
   return ((performance.now() - start) * 1000) / count;
@@ -119,8 +121,8 @@ async function allocated(module: Module, layer: ShapeLayer): Promise<number> {
 }
 
 try {
-  for (const [i, source] of ["fill-polygons", "tessellate"].entries()) {
-    const text = execFileSync("git", ["show", `${ref}:packages/player/src/render/${source}.ts`], {
+  for (const [i, source] of ["fill-polygons", "fills"].entries()) {
+    const text = execFileSync("git", ["show", `${ref}:packages/player/src/scene/${source}.ts`], {
       cwd: root,
       encoding: "utf8",
     });

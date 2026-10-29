@@ -180,8 +180,7 @@ void main(void) {
 `;
 
 /**
- * drawTriangles' bitmap as adl samples it, as the Pixi view's mesh shader
- * does (player's render/triangles.ts): u and v from 0 to 1 onto the first
+ * drawTriangles' bitmap as adl samples it: u and v from 0 to 1 onto the first
  * texel's centre to the last's, wrapped into that or clamped to it, read
  * once a pixel of Flash's, at its top left corner; not smoothed, the nearer
  * texel, the lower of two as near; smoothed, the four around, weighed.
@@ -263,8 +262,8 @@ void main(void) {
 `;
 
 /**
- * Advanced text's glyph quads, as the Pixi view's Saffron shader places
- * them (player's render/saffron.ts), its transform the row's: the text's
+ * Advanced text's glyph quads (player's text/saffron.ts), placed by the
+ * row's transform: the text's
  * pixels to Flash's, uUnit of them a stage pixel, on their grid from the
  * stage's origin, a BitmapData's in a draw. A glyph's pen stands where its
  * text's origin, at a whole pixel, puts it, snapped as its grid fits it
@@ -380,8 +379,8 @@ void main(void) {
 /**
  * Each pixel of Flash's a glyph's quad covers, by its signed distance to
  * the glyph's outline (the segments of its run in uSegments, the nearest
- * and, by parity, whether it is inside), between the cutoffs, as the Pixi
- * view's Saffron shader covers it. Nothing outside: in a mask, which
+ * and, by parity, whether it is inside), between the cutoffs, as Saffron
+ * covers it. Nothing outside: in a mask, which
  * writes the stencil wherever it draws, a glyph is its shape.
  */
 export const glyphsFragment = `#version 300 es
@@ -466,8 +465,7 @@ void main(void) {
  * row's colour transform where it has one (uRow not -1), on its straight
  * colour where it covers anything; then blended by its mode. Normal, layer,
  * add and screen are left to GL's blending; the rest read what is below
- * (uBack, a copy of it) and give the whole result, as the Pixi view's
- * blend filters do (render/blend.ts): the separable modes blend straight
+ * (uBack, a copy of it) and give the whole result: the separable modes blend straight
  * colours and composite source over, the others have formulas of their own.
  */
 export const compositeFragment = `#version 300 es

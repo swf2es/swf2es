@@ -1,6 +1,5 @@
-// The pointer, touches and wheel on the own renderer's canvas, taken to the
-// player's stage from the browser's events themselves, as the Pixi view's
-// binding (render/pointer.ts) takes them through Pixi's: Flash's display
+// The pointer, touches and wheel on the renderer's canvas, taken to the
+// player's stage from the browser's events themselves: Flash's display
 // list chooses the target, and the same rules hold for moves outside the
 // canvas, releases outside it, touches, the wheel, the cursor and the menu.
 import { canvasPoint, wheelLines } from "../input/canvas.js";
@@ -17,7 +16,7 @@ export interface ShownStage {
 /**
  * The mouse, touches and wheel on `canvas` to `player`'s stage, of which
  * the canvas shows `shown`; what undoes it. An event over the canvas
- * counts where the canvas is its target, as Pixi's do: over an element on
+ * counts where the canvas is its target: over an element on
  * top of it, as a menu or a host's control, it is outside.
  */
 export function bindCanvasPointer(
@@ -242,7 +241,7 @@ export function bindCanvasPointer(
   canvas.addEventListener("pointerleave", leave);
   page.addEventListener("pointercancel", cancel);
   canvas.addEventListener("wheel", wheel, { passive: false });
-  // A finger's drags are the SWF's, not the page's pans and zooms, as Pixi's events keep them.
+  // A finger's drags are the SWF's, not the page's pans and zooms.
   const touchAction = canvas.style.touchAction;
   canvas.style.touchAction = "none";
   // Flash's arrow, auto's or a forced one, is the arrow, not the page's cursor.

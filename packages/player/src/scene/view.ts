@@ -1,10 +1,6 @@
-// The renderer of swf2es's own as the player drives it (docs/renderer.md):
-// a view that owns a WebGL 2 canvas, walks the display list into a scene
-// list and its rows, and has @swf2es/render plan and draw it. It stands
-// beside PixiView behind a switch until it draws everything Pixi draws;
-// for now, the fills of shapes and drawings, solid, bitmap and gradient,
-// their lines, bitmaps and text, under masks, scroll clips, blend modes and
-// filters.
+// The renderer as the player drives it (docs/renderer.md): a view that
+// owns a WebGL 2 canvas, walks the display list into a scene list and its
+// rows, and has @swf2es/render plan and draw it.
 import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
 import {
   BLEND_NAMES,
@@ -333,7 +329,7 @@ export class RenderView implements Drawer {
   screenScale: number | null = null;
   background: number;
   transparent: boolean;
-  /** Lines stroked anew and lines found stroked already, as the Pixi view counts its contexts. */
+  /** Lines stroked anew and lines found stroked already (LineCache.counts). */
   readonly counts: LineCache["counts"];
   private resolution: number;
   private width: number;
@@ -522,8 +518,7 @@ export class RenderView implements Drawer {
 
   /**
    * Whether bitmaps that ask to be are smoothed: not at the stage's low
-   * quality, nor in a draw for BitmapData at a sample a pixel, as the Pixi
-   * view's snapshot has it.
+   * quality, nor in a draw for BitmapData at a sample a pixel.
    */
   private get smoothing(): boolean {
     return this.snapshotting ? this.scale > 1 : this.stageQuality !== "LOW";
@@ -559,8 +554,8 @@ export class RenderView implements Drawer {
   }
 
   /**
-   * The rectangle of the stage, from (x, y), the canvas shows, as the Pixi
-   * view's setViewport has it: its size the canvas's (resize), in stage
+   * The rectangle of the stage, from (x, y), the canvas shows: its size
+   * the canvas's (resize), in stage
    * pixels, where a host's margins or alignment show more of the stage or
    * less than its own.
    */
@@ -603,7 +598,7 @@ export class RenderView implements Drawer {
     target.height = this.gl.drawingBufferHeight;
     target.scale = this.scale * this.resolution;
     target.resolution = this.resolution;
-    // A pixel of the screen, where the host says what that is, as the Pixi view's flashPixel.
+    // A pixel of the screen, where the host says what that is (screenScale).
     target.pixel = this.screenScale ? target.scale / this.screenScale : 1;
     // Outputs kept at another scale, with bitmaps smoothed otherwise or hairlines at another
     // width, are drawn again.
@@ -739,8 +734,7 @@ export class RenderView implements Drawer {
     // Its filters draw it as a layer too, which they run over before its blend: adl filters the
     // object, then blends what they make, in its colour from the stage down, as a bitmap of it.
     // The 9-slice grid that reshapes what it draws itself (display/scale9.ts): its own, sliced as
-    // its morphs take their new ratios, so that its bounds are this frame's, as the Pixi view
-    // slices it; or, for a Shape, its owner's, kept as the owner's children are walked, unless it
+    // its morphs take their new ratios, so that its bounds are this frame's; or, for a Shape, its owner's, kept as the owner's children are walked, unless it
     // is filtered, which adl draws as a bitmap of it, stretched whole (sliceFor). Masks are
     // hidden, and draw unsliced; so does what BitmapData.draw takes, its Shapes by its grid too,
     // which draws with no transform of its own.
@@ -925,7 +919,7 @@ export class RenderView implements Drawer {
       const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
       // Its embedded glyphs as Saffron draws them, all in one geometry drawn where the first of
       // them was, else as normal text.
-      // In a 3D object's bitmap, whose pixels are not the stage's, as normal text, as Pixi's view.
+      // In a 3D object's bitmap, whose pixels are not the stage's, as normal text.
       const advanced =
         omitted.advanced && this.planeDepth === 0 ? this.advancedText(o, a, b, c, d) : null;
       if (omitted.advanced && !advanced) {
@@ -1077,8 +1071,7 @@ export class RenderView implements Drawer {
   /**
    * Whether `o`'s filters' output kept last can be drawn again, its rectangle
    * then in keptRect; else whether to keep what they make now. Kept while
-   * nothing they ran on changed but where it is on the stage, as the Pixi
-   * view's FilterChain keeps it: not past a change in `o` but a move, in
+   * nothing they ran on changed but where it is on the stage: not past a change in `o` but a move, in
    * what is in it, in its scale or turn on the stage (a b c d), a move of
    * what it scrolls, its filters, or the screen's scale; and drawn again
    * only while its rectangle moved with it, its size the same and its
@@ -1250,8 +1243,8 @@ export class RenderView implements Drawer {
   /**
    * `plan`, `o`'s, with its padding cut where it would not fit a texture
    * round what `o` drew, the scene's entries from `from` on: its area cut
-   * to the target, as Pixi's filter system measured it (render/filters.ts,
-   * fitPadding). Only a padding past what fits round the whole target asks
+   * to the target, as PixiJS's filter system measures it (measure.ts in
+   * @swf2es/render). Only a padding past what fits round the whole target asks
    * for the area.
    */
   private fitFilters(o: DisplayObject, plan: FilterPlan, from: number): FilterPlan {
@@ -1361,8 +1354,8 @@ export class RenderView implements Drawer {
    * The shape a Shape draws: the one Flash's stale bitmap cache shows, given
    * another of the same bounds while cached (display/shapeobject.ts), while
    * it stands on the stage at the scale and turn (a b c d) it was first
-   * drawn at and stays cached; from a frame either changes, what it is, as
-   * the Pixi view's shapeOf draws it (`cache-replace`). Only a frame that
+   * drawn at and stays cached; from a frame either changes, what it is
+   * (`cache-replace`). Only a frame that
    * draws it decides: one walked hidden draws nothing of it, and
    * BitmapData.draw's walk is in the bitmap's space, which shows the cache
    * as the stage last did.
@@ -2307,8 +2300,8 @@ export class RenderView implements Drawer {
 
   /**
    * A gradient's texture: a linear one's ramp of 256 colours, a radial one
-   * computed over its region, a texel a pixel up to 512 a side, as the
-   * Pixi view computes them (display/gradients.ts).
+   * computed over its region, a texel a pixel up to 512 a side
+   * (display/gradients.ts).
    */
   private gradientTexture(fill: GradientFill, region: Area | null): TextureHandle {
     let made = this.gradients.get(fill);
@@ -2385,7 +2378,7 @@ export class RenderView implements Drawer {
    * `o` drawn alone, as BitmapData.draw takes a display object, through `m`
    * into a `width` by `height` bitmap, read back as premultiplied ARGB: at
    * `samples` a side and averaged, as Flash covers edges (4 at its high
-   * quality), as the Pixi view's snapshot draws it. Built at the draw's own
+   * quality). Built at the draw's own
    * scale, a hairline a pixel of the bitmap, then drawn `samples` times
    * larger, filters and device text at that many units a pixel; no flag of
    * any object is cleared, nor an output kept, which are the stage's.

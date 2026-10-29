@@ -30,7 +30,6 @@
     "@swf2es/codegen": "workspace:*",
     "@swf2es/format": "workspace:*",
     "@swf2es/runtime": "workspace:*",
-    "pixi.js": "workspace:*",
     "@swf2es/native": "workspace:*",
     "@swf2es/render": "workspace:*"
   }

@@ -1,9 +1,8 @@
 import { installContext3D as install } from "@swf2es/player/context3d";
 import { stage3DCanvasHost } from "@swf2es/player-hosts/stage3d";
-import { autoDetectRenderer } from "pixi.js";
 import { createCodegen } from "../../../packages/codegen/dist/index.js";
 import { Player } from "../../../packages/player/dist/player.js";
-import { PixiView } from "../../../packages/player/dist/render/view.js";
+import { RenderView } from "../../../packages/player/dist/scene/view.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 
 import { check, create } from "./context.ts";
@@ -17,19 +16,12 @@ export async function composition(): Promise<void> {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
   );
-  const renderer = await autoDetectRenderer({
-    preference: "webgl",
-    width: 96,
-    height: 96,
-    resolution: 1,
-    antialias: false,
-    backgroundAlpha: 0,
-  });
-  const view = new PixiView(renderer);
+  // Transparent, for the Stage3D layers below to show through.
+  const view = new RenderView({ width: 96, height: 96, resolution: 1, transparent: true });
   const frame = document.createElement("div");
   frame.style.cssText =
     "position:fixed;left:0;top:0;width:96px;height:96px;overflow:hidden;background:black";
-  const overlay = renderer.canvas as HTMLCanvasElement;
+  const overlay = view.canvas;
   overlay.style.cssText = "position:absolute;left:0;top:0;z-index:5";
   frame.append(overlay);
   document.body.append(frame);
@@ -57,8 +49,7 @@ export async function composition(): Promise<void> {
     close();
     player?.destroy();
     scripting.destroy();
-    view.dispose(view.stage);
-    renderer.destroy();
+    view.destroy();
     frame.remove();
     compositionRun = null;
     check(owned.size === 0, "host retained layers");

@@ -106,8 +106,8 @@ function onOutline(points: number[], px: number, py: number): boolean {
 }
 
 /**
- * How far, in pixels, a flattened curve may stray from the curve. Pixi's
- * own flattening allows a fraction of the curve's length, which leaves
+ * How far, in pixels, a flattened curve may stray from the curve. PixiJS's
+ * flattening allows a fraction of the curve's length, which leaves
  * Flash's long curves visibly polygonal; this holds up to a few times scale.
  */
 export const FLATNESS = 0.02;
@@ -247,7 +247,7 @@ function resolved(
  * Resolve once at construction, including fallback, so colour copies do
  * not retry native work: a layer's fills in one call where the tessellator
  * takes layers, their positions in one buffer and their indices in another
- * that Pixi draws as they are (FillGeometry.indexOffset), else a call a fill.
+ * drawn as they are (FillGeometry.indexOffset), else a call a fill.
  */
 export function resolveFills(
   layer: ShapeLayer,
@@ -295,7 +295,7 @@ export function resolveFills(
     return resolved(points, rules[i], geometry);
   });
 
-  // Contiguous views let Pixi retain these positions instead of making another layer-sized copy.
+  // The layer's positions in one buffer, as a layer call gives them.
   const first = plans[0]?.geometry?.vertices;
   if (
     plans.length > 1 &&

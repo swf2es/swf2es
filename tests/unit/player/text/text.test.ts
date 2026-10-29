@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TextObject } from "../../../../packages/player/dist/display/display.js";
 import { Player } from "../../../../packages/player/dist/player.js";
-import { PixiView } from "../../../../packages/player/dist/render/view.js";
+import { fieldItems, type TextOmissions } from "../../../../packages/player/dist/scene/text.js";
 import * as w from "../../../swf-writer.ts";
+
+/** What a field's drawing leaves out, as fieldItems tells it. */
+const omissions = (): TextOmissions => ({ advanced: false, clip: null, clipFrom: 0, clipTo: 0 });
 
 function placed(...definitions: Uint8Array[]): TextObject {
   const player = new Player(
@@ -41,13 +44,10 @@ test("a field's tag text is read as HTML where the tag says so, in the tag's fon
 
 test("a centred field's text is drawn where its layout centres it, past the 2 pixel gutter", () => {
   const field = placed(w.editText(3, "Loading", 4000, 400, 2));
-  const view = new PixiView({} as ConstructorParameters<typeof PixiView>[0]);
-  view.prepare(field);
+  const [text] = fieldItems(field, omissions());
   const line = field.layout.lines[0];
-  const text = view.stage.children[0].children[0].children[0].children[0] as unknown as {
-    x: number;
-  };
-  assert.equal(text.x, line.x / 20);
+  assert.equal(text.kind, "device");
+  assert.equal(text.x, field.left + line.x / 20);
   // Centred in the 196 pixels past the gutters: as far from the right edge as the left.
   assert.equal(line.x / 20 - 2, 200 - 2 - (line.x + line.width) / 20);
 });
@@ -167,16 +167,13 @@ test("text a horizontal scroll moves past the gutter is clipped", async () => {
   const { TextObject } = await import("../../../../packages/player/dist/display/display.js");
   const field = new TextObject(null);
   field.model.setText("abc");
-  const view = new PixiView({} as ConstructorParameters<typeof PixiView>[0]);
-  view.prepare(field);
-  const drawn = () =>
-    view.stage.children[0].children[0].children.find((c) => c.children.length > 0) as unknown as {
-      mask: unknown;
-    };
-  assert.ok(!drawn().mask);
+  const clip = () => {
+    const omitted = omissions();
+    fieldItems(field, omitted);
+    return omitted.clip;
+  };
+  assert.equal(clip(), null);
 
   field.scrollH = 30;
-  field.invalidate(4);
-  view.prepare(field);
-  assert.ok(drawn().mask);
+  assert.ok(clip());
 });

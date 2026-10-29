@@ -20,14 +20,8 @@ const allowed: Record<string, string[]> = {
   cli: ["codegen", "format", "runtime"],
 };
 
-// Third-party packages swf2es forks are submodules in vendor/, built as
-// workspace packages under their own names (docs/architecture.md). Only the
-// packages listed may use one, and through the workspace, never a registry copy.
-const vendored: Record<string, { dir: string; users: string[] }> = {
-  "pixi.js": { dir: "pixijs", users: ["player", "web"] },
-};
-
-// C-only libraries are compiled into native's binaries, rather than linked by pnpm.
+// vendor/ holds C libraries alone, compiled into native's binaries rather than linked by pnpm:
+// no package is a third-party one swf2es forks.
 const nativeVendor = ["libtess2", "lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
@@ -62,31 +56,13 @@ for (const [name, deps] of Object.entries(allowed)) {
 
 const vendorRoot = new URL("../../vendor/", import.meta.url);
 
-test("every vendored package is in the table", () => {
+test("vendor/ holds the native libraries alone", () => {
   const dirs = readdirSync(vendorRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
-  assert.deepEqual(dirs, [...Object.values(vendored).map((v) => v.dir), ...nativeVendor].sort());
-  for (const [name, { dir }] of Object.entries(vendored)) {
-    assert.equal(readJson(`${dir}/package.json`, vendorRoot).name, name);
-  }
+  assert.deepEqual(dirs, nativeVendor);
 });
-
-for (const [name, { users }] of Object.entries(vendored)) {
-  test(`only ${users.join(", ")} use ${name}, from vendor/`, () => {
-    const using = Object.keys(allowed).filter((pkg) => {
-      const json = readJson(`${pkg}/package.json`);
-      const spec = json.dependencies?.[name] ?? json.devDependencies?.[name];
-      if (spec !== undefined) {
-        assert.equal(spec, "workspace:*", `${pkg}'s ${name}`);
-      }
-
-      return spec !== undefined;
-    });
-    assert.deepEqual(using, users);
-  });
-}
 
 // Apps (apps/*) may use any package, and no package may use an app.
 const apps = readdirSync(appsRoot, { withFileTypes: true })

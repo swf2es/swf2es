@@ -100,8 +100,8 @@ over the builtins, then each conformance case (also compiled with asc's
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
-| `render`  | the renderer of swf2es's own, beside Pixi behind a switch ([renderer.md](renderer.md)): scene list, planner and WebGL 2 backend | context3d |
-| `player`  | display list, timeline, playerglobal, PixiJS renderer, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
+| `render`  | the renderer ([renderer.md](renderer.md)): scene list, planner and WebGL 2 backend | context3d |
+| `player`  | display list, timeline, playerglobal, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, native, player, player-hosts |
@@ -157,23 +157,20 @@ but never imports its implementation. pnpm only links the packages each
 `@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL v1
 translation. Its core is built without DOM or node types; the separate
 `@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
-Neither entry depends on player AS objects or Pixi. The two TypeScript projects
+Neither entry depends on player AS objects. The two TypeScript projects
 keep browser types out of the core while the normal package build checks both.
 A third, `@swf2es/context3d/device`, is what a WebGL 2 context's one owner
 sets it through, shared with `@swf2es/render`'s backend: linking programs,
 and a cache of its state, so that nothing is set twice
 ([renderer.md](renderer.md#the-backend)).
 
-`@swf2es/render` is the renderer of swf2es's own, growing beside Pixi
-([renderer.md](renderer.md)). Its core (scene list, rows, geometries, the
-planner and the command buffer it writes) loads no DOM or node types and
-is tested as data; `@swf2es/render/webgl` executes the commands. The
-player drives it through `RenderView` (`@swf2es/player/scene`, kept off the
-player's index so that hosts on Pixi load none of it), which owns its
+`@swf2es/render` is the renderer ([renderer.md](renderer.md)). Its core
+(scene list, rows, geometries, the planner and the command buffer it
+writes) loads no DOM or node types and is tested as data;
+`@swf2es/render/webgl` executes the commands. The player drives it
+through `RenderView` (`@swf2es/player/scene`, kept off the player's index
+so that a host that draws nothing loads none of it), which owns its
 canvas and walks the display list into the scene list.
-`SWF2ES_RENDERER=own node tests/player/run.ts` draws the reference cases
-with it; `tests/player/own-renderer.json` lists those it draws as Flash
-does, and none of them may fail again.
 Flash bindings and validation are an explicit experimental entry,
 `@swf2es/player/context3d`. `installContext3D` must run before loading
 playerglobal, and its returned teardown must run before destroying Scripting.
@@ -275,36 +272,11 @@ site on GitHub Pages (see [The demo site](#the-demo-site)), and later a
 browser extension. An app may use any package, and no package may use an app; an
 app is private, never published. The boundaries test checks both.
 
-Third-party code swf2es forks lives in `vendor/`, a git submodule each,
-kept apart from `packages/` because it is neither swf2es's code nor under
-its licence, and is built with its own tools rather than `tsc -b`.
-`vendor/pixijs` is [swf2es/pixijs](https://github.com/swf2es/pixijs), PixiJS
-(MIT) pinned to a commit of its `swf2es` branch; its `SWF2ES.md` says why
-and what changes there. It is the workspace package `pixi.js`, under its
-own name and version, so `player` and `web`, the only packages that may use
-it, import `"pixi.js"` as from npm and declare it as `workspace:*`; the
-boundaries test checks both. `.pnpmfile.cjs` trims its manifest to the
-tools its build needs, at the versions of its own `package-lock.json`, and
-`tools/pixijs.ts`, the first step of `pnpm build`, runs its rollup and
-declaration builds for `lib/`, byte for byte what npm's `pixi.js` would
-hold at the fork's commit. The bundle the pages load as `"pixi.js"`
-(`dist/pixi.mjs`) is swf2es's own instead: the fork's bundle plugins over
-an entry that exports only the names the player, `web` and the test page
-import (`BROWSER_EXPORTS`, held to their imports by a unit test) and runs
-only the side-effect modules they need, tree-shaken. Pixi's accessibility
-overlay, DOMContainer and the Assets loaders are left out; the WebGPU and
-Canvas renderers, the player's fallbacks without WebGL, are chunks loaded
-only then. A host that bundles `@swf2es/web` itself takes Pixi from
-`lib/` and its own bundler decides the same.
-
-The player overwrites no method of Pixi's. What is Pixi's own
-behaviour, a bug fix or a memory or speed fix any user of Pixi would
-want, is changed in the fork; what is the player's policy, Flash's
-semantics, when a render group settles, the colour transform's shader,
-runs through extension points the fork adds for it (a pipe's
-`aloneDrawer` and `shaderFor`, a system's `onContextBuilt`,
-`onBuildInstructions` and `filterAreaHook`, and the like), which
-`render/hooks.ts` sets on each renderer the player draws with.
+Third-party C swf2es forks lives in `vendor/`, a git submodule each, kept
+apart from `packages/` because it is neither swf2es's code nor under its
+licence: zlib, the LZMA SDK, minimp3 and libtess2, compiled into
+`native`'s binaries (above), never linked by pnpm. The boundaries test
+checks that `vendor/` holds those alone.
 
 ## Parsing, linking and verifying
 

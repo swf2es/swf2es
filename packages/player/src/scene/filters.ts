@@ -1,10 +1,9 @@
 // A display object's filters as the renderer's passes (@swf2es/render's
-// filters.ts), worked out as the Pixi view's filters work them
-// (render/filters.ts), which match adl: each one's values in the target's
+// filters.ts), worked out to match adl: each one's values in the target's
 // units, how far it pads past the object, cut where the padding would not
 // fit a texture, and how far in the object's pixels start for those that
-// read them. The rules they share with the Pixi view's are in display/filters.ts and
-// bitmap/filters.ts.
+// read them. The rules they share with BitmapData.applyFilter are in
+// display/filters.ts and bitmap/filters.ts.
 import {
   BEVEL,
   BLUR,
@@ -79,7 +78,7 @@ export function planFilters(
   const planned: Planned[] = [];
   for (const record of records) {
     const kind = kindOf(record);
-    // A displacement whose map is gone leaves the object be, as the Pixi view's does.
+    // A displacement whose map is gone leaves the object be.
     if (kind === DISPLACEMENT && !mapOf(record)) {
       continue;
     }

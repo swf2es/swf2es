@@ -37,24 +37,6 @@ export function concatColorInto(
   return out;
 }
 
-/** Whether `ct` only multiplies, each channel by 0 to 1, which Pixi's tint and alpha draw. */
-export function multipliesOnly(ct: ColorTransform): boolean {
-  return (
-    ct.rAdd === 0 &&
-    ct.gAdd === 0 &&
-    ct.bAdd === 0 &&
-    ct.aAdd === 0 &&
-    ct.rMul >= 0 &&
-    ct.rMul <= 1 &&
-    ct.gMul >= 0 &&
-    ct.gMul <= 1 &&
-    ct.bMul >= 0 &&
-    ct.bMul <= 1 &&
-    ct.aMul >= 0 &&
-    ct.aMul <= 1
-  );
-}
-
 export function sameColor(a: ColorTransform | null, b: ColorTransform | null): boolean {
   return (
     a === b ||

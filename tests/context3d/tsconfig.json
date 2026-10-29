@@ -2,8 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
-    "types": [],
-    "paths": { "pixi.js": ["../../vendor/pixijs/lib/index.d.ts"] }
+    "types": []
   },
   "include": ["page.ts", "checks/**/*.ts", "stress-page.ts", "reclamation-page.ts", "host-page.ts"],
   "exclude": []

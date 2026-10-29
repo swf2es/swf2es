@@ -1,8 +1,8 @@
-// Text as the renderer of swf2es's own draws it, worked out apart from any
+// Text as the renderer draws it, worked out apart from any
 // GPU: a TextField's or a StaticText's items in order, glyphs of embedded
 // fonts placed and coloured, coloured rectangles for a field's background,
 // border, selection and caret, and runs of a device font for a canvas to
-// rasterize; and the rules both views share.
+// rasterize; and the rules for device text's resolution and clipping.
 import type { Glyph } from "@swf2es/format";
 import type { StaticTextObject, TextObject } from "../display/display.js";
 import type { shapeLayers } from "../display/shapes.js";
@@ -122,11 +122,11 @@ export function glyphShape(glyph: Glyph): Parameters<typeof shapeLayers>[0] {
 }
 
 /**
- * A TextField's items, as the Pixi view draws it (render/text.ts): its
- * background and border; each line from the first scrolled to that fits, a
- * character of an embedded font as its glyph at its size and in its
- * colour, a run of a device font in one format as one item on the line's
- * baseline; then, focused, its selection and caret. `omitted` learns what is
+ * A TextField's items: its background and border; each line from the
+ * first scrolled to that fits, a character of an embedded font as its
+ * glyph at its size and in its colour, a run of a device font in one
+ * format as one item on the line's baseline; then, focused, its selection
+ * and caret. `omitted` learns what is
  * left out.
  */
 export function fieldItems(o: TextObject, omitted: TextOmissions): TextItem[] {
@@ -268,7 +268,7 @@ function rect(x: number, y: number, width: number, height: number, color: number
 /**
  * A focused input field's caret, a pixel wide and its line's height, in
  * the colour of the text before it, and its selection shaded under it,
- * as the Pixi view draws them (render/text.ts, drawCaret).
+ * as adl draws them.
  */
 function caret(o: TextObject, items: TextItem[]): void {
   if (!o.focused || !(o.type === "input" || o.selectable)) {
@@ -308,7 +308,7 @@ function caret(o: TextObject, items: TextItem[]): void {
         i === b ? to.x : (dx + (lastShown ? lastShown.x + lastShown.advance : line.x)) / 20;
       const l = Math.max(leftX, inner.left);
       const r = Math.min(rightX, inner.right);
-      // 0x3399ff at 0.4, as the Pixi view shades it.
+      // 0x3399ff at 0.4.
       items.push(
         rect(
           l,

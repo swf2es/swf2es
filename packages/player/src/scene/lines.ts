@@ -77,7 +77,7 @@ interface LineEntry {
 
 /** Each shape layer's lines, by the transform they are stroked through (take). */
 export class LineCache {
-  /** Lines stroked anew and lines found stroked already, as the Pixi view counts its contexts. */
+  /** Lines stroked anew and lines found stroked already, which the bench and the draw counts read. */
   readonly counts = { strokeContexts: 0, strokeReuses: 0 };
   private readonly byLayer = new WeakMap<ShapeLayer, LayerLines>();
   /** Every entry, and the vertices they hold. */

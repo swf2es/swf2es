@@ -320,7 +320,7 @@ export class Tessellator {
   }
 
   /**
-   * Use as PixiView's fillTessellator. A fill alone takes its contours
+   * Use as RenderView's fillTessellator. A fill alone takes its contours
    * flattened already; a layer takes them as path commands.
    */
   readonly tessellate: FillTessellate = Object.assign(this.fill, { layer: this.layer });

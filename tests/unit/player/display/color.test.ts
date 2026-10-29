@@ -1,7 +1,7 @@
 // Colour transforms composed as Flash composes them: the child's first, then the parent's.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { concatColor, multipliesOnly } from "../../../../packages/player/dist/display/color.js";
+import { concatColor } from "../../../../packages/player/dist/display/color.js";
 
 const ct = (mul: number[], add: number[]) => ({
   rMul: mul[0],
@@ -33,11 +33,4 @@ test("a child's colour transform applies first, then its parent's", () => {
     ct([1, 1, 1, 1], [10, 10, 10, 10]),
   );
   assert.deepEqual([scaled.rAdd, scaled.gAdd, scaled.bAdd, scaled.aAdd], [6, 22, 13, 9]);
-});
-
-test("only a transform that multiplies by 0 to 1 is left to Pixi's tint", () => {
-  assert.equal(multipliesOnly(ct([0.5, 1, 0, 0.25], [0, 0, 0, 0])), true);
-  assert.equal(multipliesOnly(ct([1, 1, 1, 1], [0, 1, 0, 0])), false);
-  assert.equal(multipliesOnly(ct([2, 1, 1, 1], [0, 0, 0, 0])), false);
-  assert.equal(multipliesOnly(ct([1, -1, 1, 1], [0, 0, 0, 0])), false);
 });

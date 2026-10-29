@@ -129,8 +129,8 @@ interface Multisampled {
 
 /**
  * The most a multisampled target may take, colour and depth-stencil
- * together, 8 bytes a sample, as web's fittingSamples has for the Pixi
- * view's canvas.
+ * together, 8 bytes a sample, as web's fittingSamples has for the
+ * canvas.
  */
 const MSAA_BYTES = 256 * 1024 * 1024;
 
@@ -859,7 +859,7 @@ export class WebGLBackend {
    * A frame drawn into a layer `samples` times the size of a `width` by
    * `height` bitmap a side, as `execute` draws, then halved till a sample a
    * pixel, and read back: premultiplied RGBA bytes, a row at a time from
-   * the top, as BitmapData.draw takes them, as the Pixi view's snapshot does.
+   * the top, as BitmapData.draw takes them.
    */
   snapshot(
     commands: Commands,
@@ -1878,8 +1878,7 @@ export class WebGLBackend {
 
       // Blitted, not copied: the canvas' colour may have no alpha, which copyTexSubImage2D into an
       // RGBA texture refuses, where a blit fills it in.
-      // Out of a multisampled target the blit resolves the rectangle, as the Pixi fork's bounded
-      // resolve does.
+      // Out of a multisampled target the blit resolves the rectangle alone.
       if (!this.backFramebuffer) {
         this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);

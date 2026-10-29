@@ -52,8 +52,8 @@ const EXTRA_UNIT = 6;
 
 /**
  * A triangle over the output's frame, the viewport, reading its input
- * from 0 to uCoord: the input's frame over its texture's size, as Pixi's
- * filter vertex has vTextureCoord, or more of it for a shrink.
+ * from 0 to uCoord: the input's frame over its texture's size, or more of
+ * it for a shrink.
  */
 const VERTEX = `#version 300 es
 uniform vec2 uCoord;
@@ -114,11 +114,10 @@ interface Pass {
 
 /**
  * Runs a layer's chain of Flash's filters, each a pass or a few over
- * targets the host lends, as the Pixi view's filters run them
- * (player's render/filters.ts): the same shaders, reading their input's
- * size in the target's units, uInputSize, and its texels, uInputPixel.
- * Every target's rows run down, as Pixi's textures' do, so the shaders'
- * offsets keep their sense. Each pass clears its whole output, which its
+ * targets the host lends: the shaders of filter-shaders.ts, reading their
+ * input's size in the target's units, uInputSize, and its texels,
+ * uInputPixel. Every target's rows run down, so the shaders' offsets keep
+ * their sense. Each pass clears its whole output, which its
  * successor may read past the frame.
  */
 export class FilterRunner<T extends FilterTarget> {

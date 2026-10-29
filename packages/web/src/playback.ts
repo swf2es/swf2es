@@ -5,10 +5,10 @@
 import type { Convolver } from "@swf2es/native/bitmap";
 import type { Tessellator } from "@swf2es/native/tessellate";
 import { bindActivation, bindKeyboard, type Player, type Scripting } from "@swf2es/player";
+import type { RenderView } from "@swf2es/player/scene";
 import { configuration } from "./config.js";
 import { place, type ScaleMode, viewport } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
-import { type StageView, stageView } from "./views.js";
 
 /** How the element shows its player, read again as the page changes them. */
 export interface Look {
@@ -43,7 +43,7 @@ export class Playback {
     private readonly box: HTMLElement,
     private readonly player: Player,
     private readonly scripting: Scripting | null,
-    private readonly view: StageView,
+    private readonly view: RenderView,
     private readonly look: () => Look,
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
@@ -58,7 +58,7 @@ export class Playback {
     }
     box.append(canvas);
     if (scripting) {
-      scripting.drawer = view.drawer;
+      scripting.drawer = view;
       scripting.bitmapConvolver = convolver?.convolve ?? null;
       if (stage3D) {
         scripting.onStageLayout = this.stageLayout;
@@ -67,7 +67,7 @@ export class Playback {
 
     // An AVM1 movie's BitmapData draws display objects by it too.
     if (player.avm1) {
-      player.avm1.drawer = view.drawer;
+      player.avm1.drawer = view;
       player.avm1.bitmapConvolver = convolver?.convolve ?? null;
     }
 
@@ -83,10 +83,11 @@ export class Playback {
   }
 
   /**
-   * A renderer for `player` in `box`, Pixi or, where the configuration asks
-   * for it, the renderer of swf2es's own (views.ts). The canvas is not
-   * multisampled: the stage is drawn into buffers that are, but at low
-   * quality, which Flash draws aliased.
+   * A renderer for `player` in `box` (docs/renderer.md), which takes WebGL 2.
+   * The canvas is not multisampled: the stage is drawn into buffers that
+   * are, but at low quality, which Flash draws aliased. It keeps alpha where
+   * it may ever be left clear, for a transparent wmode or Stage3D's layers
+   * below.
    */
   static async create(
     box: HTMLElement,
@@ -98,8 +99,7 @@ export class Playback {
   ): Promise<Playback> {
     // All load together, so none costs playback another round trip. An embedder without a native
     // module, or a page that cannot load it, plays through JS.
-    const { nativeFills, nativeBitmaps, renderer } = configuration();
-    const own = renderer !== "pixi";
+    const { nativeFills, nativeBitmaps } = configuration();
     const [tessellator, convolver, scene] = await Promise.all([
       nativeFills === false
         ? null
@@ -111,17 +111,19 @@ export class Playback {
         : import("@swf2es/native/bitmap")
             .then(({ Convolver }): Convolver => new Convolver())
             .catch(() => null),
-      own ? import("@swf2es/player/scene") : null,
+      import("@swf2es/player/scene"),
     ]);
 
-    let view: StageView;
+    let view: RenderView;
     try {
-      view = await stageView(
-        player,
-        scene,
-        !!stage3D || look().wmode === "transparent",
-        tessellator,
-      );
+      view = new scene.RenderView({
+        width: player.width,
+        height: player.height,
+        resolution: 1,
+        background: player.background,
+        transparent: !!stage3D || look().wmode === "transparent",
+        fillTessellator: tessellator?.tessellate,
+      });
     } catch (error) {
       // No playback to let go of them: the native instances go here.
       tessellator?.dispose();
@@ -142,8 +144,8 @@ export class Playback {
     );
   }
 
-  /** The renderer's WebGL context, null on another API or once destroyed. */
-  get gl(): WebGLRenderingContext | WebGL2RenderingContext | null {
+  /** The renderer's WebGL context, null once destroyed. */
+  get gl(): WebGL2RenderingContext | null {
     if (this.destroyed) {
       return null;
     }
@@ -223,8 +225,9 @@ export class Playback {
     const fits = fittingSamples(canvas.width * canvas.height);
     const quality = this.player.quality;
     const samples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
+    this.view.quality = quality;
     // As fine as the stage's pixels on the canvas: fewer where each spans several.
-    this.view.setQuality(quality, denseSamples(samples, this.view.resolution));
+    this.view.samples = denseSamples(samples, this.view.canvasResolution);
   }
 
   private draw(): void {
@@ -241,7 +244,9 @@ export class Playback {
     this.box.style.background = transparent ? "" : `#${color.toString(16).padStart(6, "0")}`;
     this.drawn = this.player.changes;
     this.dirty = false;
-    this.view.render(this.player, background, clear);
+    this.view.background = background;
+    this.view.transparent = clear;
+    this.view.render(this.player.stage);
   }
 
   private readonly stageLayout = () => this.layout();
@@ -287,10 +292,10 @@ export class Playback {
     canvas.style.height = `${view.css.height}px`;
     const screenWidth = Math.max(1, view.width);
     const screenHeight = Math.max(1, view.height);
-    // Compared in the canvas's pixels, which Pixi rounds the screen to: a fractional
+    // Compared in the canvas's pixels, which resize rounds the screen to: a fractional
     // screen would otherwise never compare equal and resize on every layout.
     if (
-      view.resolution !== this.view.resolution ||
+      view.resolution !== this.view.canvasResolution ||
       canvas.width !== Math.round(screenWidth * view.resolution) ||
       canvas.height !== Math.round(screenHeight * view.resolution)
     ) {
@@ -332,14 +337,14 @@ export class Playback {
       unbind();
     }
 
-    if (this.scripting?.drawer === this.view.drawer) {
+    if (this.scripting?.drawer === this.view) {
       this.scripting.drawer = null;
     }
     if (this.scripting?.onStageLayout === this.stageLayout) {
       this.scripting.onStageLayout = null;
     }
 
-    if (this.player.avm1?.drawer === this.view.drawer) {
+    if (this.player.avm1?.drawer === this.view) {
       this.player.avm1.drawer = null;
     }
 

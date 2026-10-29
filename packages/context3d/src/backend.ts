@@ -79,7 +79,7 @@ export class TextureBindingError extends Error {
   }
 }
 
-// No AS objects, Pixi objects or browser globals cross this boundary.
+// No AS objects, renderer objects or browser globals cross this boundary.
 export interface Buffer3D {
   readonly count: number;
   readonly stride: number;

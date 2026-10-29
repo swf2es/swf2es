@@ -2,18 +2,10 @@ packages:
   - packages/*
   - apps/*
   - tests/*
-  - vendor/pixijs
 # Electron's postinstall downloads its ~100 MB binary; pnpm skips it, and
 # `pnpm --filter @swf2es/desktop fetch-electron` fetches it for those who run the app.
-# esbuild's postinstall only checks the binary its optional dependency already
-# brings. vendor/pixijs's `prepare` (husky) is dropped by .pnpmfile.cjs.
 ignoredBuiltDependencies:
   - electron
-  - esbuild
-# Rollup before 4.59 writes outside its output directory for crafted names
-# (GHSA-mw96-cpmx-2vgc); the Pixi fork's range would still take 4.55.
-overrides:
-  rollup: ^4.59.0
 # AssemblyScript's Grisu2 reads past its table of powers of ten; the patch
 # keeps the digits codegen has always printed (tests/unit/codegen/double.test.ts).
 patchedDependencies:

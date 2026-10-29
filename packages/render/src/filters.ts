@@ -1,9 +1,9 @@
 // Flash's filters as passes a layer takes before it is composited: what
 // each kind reads, as the floats a frame's filter list holds for it, and
 // the rules its passes keep to match adl (docs/architecture.md,
-// "Filters"), which the backend's runner (webgl/filters.ts) and the Pixi
-// view's filters share. Offsets and insets are in the target's units, its
-// pixels over the resolution, as the shaders read their input's size in.
+// "Filters"), which the backend's runner (webgl/filters.ts) follows.
+// Offsets and insets are in the target's units, its pixels over the
+// resolution, as the shaders read their input's size in.
 
 /** A blur: blurX, blurY, quality, units (the target's units a stage pixel). */
 export const BLUR = 1;
