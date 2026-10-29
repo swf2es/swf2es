@@ -3,9 +3,10 @@
 // pixel of the screen (render/strokes.ts has the rules), each line's path
 // outlined and its outline filled non-zero, so that where it overlaps itself
 // it is drawn once. The outline is the flattened path's sides at half the
-// width, joined on the outer side of each turn as the line joins, through
-// the turn's own point on the inner side, and capped at its ends; a closed
-// path's sides are two loops, wound opposite ways.
+// width, joined on the outer side of each turn as the line joins; on the
+// inner side, where the sides cross for a gentle turn, else through the
+// turn's own point, so that it never winds back; capped at its ends; a
+// closed path's sides are two loops, wound opposite ways.
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type Path, pointsOf, type ShapeLayer } from "../display/shapes.js";
@@ -14,13 +15,20 @@ import {
   containment,
   type FillGeometry,
   type FillTessellator,
+  FLATNESS,
   trace,
   validGeometry,
 } from "./fills.js";
 import { unsupported, vertexColor } from "./shapes.js";
 
-/** How far, in stage pixels, a round join or cap's chords may stray from its arc. */
-const ARC_FLATNESS = 0.02;
+/**
+ * How far, in pixels of the screen, a line's flattened curves and its
+ * round joins' and caps' chords may stray from the curve: a tenth of one,
+ * where the fills' finer flatness made strokes several times the
+ * triangles the Pixi view's are, which a software rasteriser pays for; a
+ * quarter shows on the references' curved lines.
+ */
+const STROKE_FLATNESS = 0.1;
 
 /**
  * A line's width on the stage through the linear transform (a b c d): its
@@ -86,8 +94,8 @@ export function strokePaths(
   return out;
 }
 
-/** `path` flattened as fills flatten curves (fills.ts, trace), each point once. */
-function polyline(path: Path): number[] {
+/** `path` flattened as fills flatten curves (fills.ts, trace), to `flatness`, each point once. */
+function polyline(path: Path, flatness: number): number[] {
   const points: number[] = [];
   const add = (x: number, y: number) => {
     const n = points.length;
@@ -95,14 +103,26 @@ function polyline(path: Path): number[] {
       points.push(x, y);
     }
   };
-  trace({ moveTo: add, lineTo: add }, path);
+  trace({ moveTo: add, lineTo: add }, path, flatness);
   return points;
 }
 
-/** The chords of an arc about (cx, cy) of radius `r`, from angle `from` turning `sweep`, past its start. */
-function arc(out: number[], cx: number, cy: number, r: number, from: number, sweep: number): void {
-  const most = r > ARC_FLATNESS ? 2 * Math.acos(1 - ARC_FLATNESS / r) : Math.PI;
-  const pieces = Math.max(1, Math.ceil(Math.abs(sweep) / most));
+/**
+ * The chords of an arc about (cx, cy) of radius `r`, from angle `from`
+ * turning `sweep`, past its start, none further than `flatness` from it.
+ */
+function arc(
+  out: number[],
+  cx: number,
+  cy: number,
+  r: number,
+  from: number,
+  sweep: number,
+  flatness: number,
+): void {
+  const most = r > flatness ? 2 * Math.acos(1 - flatness / r) : Math.PI;
+  // As many as a curve's at most (fills.ts, trace), however far the stage is zoomed.
+  const pieces = Math.min(256, Math.max(1, Math.ceil(Math.abs(sweep) / most)));
   for (let i = 1; i <= pieces; i++) {
     const angle = from + (sweep * i) / pieces;
     out.push(cx + r * Math.cos(angle), cy + r * Math.sin(angle));
@@ -133,8 +153,11 @@ function side(
   s: 1 | -1,
   join: number,
   limit: number,
+  flatness: number,
 ): void {
   const segments = closed ? n : n - 1;
+  // Whether the segment's start is already out, as where the inner side was cut at its turn.
+  let started = false;
   for (let k = 0; k < segments; k++) {
     const i = k;
     const j = (k + 1) % n;
@@ -142,8 +165,13 @@ function side(
     // The left of a way (tx, ty) on a y-down stage: (ty, -tx).
     const nx = ty * s * h;
     const ny = -tx * s * h;
-    out.push(p[i * 2] + nx, p[i * 2 + 1] + ny, p[j * 2] + nx, p[j * 2 + 1] + ny);
+    if (!started) {
+      put(out, p[i * 2] + nx, p[i * 2 + 1] + ny);
+    }
+
+    started = false;
     if (!closed && k === segments - 1) {
+      put(out, p[j * 2] + nx, p[j * 2 + 1] + ny);
       break;
     }
 
@@ -158,17 +186,38 @@ function side(
     // Positive turns to the right on a y-down stage, where the left side is the outer one; a way
     // that turns right back is joined on both sides, around its tip.
     const outer = cross * s > 0 || (cross === 0 && dot < 0);
+    const turn = Math.atan2(Math.abs(cross), dot);
     if (!outer) {
-      // The inner side goes through the turn's own point, so that the outline never winds back.
-      out.push(x, y, x + mx, y + my);
+      // A gentle turn's inner sides cross within the half of each segment next to it: one point,
+      // where they cross, which no cut at the segment's other end reaches past, so the inner side
+      // never runs back, as it would where the line is wider than its curve. Else the inner side
+      // goes through the turn's own point, so that the outline never winds back; and so at a
+      // closed contour's last turn, to its first segment's start, already out.
+      const back = (h * Math.abs(cross)) / (1 + dot);
+      const next = (j + 1) % n;
+      if (
+        dot > 0 &&
+        !(closed && k === segments - 1) &&
+        2 * back <= Math.hypot(p[j * 2] - p[i * 2], p[j * 2 + 1] - p[i * 2 + 1]) &&
+        2 * back <= Math.hypot(p[next * 2] - p[j * 2], p[next * 2 + 1] - p[j * 2 + 1])
+      ) {
+        put(out, x + nx - tx * back, y + ny - ty * back);
+        started = true;
+        continue;
+      }
+
+      put(out, x + nx, y + ny);
+      put(out, x, y);
+      put(out, x + mx, y + my);
+      started = true;
       continue;
     }
 
-    const turn = Math.atan2(Math.abs(cross), dot);
+    put(out, x + nx, y + ny);
     if (join === 0) {
       // Around from this side's normal to the next's, by way of the tip where the way turns back.
       const way = cross !== 0 ? Math.sign(nx * my - ny * mx) : Math.sign(nx * ty - ny * tx);
-      arc(out, x, y, h, Math.atan2(ny, nx), way * turn);
+      arc(out, x, y, h, Math.atan2(ny, nx), way * turn, flatness);
     } else if (join === 2) {
       const ratio = 1 / Math.cos(turn / 2);
       let bx = nx + mx;
@@ -191,7 +240,16 @@ function side(
       }
     }
 
-    out.push(x + mx, y + my);
+    put(out, x + mx, y + my);
+    started = true;
+  }
+}
+
+/** (x, y) onto `out`, unless it is the point last put there. */
+function put(out: number[], x: number, y: number): void {
+  const n = out.length;
+  if (n < 2 || out[n - 2] !== x || out[n - 1] !== y) {
+    out.push(x, y);
   }
 }
 
@@ -204,6 +262,7 @@ function cap(
   ty: number,
   h: number,
   kind: number,
+  flatness: number,
 ): void {
   const x = p[i * 2];
   const y = p[i * 2 + 1];
@@ -211,7 +270,7 @@ function cap(
   const lx = ty * h;
   const ly = -tx * h;
   if (kind === 0) {
-    arc(out, x, y, h, Math.atan2(ly, lx), Math.PI);
+    arc(out, x, y, h, Math.atan2(ly, lx), Math.PI, flatness);
   } else if (kind === 2) {
     out.push(x + lx + tx * h, y + ly + ty * h, x - lx + tx * h, y - ly + ty * h, x - lx, y - ly);
   } else {
@@ -233,6 +292,7 @@ export function outline(
   caps: number,
   join: number,
   limit: number,
+  flatness = FLATNESS,
 ): number[][] {
   let n = p.length / 2;
   if (closed && n > 1 && p[0] === p[(n - 1) * 2] && p[1] === p[(n - 1) * 2 + 1]) {
@@ -245,20 +305,20 @@ export function outline(
     }
 
     const dot: number[] = [];
-    arc(dot, p[0], p[1], h, 0, 2 * Math.PI);
+    arc(dot, p[0], p[1], h, 0, 2 * Math.PI, flatness);
     return [dot];
   }
 
   if (closed && n >= 2) {
     const left: number[] = [];
-    side(left, p, n, true, h, 1, join, limit);
+    side(left, p, n, true, h, 1, join, limit, flatness);
     // There and back: its left side, joined at both ends, is the whole outline.
     if (n === 2) {
       return [left];
     }
 
     const right: number[] = [];
-    side(right, p, n, true, h, -1, join, limit);
+    side(right, p, n, true, h, -1, join, limit, flatness);
     const back: number[] = [];
     for (let i = right.length - 2; i >= 0; i -= 2) {
       back.push(right[i], right[i + 1]);
@@ -274,13 +334,13 @@ export function outline(
   }
 
   const contour: number[] = [];
-  side(contour, p, n, false, h, 1, join, limit);
+  side(contour, p, n, false, h, 1, join, limit, flatness);
   const [ex, ey] = direction(p, n - 2, n - 1);
-  cap(contour, p, n - 1, ex, ey, h, caps);
+  cap(contour, p, n - 1, ex, ey, h, caps, flatness);
   contour.length -= 2;
-  side(contour, reversed, n, false, h, 1, join, limit);
+  side(contour, reversed, n, false, h, 1, join, limit, flatness);
   const [sx, sy] = direction(reversed, n - 2, n - 1);
-  cap(contour, reversed, n - 1, sx, sy, h, caps);
+  cap(contour, reversed, n - 1, sx, sy, h, caps, flatness);
   contour.length -= 2;
   return [contour];
 }
@@ -307,6 +367,8 @@ export function layerStrokes(
   const positions: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
+  // `least` is a pixel of the screen, in the stage's pixels the lines are drawn in.
+  const flatness = STROKE_FLATNESS * least;
   for (const stroke of layer.strokes) {
     const line = stroke.line;
     const h = strokeWidth(line, a, b, c, d, least) / 2;
@@ -315,13 +377,15 @@ export function layerStrokes(
     const join = line.join <= 2 ? line.join : 0;
     const contours: number[][] = [];
     for (const { path, home } of strokePaths(stroke)) {
-      const points = polyline(transformedPath(path, a, b, c, d));
+      const points = polyline(transformedPath(path, a, b, c, d), flatness);
       const closedPath =
         home ||
         (points.length > 4 &&
           points[0] === points[points.length - 2] &&
           points[1] === points[points.length - 1]);
-      contours.push(...outline(points, closedPath, h, caps, join, Math.max(1, line.miterLimit)));
+      contours.push(
+        ...outline(points, closedPath, h, caps, join, Math.max(1, line.miterLimit), flatness),
+      );
     }
 
     const usable = contours.filter((contour) => contour.length >= 6);

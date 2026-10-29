@@ -110,11 +110,12 @@ function onOutline(points: number[], px: number, py: number): boolean {
  * own flattening allows a fraction of the curve's length, which leaves
  * Flash's long curves visibly polygonal; this holds up to a few times scale.
  */
-const FLATNESS = 0.02;
+export const FLATNESS = 0.02;
 
 export function trace(
   context: { moveTo(x: number, y: number): unknown; lineTo(x: number, y: number): unknown },
   path: Path,
+  flatness = FLATNESS,
 ): void {
   let x = 0;
   let y = 0;
@@ -140,7 +141,7 @@ export function trace(
         Math.hypot(x - 2 * c1x + c2x, y - 2 * c1y + c2y),
         Math.hypot(c1x - 2 * c2x + ax, c1y - 2 * c2y + ay),
       );
-      const n = Math.min(256, Math.max(1, Math.ceil(Math.sqrt((3 * bend) / (4 * FLATNESS)))));
+      const n = Math.min(256, Math.max(1, Math.ceil(Math.sqrt((3 * bend) / (4 * flatness)))));
       for (let k = 1; k < n; k++) {
         const t = k / n;
         const u = 1 - t;
@@ -163,7 +164,7 @@ export function trace(
     const ax = path[i + 3];
     const ay = path[i + 4];
     const bend = Math.hypot(x - 2 * cx + ax, y - 2 * cy + ay);
-    const n = Math.min(256, Math.max(1, Math.ceil(Math.sqrt(bend / (4 * FLATNESS)))));
+    const n = Math.min(256, Math.max(1, Math.ceil(Math.sqrt(bend / (4 * flatness)))));
     for (let k = 1; k < n; k++) {
       const t = k / n;
       const u = 1 - t;

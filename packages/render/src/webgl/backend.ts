@@ -170,6 +170,7 @@ export class WebGLBackend {
   private offsetLocation: WebGLUniformLocation | null = null;
   private flipLocation: WebGLUniformLocation | null = null;
   private backOffsetLocation: WebGLUniformLocation | null = null;
+  private rectLocation: WebGLUniformLocation | null = null;
   /** The filters' passes, their programs made as first run. */
   private filters!: FilterRunner<Layer>;
   /** Layers free to draw into, and those drawn into now, innermost last. */
@@ -268,6 +269,7 @@ export class WebGLBackend {
     this.offsetLocation = gl.getUniformLocation(this.composite, "uOffset");
     this.flipLocation = gl.getUniformLocation(this.composite, "uFlip");
     this.backOffsetLocation = gl.getUniformLocation(this.composite, "uBackOffset");
+    this.rectLocation = gl.getUniformLocation(this.composite, "uRect");
     this.filters = new FilterRunner(gl, this.state, {
       take: (width, height) => this.takeLayer(width, height, true),
       give: (layer) => this.giveLayer(layer),
@@ -980,8 +982,18 @@ export class WebGLBackend {
         state.setBlend(null);
     }
 
+    // Over the rectangle alone, in the target's clip space; the scissor keeps it to whole pixels.
+    const tw = under.width;
+    const th = under.height;
+    gl.uniform4f(
+      this.rectLocation,
+      (2 * x0) / tw - 1,
+      (2 * y0) / th - 1,
+      (2 * (x0 + width)) / tw - 1,
+      (2 * (y0 + height)) / th - 1,
+    );
     state.scissor([x0, y0, width, height]);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
     state.scissor(null);
   }
 
