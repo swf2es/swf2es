@@ -5,15 +5,16 @@
 // error reaches the console, a file opened with the picker and a URL
 // load play, a URL the browser may not fetch
 // says why, the report link carries the SWF's facts and the errors, the
-// licences are there, the home page sends the player's old links to it, and
-// the guide's pages are there with every link within the site leading
-// somewhere. It leaves a screenshot in tests/site/out/site.png.
+// licences are there, the home page sends the player's old links to it, the
+// compatibility page shows its figures, and the guide's pages are there with
+// every link within the site leading somewhere. It leaves a screenshot in
+// tests/site/out/site.png.
 //
 //   node tests/site/run.ts            build the site, then check it
 //   node tests/site/run.ts --serve    build it and serve it to look at, until ^C
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readGuide } from "../../apps/site/guide.ts";
 import { cases } from "../player/cases.ts";
@@ -702,6 +703,38 @@ async function check(): Promise<void> {
           },
         ],
         [
+          "the compatibility page shows its figures, and its links to the repository's files are there",
+          async () => {
+            // A page without the player: navigate() would wait for its element.
+            await send("Page.navigate", { url: `${base}compatibility/` });
+            await until(
+              "location.pathname.endsWith('/compatibility/') && document.readyState === 'complete'",
+            );
+            const page = await value<{ figures: string[]; packages: number; files: string[] }>(
+              `({
+                figures: [...document.querySelectorAll(".stat .figure")].map((e) => e.textContent.trim()),
+                packages: document.querySelectorAll(".packages details").length,
+                files: [...document.querySelectorAll("main a[href^='https://github.com/swf2es/swf2es/blob/']")]
+                  .map((a) => a.getAttribute("href").replace(/^https:[/][/]github.com[/]swf2es[/]swf2es[/]blob[/][^/]+[/]/, "")),
+              })`,
+            );
+            assert.equal(page.figures.length, 3);
+            for (const figure of page.figures) {
+              assert.match(figure, /^\d+(\.\d)?%$/);
+              assert.ok(Number.parseFloat(figure) > 0, `${figure} is no figure`);
+            }
+
+            assert.ok(page.packages > 20, `${page.packages} packages`);
+            assert.ok(page.files.length > 0);
+            for (const file of page.files) {
+              assert.ok(
+                existsSync(`${root}${file.split("#")[0]}`),
+                `${file} is not in the repository`,
+              );
+            }
+          },
+        ],
+        [
           "the guide's pages are there, and every link within the site leads somewhere",
           async () => {
             const crawled = await value<{ pages: [string, string][]; broken: string[] }>(
@@ -713,7 +746,13 @@ async function check(): Promise<void> {
               assert.equal(titles.get(`/swf2es/${page.id}/`), page.title, `${page.id} is missing`);
             }
 
-            for (const path of ["/swf2es/", "/swf2es/play/", "/swf2es/notices/", "/swf2es/docs/"]) {
+            for (const path of [
+              "/swf2es/",
+              "/swf2es/play/",
+              "/swf2es/notices/",
+              "/swf2es/docs/",
+              "/swf2es/compatibility/",
+            ]) {
               assert.ok(titles.has(path), `${path} is not linked from the site`);
             }
           },

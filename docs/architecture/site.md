@@ -2,7 +2,7 @@
 
 `apps/site` is the static site published by `.github/workflows/pages.yml`
 from `main` to https://swf2es.github.io/swf2es/: a player for the SWFs
-people open, and the guide. Astro builds it, Starlight frames each page
+people open, the guide, and how compatible swf2es is. Astro builds it, Starlight frames each page
 (header, search, sidebar, light and dark themes), and a static host is all
 it needs. Its pages, under the base path:
 
@@ -23,14 +23,37 @@ it needs. Its pages, under the base path:
   files to GitHub at the site's commit, and links to a heading to the page
   that has it. The sidebar links Architecture to `docs/architecture.md` on
   GitHub.
+- `/compatibility/` — how much of ActionScript and Flash Player swf2es
+  runs as Flash does, every figure worked out as the site builds by
+  `compatibility.ts`, from what the repository's tests keep, so a deploy
+  from `main` is as current as its baselines:
+  - ActionScript 3: `tests/tamarin/swf2es-baseline.json` against
+    avmshell's `baseline.json`, scored as `tests/tamarin/swf2es.ts`
+    scores a run, by suite, with the tests left out said;
+  - Ruffle's corpus: `tests/player/corpus/baseline.json`, tests passed and
+    lines matched by area, and what stops the most, by the groups of
+    `unimplemented-natives.json` the natives in their errors fall in;
+  - the `flash.*` API: the player's playerglobal, read from
+    `playerglobal-library.ts` with `tools/abc-surface/read.ts`. Its
+    surface is Flash Player's (`pnpm as3:playerglobal` checks it), so no
+    file of Adobe's is needed: a member counts as implemented unless it is
+    a native `unimplemented-natives.json` lists, which
+    `natives-coverage.test.ts` keeps to exactly the natives the player
+    does not register. AIR's own API is left out, by its API versions,
+    `AIR_CLASSES` and the list's `air` group;
+  - the player's features, by hand, with counts from the same list.
+
+  Reading and scoring all three takes about 25 ms, so every build does it
+  afresh; `tests/unit/site/compatibility.test.ts` checks the scoring.
 - `/notices/` — the licences, below. `notices.html`, their old address,
   sends its links on.
 
 The base path is `SITE_BASE`, by default `/swf2es/`, as Pages serves it.
 `facts.ts` reads it once, with what the pages show of the build (its
 commit, the avmplus commit, the import map, the files under each licence),
-and the pages take them through a virtual module (`astro/site.ts`), as
-Astro bundles them away from `facts.ts`'s own URL.
+and the pages take them, and the compatibility page's figures, through
+virtual modules (`astro/site.ts`), as Astro bundles them away from
+`facts.ts`'s own URL.
 
 `build.ts` stages what the player loads in Astro's public directory
 (`dist/public/`): the packages, `codegen.wasm`, `builtin.abc`, the demos,
@@ -77,4 +100,5 @@ the pages, with Pagefind's index for the search, into
 `tests/site/run.ts`, part of `pnpm test`, builds the site and checks it in
 Chrome under `/swf2es/`: the player's checks, the old addresses, and that
 every page of the guide renders and every link within the site leads
-somewhere. `--serve` serves it to look at.
+somewhere, and that the compatibility page shows figures above zero and
+links only to files the repository has. `--serve` serves it to look at.
