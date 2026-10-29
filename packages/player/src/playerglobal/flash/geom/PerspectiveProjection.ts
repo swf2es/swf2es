@@ -5,12 +5,12 @@
 // is drawn through it (display/perspective.ts).
 import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, type Projection, TRANSFORM } from "../../../display/display.js";
+import { defaultProjection, focalLengthOver as focalLength } from "../../../display/perspective.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
-const f = Math.fround;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 
 /** Whether `d` has a projection whatever a script sets: the stage, or a SWF's root. */
@@ -25,16 +25,9 @@ function projectionOf(s: Scripting, d: DisplayObject): Projection {
   }
 
   const root = d !== s.stage && d.loaderInfo !== null;
-  return {
-    fieldOfView: (55 * Math.PI) / 180,
-    centerX: root ? s.stageWidth / 2 : 250,
-    centerY: root ? s.stageHeight / 2 : 250,
-  };
-}
-
-/** The focal length of a field of view in radians over a width, in float32 as Flash's. */
-function focalLength(radians: number, width: number): number {
-  return f((width / 2) * f(Math.tan((Math.PI - radians) / 2)));
+  return root
+    ? defaultProjection(s.stageWidth / 2, s.stageHeight / 2)
+    : defaultProjection(250, 250);
 }
 
 export function perspectiveProjectionNatives(s: Scripting): avm2.Natives {

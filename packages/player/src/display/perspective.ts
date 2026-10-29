@@ -52,6 +52,16 @@ function stageSizeOf(d: DisplayObject): { width: number; height: number } {
 /** Flash's default field of view, 55 degrees, in radians. */
 const FIELD_OF_VIEW = (55 * Math.PI) / 180;
 
+/** The projection of what has none set: Flash's field of view, centred on (centerX, centerY). */
+export function defaultProjection(centerX: number, centerY: number): Projection {
+  return { fieldOfView: FIELD_OF_VIEW, centerX, centerY };
+}
+
+/** The focal length of a field of view in radians over a width, in float32 as Flash's. */
+export function focalLengthOver(radians: number, width: number): number {
+  return Math.fround((width / 2) * Math.fround(Math.tan((Math.PI - radians) / 2)));
+}
+
 /** Whether `d` projects what is in it: a projection set on it, a SWF's root, or the stage (no parent). */
 function projects(d: DisplayObject): boolean {
   return d.projection !== null || d.loaderInfo !== null || d.parent === null;
@@ -76,21 +86,17 @@ function projectionOf(d: DisplayObject): Projection {
 
   const stage = d.parent === null && d.loaderInfo !== null;
   const size = stageSizeOf(d);
-  return {
-    fieldOfView: FIELD_OF_VIEW,
-    centerX: stage ? 250 : size.width / 2,
-    centerY: stage ? 250 : size.height / 2,
-  };
+  return stage ? defaultProjection(250, 250) : defaultProjection(size.width / 2, size.height / 2);
 }
 
 /**
- * The focal length of a field of view in radians over a width, in float32
- * as Flash's: the stage's projection measures 500 wide, any other object's
- * the stage's width.
+ * The focal length of a field of view in radians as `d` projects through
+ * it: the stage's projection measures 500 wide, any other object's the
+ * stage's width.
  */
 function focalLength(radians: number, d: DisplayObject): number {
   const width = d.parent === null && d.loaderInfo !== null ? 500 : stageSizeOf(d).width;
-  return Math.fround((width / 2) * Math.fround(Math.tan((Math.PI - radians) / 2)));
+  return focalLengthOver(radians, width);
 }
 
 /** A column-major 4x4 matrix. */
