@@ -33,11 +33,10 @@ links; how much of AS3 and Flash's behaviour it matches, in
    components and no React, the user documentation taken from
    [guide.md](guide.md), and the player as it is today on a page of its own.
 2. **`architecture.md` split by topic,** move-only.
-3. **Pixel Bender.** `Shader` and `ShaderData` from a PBJ's bytecode,
-   its parameters and inputs as Flash reports them; a compiler from PBJ
-   to GLSL; shader fills (`beginShaderFill`, `lineShaderStyle`); then
-   `ShaderFilter`, `blendShader` and `ShaderJob`. Ruffle's corpus has 27
-   tests that stop at a `Shader` native.
+3. **Pixel Bender on the GPU.** `Shader`, `ShaderData` and `ShaderJob`
+   run kernels on the CPU ([bitmaps](architecture/bitmaps.md#pixel-bender));
+   next a compiler from PBJ to GLSL, for shader fills (`beginShaderFill`,
+   `lineShaderStyle`), `ShaderFilter` and `blendShader`.
 4. **The compiler's large files split,** move-only, as the renderer's
    backend, the scene view and the AVM2 runtime were.
 

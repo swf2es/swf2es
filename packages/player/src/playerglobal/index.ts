@@ -18,6 +18,11 @@ import { interactiveObjectNatives } from "./flash/display/InteractiveObject.js";
 import { loaderNatives } from "./flash/display/Loader.js";
 import { loaderInfoNatives } from "./flash/display/LoaderInfo.js";
 import { movieClipNatives } from "./flash/display/MovieClip.js";
+import { shaderNatives } from "./flash/display/Shader.js";
+import { shaderDataNatives } from "./flash/display/ShaderData.js";
+import { shaderInputNatives } from "./flash/display/ShaderInput.js";
+import { shaderJobNatives } from "./flash/display/ShaderJob.js";
+import { shaderParameterNatives } from "./flash/display/ShaderParameter.js";
 import { shapeNatives } from "./flash/display/Shape.js";
 import { simpleButtonNatives } from "./flash/display/SimpleButton.js";
 import { spriteNatives } from "./flash/display/Sprite.js";
@@ -170,6 +175,11 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...soundMixerNatives(s),
     ...graphicsNatives(s),
     ...shapeNatives(s),
+    ...shaderNatives(s),
+    ...shaderDataNatives(s),
+    ...shaderInputNatives(s),
+    ...shaderParameterNatives(s),
+    ...shaderJobNatives(s),
     ...simpleButtonNatives(s),
     ...timerNatives(s),
     ...staticTextNatives(),

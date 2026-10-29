@@ -313,3 +313,54 @@ by zlib itself. `getPixels` and
 Reads use the ByteArray's DataView without allocating per pixel, keeping
 complete pixels and the read position when a later word fails with
 EOFError 2030 (`bitmap-pixel-endian`).
+
+## Pixel Bender
+
+A `Shader` holds a `ShaderData`, which reads a Pixel Bender kernel from
+its bytecode (`readPbj`, `packages/format/src/pbj.ts`) and gives a
+script what adl gives it: the kernel's metadata of the first metadata
+opcode (an int or a string, wherever it stands) and its name as dynamic
+properties, a `ShaderParameter` for each parameter but the outputs and
+`_OutCoord`, numbered in order, with its type's name, its value a copy of
+its `defaultValue` (or null) and the second opcode's metadata as Arrays,
+and a `ShaderInput` for each image input with its channels and texture
+number. Bytes that end inside an opcode are EOFError 2030; adl refuses
+much else with ArgumentError 2004, more than Ruffle's parser does: a
+version other than 1, a parameter named `name`, float metadata from the
+first opcode, a nop with bytes in it, an unbalanced if, and each
+operation's register kinds and sizes against a table measured
+opcode by opcode (`PBJ_RULES`); it takes high registers, an int sampling
+coordinate and a texture never declared, which is error 2167 when the
+job starts.
+
+`ShaderJob` runs the kernel on the CPU (`bitmap/pixel-bender.ts`), as
+Flash ran Pixel Bender for a job: float registers in float32, ints in
+int32, every register zero at each pixel's start but the parameters and
+`_OutCoord`, the pixel's centre. Each operation does what adl does,
+measured on every opcode in a Vector.<Number> target and matched
+exactly: ftoi rounds to the nearest even and gives int's least past its
+range, a loaded int keeps 16 bits, comparisons write `i0` whatever their
+destination, `equal` and `notEqual` compare scalars alone (of vectors they
+are false and true), the logical operations are bitwise, `boolToFloat`
+gives the bits of the int 1, `select` takes its first source on exactly
+1 where `if` takes any int but 0, dot, distance and length write their
+destination's first lane, and min and max return the source for NaN, as
+SSE does. A BitmapData samples as its premultiplied bytes times the float
+nearest 1/255, its edges clamped; linearly, each axis' weight is rounded
+to 256ths, a row and then a column cut to a byte each step; floats
+sample with the same weights. Into a BitmapData, which is written whole
+whatever the job's size, each float is clamped, times 255 and rounded to
+the nearest even, the colours kept to at most the alpha and taken as
+premultiplied; three channels are opaque. A ByteArray is rewritten from
+0 in its endian, and a Vector.<Number> replaced, to the job's width and
+height. A parameter is the `ShaderParameter` of its name where one of its
+type is there, else its default; each of its numbers must be a number
+(ArgumentError 2004), and an int converts as SSE truncates. A job runs
+once (2172 after); asynchronously, it computes at `start` and its
+target and `ShaderEvent.COMPLETE` wait for the frame's EXIT_FRAME, as in
+adl. adl runs those jobs on one thread and drops a job started beside
+another, or the result of one a synchronous job follows; each job here
+completes. The `shader-jobs` case draws kernels of each kind against
+Flash, and Ruffle's corpus's Pixel Bender tests check the rest.
+ShaderFilter, `blendShader` and shader fills, which Flash draws on the
+GPU, wait for a compiler from PBJ to GLSL.

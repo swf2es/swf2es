@@ -9,6 +9,10 @@ package flash.display
 	{
 		public function ShaderData(bytecode:ByteArray)
 		{
+			_setByteCode(bytecode);
 		}
+
+		// The player's natives (packages/player/src/playerglobal/flash/display/ShaderData.ts).
+		private native function _setByteCode(code:ByteArray):void;
 	}
 }

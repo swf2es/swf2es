@@ -120,7 +120,6 @@ From `baseline.json` on `main` (last raised 2026-10-24):
 | avm2 | 1252 | 784 (62.6%) | 78,718 of 155,484 |
 | timeline | 17 | 6 | 190 of 371 |
 
-The natives most often in the way are Pixel Bender's (`Shader`,
-`ShaderData`, `ShaderJob`: 27 tests) and the Flash Text Engine's
+The natives most often in the way are the Flash Text Engine's
 (`flash.text.engine`: 21). The rest mostly trace a line differently and
 stop comparing there; `pnpm corpus --diff` shows where for each.
