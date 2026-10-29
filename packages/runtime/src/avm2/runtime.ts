@@ -14,7 +14,7 @@
 import { AmfClasses } from "./amf-classes.js";
 import { ArrayConversion } from "./array-conversion.js";
 import { fillCache } from "./cache-fill.js";
-import { newClass, withId } from "./classes.js";
+import { newClass, specializeVector, withId } from "./classes.js";
 import { classNamed, definingAbc, definitionNamed } from "./definitions.js";
 import type {
   Abc,
@@ -68,7 +68,6 @@ import {
   CONSTANT_RTQnameA,
   CONSTANT_RTQnameL,
   CONSTANT_RTQnameLA,
-  formatClassName,
   Multiname,
   Namespace,
   NS_Private,
@@ -1730,28 +1729,9 @@ export class Runtime {
     return hook;
   }
 
-  /**
-   * Vector.<T> for a T other than int, uint and Number: Vector$object's
-   * class, typed, whose name names T as avmplus does, a builtin Vector as
-   * Vector.<int>, and whose superclass is Vector.<*>, Vector$object.
-   */
+  /** Vector.<T> for a T other than int, uint and Number (see specializeVector in classes.ts). */
   specializeVector(base: AsObject, param: AsObject): AsObject {
-    const itraits = new Traits(
-      `__AS3__.vec::Vector.<${formatClassName(param.$it.name)}>`,
-      base.$it,
-    );
-    itraits.dynamic = base.$it.dynamic;
-    itraits.refusesNames = base.$it.refusesNames;
-    itraits.hooks = base.$it.hooks;
-    const cls = Object.create(Object.getPrototypeOf(base));
-    cls.$d = null;
-    cls.$it = itraits;
-    cls.$desc = base.$desc;
-    cls.$base = base;
-    cls.$prototype = base.$prototype;
-    cls.$param = this.refOf(param);
-    itraits.cls = cls;
-    return cls;
+    return specializeVector(this, base, param);
   }
 
   // Objects, functions and classes.
