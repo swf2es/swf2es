@@ -46,8 +46,11 @@ import { base, guide } from "../site.ts";
       experimental opt-in.
     </Card>
     <Card title="Not yet" icon="warning">
-      Video, printing and Pixel Bender shaders. Compatibility is incomplete: some SWFs draw or
-      behave differently.
+      <p>
+        Video, printing and Pixel Bender shaders. Compatibility is incomplete: some SWFs draw or
+        behave differently.
+      </p>
+      <a class="card-more" href={`${base}compatibility/`}>See compatibility →</a>
     </Card>
   </CardGrid>
 
@@ -84,3 +87,23 @@ import { base, guide } from "../site.ts";
     />
   </CardGrid>
 </StarlightPage>
+
+<style>
+  /* A card's link sits at its bottom, however tall its row. */
+  :global(.card:has(.card-more)) :global(.body) {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+  }
+
+  .card-more {
+    margin-top: auto;
+    padding-top: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .card-more:hover {
+    text-decoration: underline;
+  }
+</style>
