@@ -1,5 +1,6 @@
 ---
-// The home page: what swf2es is, and the way to the player and the guide.
+// The home page: what swf2es is, and the way to the player, the guide and
+// the compatibility page.
 import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { base, guide } from "../site.ts";
@@ -70,6 +71,11 @@ import { base, guide } from "../site.ts";
       title="Embed a SWF in a page"
       description="The <swf2es-player> element, and replacing a page's Flash tags."
       href={guide}
+    />
+    <LinkCard
+      title="Compatibility"
+      description="How much of ActionScript and Flash Player runs as Flash does, from swf2es's own tests."
+      href={`${base}compatibility/`}
     />
     <LinkCard
       title="How it works"

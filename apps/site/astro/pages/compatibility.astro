@@ -1,0 +1,560 @@
+---
+// How much of Flash swf2es runs as Flash does: every figure is worked out
+// from the repository's baselines as the site builds (compatibility.ts), so
+// the page is as current as the commit it is built from.
+import { Badge } from "@astrojs/starlight/components";
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { PACKAGE_LEVEL } from "../../compatibility.ts";
+import { base, compatibility, facts, url } from "../site.ts";
+
+const { tamarin, corpus, api, groups } = compatibility;
+const { build, blob } = facts;
+const source = (path: string) => `${blob}${path}`;
+
+/** To a tenth, as docs/coverage.md rounds, but never 100% short of complete. */
+const percent = (done: number, of: number) => {
+  if (of === 0) {
+    return "–";
+  }
+
+  const tenths = Math.round((1000 * done) / of);
+  return `${((done < of ? Math.min(tenths, 999) : tenths) / 10).toFixed(1).replace(/\.0$/, "")}%`;
+};
+const number = (n: number) => n.toLocaleString("en-US");
+const bar = (done: number, of: number) => `--done: ${of === 0 ? 0 : (100 * done) / of}%`;
+/** Members a group of unimplemented natives leaves missing, or none once the group is gone. */
+const natives = (group: string) => groups[group]?.natives ?? 0;
+const pkg = (name: string) => api.packages.find((p) => p.name === name);
+const printing = pkg("flash.printing");
+const varyingClause =
+  tamarin.varying.length > 0
+    ? `, and ${tamarin.varying.length} because swf2es' result varies from run to run`
+    : "";
+
+const SUITES: Record<string, string> = {
+  ecma3: "ECMAScript 3",
+  spidermonkey: "SpiderMonkey's",
+  as3: "ActionScript 3's own",
+  e4x: "E4X",
+  regress: "Regressions",
+  other: "Others",
+};
+const AREAS: Record<string, string> = {
+  avm1: "ActionScript 1 and 2 (AVM1)",
+  avm2: "ActionScript 3 (AVM2)",
+  timeline: "Timelines",
+};
+const GROUPS: Record<string, string> = {
+  shaders: "Pixel Bender shaders",
+  textEngine: "The Flash Text Engine",
+  media: "Streaming media",
+  stage3D: "Stage3D",
+  authoring: "Authoring and debugging API",
+  flash: "Smaller APIs",
+  air: "AIR's API",
+  unlisted: "Other natives",
+};
+
+type Status = "supported" | "partial" | "experimental" | "missing";
+const STATUS: Record<Status, { text: string; variant: "success" | "caution" | "note" | "danger" }> =
+  {
+    supported: { text: "Supported", variant: "success" },
+    partial: { text: "Partial", variant: "caution" },
+    experimental: { text: "Experimental", variant: "note" },
+    missing: { text: "Missing", variant: "danger" },
+  };
+const avm1 = corpus.areas.find((a) => a.name === "avm1");
+const features: { name: string; status: Status; note: string; href: string }[] = [
+  {
+    name: "ActionScript 3",
+    status: "supported",
+    note: `${percent(tamarin.all.done, tamarin.all.of)} of Tamarin's tests as avmshell runs them.`,
+    href: "#actionscript-3",
+  },
+  {
+    name: "ActionScript 1 and 2",
+    status: "supported",
+    note: avm1
+      ? `${percent(avm1.tests.done, avm1.tests.of)} of the corpus's AVM1 tests pass.`
+      : "Compiled to JavaScript too.",
+    href: source("docs/avm1.md"),
+  },
+  {
+    name: "Display list, timelines, shapes and morphs",
+    status: "supported",
+    note: "Drawn by a WebGL 2 renderer of swf2es's own.",
+    href: source("docs/architecture/player.md"),
+  },
+  {
+    name: "Text fields and fonts",
+    status: "supported",
+    note: "TextField, embedded and device fonts.",
+    href: source("docs/architecture/text.md"),
+  },
+  {
+    name: "Bitmaps, filters and blend modes",
+    status: "supported",
+    note: "BitmapData's operations and filters in WebAssembly and on the GPU.",
+    href: source("docs/architecture/bitmaps.md"),
+  },
+  {
+    name: "Sound",
+    status: "supported",
+    note: "Timeline and event sounds, MP3 decoded in WebAssembly.",
+    href: source("docs/architecture/sound.md"),
+  },
+  {
+    name: "Loading and security",
+    status: "supported",
+    note: "Loader, URLLoader, sandboxes and application domains.",
+    href: source("docs/architecture/loading.md"),
+  },
+  {
+    name: "Mouse, keyboard and touch",
+    status: "partial",
+    note: "Gesture events are not supported yet: touches go to the mouse.",
+    href: source("docs/architecture/input.md"),
+  },
+  {
+    name: "ExternalInterface",
+    status: "supported",
+    note: "Calls between the SWF and the page.",
+    href: url("docs/externalinterface/"),
+  },
+  {
+    name: "Sockets",
+    status: "partial",
+    note: "In a browser through a WebSocket relay you run, which this site has none of; directly in node and the desktop app.",
+    href: url("docs/sockets-and-files/"),
+  },
+  {
+    name: "Workers",
+    status: "supported",
+    note: "In Web Workers, where the page is cross-origin isolated.",
+    href: url("docs/workers/"),
+  },
+  {
+    name: "Stage3D",
+    status: "experimental",
+    note: `An opt-in. Without it a SWF is told there is no GPU, as Flash would tell it, and its ${natives("stage3D")} natives count as missing above.`,
+    href: source("docs/architecture/services.md"),
+  },
+  {
+    name: "Video and streaming media",
+    status: "missing",
+    note: `NetStream, StageVideo, RTMFP and DRM: ${natives("media")} natives not supported yet.`,
+    href: source("docs/roadmap.md"),
+  },
+  {
+    name: "Camera and microphone",
+    status: "missing",
+    note: "The API is there, as on a machine with neither.",
+    href: source("docs/architecture/services.md"),
+  },
+  {
+    name: "Printing",
+    status: "missing",
+    note: printing
+      ? `flash.printing: ${printing.members.of - printing.members.done} of its ${printing.members.of} members not supported yet.`
+      : "PrintJob.",
+    href: "#the-flash-api",
+  },
+  {
+    name: "Pixel Bender shaders",
+    status: "missing",
+    note: `Shader, ShaderJob and shader fills: ${natives("shaders")} natives; next on the roadmap.`,
+    href: source("docs/roadmap.md"),
+  },
+  {
+    name: "The Flash Text Engine",
+    status: "missing",
+    note: `flash.text.engine's layout: ${natives("textEngine")} natives not supported yet.`,
+    href: "#the-flash-api",
+  },
+  {
+    name: "AIR's API",
+    status: "partial",
+    note: "AIR's WebSocket client; the rest of AIR's API is outside a browser.",
+    href: source("docs/architecture/services.md"),
+  },
+];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Compatibility",
+    description:
+      "How much of ActionScript and Flash Player swf2es runs as Flash does, from its own tests.",
+  }}
+  headings={[
+    { depth: 2, slug: "actionscript-3", text: "ActionScript 3" },
+    { depth: 2, slug: "ruffles-test-corpus", text: "Ruffle's test corpus" },
+    { depth: 2, slug: "the-flash-api", text: "The flash.* API" },
+    { depth: 2, slug: "player-features", text: "Player features" },
+  ]}
+>
+  <p>
+    Every figure here is worked out from the repository's test results as the site is built,
+    at <code>{build}</code>: they are as current as the site. How they are measured is in
+    <a href={source("docs/coverage.md")}><code>docs/coverage.md</code></a>.
+  </p>
+
+  <div class="summary">
+    <a class="stat" href="#actionscript-3">
+      <span class="figure">{percent(tamarin.all.done, tamarin.all.of)}</span>
+      <strong>ActionScript 3</strong>
+      <span>of {number(tamarin.all.of)} Tamarin tests run as avmshell runs them</span>
+    </a>
+    <a class="stat" href="#ruffles-test-corpus">
+      <span class="figure">{percent(corpus.all.tests.done, corpus.all.tests.of)}</span>
+      <strong>Ruffle's corpus</strong>
+      <span>of {number(corpus.all.tests.of)} tests trace every line as Flash Player did</span>
+    </a>
+    <a class="stat" href="#the-flash-api">
+      <span class="figure">{percent(api.members.done, api.members.of)}</span>
+      <strong>The flash.* API</strong>
+      <span>
+        of {number(api.members.of)} members implemented; {number(api.classes.done)} of {number(api.classes.of)} classes complete
+      </span>
+    </a>
+  </div>
+
+  <h2 id="actionscript-3">ActionScript 3</h2>
+  <p>
+    The Tamarin acceptance tests, avmplus' own, run in swf2es and in avmshell, the reference.
+    A test matches when it passes and fails the same checks and ends as it did in avmshell.
+  </p>
+  <table class="scores">
+    <thead>
+      <tr><th>Suite</th><th>Tests</th><th>Match avmshell</th><th class="bar-cell"></th></tr>
+    </thead>
+    <tbody>
+      {
+        tamarin.suites.map((s) => (
+          <tr>
+            <td>
+              {SUITES[s.name] ?? s.name} <code>{s.name === "other" ? s.dirs?.join(", ") : s.name}</code>
+            </td>
+            <td>{number(s.tests.of)}</td>
+            <td>
+              {number(s.tests.done)} ({percent(s.tests.done, s.tests.of)})
+            </td>
+            <td class="bar-cell">
+              <span class="bar" style={bar(s.tests.done, s.tests.of)} />
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>All</th>
+        <th>{number(tamarin.all.of)}</th>
+        <th>
+          {number(tamarin.all.done)} ({percent(tamarin.all.done, tamarin.all.of)})
+        </th>
+        <th class="bar-cell"><span class="bar" style={bar(tamarin.all.done, tamarin.all.of)} /></th>
+      </tr>
+    </tfoot>
+  </table>
+  <details>
+    <summary>Why {number(tamarin.all.of - tamarin.all.done)} tests do not match</summary>
+    <table>
+      <tbody>
+        {
+          tamarin.reasons.map((r) => (
+            <tr>
+              <td>{r.reason}</td>
+              <td>{number(r.tests)}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </details>
+  <p class="note">
+    Of the {number(tamarin.compiled)} tests avmshell compiles, {tamarin.uncounted.length} are left
+    out because avmshell's own counts follow the date or the machine{varyingClause}.
+    {
+      tamarin.varying.length > 0 && (
+        <span>
+          Those that vary: {tamarin.varying.map((t, i) => <>{i > 0 && ", "}<code>{t}</code></>)}.
+        </span>
+      )
+    }
+    {
+      tamarin.unrecorded.length > 0 &&
+        `${tamarin.unrecorded.length} are not in swf2es' baseline and count as not matching.`
+    }
+  </p>
+
+  <h2 id="ruffles-test-corpus">Ruffle's test corpus</h2>
+  <p>
+    <a href="https://github.com/ruffle-rs/ruffle">Ruffle</a>'s tests that have Flash Player's
+    output, played in Chrome, their trace compared with Flash's line by line. A test passes
+    when every line matched, no more were traced and nothing stopped it.
+  </p>
+  <table class="scores">
+    <thead>
+      <tr>
+        <th>Tests</th><th>Run</th><th>Pass</th><th class="bar-cell"></th><th>Lines matched</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        corpus.areas.map((a) => (
+          <tr>
+            <td>
+              {AREAS[a.name] ?? a.name} <code>{a.name}/</code>
+            </td>
+            <td>{number(a.tests.of)}</td>
+            <td>
+              {number(a.tests.done)} ({percent(a.tests.done, a.tests.of)})
+            </td>
+            <td class="bar-cell">
+              <span class="bar" style={bar(a.tests.done, a.tests.of)} />
+            </td>
+            <td>{percent(a.lines.done, a.lines.of)} of {number(a.lines.of)}</td>
+          </tr>
+        ))
+      }
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>All</th>
+        <th>{number(corpus.all.tests.of)}</th>
+        <th>
+          {number(corpus.all.tests.done)} ({percent(corpus.all.tests.done, corpus.all.tests.of)})
+        </th>
+        <th class="bar-cell">
+          <span class="bar" style={bar(corpus.all.tests.done, corpus.all.tests.of)} />
+        </th>
+        <th>{percent(corpus.all.lines.done, corpus.all.lines.of)} of {number(corpus.all.lines.of)}</th>
+      </tr>
+    </tfoot>
+  </table>
+  <p>The natives most often in a test's way, each a part of Flash Player not supported yet:</p>
+  <table>
+    <thead>
+      <tr><th>What</th><th>Tests stopped</th><th>Classes</th></tr>
+    </thead>
+    <tbody>
+      {
+        corpus.stoppers.map((s) => (
+          <tr>
+            <td>{GROUPS[s.group] ?? s.group}</td>
+            <td>{number(s.tests)}</td>
+            <td>
+              {s.classes.map(([name, tests], i) => (
+                <>
+                  {i > 0 && ", "}
+                  <code>{name.replace(/^.*::/, "")}</code> {tests}
+                </>
+              ))}
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+  <p class="note">
+    Most of the rest trace a line otherwise than Flash did and stop being compared there;
+    {number(corpus.otherUnsupported)} stop at something else not supported yet.{
+      corpus.varying > 0 && (
+        <> {number(corpus.varying)} whose standing varies from run to run are left out.</>
+      )
+    }
+  </p>
+
+  <h2 id="the-flash-api">The flash.* API</h2>
+  <p>
+    The player's own <code>playerglobal</code> declares every class and member of Flash Player's,
+    with the same signatures, which its build checks. Of those, a member (a method, a property,
+    whose getter and setter count as one, a constant or a variable) counts as implemented
+    unless it is a native method no implementation in the player registers, as
+    <a href={source("tests/unit/player/playerglobal/unimplemented-natives.json")}>the list the
+    tests keep</a> names them; AS3 bodies, constants and variables count as implemented. A
+    class is complete when all its members are. AIR's own API, {number(api.air)} members, is left
+    out. Stage3D's natives count as missing: the player registers them only with its experimental
+    opt-in.
+  </p>
+  <div class="packages">
+    {
+      api.packages.map((p) => (
+        <details>
+          <summary>
+            <span class="package">
+              <code>{p.name}</code>
+              <span class="counts">
+                {p.classes.of > 0 && `${p.classes.done}/${p.classes.of} classes, `}
+                {p.members.done}/{p.members.of} members
+              </span>
+              <span class="bar" style={bar(p.members.done, p.members.of)} />
+            </span>
+          </summary>
+          <table>
+            <thead>
+              <tr><th>Class</th><th>Members</th><th class="bar-cell"></th><th>Not supported yet</th></tr>
+            </thead>
+            <tbody>
+              {p.rows.map((r) => (
+                <tr>
+                  <td>{r.name === PACKAGE_LEVEL ? <em>{r.name}</em> : <code>{r.name}</code>}</td>
+                  <td>
+                    {r.members.done}/{r.members.of}
+                  </td>
+                  <td class="bar-cell">
+                    <span class="bar" style={bar(r.members.done, r.members.of)} />
+                  </td>
+                  <td class="missing">{r.missing.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      ))
+    }
+  </div>
+
+  <h2 id="player-features">Player features</h2>
+  <table class="features">
+    <thead>
+      <tr><th>Feature</th><th>Status</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      {
+        features.map((f) => (
+          <tr>
+            <td>
+              <a href={f.href}>{f.name}</a>
+            </td>
+            <td>
+              <Badge text={STATUS[f.status].text} variant={STATUS[f.status].variant} />
+            </td>
+            <td>{f.note}</td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+  <p class="note">
+    What is next is in the <a href={source("docs/roadmap.md")}>roadmap</a>. A SWF that plays
+    otherwise than in Flash Player is worth <a href={`${base}play/`}>a report</a>: the player's
+    Report a problem button fills one in.
+  </p>
+</StarlightPage>
+
+<style>
+  /* The three headline figures, each a link to its section. */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 1rem;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+    text-decoration: none;
+  }
+
+  .stat:hover {
+    border-color: var(--sl-color-accent);
+  }
+
+  .stat strong {
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-base);
+  }
+
+  .figure {
+    font-size: var(--sl-text-3xl);
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--sl-color-white);
+  }
+
+  .note {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+
+  .bar {
+    display: inline-block;
+    width: 8rem;
+    max-width: 100%;
+    height: 0.6rem;
+    border-radius: 0.3rem;
+    vertical-align: middle;
+    background: linear-gradient(
+      to right,
+      var(--sl-color-accent) var(--done),
+      var(--sl-color-gray-5) var(--done)
+    );
+  }
+
+  .bar-cell {
+    width: 8.5rem;
+  }
+
+  .scores tfoot th {
+    border-top: 2px solid var(--sl-color-gray-5);
+  }
+
+  .packages details {
+    margin-top: 0.25rem;
+  }
+
+  .packages summary {
+    cursor: pointer;
+  }
+
+  .package {
+    display: inline-grid;
+    grid-template-columns: minmax(11rem, 1fr) minmax(9rem, auto) 8rem;
+    gap: 0.25rem 1rem;
+    align-items: center;
+    width: calc(100% - 1.5rem);
+    margin: 0;
+  }
+
+  .package code {
+    justify-self: start;
+  }
+
+  .package .counts {
+    justify-self: end;
+  }
+
+  /* On a phone the figures say it: the bars of the tables go. */
+  @media (max-width: 40rem) {
+    .package {
+      grid-template-columns: 1fr;
+    }
+
+    .bar-cell {
+      display: none;
+    }
+  }
+
+  .features :global(.sl-badge) {
+    white-space: nowrap;
+  }
+
+  .counts {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-2);
+  }
+
+  .missing {
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-2);
+    overflow-wrap: anywhere;
+  }
+</style>

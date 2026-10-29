@@ -3,7 +3,11 @@
 How much of AS3 and its builtins swf2es runs as avmshell does, measured
 with the Tamarin acceptance suite (`oracle/avmplus/test/acceptance`),
 and how much of Flash's behaviour the player matches, measured with
-Ruffle's test corpus.
+Ruffle's test corpus. The site's
+[compatibility page](https://swf2es.github.io/swf2es/compatibility/)
+shows both, and how much of the `flash.*` API is implemented, worked out
+from the baselines as it builds ([site.md](architecture/site.md)); the
+figures below are dated.
 
 ## Tamarin
 
