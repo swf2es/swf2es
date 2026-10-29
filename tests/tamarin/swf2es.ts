@@ -24,6 +24,14 @@ import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import { runOracle } from "../../oracle/oracle.ts";
 import { collectTests } from "./collect.ts";
+import {
+  type Avmshell,
+  counted as countedBy,
+  matches as matchesBy,
+  type Outcome,
+  ownCounted,
+  type Recorded,
+} from "./score.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const baselineFile = `${here}swf2es-baseline.json`;
@@ -32,33 +40,6 @@ const update = args.includes("--update-baseline");
 const relax = args.includes("--relax");
 const prefixes = args.filter((a) => !a.startsWith("--"));
 const TIMEOUT = 30_000;
-
-/** What swf2es did with one test. */
-interface Outcome {
-  passed: number;
-  failed: number;
-  /**
-   * How it ended, as avmshell's exit code: 0, 1 for a VerifyError or an AS3
-   * exception nothing caught, 124 for a timeout; null if the host stopped it.
-   */
-  exitCode: number | null;
-  /** What of the host's stopped it, if anything: an error, or its worker dying. */
-  error: string | null;
-}
-
-/** A test in swf2es-baseline.json: its outcome, passed and failed null when not compared. */
-type Recorded = Omit<Outcome, "passed" | "failed"> & {
-  passed: number | null;
-  failed: number | null;
-};
-
-/** avmshell's result for a test, as run.ts records it. */
-interface Avmshell {
-  compiled: boolean;
-  exitCode: number | null;
-  passed: number | null;
-  failed: number | null;
-}
 
 const avmshell: Record<string, Avmshell> = JSON.parse(readFileSync(`${here}baseline.json`, "utf8"));
 const { tests } = collectTests(prefixes);
@@ -183,17 +164,12 @@ async function runAll(count: number): Promise<void> {
 
 await runAll(Math.min(10, availableParallelism(), queue.length));
 
-/** Whether baseline.json compares avmshell's counts for the test: not where they follow the date or the machine. */
-const counted = (path: string) => avmshell[path].passed !== null && avmshell[path].failed !== null;
+/** Whether baseline.json compares avmshell's counts for the test. */
+const counted = (path: string) => countedBy(avmshell[path]);
 
-/**
- * Whether swf2es ended as avmshell did, nothing of the host's stopping it,
- * and, with `counts`, passed and failed the checks avmshell did.
- */
+/** Whether swf2es matched avmshell on the test (score.ts). */
 const matches = (path: string, o: Recorded, counts = counted(path)) =>
-  o.error === null &&
-  (avmshell[path].exitCode === null || o.exitCode === avmshell[path].exitCode) &&
-  (!counts || (o.passed === avmshell[path].passed && o.failed === avmshell[path].failed));
+  matchesBy(avmshell[path], o, counts);
 
 // By directory: tests that match, of those run, and checks passed, swf2es against avmshell.
 const byDir = new Map<string, { tests: number; matched: number; ours: number; theirs: number }>();
@@ -293,7 +269,7 @@ if (update) {
     }
 
     // Counts not compared with avmshell's are still compared with swf2es' own, unless relaxed too.
-    const ours = before.passed !== null && before.failed !== null;
+    const ours = ownCounted(before);
     const counts = counted(path) && ours;
     const was = matches(path, before, counts);
     const is = matches(path, o, counts);

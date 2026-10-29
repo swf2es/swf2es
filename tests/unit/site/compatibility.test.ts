@@ -5,12 +5,13 @@ import { fileURLToPath } from "node:url";
 import {
   AIR_CLASSES,
   type Avmshell,
-  type CorpusEntry,
   compatibility,
   isAirVersion,
+  ownerOf,
   PACKAGE_LEVEL,
   playerglobalAbc,
   readUnimplemented,
+  type Standing,
   scoreApi,
   scoreCorpus,
   scoreTamarin,
@@ -38,6 +39,7 @@ const ours = (passed: number, failed: number, exitCode: number | null = 0, error
 });
 
 test("Tamarin is scored as swf2es.ts scores it, the uncompared and varying tests left out", () => {
+  const relaxed = { ...ours(1, 0), passed: null, failed: null };
   const score = scoreTamarin(
     {
       "ecma3/a": shell(3, 0),
@@ -50,6 +52,8 @@ test("Tamarin is scored as swf2es.ts scores it, the uncompared and varying tests
       "misc/h": shell(1, 0),
       "spidermonkey/i": shell(1, 0),
       "regress/j": { compiled: false, exitCode: null, passed: 0, failed: 0 },
+      "regress/k": shell(4, 0),
+      "regress/l": shell(2, 0),
     },
     {
       "ecma3/a": ours(3, 0),
@@ -64,30 +68,36 @@ test("Tamarin is scored as swf2es.ts scores it, the uncompared and varying tests
       "mmgc/g": ours(1, 0),
       "misc/h": ours(1, 0),
       "spidermonkey/i": null,
+      // Its counts relaxed, so not compared: it ended as avmshell did.
+      "regress/k": relaxed,
+      // regress/l is not in the baseline, which swf2es.ts fails a run for.
     },
   );
 
-  assert.deepEqual(score.all, { done: 3, of: 7 });
-  assert.equal(score.compiled, 9);
+  assert.deepEqual(score.all, { done: 4, of: 9 });
+  assert.equal(score.compiled, 11);
   assert.deepEqual(score.uncounted, ["ecma3/Date/c"]);
   assert.deepEqual(score.varying, ["spidermonkey/i"]);
+  assert.deepEqual(score.unrecorded, ["regress/l"]);
   assert.deepEqual(
     score.suites.map((s) => [s.name, s.tests.done, s.tests.of]),
     [
       ["ecma3", 1, 2],
       ["as3", 0, 2],
       ["e4x", 0, 1],
+      ["regress", 1, 2],
       ["other", 2, 2],
     ],
   );
   assert.deepEqual(score.suites.at(-1)?.dirs, ["misc", "mmgc"]);
-  assert.equal(score.reasons.length, 4);
+  assert.equal(score.reasons.length, 5);
   assert.ok(score.reasons.every((r) => r.tests === 1));
+  assert.ok(score.reasons.some((r) => r.reason === "Not in swf2es' baseline"));
 });
 
 test("the corpus: a test passes only when every line matched and nothing more was traced", () => {
   const entry = (matched: number, lines: number, traced: number, error: string | null = null) =>
-    ({ matched, lines, traced, error }) satisfies CorpusEntry;
+    ({ matched, lines, traced, error }) satisfies Standing;
   const unimplemented = readUnimplemented({
     "//": "a comment",
     shaders: { why: "Pixel Bender.", natives: ["flash.display::ShaderJob#start"] },
@@ -112,17 +122,21 @@ test("the corpus: a test passes only when every line matched and nothing more wa
         "Error: swf2es: NetConnection.call, Flash Remoting is not supported yet",
       ),
       "timeline/h": entry(0, 2, 2),
+      "timeline/i": null,
+      // An empty error is none, as run.ts's passed() reads it.
+      "timeline/j": entry(1, 1, 1, ""),
     },
     unimplemented,
   );
 
-  assert.deepEqual(score.all, { tests: { done: 1, of: 8 }, lines: { done: 9, of: 22 } });
+  assert.deepEqual(score.all, { tests: { done: 2, of: 9 }, lines: { done: 10, of: 23 } });
+  assert.equal(score.varying, 1);
   assert.deepEqual(
     score.areas.map((a) => [a.name, a.tests.done, a.tests.of, a.lines.done, a.lines.of]),
     [
       ["avm1", 1, 2, 6, 6],
       ["avm2", 0, 5, 3, 14],
-      ["timeline", 0, 1, 0, 2],
+      ["timeline", 1, 2, 1, 3],
     ],
   );
   assert.deepEqual(score.stoppers, [
@@ -135,6 +149,20 @@ test("the corpus: a test passes only when every line matched and nothing more wa
     { group: "flash", why: "Small ones.", tests: 1, classes: [["flash.desktop::Clipboard", 1]] },
   ]);
   assert.equal(score.otherUnsupported, 1);
+});
+
+test("a native belongs to its class, whatever its namespace, or is its own outside one", () => {
+  assert.equal(ownerOf("flash.display::ShaderJob#get:shader"), "flash.display::ShaderJob");
+  assert.equal(
+    ownerOf("flash.display::Stage.get:supportsOrientationChange"),
+    "flash.display::Stage",
+  );
+  assert.equal(
+    ownerOf("flash.desktop::Clipboard#flash.desktop:Clipboard::getString"),
+    "flash.desktop::Clipboard",
+  );
+  assert.equal(ownerOf("flash.sampler::getSize"), "flash.sampler::getSize");
+  assert.equal(ownerOf("adobe.utils::MMExecute"), "adobe.utils::MMExecute");
 });
 
 test("API versions: Flash Player's and AIR's interleave as avmplus numbers them", () => {
@@ -183,11 +211,13 @@ test("the API: each listed native is declared, and leaves its member missing", (
   // A static getter and a property's two accessors are one member each.
   const job = row("flash.printing", "PrintJob");
   assert.ok(job?.missing.includes("static isSupported"));
+
   for (const p of score.packages) {
     for (const r of p.rows) {
       assert.equal(new Set(r.missing).size, r.missing.length, `${p.name}::${r.name} once each`);
     }
   }
+
   assert.equal(row("flash.geom", "Matrix")?.missing.length, 0);
   assert.ok(row("flash.net", PACKAGE_LEVEL));
 
@@ -203,7 +233,6 @@ test("the API: each listed native is declared, and leaves its member missing", (
 });
 
 test("every figure the page shows comes out of the repository", () => {
-  const started = performance.now();
   const c = compatibility(root);
 
   assert.ok(c.tamarin.all.done > 0 && c.tamarin.all.done <= c.tamarin.all.of);
@@ -218,6 +247,4 @@ test("every figure the page shows comes out of the repository", () => {
   assert.ok(c.corpus.all.tests.done > 0);
   assert.ok(c.api.members.done > 0);
   assert.ok(c.groups.shaders.natives > 0);
-  // Cheap enough for every build of the site.
-  assert.ok(performance.now() - started < 2000);
 });

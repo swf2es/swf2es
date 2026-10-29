@@ -19,22 +19,7 @@ import { fileURLToPath } from "node:url";
 import { type PlayerResult, runPlayer } from "../chrome.ts";
 import { libraryAbcs } from "../libraries.ts";
 import { collectRuffle, corpus, type RuffleTest } from "./ruffle.ts";
-
-/** A pass: every line matched, no more traced, and no error. */
-function passed(s: Standing): boolean {
-  return s.matched === s.lines && s.traced === s.lines && !s.error;
-}
-
-/** How the player stood on one test: a pass is every line matched, no more traced, and no error. */
-interface Standing {
-  /** Lines matched before the first difference, of `lines` Flash traced. */
-  matched: number;
-  lines: number;
-  /** Lines the player traced, more than `lines` when it went on past Flash's. */
-  traced: number;
-  /** What stopped the player: an exception's text, "timeout", or null. */
-  error: string | null;
-}
+import { passed, type Standing } from "./standing.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const baselineFile = `${here}baseline.json`;

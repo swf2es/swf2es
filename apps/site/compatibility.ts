@@ -16,6 +16,14 @@
 // does it afresh.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { passed, type Standing } from "../../tests/player/corpus/standing.ts";
+import {
+  type Avmshell,
+  counted,
+  matches,
+  ownCounted,
+  type Recorded,
+} from "../../tests/tamarin/score.ts";
 import { readSurface, type Trait } from "../../tools/abc-surface/read.ts";
 
 /** Done of how many. */
@@ -26,21 +34,7 @@ export interface Share {
 
 // ActionScript 3: Tamarin.
 
-/** avmshell's result for a test, as tests/tamarin/run.ts records it. */
-export interface Avmshell {
-  compiled: boolean;
-  exitCode: number | null;
-  passed: number | null;
-  failed: number | null;
-}
-
-/** swf2es' result for a test, as tests/tamarin/swf2es.ts records it; null when not compared. */
-export type Recorded = {
-  passed: number | null;
-  failed: number | null;
-  exitCode: number | null;
-  error: string | null;
-} | null;
+export type { Avmshell, Recorded, Standing };
 
 export interface TamarinScore {
   /** Tests that match avmshell, of those scored. */
@@ -55,21 +49,28 @@ export interface TamarinScore {
   uncounted: string[];
   /** Left out: swf2es' result varies from run to run (null in its baseline). */
   varying: string[];
+  /** Not in swf2es' baseline, which swf2es.ts fails a run for: scored as not matching. */
+  unrecorded: string[];
 }
 
 /** The suites the page names; the rest are a test or a few each. */
 export const SUITES = ["ecma3", "spidermonkey", "as3", "e4x", "regress"];
 
-/** Score swf2es against avmshell as swf2es.ts does, from the two baselines. */
+/**
+ * Score swf2es against avmshell from the two baselines, by score.ts's rules
+ * as swf2es.ts applies them: avmshell's counts compared where baseline.json
+ * compares them, and swf2es' where its baseline was not relaxed.
+ */
 export function scoreTamarin(
   avmshell: Record<string, Avmshell>,
-  ours: Record<string, Recorded | undefined>,
+  ours: Record<string, Recorded | null | undefined>,
 ): TamarinScore {
   const suites = new Map<string, Share>();
   const others = new Set<string>();
   const reasons = new Map<string, number>();
   const uncounted: string[] = [];
   const varying: string[] = [];
+  const unrecorded: string[] = [];
   const all: Share = { done: 0, of: 0 };
   let compiled = 0;
 
@@ -79,14 +80,13 @@ export function scoreTamarin(
     }
 
     compiled++;
-    if (theirs.passed === null || theirs.failed === null) {
+    if (!counted(theirs)) {
       uncounted.push(path);
       continue;
     }
 
     const o = ours[path];
-    // A test swf2es.ts ran but recorded nothing for fails its run; here it is not scored.
-    if (o === null || o === undefined) {
+    if (o === null) {
       varying.push(path);
       continue;
     }
@@ -101,10 +101,13 @@ export function scoreTamarin(
     suites.set(suite, share);
     share.of++;
     all.of++;
-    // swf2es.ts's matches(): as avmshell ended, nothing of the host's stopping it, the same counts.
-    const ended = theirs.exitCode === null || o.exitCode === theirs.exitCode;
-    const counts = o.passed === theirs.passed && o.failed === theirs.failed;
-    if (o.error === null && ended && counts) {
+    if (o === undefined) {
+      unrecorded.push(path);
+      reasons.set("Not in swf2es' baseline", (reasons.get("Not in swf2es' baseline") ?? 0) + 1);
+      continue;
+    }
+
+    if (matches(theirs, o, ownCounted(o))) {
       share.done++;
       all.done++;
       continue;
@@ -113,9 +116,9 @@ export function scoreTamarin(
     const reason =
       o.error !== null
         ? "Stopped by the host: an error of JavaScript's or a limit"
-        : !ended
+        : theirs.exitCode !== null && o.exitCode !== theirs.exitCode
           ? "Ended otherwise than in avmshell"
-          : (o.passed ?? 0) < theirs.passed
+          : (o.passed ?? 0) < (theirs.passed ?? 0)
             ? "Fewer checks passed than in avmshell"
             : "The same checks passed, but others failed";
     reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
@@ -136,18 +139,11 @@ export function scoreTamarin(
     compiled,
     uncounted,
     varying,
+    unrecorded,
   };
 }
 
 // Ruffle's corpus.
-
-/** A test of the corpus, as tests/player/corpus/run.ts records it. */
-export interface CorpusEntry {
-  matched: number;
-  lines: number;
-  traced: number;
-  error: string | null;
-}
 
 /** The natives' groups in unimplemented-natives.json: each native's group, and each group's why. */
 export interface Unimplemented {
@@ -162,31 +158,47 @@ export interface CorpusScore {
   stoppers: { group: string; why: string; tests: number; classes: [string, number][] }[];
   /** Tests stopped by something else not supported yet, such as Flash Remoting. */
   otherUnsupported: number;
+  /** Tests whose standing varies from run to run, null in the baseline: not scored. */
+  varying: number;
 }
-
-/** A test passes when every line Flash traced matched, no more were traced, and nothing stopped it. */
-export const passes = (e: CorpusEntry) =>
-  e.error === null && e.matched === e.lines && e.traced === e.lines;
 
 const NATIVE = /native (\S+) is not supported yet/;
 
+/**
+ * What a native belongs to: its class, up to the # or . after its package's
+ * ::, whatever namespace the member has; a package-level function, which
+ * has neither, is its own.
+ */
+export function ownerOf(native: string): string {
+  const at = native.indexOf("::") + 2;
+  const end = native.slice(at).search(/[#.]/);
+  return end < 0 ? native : native.slice(0, at + end);
+}
+
 /** Score the corpus's baseline, by area (its first directory), and what stops its tests. */
 export function scoreCorpus(
-  baseline: Record<string, CorpusEntry>,
+  baseline: Record<string, Standing | null>,
   unimplemented: Unimplemented,
 ): CorpusScore {
   const areas = new Map<string, { tests: Share; lines: Share }>();
   const all = { tests: { done: 0, of: 0 }, lines: { done: 0, of: 0 } };
   const groups = new Map<string, { tests: number; classes: Map<string, number> }>();
   let otherUnsupported = 0;
+  let varying = 0;
 
   for (const [path, e] of Object.entries(baseline)) {
+    if (e === null) {
+      varying++;
+      continue;
+    }
+
     const name = path.split("/")[0];
     const area = areas.get(name) ?? { tests: { done: 0, of: 0 }, lines: { done: 0, of: 0 } };
     areas.set(name, area);
+
     for (const s of [area, all]) {
       s.tests.of++;
-      s.tests.done += passes(e) ? 1 : 0;
+      s.tests.done += passed(e) ? 1 : 0;
       s.lines.of += e.lines;
       s.lines.done += e.matched;
     }
@@ -197,9 +209,7 @@ export function scoreCorpus(
       const g = groups.get(group) ?? { tests: 0, classes: new Map<string, number>() };
       groups.set(group, g);
       g.tests++;
-      // The class: up to the # or . after its package's ::, whatever namespace the member has.
-      const at = native[1].indexOf("::") + 2;
-      const owner = native[1].slice(0, at + Math.max(native[1].slice(at).search(/[#.]/), 0));
+      const owner = ownerOf(native[1]);
       g.classes.set(owner, (g.classes.get(owner) ?? 0) + 1);
     } else if (e.error?.includes("is not supported yet")) {
       otherUnsupported++;
@@ -218,6 +228,7 @@ export function scoreCorpus(
       }))
       .sort((a, b) => b.tests - a.tests),
     otherUnsupported,
+    varying,
   };
 }
 
@@ -355,6 +366,7 @@ export function scoreApi(
       missing: [],
     };
     rows.set(name, row);
+
     for (const [key, state] of states) {
       if (state === "air") {
         air++;
@@ -373,13 +385,15 @@ export function scoreApi(
   /** Each member's state over `traits`: "air" if AIR's alone, else whether it is implemented. */
   const members = (owner: string, traits: Trait[], side: string, classAir: boolean) => {
     const states = new Map<string, boolean | "air">();
+
     for (const t of traits) {
       if (!visible(t.name) || t.kind === "class") {
         continue;
       }
 
       const n = parseName(t.name);
-      const key = `${side} ${n.local}`;
+      // By namespace too, so that one name in two namespaces is two members: public names have none.
+      const key = `${side} ${qualified(n)}`;
       let state: boolean | "air" = true;
       if (
         t.kind === "method" ||
@@ -448,6 +462,7 @@ export function scoreApi(
     air,
     unmatched: [...unimplemented.group.keys()].filter((native) => !declared.has(native)),
   };
+
   for (const [name, rows] of [...packages].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const pkg: PackageScore = {
       name: name || "(top level)",
@@ -457,6 +472,7 @@ export function scoreApi(
         a.name === PACKAGE_LEVEL ? -1 : b.name === PACKAGE_LEVEL ? 1 : a.name < b.name ? -1 : 1,
       ),
     };
+
     for (const r of pkg.rows) {
       if (r.name !== PACKAGE_LEVEL) {
         pkg.classes.of++;
@@ -482,12 +498,14 @@ export function readUnimplemented(
   json: Record<string, string | { why: string; natives: string[] }>,
 ): Unimplemented {
   const out: Unimplemented = { group: new Map(), why: new Map() };
+
   for (const [group, entry] of Object.entries(json)) {
     if (typeof entry === "string") {
       continue;
     }
 
     out.why.set(group, entry.why);
+
     for (const native of entry.natives) {
       out.group.set(native, group);
     }
@@ -511,6 +529,7 @@ export function compatibility(root: string): Compatibility {
     json("tests/unit/player/playerglobal/unimplemented-natives.json"),
   );
   const groups: Compatibility["groups"] = {};
+
   for (const [group, why] of unimplemented.why) {
     groups[group] = { why, natives: 0 };
   }

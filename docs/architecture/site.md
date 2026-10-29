@@ -28,10 +28,11 @@ it needs. Its pages, under the base path:
   `compatibility.ts`, from what the repository's tests keep, so a deploy
   from `main` is as current as its baselines:
   - ActionScript 3: `tests/tamarin/swf2es-baseline.json` against
-    avmshell's `baseline.json`, scored as `tests/tamarin/swf2es.ts`
-    scores a run, by suite, with the tests left out said;
-  - Ruffle's corpus: `tests/player/corpus/baseline.json`, tests passed and
-    lines matched by area, and what stops the most, by the groups of
+    avmshell's `baseline.json`, by the rules of `tests/tamarin/score.ts`,
+    which `swf2es.ts` scores its runs with, by suite, with the tests left
+    out said;
+  - Ruffle's corpus: `tests/player/corpus/baseline.json`, tests passed
+    (`standing.ts`, as `run.ts` counts them) and lines matched by area, and what stops the most, by the groups of
     `unimplemented-natives.json` the natives in their errors fall in;
   - the `flash.*` API: the player's playerglobal, read from
     `playerglobal-library.ts` with `tools/abc-surface/read.ts`. Its
