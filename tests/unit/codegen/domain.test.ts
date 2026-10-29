@@ -349,6 +349,117 @@ test("names are visible as avmshell's versioning tests expect", {
   assert.notEqual(find("__AS3__.vec", "Vector"), "none");
 });
 
+// Tamarin's versioning/globals.as expectations at AIR's versions, which its
+// avm_args run avmshell at: a Flash Player version moves to the next AIR one.
+test("names are visible in AIR's series as avmshell's versioning tests expect", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const AIR = [1, 3, 4, 6];
+  const seen = new Map<string, string>();
+  for (const version of AIR) {
+    testing.domainReset(version);
+    for (const name of ["builtin", "shell_toplevel"]) {
+      const bytes = new Uint8Array(readFileSync(new URL(`${name}.abc`, generated)));
+      assert.equal(testing.domainAdd(bytes, true), 0, name);
+    }
+
+    for (const name of [
+      "public_var",
+      "public_var_AIR_1_0",
+      "public_var_FP_10_0",
+      "public_var_AIR_1_5",
+      "public_var_AIR_1_5_1",
+      "public_var_FP_10_0_32",
+      "public_var_AIR_1_5_2",
+      "public_var_AIR_1_0_FP_10_0",
+      "public_var_AIR_1_5_1_FP_10_0_AIR_1_5_2",
+      "public_var_FP_10_0_32_AIR_1_0_FP_10_0",
+    ]) {
+      const visible = find("avmshell", name, version) === "none" ? "-" : "+";
+      seen.set(name, (seen.get(name) ?? "") + visible);
+    }
+  }
+
+  assert.deepEqual(Object.fromEntries(seen), {
+    public_var: "++++",
+    public_var_AIR_1_0: "++++",
+    public_var_FP_10_0: "-+++",
+    public_var_AIR_1_5: "-+++",
+    public_var_AIR_1_5_1: "--++",
+    public_var_FP_10_0_32: "---+",
+    public_var_AIR_1_5_2: "---+",
+    public_var_AIR_1_0_FP_10_0: "++++",
+    public_var_AIR_1_5_1_FP_10_0_AIR_1_5_2: "-+++",
+    public_var_FP_10_0_32_AIR_1_0_FP_10_0: "++++",
+  });
+});
+
+// A builtin ABC whose class B overrides A's m, named in a namespace marked
+// FP_10_0. In AIR's series the binding moves to AIR_1_5; so must the
+// override's lookup, as AvmCore::newNamespace moves every namespace, or B
+// finds nothing to override (VerifyError #1053), as playerglobal's
+// classes did before.
+test("in AIR's series a builtin's override in a Flash Player version finds its base's", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const METHOD_TRAIT = 1;
+  const pool = {
+    strings: ["", "Object", "A", "B", "m", `p${mark(2)}`],
+    namespaces: [
+      [0x16, ...u30(1)],
+      [0x16, ...u30(6)],
+    ],
+    multinames: [
+      [0x07, ...u30(1), ...u30(2)],
+      [0x07, ...u30(1), ...u30(3)],
+      [0x07, ...u30(1), ...u30(4)],
+      [0x07, ...u30(2), ...u30(5)],
+    ],
+  };
+  const overriding = abc(
+    pool,
+    tables({
+      methods: Array.from({ length: 7 }, () => ({})),
+      classes: [
+        {
+          instance: {
+            name: 2,
+            base: 1,
+            init: 0,
+            traits: [{ name: 4, kind: METHOD_TRAIT, index: 4 }],
+          },
+          init: 1,
+        },
+        {
+          instance: {
+            name: 3,
+            base: 2,
+            init: 2,
+            traits: [{ name: 4, kind: METHOD_TRAIT, attr: OVERRIDE, index: 5 }],
+          },
+          init: 3,
+        },
+      ],
+      scripts: [
+        {
+          init: 6,
+          traits: [
+            { name: 2, kind: 4, id: 1, index: 0 },
+            { name: 3, kind: 4, id: 2, index: 1 },
+          ],
+        },
+      ],
+      bodies: [{ method: 6 }],
+    }),
+  );
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const version of [SWF_31, 51]) {
+    testing.domainReset(version);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(overriding, true), 0, `at ${version}`);
+  }
+});
+
 test("classes link to their bases and interfaces as avmplus links them", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {

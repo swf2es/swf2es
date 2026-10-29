@@ -8,10 +8,8 @@ import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
 import { ModuleEmitter } from "./avm2/emit/module";
 import {
-  API_AllVersions,
   DOMAIN_Live,
   Domain,
-  isAir,
   LOG_Found,
   LOG_None,
   LOG_Resolve,
@@ -45,7 +43,6 @@ export function domainReset(apiVersion: i32): void {
   domain = new Domain();
   lazyVerified.clear();
   domain.apiVersion = <u8>apiVersion;
-  domain.air = <u8>apiVersion !== API_AllVersions && isAir(<u8>apiVersion);
   verified = null;
   written = null;
   releaseDecoder();
