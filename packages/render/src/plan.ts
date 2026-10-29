@@ -10,7 +10,9 @@ import {
   STENCIL_PUSH,
 } from "./commands.js";
 import {
+  ALPHA,
   DRAW,
+  ERASE,
   KEPT,
   LAYER_BEGIN,
   LAYER_END,
@@ -102,6 +104,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
         }
 
         out.push(LAYER_POP, scene.geometry[i], scene.row[i], scene.keeps[open.pop() as number]);
+        noteClearing(out, scene.geometry[i]);
         break;
       case KEPT: {
         close(i);
@@ -114,6 +117,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
             scene.blend[i],
             scene.row[i],
           );
+          noteClearing(out, scene.blend[i]);
         }
 
         break;
@@ -126,6 +130,13 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
 
 /** The layers pushed and not yet popped, by number, innermost last. */
 const open: number[] = [];
+
+/** A layer composited in `mode` noted where it clears the target itself (Commands.clearsTarget). */
+function noteClearing(out: Commands, mode: number): void {
+  if (open.length === 0 && (mode === ERASE || mode === ALPHA)) {
+    out.clearsTarget = true;
+  }
+}
 
 /** The LAYER_END that closes the layer begun at entry `begin`. */
 function layerEnd(scene: SceneList, begin: number): number {

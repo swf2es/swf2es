@@ -232,6 +232,8 @@ export class WebGLBackend {
    */
   private stageMsaa: Multisampled | null = null;
   private stageResolved: { framebuffer: WebGLFramebuffer; texture: WebGLTexture } | null = null;
+  /** The layer a frame that clears the stage is drawn into before an opaque canvas (stageAlpha). */
+  private stageLayer: Layer | null = null;
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
   /** A copy of what is below a layer whose mode reads it, the target's size. */
@@ -312,6 +314,7 @@ export class WebGLBackend {
     this.kept = [];
     this.stageMsaa = null;
     this.stageResolved = null;
+    this.stageLayer = null;
     this.freeMsaa = new SizedPool<Multisampled>(msaaBytes);
     this.maxSamples = gl.getParameter(gl.MAX_SAMPLES) as number;
     this.canvasAlpha = gl.getContextAttributes()?.alpha ?? false;
@@ -389,14 +392,22 @@ export class WebGLBackend {
     // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
     // does. Its layers take the stage's, so that their edges are the stage's.
     const stage = root ? null : this.stageBuffers(target.width, target.height, this.samples);
-    if (root) {
+    // An erase or alpha blend outside any layer clears what it covers on the stage, as adl does,
+    // which the blends after it read: an opaque canvas keeps no alpha, so such a frame is drawn
+    // into a layer the canvas' size, then copied onto it. Multisampled buffers keep it already.
+    const cleared =
+      !root && !stage && !this.canvasAlpha && commands.clearsTarget
+        ? this.stageAlpha(target.width, target.height)
+        : null;
+    const into = root ?? cleared;
+    if (into) {
       // Its own stencil, for the masks drawn into it.
-      this.layerMsaa(root, 1);
+      this.layerMsaa(into, 1);
     }
 
     this.frameSamples = stage?.samples ?? 1;
     const canvas: Open = {
-      layer: root,
+      layer: into,
       msaa: stage,
       x: 0,
       y: 0,
@@ -562,6 +573,11 @@ export class WebGLBackend {
       this.present(canvas.msaa);
     }
 
+    if (cleared) {
+      // Its rows run down, the canvas' up.
+      this.toCanvas(cleared.framebuffer, target.width, target.height, true);
+    }
+
     if (counted) {
       this.dropIdleLayers();
       this.frame++;
@@ -607,8 +623,14 @@ export class WebGLBackend {
     return bytes;
   }
 
-  /** The free layers undrawn into for LAYER_IDLE_FRAMES let go of. */
+  /** The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of. */
   private dropIdleLayers(): void {
+    const stage = this.stageLayer;
+    if (stage && this.frame - stage.usedAt > LAYER_IDLE_FRAMES) {
+      this.deleteLayer(stage);
+      this.stageLayer = null;
+    }
+
     this.freeLayers.trim(this.frame, LAYER_IDLE_FRAMES, FREE_BYTES - this.freeMsaa.bytes, (l) =>
       this.deleteLayer(l),
     );
@@ -674,17 +696,61 @@ export class WebGLBackend {
   private present(msaa: Multisampled): void {
     const gl = this.gl;
     const { width, height } = msaa;
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaa.framebuffer);
     const resolved = this.stageResolved;
     if (resolved) {
+      this.state.bindFramebuffer(msaa.framebuffer);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolved.framebuffer);
       gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, resolved.framebuffer);
     }
 
+    this.toCanvas(resolved?.framebuffer ?? msaa.framebuffer, width, height, false);
+  }
+
+  /**
+   * The first `width` by `height` pixels of `source` copied onto the canvas,
+   * upside down where `flip`. Bound through the state cache first and as
+   * it was after, so the cache holds what is bound, whatever it held.
+   */
+  private toCanvas(source: WebGLFramebuffer, width: number, height: number, flip: boolean): void {
+    const gl = this.gl;
+    this.state.bindFramebuffer(source);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
+    const top = flip ? 0 : height;
+    gl.blitFramebuffer(
+      0,
+      0,
+      width,
+      height,
+      0,
+      height - top,
+      width,
+      top,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, source);
+  }
+
+  /**
+   * The layer the canvas' size a frame that clears the stage is drawn into
+   * before an opaque canvas (execute): its own, kept apart from the free
+   * layers so that none smaller takes it, made again for another size, let
+   * go of once idle as they are.
+   */
+  private stageAlpha(width: number, height: number): Layer {
+    const known = this.stageLayer;
+    if (known && known.width === width && known.height === height) {
+      known.usedAt = this.frame;
+      return known;
+    }
+
+    if (known) {
+      this.deleteLayer(known);
+    }
+
+    const layer = this.makeLayer(width, height);
+    this.stageLayer = layer;
+    return layer;
   }
 
   /**
@@ -817,7 +883,6 @@ export class WebGLBackend {
    * targets are alike, and no larger than it needs.
    */
   private takeLayer(width: number, height: number, exact = false): Layer {
-    const gl = this.gl;
     width = layerSide(width);
     height = layerSide(height);
     // Found by its size, or the smallest size held that holds it.
@@ -829,6 +894,12 @@ export class WebGLBackend {
       return found;
     }
 
+    return this.makeLayer(width, height);
+  }
+
+  /** A layer just `width` by `height`, made. */
+  private makeLayer(width: number, height: number): Layer {
+    const gl = this.gl;
     const texture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(LAYER_UNIT, texture);
     this.state.activeTexture(LAYER_UNIT);
@@ -1288,6 +1359,10 @@ export class WebGLBackend {
     }
 
     this.dropStageBuffers();
+    if (this.stageLayer) {
+      this.deleteLayer(this.stageLayer);
+    }
+
     this.freeMsaa.clear((m) => this.deleteMultisampled(m));
 
     for (const texture of this.textures) {
