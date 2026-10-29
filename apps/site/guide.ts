@@ -4,7 +4,7 @@
 // files of the repository go to them on GitHub, and links to a heading of
 // the guide to the page that has it.
 import { readFileSync } from "node:fs";
-import { dirname, join, normalize } from "node:path";
+import { dirname, join, normalize } from "node:path/posix";
 import type { Loader } from "astro/loaders";
 
 /** The guide, by its path in the repository. */
@@ -19,13 +19,68 @@ export interface GuidePage {
   body: string;
 }
 
-/** A heading's anchor as GitHub and Astro make it, for the headings the guide has. */
+/** A heading's anchor as GitHub and Astro make it, before a repeated one is numbered. */
 export function slug(heading: string): string {
   return heading
     .toLowerCase()
     .trim()
     .replace(/[^\p{L}\p{N}\s_-]/gu, "")
     .replace(/\s/g, "-");
+}
+
+/** Anchors for the headings of one document, a repeated one numbered as GitHub does: x, x-1, x-2. */
+function slugger(): (heading: string) => string {
+  const occurrences = new Map<string, number>();
+  return (heading) => {
+    const plain = slug(heading);
+    let anchor = plain;
+    while (occurrences.has(anchor)) {
+      const n = (occurrences.get(plain) ?? 0) + 1;
+      occurrences.set(plain, n);
+      anchor = `${plain}-${n}`;
+    }
+
+    occurrences.set(anchor, 0);
+    return anchor;
+  };
+}
+
+/**
+ * Whether each of `lines` is in a fenced code block, its fences included: a
+ * fence of three or more backticks or tildes, indented up to three spaces,
+ * closes only on a fence of the same character at least as long.
+ */
+export function fenced(lines: string[]): boolean[] {
+  let open: { char: string; length: number } | null = null;
+  return lines.map((line) => {
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open === null) {
+      // A backtick fence's info string has no backtick.
+      if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) {
+        open = { char: fence[1][0], length: fence[1].length };
+        return true;
+      }
+
+      return false;
+    }
+
+    const closes =
+      fence !== null &&
+      fence[1][0] === open.char &&
+      fence[1].length >= open.length &&
+      fence[2].trim() === "";
+    if (closes) {
+      open = null;
+    }
+
+    return true;
+  });
+}
+
+/** An ATX heading's level and text. */
+function heading(line: string): [number, string] | null {
+  const match = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+  return match ? [match[1].length, match[2]] : null;
 }
 
 /**
@@ -39,99 +94,143 @@ export function guidePages(
   base: string,
   blob: string,
 ): GuidePage[] {
-  const parts: { title: string; lines: string[] }[] = [{ title: "", lines: [] }];
-  let fenced = false;
-  for (const line of markdown.split("\n")) {
-    if (/^(```|~~~)/.test(line)) {
-      fenced = !fenced;
+  const lines = markdown.split("\n");
+  const code = fenced(lines);
+  const anchorOf = slugger();
+  const parts: { title: string; anchor: string; lines: string[] }[] = [
+    { title: "", anchor: "", lines: [] },
+  ];
+  // Each heading, by its anchor on GitHub: the part it is in, and its anchor on that page,
+  // where Astro numbers repeated headings afresh. A section's heading is its page's title.
+  const targets = new Map<string, { part: number; anchor: string }>();
+  let pageAnchor = slugger();
+  for (const [i, line] of lines.entries()) {
+    const found = code[i] ? null : heading(line);
+    if (found === null) {
+      parts[parts.length - 1].lines.push(line);
+      continue;
     }
 
-    const heading = fenced ? null : /^(#{1,2}) (.+)$/.exec(line);
-    if (heading?.[1] === "#" && parts.length === 1 && parts[0].title === "") {
-      parts[0].title = heading[2].trim();
-    } else if (heading?.[1] === "##") {
-      parts.push({ title: heading[2].trim(), lines: [] });
+    const [level, text] = found;
+    const anchor = anchorOf(text);
+    if (level === 1 && parts.length === 1 && parts[0].title === "") {
+      parts[0].title = text;
+    } else if (level === 2) {
+      parts.push({ title: text, anchor, lines: [] });
+      pageAnchor = slugger();
     } else {
-      parts.at(-1)?.lines.push(line);
+      parts[parts.length - 1].lines.push(line);
     }
+
+    targets.set(anchor, { part: parts.length - 1, anchor: level <= 2 ? "" : pageAnchor(text) });
   }
 
-  const pages = parts.map(({ title, lines }, order) => ({
-    id: order === 0 ? "docs" : `docs/${slug(title)}`,
+  // GitHub's anchors are unique in the guide, so a section's makes its page's path.
+  const pages = parts.map(({ title, anchor, lines }, order) => ({
+    id: order === 0 ? "docs" : `docs/${anchor}`,
     title: title || "Guide",
     order,
     body: lines.join("\n").trim(),
   }));
-  // Every heading of the guide, by its anchor, and the page it is on.
-  const pageOf = new Map<string, string>();
-  for (const page of pages) {
-    if (page.order > 0) {
-      pageOf.set(slug(page.title), page.id);
-    }
-
-    for (const [, text] of page.body.matchAll(/^#{3,6} (.+)$/gm)) {
-      pageOf.set(slug(text), page.id);
-    }
-  }
-
   const dir = dirname(path);
-  const link = (target: string, from: GuidePage): string => {
-    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+  const link = (target: string, from: number): string => {
+    // A scheme (https:, mailto:) or another host (//host/x) is somewhere else.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) {
       return target;
     }
 
     const hash = target.indexOf("#");
     const file = hash < 0 ? target : target.slice(0, hash);
     const anchor = hash < 0 ? "" : target.slice(hash + 1);
-    if (file === "" || normalize(join(dir, file)) === path) {
-      const page = pageOf.get(anchor);
-      if (page === undefined) {
-        return `#${anchor}`;
-      }
-
-      // A section's own heading is its page's title, the page itself.
-      const own = page !== "docs" && page === `docs/${anchor}`;
-      return page === from.id && !own ? `#${anchor}` : `${base}${page}/${own ? "" : `#${anchor}`}`;
+    // GitHub takes a path from the root as one from the repository's root.
+    const repository = file.startsWith("/") ? normalize(file.slice(1)) : normalize(join(dir, file));
+    if (file !== "" && repository !== path) {
+      return `${blob}${repository}${hash < 0 ? "" : `#${anchor}`}`;
     }
 
-    return `${blob}${normalize(join(dir, file))}${anchor ? `#${anchor}` : ""}`;
+    const to = targets.get(anchor);
+    if (to === undefined) {
+      return `#${anchor}`;
+    }
+
+    if (to.part === from && to.anchor !== "") {
+      return `#${to.anchor}`;
+    }
+
+    return `${base}${pages[to.part].id}/${to.anchor ? `#${to.anchor}` : ""}`;
   };
 
   for (const page of pages) {
-    page.body = rewriteLinks(page.body, (target) => link(target, page));
+    page.body = rewriteLinks(page.body, (target) => link(target, page.order));
   }
 
   // The first page lists the others, which the guide itself has as its headings.
-  pages[0].body += `\n\n${pages
-    .slice(1)
-    .map((p) => `- [${p.title}](${base}${p.id}/)`)
-    .join("\n")}\n`;
+  const list = pages.slice(1).map((p) => `- [${p.title}](${base}${p.id}/)`);
+  pages[0].body += `\n\n${list.join("\n")}\n`;
+
   return pages;
 }
 
-/** `markdown` with the target of each inline link outside code blocks replaced. */
-function rewriteLinks(markdown: string, replace: (target: string) => string): string {
-  let fenced = false;
-  return markdown
-    .split("\n")
-    .map((line) => {
-      if (/^(```|~~~)/.test(line)) {
-        fenced = !fenced;
-      }
+/** `line` cut into the text between code spans (even indices) and the code spans (odd). */
+function codeSpans(line: string): string[] {
+  const parts: string[] = [];
+  const runs = [...line.matchAll(/`+/g)];
+  let text = 0;
+  for (let i = 0; i < runs.length; i++) {
+    // A span closes on the next run of as many backticks, no more and no fewer.
+    const open = runs[i];
+    const close = runs.findIndex((run, j) => j > i && run[0].length === open[0].length);
+    if (close < 0) {
+      continue;
+    }
 
-      if (fenced) {
+    const end = (runs[close].index ?? 0) + runs[close][0].length;
+    parts.push(line.slice(text, open.index), line.slice(open.index, end));
+    text = end;
+    i = close;
+  }
+
+  parts.push(line.slice(text));
+
+  return parts;
+}
+
+/** A link's destination, bare or in <>, and its title, if it has one. */
+const DESTINATION = String.raw`(<[^<>\n]*>|[^\s()<>]+)(\s+(?:"[^"]*"|'[^']*'|\([^()]*\)))?`;
+const INLINE = new RegExp(String.raw`\]\(\s*${DESTINATION}\s*\)`, "g");
+const DEFINITION = new RegExp(String.raw`^( {0,3}\[[^\]]+\]:[ \t]*)${DESTINATION}(.*)$`);
+
+/**
+ * `markdown` with the destination of each link outside code replaced, inline
+ * ([x](to "title"), [x](<to>)) and by reference definition ([x]: to).
+ */
+export function rewriteLinks(markdown: string, replace: (target: string) => string): string {
+  const lines = markdown.split("\n");
+  const code = fenced(lines);
+  const destination = (to: string) =>
+    to.startsWith("<") ? `<${replace(to.slice(1, -1))}>` : replace(to);
+
+  return lines
+    .map((line, i) => {
+      if (code[i]) {
         return line;
       }
 
-      // Inline code keeps its brackets: only what lies between code spans is a link.
-      return line
-        .split(/(`[^`]*`)/)
-        .map((part, i) =>
-          i % 2 === 1
-            ? part
-            : part.replace(/\]\(([^)\s]+)\)/g, (_, t: string) => `](${replace(t)})`),
-        )
-        .join("");
+      const definition = DEFINITION.exec(line);
+      if (definition) {
+        const [, label, to, title = "", rest] = definition;
+        return `${label}${destination(to)}${title}${rest}`;
+      }
+
+      const parts = codeSpans(line);
+      for (let j = 0; j < parts.length; j += 2) {
+        parts[j] = parts[j].replace(
+          INLINE,
+          (_, to: string, title = "") => `](${destination(to)}${title})`,
+        );
+      }
+
+      return parts.join("");
     })
     .join("\n");
 }
@@ -172,6 +271,7 @@ export function guideLoader(options: { root: string; blob: string }): Loader {
           void sync();
         }
       });
+
       await sync();
     },
   };
