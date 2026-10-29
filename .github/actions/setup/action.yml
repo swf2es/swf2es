@@ -1,0 +1,47 @@
+name: Setup
+description: Node, the workspace installed and built, and what the tests need of the oracle.
+inputs:
+  oracle:
+    description: Pull the oracle's image.
+    default: "false"
+  checked:
+    description: Also build the codegen whose every array access is bounds-checked.
+    default: "false"
+  store:
+    description: >-
+      The name this job keeps the oracle's store (oracle/store.ts) under, so parallel jobs
+      save theirs apart; none, no store.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - shell: bash
+      run: pnpm install --frozen-lockfile
+    - shell: bash
+      run: pnpm build
+    - if: inputs.checked == 'true'
+      shell: bash
+      run: pnpm --filter @swf2es/codegen build:wasm:checked
+    - if: inputs.oracle == 'true'
+      shell: bash
+      run: pnpm oracle:pull
+    # What ASC compiled for the tests. Its entries are content-keyed, so any earlier
+    # store helps, and it changes only with the ActionScript ASC compiles, in .as files
+    # or written in the tests' own: keyed by those, a job whose sources are unchanged
+    # restores its store whole and saves none. A new oracle.ts starts over.
+    - if: inputs.store != ''
+      uses: actions/cache@v4
+      with:
+        # Not abcdump's dumps, nine tenths of the store: abcdump runs again instead.
+        path: |
+          ~/.cache/swf2es/oracle
+          !~/.cache/swf2es/oracle/**/*.dump
+        key: oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-${{ inputs.store }}-${{ hashFiles('tests/**/*.as', 'tests/**/*.ts', 'as3/**/*.as', 'oracle/avmplus/test/**/*.as') }}
+        restore-keys: |
+          oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-${{ inputs.store }}-
+          oracle-ci-${{ hashFiles('oracle/oracle.ts') }}-

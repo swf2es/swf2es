@@ -1,6 +1,6 @@
 name: Desktop
-# The desktop app's smoke test in Electron. Apart from CI's build job,
-# which skips it: pnpm install leaves Electron's binary undownloaded, and
+# The desktop app's smoke test in Electron. Apart from CI's test jobs,
+# which skip it: pnpm install leaves Electron's binary undownloaded, and
 # only this job fetches it.
 on:
   workflow_dispatch:
