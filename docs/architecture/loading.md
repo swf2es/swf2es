@@ -281,7 +281,12 @@ class, but `new` makes the first's. `ApplicationDomain.getDefinition`
 lets the error of a lazy script's initializer through, running it again
 at each call, where `hasDefinition` says false and a lookup by code keeps
 the script as run, as avmplus does (`Runtime.definitionNamed`, the
-`definitions` case).
+`definitions` case). Both look a name up at the version of user code
+(`Runtime.apiVersion`, which the player resets the compiler with too), as
+avmplus' public namespace is the caller's: a name of AIR's series or the
+VM's own is not defined to them, as it is not to the code itself, so on
+the web `hasDefinition("flash.desktop.NativeApplication")` is false, as
+in Flash Player's plugin (`air-only.test.ts`).
 
 A SWF the player loads is in the position the oracle's harness puts
 every SWF in, so what the harness could not judge for a main movie, the

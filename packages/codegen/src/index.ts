@@ -6,16 +6,17 @@
  * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture/overview.md.
  */
+import { AIR_API_VERSION, API_VERSION, checkApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
 
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
 
-/**
- * The API version of Flash Player's SWFs' ABCs, which the player and the
- * swf2es command reset the compiler with, and module cache keys name.
- */
-export const API_VERSION = 50;
+// The API versions the player and the swf2es command reset the compiler
+// with, which module cache keys name: Flash Player's, and AIR's, whose
+// series has the names Flash Player's leaves out. format's, which the
+// runtime takes too.
+export { AIR_API_VERSION, API_VERSION };
 
 /** The ABCs added to a compiler, by their indices: each one's hash, and whether it was added as a library. */
 export interface AddedAbcs {
@@ -61,7 +62,7 @@ export function moduleKey(
 
   return JSON.stringify({
     compiler: codegen.identity,
-    api: API_VERSION,
+    api: codegen.apiVersion,
     abcs: context.abcs.map((i) => `${abcs.builtins[i] ? "builtin " : ""}${abcs.hashes[i]}`),
     own: context.own,
     libraries,
@@ -194,8 +195,14 @@ export interface Codegen {
   readonly identity: string | null;
   /** The version at the start of an ABC block, or null if it is too short. */
   abcVersion(abc: Uint8Array): AbcVersion | null;
-  /** Start a domain whose user ABCs have API version `apiVersion`: Flash Player's, 50, by default. */
+  /**
+   * Start a domain whose user ABCs have API version `apiVersion`: Flash
+   * Player's, API_VERSION, by default, or AIR's, AIR_API_VERSION; one
+   * that is neither series' (checkApiVersion) is a RangeError.
+   */
   reset(apiVersion?: number): void;
+  /** The API version of the last reset. */
+  readonly apiVersion: number;
   /**
    * Add an ABC, loaded into application domain `appDomain` (0, the root, by
    * default), linking it against what that domain sees of those before it;
@@ -473,6 +480,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
+  let apiVersion = API_VERSION;
   const collected = <T>(result: T, reclaim = false): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
@@ -494,10 +502,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     get epoch() {
       return epoch;
     },
-    reset(apiVersion = 50) {
+    reset(version = API_VERSION) {
+      checkApiVersion(version);
       added = 0;
       epoch++;
-      collected(wasm.domainReset(apiVersion));
+      apiVersion = version;
+      collected(wasm.domainReset(version));
+    },
+    get apiVersion() {
+      return apiVersion;
     },
     add(abc, builtin = false, appDomain = 0) {
       const error = collected(wasm.domainAdd(abc, builtin, appDomain));

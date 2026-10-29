@@ -157,7 +157,7 @@ const unused: Compare = () => 0;
 /** As ArraySort::FieldCompare: by each field in turn, until one differs. */
 function fieldCompare(rt: Runtime, fields: Field[], options: number): Compare {
   // Each field's name and comparison made once for the sort, not for each comparison.
-  const names = fields.map((field) => publicQname(field.name));
+  const names = fields.map((field) => publicQname(field.name, rt.userVersions));
   const compares = fields.map((field) =>
     field.options & kNumeric
       ? numericCompare(rt)
@@ -252,7 +252,7 @@ function sortWith(
   if (fields && fields.length === 1) {
     // One field: sort by its values, then write back the elements.
     fieldAtoms = new Array(len);
-    const name = publicQname(fields[0].name);
+    const name = publicQname(fields[0].name, rt.userVersions);
     for (let i = len - 1; i >= 0; i--) {
       index[i] = i;
       const v = getElement(rt, d, i);

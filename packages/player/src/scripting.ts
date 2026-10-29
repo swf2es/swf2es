@@ -9,7 +9,7 @@
 // the SWFs' code, what SymbolClass binds, display objects' comings and
 // goings, loads and timers.
 
-import { API_VERSION, type Codegen } from "@swf2es/codegen";
+import { AIR_API_VERSION, API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
@@ -201,8 +201,10 @@ export class Scripting {
   drawer: Drawer | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
-  /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's. */
+  /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's; "application" in AIR. */
   readonly sandboxType: string;
+  /** Whether the SWFs see AIR's API, as in AIR, rather than Flash Player's plugin's. */
+  readonly air: boolean;
   /**
    * Takes the policy files Security.loadPolicyFile names, resolved, for a
    * host that judges requests by them; nothing does by default, as a
@@ -301,15 +303,25 @@ export class Scripting {
 
   constructor(
     readonly codegen: Codegen,
-    options: avm2.RuntimeOptions & {
+    // The API version follows `air`, the one switch for it, below.
+    options: Omit<avm2.RuntimeOptions, "apiVersion"> & {
       fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
       url?: string;
       localConnections?: LocalConnections;
       /**
        * Security.sandboxType: "remote", "localWithFile", "localWithNetwork"
-       * or "localTrusted", as the host placed the SWF; "remote" by default.
+       * or "localTrusted", as the host placed the SWF; "remote" by default,
+       * "application", AIR's application sandbox, with `air`.
        */
       sandboxType?: string;
+      /**
+       * Whether the SWFs play as an AIR application's: AIR's series of API
+       * versions, so that NativeApplication, File and the rest of AIR's
+       * are defined, and AIR's application sandbox. False by default, as
+       * in Flash Player's plugin, where a SWF looks them up to find it is
+       * not in AIR. Capabilities stay the host's.
+       */
+      air?: boolean;
       /** Takes the URLs Security.loadPolicyFile names, resolved: an "xmlsocket:" one as given. */
       loadPolicyFile?: (url: string) => void;
       /**
@@ -443,7 +455,8 @@ export class Scripting {
       ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
       : null;
     this.url = options.url ?? this.url;
-    this.sandboxType = options.sandboxType ?? "remote";
+    this.air = options.air ?? false;
+    this.sandboxType = options.sandboxType ?? (this.air ? "application" : "remote");
     this.loadPolicyFile = options.loadPolicyFile ?? null;
     this.base = options.base ?? null;
     this.loads = new Loads(this, options);
@@ -451,13 +464,14 @@ export class Scripting {
     this.platform = { ...platformCapabilities(), ...options.platform };
     this.maxTouchPoints = Math.max(0, Math.floor(options.maxTouchPoints ?? hostTouchPoints()) || 0);
     this.inputMode = this.maxTouchPoints > 0 ? "gesture" : "none";
+    // One version for the compiler and the runtime, so that what code sees by name it sees by a string too.
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
-      options,
+      { ...options, apiVersion: this.air ? AIR_API_VERSION : API_VERSION },
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);
-    this.codegen.reset(API_VERSION);
+    this.codegen.reset(this.rt.apiVersion);
   }
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */

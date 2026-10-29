@@ -76,7 +76,7 @@ SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/player
 node tests/player/leak.ts [--loads N] [--snapshots DIR]   # load SWFs over and over in Chrome; the
                               # heap after a full collection must stay bounded, and codegen's
                               # memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries]   # AOT:
+node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]   # AOT:
                               # the player's modules for the SWF, their logs and a manifest (libraries
                               # from tests/player/out/libraries/ by default; `compile` may be left out)
 node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the

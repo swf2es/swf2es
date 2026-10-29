@@ -42,6 +42,8 @@ export interface OracleJob {
    * must be relative to the repository root: that is what the container sees.
    */
   ascArgs?: string[];
+  /** Arguments avmshell runs the ABC with, such as -api AIR_1_5 for AIR's series of API versions. */
+  shellArgs?: string[];
 }
 
 export interface OracleResult {
@@ -361,7 +363,8 @@ export function runOracle(
       dumpKey,
       compile,
       dump,
-      line: [...line, (job.ascArgs ?? []).join(" ")],
+      // A field bash's read would not skip if empty, as it skips empty fields between tabs.
+      line: [...line, (job.shellArgs ?? []).join(" ") || "-", (job.ascArgs ?? []).join(" ")],
     };
   });
 
@@ -370,7 +373,8 @@ export function runOracle(
     `out="${out}"`,
     ...(plan.some((p) => p.dump) ? buildAbcdump : []),
     "job() {",
-    `  IFS=$'\t' read -r n f compile dump args <<< "$1"`,
+    `  IFS=$'\t' read -r n f compile dump shell args <<< "$1"`,
+    `  [ "$shell" = - ] && shell=""`,
     `  d=$(dirname "$out/$n")`,
     `  mkdir -p "$d"`,
     `  rm -f "$out/$n.code" "$out/$n.out" "$out/$n.out2" "$out/$n.dump"`,
@@ -382,8 +386,10 @@ export function runOracle(
     `  if [ -f "$out/$n.abc" ]; then`,
     // Run from the job's own directory: tests may write files, which then stay in outDir.
     `    b=$(basename "$n")`,
-    ...(run ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out" 2>&1; echo $? > "$b.code")`] : []),
-    ...(repeat && run ? [`    (cd "$d" && ${avmshell} "$b.abc" > "$b.out2" 2>&1)`] : []),
+    ...(run
+      ? [`    (cd "$d" && ${avmshell} $shell "$b.abc" > "$b.out" 2>&1; echo $? > "$b.code")`]
+      : []),
+    ...(repeat && run ? [`    (cd "$d" && ${avmshell} $shell "$b.abc" > "$b.out2" 2>&1)`] : []),
     `    if [ "$dump" = 1 ]; then`,
     `      (cd "$d" && ${avmshell} "/work/$out/tools/abcdump.abc" -- "$b.abc" > "$b.dump" 2>&1)`,
     "    fi",

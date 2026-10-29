@@ -8,6 +8,7 @@
 // of their own (compileActionsAhead), which needs no library.
 import { createHash } from "node:crypto";
 import {
+  AIR_API_VERSION,
   API_VERSION,
   actionsKey,
   type Codegen,
@@ -18,7 +19,7 @@ import {
 import { type ActionList, isAs3, readActions, readDoAbc, readSwf, tags } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 
-export { API_VERSION };
+export { AIR_API_VERSION, API_VERSION };
 
 export interface AbcInput {
   /** DoABC2's name, "" for a DoABC or a bare ABC. */
@@ -151,17 +152,20 @@ export class RejectedError extends Error {
 
 /**
  * The libraries' modules, those asked for by `keepLibraries`, and the
- * ABCs' modules, in order. The libraries compile whether kept or not: the
- * player compiles each, and what a compile resolves of an ABC is what
- * later ABCs compile against.
+ * ABCs' modules, in order, compiled at `apiVersion`: Flash Player's, or
+ * AIR_API_VERSION for a host that plays them as AIR does (the player's
+ * `air`), whose keys are its alone. The libraries compile whether kept or
+ * not: the player compiles each, and what a compile resolves of an ABC is
+ * what later ABCs compile against.
  */
 export function compileAhead(
   codegen: Codegen,
   libraries: { name: string; abc: Uint8Array }[],
   abcs: AbcInput[],
   keepLibraries = false,
+  apiVersion = API_VERSION,
 ): { libraries: Module[]; libraryInputs: { name: string; abc: Uint8Array }[]; abcs: Module[] } {
-  codegen.reset(API_VERSION);
+  codegen.reset(apiVersion);
   if (
     abcs.some(({ abc }) => {
       const version = codegen.abcVersion(abc);

@@ -44,7 +44,10 @@ with `--emit-libraries`), beside it `abc-<n>.log`, what its compile fixed
 in codegen's domain (`compileModuleLogged`), and `manifest.json`, whose
 `manifestVersion` is 2: the compiler, by `COMPILER_VERSION` and the
 identity stamped into `codegen.wasm` (`Codegen.identity`; version 1 named
-it by its file's SHA-256, which is not what keys name); the API version;
+it by its file's SHA-256, which is not what keys name); the API version
+the modules were compiled at, Flash Player's, or AIR's with `--air`, for
+a player whose `air` is on, which the keys name too, so that a player in
+the other mode finds none of them;
 the input's kind, SWF version and SHA-256; and for each library and ABC
 its name, SHA-256, module and log, the module's key and the module's and
 the log's lengths, and for an ABC its lazy flag. An AVM1 SWF's manifest

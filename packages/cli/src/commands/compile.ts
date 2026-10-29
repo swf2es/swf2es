@@ -6,6 +6,7 @@ import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { COMPILER_VERSION, createCodegen } from "@swf2es/codegen";
 import {
+  AIR_API_VERSION,
   API_VERSION,
   type Avm1Input,
   compileActionsAhead,
@@ -40,6 +41,10 @@ options:
                        the player's own, from the repository's
                        tests/player/out/libraries/, if there
   --emit-libraries     write the libraries' modules too
+  --air                compile for a player that plays the SWF as AIR does
+                       (its \`air\` option), AIR's API defined; a player
+                       in the other mode looks none of the modules up.
+                       Refused for an AVM1 SWF, which has no API versions
   -q, --quiet          print nothing but errors
 ${COMMON_USAGE}
 
@@ -51,6 +56,7 @@ const OPTIONS = {
   out: { type: "string", short: "o" },
   lib: { type: "string", multiple: true },
   "emit-libraries": { type: "boolean" },
+  air: { type: "boolean" },
   quiet: { type: "boolean", short: "q" },
   ...COMMON_OPTIONS,
 } as const;
@@ -114,6 +120,11 @@ export const compile: Command = {
 
     const out = values.out ?? `${basename(file, extname(file))}.swf2es`;
     if (input.avm1) {
+      // AVM1 has no API versions: its module is the same for every player.
+      if (values.air) {
+        usageError(`${file} is an AVM1 SWF, which --air does not apply to`, "compile");
+      }
+
       await compileAvm1(file, bytes, input.avm1, out, values.quiet ?? false);
       return;
     }
@@ -137,7 +148,13 @@ export const compile: Command = {
     const started = performance.now();
     let compiled: ReturnType<typeof compileAhead>;
     try {
-      compiled = compileAhead(codegen, libs, input.abcs, values["emit-libraries"]);
+      compiled = compileAhead(
+        codegen,
+        libs,
+        input.abcs,
+        values["emit-libraries"],
+        values.air ? AIR_API_VERSION : API_VERSION,
+      );
     } catch (e) {
       if (!(e instanceof RejectedError)) {
         fail(String((e as Error).stack ?? e));
@@ -174,7 +191,8 @@ export const compile: Command = {
     const manifest = {
       manifestVersion: MANIFEST_VERSION,
       compiler: { name: "swf2es", version: COMPILER_VERSION, identity: codegen.identity },
-      apiVersion: API_VERSION,
+      // The version the modules were compiled at, which their keys name too.
+      apiVersion: codegen.apiVersion,
       input: {
         file: basename(file),
         kind: input.kind,

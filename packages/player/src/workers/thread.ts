@@ -84,6 +84,7 @@ export function runWorkerThread(port: ThreadPort): void {
       handedModules: init.modules,
       url: init.url,
       sandboxType: init.sandboxType,
+      air: init.air,
       print: (line) => port.post({ type: "trace", line }),
       onUncaught: (error) => port.post({ type: "uncaught", text: describe(error) }),
       workerParent: { id: init.id, post: (message) => port.post(message), shared: init.shared },

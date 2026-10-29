@@ -23,11 +23,12 @@
 // in an API version mark (U+E294 + version), which builtin ABCs use to say
 // which player version introduced a name. The mark is stripped from the URI
 // and kept as the namespace's version. Versions come in two interleaved
-// series, Flash Player's and AIR's; a binding gets the earliest version of
-// its namespaces in the domain's series, where AIR-only versions are
-// VM-internal. It is visible to a lookup whose namespace has an equal or
-// later version. User ABCs' public namespaces get the domain's version, so
-// they cannot see VM-internal names.
+// series, Flash Player's and AIR's, and the domain's version says which it
+// runs; every namespace's version moves into that series, where for Flash
+// Player AIR-only versions are VM-internal. A binding gets the earliest
+// version of its namespaces, and is visible to a lookup whose namespace has
+// an equal or later version. User ABCs' public namespaces get the domain's
+// version, so they cannot see VM-internal names.
 import { Abc } from "../abc/abc";
 import { verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
@@ -127,10 +128,8 @@ const NO_TRAITS = new StaticArray<i32>(0);
 
 @final
 export class Domain {
-  /** The version of user ABCs' public namespaces. */
+  /** The version of user ABCs' public namespaces, whose series is the domain's. */
   apiVersion: u8 = API_LatestFP;
-  /** Whether the domain runs AIR's series of API versions rather than Flash Player's. */
-  air: bool = false;
 
   abcs: Abc[] = [];
   /** Where each ABC's bytes start. */
@@ -712,7 +711,6 @@ export class Domain {
   rebuilt(): Domain | null {
     const fresh = new Domain();
     fresh.apiVersion = this.apiVersion;
-    fresh.air = this.air;
     fresh.domainParent = this.domainParent;
     fresh.domainDepth = this.domainDepth;
     fresh.domainState = this.domainState;
@@ -1415,7 +1413,7 @@ export class Domain {
     }
 
     const nsId = this.abcNs[index][ns];
-    const version = this.activeVersion(this.abcNsVersion[index][ns]);
+    const version = this.abcNsVersion[index][ns];
     traits.add(t, nsId, this.nameOf(index, name), version, BKIND_Var);
     traits.slotCount[t] = 1;
     traits.slotStart[t] = traits.slotType.length;
@@ -1847,14 +1845,14 @@ export class Domain {
       }
 
       let ns = pool.mnA[mn];
-      let version = this.activeVersion(versions[ns]);
+      let version = versions[ns];
       if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
         const set = ns;
         const last = pool.nsSetStart[set + 1];
         ns = pool.nsSetMembers[pool.nsSetStart[set]];
         version = API_Internal;
         for (let m = pool.nsSetStart[set]; m < last; m++) {
-          const v = this.activeVersion(versions[pool.nsSetMembers[m]]);
+          const v = versions[pool.nsSetMembers[m]];
           if (v < version) {
             version = v;
           }
@@ -2048,7 +2046,9 @@ export class Domain {
       }
 
       ids[i] = this.internNamespace(type, uri);
-      versions[i] = version;
+      // As AvmCore::newNamespace: in the domain's series, so that a lookup
+      // compares versions of the series its bindings have.
+      versions[i] = this.activeVersion(version);
     }
 
     this.abcNs.push(ids);
@@ -2075,14 +2075,14 @@ export class Domain {
 
         const name = strings[pool.mnB[mn]];
         let first = pool.mnA[mn];
-        let version = this.activeVersion(versions[first]);
+        let version = versions[first];
         if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
           const set = pool.mnA[mn];
           const last = pool.nsSetStart[set + 1];
           first = pool.nsSetMembers[pool.nsSetStart[set]];
           version = API_Internal;
           for (let m = pool.nsSetStart[set]; m < last; m++) {
-            const v = this.activeVersion(versions[pool.nsSetMembers[m]]);
+            const v = versions[pool.nsSetMembers[m]];
             if (v < version) {
               version = v;
             }
@@ -2099,12 +2099,13 @@ export class Domain {
    * first later one of the domain's, which for Flash Player means AIR-only
    * versions become VM-internal.
    */
-  activeVersion(version: u8): u8 {
-    if (version === API_AllVersions || version >= API_Internal || isAir(version) === this.air) {
+  private activeVersion(version: u8): u8 {
+    const air = this.apiVersion !== API_AllVersions && isAir(this.apiVersion);
+    if (version === API_AllVersions || version >= API_Internal || isAir(version) === air) {
       return version;
     }
 
-    if (!this.air) {
+    if (!air) {
       return API_Internal;
     }
 

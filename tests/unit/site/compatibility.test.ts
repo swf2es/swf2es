@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  AIR_CLASSES,
   type Avmshell,
   compatibility,
   isAirVersion,
@@ -16,6 +15,7 @@ import {
   scoreCorpus,
   scoreTamarin,
 } from "../../../apps/site/compatibility.ts";
+import { AIR_KEPT, AIR_ONLY } from "../../../tools/playerglobal-air.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const abc = playerglobalAbc(
@@ -189,8 +189,13 @@ test("the API: with no native listed every member is implemented, AIR's left out
   assert.deepEqual(score.classes.done, score.classes.of);
   assert.ok(score.air > 0);
   const names = score.packages.flatMap((p) => p.rows.map((r) => `${p.name}::${r.name}`));
-  for (const air of AIR_CLASSES) {
+  for (const air of AIR_ONLY) {
     assert.ok(!names.includes(air), `${air} is AIR's`);
+  }
+
+  // Kept on the web, so scored as a SWF there sees them.
+  for (const kept of AIR_KEPT) {
+    assert.ok(names.includes(kept), `${kept} is the web's`);
   }
 
   assert.ok(!names.some((n) => n.startsWith("flash.filesystem::")), "flash.filesystem is AIR's");

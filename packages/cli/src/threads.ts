@@ -39,6 +39,8 @@ export interface ShellThreadsOptions {
   group?: string;
   /** The shared memory its parent had seen when the thread started. */
   memories?: SharedBytesMemory[];
+  /** The API version the primordial's ABCs run at, which its workers' run at too (ShellOptions.apiVersion). */
+  apiVersion?: number;
 }
 
 /** What a thread is given, as workerData. */
@@ -51,6 +53,7 @@ export interface ShellThreadData {
   post: boolean;
   group: string;
   memories: SharedBytesMemory[];
+  apiVersion?: number;
 }
 
 /** What the memory thread is given, as workerData. */
@@ -145,6 +148,7 @@ export function nodeShellThreads(options: ShellThreadsOptions): ShellThreads {
         post: options.print !== undefined,
         group,
         memories: [...memories.values()],
+        apiVersion: options.apiVersion,
       };
       const worker = new Worker(new URL("./shell-thread.js", import.meta.url), {
         workerData: data,

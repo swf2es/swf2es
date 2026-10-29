@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { AIR_API_VERSION, API_VERSION } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import {
   CONSTANT_MultinameL,
@@ -53,4 +54,17 @@ test("determining an indexed name leaves an object key's string conversion defer
   assert.equal(name.name, "key");
   assert.equal(name.name, "key");
   assert.equal(conversions, 1);
+});
+
+test("a runtime runs only at an API version ABCs run at, and makes its names at it", () => {
+  for (const apiVersion of [0, 52, 256 + API_VERSION, 1.5]) {
+    assert.throws(() => avm2.createRuntime({ apiVersion }), RangeError, `${apiVersion}`);
+  }
+
+  const rt = avm2.createRuntime({ apiVersion: AIR_API_VERSION });
+  assert.deepEqual(
+    [rt.apiVersion, rt.userVersions, rt.toJSONName.versions],
+    [AIR_API_VERSION, [AIR_API_VERSION], [AIR_API_VERSION]],
+  );
+  assert.equal(avm2.createRuntime().apiVersion, API_VERSION);
 });

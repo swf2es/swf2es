@@ -369,14 +369,14 @@ export class TraitsTable {
     }
 
     let ns = pool.mnA[mn];
-    let version = domain.activeVersion(versions[ns]);
+    let version = versions[ns];
     if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
       const set = ns;
       const last = pool.nsSetStart[set + 1];
       ns = pool.nsSetMembers[pool.nsSetStart[set]];
       version = API_Internal;
       for (let m = pool.nsSetStart[set]; m < last; m++) {
-        const v = domain.activeVersion(versions[pool.nsSetMembers[m]]);
+        const v = versions[pool.nsSetMembers[m]];
         if (v < version) {
           version = v;
         }

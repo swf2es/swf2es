@@ -2,7 +2,10 @@
 
 - **avmshell** (avmplus/Tamarin shell) for AS3 semantics: the output of the
   compiled test must match avmshell's `trace()` output exactly. The Tamarin
-  acceptance suite supplies thousands of cases.
+  acceptance suite supplies thousands of cases. A conformance case whose
+  first lines hold `// avmshell: <args>` runs in avmshell with them, and
+  in swf2es at the API version its `-api` names: `api-versions-air.as`
+  runs in AIR's series of API versions.
   The oracle's avmshell is a 32-bit x86 build, whose C++ double arithmetic
   may run in the x87's extended precision. Where that shows, swf2es follows
   IEEE doubles and the cases avoid it: `Number.toString(radix)` of a value

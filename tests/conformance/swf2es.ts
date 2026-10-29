@@ -58,12 +58,16 @@ async function load(js: string): Promise<ShellModule> {
  * scripts on first use, then the ABC's entry point. The lines it traces,
  * or an error.
  */
-export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promise<string[]> {
+export async function runSwf2es(
+  builtins: Uint8Array[],
+  abc: Uint8Array,
+  apiVersion?: number,
+): Promise<string[]> {
   const lines: string[] = [];
   const print = (line: string) => lines.push(line);
   const libraries = builtins.map((bytes, i) => ({ name: `builtin-${i}`, abc: bytes }));
   const abcs = [{ name: "main", abc }];
-  const threads = nodeShellThreads({ codegen, libraries, abcs, print });
+  const threads = nodeShellThreads({ codegen, libraries, abcs, print, apiVersion });
   try {
     await runShell(libraries, abcs, {
       compiler: testingCompiler(testing),
@@ -71,6 +75,7 @@ export async function runSwf2es(builtins: Uint8Array[], abc: Uint8Array): Promis
       print,
       load,
       workers: threads.host,
+      apiVersion,
     });
   } finally {
     await threads.close();

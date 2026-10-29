@@ -35,7 +35,10 @@ const lazyVerified = new Map<u32, StaticArray<i32>>();
  */
 let written: ModuleEmitter | null = null;
 
-/** Start a new domain whose user ABCs have API version `apiVersion`. */
+/**
+ * Start a new domain whose user ABCs have API version `apiVersion`, whose
+ * series, Flash Player's or AIR's, is the domain's.
+ */
 export function domainReset(apiVersion: i32): void {
   domain = new Domain();
   lazyVerified.clear();

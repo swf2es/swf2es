@@ -244,32 +244,6 @@ export function playerglobalAbc(source: string): Uint8Array {
   return new Uint8Array(Buffer.from(base64[1], "base64"));
 }
 
-/**
- * Classes AIR alone has that Flash Player's playerglobal declares with no
- * API version of AIR's, so that their names do not say so: they are left
- * out with what the version marks leave out. NativeMenu and NativeMenuItem
- * stay, ContextMenu's bases in Flash Player.
- */
-export const AIR_CLASSES = [
-  "flash.desktop::InvokeEventReason",
-  "flash.desktop::NativeApplication",
-  "flash.desktop::NativeDragActions",
-  "flash.desktop::NativeDragOptions",
-  "flash.desktop::Updater",
-  "flash.display::NativeWindow",
-  "flash.events::NativeDragEvent",
-  "flash.filesystem::StorageVolumeInfo",
-  "flash.html::HTMLHost",
-  "flash.html::HTMLLoader",
-  "flash.html::HTMLPDFCapability",
-  "flash.net::URLRequestDefaults",
-  "flash.security::IURIDereferencer",
-  "flash.security::RevocationCheckSettings",
-  "flash.security::SignatureStatus",
-  "flash.security::SignerTrustSettings",
-  "flash.security::XMLSignatureValidator",
-];
-
 /** A trait's name, `{kind:uri@vN,...}::local`, as its namespaces, versions and local name. */
 function parseName(name: string): { uri: string; versions: number[]; local: string } {
   const m = /^\{(.*)\}::(.*)$/.exec(name);
@@ -341,8 +315,10 @@ export const PACKAGE_LEVEL = "(package level)";
  * instance side (a getter and a setter of one property are one member).
  * A member is implemented unless one of its methods is a native that
  * `unimplemented` lists; constants, variables and AS3 bodies are. AIR's
- * own API is left out: names whose versions are all AIR's, AIR_CLASSES,
- * and natives listed in the group `airGroup`.
+ * own API is left out: names whose versions are all AIR's, which our
+ * playerglobal's AIR-only classes are too (tools/playerglobal-air.ts), and
+ * natives listed in the group `airGroup`. What the web keeps of AIR's
+ * (AIR_KEPT) counts as Flash Player's, as a SWF there sees it.
  */
 export function scoreApi(
   abc: Uint8Array,
@@ -351,7 +327,6 @@ export function scoreApi(
 ): ApiScore {
   const packages = new Map<string, Map<string, ClassScore>>();
   let air = 0;
-  const airClasses = new Set(AIR_CLASSES);
   const declared = new Set<string>();
 
   const qualified = (n: { uri: string; local: string }) =>
@@ -442,7 +417,7 @@ export function scoreApi(
       }
 
       const name = qualified(n);
-      const classAir = airOnly(n.versions) || airClasses.has(name);
+      const classAir = airOnly(n.versions);
       const states = new Map([
         ...members(`${name}.`, t.class.static, "static", classAir),
         ...members(`${name}#`, t.class.instance, "instance", classAir),
