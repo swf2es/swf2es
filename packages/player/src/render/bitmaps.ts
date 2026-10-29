@@ -10,12 +10,18 @@ import {
   Texture,
   type TextureSource,
 } from "pixi.js";
-import { BitmapStore, type GpuCopy, type PixelRect } from "../bitmap/bitmap.js";
+import {
+  type BitmapStore,
+  characterStore,
+  type GpuCopy,
+  type PixelRect,
+} from "../bitmap/bitmap.js";
 import { type Region as Area, RADIAL_MAX, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
-import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
 import { rgbaOf } from "./filters.js";
 import { drawTarget, releaseDrawTarget } from "./pools.js";
+
+export { characterStore };
 
 /**
  * Make a texture source report "clamp" for addressMode: Pixi turns a
@@ -40,33 +46,6 @@ function destroyTexture(texture: Texture): void {
   source.style.removeAllListeners("change");
   texture.destroy(true);
   (source as unknown as { options: { resource?: unknown } }).options.resource = undefined;
-}
-
-/** Each bitmap's fill store, by its pixels, which the SWFs that define the bitmap alike share. */
-const fillStores = new WeakMap<BitmapPixels, BitmapStore>();
-
-/**
- * The store a SWF bitmap's fills draw from, one for all its shapes and for
- * every SWF that defines it alike, so one texture; null until its image is
- * decoded. Nothing writes it.
- */
-export function characterStore(character: BitmapCharacter): BitmapStore | null {
-  const pixels = character.pixels;
-  if (!pixels) {
-    return null;
-  }
-
-  if (!character.store) {
-    let store = fillStores.get(pixels);
-    if (!store) {
-      store = BitmapStore.of(pixels);
-      fillStores.set(pixels, store);
-    }
-
-    character.store = store;
-  }
-
-  return character.store;
 }
 
 /** RGBA bytes read from a texture as premultiplied ARGB. */

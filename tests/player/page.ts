@@ -436,7 +436,7 @@ async function runSwf(
     // The renderer that draws: Pixi through PixiView, or with ?own the renderer of swf2es's own
     // (docs/renderer.md), which owns its canvas.
     const surface = ownRenderer
-      ? await ownSurface(player, n * zoom, shownAt / zoom)
+      ? await ownSurface(player, n * zoom, shownAt, zoom)
       : await pixiSurface(player, n * zoom, shownAt, zoom, antialias);
     const context = surface.gl;
     const info = context?.getExtension("WEBGL_debug_renderer_info");
@@ -552,8 +552,13 @@ async function pixiSurface(
   };
 }
 
-/** The renderer of swf2es's own (@swf2es/player/scene), at `resolution`, the stage drawn at `scale`. */
-async function ownSurface(player: Player, resolution: number, scale: number): Promise<Surface> {
+/** The renderer of swf2es's own (@swf2es/player/scene), at `resolution`, as pixiSurface shows the stage. */
+async function ownSurface(
+  player: Player,
+  resolution: number,
+  shownAt: number,
+  zoom: number,
+): Promise<Surface> {
   const { RenderView } = await import("@swf2es/player/scene");
   const view = new RenderView({
     width: player.width,
@@ -564,7 +569,9 @@ async function ownSurface(player: Player, resolution: number, scale: number): Pr
     fillTessellator: fillOptions.fillTessellator,
   });
   view.quality = player.quality;
-  view.scale = scale;
+  // Drawn n times finer to be averaged down: the screen is the output canvas.
+  view.screenScale = shownAt;
+  view.scale = shownAt / zoom;
   return {
     name: "own",
     canvas: view.canvas,

@@ -19,6 +19,7 @@ export class GlState {
   private mask = -1;
   private unit = -1;
   private readonly textures: (WebGLTexture | null | undefined)[] = [];
+  private readonly samplers: (WebGLSampler | null | undefined)[] = [];
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
@@ -37,6 +38,7 @@ export class GlState {
     this.mask = -1;
     this.unit = -1;
     this.textures.length = 0;
+    this.samplers.length = 0;
   }
 
   useProgram(program: WebGLProgram | null): void {
@@ -144,6 +146,14 @@ export class GlState {
     this.textures[unit] = texture;
     this.activeTexture(unit);
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+  }
+
+  /** `sampler` bound to texture unit `unit`, or none for the texture's own parameters. */
+  bindSampler(unit: number, sampler: WebGLSampler | null): void {
+    if (this.samplers[unit] !== sampler) {
+      this.samplers[unit] = sampler;
+      this.gl.bindSampler(unit, sampler);
+    }
   }
 
   /** Make `unit` the active one, for an upload to the texture bound there. */

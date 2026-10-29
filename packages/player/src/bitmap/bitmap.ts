@@ -4,6 +4,7 @@
 // alpha and value): premultiplied c' = (c * a + 127) / 255, and back
 // c = min(255, (c' * floor(0xFF00 / a) + 127) >> 8), 0 for alpha 0. An
 // opaque bitmap keeps every alpha at 255.
+import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
 
 export interface PixelRect {
   x: number;
@@ -647,4 +648,31 @@ function scale(p: number, a: number): number {
 
   const channel = (shift: number) => ((((p >>> shift) & 0xff) * a) >> 8) << shift;
   return (channel(24) | channel(16) | channel(8) | channel(0)) >>> 0;
+}
+
+/** Each bitmap's fill store, by its pixels, which the SWFs that define the bitmap alike share. */
+const fillStores = new WeakMap<BitmapPixels, BitmapStore>();
+
+/**
+ * The store a SWF bitmap's fills draw from, one for all its shapes and for
+ * every SWF that defines it alike, so one texture; null until its image is
+ * decoded. Nothing writes it.
+ */
+export function characterStore(character: BitmapCharacter): BitmapStore | null {
+  const pixels = character.pixels;
+  if (!pixels) {
+    return null;
+  }
+
+  if (!character.store) {
+    let store = fillStores.get(pixels);
+    if (!store) {
+      store = BitmapStore.of(pixels);
+      fillStores.set(pixels, store);
+    }
+
+    character.store = store;
+  }
+
+  return character.store;
 }

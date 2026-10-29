@@ -2,7 +2,16 @@
 // contours flattened as Flash's curves need and tessellated by the native
 // tessellator, else planned for JS as crossing spans or a containment tree
 // (render/fill-polygons.ts). Nothing here draws.
-import { CUBIC, inside, LINE, MOVE, type Path, type ShapeLayer } from "../display/shapes.js";
+import type { Region as Area } from "../display/gradients.js";
+import {
+  CUBIC,
+  flatten,
+  inside,
+  LINE,
+  MOVE,
+  type Path,
+  type ShapeLayer,
+} from "../display/shapes.js";
 import { crossingFill } from "../render/fill-polygons.js";
 
 /** Triangles a tessellator made of a fill: positions, two a vertex, and indices, three a triangle. */
@@ -338,4 +347,29 @@ function validGeometry({ vertices, indices, indexOffset = 0 }: FillGeometry): bo
   }
 
   return true;
+}
+
+/** The bounds of a fill's contours, whole pixels out. */
+export function regionOf(contours: Path[]): Area {
+  let x0 = Number.POSITIVE_INFINITY;
+  let y0 = Number.POSITIVE_INFINITY;
+  let x1 = Number.NEGATIVE_INFINITY;
+  let y1 = Number.NEGATIVE_INFINITY;
+  for (const path of contours) {
+    const points = flatten(path);
+    for (let i = 0; i < points.length; i += 2) {
+      x0 = Math.min(x0, points[i]);
+      x1 = Math.max(x1, points[i]);
+      y0 = Math.min(y0, points[i + 1]);
+      y1 = Math.max(y1, points[i + 1]);
+    }
+  }
+
+  if (!(x1 >= x0 && y1 >= y0)) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+
+  const x = Math.floor(x0);
+  const y = Math.floor(y0);
+  return { x, y, width: Math.max(1, Math.ceil(x1) - x), height: Math.max(1, Math.ceil(y1) - y) };
 }

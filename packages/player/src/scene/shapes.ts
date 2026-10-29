@@ -1,19 +1,43 @@
-// A shape layer's fills as a geometry of the renderer's (@swf2es/render):
-// each fill tessellated (fills.ts), in order, its vertices carrying its
-// straight colour. Only solid fills for now; what is left out is counted.
+// A shape layer's fills as geometries of the renderer's (@swf2es/render):
+// each fill tessellated (fills.ts), in order, a geometry for each stretch of
+// solid fills and one for each textured fill, a bitmap's or a gradient's,
+// its vertices carrying where they sample in texels, as Pixi's matrices
+// would map them. What is left out is counted.
 import type { GeometryData } from "@swf2es/render";
-import type { ShapeLayer } from "../display/shapes.js";
-import { type FillTessellator, resolveFills } from "./fills.js";
+import type { Region as Area } from "../display/gradients.js";
+import type { GradientFill, ImageFill, Path, ShapeLayer } from "../display/shapes.js";
+import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
-/** What the renderer cannot draw yet, counted as it is met, for a test or a probe to read. */
+/**
+ * What the renderer cannot draw yet, counted as it is met, for a test or a
+ * probe to read: lines, drawTriangles' meshes and texts left out; masks and
+ * clip layers, scrollRects' clips and 9-slices ignored, so what they would
+ * cut or reshape is drawn whole; filters and blend modes ignored.
+ */
 export const unsupported = {
-  gradientFills: 0,
-  bitmapFills: 0,
   strokes: 0,
   meshes: 0,
-  /** Fills the native tessellator refused, of contours that do not cross, which need a triangulator of holes. */
+  texts: 0,
+  masks: 0,
+  scrollRects: 0,
+  scale9Grids: 0,
+  filters: 0,
+  blendModes: 0,
+  /** Fills the native tessellator refused, of contours one inside another that are not convex alone. */
   containedFills: 0,
 };
+
+/** A layer's geometry for one paint: a stretch of solid fills (null), or a bitmap or gradient fill. */
+export interface Part {
+  geometry: GeometryData;
+  paint: ImageFill | GradientFill | null;
+  /** A radial gradient's region, the texels its texture covers. */
+  region: Area | null;
+}
+
+const WHITE = 0xffffffff;
+/** The texels a linear gradient's ramp has: 256 across the gradient square, -819.2 to 819.2. */
+const RAMP = 256;
 
 /** A straight ARGB colour as a vertex carries it: its bytes red, green, blue and alpha from the lowest. */
 function vertexColor(argb: number): number {
@@ -22,15 +46,118 @@ function vertexColor(argb: number): number {
   );
 }
 
+/** The parts being gathered: positions, colours, texels and indices of the part open. */
+class Gathered {
+  readonly parts: Part[] = [];
+  private positions: number[] = [];
+  private colors: number[] = [];
+  private texels: number[] = [];
+  private indices: number[] = [];
+  private paint: ImageFill | GradientFill | null = null;
+  private region: Area | null = null;
+
+  /** Open a part for `paint`, the one open first closed, unless both are solid. */
+  open(paint: ImageFill | GradientFill | null, region: Area | null): void {
+    if (paint === null && this.paint === null) {
+      return;
+    }
+
+    this.close();
+    this.paint = paint;
+    this.region = region;
+  }
+
+  /** A vertex at (x, y) of `color`, sampling at texel (u, v): its index in the part. */
+  vertex(x: number, y: number, color: number, u: number, v: number): number {
+    this.positions.push(x, y);
+    this.colors.push(color);
+    this.texels.push(u, v);
+    return this.positions.length / 2 - 1;
+  }
+
+  triangle(a: number, b: number, c: number): void {
+    this.indices.push(a, b, c);
+  }
+
+  close(): void {
+    if (this.indices.length > 0) {
+      this.parts.push({
+        geometry: {
+          positions: Float32Array.from(this.positions),
+          colors: Uint32Array.from(this.colors),
+          texels: this.paint ? Float32Array.from(this.texels) : undefined,
+          indices: Uint32Array.from(this.indices),
+        },
+        paint: this.paint,
+        region: this.region,
+      });
+    }
+
+    this.positions = [];
+    this.colors = [];
+    this.texels = [];
+    this.indices = [];
+  }
+}
+
 /**
- * `layer`'s fills as one geometry, positions in the shape's pixels, or
- * null if none of them draws yet. A fill of a bitmap the SWF lacks is red,
- * as Flash draws it.
+ * Where a textured fill samples, in texels, at (x, y) of the shape. A
+ * bitmap: through its matrix's inverse. A linear gradient: across its ramp,
+ * half a pixel back so that a pixel's centre reads what Flash reads at its
+ * corner. A radial one: across the region its texture was computed over.
  */
-export function layerGeometry(
-  layer: ShapeLayer,
-  tessellator: FillTessellator,
-): GeometryData | null {
+type Sampling = (x: number, y: number) => [number, number];
+
+function sampling(
+  paint: ImageFill | GradientFill,
+  contours: readonly Path[],
+): {
+  at: Sampling;
+  region: Area | null;
+} {
+  const m = paint.matrix;
+  const det = m.a * m.d - m.b * m.c;
+  const inverse = (x: number, y: number): [number, number] => {
+    const dx = x - m.tx;
+    const dy = y - m.ty;
+    return [(m.d * dx - m.c * dy) / det, (m.a * dy - m.b * dx) / det];
+  };
+  if (paint.type === "image") {
+    return { at: inverse, region: null };
+  }
+
+  if (!paint.radial) {
+    return {
+      at: (x, y) => {
+        const [sx, sy] = inverse(x - 0.5, y - 0.5);
+        return [((sx + 819.2) * RAMP) / 1638.4, (sy + 819.2) / 1638.4];
+      },
+      region: null,
+    };
+  }
+
+  const region = regionOf(contours as Path[]);
+  const columns = radialTexels(region.width);
+  const rows = radialTexels(region.height);
+  return {
+    at: (x, y) => [
+      ((x - region.x) * columns) / region.width,
+      ((y - region.y) * rows) / region.height,
+    ],
+    region,
+  };
+}
+
+/** The texels a radial gradient's texture has across `pixels` of its region, as the Pixi view computes it. */
+export function radialTexels(pixels: number): number {
+  return Math.min(512, pixels);
+}
+
+/**
+ * `layer`'s fills as geometries in order, positions in the shape's pixels.
+ * A fill of a bitmap the SWF lacks is red, as Flash draws it.
+ */
+export function layerParts(layer: ShapeLayer, tessellator: FillTessellator): Part[] {
   if (layer.strokes.length > 0) {
     unsupported.strokes += layer.strokes.length;
   }
@@ -40,68 +167,110 @@ export function layerGeometry(
   }
 
   if (layer.fills.length === 0) {
-    return null;
+    return [];
   }
 
   const plans = resolveFills(layer, false, tessellator);
-  const positions: number[] = [];
-  const colors: number[] = [];
-  const indices: number[] = [];
+  const out = new Gathered();
   for (let i = 0; i < layer.fills.length; i++) {
-    const { fill } = layer.fills[i];
-    let argb: number;
-    if (fill.type === "solid") {
-      argb = fill.color;
-    } else if (fill.type === "bitmap") {
-      argb = 0xffff0000;
-    } else {
-      if (fill.type === "gradient") {
-        unsupported.gradientFills++;
-      } else {
-        unsupported.bitmapFills++;
+    const { fill, contours } = layer.fills[i];
+    const textured = fill.type === "image" || fill.type === "gradient" ? fill : null;
+    // A paint whose matrix collapses the plane covers nothing, as in the Pixi view.
+    if (textured) {
+      const m = textured.matrix;
+      if (m.a * m.d - m.b * m.c === 0) {
+        continue;
       }
-
-      continue;
     }
 
-    const color = vertexColor(argb);
+    const how = textured ? sampling(textured, contours) : null;
+    out.open(textured, how?.region ?? null);
+    const color = textured ? WHITE : vertexColor(fill.type === "solid" ? fill.color : 0xffff0000);
+    const vertex = (x: number, y: number) => {
+      const [u, v] = how ? how.at(x, y) : [0, 0];
+      return out.vertex(x, y, color, u, v);
+    };
+
     const plan = plans[i];
-    const base = positions.length / 2;
     if (plan.geometry) {
-      const { vertices, indices: own, indexOffset = 0 } = plan.geometry;
-      for (let k = 0; k < vertices.length; k += 2) {
-        positions.push(vertices[k], vertices[k + 1]);
-        colors.push(color);
+      const { vertices, indices, indexOffset = 0 } = plan.geometry;
+      const first = vertex(vertices[0], vertices[1]);
+      for (let k = 2; k < vertices.length; k += 2) {
+        vertex(vertices[k], vertices[k + 1]);
       }
 
-      for (let k = 0; k < own.length; k++) {
-        indices.push(own[k] - indexOffset + base);
+      for (let k = 0; k < indices.length; k += 3) {
+        out.triangle(
+          first + indices[k] - indexOffset,
+          first + indices[k + 1] - indexOffset,
+          first + indices[k + 2] - indexOffset,
+        );
       }
     } else if (plan.crossing) {
       // Disjoint convex pieces between the crossings: each a fan from its first corner.
       for (const piece of plan.crossing) {
-        const first = positions.length / 2;
-        for (let k = 0; k < piece.length; k += 2) {
-          positions.push(piece[k], piece[k + 1]);
-          colors.push(color);
+        const first = vertex(piece[0], piece[1]);
+        for (let k = 2; k < piece.length; k += 2) {
+          vertex(piece[k], piece[k + 1]);
         }
 
         for (let k = 2; k < piece.length / 2; k++) {
-          indices.push(first, first + k - 1, first + k);
+          out.triangle(first, first + k - 1, first + k);
         }
       }
-    } else if (plan.roots.length > 0) {
-      unsupported.containedFills++;
+    } else {
+      // Each region with nothing inside it, convex, as a fan; anything else needs a triangulator of holes.
+      for (const root of plan.roots) {
+        const points = root.points;
+        if (root.children.length > 0 || !convex(points)) {
+          unsupported.containedFills++;
+          continue;
+        }
+
+        const first = vertex(points[0], points[1]);
+        for (let k = 2; k < points.length; k += 2) {
+          vertex(points[k], points[k + 1]);
+        }
+
+        for (let k = 2; k < points.length / 2; k++) {
+          out.triangle(first, first + k - 1, first + k);
+        }
+      }
     }
   }
 
-  if (indices.length === 0) {
-    return null;
+  out.close();
+  return out.parts;
+}
+
+/** A bitmap's quad, `width` by `height` pixels, its texels its pixels. */
+export function bitmapQuad(width: number, height: number): GeometryData {
+  return {
+    positions: Float32Array.of(0, 0, width, 0, width, height, 0, height),
+    colors: Uint32Array.of(WHITE, WHITE, WHITE, WHITE),
+    texels: Float32Array.of(0, 0, width, 0, width, height, 0, height),
+    indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
+  };
+}
+
+/** Whether the polygon `points` turns one way only. */
+function convex(points: number[]): boolean {
+  const n = points.length / 2;
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const k = (i + 2) % n;
+    const cross =
+      (points[j * 2] - points[i * 2]) * (points[k * 2 + 1] - points[j * 2 + 1]) -
+      (points[j * 2 + 1] - points[i * 2 + 1]) * (points[k * 2] - points[j * 2]);
+    if (cross !== 0) {
+      if (sign !== 0 && Math.sign(cross) !== sign) {
+        return false;
+      }
+
+      sign = Math.sign(cross);
+    }
   }
 
-  return {
-    positions: Float32Array.from(positions),
-    colors: Uint32Array.from(colors),
-    indices: Uint32Array.from(indices),
-  };
+  return true;
 }

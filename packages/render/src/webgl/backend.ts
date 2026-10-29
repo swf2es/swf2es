@@ -2,11 +2,14 @@ import { GlState, linkProgram } from "@swf2es/context3d/device";
 import { CLEAR, type Commands, RUN } from "../commands.js";
 import type { Geometries, GeometryData } from "../geometry.js";
 import { ROW_FLOATS, ROWS_A_LINE, type Rows } from "../rows.js";
-import type { SceneList } from "../scene.js";
+import { MIRROR, REPEAT, type SceneList, SMOOTH } from "../scene.js";
+import type { Textures } from "../textures.js";
 import { fillFragment, fillVertex, ROW_TEXELS } from "./programs.js";
 
-/** Bytes a vertex in the atlas: its position's two floats, then its colour's four bytes. */
-const VERTEX_BYTES = 12;
+/** Bytes a vertex in the atlas: its position's two floats, its texel's two, then its colour's four bytes. */
+const VERTEX_BYTES = 20;
+/** The texture unit an entry's texture is bound to; the rows are on 0. */
+const TEXTURE_UNIT = 1;
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const LEAST = 1 << 16;
 /** Holes past which, and past the live vertices, the atlas is packed again. */
@@ -45,6 +48,10 @@ export class WebGLBackend {
   private program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
+  private texturedLocation: WebGLUniformLocation | null = null;
+  /** The textures uploaded, by the registry's ids, and the samplers made, by their bits. */
+  private textures: (WebGLTexture | null)[] = [];
+  private samplers: (WebGLSampler | null)[] = [];
   private vertexArray!: WebGLVertexArrayObject;
   private vertexBuffer!: WebGLBuffer;
   private indexBuffer!: WebGLBuffer;
@@ -64,6 +71,18 @@ export class WebGLBackend {
     this.setUp();
   }
 
+  /**
+   * The context came back after it was lost: everything made again, every
+   * geometry copied in again from the registry's arrays. The textures were
+   * lost with it, which their owners add again (Textures.lost).
+   */
+  restore(geometries: Geometries): void {
+    this.setUp();
+    geometries.added.length = 0;
+    geometries.removed.length = 0;
+    this.repack(geometries);
+  }
+
   /** Programs, buffers and textures made, as the context comes or comes back. */
   private setUp(): void {
     const gl = this.gl;
@@ -73,6 +92,10 @@ export class WebGLBackend {
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
     this.state.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
+    gl.uniform1i(gl.getUniformLocation(this.program, "uTexture"), TEXTURE_UNIT);
+    this.texturedLocation = gl.getUniformLocation(this.program, "uTextured");
+    this.textures = [];
+    this.samplers = [];
     this.vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
     this.vertexBuffer = gl.createBuffer() as WebGLBuffer;
     this.indexBuffer = gl.createBuffer() as WebGLBuffer;
@@ -80,11 +103,14 @@ export class WebGLBackend {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     const position = gl.getAttribLocation(this.program, "aPosition");
+    const texel = gl.getAttribLocation(this.program, "aTexel");
     const color = gl.getAttribLocation(this.program, "aColor");
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, VERTEX_BYTES, 0);
+    gl.enableVertexAttribArray(texel);
+    gl.vertexAttribPointer(texel, 2, gl.FLOAT, false, VERTEX_BYTES, 8);
     gl.enableVertexAttribArray(color);
-    gl.vertexAttribPointer(color, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 8);
+    gl.vertexAttribPointer(color, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 16);
     this.rowsTexture = gl.createTexture() as WebGLTexture;
     this.state.bindTexture(0, this.rowsTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -101,6 +127,7 @@ export class WebGLBackend {
     scene: SceneList,
     rows: Rows,
     geometries: Geometries,
+    textures: Textures,
     target: Target,
   ): void {
     const gl = this.gl;
@@ -109,6 +136,7 @@ export class WebGLBackend {
     }
 
     this.place(geometries);
+    this.uploadTextures(textures);
     this.uploadRows(rows);
     const state = this.state;
     state.bindFramebuffer(null);
@@ -127,6 +155,8 @@ export class WebGLBackend {
     );
 
     let lastRow = -1;
+    let lastTexture = -2;
+    gl.uniform1i(this.texturedLocation, 0);
     const ops = commands.ops;
     for (let k = 0; k < commands.length; k++) {
       const at = k * 4;
@@ -155,6 +185,22 @@ export class WebGLBackend {
               gl.uniform1i(this.rowLocation, row);
             }
 
+            const id = scene.texture[i];
+            const texture = id >= 0 ? (this.textures[id] ?? null) : null;
+            if (id >= 0 && !texture) {
+              continue;
+            }
+
+            if (id >= 0 !== lastTexture >= 0) {
+              gl.uniform1i(this.texturedLocation, id >= 0 ? 1 : 0);
+            }
+
+            lastTexture = id;
+            if (texture) {
+              state.bindTexture(TEXTURE_UNIT, texture);
+              state.bindSampler(TEXTURE_UNIT, this.sampler(scene.sampler[i]));
+            }
+
             gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
           }
 
@@ -162,6 +208,69 @@ export class WebGLBackend {
         }
       }
     }
+  }
+
+  /** The textures removed since the last frame deleted, and those added or changed uploaded, their pixels let go. */
+  private uploadTextures(textures: Textures): void {
+    const gl = this.gl;
+    for (const id of textures.removed) {
+      const texture = this.textures[id];
+      if (texture) {
+        this.state.dropTexture(texture);
+        gl.deleteTexture(texture);
+        this.textures[id] = null;
+      }
+    }
+
+    textures.removed.length = 0;
+    for (const id of textures.pending) {
+      const data = textures.get(id);
+      if (!data?.pixels) {
+        continue;
+      }
+
+      let texture = this.textures[id];
+      if (!texture) {
+        texture = gl.createTexture() as WebGLTexture;
+        this.textures[id] = texture;
+      }
+
+      this.state.bindTexture(TEXTURE_UNIT, texture);
+      this.state.activeTexture(TEXTURE_UNIT);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        data.width,
+        data.height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        data.pixels,
+      );
+      data.pixels = null;
+    }
+
+    textures.pending.length = 0;
+  }
+
+  /** The sampler for `bits` (SMOOTH, and REPEAT or MIRROR), made as first asked for. */
+  private sampler(bits: number): WebGLSampler {
+    const known = this.samplers[bits];
+    if (known) {
+      return known;
+    }
+
+    const gl = this.gl;
+    const sampler = gl.createSampler() as WebGLSampler;
+    const filter = bits & SMOOTH ? gl.LINEAR : gl.NEAREST;
+    const wrap = bits & REPEAT ? gl.REPEAT : bits & MIRROR ? gl.MIRRORED_REPEAT : gl.CLAMP_TO_EDGE;
+    gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, filter);
+    gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, filter);
+    gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, wrap);
+    gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, wrap);
+    this.samplers[bits] = sampler;
+    return sampler;
   }
 
   /** The rows a frame wrote, uploaded in one call, the texture made taller first if they need it. */
@@ -273,10 +382,13 @@ export class WebGLBackend {
     const bytes = new ArrayBuffer(count * VERTEX_BYTES);
     const floats = new Float32Array(bytes);
     const words = new Uint32Array(bytes);
+    const texels = data.texels;
     for (let i = 0; i < count; i++) {
-      floats[i * 3] = data.positions[i * 2];
-      floats[i * 3 + 1] = data.positions[i * 2 + 1];
-      words[i * 3 + 2] = data.colors[i];
+      floats[i * 5] = data.positions[i * 2];
+      floats[i * 5 + 1] = data.positions[i * 2 + 1];
+      floats[i * 5 + 2] = texels ? texels[i * 2] : 0;
+      floats[i * 5 + 3] = texels ? texels[i * 2 + 1] : 0;
+      words[i * 5 + 4] = data.colors[i];
     }
 
     const base = this.vertexTop;
@@ -308,6 +420,18 @@ export class WebGLBackend {
     gl.deleteBuffer(this.vertexBuffer);
     gl.deleteBuffer(this.indexBuffer);
     gl.deleteTexture(this.rowsTexture);
+    for (const texture of this.textures) {
+      if (texture) {
+        gl.deleteTexture(texture);
+      }
+    }
+
+    for (const sampler of this.samplers) {
+      if (sampler) {
+        gl.deleteSampler(sampler);
+      }
+    }
+
     this.state.forget();
   }
 }
