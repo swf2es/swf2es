@@ -397,6 +397,14 @@ document.addEventListener("drop", (e) => {
 
 // --- Controls -----------------------------------------------------------
 
+// The site's search opens on Ctrl or Cmd+K, listening on the window. A key pressed in the
+// player is the SWF's, which has had it by the time it bubbles here: it goes no further.
+stage.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.stopPropagation();
+  }
+});
+
 quality.addEventListener("change", () => player.setAttribute("quality", quality.value));
 scale.addEventListener("change", () => player.setAttribute("scale", scale.value));
 stage3D.addEventListener("change", () => {

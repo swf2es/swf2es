@@ -432,6 +432,38 @@ async function check(): Promise<void> {
           },
         ],
         [
+          "Ctrl+K reaches a focused SWF, not the site's search, which it opens elsewhere",
+          async () => {
+            const open = "document.querySelector('site-search dialog').open";
+            const handled = "document.getElementById('player').player.keyboard.handled";
+            const press = async () => {
+              for (const type of ["keyDown", "keyUp"]) {
+                await send("Input.dispatchKeyEvent", {
+                  type,
+                  key: "k",
+                  code: "KeyK",
+                  windowsVirtualKeyCode: 75,
+                  modifiers: 2,
+                });
+              }
+
+              await new Promise((done) => setTimeout(done, 200));
+            };
+            await value("(document.getElementById('player').focus({ preventScroll: true }), true)");
+            const before = await value<number>(handled);
+            await press();
+            assert.equal((await value<number>(handled)) - before, 2, "Ctrl+K reaches the SWF");
+            assert.equal(await value<boolean>(open), false, "the search opened over the SWF");
+
+            await value("(document.activeElement.blur(), true)");
+            await press();
+            assert.equal(await value<boolean>(open), true, "the search did not open");
+            await value(
+              "(document.querySelector('site-search dialog').close(), document.getElementById('player').focus({ preventScroll: true }), true)",
+            );
+          },
+        ],
+        [
           "the report link carries the SWF's facts and the last error",
           async () => {
             const href = await value<string>(
