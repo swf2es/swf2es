@@ -36,3 +36,69 @@
   --sl-color-accent: #1f5fbf;
   --sl-color-accent-high: #0f2f60;
 }
+
+/*
+ * The home page's way to the player glows in its own colour, the glow breathing slowly (after
+ * daisyUI's aura-glow). It sits behind the button: the hero's actions are its stacking context,
+ * and the button itself makes none.
+ */
+.hero .actions {
+  isolation: isolate;
+}
+
+.hero .actions .primary {
+  position: relative;
+}
+
+.hero .actions .primary::before,
+.hero .actions .primary::after {
+  content: "";
+  position: absolute;
+  inset: -0.25rem;
+  z-index: -1;
+  border-radius: inherit;
+  /* The button's own colour, the light accent in the dark theme. */
+  background: radial-gradient(closest-corner, var(--sl-color-text-accent), transparent);
+  opacity: 0.7;
+  filter: blur(0.25rem);
+  pointer-events: none;
+}
+
+.hero .actions .primary::after {
+  opacity: 0.3;
+  filter: blur(1rem);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero .actions .primary::before {
+    animation: glow 6s ease-out infinite;
+  }
+
+  .hero .actions .primary::after {
+    animation: glow-wide 6s ease-out infinite;
+  }
+}
+
+@keyframes glow {
+  20%,
+  80% {
+    opacity: 0.7;
+    filter: blur(0.25rem);
+  }
+  50% {
+    opacity: 1;
+    filter: blur(0.75rem);
+  }
+}
+
+@keyframes glow-wide {
+  20%,
+  80% {
+    opacity: 0.3;
+    filter: blur(1rem);
+  }
+  50% {
+    opacity: 0.6;
+    filter: blur(1.5rem);
+  }
+}
