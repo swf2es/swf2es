@@ -845,7 +845,7 @@
   "avm2/bitmapdata_copypixelstobytearray": {"matched":40,"lines":40,"traced":40,"error":null},
   "avm2/bitmapdata_dispose": {"matched":2,"lines":7,"traced":7,"error":null},
   "avm2/bitmapdata_draw": {"matched":0,"lines":0,"traced":0,"error":null},
-  "avm2/bitmapdata_draw_alpha_erase": {"matched":1,"lines":8,"traced":8,"error":null},
+  "avm2/bitmapdata_draw_alpha_erase": {"matched":8,"lines":8,"traced":8,"error":null},
   "avm2/bitmapdata_draw_cab_quality": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm2/bitmapdata_draw_colortransform": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm2/bitmapdata_draw_cpu_overwrite_gpu": {"matched":0,"lines":0,"traced":0,"error":null},

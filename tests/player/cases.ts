@@ -9889,6 +9889,14 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "draw-erase",
+    build: drawErase,
+    frames: 3,
+    capture: [1],
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
     name: "native-strings",
     swf: (abc) => bare(abc, 1, "NativeStrings"),
     script: "NativeStrings",
@@ -10782,6 +10790,45 @@ function timelineSounds(compile: Compile): Uint8Array {
         [1, "Tone"],
       ]),
       ...root.flatMap((frame) => [...frame, w.showFrame()]),
+      w.end(),
+    ],
+  });
+}
+
+/** scripts/DrawErase.as, with the kernel that copies its input it runs as CopyKernel. */
+function drawErase(compile: Compile): Uint8Array {
+  const copy = new PbjAssembler()
+    .name("Copy")
+    .version(1)
+    .param("in", "float2", "f0.rg", "_OutCoord")
+    .input(0, 4, "src")
+    .param("out", "float4", "f1.rgba", "dst")
+    .sample(false, "f1.rgba", "f0.rg", 0)
+    .bytes();
+  return w.swf({
+    width: 320,
+    height: 110,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.binaryData(1, copy),
+      w.doAbc(
+        compile(
+          "CopyKernel",
+          "package { import flash.utils.ByteArray; public class CopyKernel extends ByteArray {} }",
+        ),
+        "CopyKernel",
+      ),
+      w.doAbc(compile("DrawErase"), "DrawErase"),
+      w.symbolClass([
+        [0, "DrawErase"],
+        [1, "CopyKernel"],
+      ]),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
       w.end(),
     ],
   });

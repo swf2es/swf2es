@@ -161,6 +161,19 @@ export class BitmapStore {
   private gpuNewer = false;
   /** Counts each change, so a texture of the store knows to upload again. */
   version = 0;
+  /**
+   * Whether the store is opaque but holds pixels below alpha 255, which
+   * erase and alpha leave in one (drawBitmap), as Flash's memory does.
+   * Its pixels then read two ways (adl): as they are, by what reads their
+   * values (getPixel32, getPixels, getVector, clone, compare, floodFill,
+   * Context3D's upload, a ShaderJob's input, unmultiplied), and opaque,
+   * alpha 255 over the premultiplied colour, by what draws or copies them
+   * (draw, copyPixels, encode, the screen, hitTest's alpha): `drawable`.
+   */
+  holdsAlpha = false;
+  /** `drawable`'s pixels and the version they are of, while the store holds alpha. */
+  private opaqueCopy: Uint32Array | null = null;
+  private opaqueVersion = -1;
   disposed = false;
   /**
    * The Bitmaps showing the store, told of each change so the renderer
@@ -309,7 +322,41 @@ export class BitmapStore {
       return 0;
     }
 
-    return unmultiply(this.readable[y * this.width + x]);
+    return this.unmultiplied(this.readable[y * this.width + x]);
+  }
+
+  /**
+   * A stored pixel as its value reads back: unmultiplied, but an opaque
+   * bitmap's as it is, which is the same but where it holds alpha.
+   */
+  unmultiplied(p: number): number {
+    return this.transparent ? unmultiply(p) : p;
+  }
+
+  /**
+   * The pixels as a draw, a copy or the screen reads them, to read only:
+   * `readable`, but where an opaque store holds alpha, a copy at alpha 255.
+   */
+  get drawable(): Uint32Array {
+    const pixels = this.readable;
+    if (!this.holdsAlpha) {
+      return pixels;
+    }
+
+    if (this.opaqueCopy === null || this.opaqueVersion !== this.version) {
+      const copy =
+        this.opaqueCopy?.length === pixels.length
+          ? this.opaqueCopy
+          : new Uint32Array(pixels.length);
+      for (let i = 0; i < pixels.length; i++) {
+        copy[i] = (pixels[i] | 0xff000000) >>> 0;
+      }
+
+      this.opaqueCopy = copy;
+      this.opaqueVersion = this.version;
+    }
+
+    return this.opaqueCopy;
   }
 
   getPixel(x: number, y: number): number {
@@ -408,7 +455,8 @@ export class BitmapStore {
     // source's go over anything unchanged, and a gap is empty. In place,
     // all but a move down and left, which Flash's order smears, are a
     // memmove.
-    const replaces = !alpha && (!source.transparent || (this.transparent && !mergeAlpha));
+    const replaces =
+      !alpha && !source.holdsAlpha && (!source.transparent || (this.transparent && !mergeAlpha));
     const smears = source === this && d.y > sy && d.x < sx;
     if (
       replaces &&
@@ -428,8 +476,10 @@ export class BitmapStore {
     // it moves right.
     const up = source === this && d.y > sy && d.x >= sx;
     const left = source === this && d.x > sx;
-    // The array written, taken once: a source or alpha that is this store reads it too.
+    // The array written, taken once: a source or alpha that is this store reads it too. A
+    // source that holds alpha is copied opaque, as a draw reads it; within itself, as it is.
     const into = this.pixels;
+    const opaque = source !== this && source.holdsAlpha ? source.drawable : null;
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
       const to = (d.y + row) * this.width + d.x;
@@ -437,7 +487,7 @@ export class BitmapStore {
       for (let c = 0; c < d.width; c++) {
         const i = left ? d.width - 1 - c : c;
         // Read again each pixel: a copy within the store reads what it wrote.
-        let p = source.readable[from + i];
+        let p = opaque ? opaque[from + i] : source.readable[from + i];
         if (alpha) {
           const mx = ax + i;
           const my = ay + row;
@@ -544,7 +594,7 @@ export class BitmapStore {
 
     for (let y = c.y; y < c.y + c.height; y++) {
       for (let x = c.x; x < c.x + c.width; x++) {
-        out.push(unmultiply(this.readable[y * this.width + x]));
+        out.push(this.unmultiplied(this.readable[y * this.width + x]));
       }
     }
 
@@ -564,7 +614,7 @@ export class BitmapStore {
     let j = 0;
     for (let y = c.y; y < c.y + c.height; y++) {
       for (let i = y * this.width + c.x, end = i + c.width; i < end; i++, j += 4) {
-        const p = unmultiply(pixels[i]);
+        const p = this.unmultiplied(pixels[i]);
         view.setUint32(j, p, littleEndian);
       }
     }

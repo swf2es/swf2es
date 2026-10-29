@@ -162,8 +162,20 @@ function drawInto(
     return;
   }
 
-  // A BitmapData drawn into itself goes a row at a time; through a Bitmap, in scan order.
-  drawBitmap(store, storeOf(s, data), m, c, blend, r, !!smoothing, o.$store !== undefined);
+  // A BitmapData drawn into itself goes a row at a time; through a Bitmap, in scan order. A
+  // Bitmap is a display object, whose erase and alpha blends a BitmapData's are not.
+  const bitmap = o.$store === undefined;
+  drawBitmap(
+    store,
+    storeOf(s, data),
+    m,
+    c,
+    blend,
+    r,
+    !!smoothing,
+    !bitmap,
+    bitmap ? "bitmap" : null,
+  );
 }
 
 /**
