@@ -674,12 +674,28 @@ async function check(): Promise<void> {
           },
         ],
         [
-          "the home page sends a link to the player, as it was, to the player",
+          "the home page sends the player's old links to it, and notices.html to the licences",
           async () => {
             await navigate("index.html?swf=demos%2Fbounce.swf");
             assert.equal(await value<string>("location.pathname"), "/swf2es/play/");
             assert.equal(await value<string>("location.search"), "?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
+
+            // The licences' old page sends its links on too.
+            await send("Page.navigate", { url: `${base}notices.html` });
+            // Asked while the page moves on, a document may answer nothing.
+            for (let tries = 0; ; tries++) {
+              const at = await evaluate<string>("location.pathname").catch(() => null);
+              if (at?.value === "/swf2es/notices/") {
+                break;
+              }
+
+              assert.ok(tries < 100, `notices.html stayed at ${at?.value}`);
+              await new Promise((done) => setTimeout(done, 100));
+            }
+
+            await until("document.readyState === 'complete'");
+            assert.match(await value<string>("document.querySelector('h1').textContent"), /Licences/);
           },
         ],
         [

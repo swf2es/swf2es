@@ -167,6 +167,19 @@ for (const icon of [
 }
 // Pages serves an artifact as it is; this keeps Jekyll away were it ever built from a branch.
 writeFileSync(join(pub, ".nojekyll"), "");
+// The licences were notices.html, which links shared before point at: to notices/, as Pages
+// sends no redirect of a site's choosing. The home page sends the player's ?swf= on itself.
+writeFileSync(
+  join(pub, "notices.html"),
+  `<!doctype html>
+<meta charset="utf-8">
+<title>Licences</title>
+<link rel="canonical" href="notices/">
+<meta http-equiv="refresh" content="0; url=notices/">
+<script>location.replace("notices/" + location.hash);</script>
+<p><a href="notices/">The licences</a> have moved.</p>
+`,
+);
 
 // Astro asks to send anonymous usage data unless told not to.
 process.env.ASTRO_TELEMETRY_DISABLED ??= "1";
