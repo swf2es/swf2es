@@ -23,6 +23,8 @@ export interface Enumeration {
   names: (EnumeratedName | null)[];
   /** Each name's slot. */
   slot: Map<EnumeratedName, number>;
+  /** The length of an Array's or a Vector's elements when their names were last taken. */
+  elements: number;
 }
 
 /**
@@ -76,9 +78,10 @@ function startEnumeration(
   o: AsObject,
 ): (EnumeratedName | null)[] {
   const names = ownNames(o);
+  const elements = o.$a?.length ?? 0;
   let e = enumerating.get(o);
   if (!e) {
-    e = { names, slot: new Map(names.map((name, i) => [name, i])) };
+    e = { names, slot: new Map(names.map((name, i) => [name, i])), elements };
     enumerating.set(o, e);
     return names;
   }
@@ -106,7 +109,52 @@ function startEnumeration(
     }
   }
 
+  e.elements = elements;
   return e.names;
+}
+
+/** Above this many new indices, the elements are looked up by their keys, not index by index. */
+const ELEMENT_SCAN_LIMIT = 0x10000;
+
+/**
+ * Give elements added past those `e` has names for slots after all the
+ * others, and say whether there were any. avmplus walks an Array's dense
+ * elements and a Vector's by their live length, so a for-in or for each
+ * goes on through what is pushed during it; here they come after the
+ * dynamic names, which differs only for an Array that has both.
+ */
+function takeNewElements(e: Enumeration, o: AsObject): boolean {
+  const a = o.$a;
+  const from = e.elements;
+  if (a === undefined || a.length <= from) {
+    return false;
+  }
+
+  e.elements = a.length;
+  const before = e.names.length;
+  const add = (name: string) => {
+    if (!e.slot.has(name)) {
+      e.slot.set(name, e.names.length);
+      e.names.push(name);
+    }
+  };
+  if (a instanceof FloatVector || a.length - from <= ELEMENT_SCAN_LIMIT) {
+    const holes = !(a instanceof FloatVector);
+    for (let i = from; i < a.length; i++) {
+      if (!holes || i in a) {
+        add(String(i));
+      }
+    }
+  } else {
+    // A sparse Array, as one written far past its end: only its keys.
+    for (const k of Object.keys(a)) {
+      if (arrayIndex(k) >= from) {
+        add(k);
+      }
+    }
+  }
+
+  return e.names.length > before;
 }
 
 /** The name of `o` at a for-in's index: a weak key itself, "" once it is gone. */
@@ -128,18 +176,28 @@ export function nextIndex(
   const names = index === 0 ? startEnumeration(enumerating, o) : (enumerating.get(o)?.names ?? []);
 
   // A name deleted since the for-in started is skipped.
-  for (let i = index; i < names.length; i++) {
-    const name = names[i];
-    if (
-      name !== null &&
-      !(typeof name === "string" && o.$dontEnum?.has(name)) &&
-      stillThere(o, name)
-    ) {
-      return i + 1;
+  let from = index;
+  for (;;) {
+    for (let i = from; i < names.length; i++) {
+      const name = names[i];
+      if (
+        name !== null &&
+        !(typeof name === "string" && o.$dontEnum?.has(name)) &&
+        stillThere(o, name)
+      ) {
+        return i + 1;
+      }
     }
-  }
 
-  return 0;
+    // Elements pushed during the for-in come next, after all the others.
+    const end = names.length;
+    const e = o.$a === undefined ? undefined : enumerating.get(o);
+    if (e === undefined || !takeNewElements(e, o)) {
+      return 0;
+    }
+
+    from = Math.max(from, end);
+  }
 }
 
 function stillThere(o: AsObject, name: EnumeratedName): boolean {
