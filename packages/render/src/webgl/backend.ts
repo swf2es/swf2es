@@ -27,6 +27,7 @@ import {
   SCREEN,
   type SceneList,
   SMOOTH,
+  SNAP,
 } from "../scene.js";
 import type { Textures } from "../textures.js";
 import { FilterRunner } from "./filters.js";
@@ -224,6 +225,9 @@ export class WebGLBackend {
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
   private texturedLocation: WebGLUniformLocation | null = null;
+  private snapLocation: WebGLUniformLocation | null = null;
+  /** Whether the fill program snaps (SNAP) as the last draw told it. */
+  private lastSnap = false;
   /** The meshes' program (MESH), and where it takes its row, view, fragments' place and mode. */
   private mesh!: WebGLProgram;
   private meshRowLocation: WebGLUniformLocation | null = null;
@@ -371,6 +375,8 @@ export class WebGLBackend {
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.program, "uTexture"), TEXTURE_UNIT);
     this.texturedLocation = gl.getUniformLocation(this.program, "uTextured");
+    this.snapLocation = gl.getUniformLocation(this.program, "uSnap");
+    this.lastSnap = false;
     this.mesh = linkProgram(gl, meshVertex, meshFragment);
     this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
     this.meshViewLocation = gl.getUniformLocation(this.mesh, "uView");
@@ -1356,6 +1362,12 @@ export class WebGLBackend {
       }
 
       this.lastTexture = id;
+      const snap = (scene.sampler[i] & SNAP) !== 0;
+      if (snap !== this.lastSnap) {
+        this.lastSnap = snap;
+        gl.uniform1i(this.snapLocation, snap ? 1 : 0);
+      }
+
       if (texture) {
         state.bindTexture(TEXTURE_UNIT, texture);
         state.bindSampler(TEXTURE_UNIT, this.sampler(scene.sampler[i]));

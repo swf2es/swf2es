@@ -63,6 +63,7 @@ export {
   SCREEN,
   SceneList,
   SMOOTH,
+  SNAP,
   SUBTRACT,
 } from "./scene.js";
 export { type TextureData, type TextureHandle, Textures } from "./textures.js";

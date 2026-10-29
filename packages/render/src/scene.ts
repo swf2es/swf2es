@@ -82,6 +82,11 @@ export const MESH = 8;
  * of Flash's, as Flash reads it.
  */
 export const PLANE = 16;
+/**
+ * Its vertices placed on quarters of a stage pixel, ties to even, as Flash
+ * places a glyph's outline (the `legacy-static-text` case, drawn in adl).
+ */
+export const SNAP = 32;
 
 /**
  * A frame's drawing in order: each entry a geometry drawn under a row with

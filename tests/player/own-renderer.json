@@ -207,6 +207,7 @@
   "hidden-strokes",
   "init",
   "instance-names",
+  "legacy-static-text",
   "legacy-static-text-probe",
   "legacy-xml",
   "line-close",
