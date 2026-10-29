@@ -1,19 +1,20 @@
 ---
 // The header's links to the site's parts, before Starlight's social icons.
 import Default from "@astrojs/starlight/components/SocialIcons.astro";
-import { base } from "../site.ts";
+import { base, guide } from "../site.ts";
 
 const here = Astro.url.pathname;
+// Each link is current anywhere under its part of the site.
 const links = [
-  { label: "Play", href: `${base}play/` },
-  { label: "Guide", href: `${base}docs/` },
+  { label: "Play", href: `${base}play/`, part: `${base}play/` },
+  { label: "Guide", href: guide, part: `${base}docs/` },
 ];
 ---
 
 <nav class="site-links" aria-label="Site">
   {
-    links.map(({ label, href }) => (
-      <a href={href} aria-current={here.startsWith(href) ? "page" : undefined}>
+    links.map(({ label, href, part }) => (
+      <a href={href} aria-current={here.startsWith(part) ? "page" : undefined}>
         {label}
       </a>
     ))
