@@ -7,9 +7,10 @@
 //   node tests/tamarin/run.ts [--update-baseline | --relax] [path prefix...]
 //
 // The oracle image is pinned, so avmshell's results can only change with the
-// environment: time of day, machine, thread timing. --relax therefore sets
-// every field that differs from baseline.json to null, which stops it being
-// compared, and keeps the rest.
+// environment: the date and the time of day (TZ is UTC, but some Date tests
+// apply DST rules of their own to the current time), machine, thread timing.
+// --relax therefore sets every field that differs from baseline.json to null,
+// which stops it being compared, and keeps the rest.
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
