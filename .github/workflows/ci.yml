@@ -3,10 +3,11 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-# A push to a PR stops the run before it; main and dev run every push.
+# A push to a PR stops the run before it; each push to main or dev runs in a group of its
+# own, as one waiting in a shared group would be dropped for the next.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -17,15 +18,18 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm check
       - run: pnpm typecheck
-      # Each test package runs in one of the test job's parts below.
+      # Each test package runs in one of the test job's parts below, the player's as its
+      # cases and test:other.
       - run: |
           for package in tests/*/package.json; do
             dir=$(dirname "$package")
-            if jq -e .scripts.test "$package" > /dev/null && ! grep -q -- "$dir\b" .github/workflows/ci.yml; then
+            if jq -e .scripts.test "$package" > /dev/null && ! grep -q -- "--filter ./$dir\b" .github/workflows/ci.yml; then
               echo "$dir has tests that no part of the test job runs"
               exit 1
             fi
           done
+          test "$(jq -r .scripts.test tests/player/package.json)" = "node run.ts && pnpm run test:other" ||
+            { echo "tests/player's test runs more than its cases and test:other, which CI runs"; exit 1; }
       # The pinned Zig, which ziglang.org asks CI to cache rather than fetch each run.
       - uses: actions/cache@v4
         with:
@@ -51,10 +55,12 @@ jobs:
             run: node tests/player/run.ts --shard 3/3
           - name: player
             run: pnpm --filter ./tests/player run test:other
+            bitmaps: true
           - name: compiler
             run: >-
               pnpm -r --filter ./tests/unit --filter ./tests/conformance --filter ./tests/programs
               --filter ./tests/libraries --filter ./tests/desktop test
+            determinism: true
           - name: pages and fuzz
             run: pnpm -r --filter ./tests/web --filter ./tests/site --filter ./tests/fuzz test
     env:
@@ -67,18 +73,18 @@ jobs:
         with:
           oracle: "true"
           # pnpm determinism compiles in the checked build too.
-          checked: ${{ matrix.mode == 'checked' || matrix.part.name == 'compiler' }}
+          checked: ${{ matrix.mode == 'checked' || matrix.part.determinism == true }}
           store: ${{ matrix.mode }}-${{ matrix.part.name }}
       - run: ${{ matrix.part.run }}
-      - if: matrix.mode == 'release' && matrix.part.name == 'player'
+      - if: matrix.mode == 'release' && matrix.part.bitmaps
         run: node tests/player/run.ts apply-filter apply-filter-inner convolution convolution-draw
         env:
           SWF2ES_NATIVE_BITMAPS: "1"
       # After the conformance and programs runners, whose ABCs it compiles again.
-      - if: matrix.mode == 'release' && matrix.part.name == 'compiler'
+      - if: matrix.mode == 'release' && matrix.part.determinism
         run: pnpm determinism
       # A subset of the Tamarin acceptance tests; the full set runs in tamarin.yml.
-      - if: matrix.mode == 'release' && matrix.part.name == 'compiler'
+      - if: matrix.mode == 'release' && matrix.part.determinism
         run: pnpm tamarin ecma3/Array as3/Types
   # Ruffle's corpus against tests/player/corpus/baseline.json, beside the tests, so a
   # change that lowers a test's standing fails its PR.
@@ -93,7 +99,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           oracle: "true"
-          store: corpus
       # Fetched, never committed; a commit's corpus never changes, so it keys the cache.
       - id: ruffle
         run: |

@@ -23,12 +23,13 @@ const args = process.argv.slice(2);
 const update = args.includes("--update");
 const lazyCompilation = args.includes("--lazy");
 const shardAt = args.indexOf("--shard");
-const [shard, shards] = shardAt < 0 ? [1, 1] : args[shardAt + 1].split("/").map(Number);
-if (!(shards >= 1 && shard >= 1 && shard <= shards)) {
-  throw new Error(`--shard takes i/n with 1 <= i <= n, not ${args[shardAt + 1]}`);
+const [shard, shards] =
+  shardAt < 0 ? [1, 1] : (args[shardAt + 1] ?? "").split("/").map((n) => Number(n || NaN));
+if (!(Number.isInteger(shard) && Number.isInteger(shards) && shard >= 1 && shard <= shards)) {
+  throw new Error(`--shard takes i/n, whole numbers with 1 <= i <= n, not ${args[shardAt + 1]}`);
 }
 
-const names = args.filter((a, i) => !a.startsWith("--") && i !== shardAt + 1);
+const names = args.filter((a, i) => !a.startsWith("--") && (shardAt < 0 || i !== shardAt + 1));
 // A case marked as a known gap runs only when named; left out, its SWF is
 // still built, so that a gap case that no longer builds is noticed. Shards
 // take every n-th case, which mixes slow and fast ones alike.

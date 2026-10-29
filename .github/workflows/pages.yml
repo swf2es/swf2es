@@ -21,14 +21,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm oracle:pull
+          oracle: "true"
       - run: pnpm --filter @swf2es/site build
       - uses: actions/upload-pages-artifact@v3
         with:
