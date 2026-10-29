@@ -8,11 +8,16 @@
 //
 // swf2es-baseline.json holds swf2es' results, so that a change that breaks
 // a test that matched fails, and one that fixes a test shows. A test whose
-// entry is null is not compared: one whose result varies from run to run,
-// as with the host's stack depth or a clock. --relax makes each test that
-// differs so, as run.ts's --relax does. Each test runs
-// in one of at most 10 worker processes, which is replaced when a test runs
-// longer than TIMEOUT.
+// entry is null is not compared, nor are an entry's null passed and failed:
+// one whose result varies from run to run, as with the host's stack depth.
+// --relax makes each test that differs so, as run.ts's --relax does: its
+// counts, or the whole entry if it ended otherwise. A test whose counts
+// baseline.json does not compare, avmshell's following the date or the
+// machine, is left out of the score against avmshell, and only compared with
+// swf2es-baseline.json. The workers read a clock that starts at the same
+// instant on every run (clock.ts), so that swf2es' own Date results do not
+// follow the date. Each test runs in one of at most 10 worker processes,
+// which is replaced when a test runs longer than TIMEOUT.
 import { type ChildProcess, fork } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -40,6 +45,12 @@ interface Outcome {
   /** What of the host's stopped it, if anything: an error, or its worker dying. */
   error: string | null;
 }
+
+/** A test in swf2es-baseline.json: its outcome, passed and failed null when not compared. */
+type Recorded = Omit<Outcome, "passed" | "failed"> & {
+  passed: number | null;
+  failed: number | null;
+};
 
 /** avmshell's result for a test, as run.ts records it. */
 interface Avmshell {
@@ -110,6 +121,8 @@ async function runAll(count: number): Promise<void> {
 
       const spawn = () => {
         const c = fork(`${here}swf2es-worker.ts`, [], {
+          // The clock every run reads the same, in the worker's threads too.
+          execArgv: [...process.execArgv, "--import", new URL("./clock.ts", import.meta.url).href],
           // A test's own output comes back over IPC; a worker that runs out
           // of memory would only print V8's stack.
           stdio: ["ignore", "ignore", "ignore", "ipc"],
@@ -170,17 +183,24 @@ async function runAll(count: number): Promise<void> {
 
 await runAll(Math.min(10, availableParallelism(), queue.length));
 
-/** Whether swf2es passed and failed the checks avmshell did, and ended as it did, nothing of the host's stopping it. */
-const matches = (path: string, o: Outcome) =>
+/** Whether baseline.json compares avmshell's counts for the test: not where they follow the date or the machine. */
+const counted = (path: string) => avmshell[path].passed !== null && avmshell[path].failed !== null;
+
+/**
+ * Whether swf2es ended as avmshell did, nothing of the host's stopping it,
+ * and, with `counts`, passed and failed the checks avmshell did.
+ */
+const matches = (path: string, o: Recorded, counts = counted(path)) =>
   o.error === null &&
-  o.exitCode === avmshell[path].exitCode &&
-  o.passed === (avmshell[path].passed ?? 0) &&
-  o.failed === (avmshell[path].failed ?? 0);
+  (avmshell[path].exitCode === null || o.exitCode === avmshell[path].exitCode) &&
+  (!counts || (o.passed === avmshell[path].passed && o.failed === avmshell[path].failed));
 
 // By directory: tests that match, of those run, and checks passed, swf2es against avmshell.
 const byDir = new Map<string, { tests: number; matched: number; ours: number; theirs: number }>();
 const reasons = new Map<string, number>();
-for (const [path, o] of Object.entries(outcomes)) {
+const all = Object.entries(outcomes);
+const scored = all.filter(([path]) => counted(path));
+for (const [path, o] of scored) {
   // as3, e4x and ecma3 by their second level; the rest, a test or a few per directory, by their first.
   const parts = path.split("/");
   const dir = parts.slice(0, ["as3", "e4x", "ecma3"].includes(parts[0]) ? 2 : 1).join("/");
@@ -196,7 +216,7 @@ for (const [path, o] of Object.entries(outcomes)) {
       o.error ??
       (o.exitCode !== avmshell[path].exitCode
         ? `ended with ${o.exitCode === 124 ? "a timeout" : `exit code ${o.exitCode}`}, avmshell with ${avmshell[path].exitCode}`
-        : o.passed < (avmshell[path].passed ?? 0)
+        : o.passed < (avmshell[path].passed as number)
           ? "fewer checks passed"
           : "other checks failed");
     reasons.set(why, (reasons.get(why) ?? 0) + 1);
@@ -205,13 +225,14 @@ for (const [path, o] of Object.entries(outcomes)) {
   byDir.set(dir, d);
 }
 
-const all = Object.entries(outcomes);
-const matched = all.filter(([p, o]) => matches(p, o)).length;
-const checks = all.reduce((n, [, o]) => n + o.passed, 0);
-const theirChecks = all.reduce((n, [p]) => n + (avmshell[p].passed ?? 0), 0);
+const matched = scored.filter(([p, o]) => matches(p, o)).length;
+const checks = scored.reduce((n, [, o]) => n + o.passed, 0);
+const theirChecks = scored.reduce((n, [p]) => n + (avmshell[p].passed as number), 0);
 const seconds = ((performance.now() - started) / 1000).toFixed(0);
 console.log(`tamarin in swf2es: ${all.length} tests in ${seconds} s`);
-console.log(`  as avmshell: ${matched} tests (${((100 * matched) / all.length).toFixed(1)}%)`);
+console.log(
+  `  as avmshell: ${matched} of ${scored.length} tests (${((100 * matched) / scored.length).toFixed(1)}%); ${all.length - scored.length} not scored, avmshell's counts not compared`,
+);
 console.log(
   `  checks passed: ${checks} of avmshell's ${theirChecks} (${((100 * checks) / theirChecks).toFixed(1)}%)`,
 );
@@ -228,11 +249,11 @@ for (const [why, n] of [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 30)) {
 }
 
 // Against the baseline: a test that matched and no longer does is a regression.
-const baseline: Record<string, Outcome | null> = existsSync(baselineFile)
+const baseline: Record<string, Recorded | null> = existsSync(baselineFile)
   ? JSON.parse(readFileSync(baselineFile, "utf8"))
   : {};
 
-function writeBaseline(entries: Record<string, Outcome | null>): void {
+function writeBaseline(entries: Record<string, Recorded | null>): void {
   const sorted = Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   writeFileSync(
     baselineFile,
@@ -242,10 +263,18 @@ function writeBaseline(entries: Record<string, Outcome | null>): void {
 }
 
 if (update) {
-  // A test not compared stays so.
-  const merged: Record<string, Outcome | null> = prefixes.length ? { ...baseline } : {};
+  // A test or a count not compared stays so.
+  const merged: Record<string, Recorded | null> = prefixes.length ? { ...baseline } : {};
   for (const [path, o] of all) {
-    merged[path] = baseline[path] === null ? null : o;
+    const before = baseline[path];
+    merged[path] =
+      before === null
+        ? null
+        : {
+            ...o,
+            passed: before?.passed === null ? null : o.passed,
+            failed: before?.failed === null ? null : o.failed,
+          };
   }
 
   writeBaseline(merged);
@@ -263,13 +292,16 @@ if (update) {
       continue;
     }
 
-    const was = matches(path, before);
-    const is = matches(path, o);
+    // Counts not compared with avmshell's are still compared with swf2es' own, unless relaxed too.
+    const ours = before.passed !== null && before.failed !== null;
+    const counts = counted(path) && ours;
+    const was = matches(path, before, counts);
+    const is = matches(path, o, counts);
     if (was && !is) {
       regressions.push(`${path}: ${JSON.stringify(o)}, was ${JSON.stringify(before)}`);
     } else if (!was && is) {
       fixed.push(path);
-    } else if (!is && o.passed < before.passed) {
+    } else if ((!is || !counted(path)) && ours && o.passed < (before.passed as number)) {
       regressions.push(`${path}: ${o.passed} checks passed, was ${before.passed}`);
     }
   }
@@ -282,7 +314,14 @@ if (update) {
 
   if (relax) {
     for (const r of regressions) {
-      baseline[r.split(":")[0]] = null;
+      const path = r.split(":")[0];
+      const before = baseline[path];
+      const o = outcomes[path];
+      // Only the counts if it ended as before, else the whole entry.
+      baseline[path] =
+        before && o.exitCode === before.exitCode && o.error === before.error
+          ? { ...before, passed: null, failed: null }
+          : null;
     }
 
     writeBaseline(baseline);
