@@ -39,6 +39,7 @@ import {
   pairIndex,
   pairOf,
 } from "./enumeration.js";
+import { AsError, describe, errorMessage, stackOf } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -85,7 +86,6 @@ import {
   type ShellWorkerHost,
   type ShellWorkerInit,
 } from "./options.js";
-import { errorMessages } from "./player-messages.js";
 import {
   cached,
   epoch,
@@ -116,6 +116,8 @@ import {
   VectorRef,
 } from "./traits.js";
 
+export { AsError } from "./errors.js";
+
 /**
  * A sealed Array subclass's elements from SWF 13, as avmplus' ArrayObject
  * keeps none for one: never any. Shared and frozen; what writes elements
@@ -126,9 +128,6 @@ export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 // Object coercions use the same two lookup orders without allocating per call.
 const STRING_PRIMITIVE_ORDER = ["toString", "valueOf"] as const;
 const NUMBER_PRIMITIVE_ORDER = ["valueOf", "toString"] as const;
-
-/** Thrown for an AS3 exception that is an Error the runtime made, before its class existed. */
-export class AsError extends Error {}
 
 export class Runtime {
   readonly print: (line: string) => void;
@@ -2623,36 +2622,14 @@ export class Runtime {
     return this.constructClass(cls, [message, id]);
   }
 
-  /**
-   * Where an AS3 error was made, as JavaScript stack lines from the first
-   * compiled method's (their names begin with `$`), the runtime's and the
-   * player's frames before it left out, those between kept; every line if
-   * no compiled method made it, and null for anything but an AS3 error.
-   */
+  /** Where an AS3 error was made, as JavaScript stack lines (see stackOf in errors.ts). */
   stackOf(error: Value): string | null {
-    const made = (error as { $jsError?: Error } | null)?.$jsError;
-    if (!(made instanceof Error) || !made.stack) {
-      return null;
-    }
-
-    // V8 heads its stack with the error's own line; other engines give frames alone, `name@url`.
-    const frames = made.stack.split("\n").filter((line) => !/^Error\b/.test(line));
-    const first = frames.findIndex((line) => /^(?:\s*at (?:[\w$]+\.)?)?\$[\w$]/.test(line));
-    return frames.slice(Math.max(0, first)).join("\n");
+    return stackOf(error);
   }
 
-  /**
-   * Error `id`'s message as AS3 sees it: its number, as the release player
-   * and avmshell give it, or with its text and arguments in debugger mode.
-   */
+  /** Error `id`'s message as AS3 sees it (see errorMessage in errors.ts). */
   errorMessage(id: number, args: Value[] = []): string {
-    if (!this.debugger) {
-      return `Error #${id}`;
-    }
-
-    const template = errorMessages[id] ?? "";
-    const text = template.replace(/%(\d)/g, (_, n) => String(args[Number(n) - 1] ?? ""));
-    return `Error #${id}: ${text}`;
+    return errorMessage(this.debugger, id, args);
   }
 
   /** As MethodEnv::argcError: ArgumentError 1063, with the count required and the count given. */
@@ -2666,12 +2643,7 @@ export class Runtime {
 
   /** A value as avmplus names it in an error message. */
   describe(v: Value): string {
-    if (v === null || typeof v !== "object" || v instanceof FloatValue || v instanceof Namespace) {
-      return this.toString(v);
-    }
-
-    const name: string = v.$traits.name;
-    return `${name.slice(name.lastIndexOf("::") + (name.includes("::") ? 2 : 0))}@0`;
+    return describe(this, v);
   }
 
   /** An exception as AS3 catches it: a stack overflow is an AS3 Error; the runtime's own errors are not caught. */
