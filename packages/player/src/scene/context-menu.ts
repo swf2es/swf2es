@@ -161,7 +161,9 @@ export function bindContextMenu(
     const clientY = keyboard ? canvasRect.top + canvasRect.height / 2 : event.clientY;
     host.style.left = `${Math.max(4, Math.min(clientX, (window?.innerWidth ?? 0) - rect.width - 4))}px`;
     host.style.top = `${Math.max(4, Math.min(clientY, (window?.innerHeight ?? 0) - rect.height - 4))}px`;
-    (buttons[0] ?? menu).focus({ preventScroll: true });
+    // From the keyboard the first item takes focus; from the pointer none does, as in a native
+    // menu, so no item looks chosen before the pointer reaches it.
+    (keyboard ? (buttons[0] ?? menu) : menu).focus({ preventScroll: true });
 
     const inside = (e: Event) => e.composedPath().includes(host);
     document.addEventListener(
@@ -210,7 +212,7 @@ export function bindContextMenu(
             next = (index + 1) % buttons.length;
             break;
           case "ArrowUp":
-            next = (index - 1 + buttons.length) % buttons.length;
+            next = index < 0 ? buttons.length - 1 : (index - 1 + buttons.length) % buttons.length;
             break;
           case "Home":
             next = 0;

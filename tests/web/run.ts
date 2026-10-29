@@ -1210,6 +1210,12 @@ check(
         ),
         true,
       );
+      // Opened by the pointer, no item has focus until a key moves it there.
+      assert.equal(
+        await call(evaluate, "menuHost().shadowRoot.activeElement?.getAttribute('role')"),
+        "menu",
+      );
+      await key("ArrowDown", 40);
       await key("ArrowDown", 40);
       assert.equal(
         await call(evaluate, "menuHost().shadowRoot.activeElement.textContent"),
@@ -1230,6 +1236,12 @@ check(
       assert.equal(await call(evaluate, "document.activeElement === menuPlayer"), true);
 
       await open();
+      await key("ArrowUp", 38);
+      assert.equal(
+        await call(evaluate, "menuHost().shadowRoot.activeElement.textContent"),
+        "About swf2es",
+        "ArrowUp with no item focused goes to the last",
+      );
       await call(evaluate, "window.cancelledMenuButton = menuButtons()[0]; true");
       await key("Escape", 27);
       await call(evaluate, "cancelledMenuButton.click(); true");
@@ -1249,6 +1261,14 @@ check(
         });
       }
       assert.equal(await call(evaluate, "menuHost() !== null"), true, "Shift+F10 opens the menu");
+      assert.equal(
+        await call(
+          evaluate,
+          "menuHost().shadowRoot.activeElement === menuButtons().find((b) => !b.disabled)",
+        ),
+        true,
+        "a menu opened from the keyboard focuses its first item",
+      );
       await key("Escape", 27);
 
       await call(evaluate, 'menuPlayer.menuMode("own"); true');
