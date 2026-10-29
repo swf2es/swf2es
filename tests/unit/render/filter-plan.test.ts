@@ -13,6 +13,7 @@ import {
   READ_BACK_PASS,
   SHRINK_PASS,
 } from "../../../packages/render/dist/filter-plan.js";
+import * as filterShaders from "../../../packages/render/dist/filter-shaders.js";
 import {
   BLUR,
   COLOR_MATRIX,
@@ -113,4 +114,15 @@ test("a blur close enough coarser is drawn back between its texels", () => {
   assert.equal(last.program, READ_BACK_PASS);
   assert.equal(last.input, 0);
   assert.ok(last.blurred > 0);
+});
+
+test("every filter shader reads its input and its blur as the runner can keep them to a rectangle", () => {
+  for (const [name, source] of Object.entries(filterShaders)) {
+    if (typeof source !== "string") {
+      continue;
+    }
+
+    const reads = source.replaceAll("texture(uTexture,", "").replaceAll("texture(uBlurred,", "");
+    assert.doesNotMatch(reads, /\b(texture\w*|texelFetch\w*)\s*\(\s*u(Texture|Blurred)\b/, name);
+  }
 });

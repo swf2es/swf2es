@@ -41,10 +41,19 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
     heldAt = new Int32Array(Math.max(scene.length, heldAt.length * 2));
   }
 
+  heldAt.fill(-1, 0, scene.length);
   let holds = 0;
+
   for (let i = 0; i < scene.length; i++) {
-    heldAt[i] = -1;
-    if (scene.kind[i] === LAYER_BEGIN && holdable(scene, i)) {
+    if (scene.kind[i] !== LAYER_BEGIN) {
+      continue;
+    }
+
+    const at = scene.geometry[i] * 4;
+    if (scene.layers[at + 2] <= 0 || scene.layers[at + 3] <= 0) {
+      // Left out, all in it (emit): none held.
+      i = layerEnd(scene, i);
+    } else if (holdable(scene, i)) {
       heldAt[i] = holds++;
     }
   }
@@ -176,19 +185,13 @@ function emit(scene: SceneList, from: number, to: number, out: Commands): void {
 let heldAt = new Int32Array(256);
 
 /**
- * Whether the layer begun at entry `begin` is held: of some size, filtered,
+ * Whether the layer begun at entry `begin`, of some size, is held: filtered,
  * not kept for the frames after, and of draws and masks alone, with no
  * layer or kept output in it, whose content no other target takes part in.
  */
 function holdable(scene: SceneList, begin: number): boolean {
   const layer = scene.geometry[begin];
-  const at = layer * 4;
-  if (
-    scene.layers[at + 2] <= 0 ||
-    scene.layers[at + 3] <= 0 ||
-    scene.pads[layer] < 0 ||
-    scene.keeps[layer] >= 0
-  ) {
+  if (scene.pads[layer] < 0 || scene.keeps[layer] >= 0) {
     return false;
   }
 

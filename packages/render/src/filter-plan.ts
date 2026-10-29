@@ -146,10 +146,18 @@ export class FilterPlan {
     return pass;
   }
 
-  /** A uniform of the pass begun last, set `kind` from `values`. */
-  uniform(name: string, kind: number, ...values: number[]): void {
-    this.uniformFrom(name, kind, values, 0, values.length);
+  /** A uniform of `count` floats of the pass begun last, `x` and those after. */
+  uniform(name: string, count: number, x: number, y = 0, z = 0, w = 0): void {
+    const four = this.four;
+    four[0] = x;
+    four[1] = y;
+    four[2] = z;
+    four[3] = w;
+    this.uniformFrom(name, FLOATS, four, 0, count);
   }
+
+  /** uniform's values, passed on without an array of their own. */
+  private readonly four = new Float64Array(4);
 
   /** A uniform of the pass begun last, set `kind` from `count` of `source` from `at`. */
   uniformFrom(name: string, kind: number, source: ArrayLike<number>, at: number, count: number) {
@@ -317,12 +325,12 @@ function glow(
   const out = plan.slot(width, height);
   readBlurred(plan.pass(GLOW_PASS, input, width, height, out, width, height), blurred);
   plan.uniformFrom("uColor", FLOATS, v, at + 4, 3);
-  plan.uniform("uAlpha", FLOATS, v[at + 7]);
-  plan.uniform("uStrength", FLOATS, strength);
+  plan.uniform("uAlpha", 1, v[at + 7]);
+  plan.uniform("uStrength", 1, strength);
   plan.uniformFrom("uOffset", FLOATS, v, at + 9, 2);
-  plan.uniform("uInner", FLOATS, v[at + 11]);
-  plan.uniform("uKnockout", FLOATS, v[at + 12]);
-  plan.uniform("uHide", FLOATS, v[at + 13]);
+  plan.uniform("uInner", 1, v[at + 11]);
+  plan.uniform("uKnockout", 1, v[at + 12]);
+  plan.uniform("uHide", 1, v[at + 13]);
   return out;
 }
 
@@ -341,12 +349,12 @@ function bevel(
   readBlurred(plan.pass(BEVEL_PASS, input, width, height, out, width, height), blurred);
   plan.uniformFrom("uHighlight", FLOATS, v, at + 4, 3);
   plan.uniformFrom("uShadow", FLOATS, v, at + 7, 3);
-  plan.uniform("uHighlightAlpha", FLOATS, v[at + 10]);
-  plan.uniform("uShadowAlpha", FLOATS, v[at + 11]);
-  plan.uniform("uStrength", FLOATS, v[at + 12]);
+  plan.uniform("uHighlightAlpha", 1, v[at + 10]);
+  plan.uniform("uShadowAlpha", 1, v[at + 11]);
+  plan.uniform("uStrength", 1, v[at + 12]);
   plan.uniformFrom("uOffset", FLOATS, v, at + 13, 2);
-  plan.uniform("uType", FLOATS, v[at + 15]);
-  plan.uniform("uKnockout", FLOATS, v[at + 16]);
+  plan.uniform("uType", 1, v[at + 15]);
+  plan.uniform("uKnockout", 1, v[at + 16]);
   return out;
 }
 
@@ -367,15 +375,15 @@ function gradient(
   const pass = plan.pass(GRADIENT_PASS, input, width, height, out, width, height);
   readBlurred(pass, blurred);
   pass.texture = id;
-  plan.uniform("uStrength", FLOATS, v[at + 4]);
+  plan.uniform("uStrength", 1, v[at + 4]);
   plan.uniformFrom("uOffset", FLOATS, v, at + 5, 2);
-  plan.uniform("uType", FLOATS, v[at + 7]);
-  plan.uniform("uKnockout", FLOATS, v[at + 8]);
-  plan.uniform("uBevel", FLOATS, v[at + 9]);
+  plan.uniform("uType", 1, v[at + 7]);
+  plan.uniform("uKnockout", 1, v[at + 8]);
+  plan.uniform("uBevel", 1, v[at + 9]);
   const inset = v[at + 10];
   plan.uniform(
     "uRegion",
-    FLOATS,
+    4,
     inset - v[at + 11] * units,
     inset - v[at + 12] * units,
     width / plan.resolution - inset + units + v[at + 13] * units,
@@ -417,17 +425,17 @@ function convolution(
   const out = plan.slot(width, height);
   plan.pass(CONVOLUTION_PASS, input, width, height, out, width, height);
   plan.uniformFrom("uMatrix", VEC4S, weights, 0, weights.length);
-  plan.uniform("uSize", FLOATS, columns, rows);
+  plan.uniform("uSize", 2, columns, rows);
   plan.uniformFrom("uEdge", FLOATS, v, at + 2, 4);
-  plan.uniform("uDivisor", FLOATS, v[at + 6]);
-  plan.uniform("uReciprocal", FLOATS, v[at + 7]);
-  plan.uniform("uBias", FLOATS, v[at + 8]);
-  plan.uniform("uClamp", FLOATS, v[at + 9]);
-  plan.uniform("uPreserve", FLOATS, v[at + 10]);
+  plan.uniform("uDivisor", 1, v[at + 6]);
+  plan.uniform("uReciprocal", 1, v[at + 7]);
+  plan.uniform("uBias", 1, v[at + 8]);
+  plan.uniform("uClamp", 1, v[at + 9]);
+  plan.uniform("uPreserve", 1, v[at + 10]);
   const inset = v[at + 11];
   plan.uniform(
     "uBox",
-    FLOATS,
+    4,
     inset,
     inset,
     width / plan.resolution - inset + 1,
@@ -452,19 +460,19 @@ function displacement(
   plan.uniformFrom("uComponentX", FLOATS, v, at, 4);
   plan.uniformFrom("uComponentY", FLOATS, v, at + 4, 4);
   plan.uniformFrom("uScale", FLOATS, v, at + 8, 2);
-  plan.uniform("uMode", FLOATS, v[at + 10]);
+  plan.uniform("uMode", 1, v[at + 10]);
   plan.uniformFrom("uColor", FLOATS, v, at + 11, 4);
   plan.uniformFrom("uGrow", FLOATS, v, at + 15, 2);
   const inset = v[at + 17];
   plan.uniform(
     "uBox",
-    FLOATS,
+    4,
     inset,
     inset,
     width / plan.resolution - inset + 1,
     height / plan.resolution - inset + 1,
   );
-  plan.uniform("uMapAt", FLOATS, inset + v[at + 18], inset + v[at + 19], v[at + 20], v[at + 21]);
+  plan.uniform("uMapAt", 4, inset + v[at + 18], inset + v[at + 19], v[at + 20], v[at + 21]);
   return out;
 }
 
@@ -504,13 +512,19 @@ function blurredOf(
     h = Math.ceil(height / down);
     source = plan.slot(w, h);
     plan.pass(SHRINK_PASS, input, w * across, h * down, source, w, h);
-    plan.uniform("uFactor", FLOATS, across, down);
+    plan.uniform("uFactor", 2, across, down);
   }
 
   const out = plan.slot(w, h);
   boxRuns(plan, source, w, h, out, blurX, blurY, quality, texels / across, texels / down);
-  return { slot: out, across, down };
+  blurredScratch.slot = out;
+  blurredScratch.across = across;
+  blurredScratch.down = down;
+  return blurredScratch;
 }
+
+/** What blurredOf gives, read before it is asked again. */
+const blurredScratch: Blurred = { slot: 0, across: 1, down: 1 };
 
 /**
  * The box's runs over slot `input`'s frame into slot `output`'s, through
@@ -536,8 +550,8 @@ function boxRuns(
   const runs = quality * ((across ? 1 : 0) + (down ? 1 : 0));
   if (runs === 0) {
     plan.pass(BOX_PASS, input, width, height, output, width, height);
-    plan.uniform("uDirection", FLOATS, 1, 0);
-    plan.uniform("uWidth", FLOATS, 1);
+    plan.uniform("uDirection", 2, 1, 0);
+    plan.uniform("uWidth", 1, 1);
     return;
   }
 
@@ -548,11 +562,11 @@ function boxRuns(
     const to = k === runs - 1 ? output : k % 2 === 0 ? first : second;
     plan.pass(BOX_PASS, from, width, height, to, width, height);
     if (across && (!down || k % 2 === 0)) {
-      plan.uniform("uDirection", FLOATS, step, 0);
-      plan.uniform("uWidth", FLOATS, blurX * texelsX);
+      plan.uniform("uDirection", 2, step, 0);
+      plan.uniform("uWidth", 1, blurX * texelsX);
     } else {
-      plan.uniform("uDirection", FLOATS, 0, step);
-      plan.uniform("uWidth", FLOATS, blurY * texelsY);
+      plan.uniform("uDirection", 2, 0, step);
+      plan.uniform("uWidth", 1, blurY * texelsY);
     }
 
     from = to;
