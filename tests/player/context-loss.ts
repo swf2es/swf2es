@@ -1,5 +1,6 @@
 // A WebGL context lost and given back while a SWF plays: what the view
-// and Pixi keep on the CPU of what they uploaded must draw the same again.
+// and its renderer keep on the CPU of what they uploaded must draw the same
+// again, with Pixi or, under SWF2ES_RENDERER=own, the renderer of swf2es's own.
 // Large shapes, drawn alone through the transform table's atlas, small
 // ones batched, a colour transform, a gradient and a line; a bitmap that
 // never changes, placed and as a smoothed fill, which uploads again from
@@ -100,6 +101,19 @@ const filled = w.shape({
   ],
 });
 
+/**
+ * Filters for the renderer of swf2es's own alone: the Pixi view draws a
+ * filtered object differently after its context comes back, which, as it is
+ * to go, is left be.
+ */
+const own = process.env.SWF2ES_RENDERER === "own";
+
+// A blurred sprite holding a glowing one: filtered layers in a filtered layer.
+const nested = w.sprite(8, 1, [
+  w.place({ depth: 1, character: 2, glows: [{ color: 0x00ccff, blur: 4, strength: 2 }] }),
+  w.showFrame(),
+]);
+
 const tags: Uint8Array[] = [
   w.fileAttributes(false),
   large,
@@ -109,6 +123,7 @@ const tags: Uint8Array[] = [
   moving,
   image,
   filled,
+  nested,
 ];
 let depth = 1;
 for (let i = 0; i < 24; i++) {
@@ -120,6 +135,8 @@ for (let i = 0; i < 24; i++) {
       character: i % 3 === 2 ? 4 : 1,
       matrix: { a: 0.5, d: 0.5, tx, ty },
       colorTransform: i % 5 === 0 ? { mult: [0.5, 1, 1, 1], add: [60, 0, 0, 0] } : undefined,
+      // With the renderer of swf2es's own, glowing: filtered layers it draws ahead of the stage.
+      glows: own && i % 4 === 1 ? [{ color: 0xff3300, blur: 6, strength: 2 }] : undefined,
     }),
     w.place({ depth: depth++, character: 2, matrix: { tx: tx + 200, ty: ty + 200 } }),
   );
@@ -138,6 +155,9 @@ tags.push(
     hasImage: true,
   }),
   w.place({ depth: depth++, character: 7, matrix: { tx: 1700, ty: 3800 } }),
+  ...(own
+    ? [w.place({ depth: depth++, character: 8, matrix: { tx: 4500, ty: 4300 }, blurs: [3] })]
+    : []),
   w.showFrame(),
   w.end(),
 );
@@ -186,10 +206,12 @@ assert.equal(
   "kept filter outputs and blend layers",
 );
 
-// Force slow first builds across the settling deadline, without losing either context.
-assert.deepEqual(
-  await withPage("contextLossPlanSwf", async (evaluate) => {
-    const setup = await evaluate(`(async () => {
+// Force slow first builds across the settling deadline, without losing either context: Pixi's
+// render groups settle, the renderer of swf2es's own's plans no such thing.
+if (!own) {
+  assert.deepEqual(
+    await withPage("contextLossPlanSwf", async (evaluate) => {
+      const setup = await evaluate(`(async () => {
       const { PixiView } = await import("@swf2es/player");
       const render = PixiView.prototype.render;
       let clock = 0, frames = 0;
@@ -201,14 +223,15 @@ assert.deepEqual(
       };
       return true;
     })()`);
-    assert.equal(setup.exception, null);
-    return evaluate<string | null>(
-      `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "tt", false)`,
-    );
-  }),
-  { value: null, exception: null },
-  "both renderers settle in the same frame despite slow draws",
-);
+      assert.equal(setup.exception, null);
+      return evaluate<string | null>(
+        `contextLossPlanSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, "tt", false)`,
+      );
+    }),
+    { value: null, exception: null },
+    "both renderers settle in the same frame despite slow draws",
+  );
+}
 
 // Through the table's atlas, and drawn alone from what Pixi packed of each, as without the table.
 assert.equal(await playLosingContext(swf, 4, true), null, "with the transform table");

@@ -6,7 +6,6 @@
 // their lines, bitmaps and text, under masks, scroll clips, blend modes and
 // filters.
 import { type ColorTransform, type Glyph, IDENTITY, type Matrix } from "@swf2es/format";
-import { Tessellator } from "@swf2es/native/tessellate";
 import {
   BLEND_NAMES,
   CLAMP,
@@ -109,8 +108,12 @@ export interface RenderViewOptions {
   transparent?: boolean;
   /** Keep what was drawn after it is shown, for a page to read it back. */
   preserveDrawingBuffer?: boolean;
-  /** The fills' tessellator: @swf2es/native's, made here, if left out. */
-  fillTessellator?: FillTessellator;
+  /**
+   * The fills' and lines' tessellator, as @swf2es/native's Tessellator gives
+   * it; null or left out, fills and lines are made in JS. The view loads no
+   * native module itself, which a page may not let it.
+   */
+  fillTessellator?: FillTessellator | null;
   /** Samples a pixel the stage and its layers are multisampled with (`samples`); 1, none, if left out. */
   samples?: number;
 }
@@ -130,6 +133,9 @@ const RUN_KEYS = 512;
 
 /** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
 const GRADIENT_REGIONS = 8;
+
+/** A tessellator that leaves every fill to JS (fills.ts). */
+const IN_JS: FillTessellator = () => null;
 
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
@@ -338,7 +344,6 @@ export class RenderView implements Drawer {
   /** Whether the view made its canvas, whose context it then loses with itself. */
   private readonly ownCanvas: boolean;
   /** The tessellator the view made, which it disposes of with itself; none if it was given one. */
-  private readonly ownTessellator: Tessellator | null = null;
   private scene = new SceneList();
   private rows = new Rows();
   private readonly geometries = new Geometries();
@@ -493,12 +498,7 @@ export class RenderView implements Drawer {
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
     this.textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    if (options.fillTessellator) {
-      this.tessellator = options.fillTessellator;
-    } else {
-      this.ownTessellator = new Tessellator();
-      this.tessellator = this.ownTessellator.tessellate;
-    }
+    this.tessellator = options.fillTessellator ?? IN_JS;
 
     this.lineCache = new LineCache(this.geometries, this.tessellator);
     this.counts = this.lineCache.counts;
@@ -556,6 +556,31 @@ export class RenderView implements Drawer {
     this.stageQuality = quality;
     // Flash draws edges aliased at low, whatever samples the host asked for.
     this.samples = this.wantedSamples;
+  }
+
+  /**
+   * The rectangle of the stage, from (x, y), the canvas shows, as the Pixi
+   * view's setViewport has it: its size the canvas's (resize), in stage
+   * pixels, where a host's margins or alignment show more of the stage or
+   * less than its own.
+   */
+  setViewport(x: number, y: number, _width: number, _height: number): void {
+    this.viewX = x;
+    this.viewY = y;
+  }
+
+  /** The stage's point the canvas's corner shows (setViewport). */
+  private viewX = 0;
+  private viewY = 0;
+
+  /** Canvas pixels a stage pixel (resize). */
+  get canvasResolution(): number {
+    return this.resolution;
+  }
+
+  /** How many device texts' runs it keeps drawn (rasterized device text), which a page may check. */
+  get textRuns(): number {
+    return this.runs.size;
   }
 
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
@@ -1309,10 +1334,15 @@ export class RenderView implements Drawer {
     ];
   }
 
-  /** `o` walked from the stage's origin, untinted. */
+  /** `o` walked from the stage's origin, untinted; the stage's, moved by its viewport. */
   private walkFrom(o: DisplayObject): void {
     this.walkDepth = 0;
     this.places.set(UNIT_PLACE);
+    if (!this.drawRoot) {
+      this.places[4] = -this.viewX;
+      this.places[5] = -this.viewY;
+    }
+
     this.walk(o, null, false);
   }
 
@@ -2481,7 +2511,10 @@ export class RenderView implements Drawer {
 
     const onStage = toStageFlat(mask);
     if (!root) {
-      return onStage;
+      // Moved by the viewport, as the stage's walk is (walkFrom).
+      return this.viewX === 0 && this.viewY === 0
+        ? onStage
+        : { ...onStage, tx: onStage.tx - this.viewX, ty: onStage.ty - this.viewY };
     }
 
     // One drawn through no inverse, scaled to nothing on the stage, has no place to measure the mask
@@ -2517,7 +2550,12 @@ export class RenderView implements Drawer {
     return bindCanvasPointer(this.canvas, player, {
       get bounds() {
         const k = view.scale * view.resolution;
-        return { x: 0, y: 0, width: view.canvas.width / k, height: view.canvas.height / k };
+        return {
+          x: view.viewX,
+          y: view.viewY,
+          width: view.canvas.width / k,
+          height: view.canvas.height / k,
+        };
       },
     });
   }
@@ -2544,7 +2582,6 @@ export class RenderView implements Drawer {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
-    this.ownTessellator?.dispose();
     this.releaseOutlines();
     if (this.ownCanvas) {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();

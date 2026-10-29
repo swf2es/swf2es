@@ -4,17 +4,11 @@
 
 import type { Convolver } from "@swf2es/native/bitmap";
 import type { Tessellator } from "@swf2es/native/tessellate";
-import {
-  bindActivation,
-  bindKeyboard,
-  PixiView,
-  type Player,
-  type Scripting,
-} from "@swf2es/player";
-import { autoDetectRenderer, type Renderer } from "pixi.js";
+import { bindActivation, bindKeyboard, type Player, type Scripting } from "@swf2es/player";
 import { configuration } from "./config.js";
 import { place, type ScaleMode, viewport } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
+import { type StageView, stageView } from "./views.js";
 
 /** How the element shows its player, read again as the page changes them. */
 export interface Look {
@@ -42,7 +36,6 @@ export class Playback {
   private readonly resize: ResizeObserver;
   private readonly unbind: (() => void)[] = [];
   private destroyed = false;
-  private readonly view: PixiView;
   /** The stage's quality it last drew by. */
   private quality = "";
 
@@ -50,23 +43,22 @@ export class Playback {
     private readonly box: HTMLElement,
     private readonly player: Player,
     private readonly scripting: Scripting | null,
-    private readonly renderer: Renderer,
+    private readonly view: StageView,
     private readonly look: () => Look,
     private readonly report: (error: unknown) => void,
     private readonly stage3D: Stage3DSession | null,
     private readonly tessellator: Tessellator | null,
     private readonly convolver: Convolver | null,
   ) {
-    const canvas = renderer.canvas as HTMLCanvasElement;
+    const canvas = view.canvas;
     canvas.style.position = "absolute";
     canvas.style.display = "block";
     if (stage3D) {
       canvas.style.zIndex = "1";
     }
     box.append(canvas);
-    this.view = new PixiView(renderer, { fillTessellator: tessellator?.tessellate });
     if (scripting) {
-      scripting.drawer = this.view;
+      scripting.drawer = view.drawer;
       scripting.bitmapConvolver = convolver?.convolve ?? null;
       if (stage3D) {
         scripting.onStageLayout = this.stageLayout;
@@ -75,7 +67,7 @@ export class Playback {
 
     // An AVM1 movie's BitmapData draws display objects by it too.
     if (player.avm1) {
-      player.avm1.drawer = this.view;
+      player.avm1.drawer = view.drawer;
       player.avm1.bitmapConvolver = convolver?.convolve ?? null;
     }
 
@@ -91,9 +83,10 @@ export class Playback {
   }
 
   /**
-   * A renderer for `player` in `box`. The canvas is not multisampled: the
-   * stage is drawn into the back buffer, which is, but at low quality,
-   * which Flash draws aliased.
+   * A renderer for `player` in `box`, Pixi or, where the configuration asks
+   * for it, the renderer of swf2es's own (views.ts). The canvas is not
+   * multisampled: the stage is drawn into buffers that are, but at low
+   * quality, which Flash draws aliased.
    */
   static async create(
     box: HTMLElement,
@@ -103,10 +96,11 @@ export class Playback {
     report: (error: unknown) => void,
     stage3D: Stage3DSession | null = null,
   ): Promise<Playback> {
-    // Both load together, so the second costs playback no extra round trip. An
-    // embedder without a module, or a page that cannot load it, plays through JS.
-    const { nativeFills, nativeBitmaps } = configuration();
-    const [tessellator, convolver] = await Promise.all([
+    // All load together, so none costs playback another round trip. An embedder without a native
+    // module, or a page that cannot load it, plays through JS.
+    const { nativeFills, nativeBitmaps, renderer } = configuration();
+    const own = renderer !== "pixi";
+    const [tessellator, convolver, scene] = await Promise.all([
       nativeFills === false
         ? null
         : import("@swf2es/native/tessellate")
@@ -117,24 +111,29 @@ export class Playback {
         : import("@swf2es/native/bitmap")
             .then(({ Convolver }): Convolver => new Convolver())
             .catch(() => null),
+      own ? import("@swf2es/player/scene") : null,
     ]);
 
-    const renderer = await autoDetectRenderer({
-      preference: "webgl",
-      width: player.width,
-      height: player.height,
-      resolution: 1,
-      autoDensity: false,
-      antialias: false,
-      backgroundAlpha: stage3D || look().wmode === "transparent" ? 0 : 1,
-      // Filter-backed blend modes read what is below them from it (render/blend.ts).
-      useBackBuffer: true,
-    });
+    let view: StageView;
+    try {
+      view = await stageView(
+        player,
+        scene,
+        !!stage3D || look().wmode === "transparent",
+        tessellator,
+      );
+    } catch (error) {
+      // No playback to let go of them: the native instances go here.
+      tessellator?.dispose();
+      convolver?.dispose();
+      throw error;
+    }
+
     return new Playback(
       box,
       player,
       scripting,
-      renderer,
+      view,
       look,
       report,
       stage3D,
@@ -149,7 +148,7 @@ export class Playback {
       return null;
     }
 
-    return (this.renderer as { gl?: WebGLRenderingContext | WebGL2RenderingContext }).gl ?? null;
+    return this.view.gl;
   }
 
   /** Play and draw on every animation frame, from now. */
@@ -203,15 +202,7 @@ export class Playback {
    * best anti-alias the edges, as the GPU's multisampling does.
    */
   private requality(): void {
-    const quality = this.player.quality;
-    this.quality = quality;
-    this.view.quality = quality;
-
-    const gl = this.renderer as unknown as { backBuffer?: { antialias: boolean } };
-    if (gl.backBuffer) {
-      gl.backBuffer.antialias = quality !== "LOW";
-    }
-
+    this.quality = this.player.quality;
     this.resample();
     this.dirty = true;
   }
@@ -228,23 +219,12 @@ export class Playback {
    * for each of its pixels (denseSamples).
    */
   private resample(): void {
-    const adaptor = (
-      this.renderer as unknown as {
-        renderTarget: { adaptor: { msaaSamples?: number; backBufferSamples?: number } };
-      }
-    ).renderTarget.adaptor;
-    if (adaptor.backBufferSamples === undefined) {
-      return;
-    }
-
-    const canvas = this.renderer.canvas as HTMLCanvasElement;
+    const canvas = this.view.canvas;
     const fits = fittingSamples(canvas.width * canvas.height);
     const quality = this.player.quality;
     const samples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
     // As fine as the stage's pixels on the canvas: fewer where each spans several.
-    const dense = denseSamples(samples, this.renderer.resolution);
-    adaptor.backBufferSamples = dense;
-    adaptor.msaaSamples = dense;
+    this.view.setQuality(quality, denseSamples(samples, this.view.resolution));
   }
 
   private draw(): void {
@@ -255,13 +235,13 @@ export class Playback {
     const overlay = this.stage3D?.active ?? false;
     // A transparent clear must contain no RGB for the browser's premultiplied
     // compositor; the stage color belongs below the opaque Stage3D viewports.
-    this.renderer.background.color = overlay ? 0 : color;
-    this.renderer.background.alpha = transparent || overlay ? 0 : 1;
+    const background = overlay ? 0 : color;
+    const clear = transparent || overlay;
     // What showAll leaves around the stage is the stage's colour, as in Flash.
     this.box.style.background = transparent ? "" : `#${color.toString(16).padStart(6, "0")}`;
     this.drawn = this.player.changes;
     this.dirty = false;
-    this.view.render(this.player.stage);
+    this.view.render(this.player, background, clear);
   }
 
   private readonly stageLayout = () => this.layout();
@@ -300,7 +280,7 @@ export class Playback {
       mode,
       placed,
     );
-    const canvas = this.renderer.canvas as HTMLCanvasElement;
+    const canvas = this.view.canvas;
     canvas.style.left = `${view.css.x}px`;
     canvas.style.top = `${view.css.y}px`;
     canvas.style.width = `${view.css.width}px`;
@@ -310,11 +290,11 @@ export class Playback {
     // Compared in the canvas's pixels, which Pixi rounds the screen to: a fractional
     // screen would otherwise never compare equal and resize on every layout.
     if (
-      view.resolution !== this.renderer.resolution ||
+      view.resolution !== this.view.resolution ||
       canvas.width !== Math.round(screenWidth * view.resolution) ||
       canvas.height !== Math.round(screenHeight * view.resolution)
     ) {
-      this.renderer.resize(screenWidth, screenHeight, view.resolution);
+      this.view.resize(screenWidth, screenHeight, view.resolution);
       this.resample();
     }
 
@@ -352,14 +332,14 @@ export class Playback {
       unbind();
     }
 
-    if (this.scripting?.drawer === this.view) {
+    if (this.scripting?.drawer === this.view.drawer) {
       this.scripting.drawer = null;
     }
     if (this.scripting?.onStageLayout === this.stageLayout) {
       this.scripting.onStageLayout = null;
     }
 
-    if (this.player.avm1?.drawer === this.view) {
+    if (this.player.avm1?.drawer === this.view.drawer) {
       this.player.avm1.drawer = null;
     }
 
@@ -371,14 +351,10 @@ export class Playback {
     }
     this.convolver?.dispose();
 
-    this.view.dropSpares();
-    // Cached geometry owns its buffers; the native scratch can go before the scene does.
+    this.view.destroy();
+    // The view's geometry let go of first, which the native scratch may then follow.
     this.tessellator?.dispose();
-    // Cached text measurements hold styles; destroying the scene detaches their text listeners.
-    this.view.dispose(this.view.stage);
-
-    // Pixi loses the GL context as it goes, which a browser allows only so many of.
-    this.renderer.destroy({ removeView: true });
+    this.view.canvas.remove();
   }
 }
 

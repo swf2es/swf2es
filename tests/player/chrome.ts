@@ -240,8 +240,10 @@ export async function withPage<T>(
         ...(process.env.SWF2ES_NATIVE_FILLS ? ["nativeFills"] : []),
         ...(process.env.SWF2ES_NATIVE_BITMAPS ? ["nativeBitmaps"] : []),
         ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe" ? ["adobe"] : []),
-        // The renderer of swf2es's own in place of Pixi (docs/renderer.md): run.ts's cases.
+        // The renderer of swf2es's own in place of Pixi (docs/renderer.md): run.ts's cases; and
+        // Pixi in place of the web element's own renderer.
         ...(process.env.SWF2ES_RENDERER === "own" ? ["own"] : []),
+        ...(process.env.SWF2ES_RENDERER === "pixi" ? ["pixi"] : []),
       ];
       await devtools.send("Page.navigate", {
         url: `${url}${page}${flags.length ? `?${flags.join("&")}` : ""}`,

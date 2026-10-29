@@ -185,6 +185,8 @@ const loading = import("@swf2es/web").then((web) => {
     },
     socketProxy: [{ host: "example.test", port: 1234, proxyUrl: "ws://relay.invalid/" }],
     cache: true,
+    // The element's own renderer, or Pixi where the page asks for it (chrome.ts, SWF2ES_RENDERER).
+    renderer: new URLSearchParams(location.search).has("pixi") ? "pixi" : undefined,
   });
   return { web, replaced: web.replaceFlash() };
 });
@@ -399,12 +401,20 @@ async function churn(n: number, source = "embed.swf") {
     await p.ready;
     await frames(2);
     if (source === "text.swf") {
-      const drawer = p.player?.scripting?.drawer as PixiView | null | undefined;
-      if (!drawer?.stage?.children.length) {
+      const drawer = p.player?.scripting?.drawer as
+        | PixiView
+        | { textRuns: number }
+        | null
+        | undefined;
+      // Pixi's scene, which holds the text it measured; the renderer of swf2es's own's view,
+      // which holds the runs it drew.
+      const scene = drawer && "stage" in drawer ? drawer.stage : drawer;
+      const drew = scene && ("textRuns" in scene ? scene.textRuns > 0 : scene.children.length > 0);
+      if (!scene || !drew) {
         throw new Error("text scene did not draw");
       }
 
-      textScenes.push(new WeakRef(drawer.stage));
+      textScenes.push(new WeakRef(scene));
     }
 
     if (p.player) {
