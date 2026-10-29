@@ -708,6 +708,8 @@ let fillPlayer: Player | null = null;
  * decoding compressed data.
  */
 async function fillRun(mode: "default" | "blocked" | "missing" | "csp") {
+  // The element defined before it is made.
+  await loading;
   const Module = WebAssembly.Module;
   const Instance = WebAssembly.Instance;
   let compiles = 0;
