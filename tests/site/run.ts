@@ -695,7 +695,10 @@ async function check(): Promise<void> {
             }
 
             await until("document.readyState === 'complete'");
-            assert.match(await value<string>("document.querySelector('h1').textContent"), /Licences/);
+            assert.match(
+              await value<string>("document.querySelector('h1').textContent"),
+              /Licences/,
+            );
           },
         ],
         [

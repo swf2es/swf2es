@@ -2,8 +2,8 @@
 // The licences of what the site serves, and the files each covers, which
 // the build finds by their headers.
 
-import { base, facts } from "../site.ts";
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { base, facts } from "../site.ts";
 
 const { build, blob, avmplusSource, avmplusCommit, mpl, ruffle } = facts;
 const licence = (file: string) => `${base}licenses/${file}`;

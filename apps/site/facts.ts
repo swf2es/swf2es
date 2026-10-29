@@ -53,6 +53,7 @@ function filesSaying(dirs: string[], marker: RegExp, extensions: RegExp): string
       }
     }
   };
+
   for (const dir of dirs) {
     walk(join(root, dir));
   }

@@ -34,6 +34,7 @@ function slugger(): (heading: string) => string {
   return (heading) => {
     const plain = slug(heading);
     let anchor = plain;
+
     while (occurrences.has(anchor)) {
       const n = (occurrences.get(plain) ?? 0) + 1;
       occurrences.set(plain, n);
@@ -104,6 +105,7 @@ export function guidePages(
   // where Astro numbers repeated headings afresh. A section's heading is its page's title.
   const targets = new Map<string, { part: number; anchor: string }>();
   let pageAnchor = slugger();
+
   for (const [i, line] of lines.entries()) {
     const found = code[i] ? null : heading(line);
     if (found === null) {
@@ -176,6 +178,7 @@ function codeSpans(line: string): string[] {
   const parts: string[] = [];
   const runs = [...line.matchAll(/`+/g)];
   let text = 0;
+
   for (let i = 0; i < runs.length; i++) {
     // A span closes on the next run of as many backticks, no more and no fewer.
     const open = runs[i];
@@ -223,6 +226,7 @@ export function rewriteLinks(markdown: string, replace: (target: string) => stri
       }
 
       const parts = codeSpans(line);
+
       for (let j = 0; j < parts.length; j += 2) {
         parts[j] = parts[j].replace(
           INLINE,
@@ -253,6 +257,7 @@ export function guideLoader(options: { root: string; blob: string }): Loader {
       const base = config.base.endsWith("/") ? config.base : `${config.base}/`;
       const sync = async () => {
         store.clear();
+
         for (const page of readGuide(options.root, base, options.blob)) {
           const data = await parseData({ id: page.id, data: { title: page.title } });
           store.set({
