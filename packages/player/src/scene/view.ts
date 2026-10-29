@@ -36,10 +36,8 @@ import {
   Textures,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
-import { argbOf, BitmapStore, characterStore, type PixelRect, rgbaOf } from "../bitmap/bitmap.js";
-import { filterRect } from "../bitmap/filters.js";
+import { argbOf, BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
-import { bounds } from "../display/bounds.js";
 import { concatColorInto, IDENTITY_COLOR } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject, TRANSFORM } from "../display/displayobject.js";
@@ -51,7 +49,13 @@ import {
 } from "../display/filters.js";
 import { concat, invert, shifted } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
-import { bitmapScale, outsideMaskMap, type PlaneQuad, placeQuad } from "../display/plane.js";
+import {
+  bitmapScale,
+  drawnRect,
+  outsideMaskMap,
+  type PlaneQuad,
+  placeQuad,
+} from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { cached, ShapeObject, type StaleCache } from "../display/shapeobject.js";
 import {
@@ -132,6 +136,39 @@ const GRADIENT_REGIONS = 8;
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
 /** A geometry's colours where its vertices carry none, a 3D object's quad's. */
 const NO_COLORS = new Uint32Array(0);
+
+/**
+ * A 3D object's quad written into its geometry's arrays in place: its
+ * corners, its texels the bitmap's, `width` by `height`, and each corner's
+ * depth its w's inverse. Whether any of it changed, as stored.
+ */
+function planeQuadData(
+  data: { positions: Float32Array; texels: Float32Array; depths: Float32Array },
+  quad: PlaneQuad,
+  width: number,
+  height: number,
+): boolean {
+  let changed = false;
+  const set = (array: Float32Array, i: number, v: number) => {
+    const stored = Math.fround(v);
+    if (array[i] !== stored) {
+      array[i] = stored;
+      changed = true;
+    }
+  };
+
+  for (let i = 0; i < 8; i++) {
+    set(data.positions, i, quad.positions[i]);
+  }
+
+  for (let i = 0; i < 4; i++) {
+    set(data.texels, i * 2, i === 1 || i === 2 ? width : 0);
+    set(data.texels, i * 2 + 1, i >= 2 ? height : 0);
+    set(data.depths, i, 1 / quad.ws[i]);
+  }
+
+  return changed;
+}
 
 /** Runs kept of one text, in its styles, sizes and resolutions. */
 const TEXT_RUNS = 8;
@@ -299,10 +336,13 @@ export class RenderView implements Drawer {
     DisplayObject,
     {
       handle: GeometryHandle;
-      width: number;
-      height: number;
-      positions: Float64Array;
-      ws: Float64Array;
+      data: {
+        positions: Float32Array;
+        colors: Uint32Array;
+        texels: Float32Array;
+        depths: Float32Array;
+        indices: Uint32Array;
+      };
     }
   >();
   /** Where drawPlane works out a quad. */
@@ -362,6 +402,12 @@ export class RenderView implements Drawer {
    * matrix it is drawn through, after its scroll's shift.
    */
   private drawRoot: DisplayObject | null = null;
+  /**
+   * Whether the walk is BitmapData.draw's, which leaves the objects' flags
+   * for the stage's frame; a 3D object's pass in the frame clears them, as
+   * the frame's walk would.
+   */
+  private snapshotting = false;
   private drawMatrix: Matrix = IDENTITY;
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
@@ -444,7 +490,7 @@ export class RenderView implements Drawer {
    * view's snapshot has it.
    */
   private get smoothing(): boolean {
-    return this.drawRoot ? this.scale > 1 : this.stageQuality !== "LOW";
+    return this.snapshotting ? this.scale > 1 : this.stageQuality !== "LOW";
   }
 
   /**
@@ -605,7 +651,7 @@ export class RenderView implements Drawer {
     if (!hidden && !plane && o.mask) {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
       if (mask) {
-        const w = root && this.planeDepth > 0 ? this.planeMask(o, mask) : this.placedMask(mask);
+        const w = this.placedMask(mask);
         const first = this.maskBegin();
         this.walkMask(mask, w.a, w.b, w.c, w.d, w.tx, w.ty, true);
         this.maskUse(first);
@@ -656,7 +702,8 @@ export class RenderView implements Drawer {
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
     if (mode !== NORMAL || filtering) {
-      if (mode === LAYER || filtering) {
+      // A 3D object's colour is in its bitmap already.
+      if ((mode === LAYER && !plane) || filtering) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
       }
@@ -682,10 +729,10 @@ export class RenderView implements Drawer {
       }
     }
 
-    if (plane) {
-      this.drawPlane(o, full, pa, pb, pc, pd, ptx, pty);
-      hidden = true;
-    }
+    // Drawn in its pass, which walked all in it, its flags cleared: walked here no further. Else
+    // walked hidden, to clear them.
+    const passed = plane && this.drawPlane(o, full, pa, pb, pc, pd, ptx, pty);
+    hidden ||= plane;
 
     // Its scroll's rectangle clips what it draws, inside its layer.
     const r = hidden ? null : o.scroll;
@@ -839,7 +886,7 @@ export class RenderView implements Drawer {
       this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
     }
 
-    if (o instanceof Container) {
+    if (o instanceof Container && !passed) {
       // A timeline's clip layer clips the children after it, up to its clip depth: kept track of
       // only where a child is one, as most containers have none.
       const children = o.children;
@@ -887,7 +934,7 @@ export class RenderView implements Drawer {
         this.popMask();
       }
 
-      if (!this.drawRoot) {
+      if (!this.snapshotting) {
         o.descendantsDirty = false;
       }
     }
@@ -916,7 +963,7 @@ export class RenderView implements Drawer {
 
     this.walkDepth--;
     // A draw for BitmapData leaves them for the stage's.
-    if (!this.drawRoot) {
+    if (!this.snapshotting) {
       o.dirty = CLEAN;
     }
   }
@@ -1222,7 +1269,7 @@ export class RenderView implements Drawer {
     }
 
     let seen = this.stales.get(o);
-    if (this.drawRoot) {
+    if (this.snapshotting) {
       return seen?.cache === cache && seen.spent ? o.drawn() : cache.shape;
     }
 
@@ -1333,36 +1380,27 @@ export class RenderView implements Drawer {
     d: number,
     tx: number,
     ty: number,
-  ): void {
+  ): boolean {
     if (o.mask?.space) {
-      return;
+      return false;
     }
 
-    const drawn = bounds(o, true, true);
-    let rect: PixelRect | null = drawn && {
-      x: drawn.xMin,
-      y: drawn.yMin,
-      width: drawn.xMax - drawn.xMin,
-      height: drawn.yMax - drawn.yMin,
-    };
-    for (const f of o.filters) {
-      rect = rect && filterRect(rect, f);
-    }
-
+    const rect = drawnRect(o);
     const quad = this.planeQuad;
     if (
       !rect ||
       !placeQuad(o.placed, rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, quad)
     ) {
-      return;
+      return false;
     }
 
     const { samples, texels } = bitmapScale(quad.width, quad.height, this.textureLimit);
     const width = Math.max(1, Math.ceil(quad.width * texels));
     const height = Math.max(1, Math.ceil(quad.height * texels));
     let keep = this.planeKeeps.get(o);
+    // Drawn again on each frame it is drawn, so let go of on the first it is not.
     if (!keep || !this.keeps.alive(keep)) {
-      keep = this.keeps.add();
+      keep = this.keeps.add(0);
       this.planeKeeps.set(o, keep);
     }
 
@@ -1370,43 +1408,30 @@ export class RenderView implements Drawer {
 
     // Its quad, made again as it moves: its texels the bitmap's, each corner's depth its w. Made
     // before its content's pass, in which a 3D object inside it works out its own in `quad`.
-    const kept = this.planeQuads.get(o);
-    let handle = kept?.handle ?? null;
-    if (
-      !kept ||
-      !handle ||
-      !this.geometries.alive(handle) ||
-      kept.width !== width ||
-      kept.height !== height ||
-      kept.positions.some((v, i) => v !== quad.positions[i]) ||
-      kept.ws.some((v, i) => v !== quad.ws[i])
-    ) {
-      if (handle && this.geometries.alive(handle)) {
-        this.geometries.remove(handle.id);
-      }
-
-      handle = this.geometries.add({
-        positions: Float32Array.from(quad.positions),
+    let kept = this.planeQuads.get(o);
+    if (!kept || !this.geometries.alive(kept.handle)) {
+      const data = {
+        positions: new Float32Array(8),
         colors: NO_COLORS,
-        texels: Float32Array.of(0, 0, width, 0, width, height, 0, height),
-        depths: Float32Array.of(1 / quad.ws[0], 1 / quad.ws[1], 1 / quad.ws[2], 1 / quad.ws[3]),
+        texels: new Float32Array(8),
+        depths: new Float32Array(4),
         indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
-      });
-      this.planeQuads.set(o, {
-        handle,
-        width,
-        height,
-        positions: Float64Array.from(quad.positions),
-        ws: Float64Array.from(quad.ws),
-      });
+      };
+      planeQuadData(data, quad, width, height);
+      kept = { handle: this.geometries.add(data), data };
+      this.planeQuads.set(o, kept);
+    } else if (planeQuadData(kept.data, quad, width, height)) {
+      this.geometries.update(kept.handle.id);
     }
 
+    const handle = kept.handle;
     this.geometries.use(handle.id);
     const row = this.rows.add(a, b, c, d, tx, ty, null);
     const corner = quad.x;
     const top = quad.y;
     this.drawPlaneContent(o, full, corner, top, texels, samples, width, height, keep.id);
     this.scene.draw(handle.id, row, NORMAL, keep.id, PLANE);
+    return true;
   }
 
   /**
@@ -1472,14 +1497,9 @@ export class RenderView implements Drawer {
     this.resolution = 1;
     this.screenScale = 1;
     this.drawRoot = o;
-    this.drawMatrix = {
-      a: texels,
-      b: 0,
-      c: 0,
-      d: texels,
-      tx: -left * texels,
-      ty: -top * texels,
-    };
+    // Its scroll's rectangle at its bitmap's origin, as its bounds have it.
+    const m = { a: texels, b: 0, c: 0, d: texels, tx: -left * texels, ty: -top * texels };
+    this.drawMatrix = o.scroll ? shifted(m, o.scroll) : m;
     this.sliceOwner = null;
     this.ownerSlice = null;
     this.planeDepth++;
@@ -1487,8 +1507,10 @@ export class RenderView implements Drawer {
       this.scene.reset();
       this.rows.reset();
       this.filters.reset();
-      // A walk from a slot of its own above the frame's, as from the stage's origin.
-      const at = this.walkDepth;
+      // A walk from a slot of its own above the object's own in the frame's, as from the stage's
+      // origin.
+      const at = this.walkDepth + 1;
+      this.walkDepth = at;
       if ((at + 2) * 6 > this.places.length) {
         const grown = new Float64Array(this.places.length * 2);
         grown.set(this.places);
@@ -1689,13 +1711,13 @@ export class RenderView implements Drawer {
         this.walkMask(child, a, b, c, d, tx, ty, false);
       }
 
-      if (!this.drawRoot) {
+      if (!this.snapshotting) {
         o.descendantsDirty = false;
       }
     }
 
     // A draw for BitmapData leaves them for the stage's.
-    if (!this.drawRoot) {
+    if (!this.snapshotting) {
       o.dirty = CLEAN;
     }
   }
@@ -2300,6 +2322,7 @@ export class RenderView implements Drawer {
     this.resolution = 1;
     this.screenScale = 1;
     this.drawRoot = o;
+    this.snapshotting = true;
     this.drawMatrix = o.scroll ? shifted(m, o.scroll) : m;
     try {
       this.scene.reset();
@@ -2335,6 +2358,7 @@ export class RenderView implements Drawer {
       this.resolution = stage.resolution;
       this.screenScale = stage.screenScale;
       this.drawRoot = null;
+      this.snapshotting = false;
       this.drawMatrix = IDENTITY;
     }
   }
@@ -2344,8 +2368,13 @@ export class RenderView implements Drawer {
    * the bitmap, where it stands to what is drawn as it stands on the stage.
    */
   private placedMask(mask: DisplayObject): Matrix {
-    const onStage = toStageFlat(mask);
     const root = this.drawRoot;
+    // In a 3D object's bitmap by the matrices up to it, or Flash's rule for one outside it.
+    if (root && this.planeDepth > 0) {
+      return this.planeMask(root, mask);
+    }
+
+    const onStage = toStageFlat(mask);
     if (!root) {
       return onStage;
     }
@@ -2357,9 +2386,9 @@ export class RenderView implements Drawer {
   }
 
   /**
-   * Where the mask of a 3D object, the root of its bitmap's pass, is drawn in
-   * the bitmap: one in the object by its matrices up to it; one outside it by
-   * Flash's rule for that (display/plane.ts, outsideMaskMap).
+   * Where a mask is drawn in the bitmap of `o`, a 3D object, the root of its
+   * bitmap's pass: one in the object by its matrices up to it; one outside
+   * it by Flash's rule for that (display/plane.ts, outsideMaskMap).
    */
   private planeMask(o: DisplayObject, mask: DisplayObject): Matrix {
     let m: Matrix;

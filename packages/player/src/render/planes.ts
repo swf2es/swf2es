@@ -3,10 +3,8 @@
 // its place in its parent and placed in perspective as the frame is
 // prepared (render/three.ts has the plane itself).
 import type { BLEND_MODES, Container as PixiContainer, Renderer } from "pixi.js";
-import { filterRect } from "../bitmap/filters.js";
-import { bounds } from "../display/bounds.js";
 import type { DisplayObject } from "../display/display.js";
-import { outsideMaskMap } from "../display/plane.js";
+import { drawnRect, outsideMaskMap } from "../display/plane.js";
 import { blendFilters } from "./blend.js";
 import { FilterChain } from "./filters.js";
 import type { Node } from "./node.js";
@@ -204,13 +202,7 @@ export class Planes {
       const plane = node.plane as Plane;
       // What it draws is measured again only when it may have changed, as its bitmap is drawn.
       if (plane.stale || plane.drawnRect === undefined) {
-        const r = bounds(o, true, true);
-        let rect = r && { x: r.xMin, y: r.yMin, width: r.xMax - r.xMin, height: r.yMax - r.yMin };
-        for (const f of node.filterRecords) {
-          rect = rect && filterRect(rect, f);
-        }
-
-        plane.drawnRect = rect;
+        plane.drawnRect = drawnRect(o);
       }
 
       const rect = plane.drawnRect;

@@ -6,6 +6,8 @@
 // placed through the object's plane in perspective (display/perspective.ts)
 // as Flash places it (docs/architecture.md, "3D display objects").
 import type { Matrix } from "@swf2es/format";
+import type { PixelRect } from "../bitmap/bitmap.js";
+import { filterRect } from "../bitmap/filters.js";
 import { bounds, toStage } from "./bounds.js";
 import type { DisplayObject } from "./displayobject.js";
 import { apply, concat, isProjective } from "./geometry.js";
@@ -123,7 +125,28 @@ export function placeQuad(
   out.y = yFrom - 1;
   out.width = across + 2;
   out.height = down + 2;
+
   return true;
+}
+
+/**
+ * What a 3D object draws in its own space, which its bitmap holds: its
+ * bounds, its children's and its lines', out as far as its filters reach;
+ * null for nothing.
+ */
+export function drawnRect(o: DisplayObject): PixelRect | null {
+  const r = bounds(o, true, true);
+  let rect: PixelRect | null = r && {
+    x: r.xMin,
+    y: r.yMin,
+    width: r.xMax - r.xMin,
+    height: r.yMax - r.yMin,
+  };
+  for (const f of o.filters) {
+    rect = rect && filterRect(rect, f);
+  }
+
+  return rect;
 }
 
 /**

@@ -33,7 +33,7 @@ import {
 import { bitmapScale, type PlaneQuad, placeQuad, SAMPLES } from "../display/plane.js";
 import { drawTarget, releaseDrawTarget } from "./pools.js";
 
-export { bitmapScale, SAMPLES } from "../display/plane.js";
+export { SAMPLES } from "../display/plane.js";
 
 /** Each renderer's largest texture a side. */
 const largestTextures = new WeakMap<Renderer, number>();
