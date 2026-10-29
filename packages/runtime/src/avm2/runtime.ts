@@ -31,13 +31,6 @@ import type {
 } from "./descriptors.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
-  checkFilter,
-  escapeAttribute,
-  escapeElement,
-  getDescendants,
-  setDefaultXmlNamespace,
-} from "./e4x.js";
-import {
   type Enumeration,
   enumerated,
   INT_ATOM_LIMIT,
@@ -73,6 +66,7 @@ import {
   NS_Private,
   NS_Public,
   namespace,
+  prefixedNamespace,
   prefixOf,
   publicNs,
   publicQname,
@@ -80,6 +74,7 @@ import {
   TypeName,
 } from "./names.js";
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
+import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import type { SyncInit } from "./natives/sync.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
@@ -2783,9 +2778,14 @@ export class Runtime {
 
   // E4X.
 
-  /** getdescendants: x..name (see e4x.ts). */
+  /** getdescendants: x..name, on XML or XMLList; anything else, as avmplus, TypeError 1016. */
   getDescendants(o: Value, mn: Multiname): Value {
-    return getDescendants(this, o, mn);
+    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
+    if (!properties) {
+      throw this.error("TypeError", 1016, this.describe(o));
+    }
+
+    return properties.descendants(this, o, mn);
   }
 
   /**
@@ -2803,21 +2803,41 @@ export class Runtime {
   }
 
   setDefaultXmlNamespace(ns: Value): void {
-    setDefaultXmlNamespace(this, ns);
+    if (ns instanceof Namespace) {
+      this.defaultXmlNamespace = ns;
+    } else {
+      const uri = this.toString(ns);
+      this.defaultXmlNamespace = prefixedNamespace(uri === "" ? "" : undefined, uri);
+    }
   }
 
-  /** checkfilter: x.(...) filters XML and XMLList only. */
+  /** checkfilter: x.(...) filters XML and XMLList only, else TypeError 1123. */
   checkFilter(v: Value): void {
-    checkFilter(this, v);
+    if (!v?.$traits?.properties) {
+      throw this.error("TypeError", 1123, this.describe(v));
+    }
   }
 
-  /** esc_xelem. */
+  /** esc_xelem, as AvmCore::ToXMLString: XML's own XML, else a string escaped and trimmed. */
   escapeElement(v: Value): string {
-    return escapeElement(this, v);
+    if (typeof v === "string") {
+      return escapeElementValue(v, true);
+    }
+
+    if (typeof v !== "object" || v === null) {
+      return this.toString(v);
+    }
+
+    const properties: PropertyHook | null | undefined = v.$traits?.properties;
+    if (properties) {
+      return properties.toXMLString(this, v);
+    }
+
+    return escapeElementValue(this.toString(v), true);
   }
 
   escapeAttribute(v: Value): string {
-    return escapeAttribute(this, v);
+    return escapeAttributeValue(this.toString(v));
   }
 
   // Methods whose bodies are not generated.

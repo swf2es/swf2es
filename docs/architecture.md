@@ -765,9 +765,8 @@ Vector.<T> classes; `enumeration.ts`, the names a for-in goes through;
 `property-cache.ts`, the inline caches, and `cache-fill.ts`, what a full
 lookup leaves in one; `array-conversion.ts`, Number(array) while Array's
 conversion is the builtins'; `errors.ts`, error messages and the stack a
-host shows for an AS3 error; `e4x.ts`, the E4X opcodes; `amf-classes.ts`,
-class aliases and the classes AMF makes; `names.ts`, namespaces and
-multinames; `number-strings.ts`,
+host shows for an AS3 error; `amf-classes.ts`, class aliases and the
+classes AMF makes; `names.ts`, namespaces and multinames; `number-strings.ts`,
 numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
