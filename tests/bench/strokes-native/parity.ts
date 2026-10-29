@@ -55,7 +55,9 @@ for (let k = 0; k < cases; k++) {
   }
 
   if (js.positions.length !== zig.positions.length || js.indices.length !== zig.indices.length) {
-    fail(`counts js ${js.positions.length / 2}/${js.indices.length} zig ${zig.positions.length / 2}/${zig.indices.length}`);
+    fail(
+      `counts js ${js.positions.length / 2}/${js.indices.length} zig ${zig.positions.length / 2}/${zig.indices.length}`,
+    );
     continue;
   }
 

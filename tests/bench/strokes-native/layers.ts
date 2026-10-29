@@ -136,7 +136,9 @@ export function randomLayer(r: () => number): ShapeLayer {
     if (kind < 0.15) {
       // A fill's closing lines, some back to the start, some elsewhere.
       stroke.closes = paths.flatMap((path, at) =>
-        r() < 0.5 ? [{ at, x: r() < 0.5 ? path[1] : r() * 100, y: r() < 0.5 ? path[2] : r() * 100 }] : [],
+        r() < 0.5
+          ? [{ at, x: r() < 0.5 ? path[1] : r() * 100, y: r() < 0.5 ? path[2] : r() * 100 }]
+          : [],
       ) as Stroke["closes"];
     } else if (kind < 0.2) {
       stroke.triangles = true;
