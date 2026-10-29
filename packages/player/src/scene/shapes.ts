@@ -72,10 +72,13 @@ export function vertexColor(argb: number): number {
  * next: a drawing redrawn on every frame made each part's numbers in lists
  * and copied them out, garbage on every frame. A part copies out what it used.
  */
-let scratchPositions = new Float32Array(1024);
-let scratchColors = new Uint32Array(512);
-let scratchTexels = new Float32Array(1024);
-let scratchIndices = new Uint32Array(1536);
+const SCRATCH_VERTICES = 512;
+/** The vertices past which scratch grown for a large drawing is let go of after it, not kept. */
+const MOST_KEPT_VERTICES = 65536;
+let scratchPositions = new Float32Array(SCRATCH_VERTICES * 2);
+let scratchColors = new Uint32Array(SCRATCH_VERTICES);
+let scratchTexels = new Float32Array(SCRATCH_VERTICES * 2);
+let scratchIndices = new Uint32Array(SCRATCH_VERTICES * 3);
 
 /** `array` with room for `n` elements, its first `used` kept. */
 function roomy<T extends Float32Array | Uint32Array>(array: T, n: number, used: number): T {
@@ -85,7 +88,21 @@ function roomy<T extends Float32Array | Uint32Array>(array: T, n: number, used: 
 
   const grown = new (array.constructor as new (n: number) => T)(Math.max(n, array.length * 2));
   grown.set(array.subarray(0, used));
+
   return grown;
+}
+
+/** The scratch back at its usual size, where a large drawing grew it. */
+function shrinkScratch(): void {
+  if (scratchColors.length > MOST_KEPT_VERTICES) {
+    scratchPositions = new Float32Array(SCRATCH_VERTICES * 2);
+    scratchColors = new Uint32Array(SCRATCH_VERTICES);
+    scratchTexels = new Float32Array(SCRATCH_VERTICES * 2);
+  }
+
+  if (scratchIndices.length > MOST_KEPT_VERTICES * 3) {
+    scratchIndices = new Uint32Array(SCRATCH_VERTICES * 3);
+  }
 }
 
 /** The parts being gathered: positions, colours, texels and indices of the part open. */
@@ -116,24 +133,34 @@ class Gathered {
     this.region = region;
   }
 
-  /** A vertex at (x, y) of `color`, sampling at texel (u, v): its index in the part. */
-  vertex(x: number, y: number, color: number, u: number, v: number): number {
+  /** The index the next vertex takes in the part. */
+  get next(): number {
+    return this.vertices;
+  }
+
+  /** Room for `vertices` more vertices and `corners` more indices, which vertex and triangle take. */
+  reserve(vertices: number, corners: number): void {
+    const n = this.vertices + vertices;
+    scratchPositions = roomy(scratchPositions, n * 2, this.vertices * 2);
+    scratchColors = roomy(scratchColors, n, this.vertices);
+    scratchTexels = roomy(scratchTexels, n * 2, this.vertices * 2);
+    scratchIndices = roomy(scratchIndices, this.corners + corners, this.corners);
+  }
+
+  /** A vertex at (x, y) of `color`, sampling at texel (u, v), in room reserve made. */
+  vertex(x: number, y: number, color: number, u: number, v: number): void {
     const n = this.vertices;
-    scratchPositions = roomy(scratchPositions, n * 2 + 2, n * 2);
-    scratchColors = roomy(scratchColors, n + 1, n);
-    scratchTexels = roomy(scratchTexels, n * 2 + 2, n * 2);
     scratchPositions[n * 2] = x;
     scratchPositions[n * 2 + 1] = y;
     scratchColors[n] = color;
     scratchTexels[n * 2] = u;
     scratchTexels[n * 2 + 1] = v;
     this.vertices = n + 1;
-    return n;
   }
 
+  /** A triangle of the part's vertices `a`, `b` and `c`, in room reserve made. */
   triangle(a: number, b: number, c: number): void {
     const n = this.corners;
-    scratchIndices = roomy(scratchIndices, n + 3, n);
     scratchIndices[n] = a;
     scratchIndices[n + 1] = b;
     scratchIndices[n + 2] = c;
@@ -297,15 +324,13 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     const geometry = geometries[i];
     if (geometry && geometry.vertices.length > 0) {
       const { vertices, indices, indexOffset = 0 } = geometry;
-      let first = -1;
+      out.reserve(vertices.length / 2, indices.length);
+      const first = out.next;
       for (let k = 0; k < vertices.length; k += 2) {
         const x = vertices[k];
         const y = vertices[k + 1];
         how?.at(x, y);
-        const at = out.vertex(x, y, color, how ? how.u : 0, how ? how.v : 0);
-        if (k === 0) {
-          first = at;
-        }
+        out.vertex(x, y, color, how ? how.u : 0, how ? how.v : 0);
       }
 
       for (let k = 0; k < indices.length; k += 3) {
@@ -319,6 +344,8 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
   }
 
   out.close();
+  shrinkScratch();
+
   return out.parts;
 }
 
