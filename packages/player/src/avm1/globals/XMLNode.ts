@@ -238,7 +238,8 @@ const ESCAPES: Record<string, string> = {
   "'": "&apos;",
 };
 
-function escapeXml(text: string): string {
+/** `text` with XML's five characters escaped. */
+export function escapeXml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 

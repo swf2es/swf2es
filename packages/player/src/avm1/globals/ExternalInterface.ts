@@ -11,6 +11,7 @@
 // any object shaped as one.
 import { avm1 } from "@swf2es/runtime";
 import type { ExternalInterfaceHost } from "../../hosts.js";
+import { escapeXml } from "./XMLNode.js";
 
 type Value = avm1.Value;
 type Obj = avm1.Avm1Object;
@@ -28,6 +29,7 @@ export interface ExternalHost {
   callIn(body: () => Value): Value;
 }
 
+/** XML's five characters and their entities, `&` first. */
 const ESCAPES: [string, string][] = [
   ["&", "&amp;"],
   ['"', "&quot;"],
@@ -35,16 +37,6 @@ const ESCAPES: [string, string][] = [
   ["<", "&lt;"],
   [">", "&gt;"],
 ];
-
-/** `text` with XML's five characters escaped, `&` first. */
-function escapeXml(text: string): string {
-  let out = text;
-  for (const [c, entity] of ESCAPES) {
-    out = out.replaceAll(c, entity);
-  }
-
-  return out;
-}
 
 /** `text` with the five entities read back, `&amp;` last. */
 function unescapeXml(text: string): string {
