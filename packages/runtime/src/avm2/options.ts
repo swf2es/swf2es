@@ -33,6 +33,13 @@ export interface RuntimeOptions {
    */
   swfVersion?: number;
   /**
+   * The API version of user code, which the host resets codegen with too:
+   * Flash Player's, API_USER, by default; AIR's for an AIR host. What the
+   * runtime looks up by a string, as getDefinitionByName, JSON and AMF
+   * do, and what describeType lists, is what code of this version sees.
+   */
+  apiVersion?: number;
+  /**
    * What starts avmshell's background workers, each on a thread of its
    * own; without it a Worker can be made but not started.
    */

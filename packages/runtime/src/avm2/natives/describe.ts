@@ -9,7 +9,7 @@
 // the Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Metadata, Signature, TypeRef, Value } from "../descriptors.js";
-import { API_USER, formatClassName, type Namespace, NS_Public } from "../names.js";
+import { formatClassName, type Namespace, NS_Public } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import {
   BIND_Const,
@@ -211,7 +211,7 @@ function describeTraits(rt: Runtime, t: Traits, flags: number): AsObject {
   const methods: Value[] = [];
   if (flags & (INCLUDE_ACCESSORS | INCLUDE_METHODS | INCLUDE_VARIABLES)) {
     const hidden = flags & HIDE_NSURI_METHODS ? uriNamespacesOfBases(t) : null;
-    for (const member of members(t, flags)) {
+    for (const member of members(t, flags, rt.apiVersion)) {
       if (member.ns.kind !== NS_Public || hidden?.has(namespaceKey(member.ns, member.version))) {
         continue;
       }
@@ -312,7 +312,7 @@ function describeTraits(rt: Runtime, t: Traits, flags: number): AsObject {
  * interface. The bindings a class gets in its interfaces' namespaces are
  * no members of its own and do not show, as they do not in avmplus.
  */
-function members(t: Traits, flags: number): Member[] {
+function members(t: Traits, flags: number, apiVersion: number): Member[] {
   const chain: Traits[] = [];
   for (let c: Traits | null = t; c; c = c.base) {
     if (flags & HIDE_OBJECT && !c.base && !c.isInterface) {
@@ -331,7 +331,10 @@ function members(t: Traits, flags: number): Member[] {
       : new Set([...owner.interfaces].flatMap((i) => [i.name, i.name.replace("::", ":")]));
     for (const [name, list] of owner.bindings) {
       for (const b of list) {
-        if (b.version > API_USER || (interfaceNames && b.ns.uri && interfaceNames.has(b.ns.uri))) {
+        if (
+          b.version > apiVersion ||
+          (interfaceNames && b.ns.uri && interfaceNames.has(b.ns.uri))
+        ) {
           continue;
         }
 

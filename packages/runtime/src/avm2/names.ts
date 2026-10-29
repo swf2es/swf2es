@@ -251,13 +251,23 @@ export function qname(ns: Namespace, name: string): Multiname {
 }
 
 /**
- * The API version of user code: Flash Player's latest, 50, which hosts
- * reset codegen's domains with (its API_VERSION). An AIR host's, AIR's
- * 51, sees no more by it: in AIR's series only Flash Player's 50 moves to
- * 51, and no library has a name of it.
+ * Flash Player's latest API version, 50: user code's by default, which a
+ * host resets codegen's domains with too (its API_VERSION). An AIR host's
+ * is AIR's (RuntimeOptions.apiVersion).
  */
 export const API_USER = 50;
-const USER_VERSIONS: readonly number[] = [API_USER];
+const versionLists = new Map<number, readonly number[]>();
+
+/** The versions of a name seen at user code's API version `version`: one list for each version. */
+export function userVersions(version: number): readonly number[] {
+  let list = versionLists.get(version);
+  if (!list) {
+    list = [version];
+    versionLists.set(version, list);
+  }
+
+  return list;
+}
 
 /**
  * A public name the runtime makes from a string, as `in`, hasOwnProperty,
@@ -265,8 +275,8 @@ const USER_VERSIONS: readonly number[] = [API_USER];
  * sees it from the user code on the call stack, so an AIR-only or a
  * VM-internal binding is not there, as it is not to the code itself.
  */
-export function publicQname(name: string): Multiname {
-  return new Multiname(CONSTANT_Qname, PUBLIC_NAMESPACES, USER_VERSIONS, name, false);
+export function publicQname(name: string, version: number): Multiname {
+  return new Multiname(CONSTANT_Qname, PUBLIC_NAMESPACES, userVersions(version), name, false);
 }
 
 /** The builtin Vector classes, which avmplus names as the types they are vectors of. */

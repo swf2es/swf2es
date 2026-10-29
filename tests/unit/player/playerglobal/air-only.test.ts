@@ -47,6 +47,7 @@ const LOOKUPS = `package {
   import flash.desktop.NativeApplication;
   import flash.display.Sprite;
   import flash.system.ApplicationDomain;
+  import flash.system.Security;
   import flash.utils.describeType;
   import flash.utils.getDefinitionByName;
 
@@ -63,10 +64,12 @@ const LOOKUPS = `package {
       }
       try {
         trace("class", NativeApplication);
+        trace("supportsMenu", describeType(NativeApplication).toXMLString().indexOf("supportsMenu") >= 0);
       } catch (e:Error) {
         trace("class", e.name, e.errorID);
       }
       trace("stage.nativeWindow", describeType(stage).toXMLString().indexOf("nativeWindow") >= 0);
+      trace("sandbox", Security.sandboxType);
     }
   }
 }
@@ -96,6 +99,9 @@ async function play(swf: Uint8Array, air: boolean): Promise<string[]> {
     realTime: null,
     air,
   });
+  // What code sees by name, the runtime sees by a string: one version for both.
+  assert.equal(scripting.rt.apiVersion, air ? 51 : 50);
+  assert.equal(scripting.codegen.apiVersion, scripting.rt.apiVersion);
   await scripting.loadLibraries(libraries());
   const player = new Player(swf, scripting);
   try {
@@ -123,6 +129,7 @@ test("on the web AIR's classes are not defined, by name or by code", { skip }, a
     "flash.net.URLRequestDefaults true [class URLRequestDefaults]",
     "class ReferenceError 1065",
     "stage.nativeWindow false",
+    "sandbox remote",
   ]);
 });
 
@@ -139,7 +146,10 @@ test("in AIR they are", { skip }, async () => {
     "flash.desktop.Clipboard true [class Clipboard]",
     "flash.net.URLRequestDefaults true [class URLRequestDefaults]",
     "class [class NativeApplication]",
+    // AIR-versioned members, as describeType lists them at AIR's version.
+    "supportsMenu true",
     "stage.nativeWindow true",
+    "sandbox application",
   ]);
 });
 
@@ -162,5 +172,5 @@ test("a class that extends one links in AIR alone", { skip }, async () => {
 
   // Flash Player's plugin stops the SWF at the DoABC, Class not found.
   await assert.rejects(play(swf, false), /VerifyError #1014/);
-  assert.equal((await play(swf, true)).length, 10);
+  assert.equal((await play(swf, true)).length, 12);
 });

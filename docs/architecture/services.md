@@ -117,8 +117,9 @@ and hidden from the SWF's code (see
 package namespace's URI with API version 0, every version's, through a
 marked copy of its string. A host that plays AIR content passes
 `airLibrary` to `loadLibraries` after playerglobal, and `air: true` to
-`Scripting` for the rest of AIR's API; Flash Player has no such classes,
-so neither is the default.
+`Scripting` for the rest of AIR's API, with Security.sandboxType
+"application", as AIR's application sandbox; Flash Player has no such
+classes, so neither is the default.
 
 The natives (`playerglobal/air/net/WebSocket.ts`) run over a
 `WebSocketHost` (`hosts.ts`), by default the global WebSocket, a

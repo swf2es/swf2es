@@ -81,9 +81,9 @@ const proxyHook: PropertyHook = {
   add: () => undefined,
   // toString is a call like any other the traits do not bind: callProperty answers it.
   toString: (rt, o) =>
-    rt.toString(call(rt, o, "callProperty", nameFor(rt, publicQname("toString")))),
+    rt.toString(call(rt, o, "callProperty", nameFor(rt, publicQname("toString", rt.apiVersion)))),
   toXMLString: (rt, o) =>
-    rt.toString(call(rt, o, "callProperty", nameFor(rt, publicQname("toString")))),
+    rt.toString(call(rt, o, "callProperty", nameFor(rt, publicQname("toString", rt.apiVersion)))),
 };
 
 export const proxyHooks: Record<string, ClassHook> = {

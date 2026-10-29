@@ -5,22 +5,20 @@
 import type { Abc, AsObject, Value } from "./descriptors.js";
 import type { Domain } from "./domain.js";
 import {
-  API_USER,
   CONSTANT_Qname,
   Multiname,
   NS_Public,
   namespace,
   publicNs,
   qname,
+  userVersions,
 } from "./names.js";
 import type { Runtime } from "./runtime.js";
-
-const USER_VERSIONS: readonly number[] = [API_USER];
 
 /**
  * The class `qualified` names, "pkg::Name" or "Name", its defining script
  * run; a ReferenceError if no script defines it. What a SWF's SymbolClass
- * and a player's lookups by name go through.
+ * and a player's lookups by name go through, at every version.
  */
 export function classNamed(rt: Runtime, qualified: string, domain: Domain | null): AsObject {
   const named = (domain ?? rt.root).named;
@@ -40,6 +38,15 @@ export function classNamed(rt: Runtime, qualified: string, domain: Domain | null
 }
 
 /**
+ * The class `qualified` names in `domain` as code finds it, at user code's
+ * version, as avmshell's Domain.getClass does: a name of the other series'
+ * or the VM's own is a ReferenceError.
+ */
+export function classNamedByCode(rt: Runtime, qualified: string, domain: Domain): AsObject {
+  return rt.resolveName(qualifiedNameIn(rt, qualified, domain, userVersions(rt.apiVersion)));
+}
+
+/**
  * What `qualified` names in `domain`, as Flash's
  * ApplicationDomain.getDefinition finds it: a name no script defines is
  * refused by its local name, and a script whose initializer threw runs
@@ -49,7 +56,7 @@ export function classNamed(rt: Runtime, qualified: string, domain: Domain | null
  * or the VM's own is not defined, as it is not to the code itself.
  */
 export function definitionNamed(rt: Runtime, qualified: string, domain: Domain): Value {
-  const mn = qualifiedNameIn(rt, qualified, domain, USER_VERSIONS);
+  const mn = qualifiedNameIn(rt, qualified, domain, userVersions(rt.apiVersion));
   const script = rt.findScript(mn);
   if (!script) {
     throw rt.error("ReferenceError", 1065, mn.name);

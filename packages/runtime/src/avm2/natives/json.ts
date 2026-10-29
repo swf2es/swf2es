@@ -10,12 +10,10 @@ import { FloatVector } from "./float-vector.js";
 // Mozilla Public License, v. 2.0: http://mozilla.org/MPL/2.0/.
 
 import type { AsObject, Value } from "../descriptors.js";
-import { API_USER, NS_Public, publicQname } from "../names.js";
+import { NS_Public, publicQname } from "../names.js";
 import type { Runtime } from "../runtime.js";
 import type { Traits } from "../traits.js";
 import type { Natives } from "./define.js";
-
-const TO_JSON = publicQname("toJSON");
 
 /** Whether each traits binds a public toJSON, found once. */
 const boundToJSON = new WeakMap<Traits, boolean>();
@@ -318,7 +316,7 @@ function parse(rt: Runtime, text: string): Value {
             }
 
             advance();
-            rt.setProperty(o, publicQname(name), parseValue());
+            rt.setProperty(o, publicQname(name, rt.apiVersion), parseValue());
             if (current() !== ",") {
               break;
             }
@@ -349,7 +347,7 @@ function parse(rt: Runtime, text: string): Value {
 }
 
 /** A class instance's public variables and readable accessors but [Transient] ones, the class's own first, as TypeDescriber lists them. */
-function describedNames(traits: Traits): [string[], string[]] {
+function describedNames(traits: Traits, apiVersion: number): [string[], string[]] {
   const variables: string[] = [];
   const accessors: string[] = [];
   for (let t: Traits | null = traits; t && t.name !== "Object"; t = t.base) {
@@ -359,7 +357,7 @@ function describedNames(traits: Traits): [string[], string[]] {
         if (
           b.ns.kind !== NS_Public ||
           b.ns.uri !== "" ||
-          b.version > API_USER ||
+          b.version > apiVersion ||
           traits.isTransient(b.value)
         ) {
           continue;
@@ -469,12 +467,12 @@ class Serializer {
     const traits = rt.traitsOf(value);
     let bound = boundToJSON.get(traits);
     if (bound === undefined) {
-      bound = traits.find(TO_JSON) !== 0;
+      bound = traits.find(publicQname("toJSON", rt.apiVersion)) !== 0;
       boundToJSON.set(traits, bound);
     }
 
     if (bound) {
-      return rt.getProperty(value, TO_JSON);
+      return rt.getProperty(value, publicQname("toJSON", rt.apiVersion));
     }
 
     const own: Map<string, Value> | null | undefined =
@@ -508,7 +506,9 @@ class Serializer {
     const own: Map<string, Value> | null = value.$d;
     const prop = (name: string) => {
       // A dynamic property of its own is where getProperty would find it.
-      const v = own?.has(name) ? own.get(name) : rt.getProperty(value, publicQname(name));
+      const v = own?.has(name)
+        ? own.get(name)
+        : rt.getProperty(value, publicQname(name, rt.apiVersion));
       const written = this.str(name, v, value);
       if (written === undefined) {
         return;
@@ -527,7 +527,7 @@ class Serializer {
         prop(name);
       }
     } else {
-      const [variables, accessors] = describedNames(traits);
+      const [variables, accessors] = describedNames(traits, rt.apiVersion);
       for (const name of [...variables, ...accessors]) {
         prop(name);
       }

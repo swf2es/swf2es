@@ -155,7 +155,7 @@ export function shellNatives(rt: Runtime): Natives {
     }
 
     static get apiVersion(): number {
-      return 50;
+      return rt.apiVersion;
     }
 
     static getTimer(): number {
@@ -328,7 +328,7 @@ export function shellNatives(rt: Runtime): Natives {
       const name = rt.toString(className);
       const dot = name.lastIndexOf(".");
       const qualified = dot < 0 ? name : `${name.slice(0, dot)}::${name.slice(dot + 1)}`;
-      const cls = rt.classNamed(qualified, domainOf(this));
+      const cls = rt.classNamedByCode(qualified, domainOf(this));
       if (cls === null || typeof cls !== "object" || cls.$it === undefined) {
         throw rt.error("TypeError", 1034, rt.toString(cls), "Class");
       }
