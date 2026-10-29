@@ -47,6 +47,7 @@ import {
 } from "../display/filters.js";
 import { concat, invert, shifted } from "../display/geometry.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
+import { sliceDrawn, sliceFor, sliceLayers } from "../display/scale9.js";
 import { ShapeObject } from "../display/shapeobject.js";
 import {
   type GradientFill,
@@ -503,11 +504,21 @@ export class RenderView implements Drawer {
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow.
     const shape = o instanceof ShapeObject ? o.drawn() : null;
-    const layers = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    const slicing = hidden ? null : this.slicingOf(o);
+    const drawn = o.drawing ? o.drawing.layers : (shape?.layers ?? null);
+    const version = o.drawing ? o.drawing.version : 0;
+    const layers =
+      hidden || !drawn
+        ? null
+        : slicing
+          ? sliceLayers(drawn, slicing.slice, slicing.m, version)
+          : drawn;
+    // A sliced line keeps the width it has in its owner's parent's space, as adl's does, times a
+    // Shape child's own scale (render/view.ts, lineSpace).
+    const lineBy = slicing ? this.lineSpace(o, slicing.m !== null, pa, pb, pc, pd) : null;
     let row = -1;
     let lineRow = -1;
-    if (!hidden && layers) {
-      const version = o.drawing ? o.drawing.version : 0;
+    if (layers) {
       // A pixel of the screen, in the stage's pixels: the least a line is wide.
       const least = 1 / (this.screenScale ?? this.scale * this.resolution);
       for (let i = 0; i < layers.length; i++) {
@@ -538,7 +549,9 @@ export class RenderView implements Drawer {
 
         // The layer's lines after its fills, stroked in the stage's axes: placed by the translation alone.
         const lines =
-          layers[i].strokes.length > 0 ? this.linesOf(layers[i], version, a, b, c, d, least) : null;
+          layers[i].strokes.length > 0
+            ? this.linesOf(layers[i], version, a, b, c, d, least, lineBy)
+            : null;
         if (lines) {
           if (lineRow < 0) {
             lineRow = this.rows.add(1, 0, 0, 1, tx, ty, color);
@@ -894,6 +907,58 @@ export class RenderView implements Drawer {
     return this.filters.close();
   }
 
+  /**
+   * The 9-slice grid that reshapes what `o` draws itself, where one applies
+   * (display/scale9.ts): its own, or, for a shape, its parent's, through
+   * its matrix. One with a grid is sliced as its morphs take their new
+   * ratios, as the Pixi view slices it, so its bounds are this frame's.
+   * Masks draw unsliced, and so does what BitmapData.draw takes, which
+   * draws with no transform of its own, as the Pixi view draws them.
+   */
+  private slicingOf(o: DisplayObject): ReturnType<typeof sliceFor> {
+    const root = this.drawRoot;
+    if (o.scale9Grid && o !== root) {
+      sliceDrawn(o);
+    }
+
+    if (o === root) {
+      return null;
+    }
+
+    // The root's grid slices nothing, its Shapes' by it either; their own grids do.
+    const slicing = sliceFor(o);
+    return slicing?.m && o.parent === root ? null : slicing;
+  }
+
+  /**
+   * The linear transform a sliced object's lines are as wide through: its
+   * parent's (pa pb pc pd) for the grid's owner; for a Shape child, the
+   * owner's parent's, out of the owner's own (pa pb pc pd) and matrix,
+   * times its own matrix.
+   */
+  private lineSpace(
+    o: DisplayObject,
+    child: boolean,
+    pa: number,
+    pb: number,
+    pc: number,
+    pd: number,
+  ): number[] {
+    if (!child) {
+      return [pa, pb, pc, pd];
+    }
+
+    const owner = (o.parent as DisplayObject).matrix;
+    const det = owner.a * owner.d - owner.b * owner.c;
+    // The owner's parent's: its own taken back out of what the child is placed under.
+    const qa = det ? (pa * owner.d - pc * owner.b) / det : pa;
+    const qb = det ? (pb * owner.d - pd * owner.b) / det : pb;
+    const qc = det ? (pc * owner.a - pa * owner.c) / det : pc;
+    const qd = det ? (pd * owner.a - pb * owner.c) / det : pd;
+    const m = o.matrix;
+    return [qa * m.a + qc * m.b, qb * m.a + qd * m.b, qa * m.c + qc * m.d, qb * m.c + qd * m.d];
+  }
+
   /** A mask's draws, which `emit` writes, between its markers, kept on the stack of masks open for its pop. */
   private pushMask(emit: () => void): void {
     this.scene.marker(MASK_BEGIN);
@@ -1077,6 +1142,7 @@ export class RenderView implements Drawer {
     c: number,
     d: number,
     least: number,
+    by: readonly number[] | null = null,
   ): GeometryHandle | null {
     let byKey = this.lines.get(layer);
     if (!byKey) {
@@ -1084,7 +1150,9 @@ export class RenderView implements Drawer {
       this.lines.set(layer, byKey);
     }
 
-    const key = `${a} ${b} ${c} ${d} ${least}`;
+    const key = by
+      ? `${a} ${b} ${c} ${d} ${least} ${by.join(" ")}`
+      : `${a} ${b} ${c} ${d} ${least}`;
     const known = byKey.get(key);
     if (
       known &&
@@ -1117,7 +1185,7 @@ export class RenderView implements Drawer {
       }
     }
 
-    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator);
+    const data = layerStrokes(layer, a, b, c, d, least, this.tessellator, by);
     const handle = data ? this.geometries.add(data) : null;
     byKey.set(key, { handle, version });
     return handle;
@@ -1581,10 +1649,6 @@ function drawnWithin(scene: SceneList, layer: number): boolean {
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 function noteUnsupported(o: DisplayObject): void {
-  if (o.scale9Grid) {
-    unsupported.scale9Grids++;
-  }
-
   if (undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
