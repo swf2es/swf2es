@@ -15,6 +15,7 @@ import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "./BitmapData.js";
 import { programOf } from "./ShaderData.js";
+import { isShaderImage, shaderClasses } from "./ShaderInput.js";
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
@@ -41,9 +42,9 @@ function numberOf(v: number, float: boolean): number {
 
 export function shaderJobNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
-  const cls = (name: string) => s.rt.classNamed(name);
-  const isA = (v: Value, name: string) => s.rt.isInstance(v, cls(name));
-  const isVector = (v: Value) => s.rt.isInstance(v, s.rt.resolve(s.rt.vector("Number")));
+  const classes = () => shaderClasses(s);
+  const isBitmapData = (v: Value) => s.rt.isInstance(v, classes().bitmapData);
+  const isVector = (v: Value) => s.rt.isInstance(v, classes().vector);
   const refuse = (id: number, ...args: Value[]): never => {
     throw s.rt.error("ArgumentError", id, ...args);
   };
@@ -59,7 +60,10 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
     const float = pbjFloatType(p.type);
     const own = data.$d.get(p.name);
     let value: Value;
-    if (isA(own, "flash.display::ShaderParameter") && own.$type === (PBJ_TYPES[p.type] ?? null)) {
+    if (
+      s.rt.isInstance(own, classes().shaderParameter) &&
+      own.$type === (PBJ_TYPES[p.type] ?? null)
+    ) {
       value = own.$value ?? null;
     } else {
       const fallback = p.metadata.filter((m) => m.key === "defaultValue").pop();
@@ -68,7 +72,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
     }
 
     const values: number[] = [];
-    const items: Value[] = isA(value, "Array") ? (value as AsObject).$a : [];
+    const items: Value[] = s.rt.isInstance(value, classes().array) ? (value as AsObject).$a : [];
     for (let k = 0; k < size; k++) {
       if (k >= items.length) {
         values.push(0);
@@ -86,10 +90,19 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
     return values;
   };
 
-  /** An input's image, read now: a BitmapData's pixels, or as many floats as its size needs. */
-  const imageOf = (data: AsObject, name: string, channels: number): ShaderImage => {
+  /**
+   * An input's image, read now: a BitmapData's pixels, or as many floats
+   * as its size needs; a ByteArray's position is moved past them by
+   * `read`, once nothing refuses the job, as adl leaves it where it was then.
+   */
+  const imageOf = (
+    data: AsObject,
+    name: string,
+    channels: number,
+    read: (() => void)[],
+  ): ShaderImage => {
     const own = data.$d.get(name);
-    if (!isA(own, "flash.display::ShaderInput")) {
+    if (!s.rt.isInstance(own, classes().shaderInput)) {
       refuse(2167);
     }
 
@@ -99,7 +112,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       refuse(2164, name);
     }
 
-    if (isA(input, "flash.display::BitmapData")) {
+    if (isBitmapData(input)) {
       const store = storeOf(s, input as AsObject);
       return { width: store.width, height: store.height, pixels: store.readable, channels };
     }
@@ -132,13 +145,15 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       floats[i] = bytes.view.getFloat32(i * 4, bytes.littleEndian);
     }
 
-    bytes.position = count * 4;
+    read.push(() => {
+      bytes.position = count * 4;
+    });
     return { width, height, floats, channels };
   };
 
   /** Write the output, `channels` floats a pixel, to the target. */
   const deliver = (target: AsObject, out: Float32Array, channels: number): void => {
-    if (isA(target, "flash.display::BitmapData")) {
+    if (isBitmapData(target)) {
       const store: BitmapStore = target.$store;
       if (store.disposed) {
         return;
@@ -160,6 +175,11 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
     }
 
     if (isVector(target)) {
+      // A Vector made fixed since start, at another length: adl crashes; refused here.
+      if (target.$fixed && target.$a.length !== out.length) {
+        throw s.rt.error("RangeError", 1126);
+      }
+
       target.$a = Array.from(out);
       return;
     }
@@ -239,7 +259,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       const target: Value = this.$jobTarget ?? null;
       let width = this.$jobWidth ?? 0;
       let height = this.$jobHeight ?? 0;
-      if (isA(target, "flash.display::BitmapData")) {
+      if (isBitmapData(target)) {
         // A BitmapData is written whole, whatever the job's size; a disposed one is
         // an output adl cannot write.
         const store: BitmapStore | null = (target as AsObject).$store;
@@ -250,18 +270,15 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
 
         width = (store as BitmapStore).width;
         height = (store as BitmapStore).height;
-      } else if (
-        !(isVector(target) || isA(target, "flash.utils::ByteArray")) ||
-        width <= 0 ||
-        height <= 0
-      ) {
+      } else if (!isShaderImage(s, target) || width <= 0 || height <= 0) {
         refuse(2004);
       }
 
       const kernel = program.kernel;
       const images = new Map<number, ShaderImage>();
+      const read: (() => void)[] = [];
       for (const input of kernel.inputs) {
-        images.set(input.index, imageOf(data as AsObject, input.name, input.channels));
+        images.set(input.index, imageOf(data as AsObject, input.name, input.channels, read));
       }
 
       for (const texture of program.sampled) {
@@ -275,6 +292,11 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
         if (!p.output && p.name !== OUT_COORD) {
           values.set(p, valuesOf(data as AsObject, p));
         }
+      }
+
+      // Read: adl moves the positions before it refuses a fixed Vector (1126).
+      for (const move of read) {
+        move();
       }
 
       // A ByteArray or a Vector the browser cannot allocate is refused, not the player ended.
@@ -314,12 +336,12 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
         deliver(target as AsObject, out, program.channels);
         const o = target as AsObject;
         const event = s.rt.construct(
-          cls("flash.events::ShaderEvent"),
+          classes().shaderEvent,
           "complete",
           false,
           false,
-          isA(o, "flash.display::BitmapData") ? o : null,
-          isA(o, "flash.utils::ByteArray") ? o : null,
+          isBitmapData(o) ? o : null,
+          s.rt.isInstance(o, classes().byteArray) ? o : null,
           vector,
         ) as AsObject;
         dispatchEvent(s, this as unknown as AsObject, event);

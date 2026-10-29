@@ -40,6 +40,17 @@ const sample = hex(
     .bytes(),
 );
 
+const sampleParam = hex(
+  new PbjAssembler()
+    .version(1)
+    .param("in", "float2", "f1.rg", "_OutCoord")
+    .input(0, 1, "src")
+    .param("out", "float4", "f0.rgba", "dst")
+    .param("in", "float", "f3.r", "p")
+    .sample(false, "f0.r", "f1.rg", 0)
+    .bytes(),
+);
+
 const source = `package {
   import flash.display.*;
   import flash.events.*;
@@ -62,6 +73,10 @@ const source = `package {
       job.start();
       job.cancel();
       refused(function():void { job.start(); });
+      var again:ShaderJob = new ShaderJob(new Shader(bytes("${fill}")), c);
+      again.start();
+      again.cancel();
+      refused(function():void { again.start(true); });
     }
     public function Jobs() {
       var b:BitmapData = new BitmapData(2, 2, true, 0);
@@ -93,6 +108,22 @@ const source = `package {
       s.data.src.width = 1;
       s.data.src.height = 1;
       refused(function():void { new ShaderJob(s, b).start(true); });
+
+      // A ByteArray input's position moves past what a job read, but not for a job refused.
+      var floats:ByteArray = new ByteArray();
+      floats.writeFloat(0.5);
+      floats.writeFloat(0.25);
+      floats.position = 2;
+      var p:Shader = new Shader(bytes("${sampleParam}"));
+      p.data.src.input = floats;
+      p.data.src.width = 1;
+      p.data.src.height = 1;
+      p.data.p.value = ["x"];
+      refused(function():void { new ShaderJob(p, b).start(true); });
+      trace("position " + floats.position);
+      p.data.p.value = [1];
+      new ShaderJob(p, b).start(true);
+      trace("position " + floats.position);
 
       var target:BitmapData = new BitmapData(2, 2, true, 0);
       var job:ShaderJob = new ShaderJob(new Shader(bytes("${fill}")), target);
@@ -140,10 +171,14 @@ test("a ShaderJob runs once, writes each kind of target, and completes after EXI
     "2164",
     "2166",
     "2165",
+    "2004",
+    "position 2",
+    "position 4",
     "started 0",
     "exitFrame 0 0",
     "complete 0 true true ff4080bf",
     "enterFrame 1",
+    "2172",
     "2172",
     "exitFrame 1 ff4080bf",
   ]);

@@ -6,12 +6,45 @@ import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
 
+/** The classes the shader natives test values against, resolved once a player. */
+export interface ShaderClasses {
+  array: avm2.AsObject;
+  bitmapData: avm2.AsObject;
+  byteArray: avm2.AsObject;
+  vector: avm2.AsObject;
+  shaderParameter: avm2.AsObject;
+  shaderInput: avm2.AsObject;
+  shaderEvent: avm2.AsObject;
+}
+
+const resolved = new WeakMap<Scripting, ShaderClasses>();
+
+/** The classes, looked up at the first call, once playerglobal is loaded. */
+export function shaderClasses(s: Scripting): ShaderClasses {
+  let classes = resolved.get(s);
+  if (!classes) {
+    classes = {
+      array: s.rt.classNamed("Array"),
+      bitmapData: s.rt.classNamed("flash.display::BitmapData"),
+      byteArray: s.rt.classNamed("flash.utils::ByteArray"),
+      vector: s.rt.resolve(s.rt.vector("Number")),
+      shaderParameter: s.rt.classNamed("flash.display::ShaderParameter"),
+      shaderInput: s.rt.classNamed("flash.display::ShaderInput"),
+      shaderEvent: s.rt.classNamed("flash.events::ShaderEvent"),
+    };
+    resolved.set(s, classes);
+  }
+
+  return classes;
+}
+
 /** Whether `v` is what a ShaderInput takes, and a ShaderJob writes: a BitmapData, a ByteArray or a Vector.<Number>. */
 export function isShaderImage(s: Scripting, v: Value): boolean {
+  const c = shaderClasses(s);
   return (
-    s.rt.isInstance(v, s.rt.classNamed("flash.display::BitmapData")) ||
-    s.rt.isInstance(v, s.rt.classNamed("flash.utils::ByteArray")) ||
-    s.rt.isInstance(v, s.rt.resolve(s.rt.vector("Number")))
+    s.rt.isInstance(v, c.bitmapData) ||
+    s.rt.isInstance(v, c.byteArray) ||
+    s.rt.isInstance(v, c.vector)
   );
 }
 
