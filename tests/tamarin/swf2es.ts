@@ -14,8 +14,10 @@
 // counts, or the whole entry if it ended otherwise. A test whose counts
 // baseline.json does not compare, avmshell's following the date or the
 // machine, is left out of the score against avmshell, and only compared with
-// swf2es-baseline.json. Each test runs in one of at most 10 worker
-// processes, which is replaced when a test runs longer than TIMEOUT.
+// swf2es-baseline.json. The workers read a clock that starts at the same
+// instant on every run (clock.ts), so that swf2es' own Date results do not
+// follow the date. Each test runs in one of at most 10 worker processes,
+// which is replaced when a test runs longer than TIMEOUT.
 import { type ChildProcess, fork } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -119,6 +121,8 @@ async function runAll(count: number): Promise<void> {
 
       const spawn = () => {
         const c = fork(`${here}swf2es-worker.ts`, [], {
+          // The clock every run reads the same, in the worker's threads too.
+          execArgv: [...process.execArgv, "--import", new URL("./clock.ts", import.meta.url).href],
           // A test's own output comes back over IPC; a worker that runs out
           // of memory would only print V8's stack.
           stdio: ["ignore", "ignore", "ignore", "ipc"],
