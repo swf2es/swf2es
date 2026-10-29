@@ -75,6 +75,13 @@ export const MIRROR = 4;
  * reads it, once a pixel of Flash's (webgl/programs.ts, meshFragment).
  */
 export const MESH = 8;
+/**
+ * A 3D object's quad: drawn by the mesh program, its texture the kept
+ * output (Keeps) its bitmap was drawn into (WebGLBackend.drawPlane), its
+ * texels in that bitmap's texels, read smoothed at the centre of each pixel
+ * of Flash's, as Flash reads it.
+ */
+export const PLANE = 16;
 
 /**
  * A frame's drawing in order: each entry a geometry drawn under a row with

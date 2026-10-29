@@ -22,6 +22,7 @@ import {
   MESH,
   MIRROR,
   NORMAL,
+  PLANE,
   REPEAT,
   SCREEN,
   type SceneList,
@@ -753,6 +754,47 @@ export class WebGLBackend {
     return bytes;
   }
 
+  /**
+   * A 3D object's bitmap drawn (PLANE): the commands, as `execute` draws
+   * them, into a layer `samples` times the size of a `width` by `height`
+   * bitmap a side, halved till a sample a texel, and kept as kept output
+   * `keep` (Keeps), the one kept before given back. Called as the frame is
+   * walked, before its own commands are drawn, which composite it.
+   */
+  drawPlane(
+    keep: number,
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    width: number,
+    height: number,
+    samples: number,
+  ): void {
+    if (this.gl.isContextLost()) {
+      return;
+    }
+
+    let layer = this.takeLayer(width * samples, height * samples);
+    this.execute(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
+    for (let k = samples; k > 1; k /= 2) {
+      const half = this.filters.halve(layer, (width * k) / 2, (height * k) / 2);
+      this.giveLayer(layer);
+      layer = half;
+    }
+
+    const before = this.kept[keep];
+    if (before && before !== layer) {
+      this.giveLayer(before);
+    }
+
+    this.kept[keep] = layer;
+  }
+
   /** The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of. */
   private dropIdleLayers(): void {
     const stage = this.stageLayer;
@@ -1229,7 +1271,7 @@ export class WebGLBackend {
         continue;
       }
 
-      if (!stencil && scene.sampler[i] & MESH) {
+      if (!stencil && scene.sampler[i] & (MESH | PLANE)) {
         other = this.drawMesh(scene, i, place) || other;
         continue;
       }
@@ -1353,7 +1395,9 @@ export class WebGLBackend {
    */
   private drawMesh(scene: SceneList, i: number, place: Place): boolean {
     const id = scene.texture[i];
-    const texture = id >= 0 ? (this.textures[id] ?? null) : null;
+    const plane = (scene.sampler[i] & PLANE) !== 0;
+    const texture =
+      id < 0 ? null : plane ? (this.kept[id]?.texture ?? null) : (this.textures[id] ?? null);
     if (!texture) {
       return false;
     }
@@ -1375,15 +1419,21 @@ export class WebGLBackend {
       gl.uniform1i(this.meshRowLocation, row);
     }
 
-    const mode = scene.sampler[i] & (REPEAT | SMOOTH);
+    const mode = scene.sampler[i] & (REPEAT | SMOOTH | PLANE);
     if (mode !== this.meshMode) {
       this.meshMode = mode;
-      gl.uniform2i(this.meshModeLocation, mode & REPEAT ? 1 : 0, mode & SMOOTH ? 1 : 0);
+      gl.uniform3i(
+        this.meshModeLocation,
+        mode & REPEAT ? 1 : 0,
+        mode & SMOOTH ? 1 : 0,
+        mode & PLANE ? 1 : 0,
+      );
     }
 
     state.bindTexture(TEXTURE_UNIT, texture);
-    // Read texel by texel, but through a sampler without mipmaps, as a texture with none needs.
-    state.bindSampler(TEXTURE_UNIT, this.sampler(CLAMP));
+    // A plane's bitmap smoothed; a mesh's read texel by texel, but through a sampler without
+    // mipmaps, as a texture with none needs.
+    state.bindSampler(TEXTURE_UNIT, this.sampler(plane ? SMOOTH | CLAMP : CLAMP));
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
     return true;
   }
