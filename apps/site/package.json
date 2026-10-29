@@ -2,7 +2,7 @@
   "name": "@swf2es/site",
   "version": "0.0.0",
   "private": true,
-  "description": "swf2es's demo site: a static page that plays the SWFs people open, for GitHub Pages",
+  "description": "swf2es's site for GitHub Pages: a player for the SWFs people open, and the guide, built with Astro and Starlight",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -13,5 +13,9 @@
     "@swf2es/format": "workspace:*",
     "@swf2es/render": "workspace:*",
     "@swf2es/web": "workspace:*"
+  },
+  "devDependencies": {
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "^7.4.4"
   }
 }

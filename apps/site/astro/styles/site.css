@@ -1,0 +1,12 @@
+/* Starlight's theme, its accent the swf2es icon's blue. */
+:root {
+  --sl-color-accent-low: #0f2547;
+  --sl-color-accent: #2f6fd1;
+  --sl-color-accent-high: #c3d8f8;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #cfe0fa;
+  --sl-color-accent: #1f5fbf;
+  --sl-color-accent-high: #0f2f60;
+}

@@ -4,8 +4,10 @@
 // and traces, a SWF's workers share a Mutex and memory, a key's uncaught
 // error reaches the console, a file opened with the picker and a URL
 // load play, a URL the browser may not fetch
-// says why, the report link carries the SWF's facts and the errors, and the
-// licences are there. It leaves a screenshot in tests/site/out/site.png.
+// says why, the report link carries the SWF's facts and the errors, the
+// licences are there, the home page sends the player's old links to it, and
+// the guide's pages are there with every link within the site leading
+// somewhere. It leaves a screenshot in tests/site/out/site.png.
 //
 //   node tests/site/run.ts            build the site, then check it
 //   node tests/site/run.ts --serve    build it and serve it to look at, until ^C
@@ -13,6 +15,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readGuide } from "../../apps/site/guide.ts";
 import { cases } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { compileScripts } from "../player/scripts.ts";
@@ -39,6 +42,57 @@ const PROBE = `package {
   }
 }`;
 
+/**
+ * Run in the page: every page of the site that its pages link to from
+ * `base`, by its path and its title, and what they link to under `base`
+ * that is not there: a page, a file, or a heading of a page.
+ */
+const crawl = `async (base) => {
+  const queue = [base, base + "docs/"];
+  const seen = new Set(queue);
+  const pages = [];
+  const broken = [];
+  const ids = new Map();
+  const anchors = [];
+  const parser = new DOMParser();
+  for (let url = queue.shift(); url !== undefined; url = queue.shift()) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      broken.push(url + ": " + response.status);
+      continue;
+    }
+    if (!(response.headers.get("content-type") ?? "").includes("text/html")) {
+      continue;
+    }
+    const doc = parser.parseFromString(await response.text(), "text/html");
+    const path = new URL(url).pathname;
+    pages.push([path, doc.querySelector("h1")?.textContent?.trim() ?? ""]);
+    ids.set(path, new Set([...doc.querySelectorAll("[id]")].map((e) => e.id)));
+    for (const element of doc.querySelectorAll("a[href], link[href], script[src], img[src]")) {
+      const target = new URL(element.getAttribute("href") ?? element.getAttribute("src"), url);
+      if (!target.href.startsWith(base)) {
+        continue;
+      }
+      if (target.hash.length > 1) {
+        anchors.push([url, target.pathname, decodeURIComponent(target.hash.slice(1))]);
+      }
+      target.hash = "";
+      // A page with a query is the page: the player's ?swf= is for its script.
+      target.search = "";
+      if (!seen.has(target.href)) {
+        seen.add(target.href);
+        queue.push(target.href);
+      }
+    }
+  }
+  for (const [from, path, id] of anchors) {
+    if (!ids.get(path)?.has(id)) {
+      broken.push(from + ": " + path + "#" + id);
+    }
+  }
+  return { pages, broken };
+}`;
+
 type WorkerSwf = (abc: Uint8Array) => Uint8Array;
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -51,7 +105,7 @@ execFileSync(process.execPath, [`${root}apps/site/build.ts`], { stdio: "inherit"
 
 if (process.argv.includes("--serve")) {
   const { url } = await serve(mounts, undefined, false);
-  console.log(`the site: ${url}swf2es/index.html`);
+  console.log(`the site: ${url}swf2es/`);
 } else {
   await check();
 }
@@ -152,7 +206,7 @@ async function check(): Promise<void> {
               // at once, while the isolated page still loads, and once it has loaded.
               await send("Page.reload", { ignoreCache: true });
               await isolation(20_000);
-              await navigate("index.html");
+              await navigate("play/");
               assert.equal(await value<boolean>("crossOriginIsolated"), true);
               await send("Page.reload", { ignoreCache: true });
               await isolation(20_000);
@@ -168,7 +222,7 @@ async function check(): Promise<void> {
         [
           "?swf= plays a demo, which traces and draws",
           async () => {
-            await navigate("index.html?swf=demos%2Fbounce.swf");
+            await navigate("play/?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
             await until(logHas("Hello from ActionScript 3"));
             assert.equal(
@@ -250,7 +304,9 @@ async function check(): Promise<void> {
             const about = await value<string>(
               `[...${menu}.shadowRoot.querySelectorAll('button')].at(-1).textContent`,
             );
-            const build = await value<string>("document.documentElement.dataset.build");
+            const build = await value<string>(
+              "document.querySelector('[data-build]').dataset.build",
+            );
             assert.equal(about, build === "unknown" ? "About swf2es" : `About swf2es (${build})`);
             await send("Input.dispatchKeyEvent", {
               type: "keyDown",
@@ -537,12 +593,12 @@ async function check(): Promise<void> {
             await until("document.getElementById('status').textContent.includes('CORS')");
             // A shared link plays a SWF from a server, never one in the link itself.
             await navigate(
-              `index.html?swf=${encodeURIComponent("data:application/x-shockwave-flash;base64,RldT")}`,
+              `play/?swf=${encodeURIComponent("data:application/x-shockwave-flash;base64,RldT")}`,
             );
             await until("document.getElementById('status').textContent.startsWith('Only http')");
 
             // A link to any other SWF waits for the one who followed it to say play.
-            await navigate(`index.html?swf=${encodeURIComponent(`${base}demos/crowd.swf`)}`);
+            await navigate(`play/?swf=${encodeURIComponent(`${base}demos/crowd.swf`)}`);
             await until("!document.getElementById('ask').hidden");
             assert.equal(
               await value<string>("document.getElementById('ask-file').textContent"),
@@ -569,16 +625,42 @@ async function check(): Promise<void> {
           "the licences are there",
           async () => {
             const found = await value<number[]>(
-              "Promise.all(['notices.html', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/native/render/index.js', 'libraries/builtin.abc'].map((u) => fetch(u).then((r) => r.status)))",
+              `Promise.all(['notices/', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/native/render/index.js', 'libraries/builtin.abc'].map((u) => fetch(${JSON.stringify(base)} + u).then((r) => r.status)))`,
             );
             assert.deepEqual(found, [200, 200, 200, 200, 200, 200]);
-            const notices = await value<string>("fetch('notices.html').then((r) => r.text())");
+            const notices = await value<string>(`fetch("${base}notices/").then((r) => r.text())`);
             assert.match(notices, /Mozilla Public License/);
             assert.match(notices, /packages\/runtime\/src\/avm2\/numbers\.ts/);
             // The MPL's source form at the very commit.
             assert.match(notices, /github\.com\/swf2es\/avmplus\/tree\/[0-9a-f]{40}/);
             assert.match(notices, /licenses\/libtess2-SGI\.txt/);
             assert.doesNotMatch(notices, /\{\{/);
+          },
+        ],
+        [
+          "the home page sends a link to the player, as it was, to the player",
+          async () => {
+            await navigate("index.html?swf=demos%2Fbounce.swf");
+            assert.equal(await value<string>("location.pathname"), "/swf2es/play/");
+            assert.equal(await value<string>("location.search"), "?swf=demos%2Fbounce.swf");
+            await until(playing("bounce.swf"));
+          },
+        ],
+        [
+          "the guide's pages are there, and every link within the site leads somewhere",
+          async () => {
+            const crawled = await value<{ pages: [string, string][]; broken: string[] }>(
+              `(${crawl})(${JSON.stringify(base)})`,
+            );
+            assert.deepEqual(crawled.broken, []);
+            const titles = new Map(crawled.pages);
+            for (const page of readGuide(root, "/swf2es/", "")) {
+              assert.equal(titles.get(`/swf2es/${page.id}/`), page.title, `${page.id} is missing`);
+            }
+
+            for (const path of ["/swf2es/", "/swf2es/play/", "/swf2es/notices/", "/swf2es/docs/"]) {
+              assert.ok(titles.has(path), `${path} is not linked from the site`);
+            }
           },
         ],
       ];
@@ -601,7 +683,7 @@ async function check(): Promise<void> {
     },
     false,
     // As GitHub Pages serves it: with no headers that isolate it.
-    { page: "swf2es/index.html", mounts, isolated: false },
+    { page: "swf2es/play/", mounts, isolated: false },
   );
 
   if (failures > 0) {

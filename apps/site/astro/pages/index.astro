@@ -1,0 +1,81 @@
+---
+// The home page: what swf2es is, and the way to the player and the guide.
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "swf2es",
+    description:
+      "swf2es plays SWF files in the browser, their ActionScript compiled to JavaScript.",
+    template: "splash",
+    head: [
+      // The player was the home page once: its shared links, ?swf=, go to it.
+      {
+        tag: "script",
+        content:
+          'if (new URLSearchParams(location.search).has("swf")) location.replace("play/" + location.search + location.hash);',
+      },
+    ],
+    hero: {
+      title: "SWF files in the browser",
+      tagline:
+        "swf2es compiles their ActionScript, AS3 and AS1/2 alike, to JavaScript, and draws them with a WebGL 2 renderer of its own. Open or drop a SWF: it is read in your browser, never uploaded.",
+      image: { html: `<img src="${base}icon.svg" alt="" width="200" height="200">` },
+      actions: [
+        { text: "Play a SWF", link: `${base}play/`, icon: "right-arrow" },
+        { text: "Read the guide", link: `${base}docs/`, variant: "minimal" },
+      ],
+    },
+  }}
+>
+  <CardGrid>
+    <Card title="ActionScript 3" icon="seti:javascript">
+      Compiled to JavaScript as the SWF loads, so the browser's own JIT runs it, and checked
+      against avmshell on Tamarin's acceptance tests.
+    </Card>
+    <Card title="ActionScript 1 and 2" icon="document">
+      AVM1's timelines, clips, buttons, text fields and loads, compiled to JavaScript as well.
+    </Card>
+    <Card title="The player" icon="puzzle">
+      The display list and timeline, shapes, morphs, text, bitmaps, filters, blend modes, sound,
+      input, sockets, workers and ExternalInterface, each checked against Flash. Stage3D is an
+      experimental opt-in.
+    </Card>
+    <Card title="Not yet" icon="warning">
+      Video, printing and Pixel Bender shaders. Compatibility is incomplete: some SWFs draw or
+      behave differently.
+    </Card>
+  </CardGrid>
+
+  <h2>Try a demo</h2>
+  <CardGrid>
+    <LinkCard
+      title="Bounce (ActionScript 3)"
+      description="Gradients, glow filters and additive blending."
+      href={`${base}play/?swf=demos%2Fbounce.swf`}
+    />
+    <LinkCard
+      title="Orbit (ActionScript 1 and 2)"
+      description="A SWF 8 timeline whose frame actions trace."
+      href={`${base}play/?swf=demos%2Forbit.swf`}
+    />
+  </CardGrid>
+
+  <h2>Use it</h2>
+  <CardGrid>
+    <LinkCard
+      title="Embed a SWF in a page"
+      description="The <swf2es-player> element, and replacing a page's Flash tags."
+      href={`${base}docs/`}
+    />
+    <LinkCard
+      title="How it works"
+      description="The compiler, runtime and player, in the repository's architecture notes."
+      href="https://github.com/swf2es/swf2es/blob/main/docs/architecture.md"
+    />
+  </CardGrid>
+</StarlightPage>
