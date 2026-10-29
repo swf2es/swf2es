@@ -219,6 +219,16 @@ test("matrix register spans respect stage limits and retain every referenced row
   }
 });
 
+test("pow raises the base's magnitude, as Direct3D's pow does", () => {
+  for (const stage of ["vertex", "fragment"] as const) {
+    const bytes = binary(0x0b, 27, stage === "fragment");
+    bytes[13] = 7;
+    const { source } = translate(computation(bytes, stage), stage);
+    // GLSL's pow leaves a negative base undefined, and a GPU gives NaN.
+    assert.match(source, /= pow\(abs\((va|fc)0\.xyzw\), [vf]c27\.xyzw\)/);
+  }
+});
+
 test("arithmetic validates both sources and rejects unsupported matrix encodings", () => {
   for (const opcode of [1, 2, 3, 4, 6, 7, 0x0b, 0x11, 0x12, 0x13]) {
     const bytes = binary(opcode, 27, true);

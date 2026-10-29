@@ -311,10 +311,9 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         expression = `inversesqrt(${a})`;
         break;
       case 0x0b:
-        // As Direct3D's pow, which AIR draws with: |a|^b, by exp2 and log2 as
-        // there (0^-1 is infinity, 0^0 NaN). GLSL's pow leaves a negative base
-        // undefined, and GPUs give NaN, so lit surfaces drew black.
-        expression = `exp2(${b} * log2(abs(${a})))`;
+        // As Direct3D's pow, which AIR draws with: |a|^b. GLSL leaves a
+        // negative base undefined, where GPUs give NaN, which draws black.
+        expression = `pow(abs(${a}), ${b})`;
         break;
       case 0x0c:
         expression = `log2(${a})`;

@@ -10,8 +10,9 @@ package {
   import flash.utils.ByteArray;
 
   // AGAL pow with negative and zero bases, in each stage: what AIR draws.
-  // AIR gives |a|^b, as Direct3D's pow does. Its 0^0 is NaN, which drivers
-  // write to a color target differently, so no lane asks for it.
+  // AIR gives |a|^b, as Direct3D's pow does, and 0^-1 infinity. Its 0^0 is
+  // NaN, which drivers write to a color target differently, so no lane
+  // asks for it.
   public class PowerSigns extends Sprite {
     public var complete:Boolean = false;
     private var context:Context3D;
@@ -72,11 +73,15 @@ package {
         [[-0.25, -0.5, -0.0625, 0], [3, 1, 0.25, 0]],
         [[0.5, -0.5, 0, 0], [-1, -1, 2, 0]],
         [[0, 0, -1, 0], [0.5, 1, 3, 0]],
-        [[-2, -0.5, 0.25, 0], [-2, 0, 0.5, 0]]
+        [[-2, -0.5, 0.25, 0], [-2, 0, 0.5, 0]],
+        [[0, -4, 4, 0], [-1, -0.5, -1, 0]]
       ];
       for (var stageIndex:int = 0; stageIndex < 2; stageIndex++) {
         var stageName:String = stageIndex == 0 ? "vertex" : "fragment";
         for (var i:int = 0; i < cases.length; i++) {
+          // 0^-1 is infinity, which a vertex hands on interpolated, as
+          // drivers do differently: AIR reads 0, SwiftShader 1.
+          if (stageIndex == 0 && i == 5) { continue; }
           context.setProgramConstantsFromVector(stageName, 0, Vector.<Number>(cases[i][0]));
           context.setProgramConstantsFromVector(stageName, 1, Vector.<Number>(cases[i][1]));
           context.setProgramConstantsFromVector(stageName, 2, Vector.<Number>([0, 0, 0, 1]));
