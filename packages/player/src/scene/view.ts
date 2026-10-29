@@ -252,6 +252,18 @@ interface Made {
   version: number;
 }
 
+/**
+ * The layers an object's drawing was last drawn as, of its version
+ * (dropUndrawn): a set, as a drawing refills its own list as it is cleared
+ * and drawn again, and the list they came in, which a frame's walk passes
+ * again unchanged.
+ */
+interface DrawnLayers {
+  version: number;
+  source: ShapeLayer[];
+  layers: Set<ShapeLayer>;
+}
+
 /** A texture made of pixels that change: a store's, kept as of its version. */
 interface Kept {
   handle: TextureHandle;
@@ -449,6 +461,11 @@ export class RenderView implements Drawer {
   private drawMatrix: Matrix = IDENTITY;
   private readonly made = new WeakMap<ShapeLayer, Made>();
   private readonly maskMade = new WeakMap<ShapeLayer, Made>();
+  /**
+   * The layers each object's drawing (Graphics) was last drawn as, and of
+   * which version: those its next version leaves out are let go of then.
+   */
+  private readonly drawnLayers = new WeakMap<DisplayObject, DrawnLayers>();
   /** The masks pushed and not yet popped, as each one's first draw and count. */
   private readonly masks: number[] = [];
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
@@ -574,6 +591,11 @@ export class RenderView implements Drawer {
   /** Canvas pixels a stage pixel (resize). */
   get canvasResolution(): number {
     return this.resolution;
+  }
+
+  /** How many geometries it keeps, which a page may check. */
+  get geometryCount(): number {
+    return this.geometries.count;
   }
 
   /** How many device texts' runs it keeps drawn (rasterized device text), which a page may check. */
@@ -817,6 +839,10 @@ export class RenderView implements Drawer {
         : slice
           ? sliceLayers(drawn, slice, ownSlice ? null : o.placed, version)
           : drawn;
+    if (o.drawing && layers) {
+      this.dropUndrawn(o, layers, version);
+    }
+
     // A sliced line keeps the width it has in its owner's parent's space, as adl's does, times a
     // Shape child's own scale; made as a stroked layer first needs it.
     let lineBy: number[] | null = null;
@@ -1844,6 +1870,11 @@ export class RenderView implements Drawer {
     const layers = o.drawing
       ? facing(o.drawing.layers, a * d - b * c < 0, version)
       : (shape?.layers ?? null);
+    // A mask's drawing drawn again lets go of its old layers too.
+    if (o.drawing && layers) {
+      this.dropUndrawn(o, layers, version);
+    }
+
     // Its row made as its first draw needs it, in place: a closure here kept every number it took
     // in a context made on each call, boxed, as the walk's did.
     let row = -1;
@@ -1904,6 +1935,56 @@ export class RenderView implements Drawer {
     if (!this.snapshotting) {
       o.dirty = CLEAN;
     }
+  }
+
+  /**
+   * `o`'s drawing drawn as `layers` of `version`: the parts of the layers it
+   * was last drawn as and is no more let go of now. A drawing cleared and
+   * drawn again on every frame, as a software 3D engine draws its
+   * triangles, makes new layers each time, whose old parts the idle frames
+   * would otherwise keep for hundreds of frames.
+   */
+  private dropUndrawn(o: DisplayObject, layers: ShapeLayer[], version: number): void {
+    const last = this.drawnLayers.get(o);
+    if (last?.version === version) {
+      // Another set of the same version, mirrored (facing) or sliced, kept beside the first.
+      if (layers !== last.source) {
+        for (const layer of layers) {
+          last.layers.add(layer);
+        }
+      }
+
+      return;
+    }
+
+    if (last) {
+      const now = new Set(layers);
+      for (const layer of last.layers) {
+        if (!now.has(layer)) {
+          this.dropParts(this.made, layer);
+          this.dropParts(this.maskMade, layer);
+          this.lineCache.drop(layer);
+        }
+      }
+    }
+
+    this.drawnLayers.set(o, { version, source: layers, layers: new Set(layers) });
+  }
+
+  /** `layer`'s parts in `cache` let go of. */
+  private dropParts(cache: WeakMap<ShapeLayer, Made>, layer: ShapeLayer): void {
+    const made = cache.get(layer);
+    if (!made) {
+      return;
+    }
+
+    for (const { handle } of made.parts) {
+      if (this.geometries.alive(handle)) {
+        this.geometries.remove(handle.id);
+      }
+    }
+
+    cache.delete(layer);
   }
 
   /**

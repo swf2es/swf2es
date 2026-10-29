@@ -45,6 +45,11 @@ export class Registry {
     return this.held.length;
   }
 
+  /** How many ids name something now. */
+  get count(): number {
+    return this.held.length - this.free.length;
+  }
+
   /** `id` used this frame. */
   use(id: number): void {
     this.usedAt[id] = this.frame;

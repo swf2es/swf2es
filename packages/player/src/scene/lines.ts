@@ -294,6 +294,17 @@ export class LineCache {
     this.limit = Math.max(this.budget, this.vertices * 1.5);
   }
 
+  /** `layer`'s lines let go of, as its drawing draws it no more: the next sweep forgets them. */
+  drop(layer: ShapeLayer): void {
+    for (const bucket of this.byLayer.get(layer)?.byHash.values() ?? []) {
+      for (const e of bucket) {
+        if (e.handle && this.geometries.alive(e.handle)) {
+          this.geometries.remove(e.handle.id);
+        }
+      }
+    }
+  }
+
   /** Line entry `e` taken out of its layer's lines, its vertices no longer counted. */
   private forget(e: LineEntry): void {
     const bucket = e.within.byHash.get(e.hash);
