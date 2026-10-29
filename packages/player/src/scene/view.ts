@@ -687,7 +687,7 @@ export class RenderView implements Drawer {
       // them was, else as normal text.
       // In a 3D object's bitmap, whose pixels are not the stage's, as normal text.
       const advanced =
-        omitted.advanced && this.planes.depth === 0
+        omitted.advanced && !this.planes.inPass
           ? this.advancedTexts.advancedText(o, a, b, c, d, this.target, this.drawRoot !== null)
           : null;
       if (omitted.advanced && !advanced) {
@@ -949,10 +949,8 @@ export class RenderView implements Drawer {
       return false;
     }
 
-    // In another's bitmap, placed by what moves with all above it.
-    if (this.planes.depth > 0) {
-      this.planes.placed++;
-    }
+    // Counted in another's bitmap, placed by what moves with all above it.
+    this.planes.place();
 
     // What it draws, measured again only where something in it may have changed.
     const k = this.planes.state(o);
@@ -1058,9 +1056,7 @@ export class RenderView implements Drawer {
     height: number,
     keep: number,
   ): boolean {
-    const depth = this.planes.depth;
-    const placed = this.planes.placed;
-    const pass = this.planes.pass(depth);
+    const pass = this.planes.enter();
 
     const outer = this.passState();
     const target = {
@@ -1088,7 +1084,7 @@ export class RenderView implements Drawer {
     this.drawMatrix = o.scroll ? shifted(m, o.scroll) : m;
     this.sliceOwner = null;
     this.ownerSlice = null;
-    this.planes.depth++;
+    let placed = false;
     try {
       this.scene.reset();
       this.rows.reset();
@@ -1122,11 +1118,11 @@ export class RenderView implements Drawer {
         samples,
       );
     } finally {
-      this.planes.depth--;
+      placed = this.planes.leave();
       this.restorePass(outer);
     }
 
-    return this.planes.placed !== placed;
+    return placed;
   }
 
   /** What advanced text's quads name of the outlines' store, uploaded. */
@@ -1258,7 +1254,7 @@ export class RenderView implements Drawer {
   private placedMask(mask: DisplayObject): Matrix {
     const root = this.drawRoot;
     // In a 3D object's bitmap by the matrices up to it, or Flash's rule for one outside it.
-    if (root && this.planes.depth > 0) {
+    if (root && this.planes.inPass) {
       return this.planeMask(root, mask);
     }
 
@@ -1290,7 +1286,7 @@ export class RenderView implements Drawer {
       }
     } else {
       m = outsideMaskMap(o, mask);
-      this.planes.placed++;
+      this.planes.place();
     }
 
     return concat(m, this.drawMatrix);

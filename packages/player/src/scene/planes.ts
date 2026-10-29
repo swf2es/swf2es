@@ -99,7 +99,9 @@ export class Planes {
    * How many 3D objects and masks from outside them passes have placed: a
    * pass that places one draws a bitmap that cannot be kept (drawPlane).
    */
-  placed = 0;
+  private placed = 0;
+  /** What `placed` was as each open pass began (enter), which its leave compares with. */
+  private readonly entered: number[] = [];
   /** Where drawPlane works out a quad. */
   readonly quad: PlaneQuad = {
     x: 0,
@@ -110,7 +112,7 @@ export class Planes {
     ws: new Float64Array(4),
   };
   /** How many 3D objects' passes the walk is in, and each depth's lists, kept for the next. */
-  depth = 0;
+  private depth = 0;
   private readonly passes: {
     scene: SceneList;
     rows: Rows;
@@ -171,8 +173,46 @@ export class Planes {
     return kept.handle;
   }
 
+  /** Whether the walk is in a 3D object's pass, whose pixels are its bitmap's, not the stage's. */
+  get inPass(): boolean {
+    return this.depth > 0;
+  }
+
+  /**
+   * A 3D object, or a mask from outside one, placed by the walk: in a pass,
+   * placed by what moves with all above it, which the pass's bitmap then
+   * cannot be kept past.
+   */
+  place(): void {
+    if (this.depth > 0) {
+      this.placed++;
+    }
+  }
+
+  /**
+   * A 3D object's pass begun, a depth further in: its lists. Each enter is
+   * paired with a leave in a finally, as the walk inside may throw.
+   */
+  enter(): { scene: SceneList; rows: Rows; filters: Filters; commands: Commands } {
+    const pass = this.pass(this.depth);
+    this.entered.push(this.placed);
+    this.depth++;
+    return pass;
+  }
+
+  /** The pass begun last ended: whether it placed anything (place), which keeps its bitmap from being kept. */
+  leave(): boolean {
+    this.depth--;
+    return this.placed !== this.entered.pop();
+  }
+
   /** The lists of a pass at `depth`, made on its first. */
-  pass(depth: number): { scene: SceneList; rows: Rows; filters: Filters; commands: Commands } {
+  private pass(depth: number): {
+    scene: SceneList;
+    rows: Rows;
+    filters: Filters;
+    commands: Commands;
+  } {
     let pass = this.passes[depth];
     if (!pass) {
       pass = {
