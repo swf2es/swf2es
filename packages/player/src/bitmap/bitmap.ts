@@ -476,26 +476,28 @@ export class BitmapStore {
     // it moves right.
     const up = source === this && d.y > sy && d.x >= sx;
     const left = source === this && d.x > sx;
-    // The array written, taken once: a source or alpha that is this store reads it too. A
-    // source that holds alpha is copied opaque, as a draw reads it; within itself, as it is.
+    // The arrays taken once, the written one first: a source or alpha that is this store reads
+    // it too, and so what the copy already wrote. A source that holds alpha is copied opaque, as
+    // a draw reads it; within itself, as it is.
     const into = this.pixels;
-    const opaque = source !== this && source.holdsAlpha ? source.drawable : null;
+    const pixels = source !== this && source.holdsAlpha ? source.drawable : source.readable;
+    const mask = alpha?.readable ?? null;
+
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
       const to = (d.y + row) * this.width + d.x;
       const from = (sy + row) * source.width + sx;
       for (let c = 0; c < d.width; c++) {
         const i = left ? d.width - 1 - c : c;
-        // Read again each pixel: a copy within the store reads what it wrote.
-        let p = opaque ? opaque[from + i] : source.readable[from + i];
-        if (alpha) {
+        let p = pixels[from + i];
+        if (alpha && mask) {
           const mx = ax + i;
           const my = ay + row;
           if (mx < 0 || my < 0 || mx >= alpha.width || my >= alpha.height) {
             continue;
           }
 
-          p = scale(p, alpha.readable[my * alpha.width + mx] >>> 24);
+          p = scale(p, mask[my * alpha.width + mx] >>> 24);
         }
 
         into[to + i] = this.composite(p, into[to + i], mergeAlpha);
