@@ -11,10 +11,14 @@
 /** A byte's float as adl samples one: times the float nearest 1/255, not divided. */
 const BYTE = "0.003921568859368563";
 
-/** An image a kernel samples: its texture number, and whether it is the filtered layer. */
+/**
+ * An image a kernel samples: its texture number, and whether it is the
+ * filtered layer; or, for a blend, what is below or the layer blended.
+ */
 export interface KernelImage {
   texture: number;
   layer: boolean;
+  back?: boolean;
 }
 
 /**
@@ -67,8 +71,22 @@ vec4 pbBytes(vec4 v) {
  * filter's extensions, in stage pixels.
  */
 export function filterKernel(kernel: string, images: readonly KernelImage[]): string {
-  // Made once a kernel and its images, which a frame asks for again on each of its filters.
-  const key = images.map((i) => (i.layer ? `${i.texture}L` : i.texture)).join();
+  return madeOnce(madeFilters, kernel, images, () => filterSource(kernel, images));
+}
+
+/** The most kernels whose shaders madeOnce keeps for a use, emptied when more come. */
+const MADE = 64;
+const madeFilters = new Map<string, Map<string, string>>();
+const madeBlends = new Map<string, Map<string, string>>();
+
+/** A kernel's shader for its images, made once: a frame asks for it again on each of its uses. */
+function madeOnce(
+  made: Map<string, Map<string, string>>,
+  kernel: string,
+  images: readonly KernelImage[],
+  make: () => string,
+): string {
+  const key = images.map((i) => `${i.texture}${i.layer ? (i.back ? "B" : "L") : ""}`).join();
   let byImages = made.get(kernel);
   if (!byImages) {
     if (made.size >= MADE) {
@@ -81,16 +99,12 @@ export function filterKernel(kernel: string, images: readonly KernelImage[]): st
 
   let source = byImages.get(key);
   if (source === undefined) {
-    source = filterSource(kernel, images);
+    source = make();
     byImages.set(key, source);
   }
 
   return source;
 }
-
-/** The most kernels whose shaders filterKernel keeps, emptied when more come. */
-const MADE = 64;
-const made = new Map<string, Map<string, string>>();
 
 function filterSource(kernel: string, images: readonly KernelImage[]): string {
   const parts = [
@@ -161,3 +175,74 @@ void main(void) {
   finalColor = texelFetch(uTexture, ivec2(uTextureRect.xy) + at, 0);
 }
 `;
+
+/**
+ * A blend shader's composite (webgl/composite.ts), drawn as the composite
+ * program is (programs.ts, compositeFragment), its uniforms the same: as
+ * adl runs one, a pixel at a time, each where the layer covers anything
+ * and nothing where it does not, or over its whole rectangle (uWhole), the kernel's coordinate (0.5, 0.5) and
+ * its first two inputs that pixel of what is below and of the layer,
+ * coloured, whatever coordinate it samples them at; its result in place of
+ * what was below, clamped, each colour at most its alpha. `rows` is the
+ * colour transform's reading of uRows (programs.ts).
+ */
+export function blendKernel(kernel: string, images: readonly KernelImage[], rows: string): string {
+  return madeOnce(madeBlends, kernel, images, () => blendSource(kernel, images, rows));
+}
+
+function blendSource(kernel: string, images: readonly KernelImage[], rows: string): string {
+  const parts = [
+    `#version 300 es
+precision highp float;
+uniform sampler2D uLayer;
+uniform sampler2D uBack;
+uniform highp sampler2D uRows;
+uniform int uRow;
+uniform ivec2 uOffset;
+uniform bool uFlip;
+uniform ivec2 uBackOffset;
+uniform bool uWhole;
+out vec4 finalColor;
+vec4 pbFront;
+vec4 pbBack;
+`,
+    PRELUDE,
+  ];
+  for (const { texture: t, layer, back } of images) {
+    if (layer) {
+      parts.push(`vec4 pbTexel${t}(ivec2 at) {
+  return pbBytes(${back ? "pbBack" : "pbFront"});
+}
+`);
+    } else {
+      parts.push(`uniform sampler2D pbImage${t};
+vec4 pbTexel${t}(ivec2 at) {
+  ivec2 size = textureSize(pbImage${t}, 0);
+  return pbBytes(texelFetch(pbImage${t}, clamp(at, ivec2(0), size - 1), 0));
+}
+`);
+    }
+
+    parts.push(sampling(t, "p"));
+  }
+
+  parts.push(kernel);
+  parts.push(`void main(void) {
+  ivec2 frag = ivec2(gl_FragCoord.xy);
+  ivec2 at = ivec2(frag.x - uOffset.x, uFlip ? uOffset.y - frag.y : frag.y - uOffset.y);
+  vec4 front = texelFetch(uLayer, at, 0);
+${rows}
+  pbBack = texelFetch(uBack, frag - uBackOffset, 0);
+  if (!uWhole && pbBytes(front).a == 0.0) {
+    finalColor = pbBack;
+    return;
+  }
+  pbFront = front;
+  vec4 c = pbKernel(vec2(0.5));
+  c = mix(vec4(0.0), min(c, 1.0), greaterThan(c, vec4(0.0)));
+  c = roundEven(c * 255.0) / 255.0;
+  finalColor = vec4(min(c.rgb, c.a), c.a);
+}
+`);
+  return parts.join("\n");
+}

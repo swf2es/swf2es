@@ -85,7 +85,8 @@ multisampled. `blend-kept` keeps blends still, moved, recoloured, with a
 child moving, over a ground changing under them, inside a filtered
 sprite and with a filter of their own, and `blend-kept-antialias` the
 same multisampled; `blend-outside-mask` masks a blend from outside it,
-and `blend-subpixel` moves one by part of a pixel.
+and `blend-subpixel` moves one by part of a pixel. A Pixel Bender blend
+shader composites by its kernel ([bitmaps](bitmaps.md#pixel-bender)).
 
 ## Filters
 

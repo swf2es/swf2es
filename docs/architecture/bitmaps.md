@@ -412,5 +412,24 @@ rect's corner (rounded) and the left and top extensions, clipped.
 `generateFilterRect` gives the bitmap's own rect grown by the
 extensions, whatever the rect. An opaque destination stays opaque, where
 adl keeps the kernel's alpha in its store. The `shader-filters` case
-draws each of these against adl. `blendShader` and shader fills are still
-to come.
+draws each of these against adl.
+
+A `blendShader` set takes the kernel, its parameters and images as they
+are then, and sets `blendMode` to "shader", which keeps it through other
+modes and back; null is TypeError 2007, a Shader of no kernel TypeError
+2007 for its data, fewer than two inputs 2167 and a third unset 2164.
+adl blends a pixel at a time: where the object covers anything, its
+first input is that pixel of what is below and its second the object's,
+coloured, whatever coordinate the kernel samples, which is (0.5, 0.5)
+throughout; the result takes the place of what was below, clamped, though
+less than opaque, and where the object covers nothing what is below
+stays. A filtered object blends as the bitmap Flash keeps of it, over its
+whole rectangle, even where that is transparent. The renderer composites
+such a layer with a program of the kernel's (`blendKernel`, in
+`webgl/composite.ts`), its mode `KERNEL` plus the chain of the frame's
+filters that holds the kernel (`BLEND`); a filtered one is drawn anew each
+frame rather than kept, as a kept layer's mode is a byte. It blends a
+texel at a time, so edges the page draws finer blend there rather than
+by Flash's pixel, and adl's bitmap of a blurred object reaches a little
+further than the renderer's layer (the `shader-blends` case). Shader
+fills are still to come.

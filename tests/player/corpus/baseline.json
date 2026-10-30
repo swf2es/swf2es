@@ -879,7 +879,7 @@
   "avm2/blend_mode_null": {"matched":0,"lines":1,"traced":1,"error":null},
   "avm2/blend_multiply_alpha": {"matched":0,"lines":0,"traced":0,"error":null},
   "avm2/blend_scroll": {"matched":0,"lines":0,"traced":0,"error":null},
-  "avm2/blend_shader_luma_lighten": {"matched":0,"lines":3,"traced":0,"error":null},
+  "avm2/blend_shader_luma_lighten": {"matched":3,"lines":3,"traced":3,"error":null},
   "avm2/blend_transform": {"matched":0,"lines":1,"traced":1,"error":null},
   "avm2/blur_filter": {"matched":44,"lines":44,"traced":44,"error":null},
   "avm2/bom": {"matched":4,"lines":9,"traced":4,"error":null},

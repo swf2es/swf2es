@@ -17,6 +17,7 @@ export {
 export * as filterShaders from "./filter-shaders.js";
 export {
   BEVEL,
+  BLEND,
   BLUR,
   blurShrink,
   COLOR_MATRIX,
@@ -50,6 +51,7 @@ export {
   HARDLIGHT,
   INVERT,
   KEPT,
+  KERNEL,
   LAYER,
   LAYER_BEGIN,
   LAYER_END,

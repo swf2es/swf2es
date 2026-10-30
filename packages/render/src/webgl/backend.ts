@@ -57,6 +57,8 @@ export class WebGLBackend {
   private filters!: FilterRunner<Layer>;
   /** The layers drawn into now, innermost last. */
   private layers: Open[] = [];
+  /** The frame's filters being drawn, whose chains blend shaders' modes name (KERNEL). */
+  private frameFilters: Filters | null = null;
   /**
    * Samples a pixel the stage and its layers are drawn with, 1 for none:
    * Flash's anti-aliasing by the quality, as the host sets it.
@@ -74,7 +76,11 @@ export class WebGLBackend {
     this.stage = new Stage(gl, this.state, this.pool);
     this.gpu = new GpuTextures(gl, this.state);
     this.atlas = new GeometryAtlas(gl, this.state);
-    this.compositor = new Compositor(gl, this.state);
+    this.compositor = new Compositor(gl, this.state, {
+      filters: () => this.frameFilters,
+      texture: (id) => this.gpu.textures[id] ?? null,
+      sampler: (bits) => this.gpu.sampler(bits),
+    });
     this.draws = new Draws(gl, this.state, this.atlas, this.gpu, this.pool);
     this.holds = new HeldLayers(gl, this.state, this.pool, this.draws, this.compositor, this.gpu);
     this.setUp();
@@ -139,6 +145,7 @@ export class WebGLBackend {
       return;
     }
 
+    this.frameFilters = filters;
     this.atlas.place(geometries);
     this.gpu.uploadTextures(textures);
     for (const id of keeps.removed) {

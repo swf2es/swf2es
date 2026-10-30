@@ -16,6 +16,12 @@ export const ALPHA = 10;
 export const ERASE = 11;
 export const OVERLAY = 12;
 export const HARDLIGHT = 13;
+/**
+ * A Pixel Bender blend shader's, from KERNEL on: KERNEL + k blends by the
+ * kernel of chain k of the frame's filters (filters.ts, BLEND). A layer
+ * alone takes it, never a draw or a kept layer, whose modes are bytes.
+ */
+export const KERNEL = 14;
 
 /** Flash's blend mode names, by their number here. */
 export const BLEND_NAMES = [

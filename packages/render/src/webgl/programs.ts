@@ -466,6 +466,16 @@ void main(void) {
 }
 `;
 
+/** A composited layer's pixel, `front`, coloured by its row's colour transform where it has one (uRow not -1). */
+export const LAYER_COLOR = `  if (uRow >= 0 && front.a > 0.0) {
+    ivec2 row = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
+    vec4 mul = texelFetch(uRows, row + ivec2(2, 0), 0);
+    vec4 add = texelFetch(uRows, row + ivec2(3, 0), 0);
+    vec4 c = clamp(vec4(front.rgb / front.a, front.a) * mul + add, 0.0, 1.0);
+    front = vec4(c.rgb * c.a, c.a);
+  }
+`;
+
 /**
  * A layer composited onto what is below over its rectangle, pixel for
  * pixel: its rows run down, as the filters read them, and the target's up
@@ -501,14 +511,7 @@ void main(void) {
   ivec2 frag = ivec2(gl_FragCoord.xy);
   ivec2 at = ivec2(frag.x - uOffset.x, uFlip ? uOffset.y - frag.y : frag.y - uOffset.y);
   vec4 front = texelFetch(uLayer, at, 0);
-  if (uRow >= 0 && front.a > 0.0) {
-    ivec2 row = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
-    vec4 mul = texelFetch(uRows, row + ivec2(2, 0), 0);
-    vec4 add = texelFetch(uRows, row + ivec2(3, 0), 0);
-    vec4 c = clamp(vec4(front.rgb / front.a, front.a) * mul + add, 0.0, 1.0);
-    front = vec4(c.rgb * c.a, c.a);
-  }
-
+${LAYER_COLOR}
   if (uMode == ${NORMAL} || uMode == ${LAYER} || uMode == ${SCREEN} || uMode == ${ADD}) {
     finalColor = front;
     return;

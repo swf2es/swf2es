@@ -9,6 +9,7 @@ import {
   Commands,
   Filters,
   Geometries,
+  KERNEL,
   type KeepHandle,
   Keeps,
   LAYER,
@@ -469,7 +470,17 @@ export class RenderView implements Drawer {
     // A layer of no children is its fills, drawn as normal; a mode it has no blend for (a Pixel
     // Bender shader's) is drawn as normal, and counted.
     // BitmapData.draw takes its object with no blend mode, as with no transform or colour.
-    const named = root ? NORMAL : BLEND_NAMES.indexOf(o.blendMode);
+    // A blend shader's mode names its kernel's chain of the frame's filters; "shader" with none is
+    // normal. A filtered object blends as the bitmap Flash keeps of it, over its whole rectangle.
+    const shading = !root && !hidden && o.blendMode === "shader";
+    const named = shading
+      ? o.blendShader
+        ? KERNEL +
+          this.filterLayers.blendChain(o.blendShader, this.filters, !plane && o.filters.length > 0)
+        : NORMAL
+      : root
+        ? NORMAL
+        : BLEND_NAMES.indexOf(o.blendMode);
     if (named < 0 && !hidden) {
       unsupported.blendModes++;
     }
@@ -520,8 +531,9 @@ export class RenderView implements Drawer {
 
       // What its filters made last, where nothing they ran on changed: composited again where it
       // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
+      // A blend shader's layer is composited anew each frame: a kept one's mode is a byte.
       output =
-        filtering && !this.drawRoot
+        filtering && !this.drawRoot && mode < KERNEL
           ? this.filterLayers.keptOutput(
               o,
               filtering,
