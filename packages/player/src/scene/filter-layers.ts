@@ -3,6 +3,7 @@
 // texture; their passes added to the frame's filters; and their output
 // kept, to be composited again where nothing it was made of changed.
 import {
+  BLEND,
   drawnArea,
   type Filters,
   filteredRect,
@@ -87,12 +88,12 @@ export class FilterLayers {
     ShaderUse,
     {
       values: Float32Array;
+      ints: Int32Array;
       kernel: string;
       images: { image: ShaderImage; at: number }[];
-      /** The chain it was added as last: in which filters, at which generation, of which kind. */
+      /** The chain it was added as last: in which filters, at which generation, blending whole. */
       filters: Filters | null;
       generation: number;
-      kind: number;
       whole: boolean;
       chain: number;
     }
@@ -370,7 +371,7 @@ export class FilterLayers {
         pass.values[at] = this.imageTexture(image).id;
       }
 
-      filters.add(pass.kind, pass.values, texture, pass.kernel);
+      filters.add(pass.kind, pass.values, texture, pass.kernel, pass.ints);
     }
 
     return filters.close();
@@ -379,48 +380,48 @@ export class FilterLayers {
   /**
    * A kernel used outside the filters added to the frame's filters as a
    * chain of its own (@swf2es/render's BLEND, which a layer's KERNEL mode
-   * names, or FILL_SHADER, which a SHADED draw does): its number. A blend
-   * shader's first input is what is below and its second the layer, as adl
-   * binds them; `whole` blends over the layer's whole rectangle, as adl
-   * blends a filtered object's bitmap, rather than where it covers
-   * anything. A shader fill's inputs are all images.
+   * names, or FILL_SHADER, which a SHADED draw does), once a frame: its
+   * number. A blend shader's first input is what is below and its second
+   * the layer, as adl binds them; `whole` blends over the layer's whole
+   * rectangle, as adl blends a filtered object's bitmap, rather than where
+   * it covers anything. A shader fill's inputs are all images.
    */
   kernelChain(use: ShaderUse, filters: Filters, kind: number, whole = false): number {
     let made = this.kernels.get(use);
     if (!made) {
       const glsl = kernelGlslOf(use.kernel);
       const { floats, ints } = kernelParameters(glsl, use.values);
-      const back = use.kernel.inputs[0];
-      const values = [0, 0, 0, 0, 0, 0, glsl.textures.length];
+      const bound = kind === BLEND ? use.kernel.inputs.slice(0, 2).map((i) => i.index) : [];
+      // As a ShaderFilter's values (@swf2es/render's SHADER), whether it blends whole first.
+      const values = [0, 0, 0, 0, 0, 0, 0, glsl.textures.length];
       const images: { image: ShaderImage; at: number }[] = [];
       for (const t of glsl.textures) {
-        const image = use.images.get(t);
+        const image = bound.includes(t) ? undefined : use.images.get(t);
         if (image) {
           images.push({ image, at: values.length + 1 });
         }
 
-        values.push(t, image ? 0 : t === back?.index ? -1 : -2);
+        values.push(t, image ? 0 : t === bound[0] ? -1 : -2, image?.floats ? 1 : 0);
       }
 
-      values.push(floats.length, ...floats, ints.length, ...ints);
+      values.push(floats.length, ...floats);
       made = {
         values: Float32Array.from(values),
+        ints,
         kernel: glsl.source,
         images,
         filters: null,
         generation: -1,
-        kind: 0,
         whole: false,
         chain: -1,
       };
       this.kernels.set(use, made);
     }
 
-    // Added once a frame: a fill drawn in many parts, or by many instances, names one chain.
+    // Once a frame: a fill drawn in many parts, or by many instances, names one chain.
     if (
       made.filters === filters &&
       made.generation === filters.generation &&
-      made.kind === kind &&
       made.whole === whole
     ) {
       return made.chain;
@@ -431,10 +432,9 @@ export class FilterLayers {
     }
 
     made.values[0] = whole ? 1 : 0;
-    filters.add(kind, made.values, -1, made.kernel);
+    filters.add(kind, made.values, -1, made.kernel, made.ints);
     made.filters = filters;
     made.generation = filters.generation;
-    made.kind = kind;
     made.whole = whole;
     made.chain = filters.close();
     return made.chain;
@@ -447,7 +447,7 @@ export class FilterLayers {
       handle = this.textures.add(
         image.width,
         image.height,
-        imageBytes(image),
+        imageTexels(image),
         GRADIENT_IDLE_FRAMES,
       );
       this.images.set(image, handle);
@@ -459,22 +459,26 @@ export class FilterLayers {
 }
 
 /**
- * An image's premultiplied RGBA bytes: a BitmapData's as they are, floats'
- * clamped to bytes and their missing channels 0, as the CPU samples them,
- * as close as a texture of bytes comes.
+ * An image's texels: a BitmapData's premultiplied RGBA bytes, or floats
+ * as they are, four a texel, the channels they lack 0, as the CPU samples
+ * them.
  */
-function imageBytes(image: ShaderImage): Uint8Array {
+function imageTexels(image: ShaderImage): Uint8Array | Float32Array {
   if (image.pixels) {
     return rgbaOf(image.pixels);
   }
 
   const floats = image.floats as Float32Array;
   const c = image.channels;
-  const out = new Uint8Array(image.width * image.height * 4);
-  for (let i = 0; i < image.width * image.height; i++) {
-    for (let k = 0; k < 4; k++) {
-      const v = k < c ? floats[i * c + k] : 0;
-      out[i * 4 + k] = Math.round(Math.max(0, Math.min(1, v || 0)) * 255);
+  const n = image.width * image.height;
+  if (c === 4) {
+    return floats.subarray(0, n * 4);
+  }
+
+  const out = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < c; k++) {
+      out[i * 4 + k] = floats[i * c + k];
     }
   }
 

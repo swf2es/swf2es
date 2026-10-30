@@ -129,6 +129,24 @@ export class GpuTextures {
 
       this.state.bindTexture(TEXTURE_UNIT, texture);
       this.state.activeTexture(TEXTURE_UNIT);
+      // Floats, a kernel's image, make the texture again each time, as bytes may follow them.
+      if (data.pixels instanceof Float32Array) {
+        this.sizes[id * 2] = -1;
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA32F,
+          data.width,
+          data.height,
+          0,
+          gl.RGBA,
+          gl.FLOAT,
+          data.pixels,
+        );
+        data.pixels = null;
+        continue;
+      }
+
       // Pixels of the same size go into the texture there is; another size makes it again.
       if (this.sizes[id * 2] === data.width && this.sizes[id * 2 + 1] === data.height) {
         gl.texSubImage2D(

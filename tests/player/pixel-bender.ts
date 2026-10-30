@@ -2,7 +2,8 @@
 // interpreter (bitmap/pixel-bender.ts), the reference, and as the GLSL a
 // ShaderFilter draws with (scene/pixel-bender-glsl.ts in
 // @swf2es/render's kernel-shaders.ts), over a random image sampled nearest
-// and linearly, transparent past its edges, with random parameters. Each
+// and linearly, transparent past its edges, and a random image of floats
+// past 0 to 1, as a Vector.<Number> gives, with random parameters. Each
 // family of operations has a kernel of its own, and random programs of
 // them follow. Their bytes must agree within a level or two: the GPU's
 // transcendentals and float rounding are its own, and a value that lands
@@ -162,8 +163,12 @@ const families: [string, Uint8Array][] = [
   ],
 ];
 
-/** A random program of float operations on the sampled image, the parameters and the coordinate. */
-function program(seed: number): Uint8Array {
+/**
+ * A random program of float operations on the sampled image, the
+ * parameters and the coordinate; `floats` samples a second image too, of
+ * floats past 0 to 1, three channels a pixel, nearest and linearly.
+ */
+function program(seed: number, floats = false): Uint8Array {
   const next = random(seed);
   const pick = <T>(list: readonly T[]) => list[Math.floor(next() * list.length)];
   const lanes = "rgba";
@@ -172,8 +177,17 @@ function program(seed: number): Uint8Array {
     const start = Math.floor(next() * (5 - n));
     return lanes.slice(start, start + n);
   };
-  const a = head(`Random${seed}`)
-    .sample(next() < 0.5, "f3.rgba", "f0.rg", 0)
+  const a = head(`Random${seed}`);
+  if (floats) {
+    a.input(1, 3, "numbers")
+      .ld("f8.rg", next() * 6 - 3)
+      .op("add", "f8.rg", "f0.rg")
+      .sample(next() < 0.5, "f9.rgba", "f8.rg", 1)
+      .sample(true, "f10.rgba", "f0.gr", 1)
+      .op("add", "f9.rgba", "f10.rgba");
+  }
+
+  a.sample(next() < 0.5, "f3.rgba", "f0.rg", 0)
     .ld("f5.rg", next() * 4 - 2)
     .op("add", "f5.rg", "f0.rg")
     .sample(true, "f6.rgba", "f5.rg", 0)
@@ -185,14 +199,16 @@ function program(seed: number): Uint8Array {
   for (let k = 0; k < 24; k++) {
     const n = 1 + Math.floor(next() * 4);
     const dst = pick(["f4", "f5", "f7"]);
-    const src = pick(["f2", "f3", "f6", "f4", "f5", "f7"].filter((r) => r !== dst));
+    const src = pick(
+      ["f2", "f3", "f6", "f4", "f5", "f7", ...(floats ? ["f9"] : [])].filter((r) => r !== dst),
+    );
     const op = next() < 0.6 ? pick(binary) : pick(unary);
     // sqrt and exp kept to arguments they keep finite.
     if (op === "sqrt" || op === "exp") {
-      a.op("abs", `${dst}.${mask(n)}`, `${src}.${swizzle(n)}`);
+      // The same lanes in and out, which the sine or the absolute value made safe.
       const m = mask(n);
-      a.op(op === "exp" ? "sin" : "abs", `${dst}.${m}`, `${dst}.${swizzle(n)}`);
-      a.op(op, `${dst}.${m}`, `${dst}.${swizzle(n)}`);
+      a.op(op === "exp" ? "sin" : "abs", `${dst}.${m}`, `${src}.${swizzle(n)}`);
+      a.op(op, `${dst}.${m}`, `${dst}.${m}`);
       continue;
     }
 
@@ -217,6 +233,10 @@ const CLOSE = 2;
 const kernels: [string, Uint8Array][] = [
   ...families,
   ...Array.from({ length: 24 }, (_, i): [string, Uint8Array] => [`random ${i}`, program(i + 1)]),
+  ...Array.from({ length: 12 }, (_, i): [string, Uint8Array] => [
+    `random floats ${i}`,
+    program(i + 101, true),
+  ]),
 ];
 
 const { value, exception } = await withPage(
@@ -252,6 +272,21 @@ const { value, exception } = await withPage(
       return t;
     };
     const input = texture(bytes);
+    // Floats past 0 to 1, three channels a pixel, the fourth 0 in the texture as the CPU gives it.
+    const FW = 17, FH = 13;
+    const numbers = new Float32Array(FW * FH * 3);
+    const texels = new Float32Array(FW * FH * 4);
+    for (let i = 0; i < FW * FH; i++) {
+      for (let k = 0; k < 3; k++) {
+        numbers[i * 3 + k] = Math.fround(rand() * 6 - 3);
+        texels[i * 4 + k] = numbers[i * 3 + k];
+      }
+    }
+    const floatTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, floatTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, FW, FH, 0, gl.RGBA, gl.FLOAT, texels);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     const target = texture(null);
     const framebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -280,11 +315,22 @@ const { value, exception } = await withPage(
           values.set(p, d ? [...d.value].map((v, i) => (p.type >= 8 && v >= 32768 ? v - 65536 : v)) : []);
         }
         const out = new Float32Array(W * H * 4);
-        cpu.run(values, new Map([[0, { width: W, height: H, pixels, channels: 4, clear: true }]]), W, H, out);
+        cpu.run(
+          values,
+          new Map([
+            [0, { width: W, height: H, pixels, channels: 4, clear: true }],
+            [1, { width: FW, height: FH, floats: numbers, channels: 3 }],
+          ]),
+          W,
+          H,
+          out,
+        );
 
         const glsl = kernelGlsl(kernel);
-        const source = "#version 300 es\\nprecision highp float;\\n" +
-          filterKernel(glsl.source, glsl.textures.map((t) => ({ texture: t, layer: true })));
+        const source = filterKernel(
+            glsl.source,
+            glsl.textures.map((t) => ({ texture: t, layer: t === 0, float: t === 1 })),
+          );
         const program = gl.createProgram();
         gl.attachShader(program, shader(gl.VERTEX_SHADER, vertex));
         gl.attachShader(program, shader(gl.FRAGMENT_SHADER, source));
@@ -294,7 +340,8 @@ const { value, exception } = await withPage(
         const u = (n) => gl.getUniformLocation(program, n);
         gl.uniform4f(u("uInputPixel"), W, H, 1 / W, 1 / H);
         gl.uniform4f(u("uTextureRect"), 0, 0, W, H);
-        gl.uniform2f(u("uKernelAt"), 0, 1);
+        gl.uniform3f(u("uKernelAt"), 0, 0, 1);
+        gl.uniform2f(u("uKernelFrame"), W, H);
         gl.uniform2f(u("uOutputAt"), 0, 0);
         gl.uniform4f(u("uKernelRegion"), -1e9, -1e9, 1e9, 1e9);
         const { floats, ints } = kernelParameters(glsl, values);
@@ -303,6 +350,9 @@ const { value, exception } = await withPage(
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, input);
         gl.uniform1i(u("uTexture"), 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, floatTexture);
+        gl.uniform1i(u("pbImage1"), 1);
         gl.viewport(0, 0, W, H);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         const gpu = new Uint8Array(W * H * 4);

@@ -1,6 +1,6 @@
 import { type GlState, linkProgram } from "@swf2es/context3d/device";
 import { FILL_SHADER, type Filters } from "../filters.js";
-import { fillKernel } from "../kernel-shaders.js";
+import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
 import {
   CLAMP,
   DRAW,
@@ -15,7 +15,7 @@ import {
 } from "../scene.js";
 import type { GeometryAtlas, Place } from "./atlas.js";
 import type { GpuTextures } from "./gpu-textures.js";
-import { KernelPrograms } from "./kernels.js";
+import type { KernelHost, KernelPrograms } from "./kernels.js";
 import {
   FILL_SLOT,
   FILL_TEXTURES,
@@ -32,9 +32,6 @@ import {
   TEXTURE_UNIT,
 } from "./programs.js";
 import { framebufferOf, type Open, type Target, type TargetPool } from "./targets.js";
-
-/** The most shader fills' programs kept, the one used longest ago deleted for another. */
-const SHADED_PROGRAMS = 32;
 
 /** What the backend calls of WEBGL_multi_draw. */
 interface MultiDraw {
@@ -133,10 +130,14 @@ export class Draws {
    */
   private lastRow = -1;
 
-  /** Shader fills' programs. */
-  private readonly kernels: KernelPrograms;
-  /** The frame's filters, whose chains shader fills' draws name (SHADED). */
-  frameFilters: Filters | null = null;
+  /** Each shader fill's fragment shader by its entry in the frame's filters, for the generation it is of. */
+  private readonly fillShaders = new Map<number, string | null>();
+  /** A shader fill's program as it is linked: its rows' unit. */
+  private readonly prepareFill = (program: WebGLProgram) => {
+    this.gl.uniform1i(this.gl.getUniformLocation(program, "uRows"), 0);
+  };
+  private fillFilters: Filters | null = null;
+  private fillGeneration = -1;
 
   constructor(
     gl: WebGL2RenderingContext,
@@ -144,22 +145,21 @@ export class Draws {
     atlas: GeometryAtlas,
     gpu: GpuTextures,
     pool: TargetPool,
+    /** Where shader fills find the frame's filters, whose chains their draws name (SHADED). */
+    private readonly host: KernelHost & { filters(): Filters | null },
+    /** Shader fills' programs, the backend's one cache of kernels'. */
+    private readonly kernels: KernelPrograms,
   ) {
     this.gl = gl;
     this.state = state;
     this.atlas = atlas;
     this.gpu = gpu;
     this.pool = pool;
-    this.kernels = new KernelPrograms(gl, state, meshVertex, SHADED_PROGRAMS, (program) => {
-      gl.uniform1i(gl.getUniformLocation(program, "uRows"), 0);
-    });
   }
 
   /** The fill, mesh and glyph programs made, as the context comes or comes back. */
   setUp(): void {
     const gl = this.gl;
-    // A shader fill's program is made again as first used.
-    this.kernels.clear();
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
     try {
       this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
@@ -550,18 +550,18 @@ export class Draws {
    * uniforms; whether it was drawn, its program left in use.
    */
   private drawShaded(scene: SceneList, i: number, place: Place): boolean {
-    const filters = this.frameFilters;
+    const filters = this.host.filters();
     const chain = scene.texture[i];
     if (!filters || chain < 0 || chain >= filters.chainCount) {
       return false;
     }
 
-    // A kernel the GPU will not link, or of too many images, fills nothing.
+    // A kernel the GPU will not link, of more images than a program binds, or with an image
+    // gone, fills nothing. Its shader is found once a frame for its entry; its program is the
+    // cache's, linked again where another took its place.
     const entry = filters.chains[chain];
-    const kernel =
-      filters.kind[entry] === FILL_SHADER
-        ? this.kernels.useEntry(filters, entry, fillKernel)
-        : null;
+    const fragment = this.fillShader(filters, entry);
+    const kernel = fragment ? this.kernels.use(meshVertex, fragment, this.prepareFill) : null;
     if (!kernel) {
       return false;
     }
@@ -571,10 +571,7 @@ export class Draws {
     gl.uniform4fv(kernel.at("uView"), this.view);
     gl.uniform4fv(kernel.at("uFrag"), this.frag);
     gl.uniform1i(kernel.at("uRow"), scene.row[i]);
-    this.kernels.setUniforms(kernel, filters, entry, {
-      texture: (id) => this.gpu.textures[id] ?? null,
-      sampler: (bits) => this.gpu.sampler(bits),
-    });
+    this.kernels.setUniforms(kernel, filters, entry, this.host);
     // The mesh program is told its uniforms again after another program drew.
     this.meshStale = true;
     this.meshRow = -1;
@@ -583,10 +580,31 @@ export class Draws {
     return true;
   }
 
+  /** The fragment shader of the shader fill at entry `i` of `filters`, made once a frame; null for none. */
+  private fillShader(filters: Filters, i: number): string | null {
+    if (this.fillFilters !== filters || this.fillGeneration !== filters.generation) {
+      this.fillShaders.clear();
+      this.fillFilters = filters;
+      this.fillGeneration = filters.generation;
+    }
+
+    let fragment = this.fillShaders.get(i);
+    if (fragment === undefined) {
+      const source = filters.kernels[i];
+      const images =
+        source && filters.kind[i] === FILL_SHADER
+          ? this.kernels.readImages(filters, i, this.host)
+          : null;
+      fragment = source && images && kernelImagesFit(images) ? fillKernel(source, images) : null;
+      this.fillShaders.set(i, fragment);
+    }
+
+    return fragment;
+  }
+
   /** The programs made on the context, deleted. */
   destroy(): void {
     const gl = this.gl;
-    this.kernels.clear();
     gl.deleteProgram(this.program);
     gl.deleteProgram(this.mesh);
     gl.deleteProgram(this.glyphProgram);

@@ -12,7 +12,7 @@ import { concat } from "../../../display/geometry.js";
 import { type GraphicsDatum, graphicsData } from "../../../display/graphicsdata.js";
 import type { Paint } from "../../../display/shapes.js";
 import type { Scripting } from "../../../scripting.js";
-import { kernelOfShader, shaderUse } from "./shaders.js";
+import { CHECK, COPY, kernelOfShader, shaderUse } from "./shaders.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -58,7 +58,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
     return Number.isNaN(n) ? fallback : n;
   };
   /** A shader as a fill takes it: TypeError 2007 for null, 2171 for no kernel, its inputs set (2164). */
-  const shaderOf = (shader: Value, check = false) => {
+  const shaderOf = (shader: Value, how = COPY) => {
     if (shader === null || shader === undefined) {
       throw s.rt.error("TypeError", 2007, "shader");
     }
@@ -67,7 +67,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       throw s.rt.error("ArgumentError", 2171);
     }
 
-    return shaderUse(s, shader, 0, check);
+    return shaderUse(s, shader, 0, how);
   };
   /** A fill's matrix from an AS3 Matrix, or the identity for none. */
   const matrixFrom = (matrix: Value): Matrix => {
@@ -326,7 +326,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
 
     /** Checked as adl checks it; the line keeps its colour, as a gradient's does. */
     lineShaderStyle(shader: Value): void {
-      shaderOf(shader, true);
+      shaderOf(shader, CHECK);
     }
 
     drawRect(x: Value, y: Value, w: Value, h: Value): void {

@@ -22,6 +22,7 @@ import {
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
+  NO_WHOLE,
   type SceneList,
 } from "./scene.js";
 
@@ -68,9 +69,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
     const h = heldOrder[n];
     const i = heldBegin[h];
     const end = heldEnd[h];
-    const r = scene.layers;
-    const at = scene.geometry[i] * 4;
-    out.push(HOLD_PUSH, out.param(r[at], r[at + 1], r[at + 2], r[at + 3]), n, heldLevel[h]);
+    out.push(HOLD_PUSH, layerParams(out, scene, scene.geometry[i]), n, heldLevel[h]);
     emit(scene, i + 1, end, out, false);
     out.push(HOLD_POP, scene.texture[end], n);
   }
@@ -154,7 +153,7 @@ function emit(scene: SceneList, from: number, to: number, out: Commands, stage: 
         open.push(scene.geometry[i]);
         out.push(
           LAYER_PUSH,
-          out.param(r[at], r[at + 1], r[at + 2], r[at + 3]),
+          layerParams(out, scene, scene.geometry[i]),
           scene.pads[scene.geometry[i]] >= 0 ? 1 : 0,
         );
         break;
@@ -267,6 +266,29 @@ function findHolds(scene: SceneList): void {
       }
     }
   }
+}
+
+/**
+ * Layer `layer`'s params: its rectangle, then where its object lies in it
+ * and its size (SceneList.objects), or a width of -1 for none, as a whole
+ * layer's ShaderFilters read it.
+ */
+function layerParams(out: Commands, scene: SceneList, layer: number): number {
+  const r = scene.layers;
+  const o = scene.objects;
+  const at = layer * 4;
+  return scene.wholes[layer] === NO_WHOLE
+    ? out.param(r[at], r[at + 1], r[at + 2], r[at + 3], 0, 0, -1, -1)
+    : out.param(
+        r[at],
+        r[at + 1],
+        r[at + 2],
+        r[at + 3],
+        o[at] - r[at],
+        o[at + 1] - r[at + 1],
+        o[at + 2],
+        o[at + 3],
+      );
 }
 
 /** The layers pushed and not yet popped, by number, innermost last. */

@@ -80,8 +80,9 @@ const HELPERS = `int pbFtoi(float x) {
 }
 int pbDivide(int x, int y) {
   if (y == 0) { return 0; }
-  int q = abs(x) / abs(y);
-  return (x < 0) != (y < 0) ? -q : q;
+  // Magnitudes as uints, where int's least has one; truncated toward 0, as JavaScript's | 0.
+  uint q = (x < 0 ? 0u - uint(x) : uint(x)) / (y < 0 ? 0u - uint(y) : uint(y));
+  return (x < 0) != (y < 0) ? int(0u - q) : int(q);
 }
 float pbSign(float x) {
   return x > 0.0 ? 1.0 : (x < 0.0 ? -1.0 : 0.0);
@@ -243,6 +244,7 @@ export function kernelGlsl(kernel: PbjKernel): KernelGlsl {
     "}",
     "",
   ].join("\n");
+
   return {
     source,
     textures: [...w.textures].sort((a, b) => a - b),

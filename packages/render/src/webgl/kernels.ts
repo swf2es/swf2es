@@ -1,11 +1,17 @@
 import { type GlState, linkProgram, ShaderError } from "@swf2es/context3d/device";
 import type { Filters } from "../filters.js";
-import { KERNEL_IMAGES, type KernelImage } from "../kernel-shaders.js";
+import type { KernelImage } from "../kernel-shaders.js";
 import { CLAMP } from "../scene.js";
 
-/** A Pixel Bender kernel's program and where it takes its uniforms, asked once each. */
+/**
+ * A Pixel Bender kernel's program: where it takes its uniforms, asked
+ * once each, and the values of up to four floats it was last told for
+ * each, by name (the filter runner's `set`).
+ */
 export interface KernelProgram {
   program: WebGLProgram;
+  uniforms: Map<string, WebGLUniformLocation | null>;
+  told: Map<string, Float32Array>;
   at(name: string): WebGLUniformLocation | null;
 }
 
@@ -15,44 +21,52 @@ export interface KernelHost {
   sampler(bits: number): WebGLSampler;
 }
 
-/** The unit a kernel's images are bound from, KERNEL_IMAGES of them at most. */
-const KERNEL_UNIT = 6;
+/**
+ * The first unit a kernel's own images are bound to, as many as
+ * kernel-shaders.ts's KERNEL_IMAGES: past every unit the other programs
+ * use (programs.ts's, and the filter passes' 4 to 6), as WebGL 2 has 32
+ * for a draw's programs together.
+ */
+export const KERNEL_UNIT = 16;
+
+/** The most kernels' programs kept, the one used longest ago deleted for another. */
+const KERNEL_PROGRAMS = 32;
 
 /**
- * The programs of kernels used outside the filter passes, a blend shader's
- * or a shader fill's (filters.ts, BLEND and FILL_SHADER), by their
- * fragment shader: linked as first used, the one used longest ago deleted
- * past `most`; null for one the GPU would not link, which its user draws
- * otherwise.
+ * The programs of Pixel Bender kernels, a ShaderFilter's, a blend
+ * shader's or a shader fill's, by their fragment shaders, each a use's
+ * own and so with one vertex shader:
+ * linked as first used, the one used longest ago deleted past
+ * KERNEL_PROGRAMS; null for one the GPU would not link, which its user
+ * draws otherwise. One for the backend, which its users share.
  */
 export class KernelPrograms {
   private readonly programs = new Map<string, KernelProgram | null>();
-  /** A chain's images, read as the plan's of a ShaderFilter are. */
-  readonly images: KernelImage[] = [];
   private readonly ints = new Int32Array(4);
-  /** The programs of the frame's entries asked for so far, for the filters and generation they are of. */
-  private readonly byEntry = new Map<number, KernelProgram | null>();
-  private entryFilters: Filters | null = null;
-  private entryGeneration = -1;
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
     private readonly state: GlState,
-    private readonly vertex: string,
-    private readonly most: number,
-    /** Set on a program as it is linked: its samplers' units. */
-    private readonly prepare: (program: WebGLProgram) => void,
   ) {}
 
-  /** The program of `fragment`, in use; null where it would not link. */
-  use(fragment: string): KernelProgram | null {
+  /**
+   * The program of `vertex` and `fragment`, in use; null where it would
+   * not link. `prepare` is told it as it is linked, to set its samplers.
+   */
+  use(
+    vertex: string,
+    fragment: string,
+    prepare: (program: WebGLProgram) => void,
+  ): KernelProgram | null {
     const gl = this.gl;
-    let kernel = this.programs.get(fragment);
+    // By the fragment shader alone, a use's own, which a frame gives again as the same string.
+    const key = fragment;
+    let kernel = this.programs.get(key);
     if (kernel !== undefined) {
       // Used last now.
-      this.programs.delete(fragment);
+      this.programs.delete(key);
     } else {
-      if (this.programs.size >= this.most) {
+      if (this.programs.size >= KERNEL_PROGRAMS) {
         const [oldest, old] = this.programs.entries().next().value as [
           string,
           KernelProgram | null,
@@ -66,22 +80,24 @@ export class KernelPrograms {
 
       kernel = null;
       try {
-        const program = linkProgram(gl, this.vertex, fragment);
-        const locations = new Map<string, WebGLUniformLocation | null>();
+        const program = linkProgram(gl, vertex, fragment);
+        const uniforms = new Map<string, WebGLUniformLocation | null>();
         kernel = {
           program,
+          uniforms,
+          told: new Map(),
           at(name) {
-            let location = locations.get(name);
+            let location = uniforms.get(name);
             if (location === undefined) {
               location = gl.getUniformLocation(program, name);
-              locations.set(name, location);
+              uniforms.set(name, location);
             }
 
             return location;
           },
         };
         this.state.useProgram(program);
-        this.prepare(program);
+        prepare(program);
       } catch (e) {
         if (!(e instanceof ShaderError)) {
           throw e;
@@ -89,7 +105,7 @@ export class KernelPrograms {
       }
     }
 
-    this.programs.set(fragment, kernel);
+    this.programs.set(key, kernel);
     if (kernel) {
       this.state.useProgram(kernel.program);
     }
@@ -97,93 +113,87 @@ export class KernelPrograms {
     return kernel;
   }
 
-  /**
-   * The program of the kernel at entry `i` of `filters`, its fragment
-   * shader `fragment` makes of its source and images, in use: asked for
-   * once a frame, as a fill drawn in many parts names one entry. Null for
-   * one of more than KERNEL_IMAGES images, or one that would not link.
-   */
-  useEntry(
-    filters: Filters,
-    i: number,
-    fragment: (source: string, images: KernelImage[]) => string,
-  ): KernelProgram | null {
-    if (this.entryFilters !== filters || this.entryGeneration !== filters.generation) {
-      this.byEntry.clear();
-      this.entryFilters = filters;
-      this.entryGeneration = filters.generation;
-    }
-
-    let kernel = this.byEntry.get(i);
-    if (kernel === undefined) {
-      const source = filters.kernels[i];
-      const images = this.readImages(filters, i);
-      kernel =
-        source && images.filter((image) => !image.layer).length <= KERNEL_IMAGES
-          ? this.use(fragment(source, images))
-          : null;
-      this.byEntry.set(i, kernel);
-    } else if (kernel) {
-      this.state.useProgram(kernel.program);
-    }
-
-    return kernel;
+  /** Texture `id` bound to a kernel's own image unit `k`, which its sampler at `location` names. */
+  bindImage(location: WebGLUniformLocation | null, k: number, id: number, host: KernelHost): void {
+    this.state.bindTexture(KERNEL_UNIT + k, host.texture(id));
+    // Nearest: a float texture with a linear sampler is incomplete, and texelFetch reads either.
+    this.state.bindSampler(KERNEL_UNIT + k, host.sampler(CLAMP));
+    this.gl.uniform1i(location, KERNEL_UNIT + k);
   }
 
-  /**
-   * The images of the kernel at entry `i` of `filters`, its values laid out
-   * as SHADER's, into `images`: -1 the first bound input, -2 the second.
-   */
-  readImages(filters: Filters, i: number): KernelImage[] {
-    const v = filters.values;
-    const at = filters.start[i];
-    const images = this.images;
-    images.length = 0;
-    for (let k = 0; k < v[at + 6]; k++) {
-      const id = v[at + 8 + k * 2];
-      images.push({ texture: v[at + 7 + k * 2], layer: id < 0, back: id === -1 });
+  /** `count` ints of `source` from `at` set as the ivec4 array at `location`, its program in use. */
+  setInts(location: WebGLUniformLocation | null, source: Int32Array, at: number, count: number) {
+    let values = this.ints;
+    if (count > values.length) {
+      values = new Int32Array(count);
     }
 
+    values.set(source.subarray(at, at + count));
+    this.gl.uniform4iv(location, values, 0, count);
+  }
+
+  /** What readImages reads into, its records kept from call to call. */
+  private readonly images: KernelImage[] = [];
+
+  /**
+   * The images of the kernel at entry `i` of `filters`, a blend shader's
+   * or a shader fill's, its values laid out as a ShaderFilter's
+   * (filters.ts, SHADER): -1 for what is below, -2 for the layer blended.
+   * Null where a texture of its own is gone, as such a kernel is left out.
+   */
+  readImages(filters: Filters, i: number, host: KernelHost): KernelImage[] | null {
+    const v = filters.values;
+    const at = filters.start[i];
+    const count = v[at + 7];
+    const images = this.images;
+    for (let k = 0; k < count; k++) {
+      const id = v[at + 9 + k * 3];
+      if (id >= 0 && !host.texture(id)) {
+        return null;
+      }
+
+      if (!images[k]) {
+        images[k] = { texture: 0, layer: false, float: false, back: false };
+      }
+
+      const image = images[k];
+      image.texture = v[at + 8 + k * 3];
+      image.layer = id < 0;
+      image.back = id === -1;
+      image.float = v[at + 10 + k * 3] > 0;
+    }
+
+    images.length = count;
     return images;
   }
 
-  /** The parameters and the other images of the kernel at entry `i` of `filters`, set on `kernel`, in use. */
+  /** The parameters and own images of the kernel at entry `i` of `filters` set on `kernel`, in use. */
   setUniforms(kernel: KernelProgram, filters: Filters, i: number, host: KernelHost): void {
-    const gl = this.gl;
     const v = filters.values;
-    const start = filters.start[i];
-    const count = v[start + 6];
-    let unit = KERNEL_UNIT;
+    const at = filters.start[i];
+    const count = v[at + 7];
+    let unit = 0;
     for (let k = 0; k < count; k++) {
-      const id = v[start + 8 + k * 2];
+      const id = v[at + 9 + k * 3];
       if (id >= 0) {
-        this.state.bindTexture(unit, host.texture(id));
-        this.state.bindSampler(unit, host.sampler(CLAMP));
-        gl.uniform1i(kernel.at(`pbImage${v[start + 7 + k * 2]}`), unit++);
+        this.bindImage(kernel.at(`pbImage${v[at + 8 + k * 3]}`), unit++, id, host);
       }
     }
 
-    const floats = start + 7 + count * 2;
+    const floats = at + 8 + count * 3;
     if (v[floats] > 0) {
-      gl.uniform4fv(kernel.at("pbFloats"), v, floats + 1, v[floats]);
+      this.gl.uniform4fv(kernel.at("pbFloats"), v, floats + 1, v[floats]);
     }
 
-    const ints = floats + 1 + v[floats];
-    const n = v[ints];
+    const ints = filters.intStart[i];
+    const n = filters.intStart[i + 1] - ints;
     if (n > 0) {
-      const values = n > this.ints.length ? new Int32Array(n) : this.ints;
-      for (let k = 0; k < n; k++) {
-        values[k] = v[ints + 1 + k];
-      }
-
-      gl.uniform4iv(kernel.at("pbInts"), values, 0, n);
+      this.setInts(kernel.at("pbInts"), filters.ints, ints, n);
     }
   }
 
-  /** Every program deleted, as the context goes; none kept, as it comes back. */
+  /** Every program deleted, as the backend goes; none kept, as a lost context comes back. */
   clear(): void {
-    this.byEntry.clear();
-    this.entryFilters = null;
     for (const kernel of this.programs.values()) {
       if (kernel) {
         this.gl.deleteProgram(kernel.program);

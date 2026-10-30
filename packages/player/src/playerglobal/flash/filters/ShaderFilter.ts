@@ -26,6 +26,7 @@ export function shaderFilterNatives(s: Scripting): avm2.Natives {
       f.extensions[k] = extension(v);
     },
   ];
+
   return filterNatives(s, "shader", () => ({
     shader: [
       (f) => (f.shader as Value) ?? null,

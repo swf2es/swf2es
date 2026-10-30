@@ -1,4 +1,5 @@
 import type { GlState } from "@swf2es/context3d/device";
+import type { KernelObject } from "../filter-plan.js";
 import { SizedPool } from "./pool.js";
 import { LAYER_UNIT } from "./programs.js";
 
@@ -127,6 +128,13 @@ export interface Open {
   /** Where its rectangle's corner is in its framebuffer, a page's (HOLD_PUSH); else 0, 0. */
   ox?: number;
   oy?: number;
+  /** Where a whole layer's object lies in it, which its ShaderFilters read (filter-plan.ts). */
+  object?: KernelObject | null;
+}
+
+/** A whole layer's object from params `p` from `at` (plan.ts, layerParams): null for none. */
+export function objectOf(p: Float32Array, at: number): KernelObject | null {
+  return p[at + 2] < 0 ? null : { x: p[at], y: p[at + 1], width: p[at + 2], height: p[at + 3] };
 }
 
 /** The framebuffer `open` is drawn into: its multisampled one while it has one, else its own. */

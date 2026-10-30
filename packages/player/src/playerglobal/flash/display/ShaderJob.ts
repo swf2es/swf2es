@@ -8,7 +8,7 @@
 // while another runs among them; here each job completes.
 import { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "../../../bitmap/bitmap.js";
-import { outputByte, type ShaderImage } from "../../../bitmap/pixel-bender.js";
+import { outputPixel, type ShaderImage } from "../../../bitmap/pixel-bender.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 import { programOf } from "./ShaderData.js";
@@ -42,11 +42,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       // Premultiplied as they come, each colour at most its alpha; three channels are opaque.
       const pixels = new Uint32Array(store.width * store.height);
       for (let i = 0, at = 0; i < pixels.length; i++, at += channels) {
-        const a = channels > 3 ? outputByte(out[at + 3]) : 255;
-        const r = Math.min(a, outputByte(out[at]));
-        const g = Math.min(a, channels > 1 ? outputByte(out[at + 1]) : 0);
-        const b = Math.min(a, channels > 2 ? outputByte(out[at + 2]) : 0);
-        pixels[i] = (((store.transparent ? a : 255) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+        pixels[i] = outputPixel(out, at, channels, store.transparent);
       }
 
       store.pixels = pixels;
@@ -158,7 +154,8 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       const images = new Map<number, ShaderImage>();
       const read: (() => void)[] = [];
       for (const input of kernel.inputs) {
-        images.set(input.index, inputImage(s, data as AsObject, input.name, input.channels, read));
+        const image = inputImage(s, data as AsObject, input.name, input.channels, read);
+        images.set(input.index, image as ShaderImage);
       }
 
       for (const texture of program.sampled) {

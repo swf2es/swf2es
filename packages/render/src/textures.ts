@@ -4,11 +4,15 @@ import { type Handle, Registry } from "./registry.js";
 /** A texture as its owner holds it: its id, and the generation the id had. */
 export type TextureHandle = Handle;
 
-/** A texture's size, and its pixels while they wait to be uploaded: premultiplied RGBA bytes. */
+/**
+ * A texture's size, and its pixels while they wait to be uploaded:
+ * premultiplied RGBA bytes, or RGBA floats, which only a kernel reads, a
+ * texel at a time.
+ */
 export interface TextureData {
   width: number;
   height: number;
-  pixels: Uint8Array | null;
+  pixels: Uint8Array | Float32Array | null;
 }
 
 /**
@@ -24,7 +28,12 @@ export class Textures extends Registry {
   pending: number[] = [];
 
   /** A texture of `pixels`, let go of once undrawn for `idle` frames. */
-  add(width: number, height: number, pixels: Uint8Array, idle = IDLE_FRAMES): TextureHandle {
+  add(
+    width: number,
+    height: number,
+    pixels: Uint8Array | Float32Array,
+    idle = IDLE_FRAMES,
+  ): TextureHandle {
     const handle = this.hold(idle);
     this.data[handle.id] = { width, height, pixels };
     this.pending.push(handle.id);

@@ -178,13 +178,15 @@ class Gathered {
 
   close(): void {
     const n = this.vertices;
+    const shader = this.paint?.type === "shader";
     if (this.corners > 0) {
       this.parts.push({
         geometry: {
           positions: scratchPositions.slice(0, n * 2),
-          colors: scratchColors.slice(0, n),
+          // A shader fill's vertices carry a depth where others carry their colour (MESH's).
+          colors: shader ? NO_COLORS : scratchColors.slice(0, n),
           texels: this.paint ? scratchTexels.slice(0, n * 2) : undefined,
-          depths: this.paint?.type === "shader" ? new Float32Array(n).fill(1) : undefined,
+          depths: shader ? new Float32Array(n).fill(1) : undefined,
           indices: scratchIndices.slice(0, this.corners),
         },
         paint: this.paint,
