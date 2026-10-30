@@ -15,6 +15,7 @@ import {
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { drawBitmap, merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
 import { BitmapObject } from "../../../../packages/player/dist/display/display.js";
+import { type Affine, referenceDraw, storeOf } from "./draw-reference.ts";
 
 setFlagsFromString("--expose-gc");
 const gc = runInNewContext("gc") as () => void;
@@ -644,18 +645,16 @@ test("a draw that covers no pixel leaves a store the GPU drew last where it is",
   store.copies.add(copy);
   store.drawnOnGpu(copy);
 
-  // A pixel's tenth, short of every sample of the pixel it lies in.
+  // A pixel's tenth, short of every sample of the pixel it lies in, and a clear pixel at a
+  // whole one: neither puts a pixel, so neither counts as a change.
+  const version = store.version;
   const source = new BitmapStore(1, 1, true, 0xffffffff);
-  drawBitmap(
-    store,
-    source,
-    { a: 0.1, b: 0, c: 0, d: 0.1, tx: 2, ty: 2 },
-    null,
-    "normal",
-    null,
-    false,
-  );
+  const tenth = { a: 0.1, b: 0, c: 0, d: 0.1, tx: 2, ty: 2 };
+  drawBitmap(store, source, tenth, null, "normal", null, false);
+  const clear = new BitmapStore(1, 1, true, 0);
+  drawBitmap(store, clear, { a: 1, b: 0, c: 0, d: 1, tx: 2, ty: 2 }, null, "normal", null, false);
   assert.equal(reads, 0);
+  assert.equal(store.version, version);
 
   drawBitmap(store, source, { a: 2, b: 0, c: 0, d: 2, tx: 2, ty: 2 }, null, "normal", null, false);
   assert.equal(reads, 1);
@@ -667,7 +666,7 @@ test("a drawn bitmap covers each pixel by the samples of its 16 inside it, whate
   // where the matrix says all 16 lie inside: here counted sample by sample.
   let seed = 7;
   const random = () => {
-    seed = (seed * 1103515245 + 12345) >>> 0;
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
     return seed / 2 ** 32;
   };
   const matrices = [
@@ -726,5 +725,72 @@ test("a drawn bitmap covers each pixel by the samples of its 16 inside it, whate
         assert.equal(alpha, Math.round((255 * hits) / 16), `${JSON.stringify(m)} at ${x}, ${y}`);
       }
     }
+  }
+});
+
+test("a draw by rows puts what a draw a pixel at a time puts, into itself and at whole pixels too", () => {
+  let seed = 11;
+  const random = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const below = (n: number) => Math.floor(random() * n);
+  const pixel = () => {
+    const a = random() < 0.4 ? 255 : random() < 0.3 ? 0 : below(256);
+    const c = () => Math.round((below(256) * a) / 255);
+    return ((a << 24) | (c() << 16) | (c() << 8) | c()) >>> 0;
+  };
+  const modes = ["normal", "multiply", "screen", "add", "subtract", "invert", "hardlight"];
+
+  for (let i = 0; i < 400; i++) {
+    const width = 1 + below(14);
+    const height = 1 + below(12);
+    const transparent = random() < 0.7;
+    const pixels = Array.from({ length: width * height }, () => {
+      const p = pixel();
+      return transparent ? p : (p | 0xff000000) >>> 0;
+    });
+    // Into itself, a row at a time or in scan order; at a whole pixel; or anywhere.
+    const kind = i % 4;
+    const turn = random() * 7;
+    const scale = 0.4 + random() * 2;
+    const m: Affine =
+      kind === 2
+        ? { a: 1, b: 0, c: 0, d: 1, tx: below(9) - 4, ty: below(9) - 4 }
+        : {
+            a: Math.cos(turn) * scale,
+            b: Math.sin(turn) * scale,
+            c: -Math.sin(turn) * scale,
+            d: Math.cos(turn) * scale,
+            tx: random() * 12 - 4,
+            ty: random() * 12 - 4,
+          };
+    const ct =
+      random() < 0.5
+        ? null
+        : {
+            rMul: random() * 2,
+            gMul: 1,
+            bMul: random(),
+            aMul: random() * 1.2,
+            rAdd: below(80) - 40,
+            gAdd: 0,
+            bAdd: 10,
+            aAdd: below(120) - 80,
+          };
+    const mode = modes[below(modes.length)];
+    const smooth = random() < 0.5;
+    const rows = kind === 0;
+    const self = kind < 2;
+    const sourcePixels = Array.from({ length: 36 }, pixel);
+
+    const drawn = storeOf(width, height, transparent, pixels);
+    const expected = storeOf(width, height, transparent, pixels);
+    const from = self ? drawn : storeOf(6, 6, true, sourcePixels);
+    drawBitmap(drawn, from, m, ct, mode, null, smooth, rows);
+    const reference = self ? expected : storeOf(6, 6, true, sourcePixels);
+    referenceDraw(expected, reference, m, ct, mode, null, smooth, rows);
+    const label = JSON.stringify({ i, m, ct, mode, smooth, rows, self });
+    assert.deepEqual(drawn.pixels, expected.pixels, label);
   }
 });

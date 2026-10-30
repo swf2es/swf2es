@@ -337,7 +337,8 @@ export function bitmapDataClass(host: BitmapHost): Obj {
         return -3;
       }
 
-      drawBitmap(store, source, m, c, blend, clip, smooth);
+      // Into itself a row at a time, as AS3's BitmapData draws (adl, avm1-draw-self).
+      drawBitmap(store, source, m, c, blend, clip, smooth, true);
       return 0;
     }
 
