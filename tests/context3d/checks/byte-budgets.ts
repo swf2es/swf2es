@@ -71,5 +71,73 @@ export function byteBudgets() {
     reserve.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 
+  // AIR charges DXT1 an eighth of BGRA's reservation and DXT5 a quarter: an
+  // 8x8 texture 48 bytes and 96, a cube of 8 288 and 576. Storage is the
+  // chain's blocks, the 4x4, 2x2 and 1x1 levels a block each, or RGBA where
+  // the context decodes S3TC itself.
+  for (const s3tc of [true, false]) {
+    const compressed = create({
+      max2DTextureBytes: 96 * 2,
+      maxCubeTextureBytes: 576,
+      maxTextureBytes: 1 << 20,
+    });
+    if (!s3tc) {
+      const gl = compressed.gl as { getExtension(name: string): unknown };
+      const get = gl.getExtension.bind(gl);
+      gl.getExtension = (name) => (name === "WEBGL_compressed_texture_s3tc" ? null : get(name));
+    }
+    const c = compressed.backend;
+    try {
+      const held = [0, 1, 2, 3].map(() => c.createTexture(8, 8, false, "compressed"));
+      let error: unknown;
+      try {
+        c.createTexture(8, 8, false, "compressed");
+      } catch (caught) {
+        error = caught;
+      }
+      check(error instanceof Context3DError && error.reason === "limit", "DXT1 over its quota");
+      held[0].dispose();
+      held[1].dispose();
+      held.push(c.createTexture(8, 8, false, "compressedAlpha"));
+      error = undefined;
+      try {
+        c.createTexture(8, 8, false, "compressedAlpha");
+      } catch (caught) {
+        error = caught;
+      }
+      check(error instanceof Context3DError && error.reason === "limit", "DXT5 over its quota");
+      const cubes = [
+        c.createTexture(8, 8, true, "compressed"),
+        c.createTexture(8, 8, true, "compressed"),
+      ];
+      error = undefined;
+      try {
+        c.createTexture(8, 8, true, "compressed");
+      } catch (caught) {
+        error = caught;
+      }
+      check(
+        error instanceof Context3DError && error.reason === "limit",
+        "cube DXT1 over its quota",
+      );
+      // Blocks, pixels encoded to blocks over them, then blocks again.
+      const t = held[2];
+      t.uploadCompressed(new Uint8Array(32));
+      t.upload(new Uint32Array(64));
+      t.uploadCompressed(new Uint8Array(8), 1);
+      for (const r of [...held.slice(2), ...cubes]) {
+        r.dispose();
+      }
+      check(
+        compressed.gl.getError() === compressed.gl.NO_ERROR,
+        "compressed textures left a GL error",
+      );
+    } finally {
+      c.dispose();
+      check(compressed.live.size === 0, "compressed textures retained GPU handles");
+      compressed.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+  }
+
   return { passed: true };
 }

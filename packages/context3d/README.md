@@ -61,9 +61,23 @@ targets include their cached single-sample resolve surface. All options must be
 nonnegative safe integers, are copied at creation and allocate nothing eagerly.
 Disposal returns both quota and storage capacity. These are logical allocation
 accounts, not physical driver VRAM, and exclude back-buffer attachments.
-Compressed and `rgbaHalfFloat` textures are currently unsupported and return
-Error #3708 before backend allocation. Their AIR quotas have not been measured;
-the BGRA charge must not be reused for those formats when they are implemented.
+Compressed textures ("compressed", "compressedAlpha") hold S3TC's DXT1 and
+DXT5, which `Texture3D.uploadCompressed` takes as blocks; the player decodes
+ATF to them (`@swf2es/native/atf`). The backend stores them with
+`WEBGL_compressed_texture_s3tc` where the context has it, DXT1 with its bit of
+alpha, as AIR draws a three-colour block's fourth texel transparent, and
+decodes them to RGBA on the CPU (`dxt.ts`) where it has not. AIR charges their
+quota at DXT1's eighth of the BGRA reservation and DXT5's quarter (a 2048
+texture 3 MiB and 6 MiB: 170 and 85 fit); the aggregate counts the chain as
+stored. A compressed texture also takes pixels, as AIR's does, and as AIR
+compresses them, they are encoded to its blocks (`dxt.ts`), so that a GPU with
+S3TC and one without draw them alike. The RGBA staging array a texture uploads
+through is made at its first pixel upload or CPU decoding, so compressed
+textures uploaded as blocks on S3TC have none. Samplers must
+read a texture as what it is, AGAL's format DXT1 or DXT5 for a compressed one
+(#3763), where `samplerFormats` is set, as the player sets it for content from
+SWF 17 on. `rgbaHalfFloat` and the packed formats remain unsupported and return
+Error #3708 before backend allocation.
 
 Core failures carry typed reasons. The Flash adapter maps them to catchable AS3
 errors, including resource limits (#3691), disposed objects (#3694), draw bounds

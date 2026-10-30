@@ -52,6 +52,10 @@ export type SamplerFilter = (typeof SAMPLER_FILTERS)[number];
 export const SAMPLER_MIPS = ["mipnone", "mipnearest", "miplinear"] as const;
 export type SamplerMip = (typeof SAMPLER_MIPS)[number];
 
+/** The texture formats a backend stores: BGRA, and S3TC's DXT1 and DXT5 as Flash calls them. */
+export const TEXTURE_FORMATS = ["bgra", "compressed", "compressedAlpha"] as const;
+export type TextureFormat = (typeof TEXTURE_FORMATS)[number];
+
 export const VERTEX_FORMATS = ["float1", "float2", "float3", "float4", "bytes4"] as const;
 export type VertexFormat = (typeof VERTEX_FORMATS)[number];
 
@@ -71,11 +75,16 @@ export class TextureBindingError extends Error {
     | "dimension"
     | "wrap"
     | "rectangleMip"
-    | "feedback";
+    | "feedback"
+    | "format";
 
-  constructor(reason: TextureBindingError["reason"]) {
+  /** The sampler it names, where it names one. */
+  readonly sampler: number;
+
+  constructor(reason: TextureBindingError["reason"], sampler = -1) {
     super(`Invalid texture binding: ${reason}`);
     this.reason = reason;
+    this.sampler = sampler;
   }
 }
 
@@ -100,6 +109,8 @@ export interface Texture3D {
   readonly levels: number;
   readonly cube: boolean;
   readonly rectangle: boolean;
+  /** What samplers must read it as; a compressed texture also takes pixels, as AIR's do. */
+  readonly format: TextureFormat;
   /** Top-down premultiplied ARGB pixels, copied before returning.
    * All texture kinds clip/pad source dimensions against the selected face/mip. */
   upload(
@@ -111,6 +122,12 @@ export interface Texture3D {
   ): void;
   /** Top-down BGRA bytes, copied verbatim without alpha conversion. */
   uploadBytes(data: Uint8Array, offset: number, level?: number, face?: number): void;
+  /**
+   * A compressed texture's level as S3TC blocks, DXT1's for "compressed" and
+   * DXT5's for "compressedAlpha": rows of 4x4 blocks from the top, at least
+   * one however small the level, copied before returning.
+   */
+  uploadCompressed(blocks: Uint8Array, level?: number, face?: number): void;
   dispose(): void;
 }
 
@@ -131,6 +148,11 @@ export interface Context3D {
   readonly width: number;
   readonly height: number;
   readonly disposed: boolean;
+  /**
+   * Whether a draw refuses a sampler that reads its texture as another
+   * format (TextureBindingError "format"): AIR checks from SWF 17 on.
+   */
+  samplerFormats: boolean;
   configure(width: number, height: number, depth?: boolean, antiAlias?: number): void;
   clear(
     red: number,
@@ -157,7 +179,7 @@ export interface Context3D {
   setScissor(x: number | null, y?: number, width?: number, height?: number): void;
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
-  createTexture(width: number, height: number, cube?: boolean): Texture3D;
+  createTexture(width: number, height: number, cube?: boolean, format?: TextureFormat): Texture3D;
   createRectangleTexture(width: number, height: number): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(
