@@ -110,6 +110,9 @@ try {
     ["compressed-alpha", ["-c", "-r", "-i", "alpha.png"]],
     ["raw-alpha", ["-c", "-i", "alpha.png"]],
     ["compressed-cube", ["-c", "-r", "-m", "-i", "cube0.png"]],
+    // Compressed Lossy (12) and Compressed Lossy with Alpha (13): the endpoints' images lossy.
+    ["compressed-lossy", ["-c", "-r", "-q", "30", "-i", "quads.png"]],
+    ["compressed-lossy-alpha", ["-c", "-r", "-q", "30", "-i", "alpha.png"]],
     ["compressed-wide", ["-c", "-r", "-i", "grad.png"]],
     // Only the levels 0 to 2, the others empty.
     ["compressed-range", ["-c", "-r", "-n", "0,2", "-i", "quads.png"]],

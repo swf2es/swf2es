@@ -44,6 +44,8 @@ export const ATF_COMPRESSED_LOSSY_ALPHA = 0x0d;
 const MAX_LOG2 = 12;
 
 export interface AtfHeader {
+  /** Whether it is the old header, which AIR reads alone for content before SWF 17. */
+  old: boolean;
   /** 0 for the old header. */
   version: number;
   format: number;
@@ -56,7 +58,7 @@ export interface AtfHeader {
   count: number;
   /** Where the first face's first block starts, in the data. */
   start: number;
-  /** Where the length field says the texture ends. */
+  /** Where the length field says the texture ends: AIR refuses less data (#3669), and reads on past it. */
   end: number;
 }
 
@@ -92,7 +94,9 @@ export function atfKind(format: number): AtfKind | null | undefined {
  * the data holds the header and what its length says (#3669).
  */
 export function readAtfHeader(data: Uint8Array, offset: number): AtfHeader {
-  const available = offset <= data.length ? data.length - offset : -1;
+  // An offset past the data, or not one at all, is as short as none.
+  const available =
+    Number.isInteger(offset) && offset >= 0 && offset <= data.length ? data.length - offset : -1;
   if (available < 3) {
     throw new AtfError("size", "no ATF signature");
   }
@@ -115,8 +119,7 @@ export function readAtfHeader(data: Uint8Array, offset: number): AtfHeader {
         (data[offset + 10] << 8) |
         data[offset + 11]) >>>
       0;
-  // AIR reads the format, size and count even where the length does not
-  // cover them, and then no level: a header alone is an empty texture.
+  // Past this, AIR reads as far as the data goes, the length aside.
   const end = at + length;
   if (end > data.length) {
     throw new AtfError("size", "ATF longer than its data");
@@ -126,6 +129,7 @@ export function readAtfHeader(data: Uint8Array, offset: number): AtfHeader {
   const log2Height = data[at + 2];
 
   return {
+    old,
     version: old ? 0 : data[offset + 7],
     format: data[at] & 0x7f,
     cube: (data[at] & 0x80) !== 0,
@@ -137,6 +141,11 @@ export function readAtfHeader(data: Uint8Array, offset: number): AtfHeader {
     start: at + 4,
     end,
   };
+}
+
+/** The lossy formats, which came with version 3 and AIR reads in no other. */
+function lossy(format: number): boolean {
+  return format === ATF_COMPRESSED_LOSSY || format === ATF_COMPRESSED_LOSSY_ALPHA;
 }
 
 /** Blocks a level holds, every GPU's encoding: ETC2's from version 3. */
@@ -157,20 +166,38 @@ function blocksPerLevel(format: number, version: number): number {
       // DXT5 4, PVRTC 3, ETC1 3, ETC2 6.
       return etc2 ? 16 : 10;
     case ATF_COMPRESSED_LOSSY:
-      // As compressed, with a block of ETC2's modes.
-      return etc2 ? 12 : 8;
+      // As compressed, with a block of ETC2's modes; version 3 alone.
+      return 12;
     default:
-      // As compressed with alpha, with a block of ETC2's modes.
-      return etc2 ? 17 : 10;
+      // As compressed with alpha, with a block of ETC2's modes; version 3 alone.
+      return 17;
+  }
+}
+
+/** How many of a level's blocks the desktop reads: its BGRA image, or its DXT's. */
+function desktopBlocks(format: number): number {
+  switch (format) {
+    case ATF_COMPRESSED:
+    case ATF_COMPRESSED_LOSSY:
+      return 2;
+    case ATF_COMPRESSED_ALPHA:
+    case ATF_COMPRESSED_LOSSY_ALPHA:
+      return 4;
+    default:
+      return 1;
   }
 }
 
 /**
  * Each face's levels, each its blocks, as views of `data`; a format AIR
  * knows, a size up to 4096 and a level count from 1 to the size's own, or
- * #3677, and a format no texture takes, #3675. As AIR streams a texture, a level that does not end within the
- * length is absent, as are the ones after it, though their blocks may be in
- * the data; one that runs past the data is corrupt (#3677).
+ * #3677, and a format no texture takes, #3675. AIR reads the blocks as far
+ * as the data goes, whatever the length says, and streams what it finds: a
+ * level that starts where too little is left for a block's length is
+ * absent, as are those after it; one whose blocks for the desktop are whole
+ * stands though a later block of its is cut short, and the levels after it
+ * are absent; but a block the desktop reads that is cut short is corrupt
+ * (#3677).
  */
 export function readAtfBlocks(data: Uint8Array, header: AtfHeader): (AtfBlocks | null)[][] {
   const kind = atfKind(header.format);
@@ -184,12 +211,14 @@ export function readAtfBlocks(data: Uint8Array, header: AtfHeader): (AtfBlocks |
     header.log2Width > MAX_LOG2 ||
     header.log2Height > MAX_LOG2 ||
     header.count === 0 ||
-    header.count > levels
+    header.count > levels ||
+    (lossy(header.format) && header.version < 3)
   ) {
     throw new AtfError("decode", "ATF format, size or level count out of range");
   }
 
   const blocks = blocksPerLevel(header.format, header.version);
+  const needed = desktopBlocks(header.format);
   const field = header.version === 0 ? 3 : 4;
   const faces: (AtfBlocks | null)[][] = [];
   let at = header.start;
@@ -198,16 +227,11 @@ export function readAtfBlocks(data: Uint8Array, header: AtfHeader): (AtfBlocks |
   for (let face = 0; face < (header.cube ? 6 : 1); face++) {
     const found: (AtfBlocks | null)[] = [];
     for (let level = 0; level < header.count; level++) {
-      streamed ||= at >= header.end;
-      if (streamed) {
-        found.push(null);
-        continue;
-      }
-
       const read: AtfBlocks = [];
-      for (let block = 0; block < blocks; block++) {
+      for (let block = 0; block < blocks && !streamed; block++) {
         if (field > data.length - at) {
-          throw new AtfError("decode", "ATF block length past the data");
+          streamed = true;
+          break;
         }
 
         let length = (data[at] << 16) | (data[at + 1] << 8) | data[at + 2];
@@ -217,15 +241,19 @@ export function readAtfBlocks(data: Uint8Array, header: AtfHeader): (AtfBlocks |
 
         at += field;
         if (length > data.length - at) {
-          throw new AtfError("decode", "ATF block past the data");
+          if (block < needed) {
+            throw new AtfError("decode", "ATF block past the data");
+          }
+
+          streamed = true;
+          break;
         }
 
         read.push(data.subarray(at, at + length));
         at += length;
       }
 
-      streamed = at > header.end;
-      found.push(streamed ? null : read);
+      found.push(read.length >= needed ? read : null);
     }
 
     faces.push(found);

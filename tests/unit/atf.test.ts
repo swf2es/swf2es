@@ -67,10 +67,16 @@ test("headers name their format, size, levels and faces, in both layouts", () =>
     ["compressed-alpha", 4, "compressedAlpha", 32, 32, 6, false],
     ["raw-alpha", 5, "compressedAlpha", 32, 32, 6, false],
     ["compressed-cube", 2, "compressed", 16, 16, 5, true],
+    ["compressed-lossy", 12, "compressed", 64, 64, 7, false],
+    ["compressed-lossy-alpha", 13, "compressedAlpha", 32, 32, 6, false],
     ["compressed-wide", 2, "compressed", 64, 32, 7, false],
   ];
   for (const [name, format, kind, width, height, count, cube] of cases) {
-    for (const atf of [fixture(name), oldHeader(fixture(name))]) {
+    // The lossy formats are version 3's alone.
+    const layouts = name.includes("lossy")
+      ? [fixture(name)]
+      : [fixture(name), oldHeader(fixture(name))];
+    for (const atf of layouts) {
       const header = readAtfHeader(atf, 0);
       assert.equal(header.format, format, name);
       assert.equal(atfKind(header.format), kind, name);
@@ -139,6 +145,45 @@ test("Compressed and CompressedAlpha rebuild the very blocks raw ATFs hold", () 
   );
 });
 
+test("the lossy formats keep raw's indices, and their endpoints near raw's", () => {
+  for (const [lossy, raw, size] of [
+    ["compressed-lossy", "raw", 8],
+    ["compressed-lossy-alpha", "raw-alpha", 16],
+  ] as const) {
+    const a = decode(fixture(lossy));
+    const b = decode(fixture(raw));
+    assert.equal(a.length, b.length);
+    for (let i = 0; i < a.length; i++) {
+      assert.equal(a[i].bytes.length, b[i].bytes.length);
+      for (let at = 0; at < a[i].bytes.length; at += size) {
+        // DXT1's indices are its last 4 bytes; DXT5's alpha indices bytes 2 to 7 too.
+        const indices = (j: number) => j >= size - 4 || (size === 16 && j >= 2 && j < 8);
+        for (let j = 0; j < size; j++) {
+          const x = a[i].bytes[at + j];
+          const y = b[i].bytes[at + j];
+          if (indices(j)) {
+            assert.equal(x, y, `${lossy} level ${i} block ${at / size} byte ${j}`);
+          }
+        }
+        // Each RGB565 endpoint within a few steps of raw's.
+        for (const e of size === 8 ? [0, 2] : [8, 10]) {
+          const p = a[i].bytes[at + e] | (a[i].bytes[at + e + 1] << 8);
+          const q = b[i].bytes[at + e] | (b[i].bytes[at + e + 1] << 8);
+          assert.ok(Math.abs((p >> 11) - (q >> 11)) <= 6, `${lossy} red ${p} ${q}`);
+          assert.ok(Math.abs(((p >> 5) & 63) - ((q >> 5) & 63)) <= 12, `${lossy} green ${p} ${q}`);
+          assert.ok(Math.abs((p & 31) - (q & 31)) <= 6, `${lossy} blue ${p} ${q}`);
+        }
+      }
+    }
+  }
+
+  // Red's first block, its endpoints as the lossy image gives them: AIR draws them so (AtfTextures).
+  assert.deepEqual(
+    [...decode(fixture("compressed-lossy"))[0].bytes.subarray(0, 8)],
+    [0x40, 0xf8, 0x40, 0xf8, 0xaa, 0xaa, 0xaa, 0xaa],
+  );
+});
+
 test("the old header decodes to the same images", () => {
   for (const name of [
     "rgb",
@@ -150,6 +195,10 @@ test("the old header decodes to the same images", () => {
   ]) {
     assert.deepEqual(decode(oldHeader(fixture(name))), decode(fixture(name)), name);
   }
+
+  // The lossy formats came with version 3, and AIR reads them in no other.
+  assert.equal(refusal(oldHeader(fixture("compressed-lossy"))), "decode");
+  assert.equal(refusal(oldHeader(fixture("compressed-lossy-alpha"))), "decode");
 });
 
 test("cube maps give each face its levels, in ATF's order", () => {
@@ -173,13 +222,24 @@ test("levels whose blocks are empty are left out", () => {
   );
 });
 
-test("an upload is read at its offset, and what follows the length is not read", () => {
+test("an upload is read at its offset, a whole number within the data", () => {
   const atf = fixture("compressed");
   const shifted = new Uint8Array(atf.length + 7);
   shifted.set(atf, 3);
   assert.deepEqual(decode(shifted, 3), decode(atf));
   assert.equal(refusal(shifted, 0), "decode");
   assert.equal(refusal(shifted, 2), "decode");
+  for (const offset of [
+    -1,
+    -3,
+    0.5,
+    3.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    shifted.length + 1,
+  ]) {
+    assert.equal(refusal(shifted, offset), "size", String(offset));
+  }
 });
 
 test("refusals are AIR's: signature, size, format, level count, blocks", () => {
@@ -256,24 +316,26 @@ test("a corrupt LZMA or JPEG XR block is #3677, and the module still decodes", (
   assert.equal(jxrTraps(), 0);
 });
 
-test("a length that ends early streams the levels before it, as AIR does", () => {
+test("AIR reads the blocks as far as the data goes, the length aside", () => {
   const atf = fixture("compressed");
-  // Header alone: no level.
-  assert.deepEqual(decode(withLength(atf, 16).subarray(0, 16)), []);
-  assert.deepEqual(decode(withLength(atf, 16)), []);
-  // Ending after level 0, with the rest still there or cut away.
   const one = levelStart(atf, 1);
-  assert.deepEqual(
-    decode(withLength(atf, one)).map((image) => image.level),
-    [0],
-  );
-  assert.deepEqual(
-    decode(withLength(atf, one).subarray(0, one)).map((image) => image.level),
-    [0],
-  );
-  // Ending inside level 1: that level is not whole within the length.
-  assert.deepEqual(
-    decode(withLength(atf, one + 10)).map((image) => image.level),
-    [0],
-  );
+  const two = levelStart(atf, 2);
+  const levels = (data: Uint8Array) => decode(data).map((image) => image.level);
+  // The data whole, a length short of it changes nothing.
+  for (const end of [16, 30, one, one + 2, one + 10]) {
+    assert.deepEqual(levels(withLength(atf, end)), [0, 1, 2, 3, 4, 5, 6], `length ${end}`);
+  }
+
+  // The data cut where the length ends: the header alone, or at a level, or
+  // in its first block's length, leaves the levels before it.
+  assert.deepEqual(levels(withLength(atf, 16).subarray(0, 16)), []);
+  assert.deepEqual(levels(withLength(atf, two).subarray(0, two)), [0, 1]);
+  assert.deepEqual(levels(withLength(atf, one + 2).subarray(0, one + 2)), [0]);
+  // Cut within a block the desktop skips, level 2's ETC1 image, its DXT1 whole: level 2 stands.
+  const half = atf.length >> 1;
+  assert.deepEqual(levels(withLength(atf, half).subarray(0, half)), [0, 1, 2]);
+  assert.deepEqual(levels(withLength(atf, 16).subarray(0, half)), [0, 1, 2]);
+  // Cut within one it reads: corrupt, nothing kept.
+  assert.equal(refusal(withLength(atf, one + 10).subarray(0, one + 10)), "decode");
+  assert.equal(refusal(withLength(atf, 30).subarray(0, 30)), "decode");
 });

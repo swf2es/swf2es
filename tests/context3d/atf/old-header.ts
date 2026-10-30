@@ -2,7 +2,7 @@
 // writes but older content holds: a 24-bit length after the signature, no
 // version, 24-bit block lengths and no ETC2 blocks.
 
-/** Blocks each level holds in version 3, and how many of them are ETC2's. */
+/** Blocks each level holds in version 3, and how many of them, the last, are ETC2's. */
 const BLOCKS: Record<number, [number, number]> = {
   0: [1, 0],
   1: [1, 0],
@@ -10,6 +10,8 @@ const BLOCKS: Record<number, [number, number]> = {
   3: [4, 1],
   4: [16, 6],
   5: [4, 1],
+  12: [12, 4],
+  13: [17, 7],
 };
 
 export function oldHeader(atf: Uint8Array): Uint8Array {
