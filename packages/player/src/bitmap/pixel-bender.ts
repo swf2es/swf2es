@@ -918,6 +918,24 @@ export function outputByte(v: number): number {
 }
 
 /**
+ * Output pixel `at` of `out`, `channels` floats a pixel, as a bitmap's
+ * premultiplied ARGB: each byte by outputByte, each colour at most its
+ * alpha, three channels opaque; an opaque bitmap's alpha 255.
+ */
+export function outputPixel(
+  out: Float32Array,
+  at: number,
+  channels: number,
+  transparent: boolean,
+): number {
+  const a = channels > 3 ? outputByte(out[at + 3]) : 255;
+  const r = Math.min(a, outputByte(out[at]));
+  const g = Math.min(a, channels > 1 ? outputByte(out[at + 1]) : 0);
+  const b = Math.min(a, channels > 2 ? outputByte(out[at + 2]) : 0);
+  return (((transparent ? a : 255) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+}
+
+/**
  * BitmapData.applyFilter with a ShaderFilter, as adl runs it: the kernel's
  * first input is the whole source, transparent past its edges, and each
  * pixel's coordinate is the destination's, moved back by the left and top
@@ -965,12 +983,7 @@ export function shaderFilter(
   const pixels = dest.pixels;
   for (let y = 0, at = 0; y < height; y++) {
     for (let x = 0; x < width; x++, at += channels) {
-      const a = outputByte(out[at + 3]);
-      const r = Math.min(a, outputByte(out[at]));
-      const g = Math.min(a, outputByte(out[at + 1]));
-      const b = Math.min(a, outputByte(out[at + 2]));
-      pixels[(y0 + y) * dest.width + x0 + x] =
-        (((dest.transparent ? a : 255) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+      pixels[(y0 + y) * dest.width + x0 + x] = outputPixel(out, at, channels, dest.transparent);
     }
   }
 

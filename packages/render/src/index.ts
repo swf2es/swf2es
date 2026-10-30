@@ -35,7 +35,13 @@ export {
   IDLE_FRAMES,
 } from "./geometry.js";
 export { KEEP_IDLE_FRAMES, type KeepHandle, Keeps } from "./keeps.js";
-export { drawnArea, filteredRect, type MeasureTarget, measureLayers } from "./measure.js";
+export {
+  drawnArea,
+  filteredRect,
+  type MeasureTarget,
+  measureLayers,
+  wholeBitmap,
+} from "./measure.js";
 export { plan } from "./plan.js";
 export { type ColorRow, ROW_FLOATS, ROWS_A_LINE, Rows } from "./rows.js";
 export {

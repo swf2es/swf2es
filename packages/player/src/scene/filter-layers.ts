@@ -354,7 +354,7 @@ export class FilterLayers {
         pass.values[at] = this.imageTexture(image).id;
       }
 
-      filters.add(pass.kind, pass.values, texture, pass.kernel);
+      filters.add(pass.kind, pass.values, texture, pass.kernel, pass.ints);
     }
 
     return filters.close();
@@ -367,7 +367,7 @@ export class FilterLayers {
       handle = this.textures.add(
         image.width,
         image.height,
-        imageBytes(image),
+        imageTexels(image),
         GRADIENT_IDLE_FRAMES,
       );
       this.images.set(image, handle);
@@ -379,22 +379,26 @@ export class FilterLayers {
 }
 
 /**
- * An image's premultiplied RGBA bytes: a BitmapData's as they are, floats'
- * clamped to bytes and their missing channels 0, as the CPU samples them,
- * as close as a texture of bytes comes.
+ * An image's texels: a BitmapData's premultiplied RGBA bytes, or floats
+ * as they are, four a texel, the channels they lack 0, as the CPU samples
+ * them.
  */
-function imageBytes(image: ShaderImage): Uint8Array {
+function imageTexels(image: ShaderImage): Uint8Array | Float32Array {
   if (image.pixels) {
     return rgbaOf(image.pixels);
   }
 
   const floats = image.floats as Float32Array;
   const c = image.channels;
-  const out = new Uint8Array(image.width * image.height * 4);
-  for (let i = 0; i < image.width * image.height; i++) {
-    for (let k = 0; k < 4; k++) {
-      const v = k < c ? floats[i * c + k] : 0;
-      out[i * 4 + k] = Math.round(Math.max(0, Math.min(1, v || 0)) * 255);
+  const n = image.width * image.height;
+  if (c === 4) {
+    return floats.subarray(0, n * 4);
+  }
+
+  const out = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < c; k++) {
+      out[i * 4 + k] = floats[i * c + k];
     }
   }
 

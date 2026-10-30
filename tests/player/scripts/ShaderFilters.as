@@ -3,7 +3,8 @@
 // coordinate is the pixel's centre from the corner of the object's bitmap,
 // in stage pixels whatever the object's scale or turn, the extensions grow
 // the bitmap round it, its first input is the object, transparent past its
-// edges, nearest or linear, and its other inputs clamp to theirs; a blur
+// edges, nearest or linear, and its other inputs clamp to theirs, even for
+// an object hanging off the stage's corner; a blur
 // before it grows what it reads, and a glow after it runs on what it made;
 // its parameters and images are taken as the filters are set, so a change
 // after shows only once they are set again. Through applyFilter: the
@@ -47,6 +48,10 @@ package {
       turned.rotation = 30;
       turned.filters = [coord];
       box(260, 15, 20, 20).filters = [new BlurFilter(8, 8, 1), coord];
+      // Hanging off the stage's top left: the coordinates still from the object's own corner.
+      var off:ShaderFilter = new ShaderFilter(new Shader(new CoordKernel()));
+      off.rightExtension = 3;
+      box(-15.5, -10.25, 40, 30).filters = [new BlurFilter(4, 4, 1), off];
 
       var shift:ShaderFilter = new ShaderFilter(new Shader(new ShiftKernel()));
       shift.leftExtension = 5;

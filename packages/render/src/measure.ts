@@ -11,7 +11,6 @@ import {
   NO_WHOLE,
   type SceneList,
   WHOLE_ALIASED,
-  WHOLE_SMOOTH,
 } from "./scene.js";
 
 /**
@@ -130,6 +129,7 @@ export function measureLayers(
           scene.layers,
           layer * 4,
           scene.wholes[layer],
+          scene.objects,
         );
         areas.length = n - 4;
         const r = scene.layers;
@@ -160,10 +160,11 @@ export function measureLayers(
  * area (least x and y, greatest x and y in target pixels, from `area[at]`)
  * as PixiJS's filter system has it (FilterSystem's _calculateFilterArea): in
  * units, the area cut to the target, out to whole pixels at the
- * resolution, or to whole units as `whole` says (SceneList.wholes),
+ * resolution, or to whole stage pixels as `whole` says (SceneList.wholes),
  * padded; nothing where it has no size then; its edges snapped to the
  * pixels they lie on. Into `out` from `to`: x, y, width, height, of no
- * size for nothing.
+ * size for nothing. A whole layer's object, uncut, goes into `objects` at
+ * `to` too (SceneList.objects).
  */
 export function filteredRect(
   area: ArrayLike<number>,
@@ -173,6 +174,7 @@ export function filteredRect(
   out: Int32Array,
   to: number,
   whole = NO_WHOLE,
+  objects: Float64Array | null = null,
 ): void {
   const res = target.resolution;
   let x0 = area[at] / res;
@@ -187,39 +189,41 @@ export function filteredRect(
     return;
   }
 
-  // Each edge moved in alone, as Bounds.fitBounds does: an area off the target turns inside out,
-  // and its padding may yet give it a size.
-  x0 = Math.max(x0, 0);
-  y0 = Math.max(y0, 0);
-  x1 = Math.min(x1, target.width / res);
-  y1 = Math.min(y1, target.height / res);
   if (whole !== NO_WHOLE) {
-    // Out to twips first, as Flash keeps an object's bounds.
-    x0 = Math.floor(x0 * 20 + TEXEL_SNAP) / 20;
-    y0 = Math.floor(y0 * 20 + TEXEL_SNAP) / 20;
-    x1 = Math.ceil(x1 * 20 - TEXEL_SNAP) / 20;
-    y1 = Math.ceil(y1 * 20 - TEXEL_SNAP) / 20;
+    // Flash's bitmap of the object, of whole stage pixels, whatever the stage's scale; cut to the
+    // target only after.
+    const k = target.scale;
+    const object = wholeBitmap(
+      area[at] / k,
+      area[at + 1] / k,
+      area[at + 2] / k,
+      area[at + 3] / k,
+      whole,
+    );
+    const ox0 = object[0] * k;
+    const oy0 = object[1] * k;
+    const ox1 = object[2] * k;
+    const oy1 = object[3] * k;
+    if (objects) {
+      objects[to] = ox0;
+      objects[to + 1] = oy0;
+      objects[to + 2] = ox1 - ox0;
+      objects[to + 3] = oy1 - oy0;
+    }
+
+    x0 = Math.max(ox0, 0) / res - pad;
+    y0 = Math.max(oy0, 0) / res - pad;
+    x1 = Math.min(ox1, target.width) / res + pad;
+    y1 = Math.min(oy1, target.height) / res + pad;
+  } else {
+    // Each edge moved in alone, as Bounds.fitBounds does: an area off the target turns inside out,
+    // and its padding may yet give it a size.
+    x0 = Math.floor(Math.max(x0, 0) * res) / res - pad;
+    y0 = Math.floor(Math.max(y0, 0) * res) / res - pad;
+    x1 = Math.ceil(Math.min(x1, target.width / res) * res) / res + pad;
+    y1 = Math.ceil(Math.min(y1, target.height / res) * res) / res + pad;
   }
 
-  switch (whole) {
-    case WHOLE_SMOOTH:
-      x0 = Math.floor(x0) - pad;
-      y0 = Math.floor(y0) - pad;
-      x1 = Math.floor(x1) + 1 + pad;
-      y1 = Math.floor(y1) + 1 + pad;
-      break;
-    case WHOLE_ALIASED:
-      x0 = Math.ceil(x0 - 0.5) - pad;
-      y0 = Math.ceil(y0 - 0.5) - pad;
-      x1 = Math.ceil(x1 - 0.5) + pad;
-      y1 = Math.ceil(y1 - 0.5) + pad;
-      break;
-    default:
-      x0 = Math.floor(x0 * res) / res - pad;
-      y0 = Math.floor(y0 * res) / res - pad;
-      x1 = Math.ceil(x1 * res) / res + pad;
-      y1 = Math.ceil(y1 * res) / res + pad;
-  }
   if (!(x1 - x0 > 0 && y1 - y0 > 0)) {
     return;
   }
@@ -230,6 +234,41 @@ export function filteredRect(
   out[to + 1] = top;
   out[to + 2] = Math.ceil(x1 * res - TEXEL_SNAP) - left;
   out[to + 3] = Math.ceil(y1 * res - TEXEL_SNAP) - top;
+}
+
+/** What wholeBitmap gives, read before it is asked again. */
+const bitmap = [0, 0, 0, 0];
+
+/**
+ * Flash's bitmap of an object of bounds x0, y0 to x1, y1 in stage pixels:
+ * the bounds out to twips, then antialiased (WHOLE_SMOOTH) the pixels its
+ * edges touch and one more right and down where an edge lies on one,
+ * aliased (WHOLE_ALIASED) those whose centres it covers.
+ */
+export function wholeBitmap(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  whole: number,
+): number[] {
+  x0 = Math.floor(x0 * 20 + TEXEL_SNAP) / 20;
+  y0 = Math.floor(y0 * 20 + TEXEL_SNAP) / 20;
+  x1 = Math.ceil(x1 * 20 - TEXEL_SNAP) / 20;
+  y1 = Math.ceil(y1 * 20 - TEXEL_SNAP) / 20;
+  if (whole === WHOLE_ALIASED) {
+    bitmap[0] = Math.ceil(x0 - 0.5);
+    bitmap[1] = Math.ceil(y0 - 0.5);
+    bitmap[2] = Math.ceil(x1 - 0.5);
+    bitmap[3] = Math.ceil(y1 - 0.5);
+  } else {
+    bitmap[0] = Math.floor(x0);
+    bitmap[1] = Math.floor(y0);
+    bitmap[2] = Math.floor(x1) + 1;
+    bitmap[3] = Math.floor(y1) + 1;
+  }
+
+  return bitmap;
 }
 
 /**
