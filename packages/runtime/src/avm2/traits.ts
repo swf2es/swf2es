@@ -458,3 +458,10 @@ const slotKeys: string[] = [];
 const methodKeys: string[] = [];
 export const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);
 export const methodKey = (id: number): string => (methodKeys[id] ??= `$m${id}`);
+const untypedSetKeys: string[] = [];
+/**
+ * Where a native's setter, dispatch id `id`, is kept as an untyped set
+ * calls it, its value coerced (installMethod); a setter with none is
+ * called as it is.
+ */
+export const untypedSetKey = (id: number): string => (untypedSetKeys[id] ??= `$u${id}`);

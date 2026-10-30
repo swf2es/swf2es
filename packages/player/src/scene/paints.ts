@@ -62,19 +62,19 @@ export class Paints {
     return this.gradientTexture(paint, part.region);
   }
 
-  /** `store`'s texture, its pixels uploaded again if they changed since. */
+  /** `store`'s texture, its pixels as drawn (`drawable`) uploaded again if they changed since. */
   storeTexture(store: BitmapStore, idle?: number): TextureHandle {
     const kept = this.stores.get(store);
     if (kept && this.textures.alive(kept.handle)) {
       if (kept.version !== store.version) {
         kept.version = store.version;
-        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.readable));
+        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.drawable));
       }
 
       return kept.handle;
     }
 
-    const handle = this.textures.add(store.width, store.height, rgbaOf(store.readable), idle);
+    const handle = this.textures.add(store.width, store.height, rgbaOf(store.drawable), idle);
     this.stores.set(store, { handle, version: store.version });
     return handle;
   }

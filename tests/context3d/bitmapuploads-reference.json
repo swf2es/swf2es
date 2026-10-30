@@ -27,5 +27,9 @@
   "bitmapuploads nonpow2-mixed-mip2 ff000000 0 ff11000b",
   "bitmapuploads nonpow2-mip4 accepted",
   "bitmapuploads nonpow2-mip4 ff000000 ff000000 ff000000",
+  "bitmapuploads opaque erased 0",
+  "bitmapuploads opaque-erased-ff 0 0 0",
+  "bitmapuploads opaque erased 7f196532",
+  "bitmapuploads opaque-erased-80 7f32cb64 7f32cb64 7f32cb64",
   "bitmapuploads complete"
 ]

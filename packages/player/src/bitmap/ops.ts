@@ -3,7 +3,7 @@
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
 import type { CopyOp } from "@swf2es/native/render";
-import { type BitmapStore, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
+import { BitmapStore, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
 import { bitmapKernel } from "./kernel.js";
 import { perlinSetup } from "./turbulence.js";
 
@@ -202,8 +202,8 @@ export function comparePixels(left: BitmapStore, right: BitmapStore): Uint32Arra
   const out = new Uint32Array(left.width * left.height);
   let different = false;
   for (let i = 0; i < out.length; i++) {
-    const p = unmultiply(left.readable[i]);
-    const q = unmultiply(right.readable[i]);
+    const p = left.unmultiplied(left.readable[i]);
+    const q = right.unmultiplied(right.readable[i]);
     if (p === q) {
       continue;
     }
@@ -483,13 +483,13 @@ export function histogram(store: BitmapStore, rect: PixelRect): number[][] {
   return counts;
 }
 
-/** The unmultiplied alpha at (x, y), or -1 outside. */
+/** The unmultiplied alpha at (x, y), as a hit test reads it: an opaque bitmap's 255; -1 outside. */
 export function alphaAt(store: BitmapStore, x: number, y: number): number {
   if (x < 0 || y < 0 || x >= store.width || y >= store.height) {
     return -1;
   }
 
-  return store.readable[y * store.width + x] >>> 24;
+  return store.transparent ? store.readable[y * store.width + x] >>> 24 : 255;
 }
 
 /**
@@ -653,7 +653,14 @@ interface PreparedColorTransform extends ColorTransformValues {
   skipZeroAlpha: boolean;
 }
 
-/** The blend modes draw composites with; alpha and erase need a layer, which a bitmap drawn has not, and do nothing. */
+/** A display object's layer drawn (drawBitmap): a Bitmap's, a drawing's snapshot, or none. */
+export type Layer = "bitmap" | "drawing" | null;
+
+/**
+ * The blend modes draw composites with. Alpha and erase need a layer: a
+ * display object drawn has one, and they then scale the destination's
+ * alpha where it covers; a BitmapData drawn has not, and they do nothing.
+ */
 const BLENDS = new Set([
   "normal",
   "layer",
@@ -676,7 +683,9 @@ const BLENDS = new Set([
  * pixel the transformed source covers (a 4 x 4 sample grid), passed
  * through the colour transform as colorTransform does, and composited by
  * the blend mode. Flash's own pixels, under adl: nearest at the centre,
- * normal as the store's source-over, alpha and erase as nothing.
+ * normal as the store's source-over, alpha and erase as nothing unless the
+ * source is a display object's `layer`: a Bitmap's, every pixel of which it
+ * covers, or a drawing's snapshot, which covers only where it drew.
  */
 export function drawBitmap(
   store: BitmapStore,
@@ -687,10 +696,15 @@ export function drawBitmap(
   clip: PixelRect | null,
   smooth: boolean,
   rows = false,
+  layer: Layer = null,
 ): void {
-  if (!BLENDS.has(mode)) {
+  const whole = mode === "erase" || mode === "alpha";
+  if (!BLENDS.has(mode) && !(layer !== null && whole)) {
     return;
   }
+
+  // A drawing's alpha blend leaves the destination where it drew nothing, or drew clear (adl).
+  const keepClear = mode === "alpha" && layer === "drawing";
 
   // Flash rasterises the translation snapped down to quarter pixels, which
   // its 4 x 4 coverage then reads exactly (a move of 0.49 covers 3/4 and
@@ -729,6 +743,12 @@ export function drawBitmap(
     return;
   }
 
+  // A layer's blend reads the source as it was: of a Bitmap of the bitmap itself, the part
+  // that can reach the area is copied first.
+  if (whole && source === store) {
+    [source, m] = reachable(store, m, area);
+  }
+
   const transform = ct ? prepareColorTransform(ct) : null;
 
   // Unscaled at a whole pixel, as every snapshot of a display object is
@@ -743,7 +763,7 @@ export function drawBitmap(
     Number.isInteger(m.ty) &&
     source !== store
   ) {
-    composite(store, source, area, m.tx, m.ty, transform, mode);
+    composite(store, source, area, m.tx, m.ty, transform, mode, keepClear);
     store.changed();
     return;
   }
@@ -761,12 +781,14 @@ export function drawBitmap(
     return sx >= 0 && sy >= 0 && sx < source.width && sy < source.height;
   };
 
+  // The arrays taken once, the written one first: a source that is the store reads it too. What
+  // the source reads as: its own pixels drawn into itself, else as a draw reads them.
   const into = store.pixels;
-  const from = source.readable;
+  const pixels = source === store ? source.readable : source.drawable;
 
   // Through a Bitmap of itself, a BitmapData is drawn in plain scan order,
   // each pixel reading what the ones before it wrote, which smears both
-  // ways (adl): pixel by pixel.
+  // ways (adl): pixel by pixel. A layer's blend has a copy of it by now.
   if (source === store && !rows) {
     for (let y = area.y; y < area.y + area.height; y++) {
       for (let x = area.x; x < area.x + area.width; x++) {
@@ -786,8 +808,8 @@ export function drawBitmap(
         const sx = ia * cx + ic * cy + itx;
         const sy = ib * cx + id * cy + ity;
         let p = smooth
-          ? bilinear(from, source.width, source.height, sx - 0.5, sy - 0.5)
-          : nearest(from, source.width, source.height, sx, sy);
+          ? bilinear(pixels, source.width, source.height, sx - 0.5, sy - 0.5)
+          : nearest(pixels, source.width, source.height, sx, sy);
         if (transform) {
           p = transformed(p, transform);
         }
@@ -796,7 +818,7 @@ export function drawBitmap(
           p = scaleBy(p, hits / 16);
         }
 
-        put(into, store.transparent, y * store.width + x, mode, p);
+        put(store, into, y * store.width + x, mode, p);
       }
     }
 
@@ -821,14 +843,24 @@ export function drawBitmap(
     const full = buffers.full;
     full[0] = Number.NEGATIVE_INFINITY;
     full[1] = Number.POSITIVE_INFINITY;
-    const spans = coveredSpan(ia, ic, itx, w, y, full) && coveredSpan(ib, id, ity, h, y, full);
+    const spans =
+      !whole && coveredSpan(ia, ic, itx, w, y, full) && coveredSpan(ib, id, ity, h, y, full);
     const fullFrom = spans ? Math.max(area.x, full[0]) : 0;
     const fullTo = spans ? Math.min(area.x + n, full[1]) : 0;
     let any = 0;
 
     for (let x = area.x, k = 0; k < n; x++, k++) {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      const sx = ia * cx + ic * cy + itx;
+      const sy = ib * cx + id * cy + ity;
       let hit = 16;
-      if (x < fullFrom || x >= fullTo) {
+      if (whole) {
+        // Erase and alpha take a pixel whole where the source is at its centre, as adl
+        // draws a shape's edge for them, an edge through the centre counted on its right
+        // and below.
+        hit = sx > 0 && sy > 0 && sx <= w && sy <= h ? 16 : 0;
+      } else if (x < fullFrom || x >= fullTo) {
         hit = 0;
         for (let j = 0; j < 16; j++) {
           if (inside(x + ((j & 3) + 0.5) / 4, y + ((j >> 2) + 0.5) / 4)) {
@@ -843,23 +875,21 @@ export function drawBitmap(
       }
 
       any++;
-      const cx = x + 0.5;
-      const cy = y + 0.5;
-      us[k] = ia * cx + ic * cy + itx;
-      vs[k] = ib * cx + id * cy + ity;
+      us[k] = sx;
+      vs[k] = sy;
     }
 
     if (any === 0) {
       continue;
     }
 
-    sampleRow(from, w, h, us, vs, hits, row, n, smooth);
+    sampleRow(pixels, w, h, us, vs, hits, row, n, smooth);
     if (transform) {
       transformRow(row, hits, n, transform);
     }
 
     coverRow(row, hits, n);
-    blendRow(into, y * store.width + area.x, row, hits, n, mode, store.transparent);
+    blendRow(store, into, y * store.width + area.x, row, hits, n, mode, keepClear);
   }
 
   store.changed();
@@ -1019,18 +1049,22 @@ function coverRow(row: Uint32Array, hits: Uint8Array, n: number): void {
   }
 }
 
-/** The row's covered pixels composited into the store's pixels from `at` by the blend mode. */
+/**
+ * The row's covered pixels composited into the store's pixels from `at` by
+ * the blend mode; with `keepClear`, a clear one leaves the destination be.
+ */
 function blendRow(
+  store: BitmapStore,
   into: Uint32Array,
   at: number,
   row: Uint32Array,
   hits: Uint8Array,
   n: number,
   mode: string,
-  transparent: boolean,
+  keepClear: boolean,
 ): void {
-  const opaque = transparent ? 0 : 0xff000000;
   if (mode === "normal" || mode === "layer") {
+    const opaque = store.transparent ? 0 : 0xff000000;
     for (let k = 0; k < n; k++) {
       if (hits[k] === 0) {
         continue;
@@ -1045,8 +1079,8 @@ function blendRow(
   }
 
   for (let k = 0; k < n; k++) {
-    if (hits[k] !== 0) {
-      into[at + k] = (blend(mode, row[k], into[at + k]) | opaque) >>> 0;
+    if (hits[k] !== 0 && !(keepClear && row[k] >>> 24 === 0)) {
+      put(store, into, at + k, mode, row[k]);
     }
   }
 }
@@ -1060,9 +1094,10 @@ function composite(
   ty: number,
   ct: PreparedColorTransform | null,
   mode: string,
+  keepClear: boolean,
 ): void {
   const into = store.pixels;
-  const from = source.readable;
+  const from = source.drawable;
   const opaque = store.transparent ? 0 : 0xff000000;
   if (!ct && mode === "normal") {
     for (let y = area.y; y < area.y + area.height; y++) {
@@ -1097,19 +1132,66 @@ function composite(
     const j = (y - ty) * source.width + (area.x - tx);
     // A view and a copy: a loop copying it was slower, for all a view allocates.
     row.set(from.subarray(j, j + n));
-
     if (ct) {
       transformRow(row, hits, n, ct);
     }
 
-    blendRow(into, y * store.width + area.x, row, hits, n, mode, store.transparent);
+    blendRow(store, into, y * store.width + area.x, row, hits, n, mode, keepClear);
   }
 }
 
-/** A drawn pixel composited into a store's pixels by the blend mode, opaque where the store is. */
-function put(into: Uint32Array, transparent: boolean, i: number, mode: string, p: number): void {
+/**
+ * A drawn pixel composited into the store by the blend mode, opaque where
+ * the store is, but for erase and alpha: an opaque bitmap holds the alpha
+ * they leave, as Flash's memory does, and reads it back (getPixel32).
+ */
+function put(store: BitmapStore, into: Uint32Array, i: number, mode: string, p: number): void {
   const out = blend(mode, p, into[i]);
-  into[i] = transparent ? out : (out | 0xff000000) >>> 0;
+  if (store.transparent) {
+    into[i] = out;
+  } else if (mode === "erase" || mode === "alpha") {
+    into[i] = out;
+    store.holdsAlpha ||= out >>> 24 !== 255;
+  } else {
+    into[i] = (out | 0xff000000) >>> 0;
+  }
+}
+
+/**
+ * The part of `store` a draw of itself through `m` into `area` can read,
+ * copied, as a layer reads it before the draw writes, and the matrix that
+ * draws the copy where the store would be drawn: the area's corners taken
+ * back through the matrix, a pixel wider for smoothing, within the store.
+ */
+function reachable(store: BitmapStore, m: Affine, area: PixelRect): [BitmapStore, Affine] {
+  const det = m.a * m.d - m.b * m.c;
+  const back = [
+    [area.x, area.y],
+    [area.x + area.width, area.y],
+    [area.x, area.y + area.height],
+    [area.x + area.width, area.y + area.height],
+  ].map(([x, y]) => [
+    (m.d * (x - m.tx) - m.c * (y - m.ty)) / det,
+    (m.a * (y - m.ty) - m.b * (x - m.tx)) / det,
+  ]);
+  const x0 = Math.max(0, Math.floor(Math.min(...back.map((p) => p[0]))) - 1);
+  const y0 = Math.max(0, Math.floor(Math.min(...back.map((p) => p[1]))) - 1);
+  const x1 = Math.min(store.width, Math.ceil(Math.max(...back.map((p) => p[0]))) + 1);
+  const y1 = Math.min(store.height, Math.ceil(Math.max(...back.map((p) => p[1]))) + 1);
+  const width = Math.max(0, x1 - x0);
+  const height = Math.max(0, y1 - y0);
+  const copy = new BitmapStore(width, height, store.transparent, 0);
+  const from = store.readable;
+  const into = copy.pixels;
+  for (let y = 0; y < height; y++) {
+    into.set(
+      from.subarray((y0 + y) * store.width + x0, (y0 + y) * store.width + x0 + width),
+      y * width,
+    );
+  }
+
+  copy.holdsAlpha = store.holdsAlpha;
+  return [copy, { ...m, tx: m.tx + m.a * x0 + m.c * y0, ty: m.ty + m.b * x0 + m.d * y0 }];
 }
 
 function nearest(from: Uint32Array, width: number, height: number, x: number, y: number): number {
@@ -1225,6 +1307,18 @@ function scaleBy(p: number, f: number): number {
   );
 }
 
+/**
+ * The destination alone, as erase and alpha leave it: each channel scaled
+ * by k / 255, what the source's alpha leaves or is, floored, as adl's are.
+ */
+function scaleFloored(d: number, k: number): number {
+  const a = Math.floor(((d >>> 24) * k) / 255);
+  const r = Math.floor((((d >>> 16) & 0xff) * k) / 255);
+  const g = Math.floor((((d >>> 8) & 0xff) * k) / 255);
+  const b = Math.floor(((d & 0xff) * k) / 255);
+  return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
+}
+
 /** x * y / 255, rounded as the blend modes' arithmetic has it. */
 function mul(x: number, y: number): number {
   return (x * y + 127) / 255;
@@ -1241,6 +1335,10 @@ function blend(mode: string, s: number, d: number): number {
   }
 
   const sa = s >>> 24;
+  if (mode === "erase" || mode === "alpha") {
+    return scaleFloored(d, mode === "erase" ? 255 - sa : sa);
+  }
+
   const da = d >>> 24;
   const a =
     mode === "add" || mode === "subtract"
