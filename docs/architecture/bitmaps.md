@@ -431,5 +431,23 @@ filters that holds the kernel (`BLEND`); a filtered one is drawn anew each
 frame rather than kept, as a kept layer's mode is a byte. It blends a
 texel at a time, so edges the page draws finer blend there rather than
 by Flash's pixel, and adl's bitmap of a blurred object reaches a little
-further than the renderer's layer (the `shader-blends` case). Shader
-fills are still to come.
+further than the renderer's layer (the `shader-blends` case).
+
+`beginShaderFill` takes the kernel, its parameters and images as they are
+then (TypeError 2007 for null, 2171 for no kernel, 2164 for an input
+unset); the fill's coordinate is the pixel's centre in the shape's own
+space through the matrix's inverse, whatever the object's or its
+parents' scale and turn, as a bitmap fill's texels are; a bitmap input
+clamps to its edges; colours past the alpha composite as they are, and a
+colour transform colours the fill on its straight colour. Each shader
+fill is a part of its own (`scene/shapes.ts`), its texels the kernel's
+coordinates with a depth of 1, drawn by a program of the kernel's after
+the mesh's vertex shader (`fillKernel`, `SHADED` draws naming a
+`FILL_SHADER` chain of the frame's filters), the kernel run once a pixel
+of Flash's at its centre, as adl draws one. Turned by its matrix, adl's
+coordinates lie a fifth of a pixel off that centre, which the renderer
+does not copy; at low quality adl also places the shape on whole pixels.
+`lineShaderStyle` is checked as adl checks it and the line keeps its
+colour, as a gradient or bitmap line does; `readGraphicsData` of a shader
+fill, which crashes adl, gives an empty bitmap fill (the `shader-fills`
+case).

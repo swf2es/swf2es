@@ -10742,6 +10742,16 @@ export const cases: PlayerCase[] = [
     maxOutliers: 450,
   },
   {
+    // Shader fills (scripts/ShaderFills.as). The circle's and the triangles' edges are
+    // antialiased otherwise than adl's.
+    name: "shader-fills",
+    build: shaderFills,
+    frames: 3,
+    capture: [3],
+    tolerance: 2,
+    maxOutliers: 500,
+  },
+  {
     name: "timeline-sounds",
     build: timelineSounds,
     frames: 33,
@@ -11001,6 +11011,67 @@ function shaderBlends(compile: Compile): Uint8Array {
     ["ThreeKernel", head("Three", 3).sample(false, "f1.rgba", "f0.rg", 2).bytes()],
   ];
   return shaderSwf(compile, "ShaderBlends", kernels, 320, 120, 3);
+}
+
+/**
+ * Shader fills (scripts/ShaderFills.as): kernels that show their
+ * coordinate, sample a bitmap, give a translucent colour and colours past
+ * their alpha, and take a parameter; one sampling an input never set,
+ * which adl refuses.
+ */
+function shaderFills(compile: Compile): Uint8Array {
+  const head = (name: string) =>
+    new PbjAssembler().version(1).name(name).param("in", "float2", "f0.rg", "_OutCoord");
+  const coord = head("Coord")
+    .param("out", "float4", "f1.rgba", "dst")
+    .op("floor", "f2.rg", "f0.rg")
+    .ld("f4.r", 64)
+    .op("add", "f2.rg", "f4.rr")
+    .ld("f3.r", 1 / 255)
+    .op("mul", "f2.rg", "f3.rr")
+    .op("mov", "f1.rg", "f2.rg")
+    .op("fract", "f1.b", "f0.r")
+    .ld("f1.a", 1)
+    .bytes();
+  const image = head("Image")
+    .input(0, 4, "src")
+    .param("out", "float4", "f1.rgba", "dst")
+    .sample(false, "f1.rgba", "f0.rg", 0)
+    .bytes();
+  const smooth = head("Smooth")
+    .param("out", "float4", "f1.rgba", "dst")
+    .ld("f2.rg", 1 / 64)
+    .op("mov", "f1.rg", "f0.rg")
+    .op("mul", "f1.rg", "f2.rg")
+    .ld("f2.rg", 0.5)
+    .op("add", "f1.rg", "f2.rg")
+    .ld("f1.ba", 1)
+    .bytes();
+  const half = head("Half")
+    .param("out", "float4", "f1.rgba", "dst")
+    .ld("f1.rb", 0)
+    .ld("f1.ga", 0.5);
+  const over = head("Over")
+    .param("out", "float4", "f1.rgba", "dst")
+    .ld("f1.r", 1)
+    .ld("f1.g", 0.5)
+    .ld("f1.b", 0)
+    .ld("f1.a", 0.5);
+  const tint = head("Tint")
+    .param("out", "float4", "f1.rgba", "dst")
+    .param("in", "float4", "f2.rgba", "color")
+    .meta("defaultValue", "float4", [0, 0.6, 0.3, 1], true)
+    .op("mov", "f1.rgba", "f2.rgba")
+    .bytes();
+  const kernels: [string, Uint8Array][] = [
+    ["CoordKernel", coord],
+    ["ImageKernel", image],
+    ["SmoothKernel", smooth],
+    ["HalfKernel", half.bytes()],
+    ["OverKernel", over.bytes()],
+    ["TintKernel", tint],
+  ];
+  return shaderSwf(compile, "ShaderFills", kernels, 320, 160, 3);
 }
 
 /**

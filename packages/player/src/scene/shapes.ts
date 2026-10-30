@@ -7,7 +7,14 @@ import { IDENTITY, type Matrix } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
-import type { GradientFill, ImageFill, Path, ShapeLayer, TriangleMesh } from "../display/shapes.js";
+import type {
+  GradientFill,
+  ImageFill,
+  Path,
+  ShaderPaint,
+  ShapeLayer,
+  TriangleMesh,
+} from "../display/shapes.js";
 import { type FillTessellator, regionOf, resolveFills } from "./fills.js";
 
 /**
@@ -50,7 +57,8 @@ function samplesAlike(a: BitmapSampling, b: BitmapSampling): boolean {
 
 export interface Part {
   geometry: GeometryData;
-  paint: BitmapSampling | GradientFill | null;
+  /** A shader fill's part has its kernel's coordinates for texels, and a depth of 1 for each vertex (MESH's). */
+  paint: BitmapSampling | GradientFill | ShaderPaint | null;
   /** A radial gradient's region, the texels its texture covers. */
   region: Area | null;
   mesh: TriangleMesh | null;
@@ -110,15 +118,16 @@ class Gathered {
   readonly parts: Part[] = [];
   private vertices = 0;
   private corners = 0;
-  private paint: ImageFill | GradientFill | null = null;
+  private paint: ImageFill | GradientFill | ShaderPaint | null = null;
   private region: Area | null = null;
 
   /**
    * Open a part for `paint`, the one open first closed, unless both are
    * solid, or both sample one bitmap alike (samplesAlike): a drawing of a
-   * bitmap fill a triangle so draws in a few parts.
+   * bitmap fill a triangle so draws in a few parts. A shader fill is a part
+   * of its own.
    */
-  open(paint: ImageFill | GradientFill | null, region: Area | null): void {
+  open(paint: ImageFill | GradientFill | ShaderPaint | null, region: Area | null): void {
     if (paint === null && this.paint === null) {
       return;
     }
@@ -175,6 +184,7 @@ class Gathered {
           positions: scratchPositions.slice(0, n * 2),
           colors: scratchColors.slice(0, n),
           texels: this.paint ? scratchTexels.slice(0, n * 2) : undefined,
+          depths: this.paint?.type === "shader" ? new Float32Array(n).fill(1) : undefined,
           indices: scratchIndices.slice(0, this.corners),
         },
         paint: this.paint,
@@ -205,9 +215,10 @@ class Sampling {
   private columns = 0;
   private rows = 0;
 
-  set(paint: ImageFill | GradientFill, contours: readonly Path[]): this {
+  set(paint: ImageFill | GradientFill | ShaderPaint, contours: readonly Path[]): this {
     this.m = invert(paint.matrix) as Matrix;
-    this.kind = paint.type === "image" ? "image" : paint.radial ? "radial" : "linear";
+    // A shader's coordinates are its matrix's inverse of the shape's, as a bitmap's texels are.
+    this.kind = paint.type !== "gradient" ? "image" : paint.radial ? "radial" : "linear";
     this.region = this.kind === "radial" ? regionOf(contours as Path[]) : null;
     this.columns = this.region ? radialTexels(this.region.width) : 0;
     this.rows = this.region ? radialTexels(this.region.height) : 0;
@@ -307,7 +318,8 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
   const out = new Gathered();
   for (let i = 0; i < layer.fills.length; i++) {
     const { fill, contours } = layer.fills[i];
-    const textured = fill.type === "image" || fill.type === "gradient" ? fill : null;
+    const textured =
+      fill.type === "image" || fill.type === "gradient" || fill.type === "shader" ? fill : null;
     // A paint whose matrix collapses the plane covers nothing.
     if (textured) {
       const m = textured.matrix;

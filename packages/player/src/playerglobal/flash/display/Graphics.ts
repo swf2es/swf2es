@@ -12,6 +12,7 @@ import { concat } from "../../../display/geometry.js";
 import { type GraphicsDatum, graphicsData } from "../../../display/graphicsdata.js";
 import type { Paint } from "../../../display/shapes.js";
 import type { Scripting } from "../../../scripting.js";
+import { kernelOfShader, shaderUse } from "./shaders.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -57,6 +58,18 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
     return Number.isNaN(n) ? fallback : n;
   };
   /** A fill's matrix from an AS3 Matrix, or the identity for none. */
+  /** A shader as a fill takes it: TypeError 2007 for null, 2171 for no kernel, its inputs set (2164). */
+  const shaderOf = (shader: Value) => {
+    if (shader === null || shader === undefined) {
+      throw s.rt.error("TypeError", 2007, "shader");
+    }
+
+    if (!kernelOfShader(shader)) {
+      throw s.rt.error("ArgumentError", 2171);
+    }
+
+    return shaderUse(s, shader, 0);
+  };
   const matrixFrom = (matrix: Value): Matrix => {
     if (matrix === null || matrix === undefined) {
       return { ...IDENTITY };
@@ -253,6 +266,19 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       });
     }
 
+    /**
+     * A fill of the kernel's pixels, its parameters and images taken as they
+     * are now: the shape's points through the matrix's inverse are its
+     * coordinates, a pixel's centre each, as adl draws it.
+     */
+    beginShaderFill(shader: Value, matrix: Value = null): void {
+      drawing(this).beginFill({
+        type: "shader",
+        use: shaderOf(shader),
+        matrix: matrixFrom(matrix),
+      });
+    }
+
     endFill(): void {
       drawing(this).endFill();
     }
@@ -296,6 +322,11 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
 
     lineBitmapStyle(): void {
       // As lineGradientStyle.
+    }
+
+    /** Checked as adl checks it; the line keeps its colour, as a gradient's does. */
+    lineShaderStyle(shader: Value): void {
+      shaderOf(shader);
     }
 
     drawRect(x: Value, y: Value, w: Value, h: Value): void {

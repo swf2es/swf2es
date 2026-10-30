@@ -146,6 +146,7 @@ export class WebGLBackend {
     }
 
     this.frameFilters = filters;
+    this.draws.frameFilters = filters;
     this.atlas.place(geometries);
     this.gpu.uploadTextures(textures);
     for (const id of keeps.removed) {

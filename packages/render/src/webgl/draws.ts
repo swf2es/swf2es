@@ -1,4 +1,6 @@
 import { type GlState, linkProgram } from "@swf2es/context3d/device";
+import { FILL_SHADER, type Filters } from "../filters.js";
+import { fillKernel } from "../kernel-shaders.js";
 import {
   CLAMP,
   DRAW,
@@ -7,11 +9,13 @@ import {
   PLANE,
   REPEAT,
   type SceneList,
+  SHADED,
   SMOOTH,
   SNAP,
 } from "../scene.js";
 import type { GeometryAtlas, Place } from "./atlas.js";
 import type { GpuTextures } from "./gpu-textures.js";
+import { KernelPrograms } from "./kernels.js";
 import {
   FILL_SLOT,
   FILL_TEXTURES,
@@ -28,6 +32,9 @@ import {
   TEXTURE_UNIT,
 } from "./programs.js";
 import { framebufferOf, type Open, type Target, type TargetPool } from "./targets.js";
+
+/** The most shader fills' programs kept, the one used longest ago deleted for another. */
+const SHADED_PROGRAMS = 32;
 
 /** What the backend calls of WEBGL_multi_draw. */
 interface MultiDraw {
@@ -126,6 +133,11 @@ export class Draws {
    */
   private lastRow = -1;
 
+  /** Shader fills' programs. */
+  private readonly kernels: KernelPrograms;
+  /** The frame's filters, whose chains shader fills' draws name (SHADED). */
+  frameFilters: Filters | null = null;
+
   constructor(
     gl: WebGL2RenderingContext,
     state: GlState,
@@ -138,11 +150,16 @@ export class Draws {
     this.atlas = atlas;
     this.gpu = gpu;
     this.pool = pool;
+    this.kernels = new KernelPrograms(gl, state, meshVertex, SHADED_PROGRAMS, (program) => {
+      gl.uniform1i(gl.getUniformLocation(program, "uRows"), 0);
+    });
   }
 
   /** The fill, mesh and glyph programs made, as the context comes or comes back. */
   setUp(): void {
     const gl = this.gl;
+    // A shader fill's program is made again as first used.
+    this.kernels.clear();
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
     try {
       this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
@@ -305,6 +322,11 @@ export class Draws {
         continue;
       }
 
+      if (!stencil && scene.sampler[i] & SHADED) {
+        other = this.drawShaded(scene, i, place) || other;
+        continue;
+      }
+
       if (other) {
         this.useFill();
         other = false;
@@ -375,7 +397,7 @@ export class Draws {
         continue;
       }
 
-      if (place.glyphs || (!stencil && scene.sampler[j] & (MESH | PLANE))) {
+      if (place.glyphs || (!stencil && scene.sampler[j] & (MESH | PLANE | SHADED))) {
         break;
       }
 
@@ -522,9 +544,50 @@ export class Draws {
     return true;
   }
 
+  /**
+   * Entry `i`, a shader fill (SHADED), drawn by its kernel's program, after
+   * the mesh's vertex shader, told the view, its row and its kernel's
+   * uniforms; whether it was drawn, its program left in use.
+   */
+  private drawShaded(scene: SceneList, i: number, place: Place): boolean {
+    const filters = this.frameFilters;
+    const chain = scene.texture[i];
+    if (!filters || chain < 0 || chain >= filters.chainCount) {
+      return false;
+    }
+
+    const entry = filters.chains[chain];
+    const source = filters.kernels[entry];
+    if (filters.kind[entry] !== FILL_SHADER || !source) {
+      return false;
+    }
+
+    const kernel = this.kernels.use(fillKernel(source, this.kernels.readImages(filters, entry)));
+    if (!kernel) {
+      return false;
+    }
+
+    const gl = this.gl;
+    this.state.bindVertexArray(this.atlas.vertexArray);
+    gl.uniform4fv(kernel.at("uView"), this.view);
+    gl.uniform4fv(kernel.at("uFrag"), this.frag);
+    gl.uniform1i(kernel.at("uRow"), scene.row[i]);
+    this.kernels.setUniforms(kernel, filters, entry, {
+      texture: (id) => this.gpu.textures[id] ?? null,
+      sampler: (bits) => this.gpu.sampler(bits),
+    });
+    // The mesh program is told its uniforms again after another program drew.
+    this.meshStale = true;
+    this.meshRow = -1;
+    this.meshMode = -1;
+    gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
+    return true;
+  }
+
   /** The programs made on the context, deleted. */
   destroy(): void {
     const gl = this.gl;
+    this.kernels.clear();
     gl.deleteProgram(this.program);
     gl.deleteProgram(this.mesh);
     gl.deleteProgram(this.glyphProgram);

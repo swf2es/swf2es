@@ -95,6 +95,14 @@ export const PLANE = 16;
  * object's bitmap.
  */
 export const SNAP = 32;
+/**
+ * A shader fill's part: its texels the kernel's coordinates, carried as a
+ * mesh's are with a depth of 1, and its texture the chain of the frame's
+ * filters that holds the kernel (filters.ts, FILL_SHADER); drawn by a
+ * program of the kernel's, once a pixel of Flash's, at its centre, as adl
+ * draws one.
+ */
+export const SHADED = 64;
 
 /**
  * Which pixels a filtered layer's object covers (SceneList.wholes): those

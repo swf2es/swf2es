@@ -1354,6 +1354,8 @@
     "flash.ui::Keyboard.isAccessible",
     "flash.display::BitmapData#perlinNoise",
     "flash.display::Graphics#flash.display:Graphics::nativeGetGraphicsData",
+    "flash.display::Graphics#beginShaderFill",
+    "flash.display::Graphics#lineShaderStyle",
     "flash.media::Sound#extract",
     "flash.media::Sound#loadCompressedDataFromByteArray",
     "flash.media::Sound#loadPCMFromByteArray",

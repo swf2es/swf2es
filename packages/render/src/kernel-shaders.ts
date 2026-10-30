@@ -246,3 +246,62 @@ ${rows}
 `);
   return parts.join("\n");
 }
+
+/**
+ * A shader fill's program, after the mesh's vertex shader (programs.ts,
+ * meshVertex), which carries the kernel's coordinates in vUVT with a depth
+ * of 1: the kernel run once a pixel of Flash's, at its centre (uFrag as the
+ * mesh's has it), its images clamped to their edges; its colours left
+ * past its alpha, as adl composites them, but under a colour transform,
+ * which takes them straight.
+ */
+export function fillKernel(kernel: string, images: readonly KernelImage[]): string {
+  return madeOnce(madeFills, kernel, images, () => fillSource(kernel, images));
+}
+
+const madeFills = new Map<string, Map<string, string>>();
+
+function fillSource(kernel: string, images: readonly KernelImage[]): string {
+  const parts = [
+    `#version 300 es
+precision highp float;
+in vec3 vUVT;
+flat in vec4 vMul;
+flat in vec4 vAdd;
+uniform vec4 uFrag;
+out vec4 finalColor;
+`,
+    PRELUDE,
+  ];
+  for (const { texture: t } of images) {
+    parts.push(`uniform sampler2D pbImage${t};
+vec4 pbTexel${t}(ivec2 at) {
+  ivec2 size = textureSize(pbImage${t}, 0);
+  return pbBytes(texelFetch(pbImage${t}, clamp(at, ivec2(0), size - 1), 0));
+}
+`);
+    parts.push(sampling(t, "p"));
+  }
+
+  parts.push(kernel);
+  parts.push(`void main(void) {
+  float pixel = uFrag.w;
+  vec2 f = vec2(gl_FragCoord.x + uFrag.x, uFrag.y + uFrag.z * gl_FragCoord.y);
+  vec2 centre = (floor(f / pixel) + 0.5) * pixel;
+  vec3 at = vUVT + dFdx(vUVT) * (centre.x - f.x) + dFdy(vUVT) * ((centre.y - f.y) * uFrag.z);
+  vec4 c = pbKernel(at.xy / at.z);
+  c = mix(vec4(0.0), min(c, 1.0), greaterThan(c, vec4(0.0)));
+  if (vMul == vec4(1.0) && vAdd == vec4(0.0)) {
+    finalColor = c;
+    return;
+  }
+  if (c.a == 0.0) {
+    finalColor = vec4(0.0);
+    return;
+  }
+  vec4 s = clamp(vec4(c.rgb / c.a, c.a) * vMul + vAdd, 0.0, 1.0);
+  finalColor = vec4(s.rgb * s.a, s.a);
+}
+`);
+  return parts.join("\n");
+}

@@ -59,6 +59,11 @@ export const SHADER = 8;
  * the layer's whole rectangle rather than where the layer covers anything.
  */
 export const BLEND = 9;
+/**
+ * A shader fill, alone in a chain a SHADED draw names (scene.ts), which no
+ * filter pass runs: its values as SHADER's, every image a texture.
+ */
+export const FILL_SHADER = 10;
 
 /**
  * A frame's filters in chains, one a filtered layer: each filter its kind,

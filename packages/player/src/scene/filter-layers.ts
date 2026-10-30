@@ -3,7 +3,6 @@
 // texture; their passes added to the frame's filters; and their output
 // kept, to be composited again where nothing it was made of changed.
 import {
-  BLEND,
   drawnArea,
   type Filters,
   filteredRect,
@@ -83,8 +82,8 @@ export class FilterLayers {
   private readonly movedArea = new Float64Array(4);
   /** The textures of the images ShaderFilters' kernels sample, by image. */
   private readonly images = new WeakMap<ShaderImage, TextureHandle>();
-  /** Each blend shader's values and kernel, and where in them its other images' textures go. */
-  private readonly blends = new WeakMap<
+  /** Each blend shader's or shader fill's values and kernel, and where in them its images' textures go. */
+  private readonly kernels = new WeakMap<
     ShaderUse,
     { values: Float32Array; kernel: string; images: { image: ShaderImage; at: number }[] }
   >();
@@ -368,18 +367,20 @@ export class FilterLayers {
   }
 
   /**
-   * A blend shader added to the frame's filters as a chain of its own,
-   * which a layer's KERNEL mode names (@swf2es/render's BLEND): its number.
-   * Its first input is what is below and its second the layer, as adl
+   * A kernel used outside the filters added to the frame's filters as a
+   * chain of its own (@swf2es/render's BLEND, which a layer's KERNEL mode
+   * names, or FILL_SHADER, which a SHADED draw does): its number. A blend
+   * shader's first input is what is below and its second the layer, as adl
    * binds them; `whole` blends over the layer's whole rectangle, as adl
-   * blends a filtered object's bitmap, rather than where it covers anything.
+   * blends a filtered object's bitmap, rather than where it covers
+   * anything. A shader fill's inputs are all images.
    */
-  blendChain(use: ShaderUse, filters: Filters, whole: boolean): number {
-    let made = this.blends.get(use);
+  kernelChain(use: ShaderUse, filters: Filters, kind: number, whole = false): number {
+    let made = this.kernels.get(use);
     if (!made) {
       const glsl = kernelGlslOf(use.kernel);
       const { floats, ints } = kernelParameters(glsl, use.values);
-      const [back, front] = use.kernel.inputs;
+      const back = use.kernel.inputs[0];
       const values = [0, 0, 0, 0, 0, 0, glsl.textures.length];
       const images: { image: ShaderImage; at: number }[] = [];
       for (const t of glsl.textures) {
@@ -388,12 +389,12 @@ export class FilterLayers {
           images.push({ image, at: values.length + 1 });
         }
 
-        values.push(t, t === back.index ? -1 : t === front.index ? -2 : 0);
+        values.push(t, image ? 0 : t === back?.index ? -1 : -2);
       }
 
       values.push(floats.length, ...floats, ints.length, ...ints);
       made = { values: Float32Array.from(values), kernel: glsl.source, images };
-      this.blends.set(use, made);
+      this.kernels.set(use, made);
     }
 
     for (const { image, at } of made.images) {
@@ -401,7 +402,7 @@ export class FilterLayers {
     }
 
     made.values[0] = whole ? 1 : 0;
-    filters.add(BLEND, made.values, -1, made.kernel);
+    filters.add(kind, made.values, -1, made.kernel);
     return filters.close();
   }
 

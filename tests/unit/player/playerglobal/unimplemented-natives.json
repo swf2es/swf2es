@@ -529,13 +529,6 @@
       "flash.display3D::VertexBuffer3D#uploadFromVector"
     ]
   },
-  "shaders": {
-    "why": "Pixel Bender shader fills wait to be drawn; ShaderJob runs on the CPU, ShaderFilter and blend shaders on the GPU.",
-    "natives": [
-      "flash.display::Graphics#beginShaderFill",
-      "flash.display::Graphics#lineShaderStyle"
-    ]
-  },
   "authoring": {
     "why": "The authoring tool's, debugger's, profiler's and test automation's API (adobe.utils, flash.sampler, flash.profiler, flash.debugger, flash.automation): a release player in a browser answers none of it.",
     "natives": [

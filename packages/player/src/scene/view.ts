@@ -4,9 +4,11 @@
 import { type ColorTransform, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import {
+  BLEND,
   BLEND_NAMES,
   CLAMP,
   Commands,
+  FILL_SHADER,
   Filters,
   Geometries,
   KERNEL,
@@ -20,6 +22,7 @@ import {
   plan,
   Rows,
   SceneList,
+  SHADED,
   SMOOTH,
   Textures,
   WHOLE_ALIASED,
@@ -476,7 +479,12 @@ export class RenderView implements Drawer {
     const named = shading
       ? o.blendShader
         ? KERNEL +
-          this.filterLayers.blendChain(o.blendShader, this.filters, !plane && o.filters.length > 0)
+          this.filterLayers.kernelChain(
+            o.blendShader,
+            this.filters,
+            BLEND,
+            !plane && o.filters.length > 0,
+          )
         : NORMAL
       : root
         ? NORMAL
@@ -622,6 +630,17 @@ export class RenderView implements Drawer {
         for (const { part, handle } of this.parts.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(handle.id);
+          // A shader fill's draw names its kernel's chain of the frame's filters.
+          if (part.paint?.type === "shader") {
+            if (row < 0) {
+              row = this.rows.addPlaced(this.places, at + 6, color);
+            }
+
+            const chain = this.filterLayers.kernelChain(part.paint.use, this.filters, FILL_SHADER);
+            this.scene.draw(handle.id, row, NORMAL, chain, SHADED);
+            continue;
+          }
+
           const textured = part.paint !== null || part.mesh !== null;
           const texture = textured ? this.paints.paintTexture(part) : null;
           if (textured && !texture) {
