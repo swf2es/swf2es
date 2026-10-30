@@ -1,4 +1,4 @@
-import { Context3DError, SamplerBiasError, type Texture3D } from "@swf2es/context3d";
+import { blockBytes, Context3DError, SamplerBiasError, type Texture3D } from "@swf2es/context3d";
 import {
   AtfError,
   type AtfHeader,
@@ -159,11 +159,6 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
 
   /** AIR's errors for an ATF it refuses, their classes, and an ErrorEvent's whole text. */
   const ATF_IDS = { size: 3669, decode: 3677, format: 3675 } as const;
-  const ATF_TEXTS: Record<number, string> = {
-    3675: "Error #3675: Texture format mismatch.",
-    3677: "Error #3677: Texture decoding failed. Internal error.",
-    3679: "Error #3679: Texture size does not match.",
-  };
   const ATF_ERRORS: Record<number, string> = {
     3669: "RangeError",
     3675: "ArgumentError",
@@ -211,6 +206,30 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
 
     if (header.width !== value.width || header.height !== value.height) {
       return 3679;
+    }
+
+    // Every level is checked before any goes up, so that an upload is whole or
+    // nothing, as AIR's is. Then the backend cannot refuse one: it checks only
+    // these ranges and lengths, and its context, which nothing here changes;
+    // WebGL reports its own failures by getError, not by throwing, and a
+    // context lost meanwhile takes calls as no-ops.
+    for (const image of images) {
+      const face = value.cube ? image.face ^ 1 : 0;
+      const width = Math.max(1, value.width >> image.level);
+      const height = Math.max(1, value.height >> image.level);
+      const length =
+        kind === "bgra"
+          ? width * height * 4
+          : blockBytes(width, height, kind === "compressedAlpha");
+      if (
+        image.level >= value.levels ||
+        face >= (value.cube ? 6 : 1) ||
+        image.width !== width ||
+        image.height !== height ||
+        image.bytes.length !== length
+      ) {
+        return ATF_IDS.decode;
+      }
     }
 
     for (const image of images) {
@@ -303,7 +322,8 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
             "error",
             false,
             false,
-            ATF_TEXTS[id] ?? s.rt.errorMessage(id),
+            // AIR's whole message, in debugger players and release ones alike.
+            `Error #${id}: ${avm2.errorMessages[id] ?? ""}`,
             id,
           ) as AsObject)
         : s.event("textureReady");

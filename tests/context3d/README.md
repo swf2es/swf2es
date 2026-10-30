@@ -184,7 +184,7 @@ non-null uploads even after owner disposal. Other retired owners fail with 3694,
 then invalid faces (3673), mip levels (3674), and source ranges (3669) are checked
 in that order.
 
-`AtfTextures.as` checks 178 AIR trace lines for `uploadCompressedTextureFromByteArray`
+`AtfTextures.as` checks 182 AIR trace lines for `uploadCompressedTextureFromByteArray`
 and compressed textures, with ATFs that `atf/make.ts` encodes with png2atf from
 PNGs it draws, inlined by `fixtures.ts`, and the same with the old header. Every
 format is drawn: RGB888, RGBA8888, Compressed, CompressedAlpha, the lossy and raw
@@ -201,7 +201,8 @@ textures are at least 4x4 (3745), no rectangle's (3762), and a target only in
 name: clearing or drawing into one is #3746. An asynchronous upload throws only
 the signature and the length; the rest is an ErrorEvent with the whole message, or
 textureReady, before the next frame's enterFrame, even for a texture disposed
-meanwhile (3677), from bytes read when it was called. The browser runs it twice,
+meanwhile (3677), from bytes read when it was called; a texture disposed before
+the call checks nothing and hears nothing, sync or async. The browser runs it twice,
 the second time with `WEBGL_compressed_texture_s3tc` hidden, so that the CPU's
 decoding matches AIR too; `byte-budgets.ts` checks the compressed quotas exactly.
 The browser plays it as SWF 51, as AIR built it, since AIR's rules follow the root

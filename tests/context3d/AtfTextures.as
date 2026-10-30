@@ -387,10 +387,23 @@ package {
       // The bytes are read when it is called.
       later.push(queue("changed", 64, "compressed", changing));
       for (i = 16; i < changing.length; i++) { changing[i] = 0; }
+      // Disposed before the call, an upload checks nothing and dispatches nothing, sync or async.
+      disposedFirst("disposed-first", compressed, true);
+      disposedFirst("disposed-first-signature", signature, true);
+      disposedFirst("disposed-first-short", half, true);
+      disposedFirst("disposed-first-sync-signature", signature, false);
       // Disposed before it is ready, it hears #3677.
       var disposed:Texture = Texture(queue("disposed", 64, "compressed", compressed));
       disposed.dispose();
       draw("async-before", later[0], 1, QUADRANTS);
+    }
+
+    private function disposedFirst(label:String, data:ByteArray, async:Boolean):void {
+      var texture:Texture = context.createTexture(64, 64, "compressed", false);
+      texture.addEventListener(Event.TEXTURE_READY, function(event:Event):void { events.push(label + " " + event.type); });
+      texture.addEventListener(ErrorEvent.ERROR, function(event:ErrorEvent):void { events.push(label + " " + event.type + " " + event.errorID); });
+      texture.dispose();
+      probe(label, function():void { texture.uploadCompressedTextureFromByteArray(data, 0, async); });
     }
 
     private function queue(label:String, size:int, format:String, data:ByteArray):TextureBase {
