@@ -1,6 +1,7 @@
 // Every binary of the package, each its own wasm32-freestanding module in
-// zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK) and render
-// (bitmap's SIMD kernels, libtess2's fills and the lines). build.ts runs
+// zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK), render
+// (bitmap's SIMD kernels, libtess2's fills and the lines) and atf
+// (jxrlib's JPEG XR decoder). build.ts runs
 // this with the pinned Zig and checks the results in as base64; `zig build
 // test` runs the bitmap kernel's, the fill flattener's, the band filler's and the blurs' tests on the host.
 const std = @import("std");
@@ -19,6 +20,7 @@ pub fn build(b: *std.Build) void {
     compress(b, wasm(b, &.{.bulk_memory}), optimize, include);
     // Wasm SIMD, which every engine the player runs on has, for the bitmap kernels.
     render(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
+    atf(b, wasm(b, &.{.bulk_memory}));
 }
 
 fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.ResolvedTarget {
@@ -233,5 +235,64 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
     module.entry = .disabled;
     module.stack_size = 256 * 1024;
     module.max_memory = 128 * 1024 * 1024;
+    b.installArtifact(module);
+}
+
+/// ATF's JPEG XR images: src/atf/root.zig and jxr.c over jxrlib's decoder
+/// and its glue, unchanged; jxrlib's encoder is left out. Small rather than
+/// fast: an image decodes once, as its texture uploads.
+fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
+    const optimize: std.builtin.Optimize = .ReleaseSmall;
+    const sys = [_][]const u8{ "adapthuff.c", "image.c", "strcodec.c", "strPredQuant.c", "strTransform.c" };
+    const decode = [_][]const u8{ "decode.c", "postprocess.c", "segdec.c", "strdec.c", "strInvTransform.c", "strPredQuantDec.c" };
+    const glue = [_][]const u8{ "JXRGlue.c", "JXRGlueJxr.c", "JXRMeta.c" };
+    const exports = [_][]const u8{
+        "reset", "alloc", "decodeImage", "resultPointer", "resultWidth", "resultHeight",
+    };
+
+    const jxrlib = b.path(vendor ++ "jxrlib");
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/atf/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+        .strip = true,
+    });
+    root.export_symbol_names = &exports;
+    // The module's own libc headers, then the package's, which they take
+    // with #include_next, then jxrlib's.
+    for ([_]std.Build.LazyPath{
+        b.path("src/atf/include"),
+        b.path("include"),
+        jxrlib,
+        jxrlib.path(b, "common/include"),
+        jxrlib.path(b, "image/sys"),
+        jxrlib.path(b, "jxrgluelib"),
+    }) |dir| {
+        root.addIncludePath(dir);
+    }
+
+    // As jxrlib's Makefile builds it, with its timers off; -w as there, since
+    // its sources warn throughout and stay unchanged.
+    const flags = [_][]const u8{
+        "-Os",
+        "-D__ANSI__",
+        "-DDISABLE_PERF_MEASUREMENT",
+        "-w",
+        "-mbulk-memory",
+        "-fno-stack-protector",
+        // Relative to the package, where zig build runs.
+        "-include",
+        "src/atf/include/prelude.h",
+    };
+    root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/sys"), .files = &sys, .flags = &flags });
+    root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/decode"), .files = &decode, .flags = &flags });
+    root.addCSourceFiles(.{ .root = jxrlib.path(b, "jxrgluelib"), .files = &glue, .flags = &flags });
+    root.addCSourceFiles(.{ .root = b.path("src/atf"), .files = &.{"jxr.c"}, .flags = &flags });
+
+    const module = b.addExecutable(.{ .name = "atf", .root_module = root });
+    module.entry = .disabled;
+    module.stack_size = 256 * 1024;
+    module.max_memory = 256 * 1024 * 1024;
     b.installArtifact(module);
 }

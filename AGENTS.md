@@ -17,8 +17,8 @@ must give **identical output** in both modes.
 ```sh
 git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/as3pb and
                               # com-lz4-as3 (program tests), and
-                              # vendor/minimp3, vendor/zlib, vendor/lzma-sdk and vendor/libtess2 (C compiled into
-                              # packages/native's wasm)
+                              # vendor/minimp3, vendor/zlib, vendor/lzma-sdk, vendor/libtess2 and vendor/jxrlib
+                              # (C compiled into packages/native's wasm)
 pnpm install
 pnpm build       # asc → codegen.wasm, then tsc -b for all packages
 pnpm build:debug # the same with unoptimized wasm, names and source maps
@@ -65,6 +65,9 @@ node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib
 node tests/fuzz/pbj.ts [cases, 2000] [seed, 1]   # malformed Pixel Bender bytecode: readPbj
                               # refuses it as adl does or reads it, and the interpreter runs
                               # whatever it reads
+node tests/fuzz/atf.ts [cases, 2000] [seed, 1]   # malformed ATF textures: their reading and
+                              # JPEG XR and LZMA decoding never trap nor throw but AtfError, and
+                              # each level decoded is its size
 node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match independent point
                               # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of

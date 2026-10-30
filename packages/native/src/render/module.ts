@@ -1,3 +1,4 @@
+import { decodeBase64 } from "../base64.js";
 import { binary } from "./binary.js";
 
 let module: WebAssembly.Module | null = null;
@@ -10,7 +11,7 @@ let module: WebAssembly.Module | null = null;
  * without SIMD or Wasm or under a CSP without 'wasm-unsafe-eval'.
  */
 export function renderModule(): WebAssembly.Module {
-  module ??= new WebAssembly.Module(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0)));
+  module ??= new WebAssembly.Module(decodeBase64(binary));
   return module;
 }
 

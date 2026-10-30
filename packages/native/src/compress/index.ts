@@ -4,6 +4,7 @@
 // whose memory has grown past MEMORY_KEPT is dropped after its call, as is
 // one whose call threw, and the next call starts a new one from the
 // compiled module.
+import { KeptInstance } from "../instance.js";
 import { binary } from "./binary.js";
 
 interface Exports {
@@ -58,47 +59,13 @@ export interface DecodeOptions {
   partial?: boolean;
 }
 
-/**
- * Memory an instance may keep between calls: what a bitmap or a SWF of a
- * few MB needs, less than an LZMA encoder's for a dictionary of 1 MB.
- * Starting again costs an instantiation, a fraction of a millisecond.
- */
-export const MEMORY_KEPT = 8 << 20;
+export { MEMORY_KEPT } from "../instance.js";
 
-let compiled: WebAssembly.Module | null = null;
-let instance: Exports | null = null;
+const kept = new KeptInstance<Exports>(binary);
 
-/**
- * Run `f` on the instance, made first if there is none (the module compiled
- * synchronously the first time: about 90 KB, which browsers allow on the
- * main thread). An instance that threw, or whose memory grew past
- * MEMORY_KEPT, is let go.
- */
+/** Run `f` on the module's kept instance. */
 function call<T>(f: (x: Exports) => T): T {
-  compiled ??= new WebAssembly.Module(decodeBase64(binary));
-  instance ??= new WebAssembly.Instance(compiled).exports as unknown as Exports;
-  const x = instance;
-  try {
-    return f(x);
-  } catch (e) {
-    instance = null;
-    throw e;
-  } finally {
-    if (x.memory.buffer.byteLength > MEMORY_KEPT) {
-      instance = null;
-    }
-  }
-}
-
-/** Base64 to bytes with a plain loop: Uint8Array.from with a callback takes some 8 times as long. */
-function decodeBase64(text: string): Uint8Array {
-  const raw = atob(text);
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    bytes[i] = raw.charCodeAt(i);
-  }
-
-  return bytes;
+  return kept.call(f);
 }
 
 /** `data` in the module's memory, after a reset; 0 if it does not fit. */
@@ -254,5 +221,5 @@ export function lzmaEncode(data: Uint8Array): Uint8Array {
 
 /** The module's memory now, for measuring: 0 when no instance is kept. */
 export function memoryInUse(): number {
-  return instance ? instance.memory.buffer.byteLength : 0;
+  return kept.memory;
 }

@@ -7,7 +7,7 @@
 // binary's inputs' digest and the notices without building.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,6 +73,19 @@ const BINARIES: Binary[] = [
     ],
     note: "; libtess2 is under SGI Free Software License B",
   },
+  {
+    path: "atf",
+    modules: { binary: "atf" },
+    imports: [],
+    vendored: [
+      ...files(join(vendor, "jxrlib/common/include"), /\.h$/),
+      ...files(join(vendor, "jxrlib/image/sys"), /\.[ch]$/),
+      ...files(join(vendor, "jxrlib/image/decode"), /\.[ch]$/),
+      ...files(join(vendor, "jxrlib/jxrgluelib"), /\.[ch]$/),
+      join(vendor, "jxrlib/LICENSE"),
+    ],
+    note: "; jxrlib is under the BSD 2-Clause License",
+  },
 ];
 
 /** Our notice for the LZMA SDK, which has no licence file to copy. */
@@ -117,6 +130,7 @@ function notices(): string {
     ["@swf2es/native/mp3: minimp3", readFileSync(join(vendor, "minimp3/LICENSE"), "utf8")],
     ["@swf2es/native/render: libtess2", readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8")],
     ["@swf2es/native/render: SVG's feTurbulence (perlinNoise)", FE_TURBULENCE],
+    ["@swf2es/native/atf: jxrlib", readFileSync(join(vendor, "jxrlib/LICENSE"), "utf8")],
   ];
 
   return [
@@ -133,7 +147,12 @@ const shared = [
 
 function inputDigest(binary: Binary): string {
   const digest = createHash("sha256").update(ZIG_VERSION);
-  const own = files(join(here, "src", binary.path), /\.zig$/);
+  // A binary's own Zig, and C and libc headers where it has them.
+  const own = files(join(here, "src", binary.path), /\.(zig|c)$/);
+  if (existsSync(join(here, "src", binary.path, "include"))) {
+    own.push(...files(join(here, "src", binary.path, "include"), /\.h$/));
+  }
+
   for (const file of [...shared, ...own, ...binary.vendored]) {
     digest.update(readFileSync(file));
   }

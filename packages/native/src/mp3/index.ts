@@ -1,4 +1,5 @@
 // The compiled module is shared; each extraction has its own small decoder state.
+import { decodeBase64 } from "../base64.js";
 import { binary } from "./binary.js";
 
 interface Exports {
@@ -19,7 +20,7 @@ let preparing: Promise<void> | null = null;
  * MP3 decoding unavailable (mp3Available) rather than failing every load.
  */
 export function prepareMp3(): Promise<void> {
-  preparing ??= WebAssembly.compile(Uint8Array.from(atob(binary), (c) => c.charCodeAt(0))).then(
+  preparing ??= WebAssembly.compile(decodeBase64(binary)).then(
     (module) => {
       compiled = module;
     },
