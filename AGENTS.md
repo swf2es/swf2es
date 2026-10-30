@@ -95,6 +95,8 @@ node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]   # GL 
                               # draw-counts.json, which may only go down (part of pnpm test)
 node tests/player/context-loss.ts   # a WebGL context lost and given back mid-play draws the same
                               # in Chrome (part of pnpm test)
+node tests/player/pixel-bender.ts [--gpu]   # Pixel Bender kernels as GLSL in Chrome against the CPU
+                              # interpreter on random images (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it

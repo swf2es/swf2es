@@ -530,21 +530,11 @@
     ]
   },
   "shaders": {
-    "why": "Pixel Bender where Flash draws with it, blend shaders, shader fills and ShaderFilter, waits for a compiler from PBJ to GLSL; ShaderJob runs on the CPU.",
+    "why": "Pixel Bender where Flash draws with it as a blend shader and a shader fill waits for those to be drawn; ShaderJob runs on the CPU, ShaderFilter on the GPU.",
     "natives": [
       "flash.display::DisplayObject#set:blendShader",
       "flash.display::Graphics#beginShaderFill",
-      "flash.display::Graphics#lineShaderStyle",
-      "flash.filters::ShaderFilter#get:bottomExtension",
-      "flash.filters::ShaderFilter#get:leftExtension",
-      "flash.filters::ShaderFilter#get:rightExtension",
-      "flash.filters::ShaderFilter#get:shader",
-      "flash.filters::ShaderFilter#get:topExtension",
-      "flash.filters::ShaderFilter#set:bottomExtension",
-      "flash.filters::ShaderFilter#set:leftExtension",
-      "flash.filters::ShaderFilter#set:rightExtension",
-      "flash.filters::ShaderFilter#set:shader",
-      "flash.filters::ShaderFilter#set:topExtension"
+      "flash.display::Graphics#lineShaderStyle"
     ]
   },
   "authoring": {

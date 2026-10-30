@@ -6,16 +6,14 @@
 // EXIT_FRAME (Scripting.afterExitFrame).
 // adl runs those jobs on a thread of its own and drops some, one started
 // while another runs among them; here each job completes.
-import { PBJ_TYPE_SIZES, PBJ_TYPES, type PbjParameter, pbjFloatType } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "../../../bitmap/bitmap.js";
-import { nearest } from "../../../bitmap/bitmap.js";
-import { OUT_COORD, type ShaderImage } from "../../../bitmap/pixel-bender.js";
+import { outputPixel, type ShaderImage } from "../../../bitmap/pixel-bender.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import { storeOf } from "./BitmapData.js";
 import { programOf } from "./ShaderData.js";
 import { isShaderImage, shaderClasses } from "./ShaderInput.js";
+import { inputImage, kernelValues } from "./shaders.js";
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
@@ -24,22 +22,6 @@ const IDLE = 0;
 const RUNNING = 1;
 const DONE = 2;
 
-/** A float as a target's byte: clamped, NaN as 0, then rounded to the nearest, a half to the even. */
-function byteOf(v: number): number {
-  const c = v > 0 ? (v < 1 ? v : 1) : 0;
-  return nearest(Math.fround(c * 255));
-}
-
-/** A parameter value's number as its register takes it: float32, or an int as SSE truncates one. */
-function numberOf(v: number, float: boolean): number {
-  if (float) {
-    return Math.fround(v);
-  }
-
-  const t = Math.trunc(v);
-  return t >= -2147483648 && t <= 2147483647 ? t : -2147483648;
-}
-
 export function shaderJobNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   const classes = () => shaderClasses(s);
@@ -47,108 +29,6 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
   const isVector = (v: Value) => s.rt.isInstance(v, classes().vector);
   const refuse = (id: number, ...args: Value[]): never => {
     throw s.rt.error("ArgumentError", id, ...args);
-  };
-
-  /**
-   * A parameter's numbers: those of the ShaderParameter of its name, where
-   * one of its type is there, else its default, as adl takes them; each a
-   * number, or ArgumentError 2004, as many as its type holds, 0 past the
-   * Array's end.
-   */
-  const valuesOf = (data: AsObject, p: PbjParameter): number[] => {
-    const size = PBJ_TYPE_SIZES[p.type] ?? 0;
-    const float = pbjFloatType(p.type);
-    const own = data.$d.get(p.name);
-    let value: Value;
-    if (
-      s.rt.isInstance(own, classes().shaderParameter) &&
-      own.$type === (PBJ_TYPES[p.type] ?? null)
-    ) {
-      value = own.$value ?? null;
-    } else {
-      const fallback = p.metadata.filter((m) => m.key === "defaultValue").pop();
-      value =
-        fallback && typeof fallback.value !== "string" ? s.rt.array([...fallback.value]) : null;
-    }
-
-    const values: number[] = [];
-    const items: Value[] = s.rt.isInstance(value, classes().array) ? (value as AsObject).$a : [];
-    for (let k = 0; k < size; k++) {
-      if (k >= items.length) {
-        values.push(0);
-        continue;
-      }
-
-      const item = items[k];
-      if (typeof item !== "number") {
-        refuse(2004);
-      }
-
-      values.push(numberOf(item as number, float));
-    }
-
-    return values;
-  };
-
-  /**
-   * An input's image, read now: a BitmapData's pixels, or as many floats
-   * as its size needs; a ByteArray's position is moved past them by
-   * `read`, once nothing refuses the job, as adl leaves it where it was then.
-   */
-  const imageOf = (
-    data: AsObject,
-    name: string,
-    channels: number,
-    read: (() => void)[],
-  ): ShaderImage => {
-    const own = data.$d.get(name);
-    if (!s.rt.isInstance(own, classes().shaderInput)) {
-      refuse(2167);
-    }
-
-    const o = own as AsObject;
-    const input: Value = o.$input ?? null;
-    if (input === null) {
-      refuse(2164, name);
-    }
-
-    if (isBitmapData(input)) {
-      const store = storeOf(s, input as AsObject);
-      return { width: store.width, height: store.height, pixels: store.readable, channels };
-    }
-
-    const width: number = o.$width ?? 0;
-    const height: number = o.$height ?? 0;
-    if (width <= 0 || height <= 0) {
-      refuse(2166, name);
-    }
-
-    // Allocated once the input is known to hold them, whatever size the script set.
-    const count = width * height * channels;
-    if (isVector(input)) {
-      const items: number[] = (input as AsObject).$a;
-      if (items.length < count) {
-        refuse(2165, name);
-      }
-
-      return { width, height, floats: Float32Array.from(items.slice(0, count)), channels };
-    }
-
-    // From the start, whatever the position, which is left past what was read.
-    const bytes = avm2.bytesOf(s.rt, input as AsObject);
-    if (bytes.length < count * 4) {
-      refuse(2165, name);
-    }
-
-    const floats = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      floats[i] = bytes.view.getFloat32(i * 4, bytes.littleEndian);
-    }
-
-    read.push(() => {
-      bytes.position = count * 4;
-    });
-    return { width, height, floats, channels };
   };
 
   /** Write the output, `channels` floats a pixel, to the target. */
@@ -162,11 +42,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       // Premultiplied as they come, each colour at most its alpha; three channels are opaque.
       const pixels = new Uint32Array(store.width * store.height);
       for (let i = 0, at = 0; i < pixels.length; i++, at += channels) {
-        const a = channels > 3 ? byteOf(out[at + 3]) : 255;
-        const r = Math.min(a, byteOf(out[at]));
-        const g = Math.min(a, channels > 1 ? byteOf(out[at + 1]) : 0);
-        const b = Math.min(a, channels > 2 ? byteOf(out[at + 2]) : 0);
-        pixels[i] = (((store.transparent ? a : 255) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+        pixels[i] = outputPixel(out, at, channels, store.transparent);
       }
 
       store.pixels = pixels;
@@ -278,7 +154,8 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
       const images = new Map<number, ShaderImage>();
       const read: (() => void)[] = [];
       for (const input of kernel.inputs) {
-        images.set(input.index, imageOf(data as AsObject, input.name, input.channels, read));
+        const image = inputImage(s, data as AsObject, input.name, input.channels, read);
+        images.set(input.index, image as ShaderImage);
       }
 
       for (const texture of program.sampled) {
@@ -287,12 +164,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
         }
       }
 
-      const values = new Map<PbjParameter, number[]>();
-      for (const p of kernel.parameters) {
-        if (!p.output && p.name !== OUT_COORD) {
-          values.set(p, valuesOf(data as AsObject, p));
-        }
-      }
+      const values = kernelValues(s, data as AsObject, kernel);
 
       // Read: adl moves the positions before it refuses a fixed Vector (1126).
       for (const move of read) {

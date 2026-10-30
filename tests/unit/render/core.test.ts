@@ -10,6 +10,7 @@ import {
   ERASE,
   FILTER,
   Filters,
+  filteredRect,
   Geometries,
   HELD,
   HOLD_POP,
@@ -34,6 +35,9 @@ import {
   STENCIL_POP,
   STENCIL_PUSH,
   Textures,
+  WHOLE_ALIASED,
+  WHOLE_SMOOTH,
+  wholeBitmap,
 } from "../../../packages/render/dist/index.js";
 
 /** The commands as [op, a, b, c] tuples. */
@@ -383,7 +387,7 @@ test("a filtered layer of draws alone is held: drawn before the stage, composite
     [HOLD_PUSH, 0, 0, 0],
     [RUN, 2, 1, 0],
     [HOLD_POP, 0, 0, 0],
-    [CLEAR, 4, 0, 0],
+    [CLEAR, 8, 0, 0],
     [RUN, 0, 1, 0],
     [HELD, 0, NORMAL, 2],
     [RUN, 4, 1, 0],
@@ -425,12 +429,12 @@ test("held layers in a held layer are drawn a level before it; a kept one is dra
     [HOLD_PUSH, 0, 0, 0],
     [RUN, 2, 1, 0],
     [HOLD_POP, 1, 0, 0],
-    [HOLD_PUSH, 4, 1, 1],
+    [HOLD_PUSH, 8, 1, 1],
     [HELD, 0, NORMAL, -1],
     [HOLD_POP, 0, 1, 0],
-    [CLEAR, 8, 0, 0],
+    [CLEAR, 16, 0, 0],
     [HELD, 1, NORMAL, -1],
-    [LAYER_PUSH, 12, 1, 0],
+    [LAYER_PUSH, 20, 1, 0],
     [RUN, 6, 1, 0],
     [FILTER, 2, 0, 0],
     [LAYER_POP, NORMAL, -1, 7],
@@ -466,7 +470,7 @@ test("a filtered layer with a layer in it that is not held is drawn in its place
   assert.deepEqual(ops(commands), [
     [CLEAR, 0, 0, 0],
     [LAYER_PUSH, 4, 1, 0],
-    [LAYER_PUSH, 8, 0, 0],
+    [LAYER_PUSH, 12, 0, 0],
     [RUN, 2, 1, 0],
     [LAYER_POP, MULTIPLY, -1, -1],
     [FILTER, 0, 0, 0],
@@ -520,9 +524,9 @@ test("a layer keeps its output as its kept output, which a later frame composite
     [LAYER_PUSH, 4, 1, 0],
     [RUN, 1, 1, 0],
     [LAYER_POP, NORMAL, -1, 5],
-    [COMPOSITE, 8, MULTIPLY, 3],
+    [COMPOSITE, 12, MULTIPLY, 3],
   ]);
-  assert.deepEqual(Array.from(commands.params.subarray(8, 13)), [10, 20, 30, 40, 5]);
+  assert.deepEqual(Array.from(commands.params.subarray(12, 17)), [10, 20, 30, 40, 5]);
   // A kept output counts toward the layer it is in.
   const geometries = new Geometries();
   const rows = new Rows();
@@ -566,4 +570,21 @@ test("each layer knows the layer it is in, a kept output too", () => {
   scene.reset();
   scene.layerBegin();
   assert.equal(scene.parents[0], -1);
+});
+
+test("a whole layer covers Flash's bitmap of its object in stage pixels, kept uncut beside it", () => {
+  const out = new Int32Array(4);
+  const objects = new Float64Array(4);
+  // A stage shown at 3 times its size, 2 texels a screen pixel: 6 target pixels a stage pixel.
+  const target = { width: 600, height: 600, scale: 6, resolution: 2 };
+  // From -2.25 to 10.4 stage pixels across, 1.5 to 4 down: antialiased, -3 to 11 and 1 to 5.
+  const area = Float64Array.of(-2.25 * 6, 1.5 * 6, 10.4 * 6, 4 * 6);
+  filteredRect(area, 0, 1, target, out, 0, WHOLE_SMOOTH, objects);
+  assert.deepEqual([...objects], [-18, 6, 84, 24]);
+  // Cut to the target, then padded a unit each way.
+  assert.deepEqual([...out], [-2, 4, 70, 28]);
+  // Aliased, the pixels whose centres it covers: -2 to 10 and 1 to 4.
+  filteredRect(area, 0, 0, target, out, 0, WHOLE_ALIASED, objects);
+  assert.deepEqual([...objects], [-12, 6, 72, 18]);
+  assert.deepEqual(wholeBitmap(0.5, 0.5, 2, 2, WHOLE_SMOOTH), [0, 0, 3, 3]);
 });

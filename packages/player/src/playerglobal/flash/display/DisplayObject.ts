@@ -28,6 +28,7 @@ import type { Scripting } from "../../../scripting.js";
 import { filterClassName, filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { copyMap } from "../filters/DisplacementMapFilter.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
+import { kernelOfShader, shaderUse } from "./shaders.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -569,6 +570,15 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         // after, till its filters are set again; the map itself it keeps.
         if (f.kind === "displacementMap" && f.mapBitmap) {
           f.mapSnapshot = copyMap(s, f.mapBitmap);
+        }
+
+        // A kernel's parameters and images likewise, its first input the object (shaders.ts).
+        if (f.kind === "shader") {
+          if (!kernelOfShader(f.shader)) {
+            throw s.rt.error("ArgumentError", 2171);
+          }
+
+          f.shaderUse = shaderUse(s, f.shader, 1);
         }
 
         return f;

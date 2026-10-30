@@ -44,6 +44,17 @@ export const CONVOLUTION = 6;
  * start; the map's point, and its width and height.
  */
 export const DISPLACEMENT = 7;
+/**
+ * A ShaderFilter, its kernel's GLSL the filter's kernel (kernel-shaders.ts):
+ * units; how far in from its input's corner the filter's input starts, and
+ * how far the first filter's, the object's bitmap, is from that, both in
+ * units; its extensions left, top, right and bottom in stage pixels; how
+ * many images it samples, then each one's texture number, the texture of
+ * the frame's it reads (-1 for the layer) and whether its texels are
+ * floats; how many floats its parameters take, then them. Its parameters'
+ * ints are the filter's ints (Filters.ints).
+ */
+export const SHADER = 8;
 
 /**
  * A frame's filters in chains, one a filtered layer: each filter its kind,
@@ -53,9 +64,14 @@ export const DISPLACEMENT = 7;
 export class Filters {
   kind = new Uint8Array(64);
   texture = new Int32Array(64);
+  /** A ShaderFilter's kernel, its GLSL, by the filter; null for the others. */
+  kernels: (string | null)[] = [];
   /** Where each filter's values start in `values`, and where the next one's do. */
   start = new Int32Array(65);
   values = new Float32Array(1024);
+  /** Each filter's ints, which floats would round: from `intStart` on, as values are. */
+  intStart = new Int32Array(65);
+  ints = new Int32Array(256);
   count = 0;
   /** Where each chain's filters start, and where the next one's do: the first's, 0. */
   chains = new Int32Array(17);
@@ -64,16 +80,35 @@ export class Filters {
   reset(): void {
     this.count = 0;
     this.chainCount = 0;
+    this.kernels.length = 0;
   }
 
-  /** A filter of `kind` added to the chain open: its values, and the texture it reads. */
-  add(kind: number, values: ArrayLike<number>, texture = -1): void {
+  /** A filter of `kind` added to the chain open: its values, the texture it reads, its kernel and its ints. */
+  add(
+    kind: number,
+    values: ArrayLike<number>,
+    texture = -1,
+    kernel: string | null = null,
+    ints: ArrayLike<number> = NO_INTS,
+  ): void {
     const at = this.count++;
     if (this.count >= this.kind.length) {
       this.kind = grow(this.kind);
       this.texture = grow(this.texture);
       this.start = grow(this.start);
+      this.intStart = grow(this.intStart);
     }
+
+    const intFrom = at > 0 ? this.intStart[at] : 0;
+    if (intFrom + ints.length > this.ints.length) {
+      const grown = new Int32Array(Math.max(this.ints.length * 2, intFrom + ints.length));
+      grown.set(this.ints);
+      this.ints = grown;
+    }
+
+    this.intStart[at] = intFrom;
+    this.ints.set(ints, intFrom);
+    this.intStart[at + 1] = intFrom + ints.length;
 
     const from = at > 0 ? this.start[at] : 0;
     if (from + values.length > this.values.length) {
@@ -84,6 +119,7 @@ export class Filters {
 
     this.kind[at] = kind;
     this.texture[at] = texture;
+    this.kernels[at] = kernel;
     this.start[at] = from;
     this.values.set(values, from);
     this.start[at + 1] = from + values.length;
@@ -100,6 +136,8 @@ export class Filters {
     return chain;
   }
 }
+
+const NO_INTS = new Int32Array(0);
 
 function grow<T extends Int32Array | Uint8Array>(array: T): T {
   const grown = new (array.constructor as new (length: number) => T)(array.length * 2);

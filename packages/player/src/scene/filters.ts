@@ -12,6 +12,7 @@ import {
   DISPLACEMENT,
   GLOW,
   GRADIENT,
+  SHADER,
   type TextureHandle,
 } from "@swf2es/render";
 import { type BitmapStore, rgbaOf } from "../bitmap/bitmap.js";
@@ -24,12 +25,16 @@ import {
   integerKernel,
   paddedDistance,
 } from "../bitmap/filters.js";
+import type { ShaderImage } from "../bitmap/pixel-bender.js";
 import { emptyKernel, type Filter as FilterRecord, filterOffset } from "../display/filters.js";
+import { kernelGlslOf, kernelParameters } from "./pixel-bender-glsl.js";
 
 /**
  * A filter as the renderer runs it: its kind and values, a gradient's
- * colours with their texture, and a displacement's map, whose texture the
- * view keeps as it keeps a bitmap's.
+ * colours with their texture, a displacement's map, whose texture the
+ * view keeps as it keeps a bitmap's, and a ShaderFilter's kernel, as GLSL,
+ * with the images it samples but the object, each with where in `values`
+ * its texture goes.
  */
 export interface Pass {
   kind: number;
@@ -37,7 +42,13 @@ export interface Pass {
   colors: Uint8Array | null;
   texture: TextureHandle | null;
   map: BitmapStore | null;
+  kernel: string | null;
+  images: { image: ShaderImage; at: number }[];
+  /** A ShaderFilter's parameters' ints. */
+  ints: Int32Array;
 }
+
+const NO_INTS = new Int32Array(0);
 
 /**
  * A display object's filters worked out: their passes, how far they pad
@@ -48,6 +59,8 @@ export interface FilterPlan {
   passes: Pass[];
   padding: number;
   wanted: number[];
+  /** Whether a ShaderFilter is among them, whose bitmap covers whole pixels (SceneList.wholes). */
+  whole: boolean;
 }
 
 /**
@@ -78,8 +91,8 @@ export function planFilters(
   const planned: Planned[] = [];
   for (const record of records) {
     const kind = kindOf(record);
-    // A displacement whose map is gone leaves the object be.
-    if (kind === DISPLACEMENT && !mapOf(record)) {
+    // A displacement whose map is gone leaves the object be, as does a ShaderFilter never set.
+    if ((kind === DISPLACEMENT && !mapOf(record)) || (kind === SHADER && !record.shaderUse)) {
       continue;
     }
 
@@ -99,12 +112,17 @@ export function planFilters(
     planned[i].inset = inset;
   }
 
-  const passes = planned.map((p) => passOf(p, units));
+  const passes = planned.map((p) => passOf(p, units, inset));
   for (const pass of passes) {
     pass.texture = pass.colors ? sameColors(pass.colors, previous) : null;
   }
 
-  return { passes, padding: inset, wanted: planned.map((p) => p.wanted) };
+  return {
+    passes,
+    padding: inset,
+    wanted: planned.map((p) => p.wanted),
+    whole: planned.some((p) => p.kind === SHADER),
+  };
 }
 
 /** The texture of a gradient of `previous`'s with the same colours, if any. */
@@ -142,6 +160,8 @@ function kindOf(f: FilterRecord): number {
       return CONVOLUTION;
     case "displacementMap":
       return DISPLACEMENT;
+    case "shader":
+      return SHADER;
     default:
       return 0;
   }
@@ -196,6 +216,9 @@ function paddingOf(kind: number, f: FilterRecord, units: number): number {
     case DISPLACEMENT:
       // Its colour mode's fill round the object, and the pixel right and down adl's bitmap has.
       return Math.max(...displacementGrowth(f)) + 1;
+    case SHADER:
+      reach = Math.max(...f.extensions);
+      break;
     default:
       return 0;
   }
@@ -205,7 +228,7 @@ function paddingOf(kind: number, f: FilterRecord, units: number): number {
 }
 
 /** A filter's values, in the order its kind lists them (@swf2es/render's filters.ts). */
-function passOf(p: Planned, units: number): Pass {
+function passOf(p: Planned, units: number, padding: number): Pass {
   const f = p.record;
   const pass: Pass = {
     kind: p.kind,
@@ -213,6 +236,9 @@ function passOf(p: Planned, units: number): Pass {
     colors: null,
     texture: null,
     map: null,
+    kernel: null,
+    images: [],
+    ints: NO_INTS,
   };
   const blur = [f.blurX || 0, f.blurY || 0, f.quality, units];
   switch (p.kind) {
@@ -330,9 +356,45 @@ function passOf(p: Planned, units: number): Pass {
       pass.map = map;
       break;
     }
+
+    case SHADER:
+      shaderPass(pass, f, p.inset, padding, units);
+      break;
   }
 
   return pass;
+}
+
+/**
+ * A ShaderFilter's values (@swf2es/render's filters.ts, SHADER): its first
+ * input the object, and each other image the kernel samples a texture
+ * chainOf fills in; its parameters' ints apart, which floats would round.
+ */
+function shaderPass(
+  pass: Pass,
+  f: FilterRecord,
+  inset: number,
+  padding: number,
+  units: number,
+): void {
+  const use = f.shaderUse as NonNullable<FilterRecord["shaderUse"]>;
+  const glsl = kernelGlslOf(use.kernel);
+  const { floats, ints } = kernelParameters(glsl, use.values);
+  const first = use.kernel.inputs[0]?.index ?? -1;
+  const values = [units, inset, padding, ...f.extensions, glsl.textures.length];
+  for (const t of glsl.textures) {
+    const image = t === first ? undefined : use.images.get(t);
+    if (image) {
+      pass.images.push({ image, at: values.length + 1 });
+    }
+
+    values.push(t, -1, image?.floats ? 1 : 0);
+  }
+
+  values.push(floats.length, ...floats);
+  pass.values = Float32Array.from(values);
+  pass.ints = ints;
+  pass.kernel = glsl.source;
 }
 
 function rgb(color: number): number[] {
