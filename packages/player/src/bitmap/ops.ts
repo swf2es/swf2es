@@ -660,27 +660,8 @@ interface PreparedColorTransform extends ColorTransformValues {
 /** A display object's layer drawn (drawBitmap): a Bitmap's, a drawing's snapshot, or none. */
 export type Layer = "bitmap" | "drawing" | null;
 
-/**
- * The blend modes draw composites with. Alpha and erase need a layer: a
- * display object drawn has one, and they then scale the destination's
- * alpha where it covers; a BitmapData drawn has not, and they do nothing.
- */
-const BLENDS = new Set([
-  "normal",
-  "layer",
-  "multiply",
-  "screen",
-  "lighten",
-  "darken",
-  "difference",
-  "add",
-  "subtract",
-  "invert",
-  "overlay",
-  "hardlight",
-]);
-
-// The blend modes as the pixel loops take them, worked out once a draw.
+// The blend modes draw composites with, as the numbers the pixel loops take,
+// worked out once a draw.
 const NORMAL = 0;
 const MULTIPLY = 1;
 const SCREEN = 2;
@@ -695,6 +676,12 @@ const HARDLIGHT = 10;
 const ERASE = 11;
 const ALPHA = 12;
 
+/**
+ * Each blend mode draw takes, by its name; any other draws nothing. Alpha
+ * and erase need a layer: a display object drawn has one, and they then
+ * scale the destination's alpha where it covers; a BitmapData drawn has
+ * not, and they do nothing.
+ */
 const MODES = new Map([
   ["normal", NORMAL],
   ["layer", NORMAL],
@@ -734,15 +721,14 @@ export function drawBitmap(
   rows = false,
   layer: Layer = null,
 ): void {
-  const whole = mode === "erase" || mode === "alpha";
-  if (!BLENDS.has(mode) && !(layer !== null && whole)) {
+  const code = MODES.get(mode);
+  const whole = code === ERASE || code === ALPHA;
+  if (code === undefined || (whole && layer === null)) {
     return;
   }
 
-  const code = MODES.get(mode) ?? NORMAL;
-
   // A drawing's alpha blend leaves the destination where it drew nothing, or drew clear (adl).
-  const keepClear = mode === "alpha" && layer === "drawing";
+  const keepClear = code === ALPHA && layer === "drawing";
 
   // Flash rasterises the translation snapped down to quarter pixels, which
   // its 4 x 4 coverage then reads exactly (a move of 0.49 covers 3/4 and
@@ -801,8 +787,10 @@ export function drawBitmap(
     Number.isInteger(m.ty) &&
     source !== store
   ) {
-    composite(store, source, area, m.tx, m.ty, transform, code, keepClear);
-    store.changed();
+    if (composite(store, source, area, m.tx, m.ty, transform, code, keepClear)) {
+      store.changed();
+    }
+
     return;
   }
 
@@ -813,94 +801,345 @@ export function drawBitmap(
   const id = m.a / det;
   const itx = -(ia * m.tx + ic * m.ty);
   const ity = -(ib * m.tx + id * m.ty);
-  const inside = (x: number, y: number) => {
-    const sx = ia * x + ic * y + itx;
-    const sy = ib * x + id * y + ity;
-    return sx >= 0 && sy >= 0 && sx < source.width && sy < source.height;
+  // How many of the pixel's 4 x 4 samples fall inside the source.
+  const coverage = (x: number, y: number) => {
+    let hits = 0;
+    for (let k = 0; k < 16; k++) {
+      const px = x + ((k & 3) + 0.5) / 4;
+      const py = y + ((k >> 2) + 0.5) / 4;
+      const sx = ia * px + ic * py + itx;
+      const sy = ib * px + id * py + ity;
+      if (sx >= 0 && sy >= 0 && sx < source.width && sy < source.height) {
+        hits++;
+      }
+    }
+
+    return hits;
   };
 
-  // Drawn into itself, a BitmapData goes a row at a time, top down, every
-  // pixel of the row read before one is written, as Flash does: a move
-  // right keeps the pixels, a move down smears rows. Through a Bitmap of
-  // itself it is plain scan order, which smears both ways (adl).
-  const row = rows && source === store ? new Uint32Array(area.width) : null;
   // The arrays taken once. What the source reads as: its own pixels drawn into itself, else as
   // a draw reads them. The store's, which bring back what the GPU drew last or copy a library
   // bitmap's, are taken at the first pixel put, but first when the source is the store, which
   // reads them as written.
   let into = source === store ? store.pixels : null;
   const pixels = source === store ? source.readable : source.drawable;
-  const written = row ? new Uint8Array(area.width) : null;
-  for (let y = area.y; y < area.y + area.height; y++) {
-    if (row && written) {
-      written.fill(0);
-    }
+  // Whether a pixel was put, for the store to count a change: a draw that puts none is none.
+  let wrote = false;
 
-    for (let x = area.x; x < area.x + area.width; x++) {
-      const cx = x + 0.5;
-      const cy = y + 0.5;
-      const sx = ia * cx + ic * cy + itx;
-      const sy = ib * cx + id * cy + ity;
-      let hits = 16;
-      if (whole) {
-        // Erase and alpha take a pixel whole where the source is at its centre, as adl
-        // draws a shape's edge for them, an edge through the centre counted on its right
-        // and below.
-        if (!(sx > 0 && sy > 0 && sx <= source.width && sy <= source.height)) {
-          continue;
-        }
-      } else {
-        hits = 0;
-        for (let k = 0; k < 16; k++) {
-          if (inside(x + ((k & 3) + 0.5) / 4, y + ((k >> 2) + 0.5) / 4)) {
-            hits++;
-          }
-        }
-
+  // Through a Bitmap of itself, a BitmapData is drawn in plain scan order,
+  // each pixel reading what the ones before it wrote, which smears both
+  // ways (adl): pixel by pixel. A layer's blend has a copy of it by now.
+  if (source === store && !rows) {
+    for (let y = area.y; y < area.y + area.height; y++) {
+      for (let x = area.x; x < area.x + area.width; x++) {
+        const hits = coverage(x, y);
         if (hits === 0) {
           continue;
         }
-      }
 
-      let p = smooth
-        ? bilinear(source, pixels, sx - 0.5, sy - 0.5)
-        : nearest(source, pixels, sx, sy);
-      if (transform) {
-        p = transformed(p, transform);
-      }
-
-      if (hits < 16) {
-        p = scaleBy(p, hits / 16);
-      }
-
-      if (keepClear && p >>> 24 === 0) {
-        continue;
-      }
-
-      if (row && written) {
-        row[x - area.x] = p;
-        written[x - area.x] = 1;
-        continue;
-      }
-
-      into ??= store.pixels;
-      put(store, into, y * store.width + x, code, p);
-    }
-
-    if (row && written) {
-      for (let k = 0; k < area.width; k++) {
-        if (written[k]) {
-          into ??= store.pixels;
-          put(store, into, y * store.width + area.x + k, code, row[k]);
+        const cx = x + 0.5;
+        const cy = y + 0.5;
+        const sx = ia * cx + ic * cy + itx;
+        const sy = ib * cx + id * cy + ity;
+        let p = smooth
+          ? bilinear(pixels, source.width, source.height, sx - 0.5, sy - 0.5)
+          : nearest(pixels, source.width, source.height, sx, sy);
+        if (transform) {
+          p = transformed(p, transform);
         }
+
+        if (hits < 16) {
+          p = scaleBy(p, hits / 16);
+        }
+
+        into ??= store.pixels;
+        put(store, into, y * store.width + x, code, p);
+        wrote = true;
       }
     }
+
+    if (wrote) {
+      store.changed();
+    }
+
+    return;
   }
 
-  store.changed();
+  // Otherwise a row at a time, each pass over it in a loop of its own, so
+  // that no pixel crosses a call: a pixel past 2^30 a call returns is a
+  // number V8 allocates. Every pixel of a row is read before one is
+  // written, which is how Flash draws a BitmapData into itself: a move
+  // right keeps the pixels, a move down smears rows.
+  const n = area.width;
+  const buffers = takeRows(n);
+  try {
+    const { pixels: row, hits, us, vs } = buffers;
+    const w = source.width;
+    const h = source.height;
+
+    for (let y = area.y; y < area.y + area.height; y++) {
+      // Where all 16 samples of a pixel surely fall inside the source, and
+      // where none can: only the pixels between are tested sample by sample.
+      spanFrom = Number.NEGATIVE_INFINITY;
+      spanTo = Number.POSITIVE_INFINITY;
+      const spans = !whole && coveredSpan(ia, ic, itx, w, y) && coveredSpan(ib, id, ity, h, y);
+      const fullFrom = spans ? Math.max(area.x, spanFrom) : 0;
+      const fullTo = spans ? Math.min(area.x + n, spanTo) : 0;
+      let any = 0;
+
+      for (let x = area.x, k = 0; k < n; x++, k++) {
+        const cx = x + 0.5;
+        const cy = y + 0.5;
+        const sx = ia * cx + ic * cy + itx;
+        const sy = ib * cx + id * cy + ity;
+        let hit = 16;
+        if (whole) {
+          // Erase and alpha take a pixel whole where the source is at its centre, as adl
+          // draws a shape's edge for them, an edge through the centre counted on its right
+          // and below.
+          hit = sx > 0 && sy > 0 && sx <= w && sy <= h ? 16 : 0;
+        } else if (x < fullFrom || x >= fullTo) {
+          hit = coverage(x, y);
+        }
+
+        hits[k] = hit;
+        if (hit === 0) {
+          continue;
+        }
+
+        any++;
+        us[k] = sx;
+        vs[k] = sy;
+      }
+
+      if (any === 0) {
+        continue;
+      }
+
+      sampleRow(pixels, w, h, us, vs, hits, row, n, smooth);
+      if (transform) {
+        transformRow(row, hits, n, transform);
+      }
+
+      coverRow(row, hits, n);
+      into ??= store.pixels;
+      blendRow(store, into, y * store.width + area.x, row, hits, n, code, keepClear);
+      wrote = true;
+    }
+  } finally {
+    giveRowsBack(buffers);
+  }
+
+  if (wrote) {
+    store.changed();
+  }
 }
 
-/** `source` at (tx, ty) composited into `area` of the store, a pixel each. */
+/** drawBitmap's buffers for a row. */
+interface RowScratch {
+  pixels: Uint32Array;
+  hits: Uint8Array;
+  /** Each pixel's point in the source. */
+  us: Float64Array;
+  vs: Float64Array;
+}
+
+/**
+ * The row buffers kept between draws, which drawBitmap and composite take
+ * for a draw and give back after it. A draw runs to its end without
+ * calling out, so no other draw can take them in the middle of one:
+ * `scratchTaken` holds that, and a draw that finds them taken throws
+ * rather than overwrite a row another is working on.
+ */
+let scratch: RowScratch = {
+  pixels: new Uint32Array(0),
+  hits: new Uint8Array(0),
+  us: new Float64Array(0),
+  vs: new Float64Array(0),
+};
+let scratchTaken = false;
+
+/** The widest row whose buffers are kept for the next draw: a wider one's go with its draw. */
+const ROW_KEPT = 8192;
+
+/** Buffers for rows of `n` pixels: the kept ones where they are wide enough, until given back. */
+function takeRows(n: number): RowScratch {
+  if (scratch.pixels.length >= n) {
+    if (scratchTaken) {
+      throw new Error("drawBitmap's row buffers are taken by a draw already under way");
+    }
+
+    scratchTaken = true;
+    return scratch;
+  }
+
+  const buffers = {
+    pixels: new Uint32Array(n),
+    hits: new Uint8Array(n),
+    us: new Float64Array(n),
+    vs: new Float64Array(n),
+  };
+  if (n <= ROW_KEPT && !scratchTaken) {
+    scratch = buffers;
+    scratchTaken = true;
+  }
+
+  return buffers;
+}
+
+function giveRowsBack(buffers: RowScratch): void {
+  if (buffers === scratch) {
+    scratchTaken = false;
+  }
+}
+
+/** coveredSpan's answer: the first pixel of a row covered whole and the one past the last. */
+let spanFrom = 0;
+let spanTo = 0;
+
+/**
+ * Narrows spanFrom to spanTo, the destination pixels in row y whose 16 samples
+ * all have u = a x + c y' + t within [0, size), y' each of the row's four
+ * sample rows; false where u barely moves along x without being still,
+ * which leaves every pixel to be tested. The span keeps a margin of a
+ * thousandth of a pixel, and more where the numbers are large, from where
+ * the samples' own arithmetic decides, so a pixel in it is one the tests
+ * find whole.
+ */
+function coveredSpan(a: number, c: number, t: number, size: number, y: number): boolean {
+  if (a === 0) {
+    // u is the same all along a sample row, worked out as the tests do.
+    for (let k = 0; k < 4; k++) {
+      const u = c * (y + (k + 0.5) / 4) + t;
+      if (!(u >= 0 && u < size)) {
+        spanFrom = Number.POSITIVE_INFINITY;
+      }
+    }
+
+    return true;
+  }
+
+  if (Math.abs(a) < 1e-6) {
+    return false;
+  }
+
+  for (let k = 0; k < 4; k++) {
+    const offset = c * (y + (k + 0.5) / 4) + t;
+    // The x where u is 0 and where it is size, in either order.
+    const at0 = -offset / a;
+    const atSize = (size - offset) / a;
+    const margin =
+      0.001 +
+      (1e-12 * (Math.abs(offset) + size + Math.abs(a) * (Math.abs(at0) + Math.abs(atSize)))) /
+        Math.abs(a);
+    const low = Math.min(at0, atSize) + margin;
+    const high = Math.max(at0, atSize) - margin;
+    if (!Number.isFinite(low) || !Number.isFinite(high)) {
+      return false;
+    }
+
+    // Samples lie at x + 1/8 to x + 7/8.
+    spanFrom = Math.max(spanFrom, Math.ceil(low - 0.125));
+    spanTo = Math.min(spanTo, Math.floor(high - 0.875) + 1);
+  }
+
+  return true;
+}
+
+/** The source's pixel under each covered pixel's point of the row, nearest or bilinear. */
+function sampleRow(
+  from: Uint32Array,
+  width: number,
+  height: number,
+  us: Float64Array,
+  vs: Float64Array,
+  hits: Uint8Array,
+  row: Uint32Array,
+  n: number,
+  smooth: boolean,
+): void {
+  for (let k = 0; k < n; k++) {
+    if (hits[k] === 0) {
+      continue;
+    }
+
+    row[k] = smooth
+      ? bilinear(from, width, height, us[k] - 0.5, vs[k] - 0.5)
+      : nearest(from, width, height, us[k], vs[k]);
+  }
+}
+
+/** The row's covered pixels through the colour transform, a run of one pixel transformed once. */
+function transformRow(
+  row: Uint32Array,
+  hits: Uint8Array,
+  n: number,
+  ct: PreparedColorTransform,
+): void {
+  let last = -1;
+  let out = 0;
+  for (let k = 0; k < n; k++) {
+    if (hits[k] === 0) {
+      continue;
+    }
+
+    const p = row[k];
+    if (p !== last) {
+      last = p;
+      out = transformed(p, ct);
+    }
+
+    row[k] = out;
+  }
+}
+
+/** The row's partly covered pixels scaled by their coverage. */
+function coverRow(row: Uint32Array, hits: Uint8Array, n: number): void {
+  for (let k = 0; k < n; k++) {
+    const hit = hits[k];
+    if (hit !== 0 && hit < 16) {
+      row[k] = scaleBy(row[k], hit / 16);
+    }
+  }
+}
+
+/**
+ * The row's covered pixels composited into the store's pixels from `at` by
+ * the blend mode; with `keepClear`, a clear one leaves the destination be.
+ */
+function blendRow(
+  store: BitmapStore,
+  into: Uint32Array,
+  at: number,
+  row: Uint32Array,
+  hits: Uint8Array,
+  n: number,
+  mode: number,
+  keepClear: boolean,
+): void {
+  if (mode === NORMAL) {
+    const opaque = store.transparent ? 0 : 0xff000000;
+    for (let k = 0; k < n; k++) {
+      if (hits[k] === 0) {
+        continue;
+      }
+
+      const p = row[k];
+      const sa = p >>> 24;
+      into[at + k] = sa === 255 ? p : (over(p, into[at + k]) | opaque) >>> 0;
+    }
+
+    return;
+  }
+
+  for (let k = 0; k < n; k++) {
+    if (hits[k] !== 0 && !(keepClear && row[k] >>> 24 === 0)) {
+      put(store, into, at + k, mode, row[k]);
+    }
+  }
+}
+
+/** `source` at (tx, ty) composited into `area` of the store, a pixel each; whether it put one. */
 function composite(
   store: BitmapStore,
   source: BitmapStore,
@@ -910,40 +1149,54 @@ function composite(
   ct: PreparedColorTransform | null,
   mode: number,
   keepClear: boolean,
-): void {
-  const into = store.pixels;
+): boolean {
   const from = source.drawable;
   const opaque = store.transparent ? 0 : 0xff000000;
-  const plain = !ct && mode === NORMAL;
-  for (let y = area.y; y < area.y + area.height; y++) {
-    let i = y * store.width + area.x;
-    let j = (y - ty) * source.width + (area.x - tx);
-    for (let x = 0; x < area.width; x++, i++, j++) {
-      const p = from[j];
-      if (plain) {
+  // The store's pixels, taken as drawBitmap takes them: at the first pixel put.
+  let into: Uint32Array | null = null;
+  if (!ct && mode === NORMAL) {
+    for (let y = area.y; y < area.y + area.height; y++) {
+      let i = y * store.width + area.x;
+      let j = (y - ty) * source.width + (area.x - tx);
+      for (let x = 0; x < area.width; x++, i++, j++) {
         // Source over, inline: what blend("normal") computes.
+        const p = from[j];
         const sa = p >>> 24;
         if (sa === 0) {
           continue;
         }
 
-        if (sa === 255) {
-          into[i] = p;
-          continue;
-        }
-
-        into[i] = (over(p, into[i]) | opaque) >>> 0;
-        continue;
+        into ??= store.pixels;
+        into[i] = sa === 255 ? p : (over(p, into[i]) | opaque) >>> 0;
       }
-
-      const q = ct ? transformed(p, ct) : p;
-      if (keepClear && q >>> 24 === 0) {
-        continue;
-      }
-
-      put(store, into, i, mode, q);
     }
+
+    return into !== null;
   }
+
+  // A row at a time through the passes drawBitmap's rows take, every pixel covered.
+  const n = area.width;
+  const buffers = takeRows(n);
+  try {
+    const { pixels: row, hits } = buffers;
+    hits.fill(16, 0, n);
+    into = store.pixels;
+
+    for (let y = area.y; y < area.y + area.height; y++) {
+      const j = (y - ty) * source.width + (area.x - tx);
+      // A view and a copy: a loop copying it was slower, for all a view allocates.
+      row.set(from.subarray(j, j + n));
+      if (ct) {
+        transformRow(row, hits, n, ct);
+      }
+
+      blendRow(store, into, y * store.width + area.x, row, hits, n, mode, keepClear);
+    }
+  } finally {
+    giveRowsBack(buffers);
+  }
+
+  return true;
 }
 
 /**
@@ -1000,26 +1253,26 @@ function reachable(store: BitmapStore, m: Affine, area: PixelRect): [BitmapStore
   return [copy, { ...m, tx: m.tx + m.a * x0 + m.c * y0, ty: m.ty + m.b * x0 + m.d * y0 }];
 }
 
-function nearest(source: BitmapStore, pixels: Uint32Array, x: number, y: number): number {
-  const px = Math.min(source.width - 1, Math.max(0, Math.floor(x)));
-  const py = Math.min(source.height - 1, Math.max(0, Math.floor(y)));
-  return pixels[py * source.width + px];
+function nearest(from: Uint32Array, width: number, height: number, x: number, y: number): number {
+  const px = Math.min(width - 1, Math.max(0, Math.floor(x)));
+  const py = Math.min(height - 1, Math.max(0, Math.floor(y)));
+  return from[py * width + px];
 }
 
 /** Bilinear between the four premultiplied pixels round (x, y), clamped to the edges. */
-function bilinear(source: BitmapStore, pixels: Uint32Array, x: number, y: number): number {
+function bilinear(from: Uint32Array, width: number, height: number, x: number, y: number): number {
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
   const fx = x - x0;
   const fy = y - y0;
-  const left = Math.min(source.width - 1, Math.max(0, x0));
-  const right = Math.min(source.width - 1, Math.max(0, x0 + 1));
-  const top = Math.min(source.height - 1, Math.max(0, y0)) * source.width;
-  const bottom = Math.min(source.height - 1, Math.max(0, y0 + 1)) * source.width;
-  const p00 = pixels[top + left];
-  const p10 = pixels[top + right];
-  const p01 = pixels[bottom + left];
-  const p11 = pixels[bottom + right];
+  const left = Math.min(width - 1, Math.max(0, x0));
+  const right = Math.min(width - 1, Math.max(0, x0 + 1));
+  const top = Math.min(height - 1, Math.max(0, y0)) * width;
+  const bottom = Math.min(height - 1, Math.max(0, y0 + 1)) * width;
+  const p00 = from[top + left];
+  const p10 = from[top + right];
+  const p01 = from[bottom + left];
+  const p11 = from[bottom + right];
   const gx = 1 - fx;
   const gy = 1 - fy;
 

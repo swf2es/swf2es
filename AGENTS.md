@@ -135,6 +135,8 @@ node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property ac
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
                               # and Vectors (map, filter, sort, conversion), as the one above
+node tests/bench/bitmap-draws.ts <checkout A> <checkout B> [cases] [seed] [--big]   # random
+                              # BitmapData draws and copies in two built checkouts, every pixel compared
 node tests/bench/enumeration/run.ts [<dir A> <dir B>] [runs]   # for-in and for each over Arrays,
                               # Vectors, Objects and Dictionaries, as the two above
 ```

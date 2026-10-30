@@ -482,6 +482,8 @@ export class BitmapStore {
     const into = this.pixels;
     const pixels = source !== this && source.holdsAlpha ? source.drawable : source.readable;
     const mask = alpha?.readable ?? null;
+    const maskWidth = alpha?.width ?? 0;
+    const maskHeight = alpha?.height ?? 0;
 
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
@@ -490,14 +492,14 @@ export class BitmapStore {
       for (let c = 0; c < d.width; c++) {
         const i = left ? d.width - 1 - c : c;
         let p = pixels[from + i];
-        if (alpha && mask) {
+        if (mask) {
           const mx = ax + i;
           const my = ay + row;
-          if (mx < 0 || my < 0 || mx >= alpha.width || my >= alpha.height) {
+          if (mx < 0 || my < 0 || mx >= maskWidth || my >= maskHeight) {
             continue;
           }
 
-          p = scale(p, mask[my * alpha.width + mx] >>> 24);
+          p = scale(p, mask[my * maskWidth + mx] >>> 24);
         }
 
         into[to + i] = this.composite(p, into[to + i], mergeAlpha);

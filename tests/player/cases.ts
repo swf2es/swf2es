@@ -10219,6 +10219,15 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  {
+    name: "avm1-draw-self",
+    swf: avm1Script("draw-self", 8),
+    traced: true,
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   ...[7, 8].map(
     (version): PlayerCase => ({
       name: `avm1-drawing-frames-swf${version}`,
