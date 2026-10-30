@@ -628,6 +628,39 @@ test("merge in place reads each pixel as the ones before it left it", () => {
   );
 });
 
+test("a draw that covers no pixel leaves a store the GPU drew last where it is", () => {
+  const store = new BitmapStore(8, 8, true, 0);
+  let reads = 0;
+  const copy = {
+    version: -1,
+    read: () => {
+      reads++;
+      return new Uint32Array(64);
+    },
+    copy: () => true,
+    fill: () => true,
+    destroy: () => {},
+  };
+  store.copies.add(copy);
+  store.drawnOnGpu(copy);
+
+  // A pixel's tenth, short of every sample of the pixel it lies in.
+  const source = new BitmapStore(1, 1, true, 0xffffffff);
+  drawBitmap(
+    store,
+    source,
+    { a: 0.1, b: 0, c: 0, d: 0.1, tx: 2, ty: 2 },
+    null,
+    "normal",
+    null,
+    false,
+  );
+  assert.equal(reads, 0);
+
+  drawBitmap(store, source, { a: 2, b: 0, c: 0, d: 2, tx: 2, ty: 2 }, null, "normal", null, false);
+  assert.equal(reads, 1);
+});
+
 test("a drawn bitmap covers each pixel by the samples of its 16 inside it, whatever the matrix", () => {
   // An opaque white source drawn into a clear store leaves each pixel's alpha
   // at its coverage, which the row passes take as whole without sampling

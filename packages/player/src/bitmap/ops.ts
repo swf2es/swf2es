@@ -3,7 +3,7 @@
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
 import type { CopyOp } from "@swf2es/native/render";
-import { BitmapStore, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
+import { BitmapStore, over, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
 import { bitmapKernel } from "./kernel.js";
 import { perlinSetup } from "./turbulence.js";
 
@@ -210,8 +210,12 @@ export function comparePixels(left: BitmapStore, right: BitmapStore): Uint32Arra
 
     different = true;
     if ((p & 0xffffff) !== (q & 0xffffff)) {
-      const channel = (shift: number) => (((p >>> shift) - (q >>> shift)) & 0xff) << shift;
-      out[i] = (0xff000000 | channel(16) | channel(8) | channel(0)) >>> 0;
+      out[i] =
+        (0xff000000 |
+          ((((p >>> 16) - (q >>> 16)) & 0xff) << 16) |
+          ((((p >>> 8) - (q >>> 8)) & 0xff) << 8) |
+          ((p - q) & 0xff)) >>>
+        0;
     } else {
       const alpha = ((p >>> 24) - (q >>> 24)) & 0xff;
       out[i] = ((alpha << 24) | (alpha << 16) | (alpha << 8) | alpha) >>> 0;
@@ -676,6 +680,38 @@ const BLENDS = new Set([
   "hardlight",
 ]);
 
+// The blend modes as the pixel loops take them, worked out once a draw.
+const NORMAL = 0;
+const MULTIPLY = 1;
+const SCREEN = 2;
+const LIGHTEN = 3;
+const DARKEN = 4;
+const DIFFERENCE = 5;
+const ADD = 6;
+const SUBTRACT = 7;
+const INVERT = 8;
+const OVERLAY = 9;
+const HARDLIGHT = 10;
+const ERASE = 11;
+const ALPHA = 12;
+
+const MODES = new Map([
+  ["normal", NORMAL],
+  ["layer", NORMAL],
+  ["multiply", MULTIPLY],
+  ["screen", SCREEN],
+  ["lighten", LIGHTEN],
+  ["darken", DARKEN],
+  ["difference", DIFFERENCE],
+  ["add", ADD],
+  ["subtract", SUBTRACT],
+  ["invert", INVERT],
+  ["overlay", OVERLAY],
+  ["hardlight", HARDLIGHT],
+  ["erase", ERASE],
+  ["alpha", ALPHA],
+]);
+
 /**
  * draw of a bitmap source: each destination pixel in the clip takes the
  * source pixel under its centre, through the matrix's inverse, clamped to
@@ -702,6 +738,8 @@ export function drawBitmap(
   if (!BLENDS.has(mode) && !(layer !== null && whole)) {
     return;
   }
+
+  const code = MODES.get(mode) ?? NORMAL;
 
   // A drawing's alpha blend leaves the destination where it drew nothing, or drew clear (adl).
   const keepClear = mode === "alpha" && layer === "drawing";
@@ -763,7 +801,7 @@ export function drawBitmap(
     Number.isInteger(m.ty) &&
     source !== store
   ) {
-    composite(store, source, area, m.tx, m.ty, transform, mode, keepClear);
+    composite(store, source, area, m.tx, m.ty, transform, code, keepClear);
     store.changed();
     return;
   }
@@ -781,9 +819,11 @@ export function drawBitmap(
     return sx >= 0 && sy >= 0 && sx < source.width && sy < source.height;
   };
 
-  // The arrays taken once, the written one first: a source that is the store reads it too. What
-  // the source reads as: its own pixels drawn into itself, else as a draw reads them.
-  const into = store.pixels;
+  // The arrays taken once. What the source reads as: its own pixels drawn into itself, else as
+  // a draw reads them. The store's, which bring back what the GPU drew last or copy a library
+  // bitmap's, are taken at the first pixel put, but first when the source is the store, which
+  // reads them as written.
+  let into = source === store ? store.pixels : null;
   const pixels = source === store ? source.readable : source.drawable;
 
   // Through a Bitmap of itself, a BitmapData is drawn in plain scan order,
@@ -818,7 +858,8 @@ export function drawBitmap(
           p = scaleBy(p, hits / 16);
         }
 
-        put(store, into, y * store.width + x, mode, p);
+        into ??= store.pixels;
+        put(store, into, y * store.width + x, code, p);
       }
     }
 
@@ -889,7 +930,8 @@ export function drawBitmap(
     }
 
     coverRow(row, hits, n);
-    blendRow(store, into, y * store.width + area.x, row, hits, n, mode, keepClear);
+    into ??= store.pixels;
+    blendRow(store, into, y * store.width + area.x, row, hits, n, code, keepClear);
   }
 
   store.changed();
@@ -1060,10 +1102,10 @@ function blendRow(
   row: Uint32Array,
   hits: Uint8Array,
   n: number,
-  mode: string,
+  mode: number,
   keepClear: boolean,
 ): void {
-  if (mode === "normal" || mode === "layer") {
+  if (mode === NORMAL) {
     const opaque = store.transparent ? 0 : 0xff000000;
     for (let k = 0; k < n; k++) {
       if (hits[k] === 0) {
@@ -1072,7 +1114,7 @@ function blendRow(
 
       const p = row[k];
       const sa = p >>> 24;
-      into[at + k] = sa === 255 ? p : (sourceOver(p, into[at + k]) | opaque) >>> 0;
+      into[at + k] = sa === 255 ? p : (over(p, into[at + k]) | opaque) >>> 0;
     }
 
     return;
@@ -1093,13 +1135,13 @@ function composite(
   tx: number,
   ty: number,
   ct: PreparedColorTransform | null,
-  mode: string,
+  mode: number,
   keepClear: boolean,
 ): void {
   const into = store.pixels;
   const from = source.drawable;
   const opaque = store.transparent ? 0 : 0xff000000;
-  if (!ct && mode === "normal") {
+  if (!ct && mode === NORMAL) {
     for (let y = area.y; y < area.y + area.height; y++) {
       let i = y * store.width + area.x;
       let j = (y - ty) * source.width + (area.x - tx);
@@ -1116,7 +1158,7 @@ function composite(
           continue;
         }
 
-        into[i] = (sourceOver(p, into[i]) | opaque) >>> 0;
+        into[i] = (over(p, into[i]) | opaque) >>> 0;
       }
     }
 
@@ -1145,11 +1187,11 @@ function composite(
  * the store is, but for erase and alpha: an opaque bitmap holds the alpha
  * they leave, as Flash's memory does, and reads it back (getPixel32).
  */
-function put(store: BitmapStore, into: Uint32Array, i: number, mode: string, p: number): void {
+function put(store: BitmapStore, into: Uint32Array, i: number, mode: number, p: number): void {
   const out = blend(mode, p, into[i]);
   if (store.transparent) {
     into[i] = out;
-  } else if (mode === "erase" || mode === "alpha") {
+  } else if (mode === ERASE || mode === ALPHA) {
     into[i] = out;
     store.holdsAlpha ||= out >>> 24 !== 255;
   } else {
@@ -1214,16 +1256,19 @@ function bilinear(from: Uint32Array, width: number, height: number, x: number, y
   const p10 = from[top + right];
   const p01 = from[bottom + left];
   const p11 = from[bottom + right];
+  const gx = 1 - fx;
+  const gy = 1 - fy;
+
   return (
-    ((lerp4(p00, p10, p01, p11, 24, fx, fy) << 24) |
-      (lerp4(p00, p10, p01, p11, 16, fx, fy) << 16) |
-      (lerp4(p00, p10, p01, p11, 8, fx, fy) << 8) |
-      lerp4(p00, p10, p01, p11, 0, fx, fy)) >>>
+    ((lerp4(p00, p10, p01, p11, 24, fx, fy, gx, gy) << 24) |
+      (lerp4(p00, p10, p01, p11, 16, fx, fy, gx, gy) << 16) |
+      (lerp4(p00, p10, p01, p11, 8, fx, fy, gx, gy) << 8) |
+      lerp4(p00, p10, p01, p11, 0, fx, fy, gx, gy)) >>>
     0
   );
 }
 
-/** One channel of bilinear's four pixels, weighed. */
+/** One channel of bilinear's four pixels, weighed by fx and fy and by gx and gy, their complements. */
 function lerp4(
   p00: number,
   p10: number,
@@ -1232,10 +1277,12 @@ function lerp4(
   shift: number,
   fx: number,
   fy: number,
+  gx: number,
+  gy: number,
 ): number {
-  const top = ((p00 >>> shift) & 0xff) * (1 - fx) + ((p10 >>> shift) & 0xff) * fx;
-  const bottom = ((p01 >>> shift) & 0xff) * (1 - fx) + ((p11 >>> shift) & 0xff) * fx;
-  return Math.round(top * (1 - fy) + bottom * fy);
+  const top = ((p00 >>> shift) & 0xff) * gx + ((p10 >>> shift) & 0xff) * fx;
+  const bottom = ((p01 >>> shift) & 0xff) * gx + ((p11 >>> shift) & 0xff) * fx;
+  return Math.round(top * gy + bottom * fy);
 }
 
 /** A premultiplied pixel through a colour transform, as colorTransform computes it. */
@@ -1329,19 +1376,19 @@ function mul(x: number, y: number): number {
  * mode's mix. Every helper takes its operands as arguments, so a pixel
  * allocates nothing: a closure over them would take a context each call.
  */
-function blend(mode: string, s: number, d: number): number {
-  if (mode === "normal" || mode === "layer") {
-    return sourceOver(s, d);
+function blend(mode: number, s: number, d: number): number {
+  if (mode === NORMAL) {
+    return over(s, d);
   }
 
   const sa = s >>> 24;
-  if (mode === "erase" || mode === "alpha") {
-    return scaleFloored(d, mode === "erase" ? 255 - sa : sa);
+  if (mode === ERASE || mode === ALPHA) {
+    return scaleFloored(d, mode === ERASE ? 255 - sa : sa);
   }
 
   const da = d >>> 24;
   const a =
-    mode === "add" || mode === "subtract"
+    mode === ADD || mode === SUBTRACT
       ? Math.min(255, sa + da)
       : Math.min(255, Math.round(sa + da - mul(sa, da)));
   return (
@@ -1354,32 +1401,32 @@ function blend(mode: string, s: number, d: number): number {
 }
 
 /** A colour channel of blend: source cs and destination cd under alphas sa and da. */
-function blendChannel(mode: string, cs: number, cd: number, sa: number, da: number): number {
+function blendChannel(mode: number, cs: number, cd: number, sa: number, da: number): number {
   let b: number;
   switch (mode) {
-    case "multiply":
+    case MULTIPLY:
       b = mul(cs, cd);
       break;
-    case "screen":
+    case SCREEN:
       b = (cs * da) / 255 + (cd * sa) / 255 - mul(cs, cd);
       break;
-    case "lighten":
+    case LIGHTEN:
       b = Math.max(mul(cs, da), mul(cd, sa));
       break;
-    case "darken":
+    case DARKEN:
       b = Math.min(mul(cs, da), mul(cd, sa));
       break;
-    case "difference":
+    case DIFFERENCE:
       b = Math.abs(mul(cs, da) - mul(cd, sa));
       break;
-    case "add":
+    case ADD:
       return Math.min(255, cs + cd);
-    case "subtract":
+    case SUBTRACT:
       return Math.max(0, cd - cs);
-    case "invert":
+    case INVERT:
       // The destination inverted, the source's colour unused.
       return Math.max(0, Math.min(255, Math.floor(mul(255 - cd, sa) + mul(cd, 255 - sa))));
-    case "overlay":
+    case OVERLAY:
       b = 2 * cd <= da ? 2 * mul(cs, cd) : mul(sa, da) - 2 * mul(da - cd, sa - cs);
       break;
     default:
@@ -1388,21 +1435,4 @@ function blendChannel(mode: string, cs: number, cd: number, sa: number, da: numb
   }
 
   return Math.max(0, Math.min(255, Math.floor(b + mul(cs, 255 - da) + mul(cd, 255 - sa))));
-}
-
-/** Source over destination, both premultiplied, as Flash composites: s + ((d * (256 - sa)) >> 8). */
-function sourceOver(s: number, d: number): number {
-  const sa = s >>> 24;
-  if (sa === 255) {
-    return s >>> 0;
-  }
-
-  const k = 256 - sa;
-  return (
-    ((Math.min(255, sa + (((d >>> 24) * k) >> 8)) << 24) |
-      (Math.min(255, ((s >>> 16) & 0xff) + ((((d >>> 16) & 0xff) * k) >> 8)) << 16) |
-      (Math.min(255, ((s >>> 8) & 0xff) + ((((d >>> 8) & 0xff) * k) >> 8)) << 8) |
-      Math.min(255, (s & 0xff) + (((d & 0xff) * k) >> 8))) >>>
-    0
-  );
 }
