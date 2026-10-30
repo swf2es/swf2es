@@ -1,4 +1,6 @@
 import { type GlState, linkProgram, ShaderError } from "@swf2es/context3d/device";
+import type { Filters } from "../filters.js";
+import type { KernelImage } from "../kernel-shaders.js";
 import { CLAMP } from "../scene.js";
 
 /**
@@ -131,6 +133,66 @@ export class KernelPrograms {
 
     values.set(source.subarray(at, at + count));
     this.gl.uniform4iv(location, values, 0, count);
+  }
+
+  /** What readImages reads into, its records kept from call to call. */
+  private readonly images: KernelImage[] = [];
+
+  /**
+   * The images of the kernel at entry `i` of `filters`, a blend shader's
+   * or a shader fill's, its values laid out as a ShaderFilter's
+   * (filters.ts, SHADER): -1 for what is below, -2 for the layer blended.
+   * Null where a texture of its own is gone, as such a kernel is left out.
+   */
+  readImages(filters: Filters, i: number, host: KernelHost): KernelImage[] | null {
+    const v = filters.values;
+    const at = filters.start[i];
+    const count = v[at + 7];
+    const images = this.images;
+    for (let k = 0; k < count; k++) {
+      const id = v[at + 9 + k * 3];
+      if (id >= 0 && !host.texture(id)) {
+        return null;
+      }
+
+      if (!images[k]) {
+        images[k] = { texture: 0, layer: false, float: false, back: false };
+      }
+
+      const image = images[k];
+      image.texture = v[at + 8 + k * 3];
+      image.layer = id < 0;
+      image.back = id === -1;
+      image.float = v[at + 10 + k * 3] > 0;
+    }
+
+    images.length = count;
+    return images;
+  }
+
+  /** The parameters and own images of the kernel at entry `i` of `filters` set on `kernel`, in use. */
+  setUniforms(kernel: KernelProgram, filters: Filters, i: number, host: KernelHost): void {
+    const v = filters.values;
+    const at = filters.start[i];
+    const count = v[at + 7];
+    let unit = 0;
+    for (let k = 0; k < count; k++) {
+      const id = v[at + 9 + k * 3];
+      if (id >= 0) {
+        this.bindImage(kernel.at(`pbImage${v[at + 8 + k * 3]}`), unit++, id, host);
+      }
+    }
+
+    const floats = at + 8 + count * 3;
+    if (v[floats] > 0) {
+      this.gl.uniform4fv(kernel.at("pbFloats"), v, floats + 1, v[floats]);
+    }
+
+    const ints = filters.intStart[i];
+    const n = filters.intStart[i + 1] - ints;
+    if (n > 0) {
+      this.setInts(kernel.at("pbInts"), filters.ints, ints, n);
+    }
   }
 
   /** Every program deleted, as the backend goes; none kept, as a lost context comes back. */

@@ -10758,6 +10758,17 @@ export const cases: PlayerCase[] = [
     maxOutliers: 60,
   },
   {
+    // blendShader (scripts/ShaderBlends.as). adl's bitmap of the blurred square reaches two
+    // pixels further, which the kernel paints, and the circle's edges blend here a texel at a
+    // time, there a pixel.
+    name: "shader-blends",
+    build: shaderBlends,
+    frames: 3,
+    capture: [3],
+    tolerance: 2,
+    maxOutliers: 450,
+  },
+  {
     name: "timeline-sounds",
     build: timelineSounds,
     frames: 33,
@@ -10981,6 +10992,81 @@ function twirlKernel(): Uint8Array {
     .op("add", "f4.b", "f2.g")
     .sample(true, "f1.rgba", "f4.gb", 0)
     .bytes();
+}
+
+/**
+ * blendShader (scripts/ShaderBlends.as): kernels that show the inputs'
+ * order, the coordinate, a result less than opaque, a parameter, and a
+ * lighten by luminance; one of one input and one of three, which adl
+ * refuses.
+ */
+function shaderBlends(compile: Compile): Uint8Array {
+  const head = (name: string, inputs = 2) => {
+    const a = new PbjAssembler().version(1).name(name).param("in", "float2", "f0.rg", "_OutCoord");
+    for (let k = 0; k < inputs; k++) {
+      a.input(k, 4, "abc"[k]);
+    }
+
+    return a.param("out", "float4", "f1.rgba", "dst");
+  };
+  const order = head("Order")
+    .sample(false, "f2.rgba", "f0.rg", 0)
+    .sample(false, "f3.rgba", "f0.rg", 1)
+    .op("mov", "f1.r", "f2.r")
+    .op("mov", "f1.g", "f3.r")
+    .op("mov", "f1.b", "f3.a")
+    .ld("f4.r", 0.5)
+    .op("mul", "f1.b", "f4.r")
+    .ld("f4.g", 0.25)
+    .op("add", "f1.b", "f4.g")
+    .ld("f1.a", 1)
+    .bytes();
+  const coord = head("Coord")
+    .op("floor", "f2.rg", "f0.rg")
+    .ld("f4.r", 32)
+    .op("add", "f2.rg", "f4.rr")
+    .ld("f3.r", 1 / 255)
+    .op("mul", "f2.rg", "f3.rr")
+    .op("mov", "f1.rg", "f2.rg")
+    .ld("f6.rg", 7)
+    .op("add", "f6.rg", "f0.rg")
+    .sample(true, "f5.rgba", "f6.rg", 0)
+    .op("mov", "f1.b", "f5.r")
+    .ld("f1.a", 1)
+    .bytes();
+  const half = head("Half").ld("f1.rb", 0).ld("f1.ga", 0.5).bytes();
+  const param = head("Param")
+    .param("in", "float4", "f2.rgba", "color")
+    .meta("defaultValue", "float4", [0, 0, 1, 1], true)
+    .op("mov", "f1.rgba", "f2.rgba")
+    .bytes();
+  const luma = head("Luma")
+    .sample(false, "f2.rgba", "f0.rg", 0)
+    .sample(false, "f3.rgba", "f0.rg", 1)
+    .ld("f6.r", 0.212671)
+    .ld("f6.g", 0.71516)
+    .ld("f6.b", 0.072169)
+    .op("mov", "f4.rgb", "f2.rgb")
+    .op("dot", "f4.rgb", "f6.rgb")
+    .op("mov", "f5.rgb", "f3.rgb")
+    .op("dot", "f5.rgb", "f6.rgb")
+    .op("lessthan", "f4.r", "f5.r")
+    .if("i0.r")
+    .op("mov", "f1.rgba", "f3.rgba")
+    .else()
+    .op("mov", "f1.rgba", "f2.rgba")
+    .endif()
+    .bytes();
+  const kernels: [string, Uint8Array][] = [
+    ["OrderKernel", order],
+    ["CoordKernel", coord],
+    ["HalfKernel", half],
+    ["ParamKernel", param],
+    ["LumaKernel", luma],
+    ["OneKernel", head("One", 1).ld("f1.rgba", 1).bytes()],
+    ["ThreeKernel", head("Three", 3).sample(false, "f1.rgba", "f0.rg", 2).bytes()],
+  ];
+  return shaderSwf(compile, "ShaderBlends", kernels, 320, 120, 3);
 }
 
 /**

@@ -55,6 +55,13 @@ export const DISPLACEMENT = 7;
  * ints are the filter's ints (Filters.ints).
  */
 export const SHADER = 8;
+/**
+ * A blend shader, alone in a chain a layer's KERNEL mode names, which no
+ * filter pass runs: its values as SHADER's, its images' textures -1 for
+ * what is below and -2 for the layer, but its first, 1 where it blends
+ * the layer's whole rectangle rather than where the layer covers anything.
+ */
+export const BLEND = 9;
 
 /**
  * A frame's filters in chains, one a filtered layer: each filter its kind,

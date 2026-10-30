@@ -527,6 +527,21 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.setBlendMode(mode);
     }
 
+    /** Taken as it is set, its first input what is below and its second the object (shaders.ts). */
+    set blendShader(v: Value) {
+      if (v === null || v === undefined) {
+        throw s.rt.error("TypeError", 2007, "blendShader");
+      }
+
+      // A Shader of no kernel has no data to blend with, as adl words it.
+      if (!kernelOfShader(v)) {
+        throw s.rt.error("TypeError", 2007, "data");
+      }
+
+      this.$display.touch();
+      this.$display.setBlendShader(shaderUse(s, v, 2));
+    }
+
     // Flash caches an object with filters whatever cacheAsBitmap was set to, and reads it so.
     get cacheAsBitmap(): boolean {
       return this.$display.cachedAsBitmap || this.$display.filters.length > 0;

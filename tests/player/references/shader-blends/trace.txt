@@ -1,0 +1,6 @@
+mode shader
+modes shader multiply shader
+null 2007
+no kernel 2007
+one input 2167
+third unset 2164

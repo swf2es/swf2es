@@ -3,6 +3,7 @@
 // texture; their passes added to the frame's filters; and their output
 // kept, to be composited again where nothing it was made of changed.
 import {
+  BLEND,
   drawnArea,
   type Filters,
   filteredRect,
@@ -16,7 +17,7 @@ import {
   type Textures,
 } from "@swf2es/render";
 import { rgbaOf } from "../bitmap/bitmap.js";
-import type { ShaderImage } from "../bitmap/pixel-bender.js";
+import type { ShaderImage, ShaderUse } from "../bitmap/pixel-bender.js";
 import { Container } from "../display/container.js";
 import { type DisplayObject, TRANSFORM } from "../display/displayobject.js";
 import {
@@ -27,6 +28,7 @@ import {
 } from "../display/filters.js";
 import { type FilterPlan, planFilters } from "./filters.js";
 import { GRADIENT_IDLE_FRAMES, type Paints } from "./paints.js";
+import { kernelGlslOf, kernelParameters } from "./pixel-bender-glsl.js";
 
 /**
  * A filtered object's output as last made: whether it was kept, as which
@@ -81,6 +83,16 @@ export class FilterLayers {
   private readonly movedArea = new Float64Array(4);
   /** The textures of the images ShaderFilters' kernels sample, by image. */
   private readonly images = new WeakMap<ShaderImage, TextureHandle>();
+  /** Each blend shader's values and kernel, and where in them its other images' textures go. */
+  private readonly blends = new WeakMap<
+    ShaderUse,
+    {
+      values: Float32Array;
+      ints: Int32Array;
+      kernel: string;
+      images: { image: ShaderImage; at: number }[];
+    }
+  >();
   /** A reused output's rectangle (keptOutput). */
   readonly keptRect = new Int32Array(4);
 
@@ -357,6 +369,45 @@ export class FilterLayers {
       filters.add(pass.kind, pass.values, texture, pass.kernel, pass.ints);
     }
 
+    return filters.close();
+  }
+
+  /**
+   * A blend shader added to the frame's filters as a chain of its own,
+   * which a layer's KERNEL mode names (@swf2es/render's BLEND): its number.
+   * Its first input is what is below and its second the layer, as adl
+   * binds them; `whole` blends over the layer's whole rectangle, as adl
+   * blends a filtered object's bitmap, rather than where it covers anything.
+   */
+  blendChain(use: ShaderUse, filters: Filters, whole: boolean): number {
+    let made = this.blends.get(use);
+    if (!made) {
+      const glsl = kernelGlslOf(use.kernel);
+      const { floats, ints } = kernelParameters(glsl, use.values);
+      const [back, front] = use.kernel.inputs;
+      // As a ShaderFilter's values (@swf2es/render's SHADER), whether it blends whole first.
+      const values = [0, 0, 0, 0, 0, 0, 0, glsl.textures.length];
+      const images: { image: ShaderImage; at: number }[] = [];
+      for (const t of glsl.textures) {
+        const image = t === back.index || t === front.index ? undefined : use.images.get(t);
+        if (image) {
+          images.push({ image, at: values.length + 1 });
+        }
+
+        values.push(t, t === back.index ? -1 : t === front.index ? -2 : 0, image?.floats ? 1 : 0);
+      }
+
+      values.push(floats.length, ...floats);
+      made = { values: Float32Array.from(values), ints, kernel: glsl.source, images };
+      this.blends.set(use, made);
+    }
+
+    for (const { image, at } of made.images) {
+      made.values[at] = this.imageTexture(image).id;
+    }
+
+    made.values[0] = whole ? 1 : 0;
+    filters.add(BLEND, made.values, -1, made.kernel, made.ints);
     return filters.close();
   }
 

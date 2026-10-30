@@ -530,9 +530,8 @@
     ]
   },
   "shaders": {
-    "why": "Pixel Bender where Flash draws with it as a blend shader and a shader fill waits for those to be drawn; ShaderJob runs on the CPU, ShaderFilter on the GPU.",
+    "why": "Pixel Bender shader fills wait to be drawn; ShaderJob runs on the CPU, ShaderFilter and blend shaders on the GPU.",
     "natives": [
-      "flash.display::DisplayObject#set:blendShader",
       "flash.display::Graphics#beginShaderFill",
       "flash.display::Graphics#lineShaderStyle"
     ]

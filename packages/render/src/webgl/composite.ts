@@ -1,12 +1,27 @@
 import { type GlState, linkProgram } from "@swf2es/context3d/device";
-import { ADD, LAYER, NORMAL, SCREEN } from "../scene.js";
-import { BACK_UNIT, compositeFragment, compositeVertex, LAYER_UNIT } from "./programs.js";
+import { BLEND, type Filters } from "../filters.js";
+import { blendKernel, kernelImagesFit } from "../kernel-shaders.js";
+import { ADD, KERNEL, LAYER, NORMAL, SCREEN } from "../scene.js";
+import type { KernelHost, KernelProgram, KernelPrograms } from "./kernels.js";
+import {
+  BACK_UNIT,
+  compositeFragment,
+  compositeVertex,
+  LAYER_COLOR,
+  LAYER_UNIT,
+} from "./programs.js";
 import { framebufferOf, LAYER_STEP, type Layer, type Open } from "./targets.js";
+
+/** Where a compositor finds the frame's blend shaders and the textures they read. */
+export interface CompositeHost extends KernelHost {
+  filters(): Filters | null;
+}
 
 /**
  * Layers composited onto what they are drawn over, in Flash's blend modes:
  * through GL's blending where it computes the blend, else by the composite
- * program from a copy of what is below.
+ * program from a copy of what is below, or by a blend shader's program
+ * (KERNEL).
  */
 export class Compositor {
   private readonly gl: WebGL2RenderingContext;
@@ -24,8 +39,13 @@ export class Compositor {
   private backFramebuffer: WebGLFramebuffer | null = null;
   private backWidth = 0;
   private backHeight = 0;
-
-  constructor(gl: WebGL2RenderingContext, state: GlState) {
+  constructor(
+    gl: WebGL2RenderingContext,
+    state: GlState,
+    private readonly host: CompositeHost,
+    /** Blend shaders' programs, the backend's one cache of kernels'. */
+    private readonly kernels: KernelPrograms,
+  ) {
     this.gl = gl;
     this.state = state;
   }
@@ -58,8 +78,12 @@ export class Compositor {
    * one may reach past the canvas; in `under`'s framebuffer its rows run
    * up on the canvas and down in a layer.
    */
-  compositeLayer(open: Open, under: Open, mode: number, row: number): void {
+  compositeLayer(open: Open, under: Open, given: number, row: number): void {
     const gl = this.gl;
+    // A blend shader that will not link, of too many images, or with an image gone, composites as
+    // normal.
+    const kernel = given >= KERNEL ? this.useKernel(given - KERNEL) : null;
+    const mode = given >= KERNEL && !kernel ? NORMAL : given;
     const state = this.state;
     const dx = open.x - under.x;
     const dy = open.y - under.y;
@@ -178,17 +202,31 @@ export class Compositor {
     state.bindTexture(LAYER_UNIT, (open.layer as Layer).texture);
     state.bindSampler(LAYER_UNIT, null);
     state.bindSampler(BACK_UNIT, null);
-    state.useProgram(this.composite);
     state.bindVertexArray(null);
-    gl.uniform1i(this.modeLocation, mode);
-    gl.uniform1i(this.compositeRowLocation, row);
     // Less its corner on its page, where it is a held layer's rectangle of one (HELD), and past
     // the target's, where that is one.
     const ox = (under.ox ?? 0) - (open.ox ?? 0);
     const oy = (under.oy ?? 0) - (open.oy ?? 0);
-    gl.uniform2i(this.offsetLocation, dx + ox, flip ? under.height - 1 - dy - oy : dy + oy);
-    gl.uniform1i(this.flipLocation, flip ? 1 : 0);
-    gl.uniform2i(this.backOffsetLocation, backX, backY);
+    const offsetY = flip ? under.height - 1 - dy - oy : dy + oy;
+    if (kernel) {
+      const filters = this.host.filters() as Filters;
+      const entry = filters.chains[mode - KERNEL];
+      state.useProgram(kernel.program);
+      gl.uniform1i(kernel.at("uRow"), row);
+      gl.uniform2i(kernel.at("uOffset"), dx + ox, offsetY);
+      gl.uniform1i(kernel.at("uFlip"), flip ? 1 : 0);
+      gl.uniform2i(kernel.at("uBackOffset"), backX, backY);
+      gl.uniform1i(kernel.at("uWhole"), filters.values[filters.start[entry]]);
+      this.kernels.setUniforms(kernel, filters, entry, this.host);
+    } else {
+      state.useProgram(this.composite);
+      gl.uniform1i(this.modeLocation, mode);
+      gl.uniform1i(this.compositeRowLocation, row);
+      gl.uniform2i(this.offsetLocation, dx + ox, offsetY);
+      gl.uniform1i(this.flipLocation, flip ? 1 : 0);
+      gl.uniform2i(this.backOffsetLocation, backX, backY);
+    }
+
     switch (mode) {
       case ADD:
         state.setBlend(gl.ONE, gl.ONE);
@@ -208,7 +246,7 @@ export class Compositor {
     const tw = under.width;
     const th = under.height;
     gl.uniform4f(
-      this.rectLocation,
+      kernel ? kernel.at("uRect") : this.rectLocation,
       (2 * x0) / tw - 1,
       (2 * y0) / th - 1,
       (2 * (x0 + width)) / tw - 1,
@@ -219,10 +257,42 @@ export class Compositor {
     state.scissor(null);
   }
 
+  /**
+   * The program of the blend shader of chain `chain` of the frame's
+   * filters (KernelPrograms), in use; null for none, one that would not
+   * link, one of more images than a program binds, or one whose image is gone.
+   */
+  private useKernel(chain: number): KernelProgram | null {
+    const filters = this.host.filters();
+    if (!filters || chain >= filters.chainCount) {
+      return null;
+    }
+
+    const i = filters.chains[chain];
+    const source = filters.kernels[i];
+    const images =
+      source && filters.kind[i] === BLEND ? this.kernels.readImages(filters, i, this.host) : null;
+    if (!source || !images || !kernelImagesFit(images)) {
+      return null;
+    }
+
+    return this.kernels.use(
+      compositeVertex,
+      blendKernel(source, images, LAYER_COLOR),
+      (program) => {
+        const gl = this.gl;
+        gl.uniform1i(gl.getUniformLocation(program, "uLayer"), LAYER_UNIT);
+        gl.uniform1i(gl.getUniformLocation(program, "uBack"), BACK_UNIT);
+        gl.uniform1i(gl.getUniformLocation(program, "uRows"), 0);
+      },
+    );
+  }
+
   /** The program and the copy made on the context, deleted. */
   destroy(): void {
     const gl = this.gl;
     gl.deleteProgram(this.composite);
+
     if (this.back) {
       gl.deleteTexture(this.back);
       gl.deleteFramebuffer(this.backFramebuffer);

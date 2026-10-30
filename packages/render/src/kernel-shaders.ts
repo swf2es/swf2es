@@ -18,12 +18,14 @@ export const KERNEL_IMAGES = 8;
 /**
  * An image a kernel samples: its texture number; whether it is the
  * filtered layer, else a texture of its own; and whether its texels are
- * floats (RGBA32F), else bytes.
+ * floats (RGBA32F), else bytes. For a blend, a layer's image is what is
+ * below where `back`, else the layer blended.
  */
 export interface KernelImage {
   texture: number;
   layer: boolean;
   float: boolean;
+  back?: boolean;
 }
 
 /** Whether `images` bind no more textures of their own than a program takes (KERNEL_IMAGES). */
@@ -125,12 +127,16 @@ ${sampling(t, "p", float)}`;
 export function withImages(
   kernel: string,
   images: readonly KernelImage[],
-  layerTexel: (t: number) => string,
+  layerTexel: (t: number, back: boolean) => string,
   layerAt: string,
 ): string {
   const parts = [PRELUDE];
-  for (const { texture: t, layer, float } of images) {
-    parts.push(layer ? `${layerTexel(t)}\n${sampling(t, layerAt, false)}` : ownImage(t, float));
+  for (const { texture: t, layer, float, back } of images) {
+    parts.push(
+      layer
+        ? `${layerTexel(t, back ?? false)}\n${sampling(t, layerAt, false)}`
+        : ownImage(t, float),
+    );
   }
 
   parts.push(kernel);
@@ -150,7 +156,7 @@ export function madeOnce(
   let key = "";
   for (let k = 0; k < images.length; k++) {
     const i = images[k];
-    key += `${i.texture}${i.layer ? "L" : ""}${i.float ? "F" : ""},`;
+    key += `${i.texture}${i.layer ? (i.back ? "B" : "L") : ""}${i.float ? "F" : ""},`;
   }
 
   let byImages = made.get(kernel);
@@ -216,6 +222,57 @@ void main(void) {
     return;
   }
   finalColor = pbOutput(pbKernel(outCoord));
+}
+`;
+}
+
+const madeBlends = new Map<string, Map<string, string>>();
+
+/**
+ * A blend shader's composite (webgl/composite.ts), drawn as the composite
+ * program is (programs.ts, compositeFragment), its uniforms the same: as
+ * adl runs one, a pixel at a time, each where the layer covers anything
+ * and nothing where it does not, or over its whole rectangle (uWhole),
+ * the kernel's coordinate (0.5, 0.5) and its first two inputs that pixel
+ * of what is below and of the layer, coloured, whatever coordinate it
+ * samples them at; its result in place of what was below, as adl writes
+ * it (pbOutput). `rows` is the colour transform's reading of uRows
+ * (programs.ts, LAYER_COLOR).
+ */
+export function blendKernel(kernel: string, images: readonly KernelImage[], rows: string): string {
+  return madeOnce(madeBlends, kernel, images, () => blendSource(kernel, images, rows));
+}
+
+function blendSource(kernel: string, images: readonly KernelImage[], rows: string): string {
+  const pixel = (t: number, back: boolean) => `vec4 pbTexel${t}(ivec2 at) {
+  return pbBytes(${back ? "pbBack" : "pbFront"});
+}`;
+  return `#version 300 es
+precision highp float;
+uniform sampler2D uLayer;
+uniform sampler2D uBack;
+uniform highp sampler2D uRows;
+uniform int uRow;
+uniform ivec2 uOffset;
+uniform bool uFlip;
+uniform ivec2 uBackOffset;
+uniform bool uWhole;
+out vec4 finalColor;
+vec4 pbFront;
+vec4 pbBack;
+${withImages(kernel, images, pixel, "p")}
+void main(void) {
+  ivec2 frag = ivec2(gl_FragCoord.xy);
+  ivec2 at = ivec2(frag.x - uOffset.x, uFlip ? uOffset.y - frag.y : frag.y - uOffset.y);
+  vec4 front = texelFetch(uLayer, at, 0);
+${rows}
+  pbBack = texelFetch(uBack, frag - uBackOffset, 0);
+  if (!uWhole && pbBytes(front).a == 0.0) {
+    finalColor = pbBack;
+    return;
+  }
+  pbFront = front;
+  finalColor = pbOutput(pbKernel(vec2(0.5)));
 }
 `;
 }

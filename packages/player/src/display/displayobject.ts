@@ -9,6 +9,7 @@ import {
   readFilters,
 } from "@swf2es/format";
 import type { avm1, avm2 } from "@swf2es/runtime";
+import type { ShaderUse } from "../bitmap/pixel-bender.js";
 import type { Container } from "./container.js";
 import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
@@ -339,6 +340,11 @@ export class DisplayObject {
   scale9Grid: Rect | null = null;
   /** Its blend mode, as BlendMode names it. */
   blendMode = "normal";
+  /**
+   * Its blend shader's kernel as it was when set, with its parameters and
+   * images then, which "shader" blends it with; kept through other modes.
+   */
+  blendShader: ShaderUse | null = null;
   /** Its filters' values, which its `filters` reads copies of. */
   filters: readonly Filter[] = NO_FILTERS;
   /**
@@ -787,6 +793,13 @@ export class DisplayObject {
     if (place.blendMode !== null) {
       this.setBlendMode(BLEND_MODES[place.blendMode] ?? "normal");
     }
+  }
+
+  /** Its blend shader set: blended by it from now on, in the "shader" mode. */
+  setBlendShader(use: ShaderUse): void {
+    this.blendShader = use;
+    this.blendMode = "shader";
+    this.invalidate(TRANSFORM);
   }
 
   /** How it is composited with what is below it (BLEND_MODES). */
