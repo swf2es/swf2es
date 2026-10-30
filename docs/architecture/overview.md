@@ -95,7 +95,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3) and `render` (fills with libtess2, lines and BitmapData's CPU kernels), C and Zig built by one Zig project | — |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `render` (fills with libtess2, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
@@ -277,7 +277,7 @@ app is private, never published. The boundaries test checks both.
 
 Third-party C swf2es forks lives in `vendor/`, a git submodule each, kept
 apart from `packages/` because it is neither swf2es's code nor under its
-licence: zlib, the LZMA SDK, minimp3 and libtess2, compiled into
+licence: zlib, the LZMA SDK, minimp3, libtess2 and jxrlib, compiled into
 `native`'s binaries (above), never linked by pnpm. The boundaries test
 checks that `vendor/` holds those alone.
 

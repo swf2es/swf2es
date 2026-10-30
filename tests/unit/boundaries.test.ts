@@ -22,7 +22,7 @@ const allowed: Record<string, string[]> = {
 
 // vendor/ holds C libraries alone, compiled into native's binaries rather than linked by pnpm:
 // no package is a third-party one swf2es forks.
-const nativeVendor = ["libtess2", "lzma-sdk", "minimp3", "zlib"];
+const nativeVendor = ["jxrlib", "libtess2", "lzma-sdk", "minimp3", "zlib"];
 
 // These run in browsers, workers and node alike, so they must not see DOM or
 // node types; without them the build rejects `node:` imports and DOM globals.

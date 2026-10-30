@@ -97,8 +97,8 @@ the pages, with Pagefind's index for the search, into
   crowd. The workflow pulls the oracle's image for the first.
 - **Licences**: `notices/` gives builtin.abc's MPL-2.0 and lists the
   files translated from avmplus and taken from Ruffle, found by their
-  headers as the site builds, with the licences of minimp3, libtess2, zlib and
-  the LZMA SDK.
+  headers as the site builds, with the licences of minimp3, libtess2, zlib,
+  the LZMA SDK and jxrlib.
 
 `tests/site/run.ts`, part of `pnpm test`, builds the site and checks it in
 Chrome under `/swf2es/`: the player's checks, the old addresses, and that

@@ -26,3 +26,7 @@
 	path = vendor/libtess2
 	url = https://github.com/swf2es/libtess2.git
 	branch = swf2es
+[submodule "vendor/jxrlib"]
+	path = vendor/jxrlib
+	url = https://github.com/swf2es/jxrlib.git
+	shallow = true

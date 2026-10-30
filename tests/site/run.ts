@@ -662,15 +662,16 @@ async function check(): Promise<void> {
           "the licences are there",
           async () => {
             const found = await value<number[]>(
-              `Promise.all(['notices/', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'modules/native/render/index.js', 'libraries/builtin.abc'].map((u) => fetch(${JSON.stringify(base)} + u).then((r) => r.status)))`,
+              `Promise.all(['notices/', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'licenses/jxrlib-BSD-2-Clause.txt', 'modules/native/render/index.js', 'libraries/builtin.abc'].map((u) => fetch(${JSON.stringify(base)} + u).then((r) => r.status)))`,
             );
-            assert.deepEqual(found, [200, 200, 200, 200, 200, 200]);
+            assert.deepEqual(found, [200, 200, 200, 200, 200, 200, 200]);
             const notices = await value<string>(`fetch("${base}notices/").then((r) => r.text())`);
             assert.match(notices, /Mozilla Public License/);
             assert.match(notices, /packages\/runtime\/src\/avm2\/numbers\.ts/);
             // The MPL's source form at the very commit.
             assert.match(notices, /github\.com\/swf2es\/avmplus\/tree\/[0-9a-f]{40}/);
             assert.match(notices, /licenses\/libtess2-SGI\.txt/);
+            assert.match(notices, /licenses\/jxrlib-BSD-2-Clause\.txt/);
             assert.doesNotMatch(notices, /\{\{/);
           },
         ],

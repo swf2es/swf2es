@@ -123,6 +123,7 @@ copyFileSync(join(root, "oracle/avmplus/LICENSE"), join(licenses, "MPL-2.0.txt")
 copyFileSync(join(root, "vendor/minimp3/LICENSE"), join(licenses, "minimp3-CC0.txt"));
 copyFileSync(join(root, "vendor/zlib/LICENSE"), join(licenses, "zlib.txt"));
 copyFileSync(join(root, "vendor/libtess2/LICENSE.txt"), join(licenses, "libtess2-SGI.txt"));
+copyFileSync(join(root, "vendor/jxrlib/LICENSE"), join(licenses, "jxrlib-BSD-2-Clause.txt"));
 // Every notice of the C in @swf2es/native's binaries, the LZMA SDK's among them.
 copyFileSync(
   join(root, "packages/native/LICENSE.third-party"),
