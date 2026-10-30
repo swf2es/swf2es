@@ -57,9 +57,8 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
     const n = Number(v);
     return Number.isNaN(n) ? fallback : n;
   };
-  /** A fill's matrix from an AS3 Matrix, or the identity for none. */
   /** A shader as a fill takes it: TypeError 2007 for null, 2171 for no kernel, its inputs set (2164). */
-  const shaderOf = (shader: Value) => {
+  const shaderOf = (shader: Value, check = false) => {
     if (shader === null || shader === undefined) {
       throw s.rt.error("TypeError", 2007, "shader");
     }
@@ -68,8 +67,9 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       throw s.rt.error("ArgumentError", 2171);
     }
 
-    return shaderUse(s, shader, 0);
+    return shaderUse(s, shader, 0, check);
   };
+  /** A fill's matrix from an AS3 Matrix, or the identity for none. */
   const matrixFrom = (matrix: Value): Matrix => {
     if (matrix === null || matrix === undefined) {
       return { ...IDENTITY };
@@ -326,7 +326,7 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
 
     /** Checked as adl checks it; the line keeps its colour, as a gradient's does. */
     lineShaderStyle(shader: Value): void {
-      shaderOf(shader);
+      shaderOf(shader, true);
     }
 
     drawRect(x: Value, y: Value, w: Value, h: Value): void {

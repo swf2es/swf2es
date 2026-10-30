@@ -275,12 +275,11 @@ export class Compositor {
     }
 
     const i = filters.chains[chain];
-    const source = filters.kernels[i];
-    if (filters.kind[i] !== BLEND || !source) {
-      return null;
-    }
-
-    return this.kernels.use(blendKernel(source, this.kernels.readImages(filters, i), LAYER_COLOR));
+    return filters.kind[i] === BLEND
+      ? this.kernels.useEntry(filters, i, (source, images) =>
+          blendKernel(source, images, LAYER_COLOR),
+        )
+      : null;
   }
 
   /** The program and the copy made on the context, deleted. */

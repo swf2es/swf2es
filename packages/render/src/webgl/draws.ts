@@ -556,13 +556,12 @@ export class Draws {
       return false;
     }
 
+    // A kernel the GPU will not link, or of too many images, fills nothing.
     const entry = filters.chains[chain];
-    const source = filters.kernels[entry];
-    if (filters.kind[entry] !== FILL_SHADER || !source) {
-      return false;
-    }
-
-    const kernel = this.kernels.use(fillKernel(source, this.kernels.readImages(filters, entry)));
+    const kernel =
+      filters.kind[entry] === FILL_SHADER
+        ? this.kernels.useEntry(filters, entry, fillKernel)
+        : null;
     if (!kernel) {
       return false;
     }

@@ -52,13 +52,12 @@ export interface FilterHost<T extends FilterTarget> {
 
 /**
  * The units a pass reads its input, the blur it combines with, and a
- * gradient from; a kernel's images take those from the last on, as far as
- * KERNEL_UNITS.
+ * gradient from; a kernel's images take those from the last on, as many as
+ * kernel-shaders.ts's KERNEL_IMAGES.
  */
 const INPUT_UNIT = 4;
 const BLURRED_UNIT = 5;
 const EXTRA_UNIT = 6;
-const KERNEL_UNITS = 8;
 
 /** The most kernels' programs kept, the one used longest ago deleted for another. */
 const KERNEL_PROGRAMS = 32;
@@ -361,12 +360,11 @@ export class FilterRunner<T extends FilterTarget> {
       }
 
       case SAMPLER: {
+        // As many as KERNEL_IMAGES, the plan's limit.
         const unit = EXTRA_UNIT + this.samplers++;
-        if (unit < EXTRA_UNIT + KERNEL_UNITS) {
-          this.state.bindTexture(unit, this.host.texture(values[at]));
-          this.state.bindSampler(unit, this.host.sampler(CLAMP));
-          gl.uniform1i(location, unit);
-        }
+        this.state.bindTexture(unit, this.host.texture(values[at]));
+        this.state.bindSampler(unit, this.host.sampler(CLAMP));
+        gl.uniform1i(location, unit);
 
         break;
       }

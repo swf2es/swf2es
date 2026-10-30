@@ -83,10 +83,14 @@ export class Filters {
   chains = new Int32Array(17);
   chainCount = 0;
 
+  /** Moves on at each reset: a chain number is good while it is the same. */
+  generation = 0;
+
   reset(): void {
     this.count = 0;
     this.chainCount = 0;
     this.kernels.length = 0;
+    this.generation++;
   }
 
   /** A filter of `kind` added to the chain open: its values, the texture it reads, and its kernel. */

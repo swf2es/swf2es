@@ -15,7 +15,7 @@ import {
   GRADIENT,
   SHADER,
 } from "./filters.js";
-import { filterKernel, type KernelImage, PIXELS_BACK } from "./kernel-shaders.js";
+import { filterKernel, KERNEL_IMAGES, type KernelImage, PIXELS_BACK } from "./kernel-shaders.js";
 
 /** The passes' programs, each a fragment shader of filter-shaders.ts. */
 export const BOX_PASS = 1;
@@ -539,6 +539,11 @@ function shader(
     }
 
     kernelImages.push({ texture: v[at + 7 + k * 2], layer: id < 0 });
+  }
+
+  // More images than the pass binds: left as it is, as one whose program would not link.
+  if (kernelImages.filter((image) => !image.layer).length > KERNEL_IMAGES) {
+    return input;
   }
 
   const res = plan.resolution;

@@ -13,6 +13,7 @@ import {
   pbjFloatType,
 } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { BitmapStore } from "../../../bitmap/bitmap.js";
 import { OUT_COORD, type ShaderImage, type ShaderUse } from "../../../bitmap/pixel-bender.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "./BitmapData.js";
@@ -20,6 +21,9 @@ import { shaderClasses } from "./ShaderInput.js";
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
+
+/** The copy last taken of each BitmapData input, by its store, and the version it was taken at. */
+const copies = new WeakMap<BitmapStore, { version: number; image: ShaderImage }>();
 
 /** A parameter value's number as its register takes it: float32, or an int as SSE truncates one. */
 function numberOf(v: number, float: boolean): number {
@@ -124,8 +128,25 @@ export function inputImage(
 
   if (s.rt.isInstance(input, classes.bitmapData)) {
     const store = storeOf(s, input as AsObject);
-    const pixels = copy ? store.readable.slice() : store.readable;
-    return { width: store.width, height: store.height, pixels, channels };
+    if (!copy) {
+      return { width: store.width, height: store.height, pixels: store.readable, channels };
+    }
+
+    // One copy for each version of the store: a fill begun each frame with an input that does
+    // not change keeps one image, and the renderer one texture of it.
+    const kept = copies.get(store);
+    if (kept && kept.version === store.version && kept.image.channels === channels) {
+      return kept.image;
+    }
+
+    const image = {
+      width: store.width,
+      height: store.height,
+      pixels: store.readable.slice(),
+      channels,
+    };
+    copies.set(store, { version: store.version, image });
+    return image;
   }
 
   const width: number = o.$width ?? 0;
@@ -168,8 +189,9 @@ export function inputImage(
  * object, a blend's background and foreground), and the rest must be
  * set; each needs `bound` inputs at least (2167), and a filter and a blend
  * a kernel of four channels out (2162). Its BitmapData inputs are copies.
+ * `check` only checks: nothing is copied, nor a ByteArray's position moved.
  */
-export function shaderUse(s: Scripting, shader: Value, bound: number): ShaderUse {
+export function shaderUse(s: Scripting, shader: Value, bound: number, check = false): ShaderUse {
   const found = kernelOfShader(shader) as { data: AsObject; kernel: PbjKernel };
   const { data, kernel } = found;
   const outputs = kernel.parameters.filter((p) => p.output);
@@ -184,7 +206,7 @@ export function shaderUse(s: Scripting, shader: Value, bound: number): ShaderUse
   const images = new Map<number, ShaderImage>();
   const read: (() => void)[] = [];
   for (const input of kernel.inputs.slice(bound)) {
-    images.set(input.index, inputImage(s, data, input.name, input.channels, read, true));
+    images.set(input.index, inputImage(s, data, input.name, input.channels, read, !check));
   }
 
   // A texture sampled that no input declares, as a job refuses it.
@@ -198,8 +220,10 @@ export function shaderUse(s: Scripting, shader: Value, bound: number): ShaderUse
   }
 
   const values = kernelValues(s, data, kernel);
-  for (const move of read) {
-    move();
+  if (!check) {
+    for (const move of read) {
+      move();
+    }
   }
 
   return { kernel, values, images };

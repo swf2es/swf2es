@@ -11,6 +11,9 @@
 /** A byte's float as adl samples one: times the float nearest 1/255, not divided. */
 const BYTE = "0.003921568859368563";
 
+/** The most images a kernel's program binds besides its layer's: one with more is not drawn. */
+export const KERNEL_IMAGES = 8;
+
 /**
  * An image a kernel samples: its texture number, and whether it is the
  * filtered layer; or, for a blend, what is below or the layer blended.

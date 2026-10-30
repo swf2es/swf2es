@@ -1,6 +1,6 @@
 import { type GlState, linkProgram, ShaderError } from "@swf2es/context3d/device";
 import type { Filters } from "../filters.js";
-import type { KernelImage } from "../kernel-shaders.js";
+import { KERNEL_IMAGES, type KernelImage } from "../kernel-shaders.js";
 import { CLAMP } from "../scene.js";
 
 /** A Pixel Bender kernel's program and where it takes its uniforms, asked once each. */
@@ -15,9 +15,8 @@ export interface KernelHost {
   sampler(bits: number): WebGLSampler;
 }
 
-/** The units a kernel's images are bound from, and how many it may have. */
+/** The unit a kernel's images are bound from, KERNEL_IMAGES of them at most. */
 const KERNEL_UNIT = 6;
-const KERNEL_UNITS = 8;
 
 /**
  * The programs of kernels used outside the filter passes, a blend shader's
@@ -31,6 +30,10 @@ export class KernelPrograms {
   /** A chain's images, read as the plan's of a ShaderFilter are. */
   readonly images: KernelImage[] = [];
   private readonly ints = new Int32Array(4);
+  /** The programs of the frame's entries asked for so far, for the filters and generation they are of. */
+  private readonly byEntry = new Map<number, KernelProgram | null>();
+  private entryFilters: Filters | null = null;
+  private entryGeneration = -1;
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
@@ -95,6 +98,39 @@ export class KernelPrograms {
   }
 
   /**
+   * The program of the kernel at entry `i` of `filters`, its fragment
+   * shader `fragment` makes of its source and images, in use: asked for
+   * once a frame, as a fill drawn in many parts names one entry. Null for
+   * one of more than KERNEL_IMAGES images, or one that would not link.
+   */
+  useEntry(
+    filters: Filters,
+    i: number,
+    fragment: (source: string, images: KernelImage[]) => string,
+  ): KernelProgram | null {
+    if (this.entryFilters !== filters || this.entryGeneration !== filters.generation) {
+      this.byEntry.clear();
+      this.entryFilters = filters;
+      this.entryGeneration = filters.generation;
+    }
+
+    let kernel = this.byEntry.get(i);
+    if (kernel === undefined) {
+      const source = filters.kernels[i];
+      const images = this.readImages(filters, i);
+      kernel =
+        source && images.filter((image) => !image.layer).length <= KERNEL_IMAGES
+          ? this.use(fragment(source, images))
+          : null;
+      this.byEntry.set(i, kernel);
+    } else if (kernel) {
+      this.state.useProgram(kernel.program);
+    }
+
+    return kernel;
+  }
+
+  /**
    * The images of the kernel at entry `i` of `filters`, its values laid out
    * as SHADER's, into `images`: -1 the first bound input, -2 the second.
    */
@@ -120,7 +156,7 @@ export class KernelPrograms {
     let unit = KERNEL_UNIT;
     for (let k = 0; k < count; k++) {
       const id = v[start + 8 + k * 2];
-      if (id >= 0 && unit < KERNEL_UNIT + KERNEL_UNITS) {
+      if (id >= 0) {
         this.state.bindTexture(unit, host.texture(id));
         this.state.bindSampler(unit, host.sampler(CLAMP));
         gl.uniform1i(kernel.at(`pbImage${v[start + 7 + k * 2]}`), unit++);
@@ -146,6 +182,8 @@ export class KernelPrograms {
 
   /** Every program deleted, as the context goes; none kept, as it comes back. */
   clear(): void {
+    this.byEntry.clear();
+    this.entryFilters = null;
     for (const kernel of this.programs.values()) {
       if (kernel) {
         this.gl.deleteProgram(kernel.program);

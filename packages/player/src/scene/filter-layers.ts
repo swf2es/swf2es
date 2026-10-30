@@ -85,7 +85,17 @@ export class FilterLayers {
   /** Each blend shader's or shader fill's values and kernel, and where in them its images' textures go. */
   private readonly kernels = new WeakMap<
     ShaderUse,
-    { values: Float32Array; kernel: string; images: { image: ShaderImage; at: number }[] }
+    {
+      values: Float32Array;
+      kernel: string;
+      images: { image: ShaderImage; at: number }[];
+      /** The chain it was added as last: in which filters, at which generation, of which kind. */
+      filters: Filters | null;
+      generation: number;
+      kind: number;
+      whole: boolean;
+      chain: number;
+    }
   >();
   /** A reused output's rectangle (keptOutput). */
   readonly keptRect = new Int32Array(4);
@@ -393,8 +403,27 @@ export class FilterLayers {
       }
 
       values.push(floats.length, ...floats, ints.length, ...ints);
-      made = { values: Float32Array.from(values), kernel: glsl.source, images };
+      made = {
+        values: Float32Array.from(values),
+        kernel: glsl.source,
+        images,
+        filters: null,
+        generation: -1,
+        kind: 0,
+        whole: false,
+        chain: -1,
+      };
       this.kernels.set(use, made);
+    }
+
+    // Added once a frame: a fill drawn in many parts, or by many instances, names one chain.
+    if (
+      made.filters === filters &&
+      made.generation === filters.generation &&
+      made.kind === kind &&
+      made.whole === whole
+    ) {
+      return made.chain;
     }
 
     for (const { image, at } of made.images) {
@@ -403,7 +432,12 @@ export class FilterLayers {
 
     made.values[0] = whole ? 1 : 0;
     filters.add(kind, made.values, -1, made.kernel);
-    return filters.close();
+    made.filters = filters;
+    made.generation = filters.generation;
+    made.kind = kind;
+    made.whole = whole;
+    made.chain = filters.close();
+    return made.chain;
   }
 
   /** An image a kernel samples as a texture, made once, again only after a lost context took it. */
