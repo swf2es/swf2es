@@ -814,6 +814,7 @@ export function drawBitmap(
   const { pixels: row, hits, us, vs } = buffers;
   const w = source.width;
   const h = source.height;
+
   for (let y = area.y; y < area.y + area.height; y++) {
     // Where all 16 samples of a pixel surely fall inside the source, and
     // where none can: only the pixels between are tested sample by sample.
@@ -824,6 +825,7 @@ export function drawBitmap(
     const fullFrom = spans ? Math.max(area.x, full[0]) : 0;
     const fullTo = spans ? Math.min(area.x + n, full[1]) : 0;
     let any = 0;
+
     for (let x = area.x, k = 0; k < n; x++, k++) {
       let hit = 16;
       if (x < fullFrom || x >= fullTo) {
@@ -882,18 +884,26 @@ let scratch: RowScratch = {
   full: new Float64Array(2),
 };
 
+/** The widest row whose buffers are kept for the next draw: a wider one's go with its draw. */
+const ROW_KEPT = 8192;
+
 function rowScratch(n: number): RowScratch {
-  if (scratch.pixels.length < n) {
-    scratch = {
-      pixels: new Uint32Array(n),
-      hits: new Uint8Array(n),
-      us: new Float64Array(n),
-      vs: new Float64Array(n),
-      full: scratch.full,
-    };
+  if (scratch.pixels.length >= n) {
+    return scratch;
   }
 
-  return scratch;
+  const buffers = {
+    pixels: new Uint32Array(n),
+    hits: new Uint8Array(n),
+    us: new Float64Array(n),
+    vs: new Float64Array(n),
+    full: new Float64Array(2),
+  };
+  if (n <= ROW_KEPT) {
+    scratch = buffers;
+  }
+
+  return buffers;
 }
 
 /**
@@ -1082,9 +1092,12 @@ function composite(
   const n = area.width;
   const { pixels: row, hits } = rowScratch(n);
   hits.fill(16, 0, n);
+
   for (let y = area.y; y < area.y + area.height; y++) {
     const j = (y - ty) * source.width + (area.x - tx);
+    // A view and a copy: a loop copying it was slower, for all a view allocates.
     row.set(from.subarray(j, j + n));
+
     if (ct) {
       transformRow(row, hits, n, ct);
     }
