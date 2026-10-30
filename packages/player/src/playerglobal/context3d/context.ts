@@ -212,9 +212,6 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (levels !== 0) {
         unsupported();
       }
-      if (compressed !== "bgra" && (width < 4 || height < 4)) {
-        throw s.rt.error("ArgumentError", 3745);
-      }
 
       const value = allocate(this as unknown as AsObject, () =>
         backend.createTexture(width, height, false, compressed),
@@ -291,9 +288,6 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       const compressed = textureFormat(format);
       if (levels !== 0) {
         unsupported();
-      }
-      if (compressed !== "bgra" && size < 4) {
-        throw s.rt.error("ArgumentError", 3745);
       }
 
       const value = allocate(this as unknown as AsObject, () =>

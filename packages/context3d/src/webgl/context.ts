@@ -21,6 +21,7 @@ import {
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
+import { blockBytes } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 
 import {
@@ -745,7 +746,9 @@ export class WebGLContext3D implements Context3D {
 
   /** GL's internal format for a compressed texture's S3TC, or 0 where the context takes none. */
   private s3tcFormat(format: TextureFormat): number {
-    this.s3tc ??= this.gl.getExtension("WEBGL_compressed_texture_s3tc");
+    if (this.s3tc === undefined) {
+      this.s3tc = this.gl.getExtension("WEBGL_compressed_texture_s3tc");
+    }
     if (!this.s3tc || format === "bgra") {
       return 0;
     }
@@ -756,21 +759,23 @@ export class WebGLContext3D implements Context3D {
       : this.s3tc.COMPRESSED_RGBA_S3TC_DXT5_EXT;
   }
 
-  /** Bytes a mip chain of `storage` takes, its faces' every level. */
+  /**
+   * Bytes a mip chain of `format` takes, its faces' every level: S3TC's
+   * blocks for a compressed texture whatever its storage, as AIR counts
+   * them, so that a GPU without S3TC allocates no less than one with it.
+   */
   private chainBytes(
     width: number,
     height: number,
     levels: number,
     faces: number,
-    storage: number,
+    format: TextureFormat,
   ): number {
-    const block =
-      storage === this.gl.RGBA8 ? 0 : storage === this.s3tc?.COMPRESSED_RGBA_S3TC_DXT1_EXT ? 8 : 16;
     let size = 0;
     for (let level = 0; level < levels; level++) {
       const w = Math.max(1, width >> level);
       const h = Math.max(1, height >> level);
-      size += block ? Math.max(1, w >> 2) * Math.max(1, h >> 2) * block : w * h * 4;
+      size += format === "bgra" ? w * h * 4 : blockBytes(w, h, format === "compressedAlpha");
     }
 
     return size * faces;
@@ -801,13 +806,16 @@ export class WebGLContext3D implements Context3D {
         "Context3D texture size must be a power of two",
       );
     }
-    if (format !== "bgra" && (rectangle || width < 4 || height < 4)) {
-      throw new Context3DError("textureSize", "Context3D compressed textures are at least 4x4");
+    if (format !== "bgra" && rectangle) {
+      throw new Context3DError("unsupported", "Context3D rectangle textures are not compressed");
+    }
+    if (format !== "bgra" && (width < 4 || height < 4)) {
+      throw new Context3DError("compressedSize", "Context3D compressed textures are at least 4x4");
     }
 
     const gl = this.gl;
     const storage = this.s3tcFormat(format) || gl.RGBA8;
-    const size = this.chainBytes(width, height, levels, faces, storage);
+    const size = this.chainBytes(width, height, levels, faces, format);
     const kind = cube ? 2 : rectangle ? 1 : 0;
     const countLimit = cube
       ? this.limits.maxCubeTextures

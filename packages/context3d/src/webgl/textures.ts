@@ -1,5 +1,5 @@
 import type { Texture3D } from "../backend.js";
-import { decodeDxt, encodeDxt } from "../dxt.js";
+import { blockBytes, decodeDxt, encodeDxt } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 import { range } from "./state.js";
 import type { MultisampleTarget } from "./targets.js";
@@ -88,7 +88,6 @@ export function uploadTexture(
   const h = Math.max(1, height >> level);
   const sw = sourceWidth ?? w;
   const sh = sourceHeight ?? h;
-  staging(texture, state);
   if (
     !Number.isSafeInteger(sw) ||
     sw <= 0 ||
@@ -98,6 +97,9 @@ export function uploadTexture(
   ) {
     throw new Context3DError("textureUpload", "Context3D experiment: texture upload size mismatch");
   }
+
+  // Made once the call is known good: a refused one allocates nothing.
+  staging(texture, state);
 
   if (sw === w && sh === h) {
     for (let i = 0; i < pixels.length; i++) {
@@ -177,7 +179,7 @@ export function uploadCompressedLevel(
   const w = Math.max(1, width >> level);
   const h = Math.max(1, height >> level);
   const dxt5 = texture.format === "compressedAlpha";
-  if (blocks.length !== Math.max(1, w >> 2) * Math.max(1, h >> 2) * (dxt5 ? 16 : 8)) {
+  if (blocks.length !== blockBytes(w, h, dxt5)) {
     throw new Context3DError(
       "textureUpload",
       "Context3D experiment: compressed level size mismatch",

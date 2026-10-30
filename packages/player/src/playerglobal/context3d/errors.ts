@@ -18,6 +18,7 @@ const ERROR_IDS: Record<Context3DErrorReason, number> = {
   drawRange: 3603,
   triangleCount: 3602,
   textureSize: 3683,
+  compressedSize: 3745,
   textureShape: 3678,
   texturePowerOfTwo: 3682,
   textureUpload: 3679,
@@ -65,6 +66,7 @@ const ERROR_IDS: Record<Context3DErrorReason, number> = {
 const ERROR_CLASSES: Partial<Record<Context3DErrorReason, string>> = {
   drawRange: "RangeError",
   texturePowerOfTwo: "ArgumentError",
+  compressedSize: "ArgumentError",
 };
 
 /** A backend failure's Flash error: its ID and class. */

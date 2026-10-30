@@ -68,8 +68,10 @@ ATF to them (`@swf2es/native/atf`). The backend stores them with
 alpha, as AIR draws a three-colour block's fourth texel transparent, and
 decodes them to RGBA on the CPU (`dxt.ts`) where it has not. AIR charges their
 quota at DXT1's eighth of the BGRA reservation and DXT5's quarter (a 2048
-texture 3 MiB and 6 MiB: 170 and 85 fit); the aggregate counts the chain as
-stored. A compressed texture also takes pixels, as AIR's does, and as AIR
+texture 3 MiB and 6 MiB: 170 and 85 fit), and the aggregate counts their
+chains as S3TC's blocks even where the CPU decodes them to RGBA, so that every
+GPU allocates alike. Compressed textures are at least 4x4 (Error #3745, here
+`compressedSize`). A compressed texture also takes pixels, as AIR's does, and as AIR
 compresses them, they are encoded to its blocks (`dxt.ts`), so that a GPU with
 S3TC and one without draw them alike. The RGBA staging array a texture uploads
 through is made at its first pixel upload or CPU decoding, so compressed

@@ -132,6 +132,34 @@ export function byteBudgets() {
         compressed.gl.getError() === compressed.gl.NO_ERROR,
         "compressed textures left a GL error",
       );
+      // The aggregate counts S3TC's blocks whatever the storage: an 8x8 DXT1 chain is
+      // 32 + 8 + 8 + 8 bytes, so one fits in 56 and a second does not, on any GPU.
+      const tight = create({ maxTextureBytes: 56 });
+      if (!s3tc) {
+        const gl = tight.gl as { getExtension(name: string): unknown };
+        const get = gl.getExtension.bind(gl);
+        gl.getExtension = (name) => (name === "WEBGL_compressed_texture_s3tc" ? null : get(name));
+      }
+      try {
+        tight.backend.createTexture(8, 8, false, "compressed");
+        let over: unknown;
+        try {
+          tight.backend.createTexture(8, 8, false, "compressed");
+        } catch (caught) {
+          over = caught;
+        }
+        check(over instanceof Context3DError && over.reason === "limit", "aggregate counts blocks");
+        over = undefined;
+        try {
+          tight.backend.createTexture(2, 2, false, "compressed");
+        } catch (caught) {
+          over = caught;
+        }
+        check(over instanceof Context3DError && over.reason === "compressedSize", "4x4 at least");
+      } finally {
+        tight.backend.dispose();
+        tight.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      }
     } finally {
       c.dispose();
       check(compressed.live.size === 0, "compressed textures retained GPU handles");

@@ -48,6 +48,7 @@ export function decodeDxt(
   const size = dxt5 ? 16 : 8;
   const across = Math.max(1, (width + 3) >> 2);
   const down = Math.max(1, (height + 3) >> 2);
+
   for (let by = 0; by < down; by++) {
     for (let bx = 0; bx < across; bx++) {
       const at = (by * across + bx) * size;
@@ -130,16 +131,26 @@ function distance(r: number, g: number, b: number, c: number): number {
 }
 
 /** 0xRRGGBB as RGB565. */
-function pack(c: number): number {
-  return ((c >> 19) << 11) | (((c >> 10) & 63) << 5) | ((c >> 3) & 31);
+function pack(r: number, g: number, b: number): number {
+  return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
 }
+
+/** The bytes of a level `width` by `height` as DXT1's blocks, or DXT5's: one block at least. */
+export function blockBytes(width: number, height: number, dxt5: boolean): number {
+  return Math.max(1, (width + 3) >> 2) * Math.max(1, (height + 3) >> 2) * (dxt5 ? 16 : 8);
+}
+
+/** encodeDxt's output, kept for the next level: each upload copies its blocks out at once. */
+let encoded = new Uint8Array(0);
 
 /**
  * `rgba`, top-down RGBA rows of `width` pixels, `height` high, as blocks,
  * DXT1's or with `dxt5` DXT5's, for `decodeDxt` or a GPU: each block's
- * colours on the line between its two pixels farthest apart, four of them
- * always, and DXT5's alpha between its lowest and highest, eight. A level
- * smaller than a block repeats its pixels across it.
+ * colours on the line through them that their spread runs along (its
+ * principal axis, by a few power iterations), between the pixels that lie
+ * farthest out on it, four of them always; DXT5's alpha between its lowest
+ * and highest, eight. A level smaller than a block repeats its pixels across
+ * it. The result is a view of a buffer the next call reuses.
  */
 export function encodeDxt(
   rgba: Uint8Array,
@@ -150,50 +161,114 @@ export function encodeDxt(
   const size = dxt5 ? 16 : 8;
   const across = Math.max(1, (width + 3) >> 2);
   const down = Math.max(1, (height + 3) >> 2);
-  const out = new Uint8Array(across * down * size);
+  const length = blockBytes(width, height, dxt5);
+  if (encoded.length < length) {
+    encoded = new Uint8Array(length);
+  }
+
+  const out = encoded;
 
   for (let by = 0; by < down; by++) {
     for (let bx = 0; bx < across; bx++) {
       const at = (by * across + bx) * size;
       // The block's pixels, its edge repeated past a level smaller than a block.
-      for (let i = 0; i < 16; i++) {
-        texels[i] =
-          (Math.min(by * 4 + (i >> 2), height - 1) * width +
-            Math.min(bx * 4 + (i & 3), width - 1)) *
-          4;
-      }
-
-      // The colours' line runs between the two pixels farthest apart, whichever way each channel goes.
-      let first = texels[0];
-      let second = texels[0];
-      let farthest = -1;
+      let mr = 0;
+      let mg = 0;
+      let mb = 0;
       let lowA = 255;
       let highA = 0;
       for (let i = 0; i < 16; i++) {
-        const p = texels[i];
+        const p =
+          (Math.min(by * 4 + (i >> 2), height - 1) * width +
+            Math.min(bx * 4 + (i & 3), width - 1)) *
+          4;
+        texels[i] = p;
+        mr += rgba[p];
+        mg += rgba[p + 1];
+        mb += rgba[p + 2];
         lowA = Math.min(lowA, rgba[p + 3]);
         highA = Math.max(highA, rgba[p + 3]);
-        for (let j = i + 1; j < 16; j++) {
-          const q = texels[j];
-          const d = distance(
-            rgba[p],
-            rgba[p + 1],
-            rgba[p + 2],
-            (rgba[q] << 16) | (rgba[q + 1] << 8) | rgba[q + 2],
-          );
-          if (d > farthest) {
-            farthest = d;
-            first = p;
-            second = q;
-          }
+      }
+
+      mr /= 16;
+      mg /= 16;
+      mb /= 16;
+      // The colours' covariance, and its principal axis.
+      let rr = 0;
+      let rg = 0;
+      let rb = 0;
+      let gg = 0;
+      let gb = 0;
+      let bb = 0;
+      for (let i = 0; i < 16; i++) {
+        const p = texels[i];
+        const r = rgba[p] - mr;
+        const g = rgba[p + 1] - mg;
+        const b = rgba[p + 2] - mb;
+        rr += r * r;
+        rg += r * g;
+        rb += r * b;
+        gg += g * g;
+        gb += g * b;
+        bb += b * b;
+      }
+
+      // Iterated from the pixel farthest from the mean, which no axis is orthogonal to.
+      let vr = 0;
+      let vg = 0;
+      let vb = 0;
+      let spread = -1;
+      for (let i = 0; i < 16; i++) {
+        const p = texels[i];
+        const r = rgba[p] - mr;
+        const g = rgba[p + 1] - mg;
+        const b = rgba[p + 2] - mb;
+        if (r * r + g * g + b * b > spread) {
+          spread = r * r + g * g + b * b;
+          vr = r;
+          vg = g;
+          vb = b;
+        }
+      }
+
+      for (let k = 0; k < 4; k++) {
+        const nr = rr * vr + rg * vg + rb * vb;
+        const ng = rg * vr + gg * vg + gb * vb;
+        const nb = rb * vr + gb * vg + bb * vb;
+        const m = Math.max(Math.abs(nr), Math.abs(ng), Math.abs(nb));
+        if (m === 0) {
+          break;
+        }
+        vr = nr / m;
+        vg = ng / m;
+        vb = nb / m;
+      }
+
+      // The pixels farthest out along it, either way, are the endpoints.
+      let first = texels[0];
+      let second = texels[0];
+      let least = Infinity;
+      let most = -Infinity;
+      for (let i = 0; i < 16; i++) {
+        const p = texels[i];
+        const d = rgba[p] * vr + rgba[p + 1] * vg + rgba[p + 2] * vb;
+        if (d < least) {
+          least = d;
+          second = p;
+        }
+        if (d > most) {
+          most = d;
+          first = p;
         }
       }
 
       // Four colours need the first endpoint above the second; one alike stays one.
-      let c0 = pack((rgba[first] << 16) | (rgba[first + 1] << 8) | rgba[first + 2]);
-      let c1 = pack((rgba[second] << 16) | (rgba[second + 1] << 8) | rgba[second + 2]);
+      let c0 = pack(rgba[first], rgba[first + 1], rgba[first + 2]);
+      let c1 = pack(rgba[second], rgba[second + 1], rgba[second + 2]);
       if (c0 < c1) {
-        [c0, c1] = [c1, c0];
+        const swap = c0;
+        c0 = c1;
+        c1 = swap;
       }
 
       palette[0] = rgb(c0);
@@ -205,9 +280,6 @@ export function encodeDxt(
       out[colour + 1] = c0 >> 8;
       out[colour + 2] = c1;
       out[colour + 3] = c1 >> 8;
-      let indices = 0;
-      let low = 0;
-      let high = 0;
       if (dxt5) {
         // Eight alphas: the first endpoint above the second, or alike.
         alphas[0] = highA;
@@ -219,11 +291,15 @@ export function encodeDxt(
         out[at + 1] = lowA;
       }
 
+      let indices = 0;
+      let low = 0;
+      let high = 0;
+      const colours = c0 === c1 ? 1 : 4;
       for (let i = 0; i < 16; i++) {
         const o = texels[i];
         let best = 0;
         let nearest = Infinity;
-        for (let p = 0; p < (c0 === c1 ? 1 : 4); p++) {
+        for (let p = 0; p < colours; p++) {
           const d = distance(rgba[o], rgba[o + 1], rgba[o + 2], palette[p]);
           if (d < nearest) {
             nearest = d;
@@ -261,5 +337,5 @@ export function encodeDxt(
     }
   }
 
-  return out;
+  return out.subarray(0, length);
 }
