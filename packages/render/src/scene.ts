@@ -91,6 +91,16 @@ export const PLANE = 16;
 export const SNAP = 32;
 
 /**
+ * Which pixels a filtered layer's object covers (SceneList.wholes): those
+ * of the target its drawing touches; or whole units, as Flash's bitmap of
+ * an object is, antialiased those its edges touch and one more right and
+ * down where an edge lies on one, aliased those whose centres it covers.
+ */
+export const NO_WHOLE = 0;
+export const WHOLE_SMOOTH = 1;
+export const WHOLE_ALIASED = 2;
+
+/**
  * A frame's drawing in order: each entry a geometry drawn under a row with
  * a blend mode, and the texture it samples (-1 for none) and how. Boundaries
  * (filters, masks, blend layers) come with the features that need them.
@@ -111,6 +121,17 @@ export class SceneList {
    * unfiltered layer, which covers what is drawn alone.
    */
   pads = new Int32Array(16);
+  /**
+   * Whether each filtered layer covers whole units of the target, as Flash
+   * places the bitmap a ShaderFilter's kernel runs over, its coordinates
+   * from its corner: NO_WHOLE, WHOLE_SMOOTH or WHOLE_ALIASED.
+   */
+  wholes = new Uint8Array(16);
+  /**
+   * Each whole layer's object, Flash's bitmap of it, uncut by the target:
+   * x, y, width and height in target pixels, as measureLayers finds it.
+   */
+  objects = new Float64Array(64);
   /** Each layer's kept output, which its output becomes (Keeps), or -1. */
   keeps = new Int32Array(16);
   /** The layer each layer is in, or -1. */
@@ -135,11 +156,13 @@ export class SceneList {
   }
 
   /**
-   * A layer begun, padded for its filters (or -1), its rectangle none till
-   * measured (layerRect): its number.
+   * A layer begun, padded for its filters (or -1), over whole units as
+   * `whole` says (wholes), its rectangle none till measured (layerRect):
+   * its number.
    */
-  layerBegin(padding = -1, keep = -1): number {
+  layerBegin(padding = -1, keep = -1, whole = NO_WHOLE): number {
     const layer = this.newLayer(padding, keep);
+    this.wholes[layer] = whole;
     this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
     this.open.push(layer);
     return layer;
@@ -168,6 +191,10 @@ export class SceneList {
     if (layer >= this.pads.length) {
       this.layers = grow(this.layers);
       this.pads = grow(this.pads);
+      this.wholes = grow(this.wholes);
+      const objects = new Float64Array(this.objects.length * 2);
+      objects.set(this.objects);
+      this.objects = objects;
       this.keeps = grow(this.keeps);
       this.parents = grow(this.parents);
       const areas = new Float64Array(this.areas.length * 2);
@@ -176,6 +203,7 @@ export class SceneList {
     }
 
     this.pads[layer] = padding;
+    this.wholes[layer] = NO_WHOLE;
     this.keeps[layer] = keep;
     this.parents[layer] = this.open.at(-1) ?? -1;
     this.layerRect(layer, 0, 0, 0, 0);
