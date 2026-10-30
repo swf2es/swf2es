@@ -34,7 +34,8 @@ const KERNEL_PROGRAMS = 32;
 
 /**
  * The programs of Pixel Bender kernels, a ShaderFilter's, a blend
- * shader's or a shader fill's, by their vertex and fragment shaders:
+ * shader's or a shader fill's, by their fragment shaders, each a use's
+ * own and so with one vertex shader:
  * linked as first used, the one used longest ago deleted past
  * KERNEL_PROGRAMS; null for one the GPU would not link, which its user
  * draws otherwise. One for the backend, which its users share.
@@ -58,7 +59,8 @@ export class KernelPrograms {
     prepare: (program: WebGLProgram) => void,
   ): KernelProgram | null {
     const gl = this.gl;
-    const key = vertex + fragment;
+    // By the fragment shader alone, a use's own, which a frame gives again as the same string.
+    const key = fragment;
     let kernel = this.programs.get(key);
     if (kernel !== undefined) {
       // Used last now.
@@ -109,11 +111,6 @@ export class KernelPrograms {
     }
 
     return kernel;
-  }
-
-  /** Whether `kernel` is still kept, not deleted for another since it was given. */
-  kept(vertex: string, fragment: string, kernel: KernelProgram): boolean {
-    return this.programs.get(vertex + fragment) === kernel;
   }
 
   /** Texture `id` bound to a kernel's own image unit `k`, which its sampler at `location` names. */

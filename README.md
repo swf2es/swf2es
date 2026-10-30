@@ -18,10 +18,11 @@ select **Stage3D (experimental)** in the player controls.
 - **AVM1** (ActionScript 1 and 2) runs, compiled to JavaScript as well.
 - **The player** covers the display list and timeline, shapes, morphs,
   text, bitmaps, filters, blend modes, sound, input, loading, sockets,
-  workers and ExternalInterface, each checked against Flash under AIR's
+  workers, ExternalInterface and Pixel Bender (`ShaderJob`, shader
+  filters, blends and fills), each checked against Flash under AIR's
   `adl`. Stage3D is an experimental opt-in.
-- **Not yet:** video, printing, and Pixel Bender beyond `ShaderJob`:
-  shader fills, filters and blends. Compatibility is incomplete.
+- **Not yet:** video, printing, and Pixel Bender's shader lines.
+  Compatibility is incomplete.
 
 ## Quick start
 

@@ -476,7 +476,7 @@ export class FilterRunner<T extends FilterTarget> {
 
   /** The pass of a kernel's fragment shader (KernelPrograms), in use; null where it would not link. */
   private kernel(fragment: string): Pass | null {
-    return this.kernels.use(VERTEX, HEADER + fragment, (program) => {
+    return this.kernels.use(VERTEX, fragment, (program) => {
       this.gl.uniform1i(this.gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);
     });
   }

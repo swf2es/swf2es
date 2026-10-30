@@ -327,8 +327,7 @@ const { value, exception } = await withPage(
         );
 
         const glsl = kernelGlsl(kernel);
-        const source = "#version 300 es\\nprecision highp float;\\n" +
-          filterKernel(
+        const source = filterKernel(
             glsl.source,
             glsl.textures.map((t) => ({ texture: t, layer: t === 0, float: t === 1 })),
           );

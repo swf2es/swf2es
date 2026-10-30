@@ -90,7 +90,19 @@ export class WebGLBackend {
       },
       this.kernels,
     );
-    this.draws = new Draws(gl, this.state, this.atlas, this.gpu, this.pool);
+    this.draws = new Draws(
+      gl,
+      this.state,
+      this.atlas,
+      this.gpu,
+      this.pool,
+      {
+        filters: () => this.frameFilters,
+        texture: (id) => this.gpu.textures[id] ?? null,
+        sampler: (bits) => this.gpu.sampler(bits),
+      },
+      this.kernels,
+    );
     this.holds = new HeldLayers(gl, this.state, this.pool, this.draws, this.compositor, this.gpu);
     this.setUp();
   }

@@ -251,5 +251,5 @@ test("every figure the page shows comes out of the repository", () => {
   );
   assert.ok(c.corpus.all.tests.done > 0);
   assert.ok(c.api.members.done > 0);
-  assert.ok(c.groups.shaders.natives > 0);
+  assert.ok(c.groups.textEngine.natives > 0);
 });

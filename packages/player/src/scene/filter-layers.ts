@@ -83,14 +83,19 @@ export class FilterLayers {
   private readonly movedArea = new Float64Array(4);
   /** The textures of the images ShaderFilters' kernels sample, by image. */
   private readonly images = new WeakMap<ShaderImage, TextureHandle>();
-  /** Each blend shader's values and kernel, and where in them its other images' textures go. */
-  private readonly blends = new WeakMap<
+  /** Each blend shader's or shader fill's values and kernel, and where in them its images' textures go. */
+  private readonly kernels = new WeakMap<
     ShaderUse,
     {
       values: Float32Array;
       ints: Int32Array;
       kernel: string;
       images: { image: ShaderImage; at: number }[];
+      /** The chain it was added as last: in which filters, at which generation, blending whole. */
+      filters: Filters | null;
+      generation: number;
+      whole: boolean;
+      chain: number;
     }
   >();
   /** A reused output's rectangle (keptOutput). */
@@ -373,33 +378,53 @@ export class FilterLayers {
   }
 
   /**
-   * A blend shader added to the frame's filters as a chain of its own,
-   * which a layer's KERNEL mode names (@swf2es/render's BLEND): its number.
-   * Its first input is what is below and its second the layer, as adl
-   * binds them; `whole` blends over the layer's whole rectangle, as adl
-   * blends a filtered object's bitmap, rather than where it covers anything.
+   * A kernel used outside the filters added to the frame's filters as a
+   * chain of its own (@swf2es/render's BLEND, which a layer's KERNEL mode
+   * names, or FILL_SHADER, which a SHADED draw does), once a frame: its
+   * number. A blend shader's first input is what is below and its second
+   * the layer, as adl binds them; `whole` blends over the layer's whole
+   * rectangle, as adl blends a filtered object's bitmap, rather than where
+   * it covers anything. A shader fill's inputs are all images.
    */
-  blendChain(use: ShaderUse, filters: Filters, whole: boolean): number {
-    let made = this.blends.get(use);
+  kernelChain(use: ShaderUse, filters: Filters, kind: number, whole = false): number {
+    let made = this.kernels.get(use);
     if (!made) {
       const glsl = kernelGlslOf(use.kernel);
       const { floats, ints } = kernelParameters(glsl, use.values);
-      const [back, front] = use.kernel.inputs;
+      const bound = kind === BLEND ? use.kernel.inputs.slice(0, 2).map((i) => i.index) : [];
       // As a ShaderFilter's values (@swf2es/render's SHADER), whether it blends whole first.
       const values = [0, 0, 0, 0, 0, 0, 0, glsl.textures.length];
       const images: { image: ShaderImage; at: number }[] = [];
       for (const t of glsl.textures) {
-        const image = t === back.index || t === front.index ? undefined : use.images.get(t);
+        const image = bound.includes(t) ? undefined : use.images.get(t);
         if (image) {
           images.push({ image, at: values.length + 1 });
         }
 
-        values.push(t, t === back.index ? -1 : t === front.index ? -2 : 0, image?.floats ? 1 : 0);
+        values.push(t, image ? 0 : t === bound[0] ? -1 : -2, image?.floats ? 1 : 0);
       }
 
       values.push(floats.length, ...floats);
-      made = { values: Float32Array.from(values), ints, kernel: glsl.source, images };
-      this.blends.set(use, made);
+      made = {
+        values: Float32Array.from(values),
+        ints,
+        kernel: glsl.source,
+        images,
+        filters: null,
+        generation: -1,
+        whole: false,
+        chain: -1,
+      };
+      this.kernels.set(use, made);
+    }
+
+    // Once a frame: a fill drawn in many parts, or by many instances, names one chain.
+    if (
+      made.filters === filters &&
+      made.generation === filters.generation &&
+      made.whole === whole
+    ) {
+      return made.chain;
     }
 
     for (const { image, at } of made.images) {
@@ -407,8 +432,12 @@ export class FilterLayers {
     }
 
     made.values[0] = whole ? 1 : 0;
-    filters.add(BLEND, made.values, -1, made.kernel, made.ints);
-    return filters.close();
+    filters.add(kind, made.values, -1, made.kernel, made.ints);
+    made.filters = filters;
+    made.generation = filters.generation;
+    made.whole = whole;
+    made.chain = filters.close();
+    return made.chain;
   }
 
   /** An image a kernel samples as a texture, made once, again only after a lost context took it. */

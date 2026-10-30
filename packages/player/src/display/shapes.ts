@@ -7,6 +7,7 @@
 // on, joined where one edge starts where the last ended.
 import type { Fill, GradientStop, Line, Matrix, Shape } from "@swf2es/format";
 import type { BitmapStore } from "../bitmap/bitmap.js";
+import type { ShaderUse } from "../bitmap/pixel-bender.js";
 import type { BitmapCharacter } from "./timeline.js";
 
 /**
@@ -220,8 +221,22 @@ export interface GradientFill {
   matrix: Matrix;
 }
 
-/** A fill as the player paints it: a solid colour, a bitmap fill of a bitmap the SWF lacks, or a resolved bitmap or gradient. */
-export type Paint = Fill | ImageFill | GradientFill;
+/**
+ * A shader fill, of beginShaderFill or lineShaderStyle: its kernel as it
+ * was when set, with its parameters and images then, and its matrix in
+ * pixels, which maps the kernel's coordinates to the shape's.
+ */
+export interface ShaderPaint {
+  type: "shader";
+  use: ShaderUse;
+  matrix: Matrix;
+}
+
+/**
+ * A fill as the player paints it: a solid colour, a bitmap fill of a
+ * bitmap the SWF lacks, or a resolved bitmap, gradient or shader.
+ */
+export type Paint = Fill | ImageFill | GradientFill | ShaderPaint;
 
 export interface ShapeLayer {
   fills: { fill: Paint; contours: Path[]; winding: Winding }[];

@@ -35,9 +35,9 @@ links; how much of AS3 and Flash's behaviour it matches, in
 2. **`architecture.md` split by topic,** move-only.
 3. **Pixel Bender on the GPU.** `Shader`, `ShaderData` and `ShaderJob`
    run kernels on the CPU ([bitmaps](architecture/bitmaps.md#pixel-bender)),
-   and `ShaderFilter` and `blendShader` on the GPU through a compiler
-   from PBJ to GLSL; next shader fills (`beginShaderFill`,
-   `lineShaderStyle`).
+   and `ShaderFilter`, `blendShader` and `beginShaderFill` on the GPU
+   through a compiler from PBJ to GLSL; next shader lines
+   (`lineShaderStyle`).
 4. **The compiler's large files split,** move-only, as the renderer's
    backend, the scene view and the AVM2 runtime were.
 

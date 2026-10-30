@@ -6,11 +6,14 @@
 // does (docs/architecture/bitmaps.md, "Pixel Bender"): an image read as
 // its premultiplied bytes times the float nearest 1/255, linearly in
 // 256ths with each step's byte cut down; floats as they are, linearly in
-// the same 256ths; as the CPU interpreter reads them. GLSL ES 3 with no
-// version line.
+// the same 256ths; as the CPU interpreter reads them. GLSL ES 3, each a
+// whole fragment shader.
 
 /** A byte's float as adl samples one: times the float nearest 1/255, not divided. */
 const BYTE = "0.003921568859368563";
+
+/** Each fragment shader's first lines, so that one is the whole source a program cache keys by. */
+const HEADER = "#version 300 es\nprecision highp float;\n";
 
 /** The most images a kernel's program binds besides its layer's: one with more is not drawn. */
 export const KERNEL_IMAGES = 8;
@@ -204,7 +207,7 @@ function filterSource(kernel: string, images: readonly KernelImage[]): string {
   }
   return pbBytes(texelFetch(uTexture, ivec2(uTextureRect.xy) + at, 0));
 }`;
-  return `in vec2 vTextureCoord;
+  return `${HEADER}in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
 uniform highp vec4 uInputPixel;
@@ -247,9 +250,7 @@ function blendSource(kernel: string, images: readonly KernelImage[], rows: strin
   const pixel = (t: number, back: boolean) => `vec4 pbTexel${t}(ivec2 at) {
   return pbBytes(${back ? "pbBack" : "pbFront"});
 }`;
-  return `#version 300 es
-precision highp float;
-uniform sampler2D uLayer;
+  return `${HEADER}uniform sampler2D uLayer;
 uniform sampler2D uBack;
 uniform highp sampler2D uRows;
 uniform int uRow;
@@ -284,7 +285,7 @@ ${rows}
  * texels past the input's corner, which may be less than 0; the texels of
  * a pixel past the frame, `uKernelFrame`, left out of the mean.
  */
-export const PIXELS_DOWN = `precision highp int;
+export const PIXELS_DOWN = `${HEADER}precision highp int;
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
@@ -317,7 +318,7 @@ void main(void) {
  * A kernel's output, run a texel a stage pixel, drawn back over the
  * layer's frame: each texel its pixel's, the grid as PIXELS_DOWN had it.
  */
-export const PIXELS_BACK = `precision highp int;
+export const PIXELS_BACK = `${HEADER}precision highp int;
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
@@ -330,3 +331,45 @@ void main(void) {
   finalColor = texelFetch(uTexture, ivec2(uTextureRect.xy) + at, 0);
 }
 `;
+
+const madeFills = new Map<string, Map<string, string>>();
+
+/**
+ * A shader fill's program, after the mesh's vertex shader (programs.ts,
+ * meshVertex), which carries the kernel's coordinates in vUVT with a depth
+ * of 1: the kernel run once a pixel of Flash's, at its centre (uFrag as the
+ * mesh's has it), its images clamped to their edges; its colours left
+ * past its alpha, as adl composites them, but under a colour transform,
+ * which takes them straight.
+ */
+export function fillKernel(kernel: string, images: readonly KernelImage[]): string {
+  return madeOnce(madeFills, kernel, images, () => fillSource(kernel, images));
+}
+
+function fillSource(kernel: string, images: readonly KernelImage[]): string {
+  return `${HEADER}in vec3 vUVT;
+flat in vec4 vMul;
+flat in vec4 vAdd;
+uniform vec4 uFrag;
+out vec4 finalColor;
+${withImages(kernel, images, () => "", "p")}
+void main(void) {
+  float pixel = uFrag.w;
+  vec2 f = vec2(gl_FragCoord.x + uFrag.x, uFrag.y + uFrag.z * gl_FragCoord.y);
+  vec2 centre = (floor(f / pixel) + 0.5) * pixel;
+  vec3 at = vUVT + dFdx(vUVT) * (centre.x - f.x) + dFdy(vUVT) * ((centre.y - f.y) * uFrag.z);
+  vec4 c = pbKernel(at.xy / at.z);
+  c = mix(vec4(0.0), min(c, 1.0), greaterThan(c, vec4(0.0)));
+  if (vMul == vec4(1.0) && vAdd == vec4(0.0)) {
+    finalColor = c;
+    return;
+  }
+  if (c.a == 0.0) {
+    finalColor = vec4(0.0);
+    return;
+  }
+  vec4 s = clamp(vec4(c.rgb / c.a, c.a) * vMul + vAdd, 0.0, 1.0);
+  finalColor = vec4(s.rgb * s.a, s.a);
+}
+`;
+}

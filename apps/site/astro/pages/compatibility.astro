@@ -45,7 +45,6 @@ const AREAS: Record<string, string> = {
   timeline: "Timelines",
 };
 const GROUPS: Record<string, string> = {
-  shaders: "Pixel Bender shaders",
   textEngine: "The Flash Text Engine",
   media: "Streaming media",
   stage3D: "Stage3D",
@@ -161,9 +160,9 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   },
   {
     name: "Pixel Bender shaders",
-    status: "missing",
-    note: `Shader, ShaderJob and shader fills: ${natives("shaders")} natives; next on the roadmap.`,
-    href: source("docs/roadmap.md"),
+    status: "partial",
+    note: "ShaderJob on the CPU; ShaderFilter, blend shaders and shader fills on the GPU. A shader line keeps its colour.",
+    href: source("docs/architecture/bitmaps.md"),
   },
   {
     name: "The Flash Text Engine",

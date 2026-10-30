@@ -179,7 +179,7 @@ re-stroking as a shape's for their width under a transform. The drawing's
 points, and its lines' half widths, give the object its bounds, for
 `width`, `height`, `getBounds` and the hit tests to come. Gradient and
 bitmap fills are recorded as a shape's are, and drawn as far as a shape's
-are (the first stop); shader fills wait. An adl case draws in a `Shape` and in a
+are (the first stop); shader fills by their kernel ([bitmaps](bitmaps.md#pixel-bender)). An adl case draws in a `Shape` and in a
 `Sprite` with a child, compared by pixels; the corpus's `graphics_*`
 tests, which trace nothing, check that nothing throws.
 

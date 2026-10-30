@@ -62,6 +62,11 @@ export const SHADER = 8;
  * the layer's whole rectangle rather than where the layer covers anything.
  */
 export const BLEND = 9;
+/**
+ * A shader fill, alone in a chain a SHADED draw names (scene.ts), which no
+ * filter pass runs: its values as SHADER's, every image a texture.
+ */
+export const FILL_SHADER = 10;
 
 /**
  * A frame's filters in chains, one a filtered layer: each filter its kind,
@@ -84,10 +89,14 @@ export class Filters {
   chains = new Int32Array(17);
   chainCount = 0;
 
+  /** Moves on at each reset: a chain number is good while it is the same. */
+  generation = 0;
+
   reset(): void {
     this.count = 0;
     this.chainCount = 0;
     this.kernels.length = 0;
+    this.generation++;
   }
 
   /** A filter of `kind` added to the chain open: its values, the texture it reads, its kernel and its ints. */
