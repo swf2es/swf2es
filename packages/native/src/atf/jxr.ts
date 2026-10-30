@@ -1,13 +1,12 @@
 // JPEG XR images through jxrlib, synchronously, in one module that imports
-// nothing. Each call copies its input into the module's memory, decodes in
-// an arena reset first, and copies the pixels out. jxrlib is not memory
-// safe on corrupt input: it may read past its tables, write through null
-// pointers into the bottom of the stack, or trap, all within its instance.
-// So each texture decodes in an instance of its own (freshJxr), which
-// nothing one texture does can carry over to the next, and an instance
-// whose call trapped, or whose memory grew past MEMORY_KEPT, is let go
-// at once.
-import { decodeBase64 } from "../base64.js";
+// nothing, kept as compress's is (instance.ts). Each call copies its input
+// into the module's memory, decodes in an arena reset first, and copies
+// the pixels out. jxrlib is not memory safe on corrupt input: it may read
+// past its tables, write through null pointers into the bottom of the
+// stack, or trap, all within its instance. So an instance that refused an
+// image, or trapped, is let go, and the next image starts in a new one:
+// nothing a corrupt image did reaches another.
+import { KeptInstance } from "../instance.js";
 import { binary } from "./binary.js";
 
 interface Exports {
@@ -34,69 +33,51 @@ export interface JxrImage {
   pixels: Uint8Array;
 }
 
-/** Memory an instance may keep between calls: a 1024-pixel texture's image and its decoding. */
-const MEMORY_KEPT = 8 << 20;
-
-let compiled: WebAssembly.Module | null = null;
-let instance: Exports | null = null;
+const kept = new KeptInstance<Exports>(binary);
 let traps = 0;
 
 /**
  * The JPEG XR file `data`, which must hold `format` and be at most `limit`
  * pixels a side; null where it does not, is corrupt, or cannot have the
- * memory it needs. A call that traps lets its instance go and is null too.
+ * memory it needs, and so where the module cannot be instantiated.
  */
 export function decodeJxr(data: Uint8Array, format: number, limit: number): JxrImage | null {
-  let x: Exports;
   try {
-    compiled ??= new WebAssembly.Module(decodeBase64(binary));
-    instance ??= new WebAssembly.Instance(compiled).exports as unknown as Exports;
-    x = instance;
+    return kept.call((x) => {
+      x.reset();
+      const at = x.alloc(data.length);
+      if (at !== 0) {
+        new Uint8Array(x.memory.buffer, at, data.length).set(data);
+      }
+
+      if (at === 0 || x.decodeImage(at, data.length, format, limit) !== 0) {
+        kept.drop();
+        return null;
+      }
+
+      const width = x.resultWidth();
+      const height = x.resultHeight();
+      const n = width * height * BYTES[format];
+
+      return {
+        width,
+        height,
+        pixels: new Uint8Array(x.memory.buffer, x.resultPointer(), n).slice(),
+      };
+    });
   } catch {
-    // The host refused the module, or memory for an instance: the image does not decode.
-    return null;
-  }
-
-  try {
-    x.reset();
-    const at = x.alloc(data.length);
-    if (at === 0) {
-      return null;
-    }
-
-    new Uint8Array(x.memory.buffer, at, data.length).set(data);
-    if (x.decodeImage(at, data.length, format, limit) !== 0) {
-      return null;
-    }
-
-    const width = x.resultWidth();
-    const height = x.resultHeight();
-    const n = width * height * BYTES[format];
-
-    return { width, height, pixels: new Uint8Array(x.memory.buffer, x.resultPointer(), n).slice() };
-  } catch {
-    // jxrlib trapped on input it should have refused: this instance's state is not to be trusted.
-    instance = null;
+    // A trap, which let the instance go, or a host that refused the module or its memory.
     traps++;
     return null;
-  } finally {
-    if (x.memory.buffer.byteLength > MEMORY_KEPT) {
-      instance = null;
-    }
   }
 }
 
-/** Let the instance go, so that the next call starts a new one: before each texture. */
-export function freshJxr(): void {
-  instance = null;
-}
-
-/** How many calls have trapped, for the fuzzer: each was refused, and its instance let go. */
+/** How many calls have thrown, for the fuzzer: each was refused. */
 export function jxrTraps(): number {
   return traps;
 }
 
 /** The module's memory now, for measuring: 0 when no instance is kept. */
 export function jxrMemoryInUse(): number {
-  return instance ? instance.memory.buffer.byteLength : 0;
+  return kept.memory;
 }

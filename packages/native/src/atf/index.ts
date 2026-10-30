@@ -4,15 +4,7 @@
 // compressed formats as S3TC, DXT1 or DXT5, rebuilt from their LZMA'd
 // indices and JPEG XR endpoint images, or copied where they are raw.
 import { DONE, lzmaDecode } from "../compress/index.js";
-import {
-  decodeJxr,
-  freshJxr,
-  JXR_BGR,
-  JXR_BGRA,
-  JXR_GRAY,
-  JXR_RGB565,
-  type JxrImage,
-} from "./jxr.js";
+import { decodeJxr, JXR_BGR, JXR_BGRA, JXR_GRAY, JXR_RGB565, type JxrImage } from "./jxr.js";
 import {
   ATF_COMPRESSED,
   ATF_COMPRESSED_ALPHA,
@@ -70,8 +62,6 @@ export function atfEncoding(format: number): AtfEncoding {
  */
 export function decodeAtf(data: Uint8Array, header: AtfHeader): AtfImage[] {
   const faces = readAtfBlocks(data, header);
-  // Whatever a corrupt texture's images did to jxrlib's memory stays with it.
-  freshJxr();
   const images: AtfImage[] = [];
 
   for (let face = 0; face < faces.length; face++) {

@@ -400,14 +400,17 @@ png2atf's raw output holds for the same image (`tests/unit/atf.test.ts`).
 Refusals are AIR's, as AIR 51 gives them for the same bytes: an
 `AtfError` whose `reason` is `size` (#3669: less data than the header or
 its length), `decode` (#3677: no signature, a format past 13, a size past
-4096, a level count the size has not, a block past the data, a block that
-does not decode) or, for the caller, `format` (#3675). `readAtfHeader`
-checks only what AIR checks before an asynchronous upload returns, the
-signature and the length; `decodeAtf` the rest. As AIR streams textures,
-a level that does not end within the length is left out, as are those
-after it, and so is a level whose blocks for the desktop are empty
-(png2atf's `-n`); AIR reads nothing past the length, and nothing of the
-reserved bytes.
+4096, a level count the size has not, a block the desktop reads cut short
+by the data's end, a block that does not decode) or `format` (#3675:
+the formats 6 to 11, which no texture takes). `readAtfHeader` checks only
+what AIR checks before an asynchronous upload returns, the signature and
+the length, and an offset that is a whole number within the data;
+`decodeAtf` the rest. Past the length check, AIR reads the blocks as far
+as the data goes, the length aside, and streams what it finds: data that
+ends before a level's first block length, or within a block the desktop
+skips (PVRTC's, ETC's), leaves that level and those after it absent, as
+does a level whose blocks for the desktop are empty (png2atf's `-n`).
+Nothing of the reserved bytes is read.
 
 jxrlib's decoder and glue (`vendor/jxrlib`, https://github.com/swf2es/jxrlib,
 a fork of 4creators/jxrlib, Microsoft's release, at tag `v2019.10.9`) are
@@ -417,16 +420,20 @@ an image in the pixel format its block must have, setting jxrlib's output
 to the container's pixel format as jxrlib's own decoder does (the
 codestream may name another, which jxrlib would write by into a buffer
 sized for this one), and taking 24-bit RGB as png2atf writes it, named
-24bppBGR. `src/atf/include/` holds the libc headers jxrlib includes, its
-file streams and diagnostics inert, and `root.zig` its allocator over a
-bump arena that each call resets.
+24bppBGR. `src/atf/include/` holds what jxrlib needs of libc beyond what
+`include/` declares, each header taking the package's with
+`#include_next`, its file streams and diagnostics inert, and `root.zig`
+its allocator over a bump arena that each call resets. The instance is
+kept between images as compress's is (`src/instance.ts`, the same
+`MEMORY_KEPT`).
 
 jxrlib is not memory safe on corrupt input: AddressSanitizer finds it
 reading past its tables and writing through null pointers. In the module
 these stay within its memory, whose stack comes first: a null pointer's
-writes land at the bottom of the unused stack. A trap refuses the image
-(#3677) and lets the instance go, and each texture decodes in an instance
-of its own, so nothing a corrupt texture did reaches another.
+writes land at the bottom of the unused stack. An image refused or a
+trap (#3677 either way) lets the instance go, and the next image starts
+in a new one, so nothing a corrupt image did reaches another; one that
+decodes keeps it.
 `node tests/fuzz/atf.ts [cases] [seed]` mutates the fixtures, in both
 headers, and checks that nothing traps or throws but `AtfError` and that
 every level decoded is the size it should be; 450,000 cases traps none.
